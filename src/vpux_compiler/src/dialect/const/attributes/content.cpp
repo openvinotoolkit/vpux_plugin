@@ -167,6 +167,7 @@ Const::Content wrapBaseContent(mlir::ElementsAttr baseContent) {
 Const::Content vpux::Const::ContentAttr::fold(bool bypassCache) const {
     auto baseContent = getBaseContent();
 
+#ifdef BACKGROUND_FOLDING_ENABLED
     if (!bypassCache) {
         auto& cacheManager = Const::ConstantFoldingCacheManager::getInstance();
         auto ctx = baseContent.getContext();
@@ -178,6 +179,9 @@ Const::Content vpux::Const::ContentAttr::fold(bool bypassCache) const {
             }
         }
     }
+#else
+    VPUX_UNUSED(bypassCache);
+#endif
 
     auto res = wrapBaseContent(baseContent);
 
@@ -320,12 +324,14 @@ Const::ContentAttr Const::ContentAttr::addTransformation(Const::ContentAttr inpu
 
     auto newContentAttr = Const::ContentAttr::get(baseContent, ArrayRef(transformations));
 
+#ifdef BACKGROUND_FOLDING_ENABLED
     auto& cacheManager = Const::ConstantFoldingCacheManager::getInstance();
     auto ctx = newContentAttr.getContext();
     if (cacheManager.contains(ctx)) {
         auto& cache = cacheManager.get(ctx);
         cache.enqueueRequest(Const::FoldingRequest{newContentAttr, newTransformation});
     }
+#endif
 
     return newContentAttr;
 }

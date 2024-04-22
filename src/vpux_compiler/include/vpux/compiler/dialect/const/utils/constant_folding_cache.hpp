@@ -5,6 +5,8 @@
 
 #pragma once
 
+#ifdef BACKGROUND_FOLDING_ENABLED
+
 #include "vpux/compiler/dialect/const/attributes/content.hpp"
 #include "vpux/compiler/dialect/const/utils/content.hpp"
 
@@ -254,3 +256,5 @@ private:
 
 }  // namespace Const
 }  // namespace vpux
+
+#endif

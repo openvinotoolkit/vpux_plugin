@@ -431,6 +431,8 @@ bool getDummyOpReplacement(const Config& config) {
     }
 }
 
+#ifdef BACKGROUND_FOLDING_ENABLED
+
 template <typename Options>
 std::tuple<bool, int64_t, bool> getConstantFoldingInBackground(const Config& config) {
     const auto options = Options::createFromString(config.get<COMPILATION_MODE_PARAMS>());
@@ -466,6 +468,8 @@ std::tuple<bool, int64_t, bool> getConstantFoldingInBackground(const Config& con
         VPUX_THROW("Unsupported device type: {0}", arch);
     }
 }
+
+#endif
 
 }  // namespace
 
@@ -514,20 +518,24 @@ std::shared_ptr<INetworkDescription> vpux::CompilerImpl::compile(std::shared_ptr
     // TODO: somehow protect non-target cases
     pipelineFactory->buildPipeline(pm, config, rootTiming, log);
 
+#ifdef BACKGROUND_FOLDING_ENABLED
     const auto [foldingInBackgroundEnabled, numFoldingThreads, collectStatistics] =
             getConstantFoldingInBackground(config);
     SmallVector<std::shared_future<void>> foldingThreads;
     if (foldingInBackgroundEnabled) {
         foldingThreads = Const::initBackgroundConstantFoldingThreads(&ctx, numFoldingThreads, collectStatistics);
     }
+#endif
 
     OV_ITT_TASK_NEXT(COMPILER_IMPLEMENTATION, "compileNetwork");
 
     compileNetwork(module.get(), pm, rootTiming);  // applies each pass in the pipeline
 
+#ifdef BACKGROUND_FOLDING_ENABLED
     if (foldingInBackgroundEnabled) {
-        Const::stopBackgroundConstantFoldingThreads(&ctx, foldingThreads, collectStatistics);
+        Const::stopBackgroundConstantFoldingThreads(&ctx, foldingThreads, collectStatistics, log);
     }
+#endif
 
     OV_ITT_TASK_NEXT(COMPILER_IMPLEMENTATION, "exportNetwork");
     const std::shared_ptr<INetworkDescription>& networkDescription =

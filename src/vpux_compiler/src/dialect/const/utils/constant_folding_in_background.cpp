@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#ifdef BACKGROUND_FOLDING_ENABLED
+
 #include "vpux/compiler/dialect/const/utils/constant_folding_in_background.hpp"
 #include "vpux/compiler/dialect/const/utils/constant_folding_cache.hpp"
 
@@ -117,7 +119,7 @@ SmallVector<std::shared_future<void>> Const::initBackgroundConstantFoldingThread
 
 void Const::stopBackgroundConstantFoldingThreads(mlir::MLIRContext* ctx,
                                                  ArrayRef<std::shared_future<void>> foldingThreads,
-                                                 bool collectStatistics) {
+                                                 bool collectStatistics, Logger log) {
     auto& cacheManager = Const::ConstantFoldingCacheManager::getInstance();
     auto& cache = cacheManager.get(ctx);
 
@@ -132,7 +134,7 @@ void Const::stopBackgroundConstantFoldingThreads(mlir::MLIRContext* ctx,
     }
 
     if (collectStatistics) {
-        Logger log("constant-folding-in-background", LogLevel::Info);
+        log.setName("constant-folding-in-background");
         auto& statistics = cacheManager.get(ctx).getStatistics();
         log.trace("Cache statistics");
         log.nest().trace("number of cache hits:                       {0}", statistics.numCacheHits);
@@ -148,3 +150,5 @@ void Const::stopBackgroundConstantFoldingThreads(mlir::MLIRContext* ctx,
 
     cacheManager.removeCache(ctx);
 }
+
+#endif

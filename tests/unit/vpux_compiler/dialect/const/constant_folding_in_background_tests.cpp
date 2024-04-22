@@ -3,9 +3,12 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-#include "common/utils.hpp"
+#ifdef BACKGROUND_FOLDING_ENABLED
+
 #include "vpux/compiler/dialect/const/utils/constant_folding_cache.hpp"
 #include "vpux/compiler/dialect/const/utils/constant_folding_in_background.hpp"
+
+#include "common/utils.hpp"
 #include "vpux/compiler/init.hpp"
 
 #include <mlir/IR/AsmState.h>
@@ -128,3 +131,5 @@ TEST_P(ConstantFoldingInBackground, MultipleCompilations) {
 std::vector<size_t> numThreads = {1, 2, 3, 4, 5};
 
 INSTANTIATE_TEST_SUITE_P(MLIRThreading, ConstantFoldingInBackground, testing::ValuesIn(numThreads));
+
+#endif
