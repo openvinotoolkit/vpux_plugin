@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#ifdef BACKGROUND_FOLDING_ENABLED
+
 #include "vpux/compiler/dialect/const/utils/constant_folding_cache.hpp"
 
 using namespace vpux;
@@ -196,3 +198,5 @@ Const::ConstantFoldingCache& Const::ConstantFoldingCacheManager::get(mlir::MLIRC
     }
     VPUX_THROW("Unable to find cache for {0}", ctx);
 }
+
+#endif

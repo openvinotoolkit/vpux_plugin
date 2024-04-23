@@ -5,7 +5,10 @@
 
 #pragma once
 
+#ifdef BACKGROUND_FOLDING_ENABLED
+
 #include "vpux/utils/core/array_ref.hpp"
+#include "vpux/utils/core/logger.hpp"
 #include "vpux/utils/core/small_vector.hpp"
 
 #include <llvm/Support/ThreadPool.h>
@@ -18,7 +21,9 @@ SmallVector<std::shared_future<void>> initBackgroundConstantFoldingThreads(mlir:
                                                                            bool collectStatistics);
 
 void stopBackgroundConstantFoldingThreads(mlir::MLIRContext* ctx, ArrayRef<std::shared_future<void>> foldingThreads,
-                                          bool collectStatistics);
+                                          bool collectStatistics, Logger log = Logger::global());
 
 }  // namespace Const
 }  // namespace vpux
+
+#endif

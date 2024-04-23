@@ -96,6 +96,14 @@ if(ENABLE_HUFFMAN_CODEC)
     add_definitions(-DENABLE_HUFFMAN_CODEC)
 endif()
 
+if(THREADING STREQUAL "TBB" OR THREADING STREQUAL "TBB_AUTO")
+    set(TBB_AVAILABLE ON)
+endif()
+ov_dependent_option(ENABLE_BACKGROUND_FOLDING "Enable constant folding in background" ON "TBB_AVAILABLE" OFF)
+if(ENABLE_BACKGROUND_FOLDING)
+    add_definitions(-DBACKGROUND_FOLDING_ENABLED)
+endif()
+
 ie_option(ENABLE_SOURCE_PACKAGE "Enable generation of source code package" OFF)
 
 ie_option(ENABLE_VPUX_DOCS "Documentation for VPUX plugin" OFF)
