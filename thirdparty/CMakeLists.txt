@@ -41,29 +41,36 @@ endif()
 # flatbuffers
 #
 
-set(FLATBUFFERS_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(FLATBUFFERS_INSTALL OFF CACHE BOOL "" FORCE)
-set(FLATBUFFERS_BUILD_FLATC ON CACHE BOOL "" FORCE)
+if(CMAKE_SOURCE_DIR STREQUAL OpenVINO_SOURCE_DIR AND
+    ENABLE_OV_TF_LITE_FRONTEND AND (NOT ENABLE_SYSTEM_FLATBUFFERS OR NOT Flatbuffers_FOUND))
+    # we are building NPU plugin via -DOPENVINO_EXTRA_MODULES
+    # and flatbuffers is already built as part of OpenVINO in case of
+    # building in a single tree
+else()
+    set(FLATBUFFERS_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(FLATBUFFERS_INSTALL OFF CACHE BOOL "" FORCE)
+    set(FLATBUFFERS_BUILD_FLATC ON CACHE BOOL "" FORCE)
 
-add_subdirectory(flatbuffers EXCLUDE_FROM_ALL)
+    add_subdirectory(flatbuffers EXCLUDE_FROM_ALL)
 
-# FIXME: this flag is forced while building in a single tree with OV
-# but code cannot be compiled with the flag
-if(NOT MSVC)
-    target_compile_options(flatbuffers PRIVATE -Wno-suggest-override)
-    target_compile_options(flatc PRIVATE -Wno-suggest-override)
-    if ((CMAKE_CXX_COMPILER_ID STREQUAL "Clang") AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13))
-        target_compile_options(flatbuffers PRIVATE -Wno-unused-but-set-variable)
-        target_compile_options(flatc PRIVATE -Wno-unused-but-set-variable)
+    # FIXME: this flag is forced while building in a single tree with OV
+    # but code cannot be compiled with the flag
+    if(NOT MSVC)
+        target_compile_options(flatbuffers PRIVATE -Wno-suggest-override)
+        target_compile_options(flatc PRIVATE -Wno-suggest-override)
+        if ((CMAKE_CXX_COMPILER_ID STREQUAL "Clang") AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13))
+            target_compile_options(flatbuffers PRIVATE -Wno-unused-but-set-variable)
+            target_compile_options(flatc PRIVATE -Wno-unused-but-set-variable)
+        endif()
     endif()
-endif()
 
-vpux_add_native_tool(flatc "${CMAKE_CURRENT_SOURCE_DIR}/flatbuffers"
-    CMAKE_ARGS
-        "FLATBUFFERS_BUILD_TESTS:BOOL=OFF"
-        "FLATBUFFERS_INSTALL:BOOL=OFF"
-        "FLATBUFFERS_BUILD_FLATC:BOOL=ON"
-)
+    vpux_add_native_tool(flatc "${CMAKE_CURRENT_SOURCE_DIR}/flatbuffers"
+        CMAKE_ARGS
+            "FLATBUFFERS_BUILD_TESTS:BOOL=OFF"
+            "FLATBUFFERS_INSTALL:BOOL=OFF"
+            "FLATBUFFERS_BUILD_FLATC:BOOL=ON"
+    )
+endif()
 
 #
 # npu_elf
@@ -74,51 +81,19 @@ if (ENABLE_NPU_MONO)
         message(FATAL_ERROR "elf/vpux_elf target must exist since ENABLE_NPU_MONO is ON")
     endif()
     # TODO remove:
-    # `src/vpux_compiler/include/vpux/compiler/dialect/VPU37XX/api`
+    # `src/vpux_compiler/include/vpux/compiler/dialect/NPUReg37XX/api`
+    # `src/vpux_compiler/include/vpux/compiler/NPU40XX/dialect/NPUReg40XX/api`
     # after integration finishes
 else()
     # Legacy no-monorepo scenario
     add_subdirectory(elf/vpux_elf)
     target_include_directories(npu_elf PRIVATE
-        "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/src/vpux_compiler/include/vpux/compiler/dialect/VPU37XX/firmware_headers/details")
+        "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/src/vpux_compiler/include/vpux/compiler/NPU37XX/dialect/NPUReg37XX/firmware_headers/details"
+        "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/src/vpux_compiler/include/vpux/compiler/NPU40XX/dialect/NPUReg40XX/firmware_headers/details")
 
     target_include_directories(vpux_elf PRIVATE
-        "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/src/vpux_compiler/include/vpux/compiler/dialect/VPU37XX/firmware_headers/details")
-endif()
-
-#
-# zeroApi
-#
-
-if(ENABLE_ZEROAPI_BACKEND)
-    # We have to avoid linking against loader with debug postfix due it's a part of driver
-    # and the name will be the same for release and debug configurations
-    set(OLD_CMAKE_DEBUG_POSTFIX ${CMAKE_DEBUG_POSTFIX})
-    set(CMAKE_DEBUG_POSTFIX "")
-    add_subdirectory(level-zero EXCLUDE_FROM_ALL)
-    set(CMAKE_DEBUG_POSTFIX ${OLD_CMAKE_DEBUG_POSTFIX})
-endif()
-
-#
-# bitcompactor
-#
-
-if(ENABLE_BITCOMPACTOR)
-    set(BITCOMPACTOR_TARGET_NAME "bitcompactor")
-
-    add_library(${BITCOMPACTOR_TARGET_NAME}
-        OBJECT
-        "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/thirdparty/bitcompactor/src/bitCompactor.cpp"
-        "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/thirdparty/bitcompactor/src/utils/logger.cpp"
-        )
-
-    include_directories(
-        ${CMAKE_CURRENT_SOURCE_DIR}
-    )
-    target_include_directories(${BITCOMPACTOR_TARGET_NAME}
-        PUBLIC
-            "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/thirdparty/bitcompactor/include"
-    )
+        "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/src/vpux_compiler/include/vpux/compiler/NPU37XX/dialect/NPUReg37XX/firmware_headers/details"
+        "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/src/vpux_compiler/include/vpux/compiler/NPU40XX/dialect/NPUReg40XX/firmware_headers/details")
 endif()
 
 #
