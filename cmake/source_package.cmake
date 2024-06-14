@@ -1,9 +1,9 @@
 #
-# Copyright (C) 2022 Intel Corporation.
+# Copyright (C) 2022 Intel Corporation
 # SPDX-License-Identifier: Apache 2.0
 #
 
-if(${CMAKE_VERSION} VERSION_LESS "3.19.0") 
+if(${CMAKE_VERSION} VERSION_LESS "3.19.0")
     message(WARNING "Source code package will not be generated. "
                     "Miminum CMake version required is 3.19.0")
     return()
@@ -20,7 +20,7 @@ function(read_config_file CONFIG_FILE EXCLUDE_PATTERNS)
         set(RESULT_LIST "")
         foreach(IDX RANGE ${CFG_PATTERNS_LENGTH})
             if(NOT ${IDX} STREQUAL ${CFG_PATTERNS_LENGTH})
-                string(JSON PATTERN GET ${CFG_PATTERNS} ${IDX})  
+                string(JSON PATTERN GET ${CFG_PATTERNS} ${IDX})
                 string(REPLACE "^" "${CMAKE_CURRENT_SOURCE_DIR}" PATTERN ${PATTERN})
                 list(APPEND RESULT_LIST ${PATTERN})
             endif()
@@ -37,7 +37,7 @@ function(read_config_file CONFIG_FILE EXCLUDE_PATTERNS)
         "${CFG_EXCLUDE_PATTERNS_LEN}"
         CFG_EXCLUDE_PATTERNS_LIST
     )
-    
+
     list(APPEND CFG_EXCLUDE_PATTERNS_LIST "${CMAKE_CURRENT_BINARY_DIR}")
 
     # return variables

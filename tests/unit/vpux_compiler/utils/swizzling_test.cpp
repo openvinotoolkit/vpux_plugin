@@ -12,6 +12,8 @@
 using namespace vpux;
 using namespace testing;
 
+class SwizzlingTest_VPUX40XX : public TestWithParam<std::tuple<uint32_t, uint32_t>> {};
+
 class SwizzlingTest_VPUX37XX : public TestWithParam<std::tuple<uint32_t, uint32_t>> {};
 
 template <typename T>
@@ -80,8 +82,31 @@ TEST_P(SwizzlingTest_VPUX37XX, swizzlingTest_VPUX37XX) {
     const auto elements = std::get<1>(params);
 
     bool result = false;
-    EXPECT_TRUE(result = swizzlingTest<uint32_t>(elements, swizzlingKey, VPU::ArchKind::VPUX37XX));
+    EXPECT_TRUE(result = swizzlingTest<uint32_t>(elements, swizzlingKey, VPU::ArchKind::NPU37XX));
 }
+
+TEST_P(SwizzlingTest_VPUX40XX, swizzlingTest_VPUX40XX) {
+    auto params = GetParam();
+    auto swizzlingKey = std::get<0>(params);
+    const auto elements = std::get<1>(params);
+
+    bool result = false;
+    EXPECT_TRUE(result = swizzlingTest<uint32_t>(elements, swizzlingKey, VPU::ArchKind::NPU40XX));
+}
+
+INSTANTIATE_TEST_SUITE_P(testAligned_VPUX40XX_Key0, SwizzlingTest_VPUX40XX, Combine(Values(0), Values(1024)));
+INSTANTIATE_TEST_SUITE_P(testAligned_VPUX40XX_Key1, SwizzlingTest_VPUX40XX, Combine(Values(1), Values(2048)));
+INSTANTIATE_TEST_SUITE_P(testAligned_VPUX40XX_Key2, SwizzlingTest_VPUX40XX, Combine(Values(2), Values(1024)));
+INSTANTIATE_TEST_SUITE_P(testAligned_VPUX40XX_Key3, SwizzlingTest_VPUX40XX, Combine(Values(3), Values(2048)));
+INSTANTIATE_TEST_SUITE_P(testAligned_VPUX40XX_Key4, SwizzlingTest_VPUX40XX, Combine(Values(4), Values(1024)));
+INSTANTIATE_TEST_SUITE_P(testAligned_VPUX40XX_Key5, SwizzlingTest_VPUX40XX, Combine(Values(5), Values(2048)));
+
+INSTANTIATE_TEST_SUITE_P(testUnaligned_VPUX40XX_Key0, SwizzlingTest_VPUX40XX, Combine(Values(0), Values(1023)));
+INSTANTIATE_TEST_SUITE_P(testUnaligned_VPUX40XX_Key1, SwizzlingTest_VPUX40XX, Combine(Values(1), Values(2049)));
+INSTANTIATE_TEST_SUITE_P(testUnaligned_VPUX40XX_Key2, SwizzlingTest_VPUX40XX, Combine(Values(2), Values(1023)));
+INSTANTIATE_TEST_SUITE_P(testUnaligned_VPUX40XX_Key3, SwizzlingTest_VPUX40XX, Combine(Values(3), Values(2049)));
+INSTANTIATE_TEST_SUITE_P(testUnaligned_VPUX40XX_Key4, SwizzlingTest_VPUX40XX, Combine(Values(4), Values(1023)));
+INSTANTIATE_TEST_SUITE_P(testUnaligned_VPUX40XX_Key5, SwizzlingTest_VPUX40XX, Combine(Values(5), Values(2049)));
 
 INSTANTIATE_TEST_SUITE_P(testAligned_VPUX37XX_Key0, SwizzlingTest_VPUX37XX, Combine(Values(0), Values(1024)));
 INSTANTIATE_TEST_SUITE_P(testAligned_VPUX37XX_Key1, SwizzlingTest_VPUX37XX, Combine(Values(1), Values(2048)));

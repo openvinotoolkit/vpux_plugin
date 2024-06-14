@@ -1,13 +1,14 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2023-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
-#include "vpux/compiler/conversion/passes/VPU2VPUIP/bufferizable_ops_interface.hpp"
+#include "vpux/compiler/conversion/passes/VPU2VPUIP/bufferize_sw_ops_interface.hpp"
+#include "vpux/compiler/NPU40XX/utils.hpp"
 #include "vpux/compiler/conversion/rewriters/VPU2VPUIP/sw_rewriter.hpp"
-
-#include "vpux/compiler/dialect/VPUIP/convert_to_dma_utils.hpp"
-#include "vpux/compiler/dialect/VPUIP/sw_utils.hpp"
+#include "vpux/compiler/dialect/VPU/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/convert_to_dma_utils.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/sw_utils.hpp"
 #include "vpux/compiler/utils/allocate_buffers.hpp"
 #include "vpux/compiler/utils/logging.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
@@ -27,7 +28,7 @@ std::pair<mlir::DenseSet<size_t>, mlir::DenseSet<size_t>> getOptimalCMXPlacement
                                                                                  Byte reservedMem,
                                                                                  mlir::ModuleOp module,
                                                                                  const Logger& log) {
-    VPUX_THROW_WHEN(inputs.size() == 0 && outputs.size() == 0, "Received empty input and output arrays!");
+    VPUX_THROW_WHEN(inputs.empty() && outputs.empty(), "Received empty input and output arrays!");
     auto nestedLog2 = log.nest(2);
     auto nestedLog3 = log.nest(3);
     // Create an array of all the inputs and outputs and index them
@@ -163,18 +164,31 @@ mlir::SymbolRefAttr createBuiltInFunction(mlir::ModuleOp module, VPU::LayerOpInt
                                                                      mlir::StringRef::npos);
     builtInFunctionName.append(nonNamespaceOpName);
 
-    const auto convertToUnrankedType = [](mlir::Value operand) -> mlir::Type {
-        auto type = operand.getType().dyn_cast_or_null<mlir::MemRefType>();
-        VPUX_THROW_UNLESS(type != nullptr, "Only MemRef type is supported");
-
-        return mlir::UnrankedMemRefType::get(type.getElementType(), type.getMemorySpace());
+    const auto convertToUnrankedTypes = [](mlir::Value operand) -> SmallVector<mlir::Type> {
+        SmallVector<mlir::Type> result;
+        if (auto type = operand.getType().dyn_cast_or_null<mlir::MemRefType>()) {
+            result.emplace_back(mlir::UnrankedMemRefType::get(type.getElementType(), type.getMemorySpace()));
+        } else if (auto type = operand.getType().dyn_cast_or_null<VPUIP::BoundedBufferType>()) {
+            const auto dataNDType = type.getData().cast<NDTypeInterface>();
+            result.emplace_back(mlir::UnrankedMemRefType::get(dataNDType.getElementType(), dataNDType.getMemSpace()));
+            const auto shapeNDType = type.getDynamicShape().cast<NDTypeInterface>();
+            result.emplace_back(mlir::UnrankedMemRefType::get(shapeNDType.getElementType(), shapeNDType.getMemSpace()));
+        }
+        VPUX_THROW_UNLESS(!result.empty(),
+                          "Only MemRef or VPUIP::BoundedBufferType type are supported as createBuiltInFunction "
+                          "operands, got: {0}",
+                          operand.getType());
+        return result;
     };
 
     auto& args = kernelInfo.args;
-
     SmallVector<mlir::Type> inputTypes;
-    std::transform(operands.begin(), operands.end(), std::back_inserter(inputTypes), convertToUnrankedType);
-    std::transform(results.begin(), results.end(), std::back_inserter(inputTypes), convertToUnrankedType);
+    for (const auto& operand : operands) {
+        inputTypes.append(convertToUnrankedTypes(operand));
+    };
+    for (const auto& result : results) {
+        inputTypes.append(convertToUnrankedTypes(result));
+    };
     std::transform(args.begin(), args.end(), std::back_inserter(inputTypes), [&module](mlir::Attribute arg) {
         const auto typedAttr = arg.dyn_cast<mlir::TypedAttr>();
         return typedAttr != nullptr ? typedAttr.getType() : mlir::NoneType::get(module.getContext());
@@ -188,54 +202,26 @@ mlir::SymbolRefAttr createBuiltInFunction(mlir::ModuleOp module, VPU::LayerOpInt
 // createAlloc
 //
 
-mlir::Value createAlloc(mlir::Location loc, mlir::RewriterBase& rewriter, mlir::Value value,
-                        const mlir::bufferization::BufferizationOptions& options, vpux::IndexedSymbolAttr memSpace) {
-    auto bufferType = vpux::getBufferType(value, options);
+mlir::Value createAlloc(const Logger& log, mlir::Location loc, mlir::RewriterBase& rewriter, mlir::Value value,
+                        vpux::IndexedSymbolAttr memSpace) {
+    auto bufferType = vpux::getBufferType(value);
     auto resultBufferType = bufferType.changeMemSpace(memSpace);
-    auto allocOp = rewriter.create<mlir::memref::AllocOp>(loc, resultBufferType.cast<mlir::MemRefType>());
-    return allocOp.getMemref();
-}
-
-//
-// createAlloc using diaclet conversion & createAllocAdaptor & replaceOpAdaptor
-// Note: remove after fully implemented one-shot bufferization, E#102424
-//
-
-mlir::Value createAlloc(mlir::Location loc, mlir::RewriterBase& rewriter, mlir::Value value,
-                        mlir::TypeConverter& typeConverter, vpux::IndexedSymbolAttr memSpace) {
-    auto bufferType = typeConverter.convertType(value.getType()).cast<vpux::NDTypeInterface>();
-    auto resultBufferType = bufferType.changeMemSpace(memSpace);
-    auto allocOp = rewriter.create<mlir::memref::AllocOp>(loc, resultBufferType.cast<mlir::MemRefType>());
-    return allocOp.getMemref();
-}
-
-mlir::Value createAllocAdaptor(mlir::Location loc, mlir::RewriterBase& rewriter, mlir::Value value,
-                               const std::optional<mlir::bufferization::BufferizationOptions>& options,
-                               std::optional<std::reference_wrapper<mlir::TypeConverter>> typeConverter,
-                               vpux::IndexedSymbolAttr memSpace) {
-    return options.has_value() ? createAlloc(loc, rewriter, value, options.value(), memSpace)
-                               : createAlloc(loc, rewriter, value, typeConverter.value(), memSpace);
-}
-
-void replaceOpAdaptor(const std::optional<mlir::bufferization::BufferizationOptions>& options,
-                      mlir::RewriterBase& rewriter, mlir::Operation* op, const SmallVector<mlir::Value>& newResults) {
-    options.has_value() ? mlir::bufferization::replaceOpWithBufferizedValues(rewriter, op, newResults)
-                        : rewriter.replaceOp(op, newResults);
+    auto allocatedBuffers = allocateBuffersOfType(log, loc, rewriter, resultBufferType);
+    VPUX_THROW_UNLESS(allocatedBuffers.size() == 1,
+                      "Bufferize_sw_op_interface: allocateBuffersOfType should return only one buffer but {0} buffers "
+                      "provided for {1}",
+                      allocatedBuffers.size(), value);
+    return allocatedBuffers.front();
 }
 
 }  // namespace
 
 //
-// bufferizeSoftwareLayer
+// bufferizeSWLayerOp
 //
 
-mlir::LogicalResult vpux::bufferizeSoftwareLayer(
-        mlir::RewriterBase& rewriter, mlir::ModuleOp module, mlir::Operation* op, ArrayRef<mlir::Value> newOperands,
-        const std::optional<mlir::bufferization::BufferizationOptions>& options,
-        std::optional<std::reference_wrapper<mlir::TypeConverter>> typeConverter, vpux::Logger log) {
-    VPUX_THROW_WHEN(((options.has_value() && typeConverter.has_value()) ||
-                     (!options.has_value() && !typeConverter.has_value())),
-                    "Only one of BufferizationOptions and TypeConverter can be set at a time.");
+mlir::LogicalResult vpux::bufferizeSWLayerOp(mlir::RewriterBase& rewriter, mlir::ModuleOp module, mlir::Operation* op,
+                                             ArrayRef<mlir::Value> newOperands, vpux::Logger log) {
     auto* ctx = op->getContext();
     auto layerOp = mlir::cast<VPU::LayerOpInterface>(op);
     auto swLayerOp = mlir::cast<VPUIP::SoftwareLayerOpInterface>(op);
@@ -251,8 +237,7 @@ mlir::LogicalResult vpux::bufferizeSoftwareLayer(
             swKernelOperands.push_back(newOperands[i]);
         } else {
             log.trace("Create CMX buffer and copy operation for input: {0}", newOperands[i].getLoc());
-            const auto outputBuffer = createAllocAdaptor(newOperands[i].getLoc(), rewriter, newOperands[i], options,
-                                                         typeConverter, memSpaceCMX);
+            const auto outputBuffer = createAlloc(log, newOperands[i].getLoc(), rewriter, newOperands[i], memSpaceCMX);
             auto copyOp = rewriter.create<VPUIP::CopyOp>(op->getLoc(), newOperands[i], outputBuffer);
             swKernelOperands.push_back(copyOp.getOutput());
         }
@@ -262,18 +247,16 @@ mlir::LogicalResult vpux::bufferizeSoftwareLayer(
     for (size_t i = 0; i < op->getResults().size(); ++i) {
         if (idxForCMX.second.count(i) == 0) {
             log.trace("Create DDR buffer for output: {0}", op->getResults()[i].getLoc());
-            const auto outputBuffer =
-                    createAllocAdaptor(op->getLoc(), rewriter, op->getResults()[i], options, typeConverter, nullptr);
+            const auto outputBuffer = createAlloc(log, op->getLoc(), rewriter, op->getResults()[i], nullptr);
             swKernelResults.push_back(outputBuffer);
         } else {
             log.trace("Create CMX buffer for output: {0}", op->getResults()[i].getLoc());
-            const auto outputBuffer = createAllocAdaptor(op->getLoc(), rewriter, op->getResults()[i], options,
-                                                         typeConverter, memSpaceCMX);
+            const auto outputBuffer = createAlloc(log, op->getLoc(), rewriter, op->getResults()[i], memSpaceCMX);
             swKernelResults.push_back(outputBuffer);
         }
     }
 
-    VPUIP::createRuntimeKernelDefinition(module, log.nest());
+    VPUIP::createRuntimeKernelDefinition(module, log.nest(), VPU::getArch(op));
 
     // TODO : tile 0
     const int64_t tileIndex = 0;
@@ -299,8 +282,7 @@ mlir::LogicalResult vpux::bufferizeSoftwareLayer(
                 if (operand.getType().cast<vpux::NDTypeInterface>().getMemSpace() == memSpaceCMX) {
                     cmxOperands.push_back(operand);
                 } else {
-                    const auto outputBuffer = createAllocAdaptor(operand.getLoc(), rewriter, operand, options,
-                                                                 typeConverter, memSpaceCMX);
+                    const auto outputBuffer = createAlloc(log, operand.getLoc(), rewriter, operand, memSpaceCMX);
                     auto copyOp = rewriter.create<VPUIP::CopyOp>(op->getLoc(), operand, outputBuffer);
                     cmxOperands.push_back(copyOp.getOutput());
                 }
@@ -354,8 +336,7 @@ mlir::LogicalResult vpux::bufferizeSoftwareLayer(
         if (result.getType().cast<vpux::NDTypeInterface>().getMemSpace() == memSpaceCMX) {
             // Copy outputs that were mapped to CMX back to DDR
             log.trace("Create DDR buffer for output: {0}", result.getLoc());
-            const auto outputBuffer =
-                    createAllocAdaptor(op->getLoc(), rewriter, result, options, typeConverter, nullptr);
+            const auto outputBuffer = createAlloc(log, op->getLoc(), rewriter, result, nullptr);
             auto copyOp = rewriter.create<VPUIP::CopyOp>(op->getLoc(), result, outputBuffer);
             finalResults.push_back(copyOp.getOutput());
         } else {
@@ -364,29 +345,24 @@ mlir::LogicalResult vpux::bufferizeSoftwareLayer(
     }
 
     log.trace("Replace origin op {0} with new outputs from SW Kernel {1}", op->getLoc(), finalResults);
-    replaceOpAdaptor(options, rewriter, op, finalResults);
+    mlir::bufferization::replaceOpWithBufferizedValues(rewriter, op, finalResults);
     return mlir::success();
 }
 
 //
-// bufferizeNceClusterTilingSoftwareLayer
+// bufferizeSWLayerOpInNceClusterTiling
 //
 
-mlir::LogicalResult vpux::bufferizeNceClusterTilingSoftwareLayer(
-        mlir::RewriterBase& rewriter, mlir::ModuleOp module, mlir::Operation* op, ArrayRef<mlir::Value> newOperands,
-        const std::optional<mlir::bufferization::BufferizationOptions>& options,
-        std::optional<std::reference_wrapper<mlir::TypeConverter>> typeConverter, vpux::Logger log) {
-    VPUX_THROW_WHEN(((options.has_value() && typeConverter.has_value()) ||
-                     (!options.has_value() && !typeConverter.has_value())),
-                    "Only one of BufferizationOptions and TypeConverter can be set at a time.");
-
+mlir::LogicalResult vpux::bufferizeSWLayerOpInNceClusterTiling(mlir::RewriterBase& rewriter, mlir::ModuleOp module,
+                                                               mlir::Operation* op, ArrayRef<mlir::Value> newOperands,
+                                                               vpux::Logger log) {
     auto layerOp = mlir::cast<VPU::LayerOpInterface>(op);
     auto swLayerOp = mlir::cast<VPUIP::SoftwareLayerOpInterface>(op);
 
-    VPUIP::createRuntimeKernelDefinition(module, log.nest());
+    VPUIP::createRuntimeKernelDefinition(module, log.nest(), VPU::getArch(op));
 
-    auto outputBuffers = allocateBuffersAdaptor(log, op->getLoc(), rewriter, op->getResults(), options, typeConverter,
-                                                /*individualBuffers=*/true);
+    auto outputBuffers = allocateBuffers(log, op->getLoc(), rewriter, op->getResults(),
+                                         /*individualBuffers=*/true);
     // actual tile index will be corrected as part of unroll NCEClusterTiling pass, this index will be dropped
     const int64_t tileIndex = 0;
     auto builtInFunction =
@@ -394,47 +370,81 @@ mlir::LogicalResult vpux::bufferizeNceClusterTilingSoftwareLayer(
     auto swKernelOp = rewriter.create<VPUIP::SwKernelOp>(op->getLoc(), newOperands, outputBuffers, builtInFunction,
                                                          getIntAttr(op->getContext(), tileIndex));
     vpux::VPUIP::initSwKernel(swKernelOp, newOperands, outputBuffers, swLayerOp.getKernelInfo().args, log.nest());
-    replaceOpAdaptor(options, rewriter, op, swKernelOp.getResults());
+    mlir::bufferization::replaceOpWithBufferizedValues(rewriter, op, swKernelOp.getResults());
     return mlir::success();
 }
 
+namespace {
+
 //
-// SoftwareLayerOpBufferizeModel
+// StridedSliceOpBufferizeModel
 //
 
-template <typename MainOpType>
-class SoftwareLayerOpBufferizeModel :
-        public BufferizableOpInterfaceExternalModelBase<SoftwareLayerOpBufferizeModel<MainOpType>, MainOpType> {
+class StridedSliceOpBufferizeModel :
+        public BufferizableOpInterfaceExternalModelBase<StridedSliceOpBufferizeModel, VPU::StridedSliceOp> {
 public:
-    mlir::LogicalResult bufferizeImpl(MainOpType op, mlir::RewriterBase& rewriter,
+    mlir::LogicalResult bufferizeImpl(VPU::StridedSliceOp origOp, mlir::RewriterBase& rewriter,
                                       const mlir::bufferization::BufferizationOptions& options,
-                                      mlir::ArrayRef<mlir::Value> bufferizedOperands) const;
+                                      VPU::StridedSliceOp::Adaptor adaptor) const;
 };
 
-template <typename MainOpType>
-mlir::LogicalResult SoftwareLayerOpBufferizeModel<MainOpType>::bufferizeImpl(
-        MainOpType op, mlir::RewriterBase& rewriter, const mlir::bufferization::BufferizationOptions& options,
-        mlir::ArrayRef<mlir::Value> bufferizedOperands) const {
-    auto log = Logger::global().nest("one-shot-bufferize-VPU-to-VPUIP", 0);
-    log.trace("Got operation {0} at {1}", op->getName(), op->getLoc());
+bool isLegalStridedSliceOp(VPU::StridedSliceOp stridedSliceOp) {
+    auto attrToVector = [&](mlir::ArrayAttr attr) {
+        return parseIntArrayAttr<uint32_t>(attr);
+    };
+    const auto greaterThanOne = [](auto dim) {
+        return dim > 1;
+    };
+    const auto stridesVec = attrToVector(stridedSliceOp.getStridesAttrAttr());
+    const auto beginsVec = attrToVector(stridedSliceOp.getBeginsAttrAttr());
 
-    constexpr bool opIsSwLayerOperation = MainOpType::template hasTrait<VPU::LayerOpInterface::Trait>() ||
-                                          MainOpType::template hasTrait<VPUIP::SoftwareLayerOpInterface::Trait>();
-    static_assert(opIsSwLayerOperation, "MainOpType is not a Software layer operation");
-
-    auto module = op->template getParentOfType<mlir::ModuleOp>();
-    if (!module) {
-        return errorAt(op->getLoc(), "Operation {0} has no parent Module Op", op->getName());
-    }
-
-    auto clusterTilingOp = op->template getParentOfType<VPU::NCEClusterTilingOp>();
-    if (!clusterTilingOp) {
-        return bufferizeSoftwareLayer(rewriter, module, op, bufferizedOperands, options, std::nullopt, log);
-    } else {
-        return bufferizeNceClusterTilingSoftwareLayer(rewriter, module, op, bufferizedOperands, options, std::nullopt,
-                                                      log);
-    }
+    const auto strideDimCount = llvm::count_if(stridesVec, greaterThanOne);
+    const auto beginsDimCount = llvm::count_if(beginsVec, greaterThanOne);
+    // if the stride dim equals to 1, the layer could be converted to strided DMA.
+    return strideDimCount == 1 && beginsDimCount <= 1;
 }
+
+mlir::LogicalResult StridedSliceOpBufferizeModel::bufferizeImpl(
+        VPU::StridedSliceOp origOp, mlir::RewriterBase& rewriter,
+        const mlir::bufferization::BufferizationOptions& options, VPU::StridedSliceOp::Adaptor adaptor) const {
+    if (isLegalStridedSliceOp(origOp)) {
+        return vpux::bufferizeOp(origOp->getContext(), origOp, adaptor, rewriter);
+    }
+
+    SoftwareLayerOpBufferizeModel<VPU::StridedSliceOp> stridedSliceOpSoftwareModel;
+    return stridedSliceOpSoftwareModel.bufferizeImpl(origOp, rewriter, options, adaptor);
+}
+
+//
+// PermuteCastOpBufferizeModel
+//
+
+class PermuteCastOpBufferizeModel :
+        public BufferizableOpInterfaceExternalModelBase<PermuteCastOpBufferizeModel, VPU::PermuteCastOp> {
+public:
+    mlir::LogicalResult bufferizeImpl(VPU::PermuteCastOp origOp, mlir::RewriterBase& rewriter,
+                                      const mlir::bufferization::BufferizationOptions& options,
+                                      VPU::PermuteCastOp::Adaptor adaptor) const;
+};
+
+bool isLegalPermuteCastOp(VPU::PermuteCastOp op) {
+    const auto inputShape = getShape(op.getInput());
+    const auto outputShape = getShape(op.getOutput());
+    return inputShape.isStatic() && outputShape.isStatic();
+}
+
+mlir::LogicalResult PermuteCastOpBufferizeModel::bufferizeImpl(VPU::PermuteCastOp origOp, mlir::RewriterBase& rewriter,
+                                                               const mlir::bufferization::BufferizationOptions& options,
+                                                               VPU::PermuteCastOp::Adaptor adaptor) const {
+    if (isLegalPermuteCastOp(origOp)) {
+        return vpux::bufferizeOp(origOp->getContext(), origOp, adaptor, rewriter);
+    }
+
+    SoftwareLayerOpBufferizeModel<VPU::PermuteCastOp> permuteCastOpSoftwareModel;
+    return permuteCastOpSoftwareModel.bufferizeImpl(origOp, rewriter, options, adaptor);
+}
+
+}  // namespace
 
 //
 // registerSoftwareLayerBufferizableOpInterfaces
@@ -442,7 +452,8 @@ mlir::LogicalResult SoftwareLayerOpBufferizeModel<MainOpType>::bufferizeImpl(
 
 void vpux::registerSoftwareLayerBufferizableOpInterfaces(mlir::DialectRegistry& registry) {
     registry.addExtension(+[](mlir::MLIRContext* ctx, VPU::VPUDialect*, VPUIP::VPUIPDialect*) {
-        VPU::ConvertOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::ConvertOp>>(*ctx);
+        VPU::StridedSliceOp::attachInterface<StridedSliceOpBufferizeModel>(*ctx);
+        VPU::PermuteCastOp::attachInterface<PermuteCastOpBufferizeModel>(*ctx);
         VPU::SigmoidOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::SigmoidOp>>(*ctx);
         VPU::HardSigmoidOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::HardSigmoidOp>>(*ctx);
         VPU::GridSampleOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::GridSampleOp>>(*ctx);
@@ -456,11 +467,11 @@ void vpux::registerSoftwareLayerBufferizableOpInterfaces(mlir::DialectRegistry& 
         VPU::MVN6Op::attachInterface<SoftwareLayerOpBufferizeModel<VPU::MVN6Op>>(*ctx);
         VPU::InterpolateOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::InterpolateOp>>(*ctx);
         VPU::ScatterNDUpdateOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::ScatterNDUpdateOp>>(*ctx);
-        VPU::StridedSliceOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::StridedSliceOp>>(*ctx);
         VPU::EluOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::EluOp>>(*ctx);
         VPU::SeluOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::SeluOp>>(*ctx);
         VPU::ClampOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::ClampOp>>(*ctx);
         VPU::FullyConnectedOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::FullyConnectedOp>>(*ctx);
+        VPU::MatMulOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::MatMulOp>>(*ctx);
         VPU::SqrtOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::SqrtOp>>(*ctx);
         VPU::CeilingOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::CeilingOp>>(*ctx);
         VPU::NormalizeL2Op::attachInterface<SoftwareLayerOpBufferizeModel<VPU::NormalizeL2Op>>(*ctx);
@@ -470,10 +481,7 @@ void vpux::registerSoftwareLayerBufferizableOpInterfaces(mlir::DialectRegistry& 
                 SoftwareLayerOpBufferizeModel<VPU::DetectionOutputNormalizeOp>>(*ctx);
         VPU::DetectionOutputDecodeBoxesOp::attachInterface<
                 SoftwareLayerOpBufferizeModel<VPU::DetectionOutputDecodeBoxesOp>>(*ctx);
-        VPU::DetectionOutputSortTopKOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::DetectionOutputSortTopKOp>>(
-                *ctx);
-        VPU::DetectionOutputSelectBoxesOp::attachInterface<
-                SoftwareLayerOpBufferizeModel<VPU::DetectionOutputSelectBoxesOp>>(*ctx);
+        VPU::DetectionOutputSortOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::DetectionOutputSortOp>>(*ctx);
         VPU::DetectionOutputNmsCaffeOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::DetectionOutputNmsCaffeOp>>(
                 *ctx);
         VPU::DetectionOutputCollectResultsOp::attachInterface<
@@ -511,8 +519,10 @@ void vpux::registerSoftwareLayerBufferizableOpInterfaces(mlir::DialectRegistry& 
         VPU::PadOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::PadOp>>(*ctx);
         VPU::DepthToSpaceOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::DepthToSpaceOp>>(*ctx);
         VPU::SpaceToDepthOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::SpaceToDepthOp>>(*ctx);
+        VPU::SpaceToBatch::attachInterface<SoftwareLayerOpBufferizeModel<VPU::SpaceToBatch>>(*ctx);
         VPU::AvgPoolOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::AvgPoolOp>>(*ctx);
         VPU::AdaptiveAvgPoolOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::AdaptiveAvgPoolOp>>(*ctx);
+        VPU::AdaptiveMaxPoolOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::AdaptiveMaxPoolOp>>(*ctx);
         VPU::FakeQuantizeOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::FakeQuantizeOp>>(*ctx);
         VPU::QuantizeOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::QuantizeOp>>(*ctx);
         VPU::DequantizeOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::DequantizeOp>>(*ctx);
@@ -540,6 +550,10 @@ void vpux::registerSoftwareLayerBufferizableOpInterfaces(mlir::DialectRegistry& 
         VPU::LessOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::LessOp>>(*ctx);
         VPU::LessEqualOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::LessEqualOp>>(*ctx);
         VPU::LogicalOrOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::LogicalOrOp>>(*ctx);
+        VPU::BitwiseAndOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::BitwiseAndOp>>(*ctx);
+        VPU::BitwiseOrOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::BitwiseOrOp>>(*ctx);
+        VPU::BitwiseXorOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::BitwiseXorOp>>(*ctx);
+        VPU::BitwiseNotOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::BitwiseNotOp>>(*ctx);
         VPU::HSigmoidOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::HSigmoidOp>>(*ctx);
         VPU::LogicalXorOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::LogicalXorOp>>(*ctx);
         VPU::LogicalNotOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::LogicalNotOp>>(*ctx);
@@ -556,6 +570,7 @@ void vpux::registerSoftwareLayerBufferizableOpInterfaces(mlir::DialectRegistry& 
         VPU::ReduceProdOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::ReduceProdOp>>(*ctx);
         VPU::NegativeOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::NegativeOp>>(*ctx);
         VPU::NonMaxSuppressionOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::NonMaxSuppressionOp>>(*ctx);
+        VPU::ROIAlignOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::ROIAlignOp>>(*ctx);
         VPU::ROIPoolingOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::ROIPoolingOp>>(*ctx);
         VPU::PSROIPoolingOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::PSROIPoolingOp>>(*ctx);
         VPU::PermuteQuantizeOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::PermuteQuantizeOp>>(*ctx);
@@ -576,6 +591,7 @@ void vpux::registerSoftwareLayerBufferizableOpInterfaces(mlir::DialectRegistry& 
         VPU::LSTMGatesOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::LSTMGatesOp>>(*ctx);
         VPU::LSTMSequenceOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::LSTMSequenceOp>>(*ctx);
         VPU::ErfOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::ErfOp>>(*ctx);
+        VPU::BucketizeOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::BucketizeOp>>(*ctx);
         VPU::MaxPoolOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::MaxPoolOp>>(*ctx);
         VPU::RollOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::RollOp>>(*ctx);
         VPU::CTCGreedyDecoderSeqLenOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::CTCGreedyDecoderSeqLenOp>>(
@@ -593,5 +609,8 @@ void vpux::registerSoftwareLayerBufferizableOpInterfaces(mlir::DialectRegistry& 
         VPU::IRDFTOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::IRDFTOp>>(*ctx);
         VPU::RDFTUncutOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::RDFTUncutOp>>(*ctx);
         VPU::IRDFTLastAxisOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::IRDFTLastAxisOp>>(*ctx);
+        VPU::AccumulateOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::AccumulateOp>>(*ctx);
+        VPU::NonZeroOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::NonZeroOp>>(*ctx);
+        VPU::ShapeOfOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::ShapeOfOp>>(*ctx);
     });
 }

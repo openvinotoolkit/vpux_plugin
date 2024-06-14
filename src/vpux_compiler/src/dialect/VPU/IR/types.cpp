@@ -52,3 +52,23 @@ IndexedSymbolAttr VPU::DistributedTensorType::getMemSpace() const {
 VPU::DistributedTensorAttr VPU::DistributedTensorType::getDistribution() const {
     return getImpl()->distribution;
 }
+
+VPU::DistributedTensorType VPU::DistributedTensorType::cloneWith(std::optional<mlir::ArrayRef<int64_t>> shape,
+                                                                 mlir::Type elementType) const {
+    if (!shape.has_value()) {
+        return changeElemType(elementType).cast<VPU::DistributedTensorType>();
+    }
+    return changeShapeElemType(ShapeRef(shape.value()), elementType).cast<VPU::DistributedTensorType>();
+}
+
+//
+// VPU::SparseTensorType accessors
+//
+
+VPU::SparseTensorType VPU::SparseTensorType::cloneWith(std::optional<mlir::ArrayRef<int64_t>> shape,
+                                                       mlir::Type elementType) const {
+    if (!shape.has_value()) {
+        return changeElemType(elementType).cast<VPU::SparseTensorType>();
+    }
+    return changeShapeElemType(ShapeRef(shape.value()), elementType).cast<VPU::SparseTensorType>();
+}

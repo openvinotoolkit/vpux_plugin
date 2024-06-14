@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --split-exceeding-variant-count-barriers="max-variant-count=6" %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
@@ -203,7 +203,7 @@ func.func @ExceedingConsumersEqual() -> memref<1x16x1x1xf16, #NHWC, @DDR> {
     %buf0 = VPURT.DeclareBuffer <DDR> <0> -> memref<1x16x1x1xf16, #NHWC, @DDR>
     %buf1 = VPURT.DeclareBuffer <DDR> <32> -> memref<1x16x1x1xf16, #NHWC, @DDR>
 
-    //        0 
+    //        0
     //        |
     //       bar0
     //        |
@@ -274,7 +274,7 @@ func.func @ExceedingConsumersEqual() -> memref<1x16x1x1xf16, #NHWC, @DDR> {
     // CHECK: [[BAR1:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
 
     // CHECK: VPURT.Task updates([[BAR0]], [[BAR1]] : !VPURT.Barrier, !VPURT.Barrier)
-    
+
     // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier)
     // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier)
     // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier)
@@ -363,7 +363,7 @@ func.func @ExceedingConsumersUnEqual() -> memref<1x16x1x1xf16, #NHWC, @DDR> {
     // CHECK: [[BAR1:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
 
     // CHECK: VPURT.Task updates([[BAR0]], [[BAR1]] : !VPURT.Barrier, !VPURT.Barrier)
-    
+
     // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier)
     // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier)
     // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier)
@@ -452,7 +452,7 @@ func.func @NoChange() -> memref<1x16x1x1xf16, #NHWC, @DDR> {
     // CHECK: VPURT.Task updates([[BAR0]] : !VPURT.Barrier)
     // CHECK: VPURT.Task updates([[BAR0]] : !VPURT.Barrier)
     // CHECK: VPURT.Task updates([[BAR0]] : !VPURT.Barrier)
-    
+
     // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier)
     // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier)
     // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier)

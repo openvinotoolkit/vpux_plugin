@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --convert-expand-to-conv %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
@@ -586,4 +586,48 @@ func.func @FuseQuantizeWithShapeCastAvgPool(%arg0: tensor<1x1x19x80xf16, {order 
     // CHECK-SAME:      -> tensor<1x4x19x80x[[Q_TYPE]], {order = #NHWC}>
 
     // CHECK:   return [[RESHAPE_OUTPUT]] : tensor<1x4x19x80x[[Q_TYPE]], {order = #NHWC}>
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @SkipLargeKernelAndSmallSpatialSize
+func.func @SkipLargeKernelAndSmallSpatialSize(%arg0: tensor<1x387x45x80xf16, {order = #NHWC}>)
+    -> tensor<1x400x45x80xf16, {order = #NHWC}> {
+    %EXPAND = IE.Expand(%arg0) {
+        pads_begin = [0, 0, 0, 0],
+        pads_end = [0, 13, 0, 0]
+    } : tensor<1x387x45x80xf16, {order = #NHWC}> -> tensor<1x400x45x80xf16, {order = #NHWC}>
+
+    return %EXPAND : tensor<1x400x45x80xf16, {order = #NHWC}>
+
+    // CHECK:   [[EXPAND:%.*]] = IE.Expand(%arg0) {
+    // CHECK-SAME:      pads_begin = [0, 0, 0, 0],
+    // CHECK-SAME:      pads_end = [0, 13, 0, 0]
+    // CHECK-SAME:  } : tensor<1x387x45x80xf16, {order = #NHWC}> -> tensor<1x400x45x80xf16, {order = #NHWC}>
+
+    // CHECK:   return [[EXPAND]] : tensor<1x400x45x80xf16, {order = #NHWC}>
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @NotConvertWithBigChannelAndHeightRatio
+func.func @NotConvertWithBigChannelAndHeightRatio(%arg0: tensor<1x60x80x80xf16, {order = #NHWC}>)
+    -> tensor<1x64x80x80xf16, {order = #NHWC}> {
+    %EXPAND = IE.Expand(%arg0) {
+        pads_begin = [0, 0, 0, 0],
+        pads_end = [0, 4, 0, 0]
+    } : tensor<1x60x80x80xf16, {order = #NHWC}> -> tensor<1x64x80x80xf16, {order = #NHWC}>
+
+    return %EXPAND : tensor<1x64x80x80xf16, {order = #NHWC}>
+
+    // CHECK:   [[EXPAND:%.*]] = IE.Expand({{[^:]+}}) {
+    // CHECK-SAME:      pads_begin = [0, 0, 0, 0],
+    // CHECK-SAME:      pads_end = [0, 4, 0, 0]
+    // CHECK-SAME:  } : tensor<1x60x80x80xf16, {order = #NHWC}> -> tensor<1x64x80x80xf16, {order = #NHWC}>
+
+    // CHECK:   return [[EXPAND]] : tensor<1x64x80x80xf16, {order = #NHWC}>
 }

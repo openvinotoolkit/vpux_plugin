@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -16,9 +16,12 @@
 #include <vector>
 
 #include <openvino/openvino.hpp>
+
 #include "vcl_logger.hpp"
-#include "vpux_compiler.hpp"
 #include "vpux_driver_compiler.h"
+
+#include "intel_npu/al/icompiler.hpp"
+#include "vpux/utils/IE/config.hpp"
 
 namespace VPUXDriverCompiler {
 

@@ -145,7 +145,7 @@ def ELFNPU37XX_GetOffsetOfOpInterface : OpInterface<"GetOffsetOfOpInterface"> {
     let methods = [
         InterfaceMethod<
             "Returns the offset of a field (specified by the 'val' parameter) inside a serializable op",
-            "mlir::FailureOr<uint64_t>",
+            "size_t",
             "getOffsetOfWithinOperation", (ins "mlir::Value":$val)
         >,
     ];

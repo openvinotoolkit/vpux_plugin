@@ -1,12 +1,8 @@
-// Copyright (C) Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include "vpu_ov2_layer_test.hpp"
-
-#include <ov_models/builders.hpp>
-#include <ov_models/utils/ov_helpers.hpp>
-#include <shared_test_classes/base/layer_test_utils.hpp>
 
 using namespace ov::test;
 
@@ -50,11 +46,21 @@ class MVNWithTransposeTest_NPU3720 :
         auto order = ov::op::v0::Constant::create(ov::element::i64, {dimsOrder.size()}, dimsOrder);
         return std::make_shared<ov::op::v1::Transpose>(param, order);
     }
+
+public:
+    static std::string getTestCaseName(
+            const testing::TestParamInfo<std::tuple<std::vector<int64_t>, ov::Layout>>& obj) {
+        const std::string sep = "_";
+        std::ostringstream result;
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
+        result << "TestIdx=" << obj.index << sep;
+        return result.str();
+    };
 };
 
 TEST_P(MVNWithTransposeTest_NPU3720, HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
 }
 
 const std::vector<std::vector<int64_t>> transposes = {
@@ -64,6 +70,7 @@ const std::vector<std::vector<int64_t>> transposes = {
 const std::vector<ov::Layout> outLayout = {ov::Layout("NCHW"), ov::Layout("NHWC")};
 
 INSTANTIATE_TEST_SUITE_P(smoke_mvntranspose, MVNWithTransposeTest_NPU3720,
-                         ::testing::Combine(::testing::ValuesIn(transposes), ::testing::ValuesIn(outLayout)));
+                         ::testing::Combine(::testing::ValuesIn(transposes), ::testing::ValuesIn(outLayout)),
+                         MVNWithTransposeTest_NPU3720::getTestCaseName);
 
 }  // namespace

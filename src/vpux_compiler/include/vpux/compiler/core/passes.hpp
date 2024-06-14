@@ -20,8 +20,13 @@ namespace vpux {
 
 std::unique_ptr<mlir::Pass> createMoveDeclarationsToTopPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createPrintDotPass(StringRef fileName = {}, StringRef startAfter = {},
-                                               StringRef stopBefore = {}, bool printConst = false,
-                                               bool printDeclarations = false);
+                                               StringRef stopBefore = {}, bool printOnlyDotInterFaces = false,
+                                               bool printConst = false, bool printDeclarations = false);
+
+std::unique_ptr<mlir::Pass> createSetupLocationVerifierPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createStartLocationVerifierPass(
+        vpux::Logger log, const mlir::detail::PassOptions::Option<std::string>& locationsVerificationMode);
+std::unique_ptr<mlir::Pass> createStopLocationVerifierPass(vpux::Logger log);
 
 //
 // Generated

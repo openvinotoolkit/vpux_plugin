@@ -24,9 +24,7 @@ uint32_t vpux::VPUMI37XX::DeclareKernelEntryOp::getKernelEntry() {
     auto kernel = getKernelPath();
 
     const auto& kernelInfo = ShaveBinaryResources::getInstance();
-    const SmallString arch = ELFNPU37XX::getSwKernelArchString(VPU::getArch(this->getOperation()));
-
-    const auto elfBlob = kernelInfo.getElf(kernel, arch).vec();
+    const auto elfBlob = kernelInfo.getElf(kernel);
 
     auto accessor = elf::ElfDDRAccessManager(elfBlob.data(), elfBlob.size());
     auto elf_reader = elf::Reader<elf::ELF_Bitness::Elf32>(&accessor);

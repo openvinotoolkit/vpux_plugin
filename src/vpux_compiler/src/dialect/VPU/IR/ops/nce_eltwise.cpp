@@ -12,6 +12,8 @@
 #include "vpux/compiler/core/layers.hpp"
 #include "vpux/compiler/dialect/VPU/utils/eltwise_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
+#include "vpux/compiler/utils/VPU/ppe_utils.hpp"
+#include "vpux/compiler/utils/VPU/tile_utils.hpp"
 #include "vpux/compiler/utils/error.hpp"
 
 using namespace vpux;
@@ -121,8 +123,17 @@ vpux::VPU::PaddingAttr vpux::VPU::NCEEltwiseOp::getPad() {
 // ClusteredOpInterface
 //
 
-bool vpux::VPU::NCEEltwiseOp::checkStrategyCompatibility(VPU::MultiClusterStrategy strategy) {
+bool vpux::VPU::NCEEltwiseOp::checkStrategyCompatibility(VPU::MultiClusterStrategy strategy, size_t) {
     if (this->getIsInplace().value_or(false)) {
+        return strategy == VPU::MultiClusterStrategy::Clustering ||
+               strategy == VPU::MultiClusterStrategy::SplitOverHeight;
+    }
+
+    const auto outputType = getOutput().getType().cast<vpux::NDTypeInterface>();
+    const auto outputDimsOrder = outputType.getDimsOrder();
+    // Unsupported to broadcast the lowest dimension
+    // Track E#120804
+    if (outputDimsOrder.dimAt(outputDimsOrder.numDims() - 1) == Dims4D::Act::H) {
         return strategy == VPU::MultiClusterStrategy::Clustering ||
                strategy == VPU::MultiClusterStrategy::SplitOverHeight;
     }
@@ -133,11 +144,11 @@ bool vpux::VPU::NCEEltwiseOp::checkStrategyCompatibility(VPU::MultiClusterStrate
 
 vpux::VPU::DistributedTensorAttr vpux::VPU::NCEEltwiseOp::getExplicitDistributedTensorAttr(
         vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, mlir::ArrayAttr numTiles,
-        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::ArrayAttr kernel, vpux::VPU::PaddingAttr pad,
-        mlir::ArrayAttr stride, mlir::UnitAttr uniformDistributedSegments) {
+        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::UnitAttr uniformDistributedSegments,
+        const vpux::VPU::OverlapDistributionParams& overlapParams) {
     return VPU::getNCEExplicitDistributedTensorAttr(mlir::dyn_cast<VPU::NCEOpInterface>(getOperation()), shape,
-                                                    distributionMode, numTiles, numClusters, alignment, kernel, pad,
-                                                    stride, uniformDistributedSegments);
+                                                    distributionMode, numTiles, numClusters, alignment,
+                                                    uniformDistributedSegments, overlapParams);
 }
 
 bool VPU::NCEEltwiseOp::isOperationSplitOverHeightCompatible(const vpux::TileInfo& outputTile) {
@@ -178,9 +189,10 @@ bool vpux::VPU::NCEEltwiseOp::isVFSupported() {
 vpux::VPU::SparsitySupport vpux::VPU::NCEEltwiseOp::sparsitySupport() {
     const auto arch = getArch(getOperation());
     switch (arch) {
-    case VPU::ArchKind::VPUX30XX:
+    case VPU::ArchKind::NPU30XX:
         return VPU::SparsitySupport::NONE;
-    case VPU::ArchKind::VPUX37XX:
+    case VPU::ArchKind::NPU37XX:
+    case VPU::ArchKind::NPU40XX:
         // TODO E#66913: enable input sparsity support once inputs are aligned with respect to storage element size
         return VPU::SparsitySupport::SPARSE_OUTPUTS;
     default:
@@ -201,4 +213,103 @@ void vpux::VPU::NCEEltwiseOp::adjustAttrs(const TilingInfo&, const TileInfo&) {
 
 mlir::FailureOr<OutputTiling> vpux::VPU::NCEEltwiseOp::getTilingStrategy(TilingMode tilingMode, Logger log) {
     return vpux::getHWLayerTilingStrategy(this->getOperation(), tilingMode, log);
+}
+
+//
+// verifyEltwiseKernel
+//
+
+static mlir::LogicalResult verifyEltwiseKernel(vpux::NDTypeInterface input1, vpux::NDTypeInterface input2,
+                                               vpux::NDTypeInterface output, const bool allowDifferentScales = false,
+                                               const bool allowDifferentZp = true) {
+    // Eltwise add is expected to have the same shapes for all operands
+    if (input1.getRank() != 4 || input2.getRank() != 4 || output.getRank() != 4) {
+        return mlir::failure();
+    }
+
+    if (input1.getShape() != input2.getShape())
+        return mlir::failure();
+
+    // Output type can differ from input type. In case of quantization
+    // this can be different quant scale value.
+    // Input types can also differ when both of them are quantized. E.g. scale value for Eltwise Multiply
+    auto input1ElemType = input1.getElementType();
+    auto input2ElemType = input2.getElementType();
+
+    if (!input1ElemType.isa<mlir::quant::QuantizedType>() && !input2ElemType.isa<mlir::quant::QuantizedType>()) {
+        if (input1ElemType != input2ElemType) {
+            return mlir::failure();
+        }
+    } else if (input1ElemType.isa<mlir::quant::UniformQuantizedType>() &&
+               input2ElemType.isa<mlir::quant::UniformQuantizedType>()) {
+        auto qInput1 = input1ElemType.cast<mlir::quant::UniformQuantizedType>();
+        auto qInput2 = input2ElemType.cast<mlir::quant::UniformQuantizedType>();
+
+        if (qInput1.getExpressedType() != qInput2.getExpressedType() ||
+            qInput1.getStorageType() != qInput2.getStorageType() || qInput1.isSigned() != qInput2.isSigned()) {
+            return mlir::failure();
+        }
+
+        if (!allowDifferentZp && qInput1.getZeroPoint() != qInput2.getZeroPoint())
+            return mlir::failure();
+
+        if (!allowDifferentScales &&
+            !isFloatEqual(static_cast<float>(qInput1.getScale()), static_cast<float>(qInput2.getScale())))
+            return mlir::failure();
+    } else {
+        VPUX_THROW("Unsupported inputs type. in1='{0}', in2='{1}'", input1ElemType, input2ElemType);
+    }
+
+    return mlir::success();
+}
+
+mlir::LogicalResult vpux::VPU::NCEEltwiseOp::verifyKernel(IE::AddOp origOp, Logger) {
+    auto input1Type = origOp.getInput1().getType().cast<vpux::NDTypeInterface>();
+    auto input2Type = origOp.getInput2().getType().cast<vpux::NDTypeInterface>();
+    auto outputType = origOp.getOutput().getType().cast<vpux::NDTypeInterface>();
+
+    const auto arch = VPU::getArch(origOp->getParentOfType<mlir::ModuleOp>());
+
+    return verifyEltwiseKernel(input1Type, input2Type, outputType, supportsPerInputEltwiseScale(arch));
+}
+
+mlir::LogicalResult vpux::VPU::NCEEltwiseOp::verifyKernel(IE::MultiplyOp origOp, Logger) {
+    auto input1Type = origOp.getInput1().getType().cast<vpux::NDTypeInterface>();
+    auto input2Type = origOp.getInput2().getType().cast<vpux::NDTypeInterface>();
+    auto outputType = origOp.getOutput().getType().cast<vpux::NDTypeInterface>();
+    return verifyEltwiseKernel(input1Type, input2Type, outputType, true);
+}
+
+mlir::LogicalResult vpux::VPU::NCEEltwiseOp::verifyKernel(IE::SubtractOp origOp, Logger) {
+    auto input1Type = origOp.getInput1().getType().cast<vpux::NDTypeInterface>();
+    auto input2Type = origOp.getInput2().getType().cast<vpux::NDTypeInterface>();
+    auto outputType = origOp.getOutput().getType().cast<vpux::NDTypeInterface>();
+    return verifyEltwiseKernel(input1Type, input2Type, outputType);
+}
+
+mlir::LogicalResult vpux::VPU::NCEEltwiseOp::verifyKernel(IE::AndOp origOp, Logger) {
+    auto input1Type = origOp.getInput1().getType().cast<vpux::NDTypeInterface>();
+    auto input2Type = origOp.getInput2().getType().cast<vpux::NDTypeInterface>();
+    auto outputType = origOp.getOutput().getType().cast<vpux::NDTypeInterface>();
+    return verifyEltwiseKernel(input1Type, input2Type, outputType);
+}
+
+mlir::LogicalResult vpux::VPU::NCEEltwiseOp::verifyEltwiseCMX(mlir::Location loc, mlir::ModuleOp module, bool isInplace,
+                                                              vpux::NDTypeInterface firstInputType,
+                                                              vpux::NDTypeInterface secondInputType,
+                                                              vpux::NDTypeInterface outputType, Logger log) {
+    log.setName("NCEInvariant");
+
+    auto bufferTypes = isInplace ? SmallVector<vpux::NDTypeInterface>{firstInputType, secondInputType}
+                                 : SmallVector<vpux::NDTypeInterface>{firstInputType, secondInputType, outputType};
+    auto requiredCMX = VPU::getRequiredCMXSizeForNCEOps(bufferTypes, 0);
+
+    const auto cmxSize = vpux::VPU::getTotalCMXSize(module);
+    if (requiredCMX > cmxSize) {
+        log.trace("[{0}] CMX memory is not enough for Eltwise, available '{1}', required '{2}'", loc, cmxSize,
+                  requiredCMX);
+        return mlir::failure();
+    }
+
+    return mlir::success();
 }

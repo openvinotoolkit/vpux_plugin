@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -76,7 +76,7 @@ func.func @InsertRequantizeConvSigmoid(%arg0: tensor<1x16x4x4x!qElemType, {order
 
     // CHECK:       [[VAL1:%.*]] =  VPU.NCE.Eltwise([[VAL0]]
     // CHECK-SAME:      mode = <AND>
-    
+
     // CHECK:       [[VAL2:%.*]] =  VPU.NCE.Eltwise([[VAL1]]
     // CHECK-SAME:     mode = <AND>
 
@@ -84,4 +84,3 @@ func.func @InsertRequantizeConvSigmoid(%arg0: tensor<1x16x4x4x!qElemType, {order
 
     // CHECK:       return [[VAL3]]
 }
-

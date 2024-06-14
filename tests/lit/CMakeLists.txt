@@ -9,7 +9,7 @@ vpux_setup_lit_tool(flatc)
 
 if(ENABLE_NPU_MONO)
     if(NOT DEFINED ELF_SUBMODULE_PATH)
-        message(FATAL_ERROR "Graphfile schema submodule path is not set while `npu_mono` was activated")
+        message(FATAL_ERROR "Elf submodule path is not set while `npu_mono` was activated")
     endif()
     set(SCHEMA_SOURCE_DIR ${ELF_SUBMODULE_PATH}/src/schema)
 else()

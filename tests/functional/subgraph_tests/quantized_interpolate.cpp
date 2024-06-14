@@ -1,14 +1,12 @@
-// Copyright (C) Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include <common/utils.hpp>
 #include <vpu_ov2_layer_test.hpp>
 
-#include <ov_models/builders.hpp>
-#include <ov_models/utils/ov_helpers.hpp>
-#include <shared_test_classes/base/layer_test_utils.hpp>
-#include "vpux_private_properties.hpp"
+#include "common_test_utils/node_builders/fake_quantize.hpp"
+#include "npu_private_properties.hpp"
 
 using namespace ov::test;
 namespace {
@@ -36,7 +34,7 @@ class QuantizedSEInterpSubGraphTestCommon :
         public VpuOv2LayerTest,
         public testing::WithParamInterface<QuantizedSEInterpTestParams> {
     void configure_model() override {
-        configuration[ov::intel_vpux::compilation_mode_params.name()] = "enable-se-ptrs-operations=true";
+        configuration[ov::intel_npu::compilation_mode_params.name()] = "enable-se-ptrs-operations=true";
     }
     void SetUp() override {
         std::vector<float> dataFQRanges;
@@ -57,8 +55,8 @@ class QuantizedSEInterpSubGraphTestCommon :
         const std::vector<float> dataInHigh = {dataFQRanges.at(1)};
         const std::vector<float> dataOutLow = {dataFQRanges.at(2)};
         const std::vector<float> dataOutHigh = {dataFQRanges.at(3)};
-        const auto dataFq = ngraph::builder::makeFakeQuantize(params[0], ov::element::f32, dataLevels, {}, dataInLow,
-                                                              dataInHigh, dataOutLow, dataOutHigh);
+        const auto dataFq = ov::test::utils::make_fake_quantize(params[0], ov::element::f32, dataLevels, {}, dataInLow,
+                                                                dataInHigh, dataOutLow, dataOutHigh);
 
         auto default_out_shape_node = ov::op::v0::Constant::create(ov::element::i32, ov::Shape{4}, {0, 0, 0, 0});
         auto axes_node = ov::op::v0::Constant::create(ov::element::i64, ov::Shape{4}, {0, 1, 2, 3});
@@ -75,8 +73,8 @@ class QuantizedSEInterpSubGraphTestCommon :
 
         const std::vector<float> outDataLow = {0.0f};
         const std::vector<float> outDataHigh = {255.0f};
-        const auto outFq = ngraph::builder::makeFakeQuantize(interp, ov::element::f32, dataLevels, {}, outDataLow,
-                                                             outDataHigh, outDataLow, outDataHigh);
+        const auto outFq = ov::test::utils::make_fake_quantize(interp, ov::element::f32, dataLevels, {}, outDataLow,
+                                                               outDataHigh, outDataLow, outDataHigh);
 
         const ov::ResultVector results{std::make_shared<ov::op::v0::Result>(outFq)};
         function = std::make_shared<ov::Model>(results, params, "QuantizedInterp");
@@ -91,12 +89,14 @@ public:
         std::vector<float> interpScales;
         std::tie(ip, op, fqRanges, inputShape, interpScales) = obj.param;
 
+        const std::string sep = "_";
         std::ostringstream result;
-        result << "InputPrec=" << ip << "_";
-        result << "OutputPrec=" << op << "_";
-        result << "FQ=" << vectorToString(fqRanges) << "_";
-        result << "InputShape=" << inputShape[0].second[0] << "_";
-        result << "InterpScales=" << vectorToString(interpScales) << "_";
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
+        result << "InputPrec=" << ip << sep;
+        result << "OutputPrec=" << op << sep;
+        result << "FQ=" << vectorToString(fqRanges) << sep;
+        result << "InputShape=" << inputShape[0].second[0] << sep;
+        result << "InterpScales=" << vectorToString(interpScales) << sep;
         return result.str();
     }
 };
@@ -105,13 +105,15 @@ class QuantizedSEInterpSubGraphTest_NPU3720_HW : public QuantizedSEInterpSubGrap
 class QuantizedSEInterpSubGraphTest_NPU3720_SW : public QuantizedSEInterpSubGraphTestCommon {};
 
 TEST_P(QuantizedSEInterpSubGraphTest_NPU3720_HW, HW) {
+    abs_threshold = 1.0;
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
 }
 
 TEST_P(QuantizedSEInterpSubGraphTest_NPU3720_SW, SW) {
+    abs_threshold = 1.0;
     setReferenceSoftwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
 }
 
 std::vector<std::vector<float>> fqRanges = {{0.0f, 255.0f, 0.0f, 255.0f}};

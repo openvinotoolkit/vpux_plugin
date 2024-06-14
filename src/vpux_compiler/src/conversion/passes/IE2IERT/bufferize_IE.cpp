@@ -7,7 +7,7 @@
 
 #include "vpux/compiler/core/attributes/stride_reqs.hpp"
 #include "vpux/compiler/core/layers.hpp"
-#include "vpux/compiler/dialect/IE/ops.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IERT/ops.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
@@ -1599,7 +1599,7 @@ private:
 void BufferizeIEPass::safeRunOnFunc() {
     auto& ctx = getContext();
 
-    vpux::BufferizeTypeConverter typeConverter;
+    vpux::BufferizeOneShotTypeConverter typeConverter;
 
     const auto isLegalOp = [&](mlir::Operation* op) {
         return typeConverter.isLegal(op);
@@ -1611,7 +1611,7 @@ void BufferizeIEPass::safeRunOnFunc() {
     target.addIllegalDialect<IE::IEDialect>();
     target.addLegalOp<IE::CNNNetworkOp, IE::DataInfoOp>();
     target.addLegalOp<mlir::memref::AllocOp>();
-    vpux::populateBufferizeMaterializationLegality(target);
+    target.addLegalOp<Const::DeclareOp>();
 
     mlir::RewritePatternSet patterns(&ctx);
     patterns.add<ReshapeRewrite<IE::AffineReshapeOp>>(typeConverter, &ctx, _log);
@@ -1629,7 +1629,6 @@ void BufferizeIEPass::safeRunOnFunc() {
     patterns.add<QuantizeCastRewriter>(typeConverter, &ctx, _log);
     patterns.add<NonMaxSuppressionRewrite>(typeConverter, &ctx, _log);
     patterns.add<ReverseSequenceRewrite>(typeConverter, &ctx, _log);
-    Const::ConstDialect::populateBufferizePatterns(patterns, typeConverter, _log);
 
     auto func = getOperation();
     if (mlir::failed(mlir::applyPartialConversion(func, target, std::move(patterns)))) {

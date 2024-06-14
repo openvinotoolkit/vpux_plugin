@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --init-compiler="vpu-arch=%arch%" --canonicalize %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 func.func @FoldExpand(%arg0: tensor<1x8x4x4xf16>) -> tensor<1x8x4x4xf16> {
     %0 = IE.Expand(%arg0) {pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0]} : tensor<1x8x4x4xf16> -> tensor<1x8x4x4xf16>
@@ -56,7 +56,7 @@ func.func @KeepExpandForEltwiseToBenefitFromAdjustInputShape(%arg0: tensor<1x80x
     %add = IE.Add(%expand, %cst) { auto_broadcast = #IE.auto_broadcast_type<NUMPY> } : tensor<1x80x56x56xf16>, tensor<1x80x56x56xf16> -> tensor<1x80x56x56xf16>
     return %add : tensor<1x80x56x56xf16>
 
-    // CHECK-DAG: %[[CST:.*]] = const.Declare tensor<1x80x56x56xf16> = dense<1.000000e+00> : tensor<1x80x56x56xf16> 
+    // CHECK-DAG: %[[CST:.*]] = const.Declare tensor<1x80x56x56xf16> = dense<1.000000e+00> : tensor<1x80x56x56xf16>
     // CHECK:     %[[SLICE:.*]] = IE.Slice %arg0 [0, 0, 0, 0] [1, 72, 56, 56] : tensor<1x80x56x56xf16> to tensor<1x72x56x56xf16>
     // CHECK:     %[[EXPAND:.*]] = IE.Expand(%[[SLICE]]) {pads_begin = [0, 0, 0, 0], pads_end = [0, 8, 0, 0]} : tensor<1x72x56x56xf16> -> tensor<1x80x56x56xf16>
     // CHECK:     %[[ADD:.*]] = IE.Add(%[[EXPAND]], %[[CST]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x80x56x56xf16>, tensor<1x80x56x56xf16> -> tensor<1x80x56x56xf16>

@@ -1,4 +1,4 @@
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022 Intel Corporation
 // SPDX-License-Identifier: Apache 2.0
 
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
@@ -7,9 +7,7 @@
 #include "vpux/compiler/utils/subspaces.hpp"
 #include "vpux/compiler/utils/types.hpp"
 
-#include "vpux/utils/IE/loop.hpp"
 #include "vpux/utils/core/format.hpp"
-#include "vpux/utils/core/func_ref.hpp"
 #include "vpux/utils/core/numeric.hpp"
 
 #include <mlir/Dialect/Quant/QuantTypes.h>
@@ -97,9 +95,11 @@ Const::Content vpux::Const::GetSparsityMapAttr::transform(vpux::Const::Content& 
     } else if (inputElementType.isUnsignedInteger(8)) {
         return generateSparsityMap<uint8_t>(input, sparsifyValue, input.getType(), outputType, getContext());
     } else if (inputElementType.isF16()) {
-        return generateSparsityMap<float16>(input, sparsifyValue, input.getType(), outputType, getContext());
+        return generateSparsityMap<vpux::type::float16>(input, sparsifyValue, input.getType(), outputType,
+                                                        getContext());
     } else if (inputElementType.isBF16()) {
-        return generateSparsityMap<bfloat16>(input, sparsifyValue, input.getType(), outputType, getContext());
+        return generateSparsityMap<vpux::type::bfloat16>(input, sparsifyValue, input.getType(), outputType,
+                                                         getContext());
     } else if (inputElementType.isF32()) {
         return generateSparsityMap<float>(input, sparsifyValue, input.getType(), outputType, getContext());
     }

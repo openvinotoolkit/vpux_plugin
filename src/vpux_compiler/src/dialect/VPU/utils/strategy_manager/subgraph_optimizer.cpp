@@ -1,10 +1,19 @@
 //
 // Copyright (C) 2022-2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+//
+// LEGAL NOTICE: Your use of this software and any required dependent software
+// (the "Software Package") is subject to the terms and conditions of
+// the Intel(R) OpenVINO(TM) Distribution License for the Software Package,
+// which may also include notices, disclaimers, or license terms for
+// third party or open source software included in or with the Software Package,
+// and your use indicates your acceptance of all such terms. Please refer
+// to the "third-party-programs.txt" or other similarly-named text file
+// included with the Software Package for additional details.
 //
 
 #include "vpux/compiler/dialect/VPU/utils/strategy_manager/subgraph_optimizer.hpp"
 #include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/generate_tiling.hpp"
 #include "vpux/compiler/dialect/VPU/utils/strategy_manager/strategy_manager.hpp"
 #include "vpux/compiler/utils/strings.hpp"
 
@@ -47,7 +56,11 @@ bool SubgraphOptimizer::isStrategySOHLike(VPU::ClusteredOpInterface op) {
 }
 
 bool SubgraphOptimizer::isValidStrategy(VPU::ClusteredOpInterface clusteredOp, VPU::MultiClusterStrategy strategy) {
-    if (!clusteredOp.checkStrategyCompatibility(strategy)) {
+    auto moduleOp = clusteredOp->getParentOfType<mlir::ModuleOp>();
+    auto tileOp = IE::getTileExecutor(moduleOp);
+    const auto numTiles = tileOp.getCount();
+
+    if (!clusteredOp.checkStrategyCompatibility(strategy, numTiles)) {
         return false;
     }
 
@@ -263,6 +276,9 @@ double SubgraphOptimizer::getInputSpillingCostToMultiClusterLayer(VPU::Clustered
             .Case<NCEInterpolateOp>([&](NCEInterpolateOp origOp) {
                 return getInputSpillingCostToMultiClusterLayer(origOp, origOp.getInput(), strategy, config);
             })
+            .Case<NCEPermuteOp>([&](NCEPermuteOp origOp) {
+                return getInputSpillingCostToMultiClusterLayer(origOp, origOp.getInput(), strategy, config);
+            })
             .Case<SWOpInterface>([&](SWOpInterface swOp) {
                 return getInputSpillingCostToMultiClusterLayer(
                         mlir::cast<VPU::ClusteredOpInterface>(swOp.getOperation()), swOp->getOperand(0), strategy,
@@ -331,19 +347,21 @@ double SubgraphOptimizer::getOutputSpillingCostToMultiClusterLayer(VPU::Clustere
                                                                    const SubgraphOptConfig& config) {
     bool hasCalculatedSpillingWriteCost = false;
     double totalSpillingCost = 0.0;
-    for (auto userOp : clusteredOp->getResult(0).getUsers()) {
-        if (mlir::isa_and_nonnull<VPU::QuantizeCastOp>(userOp) ||
-            (mlir::isa_and_nonnull<VPU::ShapeCastOp>(userOp) && userOp->hasOneUse())) {
+    for (auto directUserOp : clusteredOp->getResult(0).getUsers()) {
+        auto computeUserOp = directUserOp;
+        while (mlir::isa_and_nonnull<VPU::GroupSparseTensorOp>(computeUserOp) ||
+               (mlir::isa_and_nonnull<VPU::DistributedCastOpInterface>(computeUserOp) &&
+                !VPU::hasMultiBranches(computeUserOp))) {
             // propagate cast ops
-            userOp = *userOp->getResult(0).getUsers().begin();
+            computeUserOp = *computeUserOp->getResult(0).getUsers().begin();
         }
 
-        if (userOp == nullptr || !_layerCostModel.hasMultiClusterStrategy(userOp)) {
+        if (computeUserOp == nullptr || !_layerCostModel.hasMultiClusterStrategy(computeUserOp)) {
             continue;
         }
 
-        if (hasOutputSpillingToMultiClusterLayer(clusteredOp, userOp, strategy, config)) {
-            auto userClusteredOp = mlir::dyn_cast<VPU::ClusteredOpInterface>(userOp);
+        if (hasOutputSpillingToMultiClusterLayer(clusteredOp, directUserOp, strategy, config)) {
+            auto userClusteredOp = mlir::cast<VPU::ClusteredOpInterface>(computeUserOp);
             auto userStrategy = config.useRollbackStrategy
                                         ? getRollbackStrategy(userClusteredOp)
                                         : _layerCostModel.getMultiClusterStrategyValue(userClusteredOp);
@@ -371,42 +389,47 @@ bool SubgraphOptimizer::hasSpillingAroundConcat(VPU::ClusteredOpInterface cluste
                                                 mlir::Operation* excludedOp) {
     if (auto concatOp = mlir::dyn_cast<VPU::ConcatOp>(clusteredOp.getOperation())) {
         auto currentSrcTensorType = _layerCostModel.getDistributedOutputType(clusteredOp, clusteredStrategy);
-        for (auto concatUser : concatOp->getUsers()) {
-            if (auto concatUserClusteredOp = mlir::dyn_cast<ClusteredOpInterface>(concatUser)) {
-                if (!_layerCostModel.hasMultiClusterStrategy(concatUserClusteredOp)) {
-                    return true;
-                }
-                auto currentDstTensorType = _layerCostModel.getDistributedInputType(
-                        concatUserClusteredOp, concatOp.getOperation(), getRollbackStrategy(concatUserClusteredOp));
-                if (_layerCostModel.hasSpilling(clusteredOp, currentSrcTensorType, currentDstTensorType)) {
-                    return true;
-                }
-            } else {
+        auto hasSpillingWithUser = llvm::any_of(concatOp->getUsers(), [&](auto concatUser) {
+            auto concatUserClusteredOp = mlir::dyn_cast<ClusteredOpInterface>(concatUser);
+            if (concatUserClusteredOp == nullptr || !_layerCostModel.hasMultiClusterStrategy(concatUserClusteredOp)) {
                 return true;
             }
+
+            auto currentDstTensorType = _layerCostModel.getDistributedInputType(
+                    concatUserClusteredOp, concatOp.getOperation(), getRollbackStrategy(concatUserClusteredOp));
+            return _layerCostModel.hasSpilling(clusteredOp, currentSrcTensorType, currentDstTensorType);
+        });
+
+        if (hasSpillingWithUser) {
+            return true;
         }
 
         llvm::DenseSet<mlir::Operation*> concatParents;
         for (auto concatInput : concatOp.getInputs()) {
-            auto currentParent = concatInput.getDefiningOp();
-
-            if ((currentParent == nullptr) || (!mlir::isa<VPU::NCEOpInterface>(currentParent)) ||
-                (concatParents.contains(currentParent)) || (!_layerCostModel.hasMultiClusterStrategy(currentParent))) {
+            auto op = concatInput.getDefiningOp<VPU::NCEOpInterface>();
+            if (op == nullptr || !_layerCostModel.hasMultiClusterStrategy(op)) {
                 return true;
             }
+            concatParents.insert(op);
+        }
 
-            concatParents.insert(currentParent);
+        auto inputSize = checked_cast<size_t>(std::distance(concatOp.getInputs().begin(), concatOp.getInputs().end()));
+        if (concatParents.size() != inputSize) {
+            return true;
+        };
 
-            if (currentParent != excludedOp) {
-                auto currentParentClusteredOp = mlir::cast<VPU::ClusteredOpInterface>(currentParent);
-                auto currentSrcTensorType = _layerCostModel.getDistributedOutputType(
-                        currentParentClusteredOp, getRollbackStrategy(currentParentClusteredOp));
-                auto currentDstTensorType =
-                        _layerCostModel.getDistributedInputType(clusteredOp, currentParent, clusteredStrategy);
-                if (_layerCostModel.hasSpilling(currentParentClusteredOp, currentSrcTensorType, currentDstTensorType)) {
-                    return true;
-                }
-            }
+        concatParents.erase(excludedOp);
+
+        auto hasSpillingWithParent = llvm::any_of(concatParents, [&](auto currentParent) {
+            auto currentParentClusteredOp = mlir::cast<VPU::ClusteredOpInterface>(currentParent);
+            auto currentSrcTensorType = _layerCostModel.getDistributedOutputType(
+                    currentParentClusteredOp, getRollbackStrategy(currentParentClusteredOp));
+            auto currentDstTensorType =
+                    _layerCostModel.getDistributedInputType(clusteredOp, currentParent, clusteredStrategy);
+            return _layerCostModel.hasSpilling(currentParentClusteredOp, currentSrcTensorType, currentDstTensorType);
+        });
+        if (hasSpillingWithParent) {
+            return true;
         }
     }
 
@@ -537,7 +560,8 @@ SubgraphOptimizer::ShortcutMapTy SubgraphOptimizer::detectShortcuts() {
             auto parent = input.getDefiningOp();
             // propagate cast ops
             // TODO: support to propagate more cast/viewLike ops in Strategy Manager, refer to E#65795
-            if (mlir::isa_and_nonnull<VPU::ShapeCastOp, VPU::QuantizeCastOp>(parent)) {
+            if (mlir::isa_and_nonnull<VPU::DistributedCastOpInterface, VPU::ShapeCastOp, VPU::GroupSparseTensorOp>(
+                        parent)) {
                 if (parent->getOperand(0).isa<mlir::BlockArgument>()) {
                     continue;
                 }
@@ -653,15 +677,7 @@ bool SubgraphOptimizer::hasLongTermSpilling(VPU::ClusteredOpInterface origOp, VP
         return llvm::TypeSwitch<mlir::Operation*, bool>(op)
                 .Case<VPU::ClusteredOpInterface>([&](VPU::ClusteredOpInterface clusteredOp) {
                     if (!_layerCostModel.hasMultiClusterStrategy(clusteredOp.getOperation())) {
-                        if (auto permuteQuantize =
-                                    mlir::dyn_cast<VPU::NCEPermuteQuantizeOp>(clusteredOp.getOperation())) {
-                            // single-cluster NCEPermuteQuantizeOp
-                            const auto inputType =
-                                    permuteQuantize->getOperand(0).getType().cast<vpux::NDTypeInterface>();
-                            const auto outputType =
-                                    permuteQuantize->getResult(0).getType().cast<vpux::NDTypeInterface>();
-                            return permuteQuantize.fitIntoCMX(inputType, outputType, reservedMem);
-                        } else if (auto ncePermute = mlir::dyn_cast<VPU::NCEPermuteOp>(clusteredOp.getOperation())) {
+                        if (auto ncePermute = mlir::dyn_cast<VPU::NCEPermuteOp>(clusteredOp.getOperation())) {
                             // single-cluster NCEPermuteOp
                             const auto inputType = ncePermute->getOperand(0).getType().cast<vpux::NDTypeInterface>();
                             const auto outputType = ncePermute->getResult(0).getType().cast<vpux::NDTypeInterface>();
@@ -737,7 +753,7 @@ bool SubgraphOptimizer::hasInputSpillingToMultiClusterLayer(VPU::ClusteredOpInte
     }
 
     auto parent = input.getDefiningOp();
-    if (mlir::isa_and_nonnull<VPU::ShapeCastOp, VPU::QuantizeCastOp>(parent)) {
+    if (mlir::isa_and_nonnull<VPU::ShapeCastOp, VPU::QuantizeCastOp, VPU::GroupSparseTensorOp>(parent)) {
         if (parent->getOperand(0).isa<mlir::BlockArgument>()) {
             return false;
         }
@@ -821,13 +837,41 @@ bool SubgraphOptimizer::hasOutputSpillingToMultiClusterLayer(VPU::ClusteredOpInt
                                                              mlir::Operation* userOp,
                                                              VPU::MultiClusterStrategy origStrategy,
                                                              const SubgraphOptConfig& config) {
-    if (mlir::isa<VPU::QuantizeCastOp>(userOp) || (mlir::isa<VPU::ShapeCastOp>(userOp) && userOp->hasOneUse())) {
+    auto propagateShapeCast = false;
+
+    if (mlir::isa<VPU::QuantizeCastOp, VPU::GroupSparseTensorOp>(userOp)) {
         // propagate cast ops
         userOp = *userOp->getResult(0).getUsers().begin();
     }
 
-    if (mlir::isa<VPU::SWOpInterface>(userOp) && VPU::getArch(userOp) == VPU::ArchKind::VPUX30XX) {
+    if (mlir::isa<VPU::ShapeCastOp>(userOp) && userOp->hasOneUse()) {
+        // propagate ShapeCastOp
+        propagateShapeCast = true;
+        userOp = *userOp->getResult(0).getUsers().begin();
+    }
+
+    if (mlir::isa<VPU::SWOpInterface>(userOp) && VPU::getArch(userOp) == VPU::ArchKind::NPU30XX) {
         return false;
+    }
+
+    auto origOpCastedOutputDistType = _layerCostModel.getDistributedOutputType(origClusteredOp, origStrategy);
+
+    // E#119697: Remove the checking when propagation OVERLAPPED through ShapeCastOp can be supported
+    if (!propagateShapeCast) {
+        // Infer and pass CastOp
+        while (auto castOp = mlir::dyn_cast_or_null<VPU::DistributedCastOpInterface>(userOp)) {
+            if (VPU::hasMultiBranches(userOp)) {
+                break;
+            }
+            const auto castedDistType =
+                    castOp.inferCastedDistOutput(origOpCastedOutputDistType.cast<VPU::DistributedTensorType>());
+            if (mlir::failed(castedDistType)) {
+                return true;
+            } else {
+                origOpCastedOutputDistType = castedDistType.value();
+            }
+            userOp = *userOp->getResult(0).getUsers().begin();
+        }
     }
 
     if (auto userClusteredOp = mlir::dyn_cast<VPU::ClusteredOpInterface>(userOp)) {
@@ -851,7 +895,18 @@ bool SubgraphOptimizer::hasOutputSpillingToMultiClusterLayer(VPU::ClusteredOpInt
             return true;
         }
 
-        if (_layerCostModel.hasSpilling(origClusteredOp, origStrategy, userClusteredOp, userStrategy)) {
+        const auto maybeExistingStrategy = origClusteredOp.getMultiClusterStrategy();
+        origClusteredOp.setMultiClusterStrategy(origStrategy);
+        auto userInputType =
+                _layerCostModel.getDistributedInputType(userClusteredOp, origClusteredOp.getOperation(), userStrategy)
+                        .cast<vpux::NDTypeInterface>();
+        if (maybeExistingStrategy.has_value()) {
+            origClusteredOp.setMultiClusterStrategy(maybeExistingStrategy.value());
+        } else {
+            origClusteredOp->removeAttr(VPU::multiClusterStrategy);
+        }
+        if (_layerCostModel.hasSpilling(origClusteredOp, origOpCastedOutputDistType.cast<vpux::NDTypeInterface>(),
+                                        userInputType)) {
             return true;
         }
 
@@ -878,14 +933,10 @@ bool SubgraphOptimizer::hasOutputSpillingToMultiClusterLayer(VPU::ClusteredOpInt
 /// @todo This algorithm is a local strategy optimization for subgraphs. The final strategy maybe not global optimized.
 /// For example, {SOK -> SOK -> SOH} maybe better converting to {SOK -> SOK -> SOK}
 void SubgraphOptimizer::optimizeStrategyAvoidSpillingOnSubgraph(VPU::ClusteredOpInterface clusteredOp) {
-    // There is no VPUNN cost for NCEPermuteQuantizeOp.
-    // Even if NCEPermuteQuantizeOp cost can be mapped to NCEEltwiseOp,
-    // But NCEPermuteQuantizeOp only support SOW that VPUNN cannot support.
-    // #E80251 is to refactor NCEPermuteQuantize, after that this filter can be removed.
-    if (mlir::isa<VPU::NCEPermuteQuantizeOp, VPU::NCEPermuteOp>(clusteredOp.getOperation())) {
+    // #E112083 performance regression to be investigated in order to remove this filter
+    if (mlir::isa<VPU::NCEPermuteOp>(clusteredOp.getOperation())) {
         return;
     }
-
     if (!_layerCostModel.hasMultiClusterStrategy(clusteredOp) ||
         (!hasOutputSpillingToMultiClusterLayer(clusteredOp, _layerCostModel.getMultiClusterStrategyValue(clusteredOp),
                                                _configForFindingStartNode) &&
@@ -968,46 +1019,45 @@ void SubgraphOptimizer::optimizeStrategyAvoidSpillingOnSubgraph(VPU::ClusteredOp
         }
 
         // Check if the child layer needs rollback strategy
-        for (auto child : currentOp->getResult(0).getUsers()) {
-            if (mlir::isa_and_nonnull<VPU::QuantizeCastOp>(child) ||
-                (mlir::isa_and_nonnull<VPU::ShapeCastOp>(child) && child->hasOneUse())) {
+        for (auto directChild : currentOp->getResult(0).getUsers()) {
+            auto executeChild = directChild;
+            while (mlir::isa_and_nonnull<VPU::GroupSparseTensorOp>(executeChild) ||
+                   (mlir::isa_and_nonnull<VPU::ShapeCastOp, VPU::DistributedCastOpInterface>(executeChild) &&
+                    !VPU::hasMultiBranches(executeChild))) {
                 // propagate cast ops
-                child = *child->getResult(0).getUsers().begin();
+                executeChild = *executeChild->getResult(0).getUsers().begin();
             }
 
-            if ((child == nullptr) ||
-                (std::find(layersNeedRollback.begin(), layersNeedRollback.end(), child) != layersNeedRollback.end()) ||
-                (layersWithConvergedStrategy.find(child) != layersWithConvergedStrategy.end())) {
+            if ((executeChild == nullptr) ||
+                (std::find(layersNeedRollback.begin(), layersNeedRollback.end(), executeChild) !=
+                 layersNeedRollback.end()) ||
+                (layersWithConvergedStrategy.find(executeChild) != layersWithConvergedStrategy.end())) {
                 continue;
             }
 
-            if (!doesLayerNeedRollbackStrategy(child)) {
+            if (!doesLayerNeedRollbackStrategy(executeChild)) {
                 continue;
             }
 
             // If there's a spilling to the current child and it's caused by another child that is a strided cmx concat,
             // we don't add the current child into rollback list. That's because the spilling is caused by incompatible
             // stride, we can't avoid spilling even with compatible strategy.
-            if (!mlir::isa_and_nonnull<VPU::ConcatOp>(child) &&
+            if (!mlir::isa_and_nonnull<VPU::ConcatOp>(executeChild) &&
                 hasSpillingCausedByStridedCMXConcat(clusteredCurrentOp, rollbackStrategy,
                                                     _configForFindingNeighbourNodes)) {
                 continue;
             }
-
-            // There is no VPUNN cost for NCEPermuteQuantizeOp.
-            // Even if NCEPermuteQuantizeOp cost can be mapped to NCEEltwiseOp,
-            // But NCEPermuteQuantizeOp only support SOW that VPUNN cannot support.
-            // #E80251 is to refactor NCEPermuteQuantize, after that this filter can be removed.
-            if (mlir::isa_and_nonnull<VPU::NCEPermuteQuantizeOp, VPU::NCEPermuteOp>(child)) {
+            // #E112083 performance regression to be investigated in order to remove this filter
+            if (mlir::isa_and_nonnull<VPU::NCEPermuteOp>(executeChild)) {
                 continue;
             }
 
-            auto clusteredChildOp = mlir::dyn_cast<ClusteredOpInterface>(child);
+            auto clusteredChildOp = mlir::dyn_cast<ClusteredOpInterface>(executeChild);
             if ((clusteredChildOp != nullptr) &&
-                hasOutputSpillingToMultiClusterLayer(clusteredCurrentOp, child, rollbackStrategy,
+                hasOutputSpillingToMultiClusterLayer(clusteredCurrentOp, directChild, rollbackStrategy,
                                                      _configForFindingNeighbourNodes)) {
                 layersNeedRollback.push_back(clusteredChildOp);
-                _log.trace("    Push child '{0} to layersNeedRollback queue", child->getLoc());
+                _log.trace("    Push child '{0} to layersNeedRollback queue", clusteredChildOp->getLoc());
             }
         }
 
@@ -1024,7 +1074,7 @@ void SubgraphOptimizer::optimizeStrategyAvoidSpillingOnSubgraph(VPU::ClusteredOp
 
         for (auto input : layerInputs) {
             auto parent = input.getDefiningOp();
-            if (mlir::isa_and_nonnull<VPU::ShapeCastOp, VPU::QuantizeCastOp>(parent)) {
+            if (mlir::isa_and_nonnull<VPU::ShapeCastOp, VPU::QuantizeCastOp, VPU::GroupSparseTensorOp>(parent)) {
                 if (parent->getOperand(0).isa<mlir::BlockArgument>()) {
                     continue;
                 }
@@ -1038,7 +1088,7 @@ void SubgraphOptimizer::optimizeStrategyAvoidSpillingOnSubgraph(VPU::ClusteredOp
                 continue;
             }
 
-            if (mlir::isa<SWOpInterface>(parent) && VPU::getArch(parent) == VPU::ArchKind::VPUX30XX) {
+            if (mlir::isa<SWOpInterface>(parent) && VPU::getArch(parent) == VPU::ArchKind::NPU30XX) {
                 continue;
             }
 
@@ -1059,12 +1109,8 @@ void SubgraphOptimizer::optimizeStrategyAvoidSpillingOnSubgraph(VPU::ClusteredOp
                                                     _configForFindingNeighbourNodes)) {
                 continue;
             }
-
-            // There is no VPUNN cost for NCEPermuteQuantizeOp.
-            // Even if NCEPermuteQuantizeOp cost can be mapped to NCEEltwiseOp,
-            // But NCEPermuteQuantizeOp only support SOW that VPUNN cannot support.
-            // #E80251 is to refactor NCEPermuteQuantize, after that this filter can be removed.
-            if (mlir::isa_and_nonnull<VPU::NCEPermuteQuantizeOp, VPU::NCEPermuteOp>(parent)) {
+            // #E112083 performance regression to be investigated in order to remove this filter
+            if (mlir::isa_and_nonnull<VPU::NCEPermuteOp>(parent)) {
                 continue;
             }
 
@@ -1095,10 +1141,10 @@ void SubgraphOptimizer::optimizeStrategyAvoidSpillingOnSubgraph(VPU::ClusteredOp
             return;
         }
 
-        _log.trace("add originalCost cost {0} for op {1} with strategy {2}", originalBasicCost, clusteredTask->getLoc(),
-                   oldStrategy);
-        _log.trace("add rollback cost {0} for op {1} with strategy {2}", rollbackBasicCost, clusteredTask->getLoc(),
-                   newStrategy);
+        _log.trace("add originalCost cost {0} for op {1} at {2} with strategy {3}", originalBasicCost,
+                   clusteredTask->getName(), clusteredTask->getLoc(), oldStrategy);
+        _log.trace("add rollback cost {0} for op {1} at {2} with strategy {3}", rollbackBasicCost,
+                   clusteredTask->getName(), clusteredTask->getLoc(), newStrategy);
 
         originalCost += originalBasicCost;
         rollbackCost += rollbackBasicCost;
@@ -1126,10 +1172,10 @@ void SubgraphOptimizer::optimizeStrategyAvoidSpillingOnSubgraph(VPU::ClusteredOp
                         clusteredParent, parentOldStrategy, _configForCalcOrigCost);
                 auto rollbackInputSpillingCost = getOutputSpillingCostToMultiClusterLayer(
                         clusteredParent, parentNewStrategy, _configForCalcRollbackCost);
-                _log.trace("add originalCost input Spilling {0} from op {1} with strategy {2}",
-                           originalInputSpillingCost, parent->getLoc(), parentOldStrategy);
-                _log.trace("add rollback input Spilling {0} from op {1} with strategy {2}", rollbackInputSpillingCost,
-                           parent->getLoc(), parentNewStrategy);
+                _log.trace("add originalCost input Spilling {0} from op {1} at {2} with strategy {3}",
+                           originalInputSpillingCost, parent->getName(), parent->getLoc(), parentOldStrategy);
+                _log.trace("add rollback input Spilling {0} from op {1} at {2} with strategy {3}",
+                           rollbackInputSpillingCost, parent->getName(), parent->getLoc(), parentNewStrategy);
 
                 originalCost += originalInputSpillingCost;
                 rollbackCost += rollbackInputSpillingCost;
@@ -1143,10 +1189,10 @@ void SubgraphOptimizer::optimizeStrategyAvoidSpillingOnSubgraph(VPU::ClusteredOp
                     getOutputSpillingCostToMultiClusterLayer(clusteredTask, oldStrategy, _configForCalcOrigCost);
             auto rollbackOutputSpillingCost =
                     getOutputSpillingCostToMultiClusterLayer(clusteredTask, newStrategy, _configForCalcRollbackCost);
-            _log.trace("add originalCost output Spilling {0} for op {1} with strategy {2}", originalOutputSpillingCost,
-                       clusteredTask->getLoc(), oldStrategy);
-            _log.trace("add rollback output Spilling {0} for op {1} with strategy {2}", rollbackOutputSpillingCost,
-                       clusteredTask->getLoc(), newStrategy);
+            _log.trace("add originalCost output Spilling {0} for op {1} at {2} with strategy {3}",
+                       originalOutputSpillingCost, clusteredTask->getName(), clusteredTask->getLoc(), oldStrategy);
+            _log.trace("add rollback output Spilling {0} for op {1} at {2} with strategy {3}",
+                       rollbackOutputSpillingCost, clusteredTask->getName(), clusteredTask->getLoc(), newStrategy);
 
             originalCost += originalOutputSpillingCost;
             rollbackCost += rollbackOutputSpillingCost;
@@ -1165,6 +1211,46 @@ void SubgraphOptimizer::optimizeStrategyAvoidSpillingOnSubgraph(VPU::ClusteredOp
         _log.trace("Subgraph opt: rollback unneccessary! Strategies no change");
     }
     _log.trace("  Rollback cost: {0} , Current cost: {1}", rollbackCost, originalCost);
+
+    // Adjust input NCEPermute strategy to be aligned with current SOC supported NCE
+    // clustered op to avoid spilling. Accurate DMA cost model is needed to remove this check.
+    // Tracked by: E112844
+    auto inputPermuteOp = clusteredOp->getOperand(0).getDefiningOp<VPU::NCEPermuteOp>();
+    if (inputPermuteOp != nullptr && _layerCostModel.hasMultiClusterStrategy(inputPermuteOp.getOperation())) {
+        auto inputClusteredPermuteOp = mlir::cast<VPU::ClusteredOpInterface>(inputPermuteOp.getOperation());
+        if (isSOCSegmentedNCEOp(clusteredOp.getOperation())) {
+            inputClusteredPermuteOp.setMultiClusterStrategy(VPU::MultiClusterStrategy::SplitOverKernel);
+        } else {
+            inputClusteredPermuteOp.setMultiClusterStrategy(VPU::MultiClusterStrategy::SplitOverHeightOverlapped);
+        }
+    }
+}
+
+/*
+   For op with clustering strategy, if the user has no strategy, remove the clustering strategy for the current op
+
+     |                |
+   Clustering  =>   Single
+     |                |
+   Single           Single
+ */
+void SubgraphOptimizer::removeClusteringStrategyAvoidSpillingOnSubgraph(VPU::ClusteredOpInterface clusteredOp) {
+    if (!_layerCostModel.hasMultiClusterStrategy(clusteredOp) ||
+        _layerCostModel.getMultiClusterStrategyValue(clusteredOp) != VPU::MultiClusterStrategy::Clustering) {
+        return;
+    }
+
+    auto hasSpillingToChildrenDueToClustering = llvm::all_of(clusteredOp->getResult(0).getUsers(), [&](auto child) {
+        if (mlir::isa_and_nonnull<VPU::DistributedCastOpInterface, VPU::ShapeCastOp, VPU::AffineReshapeOp>(child) &&
+            !VPU::hasMultiBranches(child)) {
+            child = *child->getResult(0).getUsers().begin();
+        }
+        return mlir::isa_and_nonnull<VPU::NCEOpInterface, VPU::SWOpInterface>(child) &&
+               !_layerCostModel.hasMultiClusterStrategy(child);
+    });
+    if (hasSpillingToChildrenDueToClustering) {
+        clusteredOp->removeAttr(multiClusterStrategy);
+    }
 }
 
 void SubgraphOptimizer::optimizeStrategyAvoidSpillingOnModel() {
@@ -1172,10 +1258,32 @@ void SubgraphOptimizer::optimizeStrategyAvoidSpillingOnModel() {
     detectShortcuts();
 
     const auto callback = [this](VPU::ClusteredOpInterface clusteredOp) {
-        //  TODO extend to support SW layers E#68740
-        //  The spilling judgement for SEGMENTED SOK is not supported yet
-        //  Enabling SW subgraph optimization leads to performance regression
-        if (mlir::isa<SWOpInterface>(clusteredOp.getOperation())) {
+        if (auto swOp = mlir::dyn_cast_or_null<VPU::SWOpInterface>(clusteredOp.getOperation())) {
+            if (swOp.supportCycleCostCalculation()) {
+                return;
+            }
+            // Try parent's strategy first
+            auto parent = clusteredOp->getOperand(0);
+            if (parent != nullptr) {
+                if (auto parentClusterOp = mlir::dyn_cast_or_null<VPU::ClusteredOpInterface>(parent.getDefiningOp())) {
+                    auto strategyAttr = parentClusterOp.getMultiClusterStrategy();
+                    auto currentStrategyAttr = clusteredOp.getMultiClusterStrategy();
+                    auto outputTensorType = parent.getType().cast<vpux::NDTypeInterface>();
+                    if (strategyAttr.has_value() && currentStrategyAttr.has_value()) {
+                        auto strategy = strategyAttr.value();
+                        auto currentStrategy = currentStrategyAttr.value();
+                        auto numClusters = VPU::getOptimalNumClusters(
+                                parentClusterOp, outputTensorType.getShape()[Dims4D::Act::C], strategyAttr.value());
+                        if (strategy != currentStrategy &&
+                            isStrategySOXCompatible(clusteredOp, strategy, numClusters.getInt())) {
+                            _log.trace("Update strategy from: {0} to: {1} for op: {2}", currentStrategy, strategy,
+                                       clusteredOp->getLoc());
+                            clusteredOp.setMultiClusterStrategy(strategy);
+                        }
+                    }
+                }
+            }
+
             return;
         }
 
@@ -1184,4 +1292,9 @@ void SubgraphOptimizer::optimizeStrategyAvoidSpillingOnModel() {
 
     /// @brief Traversing nodes with preOrder to execute subgraph optimization
     _func.walk(callback);
+
+    const auto clusteringOptimizationCallBack = [this](VPU::ClusteredOpInterface clusteredOp) {
+        removeClusteringStrategyAvoidSpillingOnSubgraph(clusteredOp);
+    };
+    _func.walk(clusteringOptimizationCallBack);
 }

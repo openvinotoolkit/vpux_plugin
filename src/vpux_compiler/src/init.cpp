@@ -5,20 +5,27 @@
 
 #include "vpux/compiler/init.hpp"
 
+#include "vpux/compiler/NPU37XX/dialect/NPUReg37XX/ops.hpp"
+#include "vpux/compiler/NPU40XX/dialect/ELF/ops.hpp"
+#include "vpux/compiler/NPU40XX/dialect/NPUReg40XX/ops.hpp"
 #include "vpux/compiler/conversion/passes/VPU2VPUIP/bufferizable_ops_interface.hpp"
 #include "vpux/compiler/dialect/ELFNPU37XX/ops.hpp"
-#include "vpux/compiler/dialect/IE/ops.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IERT/ops.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/IR/dialect.hpp"
-#include "vpux/compiler/dialect/VPU37XX/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/dialect.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
+#include "vpux/compiler/dialect/VPUASM/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/dialect.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIPDPU/dialect.hpp"
 #include "vpux/compiler/dialect/VPUMI37XX/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
+#include "vpux/compiler/dialect/VPUMI40XX/dialect.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPURegMapped/ops.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
+#include "vpux/compiler/utils/rewriter.hpp"
 
+#include <llvm/ADT/TypeSwitch.h>
 #include <mlir/Dialect/Affine/IR/AffineOps.h>
 #include <mlir/Dialect/Async/IR/Async.h>
 #include <mlir/Dialect/ControlFlow/IR/ControlFlow.h>
@@ -28,7 +35,9 @@
 #include <mlir/Dialect/Quant/QuantOps.h>
 #include <mlir/Dialect/Quant/QuantTypes.h>
 #include <mlir/Dialect/Tensor/IR/Tensor.h>
+#include <mlir/IR/BuiltinDialect.h>
 #include <mlir/IR/BuiltinTypes.h>
+#include <mlir/Transforms/BufferizationUtils.h>
 
 using namespace vpux;
 
@@ -40,6 +49,15 @@ namespace {
 
 class MemRefElementTypeModel final : public mlir::MemRefElementTypeInterface::FallbackModel<MemRefElementTypeModel> {};
 
+struct CustomBuiltinBufferizerInterface : mlir::DialectBufferizerInterface {
+    using mlir::DialectBufferizerInterface::DialectBufferizerInterface;
+
+    mlir::Type getTensorTypeFromMemRefType(mlir::Type type) const final {
+        // ensures encoding is correct in the builtin ranked tensor
+        return reconstructTensorType(type);
+    }
+};
+
 }  // namespace
 
 void vpux::registerDialects(mlir::DialectRegistry& registry) {
@@ -48,10 +66,15 @@ void vpux::registerDialects(mlir::DialectRegistry& registry) {
                     vpux::VPU::VPUDialect,                    //
                     vpux::IERT::IERTDialect,                  //
                     vpux::VPUIP::VPUIPDialect,                //
+                    vpux::VPUIPDPU::VPUIPDPUDialect,          //
                     vpux::VPURT::VPURTDialect,                //
                     vpux::VPUMI37XX::VPUMI37XXDialect,        //
+                    vpux::VPUMI40XX::VPUMI40XXDialect,        //
+                    vpux::VPUASM::VPUASMDialect,              //
                     vpux::VPURegMapped::VPURegMappedDialect,  //
-                    vpux::VPU37XX::VPU37XXDialect,            //
+                    vpux::ELF::ELFDialect,                    //
+                    vpux::NPUReg37XX::NPUReg37XXDialect,      //
+                    vpux::NPUReg40XX::NPUReg40XXDialect,      //
                     vpux::ELFNPU37XX::ELFNPU37XXDialect>();
 
     registry.insert<mlir::func::FuncDialect,           //
@@ -76,10 +99,13 @@ void vpux::registerCommonInterfaces(mlir::DialectRegistry& registry, bool enable
     });
     Const::ConstDialect::setupExtraInterfaces(registry);
     IERT::IERTDialect::setupExtraInterfaces(registry);
-    VPU::VPUDialect::setupExtraInterfaces(registry);
     VPUIP::VPUIPDialect::setupExtraInterfaces(registry);
 
     if (enableDummyOp) {
         VPUIP::VPUIPDialect::setupExtraInterfacesAdditional(registry);
     }
+
+    registry.addExtension(+[](mlir::MLIRContext*, mlir::BuiltinDialect* dialect) {
+        dialect->addInterfaces<CustomBuiltinBufferizerInterface>();
+    });
 }

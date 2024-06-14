@@ -7,9 +7,9 @@
 #include <mlir/IR/DialectRegistry.h>
 
 #include "vpux/compiler/VPU30XX/conversion/passes/VPU2VPUIP/bufferizable_op_interface.hpp"
-#include "vpux/compiler/VPU30XX/dialect/IE/ops_interfaces.hpp"
+#include "vpux/compiler/VPU30XX/dialect/IE/IR/ops_interfaces.hpp"
 #include "vpux/compiler/VPU30XX/dialect/VPU/IR/ops_interfaces.hpp"
-#include "vpux/compiler/VPU30XX/dialect/VPUIP/ops_interfaces.hpp"
+#include "vpux/compiler/VPU30XX/dialect/VPUIP/IR/ops_interfaces.hpp"
 
 namespace vpux {
 

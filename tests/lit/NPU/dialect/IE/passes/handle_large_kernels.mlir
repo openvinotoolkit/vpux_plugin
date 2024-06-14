@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --handle-large-kernels %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 // CHECK-LABEL: @HandleLargeKernelsAvgPoolWithSameKernelSize
 func.func @HandleLargeKernelsAvgPoolWithSameKernelSize(%arg0 : tensor<1x128x16x16xf16>) -> (tensor<1x128x1x1xf16>) {
@@ -404,7 +404,7 @@ func.func @HandleLargeKernelsXMaxPool(%arg0 : tensor<1x64x10x13xf16>) -> (tensor
     } : tensor<1x64x10x13xf16> -> tensor<1x64x10x1xf16>
 
     return %max_pool : tensor<1x64x10x1xf16>
-    // CHECK:       [[SLICE:%.+]] = IE.Slice %arg0 
+    // CHECK:       [[SLICE:%.+]] = IE.Slice %arg0
     // CHECK-SAME:      [0, 0, 0, 0] [1, 64, 10, 1] : tensor<1x64x10x13xf16> to tensor<1x64x10x1xf16>
     // CHECK:       IE.Concat(%arg0, [[SLICE]])
     // CHECK-SAME:      per_axis = #IE.Concat<axis = 3 : i64>
@@ -415,7 +415,7 @@ func.func @HandleLargeKernelsXMaxPool(%arg0 : tensor<1x64x10x13xf16>) -> (tensor
     // CHECK-SAME:      pads_end = [0, 0]
     // CHECK-SAME:      rounding_type = #IE.rounding_type<FLOOR>,
     // CHECK-SAME:      strides = [1, 7]
-    // CHECK-SAME:      : tensor<1x64x10x14xf16> -> tensor<1x64x10x2xf16> 
+    // CHECK-SAME:      : tensor<1x64x10x14xf16> -> tensor<1x64x10x2xf16>
     // CHECK:       IE.MaxPool
     // CHECK-SAME:      kernel_size = [1, 2]
     // CHECK-SAME:      pads_begin = [0, 0]
@@ -438,7 +438,7 @@ func.func @HandleLargeKernelsYMaxPool(%arg0 : tensor<1x64x13x10xf16>) -> (tensor
     } : tensor<1x64x13x10xf16> -> tensor<1x64x1x10xf16>
 
     return %max_pool : tensor<1x64x1x10xf16>
-    // CHECK:       [[SLICE:%.+]] = IE.Slice %arg0 
+    // CHECK:       [[SLICE:%.+]] = IE.Slice %arg0
     // CHECK-SAME:      [0, 0, 0, 0] [1, 64, 1, 10] : tensor<1x64x13x10xf16> to tensor<1x64x1x10xf16>
     // CHECK:       IE.Concat(%arg0, [[SLICE]])
     // CHECK-SAME:      per_axis = #IE.Concat<axis = 2 : i64>
@@ -449,7 +449,7 @@ func.func @HandleLargeKernelsYMaxPool(%arg0 : tensor<1x64x13x10xf16>) -> (tensor
     // CHECK-SAME:      pads_end = [0, 0]
     // CHECK-SAME:      rounding_type = #IE.rounding_type<FLOOR>,
     // CHECK-SAME:      strides = [7, 1]
-    // CHECK-SAME:      : tensor<1x64x14x10xf16> -> tensor<1x64x2x10xf16> 
+    // CHECK-SAME:      : tensor<1x64x14x10xf16> -> tensor<1x64x2x10xf16>
     // CHECK:       IE.MaxPool
     // CHECK-SAME:      kernel_size = [2, 1]
     // CHECK-SAME:      pads_begin = [0, 0]
@@ -532,7 +532,7 @@ func.func @HandleLargeKernelsMaxPoolWithPadNeed(%arg0 : tensor<1x1x71x2xf16>) ->
 
     return %max_pool : tensor<1x1x1x2xf16>
 
-    // CHECK:       [[SLICE:%.+]] = IE.Slice %arg0 
+    // CHECK:       [[SLICE:%.+]] = IE.Slice %arg0
     // CHECK-SAME:      [0, 0, 0, 0] [1, 1, 1, 2] : tensor<1x1x71x2xf16> to tensor<1x1x1x2xf16>
     // CHECK:       IE.Concat(%arg0, [[SLICE]])
     // CHECK-SAME:      per_axis = #IE.Concat<axis = 2 : i64>
@@ -543,7 +543,7 @@ func.func @HandleLargeKernelsMaxPoolWithPadNeed(%arg0 : tensor<1x1x71x2xf16>) ->
     // CHECK-SAME:      pads_end = [0, 0]
     // CHECK-SAME:      rounding_type = #IE.rounding_type<FLOOR>,
     // CHECK-SAME:      strides = [8, 1]
-    // CHECK-SAME:      : tensor<1x1x72x2xf16> -> tensor<1x1x9x2xf16> 
+    // CHECK-SAME:      : tensor<1x1x72x2xf16> -> tensor<1x1x9x2xf16>
     // CHECK:       IE.MaxPool
     // CHECK-SAME:      kernel_size = [9, 1]
     // CHECK-SAME:      pads_begin = [0, 0]
@@ -572,13 +572,13 @@ func.func @HandleLargeKernelsMaxPoolWithPadNeedAndMultiSplit(%arg0 : tensor<1x20
     // CHECK-SAME:      pads_end = [0, 0]
     // CHECK-SAME:      rounding_type = #IE.rounding_type<FLOOR>,
     // CHECK-SAME:      strides = [5, 5]
-    // CHECK-SAME:      : tensor<1x2048x65x65xf16> -> tensor<1x2048x13x13xf16> 
-    // CHECK:       [[SLICE0:%.+]] = IE.Slice [[MAXPOOL]] 
+    // CHECK-SAME:      : tensor<1x2048x65x65xf16> -> tensor<1x2048x13x13xf16>
+    // CHECK:       [[SLICE0:%.+]] = IE.Slice [[MAXPOOL]]
     // CHECK-SAME:      [0, 0, 0, 0] [1, 2048, 13, 1] : tensor<1x2048x13x13xf16> to tensor<1x2048x13x1xf16>
     // CHECK:       [[CONCAT:%.+]] = IE.Concat([[MAXPOOL]], [[SLICE0]])
     // CHECK-SAME:      per_axis = #IE.Concat<axis = 3 : i64>
     // CHECK-SAME:      : tensor<1x2048x13x13xf16>, tensor<1x2048x13x1xf16> -> tensor<1x2048x13x14xf16>
-    // CHECK:       [[SLICE1:%.+]] = IE.Slice [[CONCAT]] 
+    // CHECK:       [[SLICE1:%.+]] = IE.Slice [[CONCAT]]
     // CHECK-SAME:      [0, 0, 0, 0] [1, 2048, 1, 13] : tensor<1x2048x13x14xf16> to tensor<1x2048x1x13xf16>
     // CHECK:       IE.Concat([[CONCAT]], [[SLICE1]])
     // CHECK-SAME:      per_axis = #IE.Concat<axis = 2 : i64>
@@ -589,7 +589,7 @@ func.func @HandleLargeKernelsMaxPoolWithPadNeedAndMultiSplit(%arg0 : tensor<1x20
     // CHECK-SAME:      pads_end = [0, 0]
     // CHECK-SAME:      rounding_type = #IE.rounding_type<FLOOR>,
     // CHECK-SAME:      strides = [7, 7]
-    // CHECK-SAME:      : tensor<1x2048x14x14xf16> -> tensor<1x2048x2x2xf16> 
+    // CHECK-SAME:      : tensor<1x2048x14x14xf16> -> tensor<1x2048x2x2xf16>
     // CHECK:       IE.MaxPool
     // CHECK-SAME:      kernel_size = [2, 2]
     // CHECK-SAME:      pads_begin = [0, 0]
@@ -612,7 +612,7 @@ func.func @HandleLargeKernelsMaxPoolWithPadNeedAndMultiSplitAsymmetric(%arg0 : t
     } : tensor<1x16x258x257xf16> -> tensor<1x16x1x1xf16>
 
     return %ave_pool : tensor<1x16x1x1xf16>
-    // CHECK:       [[SLICE0:%.+]] = IE.Slice %arg0 
+    // CHECK:       [[SLICE0:%.+]] = IE.Slice %arg0
     // CHECK-SAME:      [0, 0, 0, 0] [1, 16, 258, 1] : tensor<1x16x258x257xf16> to tensor<1x16x258x1xf16>
     // CHECK:       [[CONCAT0:%.+]] = IE.Concat(%arg0, [[SLICE0]])
     // CHECK-SAME:      per_axis = #IE.Concat<axis = 3 : i64>
@@ -624,12 +624,12 @@ func.func @HandleLargeKernelsMaxPoolWithPadNeedAndMultiSplitAsymmetric(%arg0 : t
     // CHECK-SAME:      rounding_type = #IE.rounding_type<FLOOR>,
     // CHECK-SAME:      strides = [6, 6]
     // CHECK-SAME:      : tensor<1x16x258x258xf16> -> tensor<1x16x43x43xf16>
-    // CHECK:       [[SLICE1:%.+]] = IE.Slice [[MAXPOOL]] 
+    // CHECK:       [[SLICE1:%.+]] = IE.Slice [[MAXPOOL]]
     // CHECK-SAME:      [0, 0, 0, 0] [1, 16, 43, 1] : tensor<1x16x43x43xf16> to tensor<1x16x43x1xf16>
     // CHECK:       [[CONCAT1:%.+]] = IE.Concat([[MAXPOOL]], [[SLICE1]])
     // CHECK-SAME:      per_axis = #IE.Concat<axis = 3 : i64>
     // CHECK-SAME:      : tensor<1x16x43x43xf16>, tensor<1x16x43x1xf16> -> tensor<1x16x43x44xf16>
-    // CHECK:       [[SLICE2:%.+]] = IE.Slice [[CONCAT1]] 
+    // CHECK:       [[SLICE2:%.+]] = IE.Slice [[CONCAT1]]
     // CHECK-SAME:       [0, 0, 0, 0] [1, 16, 1, 43] : tensor<1x16x43x44xf16> to tensor<1x16x1x43xf16>
     // CHECK:       [[CONCAT2:%.+]] = IE.Concat([[CONCAT1]], [[SLICE2]])
     // CHECK-SAME:      per_axis = #IE.Concat<axis = 2 : i64>
@@ -685,7 +685,7 @@ func.func @HandleLargeKernelsMaxPoolWithPadNeedIsGlobalPool(%arg0 : tensor<1x204
     } : tensor<1x2048x48x23xf16> -> tensor<1x2048x2x1xf16>
 
     return %ave_pool : tensor<1x2048x2x1xf16>
-    // CHECK:       [[SLICE:%.+]] = IE.Slice %arg0 
+    // CHECK:       [[SLICE:%.+]] = IE.Slice %arg0
     // CHECK-SAME:      [0, 0, 0, 0] [1, 2048, 48, 1] : tensor<1x2048x48x23xf16> to tensor<1x2048x48x1xf16>
     // CHECK:       IE.Concat(%arg0, [[SLICE]])
     // CHECK-SAME:      per_axis = #IE.Concat<axis = 3 : i64>
@@ -696,7 +696,7 @@ func.func @HandleLargeKernelsMaxPoolWithPadNeedIsGlobalPool(%arg0 : tensor<1x204
     // CHECK-SAME:      pads_end = [0, 0]
     // CHECK-SAME:      rounding_type = #IE.rounding_type<FLOOR>,
     // CHECK-SAME:      strides = [8, 8]
-    // CHECK-SAME:      : tensor<1x2048x48x24xf16> -> tensor<1x2048x6x3xf16> 
+    // CHECK-SAME:      : tensor<1x2048x48x24xf16> -> tensor<1x2048x6x3xf16>
     // CHECK:       IE.MaxPool
     // CHECK-SAME:      kernel_size = [3, 3]
     // CHECK-SAME:      pads_begin = [0, 0]
@@ -725,7 +725,7 @@ func.func @HandleLargeKernelsOverlappedMaxPool(%arg0 : tensor<1x512x19x19xf16>) 
     // CHECK-SAME:      pads_end = [3, 3]
     // CHECK-SAME:      rounding_type = #IE.rounding_type<FLOOR>,
     // CHECK-SAME:      strides = [1, 1]
-    // CHECK-SAME:      : tensor<1x512x19x19xf16> -> tensor<1x512x19x19xf16> 
+    // CHECK-SAME:      : tensor<1x512x19x19xf16> -> tensor<1x512x19x19xf16>
     // CHECK:       IE.MaxPool
     // CHECK-SAME:      kernel_size = [7, 7]
     // CHECK-SAME:      pads_begin = [3, 3]
@@ -754,7 +754,7 @@ func.func @HandleLargeKernelsOvSerlappedMaxPoolWithOneAxis(%arg0 : tensor<1x512x
     // CHECK-SAME:      pads_end = [3, 0]
     // CHECK-SAME:      rounding_type = #IE.rounding_type<FLOOR>,
     // CHECK-SAME:      strides = [1, 1]
-    // CHECK-SAME:      : tensor<1x512x19x19xf16> -> tensor<1x512x19x19xf16> 
+    // CHECK-SAME:      : tensor<1x512x19x19xf16> -> tensor<1x512x19x19xf16>
     // CHECK:       IE.MaxPool
     // CHECK-SAME:      kernel_size = [7, 1]
     // CHECK-SAME:      pads_begin = [3, 0]
@@ -846,6 +846,31 @@ func.func @HandleLargeKernelsConvWithBias(%arg0 : tensor<1x1x1x32000xf16>) -> te
     // CHECK: [[Add1:%.+]] = IE.Add([[Add0]], [[CONV2]]) {auto_broadcast = #IE.auto_broadcast_type<NONE_OR_EXPLICIT>} : tensor<1x64x1x2000xf16>, tensor<1x64x1x2000xf16> -> tensor<1x64x1x2000xf16>
 
     // CHECK: return [[Add1]] : tensor<1x64x1x2000xf16>
+}
+
+// -----
+
+// CHECK-LABEL: @NotConvertDilatedConv
+func.func @NotConvertDilatedConv(%arg0: tensor<1x256x1x512xf16>) -> tensor<1x256x1x512xf16> {
+    %cst = const.Declare tensor<256x256x1x13xf16> = dense<1.000000e+00> : tensor<256x256x13xf32>, [#const.ConvertElemType<f16>, #const.Reshape<[256, 256, 1, 13]>]
+    %conv = IE.Convolution(%arg0, %cst) {
+        dilations = [1, 2],
+        pads_begin = [0, 12],
+        pads_end = [0, 12],
+        strides = [1, 1]
+    } : tensor<1x256x1x512xf16>, tensor<256x256x1x13xf16> -> tensor<1x256x1x512xf16>
+
+    return %conv : tensor<1x256x1x512xf16>
+
+    // CHECK-DAG:       [[CST:%.+]] = const.Declare tensor<256x256x1x13xf16> = dense<1.000000e+00> : tensor<256x256x13xf32>, [#const.ConvertElemType<f16>, #const.Reshape<[256, 256, 1, 13]>]
+    // CHECK:           [[CONV:%.+]] = IE.Convolution(%arg0, [[CST]]) {
+    // CHECK-SAME:          dilations = [1, 2],
+    // CHECK-SAME:          pads_begin = [0, 12],
+    // CHECK-SAME:          pads_end = [0, 12],
+    // CHECK-SAME:          strides = [1, 1]
+    // CHECK-SAME:      } : tensor<1x256x1x512xf16>, tensor<256x256x1x13xf16> -> tensor<1x256x1x512xf16>
+
+    // CHECK:           return [[CONV]] : tensor<1x256x1x512xf16>
 }
 
 // -----

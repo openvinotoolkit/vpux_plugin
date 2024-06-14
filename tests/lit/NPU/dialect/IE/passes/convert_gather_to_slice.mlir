@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --convert-gather-to-slice %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 // CHECK-LABEL: @ConvertGatherToSliceAxis0
 func.func @ConvertGatherToSliceAxis0(%arg0: tensor<18x8x72x64xf16>) -> tensor<8x72x64xf16> {

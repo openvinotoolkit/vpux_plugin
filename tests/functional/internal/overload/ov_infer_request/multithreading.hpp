@@ -1,19 +1,19 @@
-// Copyright (C) 2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2023-2024 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #pragma once
 
 #include <future>
 
-#include "overload/overload_test_utils_vpux.hpp"
+#include "overload/overload_test_utils_npu.hpp"
 
 namespace ov {
 namespace test {
 namespace behavior {
-using OVInferRequestMultithreadingTestsVpux = OVInferRequestTestsVpux;
+using OVInferRequestMultithreadingTestsNPU = OVInferRequestTestsNPU;
 
-TEST_P(OVInferRequestMultithreadingTestsVpux, canRun3SyncRequestsConsistentlyFromThreads) {
+TEST_P(OVInferRequestMultithreadingTestsNPU, canRun3SyncRequestsConsistentlyFromThreads) {
     ov::InferRequest req1, req2, req3;
     OV_ASSERT_NO_THROW(req1 = execNet.create_infer_request());
     OV_ASSERT_NO_THROW(req2 = execNet.create_infer_request());
@@ -38,7 +38,7 @@ TEST_P(OVInferRequestMultithreadingTestsVpux, canRun3SyncRequestsConsistentlyFro
     OV_ASSERT_NO_THROW(f3.get());
 }
 
-TEST_P(OVInferRequestMultithreadingTestsVpux, canRun3AsyncRequestsConsistentlyFromThreadsWithoutWait) {
+TEST_P(OVInferRequestMultithreadingTestsNPU, canRun3AsyncRequestsConsistentlyFromThreadsWithoutWait) {
     ov::InferRequest req1, req2, req3;
     OV_ASSERT_NO_THROW(req1 = execNet.create_infer_request());
     OV_ASSERT_NO_THROW(req2 = execNet.create_infer_request());
@@ -67,7 +67,7 @@ TEST_P(OVInferRequestMultithreadingTestsVpux, canRun3AsyncRequestsConsistentlyFr
     OV_ASSERT_NO_THROW(f3.get());
 }
 
-TEST_P(OVInferRequestMultithreadingTestsVpux, canRun3AsyncRequestsConsistentlyWithWait) {
+TEST_P(OVInferRequestMultithreadingTestsNPU, canRun3AsyncRequestsConsistentlyWithWait) {
     ov::InferRequest req1, req2, req3;
     OV_ASSERT_NO_THROW(req1 = execNet.create_infer_request());
     OV_ASSERT_NO_THROW(req2 = execNet.create_infer_request());
@@ -83,7 +83,7 @@ TEST_P(OVInferRequestMultithreadingTestsVpux, canRun3AsyncRequestsConsistentlyWi
     OV_ASSERT_NO_THROW(req3.wait());
 }
 
-TEST_P(OVInferRequestMultithreadingTestsVpux, canRun3AsyncRequestsParallelWithWait) {
+TEST_P(OVInferRequestMultithreadingTestsNPU, canRun3AsyncRequestsParallelWithWait) {
     ov::InferRequest req1, req2, req3;
     OV_ASSERT_NO_THROW(req1 = execNet.create_infer_request());
     OV_ASSERT_NO_THROW(req2 = execNet.create_infer_request());

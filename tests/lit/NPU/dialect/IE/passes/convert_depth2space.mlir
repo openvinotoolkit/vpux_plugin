@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW" --convert-depthToSpace %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 // CHECK-LABEL: @Depth2SpaceConvertToNNDMAs
 func.func @Depth2SpaceConvertToNNDMAs(%arg0: tensor<1x4x512x8xf16>) -> tensor<1x1x1024x16xf16> {

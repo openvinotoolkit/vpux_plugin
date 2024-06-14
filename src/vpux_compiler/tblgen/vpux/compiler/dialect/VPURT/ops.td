@@ -85,7 +85,7 @@ def VPURT_DeclareBufferOp :
     );
 
     let results = (outs
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer]>:$buffer
+        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_ITIBuffer]>:$buffer
     );
 
     let builders = [
@@ -175,7 +175,7 @@ def VPURT_ConfigureBarrierOp :
             return vpux::DotNodeColor::AQUA;
         }
 
-        bool printAttributes(llvm::raw_ostream& os) {
+        bool printAttributes(llvm::raw_ostream& os, llvm::StringRef, llvm::StringRef, llvm::StringRef) {
             os << "id: " << getId();
             return true;
         }
@@ -235,7 +235,7 @@ def VPURT_TaskOp :
         vpux::VPU::ExecutorKind getExecutorKind();
 
         template <typename T>
-        T getInnerTaskOpOfType();        
+        T getInnerTaskOpOfType();
     }];
 
     let assemblyFormat = [{

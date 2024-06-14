@@ -74,10 +74,10 @@ vpux::ELFNPU37XX::SectionFlagsAttr vpux::VPUMI37XX::ActKernelInvocationOp::getUs
     return (ELFNPU37XX::SectionFlagsAttr::VPU_SHF_PROC_SHAVE);
 }
 
-mlir::FailureOr<uint64_t> vpux::VPUMI37XX::ActKernelInvocationOp::getOffsetOfWithinOperation(mlir::Value val) {
+size_t vpux::VPUMI37XX::ActKernelInvocationOp::getOffsetOfWithinOperation(mlir::Value val) {
     if (val == getRangeIndex()) {
         return offsetof(nn_public::VpuActKernelInvocation, range);
     }
 
-    return mlir::failure();
+    VPUX_THROW("Provided Value is not linked to the ActKernelInvocation Op or getOffset does not support it");
 }

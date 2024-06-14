@@ -1,11 +1,10 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2023-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 #include "vpux/IMD/infer_request.hpp"
 
-#include <debug.h>
 #include <openvino/runtime/make_tensor.hpp>
 #include <openvino/util/file_util.hpp>
 
@@ -13,8 +12,9 @@
 #include "vpux/IMD/parsed_properties.hpp"
 #include "vpux/IMD/platform_helpers.hpp"
 
-#include "vpux/al/config/common.hpp"
-#include "vpux/al/config/runtime.hpp"
+#include "intel_npu/al/config/common.hpp"
+#include "intel_npu/al/config/compiler.hpp"
+#include "intel_npu/al/config/runtime.hpp"
 
 #include <device_helpers.hpp>
 #include "vpux/utils/IE/itt.hpp"
@@ -27,40 +27,40 @@
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/Program.h>
 
-namespace {
-
-constexpr void* NO_PREALLOCATED_BUFFER = nullptr;
-constexpr bool STATE_TENSOR = true;
-constexpr bool NOT_STATE_TENSOR = false;
-
-}  // namespace
+using namespace intel_npu;
 
 namespace vpux {
 
-IMDInferRequest::IMDInferRequest(const std::shared_ptr<const ov::ICompiledModel> compiledModel,
-                                 const std::shared_ptr<const NetworkDescription> networkDescription,
-                                 const Executor::Ptr executor, const Config& config)
-        : SyncInferRequest(compiledModel, networkDescription),
+IMDInferRequest::IMDInferRequest(const std::shared_ptr<const ICompiledModel>& compiledModel,
+                                 const std::shared_ptr<IExecutor>& executor, const Config& config)
+        : SyncInferRequest(compiledModel),
           _executorPtr(executor),
           _config(config),
-          _logger("IMDInferRequest", config.get<LOG_LEVEL>()),
-          _inputOrder(networkDescription->getInputOrder()),
-          _outputOrder(networkDescription->getOutputOrder()) {
-    for (const std::string& inputName : _inputNames) {
-        const IONodeDescriptor& parameterDescriptor = _parameterDescriptors.at(inputName);
+          _logger("IMDInferRequest", getLogLevel(config)) {
+    const auto& meta = compiledModel->get_network_metadata();
+    _inputOrder = meta.inputOrder;
+    _outputOrder = meta.outputOrder;
+
+    for (const std::string& inputName : meta.inputNames) {
+        const IONodeDescriptor& parameterDescriptor = meta.parameters.at(inputName);
 
         // No I/O buffers have been allocated so far by the plugin - allocate new ones here
-        allocate_tensor(inputName, parameterDescriptor, NO_PREALLOCATED_BUFFER, NOT_STATE_TENSOR);
+        allocate_tensor(inputName, parameterDescriptor);
     }
 
-    for (const std::string& outputName : _outputNames) {
-        const IONodeDescriptor& resultDescriptor = _resultDescriptors.at(outputName);
-        allocate_tensor(outputName, resultDescriptor, NO_PREALLOCATED_BUFFER, NOT_STATE_TENSOR);
+    for (const std::string& outputName : meta.outputNames) {
+        const IONodeDescriptor& resultDescriptor = meta.results.at(outputName);
+        allocate_tensor(outputName, resultDescriptor);
     }
 
-    for (const std::string& stateName : _stateNames) {
-        const IONodeDescriptor& stateDescriptor = _stateDescriptors.at(stateName);
-        allocate_tensor(stateName, stateDescriptor, NO_PREALLOCATED_BUFFER, STATE_TENSOR);
+    for (const std::string& stateName : meta.stateNames) {
+        const IONodeDescriptor& stateDescriptor = meta.states.at(stateName);
+        allocate_tensor(stateName, stateDescriptor, TensorType::State);
+    }
+
+    for (const std::string& shapeName : meta.shapeNames) {
+        const IONodeDescriptor& shapeDescriptor = meta.shapes.at(shapeName);
+        allocate_tensor(shapeName, shapeDescriptor, TensorType::Shape);
     }
 }
 
@@ -114,8 +114,8 @@ SmallString IMDInferRequest::create_temporary_work_directory() {
 void IMDInferRequest::store_compiled_model() {
     _logger.trace("Store the compile model");
 
-    const std::vector<char>& compiledModel =
-            static_cast<IMDExecutor*>(_executorPtr.get())->getNetworkDesc().getCompiledNetwork();
+    IMDExecutor* executor = static_cast<IMDExecutor*>(_executorPtr.get());
+    const auto& compiledModel = executor->getNetworkDesc()->compiledNetwork;
 
     const std::string fileName = "test.blob";
     const auto modelFilePath = printToString("{0}/{1}", _workDirectory.str(), fileName);
@@ -123,7 +123,7 @@ void IMDInferRequest::store_compiled_model() {
 
     VPUX_THROW_UNLESS(file.is_open(), "Can't open file '{0}' for write", modelFilePath);
 
-    file.write(compiledModel.data(), compiledModel.size());
+    file.write(reinterpret_cast<const char*>(compiledModel.data()), compiledModel.size());
 
     _logger.nest().trace("{0}", modelFilePath);
 }
@@ -134,12 +134,21 @@ void IMDInferRequest::store_network_inputs() {
     size_t inputIndex;
 
     for (const auto& name : _inputAndStateInputNames) {
-        const std::shared_ptr<ov::ITensor>& inputTensor = _allTensors.at(name);
+        std::shared_ptr<ov::ITensor>& inputTensor = _allTensors.at(name);
 
-        if (!isStateOutputName(name)) {
+        if (isShapeTensorName(name)) {
+            const auto actualTensorName = name.substr(SHAPE_TENSOR_PREFIX.size());
+            const auto& inputDims = _allTensors.at(actualTensorName)->get_shape();
+
+            for (size_t i = 0; i < inputTensor->get_size(); ++i) {
+                const auto reverseIdx = inputDims.size() - 1 - i;
+                inputTensor->data<uint32_t>()[i] = checked_cast<uint32_t>(inputDims[reverseIdx]);
+            }
             inputIndex = _inputOrder.at(name);
-        } else {
+        } else if (isStateOutputName(name)) {
             inputIndex = _inputOrder.at(stateOutputToStateInputName(name));
+        } else {
+            inputIndex = _inputOrder.at(name);
         }
 
         const auto inputFilePath = printToString("{0}/input-{1}.bin", _workDirectory.str(), inputIndex);
@@ -173,7 +182,7 @@ void IMDInferRequest::run_app() {
     errc = llvm::sys::fs::set_current_path(_workDirectory.str());
     VPUX_THROW_WHEN(errc, "Failed to change current path : {0}", errc.message());
 
-    const std::string emptyString = "";
+    const std::string emptyString;
     SmallVector<std::optional<StringRef>> redirects = {
             std::nullopt,  // stdin(0)
             std::nullopt,  // stdout(1)
@@ -203,7 +212,8 @@ void IMDInferRequest::run_app() {
     VPUX_THROW_WHEN(procErr != 0, "Failed to run InferenceManagerDemo ({0}) : {1}", procErr, errMsg);
 }
 
-void IMDInferRequest::read_from_file(const std::string& path, const std::shared_ptr<ov::ITensor>& tensor) {
+void IMDInferRequest::read_from_file(const std::string& path, const std::shared_ptr<ov::ITensor>& tensor,
+                                     const bool isDynamic) {
     VPUX_THROW_UNLESS(tensor->data() != nullptr, "Tensor was not allocated");
 
     std::ifstream file(path, std::ios_base::binary | std::ios_base::ate);
@@ -212,8 +222,8 @@ void IMDInferRequest::read_from_file(const std::string& path, const std::shared_
     const std::size_t tensorByteSize = tensor->get_byte_size();
     const auto fileSize = static_cast<size_t>(file.tellg());
     file.seekg(0, std::ios_base::beg);
-    VPUX_THROW_UNLESS(fileSize == tensorByteSize, "File '{0}' contains {1} bytes, but {2} expected", path, fileSize,
-                      tensorByteSize);
+    VPUX_THROW_UNLESS(fileSize == tensorByteSize || isDynamic, "File '{0}' contains {1} bytes, but {2} expected", path,
+                      fileSize, tensorByteSize);
 
     file.read(reinterpret_cast<char*>(tensor->data()), static_cast<std::streamsize>(tensorByteSize));
 }
@@ -221,25 +231,50 @@ void IMDInferRequest::read_from_file(const std::string& path, const std::shared_
 void IMDInferRequest::load_network_outputs() {
     _logger.trace("Load the network outputs");
 
+    const auto contains = [](const auto& container, const auto& value) {
+        return std::find(container.begin(), container.end(), value) != container.end();
+    };
+
     for (const auto& name : _outputAndStateOutputNames) {
         const std::shared_ptr<ov::ITensor>& outputTensor = _allTensors.at(name);
 
         const auto outputFilePath = printToString("{0}/output-{1}.bin", _workDirectory.str(), _outputOrder.at(name));
-        read_from_file(outputFilePath, outputTensor);
+
+        auto legacyNameMatch = _nodeNameToLegacyName.find(name);
+        const auto isDynamic = legacyNameMatch != _nodeNameToLegacyName.end()
+                                       ? contains(_metadata.shapeNames, legacyNameMatch->second)
+                                       : false;
+        read_from_file(outputFilePath, outputTensor, isDynamic);
+
+        if (isShapeTensorName(name)) {
+            ov::Shape actualDims;
+            for (size_t i = 0; i < outputTensor->get_size(); ++i) {
+                const auto reverseIdx = outputTensor->get_size() - 1 - i;
+                actualDims.push_back(outputTensor->data<uint32_t>()[reverseIdx]);
+            }
+
+            const auto actualTensorName = name.substr(SHAPE_TENSOR_PREFIX.size());
+            const auto& shapeNameMatch = _legacyNameToNodeName.find(actualTensorName);
+            if (shapeNameMatch != _legacyNameToNodeName.end()) {
+                std::shared_ptr<ov::ITensor>& tensorToBeReshaped = _allTensors.at(shapeNameMatch->second);
+                tensorToBeReshaped->set_shape(actualDims);
+            }
+        }
 
         _logger.nest().trace("{0} - {1}", name, outputFilePath);
     }
 
-    const NetworkDescription& networkDescription = static_cast<IMDExecutor*>(_executorPtr.get())->getNetworkDesc();
-    const IONodeDescriptorMap& profilingOutputDescriptors = networkDescription.getProfilingOutputDescriptors();
+    const std::shared_ptr<const NetworkDescription>& networkDescription =
+            static_cast<IMDExecutor*>(_executorPtr.get())->getNetworkDesc();
+    const IONodeDescriptorMap& profilingOutputDescriptors = networkDescription->metadata.profilingOutputs;
 
     if (profilingOutputDescriptors.size()) {
         _logger.info("Load profiling output");
-        OPENVINO_ASSERT(profilingOutputDescriptors.size() == 1);
+        VPUX_THROW_UNLESS(profilingOutputDescriptors.size() == 1, "Expected single profiling output");
 
         const IONodeDescriptor& profilingOutputDescriptor = profilingOutputDescriptors.begin()->second;
         const std::shared_ptr<ov::ITensor>& profilingOutputTensor = ov::make_tensor(
-                profilingOutputDescriptor.precision, profilingOutputDescriptor.transposedShape.get_shape());
+                profilingOutputDescriptor.precision, profilingOutputDescriptor.transposedShape.get_max_shape());
         read_from_file(printToString("{0}/profiling-0.bin", _workDirectory.str()), profilingOutputTensor);
         _rawProfilingData = profilingOutputTensor;
     }
@@ -276,12 +311,27 @@ void IMDInferRequest::check_network_precision(const ov::element::Type_t precisio
 }
 
 std::vector<ov::ProfilingInfo> IMDInferRequest::get_profiling_info() const {
-    OPENVINO_ASSERT(_rawProfilingData->data() != nullptr);
+    const auto& compiledModel = *std::dynamic_pointer_cast<const ICompiledModel>(_compiledModel);
+    const auto& compilerConfig = compiledModel.get_config();
+    if (!compilerConfig.get<PERF_COUNT>()) {
+        return {};
+    }
 
-    auto executorPtr = static_cast<IMDExecutor*>(_executorPtr.get());
-    const auto& compiledModel = executorPtr->getNetworkDesc().getCompiledNetwork();
-    return profiling::getLayerStatistics(reinterpret_cast<const uint8_t*>(_rawProfilingData->data()),
-                                         _rawProfilingData->get_byte_size(), compiledModel);
+    VPUX_THROW_WHEN(compilerConfig.get<COMPILER_TYPE>() != ov::intel_npu::CompilerType::MLIR,
+                    "IMD backend does not support profiling with Level Zero compiler");
+
+    const auto& networkDesc = compiledModel.get_network_description();
+    const auto& compiler = compiledModel.get_compiler();
+    const auto& blob = networkDesc->compiledNetwork;
+    auto profData = get_raw_profiling_data();
+    return compiler->process_profiling_output(profData, blob, compilerConfig);
+}
+
+std::vector<uint8_t> IMDInferRequest::get_raw_profiling_data() const {
+    VPUX_THROW_WHEN(_rawProfilingData == nullptr, "No profiling data");
+    auto begin = reinterpret_cast<uint8_t*>(_rawProfilingData->data());
+    auto end = begin + _rawProfilingData->get_byte_size();
+    return {begin, end};
 }
 
 }  // namespace vpux

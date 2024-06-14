@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -10,7 +10,7 @@
 #include "vpux/compiler/core/attributes/shape.hpp"
 #include "vpux/compiler/core/type_interfaces.hpp"
 
-#include "vpux/compiler/dialect/VPUIP/attributes.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/attributes.hpp"
 #include "vpux/compiler/utils/quantization.hpp"
 
 #include "vpux/utils/core/enums.hpp"
@@ -84,14 +84,17 @@ std::optional<int32_t> getQuantizedAxis(int32_t axis, ShapeRef prevShape, ShapeR
 mlir::MemRefType getMemRefType(ShapeRef shape, mlir::Type elemType, DimsOrder order, IndexedSymbolAttr memSpace,
                                StridesRef strides = StridesRef(),
                                VPUIP::SwizzlingSchemeAttr swizzlingSchemeAttr = nullptr,
-                               VPUIP::CompressionSchemeAttr compressionSchemeAttr = nullptr);
+                               VPUIP::SparsityCompressionAttr sparsityCompressionAttr = nullptr,
+                               mlir::IntegerAttr allocSizeAttr = nullptr,
+                               VPUIP::CompressionStateAttr compressionState = nullptr);
 template <typename Enum>
 memref_type_if<Enum> getMemRefType(ShapeRef shape, mlir::Type elemType, DimsOrder order, Enum kind,
                                    StridesRef strides = StridesRef(),
                                    VPUIP::SwizzlingSchemeAttr swizzlingSchemeAttr = nullptr,
-                                   VPUIP::CompressionSchemeAttr compressionSchemeAttr = nullptr) {
+                                   VPUIP::SparsityCompressionAttr sparsityCompressionAttr = nullptr,
+                                   mlir::IntegerAttr allocSizeAttr = nullptr) {
     return getMemRefType(shape, elemType, order, IndexedSymbolAttr::get(elemType.getContext(), stringifyEnum(kind)),
-                         strides, swizzlingSchemeAttr, compressionSchemeAttr);
+                         strides, swizzlingSchemeAttr, sparsityCompressionAttr, allocSizeAttr);
 }
 
 IndexedSymbolAttr getMemorySpace(mlir::MemRefType type);
@@ -102,8 +105,8 @@ mlir::SmallVector<float> getFloatStrides(StridesRef strides);
 // RankedTensorType utilities
 //
 
-mlir::RankedTensorType getTensorType(ShapeRef shape, mlir::Type elemType, DimsOrder order, IndexedSymbolAttr memSpace);
-
+mlir::RankedTensorType getTensorType(ShapeRef shape, mlir::Type elemType, DimsOrder order, IndexedSymbolAttr memSpace,
+                                     mlir::ArrayAttr bounds = nullptr);
 ///
 /// \brief Convert RankedTensor type to Memref type
 /// \param [in] tensorType - ranked tensor type
@@ -130,5 +133,7 @@ bool isQuantizedDimensionPermutation(mlir::quant::UniformQuantizedPerAxisType in
                                      mlir::quant::UniformQuantizedPerAxisType newElemType);
 
 bool isSubByteType(mlir::Type elemType);
+
+bool isBufferType(mlir::Type type);
 
 }  // namespace vpux

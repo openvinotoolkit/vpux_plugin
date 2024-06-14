@@ -1,91 +1,95 @@
-// Copyright (C) 2019-2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2019-2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
-#include "single_layer_tests/conversion.hpp"
+#include "single_op_tests/conversion.hpp"
 #include <vector>
 #include "common_test_utils/test_constants.hpp"
-#include "vpu_ov1_layer_test.hpp"
+#include "vpu_ov2_layer_test.hpp"
 
-namespace LayerTestsDefinitions {
+using namespace ov::test::utils;
 
-class ConversionLayerTestCommon : public ConversionLayerTest, virtual public LayerTestsUtils::VpuOv1LayerTestsCommon {};
+namespace ov {
+namespace test {
+
+class ConversionLayerTestCommon : public ConversionLayerTest, virtual public VpuOv2LayerTest {};
 
 class ConversionLayerTest_NPU3700 : public ConversionLayerTestCommon {};
 class ConversionLayerTest_NPU3720 : public ConversionLayerTestCommon {};
 using ConversionLayerTest_NPU3720_ELF = ConversionLayerTest_NPU3720;
+class ConversionLayerTest_NPU4000 : public ConversionLayerTestCommon {};
 
 TEST_P(ConversionLayerTest_NPU3700, HW) {
-    setPlatformVPU3700();
-    setDefaultHardwareModeMLIR();
-    Run();
+    setDefaultHardwareMode();
+    run(Platform::NPU3700);
 }
 
 TEST_P(ConversionLayerTest_NPU3720, HW) {
-    setPlatformVPU3720();
-    setDefaultHardwareModeMLIR();
-    Run();
+    setDefaultHardwareMode();
+    run(Platform::NPU3720);
 }
 
 TEST_P(ConversionLayerTest_NPU3720_ELF, HW) {
-    setPlatformVPU3720();
-    setDefaultHardwareModeMLIR();
-    useELFCompilerBackend();
-    Run();
+    setDefaultHardwareMode();
+    run(Platform::NPU3720);
 }
 
-}  // namespace LayerTestsDefinitions
+TEST_P(ConversionLayerTest_NPU4000, SW) {
+    setReferenceSoftwareMode();
+    run(Platform::NPU4000);
+}
 
-using namespace LayerTestsDefinitions;
+}  // namespace test
+}  // namespace ov
+
+using namespace ov::test;
 
 namespace {
-const std::vector<ngraph::helpers::ConversionTypes> conversionOpTypes = {
-        ngraph::helpers::ConversionTypes::CONVERT,
-        ngraph::helpers::ConversionTypes::CONVERT_LIKE,
+const std::vector<ConversionTypes> conversionOpTypes = {
+        ConversionTypes::CONVERT,
+        ConversionTypes::CONVERT_LIKE,
 };
 
-const std::vector<std::vector<size_t>> inShape = {{1, 2, 3, 4}};
+const std::vector<std::vector<ov::Shape>> inShape = {{{1, 2, 3, 4}}};
 
-const std::vector<InferenceEngine::Precision> netPrecisions_NPU3700 = {
-        InferenceEngine::Precision::FP32, InferenceEngine::Precision::FP16, InferenceEngine::Precision::U8};
+const std::vector<ov::element::Type> netPrecisions_NPU3700 = {ov::element::f32, ov::element::f16, ov::element::u8};
 
-const std::vector<InferenceEngine::Precision> netPrecisions = {
-        InferenceEngine::Precision::FP32, InferenceEngine::Precision::FP16, InferenceEngine::Precision::U8,
-        InferenceEngine::Precision::I8, InferenceEngine::Precision::I32};
+const std::vector<ov::element::Type> netPrecisions = {ov::element::f32, ov::element::f16, ov::element::u8,
+                                                      ov::element::i8, ov::element::i32};
 
-const auto configParams = ::testing::Combine(
-        ::testing::Values(ngraph::helpers::ConversionTypes::CONVERT), ::testing::Values(inShape),
-        ::testing::ValuesIn(netPrecisions), ::testing::ValuesIn(netPrecisions),
-        ::testing::Values(InferenceEngine::Layout::NHWC), ::testing::Values(InferenceEngine::Layout::NHWC),
-        ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+const auto configParams =
+        ::testing::Combine(::testing::ValuesIn(conversionOpTypes),                              // Conversion type
+                           ::testing::ValuesIn(static_shapes_to_test_representation(inShape)),  // Input shapes
+                           ::testing::ValuesIn(netPrecisions),                                  // Input type
+                           ::testing::ValuesIn(netPrecisions),                                  // Convert type
+                           ::testing::Values(DEVICE_NPU));                                      // Device name
 
 INSTANTIATE_TEST_SUITE_P(smoke_NoReshape, ConversionLayerTest_NPU3700,
-                         ::testing::Combine(::testing::ValuesIn(conversionOpTypes), ::testing::Values(inShape),
+                         ::testing::Combine(::testing::ValuesIn(conversionOpTypes),
+                                            ::testing::ValuesIn(static_shapes_to_test_representation(inShape)),
                                             ::testing::ValuesIn(netPrecisions_NPU3700),
-                                            ::testing::ValuesIn(netPrecisions_NPU3700),
-                                            ::testing::Values(InferenceEngine::Layout::NHWC),
-                                            ::testing::Values(InferenceEngine::Layout::NHWC),
-                                            ::testing::Values(LayerTestsUtils::testPlatformTargetDevice())),
+                                            ::testing::ValuesIn(netPrecisions_NPU3700), ::testing::Values(DEVICE_NPU)),
                          ConversionLayerTest::getTestCaseName);
 
 INSTANTIATE_TEST_SUITE_P(smoke_precommit_Conversion_NoReshape, ConversionLayerTest_NPU3720,
-                         ::testing::Combine(::testing::Values(ngraph::helpers::ConversionTypes::CONVERT),
-                                            ::testing::Values(inShape), ::testing::ValuesIn(netPrecisions),
-                                            ::testing::ValuesIn(netPrecisions),
-                                            ::testing::Values(InferenceEngine::Layout::NHWC),
-                                            ::testing::Values(InferenceEngine::Layout::NHWC),
-                                            ::testing::Values(LayerTestsUtils::testPlatformTargetDevice())),
+                         ::testing::Combine(::testing::ValuesIn(conversionOpTypes),
+                                            ::testing::ValuesIn(static_shapes_to_test_representation(inShape)),
+                                            ::testing::ValuesIn(netPrecisions), ::testing::ValuesIn(netPrecisions),
+                                            ::testing::Values(DEVICE_NPU)),
                          ConversionLayerTest::getTestCaseName);
 
 // ------ ELF ------
 
 INSTANTIATE_TEST_SUITE_P(NoReshape, ConversionLayerTest_NPU3720_ELF,
-                         ::testing::Combine(::testing::Values(ngraph::helpers::ConversionTypes::CONVERT),
-                                            ::testing::Values(inShape), ::testing::ValuesIn(netPrecisions),
-                                            ::testing::ValuesIn(netPrecisions),
-                                            ::testing::Values(InferenceEngine::Layout::NHWC),
-                                            ::testing::Values(InferenceEngine::Layout::NHWC),
-                                            ::testing::Values(LayerTestsUtils::testPlatformTargetDevice())),
+                         ::testing::Combine(::testing::Values(ConversionTypes::CONVERT),
+                                            ::testing::ValuesIn(static_shapes_to_test_representation(inShape)),
+                                            ::testing::ValuesIn(netPrecisions), ::testing::ValuesIn(netPrecisions),
+                                            ::testing::Values(DEVICE_NPU)),
+                         ConversionLayerTest::getTestCaseName);
+
+// ------ NPU4000 ------
+
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_Conversion, ConversionLayerTest_NPU4000, configParams,
                          ConversionLayerTest::getTestCaseName);
 
 }  // namespace

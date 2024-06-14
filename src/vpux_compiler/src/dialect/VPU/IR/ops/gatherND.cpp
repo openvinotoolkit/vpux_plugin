@@ -1,11 +1,12 @@
 
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 
+#include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/error.hpp"
 
 using namespace vpux;
@@ -24,19 +25,33 @@ mlir::LogicalResult vpux::VPU::GatherNDOp::inferReturnTypes(mlir::MLIRContext* c
 
     const auto inType = gatherND.getInput().getType().cast<vpux::NDTypeInterface>();
     const auto inputShape = inType.getShape().raw();
-    const auto indicesShape = gatherND.getIndices().getType().cast<vpux::NDTypeInterface>().getShape().raw();
+    const auto indicesType = gatherND.getIndices().getType().cast<vpux::NDTypeInterface>();
+    const auto indicesShape = indicesType.getShape().raw();
 
     const auto batchDims = gatherND.getBatchDims();
     const auto lastIndices = indicesShape.back();
     const auto inputRank = static_cast<int64_t>(inputShape.size());
 
-    SmallVector<int64_t> outShape;
-    outShape.append(indicesShape.begin(), indicesShape.end() - 1);
+    SmallVector<int64_t> outShape(indicesShape.begin(), indicesShape.end() - 1);
     if (batchDims + lastIndices != inputRank) {
         outShape.append(inputShape.begin() + batchDims + lastIndices, inputShape.end());
     }
 
-    const auto outType = inType.changeShape(Shape(outShape));
+    auto outType = inType.changeShape(Shape(outShape));
+    if (const auto indicesBoundsAttr = indicesType.cast<vpux::BoundedTypeInterface>().getBounds();
+        indicesBoundsAttr != nullptr) {
+        const auto bounds = parseIntArrayAttr<int64_t>(indicesBoundsAttr);
+        if (bounds.empty()) {
+            return errorAt(loc, "VPU::GatherNDOp::inferReturnTypes. Got empty bounds array");
+        }
+        SmallVector<int64_t> outBounds(bounds.begin(), bounds.end() - 1);
+        if (batchDims + lastIndices != inputRank) {
+            outBounds.append(inputShape.begin() + batchDims + lastIndices, inputShape.end());
+        }
+
+        outType = outType.cast<vpux::BoundedTypeInterface>().changeBounds(getIntArrayAttr(ctx, outBounds));
+    }
+
     inferredReturnTypes.emplace_back(outType);
 
     return mlir::success();

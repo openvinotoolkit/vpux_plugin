@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2022 Intel Corporation.
+# Copyright (C) 2022 Intel Corporation
 # SPDX-License-Identifier: Apache 2.0
 #
 
@@ -148,7 +148,7 @@ if __name__ == "__main__":
         print("\nplease set path to root directory with IRs\n\n")
         printUsage()
         sys.exit(1)
-    
+
     if re.search(r'^\s*-+[hH]', sys.argv[1]):
         printUsage(True)
         sys.exit(0)
@@ -156,9 +156,9 @@ if __name__ == "__main__":
     rootDir = sys.argv[1]
     if len(sys.argv) > 2:
         setOutDir(sys.argv[2])
-    
+
     print("Start looking for IR-files in directory:", rootDir)
-    
+
     if not os.path.exists(outDir + "/mdlayers"):
         os.makedirs(outDir + "/mdlayers")
     if not os.path.exists(outDir + "/mdnetworks"):

@@ -7,18 +7,13 @@
 
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPU/utils/cost_model/layer_vpunn_cost.hpp"
+#include "vpux/compiler/dialect/VPU/utils/vertical_fusion_config.hpp"
+#include "vpux/compiler/dialect/VPU/utils/vertical_fusion_pipeline_container.hpp"
 #include "vpux/compiler/dialect/VPU/utils/vertical_fusion_storage.hpp"
 
 namespace vpux {
 namespace VPU {
-
-// for now there is restriction for number of operations
-// which might need bigger input size
-constexpr int64_t MAXIMUM_VF_LENGTH = 3;
-
-// the length of VF pipelining pattern
-// should match the pattern DPU-SW-DPU for now
-constexpr int64_t VF_PIPELINE_LENGTH = 3;
 
 // min length of tensor by tiled axis. It limits number of tiles
 // which we may increase in order to fit in CMX
@@ -34,6 +29,10 @@ using TilingStorage = VFContainer<size_t, TileInfo>;
 // storage keeps connection between operation in the block and its information
 // about input and output tiles for each VF tile
 using TilingOperationStorage = VFContainer<mlir::Operation*, VFOperationTiling, llvm::less_second>;
+
+// storage keeps information for each pipelined "container"
+// in each "container" there are operations which might be executed in parallel
+using VFContainerPipelineStorage = VFContainer<size_t, VFPipelineContainer>;
 
 // function gets tiling information from VF subgraph and builds tiling info going up
 // to arguments of the block
@@ -80,22 +79,21 @@ mlir::FailureOr<Dim> getVFTilingDim(ArrayRef<int64_t> tilingStrategy, ArrayRef<m
 // get allowed dims for tiling
 DimArr getAllowedDims(ArrayRef<mlir::Operation*> operations, Logger log);
 
-// get operations list from VF subgraph
-SmallVector<mlir::Operation*> getVFOperations(VPU::VerticalFusionOp op);
-
 // calculate limit for number of tiles that can be supported by all operations in the VF block and all operations can
 // fit into CMX with it
 mlir::FailureOr<int64_t> getValidTilingLimit(VPU::VerticalFusionOp op, const Dim axis, Logger log);
 
-// get the operation that consumes the largest memory in the VF block
-mlir::Operation* getLargestOp(VPU::VerticalFusionOp op);
+// function merges operations to VF and returns the created subgraph
+VPU::VerticalFusionOp fuseOpsInBlock(mlir::PatternRewriter& rewriter, VPU::VerticalFusionOp vfOp,
+                                     mlir::Operation* prevOp, mlir::ArrayAttr tilingInfo = nullptr);
 
-// check if the VF subgraph matches the VF pipeline pattern DPU-SW-DPU
-bool isVFPipelinePattern(VPU::VerticalFusionOp op);
+// calculate full cost of VF subgraph
+StrategyCost getVFCost(const std::unique_ptr<VPU::LayerVPUNNCost>& costFunction, VPU::VerticalFusionOp op, Logger log,
+                       bool prefetching = true, mlir::ArrayAttr tilingStrategy = nullptr);
 
-// function merges operations to VF
-void fuseOpsInBlock(mlir::PatternRewriter& rewriter, VPU::VerticalFusionOp vfOp, mlir::Operation* prevOp,
-                    mlir::ArrayAttr tilingInfo = nullptr);
+// validate if subgraph doesn't have spills
+bool validateCMXSize(VFConfig& config, const TilingOperationStorage::UPtr& opStorage, Logger log,
+                     Byte reservedMemory = Byte(0));
 
 }  // namespace VPU
 }  // namespace vpux

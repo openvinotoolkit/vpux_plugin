@@ -1,5 +1,5 @@
-// Copyright (C) 2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2023-2024 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #pragma once
@@ -8,14 +8,14 @@
 
 #include "openvino/runtime/exception.hpp"
 
-#include "overload/overload_test_utils_vpux.hpp"
+#include "overload/overload_test_utils_npu.hpp"
 
 namespace ov {
 namespace test {
 namespace behavior {
-using OVInferRequestCancellationTestsVpux = OVInferRequestTestsVpux;
+using OVInferRequestCancellationTestsNPU = OVInferRequestTestsNPU;
 
-TEST_P(OVInferRequestCancellationTestsVpux, canCancelAsyncRequest) {
+TEST_P(OVInferRequestCancellationTestsNPU, canCancelAsyncRequest) {
     ov::InferRequest req;
     OV_ASSERT_NO_THROW(req = execNet.create_infer_request());
     OV_ASSERT_NO_THROW(req.start_async());
@@ -27,7 +27,7 @@ TEST_P(OVInferRequestCancellationTestsVpux, canCancelAsyncRequest) {
     }
 }
 
-TEST_P(OVInferRequestCancellationTestsVpux, CanResetAfterCancelAsyncRequest) {
+TEST_P(OVInferRequestCancellationTestsNPU, CanResetAfterCancelAsyncRequest) {
     ov::InferRequest req;
     OV_ASSERT_NO_THROW(req = execNet.create_infer_request());
     OV_ASSERT_NO_THROW(req.start_async());
@@ -41,13 +41,13 @@ TEST_P(OVInferRequestCancellationTestsVpux, CanResetAfterCancelAsyncRequest) {
     OV_ASSERT_NO_THROW(req.wait());
 }
 
-TEST_P(OVInferRequestCancellationTestsVpux, canCancelBeforeAsyncRequest) {
+TEST_P(OVInferRequestCancellationTestsNPU, canCancelBeforeAsyncRequest) {
     ov::InferRequest req;
     OV_ASSERT_NO_THROW(req = execNet.create_infer_request());
     OV_ASSERT_NO_THROW(req.cancel());
 }
 
-TEST_P(OVInferRequestCancellationTestsVpux, canCancelInferRequest) {
+TEST_P(OVInferRequestCancellationTestsNPU, canCancelInferRequest) {
     ov::InferRequest req;
     OV_ASSERT_NO_THROW(req = execNet.create_infer_request());
     auto infer = std::async(std::launch::async, [&req] {

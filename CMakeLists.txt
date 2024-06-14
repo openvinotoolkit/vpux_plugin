@@ -68,10 +68,10 @@ find_package(OpenVINODeveloperPackage REQUIRED
              PATHS "${InferenceEngineDeveloperPackage_DIR}")
 
 get_directory_property(defs DIRECTORY ${CMAKE_SOURCE_DIR} COMPILE_DEFINITIONS)
-set(IE_BUILD_POSTFIX_VAR)
+set(OV_BUILD_POSTFIX_VAR)
 foreach(def ${defs})
-    if(def MATCHES "IE_BUILD_POSTFIX=")
-        string(REPLACE IE_BUILD_POSTFIX= "" IE_BUILD_POSTFIX_VAR ${def})
+    if(def MATCHES "OV_BUILD_POSTFIX=")
+        string(REPLACE OV_BUILD_POSTFIX= "" OV_BUILD_POSTFIX_VAR ${def})
         remove_definitions(-D${def})
     endif()
 endforeach()
@@ -104,11 +104,15 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 if(UNIX)
-    ie_add_compiler_flags(-Wno-undef)
+    ov_add_compiler_flags(-Wno-undef)
 endif()
 
 if(ENABLE_EXPORT_SYMBOLS)
     replace_compile_visibility_options()
+endif()
+
+if (ENABLE_SPLIT_DWARF)
+    enable_split_dwarf()
 endif()
 
 #
@@ -123,7 +127,7 @@ else()
     message(STATUS "Include LLVM by source files")
     # When vpux-plugin is built independently, MLIRConfig.cmake is under this dir
     list(APPEND CMAKE_PREFIX_PATH ${PROJECT_BINARY_DIR}/lib/cmake/mlir)
-    # When vpux-plugin is added as IE_EXTRA_MODULES, MLIRConfig.cmake is under this dir
+    # When vpux-plugin is added as OPENVINO_EXTRA_MODULES, MLIRConfig.cmake is under this dir
     list(APPEND CMAKE_PREFIX_PATH ${OpenVINO_BINARY_DIR}/lib/cmake/mlir)
     # When vpux-plugin is added in monorepo, MLIRConfig.cmake is under this dir
     if(ENABLE_NPU_MONO)
@@ -169,35 +173,16 @@ if(ENABLE_SOURCE_PACKAGE)
     include(cmake/source_package.cmake)
 endif()
 
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
-        DESTINATION "runtime/include/ie"
-        COMPONENT ${VPUX_PLUGIN_COMPONENT})
-
-if(NOT BUILD_SHARED_LIBS)
-    if(TARGET ze_loader)
-        install(TARGETS ze_loader EXPORT OpenVINOTargets
-                RUNTIME DESTINATION ${OV_CPACK_RUNTIMEDIR} COMPONENT ${VPUX_PLUGIN_COMPONENT}
-                ARCHIVE DESTINATION ${OV_CPACK_ARCHIVEDIR} COMPONENT ${VPUX_PLUGIN_COMPONENT}
-                LIBRARY DESTINATION ${OV_CPACK_LIBRARYDIR} COMPONENT ${VPUX_PLUGIN_COMPONENT})
-    endif()
-
-    if(TARGET flatbuffers)
-        install(TARGETS flatbuffers EXPORT OpenVINOTargets
-                RUNTIME DESTINATION ${OV_CPACK_RUNTIMEDIR} COMPONENT ${VPUX_PLUGIN_COMPONENT}
-                ARCHIVE DESTINATION ${OV_CPACK_ARCHIVEDIR} COMPONENT ${VPUX_PLUGIN_COMPONENT}
-                LIBRARY DESTINATION ${OV_CPACK_LIBRARYDIR} COMPONENT ${VPUX_PLUGIN_COMPONENT})
-    endif()
-
-    if(TARGET npu_elf)
-        install(TARGETS npu_elf EXPORT OpenVINOTargets
-                RUNTIME DESTINATION ${OV_CPACK_RUNTIMEDIR} COMPONENT ${VPUX_PLUGIN_COMPONENT}
-                ARCHIVE DESTINATION ${OV_CPACK_ARCHIVEDIR} COMPONENT ${VPUX_PLUGIN_COMPONENT}
-                LIBRARY DESTINATION ${OV_CPACK_LIBRARYDIR} COMPONENT ${VPUX_PLUGIN_COMPONENT})
-    endif()
+if(CMAKE_SOURCE_DIR STREQUAL OpenVINO_SOURCE_DIR)
+    # NPU plugin public headers should be a part of common OpenVINO headers
+    set(dev_component ${OV_CPACK_COMP_CORE_DEV})
+else()
+    # compatibility mode while NPU plugin is not part of OpenVINO repository and can be built separately
+    set(dev_component ${VPUX_PLUGIN_COMPONENT})
 endif()
 
 #
 # CPack
 #
 
-ie_cpack(${NPU_CPACK_COMPONENTS_ALL})
+ov_cpack(${NPU_CPACK_COMPONENTS_ALL})

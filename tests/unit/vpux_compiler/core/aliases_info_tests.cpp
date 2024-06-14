@@ -10,7 +10,7 @@
 #include "vpux/utils/core/logger.hpp"
 #include "vpux/utils/core/string_ref.hpp"
 
-#include "vpux/compiler/dialect/VPUIP/dialect.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/dialect.hpp"
 
 #include <mlir/Dialect/Async/IR/Async.h>
 #include <mlir/Dialect/MemRef/IR/MemRef.h>
@@ -343,6 +343,66 @@ TEST(MLIR_AliasesInfo, RemoveAlias) {
 
     constexpr StringLiteral inputIR = R"(
         module @test {
+            func.func @main(%arg: memref<100xf32>) -> memref<50xf32> {
+                %0 = memref.alloc(): memref<100xf32>
+                %1 = memref.subview %0[0][50][1] : memref<100xf32> to memref<50xf32>
+                return %1 : memref<50xf32>
+            }
+        }
+    )";
+
+    auto module = mlir::parseSourceString<mlir::ModuleOp>(inputIR, &ctx);
+    ASSERT_TRUE(module.get() != nullptr);
+
+    auto func = module.get().lookupSymbol<mlir::func::FuncOp>("main");
+    ASSERT_TRUE(func != nullptr);
+
+    vpux::AliasesInfo info(func);
+
+    func.walk([&](mlir::Operation* op) {
+        if (auto viewOp = mlir::dyn_cast<mlir::memref::SubViewOp>(op)) {
+            const auto viewRes = viewOp.getResult();
+
+            const auto viewSources = info.getSources(viewRes);
+            EXPECT_EQ(viewSources.size(), 1) << "memref.subview sources: %0";
+            const auto viewSource = *viewSources.begin();
+
+            const auto viewRoots = info.getRoots(viewRes);
+            EXPECT_EQ(viewRoots.size(), 1) << "memref.subview roots: %0";
+            for (const auto& root : viewRoots) {
+                EXPECT_TRUE(mlir::isa<mlir::memref::AllocOp>(root.getDefiningOp()));
+            }
+            const auto viewRoot = *viewRoots.begin();
+            EXPECT_EQ(info.getAllAliases(viewRoot).size(), 2);
+
+            info.removeAlias(viewRes);
+
+            EXPECT_ANY_THROW(info.getRoots(viewRes));
+            EXPECT_ANY_THROW(info.getSources(viewRes));
+            EXPECT_EQ(info.getAllAliases(viewRoot).size(), 1);
+
+            info.addAlias(viewSource, viewRes);
+
+            EXPECT_EQ(info.getSources(viewRes).size(), 1);
+            EXPECT_EQ(*info.getSources(viewRes).begin(), viewSource);
+
+            EXPECT_EQ(info.getRoots(viewRes).size(), 1);
+
+            EXPECT_EQ(info.getAllAliases(viewRoot).size(), 2);
+        }
+    });
+}
+
+TEST(MLIR_AliasesInfo, RemoveAllAlias) {
+    mlir::DialectRegistry registry;
+    registry.insert<mlir::memref::MemRefDialect>();
+    registry.insert<mlir::func::FuncDialect>();
+    registry.insert<AlisesInfoTest::TestDialect>();
+
+    mlir::MLIRContext ctx(registry);
+
+    constexpr StringLiteral inputIR = R"(
+        module @test {
             func.func @main(%arg: memref<100xf32>) -> memref<100xf32> {
                 %0 = memref.alloc(): memref<50xf32>
                 %1 = "test.groupedview"(%arg, %0) : (memref<100xf32>, memref<50xf32>) -> memref<100xf32>
@@ -381,7 +441,7 @@ TEST(MLIR_AliasesInfo, RemoveAlias) {
                         << "producerOp = " << producerOp->getName().getStringRef().data();
             }
 
-            info.removeAlias(allocRes);
+            info.remove(allocRes);
             info.addAlias(allocRes, allocRes);
 
             const auto newAllocSource = info.getSource(allocRes);
@@ -416,7 +476,7 @@ TEST(MLIR_AliasesInfo, RemoveAlias) {
                 EXPECT_TRUE(root.isa<mlir::BlockArgument>() || mlir::isa<mlir::memref::AllocOp>(root.getDefiningOp()));
             }
 
-            info.removeAlias(viewRes);
+            info.remove(viewRes);
             info.addAlias(viewRes, viewRes);
 
             const auto newViewSources = info.getSource(viewRes);
@@ -456,7 +516,7 @@ TEST(MLIR_AliasesInfo, CallOp) {
     mlir::MLIRContext ctx(registry);
 
     constexpr StringLiteral inputIR = R"(
-        module @TwoFunctions {  
+        module @TwoFunctions {
             func.func @foo1(%arg0: memref<1x8x60x60xf16>, %arg1: memref<1x4x60x60xf16>, %arg2: memref<1x2x60x60xf16>) -> (memref<1x4x60x60xf16>, memref<1x2x60x60xf16>) {
                 %0 = memref.subview %arg0[0, 0, 0, 0][1, 4, 60, 60][1, 1, 1, 1] : memref<1x8x60x60xf16> to memref<1x4x60x60xf16>
                 memref.copy %0, %arg1 : memref<1x4x60x60xf16> to  memref<1x4x60x60xf16>
@@ -464,7 +524,7 @@ TEST(MLIR_AliasesInfo, CallOp) {
                 memref.copy %1, %arg2 : memref<1x2x60x60xf16> to  memref<1x2x60x60xf16>
                 return %arg1, %arg2 : memref<1x4x60x60xf16>, memref<1x2x60x60xf16>
             }
-            
+
             func.func @foo2(%arg0: memref<1x4x60x60xf16>, %arg1: memref<1x4x60x60xf16>) -> memref<1x4x60x60xf16> {
                 memref.copy %arg0, %arg1 : memref<1x4x60x60xf16> to  memref<1x4x60x60xf16>
                 return %arg1 : memref<1x4x60x60xf16>

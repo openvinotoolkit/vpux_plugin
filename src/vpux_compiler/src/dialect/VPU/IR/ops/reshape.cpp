@@ -119,3 +119,38 @@ mlir::LogicalResult vpux::VPU::ReshapeOp::inferReturnTypes(mlir::MLIRContext* ct
 
     return mlir::success();
 }
+
+//
+// ConvertToShapeCast
+//
+
+namespace {
+
+class ConvertToShapeCast final : public mlir::OpRewritePattern<VPU::ReshapeOp> {
+public:
+    using mlir::OpRewritePattern<VPU::ReshapeOp>::OpRewritePattern;
+
+public:
+    mlir::LogicalResult matchAndRewrite(VPU::ReshapeOp origOp, mlir::PatternRewriter& rewriter) const final;
+};
+
+mlir::LogicalResult ConvertToShapeCast::matchAndRewrite(VPU::ReshapeOp origOp, mlir::PatternRewriter& rewriter) const {
+    auto inputType = origOp.getInput().getType().cast<NDTypeInterface>();
+    auto outputType = origOp.getOutput().getType().cast<NDTypeInterface>();
+    if (!inputType.getDimsOrder().isIdentity() || inputType.getRank() != outputType.getRank()) {
+        return mlir::failure();
+    }
+
+    rewriter.replaceOpWithNewOp<VPU::ShapeCastOp>(origOp, origOp.getInput(), origOp.getShapeValueAttr());
+    return mlir::success();
+}
+
+}  // namespace
+
+//
+// getCanonicalizationPatterns
+//
+
+void vpux::VPU::ReshapeOp::getCanonicalizationPatterns(mlir::RewritePatternSet& patterns, mlir::MLIRContext* ctx) {
+    patterns.add<ConvertToShapeCast>(ctx);
+}

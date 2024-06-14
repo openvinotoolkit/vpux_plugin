@@ -1,14 +1,14 @@
 # MIT License
-# 
-# Copyright (C) 2019 Cristian Adam
-# 
+#
+# Copyright (c) 2019 Cristian Adam
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
 
@@ -21,7 +21,7 @@
 # SOFTWARE.
 
 # For a static libary ${TARGET_NAME}:
-#  * recursively collects static libraries in ${ARGN} targets and their dependencies 
+#  * recursively collects static libraries in ${ARGN} targets and their dependencies
 #  * bundles all the collected libraries to ${TARGET_NAME}
 function(bundle_static_library TARGET_NAME)
     get_target_property(TARGET_TYPE ${TARGET_NAME} TYPE)
@@ -84,7 +84,7 @@ function(bundle_static_library TARGET_NAME)
         file(WRITE ${CMAKE_BINARY_DIR}/${TARGET_NAME}.ar.in
             "CREATE ${TARGET_FULL_NAME}\n"
         )
-        
+
         file(APPEND ${CMAKE_BINARY_DIR}/${TARGET_NAME}.ar.in
                 "ADDLIB $<TARGET_FILE:${TARGET_NAME}>\n"
         )
@@ -94,7 +94,7 @@ function(bundle_static_library TARGET_NAME)
                 "ADDLIB $<TARGET_FILE:${TARGET}>\n"
             )
         endforeach()
-        
+
         file(APPEND ${CMAKE_BINARY_DIR}/${TARGET_NAME}.ar.in "SAVE\n")
         file(APPEND ${CMAKE_BINARY_DIR}/${TARGET_NAME}.ar.in "END\n")
 

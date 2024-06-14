@@ -12,9 +12,9 @@
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/task.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/utils/types.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
@@ -160,6 +160,8 @@ void buildMaxPool(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
     // barrier config
     auto barrier0 = funcBuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 0);
     auto barrier1 = funcBuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 1);
+    // finalBarrier passed as production barrier to last DMA task
+    auto finalBarrier = funcBuilder.create<vpux::VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 2);
 
     // DMA input-->cmx
     auto nndmaOp = VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(
@@ -274,9 +276,9 @@ void buildMaxPool(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
             funcBuilder, mlir::ValueRange(barrier0.getBarrier()), mlir::ValueRange(barrier1.getBarrier()),
             mlir::NameLoc::get(mlir::StringAttr::get(ctx, taskName)), input0Cmx.getOperation()->getResult(0),
             mlir::Value(), wtTblValue,
-            /*instruction_table_list*/ nullptr, actWindow0Cmx.getOperation()->getResult(0),
-            parentInput0Cmx.getOperation()->getResult(0), parentOutput0Cmx.getOperation()->getResult(0),
-            output0Cmx.getOperation()->getResult(0),
+            /*instruction_table_list*/ nullptr, /*spr_lookup_table*/ nullptr,
+            actWindow0Cmx.getOperation()->getResult(0), parentInput0Cmx.getOperation()->getResult(0),
+            parentOutput0Cmx.getOperation()->getResult(0), output0Cmx.getOperation()->getResult(0),
             profilingParams.dpuProfilingEnabled ? dpuProfOutput0Cmx.getOperation()->getResult(0) : nullptr,
             VPUIP::NCETaskType::MAXPOOL, filtersize, strides, kernelPadding, actChannelLength,
             /*is_continued*/ nullptr, /*sp_pattern*/ nullptr, /*is_segmented*/ nullptr,
@@ -310,7 +312,7 @@ void buildMaxPool(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
 
     // copy NCE task output to function output
     auto outputDma = VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(
-            funcBuilder, mlir::ValueRange(barrier1.getBarrier()), mlir::ValueRange(),
+            funcBuilder, mlir::ValueRange(barrier1.getBarrier()), mlir::ValueRange(finalBarrier.getBarrier()),
             mlir::NameLoc::get(mlir::StringAttr::get(ctx, "maxpool?t_MaxPool/cluster_0")),
             output0Cmx.getOperation()->getResult(0), funcOutput, 0);
 
@@ -327,8 +329,9 @@ void buildMaxPool(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
         dpuTask.setWorkloadIdAttr(vpux::getIntAttr(ctx, PROF_OUTPUT_CMX_OFFSET / HWP_DPU_BYTES_PER_ENTRY));
 
         // copy NCE task profiling data into DDR
-        VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcBuilder, mlir::ValueRange(barrier1.getBarrier()), mlir::ValueRange(),
-                                              builder.getUnknownLoc(), dpuProfOutput0Cmx.getOperation()->getResult(0),
+        VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcBuilder, mlir::ValueRange(barrier1.getBarrier()),
+                                              mlir::ValueRange(finalBarrier.getBarrier()), builder.getUnknownLoc(),
+                                              dpuProfOutput0Cmx.getOperation()->getResult(0),
                                               dpuProfOutput0Ddr.getOperation()->getResult(0), 0);
     }
 
@@ -341,8 +344,14 @@ void buildMaxPool(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
     funcBuilder.create<mlir::func::ReturnOp>(builder.getUnknownLoc(), funcOutputs);
 
     // set runtime resources
+    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
+
     mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    pm.addPass(VPU::createInitCompilerPass(arch, VPU::CompilationMode::DefaultHW, 1, 1, log));
+    auto initCompilerOptions = VPU::InitCompilerOptions(arch, VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.numberOfDPUGroups = 1;
+    initCompilerOptions.numberOfDMAPorts = 1;
+    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
 
     VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");
 

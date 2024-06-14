@@ -5,10 +5,11 @@
 
 #pragma once
 
-#include "vpux/compiler/dialect/IE/ops.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
-#include "vpux/compiler/dialect/VPUIP/nce_invariant.hpp"
+#include "vpux/compiler/dialect/VPUIP/interfaces/nce_invariant.hpp"
 #include "vpux/compiler/utils/types.hpp"
+#include "vpux/utils/core/algo.hpp"
 
 #include <mlir/Dialect/Quant/QuantTypes.h>
 #include <mlir/IR/BuiltinTypes.h>
@@ -28,6 +29,8 @@ Const::details::ContentRange<float> getConst(Const::DeclareOp declOp);
 mlir::Value findQuantizedInput(mlir::Value opInput, bool allowPerAxisQuantize);
 bool isSymmetricQuantType(mlir::quant::QuantizedType type);
 bool hasLeakyReLUPostOp(mlir::Operation* op);
+
+bool checkRescaledQuantApproximationForConvBasedOp(mlir::Operation* op);
 
 /*
  *  Bias will be rescaled for mixed precision and written in weight table later, so need to check whether the

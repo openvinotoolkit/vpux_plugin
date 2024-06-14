@@ -31,6 +31,29 @@ def AssignPhysicalBarriers : PassBase<"assign-physical-barriers", "vpux::Functio
 }
 
 //
+// SplitControlGraph
+//
+
+def SplitControlGraph : PassBase<"split-control-graph", "vpux::FunctionPass"> {
+    let summary = "Split control graph";
+
+    let description = [{
+        This optional pass will split control graph for large models
+        to reduce overhead of barrier processing and optimizations
+    }];
+
+    let constructor = "vpux::VPURT::createSplitControlGraphPass()";
+
+    let options = [
+        Option<
+            "blockSize", "block-size",
+            "int", "",
+            "Size of the block in number of tasks control graph will be split into. This impacts the amount of memory barrier scheduling passes will need to perform their legalization and optimization steps. Mem usage is proportional to blockSize^2 / 8"
+        >
+    ];
+}
+
+//
 // SimplifySchedule
 //
 
@@ -38,7 +61,7 @@ def SimplifySchedule : PassBase<"simplify-schedule", "vpux::FunctionPass"> {
     let summary = "Simplify schedule for runtime";
 
     let description = [{
-        This pass will simplify schedule by: 
+        This pass will simplify schedule by:
             1. sharing wait / update barriers for DMAs
             2. removing cycled dependencies where possible
     }];
@@ -54,7 +77,7 @@ def SplitExceedingVariantCountBarriers : PassBase<"split-exceeding-variant-count
     let summary = "Split exceeding variant (producer and consumer) count barriers";
 
     let description = [{
-        This pass splits virtual barriers in the IR such that the number of producer slots <= MAX_VARIANT_COUNT / 2 
+        This pass splits virtual barriers in the IR such that the number of producer slots <= MAX_VARIANT_COUNT / 2
         and the number of consumer slots <= MAX_VARIANT_COUNT / 2.
         Besides, there's a more strict limit named MAX_VARIANT_SUM from hw runtime. The value may be smaller than MAX_VARIANT_COUNT on same Arch.
         This limit will be enabled when MAX_VARIANT_SUM < MAX_VARIANT_COUNT and then check producers + consumers <= MAX_VARIANT_SUM. If not satisfied,
@@ -87,7 +110,7 @@ def SatisfyOneWaitBarrierPerTask : PassBase<"satisfy-one-wait-barrier-per-task",
     let description = [{
         This pass will satisfy barrier safety constraint
         -- single barrier drives each task
-        Handling multi barrier input can be wasteful and considerably more difficult to manage 
+        Handling multi barrier input can be wasteful and considerably more difficult to manage
         barrier safety. Pass is manipulating tasks with parallel wait barriers by two modes:
         1. Merge parallel wait barriers with legal barrier variant count
         2. Linearize parallel wait barrier producers with exceeding variant count
@@ -113,14 +136,14 @@ def ReduceExceedingActiveCountBarriers : PassBase<"reduce-exceeding-active-count
 
     let description = [{
         This pass linearizes virtual barriers in the IR such that the number of active barriers at any time
-        does not exceed the physical number of available barriers and that total producer + consumer variant 
+        does not exceed the physical number of available barriers and that total producer + consumer variant
         count <= MAX_VARIANT_COUNT.
         With exceeding active barrier count:
         - parallel barriers can be merged
         - parallel consumers to barrier can be linearized
         - parallel barriers can be linearized
         If nothing can be applied extreme linearization will be performed, where all tasks linked to active barriers
-        will be linearized. 
+        will be linearized.
     }];
 
     let constructor = "vpux::VPURT::createReduceExceedingActiveCountBarriersPass()";

@@ -1,16 +1,14 @@
 //
-// Copyright (C) 2022 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include "vpu_test_tool.hpp"
-#include <functional_test_utils/plugin_cache.hpp>
+#include <functional_test_utils/ov_plugin_cache.hpp>
 #include "vpux/utils/core/format.hpp"
 
 #include <fstream>
 #include <iostream>
-
-using namespace InferenceEngine;
 
 namespace ov::test::utils {
 
@@ -18,25 +16,6 @@ VpuTestTool::VpuTestTool(const VpuTestEnvConfig& envCfg)
         : envConfig(envCfg),
           DEVICE_NAME(envConfig.IE_NPU_TESTS_DEVICE_NAME.empty() ? "NPU" : envConfig.IE_NPU_TESTS_DEVICE_NAME),
           _log(vpux::Logger::global().nest("VpuTestTool", 1)) {
-}
-
-void VpuTestTool::exportNetwork(ExecutableNetwork& exeNet, const std::string& fsName) {
-    IE_ASSERT(!envConfig.IE_NPU_TESTS_DUMP_PATH.empty());
-
-    const auto fileName = vpux::printToString("{0}/{1}", envConfig.IE_NPU_TESTS_DUMP_PATH, fsName);
-    _log.info("Exporting nn into {0} raw file {1}, device {2}", envConfig.IE_NPU_TESTS_RAW_EXPORT ? "" : "not ",
-              fileName, DEVICE_NAME);
-
-    if (envConfig.IE_NPU_TESTS_RAW_EXPORT) {
-        exeNet.Export(fileName);
-    } else {
-        std::ofstream file(fileName, std::ios_base::out | std::ios_base::binary);
-        if (!file.is_open()) {
-            IE_THROW() << "exportNetwork(). Can't open file " << fileName;
-        }
-        exeNet.Export(file);
-    }
-    _log.info("Exported nn into file {0}", fileName);
 }
 
 void VpuTestTool::exportModel(ov::CompiledModel& compiledModel, const std::string& fsName) {
@@ -53,25 +32,6 @@ void VpuTestTool::exportModel(ov::CompiledModel& compiledModel, const std::strin
     _log.info("Exported model into file {0}", fileName);
 }
 
-ExecutableNetwork VpuTestTool::importNetwork(const std::shared_ptr<InferenceEngine::Core>& core,
-                                             const std::string& fsName) {
-    IE_ASSERT(!envConfig.IE_NPU_TESTS_DUMP_PATH.empty());
-
-    const auto fileName = vpux::printToString("{0}/{1}", envConfig.IE_NPU_TESTS_DUMP_PATH, fsName);
-    _log.info("Importing nn from {0} raw file {1}, device {2}", envConfig.IE_NPU_TESTS_RAW_EXPORT ? "" : "not ",
-              fileName, DEVICE_NAME);
-
-    if (envConfig.IE_NPU_TESTS_RAW_EXPORT) {
-        return core->ImportNetwork(fileName, DEVICE_NAME);
-    } else {
-        std::ifstream file(fileName, std::ios_base::in | std::ios_base::binary);
-        if (!file.is_open()) {
-            IE_THROW() << "importNetwork(). Can't open file " << fileName;
-        }
-        return core->ImportNetwork(file, DEVICE_NAME);
-    }
-}
-
 ov::CompiledModel VpuTestTool::importModel(const std::shared_ptr<ov::Core>& core, const std::string& fsName) {
     OPENVINO_ASSERT(!envConfig.IE_NPU_TESTS_DUMP_PATH.empty());
 
@@ -80,28 +40,12 @@ ov::CompiledModel VpuTestTool::importModel(const std::shared_ptr<ov::Core>& core
 
     std::ifstream file(fileName, std::ios_base::in | std::ios_base::binary);
     if (!file.is_open()) {
-        IE_THROW() << "importNetwork(). Can't open file " << fileName;
+        OPENVINO_THROW("importModel(). Can't open file ", fileName);
     }
     return core->import_model(file, DEVICE_NAME);
 }
 
-void VpuTestTool::importBlob(InferenceEngine::Blob::Ptr blob, const std::string& fsName) {
-    IE_ASSERT(!envConfig.IE_NPU_TESTS_DUMP_PATH.empty());
-
-    const auto fileName = vpux::printToString("{0}/{1}", envConfig.IE_NPU_TESTS_DUMP_PATH, fsName);
-    _log.debug("Importing `InferenceEngine::Blob::Ptr` from {0}, device {1}", fileName, DEVICE_NAME);
-
-    std::ifstream file(fileName, std::ios_base::in | std::ios_base::binary);
-    if (!file.is_open()) {
-        IE_THROW() << "importBlob(). Can't open file " << fileName;
-    }
-    file.read(blob->cbuffer().as<char*>(), static_cast<std::streamsize>(blob->byteSize()));
-    if (!file) {
-        IE_THROW() << "exportBlob(). Error when reading file " << fileName;
-    }
-}
-
-void VpuTestTool::importBlob(ov::Tensor& tensor, const std::string& fsName) {
+void VpuTestTool::importTensor(ov::Tensor& tensor, const std::string& fsName) {
     OPENVINO_ASSERT(!envConfig.IE_NPU_TESTS_DUMP_PATH.empty());
 
     const auto fileName = vpux::printToString("{0}/{1}", envConfig.IE_NPU_TESTS_DUMP_PATH, fsName);
@@ -109,31 +53,15 @@ void VpuTestTool::importBlob(ov::Tensor& tensor, const std::string& fsName) {
 
     std::ifstream file(fileName, std::ios_base::in | std::ios_base::binary);
     if (!file.is_open()) {
-        OPENVINO_THROW("importBlob(). Can't open file ", fileName);
+        OPENVINO_THROW("importTensor(). Can't open file ", fileName);
     }
     file.read(static_cast<char*>(tensor.data()), static_cast<std::streamsize>(tensor.get_byte_size()));
     if (!file) {
-        OPENVINO_THROW("importBlob(). Error when reading file ", fileName);
+        OPENVINO_THROW("importTensor(). Error when reading file ", fileName);
     }
 }
 
-void VpuTestTool::exportBlob(const InferenceEngine::Blob::Ptr blob, const std::string& fsName) {
-    IE_ASSERT(!envConfig.IE_NPU_TESTS_DUMP_PATH.empty());
-
-    const auto fileName = vpux::printToString("{0}/{1}", envConfig.IE_NPU_TESTS_DUMP_PATH, fsName);
-    _log.debug("Exporting `InferenceEngine::Blob::Ptr` from {0}, device {1}", fileName, DEVICE_NAME);
-
-    std::ofstream file(fileName, std::ios_base::out | std::ios_base::binary);
-    if (!file.is_open()) {
-        IE_THROW() << "exportBlob(). Can't open file " << fileName;
-    }
-    file.write(blob->cbuffer().as<const char*>(), static_cast<std::streamsize>(blob->byteSize()));
-    if (!file) {
-        IE_THROW() << "exportBlob(). Error when writing file " << fileName;
-    }
-}
-
-void VpuTestTool::exportBlob(const ov::Tensor& tensor, const std::string& fsName) {
+void VpuTestTool::exportTensor(const ov::Tensor& tensor, const std::string& fsName) {
     OPENVINO_ASSERT(!envConfig.IE_NPU_TESTS_DUMP_PATH.empty());
 
     const auto fileName = vpux::printToString("{0}/{1}", envConfig.IE_NPU_TESTS_DUMP_PATH, fsName);
@@ -141,18 +69,18 @@ void VpuTestTool::exportBlob(const ov::Tensor& tensor, const std::string& fsName
 
     std::ofstream file(fileName, std::ios_base::out | std::ios_base::binary);
     if (!file.is_open()) {
-        OPENVINO_THROW("exportBlob(). Can't open file ", fileName);
+        OPENVINO_THROW("exportTensor(). Can't open file ", fileName);
     }
     file.write(static_cast<const char*>(tensor.data()), static_cast<std::streamsize>(tensor.get_byte_size()));
     if (!file) {
-        OPENVINO_THROW("exportBlob(). Error when writing file ", fileName);
+        OPENVINO_THROW("exportTensor(). Error when writing file ", fileName);
     }
 }
 
 std::string VpuTestTool::getDeviceMetric(std::string name) {
-    std::shared_ptr<InferenceEngine::Core> core = ::PluginCache::get().ie(DEVICE_NAME);
+    std::shared_ptr<ov::Core> core = ov::test::utils::PluginCache::get().core(DEVICE_NAME);
 
-    return core->GetMetric(DEVICE_NAME, name).as<std::string>();
+    return core->get_property(DEVICE_NAME, name).as<std::string>();
 }
 
 unsigned long int FNV_hash(const std::string& str) {

@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -55,6 +55,6 @@ func.func private @maxpool_f16_f16(%arg0: memref<1x64x16x16xf16, #NHWC, @DDR>, %
     //CHECK-SAME waits(%[[VAL0]]
     //CHECK-SAME updates(%[[VAL1]])
 //CHECK-NOT: DPUTask
-//CHECK-NEXT: VPUIP.PPETask <NOOP>
+//CHECK-NEXT: VPUMI37XX.PPETask <NOOP>
 
 //CHECK: VPUMI37XX.DPUVariant

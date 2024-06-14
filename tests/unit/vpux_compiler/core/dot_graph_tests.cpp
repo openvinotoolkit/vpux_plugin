@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+//
+
 #include "vpux/compiler/core/passes.hpp"
 #include "vpux/compiler/init.hpp"
 #include "vpux/compiler/utils/dot_printer.hpp"
@@ -52,12 +54,49 @@ constexpr llvm::StringLiteral inputIR = R"(
         }
     )";
 
-void CheckDotFile(const std::string fileName) {
+constexpr llvm::StringLiteral multipleFuncIR = R"(
+ module @TwoFunctions {
+    IE.CNNNetwork entryPoint : @main
+    inputsInfo : {
+        DataInfo "input" : tensor<1x3x62x62xui8>
+    } outputsInfo : {
+        DataInfo "output" : tensor<1x48x60x60xf16>
+    }
+    func.func @foo1(%arg: tensor<1x3x62x62xf32>) -> tensor<1x48x60x60xf32> {
+        %cst = const.Declare tensor<48x3x3x3xf32> = dense<1.0> : tensor<48x3x3x3xf32>
+        %0 = IE.Convolution(%arg, %cst) {
+            dilations = [1, 1],
+            pads_begin = [0, 0],
+            pads_end = [0, 0],
+            strides = [1, 1]
+        } : tensor<1x3x62x62xf32>, tensor<48x3x3x3xf32> -> tensor<1x48x60x60xf32>
+        return %0 : tensor<1x48x60x60xf32>
+    }
+    func.func @foo2(%arg: tensor<1x48x60x60xf32>) -> tensor<1x48x60x60xf32> {
+        %0 = IE.SoftMax(%arg) {axisInd = 3} : tensor<1x48x60x60xf32> -> tensor<1x48x60x60xf32>
+        return %0 : tensor<1x48x60x60xf32>
+    }
+    func.func @main(%arg: tensor<1x3x62x62xf32>) -> tensor<1x48x60x60xf32> {
+        %0 = call @foo1(%arg) : (tensor<1x3x62x62xf32>) -> tensor<1x48x60x60xf32>
+        %1 = call @foo2(%0) : (tensor<1x48x60x60xf32>) -> tensor<1x48x60x60xf32>
+        return %1 : tensor<1x48x60x60xf32>
+    }
+}
+    )";
+
+void CheckDotFile(const std::string fileName, std::string patternToFind) {
     std::ifstream output_file(fileName);
     ASSERT_TRUE(output_file.good());
     std::string str;
-    std::getline(output_file, str);
-    ASSERT_TRUE(str.find("digraph") != std::string::npos);
+    auto pos = std::string::npos;
+    while (std::getline(output_file, str)) {
+        pos = str.find(patternToFind);
+        if (pos != std::string::npos) {
+            break;
+        }
+    }
+
+    ASSERT_TRUE(pos != std::string::npos);
 }
 
 }  // namespace
@@ -67,7 +106,6 @@ TEST_F(MLIR_DotGraph, GenerateViaPass) {
     mlir::MLIRContext ctx(registry);
 
     const std::string fileName = "output.dot";
-    std::remove(fileName.c_str());
 
     auto module = mlir::parseSourceString<mlir::ModuleOp>(inputIR, &ctx);
     ASSERT_TRUE(module.get() != nullptr);
@@ -76,8 +114,10 @@ TEST_F(MLIR_DotGraph, GenerateViaPass) {
     pm.addPass(vpux::createPrintDotPass(fileName));
 
     ASSERT_TRUE(mlir::succeeded(pm.run(module.get())));
+    const std::string expectedOutputFileName = "output_main.dot";
 
-    CheckDotFile(fileName);
+    CheckDotFile(expectedOutputFileName, std::string("IERT.SoftMax"));
+    std::remove(expectedOutputFileName.c_str());
 }
 
 TEST_F(MLIR_DotGraph, GenerateViaEnvVar) {
@@ -85,8 +125,6 @@ TEST_F(MLIR_DotGraph, GenerateViaEnvVar) {
 
     const std::string fileName = "output.dot";
     const std::string fileName2 = "output2.dot";
-    std::remove(fileName.c_str());
-    std::remove(fileName2.c_str());
 
     const std::string options = "output=" + fileName + " pass=TestPass,output=" + fileName2 + " pass=TestPass2";
 
@@ -100,6 +138,38 @@ TEST_F(MLIR_DotGraph, GenerateViaEnvVar) {
 
     ASSERT_TRUE(mlir::succeeded(pm.run(module.get())));
 
-    CheckDotFile(fileName);
-    CheckDotFile(fileName2);
+    const std::string expectedOutputFileName = "output_main.dot";
+    const std::string expectedOutputFileName2 = "output2_main.dot";
+
+    CheckDotFile(expectedOutputFileName, std::string("IERT.SoftMax"));
+    CheckDotFile(expectedOutputFileName2, std::string("IERT.SoftMax"));
+    std::remove(expectedOutputFileName.c_str());
+    std::remove(expectedOutputFileName2.c_str());
+}
+
+TEST_F(MLIR_DotGraph, GenerateViaPass_TwoFunctions) {
+    mlir::MLIRContext ctx(registry);
+
+    const std::string fileName = "output.dot";
+
+    auto module = mlir::parseSourceString<mlir::ModuleOp>(multipleFuncIR, &ctx);
+    ASSERT_TRUE(module.get() != nullptr);
+
+    mlir::PassManager pm(module.get()->getName(), mlir::OpPassManager::Nesting::Implicit);
+    pm.addPass(vpux::createPrintDotPass(fileName));
+
+    ASSERT_TRUE(mlir::succeeded(pm.run(module.get())));
+
+    const std::string expectedOutputFileMain = "output_main.dot";
+    const std::string expectedOutputFileFoo1 = "output_foo1.dot";
+    const std::string expectedOutputFileFoo2 = "output_foo2.dot";
+
+    CheckDotFile(expectedOutputFileMain, std::string("@foo1"));
+    CheckDotFile(expectedOutputFileMain, std::string("@foo2"));
+    CheckDotFile(expectedOutputFileFoo1, std::string("IE.Convolution"));
+    CheckDotFile(expectedOutputFileFoo2, std::string("IE.SoftMax"));
+
+    std::remove(expectedOutputFileMain.c_str());
+    std::remove(expectedOutputFileFoo1.c_str());
+    std::remove(expectedOutputFileFoo2.c_str());
 }

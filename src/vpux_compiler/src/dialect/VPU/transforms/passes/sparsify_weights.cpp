@@ -76,6 +76,11 @@ void SparsifyWeightsPass::safeRunOnFunc() {
         if (weights == nullptr) {
             return;
         }
+        // E#119705: Constant used by multi user will cause accuracy issue, this ticket track this issue which need
+        // further investigation
+        if (!weights.hasOneUse()) {
+            return;
+        }
         auto weightsType = weights.getType().cast<vpux::NDTypeInterface>();
         if (weightsType.getElemTypeSize().count() < CHAR_BIT) {
             _log.trace("Op '{0}' at '{1}' is not supporting sparsity for sub 8-bit weights", sparsifiableOp->getName(),
@@ -123,7 +128,8 @@ void SparsifyWeightsPass::safeRunOnFunc() {
         const auto numElemsAttr = mlir::DenseElementsAttr::get(numElemsType, ArrayRef(numNonSparseElemsPerOC));
         const auto axisAttr = getIntAttr(&ctx, Dims4D::Filter::OC.ind());
         const auto alignmentAttr = getIntAttr(&ctx, VPU::NCEInvariant::VPU_WEIGHT_SET_BYTE_ALIGNMENT);
-        const auto compressionSchemeAttr = VPU::CompressionSchemeAttr::get(&ctx, axisAttr, numElemsAttr, alignmentAttr);
+        const auto sparsityCompressionAttr =
+                VPU::SparsityCompressionAttr::get(&ctx, axisAttr, numElemsAttr, alignmentAttr);
 
         // Fold the original constant to drop the original transformations
         // This is done in order to avoid repeating the folding that was done in this pass later in the compilation
@@ -156,7 +162,7 @@ void SparsifyWeightsPass::safeRunOnFunc() {
                 builder.create<Const::DeclareOp>(weightsOp.getLoc(), sparsityMapContent.getType(), sparsityMapContent);
         const auto groupedView =
                 builder.create<VPU::GroupSparseTensorOp>(weightsOp.getLoc(), sparsifiedWeights->getResult(0),
-                                                         sparsityMap->getResult(0), true, compressionSchemeAttr);
+                                                         sparsityMap->getResult(0), true, sparsityCompressionAttr);
 
         weightsOp->replaceAllUsesWith(groupedView);
         weightsOp->erase();

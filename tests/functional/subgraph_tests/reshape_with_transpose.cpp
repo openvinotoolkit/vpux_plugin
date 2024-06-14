@@ -1,12 +1,8 @@
-// Copyright (C) Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include <vpu_ov2_layer_test.hpp>
-
-#include <ov_models/builders.hpp>
-#include <ov_models/utils/ov_helpers.hpp>
-#include <shared_test_classes/base/layer_test_utils.hpp>
 
 namespace ov::test {
 
@@ -58,22 +54,32 @@ class ReshapeWithTransposeTest_NPU3720 :
         const auto biasConst = ov::op::v0::Constant::create(ov::element::f32, constShape, values);
         return std::make_shared<ov::op::v1::Add>(lhs, biasConst);
     }
+
+public:
+    static std::string getTestCaseName(const testing::TestParamInfo<std::vector<int64_t>>& obj) {
+        const std::string sep = "_";
+        std::ostringstream result;
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
+        result << "TestIdx=" << obj.index << sep;
+        return result.str();
+    };
 };
 
 TEST_P(ReshapeWithTransposeTest_NPU3720, SW) {
     setReferenceSoftwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
 }
 
 TEST_P(ReshapeWithTransposeTest_NPU3720, HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
 }
 
 const std::vector<std::vector<int64_t>> transposes = {
         {0, 2, 1},
 };
 
-INSTANTIATE_TEST_SUITE_P(smoke_transpose_add, ReshapeWithTransposeTest_NPU3720, ::testing::ValuesIn(transposes));
+INSTANTIATE_TEST_SUITE_P(smoke_transpose_add, ReshapeWithTransposeTest_NPU3720, ::testing::ValuesIn(transposes),
+                         ReshapeWithTransposeTest_NPU3720::getTestCaseName);
 
 }  // namespace ov::test

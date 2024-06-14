@@ -28,7 +28,3 @@ python3 edit_xml.py -m `name-of-original-file`.xml -l `name-of-the-layer`
 
 The output file is expected to b the IR based on the original and ended by the specified layer.
 `name-of-original-file`-cut-`name-of-the output-layer`.xml
-
-
-
-

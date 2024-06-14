@@ -1,15 +1,19 @@
 //
-// Copyright (C) 2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2023-2024 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include "simulation/validation_mode.hpp"
-#include "layers_data.hpp"
+
 #include "scenario/accuracy_metrics.hpp"
-#include "simulation/computation.hpp"
+#include "simulation/computation_builder.hpp"
 #include "simulation/executor.hpp"
+#include "simulation/layers_data.hpp"
+#include "simulation/validation_mode.hpp"
 #include "utils/logger.hpp"
 #include "utils/utils.hpp"
+
+#include <opencv2/gapi/gproto.hpp>  // cv::GCompileArgs
 
 class LayerValidator {
 public:
@@ -39,71 +43,112 @@ Result LayerValidator::operator()(const cv::Mat& lhs, const cv::Mat& rhs) {
 
 namespace {
 
-class ValidationStrategy : public BuildStrategy {
-public:
-    explicit ValidationStrategy(const cv::util::optional<std::filesystem::path>& _per_iter_outputs_path)
-            : per_iter_outputs_path(_per_iter_outputs_path) {
+struct InputDataVisitor {
+    InputDataVisitor(const InferDesc& _infer, const ValSimulation::Options& _opts)
+            : infer(_infer), opts(_opts), providers(infer.input_layers.size()), metas(infer.input_layers.size()) {
     }
 
-    BuildStrategy::ConstructInfo build(const InferDesc& infer) override {
-        const auto& input_data = infer.input_data;
-        std::vector<IDataProvider::Ptr> providers;
-        switch (input_data.index()) {
-        case LayerVariantAttr<std::string>::index_of<std::string>(): {
-            std::filesystem::path path = cv::util::get<std::string>(input_data);
-            LOG_INFO() << "Input data path: " << path << " for model: " << infer.tag
-                       << " exists - data will be uploaded" << std::endl;
-            auto layers_data = uploadData(path, infer.tag, infer.input_layers, LayersType::INPUT);
-            providers = createConstantProviders(std::move(layers_data), extractLayerNames(infer.input_layers));
-            break;
-        }
-        // TODO: In fact it's not mandatory, extend in future.
-        default:
-            THROW_ERROR("Validation mode requires input data path to be provided"
-                        " in form of either directory or single file!");
-            break;
-        }
+    void operator()(std::monostate);
+    void operator()(const std::string&);
+    void operator()(const LayerVariantAttr<std::string>&);
 
-        const auto& output_data = infer.output_data;
-        std::vector<Meta> output_meta(infer.output_layers.size(), Meta{});
-        switch (output_data.index()) {
-        case LayerVariantAttr<std::string>::index_of<std::string>(): {
-            std::filesystem::path path = cv::util::get<std::string>(output_data);
-            LOG_INFO() << "Reference output data path: " << path << " for model: " << infer.tag
-                       << " exists - data will be uploaded" << std::endl;
-            auto layers_data = uploadData(path, infer.tag, infer.output_layers, LayersType::OUTPUT);
-            for (uint32_t i = 0; i < infer.output_layers.size(); ++i) {
-                const auto& layer = infer.output_layers[i];
-                LayerValidator validator{infer.tag, layer.name, infer.metrics.at(layer.name)};
-                output_meta[i].set(Validate{std::move(validator), layers_data.at(layer.name)});
-            }
-            break;
-        }
-        // TODO: In fact it's not mandatory, extend in future.
-        default:
-            THROW_ERROR("Validation mode requires reference output data path to be provided"
-                        " in form of either directory or single file!");
-            break;
-        }
+    InferDesc infer;
+    const ValSimulation::Options& opts;
+    std::vector<IDataProvider::Ptr> providers;
+    std::vector<Meta> metas;
+};
 
-        if (per_iter_outputs_path.has_value()) {
-            auto model_dir = per_iter_outputs_path.value() / infer.tag;
+void InputDataVisitor::operator()(std::monostate) {
+    THROW_ERROR("Validation mode requires input data path to be provided"
+                " in form of either directory or single file!");
+};
+
+void InputDataVisitor::operator()(const LayerVariantAttr<std::string>&) {
+    THROW_ERROR("Validation mode requires input data path to be provided"
+                " in form of either directory or single file!");
+};
+
+void InputDataVisitor::operator()(const std::string& path_str) {
+    std::filesystem::path path{path_str};
+    LOG_INFO() << "Input data path: " << path << " for model: " << infer.tag << " exists - data will be uploaded"
+               << std::endl;
+    auto layers_data = uploadData(path, infer.tag, infer.input_layers, LayersType::INPUT);
+    providers = createConstantProviders(std::move(layers_data), extractLayerNames(infer.input_layers));
+};
+
+struct OutputDataVisitor {
+    OutputDataVisitor(const InferDesc& _infer, const ValSimulation::Options& _opts)
+            : infer(_infer), opts(_opts), metas(infer.output_layers.size()) {
+    }
+
+    void operator()(std::monostate);
+    void operator()(const std::string&);
+    void operator()(const LayerVariantAttr<std::string>&);
+
+    InferDesc infer;
+    const ValSimulation::Options& opts;
+    std::vector<Meta> metas;
+};
+
+void OutputDataVisitor::operator()(std::monostate) {
+    THROW_ERROR("Validation mode requires output data path to be provided"
+                " in form of either directory or single file!");
+}
+
+void OutputDataVisitor::operator()(const LayerVariantAttr<std::string>&) {
+    THROW_ERROR("Validation mode requires output data path to be provided"
+                " in form of either directory or single file!");
+}
+
+void OutputDataVisitor::operator()(const std::string& path_str) {
+    auto default_metric = opts.global_metric ? opts.global_metric : std::make_shared<Norm>(0.0);
+    auto per_layer_metrics =
+            unpackWithDefault(opts.metrics_map.at(infer.tag), extractLayerNames(infer.output_layers), default_metric);
+    std::filesystem::path path{path_str};
+    LOG_INFO() << "Reference output data path: " << path << " for model: " << infer.tag
+               << " exists - data will be uploaded" << std::endl;
+    auto layers_data = uploadData(path, infer.tag, infer.output_layers, LayersType::OUTPUT);
+    for (uint32_t i = 0; i < infer.output_layers.size(); ++i) {
+        const auto& layer = infer.output_layers[i];
+        LayerValidator validator{infer.tag, layer.name, per_layer_metrics.at(layer.name)};
+        metas[i].set(Validate{std::move(validator), layers_data.at(layer.name)});
+    }
+}
+
+}  // anonymous namespace
+
+class ValidationStrategy : public IBuildStrategy {
+public:
+    explicit ValidationStrategy(const ValSimulation::Options& _opts): opts(_opts) {
+    }
+
+    IBuildStrategy::InferBuildInfo build(const InferDesc& infer) override {
+        const auto& input_data = opts.input_data_map.at(infer.tag);
+        InputDataVisitor in_data_visitor{infer, opts};
+        std::visit(in_data_visitor, input_data);
+
+        const auto& output_data = opts.output_data_map.at(infer.tag);
+        OutputDataVisitor out_data_visitor{infer, opts};
+        std::visit(out_data_visitor, output_data);
+
+        if (opts.per_iter_outputs_path.has_value()) {
+            auto model_dir = opts.per_iter_outputs_path.value() / infer.tag;
             // NB: Remove the data from the previous run if such exist
             LOG_INFO() << "Actual output data for model: " << infer.tag
                        << " will be dumped and replaced at path: " << model_dir << std::endl;
             std::filesystem::remove_all(model_dir);
             auto dump_path_vec = createDirectoryLayout(model_dir, extractLayerNames(infer.output_layers));
             for (uint32_t i = 0; i < infer.output_layers.size(); ++i) {
-                output_meta[i].set(Dump{dump_path_vec[i]});
+                out_data_visitor.metas[i].set(Dump{dump_path_vec[i]});
             }
         }
 
         // NB: No special input meta for this mode.
         std::vector<Meta> input_meta(infer.input_layers.size(), Meta{});
-        return {std::move(providers), std::move(input_meta), std::move(output_meta)};
+        return {std::move(in_data_visitor.providers), std::move(input_meta), std::move(out_data_visitor.metas)};
     }
 
-    cv::util::optional<std::filesystem::path> per_iter_outputs_path;
+    const ValSimulation::Options& opts;
 };
 
 struct FailedIter {
@@ -160,6 +205,8 @@ static void dumpOutputs(const std::vector<cv::Mat>& out_mats, const std::vector<
         }
     }
 }
+
+namespace {
 
 class SyncSimulation : public SyncCompiled {
 public:
@@ -286,21 +333,31 @@ bool PipelinedSimulation::process(cv::GStreamingCompiled& pipeline) {
 
 }  // anonymous namespace
 
-ValSimulation::ValSimulation(ScenarioGraph&& graph, const ValSimulation::Options& opts)
-        : m_opts(opts),
-          m_comp(Computation::build(std::move(graph), std::make_shared<ValidationStrategy>(opts.per_iter_outputs_path),
-                                    false)) {
+ValSimulation::ValSimulation(Simulation::Config&& cfg, ValSimulation::Options&& opts)
+        : Simulation(std::move(cfg)),
+          m_opts(std::move(opts)),
+          m_strategy(std::make_shared<ValidationStrategy>(m_opts)),
+          m_comp(ComputationBuilder{m_strategy}.build(m_cfg.graph, m_cfg.params, {false /* add performance meta */})) {
 }
 
-std::shared_ptr<PipelinedCompiled> ValSimulation::compilePipelined(const bool drop_frames,
+std::shared_ptr<PipelinedCompiled> ValSimulation::compilePipelined(DummySources&& sources,
                                                                    cv::GCompileArgs&& compile_args) {
-    auto info = m_comp.compilePipelined(drop_frames, std::move(compile_args));
-    return std::make_shared<PipelinedSimulation>(std::move(info.compiled), std::move(info.sources),
-                                                 std::move(info.out_meta));
+    auto compiled = m_comp.compileStreaming(descr_of(sources), std::move(compile_args));
+    auto out_meta = m_comp.getOutMeta();
+    return std::make_shared<PipelinedSimulation>(std::move(compiled), std::move(sources), std::move(out_meta));
 }
 
-std::shared_ptr<SyncCompiled> ValSimulation::compileSync(const bool drop_frames, cv::GCompileArgs&& compile_args) {
-    auto info = m_comp.compileSync(drop_frames, std::move(compile_args));
-    return std::make_shared<SyncSimulation>(std::move(info.compiled), std::move(info.sources),
-                                            std::move(info.out_meta));
+std::shared_ptr<SyncCompiled> ValSimulation::compileSync(DummySources&& sources, cv::GCompileArgs&& compile_args) {
+    const uint32_t max_parallel_branches = m_comp.getMaxParallelBranches();
+    if (max_parallel_branches > 1u) {
+        LOG_INFO() << "Found at most " << max_parallel_branches
+                   << " parallel branches in graph,"
+                      " so threaded executor will be used"
+                   << std::endl;
+        ;
+        compile_args += cv::compile_args(cv::use_threaded_executor{max_parallel_branches});
+    }
+    auto compiled = m_comp.compile(descr_of(sources), std::move(compile_args));
+    auto out_meta = m_comp.getOutMeta();
+    return std::make_shared<SyncSimulation>(std::move(compiled), std::move(sources), std::move(out_meta));
 }

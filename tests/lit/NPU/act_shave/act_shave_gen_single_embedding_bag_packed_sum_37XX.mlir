@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -32,8 +32,8 @@ module @VPU.SW {
     // `memref` will be translated to `MemRefData`, while raw scalars will be translated as is.
     func.func private @builtin_EmbeddingBagPackedSum(memref<*xf16, [@CMX_NN, 0]>, memref<*xsi32, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>)
         attributes {
-            VPU.kernel_code = "single_shave_embedding_bag_packed_sum.cpp",
-            VPU.kernel_entry = "single_shave_embedding_bag_packed_sum"
+            VPU.kernel_code = "embedding_bag_packed_sum.cpp",
+            VPU.kernel_entry = "embedding_bag_packed_sum"
         }
 
     // management kernel definition
@@ -69,7 +69,7 @@ func.func @main(%arg0: memref<5x10xf16, @DDR>, %arg1: memref<3x10xf16, @DDR>) ->
     }
 
     VPURT.Task waits(%0 : !VPURT.Barrier) updates(%1 : !VPURT.Barrier) attributes {isTrailingSWLayer = false} {
-        %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+        %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
                 @VPU.SW::@builtin_EmbeddingBagPackedSum
                 inputs(%4 as %arg2: memref<5x10xf16, [@CMX_NN, 0]>, %5 as %arg3: memref<3x2xsi32, [@CMX_NN, 0]>, %6 as %arg4: memref<3x2xf16, [@CMX_NN, 0]>)
                 outputs(%7 as %arg5: memref<3x10xf16, [@CMX_NN, 0]>)

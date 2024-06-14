@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
-// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --swap-operations  %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --swap-operations %s | FileCheck %s
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 #NHCW = affine_map<(d0, d1, d2, d3) -> (d0, d2, d1, d3)>
 
@@ -432,7 +432,7 @@ func.func @SwapConcatWithClamp(%arg0: tensor<4x512x1x1xf16>, %arg1: tensor<4x512
    %cst_1 = const.Declare tensor<2048x512x1x1xf16> = dense<2.000000e+00> : tensor<2048x512xf16>, [#const.Reshape<[2048, 512, 1, 1]>]
    %0 = IE.Convolution(%arg0, %cst) {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<4x512x1x1xf16>, tensor<2048x512x1x1xf16> -> tensor<4x2048x1x1xf16>
    %1 = IE.Convolution(%arg1, %cst_1) {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<4x512x1x1xf16>, tensor<2048x512x1x1xf16> -> tensor<4x2048x1x1xf16>
-   %2 = IE.Concat(%0, %1) {per_axis = #IE.Concat<axis = 3 : i64, offset = 1 : i64, stride = 2 : i64>} : tensor<4x2048x1x1xf16>, tensor<4x2048x1x1xf16> -> tensor<4x2048x1x2xf16> 
+   %2 = IE.Concat(%0, %1) {per_axis = #IE.Concat<axis = 3 : i64, offset = 1 : i64, stride = 2 : i64>} : tensor<4x2048x1x1xf16>, tensor<4x2048x1x1xf16> -> tensor<4x2048x1x2xf16>
    %3 = IE.Clamp(%2) {min = 1.0, max = 3.0} : tensor<4x2048x1x2xf16> -> tensor<4x2048x1x2xf16>
 
    return %3 : tensor<4x2048x1x2xf16>

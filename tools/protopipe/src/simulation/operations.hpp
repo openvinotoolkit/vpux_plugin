@@ -1,24 +1,19 @@
 //
-// Copyright (C) 2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #pragma once
 
-#include <chrono>
-
 #include <opencv2/gapi/cpu/gcpukernel.hpp>  // GAPI_OCV_KERNEL
 #include <opencv2/gapi/gkernel.hpp>         // G_API_OP
 #include <opencv2/gapi/infer.hpp>
-#include <opencv2/gapi/util/variant.hpp>
-
-#include <opencv2/gapi/streaming/meta.hpp>
 
 #include "utils/data_providers.hpp"
 #include "utils/utils.hpp"
 
 // clang-format off
-struct Infer {
+struct InferCall {
     cv::GProtoArgs operator()(const cv::GProtoArgs& inputs);
 
     std::string              tag;
@@ -49,7 +44,7 @@ struct GCPUDummyM: public cv::detail::KernelTag {
     static void call(cv::GCPUContext &ctx);
 };
 
-struct DummyM {
+struct DummyCall {
     std::vector<IDataProvider::Ptr> providers;
     uint64_t delay_in_us;
     // NB: Don't pull data from providers if enabled

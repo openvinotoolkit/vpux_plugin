@@ -6,7 +6,7 @@
 #pragma once
 
 #include <numeric>
-#include "vpux/compiler/dialect/IE/ops.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 
 namespace vpux {
 namespace IE {
@@ -37,6 +37,8 @@ SmallVector<int64_t> inferInterpOutShape(mlir::Location loc, ArrayRef<int64_t> a
                                          mlir::FailureOr<ArrayRef<int64_t>> sizes,
                                          mlir::FailureOr<ArrayRef<double>> scales, mlir::Type scalesElemType,
                                          vpux::Logger log);
+mlir::Value createPadding(mlir::PatternRewriter& rewriter, IE::InterpolateOp origOp, mlir::Value input, Dim axis,
+                          int64_t forwardPad, int64_t backpad);
 
 template <typename InterpolateAdaptor>
 SmallVector<int64_t> calcOutputShapes(InterpolateAdaptor interpolate, mlir::Location loc, vpux::Logger log,

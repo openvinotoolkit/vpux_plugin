@@ -4,13 +4,12 @@
 //
 
 #include "vpux/compiler/dialect/const/attributes/content.hpp"
+#include "vpux/compiler/utils/loop.hpp"
 #include "vpux/compiler/utils/quantization.hpp"
 #include "vpux/compiler/utils/subspaces.hpp"
 #include "vpux/compiler/utils/types.hpp"
 
-#include "vpux/utils/IE/loop.hpp"
 #include "vpux/utils/core/format.hpp"
-#include "vpux/utils/core/func_ref.hpp"
 
 #include <mlir/Dialect/Quant/QuantTypes.h>
 
@@ -56,9 +55,9 @@ Const::Content vpux::Const::DequantizeAttr::transform(vpux::Const::Content& inpu
         const auto scale = uniformType.getScale();
         const auto zeroPoint = uniformType.getZeroPoint();
 
-        loop_1d(LoopExecPolicy::Parallel, realVals.size(), [&](size_t i) {
+        for (size_t i = 0; i < realVals.size(); ++i) {
             realVals[i] = dequantize(qVals[i], scale, zeroPoint);
-        });
+        }
     } else if (const auto uniformType = qElemType.dyn_cast<mlir::quant::UniformQuantizedPerAxisType>()) {
         const auto scales = uniformType.getScales();
         const auto zeroPoints = uniformType.getZeroPoints();
@@ -68,24 +67,41 @@ Const::Content vpux::Const::DequantizeAttr::transform(vpux::Const::Content& inpu
         const auto memAxis = dimsOrder.toMemDim(axis);
         const auto memShape = dimsOrder.toMemoryOrder(input.getType().getShape());
 
-        const auto innerSize = memShape[memAxis];
-        const auto outerSize = subspace::getTotalLines(memShape, memAxis);
+        // Get the volume of the dimensions less significant than the quantized axis,
+        // which use the same dequantization parameters.
+        // (QuantAxisDim, ..., InnerMostDim]
+        int64_t innerSize = 1;
+        for (size_t i = memAxis.ind() + 1; i < memShape.size(); ++i) {
+            innerSize *= memShape[MemDim(i)];
+        }
         VPUX_THROW_WHEN(innerSize == 0, "Inner size is zero");
+
+        // Get the size of the quantized dimension.
+        const int64_t quantAxisSize = memShape[memAxis];
+        VPUX_THROW_WHEN(quantAxisSize == 0, "Quantized axis size is zero");
+
+        const int64_t quantAxisTotalSize = quantAxisSize * innerSize;  // = [QuantAxisDim, ..., InnerMostDim]
+        // Get the volume of the dimensions more significant than the quantized axis.
+        // [OuterMostDim, ..., QuantAxisDim)
+        const int64_t outerSize = memShape.totalSize() / quantAxisTotalSize;
         VPUX_THROW_WHEN(outerSize == 0, "Outer size is zero");
-        const auto outerShape = subspace::arrayElementExclude(memShape, memAxis);
 
-        VPUX_THROW_UNLESS(scales.size() == checked_cast<size_t>(innerSize), "Wrong scales size '{0}', expected '{1}'",
-                          scales.size(), innerSize);
-        VPUX_THROW_UNLESS(zeroPoints.size() == checked_cast<size_t>(innerSize),
-                          "Wrong zeroPoints size '{0}', expected '{1}'", zeroPoints.size(), innerSize);
+        VPUX_THROW_UNLESS(scales.size() == checked_cast<size_t>(quantAxisSize),
+                          "Wrong scales size '{0}', expected '{1}'", scales.size(), quantAxisSize);
+        VPUX_THROW_UNLESS(zeroPoints.size() == checked_cast<size_t>(quantAxisSize),
+                          "Wrong zeroPoints size '{0}', expected '{1}'", zeroPoints.size(), quantAxisSize);
 
-        loop_2d(LoopExecPolicy::Parallel, outerSize, innerSize, [&](int64_t outerInd, int64_t innerInd) {
-            const auto outerIndND = getMemIndexND(outerInd, outerShape);
-            const auto fullIndND = subspace::arrayElementInclude(outerIndND, memAxis, innerInd);
-            const auto fullInd1D = getMemIndex1D(fullIndND, memShape);
-
-            realVals[fullInd1D] = dequantize(qVals[fullInd1D], scales[innerInd], zeroPoints[innerInd]);
-        });
+        // Outermost loop goes through the volume of the outer dimensions.
+        // Middle loop goes through the quantized axis. Scale/ZP are updated based on this index.
+        // Innermost loop goes through the volume of the innermost dimensions, which share the same quantization
+        // parameters.
+        loop_3d(LoopExecPolicy::Parallel, getContext(), outerSize, quantAxisSize, innerSize,
+                [&](int64_t outerInd, int64_t quantAxisInd, int64_t innerInd) {
+                    const auto scale = scales[quantAxisInd];
+                    const auto zp = zeroPoints[quantAxisInd];
+                    const auto idx = outerInd * quantAxisTotalSize + quantAxisInd * innerSize + innerInd;
+                    realVals[idx] = dequantize(qVals[idx], scale, zp);
+                });
     } else {
         VPUX_THROW("Unsupported Quantized Type '{0}'", qElemType);
     }

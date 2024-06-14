@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include "vpux/compiler/dialect/IE/passes.hpp"
+#include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 #include "vpux/compiler/utils/types.hpp"
 #include "vpux/utils/core/small_string.hpp"
 

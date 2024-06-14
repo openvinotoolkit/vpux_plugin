@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --init-compiler="vpu-arch=%arch%" --unwrap-cluster-tiling  %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 #C = affine_map<(d0) -> (d0)>
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
@@ -58,7 +58,7 @@
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
 module @VPU.SW {
-    func.func private @builtin_TanhOp(memref<*xf16>, memref<*xf16>, i64) attributes {VPU.kernel_code = "tanh_fp16.cpp", VPU.kernel_entry = "tanh_fp16"}
+    func.func private @builtin_TanhOp(memref<*xf16>, memref<*xf16>, i64) attributes {VPU.kernel_code = "activation_tanh.cpp", VPU.kernel_entry = "activation_tanh"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
 }
 
@@ -157,7 +157,7 @@ func.func @UnwrapDmaActShaveNCEWithProfiling(%input: !Input_DDR, %output: !Outpu
     // Cluster tiling with ActShave
     VPURT.Task waits(%bar1 : !VPURT.Barrier) updates(%bar2 : !VPURT.Barrier) {
       %0 = VPUIP.NCEClusterTiling inputs(%act_in_cmx as %arg0: !OutputStub_CMX) outputs(%act_out_cmx as %arg1: !OutputStub_CMX) -> !OutputDistributed {
-         %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+         %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
          @VPU.SW::@builtin_TanhOp inputs(%arg0 as %arg2: !OutputStub_CMX) outputs(%arg1 as %arg3: !OutputStub_CMX) on tile 0 -> !OutputStub_CMX  {
             VPUIP.SW.Kernel.run {attrs = [0]}(%arg2, %arg3) : !OutputStub_CMX, !OutputStub_CMX
          }

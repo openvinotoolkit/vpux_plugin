@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt %s --split-input-file --init-compiler="vpu-arch=%arch%" --verify-diagnostics
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 // CHECK-LABEL: @wrong_entry_point
 module @wrong_entry_point {
@@ -195,4 +195,19 @@ func.func @PerAxisQuantSameAxis(%arg0: tensor<1x2x3x4x!qElemType>, %arg1: tensor
     // expected-error@+1 {{'IE.Concat' op failed to infer returned types}}
     %0 = IE.Concat(%arg0, %arg1) {per_axis = #IE.Concat<axis = 1>} : tensor<1x2x3x4x!qElemType>, tensor<1x2x3x4x!qElemType1> -> tensor<1x4x3x4x!qElemType2>
     return %0 : tensor<1x4x3x4x!qElemType2>
+}
+
+// -----
+
+#NC = affine_map<(d0, d1) -> (d0, d1)>
+
+// CHECK-LABEL: @ConvertLostBoundsForOutput
+func.func @ConvertLostBoundsForOutput(%arg0: tensor<3x?xsi64, {bounds = [3, 5], order = #NC}>)
+          -> tensor<3x?xsi64, {order = #NC}> {
+
+// expected-error@+1 {{Missed bounds for output with dynamic dims}}
+    %out = IE.Convert(%arg0) {dstElemType = si32} : tensor<3x?xsi64, {bounds = [3, 5], order = #NC}>
+         -> tensor<3x?xsi64, {order = #NC}>
+
+    return %out : tensor<3x?xsi64, {order = #NC}>
 }

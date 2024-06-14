@@ -1,16 +1,16 @@
-// Copyright (C) Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #pragma once
 
 #include <common/utils.hpp>
 #include <functional>
+#include <npu_private_properties.hpp>
 #include <optional>
 #include <shared_test_classes/base/ov_subgraph.hpp>
 #include <sstream>
 #include <vpux/utils/core/logger.hpp>
-#include <vpux_private_properties.hpp>
 #include "common/utils.hpp"
 #include "common/vpu_test_env_cfg.hpp"
 #include "vpu_test_tool.hpp"
@@ -19,7 +19,7 @@ namespace ov::test::utils {
 
 using SkipMessage = std::optional<std::string>;
 using SkipCallback = std::function<void(std::stringstream&)>;
-using VPUXPlatform = InferenceEngine::VPUXConfigParams::VPUXPlatform;
+namespace Platform = ov::intel_npu::Platform;
 
 enum class VpuCompilationMode {
     ReferenceSW,
@@ -47,8 +47,6 @@ protected:
     std::vector<ov::Tensor> importReference();
     void exportReference(const std::vector<ov::Tensor>& refs);
 
-    std::vector<InferenceEngine::Blob::Ptr> ImportOutputs();
-
 private:
     bool skipCompilationImpl();
 
@@ -69,14 +67,14 @@ public:
     bool isReferenceSoftwareMode() const;
     bool isDefaultHardwareMode() const;
 
-    void run(VPUXPlatform platform);
+    void run(const std::string_view platform);
 
     void validate() override;
 
 private:
-    // use public run(VPUXPlatform) function to always set platform explicitly
+    // use public run(const std::string_view platform) function to always set platform explicitly
     void run() override;
-    void setPlatform(VPUXPlatform platform);
+    void setPlatform(const std::string_view platform);
 
     SkipCallback skipCompilationCallback = nullptr;
     SkipCallback skipInferenceCallback = nullptr;
@@ -86,21 +84,21 @@ private:
 }  // namespace ov::test::utils
 
 namespace ov::test::subgraph {
+namespace Platform = ov::test::utils::Platform;
 using ov::test::utils::VpuOv2LayerTest;
-using ov::test::utils::VPUXPlatform;
 }  // namespace ov::test::subgraph
 
 namespace LayerTestsDefinitions {
+namespace Platform = ov::test::utils::Platform;
 using ov::test::utils::VpuOv2LayerTest;
-using ov::test::utils::VPUXPlatform;
 }  // namespace LayerTestsDefinitions
 
 namespace SubgraphTestsDefinitions {
+namespace Platform = ov::test::utils::Platform;
 using ov::test::utils::VpuOv2LayerTest;
-using ov::test::utils::VPUXPlatform;
 }  // namespace SubgraphTestsDefinitions
 
 namespace ov::test {
+namespace Platform = ov::test::utils::Platform;
 using ov::test::utils::VpuOv2LayerTest;
-using ov::test::utils::VPUXPlatform;
 }  // namespace ov::test

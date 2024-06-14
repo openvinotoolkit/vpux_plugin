@@ -51,21 +51,22 @@ target_sources(${TARGET_NAME} PRIVATE ${vs_version_output})
 
 target_include_directories(${TARGET_NAME}
     PRIVATE
-        ${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/include
-        ${IE_MAIN_VPUX_PLUFIN_SOURCE_DIR}/src/vpux_al/include)
+        $<TARGET_PROPERTY:openvino::npu_al,INTERFACE_INCLUDE_DIRECTORIES>
+)
 
 target_link_libraries(${TARGET_NAME}
     PRIVATE
-        npu_al
+        openvino::npu_al
         npu_llvm_utils
         npu_ov_utils
         npu_plugin_utils
+        npu_mlir_compiler_static
         npu_profiling_utils
 )
 
 add_dependencies(${TARGET_NAME} VPUXLoader)
 
-ie_add_api_validator_post_build_step(TARGET ${TARGET_NAME})
+ov_add_api_validator_post_build_step(TARGET ${TARGET_NAME})
 
 if(WIN32)
     install(TARGETS ${TARGET_NAME}

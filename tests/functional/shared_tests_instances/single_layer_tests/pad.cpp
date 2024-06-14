@@ -1,66 +1,68 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022-2024 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
-#include <vector>
+#include "single_op_tests/pad.hpp"
+#include "vpu_ov2_layer_test.hpp"
 
-#include "single_layer_tests/pad.hpp"
-#include "vpu_ov1_layer_test.hpp"
+using namespace ov::test::utils;
 
-namespace LayerTestsDefinitions {
+namespace ov {
+namespace test {
 
-class PadLayerTestCommon : public PadLayerTest, virtual public LayerTestsUtils::VpuOv1LayerTestsCommon {};
-class PadLayerTest_NPU3700 : public PadLayerTestCommon {};
-class PadLayerTest_NPU3720 : public PadLayerTestCommon {};
+class PadLayerTest_NPU3700 : public PadLayerTest, virtual public VpuOv2LayerTest {};
+
+class PadLayerTestCommon : public PadLayerTest, virtual public VpuOv2LayerTest {
+    void configure_model() override {  // allow both f16/f32 tests
+        configuration[ov::intel_npu::compilation_mode_params.name()] = "convert-precision-to-fp16=false";
+    }
+};
 
 TEST_P(PadLayerTest_NPU3700, HW) {
-    setPlatformVPU3700();
-    setDefaultHardwareModeMLIR();
-    Run();
+    setDefaultHardwareMode();
+    run(Platform::NPU3700);
 }
 
-TEST_P(PadLayerTest_NPU3720, HW) {
-    setPlatformVPU3720();
-    setDefaultHardwareModeMLIR();
-    Run();
+TEST_P(PadLayerTestCommon, NPU3720) {
+    setDefaultHardwareMode();
+    run(Platform::NPU3720);
+}
+TEST_P(PadLayerTestCommon, NPU4000) {
+    setDefaultHardwareMode();
+    run(Platform::NPU4000);
 }
 
-}  // namespace LayerTestsDefinitions
+}  // namespace test
+}  // namespace ov
 
-using namespace LayerTestsDefinitions;
+using namespace ov::test;
 
 namespace {
-const std::vector<InferenceEngine::Precision> netPrecisions = {InferenceEngine::Precision::FP16};
 
-//
-// NPU3700 instance
-//
+/* ================================= Pad NPU3700 ================================= */
 
+const std::vector<ov::element::Type> modelType = {ov::element::f16};
 const std::vector<std::vector<int64_t>> padsBegin4D = {{0, 0, 0, 0}, {0, 1, 1, 1}, {0, 0, 1, 0}, {0, 3, 0, 1}};
 const std::vector<std::vector<int64_t>> padsEnd4D = {{0, 0, 0, 0}, {0, 1, 1, 1}, {0, 0, 0, 1}, {0, 3, 2, 0}};
-
 const std::vector<float> argPadValue = {0.f, 1.f, 2.f, -1.f};
-
-const std::vector<ngraph::helpers::PadMode> padMode = {
-        ngraph::helpers::PadMode::EDGE, ngraph::helpers::PadMode::REFLECT, ngraph::helpers::PadMode::SYMMETRIC};
+const std::vector<ov::op::PadMode> padMode = {ov::op::PadMode::EDGE, ov::op::PadMode::REFLECT,
+                                              ov::op::PadMode::SYMMETRIC};
 
 const auto pad4DConstparams = testing::Combine(
         testing::ValuesIn(padsBegin4D), testing::ValuesIn(padsEnd4D), testing::ValuesIn(argPadValue),
-        testing::Values(ngraph::helpers::PadMode::CONSTANT), testing::ValuesIn(netPrecisions),
-        testing::Values(InferenceEngine::Precision::FP16), testing::Values(InferenceEngine::Precision::FP16),
-        testing::Values(InferenceEngine::Layout::NCHW), testing::Values(std::vector<size_t>{1, 5, 10, 11}),
-        testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+        testing::Values(ov::op::PadMode::CONSTANT), testing::ValuesIn(modelType),
+        testing::ValuesIn(static_shapes_to_test_representation(std::vector<std::vector<ov::Shape>>{{{1, 5, 10, 11}}})),
+        testing::Values(DEVICE_NPU));
 
 INSTANTIATE_TEST_SUITE_P(DISABLED_smoke_Pad4DConst, PadLayerTest_NPU3700, pad4DConstparams,
                          PadLayerTest_NPU3700::getTestCaseName);
 
 const auto pad4Dparams = testing::Combine(
         testing::ValuesIn(padsBegin4D), testing::ValuesIn(padsEnd4D), testing::Values(0), testing::ValuesIn(padMode),
-        testing::ValuesIn(netPrecisions), testing::Values(InferenceEngine::Precision::FP16),
-        testing::Values(InferenceEngine::Precision::FP16), testing::Values(InferenceEngine::Layout::NCHW),
-        testing::Values(std::vector<size_t>{1, 5, 10, 11}),
-        testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+        testing::ValuesIn(modelType),
+        testing::ValuesIn(static_shapes_to_test_representation(std::vector<std::vector<ov::Shape>>{{{1, 5, 10, 11}}})),
+        testing::Values(DEVICE_NPU));
 
 INSTANTIATE_TEST_SUITE_P(smoke_Pad4D, PadLayerTest_NPU3700, pad4Dparams, PadLayerTest_NPU3700::getTestCaseName);
 
@@ -69,86 +71,53 @@ const std::vector<std::vector<int64_t>> padsEndForConcat = {{0, 0, 0, 0}, {5, 2,
 
 const auto padConvertToConcat = testing::Combine(
         testing::ValuesIn(padsBeginForConcat), testing::ValuesIn(padsEndForConcat), testing::Values(0, 1),
-        testing::Values(ngraph::helpers::PadMode::CONSTANT), testing::ValuesIn(netPrecisions),
-        testing::Values(InferenceEngine::Precision::FP16), testing::Values(InferenceEngine::Precision::FP16),
-        testing::Values(InferenceEngine::Layout::NCHW, InferenceEngine::Layout::NHWC),
-        testing::Values(std::vector<size_t>{1, 10, 20, 30}),
-        testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+        testing::Values(ov::op::PadMode::CONSTANT), testing::ValuesIn(modelType),
+        testing::ValuesIn(static_shapes_to_test_representation(std::vector<std::vector<ov::Shape>>{{{1, 10, 20, 30}}})),
+        testing::Values(DEVICE_NPU));
 
 // Tracking number [E#85137]
 INSTANTIATE_TEST_SUITE_P(smoke_PadConvertToConcat, PadLayerTest_NPU3700, padConvertToConcat,
                          PadLayerTest_NPU3700::getTestCaseName);
 
-//
-// NPU3720 instance
-//
+/* ================================= Pad arch >= NPU3720 ================================= */
+// Note (subject to change):
+// - most common padding modes (seen in PowerBI): CONSTANT & REFLECT map on DMA (for f16|f32, SW and HW pipeline)
 
-const std::vector<std::vector<int64_t>> padsBegin4D_NPU3720 = {{0, 0, 0, 0}, {0, 3, 0, 1}};
-const std::vector<std::vector<int64_t>> padsEnd4D_NPU3720 = {{0, 0, 0, 0}, {0, 3, 2, 0}};
-const std::vector<float> argPadValue_NPU3720 = {0.f, -1.f};
-
-const auto pad4DConstParams = testing::Combine(
-        testing::ValuesIn(padsBegin4D_NPU3720), testing::ValuesIn(padsEnd4D_NPU3720),
-        testing::ValuesIn(argPadValue_NPU3720), testing::Values(ngraph::helpers::PadMode::CONSTANT),
-        testing::ValuesIn(netPrecisions), testing::Values(InferenceEngine::Precision::FP16),
-        testing::Values(InferenceEngine::Precision::FP16), testing::Values(InferenceEngine::Layout::NCHW),
-        testing::Values(std::vector<size_t>{1, 5, 10, 11}),
-        testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
-
+const std::vector<std::vector<int64_t>> padsBegin = {{0, 0, 0, 0}, {0, 3, 0, 1}};
+const std::vector<std::vector<int64_t>> padsEnd = {{0, 0, 0, 0}, {0, 3, 2, 4}};
+const std::vector<ov::op::PadMode> padModes = {ov::op::PadMode::CONSTANT, ov::op::PadMode::EDGE,
+                                               ov::op::PadMode::REFLECT, ov::op::PadMode::SYMMETRIC};
 const auto pad4DParams = testing::Combine(
-        testing::ValuesIn(padsBegin4D_NPU3720), testing::ValuesIn(padsEnd4D_NPU3720), testing::Values(0),
-        testing::ValuesIn(padMode), testing::ValuesIn(netPrecisions), testing::Values(InferenceEngine::Precision::FP16),
-        testing::Values(InferenceEngine::Precision::FP16), testing::Values(InferenceEngine::Layout::NCHW),
-        testing::Values(std::vector<size_t>{1, 5, 10, 11}),
-        testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+        testing::ValuesIn(padsBegin), testing::ValuesIn(padsEnd), testing::Values(0.0f), testing::ValuesIn(padModes),
+        testing::Values(ov::element::f16),
+        testing::ValuesIn(static_shapes_to_test_representation(std::vector<std::vector<ov::Shape>>{{{1, 5, 10, 11}}})),
+        testing::Values(DEVICE_NPU));
 
-const auto precommit_pad4DConstParams = testing::Combine(
-        testing::Values(std::vector<int64_t>({4, 2, 1, 3})), testing::Values(std::vector<int64_t>({5, 2, 6, 1})),
-        testing::Values(-1.f), testing::Values(ngraph::helpers::PadMode::CONSTANT), testing::ValuesIn(netPrecisions),
-        testing::Values(InferenceEngine::Precision::FP16), testing::Values(InferenceEngine::Precision::FP16),
-        testing::Values(InferenceEngine::Layout::NCHW), testing::Values(std::vector<size_t>{1, 5, 10, 11}),
-        testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+// returns a single explicit test param
+padLayerTestParamsSet getCfg(ov::Shape inShape, std::vector<int64_t> padsBegin, std::vector<int64_t> padsEnd,
+                             ov::op::PadMode padMode, ov::element::Type prc) {
+    auto shape = static_shapes_to_test_representation(std::vector<std::vector<ov::Shape>>{{inShape}})[0];
+    return std::make_tuple(padsBegin, padsEnd, -1.0f, padMode, prc, shape, DEVICE_NPU);
+}
 
-const auto precommit_pad4DParams = testing::Combine(
-        testing::Values(std::vector<int64_t>({0, 0, 2, 0})), testing::Values(std::vector<int64_t>({0, 1, 0, 3})),
-        testing::Values(0), testing::Values(ngraph::helpers::PadMode::EDGE), testing::ValuesIn(netPrecisions),
-        testing::Values(InferenceEngine::Precision::FP16), testing::Values(InferenceEngine::Precision::FP16),
-        testing::Values(InferenceEngine::Layout::NCHW), testing::Values(std::vector<size_t>{1, 5, 10, 11}),
-        testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+std::vector<padLayerTestParamsSet> customParams = {
+        // net configs
+        getCfg(ov::Shape({1, 1, 64, 256}), {0, 0, 0, 0}, {0, 0, 0, 2}, ov::op::PadMode::EDGE, ov::element::f16),
+        getCfg(ov::Shape({1, 32, 128, 1}), {0, 0, 1, 0}, {0, 0, 1, 0}, ov::op::PadMode::EDGE, ov::element::f16),
+};
 
-const auto failingNHWC_pad4DConstParams = testing::Combine(
-        testing::ValuesIn(padsBegin4D_NPU3720), testing::ValuesIn(padsEnd4D_NPU3720),
-        testing::ValuesIn(argPadValue_NPU3720), testing::Values(ngraph::helpers::PadMode::CONSTANT),
-        testing::ValuesIn(netPrecisions), testing::Values(InferenceEngine::Precision::FP16),
-        testing::Values(InferenceEngine::Precision::FP16), testing::Values(InferenceEngine::Layout::NHWC),
-        testing::Values(std::vector<size_t>{1, 5, 10, 11}),
-        testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+std::vector<padLayerTestParamsSet> precommitParams = {
+        getCfg(ov::Shape({1, 5, 10, 11}), {0, 0, 2, 0}, {0, 1, 0, 3}, ov::op::PadMode::REFLECT, ov::element::f32),
+        getCfg(ov::Shape({1, 5, 10, 11}), {4, 2, 1, 3}, {5, 2, 6, 1}, ov::op::PadMode::CONSTANT, ov::element::f16),
+        getCfg(ov::Shape({1, 5, 10, 11}), {0, 2, 1, 3}, {0, 2, 6, 1}, ov::op::PadMode::SYMMETRIC, ov::element::f16)};
 
-const auto failingNHWC_pad4DParams = testing::Combine(
-        testing::ValuesIn(padsBegin4D_NPU3720), testing::ValuesIn(padsEnd4D_NPU3720), testing::Values(0),
-        testing::ValuesIn(padMode), testing::ValuesIn(netPrecisions), testing::Values(InferenceEngine::Precision::FP16),
-        testing::Values(InferenceEngine::Precision::FP16), testing::Values(InferenceEngine::Layout::NHWC),
-        testing::Values(std::vector<size_t>{1, 5, 10, 11}),
-        testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+// -------------- all PadLayerTestCommon arch instances
+INSTANTIATE_TEST_SUITE_P(smoke_Pad, PadLayerTestCommon, pad4DParams, PadLayerTestCommon::getTestCaseName);
 
-// NPU3720
-INSTANTIATE_TEST_SUITE_P(smoke_Pad_Const, PadLayerTest_NPU3720, pad4DConstParams,
-                         PadLayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_Pad, PadLayerTestCommon, ::testing::ValuesIn(precommitParams),
+                         PadLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_Pad, PadLayerTest_NPU3720, pad4DParams, PadLayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_Pad_Const, PadLayerTest_NPU3720, precommit_pad4DConstParams,
-                         PadLayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_Pad, PadLayerTest_NPU3720, precommit_pad4DParams,
-                         PadLayerTest_NPU3720::getTestCaseName);
-
-// Disabled tests
-// Tracking number[E#69804]
-INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_Pad_Const, PadLayerTest_NPU3720, failingNHWC_pad4DConstParams,
-                         PadLayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_Pad, PadLayerTest_NPU3720, failingNHWC_pad4DParams,
-                         PadLayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(custom_Pad, PadLayerTestCommon, ::testing::ValuesIn(customParams),
+                         PadLayerTestCommon::getTestCaseName);
 
 }  // namespace

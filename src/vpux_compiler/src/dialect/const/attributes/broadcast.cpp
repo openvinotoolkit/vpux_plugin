@@ -6,8 +6,8 @@
 #include <mlir/IR/DialectImplementation.h>
 #include "vpux/compiler/dialect/const/attributes/content.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
+#include "vpux/compiler/utils/loop.hpp"
 #include "vpux/compiler/utils/quantization.hpp"
-#include "vpux/utils/IE/loop.hpp"
 
 #include <numeric>
 
@@ -104,12 +104,13 @@ Const::Content vpux::Const::BroadcastAttr::transform(vpux::Const::Content& input
         const auto elemSize = vpux::getElemTypeSize(input.getStorageElemType()).to<Byte>().count();
         const auto singleCopySize = afterDims * elemSize;
 
-        loop_2d(LoopExecPolicy::Parallel, preDims, factor, [&](int64_t preIndex, int64_t factorIndex) {
-            auto inOffset = preIndex * afterDims * elemSize;
-            auto outBase = singleCopySize * preIndex * factor;
-            std::copy_n(inBuf.data() + inOffset, singleCopySize,
-                        outBuf.data() + outBase + (singleCopySize * factorIndex));
-        });
+        loop_2d(LoopExecPolicy::Parallel, input.getStorageElemType().getContext(), preDims, factor,
+                [&](int64_t preIndex, int64_t factorIndex) {
+                    auto inOffset = preIndex * afterDims * elemSize;
+                    auto outBase = singleCopySize * preIndex * factor;
+                    std::copy_n(inBuf.data() + inOffset, singleCopySize,
+                                outBuf.data() + outBase + (singleCopySize * factorIndex));
+                });
     }
 
     return output;

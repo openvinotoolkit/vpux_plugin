@@ -20,7 +20,6 @@ void WrapVPUOpsInNCEClusterTilingStrategy::addPatterns(mlir::RewritePatternSet& 
     patterns.add<VPU::NCEAveragePoolRewriter>(ctx, _enableExplicitDistributedTensorAttr, log);
     patterns.add<VPU::NCEEltwiseRewriter>(ctx, _enableExplicitDistributedTensorAttr, log);
     patterns.add<VPU::NCESWRewriter>(ctx, _enableExplicitDistributedTensorAttr, log);
-    patterns.add<VPU::NCEPermuteQuantizeRewriter>(ctx, _enableExplicitDistributedTensorAttr, log);
     patterns.add<VPU::NCECompressConvolutionRewriter>(ctx, _enableExplicitDistributedTensorAttr, log);
     patterns.add<VPU::NCEInterpolateRewriter>(ctx, _enableExplicitDistributedTensorAttr, log);
 }

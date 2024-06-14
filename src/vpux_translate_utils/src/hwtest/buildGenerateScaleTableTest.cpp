@@ -10,11 +10,11 @@
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/passes.hpp"
-#include "vpux/compiler/dialect/VPUIP/utils.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/task.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/transforms/passes.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/dialect/const/passes.hpp"
 #include "vpux/compiler/utils/quantization.hpp"
@@ -122,8 +122,9 @@ void buildGenerateScaleTableTest(const nb::TestCaseJsonDescriptor& testDesc, mli
     mlir::IntegerAttr swizzlingKeyAttr;
     vpux::VPUIP::SwizzlingSchemeAttr swizzlingSchemeAttr;
     const auto swizzlingAligment =
-            (isWeightsSwizzlingRequired) ? vpux::getAddressAlignmentForSwizzling(nb::to_underlying(weightsSwizzlingKey))
-                                         : 16;
+            (isWeightsSwizzlingRequired)
+                    ? vpux::getAddressAlignmentForSwizzling(nb::to_underlying(weightsSwizzlingKey), architecture)
+                    : 16;
 
     const auto weightsCMXSize =
             vpux::alignValUp(vpux::hwtest::totalTensorSize(paddedWeightsCMXShape, weightsType),
@@ -297,9 +298,6 @@ void buildGenerateScaleTableTest(const nb::TestCaseJsonDescriptor& testDesc, mli
         weightsTableCMX = createDeclareTensorOp(functionBuilder, VPURT::BufferSection::CMX_NN, weightsTableShape, int32,
                                                 DimsOrder::NHWC, cluster, WEIGHTSTABLE_CMX_OFFSET);
     }
-    auto weightsTableDDR =
-            functionBuilder.create<vpux::Const::DeclareOp>(loc, weightsTableDDRMemRef, weightsTableContentAttr);
-
     const int64_t inputCopyBarrierId = 0;
     auto inputCopyBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, inputCopyBarrierId);
     const int64_t actShaveUpdateBarrierId = inputCopyBarrierId + 1;
@@ -313,17 +311,6 @@ void buildGenerateScaleTableTest(const nb::TestCaseJsonDescriptor& testDesc, mli
     VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(
             functionBuilder, mlir::ValueRange(), mlir::ValueRange(inputCopyBarrier.getBarrier()), loc,
             weightsDDR.getOperation()->getResult(0), weightsCMX.getOperation()->getResult(0), 0);
-
-    // The activation shave kernel does not populate scale values because it slows down the execution.
-    // In the E2E scenario the activation shave kernel expects DPU to ignore scale values.
-    // However, there's no way to set ppe_scale_override at will for VPUX37XX.
-    // In order to mitigate this limitation, an extra copy of weight table values is required.
-    // Activation shave will write weight pointer offset data on top of the weight table copy.
-    // This way correct scaling is assured.
-    // See E#109043 for details.
-    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(
-            functionBuilder, mlir::ValueRange(), mlir::ValueRange(inputCopyBarrier.getBarrier()), loc,
-            weightsTableDDR.getOperation()->getResult(0), weightsTableCMX.getOperation()->getResult(0), 0);
 
     SmallVector<mlir::Type, 1> actShaveInputTypes;
     actShaveInputTypes.push_back(weightsTableCMX.getType());
@@ -344,7 +331,7 @@ void buildGenerateScaleTableTest(const nb::TestCaseJsonDescriptor& testDesc, mli
     auto nceTask = VPURT::wrapIntoTaskOp<VPUIP::NCEClusterTaskOp>(
             functionBuilder, actShaveUpdateBarrier.getBarrier(), dpuUpdateBarrier.getBarrier(), loc,
             paddedInputCMX.getBuffer(), paddedWeightsCMX.getBuffer(), weightsTableCMX.getBuffer(),
-            /*instruction_table_list*/ nullptr,
+            /*instruction_table_list*/ nullptr, /*spr_lookup_table*/ nullptr,
             /*activation_window=*/nullptr, paddedInputCMX.getBuffer(), outputCMX.getBuffer(), outputCMX.getBuffer(),
             vpux::VPUIP::NCETaskType::CONV, kernelSize, strides, kernelPaddings, nullptr, nullptr,
             vpux::getIntAttr(builder.getContext(), sparsityPattern), nullptr, nullptr, inputChannelsCompression);
@@ -375,24 +362,38 @@ void buildGenerateScaleTableTest(const nb::TestCaseJsonDescriptor& testDesc, mli
     const auto scaleApproximation = QuantizationApproximation(testDesc.getArchitecture(), outputScale);
     nceTask.addPPETask(functionBuilder, VPU::PPEMode::NOOP, clampLow, clampHigh, lreluMult, lreluShift,
                        scaleApproximation.mult(), scaleApproximation.shift(), scaleApproximation.postShift(),
-                       outputScale);
+                       outputScale,
+                       /*ppe_fp_scale=*/1.f,
+                       /*ppe_fp_bias=*/0.f);
+
+    // finalBarrier passed as production barrier to last DMA task
+    auto finalBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, 3);
 
     VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(dpuUpdateBarrier.getBarrier()),
-                                          mlir::ValueRange(), loc, outputCMX.getOperation()->getResult(0),
-                                          functionOutput, 0);
+                                          mlir::ValueRange(finalBarrier.getBarrier()), loc,
+                                          outputCMX.getOperation()->getResult(0), functionOutput, 0);
 
     functionBuilder.create<mlir::func::ReturnOp>(loc, functionOutput);
 
     module.dump();
 
+    // set runtime resources
+    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
+
     mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    pm.addPass(VPU::createInitCompilerPass(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW, 1, std::nullopt,
-                                           log));
+    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.numberOfDPUGroups = 1;
+    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
     if (conv.compress) {
         pm.addPass(VPUIP::createCompressWeightsBTCPass(log));
     }
     if (isWeightsSwizzlingRequired) {
-        pm.addPass(Const::createConstantFoldingPass());
+        mlir::OpPassManager::Nesting nesting = pm.getNesting();
+        pm.setNesting(mlir::OpPassManager::Nesting::Explicit);
+        mlir::OpPassManager& constPm = pm.nest<mlir::func::FuncOp>().nest<Const::DeclareOp>();
+        constPm.addPass(Const::createConstantFoldingPass());
+        pm.setNesting(nesting);
     }
 
     VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");

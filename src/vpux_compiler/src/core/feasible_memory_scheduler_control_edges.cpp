@@ -9,7 +9,9 @@
 #include "vpux/compiler/utils/rewriter.hpp"
 
 #include "vpux/compiler/core/feasible_scheduler_utils.hpp"
-#include "vpux/compiler/dialect/VPUIP/dialect.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/dialect.hpp"
+
+#include "vpux/utils/core/range.hpp"
 
 using namespace vpux;
 
@@ -147,7 +149,7 @@ void vpux::updateScheduledOpsResourcesForControlEdgeBasic(std::list<ScheduledOpO
             }
             auto addressStart = scan.handler().getAddress(buf);
             auto addressEnd = addressStart + scan.handler().getSize(buf) - 1;
-            log.trace("op = '{0}'\t {1} = [{3} - {2}]", opIndex,
+            log.trace("op = '{0}'\t {1} = [{2} - {3}]", opIndex,
                       (relType == ScheduledOpOneResource::EResRelation::CONSUMER) ? "input" : "output", addressStart,
                       addressEnd);
             scheduledOpsResources.push_back(ScheduledOpOneResource(opIndex, addressStart, addressEnd, relType));
@@ -179,7 +181,23 @@ void vpux::updateScheduledOpsResourcesForControlEdge(std::list<ScheduledOpOneRes
             continue;
         }
 
-        auto inputs = mlir::dyn_cast<VPUIP::LayerOpInterface>(innerOp).getInputs();
+        auto inputs = vpux::to_small_vector(mlir::dyn_cast<VPUIP::LayerOpInterface>(innerOp).getInputs());
+        if (auto nceTaskOp = mlir::dyn_cast<VPUIP::NCEClusterTaskOp>(innerOp)) {
+            // in case of NCEClusterTaskOp we need to remove parent outputs from inputs
+            // in order to make depenendcy calculation work correctly
+            auto parentOutput = nceTaskOp.getParentOutput();
+            auto parentOutputSparsityMap = nceTaskOp.getParentOutputSparsityMap();
+            for (const auto& input : inputs) {
+                if (parentOutput == input) {
+                    inputs.erase(&input);
+                }
+            }
+            for (const auto& input : inputs) {
+                if (parentOutputSparsityMap == input) {
+                    inputs.erase(&input);
+                }
+            }
+        }
         for (const auto& input : inputs) {
             const auto type = input.getType().dyn_cast<vpux::NDTypeInterface>();
             if (type == nullptr || type.getMemoryKind() != memKind) {
@@ -254,7 +272,7 @@ void vpux::updateScheduledOpsResourcesForControlEdge(std::list<ScheduledOpOneRes
 
             auto addressStart = scan.handler().getAddress(buf);
             auto addressEnd = addressStart + allocSize - 1;
-            log.trace("op = '{0}'\t {1} = [{3} - {2}]", opIndex,
+            log.trace("op = '{0}'\t {1} = [{2} - {3}]", opIndex,
                       (relType == ScheduledOpOneResource::EResRelation::CONSUMER) ? "input" : "output", addressStart,
                       addressEnd);
             scheduledOpsResources.push_back(

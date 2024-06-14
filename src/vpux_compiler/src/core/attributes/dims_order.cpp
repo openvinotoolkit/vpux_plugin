@@ -6,9 +6,9 @@
 #include "vpux/compiler/core/attributes/dims_order.hpp"
 #include "vpux/compiler/core/attributes/stride_reqs.hpp"
 #include "vpux/compiler/core/attributes/strides.hpp"
-#include "vpux/compiler/dialect/IE/attributes.hpp"
-#include "vpux/compiler/dialect/VPUIP/attributes.hpp"
-#include "vpux/compiler/dialect/VPUIP/types.hpp"
+#include "vpux/compiler/dialect/IE/IR/attributes.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/attributes.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/types.hpp"
 #include "vpux/compiler/utils/types.hpp"
 
 #include "vpux/utils/IE/format.hpp"
@@ -29,6 +29,7 @@ constexpr size_t vpux::DimsOrder::MAX_DIM_IND;
 
 const DimsOrder vpux::DimsOrder::C = DimsOrder(0x1);
 const DimsOrder vpux::DimsOrder::NC = DimsOrder(0x12);
+const DimsOrder vpux::DimsOrder::CN = DimsOrder(0x21);
 const DimsOrder vpux::DimsOrder::CHW = DimsOrder(0x123);
 const DimsOrder vpux::DimsOrder::HWC = DimsOrder(0x231);
 const DimsOrder vpux::DimsOrder::HCW = DimsOrder(0x213);
@@ -334,6 +335,8 @@ StringLiteral vpux::DimsOrder::getCanonicalName() const {
         return StringLiteral("C");
     } else if (*this == DimsOrder::NC) {
         return StringLiteral("NC");
+    } else if (*this == DimsOrder::CN) {
+        return StringLiteral("CN");
     } else if (*this == DimsOrder::CHW) {
         return StringLiteral("CHW");
     } else if (*this == DimsOrder::HWC) {

@@ -1,13 +1,12 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 #include <mlir/IR/BuiltinTypes.h>
 
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/types.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/types.hpp"
 #include "vpux/compiler/dialect/VPUMI37XX/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 
 #include "vpux/utils/core/checked_cast.hpp"
 
@@ -1012,7 +1011,7 @@ void SetupOutput(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariantO
     SetupInvariant_Grid(op, registers);
 
     registers.odu_cfg.odu_cfg_bf.write_ac = 1;               // Always write data out!
-    registers.odu_cfg.odu_cfg_bf.write_pt = 0;               // Output SE table generation always disabled for VPU37XX
+    registers.odu_cfg.odu_cfg_bf.write_pt = 0;               // Output SE table generation always disabled for NPU37XX
     registers.odu_cfg.odu_cfg_bf.write_sp = !is_out_dense;   // Enable/Disable output sparsity map generation
     registers.odu_cfg.odu_cfg_bf.sp_out_en = !is_out_dense;  // Enable/Disable compression of output activations
 
@@ -1504,12 +1503,12 @@ bool SetupInvariant_Eltwise(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI37XX::DP
     ::std::optional<SmallVector<int64_t>> in1QuantMult;
     ::std::optional<SmallVector<int64_t>> in2QuantMult;
 
-    for (auto ppeOp : op.getPpe().getOps<VPUIP::PPETaskOp>()) {
+    for (auto ppeOp : op.getPpe().getOps<VPUMI37XX::PPETaskOp>()) {
         if (ppeOp.getIn1QuantMult().has_value()) {
-            in1QuantMult = parseIntArrayAttr<int64_t>(ppeOp.getIn1QuantMult().value());
+            in1QuantMult = parseIntArrayAttr<int64_t>(ppeOp.getIn1QuantMult().value().dyn_cast<mlir::ArrayAttr>());
         }
         if (ppeOp.getIn2QuantMult().has_value()) {
-            in2QuantMult = parseIntArrayAttr<int64_t>(ppeOp.getIn2QuantMult().value());
+            in2QuantMult = parseIntArrayAttr<int64_t>(ppeOp.getIn2QuantMult().value().dyn_cast<mlir::ArrayAttr>());
         }
     }
 
@@ -1518,7 +1517,7 @@ bool SetupInvariant_Eltwise(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI37XX::DP
     const auto isInputQuantizationProvided = in1QuantMult.has_value() && in2QuantMult.has_value();
 
     if (isInputQuantizationProvided) {
-        // Shifts must be set 0 for VPUX37XX runtime to be considered, otherwise runtime will ignore inputs
+        // Shifts must be set 0 for VPUX37XX and VPUX40XX runtime to be considered, otherwise runtime will ignore inputs
         // MULT.
         const auto inputSparsityMapOffset =
                 inputSparsityMap
@@ -1586,7 +1585,7 @@ FlatBufferAccessor<MVCNN::PPETask> getPPETask(vpux::VPUIP::BlobWriter& writer, v
     ::std::optional<float> ppeQuantScale;
     float fpPReluAlpha = 1.f;
 
-    for (auto ppeOp : op.getPpe().getOps<VPUIP::PPETaskOp>()) {
+    for (auto ppeOp : op.getPpe().getOps<VPUMI37XX::PPETaskOp>()) {
         const auto type = getPPELayerType(ppeOp.getPpeLayerType());
         if (type != MVCNN::PPELayerType_NOOP) {
             ppeList.push_back(type);
@@ -1680,7 +1679,7 @@ static void setupTaskTypeDPUEltwise(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI
     ::std::optional<SmallVector<int64_t>> in1QuantMult;
     ::std::optional<SmallVector<int64_t>> in2QuantMult;
 
-    for (auto ppeOp : op.getPpe().getOps<VPUIP::PPETaskOp>()) {
+    for (auto ppeOp : op.getPpe().getOps<VPUMI37XX::PPETaskOp>()) {
         if (ppeOp.getQuantMult().has_value()) {
             ppeQuantMult = parseIntArrayAttr<int64_t>(ppeOp.getQuantMult().value());
         }
@@ -1691,10 +1690,10 @@ static void setupTaskTypeDPUEltwise(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI
             ppeQuantPostShift = checked_cast<int64_t>(ppeOp.getQuantPostShift().value());
         }
         if (ppeOp.getIn1QuantMult().has_value()) {
-            in1QuantMult = parseIntArrayAttr<int64_t>(ppeOp.getIn1QuantMult().value());
+            in1QuantMult = parseIntArrayAttr<int64_t>(ppeOp.getIn1QuantMult().value().dyn_cast<mlir::ArrayAttr>());
         }
         if (ppeOp.getIn2QuantMult().has_value()) {
-            in2QuantMult = parseIntArrayAttr<int64_t>(ppeOp.getIn2QuantMult().value());
+            in2QuantMult = parseIntArrayAttr<int64_t>(ppeOp.getIn2QuantMult().value().dyn_cast<mlir::ArrayAttr>());
         }
     }
 
@@ -1841,7 +1840,7 @@ static void setupTaskTypeDPUAvgPool(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI
     ::std::optional<SmallVector<int64_t>> ppeQuantMult;
     ::std::optional<SmallVector<int64_t>> ppeQuantShift;
 
-    for (auto ppeOp : op.getPpe().getOps<VPUIP::PPETaskOp>()) {
+    for (auto ppeOp : op.getPpe().getOps<VPUMI37XX::PPETaskOp>()) {
         const auto type = getPPELayerType(ppeOp.getPpeLayerType());
         if (type != MVCNN::PPELayerType_NOOP) {
             ppeList.push_back(type);
@@ -2040,6 +2039,21 @@ bool Setup_PPE(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariantOp 
     VPUX_THROW_WHEN(!successful, "Cannot set up PPE");
 
     setupTaskType(writer, op, regs);
+    for (auto ppeOp : op.getPpe().getOps<VPUMI37XX::PPETaskOp>()) {
+        if (ppeOp.getPpeFpScale().has_value() || ppeOp.getPpeFpBias().has_value()) {
+            regs.ppe_scale_ctrl.ppe_scale_ctrl_bf.ppe_fp_scale_override = 1;
+        }
+
+        if (ppeOp.getPpeFpScale().has_value()) {
+            const auto fpScale = static_cast<float>(ppeOp.getPpeFpScale().value().convertToDouble());
+            regs.ppe_fp_scale = llvm::bit_cast<int32_t>(fpScale);
+        }
+
+        if (ppeOp.getPpeFpBias().has_value()) {
+            const auto fpBias = static_cast<float>(ppeOp.getPpeFpBias().value().convertToDouble());
+            regs.ppe_fp_bias = llvm::bit_cast<int32_t>(fpBias);
+        }
+    }
 
     return true;
 }

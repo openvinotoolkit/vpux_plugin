@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -34,8 +34,8 @@ module @VPU.SW {
     // `memref` will be translated to `MemRefData`, while raw scalars will be translated as is.
     func.func private @builtin_Proposal(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, i64, i64, i64, f64, i64, i64, none, none, i64, i64, i64, f64, f64, i64)
         attributes {
-            VPU.kernel_code = "single_shave_proposal.cpp",
-            VPU.kernel_entry = "single_shave_proposal"
+            VPU.kernel_code = "proposal.cpp",
+            VPU.kernel_entry = "proposal"
         }
 }
 
@@ -64,7 +64,7 @@ func.func @main(%arg0: memref<1x12x8x8xf16, @DDR>, %arg1: memref<1x24x8x8xf16, @
     }
     // Genetic Kernel information for the scheduler.
     VPURT.Task waits(%b0  : !VPURT.Barrier) updates(%b1  : !VPURT.Barrier) {
-        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 2, 0>}
+        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 2, 0, 0>}
                     @VPU.SW::@builtin_Proposal            // The reference to the Kernel function.
                     inputs(%0 as %arg4: memref<1x12x8x8xf16, [@CMX_NN, 0]>, %1 as %arg5: memref<1x24x8x8xf16, [@CMX_NN, 0]>, %2 as %arg6: memref<3xf16, [@CMX_NN, 0]>)     // Inputs/outputs buffers for generic operation interface
                     outputs(%3 as %arg7: memref<300x5xf16, [@CMX_NN, 0]>, %4 as %arg8: memref<300xf16, [@CMX_NN, 0]>)   // and their mapping to inner region.

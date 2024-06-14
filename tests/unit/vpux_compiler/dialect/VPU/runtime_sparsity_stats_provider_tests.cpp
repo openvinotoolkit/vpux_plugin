@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+//
+
 #include "common/utils.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
@@ -44,8 +46,9 @@ TEST_F(MLIR_VPU_RT_SPARSITY_STATS_PROVIDER, MissedStats) {
     ASSERT_TRUE(func != nullptr);
 
     mlir::PassManager pm(module.get()->getName(), mlir::OpPassManager::Nesting::Implicit);
-    pm.addPass(vpux::VPU::createInitCompilerPass(ArchKind::VPUX37XX, vpux::VPU::CompilationMode::DefaultHW,
-                                                 std::nullopt, std::nullopt, vpux::Logger::global()));
+    auto initCompilerOptions = VPU::InitCompilerOptions(ArchKind::NPU37XX, VPU::CompilationMode::DefaultHW);
+
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, vpux::Logger::global());
 
     ASSERT_TRUE(mlir::succeeded(pm.run(module.get())));
 
@@ -100,8 +103,9 @@ TEST_F(MLIR_VPU_RT_SPARSITY_STATS_PROVIDER, WithStats) {
     ASSERT_TRUE(func != nullptr);
 
     mlir::PassManager pm(module.get()->getName(), mlir::OpPassManager::Nesting::Implicit);
-    pm.addPass(vpux::VPU::createInitCompilerPass(ArchKind::VPUX37XX, vpux::VPU::CompilationMode::DefaultHW,
-                                                 std::nullopt, std::nullopt, vpux::Logger::global()));
+    auto initCompilerOptions = VPU::InitCompilerOptions(ArchKind::NPU37XX, VPU::CompilationMode::DefaultHW);
+
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, vpux::Logger::global());
 
     ASSERT_TRUE(mlir::succeeded(pm.run(module.get())));
 

@@ -8,6 +8,7 @@
 #include "vpux/compiler/core/passes.hpp"
 #include "vpux/compiler/utils/dot_graph_writer.hpp"
 #include "vpux/compiler/utils/logging.hpp"
+#include "vpux/utils/core/string_ref.hpp"
 
 #include "vpux/utils/core/error.hpp"
 
@@ -47,6 +48,17 @@ private:
         processModule(getOperation());
     }
 
+    std::string composeFileName(std::string funcName) {
+        std::string extension = ".";
+        if (auto pos = _fileName.find(extension)) {
+            std::string newName = _fileName;
+            newName.erase(pos, extension.size());
+            newName = newName.insert(pos, ("_" + funcName + extension));
+            return newName;
+        }
+        return _fileName + "_" + funcName;
+    }
+
 private:
     std::string _fileName;
     GraphWriterParams _writerParams;
@@ -58,6 +70,9 @@ mlir::LogicalResult PrintDotPass::initializeOptions(StringRef options) {
         return mlir::failure();
     }
 
+    if (printOnlyDotInterfaceOpt.hasValue()) {
+        _writerParams.printOnlyDotInterfaces = printOnlyDotInterfaceOpt.getValue();
+    }
     if (printDeclarationsOpt.hasValue()) {
         _writerParams.printDeclarations = printDeclarationsOpt.getValue();
     }
@@ -104,10 +119,8 @@ void PrintDotPass::processModule(mlir::ModuleOp module) {
 
 void PrintDotPass::processFunc(mlir::func::FuncOp func) {
     VPUX_THROW_WHEN(_fileName.empty(), "Output file name for PrintDot was not provided");
-
-    for (auto& block : func.getBody()) {
-        VPUX_THROW_WHEN(mlir::failed(writeDotGraph(block, _fileName, _writerParams)), "Could not create Dot File");
-    }
+    VPUX_THROW_WHEN(mlir::failed(writeDotGraph(func, composeFileName(std::string(func.getName())), _writerParams)),
+                    "Could not create Dot File");
 }
 
 //
@@ -174,10 +187,12 @@ void vpux::addDotPrinter(mlir::PassManager& pm, StringRef options) {
 //
 
 std::unique_ptr<mlir::Pass> vpux::createPrintDotPass(StringRef fileName, StringRef startAfter, StringRef stopBefore,
-                                                     bool printConst, bool printDeclarations) {
+                                                     bool printOnlyDotInterFaces, bool printConst,
+                                                     bool printDeclarations) {
     GraphWriterParams writerParams;
     writerParams.printConst = printConst;
     writerParams.printDeclarations = printDeclarations;
+    writerParams.printOnlyDotInterfaces = printOnlyDotInterFaces;
     writerParams.startAfter = startAfter.str();
     writerParams.stopBefore = stopBefore.str();
 

@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2022 Intel Corporation.
+# Copyright (C) 2022 Intel Corporation
 # SPDX-License-Identifier: Apache 2.0
 #
 
@@ -153,7 +153,7 @@ if __name__ == "__main__":
         parsing.parseNetwork(networks, allLayers, net)
 
     writeCrossTable(networks, allLayers)
-    
+
     for net in networks:
         writeNetwork(networks[net])
         print(networks[net]["netName"], " written")

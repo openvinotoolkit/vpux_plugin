@@ -8,11 +8,11 @@
 
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/passes.hpp"
-#include "vpux/compiler/dialect/VPUIP/utils.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/task.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/transforms/passes.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
 #include "vpux/hwtest/test_case_json_parser.hpp"
@@ -183,7 +183,8 @@ void buildReadAfterWriteDMADPUTest(const nb::TestCaseJsonDescriptor& testDesc, m
         VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(waitBarrier.getBarrier()),
                                               mlir::ValueRange(updateBarrier.getBarrier()), loc,
                                               inputCMX.getOperation()->getResult(0),
-                                              outputDMACMX.getOperation()->getResult(0), 0, cluster);
+                                              outputDMACMX.getOperation()->getResult(0), 0,
+                                              testDesc.getArchitecture() == vpux::VPU::ArchKind::NPU40XX ? 0 : cluster);
 
         waitBarrier = updateBarrier;
         updateBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, i + 1);
@@ -191,7 +192,7 @@ void buildReadAfterWriteDMADPUTest(const nb::TestCaseJsonDescriptor& testDesc, m
         auto nceTask = VPURT::wrapIntoTaskOp<VPUIP::NCEClusterTaskOp>(
                 functionBuilder, mlir::ValueRange(waitBarrier.getBarrier()),
                 mlir::ValueRange(updateBarrier.getBarrier()), loc, inputCMX.getBuffer(), weightsCMX.getBuffer(),
-                weightsTableCMX.getBuffer(), nullptr, nullptr, inputCMX.getBuffer(), outputDPUCMX.getBuffer(),
+                weightsTableCMX.getBuffer(), nullptr, nullptr, nullptr, inputCMX.getBuffer(), outputDPUCMX.getBuffer(),
                 outputDPUCMX.getBuffer(), vpux::VPUIP::NCETaskType::CONV, kernelSize, strides, kernelPaddings, nullptr,
                 nullptr);
 
@@ -206,16 +207,20 @@ void buildReadAfterWriteDMADPUTest(const nb::TestCaseJsonDescriptor& testDesc, m
         waitBarrier = updateBarrier;
     }
 
+    // finalBarrier passed as production barrier to last DMA task
+    auto finalBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, iterationCount);
     VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(waitBarrier.getBarrier()),
-                                          mlir::ValueRange(), loc, outputDMACMX.getOperation()->getResult(0),
-                                          functionOutput, 0);
+                                          mlir::ValueRange(finalBarrier.getBarrier()), loc,
+                                          outputDMACMX.getOperation()->getResult(0), functionOutput, 0);
 
     functionBuilder.create<mlir::func::ReturnOp>(loc, mlir::ValueRange{functionOutput});
 
     mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
 
-    pm.addPass(VPU::createInitCompilerPass(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW,
-                                           /*numOfDPUGroups=*/2, std::nullopt, log));
+    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.numberOfDPUGroups = 2;
+
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
 
     if (conv.compress) {
         pm.addPass(VPUIP::createCompressWeightsBTCPass(log));

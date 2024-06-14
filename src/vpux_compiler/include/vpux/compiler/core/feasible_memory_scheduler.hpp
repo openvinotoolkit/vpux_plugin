@@ -122,6 +122,8 @@ public:
         }
         IntervalInfo(size_t ibeg, size_t iend): begin_(ibeg), end_(iend) {
         }
+        IntervalInfo(size_t ibeg, size_t iend, mlir::Value buffer): begin_(ibeg), end_(iend), buffer_(buffer) {
+        }
         bool operator==(const IntervalInfo& other) const {
             return (begin_ == other.begin_) && (end_ == other.end_) && (buffer_ == other.buffer_);
         }
@@ -131,6 +133,16 @@ public:
     };
     // Struct used to output the scheduled op info
     struct ScheduledOpInfo {
+        ScheduledOpInfo(operationIdxType op, EOpType type, size_t cycleBegin, size_t cycleEnd,
+                        SmallVector<IntervalInfo> inputResourceInfo, SmallVector<IntervalInfo> outputResourceInfo)
+                : op_(op),
+                  opType_(type),
+                  cycleBegin_(cycleBegin),
+                  cycleEnd_(cycleEnd),
+                  inputResourceInfo_(inputResourceInfo),
+                  outputResourceInfo_(outputResourceInfo) {
+        }
+
         ScheduledOpInfo(operationIdxType op, EOpType type, size_t cycleBegin, vpux::AddressType freeCmx, bool isDataOp)
                 : op_(op), opType_(type), cycleBegin_(cycleBegin), freeCmx_(freeCmx), isDataOp_(isDataOp) {
         }
@@ -248,14 +260,13 @@ public:
         operationIdxType op_{};
         EOpType opType_{EOpType::ORIGINAL_OP};
         size_t cycleBegin_{};
+        size_t cycleEnd_{};
         vpux::AddressType freeCmx_{};
         bool isDataOp_{false};
-        SmallVector<IntervalInfo> outputResourceInfo_;
         SmallVector<IntervalInfo> inputResourceInfo_;
-        size_t cycleEnd_{};
+        SmallVector<IntervalInfo> outputResourceInfo_;
         QueueType queueType{VPU::ExecutorKind::DMA_NN, 0};
         llvm::BitVector executorInstanceMask;
-        bool isNonComputeChain{false};
     };
     using ScheduledOpInfoVec = SmallVector<ScheduledOpInfo, 1>;
 
@@ -329,6 +340,7 @@ private:
     void clearLists();
     void schedulingLoop();
     void initializeReadyLists();
+    void identifyDataOps();
 
     // DAG maintenance
     SmallVector<operationIdxType> reduceInDegreeOfAdjacentOperations(operationIdxType opIdx);
@@ -343,7 +355,6 @@ private:
 
     // scheduling type utils
     bool isDataOp(operationIdxType opIdx);
-    bool isNonComputeChainOp(operationIdxType opIdx);
 
     // cycle and executor utils
     VPU::ExecutorKind getExecutorType(operationIdxType opIdx);
@@ -461,8 +472,8 @@ private:
     ScheduledOpInfoVec _scheduledOps;
     // outputs of the graph
     llvm::DenseSet<operationIdxType> _outputOps;
-    // operation level map
-    mlir::DenseMap<operationIdxType, size_t> _opLevelMap;
+    // operation level vector
+    mlir::SmallVector<size_t> _opLevelVec;
     // order for compute ops from IR
     std::map<QueueType, SmallVector<operationIdxType>> _computeOpOrder;
     // cycle pipeline for every executor. Vector element type is to support multiple instances of
@@ -471,7 +482,8 @@ private:
     std::map<QueueType, SmallVector<size_t>> _executorPipelines = {
             {{VPU::ExecutorKind::DMA_NN}, {1}},    {{VPU::ExecutorKind::DPU}, {1}},
             {{VPU::ExecutorKind::SHAVE_UPA}, {1}}, {{VPU::ExecutorKind::NCE}, {1}},
-            {{VPU::ExecutorKind::SHAVE_NN}, {1}},  {{VPU::ExecutorKind::SHAVE_ACT}, {1}}};
+            {{VPU::ExecutorKind::SHAVE_NN}, {1}},  {{VPU::ExecutorKind::SHAVE_ACT}, {1}},
+            {{VPU::ExecutorKind::M2I}, {1}}};
 
     // spilled operation cycle cost
     mlir::DenseMap<mlir::Value, size_t> _spillBufferCycleCost;
@@ -482,9 +494,11 @@ private:
     // space
     mlir::DenseMap<mlir::Value, SmallVector<operationIdxType>> _bufferOpIdxMap;
 
-    std::unordered_map<operationIdxType, size_t> _opIdxEndCycleMap;
+    mlir::DenseMap<operationIdxType, size_t> _opIdxEndCycleMap;
 
     std::set<EvictionCandidate, EvictionPriority> _evictionCandidatesCache;
+
+    llvm::BitVector _isDataOp;
 };
 
 }  // namespace vpux

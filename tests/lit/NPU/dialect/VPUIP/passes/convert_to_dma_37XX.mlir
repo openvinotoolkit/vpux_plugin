@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -14,7 +14,7 @@
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder_fp16.cpp", VPU.kernel_entry = "reorder_fp16"}
+    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder.cpp", VPU.kernel_entry = "reorder"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -23,7 +23,7 @@ func.func @ConvertMemPermute(%arg0: memref<1x16x12x12xf16, @DDR>)
     %0 = memref.alloc() : memref<1x16x12x12xf16, [@CMX_NN, 0]>
     %1 = VPUIP.Copy inputs(%arg0 : memref<1x16x12x12xf16, @DDR>) outputs(%0 : memref<1x16x12x12xf16, [@CMX_NN, 0]>) -> memref<1x16x12x12xf16, [@CMX_NN, 0]>
     %2 = memref.alloc() : memref<1x16x12x12xf16, #NHWC, [@CMX_NN, 0]>
-    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MemPermute inputs(%1 as %arg2: memref<1x16x12x12xf16, [@CMX_NN, 0]>) outputs(%2 as %arg3: memref<1x16x12x12xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x12x12xf16, #NHWC, [@CMX_NN, 0]>{
+    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute inputs(%1 as %arg2: memref<1x16x12x12xf16, [@CMX_NN, 0]>) outputs(%2 as %arg3: memref<1x16x12x12xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x12x12xf16, #NHWC, [@CMX_NN, 0]>{
        VPUIP.SW.Kernel.run {attrs = [[2, 0, 1, 3]]}(%arg2, %arg3) : memref<1x16x12x12xf16, [@CMX_NN, 0]>, memref<1x16x12x12xf16, #NHWC, [@CMX_NN, 0]>
     }
     %3 = memref.alloc() : memref<1x16x12x12xf16, #NHWC, @DDR>
@@ -45,14 +45,14 @@ func.func @ConvertMemPermute(%arg0: memref<1x16x12x12xf16, @DDR>)
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_DepthToSpace(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "single_shave_depth_to_space.cpp", VPU.kernel_entry = "single_shave_depth_to_space"}
+    func.func private @builtin_DepthToSpace(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "depth_to_space.cpp", VPU.kernel_entry = "depth_to_space"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
 // CHECK-LABEL: @ConvertSWDepthToSpaceToDMA_BLOCKS_FIRST
 func.func @ConvertSWDepthToSpaceToDMA_BLOCKS_FIRST(%arg0: memref<1x8x2x3xf16, #NHWC, [@CMX_NN, 0]>) -> memref<1x2x4x6xf16, #NHWC, [@CMX_NN, 0]> {
     %outBuffer = memref.alloc() : memref<1x2x4x6xf16, #NHWC, [@CMX_NN, 0]>
-    %depthToSpace = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_DepthToSpace
+    %depthToSpace = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_DepthToSpace
                         inputs(%arg0 as %arg1: memref<1x8x2x3xf16, #NHWC, [@CMX_NN, 0]>)
                         outputs(%outBuffer as %arg2: memref<1x2x4x6xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x2x4x6xf16, #NHWC, [@CMX_NN, 0]>{
                     VPUIP.SW.Kernel.run {attrs = [2, 0]}(%arg1, %arg2) : memref<1x8x2x3xf16, #NHWC, [@CMX_NN, 0]>, memref<1x2x4x6xf16, #NHWC, [@CMX_NN, 0]>
@@ -75,14 +75,14 @@ func.func @ConvertSWDepthToSpaceToDMA_BLOCKS_FIRST(%arg0: memref<1x8x2x3xf16, #N
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_DepthToSpace(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "single_shave_depth_to_space.cpp", VPU.kernel_entry = "single_shave_depth_to_space"}
+    func.func private @builtin_DepthToSpace(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "depth_to_space.cpp", VPU.kernel_entry = "depth_to_space"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
 // CHECK-LABEL: @ConvertSWDepthToSpaceToDMA_BLOCKS_FIRST_LARGE_HEIGHT
 func.func @ConvertSWDepthToSpaceToDMA_BLOCKS_FIRST_LARGE_HEIGHT(%arg0: memref<1x8x800x3xf16, #NHWC, [@CMX_NN, 0]>) -> memref<1x2x1600x6xf16, #NHWC, [@CMX_NN, 0]> {
     %outBuffer = memref.alloc() : memref<1x2x1600x6xf16, #NHWC, [@CMX_NN, 0]>
-    %depthToSpace = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_DepthToSpace
+    %depthToSpace = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_DepthToSpace
                         inputs(%arg0 as %arg1: memref<1x8x800x3xf16, #NHWC, [@CMX_NN, 0]>)
                         outputs(%outBuffer as %arg2: memref<1x2x1600x6xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x2x1600x6xf16, #NHWC, [@CMX_NN, 0]>{
                     VPUIP.SW.Kernel.run {attrs = [2, 0]}(%arg1, %arg2) : memref<1x8x800x3xf16, #NHWC, [@CMX_NN, 0]>, memref<1x2x1600x6xf16, #NHWC, [@CMX_NN, 0]>
@@ -105,14 +105,14 @@ func.func @ConvertSWDepthToSpaceToDMA_BLOCKS_FIRST_LARGE_HEIGHT(%arg0: memref<1x
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_DepthToSpace(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "single_shave_depth_to_space.cpp", VPU.kernel_entry = "single_shave_depth_to_space"}
+    func.func private @builtin_DepthToSpace(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "depth_to_space.cpp", VPU.kernel_entry = "depth_to_space"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
 // CHECK-LABEL: @ConvertSWDepthToSpaceToDMA_DEPTH_FIRST
 func.func @ConvertSWDepthToSpaceToDMA_DEPTH_FIRST(%arg0: memref<1x8x2x3xf16, #NHWC, [@CMX_NN, 0]>) -> memref<1x2x4x6xf16, #NHWC, [@CMX_NN, 0]> {
     %outBuffer = memref.alloc() : memref<1x2x4x6xf16, #NHWC, [@CMX_NN, 0]>
-    %depthToSpace = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_DepthToSpace
+    %depthToSpace = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_DepthToSpace
                         inputs(%arg0 as %arg1: memref<1x8x2x3xf16, #NHWC, [@CMX_NN, 0]>)
                         outputs(%outBuffer as %arg2: memref<1x2x4x6xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x2x4x6xf16, #NHWC, [@CMX_NN, 0]>{
                     VPUIP.SW.Kernel.run {attrs = [2, 1]}(%arg1, %arg2) : memref<1x8x2x3xf16, #NHWC, [@CMX_NN, 0]>, memref<1x2x4x6xf16, #NHWC, [@CMX_NN, 0]>
@@ -136,14 +136,14 @@ func.func @ConvertSWDepthToSpaceToDMA_DEPTH_FIRST(%arg0: memref<1x8x2x3xf16, #NH
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_DepthToSpace(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "single_shave_depth_to_space.cpp", VPU.kernel_entry = "single_shave_depth_to_space"}
+    func.func private @builtin_DepthToSpace(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "depth_to_space.cpp", VPU.kernel_entry = "depth_to_space"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
 // CHECK-LABEL: @ConvertSWDepthToSpaceToDMA_DEPTH_FIRST_LARGE_HEIGHT
 func.func @ConvertSWDepthToSpaceToDMA_DEPTH_FIRST_LARGE_HEIGHT(%arg0: memref<1x8x800x3xf16, #NHWC, [@CMX_NN, 0]>) -> memref<1x2x1600x6xf16, #NHWC, [@CMX_NN, 0]> {
     %outBuffer = memref.alloc() : memref<1x2x1600x6xf16, #NHWC, [@CMX_NN, 0]>
-    %depthToSpace = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_DepthToSpace
+    %depthToSpace = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_DepthToSpace
                         inputs(%arg0 as %arg1: memref<1x8x800x3xf16, #NHWC, [@CMX_NN, 0]>)
                         outputs(%outBuffer as %arg2: memref<1x2x1600x6xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x2x1600x6xf16, #NHWC, [@CMX_NN, 0]>{
                     VPUIP.SW.Kernel.run {attrs = [2, 1]}(%arg1, %arg2) : memref<1x8x800x3xf16, #NHWC, [@CMX_NN, 0]>, memref<1x2x1600x6xf16, #NHWC, [@CMX_NN, 0]>
@@ -166,14 +166,14 @@ func.func @ConvertSWDepthToSpaceToDMA_DEPTH_FIRST_LARGE_HEIGHT(%arg0: memref<1x8
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_DepthToSpace(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "single_shave_depth_to_space.cpp", VPU.kernel_entry = "single_shave_depth_to_space"}
+    func.func private @builtin_DepthToSpace(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "depth_to_space.cpp", VPU.kernel_entry = "depth_to_space"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
 // CHECK-LABEL: @NotConvertSWDepthToSpaceToDMAIfNotBeneficial
 func.func @NotConvertSWDepthToSpaceToDMAIfNotBeneficial(%arg0: memref<1x128x2x3xf16, #NHWC, [@CMX_NN, 0]>) -> memref<1x8x8x12xf16, #NHWC, [@CMX_NN, 0]> {
     %outBuffer = memref.alloc() : memref<1x8x8x12xf16, #NHWC, [@CMX_NN, 0]>
-    %depthToSpace = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_DepthToSpace
+    %depthToSpace = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_DepthToSpace
                         inputs(%arg0 as %arg1: memref<1x128x2x3xf16, #NHWC, [@CMX_NN, 0]>)
                         outputs(%outBuffer as %arg2: memref<1x8x8x12xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x8x8x12xf16, #NHWC, [@CMX_NN, 0]>{
                     VPUIP.SW.Kernel.run {attrs = [4, 1]}(%arg1, %arg2) : memref<1x128x2x3xf16, #NHWC, [@CMX_NN, 0]>, memref<1x8x8x12xf16, #NHWC, [@CMX_NN, 0]>
@@ -183,7 +183,7 @@ func.func @NotConvertSWDepthToSpaceToDMAIfNotBeneficial(%arg0: memref<1x128x2x3x
 
     // CHECK:        [[OUTBUFFER:%.*]] = memref.alloc() : memref<1x8x8x12xf16, #NHWC, [@CMX_NN, 0]>
 
-    // CHECK:        [[D2S:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_DepthToSpace
+    // CHECK:        [[D2S:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_DepthToSpace
     // CHECK-SAME:           inputs(%arg0 as %arg1: memref<1x128x2x3xf16, #NHWC, [@CMX_NN, 0]>)
     // CHECK-SAME:           outputs([[OUTBUFFER]] as %arg2: memref<1x8x8x12xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x8x8x12xf16, #NHWC, [@CMX_NN, 0]>{
     // CHECK:            VPUIP.SW.Kernel.run {attrs = [4, 1]}(%arg1, %arg2) : memref<1x128x2x3xf16, #NHWC, [@CMX_NN, 0]>, memref<1x8x8x12xf16, #NHWC, [@CMX_NN, 0]>
@@ -198,7 +198,7 @@ func.func @NotConvertSWDepthToSpaceToDMAIfNotBeneficial(%arg0: memref<1x128x2x3x
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_DepthToSpace(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "single_shave_depth_to_space.cpp", VPU.kernel_entry = "single_shave_depth_to_space"}
+    func.func private @builtin_DepthToSpace(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "depth_to_space.cpp", VPU.kernel_entry = "depth_to_space"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -206,7 +206,7 @@ VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 409
 // CHECK-SAME: [[INPUT:%.+]]: memref<1x1024x12x12xf16, #NHWC, [@CMX_NN, 0]>
 func.func @NotConvertSWDepthToSpaceToDMAIfNotBeneficialForBS2(%arg0: memref<1x1024x12x12xf16, #NHWC, [@CMX_NN, 0]>) -> memref<1x256x24x24xf16, #NHWC, [@CMX_NN, 0]> {
     %outBuffer = memref.alloc() : memref<1x256x24x24xf16, #NHWC, [@CMX_NN, 0]>
-    %depthToSpace = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_DepthToSpace
+    %depthToSpace = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_DepthToSpace
                         inputs(%arg0 as %arg1: memref<1x1024x12x12xf16, #NHWC, [@CMX_NN, 0]>)
                         outputs(%outBuffer as %arg2: memref<1x256x24x24xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x256x24x24xf16, #NHWC, [@CMX_NN, 0]>{
                     VPUIP.SW.Kernel.run {attrs = [2, 1]}(%arg1, %arg2) : memref<1x1024x12x12xf16, #NHWC, [@CMX_NN, 0]>, memref<1x256x24x24xf16, #NHWC, [@CMX_NN, 0]>
@@ -216,7 +216,7 @@ func.func @NotConvertSWDepthToSpaceToDMAIfNotBeneficialForBS2(%arg0: memref<1x10
 
     // CHECK:        [[OUTBUFFER:%.+]] = memref.alloc() : memref<1x256x24x24xf16, #NHWC, [@CMX_NN, 0]>
 
-    // CHECK:        [[D2S:%.+]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_DepthToSpace
+    // CHECK:        [[D2S:%.+]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_DepthToSpace
     // CHECK-SAME:           inputs([[INPUT]] as %arg1: memref<1x1024x12x12xf16, #NHWC, [@CMX_NN, 0]>)
     // CHECK-SAME:           outputs([[OUTBUFFER]] as %arg2: memref<1x256x24x24xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x256x24x24xf16, #NHWC, [@CMX_NN, 0]>{
     // CHECK:            VPUIP.SW.Kernel.run {attrs = [2, 1]}(%arg1, %arg2) : memref<1x1024x12x12xf16, #NHWC, [@CMX_NN, 0]>, memref<1x256x24x24xf16, #NHWC, [@CMX_NN, 0]>
@@ -233,7 +233,7 @@ func.func @NotConvertSWDepthToSpaceToDMAIfNotBeneficialForBS2(%arg0: memref<1x10
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder_fp16.cpp", VPU.kernel_entry = "reorder_fp16"}
+    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder.cpp", VPU.kernel_entry = "reorder"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -242,7 +242,7 @@ func.func @ConvertMemPermuteWithThreeAxis(%arg0: memref<1x16x4x128xf16, @DDR>)
     %0 = memref.alloc() : memref<1x16x4x128xf16, [@CMX_NN, 0]>
     %1 = VPUIP.Copy inputs(%arg0 : memref<1x16x4x128xf16, @DDR>) outputs(%0 : memref<1x16x4x128xf16, [@CMX_NN, 0]>) -> memref<1x16x4x128xf16, [@CMX_NN, 0]>
     %2 = memref.alloc() : memref<1x4x16x128xf16, #NHWC, [@CMX_NN, 0]>
-    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MemPermute inputs(%1 as %arg2: memref<1x16x4x128xf16, [@CMX_NN, 0]>) outputs(%2 as %arg3: memref<1x4x16x128xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x4x16x128xf16, #NHWC, [@CMX_NN, 0]>{
+    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute inputs(%1 as %arg2: memref<1x16x4x128xf16, [@CMX_NN, 0]>) outputs(%2 as %arg3: memref<1x4x16x128xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x4x16x128xf16, #NHWC, [@CMX_NN, 0]>{
        VPUIP.SW.Kernel.run {attrs = [[0, 2, 1, 3]]}(%arg2, %arg3) : memref<1x16x4x128xf16, [@CMX_NN, 0]>, memref<1x4x16x128xf16, #NHWC, [@CMX_NN, 0]>
     }
     %3 = memref.alloc() : memref<1x4x16x128xf16, #NHWC, @DDR>
@@ -267,7 +267,7 @@ func.func @ConvertMemPermuteWithThreeAxis(%arg0: memref<1x16x4x128xf16, @DDR>)
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder_fp16.cpp", VPU.kernel_entry = "reorder_fp16"}
+    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder.cpp", VPU.kernel_entry = "reorder"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -276,7 +276,7 @@ func.func @ConvertMemPermuteHWCToWHC(%arg0: memref<1x16x4x76xf16, #map, @DDR>)
     %0 = memref.alloc() : memref<1x16x4x76xf16, #map, [@CMX_NN, 0]>
     %1 = VPUIP.Copy inputs(%arg0 : memref<1x16x4x76xf16, #map, @DDR>) outputs(%0 : memref<1x16x4x76xf16, #map, [@CMX_NN, 0]>) -> memref<1x16x4x76xf16, #map, [@CMX_NN, 0]>
     %2 = memref.alloc() : memref<1x16x4x76xf16, #NHWC, [@CMX_NN, 0]>
-    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MemPermute inputs(%1 as %arg2: memref<1x16x4x76xf16, #map, [@CMX_NN, 0]>) outputs(%2 as %arg3: memref<1x16x4x76xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x4x76xf16, #NHWC, [@CMX_NN, 0]>{
+    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute inputs(%1 as %arg2: memref<1x16x4x76xf16, #map, [@CMX_NN, 0]>) outputs(%2 as %arg3: memref<1x16x4x76xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x4x76xf16, #NHWC, [@CMX_NN, 0]>{
        VPUIP.SW.Kernel.run {attrs = [[1, 0, 3, 2]]}(%arg2, %arg3) : memref<1x16x4x76xf16, #map, [@CMX_NN, 0]>, memref<1x16x4x76xf16, #NHWC, [@CMX_NN, 0]>
     }
     %3 = memref.alloc() : memref<1x16x4x76xf16, #NHWC, @DDR>
@@ -299,7 +299,7 @@ func.func @ConvertMemPermuteHWCToWHC(%arg0: memref<1x16x4x76xf16, #map, @DDR>)
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder_fp16.cpp", VPU.kernel_entry = "reorder_fp16"}
+    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder.cpp", VPU.kernel_entry = "reorder"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -308,7 +308,7 @@ func.func @ConvertMemPermuteHWCToHCW(%arg0: memref<1x16x4x76xf16, @DDR>)
     %0 = memref.alloc() : memref<1x16x4x76xf16, [@CMX_NN, 0]>
     %1 = VPUIP.Copy inputs(%arg0 : memref<1x16x4x76xf16, @DDR>) outputs(%0 : memref<1x16x4x76xf16, [@CMX_NN, 0]>) -> memref<1x16x4x76xf16, [@CMX_NN, 0]>
     %2 = memref.alloc() : memref<1x16x4x76xf16, #NHWC, [@CMX_NN, 0]>
-    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MemPermute inputs(%1 as %arg2: memref<1x16x4x76xf16, [@CMX_NN, 0]>) outputs(%2 as %arg3: memref<1x16x4x76xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x4x76xf16, #NHWC, [@CMX_NN, 0]>{
+    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute inputs(%1 as %arg2: memref<1x16x4x76xf16, [@CMX_NN, 0]>) outputs(%2 as %arg3: memref<1x16x4x76xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x4x76xf16, #NHWC, [@CMX_NN, 0]>{
        VPUIP.SW.Kernel.run {attrs = [[1, 0, 3, 2]]}(%arg2, %arg3) : memref<1x16x4x76xf16, [@CMX_NN, 0]>, memref<1x16x4x76xf16, #NHWC, [@CMX_NN, 0]>
     }
     %3 = memref.alloc() : memref<1x16x4x76xf16, #NHWC, @DDR>
@@ -331,7 +331,7 @@ func.func @ConvertMemPermuteHWCToHCW(%arg0: memref<1x16x4x76xf16, @DDR>)
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder_fp16.cpp", VPU.kernel_entry = "reorder_fp16"}
+    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder.cpp", VPU.kernel_entry = "reorder"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -340,7 +340,7 @@ func.func @ConvertMemPermuteWHCToCHW(%arg0: memref<1x16x4x76xf16, #NWHC, @DDR>)
     %0 = memref.alloc() : memref<1x16x4x76xf16, #NWHC, [@CMX_NN, 0]>
     %1 = VPUIP.Copy inputs(%arg0 : memref<1x16x4x76xf16, #NWHC, @DDR>) outputs(%0 : memref<1x16x4x76xf16, #NWHC, [@CMX_NN, 0]>) -> memref<1x16x4x76xf16, #NWHC, [@CMX_NN, 0]>
     %2 = memref.alloc() : memref<1x16x4x76xf16, [@CMX_NN, 0]>
-    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MemPermute inputs(%1 as %arg2: memref<1x16x4x76xf16, #NWHC, [@CMX_NN, 0]>) outputs(%2 as %arg3: memref<1x16x4x76xf16, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x4x76xf16, [@CMX_NN, 0]>{
+    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute inputs(%1 as %arg2: memref<1x16x4x76xf16, #NWHC, [@CMX_NN, 0]>) outputs(%2 as %arg3: memref<1x16x4x76xf16, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x4x76xf16, [@CMX_NN, 0]>{
        VPUIP.SW.Kernel.run {attrs = [[2, 1, 0, 3]]}(%arg2, %arg3) : memref<1x16x4x76xf16, #NWHC, [@CMX_NN, 0]>, memref<1x16x4x76xf16, [@CMX_NN, 0]>
     }
     %3 = memref.alloc() : memref<1x16x4x76xf16, @DDR>
@@ -367,7 +367,7 @@ func.func @ConvertMemPermuteWHCToCHW(%arg0: memref<1x16x4x76xf16, #NWHC, @DDR>)
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder_fp16.cpp", VPU.kernel_entry = "reorder_fp16"}
+    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder.cpp", VPU.kernel_entry = "reorder"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -376,7 +376,7 @@ func.func @ConvertMemPermuteWCHToCHW(%arg0: memref<1x16x4x76xf16, #NWCH, @DDR>)
     %0 = memref.alloc() : memref<1x16x4x76xf16, #NWCH, [@CMX_NN, 0]>
     %1 = VPUIP.Copy inputs(%arg0 : memref<1x16x4x76xf16, #NWCH, @DDR>) outputs(%0 : memref<1x16x4x76xf16, #NWCH, [@CMX_NN, 0]>) -> memref<1x16x4x76xf16, #NWCH, [@CMX_NN, 0]>
     %2 = memref.alloc() : memref<1x16x4x76xf16, [@CMX_NN, 0]>
-    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MemPermute inputs(%1 as %arg2: memref<1x16x4x76xf16, #NWCH, [@CMX_NN, 0]>) outputs(%2 as %arg3: memref<1x16x4x76xf16, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x4x76xf16, [@CMX_NN, 0]>{
+    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute inputs(%1 as %arg2: memref<1x16x4x76xf16, #NWCH, [@CMX_NN, 0]>) outputs(%2 as %arg3: memref<1x16x4x76xf16, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x4x76xf16, [@CMX_NN, 0]>{
        VPUIP.SW.Kernel.run {attrs = [[2, 1, 0, 3]]}(%arg2, %arg3) : memref<1x16x4x76xf16, #NWCH, [@CMX_NN, 0]>, memref<1x16x4x76xf16, [@CMX_NN, 0]>
     }
     %3 = memref.alloc() : memref<1x16x4x76xf16, @DDR>
@@ -403,7 +403,7 @@ func.func @ConvertMemPermuteWCHToCHW(%arg0: memref<1x16x4x76xf16, #NWCH, @DDR>)
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder_fp16.cpp", VPU.kernel_entry = "reorder_fp16"}
+    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder.cpp", VPU.kernel_entry = "reorder"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -412,7 +412,7 @@ func.func @ConvertMemPermuteCWHToHWC(%arg0: memref<1x16x4x76xf16, #NCWH, @DDR>)
     %0 = memref.alloc() : memref<1x16x4x76xf16, #NCWH, [@CMX_NN, 0]>
     %1 = VPUIP.Copy inputs(%arg0 : memref<1x16x4x76xf16, #NCWH, @DDR>) outputs(%0 : memref<1x16x4x76xf16, #NCWH, [@CMX_NN, 0]>) -> memref<1x16x4x76xf16, #NCWH, [@CMX_NN, 0]>
     %2 = memref.alloc() : memref<1x16x4x76xf16, #NHWC, [@CMX_NN, 0]>
-    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MemPermute inputs(%1 as %arg2: memref<1x16x4x76xf16, #NCWH, [@CMX_NN, 0]>) outputs(%2 as %arg3: memref<1x16x4x76xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x4x76xf16, #NHWC, [@CMX_NN, 0]>{
+    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute inputs(%1 as %arg2: memref<1x16x4x76xf16, #NCWH, [@CMX_NN, 0]>) outputs(%2 as %arg3: memref<1x16x4x76xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x4x76xf16, #NHWC, [@CMX_NN, 0]>{
        VPUIP.SW.Kernel.run {attrs = [[2, 1, 0, 3]]}(%arg2, %arg3) : memref<1x16x4x76xf16, #NCWH, [@CMX_NN, 0]>, memref<1x16x4x76xf16, #NHWC, [@CMX_NN, 0]>
     }
     %3 = memref.alloc() : memref<1x16x4x76xf16, #NHWC, @DDR>
@@ -429,6 +429,39 @@ func.func @ConvertMemPermuteCWHToHWC(%arg0: memref<1x16x4x76xf16, #NCWH, @DDR>)
     // CHECK:   [[VAR7:%.*]] = memref.alloc() : memref<1x16x4x76xf16, #NHWC, @DDR>
     // CHECK:   [[VAR8:%.*]] = VPUIP.Copy inputs([[VAR6]] : memref<1x16x4x76xf16, #NHWC, [@CMX_NN, 0]>) outputs([[VAR7]] : memref<1x16x4x76xf16, #NHWC, @DDR>) -> memref<1x16x4x76xf16, #NHWC, @DDR>
     // CHECK:   return [[VAR8]] : memref<1x16x4x76xf16, #NHWC, @DDR>
+}
+
+// -----
+
+VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
+  module @VPU.SW {
+    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder.cpp", VPU.kernel_entry = "reorder"}
+    func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
+  }
+
+// CHECK-LABEL: @ConvertMemPermuteWithMemPermHNWC
+// CHECK-SAME:    [[INPUT:%.+]]: memref<1x15x2x128xf16, @DDR>
+func.func @ConvertMemPermuteWithMemPermHNWC(%arg0: memref<1x15x2x128xf16, @DDR>)
+        -> memref<2x1x128x15xf16, @DDR> {
+    %0 = memref.alloc() : memref<1x15x2x128xf16, [@CMX_NN, 0]>
+    %1 = VPUIP.Copy inputs(%arg0 : memref<1x15x2x128xf16, @DDR>) outputs(%0 : memref<1x15x2x128xf16, [@CMX_NN, 0]>) -> memref<1x15x2x128xf16, [@CMX_NN, 0]>
+    %2 = memref.alloc() : memref<2x1x128x15xf16, [@CMX_NN, 0]>
+    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute
+        inputs(%1 as %arg2: memref<1x15x2x128xf16, [@CMX_NN, 0]>)
+        outputs(%2 as %arg3: memref<2x1x128x15xf16, [@CMX_NN, 0]>) on tile 0 -> memref<2x1x128x15xf16, [@CMX_NN, 0]>{
+            VPUIP.SW.Kernel.run {attrs = [[2, 0, 3, 1]]}(%arg2, %arg3) : memref<1x15x2x128xf16, [@CMX_NN, 0]>, memref<2x1x128x15xf16, [@CMX_NN, 0]>
+    }
+    %3 = memref.alloc() : memref<2x1x128x15xf16, @DDR>
+    %4 = VPUIP.Copy inputs(%results : memref<2x1x128x15xf16, [@CMX_NN, 0]>) outputs(%3 : memref<2x1x128x15xf16, @DDR>) -> memref<2x1x128x15xf16, @DDR>
+    return %4: memref<2x1x128x15xf16, @DDR>
+
+    // CHECK:   [[BUFF_IN:%.+]] = memref.alloc() : memref<1x15x2x128xf16, [@CMX_NN, 0]>
+    // CHECK:   [[COPY_IN:%.+]] = VPUIP.Copy inputs([[INPUT]] : memref<1x15x2x128xf16, @DDR>) outputs([[BUFF_IN]] : memref<1x15x2x128xf16, [@CMX_NN, 0]>) -> memref<1x15x2x128xf16, [@CMX_NN, 0]>
+    // CHECK:   [[PERMUTE_OUT:%.+]] = memref.alloc() : memref<2x1x128x15xf16, [@CMX_NN, 0]>
+    // CHECK:   [[PERMUTE:%.+]] = VPUIP.PermuteDMA {mem_perm = #map} inputs([[COPY_IN]] : memref<1x15x2x128xf16, [@CMX_NN, 0]>) outputs([[PERMUTE_OUT]] : memref<2x1x128x15xf16, [@CMX_NN, 0]>) -> memref<2x1x128x15xf16, [@CMX_NN, 0]>
+    // CHECK:   [[BUFF_OUT:%.+]] =  memref.alloc() : memref<2x1x128x15xf16, @DDR>
+    // CHECK:   [[COPY_OUT:%.+]] = VPUIP.Copy inputs([[PERMUTE]] : memref<2x1x128x15xf16, [@CMX_NN, 0]>) outputs([[BUFF_OUT]] : memref<2x1x128x15xf16, @DDR>) -> memref<2x1x128x15xf16, @DDR>
+    // CHECK:   return [[COPY_OUT]] : memref<2x1x128x15xf16, @DDR>
 }
 
 // -----
@@ -457,7 +490,7 @@ func.func @WrapExpandandPermuteWithoutClusterTiling(%arg0: memref<1x3x24x24x!qEl
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_Tile(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "single_shave_tile.cpp", VPU.kernel_entry = "single_shave_tile"}
+    func.func private @builtin_Tile(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "tile.cpp", VPU.kernel_entry = "tile"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -469,7 +502,7 @@ func.func @ConvertPerAxisTileToDMA(%arg0: memref<1x1x1x1xf16, #NHWC, @DDR>)
     %2 = memref.alloc() : memref<4xsi32, [@CMX_NN, 0]>
     %3 = VPUIP.Copy inputs(%cst_0 : memref<4xsi32>) outputs(%2 : memref<4xsi32, [@CMX_NN, 0]>) -> memref<4xsi32, [@CMX_NN, 0]>
     %4 = memref.alloc() : memref<1x512x1x1xf16, #NHWC, [@CMX_NN, 0]>
-    %5 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_Tile
+    %5 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Tile
           inputs(%1 as %arg3: memref<1x1x1x1xf16, #NHWC, [@CMX_NN, 0]>, %3 as %arg4: memref<4xsi32, [@CMX_NN, 0]>)
           outputs(%4 as %arg5: memref<1x512x1x1xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x512x1x1xf16, #NHWC, [@CMX_NN, 0]>{
       VPUIP.SW.Kernel.run(%arg3, %arg4, %arg5) : memref<1x1x1x1xf16, #NHWC, [@CMX_NN, 0]>, memref<4xsi32, [@CMX_NN, 0]>, memref<1x512x1x1xf16, #NHWC, [@CMX_NN, 0]>
@@ -498,7 +531,7 @@ func.func @ConvertPerAxisTileToDMA(%arg0: memref<1x1x1x1xf16, #NHWC, @DDR>)
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_Tile(memref<*xsi32, [@CMX_NN, 0]>, memref<*xsi32, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "single_shave_tile.cpp", VPU.kernel_entry = "single_shave_tile"}
+    func.func private @builtin_Tile(memref<*xsi32, [@CMX_NN, 0]>, memref<*xsi32, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "tile.cpp", VPU.kernel_entry = "tile"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -510,7 +543,7 @@ func.func @ConvertSI32PerAxisTileToDMA(%arg0: memref<1x1x1x1xsi32, #NHWC, @DDR>)
     %2 = memref.alloc() : memref<4xsi32, [@CMX_NN, 0]>
     %3 = VPUIP.Copy inputs(%cst_0 : memref<4xsi32>) outputs(%2 : memref<4xsi32, [@CMX_NN, 0]>) -> memref<4xsi32, [@CMX_NN, 0]>
     %4 = memref.alloc() : memref<1x512x1x1xsi32, #NHWC, [@CMX_NN, 0]>
-    %5 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_Tile
+    %5 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Tile
           inputs(%1 as %arg3: memref<1x1x1x1xsi32, #NHWC, [@CMX_NN, 0]>, %3 as %arg4: memref<4xsi32, [@CMX_NN, 0]>)
           outputs(%4 as %arg5: memref<1x512x1x1xsi32, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x512x1x1xsi32, #NHWC, [@CMX_NN, 0]>{
       VPUIP.SW.Kernel.run(%arg3, %arg4, %arg5) : memref<1x1x1x1xsi32, #NHWC, [@CMX_NN, 0]>, memref<4xsi32, [@CMX_NN, 0]>, memref<1x512x1x1xsi32, #NHWC, [@CMX_NN, 0]>
@@ -538,7 +571,7 @@ func.func @ConvertSI32PerAxisTileToDMA(%arg0: memref<1x1x1x1xsi32, #NHWC, @DDR>)
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_Tile(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "single_shave_tile.cpp", VPU.kernel_entry = "single_shave_tile"}
+    func.func private @builtin_Tile(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "tile.cpp", VPU.kernel_entry = "tile"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -550,7 +583,7 @@ func.func @ConvertTileToDMAWithThreeAxisExpansion(%arg0: memref<1x2x3x4xf16, #NH
     %2 = memref.alloc() : memref<4xsi32, [@CMX_NN, 0]>
     %3 = VPUIP.Copy inputs(%cst_0 : memref<4xsi32>) outputs(%2 : memref<4xsi32, [@CMX_NN, 0]>) -> memref<4xsi32, [@CMX_NN, 0]>
     %4 = memref.alloc() : memref<1x4x9x16xf16, #NHWC, [@CMX_NN, 0]>
-    %5 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_Tile
+    %5 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Tile
           inputs(%1 as %arg3: memref<1x2x3x4xf16, #NHWC, [@CMX_NN, 0]>, %3 as %arg4: memref<4xsi32, [@CMX_NN, 0]>)
           outputs(%4 as %arg5: memref<1x4x9x16xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x4x9x16xf16, #NHWC, [@CMX_NN, 0]>{
       VPUIP.SW.Kernel.run(%arg3, %arg4, %arg5) : memref<1x2x3x4xf16, #NHWC, [@CMX_NN, 0]>, memref<4xsi32, [@CMX_NN, 0]>, memref<1x4x9x16xf16, #NHWC, [@CMX_NN, 0]>
@@ -706,7 +739,7 @@ func.func @NotMoveUpsamplingDMAInCMXWithLargeSize(%arg0: memref<1x64x128x128xf16
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder_fp16.cpp", VPU.kernel_entry = "reorder_fp16"}
+    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder.cpp", VPU.kernel_entry = "reorder"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -715,7 +748,7 @@ func.func @NotConvertD0IsInPermutationCase0(%arg0: memref<10x16x4x76xf16, #NCWH,
     %0 = memref.alloc() : memref<10x16x4x76xf16, #NCWH, [@CMX_NN, 0]>
     %1 = VPUIP.Copy inputs(%arg0 : memref<10x16x4x76xf16, #NCWH, @DDR>) outputs(%0 : memref<10x16x4x76xf16, #NCWH, [@CMX_NN, 0]>) -> memref<10x16x4x76xf16, #NCWH, [@CMX_NN, 0]>
     %2 = memref.alloc() : memref<10x16x4x76xf16, #NHWC, [@CMX_NN, 0]>
-    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MemPermute inputs(%1 as %arg2: memref<10x16x4x76xf16, #NCWH, [@CMX_NN, 0]>) outputs(%2 as %arg3: memref<10x16x4x76xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<10x16x4x76xf16, #NHWC, [@CMX_NN, 0]>{
+    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute inputs(%1 as %arg2: memref<10x16x4x76xf16, #NCWH, [@CMX_NN, 0]>) outputs(%2 as %arg3: memref<10x16x4x76xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<10x16x4x76xf16, #NHWC, [@CMX_NN, 0]>{
        VPUIP.SW.Kernel.run {attrs = [[3, 1, 2, 0]]}(%arg2, %arg3) : memref<10x16x4x76xf16, #NCWH, [@CMX_NN, 0]>, memref<10x16x4x76xf16, #NHWC, [@CMX_NN, 0]>
     }
     %3 = memref.alloc() : memref<10x16x4x76xf16, #NHWC, @DDR>
@@ -725,7 +758,7 @@ func.func @NotConvertD0IsInPermutationCase0(%arg0: memref<10x16x4x76xf16, #NCWH,
     // CHECK:   [[VAR0:%.*]] = memref.alloc() : memref<10x16x4x76xf16, #NCWH, [@CMX_NN, 0]>
     // CHECK:   [[COPY0:%.*]] = VPUIP.Copy inputs(%arg0 : memref<10x16x4x76xf16, #NCWH, @DDR>) outputs([[VAR0]] : memref<10x16x4x76xf16, #NCWH, [@CMX_NN, 0]>) -> memref<10x16x4x76xf16, #NCWH, [@CMX_NN, 0]>
     // CHECK:   [[VAR1:%.*]] = memref.alloc() : memref<10x16x4x76xf16, #NHWC, [@CMX_NN, 0]>
-    // CHECK:   [[RESULTS:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MemPermute
+    // CHECK:   [[RESULTS:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute
     // CHECK-SAME: inputs([[COPY0]] as %arg1: memref<10x16x4x76xf16, #NCWH, [@CMX_NN, 0]>)
     // CHECK-SAME: outputs([[VAR1]] as %arg2: memref<10x16x4x76xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<10x16x4x76xf16, #NHWC, [@CMX_NN, 0]>{
     // CHECK:     VPUIP.SW.Kernel.run {attrs = [
@@ -745,7 +778,7 @@ func.func @NotConvertD0IsInPermutationCase0(%arg0: memref<10x16x4x76xf16, #NCWH,
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder_fp16.cpp", VPU.kernel_entry = "reorder_fp16"}
+    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder.cpp", VPU.kernel_entry = "reorder"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -754,7 +787,7 @@ func.func @NotConvertD0IsInPermutationCase1(%arg0: memref<1x16x4x76xf16, #NCWH, 
     %0 = memref.alloc() : memref<1x16x4x76xf16, #NCWH, [@CMX_NN, 0]>
     %1 = VPUIP.Copy inputs(%arg0 : memref<1x16x4x76xf16, #NCWH, @DDR>) outputs(%0 : memref<1x16x4x76xf16, #NCWH, [@CMX_NN, 0]>) -> memref<1x16x4x76xf16, #NCWH, [@CMX_NN, 0]>
     %2 = memref.alloc() : memref<1x16x4x76xf16, #NHWC, [@CMX_NN, 0]>
-    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MemPermute inputs(%1 as %arg2: memref<1x16x4x76xf16, #NCWH, [@CMX_NN, 0]>) outputs(%2 as %arg3: memref<1x16x4x76xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x4x76xf16, #NHWC, [@CMX_NN, 0]>{
+    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute inputs(%1 as %arg2: memref<1x16x4x76xf16, #NCWH, [@CMX_NN, 0]>) outputs(%2 as %arg3: memref<1x16x4x76xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x4x76xf16, #NHWC, [@CMX_NN, 0]>{
        VPUIP.SW.Kernel.run {attrs = [[2, 3, 1, 0]]}(%arg2, %arg3) : memref<1x16x4x76xf16, #NCWH, [@CMX_NN, 0]>, memref<1x16x4x76xf16, #NHWC, [@CMX_NN, 0]>
     }
     %3 = memref.alloc() : memref<1x16x4x76xf16, #NHWC, @DDR>
@@ -764,7 +797,7 @@ func.func @NotConvertD0IsInPermutationCase1(%arg0: memref<1x16x4x76xf16, #NCWH, 
     // CHECK:   [[VAR0:%.*]] = memref.alloc() : memref<1x16x4x76xf16, #NCWH, [@CMX_NN, 0]>
     // CHECK:   [[COPY0:%.*]] = VPUIP.Copy inputs(%arg0 : memref<1x16x4x76xf16, #NCWH, @DDR>) outputs([[VAR0]] : memref<1x16x4x76xf16, #NCWH, [@CMX_NN, 0]>) -> memref<1x16x4x76xf16, #NCWH, [@CMX_NN, 0]>
     // CHECK:   [[VAR1:%.*]] = memref.alloc() : memref<1x16x4x76xf16, #NHWC, [@CMX_NN, 0]>
-    // CHECK:   [[RESULTS:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MemPermute
+    // CHECK:   [[RESULTS:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute
     // CHECK-SAME: inputs([[COPY0]] as %arg1: memref<1x16x4x76xf16, #NCWH, [@CMX_NN, 0]>)
     // CHECK-SAME: outputs([[VAR1]] as %arg2: memref<1x16x4x76xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x4x76xf16, #NHWC, [@CMX_NN, 0]>{
     // CHECK:     VPUIP.SW.Kernel.run {attrs = [
@@ -784,7 +817,7 @@ func.func @NotConvertD0IsInPermutationCase1(%arg0: memref<1x16x4x76xf16, #NCWH, 
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder_fp16.cpp", VPU.kernel_entry = "reorder_fp16"}
+    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder.cpp", VPU.kernel_entry = "reorder"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -793,7 +826,7 @@ func.func @NotConvertD0IsInPermutationCase2(%arg0: memref<10x16x4x76xf16, #NCWH,
     %0 = memref.alloc() : memref<10x16x4x76xf16, #NCWH, [@CMX_NN, 0]>
     %1 = VPUIP.Copy inputs(%arg0 : memref<10x16x4x76xf16, #NCWH, @DDR>) outputs(%0 : memref<10x16x4x76xf16, #NCWH, [@CMX_NN, 0]>) -> memref<10x16x4x76xf16, #NCWH, [@CMX_NN, 0]>
     %2 = memref.alloc() : memref<10x16x4x76xf16, #NHWC, [@CMX_NN, 0]>
-    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MemPermute inputs(%1 as %arg2: memref<10x16x4x76xf16, #NCWH, [@CMX_NN, 0]>) outputs(%2 as %arg3: memref<10x16x4x76xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<10x16x4x76xf16, #NHWC, [@CMX_NN, 0]>{
+    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute inputs(%1 as %arg2: memref<10x16x4x76xf16, #NCWH, [@CMX_NN, 0]>) outputs(%2 as %arg3: memref<10x16x4x76xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<10x16x4x76xf16, #NHWC, [@CMX_NN, 0]>{
        VPUIP.SW.Kernel.run {attrs = [[3, 2, 0, 1]]}(%arg2, %arg3) : memref<10x16x4x76xf16, #NCWH, [@CMX_NN, 0]>, memref<10x16x4x76xf16, #NHWC, [@CMX_NN, 0]>
     }
     %3 = memref.alloc() : memref<10x16x4x76xf16, #NHWC, @DDR>
@@ -803,7 +836,7 @@ func.func @NotConvertD0IsInPermutationCase2(%arg0: memref<10x16x4x76xf16, #NCWH,
     // CHECK:   [[VAR0:%.*]] = memref.alloc() : memref<10x16x4x76xf16, #NCWH, [@CMX_NN, 0]>
     // CHECK:   [[COPY0:%.*]] = VPUIP.Copy inputs(%arg0 : memref<10x16x4x76xf16, #NCWH, @DDR>) outputs([[VAR0]] : memref<10x16x4x76xf16, #NCWH, [@CMX_NN, 0]>) -> memref<10x16x4x76xf16, #NCWH, [@CMX_NN, 0]>
     // CHECK:   [[VAR1:%.*]] = memref.alloc() : memref<10x16x4x76xf16, #NHWC, [@CMX_NN, 0]>
-    // CHECK:   [[RESULTS:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MemPermute
+    // CHECK:   [[RESULTS:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute
     // CHECK-SAME: inputs([[COPY0]] as %arg1: memref<10x16x4x76xf16, #NCWH, [@CMX_NN, 0]>)
     // CHECK-SAME: outputs([[VAR1]] as %arg2: memref<10x16x4x76xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<10x16x4x76xf16, #NHWC, [@CMX_NN, 0]>{
     // CHECK:     VPUIP.SW.Kernel.run {attrs = [
@@ -819,7 +852,7 @@ func.func @NotConvertD0IsInPermutationCase2(%arg0: memref<10x16x4x76xf16, #NCWH,
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder_fp16.cpp", VPU.kernel_entry = "reorder_fp16"}
+    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder.cpp", VPU.kernel_entry = "reorder"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -839,7 +872,7 @@ func.func @ConvertMemPermuteNCHWToNHCW(%arg0: memref<6x4x8x512xf16, @DDR>)
     }
 
     %2 = memref.alloc() : memref<6x8x4x512xf16, [@CMX_NN, 0]>
-    %3 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+    %3 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
                 @VPU.SW::@builtin_MemPermute
                 inputs(%1 as %arg2: memref<6x4x8x512xf16, [@CMX_NN, 0]>)
                 outputs(%2 as %arg3: memref<6x8x4x512xf16, [@CMX_NN, 0]>)
@@ -886,7 +919,7 @@ func.func @ConvertMemPermuteNCHWToNHCW(%arg0: memref<6x4x8x512xf16, @DDR>)
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder_fp16.cpp", VPU.kernel_entry = "reorder_fp16"}
+    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder.cpp", VPU.kernel_entry = "reorder"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -906,7 +939,7 @@ func.func @ConvertMemPermuteNCHWToNHCWWithDifferentDimsOrder(%arg0: memref<6x4x8
     }
 
     %2 = memref.alloc() : memref<6x512x8x4xf16, #NHWC, [@CMX_NN, 0]>
-    %3 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+    %3 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
                 @VPU.SW::@builtin_MemPermute
                 inputs(%1 as %arg2: memref<6x4x8x512xf16, [@CMX_NN, 0]>)
                 outputs(%2 as %arg3: memref<6x512x8x4xf16, #NHWC, [@CMX_NN, 0]>)
@@ -954,7 +987,7 @@ func.func @ConvertMemPermuteNCHWToNHCWWithDifferentDimsOrder(%arg0: memref<6x4x8
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder_fp16.cpp", VPU.kernel_entry = "reorder_fp16"}
+    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder.cpp", VPU.kernel_entry = "reorder"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -974,7 +1007,7 @@ func.func @ConvertMemPermuteNCHWToHCNW(%arg0: memref<6x4x8x512xf16, @DDR>)
     }
 
     %2 = memref.alloc() : memref<8x4x6x512xf16, [@CMX_NN, 0]>
-    %3 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+    %3 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
                 @VPU.SW::@builtin_MemPermute
                 inputs(%1 as %arg2: memref<6x4x8x512xf16, [@CMX_NN, 0]>)
                 outputs(%2 as %arg3: memref<8x4x6x512xf16, [@CMX_NN, 0]>)
@@ -1024,7 +1057,7 @@ func.func @ConvertMemPermuteNCHWToHCNW(%arg0: memref<6x4x8x512xf16, @DDR>)
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder_fp16.cpp", VPU.kernel_entry = "reorder_fp16"}
+    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder.cpp", VPU.kernel_entry = "reorder"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -1044,7 +1077,7 @@ func.func @ConvertMemPermuteNCHWToNWHC(%arg0: memref<6x4x8x512xf16, @DDR>)
     }
 
     %2 = memref.alloc() : memref<6x512x8x4xf16, [@CMX_NN, 0]>
-    %3 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+    %3 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
                 @VPU.SW::@builtin_MemPermute
                 inputs(%1 as %arg2: memref<6x4x8x512xf16, [@CMX_NN, 0]>)
                 outputs(%2 as %arg3: memref<6x512x8x4xf16, [@CMX_NN, 0]>)
@@ -1092,7 +1125,7 @@ func.func @ConvertMemPermuteNCHWToNWHC(%arg0: memref<6x4x8x512xf16, @DDR>)
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder_fp16.cpp", VPU.kernel_entry = "reorder_fp16"}
+    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder.cpp", VPU.kernel_entry = "reorder"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -1112,7 +1145,7 @@ func.func @ConvertMemPermuteNCHWToCWNH(%arg0: memref<86x4x256x4xf16, @DDR>)
     }
 
     %2 = memref.alloc() : memref<4x4x86x256xf16, [@CMX_NN, 0]>
-    %3 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+    %3 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
                 @VPU.SW::@builtin_MemPermute
                 inputs(%1 as %arg2: memref<86x4x256x4xf16, [@CMX_NN, 0]>)
                 outputs(%2 as %arg3: memref<4x4x86x256xf16, [@CMX_NN, 0]>)

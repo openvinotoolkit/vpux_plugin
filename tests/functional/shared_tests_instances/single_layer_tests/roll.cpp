@@ -1,53 +1,52 @@
-// Copyright (C) 2022-2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022-2024 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
-#include "single_layer_tests/roll.hpp"
+#include "single_op_tests/roll.hpp"
+#include "vpu_ov2_layer_test.hpp"
 
-#include <vector>
+namespace ov {
 
-#include "common_test_utils/test_constants.hpp"
-#include "vpu_ov1_layer_test.hpp"
+namespace test {
 
-namespace LayerTestsDefinitions {
+class RollLayerTestCommon : public RollLayerTest, virtual public VpuOv2LayerTest {};
 
-class RollLayerTestCommon : public RollLayerTest, virtual public LayerTestsUtils::VpuOv1LayerTestsCommon {};
-
-class RollLayerTest_NPU3700 : public RollLayerTestCommon {};
-class RollLayerTest_NPU3720 : public RollLayerTestCommon {};
-
-TEST_P(RollLayerTest_NPU3700, HW) {
-    setPlatformVPU3700();
-    setDefaultHardwareModeMLIR();
-    Run();
+TEST_P(RollLayerTestCommon, NPU3700) {
+    setDefaultHardwareMode();
+    run(Platform::NPU3700);
 }
 
-TEST_P(RollLayerTest_NPU3720, SW) {
-    setPlatformVPU3720();
-    setReferenceSoftwareModeMLIR();
-    Run();
+TEST_P(RollLayerTestCommon, NPU3720) {
+    setReferenceSoftwareMode();
+    run(Platform::NPU3720);
 }
 
-}  // namespace LayerTestsDefinitions
+TEST_P(RollLayerTestCommon, NPU4000) {
+    setReferenceSoftwareMode();
+    run(Platform::NPU4000);
+}
 
-using namespace LayerTestsDefinitions;
+}  // namespace test
+
+}  // namespace ov
+
+using ov::test::RollLayerTestCommon;
 
 namespace {
 
-const std::vector<InferenceEngine::Precision> inputPrecisions = {
-        InferenceEngine::Precision::U8, InferenceEngine::Precision::I32,
-        InferenceEngine::Precision::FP16,  // CPU-plugin has parameter I16, but NPU does not support it. So value from
-                                           // CPU-plugin I16 is changed to FP16.
-        InferenceEngine::Precision::FP32};
+const std::vector<ov::element::Type> modelTypes = {
+        ov::element::u8, ov::element::i32,
+        ov::element::f16,  // CPU-plugin has parameter I16, but NPU does not support it. So value from
+                           // CPU-plugin I16 is changed to FP16.
+};
 
-std::vector<std::vector<size_t>> inputShapes = {
-        {16},             // testCase1D
-        {17, 19},         // testCase2DZeroShifts
-        {4, 3},           // testCase2D
-        {2, 320, 320},    // testCase3D
-        {3, 11, 6, 4},    // testCaseNegativeUnorderedAxes4D
-        {2, 16, 32, 32},  // testCaseRepeatingAxes5D
-        {600, 450}        // testCase2D
+std::vector<std::vector<ov::Shape>> inputShapes = {
+        {{16}},             // testCase1D
+        {{17, 19}},         // testCase2DZeroShifts
+        {{4, 3}},           // testCase2D
+        {{2, 320, 320}},    // testCase3D
+        {{3, 11, 6, 4}},    // testCaseNegativeUnorderedAxes4D
+        {{2, 16, 32, 32}},  // testCaseRepeatingAxes5D
 };
 
 const std::vector<std::vector<int64_t>> shift = {
@@ -56,88 +55,51 @@ const std::vector<std::vector<int64_t>> shift = {
 const std::vector<std::vector<int64_t>> axes = {
         {0}, {0, 1}, {0, 1, 0}, {1, 2}, {-3, -2}, {-1, -2, -3, 1, 0, 3, 3, 2, -2, -3}, {0, 1}};
 
-const auto testRollParams0 = ::testing::Combine(::testing::Values(inputShapes[0]), ::testing::ValuesIn(inputPrecisions),
-                                                ::testing::Values(shift[0]), ::testing::Values(axes[0]),
-                                                ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+const auto testRollParams0 =
+        ::testing::Combine(::testing::Values(ov::test::static_shapes_to_test_representation(inputShapes[0])),
+                           ::testing::ValuesIn(modelTypes), ::testing::Values(shift[0]), ::testing::Values(axes[0]),
+                           ::testing::Values(ov::test::utils::DEVICE_NPU));
 
-const auto testRollParams1 = ::testing::Combine(::testing::Values(inputShapes[1]), ::testing::ValuesIn(inputPrecisions),
-                                                ::testing::Values(shift[1]), ::testing::Values(axes[1]),
-                                                ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+const auto testRollParams1 =
+        ::testing::Combine(::testing::Values(ov::test::static_shapes_to_test_representation(inputShapes[1])),
+                           ::testing::ValuesIn(modelTypes), ::testing::Values(shift[1]), ::testing::Values(axes[1]),
+                           ::testing::Values(ov::test::utils::DEVICE_NPU));
 
-const auto testRollParams2 = ::testing::Combine(::testing::Values(inputShapes[2]), ::testing::ValuesIn(inputPrecisions),
-                                                ::testing::Values(shift[2]), ::testing::Values(axes[2]),
-                                                ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+const auto testRollParams2 =
+        ::testing::Combine(::testing::Values(ov::test::static_shapes_to_test_representation(inputShapes[2])),
+                           ::testing::ValuesIn(modelTypes), ::testing::Values(shift[2]), ::testing::Values(axes[2]),
+                           ::testing::Values(ov::test::utils::DEVICE_NPU));
 
-const auto testRollParams3 = ::testing::Combine(::testing::Values(inputShapes[3]), ::testing::ValuesIn(inputPrecisions),
-                                                ::testing::Values(shift[3]), ::testing::Values(axes[3]),
-                                                ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+const auto testRollParams3 =
+        ::testing::Combine(::testing::Values(ov::test::static_shapes_to_test_representation(inputShapes[3])),
+                           ::testing::ValuesIn(modelTypes), ::testing::Values(shift[3]), ::testing::Values(axes[3]),
+                           ::testing::Values(ov::test::utils::DEVICE_NPU));
 
-const auto testRollParams4 = ::testing::Combine(::testing::Values(inputShapes[4]), ::testing::ValuesIn(inputPrecisions),
-                                                ::testing::Values(shift[4]), ::testing::Values(axes[4]),
-                                                ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+const auto testRollParams4 =
+        ::testing::Combine(::testing::Values(ov::test::static_shapes_to_test_representation(inputShapes[4])),
+                           ::testing::ValuesIn(modelTypes), ::testing::Values(shift[4]), ::testing::Values(axes[4]),
+                           ::testing::Values(ov::test::utils::DEVICE_NPU));
 
-const auto testRollParams5 = ::testing::Combine(::testing::Values(inputShapes[5]), ::testing::ValuesIn(inputPrecisions),
-                                                ::testing::Values(shift[5]), ::testing::Values(axes[5]),
-                                                ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+const auto testRollParams5 =
+        ::testing::Combine(::testing::Values(ov::test::static_shapes_to_test_representation(inputShapes[5])),
+                           ::testing::ValuesIn(modelTypes), ::testing::Values(shift[5]), ::testing::Values(axes[5]),
+                           ::testing::Values(ov::test::utils::DEVICE_NPU));
 
-const auto testRollParams6 = ::testing::Combine(::testing::Values(inputShapes[6]), ::testing::ValuesIn(inputPrecisions),
-                                                ::testing::Values(shift[6]), ::testing::Values(axes[6]),
-                                                ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+INSTANTIATE_TEST_CASE_P(smoke_precommit_Roll_Test_Check0, RollLayerTestCommon, testRollParams0,
+                        RollLayerTestCommon::getTestCaseName);
 
-const auto testRollParams3D =
-        ::testing::Combine(::testing::Values(inputShapes[3]),
-                           ::testing::Values(InferenceEngine::Precision::FP32, InferenceEngine::Precision::FP16,
-                                             InferenceEngine::Precision::U8),
-                           ::testing::Values(shift[3]), ::testing::Values(axes[3]),
-                           ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+INSTANTIATE_TEST_CASE_P(smoke_Roll_Test_Check1, RollLayerTestCommon, testRollParams1,
+                        RollLayerTestCommon::getTestCaseName);
 
-const auto testRollParams3DDisabled =
-        ::testing::Combine(::testing::Values(inputShapes[3]), ::testing::Values(InferenceEngine::Precision::I32),
-                           ::testing::Values(shift[3]), ::testing::Values(axes[3]),
-                           ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+INSTANTIATE_TEST_CASE_P(smoke_Roll_Test_Check2, RollLayerTestCommon, testRollParams2,
+                        RollLayerTestCommon::getTestCaseName);
 
-// NPU3700
+INSTANTIATE_TEST_CASE_P(smoke_Roll_Test_Check3, RollLayerTestCommon, testRollParams3,
+                        RollLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(smoke_Roll_Test_Check0, RollLayerTest_NPU3700, testRollParams0,
-                        RollLayerTest_NPU3700::getTestCaseName);
+INSTANTIATE_TEST_CASE_P(smoke_Roll_Test_Check4, RollLayerTestCommon, testRollParams4,
+                        RollLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(smoke_Roll_Test_Check1, RollLayerTest_NPU3700, testRollParams1,
-                        RollLayerTest_NPU3700::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_Roll_Test_Check2, RollLayerTest_NPU3700, testRollParams2,
-                        RollLayerTest_NPU3700::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_Roll_Test_Check3, RollLayerTest_NPU3700, testRollParams3,
-                        RollLayerTest_NPU3700::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_Roll_Test_Check4, RollLayerTest_NPU3700, testRollParams4,
-                        RollLayerTest_NPU3700::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_Roll_Test_Check5, RollLayerTest_NPU3700, testRollParams5,
-                        RollLayerTest_NPU3700::getTestCaseName);
-
-// NPU3720
-
-INSTANTIATE_TEST_CASE_P(smoke_Roll_Test_Check0, RollLayerTest_NPU3720, testRollParams0,
-                        RollLayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_Roll_Test_Check1, RollLayerTest_NPU3720, testRollParams1,
-                        RollLayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_Roll_Test_Check2, RollLayerTest_NPU3720, testRollParams2,
-                        RollLayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_Roll_Test_Check3, RollLayerTest_NPU3720, testRollParams3,
-                        RollLayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_Roll_Test_Check4, RollLayerTest_NPU3720, testRollParams4,
-                        RollLayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_Roll_Test_Check5, RollLayerTest_NPU3720, testRollParams5,
-                        RollLayerTest_NPU3720::getTestCaseName);
-
-// Tracking number [E#86494]
-INSTANTIATE_TEST_CASE_P(DISABLED_TMP_smoke_Roll_Test_Check6, RollLayerTest_NPU3720, testRollParams6,
-                        RollLayerTest_NPU3720::getTestCaseName);
-
+INSTANTIATE_TEST_CASE_P(smoke_Roll_Test_Check5, RollLayerTestCommon, testRollParams5,
+                        RollLayerTestCommon::getTestCaseName);
 }  // namespace

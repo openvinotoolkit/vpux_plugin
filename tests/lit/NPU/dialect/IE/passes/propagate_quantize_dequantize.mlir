@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --propagate-quantize-dequantize %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 !qElemType = !quant.uniform<u8:f16, 0.0016544117647058823>
 
 // CHECK-LABEL: @PropagateDequantReshape
@@ -64,6 +64,24 @@ func.func @PropagateDequantTranspose(%arg0: tensor<1x256x2x2x!qElemType>) -> ten
   //CHECK: [[VAL1:%.*]] = IE.Dequantize([[VAL0]]) {dstElemType = f16} : tensor<1x2x2x256x!qElemType> -> tensor<1x2x2x256xf16>
   //CHECK: [[VAL2:%.*]] = IE.Add
   //CHECK: return [[VAL2]]
+}
+
+// -----
+
+!qElemType = !quant.uniform<u8:f16, 0.0016649433210784313>
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @PropagateDequantBeforeOutput
+func.func @PropagateDequantBeforeOutput(%arg0: tensor<1x256x2x2x!qElemType>) -> tensor<1x2x2x256xf16> {
+  %1 = IE.Dequantize(%arg0) {dstElemType = f16} : tensor<1x256x2x2x!qElemType> -> tensor<1x256x2x2xf16>
+  %2 = IE.Transpose(%1) {order_value = #NHWC} : tensor<1x256x2x2xf16> -> tensor<1x2x2x256xf16>
+
+  return %2 : tensor<1x2x2x256xf16>
+
+  //CHECK: [[VAL0:%.*]] = IE.Transpose(%arg0) {order_value = #NHWC}
+  //CHECK-SAME: : tensor<1x256x2x2x!qElemType> -> tensor<1x2x2x256x!qElemType>
+  //CHECK: [[VAL1:%.*]] = IE.Dequantize([[VAL0]]) {dstElemType = f16} : tensor<1x2x2x256x!qElemType> -> tensor<1x2x2x256xf16>
+  //CHECK: return [[VAL1]]
 }
 
 // -----
@@ -643,54 +661,6 @@ func.func @NoPropagationDequantPerAxisClamp(%arg0: tensor<1x3x1x2xf32>) -> (tens
   //CHECK: [[QUANTIZE0:%.*]] = IE.Quantize([[CLAMP]])
   //CHECK: [[QUANTIZE1:%.*]] = IE.Quantize([[CLAMP]])
   //CHECK: return [[QUANTIZE0]], [[QUANTIZE1]]
-}
-
-// -----
-
-!qElemType = !quant.uniform<u8:f16, 0.0024337469362745098>
-
-// CHECK-LABEL: @PropagateDequantMaxPool
-func.func @PropagateDequantMaxPool(%arg0: tensor<1x512x19x19x!qElemType>) -> tensor<1x512x19x19xf16> {
-  %1 = IE.Dequantize(%arg0) {dstElemType = f16} : tensor<1x512x19x19x!qElemType> -> tensor<1x512x19x19xf16>
-  %2 = IE.MaxPool(%1) {
-        kernel_size = [13, 13],
-        pads_begin = [6, 6],
-        pads_end = [6, 6],
-        rounding_type = #IE.rounding_type<FLOOR>,
-        strides = [1, 1]} : tensor<1x512x19x19xf16> -> tensor<1x512x19x19xf16>
-  %3 = IE.Add(%2, %2) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>}  : tensor<1x512x19x19xf16>, tensor<1x512x19x19xf16> -> tensor<1x512x19x19xf16>
-
-  return %3 : tensor<1x512x19x19xf16>
-
-  //CHECK: [[MAXPOOL:%.*]] = IE.MaxPool(%arg0) {kernel_size = [13, 13], pads_begin = [6, 6], pads_end = [6, 6], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]} : tensor<1x512x19x19x!qElemType> -> tensor<1x512x19x19x!qElemType>
-  //CHECK: [[DEQUANT:%.*]] = IE.Dequantize([[MAXPOOL]]) {dstElemType = f16} : tensor<1x512x19x19x!qElemType> -> tensor<1x512x19x19xf16>
-  //CHECK: [[ADD:%.*]] = IE.Add([[DEQUANT]], [[DEQUANT]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x512x19x19xf16>, tensor<1x512x19x19xf16> -> tensor<1x512x19x19xf16>
-  //CHECK: return [[ADD]] : tensor<1x512x19x19xf16>
-
-}
-
-// -----
-
-!qElemType = !quant.uniform<u8:f16, 0.0024337469362745098>
-
- // CHECK-LABEL: @PropagateQuantMaxPool
-func.func @PropagateQuantMaxPool(%arg0: tensor<1x512x19x19xf16>) -> tensor<1x512x19x19x!qElemType> {
-  %1 = IE.MaxPool(%arg0) {
-        kernel_size = [13, 13],
-        pads_begin = [6, 6],
-        pads_end = [6, 6],
-        rounding_type = #IE.rounding_type<FLOOR>,
-        strides = [1, 1]} : tensor<1x512x19x19xf16> -> tensor<1x512x19x19xf16>
-  %2 = IE.Quantize(%1) {dstElemType = !qElemType} : tensor<1x512x19x19xf16> -> tensor<1x512x19x19x!qElemType>
-  %3 = IE.Add(%2, %2) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>}  : tensor<1x512x19x19x!qElemType>, tensor<1x512x19x19x!qElemType> -> tensor<1x512x19x19x!qElemType>
-
-  return %3 : tensor<1x512x19x19x!qElemType>
-
-  //CHECK: [[QUANTIZE:%.*]] = IE.Quantize(%arg0) {dstElemType = !qElemType} : tensor<1x512x19x19xf16> -> tensor<1x512x19x19x!qElemType>
-  //CHECK: [[MAXPOOL:%.*]] = IE.MaxPool([[QUANTIZE]]) {kernel_size = [13, 13], pads_begin = [6, 6], pads_end = [6, 6], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]} : tensor<1x512x19x19x!qElemType> -> tensor<1x512x19x19x!qElemType>
-  //CHECK: [[ADD:%.*]] = IE.Add([[MAXPOOL]], [[MAXPOOL]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x512x19x19x!qElemType>, tensor<1x512x19x19x!qElemType> -> tensor<1x512x19x19x!qElemType>
-  //CHECK: return [[ADD]] : tensor<1x512x19x19x!qElemType>
-
 }
 
 // -----
@@ -1435,4 +1405,48 @@ func.func @PropagatePerAxisDequant(%arg0: tensor<2x16x4x8x!qElemType>) -> tensor
     return %CONVERT : tensor<2x4x8x16xf32>
 
     // CHECK:   return [[CONVERT]] : tensor<2x4x8x16xf32>
+}
+
+// -----
+!qElemType = !quant.uniform<u8:f16, 0.0024337469362745098>
+
+// CHECK-LABEL: @PropagateDequantMaxPoolNCE
+func.func @PropagateDequantMaxPoolNCE(%arg0: tensor<1x8x1x4x!qElemType>) -> tensor<1x8x1x4xf16> {
+    %1 = IE.Dequantize(%arg0) {dstElemType = f16} : tensor<1x8x1x4x!qElemType> -> tensor<1x8x1x4xf16>
+    %2 = IE.MaxPool(%1) {
+        kernel_size = [1, 1],
+        pads_begin = [0, 0],
+        pads_end = [0, 0],
+        rounding_type = #IE.rounding_type<FLOOR>,
+        strides = [1, 1]} : tensor<1x8x1x4xf16> -> tensor<1x8x1x4xf16>
+    %3 = IE.Add(%2, %2) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>}  : tensor<1x8x1x4xf16>, tensor<1x8x1x4xf16> -> tensor<1x8x1x4xf16>
+
+    return %3 : tensor<1x8x1x4xf16>
+
+    //CHECK: [[MAXPOOL:%.*]] = IE.MaxPool(%arg0) {kernel_size = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]} : tensor<1x8x1x4x!qElemType> -> tensor<1x8x1x4x!qElemType>
+    //CHECK: [[DEQUANT:%.*]] = IE.Dequantize([[MAXPOOL]]) {dstElemType = f16} : tensor<1x8x1x4x!qElemType> -> tensor<1x8x1x4xf16>
+    //CHECK: [[ADD:%.*]] = IE.Add([[DEQUANT]], [[DEQUANT]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x8x1x4xf16>, tensor<1x8x1x4xf16> -> tensor<1x8x1x4xf16>
+    //CHECK: return [[ADD]] : tensor<1x8x1x4xf16>
+  
+}
+
+// -----
+
+!qElemType = !quant.uniform<u8:f16, 1.0000000000000000E-1>
+
+// CHECK-LABEL: @QuantizePropagationMaxPoolNCE
+func.func @QuantizePropagationMaxPoolNCE(%arg0: tensor<1x8x1x4xf16>) -> tensor<1x8x1x4x!qElemType> {
+    %0 = IE.MaxPool(%arg0) {
+        kernel_size = [1, 1],
+        pads_begin = [0, 0],
+        pads_end = [0, 0],
+        rounding_type = #IE.rounding_type<FLOOR>,
+        strides = [1, 1]} : tensor<1x8x1x4xf16> -> tensor<1x8x1x4xf16>
+    %1 = IE.Quantize(%0) {dstElemType = !qElemType} : tensor<1x8x1x4xf16> -> tensor<1x8x1x4x!qElemType>
+    return %1 : tensor<1x8x1x4x!qElemType>
+
+    //CHECK: [[QUANTIZE:%.*]]  = IE.Quantize(%arg0) {dstElemType = !qElemType} : tensor<1x8x1x4xf16> -> tensor<1x8x1x4x!qElemType>
+    //CHECK: [[MAXPOOL:%.*]] = IE.MaxPool([[QUANTIZE]]) {kernel_size = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]} : tensor<1x8x1x4x!qElemType> -> tensor<1x8x1x4x!qElemType>
+    //CHECK: return [[MAXPOOL]] : tensor<1x8x1x4x!qElemType>
+
 }

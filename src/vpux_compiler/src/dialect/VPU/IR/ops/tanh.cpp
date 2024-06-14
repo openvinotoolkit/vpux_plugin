@@ -30,7 +30,7 @@ mlir::LogicalResult vpux::VPU::TanhOp::inferReturnTypes(mlir::MLIRContext* ctx, 
 // ClusteredOpInterface
 //
 
-bool vpux::VPU::TanhOp::checkStrategyCompatibility(VPU::MultiClusterStrategy strategy) {
+bool vpux::VPU::TanhOp::checkStrategyCompatibility(VPU::MultiClusterStrategy strategy, size_t) {
     // Track [E#68740]
     // SOK is temporarily disabled because SEGMENTED SOK causes spilling and performance regression
     // Need to enable SOK after subgraph opt's refactoring
@@ -39,8 +39,8 @@ bool vpux::VPU::TanhOp::checkStrategyCompatibility(VPU::MultiClusterStrategy str
 
 vpux::VPU::DistributedTensorAttr vpux::VPU::TanhOp::getExplicitDistributedTensorAttr(
         vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, mlir::ArrayAttr numTiles,
-        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::ArrayAttr /*kernel*/,
-        vpux::VPU::PaddingAttr /*pad*/, mlir::ArrayAttr /*stride*/, mlir::UnitAttr uniformDistributedSegments) {
+        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::UnitAttr uniformDistributedSegments,
+        const vpux::VPU::OverlapDistributionParams& /*overlapParams*/) {
     return VPU::getSWExplicitDistributedTensorAttr(mlir::dyn_cast<VPU::SWOpInterface>(getOperation()), shape,
                                                    distributionMode, numTiles, numClusters, alignment,
                                                    uniformDistributedSegments);
@@ -72,10 +72,5 @@ bool vpux::VPU::TanhOp::fitIntoCMX(llvm::ArrayRef<vpux::NDTypeInterface> buffers
 }
 
 bool vpux::VPU::TanhOp::supportCycleCostCalculation() {
-    return false;
-}
-
-bool vpux::VPU::TanhOp::availableSingleMerge() {
-    // do not fuse post ops as first op in the block
     return false;
 }

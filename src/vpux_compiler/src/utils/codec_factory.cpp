@@ -10,14 +10,7 @@
 namespace vpux {
 
 std::unique_ptr<ICodec> getBitCompactorCodec(VPU::ArchKind arch) {
-    switch (arch) {
-#ifdef ENABLE_BITCOMPACTOR
-    case VPU::ArchKind::VPUX37XX:
-        return std::make_unique<vpux::BitCompactorCodec>();
-#endif
-    default:
-        VPUX_THROW("Unsupported architecture '{0}' or codec not enabled", arch);
-    }
+    return std::make_unique<vpux::BitCompactorCodec>(arch);
 }
 
 std::unique_ptr<ICodec> makeCodec(const ICodec::CompressionAlgorithm algo, VPU::ArchKind arch) {

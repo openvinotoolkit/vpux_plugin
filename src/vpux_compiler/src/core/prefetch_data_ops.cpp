@@ -5,7 +5,7 @@
 
 #include "vpux/compiler/core/prefetch_data_ops.hpp"
 
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 
 #include "vpux/utils/core/range.hpp"
@@ -40,7 +40,7 @@ bool PrefetchDataOps::isScheduled(size_t opIdx) {
 }
 
 bool PrefetchDataOps::hasDependencies(size_t opIdx) {
-    return _depsInfo.getOpDeps(opIdx).any();
+    return !_depsInfo.getOpDeps(opIdx).empty();
 }
 
 size_t PrefetchDataOps::getOperationCycleCost(size_t opIdx) {
@@ -71,7 +71,7 @@ PrefetchDataOps::CycleInfo PrefetchDataOps::scheduleOp(size_t opIdx, size_t cycl
 }
 
 bool PrefetchDataOps::dependenciesScheduled(size_t opIdx) {
-    for (const auto depIdx : _depsInfo.getOpDeps(opIdx).set_bits()) {
+    for (const auto depIdx : _depsInfo.getOpDeps(opIdx)) {
         if (!isScheduled(depIdx)) {
             return false;
         }
@@ -81,7 +81,7 @@ bool PrefetchDataOps::dependenciesScheduled(size_t opIdx) {
 
 size_t PrefetchDataOps::getDependencyCycleEnd(size_t opIdx) {
     size_t cycleEnd = std::numeric_limits<size_t>::min();
-    for (const auto depIdx : _depsInfo.getOpDeps(opIdx).set_bits()) {
+    for (const auto depIdx : _depsInfo.getOpDeps(opIdx)) {
         VPUX_THROW_UNLESS(isScheduled(depIdx), "Dependency '{0}' was not scheduled for '{1}'", depIdx, opIdx);
         cycleEnd = std::max(cycleEnd, _operationCycles[depIdx].getCycleEnd());
     }
@@ -228,7 +228,7 @@ void PrefetchDataOps::prefetchDataOps(size_t dmaTargetEndCycle) {
 size_t PrefetchDataOps::scheduleDependenciesForCompute(size_t opIdx, VPU::ExecutorKind executorKind) {
     // find earliest possible cycle for compute op, it will be the optimal end cycle for data ops
     auto dataOpTargetCycleEnd = getNextFreePipelineCycle(executorKind);
-    for (const auto dep : _depsInfo.getOpDeps(opIdx).set_bits()) {
+    for (const auto dep : _depsInfo.getOpDeps(opIdx)) {
         if (!isScheduled(dep)) {
             continue;
         }
@@ -236,7 +236,7 @@ size_t PrefetchDataOps::scheduleDependenciesForCompute(size_t opIdx, VPU::Execut
     }
 
     // schedule dependencies for compute op and update cycle end for dependencies
-    for (const auto depIdx : _depsInfo.getOpDeps(opIdx).set_bits()) {
+    for (const auto depIdx : _depsInfo.getOpDeps(opIdx)) {
         if (isScheduled(depIdx)) {
             continue;
         } else if (_prefetchOpsDefined || hasDependencies(depIdx)) {
@@ -278,7 +278,7 @@ void PrefetchDataOps::performCycleScheduling() {
     _log.trace("Performing cycle scheduling, with prefetching = '{0}'", _prefetchOpsDefined);
     for (const auto& op : _scheduledOps) {
         // skip implicit spill and profiling operations
-        if (!op.isOriginalOp() || op.isNonComputeChain) {
+        if (!op.isOriginalOp()) {
             continue;
         }
 
@@ -348,7 +348,8 @@ void PrefetchDataOps::createDataOpPipeline() {
     _operationCycles.clear();
     _executorPipelineCycles = {{VPU::ExecutorKind::DMA_NN, {}},    {VPU::ExecutorKind::DPU, {}},
                                {VPU::ExecutorKind::SHAVE_UPA, {}}, {VPU::ExecutorKind::NCE, {}},
-                               {VPU::ExecutorKind::SHAVE_NN, {}},  {VPU::ExecutorKind::SHAVE_ACT, {}}};
+                               {VPU::ExecutorKind::SHAVE_NN, {}},  {VPU::ExecutorKind::SHAVE_ACT, {}},
+                               {VPU::ExecutorKind::M2I, {}}};
 }
 
 void PrefetchDataOps::sortOps(SmallVector<CycleInfo>& toBeSorted) {
@@ -397,7 +398,7 @@ SmallVector<PrefetchDataOps::CycleInfo> PrefetchDataOps::getNewOrder() {
 
     std::set<size_t> scheduledOps;
     const auto dependenciesScheduled = [&](size_t opIdx) {
-        for (const auto depIdx : _depsInfo.getOpDeps(opIdx).set_bits()) {
+        for (const auto depIdx : _depsInfo.getOpDeps(opIdx)) {
             if (scheduledOps.find(depIdx) == scheduledOps.end()) {
                 return false;
             }

@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -41,8 +41,8 @@ module @VPU.SW {
     // `memref` will be translated to `MemRefData`, while raw scalars will be translated as is.
     func.func private @builtin_CTCGreedyDecoder(%input0 : memref<*xf16>, %input1 : memref<*xf16>, %output : memref<*xf16>, %mergeRepeated : i64)
         attributes {
-            VPU.kernel_code = "single_shave_ctc_greedy_decoder.cpp",
-            VPU.kernel_entry = "single_shave_ctc_greedy_decoder"
+            VPU.kernel_code = "ctc_greedy_decoder.cpp",
+            VPU.kernel_entry = "ctc_greedy_decoder"
         }
     // management kernel definition
     func.func private @runtime()
@@ -70,7 +70,7 @@ func.func @main(%0: memref<10x1x16xf16>, %2: memref<1x10x1x1xf16>) -> memref<1x1
 
     // Genetic Kernel information for the scheduler.
     VPURT.Task waits(%b0  : !VPURT.Barrier) updates(%b1  : !VPURT.Barrier) {
-        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
                     @VPU.SW::@builtin_CTCGreedyDecoder            // The reference to the Kernel function.
                     inputs(%in0_tile0_cmx as %arg0: memref<10x1x16xf16, [@CMX_NN, 0]>, %in1_tile0_cmx as %arg1: memref<10x1xf16, [@CMX_NN, 0]>)     // Inputs/outputs buffers for generic operation interface
                     outputs(%out_tile0_cmx as %arg2: memref<1x10x1x1xf16, [@CMX_NN, 0]>)   // and their mapping to inner region.

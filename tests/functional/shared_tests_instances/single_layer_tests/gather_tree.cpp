@@ -1,70 +1,80 @@
-// Copyright (C) Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
-#include "single_layer_tests/gather_tree.hpp"
+#include "single_op_tests/gather_tree.hpp"
 #include <vector>
-#include "vpu_ov1_layer_test.hpp"
+#include "vpu_ov2_layer_test.hpp"
 
-namespace LayerTestsDefinitions {
+using namespace ov::test::utils;
+using ov::test::utils::InputLayerType;
 
-class GatherTreeLayerTestCommon : public GatherTreeLayerTest, virtual public LayerTestsUtils::VpuOv1LayerTestsCommon {
-    void SkipBeforeLoad() override {
-        InferenceEngine::Precision netPrecision;
-        ngraph::helpers::InputLayerType secondaryInputType;
-        std::tie(std::ignore, secondaryInputType, netPrecision, std::ignore, std::ignore, std::ignore, std::ignore,
-                 std::ignore) = GetParam();
+namespace ov {
+namespace test {
 
-        if (secondaryInputType == ngraph::helpers::InputLayerType::PARAMETER) {
-            throw LayerTestsUtils::VpuSkipTestException("Unsupported secondaryInputType, OV provides scalor end_token "
-                                                        "only, but plugin only supports tensors.");
-        }
-
-        if (netPrecision == InferenceEngine::Precision::FP32 &&
-            secondaryInputType == ngraph::helpers::InputLayerType::CONSTANT) {
-            throw LayerTestsUtils::VpuSkipTestException(
-                    "FP32 precision with secondaryInputType == CONSTANT generates invalid parent_ids!");
-        }
-    }
-};
+class GatherTreeLayerTestCommon : public GatherTreeLayerTest, virtual public VpuOv2LayerTest {};
 
 class GatherTreeLayerTest_NPU3720 : public GatherTreeLayerTestCommon {};
+class GatherTreeLayerTest_NPU4000 : public GatherTreeLayerTestCommon {};
 
-TEST_P(GatherTreeLayerTest_NPU3720, HW) {
-    setPlatformVPU3720();
-    setDefaultHardwareModeMLIR();
-    Run();
+void skipCompilationCallBackImpl(std::stringstream& skip, InputLayerType secInType, ov::element::Type precision) {
+    if (secInType == InputLayerType::PARAMETER) {
+        skip << "Unsupported secondaryInputType, OV provides scalor end_token only, but plugin only supports "
+                "tensors.";
+    }
+    if (precision == ov::element::f32 && secInType == InputLayerType::CONSTANT) {
+        skip << "FP32 precision with secondaryInputType == CONSTANT generates invalid parent_ids!";
+    }
 }
 
-}  // namespace LayerTestsDefinitions
+TEST_P(GatherTreeLayerTest_NPU3720, HW) {
+    setSkipCompilationCallback([](std::stringstream& skip) {
+        InputLayerType secondaryInputType = std::get<1>(GetParam());
+        ov::element::Type modelType = std::get<2>(GetParam());
+        skipCompilationCallBackImpl(skip, secondaryInputType, modelType);
+    });
+    setDefaultHardwareMode();
+    run(Platform::NPU3720);
+}
 
-using namespace LayerTestsDefinitions;
+TEST_P(GatherTreeLayerTest_NPU4000, SW) {
+    setSkipCompilationCallback([](std::stringstream& skip) {
+        InputLayerType secondaryInputType = std::get<1>(GetParam());
+        ov::element::Type modelType = std::get<2>(GetParam());
+        skipCompilationCallBackImpl(skip, secondaryInputType, modelType);
+    });
+    setReferenceSoftwareMode();
+    run(Platform::NPU4000);
+}
+
+}  // namespace test
+}  // namespace ov
+
+using namespace ov::test;
 
 namespace {
 
-std::vector<std::vector<size_t>> inShapes = {
+std::vector<ov::Shape> inShapes = {
         {10, 1, 100},
         {5, 1, 10},
         {3, 2, 3},
         {20, 20, 10},
 };
 
-const std::vector<ngraph::helpers::InputLayerType> secondaryInputTypes = {ngraph::helpers::InputLayerType::CONSTANT,
-                                                                          ngraph::helpers::InputLayerType::PARAMETER};
+const std::vector<InputLayerType> secondaryInputTypes = {InputLayerType::CONSTANT, InputLayerType::PARAMETER};
 
-const std::vector<InferenceEngine::Precision> netPrecision = {
-        InferenceEngine::Precision::FP32, InferenceEngine::Precision::I32, InferenceEngine::Precision::FP16};
+const std::vector<ov::element::Type> modelType = {ov::element::f32, ov::element::i32, ov::element::f16};
 
-const std::vector<InferenceEngine::Precision> precision = {InferenceEngine::Precision::UNSPECIFIED};
-
-const std::vector<InferenceEngine::Layout> layouts = {InferenceEngine::Layout::ANY};
-
-const auto gatherTreeArgsSubsetPrecommit = testing::Combine(
-        testing::ValuesIn(inShapes), testing::ValuesIn(secondaryInputTypes), testing::ValuesIn(netPrecision),
-        testing::ValuesIn(precision), testing::ValuesIn(precision), testing::ValuesIn(layouts),
-        testing::ValuesIn(layouts), testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+const auto gatherTreeArgsSubsetPrecommit =
+        testing::Combine(testing::ValuesIn(inShapes),             // Input tensors shape
+                         testing::ValuesIn(secondaryInputTypes),  // Secondary input type
+                         testing::ValuesIn(modelType),            // Model type
+                         testing::Values(DEVICE_NPU));            // Device name
 
 INSTANTIATE_TEST_SUITE_P(precommit_gather_tree, GatherTreeLayerTest_NPU3720, gatherTreeArgsSubsetPrecommit,
+                         GatherTreeLayerTest::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(precommit_gather_tree, GatherTreeLayerTest_NPU4000, gatherTreeArgsSubsetPrecommit,
                          GatherTreeLayerTest::getTestCaseName);
 
 }  // namespace

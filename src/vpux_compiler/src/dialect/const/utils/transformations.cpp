@@ -7,8 +7,8 @@
 #include "vpux/compiler/dialect/const/attributes/content.hpp"
 #include "vpux/compiler/dialect/const/utils/const_logger.hpp"
 #include "vpux/compiler/dialect/const/utils/mem_permute_optimized.hpp"
+#include "vpux/compiler/utils/loop.hpp"
 
-#include "vpux/utils/IE/loop.hpp"
 #include "vpux/utils/core/hash.hpp"
 
 #include <unordered_map>
@@ -50,20 +50,23 @@ Const::Content Const::details::memPermuteTransformation(vpux::Const::Content& in
             const auto outShape = outType.getShape();
             const auto outMemShape = outOrder.toMemoryOrder(outShape);
 
-            loop_1d(LoopExecPolicy::Parallel, input.getType().getNumElements(), [&](int64_t inMemInd1D) {
-                const auto inMemIndND = getMemIndexND(inMemInd1D, inMemShape);
-                const auto outMemIndND = permOrder.toMemoryOrder(ShapeRef(inMemIndND.raw()));
-                const auto outMemInd1D = getMemIndex1D(outMemIndND, outMemShape);
+            loop_1d(LoopExecPolicy::Parallel, memPerm.getContext(), input.getType().getNumElements(),
+                    [&](int64_t inMemInd1D) {
+                        const auto inMemIndND = getMemIndexND(inMemInd1D, inMemShape);
+                        const auto outMemIndND = permOrder.toMemoryOrder(ShapeRef(inMemIndND.raw()));
+                        const auto outMemInd1D = getMemIndex1D(outMemIndND, outMemShape);
 
-                const auto inMemRawInd = checked_cast<size_t>(inMemInd1D * elemSize.count());
-                VPUX_THROW_UNLESS(inMemRawInd < inBuf.size(), "Out-of-bound access in 'memPermuteTransformation'");
+                        const auto inMemRawInd = checked_cast<size_t>(inMemInd1D * elemSize.count());
+                        VPUX_THROW_UNLESS(inMemRawInd < inBuf.size(),
+                                          "Out-of-bound access in 'memPermuteTransformation'");
 
-                const auto outMemRawInd = checked_cast<size_t>(outMemInd1D * elemSize.count());
-                VPUX_THROW_UNLESS(outMemRawInd < outBuf.size(), "Out-of-bound access in 'memPermuteTransformation'");
+                        const auto outMemRawInd = checked_cast<size_t>(outMemInd1D * elemSize.count());
+                        VPUX_THROW_UNLESS(outMemRawInd < outBuf.size(),
+                                          "Out-of-bound access in 'memPermuteTransformation'");
 
-                std::copy_n(inBuf.data() + inMemRawInd, checked_cast<size_t>(elemSize.count()),
-                            outBuf.data() + outMemRawInd);
-            });
+                        std::copy_n(inBuf.data() + inMemRawInd, checked_cast<size_t>(elemSize.count()),
+                                    outBuf.data() + outMemRawInd);
+                    });
         }
         return output;
     }

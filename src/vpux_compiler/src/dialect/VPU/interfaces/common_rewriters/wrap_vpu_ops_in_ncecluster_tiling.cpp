@@ -86,6 +86,9 @@ mlir::LogicalResult VPU::NCEConvolutionRewriter::matchAndRewrite(VPU::NCEConvolu
         mlir::IRMapping mapper;
         mapper.map(origOp->getOperands(), newOperands);
         auto* newOp = builder.clone(*origOp, mapper);
+        if (newOp->hasAttr("multiClusterStrategy")) {
+            newOp->removeAttr("multiClusterStrategy");
+        }
         auto newOutput = newOp->getResult(0);
         const auto newOutType = newOutput.getType().cast<vpux::NDTypeInterface>();
         const auto cmxMemSpace = newOutType.changeMemSpace(MemoryKind::CMX_NN);
@@ -218,6 +221,9 @@ mlir::LogicalResult VPU::NCEDepthConvolutionRewriter::matchAndRewrite(VPU::NCEDe
         mlir::IRMapping mapper;
         mapper.map(origOp->getOperands(), newOperands);
         auto* newOp = builder.clone(*origOp, mapper);
+        if (newOp->hasAttr("multiClusterStrategy")) {
+            newOp->removeAttr("multiClusterStrategy");
+        }
         auto newOutput = newOp->getResult(0);
         const auto newOutType = newOutput.getType().cast<vpux::NDTypeInterface>();
         const auto cmxMemSpace = newOutType.changeMemSpace(MemoryKind::CMX_NN);
@@ -309,6 +315,9 @@ mlir::LogicalResult VPU::NCEMaxPoolRewriter::matchAndRewrite(VPU::NCEMaxPoolOp o
         mlir::IRMapping mapper;
         mapper.map(origOp->getOperands(), newOperands);
         auto* newOp = builder.clone(*origOp, mapper);
+        if (newOp->hasAttr("multiClusterStrategy")) {
+            newOp->removeAttr("multiClusterStrategy");
+        }
         auto newOutput = newOp->getResult(0);
         const auto newOutType = newOutput.getType().cast<vpux::NDTypeInterface>();
         const auto cmxMemSpace = newOutType.changeMemSpace(MemoryKind::CMX_NN);
@@ -370,6 +379,9 @@ mlir::LogicalResult VPU::NCEAveragePoolRewriter::matchAndRewrite(VPU::NCEAverage
         mlir::IRMapping mapper;
         mapper.map(origOp->getOperands(), newOperands);
         auto* newOp = builder.clone(*origOp, mapper);
+        if (newOp->hasAttr("multiClusterStrategy")) {
+            newOp->removeAttr("multiClusterStrategy");
+        }
         auto newOutput = newOp->getResult(0);
         const auto newOutType = newOutput.getType().cast<vpux::NDTypeInterface>();
         const auto cmxMemSpace = newOutType.changeMemSpace(MemoryKind::CMX_NN);
@@ -428,13 +440,28 @@ mlir::LogicalResult VPU::NCEEltwiseRewriter::matchAndRewrite(VPU::NCEEltwiseOp o
                 activationAlignmentAttr, strategy, _enableExplicitDistributedTensorAttr);
         newEltwiseInputs.push_back(distributedActivationCopyOp->getResult(0));
     } else {
-        const auto distributedActivationCopyOp1 = createDistributedCopyIn(
+        const auto distributedType1 = getDistributedTypeFromInput(
                 clusteredOp, origOp.getInput1(), activationTensorDistributionMode, activationTensorNumTiles,
                 activationAlignmentAttr, strategy, _enableExplicitDistributedTensorAttr);
 
-        const auto distributedActivationCopyOp2 = createDistributedCopyIn(
+        const auto distributedType2 = getDistributedTypeFromInput(
                 clusteredOp, origOp.getInput2(), activationTensorDistributionMode, activationTensorNumTiles,
                 activationAlignmentAttr, strategy, _enableExplicitDistributedTensorAttr);
+
+        mlir::OpBuilder builder(clusteredOp);
+        builder.setInsertionPoint(clusteredOp);
+        const auto inputTensorBodyBuilder = [&](mlir::OpBuilder& builder, mlir::Location loc,
+                                                mlir::ValueRange newOperands) {
+            const auto memSpace = IndexedSymbolAttr::get(builder.getContext(), stringifyEnum(MemoryKind::CMX_NN));
+            auto inputTensorDistributedCopyOp =
+                    builder.create<VPU::CopyOp>(clusteredOp->getLoc(), newOperands[0], memSpace);
+            builder.create<YieldOp>(loc, inputTensorDistributedCopyOp->getResults());
+        };
+
+        const auto distributedActivationCopyOp1 = builder.create<NCEClusterTilingOp>(
+                clusteredOp->getLoc(), distributedType1, origOp.getInput1(), inputTensorBodyBuilder);
+        const auto distributedActivationCopyOp2 = builder.create<NCEClusterTilingOp>(
+                clusteredOp->getLoc(), distributedType2, origOp.getInput2(), inputTensorBodyBuilder);
         newEltwiseInputs.push_back(distributedActivationCopyOp1->getResult(0));
         newEltwiseInputs.push_back(distributedActivationCopyOp2->getResult(0));
     }
@@ -445,6 +472,9 @@ mlir::LogicalResult VPU::NCEEltwiseRewriter::matchAndRewrite(VPU::NCEEltwiseOp o
         mlir::IRMapping mapper;
         mapper.map(origOp->getOperands(), newOperands);
         auto* newOp = builder.clone(*origOp, mapper);
+        if (newOp->hasAttr("multiClusterStrategy")) {
+            newOp->removeAttr("multiClusterStrategy");
+        }
         auto newOutput = newOp->getResult(0);
         const auto newOutType = newOutput.getType().cast<vpux::NDTypeInterface>();
         const auto cmxMemSpace = newOutType.changeMemSpace(MemoryKind::CMX_NN);
@@ -523,6 +553,9 @@ mlir::LogicalResult VPU::NCESWRewriter::matchAndRewrite(VPU::SWOpInterface swOp,
 
     const auto bodyBuilder = [swOp](mlir::OpBuilder& builder, mlir::Location loc, mlir::ValueRange newOperands) {
         auto* newOp = builder.clone(*swOp);
+        if (newOp->hasAttr("multiClusterStrategy")) {
+            newOp->removeAttr("multiClusterStrategy");
+        }
         for (auto operand : swOp->getOperands() | indexed) {
             newOp->setOperand(operand.index(), newOperands[operand.index()]);
         }
@@ -562,221 +595,6 @@ mlir::LogicalResult VPU::NCESWRewriter::matchAndRewrite(VPU::SWOpInterface swOp,
 
     rewriter.replaceOp(swOp, newOutputs);
     return mlir::success();
-}
-
-//
-// NCEPermuteQuantizeRewriter
-//
-
-mlir::LogicalResult VPU::NCEPermuteQuantizeRewriter::matchAndRewrite(VPU::NCEPermuteQuantizeOp origOp,
-                                                                     mlir::PatternRewriter& rewriter) const {
-    _log.trace("[{0}] Got '{1}' at '{2}'", getDebugName(), origOp->getName(), origOp->getLoc());
-
-    if (origOp->getParentOfType<NCEClusterTilingOp>() != nullptr) {
-        return matchFailed(_log, rewriter, origOp, "The operation is already wrapped with NCEClusterTiling");
-    }
-
-    if (!origOp.getMultiClusterStrategy().has_value()) {
-        return matchFailed(_log, rewriter, origOp, "The operation does not have multi-cluster strategy.");
-    }
-
-    auto* ctx = origOp->getContext();
-    auto clusteredOp = mlir::dyn_cast<VPU::ClusteredOpInterface>(origOp.getOperation());
-    VPUX_THROW_UNLESS(clusteredOp != nullptr, "Operation '{0}' cannot be converted to VPU::ClusteredOpInterface",
-                      origOp);
-
-    // NCE PermuteQuantize is expected to be surrounded by reshapes after ConvertIEToVPUNCEPass.
-    // For example:
-    // Input (1x3x16x32) -> Reshape (1x32x3x16) -> LayoutCast (NCHW to NHWC) -> PermuteQuantize
-    // PermuteQuantize input DMA must tile the original shape over height:
-    // 1x3x16x32 with two tiles yields 1x3x8x32 shape per tile (split over height).
-    // PermuteQuantize operation will be converted into NCE ELTWISE.
-    // Each workload of that NCE ELTWISE must process 1x32x3x8 shape (split over width).
-    // 1x32x3x8 permutation to NWCH gives an equivalent of 1x3x8x32 NHWC in each tile.
-    // Output DMA must copy 1x3x8x32 NHWC from both tiles (split over height).
-    const auto inLayoutCast = origOp->getOperand(0).getDefiningOp<VPU::LayoutCastOp>();
-    VPUX_THROW_WHEN(inLayoutCast == nullptr, "VPU.NCE.PermuteQuantize producer must be a VPU.LayoutCast");
-
-    const auto inReshape = inLayoutCast->getOperand(0).getDefiningOp<VPU::ReshapeOp>();
-    VPUX_THROW_WHEN(inReshape == nullptr, "VPU.Reshape -> VPU.LayoutCast -> VPU.NCE.PermuteQuantize not found");
-
-    const auto nextConv = getNextCompressConv(origOp);
-    const auto strategy = nextConv == nullptr ? VPU::MultiClusterStrategy::SplitOverHeight
-                                              : VPU::MultiClusterStrategy::SplitOverHeightOverlapped;
-    const auto workloadStrategy = origOp.getMultiClusterStrategy().value();
-    auto outputTensorType = origOp.getOutput().getType().cast<vpux::NDTypeInterface>();
-    // outputTensorType has shape 1x32x3x16, therefore width must be considered when setting the number of clusters.
-    auto numClusters =
-            VPU::getOptimalNumClusters(clusteredOp, outputTensorType.getShape()[Dims4D::Act::W], workloadStrategy);
-
-    mlir::ArrayAttr alignmentAttr = nullptr;
-    const auto alignment = getActivationTensorAlignment(clusteredOp, numClusters, strategy);
-    if (alignment.has_value()) {
-        alignmentAttr = getIntArrayAttr(ctx, alignment.value());
-    }
-
-    const auto distMode = getActivationTensorDistributionMode(clusteredOp, strategy);
-    const auto tileOverWidth =
-            getIntArrayAttr(ctx, getActivationTensorNumTiles(clusteredOp, numClusters.getInt(), workloadStrategy));
-    const auto tileOverHeight =
-            getIntArrayAttr(ctx, getActivationTensorNumTiles(clusteredOp, numClusters.getInt(), strategy));
-    const auto permuteQuantizeInType = clusteredOp->getOperand(0).getType().cast<vpux::NDTypeInterface>();
-
-    // 1. Tile original input over height via NNDMA.
-    // 2. Cast tiling from split-over-height to split-over-width.
-    // 3. Add ELTWISE cluster task.
-    // 4. Cast ELTWISE output from split-over-width to split-over-height.
-    // 5. Copy split-over-height output via NNDMA.
-    const auto inputNdType = inReshape->getOperand(0).getType().cast<vpux::NDTypeInterface>();
-    // PermuteQuantize uses padding to perform in-place expansion of its input tensor.
-    // In OVERLAPPED mode the padding impacts NNDMA.
-    // For example 3x224x224 tensor with bottom pad = 13 will be split into 3x119x224 + 3x105x224.
-    // The expected split is 3x112x224 + 3x112x224.
-    // Set neutral padding to configure input NNDMA properly.
-    const auto neutralPads = VPU::getPaddingAttr(ctx, 0, 0, 0, 0);
-    const auto inputDistType = VPU::createDistributedTensorType(
-            clusteredOp, inputNdType, distMode, tileOverHeight, numClusters, alignmentAttr,
-            _enableExplicitDistributedTensorAttr, getIntArrayAttr(ctx, origOp.getKernelSizeVal()), neutralPads,
-            getIntArrayAttr(ctx, origOp.getStridesVal()));
-    // Reevaluate the input distributed type, based on the overlapped params of the subsequent conv
-    const auto fusedDistType = fusePaddings(clusteredOp, inputDistType, nextConv);
-    const auto inputCopyOp = buildInputCopy(clusteredOp, inReshape->getOperand(0), fusedDistType);
-    const auto castInput = buildCast(clusteredOp, inputCopyOp, permuteQuantizeInType, tileOverWidth, rewriter);
-
-    const auto bodyBuilder = [origOp](mlir::OpBuilder& builder, mlir::Location loc, mlir::ValueRange newOperands) {
-        mlir::IRMapping mapper;
-        mapper.map(origOp->getOperands(), newOperands);
-        auto* newOp = builder.clone(*origOp, mapper);
-        auto newOutput = newOp->getResult(0);
-        const auto newOutType = newOutput.getType().cast<vpux::NDTypeInterface>();
-        const auto cmxMemSpace = newOutType.changeMemSpace(MemoryKind::CMX_NN);
-        newOutput.setType(cmxMemSpace);
-        builder.create<YieldOp>(loc, newOp->getResults());
-    };
-
-    // Workload input has float16 data type with non-expanded shape and NHWC order.
-    // Workload output must have quantized data type with expanded shape and NWCH order.
-    // All these parameters (data type, shape and order) can be fetched from the output of the original operation.
-    const auto workloadInputType = castInput->getResult(0).getType().cast<VPU::DistributedTensorType>();
-    const auto origOutputType = origOp->getResult(0).getType().cast<vpux::NDTypeInterface>();
-    const auto equalComputeAndMemoryView = mlir::UnitAttr::get(ctx);
-    const auto workloadOutputTensorType =
-            composeDistributedType(clusteredOp, workloadInputType, origOutputType, tileOverWidth, nullptr, nullptr,
-                                   nullptr, _enableExplicitDistributedTensorAttr, equalComputeAndMemoryView);
-    const auto clusterTilingOp = rewriter.create<NCEClusterTilingOp>(
-            origOp->getLoc(), workloadOutputTensorType, mlir::ValueRange{castInput->getResult(0)}, bodyBuilder);
-
-    // Target layout and shape must be fetched from trailing LayoutCastOp and AffineReshapeOp operations.
-    // Here distributed output of ELTWISE is casted to 1xCxHxW NHWC output.
-    // Trailing reshape and layout cast must be removed, otherwise, graph consistency will be broken.
-    const auto outLayoutCast = mlir::dyn_cast<VPU::LayoutCastOp>(*origOp->getUsers().begin());
-    VPUX_THROW_WHEN(outLayoutCast == nullptr, "VPU.NCE.PermuteQuantize -> VPU.LayoutCast not found");
-    const auto outAffineReshape = mlir::dyn_cast<VPU::AffineReshapeOp>(*outLayoutCast->getUsers().begin());
-    // Trivial reshapes (1x16x16x16 to 1x16x16x16) may be eliminated from the graph.
-    // In that case, get shape from LayoutCastOp.
-    const auto& origOutOp = (outAffineReshape != nullptr) ? outAffineReshape : outLayoutCast;
-
-    const auto affineReshapeOutType = origOutOp->getResult(0).getType().cast<vpux::NDTypeInterface>();
-    const auto castOutput = buildCast(clusteredOp, clusterTilingOp, affineReshapeOutType, tileOverHeight, rewriter);
-    const auto outputCopyOp = buildOutputCopy(origOutOp, castOutput);
-
-    const auto origOutput = origOp->getResult(0);
-    origOutput.replaceAllUsesWith(outputCopyOp->getResult(0));
-    rewriter.replaceOp(origOp, outputCopyOp->getResult(0));
-
-    origOutOp->getResult(0).replaceAllUsesWith(outputCopyOp->getResult(0));
-    if (outAffineReshape != nullptr) {
-        rewriter.eraseOp(outAffineReshape);
-    }
-    rewriter.eraseOp(outLayoutCast);
-    rewriter.eraseOp(inReshape);
-    rewriter.eraseOp(inLayoutCast);
-
-    return mlir::success();
-}
-
-NCEClusterTilingOp VPU::NCEPermuteQuantizeRewriter::buildInputCopy(VPU::ClusteredOpInterface clusteredOp,
-                                                                   mlir::Value input, mlir::Type distType) const {
-    mlir::OpBuilder builder(clusteredOp);
-    builder.setInsertionPoint(clusteredOp);
-    const auto inputTensorBodyBuilder = [&](mlir::OpBuilder& builder, mlir::Location loc,
-                                            mlir::ValueRange newOperands) {
-        const auto memSpace = IndexedSymbolAttr::get(builder.getContext(), stringifyEnum(MemoryKind::CMX_NN));
-        auto inputTensorDistributedCopyOp =
-                builder.create<VPU::CopyOp>(clusteredOp->getLoc(), newOperands[0], memSpace);
-        builder.create<YieldOp>(loc, inputTensorDistributedCopyOp->getResults());
-    };
-
-    auto distributedInputCopyOp =
-            builder.create<NCEClusterTilingOp>(clusteredOp->getLoc(), distType, input, inputTensorBodyBuilder);
-
-    return distributedInputCopyOp;
-}
-
-NCEClusterTilingOp VPU::NCEPermuteQuantizeRewriter::buildOutputCopy(mlir::Operation* nceOp,
-                                                                    mlir::Operation* clusterTilingOp) const {
-    mlir::OpBuilder builder(nceOp);
-    auto origOutput = nceOp->getResult(0);
-    const auto origOutType = origOutput.getType().cast<NDTypeInterface>();
-    const auto origOutMemSpace = origOutType.getMemSpace();
-
-    const auto outputTensorBodyBuilder = [&](mlir::OpBuilder& builder, mlir::Location loc,
-                                             mlir::ValueRange newOperands) {
-        auto outputTensorDistributedCopyOp = builder.create<VPU::CopyOp>(loc, newOperands[0], origOutMemSpace);
-        builder.create<YieldOp>(loc, outputTensorDistributedCopyOp->getResults());
-    };
-
-    return builder.create<NCEClusterTilingOp>(clusterTilingOp->getLoc(), origOutType, clusterTilingOp->getResult(0),
-                                              outputTensorBodyBuilder);
-}
-
-mlir::Type VPU::NCEPermuteQuantizeRewriter::fusePaddings(VPU::ClusteredOpInterface permQuantOp,
-                                                         const VPU::DistributedTensorType distType,
-                                                         mlir::Operation* nextConv) const {
-    if (nextConv == nullptr) {
-        return distType;
-    }
-    auto* ctx = distType.getContext();
-    // Get kernel and padding parameters for PermuteQuantize from trailing convolution.
-    VPUX_THROW_UNLESS(mlir::isa<VPU::NCEConvolutionOp>(nextConv) || mlir::isa<VPU::NCECompressConvolutionOp>(nextConv),
-                      "Next Conv is neither NCEConv nor NCECompressConv");
-
-    auto conv = mlir::cast<VPU::NCEOpInterface>(nextConv);
-    const auto kernel = getIntArrayAttr(ctx, conv.getKernelSizeVal());
-    const auto strides = getIntArrayAttr(ctx, conv.getStridesVal());
-    const auto pads = conv.getPad();
-
-    const auto origDistTensorAttr = distType.getDistribution();
-    const auto tileOverDim = origDistTensorAttr.getNumTiles();
-    if (auto sparseInputType = distType.dyn_cast<VPU::SparseTensorType>()) {
-        const auto dataNdType = sparseInputType.getData().cast<vpux::NDTypeInterface>();
-        auto distributedDataType = composeDistributedType(permQuantOp, distType, dataNdType, tileOverDim, kernel,
-                                                          strides, pads, _enableExplicitDistributedTensorAttr);
-        const auto sparsityNdType = sparseInputType.getSparsityMap().cast<vpux::NDTypeInterface>();
-        auto distributedSMType = composeDistributedType(permQuantOp, distType, sparsityNdType, tileOverDim, kernel,
-                                                        strides, pads, _enableExplicitDistributedTensorAttr);
-        return VPU::SparseTensorType::get(distributedDataType, distributedSMType, nullptr,
-                                          sparseInputType.getIsWeights(), sparseInputType.getCompressionScheme());
-    }
-    const auto ndType = distType.cast<vpux::NDTypeInterface>();
-    return composeDistributedType(permQuantOp, distType, ndType, tileOverDim, kernel, strides, pads,
-                                  _enableExplicitDistributedTensorAttr);
-}
-
-VPU::WorkloadCastOp VPU::NCEPermuteQuantizeRewriter::buildCast(VPU::ClusteredOpInterface permQuantOp,
-                                                               NCEClusterTilingOp copyOp,
-                                                               const vpux::NDTypeInterface targetType,
-                                                               const mlir::ArrayAttr tileOverDim,
-                                                               mlir::PatternRewriter& rewriter) const {
-    const auto loc = copyOp->getLoc();
-    const auto castLoc = appendLoc(loc, "cast number of input tiles");
-    const auto copyType = copyOp->getResult(0).getType();
-
-    const auto copyDistTensorType = copyType.cast<VPU::DistributedTensorType>();
-    const auto castToDistType = composeDistributedType(permQuantOp, copyDistTensorType, targetType, tileOverDim,
-                                                       nullptr, nullptr, nullptr, _enableExplicitDistributedTensorAttr);
-    auto cast = rewriter.create<VPU::WorkloadCastOp>(castLoc, castToDistType, copyOp->getResult(0));
-    return cast;
 }
 
 //
@@ -839,6 +657,9 @@ mlir::LogicalResult VPU::NCECompressConvolutionRewriter::matchAndRewrite(VPU::NC
         mlir::IRMapping mapper;
         mapper.map(origOp->getOperands(), newOperands);
         auto* newOp = builder.clone(*origOp, mapper);
+        if (newOp->hasAttr("multiClusterStrategy")) {
+            newOp->removeAttr("multiClusterStrategy");
+        }
         auto newOutput = newOp->getResult(0);
         const auto newOutType = newOutput.getType().cast<vpux::NDTypeInterface>();
         const auto cmxMemSpace = newOutType.changeMemSpace(MemoryKind::CMX_NN);
@@ -926,6 +747,9 @@ mlir::LogicalResult VPU::NCEInterpolateRewriter::matchAndRewrite(VPU::NCEInterpo
         mlir::IRMapping mapper;
         mapper.map(origOp->getOperands(), newOperands);
         auto* newOp = builder.clone(*origOp, mapper);
+        if (newOp->hasAttr("multiClusterStrategy")) {
+            newOp->removeAttr("multiClusterStrategy");
+        }
         auto newOutput = newOp->getResult(0);
         const auto newOutType = newOutput.getType().cast<vpux::NDTypeInterface>();
         const auto cmxMemSpace = newOutType.changeMemSpace(MemoryKind::CMX_NN);

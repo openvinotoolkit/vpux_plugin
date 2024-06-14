@@ -22,23 +22,27 @@ public:
     static bool classof(mlir::Attribute attr);
 
 public:
-    static TensorAttr get(mlir::MLIRContext* context, mlir::AffineMapAttr order, vpux::IndexedSymbolAttr memSpace);
+    static TensorAttr get(mlir::MLIRContext* context, mlir::AffineMapAttr order, vpux::IndexedSymbolAttr memSpace,
+                          mlir::ArrayAttr bounds = nullptr);
 
 public:
     mlir::AffineMapAttr getOrder() const;
     vpux::IndexedSymbolAttr getMemSpace() const;
+    mlir::ArrayAttr getBounds() const;
 };
 
 //
 // Helpers
 //
 
-TensorAttr getTensorAttr(mlir::AffineMapAttr order, vpux::IndexedSymbolAttr memSpace);
-TensorAttr getTensorAttr(mlir::AffineMap order, vpux::IndexedSymbolAttr memSpace);
-TensorAttr getTensorAttr(mlir::MLIRContext* ctx, vpux::DimsOrder order, vpux::IndexedSymbolAttr memSpace);
+TensorAttr getTensorAttr(mlir::AffineMapAttr order, vpux::IndexedSymbolAttr memSpace, mlir::ArrayAttr bounds = nullptr);
+TensorAttr getTensorAttr(mlir::AffineMap order, vpux::IndexedSymbolAttr memSpace, mlir::ArrayAttr bounds = nullptr);
+TensorAttr getTensorAttr(mlir::MLIRContext* ctx, vpux::DimsOrder order, vpux::IndexedSymbolAttr memSpace,
+                         mlir::ArrayAttr bounds = nullptr);
 TensorAttr getTensorAttr(mlir::RankedTensorType type);
 
 mlir::AffineMap getOrder(mlir::RankedTensorType type);
 vpux::IndexedSymbolAttr getMemorySpace(mlir::RankedTensorType type);
+mlir::ArrayAttr getBounds(mlir::RankedTensorType type);
 
 }  // namespace vpux

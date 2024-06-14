@@ -1,6 +1,14 @@
 //
 // Copyright Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+//
+// LEGAL NOTICE: Your use of this software and any required dependent software
+// (the "Software Package") is subject to the terms and conditions of
+// the Intel(R) OpenVINO(TM) Distribution License for the Software Package,
+// which may also include notices, disclaimers, or license terms for
+// third party or open source software included in or with the Software Package,
+// and your use indicates your acceptance of all such terms. Please refer
+// to the "third-party-programs.txt" or other similarly-named text file
+// included with the Software Package for additional details.
 //
 
 #ifndef VPUX_COMPILER_DIALECT_VPUREGMAPPED_TYPES
@@ -109,6 +117,10 @@ def VPURegMapped_RegMapped : VPURegMapped_Type<"RegMapped"> {
 
 class VPURegMapped_RegFieldWrapper<Dialect dialect, string name = "", int width = 0, int pos = 0, string dataType = "UINT"> :
         TypeDef<dialect, "RegField_" # name, [], "vpux::VPURegMapped::RegFieldType"> {
+
+    let mnemonic = "RegField_" # name;
+    let hasCustomAssemblyFormat = 1;
+
     let extraClassDeclaration = [{
     static vpux::VPURegMapped::RegFieldType get(mlir::MLIRContext *context, uint64_t value) {
         return vpux::VPURegMapped::RegFieldType::get(context, }] # width # [{, }] # pos # [{, value, "}] # name # [{", vpux::VPURegMapped::RegFieldDataType::}] # dataType # [{);
@@ -146,6 +158,9 @@ class VPURegMapped_RegisterWrapper<Dialect dialect, string regDialectStr, string
     list<string> regFieldListValues = !foreach(name, regFieldTypes, "{\"" # name # "\", extractFieldValue(regType, \"" # name # "\")}," );
     string regFieldStrValues = !interleave(regFieldListValues, "\n");
 
+
+    let mnemonic = "Register_" # name;
+    let hasCustomAssemblyFormat = 1;
 
     let extraClassDeclaration = [{
     static vpux::VPURegMapped::RegisterType get(mlir::OpBuilder builder, std::map<std::string, uint64_t> values) {
@@ -202,6 +217,9 @@ class VPURegMapped_RegMappedWrapper<Dialect dialect, string regDialectStr, strin
     string regStrValues = !interleave(regsListValues, "\n");
 
 
+    let mnemonic = "RegMapped_" # name;
+    let hasCustomAssemblyFormat = 1;
+
     let extraClassDeclaration = [{
     static vpux::VPURegMapped::RegMappedType get(mlir::OpBuilder builder, std::map<std::string, std::map<std::string, uint64_t>> values) {
         auto regs = getVPURegMapped_RegisterArrayAttr(builder, { }] # "\n" # regsStr # "\n" # [{ });
@@ -240,7 +258,7 @@ def VPURegMapped_IndexType : VPURegMapped_Type<"Index"> {
       TypeBuilder<(ins "uint32_t":$value)>,
       TypeBuilder<(ins "uint32_t":$listIdx, "uint32_t":$value)>
     ];
-    
+
     let hasCustomAssemblyFormat = 1;
 }
 

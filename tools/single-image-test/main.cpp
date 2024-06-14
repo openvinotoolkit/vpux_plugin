@@ -3,17 +3,14 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-#include "vpux/utils/models/blob.hpp"
 #include "vpux/utils/models/image_quality_helper.hpp"
 #include "vpux/utils/models/semantic_segmentation_helpers.hpp"
+#include "vpux/utils/models/tensor.hpp"
 #include "vpux/utils/models/yolo_helpers.hpp"
 
-#include <file_utils.h>
-#include <precision_utils.h>
-#include <blob_factory.hpp>
-#include <caseless.hpp>
-#include <inference_engine.hpp>
+#include <openvino/core/parallel.hpp>
 #include <openvino/openvino.hpp>
+#include <openvino/util/file_util.hpp>
 
 #include <opencv2/core.hpp>
 #include <opencv2/imgcodecs.hpp>
@@ -28,32 +25,78 @@
 #include <string>
 #include <vector>
 
-namespace ie = InferenceEngine;
+using TensorMap = std::map<std::string, ov::Tensor>;
 
-const auto NHWC_LAYOUT_NUMBER_OF_DIMENSIONS = 4;
-const auto NDHWC_LAYOUT_NUMBER_OF_DIMENSIONS = 5;
+struct TensorDescriptor {
+    ov::element::Type precision;
+    ov::Shape shape;
+    ov::Layout layout;
+};
 
-ie::details::CaselessEq<std::string> strEq;
+using TensorDescriptorMap = std::unordered_map<std::string, TensorDescriptor>;
+using LayoutMap = std::unordered_map<std::string, ov::Layout>;
+
+/**
+ * @brief Provides a caseless equality function for STL algorithms.
+ * @details Utility function taken from the OpenVINO implementation, formerly registered as
+ * "InferenceEngine::details::CaselessEq"
+ * @tparam Key
+ */
+template <class Key>
+class CaselessEq {
+public:
+    bool operator()(const Key& a, const Key& b) const noexcept {
+        return a.size() == b.size() &&
+               std::equal(std::begin(a), std::end(a), std::begin(b), [](const char cha, const char chb) {
+                   return std::tolower(cha) == std::tolower(chb);
+               });
+    }
+};
+
+CaselessEq<std::string> strEq;
 
 //
 // Command line options
 //
 
-DEFINE_bool(ov_api_1_0, false, "Optional. Use legacy Inference Engine API (default: false)");
 DEFINE_string(network, "", "Network file (either XML or pre-compiled blob)");
 DEFINE_string(input, "", "Input file(s)");
 DEFINE_string(compiled_blob, "", "Output compiled network file (compiled result blob)");
+DEFINE_uint32(override_model_batch_size, 1, "Enforce a model to be compiled for batch size");
 DEFINE_string(device, "", "Device to use");
 DEFINE_string(config, "", "Path to the configuration file (optional)");
-DEFINE_string(ip, "", "Input precision (default: U8)");
-DEFINE_string(op, "", "Output precision (default: FP32)");
+DEFINE_string(ip, "", "Input precision (default: U8, available: FP32, FP16, I32, I64, U8)");
+DEFINE_string(op, "", "Output precision (default: FP32, available: FP32, FP16, I32, I64, U8)");
 DEFINE_string(il, "", "Input layout");
 DEFINE_string(ol, "", "Output layout");
 DEFINE_string(iml, "", "Model input layout");
 DEFINE_string(oml, "", "Model output layout");
 DEFINE_bool(img_as_bin, false, "Force binary input even if network expects an image");
 DEFINE_bool(pc, false, "Report performance counters");
-DEFINE_string(img_bin_precision, "", "Specify the precision of the binary input files. Eg: 'FP32,FP16;FP32,U8'");
+
+// for using input image mean and scale
+static constexpr char mean_values_message[] =
+        "Optional. Mean values to be used for the input image per channel. "
+        "Values to be provided in the [channel1,channel2,channel3] format. "
+        "Can be defined for desired input of the model, for example: \"--mean_values "
+        "data[255,255,255],info[255,255,255]\". The exact meaning and order of channels depend on how the original "
+        "model "
+        "was trained. Applying the values affects performance and may cause type conversion";
+
+static constexpr char scale_values_message[] =
+        "Optional. Scale values to be used for the input image per channel. "
+        "Values are provided in the [channel1,channel2,channel3] format. "
+        "Can be defined for desired input of the model, for example: \"--scale_values "
+        "data[255,255,255],info[255,255,255]\". "
+        "The exact meaning and order of channels depend on how the original model was trained. If both --mean_values "
+        "and "
+        "--scale_values are specified, the mean is subtracted first and then scale is applied regardless of the order "
+        "of "
+        "options in command line. Applying the values affects performance and may cause type conversion";
+DEFINE_string(mean_values, "", mean_values_message);
+DEFINE_string(scale_values, "", scale_values_message);
+
+DEFINE_string(img_bin_precision, "", "Specify the precision of the binary input files. Eg: 'FP32,FP16,I32,I64,U8'");
 
 DEFINE_bool(run_test, false, "Run the test (compare current results with previously dumped)");
 DEFINE_string(mode, "", "Comparison mode to use");
@@ -120,28 +163,30 @@ void parseCommandLine(int argc, char* argv[]) {
     gflags::SetUsageMessage(usage.str());
 
     std::ostringstream version;
-    version << ie::GetInferenceEngineVersion();
+    version << ov::get_openvino_version();
     gflags::SetVersionString(version.str());
 
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
     std::cout << "Parameters:" << std::endl;
-    std::cout << "    Network file:                     " << FLAGS_network << std::endl;
-    std::cout << "    Input file(s):                    " << FLAGS_input << std::endl;
-    std::cout << "    Output compiled network file:     " << FLAGS_compiled_blob << std::endl;
-    std::cout << "    Color format:                     " << FLAGS_color_format << std::endl;
-    std::cout << "    Input precision:                  " << FLAGS_ip << std::endl;
-    std::cout << "    Output precision:                 " << FLAGS_op << std::endl;
-    std::cout << "    Input layout:                     " << FLAGS_il << std::endl;
-    std::cout << "    Output layout:                    " << FLAGS_ol << std::endl;
-    std::cout << "    Model input layout:               " << FLAGS_iml << std::endl;
-    std::cout << "    Model output layout:              " << FLAGS_oml << std::endl;
-    std::cout << "    Img as binary:                    " << FLAGS_img_as_bin << std::endl;
-    std::cout << "    Bin input file precision:         " << FLAGS_img_bin_precision << std::endl;
-    std::cout << "    Device:                           " << FLAGS_device << std::endl;
-    std::cout << "    Config file:                      " << FLAGS_config << std::endl;
-    std::cout << "    Run test:                         " << FLAGS_run_test << std::endl;
-    std::cout << "    Performance counters:             " << FLAGS_pc << std::endl;
+    std::cout << "    Network file:                             " << FLAGS_network << std::endl;
+    std::cout << "    Input file(s):                            " << FLAGS_input << std::endl;
+    std::cout << "    Output compiled network file:             " << FLAGS_compiled_blob << std::endl;
+    std::cout << "    Color format:                             " << FLAGS_color_format << std::endl;
+    std::cout << "    Input precision:                          " << FLAGS_ip << std::endl;
+    std::cout << "    Output precision:                         " << FLAGS_op << std::endl;
+    std::cout << "    Input layout:                             " << FLAGS_il << std::endl;
+    std::cout << "    Output layout:                            " << FLAGS_ol << std::endl;
+    std::cout << "    Model input layout:                       " << FLAGS_iml << std::endl;
+    std::cout << "    Model output layout:                      " << FLAGS_oml << std::endl;
+    std::cout << "    Img as binary:                            " << FLAGS_img_as_bin << std::endl;
+    std::cout << "    Bin input file precision:                 " << FLAGS_img_bin_precision << std::endl;
+    std::cout << "    Device:                                   " << FLAGS_device << std::endl;
+    std::cout << "    Config file:                              " << FLAGS_config << std::endl;
+    std::cout << "    Run test:                                 " << FLAGS_run_test << std::endl;
+    std::cout << "    Performance counters:                     " << FLAGS_pc << std::endl;
+    std::cout << "    Mean_values [channel1,channel2,channel3]  " << FLAGS_mean_values << std::endl;
+    std::cout << "    Scale_values [channel1,channel2,channel3] " << FLAGS_scale_values << std::endl;
     if (FLAGS_run_test) {
         std::cout << "    Mode:             " << FLAGS_mode << std::endl;
         if (strEq(FLAGS_mode, "classification")) {
@@ -167,120 +212,157 @@ void parseCommandLine(int argc, char* argv[]) {
 }
 
 //
-// OpenCV to InferenceEngine conversion
+// OpenCV to OpenVINO conversion
 //
 
-bool isImage(const ie::TensorDesc& desc) {
-    const auto& dims = desc.getDims();
-
-    if (dims.size() == 4) {
-        const auto numChannels = dims[1];
+bool isImage(const ov::Shape& shape, const ov::Layout& layout) {
+    if (shape.size() == 4) {
+        const auto numChannels = shape[ov::layout::channels_idx(layout)];
         return (numChannels == 3) || (numChannels == 4);
     }
 
     return false;
 }
 
-std::vector<cv::Mat> ieToCv(const ie::MemoryBlob::Ptr& blob, size_t batchInd = 0, size_t depthInd = 0) {
-    IE_ASSERT(blob != nullptr);
+/**
+ * @brief Computes the offsets for each axis in terms of number of elements.
+ * @details Taken from the OpenVINO implementation ("InferenceEngine::BlockingDesc::fillDesc") and slightly modified for
+ * the current usecase.
+ *
+ * @param shape The shape based on which the offsets will be computed.
+ * @return The resulting strides.
+ */
+std::vector<size_t> getStrides(const ov::Shape& shape) {
+    std::vector<size_t> strides(shape.size());
 
-    const auto& tensDesc = blob->getTensorDesc();
-    const auto layout = tensDesc.getLayout();
-    const auto& precision = tensDesc.getPrecision();
-    const auto& dims = tensDesc.getDims();
+    strides[strides.size() - 1] = 1;
 
-    IE_ASSERT(layout == ie::Layout::NCHW || layout == ie::Layout::NCDHW);
+    for (size_t i = 2; i <= shape.size(); i++) {
+        strides[strides.size() - i] = strides[strides.size() - (i - 1)] * shape[shape.size() - (i - 1)];
+    }
 
-    IE_ASSERT(precision == ie::Precision::U8 || precision == ie::Precision::FP32 || precision == ie::Precision::FP16);
+    return strides;
+}
+
+std::vector<cv::Mat> ovToCV(const ov::Tensor& tensor, const ov::Shape& shape, const ov::Layout& layout,
+                            size_t batchInd = 0, size_t depthInd = 0) {
+    const ov::element::Type& precision = tensor.get_element_type();
+
+    OPENVINO_ASSERT(layout == ov::Layout("NCHW") || layout == ov::Layout("NCDHW"),
+                    "Unsupported layout: ", layout.to_string());
+
+    OPENVINO_ASSERT(precision == ov::element::Type_t::u8 || precision == ov::element::Type_t::f32 ||
+                            precision == ov::element::Type_t::f16 || precision == ov::element::Type_t::i32,
+                    "Unsupported precision: ", precision.get_type_name());
 
     int cvType = 0;
     size_t elemSize = 0;
 
-    if (precision == ie::Precision::U8) {
+    if (precision == ov::element::Type_t::u8) {
         cvType = CV_8UC1;
         elemSize = sizeof(uint8_t);
-    } else if (precision == ie::Precision::FP32) {
+    } else if (precision == ov::element::Type_t::f32) {
         cvType = CV_32FC1;
         elemSize = sizeof(float);
-    } else if (precision == ie::Precision::FP16) {
+    } else if (precision == ov::element::Type_t::f16) {
         cvType = CV_16SC1;
-        elemSize = sizeof(ie::ie_fp16);
+        elemSize = sizeof(ov::float16);
+    } else if (precision == ov::element::Type_t::i32) {
+        cvType = CV_32SC1;
+        elemSize = sizeof(int32_t);
     }
 
     std::vector<cv::Mat> out;
 
-    if (layout == ie::Layout::NCHW) {
-        const auto N = dims[0];
-        const auto C = dims[1];
-        const auto H = dims[2];
-        const auto W = dims[3];
+    const size_t N = shape[ov::layout::batch_idx(layout)];
+    const size_t C = shape[ov::layout::channels_idx(layout)];
+    const size_t H = shape[ov::layout::height_idx(layout)];
+    const size_t W = shape[ov::layout::width_idx(layout)];
 
-        IE_ASSERT(batchInd < N);
-        IE_ASSERT(C == 3 || C == 4);
+    const auto dataBuffer = reinterpret_cast<uint8_t*>(tensor.data());
 
-        const auto blobMem = blob->wmap();
-        const auto blobPtr = blobMem.as<uint8_t*>();
+    if (layout == ov::Layout("NCHW")) {
+        OPENVINO_ASSERT(batchInd < N);
+        OPENVINO_ASSERT(C == 3 || C == 4, "Unsupported number of channels: ", C);
 
         out.resize(C);
         for (size_t c = 0; c < C; ++c) {
-            out[c] = cv::Mat(H, W, cvType, blobPtr + (batchInd * C + c) * W * H * elemSize);
+            out[c] = cv::Mat(static_cast<int>(H), static_cast<int>(W), cvType,
+                             dataBuffer + (batchInd * C + c) * W * H * elemSize);
         }
-    } else if (layout == ie::Layout::NCDHW) {
-        const auto N = dims[0];
-        const auto C = dims[1];
-        const auto D = dims[2];
-        const auto H = dims[3];
-        const auto W = dims[4];
+    } else if (layout == ov::Layout("NCDHW")) {
+        const size_t D = shape[ov::layout::depth_idx(layout)];
 
-        const auto& strides = tensDesc.getBlockingDesc().getStrides();
-        const auto strideN = strides[0];
-        const auto strideC = strides[1];
-        const auto strideD = strides[2];
+        const std::vector<size_t> strides = getStrides(shape);
 
-        IE_ASSERT(batchInd < N);
-        IE_ASSERT(depthInd < D);
-        IE_ASSERT(C == 3 || C == 4);
+        const auto strideN = strides[ov::layout::batch_idx(layout)];
+        const auto strideC = strides[ov::layout::channels_idx(layout)];
+        const auto strideD = strides[ov::layout::depth_idx(layout)];
 
-        const auto blobMem = blob->wmap();
-        const auto blobPtr = blobMem.as<uint8_t*>();
+        OPENVINO_ASSERT(batchInd < N);
+        OPENVINO_ASSERT(depthInd < D);
+        OPENVINO_ASSERT(C == 3 || C == 4, "Unsupported number of channels: ", C);
 
         out.resize(C);
         for (size_t c = 0; c < C; ++c) {
-            out[c] =
-                    cv::Mat(H, W, cvType, blobPtr + (strideN * batchInd + strideC * c + strideD * depthInd) * elemSize);
+            out[c] = cv::Mat(static_cast<int>(H), static_cast<int>(W), cvType,
+                             dataBuffer + (strideN * batchInd + strideC * c + strideD * depthInd) * elemSize);
         }
     }
 
     return out;
 }
 
-void cvToIe(const cv::Mat& cvImg, const ie::MemoryBlob::Ptr& ieBlob, const std::string& colorFormat) {
-    const auto& tensDesc = ieBlob->getTensorDesc();
-    const auto& precision = tensDesc.getPrecision();
-    const auto layout = tensDesc.getLayout();
-    const auto& dims = tensDesc.getDims();
+/**
+ * @brief Converts the source data from its current precision to the one used by the destination buffer and then places
+ * the result inside it.
+ * @details The conversion is performed by the use of the "static_cast" operator. Depending on the types between which
+ * the conversions are made, this may lead to undefined behavior.
+ *
+ * E.g.: Several experiments suggest float<->ov::float16 conversions may work fine, but float->uint8_t may lead to
+ * division by zero.
+ *
+ * @tparam InT The type of the source buffer
+ * @tparam OutT The type of the destination buffer
+ * @param destination Where the result will be stored
+ * @param source The data which shall be converted
+ * @param numberOfElements Indicates how many elements will be taken from the source buffer.
+ */
+template <typename InT, typename OutT>
+void convertBufferType(OutT* destination, const InT* source, size_t numberOfElements) {
+    ov::parallel_for(numberOfElements, [source, destination](int64_t index) {
+        destination[index] = static_cast<OutT>(source[index]);
+    });
+}
 
-    IE_ASSERT(layout == ie::Layout::NHWC || layout == ie::Layout::NCHW) << "Unsupported layout " << layout;
+void cvToOV(const cv::Mat& cvImg, const ov::Tensor& tensor, const ov::Shape& shape, const ov::Layout& layout,
+            const std::string& colorFormat) {
+    const ov::element::Type& precision = tensor.get_element_type();
 
-    const auto N = dims[0];
-    const auto C = dims[1];
-    const auto H = dims[2];
-    const auto W = dims[3];
+    OPENVINO_ASSERT(layout == ov::Layout("NHWC") || layout == ov::Layout("NCHW"),
+                    "Unsupported layout: ", layout.to_string());
 
-    IE_ASSERT(C == 3 || C == 4) << "Unsupported number of channels " << C;
+    const auto N = shape[ov::layout::batch_idx(layout)];
+    const auto C = shape[ov::layout::channels_idx(layout)];
+    const auto H = shape[ov::layout::height_idx(layout)];
+    const auto W = shape[ov::layout::width_idx(layout)];
+
+    OPENVINO_ASSERT(C == 3 || C == 4, "Unsupported number of channels: ", C);
 
     int cvType = 0;
 
-    if (precision == ie::Precision::U8) {
-        cvType = CV_8UC(C);
-    } else if (precision == ie::Precision::FP32) {
-        cvType = CV_32FC(C);
-    } else if (precision == ie::Precision::FP16) {
-        cvType = CV_16SC(C);
+    if (precision == ov::element::Type_t::u8) {
+        cvType = static_cast<int>(CV_8UC(C));
+    } else if (precision == ov::element::Type_t::f32) {
+        cvType = static_cast<int>(CV_32FC(C));
+    } else if (precision == ov::element::Type_t::f16) {
+        cvType = static_cast<int>(CV_16SC(C));
+    } else if (precision == ov::element::Type_t::i32) {
+        cvType = static_cast<int>(CV_32SC(C));
     } else {
-        IE_ASSERT(precision == ie::Precision::U8 || precision == ie::Precision::FP32 ||
-                  precision == ie::Precision::FP16)
-                << "Unsupported precision " << precision;
+        OPENVINO_ASSERT(precision == ov::element::Type_t::u8 || precision == ov::element::Type_t::f32 ||
+                                precision == ov::element::Type_t::f16 || precision == ov::element::Type_t::i32,
+                        "Unsupported precision ", precision.get_type_name());
     }
 
     cv::Mat in;
@@ -299,141 +381,169 @@ void cvToIe(const cv::Mat& cvImg, const ie::MemoryBlob::Ptr& ieBlob, const std::
         }
     }
 
-    if (precision != ie::Precision::U8) {
+    if (precision != ov::element::Type_t::u8) {
         in.convertTo(in, CV_32F);
     }
 
     const auto pictureArea = static_cast<size_t>(in.size().area());
 
     if (W * H > pictureArea) {
-        cv::resize(in, in, cv::Size(W, H), 0.0, 0.0, cv::INTER_AREA);
+        cv::resize(in, in, cv::Size(static_cast<int>(W), static_cast<int>(H)), 0.0, 0.0, cv::INTER_AREA);
     } else {
-        cv::resize(in, in, cv::Size(W, H), 0.0, 0.0, cv::INTER_LINEAR);
+        cv::resize(in, in, cv::Size(static_cast<int>(W), static_cast<int>(H)), 0.0, 0.0, cv::INTER_LINEAR);
     }
 
-    if (layout == ie::Layout::NHWC) {
-        const auto blobMem = ieBlob->wmap();
-        const auto blobPtr = blobMem.as<uint8_t*>();
+    if (layout == ov::Layout("NHWC")) {
+        const auto dataBuffer = reinterpret_cast<uint8_t*>(tensor.data());
 
-        cv::Mat out(H, W, cvType, blobPtr);
+        cv::Mat out(static_cast<int>(H), static_cast<int>(W), cvType, dataBuffer);
 
-        if (precision != ie::Precision::FP16) {
-            in.copyTo(out);
-        } else {
+        if (precision == ov::element::Type_t::f16) {
             const auto inPtr = in.ptr<float>();
-            const auto outPtr = out.ptr<ie::ie_fp16>();
-            ie::PrecisionUtils::f32tof16Arrays(outPtr, inPtr, out.size().area() * C);
+            const auto outPtr = out.ptr<ov::float16>();
+            convertBufferType(outPtr, inPtr, out.size().area() * C);
+        } else if (precision == ov::element::Type_t::i32) {
+            in.convertTo(out, CV_32S);
+        } else {
+            in.copyTo(out);
         }
 
         for (size_t n = 1; n < N; ++n) {
-            cv::Mat batch(H, W, cvType, blobPtr + out.size().area() * out.elemSize());
+            cv::Mat batch(static_cast<int>(H), static_cast<int>(W), cvType,
+                          dataBuffer + n * (out.size().area() * out.elemSize()));
             out.copyTo(batch);
         }
-    } else if (layout == ie::Layout::NCHW) {
-        auto blobPlanes = ieToCv(ieBlob, 0);
+    } else if (layout == ov::Layout("NCHW")) {
+        auto tensorPlanes = ovToCV(tensor, shape, layout, 0);
 
-        if (precision != ie::Precision::FP16) {
-            cv::split(in, blobPlanes);
+        if (precision != ov::element::Type_t::f16) {
+            cv::split(in, tensorPlanes);
         } else {
             std::vector<cv::Mat> inPlanes;
             cv::split(in, inPlanes);
 
-            IE_ASSERT(blobPlanes.size() == inPlanes.size());
+            OPENVINO_ASSERT(tensorPlanes.size() == inPlanes.size());
 
-            for (size_t i = 0; i < blobPlanes.size(); ++i) {
+            for (size_t i = 0; i < tensorPlanes.size(); ++i) {
                 const auto inPtr = inPlanes[i].ptr<float>();
-                const auto outPtr = blobPlanes[i].ptr<ie::ie_fp16>();
-                ie::PrecisionUtils::f32tof16Arrays(outPtr, inPtr, inPlanes[i].size().area());
+                const auto outPtr = tensorPlanes[i].ptr<ov::float16>();
+                convertBufferType(outPtr, inPtr, inPlanes[i].size().area());
             }
         }
 
         for (size_t n = 1; n < N; ++n) {
-            const auto batchPlanes = ieToCv(ieBlob, n);
+            const auto batchPlanes = ovToCV(tensor, shape, layout, n);
 
-            IE_ASSERT(batchPlanes.size() == blobPlanes.size());
+            OPENVINO_ASSERT(batchPlanes.size() == tensorPlanes.size());
 
-            for (size_t i = 0; i < blobPlanes.size(); ++i) {
-                blobPlanes[i].copyTo(batchPlanes[i]);
+            for (size_t i = 0; i < tensorPlanes.size(); ++i) {
+                tensorPlanes[i].copyTo(batchPlanes[i]);
             }
         }
     }
 }
 
-/**
- * @brief Restores the the metadata found in the "IE::Data" structure based on the given layout.
- * @details This functions acts as a helper for the "adjustInputLayout" method.
- * @param inputMetadata The metadata object on which the previously mentioned changes shall be applied.
- * @param layout The layout indicated by the user which influences these changes.
- */
-void adjustDataLayout(const std::shared_ptr<ie::Data>& inputMetadata, const std::string& targetLayout) {
-    const ie::Layout& originalLayout = inputMetadata->getLayout();
-    const ie::SizeVector& originalDimensions = inputMetadata->getDims();
-    const auto numberOfDimensions = originalDimensions.size();
+std::vector<float> splitFloat(const std::string& s, char delim) {
+    std::vector<float> result;
+    std::stringstream ss(s);
+    std::string item;
 
-    if (numberOfDimensions == NHWC_LAYOUT_NUMBER_OF_DIMENSIONS && targetLayout == "NHWC" &&
-        originalLayout != ie::Layout::NHWC) {
-        const auto batchAxis = 0;
-        const auto heightAxis = 1;
-        const auto widthAxis = 2;
-        const auto channelAxis = 3;
-
-        const ie::SizeVector reshapedDimensions({originalDimensions[batchAxis], originalDimensions[channelAxis],
-                                                 originalDimensions[heightAxis], originalDimensions[widthAxis]});
-
-        inputMetadata->setDims(reshapedDimensions);
-        inputMetadata->setLayout(ie::Layout::NHWC);
-    } else if (numberOfDimensions == NDHWC_LAYOUT_NUMBER_OF_DIMENSIONS && targetLayout == "NDHWC" &&
-               originalLayout != ie::Layout::NDHWC) {
-        const auto batchAxis = 0;
-        const auto depthAxis = 1;
-        const auto heightAxis = 2;
-        const auto widthAxis = 3;
-        const auto channelAxis = 4;
-
-        const ie::SizeVector reshapedDimensions({originalDimensions[batchAxis], originalDimensions[channelAxis],
-                                                 originalDimensions[depthAxis], originalDimensions[heightAxis],
-                                                 originalDimensions[widthAxis]});
-
-        inputMetadata->setDims(reshapedDimensions);
-        inputMetadata->setLayout(ie::Layout::NDHWC);
+    while (getline(ss, item, delim)) {
+        result.push_back(std::stof(item));
     }
+    return result;
 }
 
-/**
- * @brief Restores the legacy input layout information found inside the compiled model.
- * @details As a consequence of the Plugin API 2.0 refactoring, the legacy layout information
- * is lost upon compiling the model, storing the result and then loading it back into this application.
- *
- * To exemplify the previous issue, the input information which previously would have contained the "NHWC"
- * layout and the "[1, 3, 224, 224]" shape now stores the "NCHW" and "[1, 224, 224, 3]" values, fact which,
- * in some way, is more specific to the 2.0 API.
- *
- * This is an issue since this application expects to find the value "3" or "4" on the channel axis indicated
- * by these attributes in order to call the image loading methods. The solution found here implies making use
- * of the layout offered by the user as a CLI argument and reverting the effect explained previously.
- * @param network The compiled model represented in the legacy manner on which the layout metadata changes
- * will be applied.
- * @param inputLayoutStringRepresentation String indicating the desired layout of the inputs.
- * @see Jira issue E#70453
- */
-void adjustInputLayout(ie::ExecutableNetwork& network, const std::string& layoutStringRepresentation) {
-    const ie::ConstInputsDataMap& inputsInfo = network.GetInputsInfo();
+std::unordered_map<std::string, std::vector<float>> parseMeanOrScaleString(const std::string& mean_scale) {
+    std::unordered_map<std::string, std::vector<float>> result;
 
-    for (const auto& mapEntry : inputsInfo) {
-        const std::shared_ptr<const ie::InputInfo>& inputInfo = mapEntry.second;
-        const ie::DataPtr& inputData = inputInfo->getInputData();
+    //  Format: layer1[255,255,255],layer2[255,255,255] for particular layers,
+    //          or [255,255,255] for all layers
+    std::string search_string = mean_scale;
+    auto start_pos = search_string.find_first_of('[');
+    while (start_pos != std::string::npos) {
+        auto end_pos = search_string.find_first_of(']');
+        if (end_pos == std::string::npos)
+            break;
+        auto input_name = search_string.substr(0, start_pos);
+        if (result.count(input_name) == 0) {
+            auto input_value_string = search_string.substr(start_pos + 1, end_pos - start_pos - 1);
+            result[input_name] = splitFloat(input_value_string, ',');
+            if (input_name.empty()) {
+                if (mean_scale != search_string) {
+                    throw std::logic_error("Can't parse input parameter string: " + mean_scale +
+                                           ". Format of value: layer1[255,255,255],layer2[255,255,255] "
+                                           "for particular layers, or just [255,255,255] for all layers.");
+                }
+                search_string = search_string.substr(end_pos + 1);
+                break;
+            }
+        } else {
+            throw std::logic_error("Specifying mean and scale for the same layer/s"
+                                   " more than once is prohibited: " +
+                                   mean_scale);
+        }
 
-        adjustDataLayout(inputData, layoutStringRepresentation);
+        search_string = search_string.substr(end_pos + 1);
+        if (search_string.empty() || search_string.front() != ',')
+            break;
+        search_string = search_string.substr(1);
+        if (search_string.empty()) {
+            throw std::logic_error("Can't parse input parameter string: " + mean_scale +
+                                   ". Format of value: layer1[255,255,255],layer2[255,255,255] "
+                                   "for particular layers, or just [255,255,255] for all layers.");
+        }
+        start_pos = search_string.find_first_of('[');
     }
+    if (!search_string.empty())
+        throw std::logic_error("Can't parse input parameter string: " + mean_scale +
+                               ". Format of value: layer1[255,255,255],layer2[255,255,255] "
+                               "for particular layers, or just [255,255,255] for all layers.");
+
+    return result;
+}
+
+std::vector<std::vector<float>> parseMeanOrScale(const std::string& mean_scale,
+                                                 const std::vector<ov::Output<ov::Node>>& inputs_info) {
+    std::vector<std::vector<float>> result(inputs_info.size());
+
+    auto mean_or_scale_map = parseMeanOrScaleString(mean_scale);
+
+    for (auto&& [layer_name, mean_or_scale] : mean_or_scale_map) {
+        if (!layer_name.empty()) {
+            // Add an explicit reference. Lambda expressions in C++17 cannot capture structured bindings.
+            const auto& layer_name_ref = layer_name;
+            auto required_input_it = std::find_if(inputs_info.begin(), inputs_info.end(),
+                                                  [&layer_name_ref](const ov::Output<const ov::Node>& item) {
+                                                      return item.get_any_name() == layer_name_ref;
+                                                  });
+            if (required_input_it != inputs_info.end()) {
+                result[std::distance(inputs_info.begin(), required_input_it)] = mean_or_scale;
+            } else {
+                throw std::logic_error(std::string("Input with name '") + layer_name + "' doesn't exist.");
+            }
+        } else {
+            for (int idx = 0; idx < inputs_info.size(); ++idx) {
+                result[idx] = mean_or_scale;
+            }
+        }
+    }
+
+    return result;
 }
 
 //
 // File utils
 //
+
 bool hasLoadableExt(const std::string& network_path) {
     static const std::array<const char*, 5> ext_support_table{"xml", "onnx", "pdmodel", "pb", "tflite"};
     return std::any_of(ext_support_table.begin(), ext_support_table.end(), [&network_path](const char* ext) {
-        return strEq(FileUtils::fileExt(network_path), ext);
+        auto pos = network_path.rfind(ov::util::FileTraits<char>::dot_symbol);
+        std::string ext_name = {};
+        if (pos != std::string::npos)
+            ext_name = network_path.substr(pos + 1);
+        return strEq(ext_name, ext);
     });
 }
 
@@ -447,214 +557,95 @@ std::string cleanName(std::string&& name) {
     return std::move(name);
 }
 
-ie::MemoryBlob::Ptr loadImage(const ie::TensorDesc& desc, const std::string& filePath, const std::string& colorFormat) {
+ov::Tensor loadImage(const ov::element::Type& precision, const ov::Shape& shape, const ov::Layout& layout,
+                     const std::string& filePath, const std::string& colorFormat) {
     const auto frame = cv::imread(filePath, cv::IMREAD_COLOR);
-    IE_ASSERT(!frame.empty()) << "Failed to open input image file " << filePath;
+    OPENVINO_ASSERT(!frame.empty(), "Failed to open input image file ", filePath);
 
-    const auto blob = ie::as<ie::MemoryBlob>(make_blob_with_precision(desc));
-    blob->allocate();
+    const ov::Tensor tensor(precision, shape);
 
-    cvToIe(frame, blob, colorFormat);
+    cvToOV(frame, tensor, shape, layout, colorFormat);
 
-    return blob;
+    return tensor;
 }
 
-ie::MemoryBlob::Ptr loadBinary(const ie::TensorDesc& desc, const std::string& filePath,
-                               const ie::Precision& inputPrecision) {
-    const auto blob = ie::as<ie::MemoryBlob>(make_blob_with_precision(desc));
-    IE_ASSERT(blob != nullptr) << "Can't create MemoryBlob for binary file";
-
+ov::Tensor loadBinary(const ov::element::Type& modelPrecision, const ov::Shape& shape, const std::string& filePath,
+                      const ov::element::Type& dataPrecision) {
     std::ifstream binaryFile(filePath, std::ios_base::binary | std::ios_base::ate);
-
-    IE_ASSERT(binaryFile) << "Failed to open input binary file: " << filePath;
-
-    const int fileSize = binaryFile.tellg();
+    OPENVINO_ASSERT(binaryFile, "Failed to open input binary file: ", filePath);
+    const int fileBytes = binaryFile.tellg();
     binaryFile.seekg(0, std::ios_base::beg);
-    const int expectedSize = static_cast<int>(blob->byteSize());
-    IE_ASSERT(binaryFile.good()) << "While reading a file an error is encountered";
-    blob->allocate();
-    const auto blobMem = blob->wmap();
+    OPENVINO_ASSERT(binaryFile.good(), "While reading a file an error is encountered");
 
-    const auto inTensorPrec = desc.getPrecision();
-    bool implicitPrecision = false;
-    switch (inputPrecision) {
-    case ie::Precision::FP32: {
-        switch (inTensorPrec) {
-        case ie::Precision::FP32:
-            implicitPrecision = true;
-            break;
-        case ie::Precision::FP16: {
-            std::cout << "Converting " << filePath << " input from FP32 to FP16\n";
-            IE_ASSERT(fileSize == expectedSize * 2)
-                    << "File contains " << fileSize << " bytes, but " << expectedSize * 2 << " expected";
+    const ov::Tensor requestedTensor(modelPrecision, shape);
+    const int reqTensorBytes = static_cast<int>(requestedTensor.get_byte_size());
 
-            std::vector<uint8_t> input(fileSize);
-            binaryFile.read(reinterpret_cast<char*>(input.data()), static_cast<std::streamsize>(fileSize));
-            const auto blobPtr = blobMem.as<ie::ie_fp16*>();
-            ie::PrecisionUtils::f32tof16Arrays(blobPtr, reinterpret_cast<float*>(input.data()), blob->size());
-            break;
-        }
-        case ie::Precision::U8: {
-            std::cout << "Converting " << filePath << " input from FP32 to U8\n";
-            std::cout << "WARNING: FP32->U8 conversion is currently just a type-cast\n";
-            IE_ASSERT(fileSize == expectedSize * 4)
-                    << "File contains " << fileSize << " bytes, but " << expectedSize * 4 << " expected";
-
-            std::vector<uint8_t> input(fileSize);
-            binaryFile.read(reinterpret_cast<char*>(input.data()), static_cast<std::streamsize>(fileSize));
-            const auto blobPtr = blobMem.as<uint8_t*>();
-            const float* srcPtr = reinterpret_cast<float*>(input.data());
-
-            // naive conversion, to be improved
-            for (std::size_t i = 0; i < expectedSize; ++i) {
-                blobPtr[i] = static_cast<uint8_t>(srcPtr[i]);
-            }
-            break;
-        }
-        default:
-            implicitPrecision = true;
-            break;
-        }
-        break;
-    }
-    case ie::Precision::FP16: {
-        switch (inTensorPrec) {
-        case ie::Precision::FP32: {
-            std::cout << "Converting " << filePath << " input from FP16 to FP32\n";
-            IE_ASSERT(fileSize * 2 == expectedSize)
-                    << "File contains " << fileSize * 2 << " bytes, but " << expectedSize << " expected";
-
-            std::vector<uint8_t> input(fileSize);
-            binaryFile.read(reinterpret_cast<char*>(input.data()), static_cast<std::streamsize>(fileSize));
-            const auto blobPtr = blobMem.as<float*>();
-            ie::PrecisionUtils::f16tof32Arrays(blobPtr, reinterpret_cast<ie::ie_fp16*>(input.data()), blob->size());
-            break;
-        }
-        case ie::Precision::FP16:
-            implicitPrecision = true;
-            break;
-        case ie::Precision::U8: {
-            std::cout << "Converting " << filePath << " input from FP16 to U8\n";
-            std::cout << "WARNING: FP16->U8 conversion is currently just a type-cast\n";
-            IE_ASSERT(fileSize == expectedSize * 2)
-                    << "File contains " << fileSize << " bytes, but " << expectedSize * 2 << " expected";
-
-            std::vector<uint8_t> input(fileSize);
-            std::vector<uint8_t> intermediaryFP32(fileSize * 2);
-            binaryFile.read(reinterpret_cast<char*>(input.data()), static_cast<std::streamsize>(fileSize));
-            const auto blobPtr = blobMem.as<uint8_t*>();
-            ie::PrecisionUtils::f16tof32Arrays(reinterpret_cast<float*>(intermediaryFP32.data()),
-                                               reinterpret_cast<ie::ie_fp16*>(input.data()), blob->size());
-            const float* srcPtr = reinterpret_cast<float*>(intermediaryFP32.data());
-
-            // naive conversion, to be improved
-            for (std::size_t i = 0; i < expectedSize; ++i) {
-                blobPtr[i] = static_cast<uint8_t>(srcPtr[i]);
-            }
-            break;
-        }
-        default:
-            implicitPrecision = true;
-            break;
-        }
-        break;
-    }
-    case ie::Precision::U8: {
-        switch (inTensorPrec) {
-        case ie::Precision::FP32: {
-            std::cout << "Converting " << filePath << " input from U8 to FP32\n";
-            std::cout << "WARNING: U8->FP32 conversion is currently just a type-cast\n";
-            IE_ASSERT(fileSize * 4 == expectedSize)
-                    << "File contains " << fileSize * 4 << " bytes, but " << expectedSize << " expected";
-
-            std::vector<uint8_t> input(fileSize);
-            binaryFile.read(reinterpret_cast<char*>(input.data()), static_cast<std::streamsize>(fileSize));
-            const auto blobPtr = blobMem.as<float*>();
-
-            // naive conversion, to be improved
-            for (std::size_t i = 0; i < fileSize; ++i) {
-                blobPtr[i] = static_cast<float>(input[i]);
-            }
-            break;
-        }
-        case ie::Precision::FP16: {
-            std::cout << "Converting " << filePath << " input from U8 to FP16\n";
-            std::cout << "WARNING: U8->FP16 conversion is currently just a type-cast\n";
-            IE_ASSERT(fileSize * 2 == expectedSize)
-                    << "File contains " << fileSize * 2 << " bytes, but " << expectedSize << " expected";
-
-            std::vector<uint8_t> input(fileSize);
-            std::vector<float> intermediaryFP32(fileSize);
-            binaryFile.read(reinterpret_cast<char*>(input.data()), static_cast<std::streamsize>(fileSize));
-            const auto blobPtr = blobMem.as<ie::ie_fp16*>();
-
-            // naive conversion, to be improved
-            for (std::size_t i = 0; i < fileSize; ++i) {
-                intermediaryFP32[i] = static_cast<float>(input[i]);
-            }
-            ie::PrecisionUtils::f32tof16Arrays(blobPtr, intermediaryFP32.data(), blob->size());
-
-            break;
-        }
-        case ie::Precision::U8:
-            implicitPrecision = true;
-            break;
-        }
-        break;
-    }
-    default:
-        implicitPrecision = true;
-        break;
-    }
-
-    if (implicitPrecision == true) {
-        IE_ASSERT(fileSize == expectedSize)
-                << "File contains " << fileSize << " bytes, but " << expectedSize << " expected";
-
-        const auto blobPtr = blobMem.as<char*>();
-        binaryFile.read(blobPtr, static_cast<std::streamsize>(expectedSize));
-    }
-
-    return blob;
-}
-
-ie::MemoryBlob::Ptr loadInput(const ie::TensorDesc& desc, const std::string& filePath, const std::string& colorFormat,
-                              const ie::Precision& inputPrecision = ie::Precision::UNSPECIFIED) {
-    if (isImage(desc) && !FLAGS_img_as_bin) {
-        return loadImage(desc, filePath, colorFormat);
+    if (dataPrecision != modelPrecision && dataPrecision != ov::element::Type_t::undefined) {
+        std::cout << "Converting " << filePath << " input from " << dataPrecision << " to " << modelPrecision
+                  << std::endl;
+        const ov::Tensor inputTensor(dataPrecision, shape);
+        binaryFile.read(reinterpret_cast<char*>(inputTensor.data()), static_cast<std::streamsize>(fileBytes));
+        vpux::convertTensorPrecision(inputTensor, requestedTensor);
     } else {
-        return loadBinary(desc, filePath, inputPrecision);
+        OPENVINO_ASSERT(fileBytes == reqTensorBytes, "File contains ", fileBytes, " bytes, but ", reqTensorBytes,
+                        " expected");
+        binaryFile.read(reinterpret_cast<char*>(requestedTensor.data()), static_cast<std::streamsize>(reqTensorBytes));
+    }
+
+    return requestedTensor;
+}
+
+/**
+ * @brief Loads the contents of a locally stored file inside an OpenVINO tensor intended to be used as input in the
+ * context of the application.
+ * @details The data being loaded can either be an image or a binary file, the switch between these cases can be
+ * performed by setting the "img_as_bin" flag accordingly. If an image is being loaded, the OpenCV library is deployed
+ * for reading followed by a conversion to the OpenVINO format. If a binary file is loaded, the content's type is
+ * converted from "dataPrecision" to "modelPrecision" before constructing the tensor.
+ *
+ * @param modelPrecision The precision accepted by the model's input
+ * @param shape The shape accepted by the model's input
+ * @param layout The layout used by the model's input
+ * @param filePath Indicates the location of the file to be loaded
+ * @param colorFormat Indicates the color format only in the case when an image is being loaded.
+ * @param dataPrecision Indicates the precision used by the data found within the binary file.
+ * @return The tensor containing the loaded data.
+ */
+ov::Tensor loadInput(const ov::element::Type& modelPrecision, const ov::Shape& shape, const ov::Layout& layout,
+                     const std::string& filePath, const std::string& colorFormat,
+                     const ov::element::Type& dataPrecision = ov::element::Type_t::undefined) {
+    if (isImage(shape, layout) && !FLAGS_img_as_bin) {
+        return loadImage(modelPrecision, shape, layout, filePath, colorFormat);
+    } else {
+        return loadBinary(modelPrecision, shape, filePath, dataPrecision);
     }
 }
 
-ie::MemoryBlob::Ptr loadBlob(const ie::TensorDesc& desc, const std::string& filePath) {
-    const auto blob = ie::as<ie::MemoryBlob>(make_blob_with_precision(desc));
-    blob->allocate();
+ov::Tensor loadTensor(const ov::element::Type& precision, const ov::Shape& shape, const std::string& filePath) {
+    const ov::Tensor tensor(precision, shape);
 
     std::ifstream file(filePath, std::ios_base::in | std::ios_base::binary);
-    IE_ASSERT(file.is_open()) << "Can't open file " << filePath << " for read";
+    OPENVINO_ASSERT(file.is_open(), "Can't open file ", filePath, " for read");
 
-    const auto blobMem = blob->wmap();
-    const auto blobPtr = blobMem.as<char*>();
-    file.read(blobPtr, static_cast<std::streamsize>(blob->byteSize()));
+    const auto dataBuffer = reinterpret_cast<char*>(tensor.data());
+    file.read(dataBuffer, static_cast<std::streamsize>(tensor.get_byte_size()));
 
-    return blob;
+    return tensor;
 }
 
-void dumpBlob(const ie::MemoryBlob::Ptr& blob, const std::string& filePath) {
+void dumpTensor(const ov::Tensor& tensor, const std::string& filePath) {
     std::ofstream file(filePath, std::ios_base::out | std::ios_base::binary);
-    IE_ASSERT(file.is_open()) << "Can't open file " << filePath << " for write";
+    OPENVINO_ASSERT(file.is_open(), "Can't open file ", filePath, " for write");
 
-    const auto blobMem = blob->rmap();
-    const auto blobPtr = blobMem.as<const char*>();
-    file.write(blobPtr, static_cast<std::streamsize>(blob->byteSize()));
+    const auto dataBuffer = reinterpret_cast<char*>(tensor.data());
+    file.write(dataBuffer, static_cast<std::streamsize>(tensor.get_byte_size()));
 }
 
 std::map<std::string, std::string> parseConfigFile() {
     std::map<std::string, std::string> config;
 
     std::ifstream file(FLAGS_config);
-    IE_ASSERT(file.is_open()) << "Can't open file " << FLAGS_config << " for read";
+    OPENVINO_ASSERT(file.is_open(), "Can't open file ", FLAGS_config, " for read");
 
     std::string option;
     while (std::getline(file, option)) {
@@ -662,14 +653,14 @@ std::map<std::string, std::string> parseConfigFile() {
             continue;
         }
         size_t spacePos = option.find_first_of(" \t\n\r");
-        IE_ASSERT(spacePos != std::string::npos)
-                << "Invalid config parameter format. Space separator required here: " << option;
+        OPENVINO_ASSERT(spacePos != std::string::npos,
+                        "Invalid config parameter format. Space separator required here: ", option);
         std::string key, value;
         if (spacePos != std::string::npos) {
             key = option.substr(0, spacePos);
             size_t valueStart = option.find_first_not_of(" \t\n\r", spacePos);
-            IE_ASSERT(valueStart != std::string::npos)
-                    << "An invalid config parameter value detected, it mustn't be empty: " << option;
+            OPENVINO_ASSERT(valueStart != std::string::npos,
+                            "An invalid config parameter value detected, it mustn't be empty: ", option);
             size_t valueEnd = option.find_last_not_of(" \t\n\r");
             value = option.substr(valueStart, valueEnd - valueStart + 1);
             config[key] = value;
@@ -677,43 +668,6 @@ std::map<std::string, std::string> parseConfigFile() {
     }
 
     return config;
-}
-
-//
-// Inference Engine
-//
-
-std::weak_ptr<ie::Core> ieCore;
-
-void setupInferenceEngine() {
-    auto flagDevice = FLAGS_device;
-    auto ieCoreShared = ieCore.lock();
-    IE_ASSERT(ieCoreShared) << "ieCore object expired";
-
-    if (!FLAGS_log_level.empty()) {
-        ieCoreShared->SetConfig({{CONFIG_KEY(LOG_LEVEL), FLAGS_log_level}}, flagDevice);
-    }
-
-    if (FLAGS_device == "CPU") {
-        ieCoreShared->SetConfig({{"LP_TRANSFORMS_MODE", CONFIG_VALUE(NO)}}, flagDevice);
-    }
-
-    if (FLAGS_pc) {
-        ieCoreShared->SetConfig({{CONFIG_KEY(PERF_COUNT), CONFIG_VALUE(YES)}}, flagDevice);
-    }
-
-    if (!FLAGS_config.empty()) {
-        ieCoreShared->SetConfig(parseConfigFile(), flagDevice);
-    }
-}
-
-ie::ExecutableNetwork importNetwork(const std::string& filePath) {
-    std::ifstream file(filePath, std::ios_base::in | std::ios_base::binary);
-    IE_ASSERT(file.is_open()) << "Can't open file " << filePath << " for read";
-    if (auto ieCoreShared = ieCore.lock()) {
-        return ieCoreShared->ImportNetwork(file, FLAGS_device);
-    }
-    THROW_IE_EXCEPTION << "ieCore object expired";
 }
 
 // This function formats performance counters in a same way as benchmark_app -pc does.
@@ -762,92 +716,6 @@ static void printPerformanceCounts(ProfVec performanceData, std::ostream& stream
     std::cout << "Full device name: " << deviceName << std::endl;
     std::cout << std::endl;
     std::cout.flags(fmt);
-}
-
-// This is a copy-paste of openvino/src/inference/src/cpp/ie_infer_request.cpp get_profiling_info func
-static ProfVec get_profiling_info(InferenceEngine::InferRequest& req) {
-    auto ieInfos = req.GetPerformanceCounts();
-    ProfVec infos;
-    infos.reserve(ieInfos.size());
-    while (!ieInfos.empty()) {
-        auto itIeInfo = std::min_element(
-                std::begin(ieInfos), std::end(ieInfos),
-                [](const decltype(ieInfos)::value_type& lhs, const decltype(ieInfos)::value_type& rhs) {
-                    return lhs.second.execution_index < rhs.second.execution_index;
-                });
-        IE_ASSERT(itIeInfo != ieInfos.end());
-        auto& ieInfo = itIeInfo->second;
-        infos.push_back(ov::ProfilingInfo{});
-        auto& info = infos.back();
-        switch (ieInfo.status) {
-        case ie::InferenceEngineProfileInfo::NOT_RUN:
-            info.status = ov::ProfilingInfo::Status::NOT_RUN;
-            break;
-        case ie::InferenceEngineProfileInfo::OPTIMIZED_OUT:
-            info.status = ov::ProfilingInfo::Status::OPTIMIZED_OUT;
-            break;
-        case ie::InferenceEngineProfileInfo::EXECUTED:
-            info.status = ov::ProfilingInfo::Status::EXECUTED;
-            break;
-        }
-        info.real_time = std::chrono::microseconds{ieInfo.realTime_uSec};
-        info.cpu_time = std::chrono::microseconds{ieInfo.cpu_uSec};
-        info.node_name = itIeInfo->first;
-        info.exec_type = std::string{ieInfo.exec_type};
-        info.node_type = std::string{ieInfo.layer_type};
-        ieInfos.erase(itIeInfo);
-    }
-    return infos;
-}
-
-std::pair<ie::BlobMap, ProfVec> runInfer(ie::InferRequest& inferRequest, ie::ExecutableNetwork& exeNet,
-                                         const ie::BlobMap& inputs, const std::vector<std::string>& dumpedInputsPaths) {
-    for (const auto& p : inputs) {
-        inferRequest.SetBlob(p.first, p.second);
-    }
-
-    inferRequest.Infer();
-
-    ie::BlobMap out;
-
-    for (const auto& p : exeNet.GetOutputsInfo()) {
-        out.insert({p.first, inferRequest.GetBlob(p.first)});
-    }
-
-    ProfVec profData{};
-
-    if (FLAGS_pc) {
-        profData = get_profiling_info(inferRequest);
-    }
-
-    return std::make_pair(out, profData);
-}
-
-//
-// SSD_Detection mode
-//
-
-static std::vector<utils::BoundingBox> SSDBoxExtractor(float threshold, std::vector<float>& net_out, size_t imgWidth,
-                                                       size_t imgHeight) {
-    std::vector<utils::BoundingBox> boxes_result;
-
-    if (net_out.empty()) {
-        return boxes_result;
-    }
-    size_t oneDetectionSize = 7;
-
-    IE_ASSERT(net_out.size() % oneDetectionSize == 0);
-
-    for (size_t i = 0; i < net_out.size() / oneDetectionSize; ++i) {
-        if (net_out[i * oneDetectionSize + 2] > threshold) {
-            boxes_result.emplace_back(
-                    static_cast<int>(net_out[i * oneDetectionSize + 1]), net_out[i * oneDetectionSize + 3] * imgWidth,
-                    net_out[i * oneDetectionSize + 4] * imgHeight, net_out[i * oneDetectionSize + 5] * imgWidth,
-                    net_out[i * oneDetectionSize + 6] * imgHeight, net_out[i * oneDetectionSize + 2]);
-        }
-    }
-
-    return boxes_result;
 }
 
 bool checkBBoxOutputs(std::vector<utils::BoundingBox>& actualOutput, std::vector<utils::BoundingBox>& refOutput,
@@ -911,46 +779,17 @@ bool checkBBoxOutputs(std::vector<utils::BoundingBox>& actualOutput, std::vector
     return true;
 }
 
-bool testSSDDetection(const ie::BlobMap& outputs, const ie::BlobMap& refOutputs,
-                      const ie::ConstInputsDataMap& inputsDesc) {
-    IE_ASSERT(outputs.size() == 1 && refOutputs.size() == 1);
-    const auto& outBlob = outputs.begin()->second;
-    const auto& refOutBlob = refOutputs.begin()->second;
-    IE_ASSERT(!inputsDesc.empty());
-
-    const auto& inputDesc = inputsDesc.begin()->second->getTensorDesc();
-
-    const auto imgWidth = inputDesc.getDims().at(3);
-    const auto imgHeight = inputDesc.getDims().at(2);
-
-    auto confThresh = FLAGS_confidence_threshold;
-    auto probTolerance = FLAGS_prob_tolerance;
-    auto boxTolerance = FLAGS_box_tolerance;
-
-    auto actualOutput = utils::parseSSDOutput(ie::as<ie::MemoryBlob>(outBlob), imgWidth, imgHeight, confThresh);
-    auto refOutput = utils::parseSSDOutput(ie::as<ie::MemoryBlob>(refOutBlob), imgWidth, imgHeight, confThresh);
-
-    auto result = checkBBoxOutputs(actualOutput, refOutput, imgWidth, imgHeight, boxTolerance, probTolerance);
-
-    return result;
-}
-
 //
 // Classification mode
 //
 
-std::vector<std::pair<int, float>> parseClassification(const ie::MemoryBlob::Ptr& blob) {
-    IE_ASSERT(blob->getTensorDesc().getPrecision() == ie::Precision::FP32);
+std::vector<std::pair<int, float>> parseClassification(const float* dataBuffer, size_t dataBufferElementsCount) {
+    OPENVINO_ASSERT(dataBuffer != nullptr, "Received a tensor with no allocated buffer");
 
-    std::vector<std::pair<int, float>> res(blob->size());
-
-    const auto blobMem = blob->rmap();
-    const auto blobPtr = blobMem.as<const float*>();
-    IE_ASSERT(blobPtr != nullptr);
-
-    for (size_t i = 0; i < blob->size(); ++i) {
+    std::vector<std::pair<int, float>> res(dataBufferElementsCount);
+    for (size_t i = 0; i < dataBufferElementsCount; ++i) {
         res[i].first = static_cast<int>(i);
-        res[i].second = blobPtr[i];
+        res[i].second = dataBuffer[i];
     }
 
     std::sort(res.begin(), res.end(), [](const std::pair<int, float>& a, const std::pair<int, float>& b) {
@@ -960,97 +799,138 @@ std::vector<std::pair<int, float>> parseClassification(const ie::MemoryBlob::Ptr
     return res;
 }
 
-bool testClassification(const ie::BlobMap& outputs, const ie::BlobMap& refOutputs) {
-    IE_ASSERT(outputs.size() == 1 && refOutputs.size() == 1);
+std::vector<std::vector<std::pair<int, float>>> parseClassificationBatch(const ov::Tensor& tensor, size_t batch_size) {
+    OPENVINO_ASSERT(batch_size, "batch_size can't be 0");
+    OPENVINO_ASSERT(tensor.get_element_type() == ov::element::Type_t::f32,
+                    "Unsupported precision: ", tensor.get_element_type().get_type_name());
 
-    const auto& outBlob = vpux::toFP32(InferenceEngine::as<InferenceEngine::MemoryBlob>(outputs.begin()->second));
-    const auto& refOutBlob = vpux::toFP32(InferenceEngine::as<InferenceEngine::MemoryBlob>(refOutputs.begin()->second));
+    std::vector<std::vector<std::pair<int, float>>> ret;
 
-    IE_ASSERT(outBlob->getTensorDesc() == refOutBlob->getTensorDesc());
-    IE_ASSERT(refOutBlob->getTensorDesc().getPrecision() == ie::Precision::FP32);
+    const float* dataBuffer = tensor.data<const float>();
+    OPENVINO_ASSERT(dataBuffer != nullptr, "Received a tensor with no allocated buffer");
 
-    auto probs = parseClassification(outBlob);
-    auto refProbs = parseClassification(refOutBlob);
+    size_t batch_bundle_size = tensor.get_size() / batch_size;
+    OPENVINO_ASSERT(!(tensor.get_size() % batch_bundle_size),
+                    "Tensor is a not batched tensor! Size: ", tensor.get_size(),
+                    " can't be batched on a batch size: ", batch_size, " properly");
 
-    IE_ASSERT(probs.size() >= FLAGS_top_k);
-    probs.resize(FLAGS_top_k);
-
-    IE_ASSERT(refProbs.size() >= FLAGS_top_k);
-    refProbs.resize(FLAGS_top_k);
-
-    std::cout << "Actual top:" << std::endl;
-    for (size_t i = 0; i < probs.size(); ++i) {
-        std::cout << "    " << i << " : " << probs[i].first << " : " << probs[i].second << std::endl;
+    size_t i = 0;
+    for (; i < tensor.get_size(); i += batch_bundle_size) {
+        if (batch_size != 1) {
+            std::cout << "restore tensor from data bundle: (" << i << "/" << tensor.get_size() << " bytes)"
+                      << std::endl;
+        }
+        ret.push_back(parseClassification(dataBuffer + i, batch_bundle_size));
     }
 
-    std::cout << "Ref Top:" << std::endl;
-    for (size_t i = 0; i < refProbs.size(); ++i) {
-        std::cout << "    " << i << " : " << refProbs[i].first << " : " << refProbs[i].second << std::endl;
+    OPENVINO_ASSERT(i == tensor.get_size());
+    return ret;
+}
+
+bool testClassification(const TensorMap& outputs, const TensorMap& references, size_t batch_size = 1) {
+    OPENVINO_ASSERT(outputs.size() == 1);
+    OPENVINO_ASSERT(outputs.size() == references.size());
+
+    const ov::Tensor outputFP32 = vpux::toFP32(outputs.begin()->second);
+    const ov::Tensor referenceFP32 = vpux::toFP32(references.begin()->second);
+
+    OPENVINO_ASSERT(outputFP32.get_element_type() == referenceFP32.get_element_type());
+    OPENVINO_ASSERT(outputFP32.get_shape() == referenceFP32.get_shape());
+    OPENVINO_ASSERT(referenceFP32.get_element_type() == ov::element::Type_t::f32);
+
+    auto probsBatch = parseClassificationBatch(outputFP32, batch_size);
+    auto refProbsBatch = parseClassificationBatch(referenceFP32, batch_size);
+    OPENVINO_ASSERT(refProbsBatch.size() == probsBatch.size(),
+                    "Incorrect batch size of both output tensor: ", probsBatch.size(),
+                    " and reference tensor: ", refProbsBatch.size(), ". Expected: ", batch_size);
+    for (size_t i = 0; i < batch_size; i++) {
+        OPENVINO_ASSERT(probsBatch[i].size() == refProbsBatch[i].size(),
+                        "Incorrect size of referenced tensor in batch bundle number: (", i, "/", batch_size, ")",
+                        ". Expected size: ", probsBatch[i].size(), ", got: ", refProbsBatch[i].size());
+        OPENVINO_ASSERT(refProbsBatch[i].size() >= FLAGS_top_k);
+        refProbsBatch[i].resize(FLAGS_top_k);
     }
 
-    for (const auto& refElem : refProbs) {
-        const auto actualIt = std::find_if(probs.cbegin(), probs.cend(), [&refElem](const std::pair<int, float>& arg) {
-            return refElem.first == arg.first;
-        });
-        if (actualIt == probs.end()) {
-            std::cout << "Ref result " << refElem.first << " was not found in actual results" << std::endl;
-            return false;
+    bool result = true;
+    for (int i = 0; i < probsBatch.size(); i++) {
+        if (batch_size != 1) {
+            std::cout << "Check tensor bundle: (" << i << "/" << batch_size << " batch)" << std::endl;
+        }
+        auto probs = probsBatch[i];
+        const auto& refs = refProbsBatch[i];
+        OPENVINO_ASSERT(probs.size() >= FLAGS_top_k);
+        probs.resize(FLAGS_top_k);
+
+        std::cout << "Actual top:" << std::endl;
+        for (size_t j = 0; j < probs.size(); ++j) {
+            std::cout << "    " << j << " : " << probs[j].first << " : " << probs[j].second << std::endl;
         }
 
-        const auto& actualElem = *actualIt;
+        std::cout << "Ref Top:" << std::endl;
+        for (size_t j = 0; j < refs.size(); ++j) {
+            std::cout << "    " << j << " : " << refs[j].first << " : " << refs[j].second << std::endl;
+        }
 
-        if (refElem.second > actualElem.second) {
-            const auto probDiff = std::fabs(refElem.second - actualElem.second);
-            if (probDiff > FLAGS_prob_tolerance) {
-                std::cout << "Probability value mismatch for " << refElem.first << " : " << refElem.second << " vs "
-                          << actualElem.second;
-                return false;
+        for (const auto& refElem : refs) {
+            const auto actualIt =
+                    std::find_if(probs.cbegin(), probs.cend(), [&refElem](const std::pair<int, float>& arg) {
+                        return refElem.first == arg.first;
+                    });
+            if (actualIt == probs.end()) {
+                std::cout << "Ref result " << refElem.first << " was not found in actual results" << std::endl;
+                result = result && false;
+                continue;
+            }
+
+            const auto& actualElem = *actualIt;
+
+            if (refElem.second > actualElem.second) {
+                const auto probDiff = std::fabs(refElem.second - actualElem.second);
+                if (probDiff > FLAGS_prob_tolerance) {
+                    std::cout << "Probability value mismatch for " << refElem.first << " : " << refElem.second << " vs "
+                              << actualElem.second;
+                    result = result && false;
+                }
             }
         }
     }
 
-    return true;
+    return result;
 }
 
 //
 // RAW mode
 //
 
-bool compareBlobs(const ie::MemoryBlob::Ptr& actualOutput, const ie::MemoryBlob::Ptr& refOutput) {
-    const auto& actualDesc = actualOutput->getTensorDesc();
-    const auto& refDesc = refOutput->getTensorDesc();
-
-    if (actualDesc.getBlockingDesc().getBlockDims() != refDesc.getBlockingDesc().getBlockDims()) {
-        std::cout << "Actual and reference blobs has different shape" << std::endl;
+bool compareTensors(const ov::Tensor& output, const ov::Tensor& reference) {
+    if (output.get_shape() != reference.get_shape()) {
+        std::cout << "Output and reference tensors have different shapes" << std::endl;
         return false;
     }
 
-    const auto actualFP32 = vpux::toFP32(vpux::toDefLayout(actualOutput));
-    const auto refFP32 = vpux::toFP32(vpux::toDefLayout(refOutput));
+    const ov::Tensor outputFP32 = vpux::toFP32(output);
+    const ov::Tensor referenceFP32 = vpux::toFP32(reference);
 
-    const auto actualMem = actualFP32->rmap();
-    const auto refMem = refFP32->rmap();
+    const auto outputBuffer = outputFP32.data<const float>();
+    const auto referenceBuffer = referenceFP32.data<const float>();
 
-    const auto actualPtr = actualMem.as<const float*>();
-    const auto refPtr = refMem.as<const float*>();
-
-    const auto totalCount = refOutput->size();
+    const auto totalCount = referenceFP32.get_size();
     const auto printCount = std::min<size_t>(totalCount, 10);
 
     for (size_t i = 0; i < totalCount; ++i) {
-        const auto refVal = refPtr[i];
-        const auto actualVal = actualPtr[i];
-        const auto absDiff = std::fabs(refVal - actualVal);
+        const auto referenceValue = referenceBuffer[i];
+        const auto outputValue = outputBuffer[i];
+        const auto absDiff = std::fabs(referenceValue - outputValue);
 
         if (i < printCount) {
             std::cout << "        " << i << " :"
-                      << " ref : " << std::setw(10) << refVal << " actual : " << std::setw(10) << actualVal
+                      << " ref : " << std::setw(10) << referenceValue << " output : " << std::setw(10) << outputValue
                       << " absdiff : " << std::setw(10) << absDiff << std::endl;
         }
 
         if (absDiff > FLAGS_raw_tolerance) {
-            std::cout << "Absolute difference between actual value " << actualVal << " and reference value " << refVal
-                      << " at index " << i << " larger then tolerance" << std::endl;
+            std::cout << "Absolute difference between output value " << outputValue << " and reference value "
+                      << referenceValue << " at index " << i << " larger then tolerance" << std::endl;
             return false;
         }
     }
@@ -1058,18 +938,23 @@ bool compareBlobs(const ie::MemoryBlob::Ptr& actualOutput, const ie::MemoryBlob:
     return true;
 }
 
-bool testRAW(const ie::BlobMap& outputs, const ie::BlobMap& refOutputs) {
-    if (outputs.size() != refOutputs.size()) {
-        std::cout << "Actual and reference has different number of output blobs" << std::endl;
+bool testRAW(const TensorMap& outputTensors, const TensorMap& referenceTensors, size_t batch_size = 1) {
+    if (batch_size != 1) {
+        throw std::runtime_error(
+                "The testcase 'raw' doesn't support any `override_model_batch_size` values besides 1 yet");
+    }
+
+    if (outputTensors.size() != referenceTensors.size()) {
+        std::cout << "The number of predicted outputs differ from the number of references" << std::endl;
         return false;
     }
 
-    for (const auto& actualBlob : outputs) {
-        auto ref_it = refOutputs.find(actualBlob.first);
-        IE_ASSERT(ref_it != refOutputs.end());
+    for (const auto& [tensorName, outputTensor] : outputTensors) {
+        auto referenceTensorIterator = referenceTensors.find(tensorName);
+        OPENVINO_ASSERT(referenceTensorIterator != referenceTensors.end());
 
-        std::cout << "Compare " << actualBlob.first << " with reference" << std::endl;
-        if (!compareBlobs(ie::as<ie::MemoryBlob>(actualBlob.second), ie::as<ie::MemoryBlob>(ref_it->second))) {
+        std::cout << "Compare " << tensorName << " with reference" << std::endl;
+        if (!compareTensors(outputTensor, referenceTensorIterator->second)) {
             return false;
         }
     }
@@ -1083,31 +968,25 @@ bool testRAW(const ie::BlobMap& outputs, const ie::BlobMap& refOutputs) {
 // e.g. '--mode cosim --cosim_threshold 0.98'
 //
 
-bool compareCoSim(const ie::MemoryBlob::Ptr actOutput, const ie::MemoryBlob::Ptr refOutput) {
-    const auto& actDesc = actOutput->getTensorDesc();
-    const auto& refDesc = refOutput->getTensorDesc();
-
-    if (actDesc.getBlockingDesc().getBlockDims() != refDesc.getBlockingDesc().getBlockDims()) {
+bool compareCoSim(const ov::Tensor& output, const ov::Tensor& reference) {
+    if (output.get_shape() != reference.get_shape()) {
         std::cout << "Actual and reference blobs has different shape" << std::endl;
         return false;
     }
 
-    const auto actFP32 = vpux::toFP32(vpux::toDefLayout(actOutput));
-    const auto refFP32 = vpux::toFP32(vpux::toDefLayout(refOutput));
+    const ov::Tensor outputFP32 = vpux::toFP32(output);
+    const ov::Tensor referenceFP32 = vpux::toFP32(reference);
 
-    const auto actMem = actFP32->rmap();
-    const auto refMem = refFP32->rmap();
+    const auto outputBuffer = outputFP32.data<const float>();
+    const auto referenceBuffer = referenceFP32.data<const float>();
 
-    const auto act = actMem.as<const float*>();
-    const auto ref = refMem.as<const float*>();
-
-    const auto size = refOutput->size();
+    const auto size = referenceFP32.get_size();
 
     double numr = 0.0, denA = 0.0, denB = 0.0;
     for (size_t i = 0; i < size; ++i) {
-        numr += act[i] * ref[i];
-        denA += act[i] * act[i];
-        denB += ref[i] * ref[i];
+        numr += outputBuffer[i] * referenceBuffer[i];
+        denA += outputBuffer[i] * outputBuffer[i];
+        denB += referenceBuffer[i] * referenceBuffer[i];
     }
 
     if (denA == 0 || denB == 0) {
@@ -1130,18 +1009,23 @@ bool compareCoSim(const ie::MemoryBlob::Ptr actOutput, const ie::MemoryBlob::Ptr
     return similarity > FLAGS_cosim_threshold;
 }
 
-bool testCoSim(const ie::BlobMap& outputs, const ie::BlobMap& refOutputs) {
-    if (outputs.size() != refOutputs.size()) {
-        std::cout << "Actual and reference has different number of output blobs" << std::endl;
+bool testCoSim(const TensorMap& outputs, const TensorMap& references, size_t batch_size = 1) {
+    if (batch_size != 1) {
+        throw std::runtime_error(
+                "The testcase 'testCoSim' doesn't support any `override_model_batch_size` values besides 1 yet");
+    }
+
+    if (outputs.size() != references.size()) {
+        std::cout << "The outputs and references differ in the number of tensors" << std::endl;
         return false;
     }
 
-    for (const auto& actualBlob : outputs) {
-        auto ref_it = refOutputs.find(actualBlob.first);
-        IE_ASSERT(ref_it != refOutputs.end());
+    for (const auto& [tensorName, output] : outputs) {
+        auto referencesIterator = references.find(tensorName);
+        OPENVINO_ASSERT(referencesIterator != references.end());
 
-        std::cout << "Compare " << actualBlob.first << " with reference" << std::endl;
-        if (!compareCoSim(ie::as<ie::MemoryBlob>(actualBlob.second), ie::as<ie::MemoryBlob>(ref_it->second))) {
+        std::cout << "Compare " << tensorName << " with reference" << std::endl;
+        if (!compareCoSim(output, referencesIterator->second)) {
             return false;
         }
     }
@@ -1155,30 +1039,24 @@ bool testCoSim(const ie::BlobMap& outputs, const ie::BlobMap& refOutputs) {
 // e.g. '--mode rrmse --rrmse_loss_threshold 0.1'
 //
 
-bool computeRRMSE(const ie::MemoryBlob::Ptr actOutput, const ie::MemoryBlob::Ptr refOutput) {
-    const auto& actDesc = actOutput->getTensorDesc();
-    const auto& refDesc = refOutput->getTensorDesc();
-
-    if (actDesc.getBlockingDesc().getBlockDims() != refDesc.getBlockingDesc().getBlockDims()) {
-        std::cout << "Actual and reference blobs has different shape" << std::endl;
+bool computeRRMSE(const ov::Tensor& output, const ov::Tensor& reference) {
+    if (output.get_shape() != reference.get_shape()) {
+        std::cout << "Output and reference tensors have different shapes" << std::endl;
         return false;
     }
 
-    const auto actFP32 = vpux::toFP32(vpux::toDefLayout(actOutput));
-    const auto refFP32 = vpux::toFP32(vpux::toDefLayout(refOutput));
+    const ov::Tensor outputFP32 = vpux::toFP32(output);
+    const ov::Tensor referenceFP32 = vpux::toFP32(reference);
 
-    const auto actMem = actFP32->rmap();
-    const auto refMem = refFP32->rmap();
+    const auto outputBuffer = outputFP32.data<const float>();
+    const auto referenceBuffer = referenceFP32.data<const float>();
 
-    const auto act = actMem.as<const float*>();
-    const auto ref = refMem.as<const float*>();
-
-    const auto size = refOutput->size();
+    const auto size = referenceFP32.get_size();
 
     double error = 0, sum = 0, diff;
     for (size_t i = 0; i < size; ++i) {
-        diff = (act[i] - ref[i]);
-        sum += (act[i] * act[i]);
+        diff = (outputBuffer[i] - referenceBuffer[i]);
+        sum += (outputBuffer[i] * outputBuffer[i]);
         error += (diff * diff);
     }
 
@@ -1198,18 +1076,23 @@ bool computeRRMSE(const ie::MemoryBlob::Ptr actOutput, const ie::MemoryBlob::Ptr
     return rrmseLoss <= FLAGS_rrmse_loss_threshold;
 }
 
-bool testRRMSE(const ie::BlobMap& actOutputs, const ie::BlobMap& refOutputs) {
-    if (actOutputs.size() != refOutputs.size()) {
+bool testRRMSE(const TensorMap& outputs, const TensorMap& references, size_t batch_size = 1) {
+    if (batch_size != 1) {
+        throw std::runtime_error(
+                "The testcase 'rrmse' doesn't support any `override_model_batch_size` values besides 1 yet");
+    }
+
+    if (outputs.size() != references.size()) {
         std::cout << "Actual and reference has different number of output blobs" << std::endl;
         return false;
     }
 
-    for (const auto& actualBlob : actOutputs) {
-        auto ref_it = refOutputs.find(actualBlob.first);
-        IE_ASSERT(ref_it != refOutputs.end());
+    for (const auto& [tensorName, output] : outputs) {
+        auto referencesIterator = references.find(tensorName);
+        OPENVINO_ASSERT(referencesIterator != references.end());
 
-        std::cout << "Compare " << actualBlob.first << " with reference" << std::endl;
-        if (!computeRRMSE(ie::as<ie::MemoryBlob>(actualBlob.second), ie::as<ie::MemoryBlob>(ref_it->second))) {
+        std::cout << "Compare " << tensorName << " with reference" << std::endl;
+        if (!computeRRMSE(output, referencesIterator->second)) {
             return false;
         }
     }
@@ -1223,60 +1106,60 @@ bool testRRMSE(const ie::BlobMap& actOutputs, const ie::BlobMap& refOutputs) {
 // e.g. '--mode nrmse --nrmse_loss_threshold 0.01'
 //
 
-bool computeNRMSE(const ie::MemoryBlob::Ptr actOutput, const ie::MemoryBlob::Ptr refOutput) {
-    const auto& actDesc = actOutput->getTensorDesc();
-    const auto& refDesc = refOutput->getTensorDesc();
-
-    if (actDesc.getBlockingDesc().getBlockDims() != refDesc.getBlockingDesc().getBlockDims()) {
-        std::cout << "Actual and reference blobs has different shape" << std::endl;
+bool computeNRMSE(const ov::Tensor& output, const ov::Tensor& reference) {
+    if (output.get_shape() != reference.get_shape()) {
+        std::cout << "Output and reference tensors have different shapes" << std::endl;
         return false;
     }
 
-    const auto size = refOutput->size();
+    const auto size = reference.get_size();
 
     if (size == 0) {
-        std::cout << "Empty actual and reference outputs, NRMSE loss set to 0" << std::endl;
+        std::cout << "Empty output and reference tensors, NRMSE loss set to 0" << std::endl;
         return true;
     }
 
-    const auto actFP32 = vpux::toFP32(vpux::toDefLayout(actOutput));
-    const auto refFP32 = vpux::toFP32(vpux::toDefLayout(refOutput));
+    const ov::Tensor outputFP32 = vpux::toFP32(output);
+    const ov::Tensor referenceFP32 = vpux::toFP32(reference);
 
-    const auto actMem = actFP32->rmap();
-    const auto refMem = refFP32->rmap();
-
-    const auto act = actMem.as<const float*>();
-    const auto ref = refMem.as<const float*>();
+    const auto outputBuffer = outputFP32.data<const float>();
+    const auto referenceBuffer = referenceFP32.data<const float>();
 
     double error = 0;
-    float maxAct = 0, maxRef = 0, minAct = 0, minRef = 0;
+    float maxOutput = 0, maxReference = 0, minOutput = 0, minReference = 0;
     for (size_t i = 0; i < size; ++i) {
-        const auto diff = act[i] - ref[i];
+        const auto diff = outputBuffer[i] - referenceBuffer[i];
         error += diff * diff;
-        maxAct = std::max(act[i], maxAct);
-        maxRef = std::max(ref[i], maxRef);
-        minAct = std::min(act[i], minAct);
-        minRef = std::min(ref[i], minRef);
+        maxOutput = std::max(outputBuffer[i], maxOutput);
+        maxReference = std::max(referenceBuffer[i], maxReference);
+        minOutput = std::min(outputBuffer[i], minOutput);
+        minReference = std::min(referenceBuffer[i], minReference);
     }
 
-    double nrmseLoss = sqrt(error / size) / std::max(0.001f, std::max(maxAct - minAct, maxRef - minRef));
+    double nrmseLoss =
+            sqrt(error / size) / std::max(0.001f, std::max(maxOutput - minOutput, maxReference - minReference));
 
     std::cout << "NRMSE loss : " << nrmseLoss << "   NRMSE threshold : " << FLAGS_nrmse_loss_threshold << std::endl;
     return nrmseLoss <= FLAGS_nrmse_loss_threshold;
 }
 
-bool testNRMSE(const ie::BlobMap& actOutputs, const ie::BlobMap& refOutputs) {
-    if (actOutputs.size() != refOutputs.size()) {
+bool testNRMSE(const TensorMap& outputs, const TensorMap& references, size_t batch_size = 1) {
+    if (batch_size != 1) {
+        throw std::runtime_error(
+                "The testcase 'nrmse' doesn't support any `override_model_batch_size` values besides 1 yet");
+    }
+
+    if (outputs.size() != references.size()) {
         std::cout << "Actual and reference has different number of output blobs" << std::endl;
         return false;
     }
 
-    for (const auto& actualBlob : actOutputs) {
-        auto ref_it = refOutputs.find(actualBlob.first);
-        IE_ASSERT(ref_it != refOutputs.end());
+    for (const auto& [tensorName, output] : outputs) {
+        auto referencesIterator = references.find(tensorName);
+        OPENVINO_ASSERT(referencesIterator != references.end());
 
-        std::cout << "Compare " << actualBlob.first << " with reference" << std::endl;
-        if (!computeNRMSE(ie::as<ie::MemoryBlob>(actualBlob.second), ie::as<ie::MemoryBlob>(ref_it->second))) {
+        std::cout << "Compare " << tensorName << " with reference" << std::endl;
+        if (!computeNRMSE(output, referencesIterator->second)) {
             return false;
         }
     }
@@ -1285,120 +1168,26 @@ bool testNRMSE(const ie::BlobMap& actOutputs, const ie::BlobMap& refOutputs) {
 }
 
 //
-// Yolo V2 mode
-//
-bool testYoloV2(const ie::BlobMap& actualBlobs, const ie::BlobMap& refBlobs, const ie::ConstInputsDataMap& inputsDesc) {
-    IE_ASSERT(inputsDesc.size() == 1);
-    IE_ASSERT(actualBlobs.size() == 1u && actualBlobs.size() == refBlobs.size());
-    auto actualBlob = actualBlobs.begin()->second;
-    auto refBlob = refBlobs.begin()->second;
-
-    const auto& inputDesc = inputsDesc.begin()->second->getTensorDesc();
-
-    const auto imgWidth = inputDesc.getDims().at(3);
-    const auto imgHeight = inputDesc.getDims().at(2);
-    double confThresh = FLAGS_confidence_threshold;
-    double probTolerance = FLAGS_prob_tolerance;
-    double boxTolerance = FLAGS_box_tolerance;
-    bool isTiny = FLAGS_is_tiny_yolo;
-
-    auto actualOutput =
-            utils::parseYoloOutput(vpux::toFP32(InferenceEngine::as<InferenceEngine::MemoryBlob>(actualBlob)), imgWidth,
-                                   imgHeight, confThresh, isTiny);
-    auto refOutput = utils::parseYoloOutput(vpux::toFP32(InferenceEngine::as<InferenceEngine::MemoryBlob>(refBlob)),
-                                            imgWidth, imgHeight, confThresh, isTiny);
-
-    bool result = checkBBoxOutputs(actualOutput, refOutput, imgWidth, imgHeight, boxTolerance, probTolerance);
-    return result;
-}
-
-//
-// Yolo V3 mode
-//
-bool testYoloV3(const ie::BlobMap& actBlobs, const ie::BlobMap& refBlobs, const ie::ConstInputsDataMap& inputsDesc) {
-    IE_ASSERT(inputsDesc.size() == 1);
-    IE_ASSERT(actBlobs.size() == 3);
-    IE_ASSERT(actBlobs.size() == refBlobs.size());
-
-    const auto& inputDesc = inputsDesc.begin()->second->getTensorDesc();
-    const auto imgWidth = inputDesc.getDims().at(3);
-    const auto imgHeight = inputDesc.getDims().at(2);
-
-    double confThresh = FLAGS_confidence_threshold;
-    double probTolerance = FLAGS_prob_tolerance;
-    double boxTolerance = FLAGS_box_tolerance;
-    int classes = FLAGS_classes;
-    int coords = FLAGS_coords;
-    int num = FLAGS_num;
-    std::vector<float> anchors = {10.0, 13.0, 16.0,  30.0,  33.0, 23.0,  30.0,  61.0,  62.0,
-                                  45.0, 59.0, 119.0, 116.0, 90.0, 156.0, 198.0, 373.0, 326.0};
-
-    auto actOutput = utils::parseYoloV3Output(actBlobs, imgWidth, imgHeight, classes, coords, num, anchors, confThresh,
-                                              InferenceEngine::NCHW);
-    auto refOutput = utils::parseYoloV3Output(refBlobs, imgWidth, imgHeight, classes, coords, num, anchors, confThresh,
-                                              refBlobs.begin()->second->getTensorDesc().getLayout());
-
-    bool result = checkBBoxOutputs(actOutput, refOutput, imgWidth, imgHeight, boxTolerance, probTolerance);
-    return result;
-};
-
-//
-// Yolo V4 mode
-// Ref link: https://docs.openvino.ai/latest/omz_models_model_yolo_v4_tiny_tf.html
-//
-bool testYoloV4(const ie::BlobMap& actBlobs, const ie::BlobMap& refBlobs, const ie::ConstInputsDataMap& inputsDesc) {
-    IE_ASSERT(inputsDesc.size() == 1);
-    IE_ASSERT(actBlobs.size() == 2);
-    IE_ASSERT(actBlobs.size() == refBlobs.size());
-
-    const auto& inputDesc = inputsDesc.begin()->second->getTensorDesc();
-    const auto imgWidth = inputDesc.getDims().at(3);
-    const auto imgHeight = inputDesc.getDims().at(2);
-
-    double confThresh = FLAGS_confidence_threshold;
-    double probTolerance = FLAGS_prob_tolerance;
-    double boxTolerance = FLAGS_box_tolerance;
-    int classes = FLAGS_classes;
-    int coords = FLAGS_coords;
-    int num = FLAGS_num;
-    std::vector<float> anchors = {10.0, 14.0, 23.0, 27.0, 37.0, 58.0, 81.0, 82.0, 135.0, 169.0, 344.0, 319.0};
-    std::vector<std::vector<float>> anchor_mask{{3, 4, 5}, {1, 2, 3}};
-    std::vector<float> masked_anchors{};
-    for (auto& it : anchor_mask) {
-        int index = 0;
-        for (auto& anchorIndex : it) {
-            if (index >= num)
-                break;
-
-            index++;
-            masked_anchors.push_back(anchors[2 * anchorIndex]);
-            masked_anchors.push_back(anchors[2 * anchorIndex + 1]);
-        }
-    }
-
-    auto refOutput = utils::parseYoloV4Output(refBlobs, imgWidth, imgHeight, classes, coords, num, masked_anchors,
-                                              confThresh, refBlobs.begin()->second->getTensorDesc().getLayout());
-    auto actOutput = utils::parseYoloV4Output(actBlobs, imgWidth, imgHeight, classes, coords, num, masked_anchors,
-                                              confThresh, actBlobs.begin()->second->getTensorDesc().getLayout());
-    bool result = checkBBoxOutputs(actOutput, refOutput, imgWidth, imgHeight, boxTolerance, probTolerance);
-    return result;
-};
-
-//
 // PSNR mode
 // using psnr_reference and psnr_tolerance flags for validation
 // e.g. '--mode psnr --psnr_reference <value> --psnr_tolerance <value>'
 // Direction of metric’s growth is higher-better. If the images are identical, the PSNR is infinite.
 //
 
-bool testPSNR(const ie::BlobMap& actBlobs, const ie::BlobMap& refBlobs, const int dstHeight, const int dstWidth) {
-    IE_ASSERT(actBlobs.size() == refBlobs.size());
+bool testPSNR(const TensorMap& outputs, const TensorMap& references, const int dstHeight, const int dstWidth,
+              size_t batch_size = 1) {
+    if (batch_size != 1) {
+        throw std::runtime_error(
+                "The testcase 'psnr' doesn't support any `override_model_batch_size` values besides 1 yet");
+    }
+    OPENVINO_ASSERT(outputs.size() == references.size(),
+                    "Mismatch between the number of model outputs and the number of references");
 
     int scaleBorder = FLAGS_scale_border;
     bool normalizedImage = FLAGS_normalized_image;
 
-    auto refOutput = vpux::parseBlobAsFP32(refBlobs);
-    auto actOutput = vpux::parseBlobAsFP32(actBlobs);
+    auto refOutput = vpux::parseTensorsAsFP32(references);
+    auto actOutput = vpux::parseTensorsAsFP32(outputs);
 
     auto result = utils::runPSNRMetric(actOutput, refOutput, dstHeight, dstWidth, scaleBorder, normalizedImage);
 
@@ -1458,440 +1247,19 @@ bool compare_mean_IoU(std::vector<std::pair<bool, float>> iou, float semSegThres
     return stateValue;
 }
 
-//
-// MeanIoU mode
-// Using sem_seg_classes, sem_seg_threshold flags and optionally sem_seg_ignore_label and dataset flags for validation
-// e.g. '--mode mean_iou --sem_seg_classes 12 --sem_seg_threshold 0.98 --sem_seg_ignore_label 11 --dataset camVid12'
-//
-bool testMeanIoU(const ie::BlobMap& actBlobs, const ie::BlobMap& refBlobs, const ie::ConstInputsDataMap& inputsDesc) {
-    IE_ASSERT(inputsDesc.size() == 1);
-    IE_ASSERT(actBlobs.size() == 1);
-    IE_ASSERT(actBlobs.size() == refBlobs.size());
-
-    unsigned int classes = FLAGS_sem_seg_classes;
-    float semSegThreshold = FLAGS_sem_seg_threshold;
-
-    std::vector<uint8_t> refOutput;
-    std::vector<uint8_t> actOutput;
-    std::vector<std::pair<bool, float>> iou(classes, {false, 0.0f});
-
-    utils::argMax_channels(ie::as<ie::MemoryBlob>(refBlobs.begin()->second), refOutput);
-    utils::argMax_channels(ie::as<ie::MemoryBlob>(actBlobs.begin()->second), actOutput);
-
-    if (refOutput.size() != actOutput.size()) {
-        std::cout << "Ref size and Act size are different" << std::endl;
-        return false;
-    }
-    iou = utils::mean_IoU(actOutput, refOutput, classes, FLAGS_sem_seg_ignore_label);
-
-    return compare_mean_IoU(iou, semSegThreshold, classes);
-};
-
-static int runSingleImageTestOV10() {
-    std::cout << "Run single image test with OV 1.0 API" << std::endl;
-    try {
-        std::shared_ptr<ie::Core> ieCoreShared = std::make_shared<ie::Core>();
-        ieCore = ieCoreShared;
-
-        const std::unordered_set<std::string> allowedPrecision = {"U8", "FP16", "FP32"};
-        if (!FLAGS_ip.empty()) {
-            // input precision is U8, FP16 or FP32 only
-            std::transform(FLAGS_ip.begin(), FLAGS_ip.end(), FLAGS_ip.begin(), ::toupper);
-            if (allowedPrecision.count(FLAGS_ip) == 0)
-                throw std::logic_error("Parameter -ip " + FLAGS_ip + " is not supported");
-        }
-        if (!FLAGS_op.empty()) {
-            // output precision is U8, FP16 or FP32 only
-            std::transform(FLAGS_op.begin(), FLAGS_op.end(), FLAGS_op.begin(), ::toupper);
-            if (allowedPrecision.count(FLAGS_op) == 0)
-                throw std::logic_error("Parameter -op " + FLAGS_op + " is not supported");
-        }
-
-        std::vector<std::string> inputFilesPerCase;
-        std::vector<std::vector<std::string>> inputFilesForOneInfer;
-        inputFilesPerCase = splitStringList(FLAGS_input, ';');
-        for (const auto& images : inputFilesPerCase) {
-            inputFilesForOneInfer.push_back(splitStringList(images, ','));
-        }
-
-        std::vector<std::string> inputBinPrecisionStrPerCase;
-        std::vector<std::vector<ie::Precision>> inputBinPrecisionForOneInfer(inputFilesForOneInfer.size());
-        if (FLAGS_img_as_bin) {
-            for (std::size_t i = 0; i < inputFilesForOneInfer.size(); ++i) {
-                inputBinPrecisionForOneInfer[i] =
-                        std::vector<ie::Precision>(inputFilesForOneInfer[i].size(), ie::Precision::UNSPECIFIED);
-            }
-            inputBinPrecisionStrPerCase = splitStringList(FLAGS_img_bin_precision, ';');
-            std::size_t inferIdx = 0;
-            for (const auto& precisions : inputBinPrecisionStrPerCase) {
-                std::vector<std::string> inputBinPrecisionsStrThisInfer = splitStringList(precisions, ',');
-                std::size_t precisionIdx = 0;
-                for (const auto& precision : inputBinPrecisionsStrThisInfer) {
-                    if (strEq(precision, "FP32")) {
-                        inputBinPrecisionForOneInfer[inferIdx][precisionIdx] = ie::Precision::FP32;
-                    } else if (strEq(precision, "FP16")) {
-                        inputBinPrecisionForOneInfer[inferIdx][precisionIdx] = ie::Precision::FP16;
-                    } else if (strEq(precision, "U8")) {
-                        inputBinPrecisionForOneInfer[inferIdx][precisionIdx] = ie::Precision::U8;
-                    } else {
-                        std::cout << "WARNING: Unhandled precision '" << precision
-                                  << "'! Only FP32, FP16 and U8 can be currently converted to the network's input "
-                                     "tensor precision.";
-                    }
-                    ++precisionIdx;
-                }
-                ++inferIdx;
-            }
-        }
-
-        if (FLAGS_network.empty()) {
-            std::cout << "Not enough parameters. Check help." << std::endl;
-            return EXIT_FAILURE;
-        }
-
-        setupInferenceEngine();
-
-        ie::ExecutableNetwork exeNet;
-
-        if (hasLoadableExt(FLAGS_network)) {
-            std::cout << "Load network " << FLAGS_network << std::endl;
-
-            auto cnnNet = ieCoreShared->ReadNetwork(FLAGS_network);
-
-            // Input precision
-            ie::InputsDataMap inputInfo(cnnNet.getInputsInfo());
-            if (!FLAGS_ip.empty()) {
-                ie::Precision prc_in = ie::Precision::U8;
-                if (FLAGS_ip == "FP16")
-                    prc_in = ie::Precision::FP16;
-                else if (FLAGS_ip == "FP32")
-                    prc_in = ie::Precision::FP32;
-                else
-                    prc_in = ie::Precision::U8;
-
-                for (auto inputInfoIt = inputInfo.begin(); inputInfoIt != inputInfo.end(); ++inputInfoIt) {
-                    inputInfoIt->second->setPrecision(prc_in);
-                }
-            }
-            // Input layout
-            if (!FLAGS_il.empty()) {
-                for (auto& info : inputInfo) {
-                    if (info.second->getLayout() == InferenceEngine::C)
-                        continue;
-                    else if (info.second->getTensorDesc().getDims().size() == 2) {
-                        info.second->setLayout(ie::Layout::NC);
-                    } else if (info.second->getTensorDesc().getDims().size() == 3) {
-                        if (FLAGS_il == "NCHW") {
-                            info.second->setLayout(ie::Layout::CHW);
-                        } else {
-                            info.second->setLayout(ie::Layout::HWC);
-                        }
-                    } else {
-                        if (FLAGS_il == "NCHW") {
-                            info.second->setLayout(ie::Layout::NCHW);
-                        } else {
-                            info.second->setLayout(ie::Layout::NHWC);
-                        }
-                    }
-                }
-            }
-            // Output precision
-            ie::OutputsDataMap outputInfo(cnnNet.getOutputsInfo());
-            if (!FLAGS_op.empty()) {
-                ie::Precision prc_out = ie::Precision::U8;
-                if (FLAGS_op == "FP16")
-                    prc_out = ie::Precision::FP16;
-                else if (FLAGS_op == "FP32")
-                    prc_out = ie::Precision::FP32;
-                else
-                    prc_out = ie::Precision::U8;
-
-                // possibly multiple outputs
-                for (auto outputInfoIt = outputInfo.begin(); outputInfoIt != outputInfo.end(); ++outputInfoIt) {
-                    outputInfoIt->second->setPrecision(prc_out);
-                }
-            }
-            // Output layout
-            if (!FLAGS_ol.empty()) {
-                for (auto outputInfoIt = outputInfo.begin(); outputInfoIt != outputInfo.end(); ++outputInfoIt) {
-                    if (outputInfoIt->second->getDims().size() == 2) {
-                        outputInfoIt->second->setLayout(ie::Layout::NC);
-                    } else if (outputInfoIt->second->getDims().size() == 3) {
-                        if (FLAGS_ol == "NCHW") {
-                            outputInfoIt->second->setLayout(ie::Layout::CHW);
-                        } else {
-                            outputInfoIt->second->setLayout(ie::Layout::HWC);
-                        }
-                    } else if (outputInfoIt->second->getDims().size() == 5) {
-                        if (FLAGS_ol == "NCDHW") {
-                            outputInfoIt->second->setLayout(ie::Layout::NCDHW);
-                        } else {
-                            outputInfoIt->second->setLayout(ie::Layout::NDHWC);
-                        }
-                    } else {
-                        if (FLAGS_ol == "NCHW") {
-                            outputInfoIt->second->setLayout(ie::Layout::NCHW);
-                        } else {
-                            outputInfoIt->second->setLayout(ie::Layout::NHWC);
-                        }
-                    }
-                }
-            }
-
-            exeNet = ieCoreShared->LoadNetwork(cnnNet, FLAGS_device);
-        } else {
-            std::cout << "Import network " << FLAGS_network << std::endl;
-            if (FLAGS_il.empty() || FLAGS_ol.empty()) {
-                std::cout << "WARNING: Input and/or output layout parameter is missing.\n Please note that if the "
-                             "model was compiled using a non-default layout value this may result in failure. If that "
-                             "is the case, consider using the same layout parameter values that were used for "
-                             "compiling the model."
-                          << std::endl;
-            }
-
-            exeNet = importNetwork(FLAGS_network);
-        }
-
-        // store compiled model, if requried
-        if (!FLAGS_compiled_blob.empty()) {
-            std::ofstream outputFile{FLAGS_compiled_blob, std::ios::out | std::ios::binary};
-            if (!outputFile.is_open()) {
-                std::cerr << "Output file \"" << FLAGS_compiled_blob << "\" can't be opened for writing" << std::endl;
-                return EXIT_FAILURE;
-            } else {
-                exeNet.Export(outputFile);
-            }
-        }
-        adjustInputLayout(exeNet, FLAGS_il);
-        auto inferRequest = exeNet.CreateInferRequest();
-
-        std::string netFileName;
-        {
-            auto startPos = FLAGS_network.rfind('/');
-            if (startPos == std::string::npos) {
-                startPos = FLAGS_network.rfind('\\');
-                if (startPos == std::string::npos) {
-                    startPos = 0;
-                }
-            }
-
-            auto endPos = FLAGS_network.rfind('.');
-            if (endPos == std::string::npos) {
-                endPos = FLAGS_network.size();
-            }
-
-            IE_ASSERT(endPos > startPos);
-            netFileName = cleanName(FLAGS_network.substr(startPos, endPos - startPos));
-        }
-
-        for (size_t numberOfTestCase = 0; numberOfTestCase < inputFilesPerCase.size(); ++numberOfTestCase) {
-            const auto inputsInfo = exeNet.GetInputsInfo();
-            const auto outputsInfo = exeNet.GetOutputsInfo();
-            std::vector<std::string> inputFiles = inputFilesForOneInfer[numberOfTestCase];
-            IE_ASSERT(inputFiles.size() == inputsInfo.size())
-                    << "Number of input files " << inputFiles.size() << " doesn't match network configuration "
-                    << inputsInfo.size();
-
-            ie::BlobMap inputs;
-            size_t inputInd = 0;
-            std::vector<std::string> dumpedInputsPaths;
-            for (const auto& p : inputsInfo) {
-                std::cout << "Load input #" << inputInd << " from " << inputFiles[inputInd] << " as "
-                          << p.second->getTensorDesc().getPrecision() << std::endl;
-                const auto blob =
-                        !FLAGS_img_as_bin
-                                ? loadInput(p.second->getTensorDesc(), inputFiles[inputInd], FLAGS_color_format)
-                                : loadInput(p.second->getTensorDesc(), inputFiles[inputInd], FLAGS_color_format,
-                                            inputBinPrecisionForOneInfer[numberOfTestCase][inputInd]);
-                inputs.emplace(p.first, blob);
-
-                std::ostringstream ostr;
-                ostr << netFileName << "_input_" << inputInd << "_case_" << numberOfTestCase << ".blob";
-                const auto blobFileName = ostr.str();
-
-                std::cout << "Dump input #" << inputInd << "_case_" << numberOfTestCase << " to " << blobFileName
-                          << std::endl;
-                dumpBlob(blob, blobFileName);
-
-                ++inputInd;
-
-                dumpedInputsPaths.push_back(blobFileName);
-            }
-
-            std::cout << "Run inference on " << FLAGS_device << std::endl;
-            const auto startTime = Time::now();
-            const auto inferenceOutput = runInfer(inferRequest, exeNet, inputs, dumpedInputsPaths);
-            const auto endTime = Time::now();
-
-            const ie::BlobMap outputs = inferenceOutput.first;
-
-            printPerformanceCountsAndLatency(numberOfTestCase, inferenceOutput.second, endTime - startTime);
-
-            if (FLAGS_run_test) {
-                ie::BlobMap refOutputs;
-                size_t outputInd = 0;
-                for (const auto& p : outputsInfo) {
-                    std::ostringstream ostr;
-                    ostr << netFileName << "_ref_out_" << outputInd << "_case_" << numberOfTestCase << ".blob";
-                    const auto blobFileName = ostr.str();
-
-                    auto refTensorDesc = p.second->getTensorDesc();
-
-                    std::cout << "Load reference output #" << outputInd << " from " << blobFileName << " as "
-                              << refTensorDesc.getPrecision() << std::endl;
-
-                    const auto blob = loadBlob(refTensorDesc, blobFileName);
-                    refOutputs.emplace(p.first, blob);
-
-                    ++outputInd;
-                }
-
-                outputInd = 0;
-                for (const auto& p : outputs) {
-                    std::ostringstream ostr;
-                    ostr << netFileName << "_kmb_out_" << outputInd << "_case_" << numberOfTestCase << ".blob";
-                    const auto blobFileName = ostr.str();
-
-                    std::cout << "Dump device output #" << outputInd << "_case_" << numberOfTestCase << " to "
-                              << blobFileName << std::endl;
-                    dumpBlob(ie::as<ie::MemoryBlob>(p.second), blobFileName);
-
-                    ++outputInd;
-                }
-
-                if (strEq(FLAGS_mode, "classification")) {
-                    if (testClassification(outputs, refOutputs)) {
-                        std::cout << "PASSED" << std::endl;
-                    } else {
-                        std::cout << "FAILED" << std::endl;
-                        return EXIT_FAILURE;
-                    }
-                } else if (strEq(FLAGS_mode, "raw")) {
-                    if (testRAW(outputs, refOutputs)) {
-                        std::cout << "PASSED" << std::endl;
-                    } else {
-                        std::cout << "FAILED" << std::endl;
-                        return EXIT_FAILURE;
-                    }
-                } else if (strEq(FLAGS_mode, "cosim")) {
-                    if (testCoSim(outputs, refOutputs)) {
-                        std::cout << "PASSED" << std::endl;
-                    } else {
-                        std::cout << "FAILED" << std::endl;
-                        return EXIT_FAILURE;
-                    }
-                } else if (strEq(FLAGS_mode, "rrmse")) {
-                    if (testRRMSE(outputs, refOutputs)) {
-                        std::cout << "PASSED" << std::endl;
-                    } else {
-                        std::cout << "FAILED" << std::endl;
-                        return EXIT_FAILURE;
-                    }
-                } else if (strEq(FLAGS_mode, "nrmse")) {
-                    if (testNRMSE(outputs, refOutputs)) {
-                        std::cout << "PASSED" << std::endl;
-                    } else {
-                        std::cout << "FAILED" << std::endl;
-                        return EXIT_FAILURE;
-                    }
-                } else if (strEq(FLAGS_mode, "ssd")) {
-                    if (testSSDDetection(outputs, refOutputs, inputsInfo)) {
-                        std::cout << "PASSED" << std::endl;
-                    } else {
-                        std::cout << "FAILED" << std::endl;
-                        return EXIT_FAILURE;
-                    }
-                } else if (strEq(FLAGS_mode, "yolo_v2")) {
-                    if (testYoloV2(outputs, refOutputs, inputsInfo)) {
-                        std::cout << "PASSED" << std::endl;
-                    } else {
-                        std::cout << "FAILED" << std::endl;
-                        return EXIT_FAILURE;
-                    }
-                } else if (strEq(FLAGS_mode, "yolo_v3")) {
-                    if (testYoloV3(outputs, refOutputs, inputsInfo)) {
-                        std::cout << "PASSED" << std::endl;
-                    } else {
-                        std::cout << "FAILED" << std::endl;
-                        return EXIT_FAILURE;
-                    }
-                } else if (strEq(FLAGS_mode, "yolo_v4")) {
-                    if (testYoloV4(outputs, refOutputs, inputsInfo)) {
-                        std::cout << "PASSED" << std::endl;
-                    } else {
-                        std::cout << "FAILED" << std::endl;
-                        return EXIT_FAILURE;
-                    }
-                } else if (strEq(FLAGS_mode, "psnr")) {
-                    const auto& outputDesc = outputsInfo.begin()->second->getTensorDesc();
-                    const auto dstHeight = outputDesc.getDims().at(2);
-                    const auto dstWidth = outputDesc.getDims().at(3);
-
-                    if (testPSNR(outputs, refOutputs, dstHeight, dstWidth)) {
-                        std::cout << "PASSED" << std::endl;
-                    } else {
-                        std::cout << "FAILED" << std::endl;
-                        return EXIT_FAILURE;
-                    }
-                } else if (strEq(FLAGS_mode, "mean_iou")) {
-                    if (testMeanIoU(outputs, refOutputs, inputsInfo)) {
-                        std::cout << "PASSED" << std::endl;
-                    } else {
-                        std::cout << "FAILED" << std::endl;
-                        return EXIT_FAILURE;
-                    }
-                } else {
-                    std::cout << "Unknown mode " << FLAGS_mode << std::endl;
-                    return EXIT_FAILURE;
-                }
-            } else {
-                size_t outputInd = 0;
-                for (const auto& p : outputs) {
-                    std::ostringstream ostr;
-                    ostr << netFileName << "_ref_out_" << outputInd << "_case_" << numberOfTestCase << ".blob";
-                    const auto blobFileName = ostr.str();
-
-                    std::cout << "Dump reference output #" << outputInd << " to " << blobFileName << std::endl;
-                    // WA: By some CPU Plugin returns FP32 blob although user specified FP16 for the output.
-                    // This issue is reproducible only with OpenVINO 1.0 API.
-                    // In that case, perform conversion on application side.
-                    if (FLAGS_device == "CPU" &&
-                        outputsInfo.at(p.first)->getTensorDesc().getPrecision() == ie::Precision::FP16) {
-                        dumpBlob(vpux::toFP16(ie::as<ie::MemoryBlob>(p.second)), blobFileName);
-                    } else {
-                        dumpBlob(ie::as<ie::MemoryBlob>(p.second), blobFileName);
-                    }
-
-                    ++outputInd;
-                }
-            }
-        }
-    }  // try
-    catch (const std::exception& ex) {
-        std::cerr << "exception: " << ex.what() << std::endl;
-        return EXIT_FAILURE;
-    }
-
-    return EXIT_SUCCESS;
-}
-
-//
-// OpenVINO 2.0
-//
-
 void setupOVCore(ov::Core& core) {
     auto flagDevice = FLAGS_device;
 
     if (!FLAGS_log_level.empty()) {
-        core.set_property(flagDevice, {{CONFIG_KEY(LOG_LEVEL), FLAGS_log_level}});
+        core.set_property(flagDevice, {{ov::log::level.name(), FLAGS_log_level}});
     }
 
     if (FLAGS_device == "CPU") {
-        core.set_property(flagDevice, {{"LP_TRANSFORMS_MODE", CONFIG_VALUE(NO)}});
+        core.set_property(flagDevice, {{"LP_TRANSFORMS_MODE", "NO"}});
     }
 
     if (FLAGS_pc) {
-        core.set_property(flagDevice, {{CONFIG_KEY(PERF_COUNT), CONFIG_VALUE(YES)}});
+        core.set_property(flagDevice, {{ov::enable_profiling.name(), true}});
     }
 
     if (!FLAGS_config.empty()) {
@@ -1900,11 +1268,10 @@ void setupOVCore(ov::Core& core) {
     }
 }
 
-using TensorMap = std::map<std::string, ov::Tensor>;
 std::pair<TensorMap, ProfVec> runInfer(ov::InferRequest& inferRequest, ov::CompiledModel& compiledModel,
                                        const TensorMap& inputs, const std::vector<std::string>& dumpedInputsPaths) {
-    for (const auto& p : inputs) {
-        inferRequest.set_tensor(p.first, p.second);
+    for (const auto& [tensorName, tensor] : inputs) {
+        inferRequest.set_tensor(tensorName, tensor);
     }
 
     inferRequest.infer();
@@ -1922,58 +1289,6 @@ std::pair<TensorMap, ProfVec> runInfer(ov::InferRequest& inferRequest, ov::Compi
     }
 
     return std::make_pair(out, profData);
-}
-
-static ie::Precision toIE(const ov::element::Type& type) {
-    switch (type) {
-    case ov::element::u8:
-        return ie::Precision::U8;
-    case ov::element::f32:
-        return ie::Precision::FP32;
-    case ov::element::f16:
-        return ie::Precision::FP16;
-    case ov::element::undefined:
-        return ie::Precision::UNSPECIFIED;
-    }
-    std::stringstream ss;
-    ss << "Failed to convert ov::Precision: " << type << " to IE::Precision";
-    throw std::logic_error(ss.str());
-}
-
-static ie::Layout toIE(const ov::Layout layout) {
-    if (layout == ov::Layout("NCHW")) {
-        return ie::Layout::NCHW;
-    } else if (layout == ov::Layout("NHWC")) {
-        return ie::Layout::NHWC;
-    } else if (layout == ov::Layout("CHW")) {
-        return ie::Layout::CHW;
-    } else if (layout == ov::Layout("HWC")) {
-        return ie::Layout::HWC;
-    } else if (layout == ov::Layout("NC")) {
-        return ie::Layout::NC;
-    } else if (layout == ov::Layout("HW")) {
-        return ie::Layout::HW;
-    } else if (layout == ov::Layout("CN")) {
-        return ie::Layout::CN;
-    } else if (layout == ov::Layout("C")) {
-        return ie::Layout::C;
-    } else if (layout == ov::Layout("NCDHW")) {
-        return ie::Layout::NCDHW;
-    } else if (layout == ov::Layout("NDHWC")) {
-        return ie::Layout::NDHWC;
-    }
-    std::stringstream ss;
-    ss << "Failed to convert ov::Layout(" << layout.to_string() << ") to IE::Layout";
-    throw std::logic_error(ss.str());
-}
-
-// NB: Need to keep dims in "NCHW" order as it was for OV 1.0 to keep backward compatibility for ie::TensorDesc.
-static ie::SizeVector toIE(const ov::Shape& shape, const ov::Layout& layout) {
-    if (shape.size() == 4u) {
-        return ie::SizeVector{shape[ov::layout::batch_idx(layout)], shape[ov::layout::channels_idx(layout)],
-                              shape[ov::layout::height_idx(layout)], shape[ov::layout::width_idx(layout)]};
-    }
-    return ie::SizeVector(shape);
 }
 
 void boundDynamicShape(std::shared_ptr<ov::Model>& model) {
@@ -2007,10 +1322,40 @@ void boundDynamicShape(std::shared_ptr<ov::Model>& model) {
     }
 }
 
+void setModelBatch(std::shared_ptr<ov::Model>& model, uint32_t batch) {
+    if (batch == 1) {
+        return;
+    }
+
+    // New batch value is applicable if the model has non dynamic inputs/outputs only
+    // Amend layout by adding N if it has no batch dimension
+    for (auto&& item : model->get_parameters()) {
+        auto shape = item->get_partial_shape();
+        auto rank = shape.rank();
+        if (rank.is_dynamic()) {
+            throw std::logic_error("Rank \"" + rank.to_string() + "\" of the shape \"" + shape.to_string() +
+                                   "\" is dynamic which is not supported by SIT");
+        }
+        auto layout = item->get_layout();
+        if (!ov::layout::has_batch(layout)) {
+            item->set_layout(ov::Layout(layout.to_string().insert(1, "N,")));
+        }
+
+        shape = item->get_partial_shape();
+        if (shape.is_dynamic()) {
+            throw std::logic_error("Model's input shape \"" + shape.to_string() + "\"" +
+                                   " is dynamic which is not supported by SIT");
+        }
+    }
+    ov::set_batch(model, batch);
+}
+
 // FIXME: User must provide layout explicitly.
 // No "default" layout for IRv11 models.
-static ov::Layout getLayoutByRank(const int rank) {
+static ov::Layout getLayoutByRank(const size_t rank) {
     switch (rank) {
+    case 0:
+        return ov::Layout::scalar();
     case 1:
         return ov::Layout("C");
     case 2:
@@ -2027,40 +1372,45 @@ static ov::Layout getLayoutByRank(const int rank) {
 
 static std::string toString(const std::vector<size_t>& vec) {
     std::stringstream ss;
-    ss << "[";
-    for (size_t i = 0; i < vec.size() - 1; ++i) {
-        ss << vec[i] << ",";
+    if (!vec.empty()) {
+        ss << "[";
+        for (size_t i = 0; i < vec.size() - 1; ++i) {
+            ss << vec[i] << ",";
+        }
+        ss << vec[vec.size() - 1];
+        ss << "]";
+    } else {
+        ss << "SCALAR";
     }
-    ss << vec[vec.size() - 1] << "]";
     return ss.str();
 }
 
-ie::Blob::Ptr toIE(const ov::Tensor& tensor, const ov::Layout& layout) {
-    ie::TensorDesc desc(toIE(tensor.get_element_type()), toIE(tensor.get_shape(), layout), toIE(layout));
-    return make_blob_with_precision(desc, tensor.data());
-}
+bool testSSDDetection(const TensorMap& outputs, const TensorMap& references,
+                      const TensorDescriptorMap& inputDescriptors, size_t batch_size = 1) {
+    if (batch_size != 1) {
+        throw std::runtime_error(
+                "The testcase 'ssd' doesn't support any `override_model_batch_size` values besides 1 yet");
+    }
 
-using TensorDescMap = std::unordered_map<std::string, ie::TensorDesc>;
+    OPENVINO_ASSERT(outputs.size() == 1 && references.size() == 1);
+    OPENVINO_ASSERT(!inputDescriptors.empty(), "No input descriptors received");
 
-bool testSSDDetection(const ie::BlobMap& outputs, const ie::BlobMap& refOutputs, const TensorDescMap& inputsDesc) {
-    IE_ASSERT(outputs.size() == 1 && refOutputs.size() == 1);
-    const auto& outBlob = outputs.begin()->second;
-    const auto& refOutBlob = refOutputs.begin()->second;
-    IE_ASSERT(!inputsDesc.empty());
+    const ov::Tensor& output = outputs.begin()->second;
+    const ov::Tensor& reference = references.begin()->second;
+    const TensorDescriptor& inputDescriptor = inputDescriptors.begin()->second;
 
-    const auto& inputDesc = inputsDesc.begin()->second;
-
-    const auto imgWidth = inputDesc.getDims().at(3);
-    const auto imgHeight = inputDesc.getDims().at(2);
+    const auto imgWidth = inputDescriptor.shape.at(ov::layout::width_idx(inputDescriptor.layout));
+    const auto imgHeight = inputDescriptor.shape.at(ov::layout::height_idx(inputDescriptor.layout));
 
     auto confThresh = FLAGS_confidence_threshold;
     auto probTolerance = FLAGS_prob_tolerance;
     auto boxTolerance = FLAGS_box_tolerance;
 
-    auto actualOutput = utils::parseSSDOutput(ie::as<ie::MemoryBlob>(outBlob), imgWidth, imgHeight, confThresh);
-    auto refOutput = utils::parseSSDOutput(ie::as<ie::MemoryBlob>(refOutBlob), imgWidth, imgHeight, confThresh);
+    auto parsedOutput = utils::parseSSDOutput(output, imgWidth, imgHeight, static_cast<float>(confThresh));
+    auto parsedReference = utils::parseSSDOutput(reference, imgWidth, imgHeight, static_cast<float>(confThresh));
 
-    auto result = checkBBoxOutputs(actualOutput, refOutput, imgWidth, imgHeight, boxTolerance, probTolerance);
+    auto result = checkBBoxOutputs(parsedOutput, parsedReference, imgWidth, imgHeight, static_cast<float>(boxTolerance),
+                                   static_cast<float>(probTolerance));
 
     return result;
 }
@@ -2068,42 +1418,55 @@ bool testSSDDetection(const ie::BlobMap& outputs, const ie::BlobMap& refOutputs,
 //
 // Yolo V2 mode
 //
-bool testYoloV2(const ie::BlobMap& actualBlobs, const ie::BlobMap& refBlobs, const TensorDescMap& inputsDesc) {
-    IE_ASSERT(inputsDesc.size() == 1);
-    IE_ASSERT(actualBlobs.size() == 1u && actualBlobs.size() == refBlobs.size());
-    auto actualBlob = actualBlobs.begin()->second;
-    auto refBlob = refBlobs.begin()->second;
+bool testYoloV2(const TensorMap& outputs, const TensorMap& references, const TensorDescriptorMap& inputDescriptors,
+                size_t batch_size = 1) {
+    if (batch_size != 1) {
+        throw std::runtime_error(
+                "The testcase 'yolo_v2' doesn't support any `override_model_batch_size` values besides 1 yet");
+    }
+    OPENVINO_ASSERT(inputDescriptors.size() == 1, "The YOLO v2 model accepts only a single input");
+    OPENVINO_ASSERT(outputs.size() == 1, "The YOLO v2 model a single output");
+    OPENVINO_ASSERT(outputs.size() == references.size(),
+                    "Mismatch between the number of model outputs and the number of references");
+    const ov::Tensor& output = outputs.begin()->second;
+    const ov::Tensor& reference = references.begin()->second;
 
-    const auto& inputDesc = inputsDesc.begin()->second;
+    const TensorDescriptor& inputDescriptor = inputDescriptors.begin()->second;
 
-    const auto imgWidth = inputDesc.getDims().at(3);
-    const auto imgHeight = inputDesc.getDims().at(2);
+    const auto imgWidth = inputDescriptor.shape.at(ov::layout::width_idx(inputDescriptor.layout));
+    const auto imgHeight = inputDescriptor.shape.at(ov::layout::height_idx(inputDescriptor.layout));
     double confThresh = FLAGS_confidence_threshold;
     double probTolerance = FLAGS_prob_tolerance;
     double boxTolerance = FLAGS_box_tolerance;
     bool isTiny = FLAGS_is_tiny_yolo;
 
-    auto actualOutput =
-            utils::parseYoloOutput(vpux::toFP32(InferenceEngine::as<InferenceEngine::MemoryBlob>(actualBlob)), imgWidth,
-                                   imgHeight, confThresh, isTiny);
-    auto refOutput = utils::parseYoloOutput(vpux::toFP32(InferenceEngine::as<InferenceEngine::MemoryBlob>(refBlob)),
-                                            imgWidth, imgHeight, confThresh, isTiny);
+    auto parsedOutput =
+            utils::parseYoloOutput(vpux::toFP32(output), imgWidth, imgHeight, static_cast<float>(confThresh), isTiny);
+    auto parsedReference = utils::parseYoloOutput(vpux::toFP32(reference), imgWidth, imgHeight,
+                                                  static_cast<float>(confThresh), isTiny);
 
-    bool result = checkBBoxOutputs(actualOutput, refOutput, imgWidth, imgHeight, boxTolerance, probTolerance);
+    bool result = checkBBoxOutputs(parsedOutput, parsedReference, imgWidth, imgHeight, static_cast<float>(boxTolerance),
+                                   static_cast<float>(probTolerance));
     return result;
 }
 
 //
 // Yolo V3 mode
 //
-bool testYoloV3(const ie::BlobMap& actBlobs, const ie::BlobMap& refBlobs, const TensorDescMap& inputsDesc) {
-    IE_ASSERT(inputsDesc.size() == 1);
-    IE_ASSERT(actBlobs.size() == 3);
-    IE_ASSERT(actBlobs.size() == refBlobs.size());
+bool testYoloV3(const TensorMap& outputs, const TensorMap& references, const TensorDescriptorMap& inputDescriptors,
+                const LayoutMap& outputLayouts, size_t batch_size = 1) {
+    if (batch_size != 1) {
+        throw std::runtime_error(
+                "The testcase 'yolo_v3' doesn't support any `override_model_batch_size` values besides 1 yet");
+    }
+    OPENVINO_ASSERT(inputDescriptors.size() == 1, "The YOLO v3 model accepts only a single input");
+    OPENVINO_ASSERT(outputs.size() == 3, "The YOLO v3 model has three outputs");
+    OPENVINO_ASSERT(outputs.size() == references.size(),
+                    "Mismatch between the number of model outputs and the number of references");
 
-    const auto& inputDesc = inputsDesc.begin()->second;
-    const auto imgWidth = inputDesc.getDims().at(3);
-    const auto imgHeight = inputDesc.getDims().at(2);
+    const TensorDescriptor& inputDescriptor = inputDescriptors.begin()->second;
+    const auto imgWidth = inputDescriptor.shape.at(ov::layout::width_idx(inputDescriptor.layout));
+    const auto imgHeight = inputDescriptor.shape.at(ov::layout::height_idx(inputDescriptor.layout));
 
     double confThresh = FLAGS_confidence_threshold;
     double probTolerance = FLAGS_prob_tolerance;
@@ -2114,12 +1477,13 @@ bool testYoloV3(const ie::BlobMap& actBlobs, const ie::BlobMap& refBlobs, const 
     std::vector<float> anchors = {10.0, 13.0, 16.0,  30.0,  33.0, 23.0,  30.0,  61.0,  62.0,
                                   45.0, 59.0, 119.0, 116.0, 90.0, 156.0, 198.0, 373.0, 326.0};
 
-    auto actOutput = utils::parseYoloV3Output(actBlobs, imgWidth, imgHeight, classes, coords, num, anchors, confThresh,
-                                              InferenceEngine::NCHW);
-    auto refOutput = utils::parseYoloV3Output(refBlobs, imgWidth, imgHeight, classes, coords, num, anchors, confThresh,
-                                              refBlobs.begin()->second->getTensorDesc().getLayout());
+    auto parsedOutput = utils::parseYoloV3Output(outputs, imgWidth, imgHeight, classes, coords, num, anchors,
+                                                 static_cast<float>(confThresh), outputLayouts);
+    auto parsedReference = utils::parseYoloV3Output(references, imgWidth, imgHeight, classes, coords, num, anchors,
+                                                    static_cast<float>(confThresh), outputLayouts);
 
-    bool result = checkBBoxOutputs(actOutput, refOutput, imgWidth, imgHeight, boxTolerance, probTolerance);
+    bool result = checkBBoxOutputs(parsedOutput, parsedReference, imgWidth, imgHeight, static_cast<float>(boxTolerance),
+                                   static_cast<float>(probTolerance));
     return result;
 };
 
@@ -2127,14 +1491,21 @@ bool testYoloV3(const ie::BlobMap& actBlobs, const ie::BlobMap& refBlobs, const 
 // Yolo V4 mode
 // Ref link: https://docs.openvino.ai/latest/omz_models_model_yolo_v4_tiny_tf.html
 //
-bool testYoloV4(const ie::BlobMap& actBlobs, const ie::BlobMap& refBlobs, const TensorDescMap& inputsDesc) {
-    IE_ASSERT(inputsDesc.size() == 1);
-    IE_ASSERT(actBlobs.size() == 2);
-    IE_ASSERT(actBlobs.size() == refBlobs.size());
+bool testYoloV4(const TensorMap& outputs, const TensorMap& references, const TensorDescriptorMap& inputDescriptors,
+                const LayoutMap& outputLayouts, size_t batch_size = 1) {
+    if (batch_size != 1) {
+        throw std::runtime_error(
+                "The testcase 'yolo_v4' doesn't support any `override_model_batch_size` values besides 1 yet");
+    }
 
-    const auto& inputDesc = inputsDesc.begin()->second;
-    const auto imgWidth = inputDesc.getDims().at(3);
-    const auto imgHeight = inputDesc.getDims().at(2);
+    OPENVINO_ASSERT(inputDescriptors.size() == 1, "The YOLO v4 model accepts only a single input");
+    OPENVINO_ASSERT(outputs.size() == 2, "The YOLO v4 model has two outputs");
+    OPENVINO_ASSERT(outputs.size() == references.size(),
+                    "Mismatch between the number of model outputs and the number of references");
+
+    const TensorDescriptor& inputDescriptor = inputDescriptors.begin()->second;
+    const auto imgWidth = inputDescriptor.shape.at(ov::layout::width_idx(inputDescriptor.layout));
+    const auto imgHeight = inputDescriptor.shape.at(ov::layout::height_idx(inputDescriptor.layout));
 
     double confThresh = FLAGS_confidence_threshold;
     double probTolerance = FLAGS_prob_tolerance;
@@ -2152,60 +1523,69 @@ bool testYoloV4(const ie::BlobMap& actBlobs, const ie::BlobMap& refBlobs, const 
                 break;
 
             index++;
-            masked_anchors.push_back(anchors[2 * anchorIndex]);
-            masked_anchors.push_back(anchors[2 * anchorIndex + 1]);
+            masked_anchors.push_back(anchors[static_cast<size_t>(2 * anchorIndex)]);
+            masked_anchors.push_back(anchors[static_cast<size_t>(2 * anchorIndex + 1)]);
         }
     }
 
-    auto refOutput = utils::parseYoloV4Output(refBlobs, imgWidth, imgHeight, classes, coords, num, masked_anchors,
-                                              confThresh, refBlobs.begin()->second->getTensorDesc().getLayout());
-    auto actOutput = utils::parseYoloV4Output(actBlobs, imgWidth, imgHeight, classes, coords, num, masked_anchors,
-                                              confThresh, actBlobs.begin()->second->getTensorDesc().getLayout());
-    bool result = checkBBoxOutputs(actOutput, refOutput, imgWidth, imgHeight, boxTolerance, probTolerance);
+    auto refOutput = utils::parseYoloV4Output(references, imgWidth, imgHeight, classes, coords, num, masked_anchors,
+                                              static_cast<float>(confThresh), outputLayouts);
+    auto actOutput = utils::parseYoloV4Output(outputs, imgWidth, imgHeight, classes, coords, num, masked_anchors,
+                                              static_cast<float>(confThresh), outputLayouts);
+    bool result = checkBBoxOutputs(actOutput, refOutput, imgWidth, imgHeight, static_cast<float>(boxTolerance),
+                                   static_cast<float>(probTolerance));
     return result;
-};
+}
 
 //
 // MeanIoU mode
 // Using sem_seg_classes, sem_seg_threshold flags and optionally sem_seg_ignore_label and dataset flags for validation
 // e.g. '--mode mean_iou --sem_seg_classes 12 --sem_seg_threshold 0.98 --sem_seg_ignore_label 11 --dataset camVid12'
 //
-bool testMeanIoU(const ie::BlobMap& actBlobs, const ie::BlobMap& refBlobs, const TensorDescMap& inputsDesc) {
-    IE_ASSERT(inputsDesc.size() == 1);
-    IE_ASSERT(actBlobs.size() == 1);
-    IE_ASSERT(actBlobs.size() == refBlobs.size());
+bool testMeanIoU(const TensorMap& outputs, const TensorMap& references, const LayoutMap& outputLayouts,
+                 size_t batch_size = 1) {
+    if (batch_size != 1) {
+        throw std::runtime_error(
+                "The testcase 'mean_iou' doesn't support any `override_model_batch_size` values besides 1 yet");
+    }
+
+    OPENVINO_ASSERT(outputs.size() == 1, "The metric accepts only a single output");
+    OPENVINO_ASSERT(outputs.size() == references.size(),
+                    "Mismatch between the number of model outputs and the number of references");
+    OPENVINO_ASSERT(outputs.size() == outputLayouts.size(),
+                    "Mismatch between the number of model outputs and their corresponding layout values");
 
     unsigned int classes = FLAGS_sem_seg_classes;
-    float semSegThreshold = FLAGS_sem_seg_threshold;
+    auto semSegThreshold = static_cast<float>(FLAGS_sem_seg_threshold);
 
-    std::vector<uint8_t> refOutput;
-    std::vector<uint8_t> actOutput;
+    std::vector<uint8_t> parsedReferences;
+    std::vector<uint8_t> parsedOutputs;
     std::vector<std::pair<bool, float>> iou(classes, {false, 0.0f});
 
-    utils::argMax_channels(ie::as<ie::MemoryBlob>(refBlobs.begin()->second), refOutput);
-    utils::argMax_channels(ie::as<ie::MemoryBlob>(actBlobs.begin()->second), actOutput);
+    utils::argMax_channels(references.begin()->second, parsedReferences, outputLayouts.begin()->second);
+    utils::argMax_channels(outputs.begin()->second, parsedOutputs, outputLayouts.begin()->second);
 
-    if (refOutput.size() != actOutput.size()) {
-        std::cout << "Ref size and Act size are different" << std::endl;
+    if (parsedReferences.size() != parsedOutputs.size()) {
+        std::cout << "Reference size and output size are different" << std::endl;
         return false;
     }
-    iou = utils::mean_IoU(actOutput, refOutput, classes, FLAGS_sem_seg_ignore_label);
+    iou = utils::mean_IoU(parsedOutputs, parsedReferences, classes, FLAGS_sem_seg_ignore_label);
 
     return compare_mean_IoU(iou, semSegThreshold, classes);
-};
+}
 
-static int runSingleImageTestOV20() {
-    std::cout << "Run single image test with OV 2.0 API" << std::endl;
+static int runSingleImageTest() {
+    std::cout << "Run single image test" << std::endl;
     try {
-        const std::unordered_set<std::string> allowedPrecision = {"U8", "FP16", "FP32"};
+        const std::unordered_set<std::string> allowedPrecision = {"U8", "I32", "I64", "FP16", "FP32"};
         if (!FLAGS_ip.empty()) {
-            // input precision is U8, FP16 or FP32 only
+            // input precision is U8, I32, I64, FP16 or FP32 only
             std::transform(FLAGS_ip.begin(), FLAGS_ip.end(), FLAGS_ip.begin(), ::toupper);
             if (allowedPrecision.count(FLAGS_ip) == 0)
                 throw std::logic_error("Parameter -ip " + FLAGS_ip + " is not supported");
         }
         if (!FLAGS_op.empty()) {
-            // output precision is U8, FP16 or FP32 only
+            // output precision is U8, I32, I64, FP16 or FP32 only
             std::transform(FLAGS_op.begin(), FLAGS_op.end(), FLAGS_op.begin(), ::toupper);
             if (allowedPrecision.count(FLAGS_op) == 0)
                 throw std::logic_error("Parameter -op " + FLAGS_op + " is not supported");
@@ -2241,12 +1621,16 @@ static int runSingleImageTestOV20() {
                         inputBinPrecisionForOneInfer[inferIdx][precisionIdx] = ov::element::f32;
                     } else if (strEq(precision, "FP16")) {
                         inputBinPrecisionForOneInfer[inferIdx][precisionIdx] = ov::element::f16;
+                    } else if (strEq(precision, "I32")) {
+                        inputBinPrecisionForOneInfer[inferIdx][precisionIdx] = ov::element::i32;
+                    } else if (strEq(precision, "I64")) {
+                        inputBinPrecisionForOneInfer[inferIdx][precisionIdx] = ov::element::i64;
                     } else if (strEq(precision, "U8")) {
                         inputBinPrecisionForOneInfer[inferIdx][precisionIdx] = ov::element::u8;
                     } else {
                         std::cout << "WARNING: Unhandled precision '" << precision
-                                  << "'! Only FP32, FP16 and U8 can be currently converted to the network's input "
-                                     "tensor precision.";
+                                  << "'! Only FP32, FP16, I32, I64 and U8 can be currently converted to the network's"
+                                  << "input tensor precision.";
                     }
                     ++precisionIdx;
                 }
@@ -2268,6 +1652,7 @@ static int runSingleImageTestOV20() {
 
             auto model = core.read_model(FLAGS_network);
 
+            setModelBatch(model, FLAGS_override_model_batch_size);
             if (FLAGS_device.find("NPU") != std::string::npos ||
                 // FIXME: SIT on CPU also requires to bound dynamic shapes
                 FLAGS_device.find("CPU") != std::string::npos) {
@@ -2284,6 +1669,10 @@ static int runSingleImageTestOV20() {
                     prc_in = ov::element::f16;
                 else if (FLAGS_ip == "FP32")
                     prc_in = ov::element::f32;
+                else if (FLAGS_ip == "I32")
+                    prc_in = ov::element::i32;
+                else if (FLAGS_ip == "I64")
+                    prc_in = ov::element::i64;
                 else
                     prc_in = ov::element::u8;
 
@@ -2312,6 +1701,20 @@ static int runSingleImageTestOV20() {
                 }
             }
 
+            // Input mean and scale if exist
+            if (!FLAGS_mean_values.empty() || !FLAGS_scale_values.empty()) {
+                auto means = parseMeanOrScale(FLAGS_mean_values, inputInfo);
+                auto scales = parseMeanOrScale(FLAGS_scale_values, inputInfo);
+                for (size_t i = 0; i < inputInfo.size(); ++i) {
+                    if (!means[i].empty()) {
+                        ppp.input(i).preprocess().convert_element_type(ov::element::f32).mean(means[i]);
+                    }
+                    if (!scales[i].empty()) {
+                        ppp.input(i).preprocess().convert_element_type(ov::element::f32).scale(scales[i]);
+                    }
+                }
+            }
+
             // Output precision
             const auto outputInfo = model->outputs();
             if (!FLAGS_op.empty()) {
@@ -2320,6 +1723,10 @@ static int runSingleImageTestOV20() {
                     prc_out = ov::element::f16;
                 else if (FLAGS_op == "FP32")
                     prc_out = ov::element::f32;
+                else if (FLAGS_op == "I32")
+                    prc_out = ov::element::i32;
+                else if (FLAGS_op == "I64")
+                    prc_out = ov::element::i64;
                 else
                     prc_out = ov::element::u8;
 
@@ -2351,12 +1758,19 @@ static int runSingleImageTestOV20() {
             compiledModel = core.compile_model(ppp.build(), FLAGS_device);
         } else {
             std::cout << "Import network " << FLAGS_network << std::endl;
+
+            if (!FLAGS_mean_values.empty() || !FLAGS_scale_values.empty()) {
+                throw std::runtime_error("--mean_values and --scale_values aren't supported for "
+                                         "compiled model.\n The values can be set via "
+                                         "model_optimizer while generating xml\n");
+            }
+
             std::ifstream file(FLAGS_network, std::ios_base::in | std::ios_base::binary);
-            IE_ASSERT(file.is_open()) << "Can't open file " << FLAGS_network << " for read";
+            OPENVINO_ASSERT(file.is_open(), "Can't open file ", FLAGS_network, " for read");
             compiledModel = core.import_model(file, FLAGS_device);
         }
 
-        // store compiled model, if requried
+        // store compiled model, if required
         if (!FLAGS_compiled_blob.empty()) {
             std::ofstream outputFile{FLAGS_compiled_blob, std::ios::out | std::ios::binary};
             if (!outputFile.is_open()) {
@@ -2384,7 +1798,7 @@ static int runSingleImageTestOV20() {
                 endPos = FLAGS_network.size();
             }
 
-            IE_ASSERT(endPos > startPos);
+            OPENVINO_ASSERT(endPos > startPos);
             netFileName = cleanName(FLAGS_network.substr(startPos, endPos - startPos));
         }
 
@@ -2392,120 +1806,112 @@ static int runSingleImageTestOV20() {
             const auto inputsInfo = compiledModel.inputs();
             const auto outputsInfo = compiledModel.outputs();
             std::vector<std::string> inputFiles = inputFilesForOneInfer[numberOfTestCase];
-            IE_ASSERT(inputFiles.size() == inputsInfo.size())
-                    << "Number of input files " << inputFiles.size() << " doesn't match network configuration "
-                    << inputsInfo.size();
+            OPENVINO_ASSERT(inputFiles.size() == inputsInfo.size(), "Number of input files ", inputFiles.size(),
+                            " doesn't match network configuration ", inputsInfo.size());
 
-            TensorMap in_tensors;
-            ie::BlobMap inputs, outputs;
+            TensorMap inTensors;
             size_t inputInd = 0;
             std::vector<std::string> dumpedInputsPaths;
-            TensorDescMap inDescMap;
+            TensorDescriptorMap inputDescriptors;  // Several metrics require the input metadata
 
+            // Load the input data
             for (const auto& inputInfo : inputsInfo) {
-                const auto shape = inputInfo.get_shape();
-                const auto prec = inputInfo.get_element_type();
+                const ov::Shape& shape = inputInfo.get_shape();
+                const ov::element::Type& precision = inputInfo.get_element_type();
 
-                ov::Layout inLayerUserLayout;
-                if (inUserLayout.empty()) {
-                    ov::Layout inLayerModelLayout;
-                    if (inModelLayout.empty()) {
-                        inLayerModelLayout = getLayoutByRank(shape.size());
-                        std::cout << "WARNING: Loading input data. Since --iml option isn't set, input model layout "
-                                     "for layer \""
-                                  << inputInfo.get_any_name() << "\" is infered from shape: " << toString(shape)
-                                  << " rank (" << shape.size() << ") as " << inLayerModelLayout.to_string()
-                                  << std::endl;
-                    } else {
-                        inLayerModelLayout = inModelLayout;
-                    }
-                    inLayerUserLayout = inLayerModelLayout;
+                // Determine the input layout
+                ov::Layout inputLayout;
+
+                if (!inUserLayout.empty()) {
+                    inputLayout = inUserLayout;
+                } else if (!inModelLayout.empty()) {
+                    inputLayout = inModelLayout;
                 } else {
-                    inLayerUserLayout = inUserLayout;
+                    inputLayout = getLayoutByRank(shape.size());
+                    std::cout << "WARNING: Loading input data. Since --iml option isn't set, input model layout for "
+                                 "layer \""
+                              << inputInfo.get_any_name() << "\" is infered from shape: " << toString(shape)
+                              << " rank (" << shape.size() << ") as " << inputLayout.to_string() << std::endl;
                 }
 
-                ie::TensorDesc desc(toIE(prec), toIE(shape, inLayerUserLayout), toIE(inLayerUserLayout));
+                inputDescriptors.emplace(inputInfo.get_any_name(), TensorDescriptor{precision, shape, inputLayout});
 
-                inDescMap.emplace(inputInfo.get_any_name(), desc);
+                std::cout << "Load input #" << inputInd << " from " << inputFiles[inputInd] << " as " << precision
+                          << " " << inputLayout.to_string() << " " << shape << std::endl;
 
-                std::cout << "Load input #" << inputInd << " from " << inputFiles[inputInd] << " as "
-                          << desc.getPrecision() << " " << desc.getLayout() << " " << toString(desc.getDims())
-                          << std::endl;
-
-                const auto blob = !FLAGS_img_as_bin
-                                          ? loadInput(desc, inputFiles[inputInd], FLAGS_color_format)
-                                          : loadInput(desc, inputFiles[inputInd], FLAGS_color_format,
-                                                      toIE(inputBinPrecisionForOneInfer[numberOfTestCase][inputInd]));
-                inputs.emplace(inputInfo.get_any_name(), blob);
-
+                const ov::Tensor tensor =
+                        !FLAGS_img_as_bin
+                                ? loadInput(precision, shape, inputLayout, inputFiles[inputInd], FLAGS_color_format)
+                                : loadInput(precision, shape, inputLayout, inputFiles[inputInd], FLAGS_color_format,
+                                            inputBinPrecisionForOneInfer[numberOfTestCase][inputInd]);
                 std::ostringstream ostr;
                 ostr << netFileName << "_input_" << inputInd << "_case_" << numberOfTestCase << ".blob";
                 const auto blobFileName = ostr.str();
 
                 std::cout << "Dump input #" << inputInd << "_case_" << numberOfTestCase << " to " << blobFileName
                           << std::endl;
-                dumpBlob(blob, blobFileName);
+                dumpTensor(tensor, blobFileName);
 
                 ++inputInd;
 
                 dumpedInputsPaths.push_back(blobFileName);
 
-                in_tensors.emplace(inputInfo.get_any_name(), ov::Tensor(prec, shape, blob->buffer().as<void*>()));
+                inTensors.emplace(inputInfo.get_any_name(), std::move(tensor));
             }
 
             std::cout << "Run inference on " << FLAGS_device << std::endl;
 
             const auto startTime = Time::now();
-            const auto outInference = runInfer(inferRequest, compiledModel, in_tensors, dumpedInputsPaths);
+            const auto outInference = runInfer(inferRequest, compiledModel, inTensors, dumpedInputsPaths);
             const auto endTime = Time::now();
 
-            const TensorMap& outTensors = outInference.first;
+            const TensorMap& outputTensors = outInference.first;
 
             printPerformanceCountsAndLatency(numberOfTestCase, outInference.second, endTime - startTime);
 
-            // NB: Make a view over ov::Tensor
-            for (const auto& p : outTensors) {
-                const auto shape = p.second.get_shape();
-                ov::Layout outLayerUserLayout;
-                if (outUserLayout.empty()) {
-                    ov::Layout outLayerModelLayout;
-                    if (outModelLayout.empty()) {
-                        outLayerModelLayout = getLayoutByRank(shape.size());
-                        std::cout << "WARNING: Casting output ov::Tensor to ie::Blob. Since --oml option isn't set, "
-                                     "output model layout for layer \""
-                                  << p.first << "\" is infered from shape: " << toString(shape) << " rank ("
-                                  << shape.size() << ") as " << outLayerModelLayout.to_string() << std::endl;
-                    } else {
-                        outLayerModelLayout = outModelLayout;
-                    }
-                    outLayerUserLayout = outLayerModelLayout;
-                } else {
-                    outLayerUserLayout = outUserLayout;
-                }
-
-                outputs.emplace(p.first, toIE(p.second, outLayerUserLayout));
-            }
-
             if (FLAGS_run_test) {
-                ie::BlobMap refOutputs;
+                TensorMap referenceTensors;
                 size_t outputInd = 0;
-                for (const auto& p : outputs) {
+                LayoutMap outputLayouts;  // Several metrics may require this
+
+                // Load the reference data
+                for (const auto& [tensorName, tensor] : outputTensors) {
+                    const ov::element::Type& precision = tensor.get_element_type();
+                    const ov::Shape& shape = tensor.get_shape();
+
                     std::ostringstream ostr;
                     ostr << netFileName << "_ref_out_" << outputInd << "_case_" << numberOfTestCase << ".blob";
                     const auto blobFileName = ostr.str();
-                    const auto& refTensorDesc = p.second->getTensorDesc();
 
                     std::cout << "Load reference output #" << outputInd << " from " << blobFileName << " as "
-                              << refTensorDesc.getPrecision() << std::endl;
+                              << precision << std::endl;
 
-                    const auto blob = loadBlob(refTensorDesc, blobFileName);
-                    refOutputs.emplace(p.first, blob);
+                    const ov::Tensor referenceTensor = loadTensor(precision, shape, blobFileName);
+                    referenceTensors.emplace(tensorName, referenceTensor);
+
+                    // Determine the output layout
+                    ov::Layout outputLayout;
+
+                    if (!outUserLayout.empty()) {
+                        outputLayout = outUserLayout;
+                    } else if (!outModelLayout.empty()) {
+                        outputLayout = outModelLayout;
+                    } else {
+                        outputLayout = getLayoutByRank(shape.size());
+                        std::cout << "WARNING: Since --oml option isn't set, output model layout for layer \""
+                                  << tensorName << "\" is infered from shape: " << toString(shape) << " rank ("
+                                  << shape.size() << ") as " << outputLayout.to_string() << std::endl;
+                    }
+
+                    outputLayouts.emplace(tensorName, outputLayout);
 
                     ++outputInd;
                 }
 
                 outputInd = 0;
-                for (const auto& p : outputs) {
+
+                // Dump the outputs obtained upon prediction
+                for (const auto& tensorEntry : outputTensors) {
                     std::ostringstream ostr;
                     ostr << netFileName << "_kmb_out_" << outputInd << "_case_" << numberOfTestCase << ".blob";
                     const auto blobFileName = ostr.str();
@@ -2513,85 +1919,94 @@ static int runSingleImageTestOV20() {
                     std::cout << "Dump device output #" << outputInd << "_case_" << numberOfTestCase << " to "
                               << blobFileName << std::endl;
 
-                    dumpBlob(ie::as<ie::MemoryBlob>(p.second), blobFileName);
+                    dumpTensor(tensorEntry.second, blobFileName);
                     ++outputInd;
                 }
+
+                // Compare the outputs with their references using the chosen metric
                 if (strEq(FLAGS_mode, "classification")) {
-                    if (testClassification(outputs, refOutputs)) {
+                    if (testClassification(outputTensors, referenceTensors, FLAGS_override_model_batch_size)) {
                         std::cout << "PASSED" << std::endl;
                     } else {
                         std::cout << "FAILED" << std::endl;
                         return EXIT_FAILURE;
                     }
                 } else if (strEq(FLAGS_mode, "raw")) {
-                    if (testRAW(outputs, refOutputs)) {
+                    if (testRAW(outputTensors, referenceTensors, FLAGS_override_model_batch_size)) {
                         std::cout << "PASSED" << std::endl;
                     } else {
                         std::cout << "FAILED" << std::endl;
                         return EXIT_FAILURE;
                     }
                 } else if (strEq(FLAGS_mode, "cosim")) {
-                    if (testCoSim(outputs, refOutputs)) {
+                    if (testCoSim(outputTensors, referenceTensors, FLAGS_override_model_batch_size)) {
                         std::cout << "PASSED" << std::endl;
                     } else {
                         std::cout << "FAILED" << std::endl;
                         return EXIT_FAILURE;
                     }
                 } else if (strEq(FLAGS_mode, "rrmse")) {
-                    if (testRRMSE(outputs, refOutputs)) {
+                    if (testRRMSE(outputTensors, referenceTensors, FLAGS_override_model_batch_size)) {
                         std::cout << "PASSED" << std::endl;
                     } else {
                         std::cout << "FAILED" << std::endl;
                         return EXIT_FAILURE;
                     }
                 } else if (strEq(FLAGS_mode, "nrmse")) {
-                    if (testNRMSE(outputs, refOutputs)) {
+                    if (testNRMSE(outputTensors, referenceTensors, FLAGS_override_model_batch_size)) {
                         std::cout << "PASSED" << std::endl;
                     } else {
                         std::cout << "FAILED" << std::endl;
                         return EXIT_FAILURE;
                     }
                 } else if (strEq(FLAGS_mode, "ssd")) {
-                    if (testSSDDetection(outputs, refOutputs, inDescMap)) {
+                    if (testSSDDetection(outputTensors, referenceTensors, inputDescriptors,
+                                         FLAGS_override_model_batch_size)) {
                         std::cout << "PASSED" << std::endl;
                     } else {
                         std::cout << "FAILED" << std::endl;
                         return EXIT_FAILURE;
                     }
                 } else if (strEq(FLAGS_mode, "yolo_v2")) {
-                    if (testYoloV2(outputs, refOutputs, inDescMap)) {
+                    if (testYoloV2(outputTensors, referenceTensors, inputDescriptors,
+                                   FLAGS_override_model_batch_size)) {
                         std::cout << "PASSED" << std::endl;
                     } else {
                         std::cout << "FAILED" << std::endl;
                         return EXIT_FAILURE;
                     }
                 } else if (strEq(FLAGS_mode, "yolo_v3")) {
-                    if (testYoloV3(outputs, refOutputs, inDescMap)) {
+                    if (testYoloV3(outputTensors, referenceTensors, inputDescriptors, outputLayouts,
+                                   FLAGS_override_model_batch_size)) {
                         std::cout << "PASSED" << std::endl;
                     } else {
                         std::cout << "FAILED" << std::endl;
                         return EXIT_FAILURE;
                     }
                 } else if (strEq(FLAGS_mode, "yolo_v4")) {
-                    if (testYoloV4(outputs, refOutputs, inDescMap)) {
+                    if (testYoloV4(outputTensors, referenceTensors, inputDescriptors, outputLayouts,
+                                   FLAGS_override_model_batch_size)) {
                         std::cout << "PASSED" << std::endl;
                     } else {
                         std::cout << "FAILED" << std::endl;
                         return EXIT_FAILURE;
                     }
                 } else if (strEq(FLAGS_mode, "psnr")) {
-                    const auto shape = outTensors.begin()->second.get_shape();
-                    const auto dstHeight = shape[2];
-                    const auto dstWidth = shape[3];
+                    const auto& [firstOutputName, firstOutput] = *outputTensors.begin();
+                    const ov::Shape& shape = firstOutput.get_shape();
+                    const ov::Layout& outputLayout = outputLayouts.at(firstOutputName);
+                    const size_t dstHeight = shape[ov::layout::height_idx(outputLayout)];
+                    const size_t dstWidth = shape[ov::layout::width_idx(outputLayout)];
 
-                    if (testPSNR(outputs, refOutputs, dstHeight, dstWidth)) {
+                    if (testPSNR(outputTensors, referenceTensors, static_cast<int>(dstHeight),
+                                 static_cast<int>(dstWidth), FLAGS_override_model_batch_size)) {
                         std::cout << "PASSED" << std::endl;
                     } else {
                         std::cout << "FAILED" << std::endl;
                         return EXIT_FAILURE;
                     }
                 } else if (strEq(FLAGS_mode, "mean_iou")) {
-                    if (testMeanIoU(outputs, refOutputs, inDescMap)) {
+                    if (testMeanIoU(outputTensors, referenceTensors, outputLayouts, FLAGS_override_model_batch_size)) {
                         std::cout << "PASSED" << std::endl;
                     } else {
                         std::cout << "FAILED" << std::endl;
@@ -2603,13 +2018,13 @@ static int runSingleImageTestOV20() {
                 }
             } else {
                 size_t outputInd = 0;
-                for (const auto& p : outputs) {
+                for (const auto& tensorEntry : outputTensors) {
                     std::ostringstream ostr;
                     ostr << netFileName << "_ref_out_" << outputInd << "_case_" << numberOfTestCase << ".blob";
                     const auto blobFileName = ostr.str();
 
                     std::cout << "Dump reference output #" << outputInd << " to " << blobFileName << std::endl;
-                    dumpBlob(ie::as<ie::MemoryBlob>(p.second), blobFileName);
+                    dumpTensor(tensorEntry.second, blobFileName);
 
                     ++outputInd;
                 }
@@ -2630,9 +2045,6 @@ static int runSingleImageTestOV20() {
 
 int main(int argc, char* argv[]) {
     parseCommandLine(argc, argv);
-    if (FLAGS_ov_api_1_0) {
-        return runSingleImageTestOV10();
-    } else {
-        return runSingleImageTestOV20();
-    }
+
+    return runSingleImageTest();
 }

@@ -6,10 +6,9 @@
 #pragma once
 
 #include "vpux/compiler/core/feasible_memory_scheduler.hpp"
-#include "vpux/compiler/dialect/IE/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/dpu_tiler.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/interfaces/dpu_tiler.hpp"
 #include "vpux/compiler/utils/strings.hpp"
-#include "vpux/utils/plugin/profiling_json.hpp"
 
 namespace vpux {
 
@@ -26,9 +25,6 @@ struct SpillStats {
     size_t numOfSpillWritesOfDataOps;
     size_t numOfSpillRead;
 };
-
-static const std::map<std::string, int> executorStrToId = {{"DMA_NN", 0},    {"DPU", 1},       {"NCE", 2},
-                                                           {"SHAVE_UPA", 3}, {"SHAVE_ACT", 4}, {"SHAVE_NN", 5}};
 
 ExecutorStallCycles getExecutorStallRegions(ScheduledOpInfoVec& scheduledOps);
 StallCycles getStallsOnAllExecutorPipelines(ScheduledOpInfoVec& scheduledOps);

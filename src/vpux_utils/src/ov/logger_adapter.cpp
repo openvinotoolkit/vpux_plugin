@@ -32,6 +32,6 @@ void LoggerAdapter::setGlobalLevel(LogLevel lvl) {
 }
 
 void LoggerAdapter::printImpl(LogLevel level, const std::string& str) {
-    impl->addEntryPacked(level, formatv("{0}", str));
+    impl->addEntryPacked(level, "{0}", str);
 }
 }  // namespace vpux

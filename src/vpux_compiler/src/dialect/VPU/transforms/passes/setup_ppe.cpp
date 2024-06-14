@@ -42,7 +42,7 @@ int32_t setupClampLow(const mlir::Type elemType) {
 
 int32_t fixedPointToHalf(const int64_t fixedPoint) {
     const float clampF32 = checked_cast<float>(fixedPoint) / (1 << 16);
-    const ov::float16 half(clampF32);
+    const vpux::type::float16 half(clampF32);
     const int16_t* ptrI16 = reinterpret_cast<const int16_t*>(&half);
     const int16_t i16 = *ptrI16;
     return i16;
@@ -50,7 +50,7 @@ int32_t fixedPointToHalf(const int64_t fixedPoint) {
 
 int32_t fixedPointToBFloat(const int64_t fixedPoint) {
     const float clampF32 = checked_cast<float>(fixedPoint) / (1 << 16);
-    const ov::bfloat16 biFloat(clampF32);
+    const vpux::type::bfloat16 biFloat(clampF32);
     const int16_t* ptrI16 = reinterpret_cast<const int16_t*>(&biFloat);
     const int16_t i16 = *ptrI16;
     return i16;

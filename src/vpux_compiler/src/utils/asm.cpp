@@ -238,3 +238,52 @@ mlir::ParseResult vpux::parseGroupOfOperands(mlir::OpAsmParser& parser, mlir::Op
 
     return mlir::success();
 }
+
+mlir::ParseResult vpux::parseTensorDims(mlir::OpAsmParser& parser, mlir::OperationState& result,
+                                        mlir::StringRef groupName, int32_t& dimsCount) {
+    if (succeeded(parser.parseOptionalKeyword(groupName))) {
+        SmallVector<mlir::OpAsmParser::UnresolvedOperand> tensorDimsOperands;
+        SmallVector<mlir::Type> tensorDimsTypes;
+
+        // Parse a single instance of `%operand: <type>`
+        const auto parseOperand = [&]() -> mlir::ParseResult {
+            mlir::OpAsmParser::UnresolvedOperand operand;
+            const auto parsedOperandResult = parser.parseOptionalOperand(operand);
+            if (parsedOperandResult.has_value()) {
+                if (failed(*parsedOperandResult)) {
+                    return mlir::failure();
+                }
+                tensorDimsOperands.push_back(operand);
+            }
+
+            if (parser.parseColon()) {
+                return mlir::failure();
+            }
+
+            mlir::Type optionalType;
+            const auto parsedTypeResult = parser.parseOptionalType(optionalType);
+            if (parsedTypeResult.has_value()) {
+                if (failed(*parsedTypeResult)) {
+                    return mlir::failure();
+                }
+                tensorDimsTypes.push_back(optionalType);
+            }
+
+            dimsCount++;
+            return mlir::success();
+        };
+
+        auto argsLoc = parser.getCurrentLocation();
+
+        // Parse a range of `(%operand: <type>, ...)`
+        if (parser.parseCommaSeparatedList(mlir::OpAsmParser::Delimiter::Paren, parseOperand)) {
+            return mlir::failure();
+        }
+
+        if (parser.resolveOperands(tensorDimsOperands, tensorDimsTypes, argsLoc, result.operands)) {
+            return mlir::failure();
+        }
+    }
+
+    return mlir::success();
+}

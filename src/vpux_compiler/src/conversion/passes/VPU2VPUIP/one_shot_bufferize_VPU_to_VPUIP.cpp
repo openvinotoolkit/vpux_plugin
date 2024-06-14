@@ -4,19 +4,22 @@
 //
 
 #include "vpux/compiler/conversion.hpp"
-#include "vpux/compiler/utils/rewriter.hpp"
 
-#include <mlir/Dialect/Bufferization/IR/BufferizableOpInterface.h>
-#include <mlir/Dialect/Bufferization/IR/Bufferization.h>
-#include <mlir/Dialect/Bufferization/Transforms/Bufferize.h>
-#include <mlir/Dialect/Bufferization/Transforms/OneShotAnalysis.h>
-#include <mlir/Dialect/Bufferization/Transforms/OneShotModuleBufferize.h>
-#include <mlir/Dialect/Bufferization/Transforms/Passes.h>
-#include <mlir/Transforms/GreedyPatternRewriteDriver.h>
+#include "vpux/compiler/conversion/passes/VPU2VPUIP/bufferizable_ops_interface.hpp"
+#include "vpux/compiler/conversion/passes/VPU2VPUIP/bufferize_vpu_nce_ops_interface.hpp"
 
 using namespace vpux;
 
 namespace {
+
+void removeBufferizationAttributes(mlir::Operation* op) {
+    // removed "__inplace_operands_attr__" on each in-place analyzed operations
+    op->walk([&](mlir::Operation* op) {
+        if (op->hasAttr("__inplace_operands_attr__")) {
+            op->removeAttr("__inplace_operands_attr__");
+        }
+    });
+}
 
 //
 // OneshotBufferizeVPU2VPUIPPass
@@ -29,24 +32,27 @@ private:
 
 void OneShotBufferizeVPU2VPUIPPass::safeRunOnModule() {
     mlir::bufferization::OneShotBufferizationOptions options = vpux::getOneShotBufferizationOptions();
-    mlir::bufferization::BufferizationStatistics statistics;
     mlir::ModuleOp moduleOp = getOperation();
+    auto& ctx = getContext();
+
+    // E#112397: special case: "bufferize" multi-tile vpu nce permute operation
+    // before anything else. can be (safely) deleted once NCEClusterTiling is
+    // removed and necessary functionality is supported directly in NCEPermuteOp
+    auto log = Logger::global().nest("one-shot-bufferize-MultiTileNcePermute", 0);
+    for (auto funcOp : moduleOp.getRegion().getOps<mlir::func::FuncOp>()) {
+        if (mlir::failed(vpux::lowerMultiTileVpuNcePermuteOneShot(&ctx, funcOp, log))) {
+            signalPassFailure();
+            return;
+        }
+    }
 
     if (mlir::failed(mlir::bufferization::bufferizeOp(moduleOp, options, options.copyBeforeWrite,
-                                                      /*opFilter=*/nullptr, &statistics))) {
+                                                      /*opFilter=*/nullptr, /*statistics=*/nullptr))) {
         signalPassFailure();
         return;
     }
 
-    mlir::bufferization::removeBufferizationAttributesInModule(getOperation());
-
-    auto& ctx = getContext();
-    mlir::RewritePatternSet patterns(&ctx);
-    mlir::bufferization::ToMemrefOp::getCanonicalizationPatterns(patterns, &ctx);
-    mlir::bufferization::ToTensorOp::getCanonicalizationPatterns(patterns, &ctx);
-    if (mlir::failed(applyPatternsAndFoldGreedily(moduleOp, std::move(patterns), getDefaultGreedyRewriteConfig()))) {
-        signalPassFailure();
-    }
+    removeBufferizationAttributes(moduleOp);
 }
 
 }  // namespace

@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --reduce-exceeding-active-count-barriers="num-barriers=2 max-variant-count=2" %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 // Note: 'idx' added since tasks can be reordered
 
@@ -120,7 +120,7 @@ func.func @ParallelUpdateBarriers() -> memref<1x16x1x1xf16, #NHWC, @DDR> {
     // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) updates([[BAR2]] : !VPURT.Barrier) attributes {idx = 2 : i64}
     // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier) updates([[BAR3]] : !VPURT.Barrier) attributes {idx = 3 : i64}
     // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) updates([[BAR4]] : !VPURT.Barrier) attributes {idx = 4 : i64}
-    
+
     // CHECK: VPURT.Task waits([[BAR4]] : !VPURT.Barrier) attributes {idx = 5 : i64}
 }
 
@@ -237,7 +237,7 @@ func.func @MergeParallelOutputPathsFromSharedBarrier() -> memref<1x16x1x1xf16, #
     // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) updates([[BAR2]] : !VPURT.Barrier) attributes {idx = 2 : i64}
     // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier) updates([[BAR3]] : !VPURT.Barrier) attributes {idx = 3 : i64}
     // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) updates([[BAR4]] : !VPURT.Barrier) attributes {idx = 4 : i64}
-    
+
     // CHECK: VPURT.Task waits([[BAR4]] : !VPURT.Barrier) attributes {idx = 5 : i64}
 }
 
@@ -309,7 +309,7 @@ func.func @LinearizeBarrierWithMultipleConsumers() -> memref<1x16x1x1xf16, #NHWC
             outputs(%buf1: memref<1x16x1x1xf16, #NHWC, @DDR>)
             -> memref<1x16x1x1xf16, #NHWC, @DDR>
     }
-    
+
     VPURT.Task waits(%bar1 : !VPURT.Barrier) updates(%bar3: !VPURT.Barrier) attributes {"idx" = 5 : i64} {
          VPUIP.NNDMA
             inputs(%buf0: memref<1x16x1x1xf16, #NHWC, @DDR>)
@@ -370,7 +370,7 @@ func.func @LinearizeBarrierWithMultipleConsumers() -> memref<1x16x1x1xf16, #NHWC
     // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier) updates([[BAR3]] : !VPURT.Barrier) attributes {idx = 4 : i64}
     // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier) updates([[BAR3]] : !VPURT.Barrier) attributes {idx = 5 : i64}
     // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) updates([[BAR4]] : !VPURT.Barrier) attributes {idx = 6 : i64}
-    
+
     // CHECK: VPURT.Task waits([[BAR4]] : !VPURT.Barrier) attributes {idx = 7 : i64}
 }
 
@@ -442,7 +442,7 @@ func.func @LinearizeBarrierWithMultipleConsumersAndProducers() -> memref<1x16x1x
             outputs(%buf1: memref<1x16x1x1xf16, #NHWC, @DDR>)
             -> memref<1x16x1x1xf16, #NHWC, @DDR>
     }
-    
+
     VPURT.Task waits(%bar1 : !VPURT.Barrier) updates(%bar3: !VPURT.Barrier) attributes {"idx" = 5 : i64} {
          VPUIP.NNDMA
             inputs(%buf0: memref<1x16x1x1xf16, #NHWC, @DDR>)
@@ -518,7 +518,7 @@ func.func @LinearizeBarrierWithMultipleConsumersAndProducers() -> memref<1x16x1x
     // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier) updates([[BAR3]] : !VPURT.Barrier) attributes {idx = 5 : i64}
     // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) updates([[BAR4]] : !VPURT.Barrier) attributes {idx = 6 : i64}
     // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) updates([[BAR4]] : !VPURT.Barrier) attributes {idx = 7 : i64}
-    
+
     // CHECK: VPURT.Task waits([[BAR4]] : !VPURT.Barrier) attributes {idx = 8 : i64}
     // CHECK: VPURT.Task waits([[BAR4]] : !VPURT.Barrier) attributes {idx = 9 : i64}
 }
@@ -584,7 +584,7 @@ func.func @LinearizeBarriersWithMultipleConsumersVariousOrder() -> memref<1x16x1
             outputs(%buf1: memref<1x16x1x1xf16, #NHWC, @DDR>)
             -> memref<1x16x1x1xf16, #NHWC, @DDR>
     }
-    
+
     VPURT.Task waits(%bar1 : !VPURT.Barrier) updates(%bar3: !VPURT.Barrier) attributes {"idx" = 4 : i64} {
          VPUIP.NNDMA
             inputs(%buf0: memref<1x16x1x1xf16, #NHWC, @DDR>)
@@ -775,7 +775,7 @@ func.func @ParallelWaitBarriers() -> memref<1x16x1x1xf16, #NHWC, @DDR> {
     // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) updates([[BAR2]] : !VPURT.Barrier) attributes {idx = 2 : i64}
     // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier) updates([[BAR3]] : !VPURT.Barrier) attributes {idx = 3 : i64}
     // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) updates([[BAR4]] : !VPURT.Barrier) attributes {idx = 4 : i64}
-    
+
     // CHECK: VPURT.Task waits([[BAR4]] : !VPURT.Barrier) attributes {idx = 5 : i64}
 }
 
@@ -892,7 +892,7 @@ func.func @MergeParallelInputPathsFromSharedBarrier() -> memref<1x16x1x1xf16, #N
     // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) updates([[BAR2]] : !VPURT.Barrier) attributes {idx = 2 : i64}
     // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier) updates([[BAR3]] : !VPURT.Barrier) attributes {idx = 3 : i64}
     // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) updates([[BAR4]] : !VPURT.Barrier) attributes {idx = 4 : i64}
-    
+
     // CHECK: VPURT.Task waits([[BAR4]] : !VPURT.Barrier) attributes {idx = 5 : i64}
 }
 
@@ -1025,7 +1025,7 @@ func.func @LinearizeBarriersWithMultipleProducers() -> memref<1x16x1x1xf16, #NHW
     // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) updates([[BAR2]] : !VPURT.Barrier) attributes {idx = 4 : i64}
     // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier) updates([[BAR3]] : !VPURT.Barrier) attributes {idx = 5 : i64}
     // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) updates([[BAR4]] : !VPURT.Barrier) attributes {idx = 6 : i64}
-    
+
     // CHECK: VPURT.Task waits([[BAR4]] : !VPURT.Barrier) attributes {idx = 7 : i64}
 }
 
@@ -1163,7 +1163,7 @@ func.func @ExtremeLinearization() -> memref<1x16x1x1xf16, #NHWC, @DDR> {
     // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier) updates([[BAR3]] : !VPURT.Barrier) attributes {idx = 4 : i64}
     // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) updates([[BAR4]] : !VPURT.Barrier) attributes {idx = 5 : i64}
     // CHECK: VPURT.Task waits([[BAR4]] : !VPURT.Barrier) updates([[BAR5]] : !VPURT.Barrier) attributes {idx = 6 : i64}
-    
+
     // CHECK: VPURT.Task waits([[BAR5]] : !VPURT.Barrier) attributes {idx = 7 : i64}
 }
 
@@ -1276,7 +1276,7 @@ func.func @TwoPaths() -> memref<1x16x1x1xf16, #NHWC, @DDR> {
     // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) updates([[BAR2]] : !VPURT.Barrier) attributes {idx = 2 : i64}
     // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier) updates([[BAR3]] : !VPURT.Barrier) attributes {idx = 3 : i64}
     // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) updates([[BAR4]] : !VPURT.Barrier) attributes {idx = 4 : i64}
-    
+
     // CHECK: VPURT.Task waits([[BAR4]] : !VPURT.Barrier) attributes {idx = 5 : i64}
 }
 
@@ -1311,7 +1311,7 @@ func.func @ThreeOutputPathsFromSharedBarrier() -> memref<1x16x1x1xf16, #NHWC, @D
     //   |     |     |
     //  bar2  bar3  bar4
     //   |     |     |
-    //   5     6     7   
+    //   5     6     7
 
     // multiple active barrier producers
 
@@ -1422,6 +1422,6 @@ func.func @ThreeOutputPathsFromSharedBarrier() -> memref<1x16x1x1xf16, #NHWC, @D
     // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) updates([[BAR4]] : !VPURT.Barrier) attributes {idx = 4 : i64}
     // CHECK: VPURT.Task waits([[BAR4]] : !VPURT.Barrier) updates([[BAR5]] : !VPURT.Barrier) attributes {idx = 5 : i64}
     // CHECK: VPURT.Task waits([[BAR5]] : !VPURT.Barrier) updates([[BAR6]] : !VPURT.Barrier) attributes {idx = 6 : i64}
-    
+
     // CHECK: VPURT.Task waits([[BAR6]] : !VPURT.Barrier) attributes {idx = 7 : i64}
 }

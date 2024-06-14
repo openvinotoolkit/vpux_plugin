@@ -8,6 +8,7 @@
 #include "vpux/compiler/dialect/VPURegMapped/utils.hpp"
 
 #include <llvm/ADT/TypeSwitch.h>
+#include <llvm/Support/Format.h>
 #include <llvm/Support/YAMLParser.h>
 
 #include <llvm/Support/Debug.h>
@@ -113,23 +114,13 @@ mlir::LogicalResult vpux::VPURegMapped::RegFieldType::verify(
     return mlir::success();
 }
 
+llvm::FormattedNumber getFormattedValue(uint64_t value) {
+    return value > 9 ? llvm::format_hex(value, 2, true) : llvm::format_decimal(value, 1);
+}
+
 void VPURegMapped::RegFieldType::print(mlir::AsmPrinter& printer) const {
-    printer << "<";
-    printer << "width"
-            << "(" << getWidth() << ")";
-    printer << " "
-            << "pos"
-            << "(" << getPos() << ")";
-    printer << " "
-            << "value"
-            << "(" << getValue() << ")";
-    printer << " "
-            << "name"
-            << "(" << getName() << ")";
-    printer << " "
-            << "dataType"
-            << "(" << VPURegMapped::stringifyEnum(getDataType()) << ")";
-    printer << ">";
+    printer << VPURegMapped::stringifyEnum(getDataType()) << " " << getName() << " at " << getPos() << " size "
+            << getWidth() << " = " << getFormattedValue(getValue());
 }
 
 mlir::Type VPURegMapped::RegFieldType::parse(mlir::AsmParser& parser) {
@@ -138,77 +129,33 @@ mlir::Type VPURegMapped::RegFieldType::parse(mlir::AsmParser& parser) {
     std::string name;
     std::string dataType;
 
-    if (parser.parseLess()) {
-        return mlir::Type();
-    }
-
-    if (parser.parseKeyword("width")) {
-        return {};
-    }
-    if (parser.parseLParen()) {
-        return {};
-    }
-    if (parser.parseInteger(width)) {
-        return {};
-    }
-    if (parser.parseRParen()) {
+    if (parser.parseKeywordOrString(&dataType)) {
         return {};
     }
 
-    if (parser.parseKeyword("pos")) {
+    if (parser.parseKeywordOrString(&name)) {
         return {};
     }
-    if (parser.parseLParen()) {
+
+    if (parser.parseKeyword("at")) {
         return {};
     }
     if (parser.parseInteger(pos)) {
         return {};
     }
-    if (parser.parseRParen()) {
+
+    if (parser.parseKeyword("size")) {
+        return {};
+    }
+    if (parser.parseInteger(width)) {
         return {};
     }
 
-    if (parser.parseKeyword("value")) {
-        return {};
-    }
-    if (parser.parseLParen()) {
+    if (parser.parseEqual()) {
         return {};
     }
     if (parser.parseInteger(value)) {
         return {};
-    }
-    if (parser.parseRParen()) {
-        return {};
-    }
-
-    if (parser.parseKeyword("name")) {
-        return {};
-    }
-    if (parser.parseLParen()) {
-        return {};
-    }
-    if (parser.parseKeywordOrString(&name)) {
-        return {};
-    }
-    if (parser.parseRParen()) {
-        return {};
-    }
-
-    if (parser.parseKeyword("dataType")) {
-        return {};
-    }
-    if (parser.parseLParen()) {
-        return {};
-    }
-    if (parser.parseKeywordOrString(&dataType)) {
-        return {};
-    }
-    if (parser.parseRParen()) {
-        return {};
-    }
-
-    if (parser.parseGreater()) {
-        return mlir::Type();
     }
 
     return get(parser.getContext(), width, pos, value, name,
@@ -310,104 +257,90 @@ mlir::LogicalResult vpux::VPURegMapped::RegisterType::verify(
 }
 
 void VPURegMapped::RegisterType::print(mlir::AsmPrinter& printer) const {
-    printer << "<";
-    printer << "size"
-            << "(" << getSize() << ")";
-    printer << " "
-            << "name"
-            << "(" << getName() << ")";
-    printer << " "
-            << "address"
-            << "(" << getAddress() << ")";
-    printer << " "
-            << "regFields"
-            << "(" << getRegFields() << ")";
-    printer << " "
-            << "allowOverlap"
-            << "(" << getAllowOverlap() << ")";
-    printer << ">";
+    printer << getName() << " offset " << getAddress() << " size " << getSize();
+    if (getAllowOverlap()) {
+        printer << " allowOverlap";
+    }
+    auto regFields = getRegFields().getValue();
+    auto firstRegField = regFields.front().cast<VPURegMapped::RegisterFieldAttr>().getRegField();
+    if (getName() == firstRegField.getName() && getSize() == firstRegField.getWidth()) {
+        printer << " = " << VPURegMapped::stringifyEnum(firstRegField.getDataType()) << " "
+                << getFormattedValue(firstRegField.getValue());
+        return;
+    }
+    printer << " {";
+    printer.increaseIndent();
+    for (auto regFieldAttr : regFields) {
+        printer.printNewline();
+        regFieldAttr.cast<VPURegMapped::RegisterFieldAttr>().getRegField().print(printer);
+        if (regFieldAttr != regFields.back()) {
+            printer << ",";
+        }
+    }
+    printer.decreaseIndent();
+    printer.printNewline();
+    printer << "}";
 }
 
 mlir::Type VPURegMapped::RegisterType::parse(mlir::AsmParser& parser) {
-    std::string name, allowOverlapStr;
+    std::string name;
     mlir::ArrayAttr regFields;
+    mlir::SmallVector<mlir::Attribute> regFieldsVec;
     uint32_t size, address;
     bool allowOverlap = false;
 
-    if (parser.parseLess()) {
-        return mlir::Type();
-    }
-
-    if (parser.parseKeyword("size")) {
-        return {};
-    }
-    if (parser.parseLParen()) {
-        return {};
-    }
-    if (parser.parseInteger(size)) {
-        return {};
-    }
-    if (parser.parseRParen()) {
-        return {};
-    }
-
-    if (parser.parseKeyword("name")) {
-        return {};
-    }
-    if (parser.parseLParen()) {
-        return {};
-    }
     if (parser.parseKeywordOrString(&name)) {
         return {};
     }
-    if (parser.parseRParen()) {
-        return {};
-    }
 
-    if (parser.parseKeyword("address")) {
-        return {};
-    }
-    if (parser.parseLParen()) {
+    if (parser.parseKeyword("offset")) {
         return {};
     }
     if (parser.parseInteger(address)) {
         return {};
     }
-    if (parser.parseRParen()) {
+
+    if (parser.parseKeyword("size")) {
+        return {};
+    }
+    if (parser.parseInteger(size)) {
         return {};
     }
 
-    if (parser.parseKeyword("regFields")) {
-        return {};
-    }
-    if (parser.parseLParen()) {
-        return {};
-    }
-    if (parser.parseAttribute(regFields)) {
-        return mlir::Type();
-    }
-    if (parser.parseRParen()) {
-        return {};
+    if (mlir::succeeded(parser.parseOptionalKeyword("allowOverlap"))) {
+        allowOverlap = true;
     }
 
-    if (parser.parseKeyword("allowOverlap")) {
-        return {};
-    }
-    if (parser.parseLParen()) {
-        return {};
-    }
-    if (parser.parseKeywordOrString(&allowOverlapStr)) {
-        return mlir::Type();
-    }
-    if (llvm::yaml::parseBool(allowOverlapStr).has_value()) {
-        allowOverlap = llvm::yaml::parseBool(allowOverlapStr).value();
-    }
-    if (parser.parseRParen()) {
-        return {};
-    }
+    if (mlir::succeeded(parser.parseOptionalEqual())) {
+        std::string dataType;
+        uint64_t value;
 
-    if (parser.parseGreater()) {
-        return mlir::Type();
+        if (parser.parseKeywordOrString(&dataType)) {
+            return {};
+        }
+
+        if (parser.parseInteger(value)) {
+            return {};
+        }
+
+        auto regFieldType = RegFieldType::get(parser.getContext(), size, 0, value, name,
+                                              VPURegMapped::symbolizeEnum<RegFieldDataType>(dataType).value());
+        auto regFieldAttr = RegisterFieldAttr::get(parser.getContext(), regFieldType);
+        regFields = parser.getBuilder().getArrayAttr(regFieldAttr);
+    } else {
+        auto parseRegField = [&]() -> mlir::ParseResult {
+            if (auto regFieldType = RegFieldType::parse(parser).dyn_cast_or_null<RegFieldType>()) {
+                auto registerFieldAttr = parser.getChecked<RegisterFieldAttr>(parser.getContext(), regFieldType);
+                regFieldsVec.push_back(registerFieldAttr);
+                return mlir::success();
+            }
+            return mlir::failure();
+        };
+
+        if (parser.parseCommaSeparatedList(mlir::AsmParser::Delimiter::Braces, parseRegField)) {
+            return mlir::Type();
+        }
+        regFields = parser.getBuilder().getArrayAttr(regFieldsVec);
     }
 
     return get(parser.getContext(), size, name, address, regFields, allowOverlap);
@@ -480,52 +413,47 @@ mlir::LogicalResult vpux::VPURegMapped::RegMappedType::verify(
 }
 
 void VPURegMapped::RegMappedType::print(mlir::AsmPrinter& printer) const {
-    printer << "<";
-    printer << "name"
-            << "(" << getName() << ")";
-    printer << " "
-            << "regs"
-            << "(" << getRegs() << ")";
-    printer << ">";
+    printer.increaseIndent();
+    printer.printNewline();
+    printer << getName() << " {";
+    printer.increaseIndent();
+    auto regs = getRegs().getValue();
+    for (auto regAttr : regs) {
+        printer.printNewline();
+        regAttr.cast<VPURegMapped::RegisterAttr>().getReg().print(printer);
+        if (regAttr != regs.back()) {
+            printer << ",";
+        }
+    }
+    printer.decreaseIndent();
+    printer.printNewline();
+    printer << "}";
+    printer.decreaseIndent();
+    printer.printNewline();
 }
 
 mlir::Type VPURegMapped::RegMappedType::parse(mlir::AsmParser& parser) {
     std::string name;
     mlir::ArrayAttr regs;
+    mlir::SmallVector<mlir::Attribute> regsVec;
 
-    if (parser.parseLess()) {
-        return mlir::Type();
-    }
-
-    if (parser.parseKeyword("name")) {
-        return {};
-    }
-    if (parser.parseLParen()) {
-        return {};
-    }
     if (parser.parseKeywordOrString(&name)) {
         return {};
     }
-    if (parser.parseRParen()) {
-        return {};
-    }
 
-    if (parser.parseKeyword("regs")) {
-        return {};
-    }
-    if (parser.parseLParen()) {
-        return {};
-    }
-    if (parser.parseAttribute(regs)) {
+    auto parseReg = [&]() -> mlir::ParseResult {
+        if (auto regType = RegisterType::parse(parser).dyn_cast_or_null<RegisterType>()) {
+            auto registerAttr = parser.getChecked<RegisterAttr>(parser.getContext(), regType);
+            regsVec.push_back(registerAttr);
+            return mlir::success();
+        }
+        return mlir::failure();
+    };
+
+    if (parser.parseCommaSeparatedList(mlir::AsmParser::Delimiter::Braces, parseReg)) {
         return mlir::Type();
     }
-    if (parser.parseRParen()) {
-        return {};
-    }
-
-    if (parser.parseGreater()) {
-        return mlir::Type();
-    }
+    regs = parser.getBuilder().getArrayAttr(regsVec);
 
     return get(parser.getContext(), std::move(name), regs);
 }

@@ -1,0 +1,67 @@
+//
+// Copyright (C) 2022 Intel Corporation.
+// SPDX-License-Identifier: Apache 2.0
+//
+
+#include <cstring>
+#include <vpux_elf/writer.hpp>
+#include "vpux/compiler/NPU40XX/dialect/ELF/ops.hpp"
+#include "vpux/compiler/utils/ELF/utils.hpp"
+
+namespace {
+// Loader ABI version (HPI4000 specific) - To be updated on Loader ABI changes
+static constexpr uint32_t VERSION_MAJOR = 1;
+static constexpr uint32_t VERSION_MINOR = 0;
+static constexpr uint32_t VERSION_PATCH = 1;
+}  // namespace
+
+using LoaderAbiVersionNote = elf::elf_note::VersionNote;
+
+void vpux::ELF::ABIVersionOp::serialize(elf::writer::BinaryDataSection<uint8_t>& binDataSection) {
+    LoaderAbiVersionNote abiVersionStruct;
+    constexpr uint8_t nameSize = 4;
+    constexpr uint8_t descSize = 16;
+    abiVersionStruct.n_namesz = nameSize;
+    abiVersionStruct.n_descz = descSize;
+    abiVersionStruct.n_type = elf::elf_note::NT_GNU_ABI_TAG;
+
+    const uint8_t name[4] = {0x47, 0x4e, 0x55, 0};  // 'G' 'N' 'U' '\0' as required by standard
+    static_assert(sizeof(name) == nameSize);
+    std::memcpy(abiVersionStruct.n_name, name, nameSize);
+
+    const uint32_t desc[4] = {elf::elf_note::ELF_NOTE_OS_LINUX, VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH};
+    static_assert(sizeof(desc) == descSize);
+    std::memcpy(abiVersionStruct.n_desc, desc, descSize);
+
+    auto ptrCharTmp = reinterpret_cast<uint8_t*>(&abiVersionStruct);
+    binDataSection.appendData(ptrCharTmp, getBinarySize());
+}
+
+size_t vpux::ELF::ABIVersionOp::getBinarySize() {
+    return sizeof(LoaderAbiVersionNote);
+}
+
+size_t vpux::ELF::ABIVersionOp::getAlignmentRequirements() {
+    return alignof(LoaderAbiVersionNote);
+}
+
+vpux::ELF::SectionFlagsAttr vpux::ELF::ABIVersionOp::getAccessingProcs(mlir::SymbolUserMap&) {
+    return ELF::SectionFlagsAttr::SHF_NONE;
+}
+
+vpux::ELF::SectionFlagsAttr vpux::ELF::ABIVersionOp::getUserProcs() {
+    return ELF::SectionFlagsAttr::SHF_NONE;
+}
+
+std::optional<ELF::SectionSignature> vpux::ELF::ABIVersionOp::getSectionSignature() {
+    return ELF::SectionSignature(vpux::ELF::generateSignature("note", "LoaderABIVersion"),
+                                 ELF::SectionFlagsAttr::SHF_NONE, ELF::SectionTypeAttr::SHT_NOTE);
+}
+
+bool vpux::ELF::ABIVersionOp::hasMemoryFootprint() {
+    return true;
+}
+
+void vpux::ELF::ABIVersionOp::build(mlir::OpBuilder& builder, mlir::OperationState& state) {
+    build(builder, state, "LoaderABIVersion", VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH);
+}

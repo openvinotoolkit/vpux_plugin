@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --canonicalize --init-compiler="vpu-arch=%arch%" %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 #NCWH = affine_map<(d0, d1, d2, d3) -> (d0, d1, d3, d2)>
@@ -43,8 +43,8 @@ func.func @ConstFoldQuant(%arg0 : tensor<1x48x27x27xf16> ) -> tensor<2x48x5x5xf1
     // CHECK-NOT: IE.AffineReshape
     // CHECK:     [[CST:%.*]] = const.Declare tensor<2x48x5x5x!qElemType> = dense<1.000000e+00> : tensor<2x128x48x5x5xf32>
     // CHECK-SAME:      #const.ConvertElemType<f16>, #const.Reshape<[1, 2, 48, 25]>, #const.ConvertElemType<si8>, #const.QuantCast<!qElemType1>, #const.ChangeShapeAndElemType<[2, 48, 5, 5], !qElemType>
-    // CHECK:     [[DEQUANT:%.*]] = IE.Dequantize([[CST]]) {dstElemType = f16} : tensor<2x48x5x5x!qElemType> -> tensor<2x48x5x5xf16>    
-    // CHECK:     return [[DEQUANT]]   
+    // CHECK:     [[DEQUANT:%.*]] = IE.Dequantize([[CST]]) {dstElemType = f16} : tensor<2x48x5x5x!qElemType> -> tensor<2x48x5x5xf16>
+    // CHECK:     return [[DEQUANT]]
 }
 
 // CHECK-LABEL: @FuseWithReshape

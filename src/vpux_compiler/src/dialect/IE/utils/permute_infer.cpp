@@ -1,9 +1,12 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 #include "vpux/compiler/dialect/IE/utils/permute_infer.hpp"
+#include "vpux/compiler/core/type_interfaces.hpp"
+
+#include <mlir/IR/BuiltinAttributes.h>
 
 void inferPermuteReturnTypeComponents(mlir::Value input, mlir::AffineMap mem_perm, mlir::AffineMap dst_order,
                                       SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes,
@@ -17,7 +20,10 @@ void inferPermuteReturnTypeComponents(mlir::Value input, mlir::AffineMap mem_per
     const auto outMemShape = applyPerm(inMemShape, mem_perm);
     const auto outShape = outOrder.toLogicalOrder(outMemShape);
 
-    const auto outDesc = vpux::getTensorAttr(dst_order, strictInfer ? vpux::getMemorySpace(inType) : nullptr);
+    const auto outBoundsAttr =
+            permuteBounds(input.getContext(), inType.cast<vpux::BoundedTypeInterface>(), inOrder, outOrder, mem_perm);
+    const auto outDesc =
+            vpux::getTensorAttr(dst_order, strictInfer ? vpux::getMemorySpace(inType) : nullptr, outBoundsAttr);
 
     auto elemType = inType.getElementType();
     if (auto perAxisType = elemType.dyn_cast<mlir::quant::UniformQuantizedPerAxisType>()) {
@@ -49,4 +55,16 @@ void inferPermuteReturnTypeComponents(mlir::Value input, mlir::AffineMap mem_per
     }
 
     inferredReturnShapes.emplace_back(outShape.raw(), elemType, outDesc);
+}
+
+mlir::ArrayAttr permuteBounds(mlir::MLIRContext* ctx, vpux::BoundedTypeInterface boundedTensor, DimsOrder srcOrder,
+                              DimsOrder dstOrder, mlir::AffineMap memPerm) {
+    if (boundedTensor == nullptr || boundedTensor.getBounds() == nullptr) {
+        return nullptr;
+    }
+    const auto boundValues = parseIntArrayAttr<int64_t>(boundedTensor.getBounds());
+    const auto srcMemBounds = srcOrder.toMemoryOrder(ShapeRef(boundValues));
+    const auto dstMemBounds = applyPerm(srcMemBounds, memPerm);
+    const auto dstBounds = dstOrder.toLogicalOrder(dstMemBounds);
+    return getIntArrayAttr(ctx, dstBounds.raw());
 }

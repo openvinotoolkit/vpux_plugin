@@ -7,18 +7,9 @@
 [submodule "thirdparty/llvm-project"]
 	path = thirdparty/llvm-project
 	url = https://github.com/intel/npu-plugin-llvm.git
-[submodule "thirdparty/level-zero"]
-	path = thirdparty/level-zero
-	url = https://github.com/oneapi-src/level-zero.git
-[submodule "thirdparty/level-zero-ext"]
-	path = thirdparty/level-zero-ext
-	url = https://github.com/intel/level-zero-npu-extensions.git
 [submodule "thirdparty/vpucostmodel"]
 	path = thirdparty/vpucostmodel
 	url = https://github.com/intel/npu-nn-cost-model.git
-[submodule "thirdparty/bitcompactor"]
-	path = thirdparty/bitcompactor
-	url = https://github.com/openvinotoolkit/npu_plugin_btc.git
 [submodule "thirdparty/yaml-cpp"]
 	path = thirdparty/yaml-cpp
 	url = https://github.com/jbeder/yaml-cpp

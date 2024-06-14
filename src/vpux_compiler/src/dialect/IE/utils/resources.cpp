@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -371,6 +371,32 @@ SmallVector<IE::MemoryResourceOp> vpux::IE::details::getReservedMemoryResource(
     return reservedMem;
 }
 
+// Get information about reserved resources in given memory type
+// This function should be called before performing memory allocation
+SmallVector<std::pair<uint64_t, uint64_t>> vpux::IE::getReservedMemOffsetAndSizeVec(mlir::ModuleOp module,
+                                                                                    mlir::SymbolRefAttr memSpaceAttr) {
+    SmallVector<std::pair<uint64_t, uint64_t>> reservedMemVec;
+    // Check for reserved memory which memory scheduler should take into account
+    // so that they not overlap with other buffers. Those reserved resource might be related
+    // to handling of additional special features (e.g. DMA HW profiling)
+    auto reservedMemoryResources = IE::getReservedMemoryResources(module, memSpaceAttr);
+    if (!reservedMemoryResources.empty()) {
+        // Put all reserved resources starting from 0 if they were not assigned any address
+        size_t resMemOffset = 0;
+        for (auto& resMem : reservedMemoryResources) {
+            auto resMemSize = resMem.getByteSize();
+            resMemOffset = resMem.getOffset().value_or(resMemOffset);
+            reservedMemVec.push_back(std::make_pair(resMemOffset, resMemSize));
+            if (!resMem.getOffset().has_value()) {
+                resMem.setOffsetAttr(getIntAttr(module->getContext(), resMemOffset));
+            }
+            resMemOffset += resMemSize;
+        }
+    }
+
+    return reservedMemVec;
+}
+
 //
 // DMA profiling reserved memory
 //
@@ -403,6 +429,24 @@ IE::MemoryResourceOp vpux::IE::getCompressDmaReservedMemory(mlir::ModuleOp mainM
 
 SmallVector<IE::MemoryResourceOp> vpux::IE::getCompressDmaReservedMemory(mlir::ModuleOp mainModule) {
     return details::getReservedMemoryResource(mainModule, compressDmaResMemModuleName);
+}
+
+//
+// SW Kernel prefetching reserved memory
+//
+
+IE::MemoryResourceOp vpux::IE::setSWKernelPrefetchingReservedMemory(mlir::ModuleOp mainModule,
+                                                                    mlir::SymbolRefAttr memSpace, int64_t size) {
+    return details::addReservedMemoryResource(mainModule, swKernelPrefetchingResMemModuleName, memSpace, size);
+}
+
+IE::MemoryResourceOp vpux::IE::getSWKernelPrefetchingReservedMemory(mlir::ModuleOp mainModule,
+                                                                    mlir::SymbolRefAttr memSpace) {
+    return details::getReservedMemoryResource(mainModule, swKernelPrefetchingResMemModuleName, memSpace);
+}
+
+SmallVector<IE::MemoryResourceOp> vpux::IE::getSWKernelPrefetchingReservedMemory(mlir::ModuleOp mainModule) {
+    return details::getReservedMemoryResource(mainModule, swKernelPrefetchingResMemModuleName);
 }
 
 //
@@ -506,4 +550,9 @@ bool IE::hasTileExecutor(mlir::ModuleOp mainModule) {
 
 IE::TileResourceOp IE::getTileExecutor(mlir::ModuleOp mainModule) {
     return mainModule.lookupSymbol<IE::TileResourceOp>(stringifyEnum(VPU::ExecutorKind::NCE));
+}
+
+IE::TileResourceOp IE::getTileExecutor(mlir::func::FuncOp funcOp) {
+    auto moduleOp = funcOp->getParentOfType<mlir::ModuleOp>();
+    return moduleOp.lookupSymbol<IE::TileResourceOp>(stringifyEnum(VPU::ExecutorKind::NCE));
 }

@@ -6,7 +6,8 @@
 #include "vpux/compiler/conversion.hpp"
 
 #include "vpux/compiler/conversion/rewriters/VPU2VPUIP/sw_rewriter.hpp"
-#include "vpux/compiler/dialect/VPUIP/utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/m2i_utils.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/utils/allocate_buffers.hpp"
 #include "vpux/compiler/utils/error.hpp"
@@ -57,7 +58,7 @@ mlir::LogicalResult ReverseSequenceRewrite::matchAndRewrite(VPU::ReverseSequence
     auto convertOp =
             rewriter.create<VPUIP::ConvertUPAOp>(origOp->getLoc(), newArgs.getSeqLength(), allocOp.getMemref());
 
-    auto resultBufs = allocateBuffers(_log, origOp->getLoc(), rewriter, *typeConverter, origOp->getOpResults());
+    auto resultBufs = allocateBuffers(_log, origOp->getLoc(), rewriter, origOp->getOpResults());
 
     rewriter.replaceOpWithNewOp<VPUIP::ReverseSequenceUPAOp>(origOp, newArgs.getData(), convertOp.getOutput(),
                                                              resultBufs[0], origOp.getSeqAxisAttr(),
@@ -105,7 +106,7 @@ mlir::LogicalResult LSTMCellRewrite::matchAndRewrite(VPU::LSTMCellOp origOp, OpA
             rewriter, origOp->getLoc(), typeConverter->convertType(srcConcatenatedWeights.getType()),
             srcConcatenatedWeights.getOutput());
 
-    auto resultBufs = allocateBuffers(_log, origOp->getLoc(), rewriter, *typeConverter, origOp->getOpResults());
+    auto resultBufs = allocateBuffers(_log, origOp->getLoc(), rewriter, origOp->getOpResults());
 
     rewriter.replaceOpWithNewOp<VPUIP::LSTMCellUPAOp>(origOp, newArgs.getInputData(), newArgs.getInitialHiddenState(),
                                                       newArgs.getInitialCellState(), targetConcatenatedWeights,
@@ -153,7 +154,7 @@ mlir::LogicalResult LSTMSequenceRewrite::matchAndRewrite(VPU::LSTMSequenceOp ori
             rewriter, origOp->getLoc(), typeConverter->convertType(srcConcatenatedWeights.getType()),
             srcConcatenatedWeights.getOutput());
 
-    auto resultBufs = allocateBuffers(_log, origOp->getLoc(), rewriter, *typeConverter, origOp->getOpResults());
+    auto resultBufs = allocateBuffers(_log, origOp->getLoc(), rewriter, origOp->getOpResults());
 
     rewriter.replaceOpWithNewOp<VPUIP::LSTMSequenceUPAOp>(
             origOp, newArgs.getInputData(), newArgs.getInitialHiddenState(), newArgs.getInitialCellState(),
@@ -194,7 +195,7 @@ mlir::LogicalResult FakeQuantizeRewrite::matchAndRewrite(VPU::FakeQuantizeOp ori
         return matchFailed(rewriter, origOp, "Got non constant parameters");
     }
 
-    auto outputBuffers = allocateBuffers(_log, origOp->getLoc(), rewriter, *typeConverter, {origOp.getOutput()});
+    auto outputBuffers = allocateBuffers(_log, origOp->getLoc(), rewriter, {origOp.getOutput()});
 
     rewriter.replaceOpWithNewOp<VPUIP::FakeQuantizeUPAOp>(
             origOp, newArgs.getInput(), outputBuffers[0], origOp.getLevelsAttr(), inLowConst.getContentAttr(),
@@ -225,7 +226,7 @@ mlir::LogicalResult FullyConnectedRewrite::matchAndRewrite(VPU::FullyConnectedOp
                                                            mlir::ConversionPatternRewriter& rewriter) const {
     _log.trace("Found FullyConnected Operation '{0}'", origOp->getLoc());
 
-    auto outputBuffers = allocateBuffers(_log, origOp->getLoc(), rewriter, *typeConverter, {origOp.getOutput()});
+    auto outputBuffers = allocateBuffers(_log, origOp->getLoc(), rewriter, {origOp.getOutput()});
 
     if (origOp.getBias() == nullptr) {
         rewriter.replaceOpWithNewOp<VPUIP::FullyConnectedUPAOp>(origOp, newArgs.getInput(), newArgs.getWeights(),
@@ -271,7 +272,7 @@ mlir::LogicalResult RewriteConvolution::matchAndRewrite(VPU::ConvolutionOp origO
                                                         mlir::ConversionPatternRewriter& rewriter) const {
     _log.trace("Found Convolution Operation '{0}'", origOp->getLoc());
 
-    auto outputBuffers = allocateBuffers(_log, origOp->getLoc(), rewriter, *typeConverter, {origOp.getOutput()});
+    auto outputBuffers = allocateBuffers(_log, origOp->getLoc(), rewriter, {origOp.getOutput()});
 
     const int64_t groups = 1;
     if (origOp.getBias() == nullptr) {
@@ -316,10 +317,8 @@ mlir::LogicalResult TopKRewrite::matchAndRewrite(VPU::TopKOp origOp, OpAdaptor n
                                                  mlir::ConversionPatternRewriter& rewriter) const {
     _log.trace("Found TopK Operation '{0}'", origOp->getLoc());
 
-    auto outputValuesBuffers =
-            allocateBuffers(_log, origOp->getLoc(), rewriter, *typeConverter, {origOp.getOutputValues()});
-    auto targetShapesBuffers =
-            allocateBuffers(_log, origOp->getLoc(), rewriter, *typeConverter, {origOp.getTargetShape()});
+    auto outputValuesBuffers = allocateBuffers(_log, origOp->getLoc(), rewriter, {origOp.getOutputValues()});
+    auto targetShapesBuffers = allocateBuffers(_log, origOp->getLoc(), rewriter, {origOp.getTargetShape()});
 
     rewriter.replaceOpWithNewOp<VPUIP::TopKUPAOp>(origOp, newArgs.getInput(), newArgs.getK(), outputValuesBuffers[0],
                                                   targetShapesBuffers[0], origOp.getAxis(), origOp.getMode(),
@@ -349,7 +348,7 @@ mlir::LogicalResult NonMaxSuppressionRewrite::matchAndRewrite(VPU::NonMaxSuppres
                                                               mlir::ConversionPatternRewriter& rewriter) const {
     _log.trace("Found NonMaxSuppression Operation '{0}'", origOp->getLoc());
 
-    auto resultBufs = allocateBuffers(_log, origOp->getLoc(), rewriter, *typeConverter, origOp->getOpResults());
+    auto resultBufs = allocateBuffers(_log, origOp->getLoc(), rewriter, origOp->getOpResults());
 
     rewriter.replaceOpWithNewOp<VPUIP::NonMaxSuppressionUPAOp>(
             origOp, newArgs.getInBoxCoords(), newArgs.getInBoxScores(), resultBufs[0], resultBufs[1], resultBufs[2],
@@ -380,7 +379,7 @@ void ConvertSWLayers2VPUIPUPAPass::safeRunOnFunc() {
     auto& ctx = getContext();
     auto func = getOperation();
 
-    vpux::BufferizeTypeConverter typeConverter;
+    vpux::BufferizeOneShotTypeConverter typeConverter;
 
     const auto isLegalOp = [&](mlir::Operation* op) {
         return typeConverter.isLegal(op);
@@ -393,22 +392,23 @@ void ConvertSWLayers2VPUIPUPAPass::safeRunOnFunc() {
     target.addLegalDialect<VPURT::VPURTDialect>();
     target.addLegalOp<mlir::func::FuncOp, mlir::func::ReturnOp, mlir::func::CallOp>();
     target.addLegalOp<mlir::memref::AllocOp>();
+    target.addLegalOp<Const::DeclareOp>();
     // NCE ops are not handled in this pass
     target.addLegalOp<VPU::NCEConvolutionOp, VPU::NCEDepthConvolutionOp, VPU::NCEMaxPoolOp, VPU::NCEAveragePoolOp,
-                      VPU::NCEEltwiseOp, VPU::NCEPermuteQuantizeOp, VPU::NCEPermuteOp>();
+                      VPU::NCEEltwiseOp, VPU::NCEPermuteOp>();
     target.addLegalOp<VPU::NCEClusterTilingOp, VPU::YieldOp>();
     target.addLegalOp<VPU::DPUWorkloadOp>();
     // ViewLike and other non-SW ops are not handled in this pass
     target.addLegalOp<VPU::CopyOp, VPU::ExpandOp, VPU::StridedSliceOp, VPU::AffineReshapeOp, VPU::ReshapeOp,
                       VPU::SqueezeOp, VPU::UnsqueezeOp, VPU::SliceOp, VPU::SplitOp, VPU::ConcatOp, VPU::PermuteCastOp,
-                      VPU::QuantizeCastOp, VPU::DistributedCastOp, VPU::StubOp, VPU::GroupSparseTensorOp,
-                      VPU::StorageElementTableOp, VPU::ShapeCastOp, VPU::LayoutCastOp, VPU::WorkloadCastOp>();
+                      VPU::QuantizeCastOp, VPU::DistributedCastOp, VPU::M2ITaskOp, VPU::StubOp,
+                      VPU::GroupSparseTensorOp, VPU::StorageElementTableOp, VPU::ShapeCastOp, VPU::LayoutCastOp,
+                      VPU::WorkloadCastOp>();
 
     target.addLegalOp<VPUIP::SwKernelOp>();
     target.markOpRecursivelyLegal<VPUIP::SwKernelOp>([&](mlir::Operation*) {
         return true;
     });
-    vpux::populateBufferizeMaterializationLegality(target);
 
     mlir::RewritePatternSet patterns(&ctx);
     patterns.add<LayerRewrite>(typeConverter, &ctx, _log);
@@ -420,8 +420,6 @@ void ConvertSWLayers2VPUIPUPAPass::safeRunOnFunc() {
     patterns.add<RewriteConvolution>(typeConverter, &ctx, _log);
     patterns.add<TopKRewrite>(typeConverter, &ctx, _log);
     patterns.add<NonMaxSuppressionRewrite>(typeConverter, &ctx, _log);
-
-    Const::ConstDialect::populateBufferizePatterns(patterns, typeConverter, _log);
 
     if (mlir::failed(mlir::applyPartialConversion(func, target, std::move(patterns)))) {
         signalPassFailure();

@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include "vpux/compiler/dialect/IE/ops.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 
 #include "vpux/compiler/core/attributes/dims_order.hpp"
 #include "vpux/compiler/core/attributes/shape.hpp"

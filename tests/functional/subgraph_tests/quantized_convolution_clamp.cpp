@@ -1,13 +1,13 @@
-// Copyright (C) Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include <vpu_ov2_layer_test.hpp>
 
 #include <common_test_utils/ov_tensor_utils.hpp>
-#include <ov_models/builders.hpp>
-#include <ov_models/utils/ov_helpers.hpp>
-#include <shared_test_classes/base/layer_test_utils.hpp>
+#include "common_test_utils/node_builders/activation.hpp"
+#include "common_test_utils/node_builders/constant.hpp"
+#include "common_test_utils/node_builders/fake_quantize.hpp"
 
 using namespace ov::test::utils;
 
@@ -69,18 +69,21 @@ class QuantizedConvClampSubGraphTestCommon :
         const std::vector<float> dataInHigh = {128};
         const std::vector<float> dataOutLow = {-127};
         const std::vector<float> dataOutHigh = {128};
-        const auto dataFq = ngraph::builder::makeFakeQuantize(params[0], ov::element::f32, dataLevels, {}, dataInLow,
-                                                              dataInHigh, dataOutLow, dataOutHigh);
+        const auto dataFq = ov::test::utils::make_fake_quantize(params[0], ov::element::f32, dataLevels, {}, dataInLow,
+                                                                dataInHigh, dataOutLow, dataOutHigh);
 
         // Create FQ for weights
-        const auto weightsU8 = ngraph::builder::makeConstant<uint8_t>(ov::element::u8, weightsShape, {}, true,
-                                                                      /*upTo=*/1, /*startFrom=*/1);
+        const auto weightsU8 =
+                ov::test::utils::deprecated::make_constant<uint8_t>(ov::element::u8, weightsShape, {}, true,
+                                                                    /*upTo=*/1, /*startFrom=*/1);
 
         const auto weightsFP32 = std::make_shared<ov::op::v0::Convert>(weightsU8, ov::element::f32);
 
         const size_t weightsLevels = 255;
-        const auto weightsInLow = ngraph::builder::makeConstant<float>(ov::element::f32, {1}, {-127.0f}, false);
-        const auto weightsInHigh = ngraph::builder::makeConstant<float>(ov::element::f32, {1}, {127.0f}, false);
+        const auto weightsInLow =
+                ov::op::v0::Constant::create(ov::element::f32, ov::Shape{1}, std::vector<float>{-127.0f});
+        const auto weightsInHigh =
+                ov::op::v0::Constant::create(ov::element::f32, ov::Shape{1}, std::vector<float>{127.0f});
 
         std::vector<float> perChannelLow(weightsShape[0]);
         std::vector<float> perChannelHigh(weightsShape[0]);
@@ -90,10 +93,10 @@ class QuantizedConvClampSubGraphTestCommon :
             perChannelHigh[i] = 127.0f;
         }
 
-        const auto weightsOutLow = ngraph::builder::makeConstant<float>(ov::element::f32, {weightsShape[0], 1, 1, 1},
-                                                                        perChannelLow, false);
-        const auto weightsOutHigh = ngraph::builder::makeConstant<float>(ov::element::f32, {weightsShape[0], 1, 1, 1},
-                                                                         perChannelHigh, false);
+        const auto weightsOutLow = ov::test::utils::deprecated::make_constant<float>(
+                ov::element::f32, {weightsShape[0], 1, 1, 1}, perChannelLow, false);
+        const auto weightsOutHigh = ov::test::utils::deprecated::make_constant<float>(
+                ov::element::f32, {weightsShape[0], 1, 1, 1}, perChannelHigh, false);
 
         const auto weightsFq = std::make_shared<ov::op::v0::FakeQuantize>(weightsFP32, weightsInLow, weightsInHigh,
                                                                           weightsOutLow, weightsOutHigh, weightsLevels);
@@ -110,15 +113,15 @@ class QuantizedConvClampSubGraphTestCommon :
         auto outFQRanges = outFQAndClampRanges[0];
         const std::vector<float> outDataLow = {outFQRanges.first};
         const std::vector<float> outDataHigh = {outFQRanges.second};
-        const auto outFq = ngraph::builder::makeFakeQuantize(conv, ov::element::f32, dataLevels, {}, outDataLow,
-                                                             outDataHigh, outDataLow, outDataHigh);
+        const auto outFq = ov::test::utils::make_fake_quantize(conv, ov::element::f32, dataLevels, {}, outDataLow,
+                                                               outDataHigh, outDataLow, outDataHigh);
 
         // Create Clamp
         const ov::Shape convOutShape{1, 32, 20, 20};
         auto clampRanges = outFQAndClampRanges[1];
         std::vector<float> constantsValue{clampRanges.first, clampRanges.second};
-        auto clamp = ngraph::builder::makeActivation(outFq, ov::element::f16, ngraph::helpers::Clamp, convOutShape,
-                                                     constantsValue);
+        auto clamp = ov::test::utils::make_activation(outFq, ov::element::f16, ov::test::utils::Clamp, convOutShape,
+                                                      constantsValue);
 
         const ov::ResultVector results{std::make_shared<ov::op::v0::Result>(clamp)};
         function = std::make_shared<ov::Model>(results, params, "QuantizedConvClamp");
@@ -134,12 +137,14 @@ public:
         auto outFQRanges = outFQAndClampRanges[0];
         auto clampRanges = outFQAndClampRanges[1];
 
+        const std::string sep = "_";
         std::ostringstream result;
-        result << "InputPrec=" << ip << "_";
-        result << "OutputPrec=" << op << "_";
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
+        result << "InputPrec=" << ip << "}" << sep;
+        result << "OutputPrec=" << op << "}" << sep;
         result << "outFQ={" << outFQRanges.first << ", " << outFQRanges.second << ", " << outFQRanges.first << ", "
-               << outFQRanges.second << "}_";
-        result << "clamp={" << clampRanges.first << ", " << clampRanges.second << "}_";
+               << outFQRanges.second << "}" << sep;
+        result << "clamp={" << clampRanges.first << ", " << clampRanges.second << "}" << sep;
         return result.str();
     }
 };
@@ -148,7 +153,7 @@ class QuantizedConvClampSubGraphTest_NPU3720 : public QuantizedConvClampSubGraph
 
 TEST_P(QuantizedConvClampSubGraphTest_NPU3720, HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
 }
 
 }  // namespace LayerTestsDefinitions
@@ -176,7 +181,7 @@ const std::vector<ov::element::Type> outrecisions = {
         // Convert layer will be inserted because of FP32 output, that allows:
         // - Propagate Dequantize through the Clamp, since if there is Return after the Clamp, then we cannot do
         // it(E#35846)
-        // - Avoid an error in ngraph::float16::ie_abs (C#101214)
+        // - Avoid an error in ov::float16::ie_abs (C#101214)
         ov::element::f32};
 
 const auto basicCases = ::testing::Combine(::testing::ValuesIn(inPrecisions), ::testing::ValuesIn(outrecisions),

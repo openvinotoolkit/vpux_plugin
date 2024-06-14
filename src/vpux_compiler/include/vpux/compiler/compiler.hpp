@@ -5,19 +5,29 @@
 
 #pragma once
 
-#include "vpux_compiler.hpp"
+#include "intel_npu/al/icompiler.hpp"
 
 namespace vpux {
 
-class CompilerImpl final : public ICompiler {
+class CompilerImpl final : public intel_npu::ICompiler {
 public:
-    std::shared_ptr<INetworkDescription> compile(std::shared_ptr<ov::Model>& model, const std::string& networkName,
-                                                 const Config& config) final;
+    uint32_t getSupportedOpsetVersion() const final;
 
-    ov::SupportedOpsMap query(const std::shared_ptr<const ov::Model>& model, const vpux::Config& config) final;
+    // Mutable model variant for direct use with deserialized model in VCL
+    intel_npu::NetworkDescription compile(const std::shared_ptr<ov::Model>& model,
+                                          const intel_npu::Config& config) const;
 
-    std::shared_ptr<INetworkDescription> parse(const std::vector<char>& network, const Config& config,
-                                               const std::string& graphName) final;
+    intel_npu::NetworkDescription compile(const std::shared_ptr<const ov::Model>& model,
+                                          const intel_npu::Config& config) const final;
+
+    ov::SupportedOpsMap query(const std::shared_ptr<const ov::Model>& model,
+                              const intel_npu::Config& config) const final;
+
+    intel_npu::NetworkMetadata parse(const std::vector<uint8_t>& network, const intel_npu::Config& config) const final;
+
+    std::vector<ov::ProfilingInfo> process_profiling_output(const std::vector<uint8_t>& profData,
+                                                            const std::vector<uint8_t>& network,
+                                                            const intel_npu::Config& config) const final;
 };
 
 /**
@@ -30,6 +40,6 @@ enum class IRPrintingOrder {
     BEFORE_AFTER,
 };
 
-bool isELFEnabled(const vpux::Config& configuration);
+bool isELFEnabled(const intel_npu::Config& configuration);
 
 }  // namespace vpux

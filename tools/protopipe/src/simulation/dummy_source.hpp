@@ -1,6 +1,6 @@
 //
-// Copyright (C) 2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2023-2024 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #pragma once
@@ -18,19 +18,16 @@
 class DummySource final : public cv::gapi::wip::IStreamSource {
 public:
     using Ptr = std::shared_ptr<DummySource>;
-    explicit DummySource(const uint32_t fps);
+
+    explicit DummySource(const uint32_t frames_interval_in_ms, const bool drop_frames,
+                         const bool disable_high_resolution_timer);
 
     bool pull(cv::gapi::wip::Data& data) override;
     cv::GMetaArg descr_of() const override;
     void reset();
-    void enableDropFrames(const bool drop_frames);
-
-    uint32_t getLatency() const {
-        return static_cast<uint32_t>(m_latency_in_us / 1000u);
-    }
 
 private:
-    int64_t m_latency_in_us;
+    uint64_t m_latency_in_us;
     bool m_drop_frames;
     IWaitable::Ptr m_timer;
 

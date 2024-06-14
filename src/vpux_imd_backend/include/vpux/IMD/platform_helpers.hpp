@@ -5,13 +5,14 @@
 
 #pragma once
 
-#include "vpux_private_properties.hpp"
+#include "npu_private_properties.hpp"
+#include "vpux/utils/IE/private_properties.hpp"
 
 #include "vpux/utils/core/string_ref.hpp"
 
 namespace vpux {
 
-bool platformSupported(InferenceEngine::VPUXConfigParams::VPUXPlatform platform);
-StringRef getAppName(InferenceEngine::VPUXConfigParams::VPUXPlatform platform);
+bool platformSupported(const std::string_view platform);
+StringRef getAppName(const std::string_view platform);
 
 }  // namespace vpux

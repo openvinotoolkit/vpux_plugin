@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -34,13 +34,13 @@ module @VPU.SW {
     // `memref` will be translated to `MemRefData`, while raw scalars will be translated as is.
     func.func private @builtin_GRUSequenceLastPart(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, i64, i64, i64, i64, f64)
         attributes {
-            VPU.kernel_code = "single_shave_gru_sequence_last_part.cpp",
-            VPU.kernel_entry = "single_shave_gru_sequence_last_part"
+            VPU.kernel_code = "gru_sequence_last_part.cpp",
+            VPU.kernel_entry = "gru_sequence_last_part"
         }
     func.func private @builtin_GRUSequenceFirstPart(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, i64, i64, f64)
         attributes {
-            VPU.kernel_code = "single_shave_gru_sequence_first_part.cpp",
-            VPU.kernel_entry = "single_shave_gru_sequence_first_part"
+            VPU.kernel_code = "gru_sequence_first_part.cpp",
+            VPU.kernel_entry = "gru_sequence_first_part"
         }
 
     // management kernel definition
@@ -72,7 +72,7 @@ func.func @main(%arg0: memref<1x157x512xf16, @DDR>, %arg1: memref<1x1x384xf16, @
     }
     %10 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     VPURT.Task waits(%8, %9 : !VPURT.Barrier, !VPURT.Barrier) updates(%10 : !VPURT.Barrier) attributes {isTrailingSWLayer = false} {
-        %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+        %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
                 @VPU.SW::@builtin_GRUSequenceFirstPart
                 inputs(%0 as %arg4: memref<1x157x512xf16, [@CMX_NN, 0]>, %1 as %arg5: memref<1x1152x512xf16, [@CMX_NN, 0]>)
                 outputs(%2 as %arg6: memref<1x1x157x1152xf16, [@CMX_NN, 0]>)
@@ -98,7 +98,7 @@ func.func @main(%arg0: memref<1x157x512xf16, @DDR>, %arg1: memref<1x1x384xf16, @
     }
     %14 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     VPURT.Task waits(%11, %12, %13 : !VPURT.Barrier, !VPURT.Barrier, !VPURT.Barrier) updates(%14 : !VPURT.Barrier) attributes {isTrailingSWLayer = false} {
-        %results:2 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 2, 0>}
+        %results:2 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 2, 0, 0>}
                 @VPU.SW::@builtin_GRUSequenceLastPart
                 inputs(%2 as %arg4: memref<1x1x157x1152xf16, [@CMX_NN, 0]>, %3 as %arg5: memref<1x1x384xf16, [@CMX_NN, 0]>, %4 as %arg6: memref<1x1152x384xf16, [@CMX_NN, 0]>, %5 as %arg7: memref<1x1536xf16, [@CMX_NN, 0]>)
                 outputs(%6 as %arg8: memref<1x1x157x384xf16, [@CMX_NN, 0]>, %7 as %arg9: memref<1x1x384xf16, [@CMX_NN, 0]>)

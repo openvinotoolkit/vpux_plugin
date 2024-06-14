@@ -1,10 +1,10 @@
-// Copyright (C) 2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include "simulation/operations.hpp"
 
-cv::GProtoArgs Infer::operator()(const cv::GProtoArgs& inputs) {
+cv::GProtoArgs InferCall::operator()(const cv::GProtoArgs& inputs) {
     cv::GInferInputs infer_inputs;
     for (int i = 0; i < inputs.size(); ++i) {
         auto gmat = cv::util::get<cv::GMat>(inputs[i]);
@@ -105,7 +105,7 @@ void GCPUDummyM::call(cv::GCPUContext& ctx) {
     utils::busyWait(microseconds{std::max(delay_in_us - elapsed, uint64_t{0})});
 }
 
-cv::GProtoArgs DummyM::operator()(const cv::GProtoArgs& inputs) {
+cv::GProtoArgs DummyCall::operator()(const cv::GProtoArgs& inputs) {
     std::vector<cv::GMat> gmats;
     gmats.reserve(inputs.size());
     for (auto& in : inputs) {

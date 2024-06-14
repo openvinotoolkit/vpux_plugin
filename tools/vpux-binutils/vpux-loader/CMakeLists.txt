@@ -11,7 +11,6 @@ add_tool_target(
     NAME ${TARGET_NAME}
     ROOT ${CMAKE_CURRENT_SOURCE_DIR}
     ENABLE_WARNINGS_AS_ERRORS
-    ADD_CLANG_FORMAT
     LINK_LIBRARIES
          npu_elf
          npu_llvm_utils

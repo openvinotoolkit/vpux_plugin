@@ -4,10 +4,10 @@
 //
 
 #include "vpux/compiler/core/type_interfaces.hpp"
-#include "vpux/compiler/dialect/IE/ops.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/init.hpp"
 
 #include "vpux/utils/core/mem_size.hpp"
@@ -345,10 +345,10 @@ TEST_F(MLIR_NDTypeInterface, CompressedMemRefType) {
     const auto numElemsAttr = mlir::DenseElementsAttr::get(numElemsType, ArrayRef(numElems));
     const int64_t compressionAxis = 1;
     const int64_t alignment = 16;
-    const auto compressionScheme = VPUIP::CompressionSchemeAttr::get(&ctx, getIntAttr(&ctx, compressionAxis),
-                                                                     numElemsAttr, getIntAttr(&ctx, alignment));
+    const auto sparsityCompression = VPUIP::SparsityCompressionAttr::get(&ctx, getIntAttr(&ctx, compressionAxis),
+                                                                         numElemsAttr, getIntAttr(&ctx, alignment));
     const auto memrefType = getMemRefType(shape, mlir::Float16Type::get(&ctx), order, memSpace, StridesRef(), nullptr,
-                                          compressionScheme);
+                                          sparsityCompression);
 
     const auto ndType = memrefType.dyn_cast<vpux::NDTypeInterface>();
     ASSERT_TRUE(ndType != nullptr) << "Type cannot be cast to vpux::NDTypeInterface";
@@ -357,7 +357,7 @@ TEST_F(MLIR_NDTypeInterface, CompressedMemRefType) {
 
     int64_t totalByteSize = 0;
     for (auto elems : numElems) {
-        totalByteSize += alignValUp<int64_t>(elems * sizeof(float16), alignment);
+        totalByteSize += alignValUp<int64_t>(elems * sizeof(vpux::type::float16), alignment);
     }
     EXPECT_EQ(ndType.getTotalAllocSize().count(), totalByteSize);
     EXPECT_EQ(ndType.getCompactAllocSize().count(), totalByteSize);
@@ -370,7 +370,7 @@ TEST_F(MLIR_NDTypeInterface, CompressedMemRefType) {
     ASSERT_TRUE(memrefTiledType != nullptr);
     auto layout = memrefTiledType.getLayout().dyn_cast_or_null<vpux::MemRefAttr>();
     ASSERT_TRUE(layout != nullptr);
-    auto tiledNumElems = layout.hwSpecificField<VPUIP::CompressionSchemeAttr>().getNumElems().getValues<int64_t>();
+    auto tiledNumElems = layout.hwSpecificField<VPUIP::SparsityCompressionAttr>().getNumElems().getValues<int64_t>();
     EXPECT_EQ(tiledNumElems.size(), tileShape[compressionAxis]);
 }
 

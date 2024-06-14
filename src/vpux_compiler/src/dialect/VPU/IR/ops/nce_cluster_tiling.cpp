@@ -147,7 +147,7 @@ void vpux::VPU::NCEClusterTilingOp::build(mlir::OpBuilder& builder, mlir::Operat
                     seType = sparseType.getStorageElementTable().cast<DistributedTensorType>().getCompactType();
                 }
                 type = SparseTensorType::get(dataType, smType, seType, sparseType.getIsWeights(),
-                                             sparseType.getCompressionScheme(), sparseType.getSeAttr());
+                                             sparseType.getSparsityCompression(), sparseType.getSeAttr());
             }
         }
 

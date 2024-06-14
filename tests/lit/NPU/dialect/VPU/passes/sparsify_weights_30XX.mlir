@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -45,8 +45,8 @@ func.func @SparsifyPaddedConv(%arg0: tensor<1x32x16x16xf16, {order = #NHWC}>, %a
     // CHECK-DAG:   [[sparsity_map:%.+]] = const.Declare tensor<16x1x1x128xi1> =
     // CHECK-SAME:    : tensor<16x32x1x1xf16, {order = #NHWC}>, [#const.GetSparsityMap]
     // CHECK:       [[new_weights:%.+]] = VPU.GroupSparseTensor([[weights]], [[sparsity_map]])
-    // CHECK-SAME:      {compression_scheme = #VPU.CompressionScheme<axis = 0 : i64, numElems = dense<15> : tensor<16xi64>, alignment = 16 : i64>, is_weights}
+    // CHECK-SAME:      {is_weights, sparsity_compression = #VPU.SparsityCompression<axis = 0 : i64, numElems = dense<15> : tensor<16xi64>, alignment = 16 : i64>}
     // CHECK-SAME:    -> !VPU.SparseTensor<data=tensor<16x32x1x1xf16, {order = #NHWC}>, sparsity_map=tensor<16x1x1x128xi1>, is_weights,
-    // CHECK-SAME:                         #VPU.CompressionScheme<axis = 0 : i64, numElems = dense<15> : tensor<16xi64>, alignment = 16 : i64>>
+    // CHECK-SAME:                         #VPU.SparsityCompression<axis = 0 : i64, numElems = dense<15> : tensor<16xi64>, alignment = 16 : i64>>
     // CHECK:       VPU.NCE.Convolution(%arg0, [[new_weights]], %arg1)
 }

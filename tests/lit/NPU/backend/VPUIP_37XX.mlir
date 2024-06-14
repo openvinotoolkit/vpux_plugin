@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2021-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -31,7 +31,7 @@ IE.CNNNetwork
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
 module @VPU.SW  {
-    func.func private @builtin_Softmax(memref<*xf16>, memref<*xf16>) attributes {VPU.kernel_code = "singleShaveSoftmax.cpp", VPU.kernel_entry = "singleShaveSoftmax"}
+    func.func private @builtin_Softmax(memref<*xf16>, memref<*xf16>) attributes {VPU.kernel_code = "softmax.cpp", VPU.kernel_entry = "softmax"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
 }
 
@@ -39,7 +39,7 @@ func.func @main(%arg0: memref<1x1x1x1000xf16>, %arg1: memref<1x1x1x1000xf16>) ->
     %0 = VPURT.DeclareBuffer <DDR> <0> -> memref<1x1x1x1000xf16, @DDR>
     %1 = VPURT.ConfigureBarrier<0> -> !VPURT.Barrier
     VPURT.Task updates(%1 : !VPURT.Barrier) {
-        %2 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+        %2 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
             @VPU.SW::@builtin_Softmax inputs(%arg0 as %arg2: memref<1x1x1x1000xf16>) outputs(%0 as %arg3: memref<1x1x1x1000xf16, @DDR>) on tile 0 -> memref<1x1x1x1000xf16, @DDR>  {
                 VPUIP.SW.Kernel.run {attrs = [0]}(%arg2, %arg3) : memref<1x1x1x1000xf16>, memref<1x1x1x1000xf16, @DDR>
             }

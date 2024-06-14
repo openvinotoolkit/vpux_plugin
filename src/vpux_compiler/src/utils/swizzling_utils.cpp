@@ -3,8 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 #include "vpux/compiler/utils/swizzling_utils.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/types.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/types.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/types.hpp"
 
@@ -12,8 +12,10 @@ using namespace vpux;
 
 int64_t vpux::getSizeAlignmentForSwizzling(VPU::ArchKind arch) {
     switch (arch) {
-    case VPU::ArchKind::VPUX37XX:
+    case VPU::ArchKind::NPU37XX:
         return SWIZZLING_SIZE_ALIGNMENT_VPUX37XX;
+    case VPU::ArchKind::NPU40XX:
+        return SWIZZLING_SIZE_ALIGNMENT_VPUX40XX;
     default:
         VPUX_THROW("Architecture {0} does not support swizzling", arch);
     }
@@ -34,7 +36,7 @@ VPUIP::SwizzlingSchemeAttr vpux::createSwizzlingSchemeAttr(mlir::MLIRContext* ct
     return swizzlingSchemeAttr;
 }
 
-int64_t vpux::getAddressAlignmentForSwizzling(int64_t swizzlingKey) {
+int64_t vpux::getAddressAlignmentForSwizzling(int64_t swizzlingKey, VPU::ArchKind archKind) {
     if (swizzlingKey < 1 || swizzlingKey > 5) {
         return 0;
     }
@@ -45,7 +47,7 @@ int64_t vpux::getAddressAlignmentForSwizzling(int64_t swizzlingKey) {
                                                                  {3, 4096},
                                                                  {4, 8192},
                                                                  {5, 16384}};
-    int64_t archMultiplier = 1;
+    int64_t archMultiplier = (archKind == VPU::ArchKind::NPU40XX) ? 2 : 1;
     return swizzlingAddressAlignment.at(swizzlingKey) * archMultiplier;
 }
 
@@ -120,6 +122,8 @@ VPUIP::SwizzlingSchemeAttr vpux::getSwizzlingSchemeAttr(mlir::Type type) {
         layout = memref.getLayout();
     } else if (auto distributedBuffer = type.dyn_cast<VPUIP::DistributedBufferType>()) {
         layout = distributedBuffer.getLayout();
+    } else if (auto itiBuffer = type.dyn_cast<VPUIP::ITIBufferType>()) {
+        layout = itiBuffer.getLayout();
     } else {
         return swizzlingSchemeAttr;
     }
@@ -160,8 +164,8 @@ mlir::Type vpux::setSwizzlingKey(mlir::Type type, mlir::IntegerAttr swizzlingKey
 
     if (type.isa<mlir::MemRefType>()) {
         return vpux::getMemRefType(shape, elemType, order, memSpace, strides, swizzlingSchemeAttr,
-                                   VPUIP::getCompressionSchemeAttr(type));
-    } else if (type.isa<VPUIP::DistributedBufferType>()) {
+                                   VPUIP::getSparsityCompressionAttr(type));
+    } else if (type.isa<VPUIP::DistributedBufferType>() || type.isa<VPUIP::ITIBufferType>()) {
         mlir::ArrayAttr stridesAttr;
         const auto orderAttr = mlir::AffineMapAttr::get(order.toAffineMap(ctx));
         const Bit elemSize = ndType.getElemTypeSize();
@@ -180,10 +184,16 @@ mlir::Type vpux::setSwizzlingKey(mlir::Type type, mlir::IntegerAttr swizzlingKey
         const auto layoutAttr = vpux::MemRefAttr::get(orderAttr, stridesAttr,
                                                       /*allocSize=*/nullptr, {swizzlingSchemeAttr}, ctx);
 
+        if (auto itiBufferType = type.dyn_cast<VPUIP::ITIBufferType>()) {
+            return VPUIP::ITIBufferType::get(ctx, shape.raw(), elemType, layoutAttr, memSpace,
+                                             itiBufferType.getIduSegmentation(), itiBufferType.getInwardHaloRegions(),
+                                             itiBufferType.getOutwardHaloRegions());
+        }
+
         auto distBufferType = type.cast<VPUIP::DistributedBufferType>();
         return VPUIP::DistributedBufferType::get(ctx, shape.raw(), elemType, layoutAttr, memSpace,
                                                  distBufferType.getDistribution(),
-                                                 distBufferType.getCompressionScheme());
+                                                 distBufferType.getSparsityCompression());
     }
 
     VPUX_THROW("Unsupported type for storing swizzling setting");
@@ -238,5 +248,5 @@ vpux::NDTypeInterface vpux::updateSwizzlingSchemeBasedOnDistributedType(VPUIP::D
 
     return vpux::getMemRefType(newType.getShape(), newType.getElementType(), newType.getDimsOrder(),
                                newType.getMemSpace(), newType.getStrides(), parentSwizzlingSchemeAttr,
-                               VPUIP::getCompressionSchemeAttr(newType));
+                               VPUIP::getSparsityCompressionAttr(newType));
 }

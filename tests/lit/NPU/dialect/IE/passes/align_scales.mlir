@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --align-scales %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 // CHECK-LABEL: @AlignConcatScales
 func.func @AlignConcatScales(%arg0: tensor<16x8x8xf16>, %arg1: tensor<16x1x8xf16>) -> tensor<1x16x5x8xf16> {
@@ -13,7 +13,7 @@ func.func @AlignConcatScales(%arg0: tensor<16x8x8xf16>, %arg1: tensor<16x1x8xf16
   %cst_1 = const.Declare tensor<1x1x1x1xf16> = dense<0.000000e+00> : tensor<1x1x1x1xf16>
   %cst_2 = const.Declare tensor<16x16x5x3xf16> = dense<1.000000e+00> : tensor<16x16x5x3xf16>
   %0 = IE.Reshape(%arg0) { shape_value = [1, 16, 8, 8] } : tensor<16x8x8xf16> -> tensor<1x16x8x8xf16>
-  %1 = IE.Reshape(%arg1) { shape_value = [1, 16, 1, 8] } : tensor<16x1x8xf16> -> tensor<1x16x1x8xf16> 
+  %1 = IE.Reshape(%arg1) { shape_value = [1, 16, 1, 8] } : tensor<16x1x8xf16> -> tensor<1x16x1x8xf16>
   %2 = IE.FakeQuantize(%0, %cst_1, %cst, %cst_1, %cst) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64} : tensor<1x16x8x8xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16> -> tensor<1x16x8x8xf16>
   %3 = IE.FakeQuantize(%1, %cst_1, %cst_0, %cst_1, %cst_0) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64} : tensor<1x16x1x8xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16> -> tensor<1x16x1x8xf16>
   %4 = IE.Concat(%2, %3) {static_offsets = [[0, 0, 0, 0], [0, 0, 8, 0]]} : tensor<1x16x8x8xf16>, tensor<1x16x1x8xf16> -> tensor<1x16x9x8xf16>
@@ -33,7 +33,7 @@ func.func @AlignConcatScales(%arg0: tensor<16x8x8xf16>, %arg1: tensor<16x1x8xf16
   // CHECK: [[CLAMP:%.*]] = IE.Clamp([[FQ_0]]) {max = 0.306884765625 : f64, min = 0.000000e+00 : f64} : tensor<1x16x1x8xf16> -> tensor<1x16x1x8xf16>
   // CHECK: [[CONCAT:%.*]] = IE.Concat([[FQ]], [[CLAMP]]) {static_offsets = {{\[\[}}0, 0, 0, 0], [0, 0, 8, 0]]} : tensor<1x16x8x8xf16>, tensor<1x16x1x8xf16> -> tensor<1x16x9x8xf16>
   // CHECK: [[CONV:%.*]] = IE.Convolution([[CONCAT]], [[CST_1]]) {dilations = [1, 1], pads_begin = [0, 1], pads_end = [0, 1], strides = [1, 1]} : tensor<1x16x9x8xf16>, tensor<16x16x5x3xf16> -> tensor<1x16x5x8xf16>
-   
+
   // CHECK: return [[CONV]] : tensor<1x16x5x8xf16>
 }
 
@@ -170,7 +170,7 @@ func.func @AlignOnlyFQAgnostic(%arg0: tensor<1x2x3x4xf16>, %arg1: tensor<1x2x3x4
   %9 = IE.Concat(%1#1, %8) {static_offsets = [[0, 0, 0, 0], [0, 1, 0, 0]]} : tensor<1x1x3x4xf16>, tensor<1x1x3x4xf16> -> tensor<1x2x3x4xf16>
   %10 = IE.FakeQuantize(%9, %cst_7, %cst_8, %cst_7, %cst_8) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64} : tensor<1x2x3x4xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16> -> tensor<1x2x3x4xf16>
 
-  return %3, %10 : tensor<1x1x3x2xf16>, tensor<1x2x3x4xf16> 
+  return %3, %10 : tensor<1x1x3x2xf16>, tensor<1x2x3x4xf16>
 
   // CHECK-DAG: [[CST:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<-2.4395833> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
   // CHECK-DAG: [[CST_0:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<6.7088542> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
@@ -260,7 +260,7 @@ func.func @AlignConsecutiveCocats(%arg0: tensor<1x32x144x128xf16>, %arg1: tensor
 
   return %10 : tensor<1x32x144x384xf16>
 
-    
+
   // CHECK-DAG: [[CST:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<-3.02352953> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
   // CHECK-DAG: [[CST_0:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<253.976471> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
   // CHECK-DAG: [[CST_1:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<2.500000e+02> : tensor<1x1x1x1xf16>

@@ -1,12 +1,12 @@
 //
-// Copyright (C) 2022 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #pragma once
 
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
-#include "vpux/compiler/dialect/VPUIP/dpu_tiler.hpp"
+#include "vpux/compiler/dialect/VPUIP/interfaces/dpu_tiler.hpp"
 
 #include <vpu_cost_model.h>
 #include <vpu_layer_cost_model.h>
@@ -33,9 +33,9 @@ void printVPUNNWorkloadConfig(const VPUNN::DPUWorkload& wl, LogCb logCb = global
 float getWeightsSparsityRatio(mlir::Value weights);
 VPUNN::VPUDevice getVPUDeviceType(VPU::ArchKind archKind);
 VPUNN::DataType getVPUNNElementType(mlir::Type type);
-VPUNN::Layout getVPUNNLayout(VPU::ODUPermuteDataMode oduPermutation);
+VPUNN::Layout getVPUNNLayout(VPUIPDPU::ODUPermuteDataMode oduPermutation);
 VPUNN::VPUTensor getVPUTensor(ShapeRef shape, mlir::Type elemType,
-                              VPU::ODUPermuteDataMode oduPermutation = VPU::ODUPermuteDataMode::PERMUTE_ZXY);
+                              VPUIPDPU::ODUPermuteDataMode oduPermutation = VPUIPDPU::ODUPermuteDataMode::PERMUTE_ZXY);
 VPUNN::ExecutionMode getExecutionMode(VPU::MPEMode mpeMode);
 VPUNN::ActivationFunction getVPUNNActivationFunction(VPU::PPETaskAttr ppeTask);
 VPUNN::VPULayerStrategy getVPULayerStrategy(VPU::MultiClusterStrategy, size_t nDPUs, size_t nTiles, size_t nSHVs = 1,

@@ -1,12 +1,10 @@
-// Copyright (C) Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include <vpu_ov2_layer_test.hpp>
 
-#include <ov_models/builders.hpp>
-#include <ov_models/utils/ov_helpers.hpp>
-#include <shared_test_classes/base/layer_test_utils.hpp>
+#include "common_test_utils/node_builders/fake_quantize.hpp"
 
 namespace ov::test {
 
@@ -34,8 +32,8 @@ class PropagateFQSubGraphTest_NPU3720 :
 
         const auto lhsTranspose = buildTranspose(reshape, transposeOrder);
 
-        const auto dataFq = ngraph::builder::makeFakeQuantize(lhsTranspose, ov::element::f32, dataLevels, {}, inDataLow,
-                                                              inDataHigh, inDataLow, inDataHigh);
+        const auto dataFq = ov::test::utils::make_fake_quantize(lhsTranspose, ov::element::f32, dataLevels, {},
+                                                                inDataLow, inDataHigh, inDataLow, inDataHigh);
         const ov::Strides strides = {2, 2};
         const std::vector<size_t> pads_begin = {0, 0};
         const std::vector<size_t> pads_end = {0, 0};
@@ -44,9 +42,8 @@ class PropagateFQSubGraphTest_NPU3720 :
         const ov::op::PadType padType = ov::op::PadType::AUTO;
         const ov::op::RoundingType roundingType = ov::op::RoundingType::FLOOR;
 
-        const auto pooling =
-                ngraph::builder::makePooling(dataFq, strides, pads_begin, pads_end, kernelSize, roundingType, padType,
-                                             false, ngraph::helpers::PoolingTypes::MAX);
+        const auto pooling = std::make_shared<ov::op::v1::MaxPool>(dataFq, strides, pads_begin, pads_end, kernelSize,
+                                                                   roundingType, padType);
 
         const ov::ResultVector results{std::make_shared<ov::op::v0::Result>(pooling),
                                        std::make_shared<ov::op::v0::Result>(lhsTranspose)};
@@ -64,6 +61,15 @@ class PropagateFQSubGraphTest_NPU3720 :
                 std::make_shared<ov::op::v1::Reshape>(param, constNode, false));
         return reshape;
     }
+
+public:
+    static std::string getTestCaseName(const testing::TestParamInfo<std::tuple<std::vector<int64_t>>>& obj) {
+        const std::string sep = "_";
+        std::ostringstream result;
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
+        result << "TestIdx=" << obj.index << sep;
+        return result.str();
+    };
 };
 
 using PropagateFQUpwardTestParams = std::tuple<std::vector<float>,  // fqRanges1
@@ -83,10 +89,11 @@ class PropagateFQUpwardSubGraphTest_NPU3720 :
         const auto sigmoidOp = std::make_shared<ov::op::v0::Sigmoid>(params[0]);
 
         const auto sliceBeginConst =
-                ngraph::builder::makeConstant<int64_t>(ov::element::i64, {4}, {0, 16, 0, 0}, false);
-        const auto sliceEndConst = ngraph::builder::makeConstant<int64_t>(ov::element::i64, {4}, {0, 32, 0, 0}, false);
+                ov::op::v0::Constant::create(ov::element::i64, ov::Shape{4}, std::vector<int64_t>{0, 16, 0, 0});
+        const auto sliceEndConst =
+                ov::op::v0::Constant::create(ov::element::i64, ov::Shape{4}, std::vector<int64_t>{0, 32, 0, 0});
         const auto sliceStridesConst =
-                ngraph::builder::makeConstant<int64_t>(ov::element::i64, {4}, {1, 1, 1, 1}, false);
+                ov::op::v0::Constant::create(ov::element::i64, ov::Shape{4}, std::vector<int64_t>{1, 1, 1, 1});
         std::vector<int64_t> begin_mask{1, 0, 1, 1};
         std::vector<int64_t> end_mask{1, 0, 1, 1};
         std::vector<int64_t> new_axis_mask = {0, 0, 0, 0};
@@ -100,12 +107,12 @@ class PropagateFQUpwardSubGraphTest_NPU3720 :
         std::vector<float> firstFQRanges;
         std::vector<float> secondFQRanges;
         std::tie(firstFQRanges, secondFQRanges) = this->GetParam();
-        const auto firstFq =
-                ngraph::builder::makeFakeQuantize(stridedSlice, ov::element::f32, dataLevels, {}, {firstFQRanges.at(0)},
-                                                  {firstFQRanges.at(1)}, {firstFQRanges.at(2)}, {firstFQRanges.at(3)});
-        const auto secondFq = ngraph::builder::makeFakeQuantize(stridedSlice, ov::element::f32, dataLevels, {},
-                                                                {secondFQRanges.at(0)}, {secondFQRanges.at(1)},
-                                                                {secondFQRanges.at(2)}, {secondFQRanges.at(3)});
+        const auto firstFq = ov::test::utils::make_fake_quantize(stridedSlice, ov::element::f32, dataLevels, {},
+                                                                 {firstFQRanges.at(0)}, {firstFQRanges.at(1)},
+                                                                 {firstFQRanges.at(2)}, {firstFQRanges.at(3)});
+        const auto secondFq = ov::test::utils::make_fake_quantize(stridedSlice, ov::element::f32, dataLevels, {},
+                                                                  {secondFQRanges.at(0)}, {secondFQRanges.at(1)},
+                                                                  {secondFQRanges.at(2)}, {secondFQRanges.at(3)});
 
         const ov::ResultVector results{std::make_shared<ov::op::v0::Result>(firstFq),
                                        std::make_shared<ov::op::v0::Result>(secondFq)};
@@ -120,11 +127,13 @@ public:
         std::vector<float> secondFQRanges;
         std::tie(firstFQRanges, secondFQRanges) = obj.param;
 
+        const std::string sep = "_";
         std::ostringstream result;
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
         result << "FQ1={" << firstFQRanges.at(0) << ", " << firstFQRanges.at(1) << ", " << firstFQRanges.at(2) << ", "
-               << firstFQRanges.at(3) << "}_";
+               << firstFQRanges.at(3) << "}" << sep;
         result << "FQ2={" << secondFQRanges.at(0) << ", " << secondFQRanges.at(1) << ", " << secondFQRanges.at(2)
-               << ", " << secondFQRanges.at(3) << "}_";
+               << ", " << secondFQRanges.at(3) << "}" << sep;
         return result.str();
     }
 };
@@ -133,12 +142,12 @@ public:
 
 TEST_P(PropagateFQSubGraphTest_NPU3720, SW) {
     setReferenceSoftwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
 }
 
 TEST_P(PropagateFQSubGraphTest_NPU3720, HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
 }
 
 const std::vector<std::vector<int64_t>> transposes = {
@@ -146,18 +155,19 @@ const std::vector<std::vector<int64_t>> transposes = {
 };
 
 INSTANTIATE_TEST_CASE_P(smoke_PropagateFQSubGraph, PropagateFQSubGraphTest_NPU3720,
-                        ::testing::Combine(::testing::ValuesIn(transposes)));
+                        ::testing::Combine(::testing::ValuesIn(transposes)),
+                        PropagateFQSubGraphTest_NPU3720::getTestCaseName);
 
 // PropagateFQUpwardSubGraphTest_NPU3720
 
 TEST_P(PropagateFQUpwardSubGraphTest_NPU3720, HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
 }
 
 TEST_P(PropagateFQUpwardSubGraphTest_NPU3720, SW) {
     setReferenceSoftwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
 }
 
 std::vector<std::vector<float>> fqRanges1 = {{0.0f, 8.0f, 0.0f, 8.0f}};

@@ -4,11 +4,16 @@
 //
 
 #include "vpux/compiler/conversion.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/utils/analysis.hpp"
+#include "vpux/compiler/utils/rewriter.hpp"
 
 #include <mlir/IR/Operation.h>
 #include <mlir/Pass/Pass.h>
 #include <mlir/Transforms/DialectConversion.h>
+
+#include <functional>
 
 using namespace vpux;
 
@@ -38,14 +43,61 @@ void updateFuncOp(mlir::func::FuncOp func, SmallVectorImpl<mlir::BlockArgument>&
     }
 }
 
-// Updates all ReturnOps in the scope of the given FuncOp by  copying the associated buffer contents into the given
+// Function to create callback, which provides location for result. It tries to get access to location from
+// IE::CNNNetworkOp, but in tests this information may be unavailable, so empty callback will be returned
+std::function<const std::optional<mlir::Location>(mlir::OpOperand&)> getResultLocationProvider(mlir::func::FuncOp func,
+                                                                                               vpux::Logger log) {
+    auto moduleOp = getModuleOp(func);
+    auto netOps = to_small_vector(moduleOp.getOps<IE::CNNNetworkOp>());
+    if (netOps.size() != 1) {
+        log.warning("Can't get location for output. If it isn't a test, please, debug this.");
+        return [](mlir::OpOperand&) -> const std::optional<mlir::Location> {
+            return std::nullopt;
+        };
+    }
+
+    IE::CNNNetworkOp netOp = netOps.front();
+    mlir::func::FuncOp entryPointFuncOp;
+    IE::CNNNetworkOp::getFromModule(moduleOp, netOp, entryPointFuncOp);
+
+    if (func == entryPointFuncOp) {
+        const auto outputsInfo = to_small_vector(netOp.getOutputsInfo().getOps<IE::DataInfoOp>());
+        return [=](mlir::OpOperand& operand) -> const std::optional<mlir::Location> {
+            const auto loc = outputsInfo[operand.getOperandNumber()]->getLoc();
+            VPUX_THROW_WHEN(loc.isa<mlir::UnknownLoc>(), "Network output {0} must have location",
+                            operand.getOperandNumber());
+            return loc;
+        };
+    }
+
+    // This is outlined function.
+    auto baseName = printToString("{0}_outputBuff", func.getName());
+    return [=, baseName = std::move(baseName)](mlir::OpOperand& operand) -> const std::optional<mlir::Location> {
+        if (mlir::isa<mlir::BlockArgument>(operand.get())) {
+            auto retOp = operand.getOwner();
+            auto funcOp = retOp->getParentOfType<mlir::func::FuncOp>();
+            return appendLoc(funcOp->getLoc(), "{0}{1}", baseName.c_str(), operand.getOperandNumber());
+        }
+
+        auto producerOp = operand.get().getDefiningOp();
+        return appendLoc(producerOp->getLoc(), "{0}{1}", baseName.c_str(), operand.getOperandNumber());
+    };
+}
+
+// Updates all ReturnOps in the scope of the given FuncOp by copying the associated buffer contents into the given
 // out-params.
-void updateReturnOps(mlir::func::FuncOp func, ArrayRef<mlir::BlockArgument> appendedEntryArgs) {
+void updateReturnOps(mlir::func::FuncOp func, ArrayRef<mlir::BlockArgument> appendedEntryArgs, vpux::Logger log) {
+    const auto locProvider = getResultLocationProvider(func, log);
     func.walk([&](mlir::func::ReturnOp op) {
         mlir::OpBuilder builder(op);
-        for (auto i : irange(op.getNumOperands())) {
-            auto copyOp = builder.create<VPUIP::CopyOp>(op.getLoc(), op.getOperand(i), appendedEntryArgs[i]);
-            op.setOperand(i, copyOp.getOutput());
+        for (auto& opOperand : op->getOpOperands()) {
+            auto opLoc = op->getLoc();
+            if (auto realLoc = locProvider(opOperand)) {
+                opLoc = realLoc.value();
+            }
+            auto idx = opOperand.getOperandNumber();
+            auto copyOp = builder.create<VPUIP::CopyOp>(opLoc, op.getOperand(idx), appendedEntryArgs[idx]);
+            opOperand.set(copyOp.getOutput());
         }
     });
 }
@@ -112,7 +164,7 @@ void AddBuffersForNetResults::safeRunOnModule() {
 
         SmallVector<mlir::BlockArgument> appendedEntryArgs;
         updateFuncOp(func, appendedEntryArgs);
-        updateReturnOps(func, appendedEntryArgs);
+        updateReturnOps(func, appendedEntryArgs, _log);
     }
 
     updateCallOp(module);

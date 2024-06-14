@@ -1,46 +1,52 @@
-// Copyright (C) 2018-2022 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2018-2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
-#include "shared_test_classes/subgraph/memory_LSTMCell.hpp"
-#include <subgraph_tests/memory_LSTMCell.hpp>
+#include "subgraph_tests/memory_LSTMCell.hpp"
+#include <common_test_utils/test_constants.hpp>
+#include <shared_test_classes/subgraph/memory_LSTMCell.hpp>
 #include "common/utils.hpp"
 #include "common/vpu_test_env_cfg.hpp"
-#include "common_test_utils/test_constants.hpp"
+#include "vpu_test_tool.hpp"
 
-using namespace SubgraphTestsDefinitions;
+using namespace ov::test::utils;
+
+namespace ov::test {
 
 static std::string getTestCaseName(testing::TestParamInfo<memoryLSTMCellParams> obj) {
-    ngraph::helpers::MemoryTransformation memoryTransform;
+    MemoryTransformation memoryTransform;
+    ov::element::Type precision;
     std::string targetDevice;
-    InferenceEngine::Precision precision;
     size_t inputSize;
     size_t outputSize;
-    std::map<std::string, std::string> configuration;
-    std::tie(memoryTransform, targetDevice, precision, inputSize, outputSize, configuration) = obj.param;
+    ov::AnyMap configuration;
+    std::tie(memoryTransform, std::ignore, precision, inputSize, outputSize, configuration) = obj.param;
+    const std::string sep = "_";
     std::ostringstream result;
-    result << "targetDevice=" << LayerTestsUtils::getDeviceNameTestCase(targetDevice) << "_";
-    result << "inSize=" << inputSize << "_";
-    result << "outSize=" << outputSize << "_";
+    targetDevice = LayerTestsUtils::getTestsPlatformFromEnvironmentOr(ov::test::utils::DEVICE_NPU);
+    result << "targetDevice=" << targetDevice << sep;
+    result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
+    result << "TestIdx=" << obj.index << sep;
+    result << "inSize=" << inputSize << sep;
+    result << "outSize=" << outputSize << sep;
     return result.str();
 }
 
-std::vector<ngraph::helpers::MemoryTransformation> transformation{
-        ngraph::helpers::MemoryTransformation::NONE,
+std::vector<MemoryTransformation> transformation{
+        MemoryTransformation::NONE,
 };
 
-std::vector<size_t> input_sizes = {80, 32, 64, 100, 25};
+std::vector<size_t> inputSizes = {80, 32, 64, 100, 25};
 
-std::vector<size_t> hidden_sizes = {
+std::vector<size_t> hiddenSizes = {
         128, 200, 300, 24, 32,
 };
 
-std::map<std::string, std::string> additional_config = {};
+ov::AnyMap additionalConfig = {};
 
 INSTANTIATE_TEST_SUITE_P(smoke_MemoryLSTMCellTest, MemoryLSTMCellTest,
-                         ::testing::Combine(::testing::ValuesIn(transformation),
-                                            ::testing::Values(ov::test::utils::DEVICE_NPU),
-                                            ::testing::Values(InferenceEngine::Precision::FP32),
-                                            ::testing::ValuesIn(input_sizes), ::testing::ValuesIn(hidden_sizes),
-                                            ::testing::Values(additional_config)),
+                         ::testing::Combine(::testing::ValuesIn(transformation), ::testing::Values(utils::DEVICE_NPU),
+                                            ::testing::Values(ov::element::f32), ::testing::ValuesIn(inputSizes),
+                                            ::testing::ValuesIn(hiddenSizes), ::testing::Values(additionalConfig)),
                          getTestCaseName);
+}  // namespace ov::test

@@ -8,7 +8,7 @@ Usage of script:
 
 python3 main.py <imageFileName> <probabilityForObjectDetection>
 
-or 
+or
 
 python3 main.py <imageFileName>
 
@@ -62,4 +62,3 @@ Example of usage and some results:
 	Object : dog
 	Probability = 0.32101479962268487
 	Coordinates (x_min, y_min - x_max, y_max) : 36, 142 - 187, 401
-

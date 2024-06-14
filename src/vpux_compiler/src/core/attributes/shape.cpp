@@ -6,7 +6,7 @@
 #include "vpux/compiler/core/attributes/shape.hpp"
 
 #include "vpux/compiler/core/attributes/dims_order.hpp"
-#include "vpux/compiler/dialect/VPURT/types.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/types.hpp"
 
 #include "vpux/utils/core/error.hpp"
 

@@ -8,10 +8,9 @@
 using namespace vpux;
 
 namespace VPUXDriverCompiler {
-VPUXExecutableL0::VPUXExecutableL0(const NetworkDescription::Ptr& networkDesc, bool enableProfiling,
+VPUXExecutableL0::VPUXExecutableL0(const std::shared_ptr<const NetworkDescription>& networkDesc, bool enableProfiling,
                                    VCLLogger* vclLogger)
         : _networkDesc(networkDesc), enableProfiling(enableProfiling), _logger(vclLogger) {
-    _blob.clear();
 }
 
 vcl_result_t VPUXExecutableL0::serializeNetwork() {
@@ -19,8 +18,6 @@ vcl_result_t VPUXExecutableL0::serializeNetwork() {
     if (enableProfiling) {
         stopWatch.start();
     }
-
-    _blob = _networkDesc->getCompiledNetwork();
 
     if (enableProfiling) {
         stopWatch.stop();
@@ -34,7 +31,8 @@ vcl_result_t VPUXExecutableL0::getNetworkSize(uint64_t* blobSize) const {
         _logger->outputError("Can not return blob size for NULL argument!");
         return VCL_RESULT_ERROR_INVALID_ARGUMENT;
     }
-    *blobSize = _blob.size();
+    const auto& blob = _networkDesc->compiledNetwork;
+    *blobSize = blob.size();
     if (*blobSize == 0) {
         // The executable handle do not contain a legal network.
         _logger->outputError("No blob created! The compiled network is empty!");
@@ -44,8 +42,9 @@ vcl_result_t VPUXExecutableL0::getNetworkSize(uint64_t* blobSize) const {
     }
 }
 
-vcl_result_t VPUXExecutableL0::exportNetwork(uint8_t* blob, uint64_t blobSize) const {
-    if (!blob || blobSize != _blob.size()) {
+vcl_result_t VPUXExecutableL0::exportNetwork(uint8_t* blobOut, uint64_t blobSize) const {
+    const auto& blob = _networkDesc->compiledNetwork;
+    if (!blobOut || blobSize != blob.size()) {
         _logger->outputError("Invalid argument to export network");
         return VCL_RESULT_ERROR_INVALID_ARGUMENT;
     }
@@ -54,7 +53,7 @@ vcl_result_t VPUXExecutableL0::exportNetwork(uint8_t* blob, uint64_t blobSize) c
     if (enableProfiling)
         stopWatch.start();
 
-    memcpy(blob, _blob.data(), blobSize);
+    memcpy(blobOut, blob.data(), blobSize);
 
     if (enableProfiling) {
         stopWatch.stop();

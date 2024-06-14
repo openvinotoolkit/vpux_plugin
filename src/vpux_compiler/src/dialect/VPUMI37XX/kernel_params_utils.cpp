@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 #include "vpux/compiler/dialect/VPUMI37XX/kernel_params_utils.hpp"
-
+#include "vpux/compiler/core/bounded_buffer.hpp"
 namespace vpux {
 namespace VPUMI37XX {
 
@@ -54,6 +54,24 @@ sw_params::DataType KernelParamsSerializer::getDataTypeFromMlirType(mlir::Type t
             case 1:
                 return sw_params::DataType::NN_BIN;
             }
+        } else if (integerType.isSignless()) {
+            auto typeWidth = integerType.getWidth();
+            switch (typeWidth) {
+            case 64:
+                return sw_params::DataType::NN_I64;
+            case 32:
+                return sw_params::DataType::NN_I32;
+            case 16:
+                return sw_params::DataType::NN_I16;
+            case 8:
+                return sw_params::DataType::NN_I8;
+            case 4:
+                return sw_params::DataType::NN_I4;
+            case 2:
+                return sw_params::DataType::NN_I2;
+            case 1:
+                return sw_params::DataType::NN_BIN;
+            }
         }
     } else if (auto quantizeType = type.dyn_cast<mlir::quant::QuantizedType>()) {
         return sw_params::DataType::NN_U8;
@@ -97,7 +115,7 @@ void KernelParamsSerializer::addAttrsToVector(SmallVector<uint8_t>& vec, mlir::A
     }
 }
 
-void KernelParamsSerializer::addTensorArgToVector(SmallVector<uint8_t>& vec, mlir::Value value) {
+void KernelParamsSerializer::addTensorArgToVector(SmallVector<uint8_t>& vec, mlir::Value value, bool isDynamic) {
     sw_params::MemRefData memrefData{};
 
     const auto shape = getShape(value);
@@ -113,8 +131,33 @@ void KernelParamsSerializer::addTensorArgToVector(SmallVector<uint8_t>& vec, mli
 
     memrefData.dataType = getDataTypeFromMlirType(ndType.getElementType());
     memrefData.location = getSwParamsLocationFromMemKind(ndType.getMemoryKind());
+    memrefData.isStatic = !isDynamic;
 
     appendValueToVector(vec, memrefData);
+}
+
+// blockArgs: inputs, outputs
+// operands : inputs, input_dims, outputs, output_dims
+// get {inputs, isDynamic} or {outputs, isDynamic}
+auto extractKernelBuffer(VPUIP::SwKernelOp swKernelOp, int32_t inDimsSize, int32_t blockId) {
+    const int32_t insSize = swKernelOp.getInputs().size();
+
+    if (blockId < insSize) {
+        const auto operandId = blockId;
+        const auto operandVal = swKernelOp->getOpOperand(operandId).get();
+        const auto isDynamic = swKernelOp.getDynamicInputShapesMap().has_value()
+                                       ? (swKernelOp.getDynamicInputShapesMap().value()[operandId] != ABSENT_DIMS_FLAG)
+                                       : false;
+        return std::make_tuple(operandVal, isDynamic);
+    } else {
+        const auto operandId = blockId + inDimsSize;
+        const auto outputId = blockId - insSize;
+        const auto operandVal = swKernelOp->getOpOperand(operandId).get();
+        const auto isDynamic = swKernelOp.getDynamicOutputShapesMap().has_value()
+                                       ? (swKernelOp.getDynamicOutputShapesMap().value()[outputId] != ABSENT_DIMS_FLAG)
+                                       : false;
+        return std::make_tuple(operandVal, isDynamic);
+    }
 }
 
 SmallVector<uint8_t> KernelParamsSerializer::createKernelParams(VPUIP::SwKernelOp swKernelOp) {
@@ -122,6 +165,7 @@ SmallVector<uint8_t> KernelParamsSerializer::createKernelParams(VPUIP::SwKernelO
 
     const auto insSize = swKernelOp.getInputs().size();
     const auto outsSize = swKernelOp.getResults().size();
+    const auto dynInputShapesSize = swKernelOp.getDynamicInputShapes().size();
 
     const auto kernelOpArgsCount = insSize + outsSize;
 
@@ -129,15 +173,15 @@ SmallVector<uint8_t> KernelParamsSerializer::createKernelParams(VPUIP::SwKernelO
         for (auto&& operand : kernelRun.getArgs()) {
             auto blockArg = operand.dyn_cast_or_null<mlir::BlockArgument>();
             if (blockArg) {
-                auto id = blockArg.getArgNumber();
-                VPUX_THROW_UNLESS(id < kernelOpArgsCount,
-                                  "Index '{0}' of argument of Kernel.Run operation is out of range {1}'", id,
+                auto blockId = blockArg.getArgNumber();
+                VPUX_THROW_UNLESS(blockId < kernelOpArgsCount,
+                                  "Index '{0}' of argument of Kernel.Run operation is out of range {1}'", blockId,
                                   kernelOpArgsCount);
 
                 auto blockArgType = blockArg.getType();
                 auto blockArgNdTypeIf = blockArgType.cast<vpux::NDTypeInterface>();
-                auto ioType = id < insSize ? swKernelOp.getInputs()[id].getType()
-                                           : swKernelOp.getOutputBuffs()[id - insSize].getType();
+                auto ioType = blockId < insSize ? swKernelOp.getInputs()[blockId].getType()
+                                                : swKernelOp.getOutputBuffs()[blockId - insSize].getType();
                 auto ioNdTypeIf = ioType.cast<vpux::NDTypeInterface>();
                 VPUX_THROW_UNLESS(blockArgNdTypeIf != nullptr || ioNdTypeIf != nullptr,
                                   "createKernelParams: sw kernel I/O does not implement NDTypeInterface");
@@ -147,8 +191,8 @@ SmallVector<uint8_t> KernelParamsSerializer::createKernelParams(VPUIP::SwKernelO
                 VPUX_THROW_UNLESS(blockArgNdTypeIf.getShape() == ioNdTypeIf.getShape(),
                                   "createKernelParams: shapes of I/O do not match");
 
-                const auto operandVal = swKernelOp->getOpOperand(id).get();
-                addTensorArgToVector(paramsVector, operandVal);
+                const auto [buffer, isDynamic] = extractKernelBuffer(swKernelOp, dynInputShapesSize, blockId);
+                addTensorArgToVector(paramsVector, buffer, isDynamic);
             } else {
                 VPUX_THROW("Only block arguments are supported");
             }

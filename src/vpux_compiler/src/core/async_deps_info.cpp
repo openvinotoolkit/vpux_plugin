@@ -11,6 +11,16 @@
 #include "vpux/utils/core/range.hpp"
 
 using namespace vpux;
+/**
+ * @brief For large-scale models simplified graph optimization is performed due to N^2 memory
+ * complexity required by the algorithm for fast and full optimization of the dependencies graph.
+ * The threshold is set so as to enable simplified (partial) optimization for very large models.
+ *
+ * For the number of operations above the threshold, the optimization of the graph is partial with
+ * benefit of smaller memory usage. At the optimization threshold the largest allocated structure
+ * size will be of the order 800MB.
+ */
+#define SIMPLIFIED_OPTIMIZATION_OP_COUNT_THRESHOLD 10000
 
 //
 // Constructor
@@ -28,6 +38,16 @@ vpux::AsyncDepsInfo::AsyncDepsInfo(mlir::func::FuncOp func)
 
 void vpux::AsyncDepsInfo::setIndex(mlir::async::ExecuteOp execOp, uint64_t index) {
     execOp->setAttr(_indexAttrName, getIntAttr(execOp.getContext(), index));
+}
+
+SmallVector<size_t> vpux::AsyncDepsInfo::getDepsVec(const llvm::DenseSet<size_t>& deps) const {
+    SmallVector<size_t> vec(deps.begin(), deps.end());
+    /* The order of dependencies may impact order of prefetched DMA.
+     * Experiments show that arbitrary order of these dependencies may impact
+     * inference accuracy (E102917) hence sorting.
+     */
+    llvm::sort(vec.begin(), vec.end());
+    return vec;
 }
 
 uint32_t vpux::AsyncDepsInfo::getIndex(mlir::async::ExecuteOp execOp) const {
@@ -58,9 +78,6 @@ void vpux::AsyncDepsInfo::buildDepsMap(mlir::func::FuncOp func) {
 
     _execOpCount = _allExecOps.size();
     _depsMap.resize(_execOpCount);
-    for (auto& deps : _depsMap) {
-        deps.resize(checked_cast<uint32_t>(_allExecOps.size()));
-    }
 
     for (auto& op : func.getOps()) {
         if (auto execOp = mlir::dyn_cast<mlir::async::ExecuteOp>(op)) {
@@ -78,7 +95,6 @@ void vpux::AsyncDepsInfo::buildDepsMap(mlir::func::FuncOp func) {
             }
         }
     }
-
     _log = _log.unnest();
 }
 
@@ -97,7 +113,7 @@ void vpux::AsyncDepsInfo::addExecOp(mlir::async::ExecuteOp execOp) {
         _log.trace("It has a dependency from other 'async.execute' Operation at '{0}'", argExecOp->getLoc());
 
         const auto argExecInd = getIndex(argExecOp);
-        _depsMap[execInd].set(argExecInd);
+        _depsMap[execInd].insert(argExecInd);
     }
 
     _log = _log.unnest();
@@ -110,10 +126,10 @@ void vpux::AsyncDepsInfo::addExecOp(mlir::async::ExecuteOp execOp) {
 void vpux::AsyncDepsInfo::addDependency(mlir::async::ExecuteOp from, mlir::async::ExecuteOp to) {
     const auto fromInd = getIndex(from);
     const auto toInd = getIndex(to);
-    _depsMap[toInd].set(fromInd);
+    _depsMap[toInd].insert(fromInd);
     if (!_consumerMap.empty()) {
         // also update consumer map if build
-        _consumerMap[fromInd].set(toInd);
+        _consumerMap[fromInd].insert(toInd);
     }
 }
 
@@ -138,47 +154,42 @@ void vpux::AsyncDepsInfo::optimizeDepsMap() {
     // Step 1: Transitive closure
     // Update all dependencies in a new depsMapClosure to represent transitive closure
     // of initial dependencies graph. For each node starting from beginning it will go
-    // though its dependencies, take their dependensiec and update its own based on that
-    // In this step even if initial graph was sparse, after it, it will be dense
-    // In depsStartAndEnd for each node (represented by async deps index) store information
-    // about first and last dependency index. This is used to reduce computation time of step 2
-    // in case original graph had nodes which in most cases depended only on fairly close neighbours
+    // though its dependencies, take their dependencies and update its own.
+    // In this step even if initial graph was sparse, after it, it will be dense for the case of
+    // full optimization. Partial optimization does not build cumulatively the full history of all tasks ancestors
+    // but limits the scope to second order dependencies (E102917).
     auto depsMapClosure = _depsMap;
-    SmallVector<std::pair<int, int>> depsStartAndEnd;
+    bool performSimplifiedOptimization = _depsMap.size() > SIMPLIFIED_OPTIMIZATION_OP_COUNT_THRESHOLD;
+    SmallVector<llvm::DenseSet<size_t>>& refDeps = performSimplifiedOptimization ? _depsMap : depsMapClosure;
+    unsigned i = 0;
     for (auto& curDeps : depsMapClosure) {
-        depsStartAndEnd.push_back(std::make_pair(curDeps.find_first(), curDeps.find_last()));
-        for (auto curDepInd : curDeps.set_bits()) {
-            const auto& depOfDeps = depsMapClosure[curDepInd];
-            curDeps |= depOfDeps;
+        if (i == depsMapClosure.size() - 1) {
+            break;  // during optimization we don't use the last entry because an operation cannot depend on itself.
         }
+        for (auto curDepInd : llvm::DenseSet<size_t>(curDeps)) {
+            const auto& depOfDeps = refDeps[curDepInd];
+            curDeps.insert(depOfDeps.begin(), depOfDeps.end());
+        }
+        i++;
     }
 
     // Step 2: Transitive reduction
     // Remove all unnecessary edges.
-    // Go through each node starting from the end and remove depndencies if those dependencies
-    // are already represented in its dependand nodes
-    // To leverage the fact that in most cases each node will only have limited range of dependencies
-    // this step is optimized to only scan range from original deps (depsStartAndEnd) and not all
-    // from transitive closure step. This optimization reduces expected computation time, although worst case
-    // complexity can be the same as without it.
+    // Go through each node starting from the end and remove dependencies if those dependencies
+    // that are already represented in its dependant nodes
     for (int depInd = (static_cast<int>(_depsMap.size()) - 1); depInd >= 0; depInd--) {
         auto& curDeps = _depsMap[depInd];
 
-        auto startIdx = depsStartAndEnd[depInd].first;
-        auto endIdx = depsStartAndEnd[depInd].second;
-
-        // If node does not have any dependency (negative idx) or it has
-        // only one dependency then skip
-        if (startIdx < 0 || endIdx < 0 || startIdx == endIdx) {
+        // If node does not have any dependency or it has only one dependency then skip
+        if (curDeps.size() <= 1) {
             continue;
         }
 
-        for (int curDepInd = startIdx; curDepInd <= endIdx; ++curDepInd) {
-            if (!curDeps[curDepInd]) {
-                continue;
-            }
+        for (auto curDepInd : llvm::DenseSet<size_t>(curDeps)) {
             const auto& depOfDeps = depsMapClosure[curDepInd];
-            curDeps.reset(depOfDeps);
+            for (auto dep : depOfDeps) {
+                curDeps.erase(dep);
+            }
         }
     }
 
@@ -196,13 +207,9 @@ void vpux::AsyncDepsInfo::optimizeDepsMap() {
 void vpux::AsyncDepsInfo::buildConsMap() {
     _consumerMap.resize(_depsMap.size());
 
-    for (auto& cons : _consumerMap) {
-        cons.resize(checked_cast<uint32_t>(_depsMap.size()));
-    }
-
     for (size_t idx = 0; idx < _depsMap.size(); idx++) {
-        for (auto bit : _depsMap[idx].set_bits()) {
-            _consumerMap[checked_cast<size_t>(bit)].set(checked_cast<uint32_t>(idx));
+        for (auto bit : _depsMap[idx]) {
+            _consumerMap[checked_cast<size_t>(bit)].insert(checked_cast<uint32_t>(idx));
         }
     }
 }
@@ -219,10 +226,10 @@ void vpux::AsyncDepsInfo::updateTokenDependencies() {
         _log.trace("Process 'async.execute' Operation at '{0}'", execOpIt->getLoc());
 
         const auto execInd = getIndex(*execOpIt);
-        const auto& execDeps = _depsMap[execInd];
+        const auto execDeps = getDepsVec(_depsMap[execInd]);
 
         SmallVector<mlir::Value> depsVec;
-        for (auto depInd : execDeps.set_bits()) {
+        for (auto depInd : execDeps) {
             depsVec.push_back(_allExecOps[depInd].getToken());
         }
 
@@ -256,30 +263,23 @@ void vpux::AsyncDepsInfo::preAllocateForNewOps(size_t numOfNewOps) {
     _allExecOps.resize(newSize);
     _depsMap.resize(newSize);
     _consumerMap.resize(newSize);
-
-    for (auto& deps : _depsMap) {
-        deps.resize(checked_cast<uint32_t>(newSize));
-    }
-    for (auto& cons : _consumerMap) {
-        cons.resize(checked_cast<uint32_t>(newSize));
-    }
 }
 
-const llvm::BitVector& vpux::AsyncDepsInfo::getOpDeps(size_t opIdx) const {
+const llvm::SmallVector<size_t> vpux::AsyncDepsInfo::getOpDeps(size_t opIdx) const {
     VPUX_THROW_WHEN(opIdx >= _execOpCount, "Invalid index '{0}' for _depsMap", opIdx);
-    return _depsMap[opIdx];
+    return getDepsVec(_depsMap[opIdx]);
 }
 
-const llvm::BitVector& vpux::AsyncDepsInfo::getConsumerOps(size_t opIdx) const {
+const llvm::SmallVector<size_t> vpux::AsyncDepsInfo::getConsumerOps(size_t opIdx) const {
     VPUX_THROW_WHEN(_consumerMap.empty(), "Consumer map was not build");
     VPUX_THROW_WHEN(opIdx >= _execOpCount, "Invalid index '{0}' for _consumerMap", opIdx);
-    return _consumerMap[opIdx];
+    return getDepsVec(_consumerMap[opIdx]);
 }
 
 std::unordered_map<size_t, size_t> vpux::AsyncDepsInfo::calculateOpInDegreeTable() const {
     std::unordered_map<size_t, size_t> opInDegree;
     for (size_t i = 0; i < _execOpCount; ++i) {
-        opInDegree[i] = static_cast<size_t>(_depsMap[i].count());
+        opInDegree[i] = static_cast<size_t>(_depsMap[i].size());
     }
     return opInDegree;
 }
@@ -288,7 +288,7 @@ std::unordered_map<size_t, size_t> vpux::AsyncDepsInfo::calculateOpOutDegreeTabl
     VPUX_THROW_WHEN(_consumerMap.empty(), "Consumer map was not build");
     std::unordered_map<size_t, size_t> opOutDegree;
     for (size_t i = 0; i < _execOpCount; ++i) {
-        opOutDegree[i] = static_cast<size_t>(_consumerMap[i].count());
+        opOutDegree[i] = static_cast<size_t>(_consumerMap[i].size());
     }
     return opOutDegree;
 }

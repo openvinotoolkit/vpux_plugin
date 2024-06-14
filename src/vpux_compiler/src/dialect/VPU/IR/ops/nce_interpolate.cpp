@@ -17,7 +17,7 @@
 
 #include "vpux/compiler/utils/empty_node.hpp"
 
-#include <openvino/core/validation_util.hpp>
+#include <openvino/op/convolution.hpp>
 
 using namespace vpux;
 
@@ -38,17 +38,20 @@ mlir::LogicalResult vpux::VPU::NCEInterpolateOp::inferReturnTypes(
 
     auto inShape = getShape(op.getInput());
 
-    const auto dataDilations = ov::Strides({1, 1});
     const auto dataPaddingBelow = ov::CoordinateDiff({0, 0});
     const auto dataPaddingAbove = ov::CoordinateDiff({0, 0});
     const auto filterShape = Shape(parseIntArrayAttr<int64_t>(op.getRawFilterShape()));
     const auto filterStrides = Shape(parseIntArrayAttr<int64_t>(op.getStrides()));
     const auto filterDilations = ov::Strides({1, 1});
 
-    const auto outputShapeNG = ov::infer_convolution_forward(
-            EmptyNode::instance(), ov::Shape(inShape.begin(), inShape.end()), dataDilations, dataPaddingBelow,
-            dataPaddingAbove, ov::Shape(filterShape.begin(), filterShape.end()),
-            ov::Strides(filterStrides.begin(), filterStrides.end()), filterDilations);
+    const auto conv = ov::op::v1::Convolution(
+            std::make_shared<ov::op::v0::Parameter>(ov::element::i32, ov::Shape(inShape.begin(), inShape.end())),
+            std::make_shared<ov::op::v0::Parameter>(ov::element::i32,
+                                                    ov::Shape(filterShape.begin(), filterShape.end())),
+            ov::Strides(filterStrides.begin(), filterStrides.end()), dataPaddingBelow, dataPaddingAbove,
+            filterDilations);
+
+    const auto& outputShapeNG = conv.get_output_partial_shape(0);
 
     const auto outShape = to_small_vector(outputShapeNG.get_shape() | transformed([](size_t val) {
                                               return checked_cast<int64_t>(val);
@@ -286,7 +289,7 @@ mlir::FailureOr<OutputTiling> vpux::VPU::NCEInterpolateOp::getTilingStrategy(Til
 // ClusteredOpInterface
 //
 
-bool vpux::VPU::NCEInterpolateOp::checkStrategyCompatibility(vpux::VPU::MultiClusterStrategy strategy) {
+bool vpux::VPU::NCEInterpolateOp::checkStrategyCompatibility(vpux::VPU::MultiClusterStrategy strategy, size_t) {
     return strategy == VPU::MultiClusterStrategy::Clustering ||
            strategy == VPU::MultiClusterStrategy::SplitOverHeight ||
            strategy == VPU::MultiClusterStrategy::SplitOverKernel || strategy == VPU::MultiClusterStrategy::HKSwitch;
@@ -294,11 +297,11 @@ bool vpux::VPU::NCEInterpolateOp::checkStrategyCompatibility(vpux::VPU::MultiClu
 
 vpux::VPU::DistributedTensorAttr vpux::VPU::NCEInterpolateOp::getExplicitDistributedTensorAttr(
         vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, mlir::ArrayAttr numTiles,
-        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::ArrayAttr kernel, vpux::VPU::PaddingAttr pad,
-        mlir::ArrayAttr stride, mlir::UnitAttr uniformDistributedSegments) {
+        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::UnitAttr uniformDistributedSegments,
+        const vpux::VPU::OverlapDistributionParams& overlapParams) {
     return VPU::getNCEExplicitDistributedTensorAttr(mlir::dyn_cast<VPU::NCEOpInterface>(getOperation()), shape,
-                                                    distributionMode, numTiles, numClusters, alignment, kernel, pad,
-                                                    stride, uniformDistributedSegments);
+                                                    distributionMode, numTiles, numClusters, alignment,
+                                                    uniformDistributedSegments, overlapParams);
 }
 
 // Each cluster should compute at least one output line. Therefore in order for a layer to be SOH
@@ -413,12 +416,13 @@ vpux::VPU::SparsitySupport vpux::VPU::NCEInterpolateOp::sparsitySupport() {
     }
 
     switch (arch) {
-    case VPU::ArchKind::VPUX30XX: {
+    case VPU::ArchKind::NPU30XX: {
         // Layout will always be NHWC for VPUX30XX.
         return (VPU::SparsitySupport::SPARSE_INPUTS | VPU::SparsitySupport::SPARSE_WEIGHTS) & excludeMode;
     }
 
-    case VPU::ArchKind::VPUX37XX:
+    case VPU::ArchKind::NPU37XX:
+    case VPU::ArchKind::NPU40XX:
         return NCESparsity::FULLY_SUPPORTED_SPARSITY_MODE & excludeMode;
 
     default:

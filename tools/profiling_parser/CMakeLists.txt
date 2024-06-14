@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2022-2023 Intel Corporation.
+# Copyright (C) 2022-2024 Intel Corporation.
 # SPDX-License-Identifier: Apache 2.0
 #
 
@@ -15,5 +15,6 @@ add_tool_target(
         gflags
         npu_llvm_utils
         npu_profiling_utils
+        openvino::runtime::dev
+        npu_profiling_schema
 )
-

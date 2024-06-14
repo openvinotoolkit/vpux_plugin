@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2022 Intel Corporation.
+# Copyright (C) 2022 Intel Corporation
 # SPDX-License-Identifier: Apache 2.0
 #
 
@@ -13,7 +13,7 @@ import random
 from PIL import Image, ImageOps
 
 class RandomCropLetterbox(imgaug.ImageAugmentor):
-      
+
   def __init__(self, output_w, output_h, jitter, fill_color=127):
       self.output_w = output_w
       self.output_h = output_h
@@ -30,7 +30,7 @@ class RandomCropLetterbox(imgaug.ImageAugmentor):
       @param: img_np (ndarray) (width, height, channel)
       '''
       #print(img_np.dtype, img_np.shape)
-      img = Image.fromarray(img_np) 
+      img = Image.fromarray(img_np)
       orig_w, orig_h = img.size
       channels = img_np.shape[2]
       dw = int(self.jitter * orig_w)
@@ -72,7 +72,7 @@ class RandomCropLetterbox(imgaug.ImageAugmentor):
       img_np = np.array(output_img)
       return img_np
 
-  
+
   def _augment_coords(self, coords, param):
       annos = coords.reshape(-1, 4) #restore the layout (x1, y1, x2, y2)
       sx, sy, crop_xmin, crop_ymin, crop_xmax, crop_ymax = self.crop_info
@@ -96,7 +96,7 @@ class RandomFlip(imgaug.ImageAugmentor):
       self.flip = False
       self.im_w = None
 
-  
+
   def _get_augment_params(self, img):
       return None
 
@@ -232,14 +232,14 @@ def show_im(img, bbox):
     img = img[:,:,::-1]
     ax.imshow(img.squeeze())
     for box in bbox:
-      rect = patches.Rectangle((box[0], box[1]), 
-                                box[2]-box[0], box[3] - box[1], 
-                                edgecolor='r',facecolor='none') 
+      rect = patches.Rectangle((box[0], box[1]),
+                                box[2]-box[0], box[3] - box[1],
+                                edgecolor='r',facecolor='none')
       ax.add_patch(rect)
     plt.show()
     plt.close()
 
-def train_img_augment(img, bbox): 
+def train_img_augment(img, bbox):
     '''
     img: (width, height, 3) numpy ndarray
     bbox: Nx4 numpy ndarray (x11, y11, x12, y12  # x-y coordinate of the topleft/rightdown points of the first bbox
@@ -247,7 +247,7 @@ def train_img_augment(img, bbox):
                              x31, y31, x32, y32
                              ..................
                             )
-    
+
     '''
     #aug = imgaug.AugmentorList([imgaug.Grayscale(), imgaug.Affine(scale=(0.8, 1.), translate_frac=(0.01, 0.03), rotate_max_deg=10)])
     aug = imgaug.AugmentorList([HSVShift(0.1, 1.5, 1.5), RandomFlip(0.5), RandomCropLetterbox(416, 416, 0.2, 127)])

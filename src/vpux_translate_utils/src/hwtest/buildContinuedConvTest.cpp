@@ -9,9 +9,9 @@
 
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/task.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
 #include "vpux/hwtest/test_case_json_parser.hpp"
@@ -179,7 +179,7 @@ void buildContinuedConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Module
     // Barriers
     std::vector<mlir::Value> barriers;
     auto num_barriers = 3;
-    for (auto i = 0; i < num_barriers; ++i) {
+    for (auto i = 0; i <= num_barriers; ++i) {
         auto barrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), i);
         barriers.push_back(barrier.getBarrier());
     }
@@ -214,6 +214,7 @@ void buildContinuedConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Module
     auto nceTask_0 = VPURT::wrapIntoTaskOp<NCEClusterTaskOp>(
             functionBuilder, barriers[0], barriers[1], builder.getUnknownLoc(), inputPartial0CMX.getBuffer(),
             weightsPartial0CMX.getBuffer(), weightsTable0CMX.getBuffer(), /*instruction_table_list=*/nullptr,
+            /*spr_lookup_table*/ nullptr,
             /*activation_window=*/nullptr, inputPartial0CMX.getBuffer(), output0CMX.getBuffer(), output0CMX.getBuffer(),
             VPUIP::NCETaskType::CONV, kernelSize, strides, kernelPaddings,
             /*activation_window_channel_length=*/nullptr, isContinued, /*sp_pattern*/ nullptr);
@@ -234,6 +235,7 @@ void buildContinuedConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Module
     auto nceTask_1 = VPURT::wrapIntoTaskOp<NCEClusterTaskOp>(
             functionBuilder, barriers[1], barriers[2], builder.getUnknownLoc(), inputPartial1CMX.getBuffer(),
             weightsPartial1CMX.getBuffer(), weightsTable1CMX.getBuffer(), /*instruction_table_list=*/nullptr,
+            /*spr_lookup_table*/ nullptr,
             /*activation_window=*/nullptr, inputPartial1CMX.getBuffer(), output1CMX.getBuffer(), output1CMX.getBuffer(),
             VPUIP::NCETaskType::CONV, kernelSize, strides, kernelPaddings,
             /*activation_window_channel_length=*/nullptr,
@@ -241,14 +243,19 @@ void buildContinuedConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Module
 
     nceTask_1.addDPUTask(functionBuilder, start, outEnd, start, inEnd, pad, VPU::MPEMode::CUBOID_16x16);
 
-    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, barriers[2], mlir::ValueRange(), builder.getUnknownLoc(),
+    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, barriers[2], barriers[3], builder.getUnknownLoc(),
                                           output1CMX.getOperation()->getResult(0), functionOutput, 0);
 
     functionBuilder.create<mlir::func::ReturnOp>(builder.getUnknownLoc(), functionOutput);
 
+    // set runtime resources
+    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
+
     mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    pm.addPass(VPU::createInitCompilerPass(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW, 1, std::nullopt,
-                                           log));
+    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.numberOfDPUGroups = 1;
+    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
 
     VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");
 

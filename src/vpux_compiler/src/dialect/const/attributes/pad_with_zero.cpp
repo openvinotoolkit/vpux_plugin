@@ -6,12 +6,11 @@
 #include "vpux/compiler/core/layers.hpp"
 #include "vpux/compiler/dialect/const/attributes/content.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
+#include "vpux/compiler/utils/loop.hpp"
 #include "vpux/compiler/utils/subspaces.hpp"
 #include "vpux/compiler/utils/types.hpp"
 
-#include "vpux/utils/IE/loop.hpp"
 #include "vpux/utils/core/format.hpp"
-#include "vpux/utils/core/func_ref.hpp"
 #include "vpux/utils/core/range.hpp"
 
 #include <mlir/IR/DialectImplementation.h>
@@ -133,7 +132,7 @@ Const::Content vpux::Const::PadWithZeroAttr::transform(vpux::Const::Content& inp
             const auto IN0 = inMemShape[md0];
             const auto off0 = memPadBefore[md0];
 
-            loop_1d(LoopExecPolicy::Parallel, IN0, [&](int64_t in0) {
+            loop_1d(LoopExecPolicy::Parallel, getContext(), IN0, [&](int64_t in0) {
                 const auto out0 = in0 + off0;
 
                 std::copy_n(inBuf.data(), checked_cast<size_t>(elemSize.count()),
@@ -157,7 +156,7 @@ Const::Content vpux::Const::PadWithZeroAttr::transform(vpux::Const::Content& inp
         const auto off0 = memPadBefore[md0];
         const auto off1 = memPadBefore[md1];
 
-        loop_2d(LoopExecPolicy::Parallel, IN0, IN1, [&](int64_t in0, int64_t in1) {
+        loop_2d(LoopExecPolicy::Parallel, getContext(), IN0, IN1, [&](int64_t in0, int64_t in1) {
             const auto out0 = in0 + off0;
             const auto out1 = in1 + off1;
 
@@ -186,7 +185,7 @@ Const::Content vpux::Const::PadWithZeroAttr::transform(vpux::Const::Content& inp
         const auto off1 = memPadBefore[md1];
         const auto off2 = memPadBefore[md2];
 
-        loop_3d(LoopExecPolicy::Parallel, IN0, IN1, IN2, [&](int64_t in0, int64_t in1, int64_t in2) {
+        loop_3d(LoopExecPolicy::Parallel, getContext(), IN0, IN1, IN2, [&](int64_t in0, int64_t in1, int64_t in2) {
             const auto out0 = in0 + off0;
             const auto out1 = in1 + off1;
             const auto out2 = in2 + off2;
@@ -220,23 +219,25 @@ Const::Content vpux::Const::PadWithZeroAttr::transform(vpux::Const::Content& inp
         const auto off2 = memPadBefore[md2];
         const auto off3 = memPadBefore[md3];
 
-        loop_4d(LoopExecPolicy::Parallel, IN0, IN1, IN2, IN3, [&](int64_t in0, int64_t in1, int64_t in2, int64_t in3) {
-            const auto out0 = in0 + off0;
-            const auto out1 = in1 + off1;
-            const auto out2 = in2 + off2;
-            const auto out3 = in3 + off3;
+        loop_4d(LoopExecPolicy::Parallel, getContext(), IN0, IN1, IN2, IN3,
+                [&](int64_t in0, int64_t in1, int64_t in2, int64_t in3) {
+                    const auto out0 = in0 + off0;
+                    const auto out1 = in1 + off1;
+                    const auto out2 = in2 + off2;
+                    const auto out3 = in3 + off3;
 
-            const auto outRawInd = out3 + out2 * OUT3 + out1 * OUT3 * OUT2 + out0 * OUT3 * OUT2 * OUT1;
-            const auto inRawInd = input.isSplat() ? 0 : in3 + in2 * IN3 + in1 * IN3 * IN2 + in0 * IN3 * IN2 * IN1;
+                    const auto outRawInd = out3 + out2 * OUT3 + out1 * OUT3 * OUT2 + out0 * OUT3 * OUT2 * OUT1;
+                    const auto inRawInd =
+                            input.isSplat() ? 0 : in3 + in2 * IN3 + in1 * IN3 * IN2 + in0 * IN3 * IN2 * IN1;
 
-            std::copy_n(inBuf.data() + checked_cast<size_t>(inRawInd * elemSize.count()),
-                        checked_cast<size_t>(elemSize.count()),
-                        outBuf.data() + checked_cast<size_t>(outRawInd * elemSize.count()));
-        });
+                    std::copy_n(inBuf.data() + checked_cast<size_t>(inRawInd * elemSize.count()),
+                                checked_cast<size_t>(elemSize.count()),
+                                outBuf.data() + checked_cast<size_t>(outRawInd * elemSize.count()));
+                });
     } else {
         // Generic case
 
-        loop_1d(LoopExecPolicy::Parallel, input.getType().getNumElements(), [&](int64_t inMemInd1D) {
+        loop_1d(LoopExecPolicy::Parallel, getContext(), input.getType().getNumElements(), [&](int64_t inMemInd1D) {
             const auto inMemIndND = getMemIndexND(inMemInd1D, inMemShape);
 
             MemShape outMemIndND(inMemIndND.size());

@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -128,6 +128,24 @@ def ConvertEltwiseToInPlace : PassBase<"convert-eltwise-to-in-place", "vpux::Fun
 }
 
 //
+// InsertCopyForEltwiseInPlaceInput
+//
+
+def InsertCopyForEltwiseInPlaceInput : PassBase<"insert-copy-for-eltwise-in-place-input", "vpux::FunctionPass"> {
+    let summary = "Ensures input buffer that gets overwritten by output is not used by another op.";
+
+    let description = [{
+        This is a legalization pass which will check that the input buffer that gets overwritten by an in place
+        Eltwise's output will not be used by another op. If such a case exist, we introduce a spill at
+        Eltwise's input, thus ensuring that the other ops receive an input buffer that is not overwritten.
+
+        This pass should be applied after copy optimization passes
+    }];
+
+    let constructor = "vpux::VPUIP::createInsertCopyForEltwiseInPlaceInputPass()";
+}
+
+//
 // SetMemorySpace
 //
 
@@ -163,7 +181,7 @@ def QueryArgsAllocationAnalysis : PassBase<"query-args-allocation-analysis", "vp
     let description = [{
         StaticAllocation pass should be function pass to achieve the best performance in multithreaded mode(when there are several functions in IR).
         At the same time, StaticAllocation should be aware whether some memory is reserved by the caller(for example, for arguments).
-        Since caller's function is changing at the same time, 
+        Since caller's function is changing at the same time,
         the QueryArgsAllocationAnalysis prepare the necessary information and marks it preserved to be used in StaticAllocation.
     }];
 
@@ -619,7 +637,7 @@ def CompressWeightsBTC : PassBase<"compress-weights-btc", "vpux::FunctionPass"> 
         is set to be executed after unroll-cluster-tiling, which splits SEGMENTED buffers into per-cluster
         chunks.
 
-        This pass behaves differently for pre-VPU37XX and post-VPU37XX platforms. For former the compression
+        This pass behaves differently for pre-NPU37XX and post-NPU37XX platforms. For former the compression
         is done using huffman encoding and applied only to quantized data types, for the latter the
         compression is done using bit-compactor library.
     }];
@@ -770,7 +788,7 @@ def ConvertAllocationsToDeclarations : PassBase<"convert-allocations-to-declarat
 // ConvertFuncArgsToDeclarations
 //
 
-def ConvertFuncArgsToDeclarations : PassBase<"convert-func-args-to-declarations", "vpux::FunctionPass"> {
+def ConvertFuncArgsToDeclarations : PassBase<"convert-func-args-to-declarations", "vpux::ModulePass"> {
     let summary = "Replace use of function arguments with result of DeclareBuffer";
 
     let description = [{
@@ -942,25 +960,10 @@ def FuseConstants : PassBase<"fuse-constants", "vpux::FunctionPass"> {
 }
 
 //
-// Patch Fused Constants
+// PropagateSparsityCompression
 //
 
-def PatchFusedConstants : PassBase<"patch-fused-constants", "vpux::FunctionPass"> {
-    let summary = "Patch the weight table fused in fused constant";
-
-    let description = [{
-        This pass converts the U8 weight table values to I32. Updates the address of each weight set
-        and activation window present in the fused constant for each output channel of the layer
-    }];
-
-    let constructor = "vpux::VPUIP::createPatchFusedConstantsPass()";
-}
-
-//
-// PropagateCompressionScheme
-//
-
-def PropagateCompressionScheme : PassBase<"propagate-compression-scheme", "vpux::FunctionPass"> {
+def PropagateSparsityCompression : PassBase<"propagate-compression-scheme", "vpux::FunctionPass"> {
     let summary = "Compresses the type of the sparse weights";
 
     let description = [{
@@ -969,7 +972,7 @@ def PropagateCompressionScheme : PassBase<"propagate-compression-scheme", "vpux:
         the consumer NCE operation will have the compression scheme present.
     }];
 
-    let constructor = "vpux::VPUIP::createPropagateCompressionSchemePass()";
+    let constructor = "vpux::VPUIP::createPropagateSparsityCompressionPass()";
 
     let dependentDialects = [
         "vpux::VPUIP::VPUIPDialect"
@@ -1202,6 +1205,41 @@ def TileActShaveKernelTask : PassBase<"tile-act-shave-kernel-task", "vpux::Funct
 }
 
 //
+// SegmentHalos
+//
+
+def SegmentHalos : PassBase<"segment-halos", "vpux::FunctionPass"> {
+    let summary = "Segment halos according to DPUTask workloads";
+
+    let description = [{
+        Halos are a per-workload feature, meaning each workload will need to be programmed to send its halos separately.
+
+        Initially, each halo region represents the entire halo slice sent/received by the current NCEClusterTask. However,
+        the NCEClusterTask can be further segmented into workloads. To be able to lower the halo information from ITI Buffer
+        to the workloads, we will need to split the halos so that each one of them that spans more than one workload is
+        divided among them. That is the purpose of this pass.
+
+        E.g.
+
+        Full shape produced by cluster = [1, 16, 32, 17]
+        Initial outward halo: shape = [1, 16, 32, 1], offset = [0, 0, 0, 16]
+
+        Workload 0: outStart = [0, 0, 0] - outEnd = [16, 15, 15]
+        Workload 1: outStart = [0, 16, 0] - outEnd = [16, 31, 15]
+
+        After pass:
+            Halo0: shape = [1, 16, 16, 1], offset = [0, 0, 0, 16]
+            Halo1: shape = [1, 16, 16, 1], offset = [0, 0, 16, 16]
+    }];
+
+    let constructor = "vpux::VPUIP::createSegmentHalosPass()";
+
+    let dependentDialects = [
+        "vpux::VPUIP::VPUIPDialect"
+    ];
+}
+
+//
 // Adjust activation spilling size
 //
 
@@ -1230,6 +1268,28 @@ def CompressDmaReserveMem : PassBase<"compress-dma-reserve-mem", "vpux::ModulePa
     }];
 
     let constructor = "vpux::VPUIP::createCompressDmaReserveMemPass()";
+}
+
+//
+// SWKernelPrefetchingReserveMem
+//
+
+def SWKernelPrefetchingReserveMem : PassBase<"sw-kernel-prefetching-reserve-mem", "vpux::ModulePass"> {
+    let summary = "Reserve memory for SW Kernel data prefetching";
+
+    let description = [{
+        SW Kernel reads extra few bytes of data for better performance.
+        When input buffer is at the end of CMX, reading extra data would cause ACT SHAVE read violation.
+        Now we reserve CMX for profiling and activation compression at the end of CMX.
+        This pass checks the total reserved memory size and inserts a dummy section if necessary, to ensure
+        the total reserved memory size is safe for SW Kenel data prefetching.
+
+        This pass eliminates the risk of ACT SHAVE read violation, but model performance might be impacted.
+        One case is described in E#122488, where DMA and DPU execution pipeline is impacted by the memory layout adjustment.
+        This can be optimized in the future by CMX allocation improvement.
+    }];
+
+    let constructor = "vpux::VPUIP::createSWKernelPrefetchingReserveMemPass()";
 }
 
 //
@@ -1266,6 +1326,50 @@ def NNDMATiling : PassBase<"nn-dma-tiling", "vpux::FunctionPass"> {
 }
 
 //
+// UngroupBoundedBuffer
+//
+
+def UngroupBoundedBuffers : PassBase<"ungroup-bounded-buffers", "vpux::FunctionPass"> {
+    let summary = "Ungroup all values (data and shape) of BoundedBufferType";
+
+    let description = [{
+        Feasible allocation does not support multiple root buffers per input, therefore separate processing of dynamic data
+        and dynamic shape is required.
+
+        This pass consists of two parts:
+          * Ungroup CopyOp. All CopyOp working with BoundedBuffer are split in two CopyOp working with individual memrefs.
+          * Ungroup SwKernelOp. All SwKernelOp working with BoundedBuffer are updated to work with data and dims individually.
+    }];
+
+    let constructor = "vpux::VPUIP::createUngroupBoundedBuffersPass()";
+    let dependentDialects = [
+        "vpux::VPUIP::VPUIPDialect"
+    ];
+}
+
+//
+// UngroupFuncArgs
+//
+
+def UngroupBoundedBuffersAsFuncArgs : PassBase<"ungroup-bounded-buffers-as-func-args", "vpux::ModulePass"> {
+    let summary = "Ungroup func inputs/outputs if they are VPUIP.BoundedBuffers";
+
+    let description = [{
+        In this pass each !VPUIP.BoundedBuffer function input/output argument is replaced by two separate
+        memref arguments representing data and dynamic_shape.
+        Pass also introduces two new operations:
+        - VPUIP.GroupBoundedBuffer that groups the input data and dynamic_shape memref arguments into !VPUIP.BoundedBuffer types at the begin of func
+        - VPUIP.UngroupBoundedBuffer that ungroups the !VPUIP.BoundedBuffer at the end of func into separate memref types for data and dynamic_shape.
+        Pass also makes changes in CNNNetwork accordinally
+    }];
+
+    let constructor = "vpux::VPUIP::createUngroupBoundedBuffersAsFuncArgsPass()";
+    let dependentDialects = [
+        "vpux::VPUIP::VPUIPDialect"
+    ];
+}
+
+//
 // CollectUsedMemory
 //
 
@@ -1273,12 +1377,12 @@ def CollectUsedMemory : PassBase<"collect-used-memory", "vpux::ModulePass"> {
     let summary = "Collect info from tempopary modules in functions and erase them";
 
     let description = [{
-        "Temporary" because the function should contain only IR operations, 
-        the rest of the information should be stored in the parent module. 
-        This WA is introduced for function passes ran in multithreaded mode, 
+        "Temporary" because the function should contain only IR operations,
+        the rest of the information should be stored in the parent module.
+        This WA is introduced for function passes ran in multithreaded mode,
         the results of which include some statistics.
-        These passes are required not to modify the parent module for thread safety reasons. 
-        This module pass should collect the information, 
+        These passes are required not to modify the parent module for thread safety reasons.
+        This module pass should collect the information,
         transfer it to the main module and delete the temporary ones.
         More info about operation passes:
         https://mlir.llvm.org/docs/PassManagement/#operation-pass

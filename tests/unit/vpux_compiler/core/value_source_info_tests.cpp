@@ -6,7 +6,7 @@
 #include "vpux/utils/core/logger.hpp"
 
 #include "vpux/compiler/core/aliases_info.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/utils/core/string_ref.hpp"
 
 #include "common/utils.hpp"

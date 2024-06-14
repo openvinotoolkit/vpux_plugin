@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -298,12 +298,12 @@ func.func @InterpolateAlignCornersAssignedSOHOverlapped(%arg0: tensor<1x1x96x160
 // -----
 
 // CHECK-LABEL: @InterpolateAlignCornersAssignedClustering
-func.func @InterpolateAlignCornersAssignedClustering(%arg0: tensor<1x1x1x160xf16>) -> tensor<1x1x2x320xf16> {
-    %0 = VPU.Interpolate(%arg0) {attr = #IE.Interpolate<antialias = false, coord_mode = <ALIGN_CORNERS>, cube_coeff = -7.500000e-01 : f64, mode = <LINEAR_ONNX>, nearest_mode = <ROUND_PREFER_FLOOR>, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], shape_calc_mode = <SIZES>>, axes_attr = [2, 3], operandSegmentSizes = array<i32: 1, 0, 0, 0>, scales_attr = [2.000000e+00, 2.000000e+00], sizes_attr = [2, 320]} : tensor<1x1x1x160xf16> -> tensor<1x1x2x320xf16>
-    return %0 : tensor<1x1x2x320xf16>
+func.func @InterpolateAlignCornersAssignedClustering(%arg0: tensor<1x1x1x160xf16>) -> tensor<1x1x1x320xf16> {
+    %0 = VPU.Interpolate(%arg0) {attr = #IE.Interpolate<antialias = false, coord_mode = <ALIGN_CORNERS>, cube_coeff = -7.500000e-01 : f64, mode = <LINEAR_ONNX>, nearest_mode = <ROUND_PREFER_FLOOR>, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], shape_calc_mode = <SIZES>>, axes_attr = [2, 3], operandSegmentSizes = array<i32: 1, 0, 0, 0>, scales_attr = [1.000000e+00, 2.000000e+00], sizes_attr = [1, 320]} : tensor<1x1x1x160xf16> -> tensor<1x1x1x320xf16>
+    return %0 : tensor<1x1x1x320xf16>
     // CHECK:   [[INTERPOLATE:%.*]] = VPU.Interpolate(%arg0)
     // CHECK-SAME: multiClusterStrategy = #VPU.multi_cluster_strategy<Clustering>
-    // CHECK:   return [[INTERPOLATE]] : tensor<1x1x2x320xf16>
+    // CHECK:   return [[INTERPOLATE]] : tensor<1x1x1x320xf16>
 }
 
 // -----
@@ -533,4 +533,48 @@ func.func @TileWithSOKTiling(%arg0 : tensor<1x32x30x30xf16, {order = #NHWC}>)->t
     // CHECK-SAME:        -> tensor<1x768x30x30xf16, {order = #NHWC}>
 
     // CHECK:       return [[CONV1]] : tensor<1x768x30x30xf16, {order = #NHWC}>
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+!qElemType = !quant.uniform<u8:f16, 0.15407909318512561:127>
+
+// -----
+
+!qElemType = !quant.uniform<u8:f16, 0.15407909318512561:127>
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @LastOpExceptionCase
+// CHECK-SAME:  [[INPUT:%arg[0-9]]]: tensor<1x32x60x60x!qElemType, {order = #NHWC}>
+func.func @LastOpExceptionCase(%arg0: tensor<1x32x60x60x!qElemType, {order = #NHWC}>) -> tensor<1x32x15x15x!qElemType, {order = #NHWC}>  {
+    %cst = const.Declare tensor<16x32x3x3x!qElemType, {order = #NHWC}> = dense<1.000000e+00> : tensor<16x32x3x3xf32, {order = #NHWC}>
+    %cst_0 = const.Declare tensor<64x16x3x3x!qElemType, {order = #NHWC}> = dense<1.000000e+00> : tensor<64x16x3x3xf32, {order = #NHWC}>
+    %cst_1 = const.Declare tensor<32x64x3x3x!qElemType, {order = #NHWC}> = dense<1.000000e+00> : tensor<32x64x3x3xf32, {order = #NHWC}>
+    %cst_2 = const.Declare tensor<32x1x1x4xsi32> = dense<10> : tensor<32x1x1x4xsi32>
+    %cst_3 = const.Declare tensor<64x1x1x4xsi32> = dense<10> : tensor<64x1x1x4xsi32>
+    %cst_4 = const.Declare tensor<64x16x1x1xf16, {order = #NHWC}> = dense<10.0> : tensor<1x64x1x1xf32>, [#const.ConvertElemType<f16>, #const.Reshape<[64, 1, 1, 1]>, #const.Reorder<#NHWC>, #const.Reorder<#NCHW>, #const.Reshape<[64, 1, 1, 1]>, #const.PadWithZero<[0, 0, 0, 0], [0, 15, 0, 0]>, #const.Reorder<#NHWC>]
+    %cst_5 = const.Declare tensor<64x1x1x4xsi32> = dense<10> : tensor<64x1x1x4xsi32>
+    %cst_6 = const.Declare tensor<16x1x1x4xsi32> = dense<10> : tensor<16x1x1x4xsi32>
+
+    %0 = VPU.NCE.Convolution(%arg0, %cst, %cst_6) {pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 1 : i64, bottom = 0 : i64>, ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = 0 : i64, clamp_high = 255 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>, rawFilterShape = [16, 32, 3, 3], strides = [2, 2]} -> tensor<1x16x30x30x!qElemType, {order = #NHWC}>
+    %1 = VPU.NCE.Convolution(%0, %cst_0, %cst_5) {pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>, ppe = #VPU.PPETask<mode = <LRELU>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>, rawFilterShape = [64, 16, 3, 3], strides = [1, 1]} -> tensor<1x64x30x30xf16, {order = #NHWC}>
+    %2 = VPU.NCE.DepthConvolution(%1, %cst_4, %cst_3) {pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = 0 : i64, clamp_high = 255 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 4.1525912284851074 : f64>, rawFilterShape = [64, 1, 1, 1], strides = [1, 1]} -> tensor<1x64x30x30x!qElemType, {order = #NHWC}>
+    %3 = VPU.NCE.Convolution(%2, %cst_1, %cst_2) {pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 1 : i64, bottom = 0 : i64>, ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = 0 : i64, clamp_high = 255 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>, rawFilterShape = [32, 64, 3, 3], strides = [2, 2]} -> tensor<1x32x15x15x!qElemType, {order = #NHWC}>
+
+    return %3 : tensor<1x32x15x15x!qElemType, {order = #NHWC}>
+    // CHECK-COUNT-7:    const.Declare
+    //CHECK:            [[VAL0:%.+]] = VPU.NCE.Convolution(%arg0,
+    //CHECK-SAME:          multiClusterStrategy = #VPU.multi_cluster_strategy<HKSwitch>
+    //CHECK:            [[VAL1:%.+]] = VPU.NCE.Convolution([[VAL0]],
+    //CHECK-SAME:          multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverKernel>
+    //CHECK:            [[VAL2:%.+]] = VPU.NCE.DepthConvolution([[VAL1]],
+    //CHECK-SAME:          multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverKernel>
+    //CHECK:            [[VAL3:%.+]] = VPU.NCE.Convolution([[VAL2]],
+    //CHECK-SAME:         multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverKernel>
+    //CHECK-NOT:          multiClusterStrategy = #VPU.multi_cluster_strategy<HKSwitch>
+
+    //CHECK:            return [[VAL3]] : tensor<1x32x15x15x!qElemType, {order = #NHWC}>
+
 }

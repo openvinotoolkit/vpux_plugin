@@ -1,7 +1,9 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
+
+#include <openvino/core/partial_shape.hpp>
 
 #include <vpux_elf/accessor.hpp>
 #include <vpux_elf/reader.hpp>
@@ -21,6 +23,10 @@
 #include <algorithm>
 
 using namespace vpux;
+
+using intel_npu::IONodeDescriptor;
+using intel_npu::IONodeDescriptorMap;
+using intel_npu::NetworkMetadata;
 
 namespace {
 
@@ -96,18 +102,69 @@ void deserializeStateTensors(elf::TensorRef* tensors, uint32_t count, IONodeDesc
 }
 
 /**
+ * @brief Extracts the shape descriptors in a format interpretable by the OpenVINO API.
+ * @param inTensors An array from which the descriptors of input tensors shall be extracted.
+ * @param outTensors An array from which the descriptors of output tensors shall be extracted.
+ * @param inCount, outCount The number of tensors in the arrays
+ * @param shapeDescriptors The structure in which the result shall be stored.
+ * @param shapeNames The names shall be stored here in the order in which the state descriptors are found.
+ */
+void deserializeShapeTensors(elf::TensorRef* inTensors, uint32_t inCount, elf::TensorRef* outTensors, uint32_t outCount,
+                             IONodeDescriptorMap& shapeDescriptors, std::vector<std::string>& shapeNames) {
+    for (uint32_t i = 0; i < inCount; ++i) {
+        auto tensor = inTensors + i;
+        std::string tensorName = tensor->name;
+
+        if (isShapeTensorName(tensorName)) {
+            tensorName = tensorName.substr(SHAPE_TENSOR_PREFIX.length());
+            shapeNames.push_back(tensorName);
+            shapeDescriptors[tensorName] = deserializeTensor(tensor);
+            shapeDescriptors[tensorName].outputTensorNames = {tensorName};
+            shapeDescriptors[tensorName].legacyName = tensorName;
+        }
+    }
+    for (uint32_t i = 0; i < outCount; ++i) {
+        auto tensor = outTensors + i;
+        std::string tensorName = tensor->name;
+
+        if (isShapeTensorName(tensorName)) {
+            tensorName = tensorName.substr(SHAPE_TENSOR_PREFIX.length());
+            shapeNames.push_back(tensorName);
+            shapeDescriptors[tensorName] = deserializeTensor(tensor);
+            shapeDescriptors[tensorName].outputTensorNames = {tensorName};
+            shapeDescriptors[tensorName].legacyName = tensorName;
+        }
+    }
+}
+
+/**
  * @brief Extracts the order in which the inputs/outputs are found within the compiled model.
  * @details The order is a requirement only when running inferences using the IMD backend.
- * @param tensors The array from which the order shall be extracted
+ * @param OVNode The array from which the order of inputs/outputs shall be extracted.
+ * @param count The number of inputs/outputs in the array
+ * @param tensors The array from which the order of states and shape tensors shall be extracted
  * @param count The number of tensors in the array
  * @return A mapping between the names of the inputs/outputs and their order indices.
  */
-std::unordered_map<std::string, size_t> extractIOOrder(const elf::TensorRef* tensors, uint32_t count) {
+std::unordered_map<std::string, size_t> extractIOOrder(const elf::OVNode* OVNode, uint32_t countNodes,
+                                                       const elf::TensorRef* tensors, uint32_t countTensors) {
     std::unordered_map<std::string, size_t> order;
 
-    for (uint32_t tensorIndex = 0; tensorIndex < count; ++tensorIndex) {
-        const elf::TensorRef* tensor = tensors + tensorIndex;
-        order.emplace(tensor->name, tensorIndex);
+    uint32_t tensorIndex = 0;
+
+    for (uint32_t ind = 0; ind < countNodes; ++ind) {
+        if (auto* node = OVNode + ind) {
+            order.emplace(node->friendly_name, tensorIndex);
+            ++tensorIndex;
+        }
+    }
+
+    for (uint32_t ind = 0; ind < countTensors; ++ind) {
+        const elf::TensorRef* tensor = tensors + ind;
+        if (isStateInputName(tensor->name) || isStateOutputName(tensor->name) || isShapeTensorName(tensor->name)) {
+            order.emplace(tensor->name, tensorIndex);
+            ++tensorIndex;
+        }
     }
 
     return order;
@@ -174,9 +231,14 @@ void deserializeIONodes(elf::OVNode* OVNode, uint32_t count, IONodeDescriptorMap
             const auto currentNodeName = std::string(node->friendly_name);
 
             const auto nodeShape = [&node]() {
-                ov::Shape retShape;
+                const auto dynamicDim = std::numeric_limits<uint64_t>::max();
+                ov::PartialShape retShape;
                 for (size_t i = 0; i < node->shape_size; i++) {
-                    retShape.push_back(node->shape[i]);
+                    if (node->shape[i] != dynamicDim) {
+                        retShape.push_back(checked_cast<int64_t>(node->shape[i]));
+                    } else {
+                        retShape.push_back(-1);
+                    }
                 }
                 return retShape;
             }();
@@ -191,24 +253,22 @@ void deserializeIONodes(elf::OVNode* OVNode, uint32_t count, IONodeDescriptorMap
 
             const auto legacyName = std::string(node->input_name);
 
-            names.push_back(legacyName);
-            nodes[legacyName] = {legacyName, currentNodeName, outputTensorNames, nodeType, nodeShape, nodeShape};
+            names.push_back(currentNodeName);
+            nodes[currentNodeName] = {legacyName, currentNodeName, outputTensorNames, nodeType, nodeShape, nodeShape};
         }
     }
 }
 
 }  // namespace
 
-vpux::VPUMI37XX::NetworkDescription::NetworkDescription(std::vector<char> blob) {
+NetworkMetadata vpux::VPUMI37XX::getNetworkMetadata(const std::vector<uint8_t>& blob) {
+    NetworkMetadata network;
+
     OV_ITT_TASK_CHAIN(NETWORK_DESCRIPTION, itt::domains::VPUXPlugin, "NetworkDescription::NetworkDescription",
                       "elfReader");
     VPUX_THROW_UNLESS(!blob.empty(), "Got NULL pointer");
 
-    _compiledNetwork = std::move(blob);
-
-    auto binaryNetworkPtr = reinterpret_cast<const uint8_t*>(_compiledNetwork.data());
-
-    auto accessor = elf::ElfDDRAccessManager(binaryNetworkPtr, _compiledNetwork.size());
+    auto accessor = elf::ElfDDRAccessManager(blob.data(), blob.size());
     elf::Reader<elf::ELF_Bitness::Elf64> reader(&accessor);
 
     std::shared_ptr<elf::NetworkMetadata> metadata;
@@ -225,25 +285,33 @@ vpux::VPUMI37XX::NetworkDescription::NetworkDescription(std::vector<char> blob) 
     }
 
     VPUX_THROW_UNLESS(metadata != nullptr, "METADATA NOT FOUND IN ELF");
-    _name = metadata->mIdentification.blob_name;
+    network.name = metadata->mIdentification.blob_name;
 
     OV_ITT_TASK_NEXT(NETWORK_DESCRIPTION, "deserializeIONodes");
 
-    deserializeIONodes(&metadata->mOVParameters[0], metadata->mOVParameters.size(), _parameters, _inputNames);
-    deserializeIONodes(&metadata->mOVResults[0], metadata->mOVResults.size(), _results, _outputNames);
+    deserializeIONodes(metadata->mOVParameters.data(), metadata->mOVParameters.size(), network.parameters,
+                       network.inputNames);
+    deserializeIONodes(metadata->mOVResults.data(), metadata->mOVResults.size(), network.results, network.outputNames);
 
-    VPUX_THROW_UNLESS(!_results.empty(), "Metadata structure does not contain info on outputs");
+    VPUX_THROW_UNLESS(!network.results.empty(), "Metadata structure does not contain info on outputs");
 
     OV_ITT_TASK_NEXT(NETWORK_DESCRIPTION, "deserializeStatesAndProfilingOutputs");
 
-    deserializeStateTensors(&metadata->mNetInputs[0], metadata->mNetInputs.size(), _states, _stateNames);
-    _profilingOutputs =
-            deserializeProfilingOutputTensors(&metadata->mProfilingOutputs[0], metadata->mProfilingOutputs.size());
+    deserializeStateTensors(metadata->mNetInputs.data(), metadata->mNetInputs.size(), network.states,
+                            network.stateNames);
+    deserializeShapeTensors(metadata->mNetInputs.data(), metadata->mNetInputs.size(), metadata->mNetOutputs.data(),
+                            metadata->mNetOutputs.size(), network.shapes, network.shapeNames);
+    network.profilingOutputs =
+            deserializeProfilingOutputTensors(metadata->mProfilingOutputs.data(), metadata->mProfilingOutputs.size());
 
     OV_ITT_TASK_NEXT(NETWORK_DESCRIPTION, "extractInputsOutputsOrder");
 
-    _inputOrder = extractIOOrder(&metadata->mNetInputs[0], metadata->mNetInputs.size());
-    _outputOrder = extractIOOrder(&metadata->mNetOutputs[0], metadata->mNetOutputs.size());
+    network.inputOrder = extractIOOrder(metadata->mOVParameters.data(), metadata->mOVParameters.size(),
+                                        metadata->mNetInputs.data(), metadata->mNetInputs.size());
+    network.outputOrder = extractIOOrder(metadata->mOVResults.data(), metadata->mOVResults.size(),
+                                         metadata->mNetOutputs.data(), metadata->mNetOutputs.size());
 
-    _numStreams = metadata->mResourceRequirements.nn_slice_count_;
+    network.numStreams = metadata->mResourceRequirements.nn_slice_count_;
+
+    return network;
 }

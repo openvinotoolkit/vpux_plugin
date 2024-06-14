@@ -1,10 +1,18 @@
 #
-# Copyright (C) 2022 Intel Corporation.
-# SPDX-License-Identifier: Apache 2.0
+# Copyright 2022 Intel Corporation.
+#
+# LEGAL NOTICE: Your use of this software and any required dependent software
+# (the "Software Package") is subject to the terms and conditions of
+# the Intel(R) OpenVINO(TM) Distribution License for the Software Package,
+# which may also include notices, disclaimers, or license terms for
+# third party or open source software included in or with the Software Package,
+# and your use indicates your acceptance of all such terms. Please refer
+# to the "third-party-programs.txt" or other similarly-named text file
+# included with the Software Package for additional details.
 #
 
 function(vpux_embed_bin_file)
-    set(options APPEND)
+    set(options)
     set(oneValueArgs SOURCE_FILE HEADER_FILE VARIABLE_NAME)
     set(multiValueArgs)
     cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
@@ -28,8 +36,8 @@ function(vpux_embed_bin_file)
 
     string(REGEX REPLACE "([0-9a-f][0-9a-f])" "static_cast<char>(0x\\1), " hex_array "${hex_string}")
     math(EXPR hex_array_size "${hex_string_length} / 2")
-    
-    if (hex_array_size LESS "1000") 
+
+    if (hex_array_size LESS "1000")
         message(FATAL_ERROR "File '${ARG_SOURCE_FILE}' too small, check that git-lfs pull step has been done.")
     endif()
 
@@ -38,9 +46,19 @@ const char ${ARG_VARIABLE_NAME}[] = { ${hex_array} };
 const size_t ${ARG_VARIABLE_NAME}_SIZE = ${hex_array_size};
 ")
 
-    if(ARG_APPEND)
-        file(APPEND ${ARG_HEADER_FILE} "${content}")
-    else()
+    # tracking of rewrite is required to avoid rebuild of the whole MLIR compiler
+    # in case of cmake rerun. Need to rebuild only if content of SOURCE_FILE is changed
+    set(rewrite_file ON)
+    if(EXISTS ${ARG_HEADER_FILE})
+        file(READ ${ARG_HEADER_FILE} current_content)
+        string(SHA256 current_hash "${current_content}")
+        string(SHA256 new_hash "${content}")
+        if(current_hash STREQUAL new_hash)
+            set(rewrite_file OFF)
+        endif()
+    endif()
+
+    if(rewrite_file)
         file(WRITE ${ARG_HEADER_FILE} "${content}")
     endif()
 endfunction()

@@ -184,9 +184,9 @@ def ExpandActivationChannels : PassBase<"expand-activation-channels", "vpux::Fun
             "Flag to identify whether operations that can be executed using the Storage Element hardware feature are enabled"
         >,
         Option<
-            "seTransposedConvEnabled", "se-transposed-conv-enabled",
+            "seExperimentalOpsEnabled", "se-experimental-ops-enabled",
             "bool", "false",
-            "(Experimental) Flag to identify whether Transposed Convolutions can be executed using the Storage Element hardware feature"
+            "This flag identifies operations that are still a work in progress and can be executed using the Storage Element hardware feature."
         >
     ];
 }

@@ -6,7 +6,7 @@
 #pragma once
 
 #include <mlir/IR/BuiltinTypes.h>
-#include "vpux/compiler/dialect/IE/ops.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/utils/shape_infer.hpp"
 #include "vpux/compiler/utils/error.hpp"
 #include "vpux/compiler/utils/types.hpp"

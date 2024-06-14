@@ -4,7 +4,12 @@
 //
 
 #include "vpux/compiler/conversion/passes/IE2VPU/convert_layers_to_VPU.hpp"
+#include "vpux/compiler/conversion.hpp"
+#include "vpux/compiler/conversion/factories/convert_layers_to_vpu_strategy_getter.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
+
+// Generated
+#include <vpux/compiler/conversion/convert_layers_to_VPU.hpp.inc>
 
 using namespace vpux;
 
@@ -34,7 +39,7 @@ void vpux::computeWeightForEmbeddingOp(mlir::MLIRContext* ctx, mlir::RankedTenso
     } else if (iType.isF16()) {
         // netPrecision:float16
         weightsTensorType = mlir::RankedTensorType::get(weightsShape, mlir::Float16Type::get(ctx));
-        baseAttr = mlir::DenseElementsAttr::get(weightsTensorType, ov::float16(1));
+        baseAttr = mlir::DenseElementsAttr::get(weightsTensorType, vpux::type::float16(1));
     } else {
         VPUX_THROW("Unsupported element type: {0}", iType);
     }
@@ -51,12 +56,13 @@ mlir::LogicalResult IfRewrite::matchAndRewrite(IE::IfOp origOp, mlir::PatternRew
     auto thenBlock = &origOp.getThenBranch().getBlocks().front();
     auto elseBlock = &origOp.getElseBranch().getBlocks().front();
 
-    // Map then and else branch inputs
-    for (auto valueIt : llvm::enumerate(origOp.getInputs())) {
-        auto blockArg = thenBlock->getArgument(valueIt.index());
-        mapper.map(blockArg, valueIt.value());
-        blockArg = elseBlock->getArgument(valueIt.index());
-        mapper.map(blockArg, valueIt.value());
+    for (auto valueIt : llvm::enumerate(thenBlock->getArguments())) {
+        auto blockArg = origOp.getInputs()[valueIt.index()];
+        mapper.map(valueIt.value(), blockArg);
+    }
+    for (auto valueIt : llvm::enumerate(elseBlock->getArguments())) {
+        auto blockArg = origOp.getInputs()[valueIt.index()];
+        mapper.map(valueIt.value(), blockArg);
     }
 
     // Then branch construct
@@ -145,7 +151,7 @@ mlir::LogicalResult ProposalRewrite::matchAndRewrite(IE::ProposalOp origOp, mlir
     _log.trace("Found Proposal Operation '{0}'", origOp->getLoc());
 
     rewriter.replaceOpWithNewOp<VPU::ProposalOp>(origOp, origOp.getClassProbs(), origOp.getBboxDeltas(),
-                                                 origOp.getImageShape(), origOp.getProposalAttrsAttr());
+                                                 origOp.getImageShape(), nullptr, origOp.getProposalAttrsAttr());
     _log.trace("Replaced with 'VPU.ProposalOp'");
 
     return mlir::success();
@@ -335,4 +341,66 @@ mlir::LogicalResult NormalizeL2Rewrite::matchAndRewrite(IE::NormalizeL2Op origOp
                                                     /*multiClusterStrategy=*/nullptr);
 
     return mlir::success();
+}
+
+namespace {
+
+//
+// ConvertLayers2VPUPass
+//
+
+class ConvertLayers2VPUPass final : public ConvertLayers2VPUBase<ConvertLayers2VPUPass> {
+public:
+    explicit ConvertLayers2VPUPass(Logger log) {
+        Base::initLogger(log, Base::getArgumentName());
+    }
+
+private:
+    void safeRunOnFunc() final;
+};
+
+void ConvertLayers2VPUPass::safeRunOnFunc() {
+    auto& ctx = getContext();
+    auto func = getOperation();
+    auto arch = VPU::getArch(func);
+
+    auto archSpecificStrategy = CreateConvertLayers2VPUStrategy(arch);
+
+    mlir::ConversionTarget target(ctx);
+    target.addIllegalDialect<IE::IEDialect>();
+    target.addLegalDialect<Const::ConstDialect>();
+    target.addLegalDialect<VPU::VPUDialect>();
+    target.addLegalOp<mlir::func::FuncOp, mlir::func::ReturnOp, mlir::func::CallOp>();
+
+    mlir::RewritePatternSet patterns(&ctx);
+    archSpecificStrategy->addPatterns(patterns, _log);
+
+    patterns.add<IfRewrite>(&ctx, _log);
+    patterns.add<CTCGreedyDecoderSeqLenRewrite>(&ctx, _log);
+    patterns.add<ProposalRewrite>(&ctx, _log);
+    patterns.add<SplitRewrite>(&ctx, _log);
+    patterns.add<StubRewrite>(&ctx, _log);
+    patterns.add<NonMaxSuppressionRewrite>(&ctx, _log);
+    patterns.add<InterpolateRewrite>(&ctx, _log);
+
+    patterns.add<GRUCellRewrite>(&ctx, _log);
+    patterns.add<EmbeddingBagPackedSumRewrite>(&ctx, _log);
+    patterns.add<TopKRewrite>(&ctx, _log);
+    patterns.add<TransposedConvRewrite>(&ctx, _log);
+    patterns.add<NormalizeL2Rewrite>(&ctx, _log);
+    populateWithGenerated(patterns);
+
+    if (mlir::failed(mlir::applyFullConversion(func, target, std::move(patterns)))) {
+        signalPassFailure();
+    }
+}
+
+}  // namespace
+
+//
+// createConvertLayers2VPUPass
+//
+
+std::unique_ptr<mlir::Pass> vpux::createConvertLayers2VPUPass(Logger log) {
+    return std::make_unique<ConvertLayers2VPUPass>(log);
 }

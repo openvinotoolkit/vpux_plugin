@@ -6,11 +6,11 @@
 #pragma once
 
 #include "vpux/compiler/core/attributes/stride_reqs.hpp"
-#include "vpux/compiler/dialect/IE/attributes.hpp"
-#include "vpux/compiler/dialect/IE/ops.hpp"
+#include "vpux/compiler/dialect/IE/IR/attributes.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPUIP/graph-schema/schema.hpp"
-#include "vpux/compiler/dialect/VPURT/attributes.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/attributes.hpp"
 
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/utils/core/enums.hpp"
@@ -46,6 +46,8 @@ MVCNN::SpaceToDepthMode convertVPUXSpaceToDepthMode2MVCNN(IE::SpaceToDepthMode v
 MVCNN::PadMode convertVPUXPadMode2MVCNN(IE::PadMode vpux_mode);
 MVCNN::RoundMode convertVPUXRoundMode2MVCNN(IE::RoundMode vpux_mode);
 MVCNN::PSROIPoolingMode convertVPUXPSROIPoolingModeToMVNCNN(IE::PSROIPoolingMode mode);
+MVCNN::M2IFormat convertM2iColor2MVCNN(VPU::M2iColorFmt fmt);
+MVCNN::M2IInterp convertM2iInterp2MVCNN(VPU::M2iInterp interp);
 MVCNN::DeformablePSROIPoolingMode convertVPUXDeformablePSROIPoolingModeToMVNCNN(IE::DeformablePSROIPoolingMode mode);
 uint32_t convertVPUXROIPoolingMethod2Int32(IE::ROIPoolingMethod method);
 

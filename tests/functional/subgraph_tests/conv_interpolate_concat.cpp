@@ -1,9 +1,8 @@
 //
-// Copyright (C) 2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
-#include <shared_test_classes/base/layer_test_utils.hpp>
 #include "common_test_utils/ov_tensor_utils.hpp"
 #include "openvino/opsets/opset1.hpp"
 #include "vpu_ov2_layer_test.hpp"
@@ -23,9 +22,11 @@ public:
         int axis;
         std::tie(inputShape, axis) = obj.param;
 
+        const std::string sep = "_";
         std::ostringstream result;
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
         result << "inputShape={" << inputShape.at(0) << ", " << inputShape.at(1) << ", " << inputShape.at(2) << ", "
-               << inputShape.at(3) << "}_";
+               << inputShape.at(3) << "}" << sep;
         result << "axis={" << axis << "}_";
         return result.str();
     }
@@ -49,8 +50,8 @@ public:
 
     std::shared_ptr<ov::Node> buildInterpolate(const ov::Output<ov::Node>& param) {
         std::vector<float> scales = {1.f, 1.f, 2.f, 2.f};
-        auto scales_const = ngraph::opset3::Constant(ngraph::element::Type_t::f32, ov::Shape{scales.size()}, scales);
-        auto scalesInput = std::make_shared<ngraph::opset3::Constant>(scales_const);
+        auto scales_const = ov::op::v0::Constant(ov::element::Type_t::f32, ov::Shape{scales.size()}, scales);
+        auto scalesInput = std::make_shared<ov::op::v0::Constant>(scales_const);
 
         ov::op::util::InterpolateBase::InterpolateMode mode = ov::op::v4::Interpolate::InterpolateMode::LINEAR_ONNX;
         ov::op::util::InterpolateBase::ShapeCalcMode shapeCalcMode = ov::op::v4::Interpolate::ShapeCalcMode::SCALES;
@@ -66,7 +67,7 @@ public:
         ov::op::util::InterpolateBase::InterpolateAttrs interpolateAttributes{
                 mode, shapeCalcMode, padBegin, padEnd, coordinateTransformMode, nearestMode, antialias, cubeCoef};
 
-        return std::make_shared<ngraph::op::v11::Interpolate>(param, scalesInput, interpolateAttributes);
+        return std::make_shared<ov::op::v11::Interpolate>(param, scalesInput, interpolateAttributes);
     }
 
     void SetUp() override {
@@ -106,14 +107,21 @@ class ConvInterpolateConcatTest_NPU3700 : public ConvInterpolateConcatTestCommon
 
 TEST_P(ConvInterpolateConcatTest_NPU3700, HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3700);
+    run(Platform::NPU3700);
 }
 
 class ConvInterpolateConcatTest_NPU3720 : public ConvInterpolateConcatTestCommon {};
 
 TEST_P(ConvInterpolateConcatTest_NPU3720, HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
+}
+
+class ConvInterpolateConcatTest_NPU4000 : public ConvInterpolateConcatTestCommon {};
+
+TEST_P(ConvInterpolateConcatTest_NPU4000, HW) {
+    setDefaultHardwareMode();
+    run(Platform::NPU4000);
 }
 
 }  // namespace ov::test::subgraph
@@ -122,7 +130,7 @@ using namespace ov::test::subgraph;
 
 namespace {
 
-const std::vector<InferenceEngine::SizeVector> inputShapes = {
+const std::vector<std::vector<size_t>> inputShapes = {
         {1, 16, 224, 224},
 };
 
@@ -133,6 +141,10 @@ INSTANTIATE_TEST_SUITE_P(smoke_ConvInterpolateConcatTest, ConvInterpolateConcatT
                          ConvInterpolateConcatTestCommon::getTestCaseName);
 
 INSTANTIATE_TEST_SUITE_P(smoke_ConvInterpolateConcatTest, ConvInterpolateConcatTest_NPU3720,
+                         ::testing::Combine(::testing::ValuesIn(inputShapes), ::testing::ValuesIn(concatAxis)),
+                         ConvInterpolateConcatTestCommon::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(smoke_ConvInterpolateConcatTest, ConvInterpolateConcatTest_NPU4000,
                          ::testing::Combine(::testing::ValuesIn(inputShapes), ::testing::ValuesIn(concatAxis)),
                          ConvInterpolateConcatTestCommon::getTestCaseName);
 

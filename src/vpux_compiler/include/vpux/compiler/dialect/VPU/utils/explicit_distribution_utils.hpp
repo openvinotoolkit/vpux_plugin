@@ -8,8 +8,8 @@
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/IR/types.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/types.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/types.hpp"
 
 #include <mlir/IR/BuiltinTypes.h>
 
@@ -23,21 +23,24 @@ DistributedTensorAttr getSWExplicitDistributedTensorAttr(SWOpInterface swOp, Sha
 DistributedTensorAttr getNCEExplicitDistributedTensorAttr(NCEOpInterface nceOp, ShapeRef shape,
                                                           VPU::DistributionMode distributionMode,
                                                           mlir::ArrayAttr numTiles, mlir::IntegerAttr numClusters,
-                                                          mlir::ArrayAttr alignment, mlir::ArrayAttr kernel,
-                                                          PaddingAttr pad, mlir::ArrayAttr stride,
-                                                          mlir::UnitAttr uniformDistributedSegments);
+                                                          mlir::ArrayAttr alignment,
+                                                          mlir::UnitAttr uniformDistributedSegments,
+                                                          const vpux::VPU::OverlapDistributionParams& overlapParams);
 DistributedTensorAttr getConcatExplicitDistributedAttr(ShapeRef shape, VPU::DistributionMode distributionMode,
                                                        mlir::ArrayAttr numTiles, mlir::IntegerAttr numClusters,
-                                                       mlir::ArrayAttr alignment, mlir::ArrayAttr kernel,
-                                                       VPU::PaddingAttr pad, mlir::ArrayAttr stride,
+                                                       mlir::ArrayAttr alignment,
                                                        mlir::UnitAttr uniformDistributedSegments,
+                                                       const vpux::VPU::OverlapDistributionParams& overlapParams,
                                                        mlir::MLIRContext* ctx);
 DistributedTensorAttr getConcatExplicitDistributedAttrForNewShape(VPU::DistributedTensorAttr originDistribution,
                                                                   ShapeRef newShape, mlir::MLIRContext* ctx);
-DistributedTensorAttr getExplicitDistrAttrForSliceLikeOps(VPU::DistributedTensorAttr originDistribution,
+DistributedTensorAttr getExplicitDistrAttrForSliceLikeOps(VPU::DistributedTensorAttr distributionWithProperAlignment,
                                                           ArrayRef<int64_t> sliceShape, ArrayRef<int64_t> originShape,
                                                           mlir::MLIRContext* ctx);
-
+DistributedTensorAttr getSegmentedExplicitDistrAttrForSliceLikeOps(VPU::DistributedTensorAttr distribution,
+                                                                   ArrayRef<int64_t> sliceOutputShape,
+                                                                   mlir::ArrayAttr explicitOutputShapes,
+                                                                   mlir::MLIRContext* ctx);
 DistributedTensorAttr getNonOverlappedDistributedAttr(ShapeRef shape, VPU::DistributionModeAttr distrModeAttr,
                                                       mlir::ArrayAttr numTiles, mlir::IntegerAttr numClusters,
                                                       mlir::ArrayAttr alignment,

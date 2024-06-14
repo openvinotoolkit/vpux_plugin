@@ -1,11 +1,11 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation
 // SPDX-License-Identifier: Apache 2.0
 //
 
 #include <gtest/gtest.h>
 
-#include "vpux/utils/plugin/profiling_meta.hpp"
+#include "vpux/utils/profiling/metadata.hpp"
 
 using ProfVersionUnitTests = ::testing::Test;
 using namespace vpux::profiling;

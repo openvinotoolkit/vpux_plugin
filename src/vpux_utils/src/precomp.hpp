@@ -9,10 +9,13 @@
 #include <openvino/core/node_output.hpp>
 #include <openvino/core/partial_shape.hpp>
 #include <openvino/core/shape.hpp>
-#include <openvino/core/type/bfloat16.hpp>
 #include <openvino/core/type/element_type.hpp>
-#include <openvino/core/type/float16.hpp>
 #include <openvino/op/ops.hpp>
+
+#include <vpux/utils/core/type/bfloat16.hpp>
+#include <vpux/utils/core/type/float16.hpp>
+#include <vpux/utils/core/type/float8_e4m3.hpp>
+#include <vpux/utils/core/type/float8_e5m2.hpp>
 
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/DenseMapInfo.h>

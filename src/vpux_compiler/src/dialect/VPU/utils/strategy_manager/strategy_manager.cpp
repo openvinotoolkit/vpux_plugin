@@ -10,8 +10,9 @@
 using namespace vpux;
 using namespace VPU;
 
-StrategyManager::StrategyManager(mlir::func::FuncOp func, bool enablePrefetchTiling, Logger log)
+StrategyManager::StrategyManager(mlir::func::FuncOp func, int64_t numTiles, bool enablePrefetchTiling, Logger log)
         : _func(func),
+          _numTiles(numTiles),
           _log(log),
           _costModel(func, enablePrefetchTiling, log),
           _optimizer(func, enablePrefetchTiling, log) {
@@ -112,44 +113,6 @@ void StrategyManager::assignMultiClusterStrategy(bool enableMultiClusterForSWLay
                             mlir::cast<VPU::ClusteredOpInterface>(origOp.getOperation()));
                     setLayerStrategy(bestStrategy, origOp.getOperation());
                 })
-                .Case<NCEPermuteQuantizeOp>([&](NCEPermuteQuantizeOp origOp) {
-                    const auto inputType = origOp.getInput().getType().cast<vpux::NDTypeInterface>();
-                    const auto inputShape = inputType.getShape();
-                    // Such configurations cannot be tiled properly.
-                    if (inputShape.size() != RANK_REQUIRED_FOR_TILING) {
-                        _log.trace(
-                                "Operation '{0}' at '{1}' has input rank {2} and cannot be tiled. Expected rank: {3}.",
-                                origOp->getName(), origOp->getLoc(), inputShape.size(), RANK_REQUIRED_FOR_TILING);
-                        return;
-                    }
-                    constexpr int64_t MIN_DIM_SIZE_FOR_TILING = 2;
-                    if (inputShape[Dims4D::Act::W] < MIN_DIM_SIZE_FOR_TILING) {
-                        _log.trace("Operation '{0}' at '{1}' has size {2} over tiled dimension in input. Expected to "
-                                   "have greater than or equal to: {3}.",
-                                   origOp->getName(), origOp->getLoc(), inputShape[Dims4D::Act::W],
-                                   MIN_DIM_SIZE_FOR_TILING);
-                        return;
-                    }
-
-                    const auto outputType = origOp.getOutput().getType().cast<vpux::NDTypeInterface>();
-                    const auto outputShape = outputType.getShape();
-                    if (outputShape.size() != RANK_REQUIRED_FOR_TILING) {
-                        _log.trace(
-                                "Operation '{0}' at '{1}' has output rank {2} and cannot be tiled. Expected rank: {3}.",
-                                origOp->getName(), origOp->getLoc(), outputShape.size(), RANK_REQUIRED_FOR_TILING);
-                        return;
-                    }
-                    if (outputShape[Dims4D::Act::W] < MIN_DIM_SIZE_FOR_TILING) {
-                        _log.trace("Operation '{0}' at '{1}' has size {2} over tiled dimension in output. Expected to "
-                                   "have greater than or equal to: {3}.",
-                                   origOp->getName(), origOp->getLoc(), outputShape[Dims4D::Act::W],
-                                   MIN_DIM_SIZE_FOR_TILING);
-                        return;
-                    }
-
-                    const auto bestStrategy = VPU::MultiClusterStrategy::SplitOverWidth;
-                    setLayerStrategy(bestStrategy, origOp.getOperation());
-                })
                 .Case<NCEInterpolateOp>([&](NCEInterpolateOp origOp) {
                     auto bestStrategy = _costModel.getOptimalLayerStrategy(
                             mlir::cast<VPU::ClusteredOpInterface>(origOp.getOperation()));
@@ -167,8 +130,9 @@ void StrategyManager::assignMultiClusterStrategy(bool enableMultiClusterForSWLay
 
                     // Non 4D Tensor or Tensor with larger batch size cannot be tiled properly.
                     // [E90039]MC support for Non 4D Tensor.
-                    VPU::MultiClusterStrategy bestStrategy;
-                    if (inputShape.front() > SINGLE_BATCH || inputShape.size() != RANK_REQUIRED_FOR_TILING ||
+                    std::optional<VPU::MultiClusterStrategy> bestStrategy;
+                    if ((inputShape.front() > SINGLE_BATCH && !mlir::isa<VPU::MVN1NormalizeOp>(op)) ||
+                        inputShape.size() != RANK_REQUIRED_FOR_TILING ||
                         outputShape.size() != RANK_REQUIRED_FOR_TILING) {
                         _log.trace("Operation '{0}' at '{1}' has input shape {2} forcing clustering", origOp->getName(),
                                    origOp->getLoc(), inputShape);
@@ -182,8 +146,12 @@ void StrategyManager::assignMultiClusterStrategy(bool enableMultiClusterForSWLay
                                     mlir::cast<VPU::ClusteredOpInterface>(origOp.getOperation()));
                         }
                     }
-                    setLayerStrategy(bestStrategy, origOp.getOperation());
-                    _log.info("SW Operation '{0}' {1} set to {2}", origOp->getName(), origOp->getLoc(), bestStrategy);
+                    if (bestStrategy.has_value()) {
+                        setLayerStrategy(bestStrategy.value(), origOp.getOperation());
+                        _log.info("SW Operation '{0}' {1} set to {2}", origOp->getName(), origOp->getLoc(),
+                                  bestStrategy);
+                    }
+                    return;
                 })
                 .Case<ConcatOp>([&](ConcatOp origOp) {
                     const auto inputType = origOp.getInputs().front().getType().cast<vpux::NDTypeInterface>();
@@ -208,11 +176,16 @@ void StrategyManager::assignMultiClusterStrategy(bool enableMultiClusterForSWLay
 
                     auto bestStrategy =
                             VPU::getDefaultLayerStrategy(mlir::cast<VPU::ClusteredOpInterface>(origOp.getOperation()));
-                    setLayerStrategy(bestStrategy, origOp.getOperation());
+                    if (bestStrategy.has_value()) {
+                        setLayerStrategy(bestStrategy.value(), origOp.getOperation());
+                    }
+                    return;
                 })
                 .Case<NCEPermuteOp>([&](NCEPermuteOp origOp) {
                     const auto inputType = origOp.getInput().getType().cast<vpux::NDTypeInterface>();
+                    const auto outputType = origOp.getOutput().getType().cast<vpux::NDTypeInterface>();
                     const auto inputShape = inputType.getShape();
+                    const auto outputShape = outputType.getShape();
                     // Such configurations cannot be tiled properly.
                     if (inputShape.size() != RANK_REQUIRED_FOR_TILING) {
                         _log.trace(
@@ -220,35 +193,80 @@ void StrategyManager::assignMultiClusterStrategy(bool enableMultiClusterForSWLay
                                 origOp->getName(), origOp->getLoc(), inputShape.size(), RANK_REQUIRED_FOR_TILING);
                         return;
                     }
-
-                    const int64_t MIN_DIM_SIZE_FOR_TILING =
-                            IE::getTileExecutor(origOp.getOperation()->getParentOfType<mlir::ModuleOp>()).getCount();
-                    if (inputShape[Dims4D::Act::H] < MIN_DIM_SIZE_FOR_TILING) {
-                        _log.trace("Operation '{0}' at '{1}' has size {2} over tiled dimension in input. Expected to "
-                                   "have greater than or equal to: {3}.",
-                                   origOp->getName(), origOp->getLoc(), inputShape[Dims4D::Act::H],
-                                   MIN_DIM_SIZE_FOR_TILING);
-                        return;
-                    }
-
-                    const auto outputType = origOp.getOutput().getType().cast<vpux::NDTypeInterface>();
-                    const auto outputShape = outputType.getShape();
                     if (outputShape.size() != RANK_REQUIRED_FOR_TILING) {
                         _log.trace(
                                 "Operation '{0}' at '{1}' has output rank {2} and cannot be tiled. Expected rank: {3}.",
                                 origOp->getName(), origOp->getLoc(), outputShape.size(), RANK_REQUIRED_FOR_TILING);
                         return;
                     }
-                    if (outputShape[Dims4D::Act::H] < MIN_DIM_SIZE_FOR_TILING) {
-                        _log.trace("Operation '{0}' at '{1}' has size {2} over tiled dimension in output. Expected to "
-                                   "have greater than or equal to: {3}.",
-                                   origOp->getName(), origOp->getLoc(), outputShape[Dims4D::Act::H],
-                                   MIN_DIM_SIZE_FOR_TILING);
-                        return;
+
+                    const auto isSOCSupportedWithoutTiling = [&](mlir::Operation* op) {
+                        auto clusteredOp = mlir::dyn_cast_or_null<VPU::ClusteredOpInterface>(op);
+                        if (clusteredOp == nullptr) {
+                            return false;
+                        }
+                        if (!mlir::isa<VPU::SWOpInterface, VPU::NCEDepthConvolutionOp, VPU::NCEMaxPoolOp,
+                                       VPU::NCEAveragePoolOp>(op)) {
+                            return false;
+                        }
+                        return clusteredOp.doesLayerFitIntoCMX(VPU::MultiClusterStrategy::SplitOverKernel,
+                                                               /*reservedMem=*/Byte(0)) &&
+                               clusteredOp.checkStrategyCompatibility(VPU::MultiClusterStrategy::SplitOverKernel,
+                                                                      _numTiles) &&
+                               clusteredOp.isOperationSplitOverKernelCompatible(/*outputShape=*/ShapeRef(),
+                                                                                /*offset=*/ShapeRef(),
+                                                                                /*axis=*/ShapeRef());
+                    };
+
+                    const auto checkTileDim = [&](Dim tileDim) -> bool {
+                        const int64_t MIN_DIM_SIZE_FOR_TILING =
+                                IE::getTileExecutor(origOp.getOperation()->getParentOfType<mlir::ModuleOp>())
+                                        .getCount();
+                        if (inputShape[tileDim] < MIN_DIM_SIZE_FOR_TILING) {
+                            _log.trace(
+                                    "Operation '{0}' at '{1}' has size {2} over tiled dimension in input. Expected to "
+                                    "have greater than or equal to: {3}.",
+                                    origOp->getName(), origOp->getLoc(), inputShape[tileDim], MIN_DIM_SIZE_FOR_TILING);
+                            return false;
+                        }
+                        if (outputShape[tileDim] < MIN_DIM_SIZE_FOR_TILING) {
+                            _log.trace(
+                                    "Operation '{0}' at '{1}' has size {2} over tiled dimension in output. Expected to "
+                                    "have greater than or equal to: {3}.",
+                                    origOp->getName(), origOp->getLoc(), outputShape[tileDim], MIN_DIM_SIZE_FOR_TILING);
+                            return false;
+                        }
+                        return true;
+                    };
+
+                    const auto isSplitOverChannelPreferred = [&](VPU::NCEPermuteOp permuteOp) {
+                        // Check if permute can use multi clusters
+                        const auto outputShape = getShape(permuteOp.getOutput());
+                        const auto numClusters = VPU::getOptimalNumClusters(permuteOp, outputShape[Dims4D::Act::C],
+                                                                            VPU::MultiClusterStrategy::SplitOverKernel);
+                        if (numClusters.getInt() <= 1) {
+                            return false;
+                        }
+                        auto clusteredOp = mlir::cast<VPU::ClusteredOpInterface>(permuteOp.getOperation());
+                        // Temporarily assign SOK to NCEPermute for ops around to get correct distribution mode
+                        clusteredOp.setMultiClusterStrategy(VPU::MultiClusterStrategy::SplitOverKernel);
+                        const auto inputOpSupportSOC =
+                                isSOCSupportedWithoutTiling(permuteOp.getInput().getDefiningOp());
+                        const auto outputOpsSupportSOC =
+                                llvm::all_of(permuteOp->getUsers(), isSOCSupportedWithoutTiling);
+                        // Remove temporary startegy
+                        clusteredOp->removeAttr(multiClusterStrategy);
+                        return inputOpSupportSOC && outputOpsSupportSOC;
+                    };
+
+                    // NCEPermute was disabled in subgraph optimizer, so need to assign correct strategy manually here.
+                    // Tracked by: #E116504
+                    if (origOp.checkStrategyCompatibility(VPU::MultiClusterStrategy::SplitOverKernel, _numTiles) &&
+                        checkTileDim(Dims4D::Act::C) && isSplitOverChannelPreferred(origOp)) {
+                        setLayerStrategy(VPU::MultiClusterStrategy::SplitOverKernel, origOp.getOperation());
+                    } else if (checkTileDim(Dims4D::Act::H)) {
+                        setLayerStrategy(VPU::MultiClusterStrategy::SplitOverHeightOverlapped, origOp.getOperation());
                     }
-                    // SOH strategy is the only one permited for NCE Permute
-                    const auto bestStrategy = VPU::MultiClusterStrategy::SplitOverHeightOverlapped;
-                    setLayerStrategy(bestStrategy, origOp.getOperation());
                 })
                 .Default([&](mlir::Operation* unknownOp) -> void {
                     _log.trace("Operation '{0}' at '{1}' does not support multi cluster", unknownOp->getName(),
@@ -269,20 +287,5 @@ void StrategyManager::removeTemporaryMulticlusterStrategy() {
     const auto callbackConcat = [](VPU::ConcatOp concatOp) {
         concatOp.removeMultiClusterStrategyAttr();
     };
-    // E#81901 When assigning clustering strategy to ConvertOps for the following pattern(s) breaks the accuracy
-    // ConvertOp            ConvertOp
-    //     |                    |
-    //     IntermediateOp       |
-    //           |              |
-    //              Layer (Layers with multiple inputs)
-    // For such cases and strategies remove the strategy as a temporary measure
-    const auto callbackConvert = [&](VPU::ConvertOp convertOp) {
-        if (hasLayerWithMultipleInputs(convertOp)) {
-            _log.info("SW Operation '{0}' {1} removed strategy {2}", convertOp->getName(), convertOp->getLoc(),
-                      convertOp.getMultiClusterStrategy());
-            convertOp.removeMultiClusterStrategyAttr();
-        }
-    };
-    _func.walk(callbackConvert);
     _func.walk(callbackConcat);
 }

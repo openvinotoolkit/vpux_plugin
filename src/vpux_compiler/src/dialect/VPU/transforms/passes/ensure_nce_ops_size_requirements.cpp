@@ -10,6 +10,7 @@
 #include "vpux/compiler/dialect/VPU/utils/generate_tiling.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
 #include "vpux/compiler/utils/VPU/ppe_utils.hpp"
+#include "vpux/compiler/utils/sparsity.hpp"
 
 using namespace vpux;
 
@@ -135,13 +136,19 @@ mlir::LogicalResult EnsureConvICRequirements::matchAndRewrite(VPU::NCEConvolutio
     const auto kernelShape = getShape(origOp.getFilter());
     auto kernelW = kernelShape[Dims4D::Filter::KX];
     auto kernelH = kernelShape[Dims4D::Filter::KY];
-    auto kernelC = kernelShape[Dims4D::Filter::IC];
     auto kernelN = kernelShape[Dims4D::Filter::OC];
 
     SmallVector<VPU::NCEConvolutionOp> convOps;
     auto maxTiles = vpux::divUp(inputC, VPU::NCEInvariant::VPU_DIMENSION_LIMIT);
 
     if (maxTiles == 1) {
+        return mlir::failure();
+    }
+
+    Shape nTilesOnDim(inputShape.size(), 1);
+    nTilesOnDim[Dims4D::Act::C] = maxTiles;
+    const auto tiles = fillDividedTiles(origOp, nTilesOnDim, inputShape);
+    if (mlir::failed(tiles)) {
         return mlir::failure();
     }
 
@@ -157,13 +164,13 @@ mlir::LogicalResult EnsureConvICRequirements::matchAndRewrite(VPU::NCEConvolutio
     std::vector<int32_t> weightsTableVec(weightsTableVecSize);
     std::copy(weightsTableValues.begin(), weightsTableValues.end(), weightsTableVec.begin());
 
-    auto inType = origOp.getInput().getType().cast<vpux::NDTypeInterface>();
-    auto inElemType = inType.getElementType();
+    auto filterType = origOp.getFilter().getType().cast<vpux::NDTypeInterface>();
+    auto filterElemType = filterType.getElementType();
 
     // TODO: E#70371 - Remaining opens for InputChannels 8K size
     for (auto tile = 0; tile < maxTiles; tile++) {
-        const auto offsetIC = tile * VPU::NCEInvariant::VPU_DIMENSION_LIMIT;
-        const auto sizeIC = std::min(VPU::NCEInvariant::VPU_DIMENSION_LIMIT, inputC - offsetIC);
+        auto offsetIC = tiles.value()[tile].offsets[Dims4D::Act::C];
+        auto sizeIC = tiles.value()[tile].shape[Dims4D::Act::C];
         _log.nest().trace("Slicing channels {0} - {1}", offsetIC, sizeIC);
 
         // Slice inputs
@@ -175,15 +182,21 @@ mlir::LogicalResult EnsureConvICRequirements::matchAndRewrite(VPU::NCEConvolutio
 
         // Slice kernels
         const Shape kernelSliceOffsets{0, offsetIC, 0, 0};
-        const Shape kernelSliceShape{kernelN, std::min(VPU::NCEInvariant::VPU_DIMENSION_LIMIT, kernelC - offsetIC),
-                                     kernelH, kernelW};
+        const Shape kernelSliceShape{kernelN, sizeIC, kernelH, kernelW};
         const auto rawKernelSliceShape = getIntArrayAttr(rewriter, kernelSliceShape);
         auto convFilter = rewriter.create<VPU::SliceOp>(origOp.getLoc(), origOp.getFilter(),
                                                         getIntArrayAttr(rewriter, kernelSliceOffsets.raw()),
                                                         getIntArrayAttr(rewriter, kernelSliceShape.raw()));
 
         // Adjust the weights table pointers to correspond to the new offsets of the slices
-        const auto noOfBytes = vpux::getElemTypeSize(inElemType).to<Byte>().count();
+        const auto noOfBits = vpux::getElemTypeSize(filterElemType);
+        const auto weightSetSize = alignMemSize(kernelH * kernelW * sizeIC * noOfBits,
+                                                Byte(VPU::NCEInvariant::VPU_WEIGHT_SET_BYTE_ALIGNMENT))
+                                           .to<Byte>()
+                                           .count();
+        const auto sparsitySetSize =
+                alignValUp(divUp(kernelH * kernelW * sizeIC, CHAR_BIT * getValuesPerSparsityBit(filterElemType)),
+                           static_cast<int64_t>(VPU::NCEInvariant::VPU_WEIGHT_SET_BYTE_ALIGNMENT));
 
         // Apply bias for the first convolution only
         if (tile != 0) {
@@ -195,14 +208,14 @@ mlir::LogicalResult EnsureConvICRequirements::matchAndRewrite(VPU::NCEConvolutio
 
         // Adjust the weight pointers
         for (size_t i = 0; i < weightsTableVecSize; i += VPU::NCEInvariant::WEIGHT_TABLE_NUM_ELEMENTS_PER_OC) {
-            weightsTableVec[i] = checked_cast<int32_t>((i / VPU::NCEInvariant::WEIGHT_TABLE_NUM_ELEMENTS_PER_OC) *
-                                                       kernelH * kernelW * sizeIC * noOfBytes);
+            weightsTableVec[i] =
+                    checked_cast<int32_t>((i / VPU::NCEInvariant::WEIGHT_TABLE_NUM_ELEMENTS_PER_OC) * weightSetSize);
         }
 
         // Adjust the sparsity pointers
         for (size_t i = 1; i < weightsTableVecSize; i += VPU::NCEInvariant::WEIGHT_TABLE_NUM_ELEMENTS_PER_OC) {
-            weightsTableVec[i] = checked_cast<int32_t>((i / VPU::NCEInvariant::WEIGHT_TABLE_NUM_ELEMENTS_PER_OC) *
-                                                       kernelH * kernelW * sizeIC / 8);
+            weightsTableVec[i] =
+                    checked_cast<int32_t>((i / VPU::NCEInvariant::WEIGHT_TABLE_NUM_ELEMENTS_PER_OC) * sparsitySetSize);
         }
 
         auto weightsTable = VPU::createWeightsTableTensor(rewriter, origOp->getLoc(), weightsTableVec);
@@ -247,7 +260,7 @@ mlir::LogicalResult EnsureConvICRequirements::matchAndRewrite(VPU::NCEConvolutio
         //                                         NCEElt (inL=NHWC,out=NCHW)
         if (auto iface = mlir::dyn_cast<IE::LayoutInfoOpInterface>(addResult.getOperation())) {
             auto orderInfo = iface.getLayoutInfo();
-            iface.inferLayoutInfo(orderInfo, /*seOpsEnabled=*/false, /*seTransposedConvEnabled=*/false);
+            iface.inferLayoutInfo(orderInfo, /*seOpsEnabled=*/false, /*seExperimentalOpsEnabled=*/false);
             const auto supportOrder1 = orderInfo.getInput(0);
             const auto supportOrder2 = orderInfo.getInput(1);
             const auto inputOrder1 = DimsOrder::fromValue(addResult.getInput1());

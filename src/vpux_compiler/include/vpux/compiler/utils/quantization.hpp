@@ -8,11 +8,13 @@
 #include "vpux/compiler/core/attributes/shape.hpp"
 #include "vpux/compiler/core/type_interfaces.hpp"
 
-#include "vpux/compiler/dialect/IE/attributes.hpp"
-#include "vpux/compiler/dialect/VPURT/attributes.hpp"
+#include "vpux/compiler/dialect/IE/IR/attributes.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/attributes.hpp"
 
 #include <mlir/Dialect/Quant/QuantTypes.h>
 #include <mlir/IR/BuiltinTypes.h>
+
+#include <llvm/ADT/bit.h>
 
 #include <flatbuffers/flatbuffers.h>
 
@@ -20,6 +22,8 @@
 #include <tuple>
 
 namespace vpux {
+
+static constexpr int64_t MAX_LEVELS = 256;
 
 //
 // Utilities for quantized types
@@ -47,6 +51,19 @@ using Scales = SmallVector<double>;
 using ZeroPoints = SmallVector<int64_t>;
 
 std::pair<Scales, ZeroPoints> extractScalesAndZeroPoints(mlir::Type tensorElemType);
+Scales exractWeightsScales(mlir::Type weightsElemType);
+
+template <typename MultType>
+std::tuple<MultType, uint8_t, int8_t> approximate(uint8_t bits, double target) {
+    int exponent = 0;
+    const auto mantissa = std::frexp(target, &exponent);
+
+    const auto mult = checked_cast<MultType>(mantissa * std::pow(2, bits));
+    const auto shift = exponent > bits ? 0 : checked_cast<uint8_t>(bits - exponent);
+    const auto postShift = exponent > bits ? checked_cast<int8_t>(bits - exponent) : 0;
+
+    return std::make_tuple(mult, shift, postShift);
+}
 
 class QuantizationApproximation {
 public:
@@ -100,9 +117,11 @@ std::pair<int64_t, int64_t> getClampValuesForQuantizedOps(std::pair<double, doub
 // FakeQuantize support
 //
 
-mlir::quant::QuantizedType getQuantizedType(mlir::Attribute lowConstAttr, mlir::Attribute highConstAttr, int64_t levels,
+mlir::quant::QuantizedType getQuantizedType(mlir::Attribute lowConstAttr, mlir::Attribute highConstAttr,
+                                            std::optional<int64_t> levels, std::optional<mlir::Type> lowFpType,
                                             mlir::FloatType realType, bool isSigned, mlir::Location loc,
-                                            IE::AutoBroadcastType broadcast = IE::AutoBroadcastType::NONE_OR_EXPLICIT);
+                                            IE::AutoBroadcastType broadcast = IE::AutoBroadcastType::NONE_OR_EXPLICIT,
+                                            const Logger& log = Logger::global());
 
 void getFakeQuantParams(mlir::quant::UniformQuantizedType qElemType, int64_t& levels, float& rMin, float& rMax);
 
@@ -114,18 +133,30 @@ void getFakeQuantParams(vpux::NDTypeInterface qType, int64_t& levels, mlir::Rank
 
 std::tuple<double, int64_t> calcScaleAndZeroPoint(int64_t qMin, int64_t qMax, double rMin, double rMax);
 std::tuple<int64_t, int64_t, mlir::Type> getStorageParams(mlir::MLIRContext* ctx, int64_t levels, bool isSigned);
+std::tuple<int64_t, int64_t, mlir::Type> getStorageParams(mlir::MLIRContext* ctx, mlir::Type lowFpType);
+mlir::FailureOr<std::tuple<float, float>> getFp8Range(mlir::Type lowFpType);
 
 //
 // Dequantize support
 //
 
-float dequantize(int64_t qVal, double scale, int64_t zeroPoint);
+inline float dequantize(int64_t qVal, double scale, int64_t zeroPoint) {
+    return static_cast<float>((qVal - zeroPoint) * scale);
+}
 
 //
-// Convert real numbers to fixed point S16.16 format.
+// FakeQuantize support
 //
 
-int32_t toFixedPoint(const double realVal);
+inline float fakeQuantize(float inVal, float inLow, float inHigh, float qLow, float qHigh, float fLevels) {
+    if (inVal <= inLow) {
+        return qLow;
+    } else if (inVal > inHigh) {
+        return qHigh;
+    } else {
+        return std::round((inVal - inLow) / (inHigh - inLow) * (fLevels - 1)) / (fLevels - 1) * (qHigh - qLow) + qLow;
+    }
+}
 
 // Broadcasting
 

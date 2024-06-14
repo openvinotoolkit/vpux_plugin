@@ -1,69 +1,92 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022-2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
-#include "single_layer_tests/reorg_yolo.hpp"
-#include "vpu_ov1_layer_test.hpp"
+#include "single_op_tests/reorg_yolo.hpp"
+#include "vpu_ov2_layer_test.hpp"
 
-namespace LayerTestsDefinitions {
-class ReorgYoloLayerTestCommon : public ReorgYoloLayerTest, virtual public LayerTestsUtils::VpuOv1LayerTestsCommon {};
+using namespace ov::test::utils;
 
-class ReorgYoloLayerTest_NPU3700 : public ReorgYoloLayerTestCommon {
-    void SkipBeforeLoad() override {
-        ngraph::Shape inputShape;
-        std::tie(inputShape, std::ignore, std::ignore, std::ignore) = GetParam();
-        auto inN = inputShape[0];
-        if (inN != 1) {
-            throw LayerTestsUtils::VpuSkipTestException("Runtime only supports N=1 shape, got " + std::to_string(inN));
-        }
+namespace ov {
+
+namespace test {
+
+class ReorgYoloLayerTestCommon : public ReorgYoloLayerTest, virtual public VpuOv2LayerTest {
+    void SetUp() override {
+        std::vector<size_t> inputShape;
+        ov::element::Type modelType;
+        size_t stride;
+        std::tie(inputShape, stride, modelType, std::ignore) = this->GetParam();
+        VpuOv2LayerTest::init_input_shapes(static_shapes_to_test_representation({inputShape}));
+
+        auto param = std::make_shared<ov::op::v0::Parameter>(modelType, VpuOv2LayerTest::inputDynamicShapes.front());
+        auto reorgYolo = std::make_shared<ov::op::v0::ReorgYolo>(param, stride);
+        VpuOv2LayerTest::function =
+                std::make_shared<ov::Model>(reorgYolo->outputs(), ov::ParameterVector{param}, "ReorgYolo");
+    }
+    void TearDown() override {
+        VpuOv2LayerTest::TearDown();
     }
 };
 
+class ReorgYoloLayerTest_NPU3700 : public ReorgYoloLayerTestCommon {};
+
 class ReorgYoloLayerTest_NPU3720 : public ReorgYoloLayerTestCommon {};
+class ReorgYoloLayerTest_NPU4000 : public ReorgYoloLayerTestCommon {};
 
 TEST_P(ReorgYoloLayerTest_NPU3700, HW) {
-    setPlatformVPU3700();
-    setDefaultHardwareModeMLIR();
-    Run();
+    VpuOv2LayerTest::setSkipCompilationCallback([this](std::stringstream& skip) {
+        std::vector<size_t> inputShape = std::get<0>(GetParam());
+        auto inN = inputShape[0];
+        if (inN != 1) {
+            skip << "Runtime only supports N=1 shape, got " + std::to_string(inN);
+        }
+    });
+    VpuOv2LayerTest::setDefaultHardwareMode();
+    VpuOv2LayerTest::run(Platform::NPU3700);
 }
 
 TEST_P(ReorgYoloLayerTest_NPU3720, HW) {
-    setPlatformVPU3720();
-    setDefaultHardwareModeMLIR();
-    Run();
+    VpuOv2LayerTest::setDefaultHardwareMode();
+    VpuOv2LayerTest::run(Platform::NPU3720);
 }
 
-}  // namespace LayerTestsDefinitions
+TEST_P(ReorgYoloLayerTest_NPU4000, SW) {
+    VpuOv2LayerTest::setReferenceSoftwareMode();
+    VpuOv2LayerTest::run(Platform::NPU4000);
+}
 
-using namespace LayerTestsDefinitions;
+}  // namespace test
+
+}  // namespace ov
+
+using namespace ov::test;
 
 namespace {
 
-const std::vector<ngraph::Shape> inputShapesA = {
-        ngraph::Shape{1, 64, 26, 26},  // openvino eg
-        ngraph::Shape{1, 4, 4, 4},    ngraph::Shape{1, 8, 4, 4},    ngraph::Shape{2, 8, 4, 4},
-        ngraph::Shape{1, 62, 14, 14}, ngraph::Shape{1, 62, 34, 24}, ngraph::Shape{1, 24, 34, 62},
-        ngraph::Shape{1, 26, 64, 26},
+const std::vector<std::vector<size_t>> inputShapesA = {
+        std::vector<size_t>{1, 64, 26, 26},  // openvino eg
+        std::vector<size_t>{1, 4, 4, 4},    std::vector<size_t>{1, 8, 4, 4},    std::vector<size_t>{2, 8, 4, 4},
+        std::vector<size_t>{1, 62, 14, 14}, std::vector<size_t>{1, 62, 34, 24}, std::vector<size_t>{1, 24, 34, 62},
+        std::vector<size_t>{1, 26, 64, 26},
 };
 
 const std::vector<size_t> stridesA = {2};
 
-const std::vector<ngraph::Shape> inputShapesB = {
-        ngraph::Shape{1, 9, 3, 3},
+const std::vector<std::vector<size_t>> inputShapesB = {
+        std::vector<size_t>{1, 9, 3, 3},
 };
 
 const std::vector<size_t> stridesB = {3};
 
-const std::vector<InferenceEngine::Precision> netPrecisions = {InferenceEngine::Precision::FP16};
+const std::vector<ov::element::Type> modelTypes = {ov::element::f16};
 
-const auto paramsA =
-        testing::Combine(testing::ValuesIn(inputShapesA), testing::ValuesIn(stridesA), testing::ValuesIn(netPrecisions),
-                         testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+const auto paramsA = testing::Combine(testing::ValuesIn(inputShapesA), testing::ValuesIn(stridesA),
+                                      testing::ValuesIn(modelTypes), testing::Values(DEVICE_NPU));
 
-const auto paramsB =
-        testing::Combine(testing::ValuesIn(inputShapesB), testing::ValuesIn(stridesB), testing::ValuesIn(netPrecisions),
-                         testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+const auto paramsB = testing::Combine(testing::ValuesIn(inputShapesB), testing::ValuesIn(stridesB),
+                                      testing::ValuesIn(modelTypes), testing::Values(DEVICE_NPU));
 
 INSTANTIATE_TEST_CASE_P(smoke_ReorgYolo_a, ReorgYoloLayerTest_NPU3700, paramsA,
                         ReorgYoloLayerTest_NPU3700::getTestCaseName);
@@ -76,5 +99,11 @@ INSTANTIATE_TEST_CASE_P(smoke_ReorgYolo_a, ReorgYoloLayerTest_NPU3720, paramsA,
 
 INSTANTIATE_TEST_CASE_P(smoke_ReorgYolo_b, ReorgYoloLayerTest_NPU3720, paramsB,
                         ReorgYoloLayerTest_NPU3720::getTestCaseName);
+
+INSTANTIATE_TEST_CASE_P(smoke_ReorgYolo_a, ReorgYoloLayerTest_NPU4000, paramsA,
+                        ReorgYoloLayerTest_NPU4000::getTestCaseName);
+
+INSTANTIATE_TEST_CASE_P(smoke_precommit_ReorgYolo_b, ReorgYoloLayerTest_NPU4000, paramsB,
+                        ReorgYoloLayerTest_NPU4000::getTestCaseName);
 
 }  // namespace

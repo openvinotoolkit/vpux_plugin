@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --init-compiler="vpu-arch=%arch%" --group-profiling-buffers %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 // CHECK-LABEL: @GroupProfilingBuffers
 module @GroupProfilingBuffers {
@@ -58,5 +58,3 @@ module @GroupProfilingBuffers {
     //CHECK-SAME:   outputs([[VAR2]] : memref<14xui32>)
     //CHECK:        return %arg1, %arg2 : memref<1x48x30x30xf32>, memref<64xui32>
 }
-
-

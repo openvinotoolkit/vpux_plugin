@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022 Intel Corporation
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -210,6 +210,8 @@ void overwriteManualStrategy(llvm::json::Value& manualStrategyValue,
                         }
                         parentVerticalFusionOp.getOperation()->setAttr(tilingStrategy, manualAttribute);
                     } else {
+                        Logger::global().warning("Overwrite manual strategy {0} for op. opName {1}, opLoc {2}",
+                                                 manualAttribute, opName, op.second->getLoc());
                         op.second->setAttr(tilingStrategy, manualAttribute);
                     }
                 } else {
@@ -223,6 +225,62 @@ void overwriteManualStrategy(llvm::json::Value& manualStrategyValue,
                     op.second->removeAttr(attrType);
                 }
             }
+        }
+    }
+}
+
+void updateAttributeValue(llvm::json::Value& json, const std::string& opName, StringRef attribute,
+                          llvm::json::Value&& newValue) {
+    auto jsonAsObject = json.getAsObject();
+    if (jsonAsObject == nullptr) {
+        return;
+    }
+
+    if (jsonAsObject->find(opName) == jsonAsObject->end()) {
+        return;
+    }
+
+    auto jsonOpsToAttributes = jsonAsObject->operator[](opName).getAsObject();
+    if (jsonOpsToAttributes == nullptr) {
+        return;
+    }
+
+    auto jsonAttrsToLayerAttribute = jsonOpsToAttributes;
+    if (jsonAttrsToLayerAttribute->find(attribute.str()) == jsonAttrsToLayerAttribute->end()) {
+        return;
+    }
+
+    (*jsonAttrsToLayerAttribute)[attribute.str()] = std::move(newValue);
+}
+
+// find tilingStrategy JSON value in JSON file via key 'opName' and update this JSON value according to operation's
+// tilingStrategy attribute
+void updateTilingStrategyInJSONForOperations(llvm::json::Value& json,
+                                             llvm::MapVector<mlir::Location, mlir::Operation*>& operations) {
+    for (auto& op : operations) {
+        auto opName = vpux::stringifyPrimaryLocation(op.first);
+        auto parentClusterOp = op.second->getParentOfType<VPU::NCEClusterTilingOp>();
+
+        // If opName is found, retrieve previous attribute from json
+        auto prevAttributeValue = getPreviousAttributeValue(json, opName, tilingStrategy);
+        if (!prevAttributeValue.has_value()) {
+            continue;
+        }
+
+        llvm::json::Value currAttributeValue(defaultNoValue);
+        if (op.second->hasAttr(tilingStrategy)) {
+            // Get value present in IR
+            currAttributeValue = convertAttrToJSON(op.second->getAttr(tilingStrategy));
+        } else if (parentClusterOp != nullptr && parentClusterOp->hasAttr(tilingStrategy)) {
+            // Get value from parentClusterOp
+            currAttributeValue = convertAttrToJSON(parentClusterOp->getAttr(tilingStrategy));
+        }
+
+        // Update tiling strategy attribute in json
+        if (prevAttributeValue.value() != currAttributeValue) {
+            Logger::global().warning("Update tiling strategy in JSON. opName {0}, opLoc {1}, from {2} to {3}", opName,
+                                     op.second->getLoc(), prevAttributeValue.value(), currAttributeValue);
+            updateAttributeValue(json, opName, tilingStrategy, std::move(currAttributeValue));
         }
     }
 }

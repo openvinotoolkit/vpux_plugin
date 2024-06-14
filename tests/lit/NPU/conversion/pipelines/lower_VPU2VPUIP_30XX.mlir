@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -97,10 +97,10 @@ func.func @NCEConv(%arg0 : tensor<1x32x16x16xf16, {mem_space = @CMX_NN, order = 
 
     return %out : tensor<1x64x14x14xf16, {mem_space = @CMX_NN, order = #NHWC}>
 
-    // CHECK-DAG:       [[WEIGHTS_TABLE:%.+]] = const.Declare memref<64x1x1x4xsi32, @CMX_NN> = dense<1>
-    // CHECK-SAME:      : tensor<64x1x1x4xsi32, {mem_space = @CMX_NN}>
     // CHECK-DAG:       [[WEIGHTS:%.+]] = const.Declare memref<64x32x3x3xf16, #NHWC, @CMX_NN> = dense<1.000000e+00>
     // CHECK-SAME:      : tensor<64x32x3x3xf16, {mem_space = @CMX_NN}>, [#const.Reorder<#NHWC>]
+    // CHECK-DAG:       [[WEIGHTS_TABLE:%.+]] = const.Declare memref<64x1x1x4xsi32, @CMX_NN> = dense<1>
+    // CHECK-SAME:      : tensor<64x1x1x4xsi32, {mem_space = @CMX_NN}>
 
     // CHECK:       [[OUT_BUF:%.+]] = memref.alloc() : memref<1x64x14x14xf16, #NHWC, @CMX_NN>
     // CHECK:       [[OUT:%.+]] = VPUIP.NCEClusterTask

@@ -14,6 +14,9 @@
 #include <transformations/utils/utils.hpp>
 #include <vector>
 #include "vpux/quantization_helpers.hpp"
+#include "vpux/utils/core/checked_cast.hpp"
+
+using vpux::checked_cast;
 
 namespace vpux {
 namespace pass {
@@ -239,7 +242,9 @@ bool FuseScaleShift::run_on_model(const std::shared_ptr<ov::Model>& m) {
                 }
                 auto weights_const = std::dynamic_pointer_cast<ov::op::v0::Constant>(
                         weights_convert->input_value(0).get_node_shared_ptr());
-                if (weights_const == nullptr) {
+                if (weights_const == nullptr ||
+                    (weights_const->get_output_element_type(0) != ov::element::Type_t::i8 &&
+                     weights_const->get_output_element_type(0) != ov::element::Type_t::u8)) {
                     continue;
                 }
                 auto weights_scale_const = std::dynamic_pointer_cast<ov::op::v0::Constant>(
@@ -341,8 +346,8 @@ bool FuseScaleShift::run_on_model(const std::shared_ptr<ov::Model>& m) {
             continue;
         }
 
-        int input_fq_levels = input_fq_node->get_levels();
-        int weights_fq_levels = weights_fq_node->get_levels();
+        auto input_fq_levels = checked_cast<int>(input_fq_node->get_levels());
+        auto weights_fq_levels = checked_cast<int>(weights_fq_node->get_levels());
 
         auto dims = convolution_weights_node->get_output_shape(0);
         if (dims.size() != 4) {
@@ -398,8 +403,10 @@ bool FuseScaleShift::run_on_model(const std::shared_ptr<ov::Model>& m) {
             input_min = 0;
         if (input_max < 0)
             input_max = 0;
-        double input_zp = calculateZeroPoint(input_min, input_max, input_fq_levels, ov::element::u8);
-        double input_scale = calculateScale(input_min, input_max, input_fq_levels);
+        auto input_zp = checked_cast<double>(calculateZeroPoint(
+                static_cast<float>(input_min), static_cast<float>(input_max), input_fq_levels, ov::element::u8));
+        double input_scale =
+                calculateScale(static_cast<float>(input_min), static_cast<float>(input_max), input_fq_levels);
         input_min = (0 - input_zp) * input_scale;
         input_max = (255 - input_zp) * input_scale;
         if (input_scale < std::numeric_limits<double>::epsilon()) {
@@ -413,15 +420,15 @@ bool FuseScaleShift::run_on_model(const std::shared_ptr<ov::Model>& m) {
         bool is_different_scales =
                 std::any_of(scaleshift_scale_data.begin(), scaleshift_scale_data.end(), is_scale_near);
 
-        replace_node_if_changed(input_fq_node1, ov::element::f32, 0, "_fused");
-        replace_node_if_changed(input_fq_node2, ov::element::f32, input_fq_levels - 1, "_fused");
-        replace_node_if_changed(input_fq_node3, ov::element::f32, input_min, "_fused");
-        replace_node_if_changed(input_fq_node4, ov::element::f32, input_max, "_fused");
+        replace_node_if_changed(input_fq_node1, ov::element::f32, 0.0F, "_fused");
+        replace_node_if_changed(input_fq_node2, ov::element::f32, checked_cast<float>(input_fq_levels - 1), "_fused");
+        replace_node_if_changed(input_fq_node3, ov::element::f32, static_cast<float>(input_min), "_fused");
+        replace_node_if_changed(input_fq_node4, ov::element::f32, static_cast<float>(input_max), "_fused");
 
         auto convolution_biases_data = (convolution_biases_node)->cast_vector<double>();
         auto convolution_weights_data = (convolution_weights_node)->cast_vector<double>();
         float new_weights_fq_ilo = 0;
-        float new_weights_fq_ihi = weights_fq_levels - 1.0;
+        float new_weights_fq_ihi = weights_fq_levels - 1.0F;
         std::vector<float> new_weights_fq_olo(OC);
         std::vector<float> new_weights_fq_ohi(OC);
         double sumOfZeroPoints = 0;
@@ -461,8 +468,8 @@ bool FuseScaleShift::run_on_model(const std::shared_ptr<ov::Model>& m) {
                 }
             }
 
-            new_weights_fq_olo[oc] = weights_min;
-            new_weights_fq_ohi[oc] = weights_max;
+            new_weights_fq_olo[oc] = static_cast<float>(weights_min);
+            new_weights_fq_ohi[oc] = static_cast<float>(weights_max);
             convolution_biases_data[oc] += scaleshift_bias_acc;
             sumOfZeroPoints += -(weights_fq_levels - 1.0) * weights_min / (weights_max - weights_min);
         }
@@ -480,9 +487,9 @@ bool FuseScaleShift::run_on_model(const std::shared_ptr<ov::Model>& m) {
 
                 ol = std::min(ol, zpl);
                 oh = std::max(oh, zph);
-                double scale = calculateScale(ol, oh, weights_fq_levels);
-                new_weights_fq_olo[oc] = ol;
-                new_weights_fq_ohi[oc] = oh;
+                double scale = calculateScale(static_cast<float>(ol), static_cast<float>(oh), weights_fq_levels);
+                new_weights_fq_olo[oc] = static_cast<float>(ol);
+                new_weights_fq_ohi[oc] = static_cast<float>(oh);
 
                 for (size_t ic = 0; ic < IC; ++ic) {
                     for (size_t h = 0; h < H; ++h) {

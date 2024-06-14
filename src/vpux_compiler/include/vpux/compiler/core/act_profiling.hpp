@@ -1,18 +1,18 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2023-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 #pragma once
 
-#include "vpux/compiler/dialect/IE/ops.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/utils/core/func_ref.hpp"
-#include "vpux/utils/core/profiling.hpp"
+#include "vpux/utils/profiling/common.hpp"
 
 #include "vpux/compiler/core/profiling.hpp"
-#include "vpux/compiler/dialect/VPUIP/dialect.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/utils.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/dialect.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
 #include <mlir/IR/IRMapping.h>
@@ -21,6 +21,8 @@
 #include <iterator>
 #include <sstream>
 #include <string>
+
+// E#73766: merge NCETiledActShaveProfiler and UniformNonTiledActShaveProfiler in the end of epic
 
 namespace vpux {
 

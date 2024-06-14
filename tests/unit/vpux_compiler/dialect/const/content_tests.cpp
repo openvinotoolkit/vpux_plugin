@@ -1,11 +1,12 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
-#include "vpux/compiler/dialect/IE/ops.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/const/attributes/content.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
+#include "vpux/compiler/utils/swizzling_utils.hpp"
 #include "vpux/compiler/utils/types.hpp"
 #include "vpux/utils/core/small_vector.hpp"
 
@@ -439,7 +440,7 @@ TEST_F(MLIR_ConstContentAttrTest, CopyTo_I4) {
     std::vector<uint8_t> tempBuf(bufSizeBytes);
     content.copyTo(MutableArrayRef(reinterpret_cast<char*>(tempBuf.data()), bufSizeBytes));
 
-    const std::vector<uint8_t> expectedVals = {0x17, 0xAF};
+    const std::vector<uint8_t> expectedVals = {0x71, 0xFA};
     EXPECT_EQ(expectedVals.size(), bufSizeBytes);
     for (size_t i = 0; i < expectedVals.size(); ++i) {
         EXPECT_EQ(expectedVals[i], tempBuf[i]);
@@ -449,10 +450,10 @@ TEST_F(MLIR_ConstContentAttrTest, CopyTo_I4) {
 TEST_F(MLIR_ConstContentAttrTest, CopyTo_I1) {
     const auto baseType = mlir::RankedTensorType::get({16}, mlir::IntegerType::get(&ctx, 8));
 
-    const std::vector<uint8_t> vals = {0, 0, 0, 1,   // 0x1
-                                       0, 0, 1, 1,   // 0x3
-                                       1, 1, 1, 1,   // 0xF
-                                       1, 1, 1, 0};  // 0xE
+    const std::vector<uint8_t> vals = {0, 0, 0, 1,   // 0x1 -> 0x8 packed
+                                       0, 0, 1, 1,   // 0x3 -> 0xC packed
+                                       1, 1, 1, 1,   // 0xF -> 0xF packed
+                                       1, 1, 1, 0};  // 0xE -> 0x7 packed
     const auto baseAttr = mlir::DenseElementsAttr::get(baseType, ArrayRef(vals));
 
     auto contentAttr = Const::ContentAttr::get(baseAttr);
@@ -469,7 +470,7 @@ TEST_F(MLIR_ConstContentAttrTest, CopyTo_I1) {
     std::vector<uint8_t> tempBuf(bufSizeBytes);
     content.copyTo(MutableArrayRef(reinterpret_cast<char*>(tempBuf.data()), bufSizeBytes));
 
-    const std::vector<uint8_t> expectedVals = {0x13, 0xFE};
+    const std::vector<uint8_t> expectedVals = {0xC8, 0x7F};
     EXPECT_EQ(expectedVals.size(), bufSizeBytes);
     for (size_t i = 0; i < expectedVals.size(); ++i) {
         EXPECT_EQ(expectedVals[i], tempBuf[i]);
@@ -576,6 +577,37 @@ TEST_F(MLIR_ConstContentAttrTest, Splat_CopyTo_I1) {
     EXPECT_EQ(expectedVals.size(), bufSizeBytes);
     for (size_t i = 0; i < expectedVals.size(); ++i) {
         EXPECT_EQ(expectedVals[i], tempBuf[i]);
+    }
+}
+
+TEST_F(MLIR_ConstContentAttrTest, CopyTo_I1_With_Enough_Buffer) {
+    const auto baseType = mlir::RankedTensorType::get({16}, mlir::IntegerType::get(&ctx, 8));
+
+    const std::vector<uint8_t> vals = {0, 0, 0, 1,   // 0x1 -> 0x8 packed
+                                       0, 0, 1, 1,   // 0x3 -> 0xC packed
+                                       1, 1, 1, 1,   // 0xF -> 0xF packed
+                                       1, 1, 1, 0};  // 0xE -> 0x7 packed
+    const auto baseAttr = mlir::DenseElementsAttr::get(baseType, ArrayRef(vals));
+
+    auto contentAttr = Const::ContentAttr::get(baseAttr);
+    ASSERT_NE(contentAttr, nullptr);
+    EXPECT_EQ(contentAttr.getType(), baseType);
+
+    contentAttr = contentAttr.convertElemType(mlir::IntegerType::get(&ctx, 1));
+    ASSERT_NE(contentAttr, nullptr);
+
+    const auto content = contentAttr.fold();
+    EXPECT_FALSE(content.isSplat());
+
+    // Offer a large enough buffer to copy the data. The data not will be packed.
+    int bufSizeBytes = 512;
+    std::vector<uint8_t> tempBuf(bufSizeBytes);
+    content.copyTo(MutableArrayRef(reinterpret_cast<char*>(tempBuf.data()), bufSizeBytes));
+
+    const std::vector<uint8_t> UnpackedVals = {0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0};
+
+    for (size_t i = 0; i < UnpackedVals.size(); ++i) {
+        EXPECT_EQ(UnpackedVals[i], tempBuf[i]);
     }
 }
 
@@ -1339,6 +1371,44 @@ TEST_F(MLIR_ConstContentAttrTest, Transpose) {
     }
 }
 
+TEST_F(MLIR_ConstContentAttrTest, MemPermute) {
+    const int64_t N = 512;
+    const int64_t C = 40;
+    const auto baseType = mlir::RankedTensorType::get({N, C}, mlir::Float32Type::get(&ctx));
+
+    const auto vals = generateValues<float>(baseType.getNumElements());
+    const auto baseAttr = mlir::DenseElementsAttr::get(baseType, ArrayRef(vals));
+
+    const auto baseContentAttr = Const::ContentAttr::get(baseAttr);
+    ASSERT_NE(baseContentAttr, nullptr);
+    EXPECT_EQ(baseContentAttr.getType(), baseType);
+
+    const auto permutationMap = mlir::AffineMap::getPermutationMap(SmallVector<unsigned>{1, 0}, &ctx);
+    const auto memPermAttr = DimsOrder::fromAffineMap(permutationMap);
+
+    const auto dstOrderMap = mlir::AffineMap::getMultiDimIdentityMap(permutationMap.getNumDims(), &ctx);
+    const auto dstOrderAttr = DimsOrder::fromAffineMap(dstOrderMap);
+
+    const auto contentAttr = baseContentAttr.memPermute(dstOrderAttr, memPermAttr);
+    ASSERT_NE(contentAttr, nullptr);
+    EXPECT_NE(contentAttr.getType(), baseType);
+
+    const auto content = contentAttr.fold();
+    EXPECT_NE(content.getType(), baseType);
+    EXPECT_FALSE(content.isSplat());
+
+    const auto contentVals = content.getValues<float>();
+    EXPECT_EQ(contentVals.size(), vals.size());
+
+    for (int64_t n = 0; n < N; ++n) {
+        for (int64_t c = 0; c < C; ++c) {
+            const auto origIndex = n * C + c * 1;
+            const auto newIndex = n * 1 + c * N;
+            EXPECT_EQ(contentVals[newIndex], vals[origIndex]) << n << " " << c << " ";
+        }
+    }
+}
+
 TEST_F(MLIR_ConstContentAttrTest, BitPackIsLast) {
     ctx.loadDialect<mlir::quant::QuantizationDialect>();
     const int64_t IN = 1;
@@ -1383,7 +1453,7 @@ TEST_F(MLIR_ConstContentAttrTest, BitPackIsLast) {
     EXPECT_NO_THROW(contentAttr.transpose(DimsOrder::NHWC));
 
     // Inserting another transformation that has the LAST position requirement
-    EXPECT_ANY_THROW(contentAttr.swizzleConstant(5, static_cast<uint64_t>(VPU::ArchKind::VPUX37XX)));
+    EXPECT_ANY_THROW(contentAttr.swizzleConstant(5, static_cast<uint64_t>(VPU::ArchKind::NPU37XX)));
 
     const auto quantType =
             mlir::quant::UniformQuantizedType::get(mlir::quant::QuantizationFlags::Signed, getSInt8Type(&ctx),
@@ -1620,7 +1690,7 @@ TEST_F(MLIR_ConstContentAttrTest, PositionRequirement) {
     const auto contentAttr1 = baseContentAttr.rescale(10.0);
 
     // Inserting a transformation that has the LAST position requirement
-    const auto contentAttr2 = contentAttr1.swizzleConstant(5, static_cast<uint64_t>(VPU::ArchKind::VPUX37XX));
+    const auto contentAttr2 = contentAttr1.swizzleConstant(5, static_cast<uint64_t>(VPU::ArchKind::NPU37XX));
 
     // Inserting a transformation that has the PREFERRED_LAST position requirement
     const auto contentAttr3 = contentAttr2.sparsify(false);
@@ -1793,6 +1863,381 @@ TEST_F(MLIR_ConstContentAttrTest, GetTransformationsRangeDuplicatedTransformatio
     ASSERT_EQ(tailTransformations.size(), 2);
     EXPECT_EQ(tailTransformations[0].getTransformationName(), "Reshape");
     EXPECT_EQ(tailTransformations[1].getTransformationName(), "SubView");
+}
+
+TEST_F(MLIR_ConstContentAttrTest, SwizzleConstant_SubBytes_I1) {
+    const int64_t IN = 1;
+    const int64_t IC = 1;
+    const int64_t IH = 4;
+    const int64_t IW = 4;
+
+    const auto baseType = mlir::RankedTensorType::get({IN, IC, IH, IW}, mlir::IntegerType::get(&ctx, 8));
+
+    const std::vector<uint8_t> vals = {0, 0, 0, 1,   // 0x1 -> 0x8 packed
+                                       0, 0, 1, 1,   // 0x3 -> 0xC packed
+                                       1, 1, 1, 1,   // 0xF -> 0xF packed
+                                       1, 1, 1, 0};  // 0xE -> 0x7 packed
+    const auto baseAttr = mlir::DenseElementsAttr::get(baseType, ArrayRef(vals));
+    const auto baseContentAttr = Const::ContentAttr::get(baseAttr);
+    ASSERT_NE(baseContentAttr, nullptr);
+    EXPECT_EQ(baseContentAttr.getType(), baseType);
+
+    const auto contentAttr = baseContentAttr.convertElemType(mlir::IntegerType::get(&ctx, 1));
+    const auto contentType = contentAttr.getType();
+    const auto contentAttr1 = contentAttr.swizzleConstant(5, static_cast<uint64_t>(VPU::ArchKind::NPU37XX));
+
+    const auto content = contentAttr1.fold();
+    EXPECT_FALSE(content.isSplat());
+    VPU::ArchKind archKind = static_cast<VPU::ArchKind>(VPU::ArchKind::NPU37XX);
+    auto acheAlignSize = static_cast<size_t>(
+            alignSizeForSwizzling(contentType.getTotalAllocSize().count(), getSizeAlignmentForSwizzling(archKind)));
+    const auto bufSizeBytes = checked_cast<size_t>(content.getType().getTotalAllocSize().count());
+    std::vector<uint8_t> tempBuf(bufSizeBytes);
+    content.copyTo(MutableArrayRef(reinterpret_cast<char*>(tempBuf.data()), bufSizeBytes));
+    const std::vector<uint8_t> expectedVals = {0xC8, 0x7F};
+
+    EXPECT_EQ(acheAlignSize, static_cast<size_t>(bufSizeBytes));
+    for (size_t i = 0; i < expectedVals.size(); ++i) {
+        EXPECT_EQ(expectedVals[i], tempBuf[i]);
+    }
+}
+
+TEST_F(MLIR_ConstContentAttrTest, SwizzleConstant_SubBytes_I4) {
+    const int64_t IN = 1;
+    const int64_t IC = 1;
+    const int64_t IH = 2;
+    const int64_t IW = 2;
+
+    const auto baseType = mlir::RankedTensorType::get({IN, IC, IH, IW}, mlir::IntegerType::get(&ctx, 8));
+
+    const auto vals = std::vector<uint8_t>{1, 7,     // 0x17
+                                           10, 15};  // 0xAF
+    const auto baseAttr = mlir::DenseElementsAttr::get(baseType, ArrayRef(vals));
+
+    const auto baseContentAttr = Const::ContentAttr::get(baseAttr);
+    ASSERT_NE(baseContentAttr, nullptr);
+    EXPECT_EQ(baseContentAttr.getType(), baseType);
+
+    const auto contentAttr = baseContentAttr.convertElemType(mlir::IntegerType::get(&ctx, 4));
+    ASSERT_NE(contentAttr, nullptr);
+
+    const auto contentType = contentAttr.getType();
+    ASSERT_NE(contentType, nullptr);
+
+    const auto contentAttr1 = contentAttr.swizzleConstant(5, static_cast<uint64_t>(VPU::ArchKind::NPU37XX));
+    ASSERT_NE(contentAttr1, nullptr);
+
+    const auto content = contentAttr1.fold();
+    EXPECT_FALSE(content.isSplat());
+
+    VPU::ArchKind archKind = static_cast<VPU::ArchKind>(VPU::ArchKind::NPU37XX);
+    auto acheAlignSize = static_cast<size_t>(
+            alignSizeForSwizzling(contentType.getTotalAllocSize().count(), getSizeAlignmentForSwizzling(archKind)));
+
+    const auto bufSizeBytes = checked_cast<size_t>(content.getType().getTotalAllocSize().count());
+    std::vector<uint8_t> tempBuf(bufSizeBytes);
+    content.copyTo(MutableArrayRef(reinterpret_cast<char*>(tempBuf.data()), bufSizeBytes));
+
+    const std::vector<uint8_t> expectedVals = {0x71, 0xFA};
+
+    EXPECT_EQ(acheAlignSize, static_cast<int>(bufSizeBytes));
+    for (size_t i = 0; i < expectedVals.size(); ++i) {
+        EXPECT_EQ(expectedVals[i], tempBuf[i]);
+    }
+}
+
+TEST_F(MLIR_ConstContentAttrTest, SwizzleConstant_U8) {
+    const int64_t IN = 1;
+    const int64_t IC = 1;
+    const int64_t IH = 2;
+    const int64_t IW = 2;
+
+    const auto baseType = mlir::RankedTensorType::get({IN, IC, IH, IW}, mlir::IntegerType::get(&ctx, 8));
+
+    const auto vals = std::vector<uint8_t>{255, 100, 0, 1};
+    const auto baseAttr = mlir::DenseElementsAttr::get(baseType, ArrayRef(vals));
+    const auto baseContentAttr = Const::ContentAttr::get(baseAttr);
+    ASSERT_NE(baseContentAttr, nullptr);
+    EXPECT_EQ(baseContentAttr.getType(), baseType);
+
+    const auto contentAttr = baseContentAttr.swizzleConstant(5, static_cast<uint64_t>(VPU::ArchKind::NPU37XX));
+
+    const auto contentType = contentAttr.getType();
+
+    const auto content = contentAttr.fold();
+    EXPECT_FALSE(content.isSplat());
+    VPU::ArchKind archKind = static_cast<VPU::ArchKind>(VPU::ArchKind::NPU37XX);
+    auto acheAlignSize = static_cast<size_t>(
+            alignSizeForSwizzling(contentType.getTotalAllocSize().count(), getSizeAlignmentForSwizzling(archKind)));
+    const auto bufSizeBytes = checked_cast<size_t>(content.getType().getTotalAllocSize().count());
+    std::vector<uint8_t> tempBuf(bufSizeBytes);
+    content.copyTo(MutableArrayRef(reinterpret_cast<char*>(tempBuf.data()), bufSizeBytes));
+    const std::vector<uint8_t> expectedVals = {255, 100, 0, 1};
+
+    EXPECT_EQ(acheAlignSize, static_cast<size_t>(bufSizeBytes));
+    for (size_t i = 0; i < expectedVals.size(); ++i) {
+        EXPECT_EQ(expectedVals[i], tempBuf[i]);
+    }
+}
+
+TEST_F(MLIR_ConstContentAttrTest, SwizzleConstant_FP32) {
+    const int64_t IN = 1;
+    const int64_t IC = 1;
+    const int64_t IH = 2;
+    const int64_t IW = 2;
+
+    const auto baseType = mlir::RankedTensorType::get({IN, IC, IH, IW}, mlir::Float32Type::get(&ctx));
+
+    const auto vals = std::vector<float>{700, 800, 900, 900};
+    const auto baseAttr = mlir::DenseElementsAttr::get(baseType, ArrayRef(vals));
+    const auto baseContentAttr = Const::ContentAttr::get(baseAttr);
+    ASSERT_NE(baseContentAttr, nullptr);
+    EXPECT_EQ(baseContentAttr.getType(), baseType);
+
+    const auto contentAttr = baseContentAttr.swizzleConstant(5, static_cast<uint64_t>(VPU::ArchKind::NPU37XX));
+
+    const auto contentType = contentAttr.getType();
+
+    const auto content = contentAttr.fold();
+    EXPECT_FALSE(content.isSplat());
+    VPU::ArchKind archKind = static_cast<VPU::ArchKind>(VPU::ArchKind::NPU37XX);
+    auto acheAlignSize = static_cast<size_t>(
+            alignSizeForSwizzling(contentType.getTotalAllocSize().count(), getSizeAlignmentForSwizzling(archKind)));
+    const auto bufSizeBytes = checked_cast<size_t>(content.getType().getTotalAllocSize().count());
+    std::vector<float> tempBuf(bufSizeBytes);
+    content.copyTo(MutableArrayRef(reinterpret_cast<char*>(tempBuf.data()), bufSizeBytes));
+    const std::vector<float> expectedVals = {700, 800, 900, 900};
+
+    EXPECT_EQ(acheAlignSize, static_cast<size_t>(bufSizeBytes));
+    for (size_t i = 0; i < expectedVals.size(); ++i) {
+        EXPECT_EQ(expectedVals[i], tempBuf[i]);
+    }
+}
+
+TEST_F(MLIR_ConstContentAttrTest, SwizzleConstant_SubBytes_Splat_I1) {
+    const int64_t IN = 1;
+    const int64_t IC = 1;
+    const int64_t IH = 4;
+    const int64_t IW = 4;
+
+    const auto baseType = mlir::RankedTensorType::get({IN, IC, IH, IW}, mlir::IntegerType::get(&ctx, 8));
+
+    const std::vector<uint8_t> vals = {1};
+    const auto baseAttr = mlir::DenseElementsAttr::get(baseType, ArrayRef(vals));
+
+    auto baseContentAttr = Const::ContentAttr::get(baseAttr);
+    ASSERT_NE(baseContentAttr, nullptr);
+    EXPECT_EQ(baseContentAttr.getType(), baseType);
+
+    const auto contentAttr = baseContentAttr.convertElemType(mlir::IntegerType::get(&ctx, 1));
+    ASSERT_NE(contentAttr, nullptr);
+
+    const auto contentType = contentAttr.getType();
+    ASSERT_NE(contentType, nullptr);
+
+    const auto contentAttr1 = contentAttr.swizzleConstant(5, static_cast<uint64_t>(VPU::ArchKind::NPU37XX));
+
+    const auto content = contentAttr1.fold();
+    EXPECT_FALSE(content.isSplat());
+
+    VPU::ArchKind archKind = static_cast<VPU::ArchKind>(VPU::ArchKind::NPU37XX);
+    auto acheAlignSize = static_cast<size_t>(
+            alignSizeForSwizzling(contentType.getTotalAllocSize().count(), getSizeAlignmentForSwizzling(archKind)));
+
+    const auto bufSizeBytes = checked_cast<size_t>(content.getType().getTotalAllocSize().count());
+    std::vector<uint8_t> tempBuf(bufSizeBytes);
+    content.copyTo(MutableArrayRef(reinterpret_cast<char*>(tempBuf.data()), bufSizeBytes));
+
+    const std::vector<uint8_t> expectedVals = {0xFF, 0xFF};
+
+    EXPECT_EQ(acheAlignSize, static_cast<int>(bufSizeBytes));
+    for (size_t i = 0; i < expectedVals.size(); ++i) {
+        EXPECT_EQ(expectedVals[i], tempBuf[i]);
+    }
+}
+
+TEST_F(MLIR_ConstContentAttrTest, SwizzleConstant_SubBytes_Splat_I4) {
+    const int64_t IN = 1;
+    const int64_t IC = 1;
+    const int64_t IH = 4;
+    const int64_t IW = 4;
+
+    const auto baseType = mlir::RankedTensorType::get({IN, IC, IH, IW}, mlir::IntegerType::get(&ctx, 8));
+
+    const std::vector<uint8_t> vals = {10};
+    const auto baseAttr = mlir::DenseElementsAttr::get(baseType, ArrayRef(vals));
+
+    auto baseContentAttr = Const::ContentAttr::get(baseAttr);
+    ASSERT_NE(baseContentAttr, nullptr);
+    EXPECT_EQ(baseContentAttr.getType(), baseType);
+
+    const auto contentAttr = baseContentAttr.convertElemType(mlir::IntegerType::get(&ctx, 4));
+    ASSERT_NE(contentAttr, nullptr);
+
+    const auto contentType = contentAttr.getType();
+    ASSERT_NE(contentType, nullptr);
+
+    const auto contentAttr1 = contentAttr.swizzleConstant(5, static_cast<uint64_t>(VPU::ArchKind::NPU37XX));
+
+    const auto content = contentAttr1.fold();
+    EXPECT_FALSE(content.isSplat());
+
+    VPU::ArchKind archKind = static_cast<VPU::ArchKind>(VPU::ArchKind::NPU37XX);
+    auto acheAlignSize = static_cast<size_t>(
+            alignSizeForSwizzling(contentType.getTotalAllocSize().count(), getSizeAlignmentForSwizzling(archKind)));
+
+    const auto bufSizeBytes = checked_cast<size_t>(content.getType().getTotalAllocSize().count());
+    std::vector<uint8_t> tempBuf(bufSizeBytes);
+    content.copyTo(MutableArrayRef(reinterpret_cast<char*>(tempBuf.data()), bufSizeBytes));
+
+    const std::vector<uint8_t> expectedVals = {0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA};
+
+    EXPECT_EQ(acheAlignSize, static_cast<int>(bufSizeBytes));
+    for (size_t i = 0; i < expectedVals.size(); ++i) {
+        EXPECT_EQ(expectedVals[i], tempBuf[i]);
+    }
+}
+
+TEST_F(MLIR_ConstContentAttrTest, SwizzleConstant_Splat_U8) {
+    const int64_t IN = 1;
+    const int64_t IC = 1;
+    const int64_t IH = 2;
+    const int64_t IW = 2;
+
+    const auto baseType = mlir::RankedTensorType::get({IN, IC, IH, IW}, mlir::IntegerType::get(&ctx, 8));
+
+    const std::vector<uint8_t> vals = {10};
+    const auto baseAttr = mlir::DenseElementsAttr::get(baseType, ArrayRef(vals));
+
+    auto baseContentAttr = Const::ContentAttr::get(baseAttr);
+    ASSERT_NE(baseContentAttr, nullptr);
+    EXPECT_EQ(baseContentAttr.getType(), baseType);
+
+    const auto contentAttr = baseContentAttr.swizzleConstant(5, static_cast<uint64_t>(VPU::ArchKind::NPU37XX));
+
+    const auto contentType = contentAttr.getType();
+    ASSERT_NE(contentType, nullptr);
+
+    const auto content = contentAttr.fold();
+    EXPECT_FALSE(content.isSplat());
+
+    VPU::ArchKind archKind = static_cast<VPU::ArchKind>(VPU::ArchKind::NPU37XX);
+    auto acheAlignSize = static_cast<size_t>(
+            alignSizeForSwizzling(contentType.getTotalAllocSize().count(), getSizeAlignmentForSwizzling(archKind)));
+
+    const auto bufSizeBytes = checked_cast<size_t>(content.getType().getTotalAllocSize().count());
+    std::vector<uint8_t> tempBuf(bufSizeBytes);
+    content.copyTo(MutableArrayRef(reinterpret_cast<char*>(tempBuf.data()), bufSizeBytes));
+
+    const std::vector<uint8_t> expectedVals = {0x0A, 0x0A, 0x0A, 0x0A};
+
+    EXPECT_EQ(acheAlignSize, static_cast<int>(bufSizeBytes));
+    for (size_t i = 0; i < expectedVals.size(); ++i) {
+        EXPECT_EQ(expectedVals[i], tempBuf[i]);
+    }
+}
+
+TEST_F(MLIR_ConstContentAttrTest, SwizzleConstant_Splat_FP32) {
+    const int64_t IN = 1;
+    const int64_t IC = 1;
+    const int64_t IH = 2;
+    const int64_t IW = 2;
+
+    const auto baseType = mlir::RankedTensorType::get({IN, IC, IH, IW}, mlir::Float32Type::get(&ctx));
+
+    const std::vector<float> vals = {10};
+    const auto baseAttr = mlir::DenseElementsAttr::get(baseType, ArrayRef(vals));
+
+    auto baseContentAttr = Const::ContentAttr::get(baseAttr);
+    ASSERT_NE(baseContentAttr, nullptr);
+    EXPECT_EQ(baseContentAttr.getType(), baseType);
+
+    const auto contentAttr = baseContentAttr.swizzleConstant(5, static_cast<uint64_t>(VPU::ArchKind::NPU37XX));
+
+    const auto contentType = contentAttr.getType();
+    ASSERT_NE(contentType, nullptr);
+
+    const auto content = contentAttr.fold();
+    EXPECT_FALSE(content.isSplat());
+
+    VPU::ArchKind archKind = static_cast<VPU::ArchKind>(VPU::ArchKind::NPU37XX);
+    auto acheAlignSize = static_cast<size_t>(
+            alignSizeForSwizzling(contentType.getTotalAllocSize().count(), getSizeAlignmentForSwizzling(archKind)));
+
+    const auto bufSizeBytes = checked_cast<size_t>(content.getType().getTotalAllocSize().count());
+    std::vector<float> tempBuf(bufSizeBytes);
+    content.copyTo(MutableArrayRef(reinterpret_cast<char*>(tempBuf.data()), bufSizeBytes));
+
+    const std::vector<float> expectedVals = {10, 10, 10, 10};
+
+    EXPECT_EQ(acheAlignSize, static_cast<int>(bufSizeBytes));
+
+    for (size_t i = 0; i < expectedVals.size(); ++i) {
+        EXPECT_EQ(expectedVals[i], tempBuf[i]);
+    }
+}
+
+TEST_F(MLIR_ConstContentAttrTest, ScalarMultInverse) {
+    const auto baseType = mlir::RankedTensorType::get({1, 2, 3, 4}, mlir::Float32Type::get(&ctx));
+
+    const auto vals = [&]() {
+        auto values = generateValues<float>(baseType.getNumElements());
+        values[0] = 42.f;  // Note: change values[0] (that is 0.f) to avoid divide-by-zero
+        return values;
+    }();
+    std::vector<float> expectedVals(vals.size());
+    std::transform(vals.begin(), vals.end(), expectedVals.begin(), [&](float item) {
+        return 1.f / item;
+    });
+
+    const auto baseAttr = mlir::DenseElementsAttr::get(baseType, ArrayRef(vals));
+
+    const auto baseContentAttr = Const::ContentAttr::get(baseAttr);
+    ASSERT_NE(baseContentAttr, nullptr);
+    EXPECT_EQ(baseContentAttr.getType(), baseType);
+
+    const auto contentAttr = baseContentAttr.scalarMultInverse();
+    ASSERT_NE(contentAttr, nullptr);
+    EXPECT_EQ(contentAttr.getType(), baseType);
+
+    const auto content = contentAttr.fold();
+    EXPECT_EQ(content.getType(), baseType);
+    EXPECT_FALSE(content.isSplat());
+
+    const auto contentVals = content.getValues<float>();
+    EXPECT_EQ(contentVals.size(), vals.size());
+
+    for (size_t i = 0; i < contentVals.size(); ++i) {
+        EXPECT_EQ(contentVals[i], expectedVals[i]);
+    }
+}
+
+TEST_F(MLIR_ConstContentAttrTest, ScalarMultInverse_Splat) {
+    const auto baseType = mlir::RankedTensorType::get({1, 2, 3, 4}, mlir::Float32Type::get(&ctx));
+
+    const std::vector<float> vals{42.f};
+    const std::vector<float> expectedVals{1.f / vals[0]};
+
+    const auto baseAttr = mlir::DenseElementsAttr::get(baseType, ArrayRef(vals));
+
+    const auto baseContentAttr = Const::ContentAttr::get(baseAttr);
+    ASSERT_NE(baseContentAttr, nullptr);
+    EXPECT_EQ(baseContentAttr.getType(), baseType);
+
+    const auto contentAttr = baseContentAttr.scalarMultInverse();
+    ASSERT_NE(contentAttr, nullptr);
+    EXPECT_EQ(contentAttr.getType(), baseType);
+
+    const auto content = contentAttr.fold();
+    EXPECT_EQ(content.getType(), baseType);
+    EXPECT_TRUE(content.isSplat());
+
+    const auto contentVals = content.getValues<float>();
+    EXPECT_EQ(contentVals.size(), static_cast<size_t>(baseType.getNumElements()));
+
+    for (size_t i = 0; i < expectedVals.size(); ++i) {
+        EXPECT_EQ(expectedVals[i], contentVals[i]);
+    }
 }
 
 using CreateElementsAttr = std::function<mlir::ElementsAttr(mlir::MLIRContext*)>;

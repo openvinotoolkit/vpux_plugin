@@ -1,64 +1,97 @@
 //
-// Copyright (C) 2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
-#include "single_layer_tests/grid_sample.hpp"
+#include "single_op_tests/grid_sample.hpp"
 #include <common/functions.h>
+#include <common_test_utils/ov_tensor_utils.hpp>
 #include <vector>
-#include "vpu_ov1_layer_test.hpp"
+#include "common_test_utils/test_constants.hpp"
+#include "vpu_ov2_layer_test.hpp"
 
-namespace LayerTestsDefinitions {
+using namespace ov::test::utils;
 
-class GridSampleLayerTestCommon : public GridSampleLayerTest, virtual public LayerTestsUtils::VpuOv1LayerTestsCommon {
-    void SetUp() override {
-        inPrc = InferenceEngine::Precision::FP16;
-        outPrc = InferenceEngine::Precision::FP16;
-        GridSampleLayerTest::SetUp();
-    }
+namespace ov {
+namespace test {
 
-    void GenerateInputs() override {
-        inputs.clear();
-        const auto& inputsInfo = executableNetwork.GetInputsInfo();
-        const auto& functionParams = function->get_parameters();
-        for (size_t i = 0; i < functionParams.size(); ++i) {
-            const auto& param = functionParams[i];
-            const auto infoIt = inputsInfo.find(param->get_friendly_name());
-            GTEST_ASSERT_NE(infoIt, inputsInfo.cend());
-            InferenceEngine::InputInfo::CPtr info = infoIt->second;
-            auto blob = GenerateInput(*info);
+class GridSampleLayerTestCommon : public GridSampleLayerTest, virtual public VpuOv2LayerTest {
+    void generate_inputs(const std::vector<ov::Shape>& targetInputStaticShapes) override {
+        VpuOv2LayerTest::inputs.clear();
+        const auto& funcInputs = VpuOv2LayerTest::function->inputs();
+        auto itTargetShape = targetInputStaticShapes.begin();
+        for (size_t i = 0; i < funcInputs.size(); ++i) {
+            const auto& funcInput = funcInputs[i];
+            ov::Tensor tensor;
+
             if (i > 0) {
-                blob = FuncTestUtils::createAndFillBlobFloatNormalDistribution(info->getTensorDesc(), 0, 0.5);
+                tensor = create_and_fill_tensor_normal_distribution(funcInput.get_element_type(), *itTargetShape, 0,
+                                                                    0.5);
             } else {
-                blob = FuncTestUtils::createAndFillBlob(info->getTensorDesc(), 10, 0);
+                tensor = create_and_fill_tensor(funcInput.get_element_type(), *itTargetShape, 10, 0);
             }
-            inputs.push_back(blob);
+            VpuOv2LayerTest::inputs.insert({funcInput.get_node_shared_ptr(), tensor});
+            itTargetShape++;
         }
+    }
+    void SetUp() override {
+        ov::Shape dataShape, gridShape;
+        bool alignCorners;
+        ov::op::v9::GridSample::InterpolationMode mode;
+        ov::op::v9::GridSample::PaddingMode paddingMode;
+        ov::element::Type modelType, gridType;
+
+        std::tie(dataShape, gridShape, alignCorners, mode, paddingMode, modelType, gridType, std::ignore) =
+                this->GetParam();
+
+        VpuOv2LayerTest::init_input_shapes(static_shapes_to_test_representation({dataShape, gridShape}));
+
+        auto data = std::make_shared<ov::op::v0::Parameter>(modelType, VpuOv2LayerTest::inputDynamicShapes[0]);
+        // C#133057
+        // `grid` element type should not be hardcoded to `f32`
+        auto grid = std::make_shared<ov::op::v0::Parameter>(ov::element::f32, VpuOv2LayerTest::inputDynamicShapes[1]);
+        auto gridSample = std::make_shared<ov::op::v9::GridSample>(
+                data, grid, ov::op::v9::GridSample::Attributes(alignCorners, mode, paddingMode));
+
+        VpuOv2LayerTest::function = std::make_shared<ov::Model>(std::make_shared<ov::op::v0::Result>(gridSample),
+                                                                ov::ParameterVector{data, grid}, "GridSample");
+    }
+    void TearDown() override {
+        VpuOv2LayerTest::TearDown();
     }
 };
 
 class GridSampleLayerTest_NPU3720 : public GridSampleLayerTestCommon {};
+class GridSampleLayerTest_NPU4000 : public GridSampleLayerTestCommon {};
 
 TEST_P(GridSampleLayerTest_NPU3720, HW) {
-    setPlatformVPU3720();
-    setDefaultHardwareModeMLIR();
-    Run();
+    VpuOv2LayerTest::abs_threshold = 0.8;
+    VpuOv2LayerTest::setDefaultHardwareMode();
+    VpuOv2LayerTest::run(Platform::NPU3720);
 }
 
-}  // namespace LayerTestsDefinitions
+TEST_P(GridSampleLayerTest_NPU4000, HW) {
+    VpuOv2LayerTest::abs_threshold = 0.8;
+    VpuOv2LayerTest::setDefaultHardwareMode();
+    VpuOv2LayerTest::run(Platform::NPU4000);
+}
 
-using namespace LayerTestsDefinitions;
+}  // namespace test
+}  // namespace ov
+
+using namespace ov::test;
+
 using GridSampleOp = ov::op::v9::GridSample;
 
 namespace {
 
-const std::vector<std::vector<size_t>> dataShapes = {{2, 2, 3, 4}};
+const std::vector<ov::Shape> dataShapes = {{2, 2, 3, 4}};
 
-const std::vector<std::vector<size_t>> gridShapes = {{2, 2, 3, 2}};
+const std::vector<ov::Shape> gridShapes = {{2, 2, 3, 2}};
 
-const std::vector<std::vector<size_t>> dataShapesTiling = {{1, 2, 800, 800}};
+const std::vector<ov::Shape> dataShapesTiling = {{1, 2, 800, 800}};
 
-const std::vector<std::vector<size_t>> gridShapesTiling = {{1, 2, 2, 2}};
+const std::vector<ov::Shape> gridShapesTiling = {{1, 2, 2, 2}};
 
 const std::vector<bool> alignCorners = {true, false};
 
@@ -71,29 +104,36 @@ const std::vector<GridSampleOp::InterpolationMode> modes = {
 const std::vector<GridSampleOp::PaddingMode> paddingModes = {
         GridSampleOp::PaddingMode::ZEROS, GridSampleOp::PaddingMode::BORDER, GridSampleOp::PaddingMode::REFLECTION};
 
-const std::vector<InferenceEngine::Precision> dataPrecisions = {
-        InferenceEngine::Precision::FP16,
+const std::vector<ov::element::Type> dataTypes = {
+        ov::element::f16,
 };
 
-const std::vector<InferenceEngine::Precision> gridPrecisions = {
-        InferenceEngine::Precision::FP16,
+const std::vector<ov::element::Type> gridTypes = {
+        ov::element::f16,
 };
 
-const auto params = testing::Combine(
-        ::testing::ValuesIn(dataShapes), ::testing::ValuesIn(gridShapes), ::testing::ValuesIn(alignCorners),
-        ::testing::ValuesIn(modes), ::testing::ValuesIn(paddingModes), ::testing::ValuesIn(dataPrecisions),
-        ::testing::ValuesIn(gridPrecisions), ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+const auto params = testing::Combine(::testing::ValuesIn(dataShapes), ::testing::ValuesIn(gridShapes),
+                                     ::testing::ValuesIn(alignCorners), ::testing::ValuesIn(modes),
+                                     ::testing::ValuesIn(paddingModes), ::testing::ValuesIn(dataTypes),
+                                     ::testing::ValuesIn(gridTypes), ::testing::Values(DEVICE_NPU));
 
-const auto paramsTiling = testing::Combine(
-        ::testing::ValuesIn(dataShapesTiling), ::testing::ValuesIn(gridShapesTiling), ::testing::ValuesIn(alignCorners),
-        ::testing::ValuesIn(modes), ::testing::ValuesIn(paddingModes), ::testing::ValuesIn(dataPrecisions),
-        ::testing::ValuesIn(gridPrecisions), ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+const auto paramsTiling = testing::Combine(::testing::ValuesIn(dataShapesTiling), ::testing::ValuesIn(gridShapesTiling),
+                                           ::testing::ValuesIn(alignCorners), ::testing::ValuesIn(modes),
+                                           ::testing::ValuesIn(paddingModes), ::testing::ValuesIn(dataTypes),
+                                           ::testing::ValuesIn(gridTypes), ::testing::Values(DEVICE_NPU));
 
 // NPU3720
 INSTANTIATE_TEST_SUITE_P(smoke_precommit_GridSample, GridSampleLayerTest_NPU3720, params,
                          GridSampleLayerTest::getTestCaseName);
 
 INSTANTIATE_TEST_SUITE_P(smoke_precommit_GridSample_Tiling, GridSampleLayerTest_NPU3720, paramsTiling,
+                         GridSampleLayerTest::getTestCaseName);
+
+// NPU4000
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_GridSample, GridSampleLayerTest_NPU4000, params,
+                         GridSampleLayerTest::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_GridSample_Tiling, GridSampleLayerTest_NPU4000, paramsTiling,
                          GridSampleLayerTest::getTestCaseName);
 
 }  // namespace

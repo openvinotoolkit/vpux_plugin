@@ -1,3 +1,5 @@
+//
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -12,7 +14,7 @@
 // check for regressions in the VPUIP dialect.
 //
 
-module @Test attributes {VPU.arch = #VPU.arch_kind<VPUX37XX>, VPU.compilationMode = #VPU.compilation_mode<ReferenceHW>} {
+module @Test attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilationMode = #VPU.compilation_mode<ReferenceHW>} {
 
 IE.MemoryResource 31457280 bytes of @DDR {VPU.bandwidth = 8 : i64, VPU.derateFactor = 6.000000e-01 : f64}
 IE.ExecutorResource 1 of @DMA_NN
@@ -49,8 +51,8 @@ module @VPU.SW {
     // `memref` will be translated to `MemRefData`, while raw scalars will be translated as is.
     func.func private @builtin_hswish(%input : memref<*xf16>, %output : memref<*xf16>)
         attributes {
-            VPU.kernel_code = "hswish_fp16.cpp",
-            VPU.kernel_entry = "hswish_fp16"
+            VPU.kernel_code = "activation_hswish.cpp",
+            VPU.kernel_entry = "activation_hswish"
         }
 
     // management kernel definition
@@ -75,7 +77,7 @@ func.func @main(%in0: memref<1x1x1x1000xf16>, %in1: memref<1x1x1x1000xf16>) -> m
     }
 
     VPURT.Task waits(%b0  : !VPURT.Barrier) updates(%b1  : !VPURT.Barrier) {
-        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
                     @VPU.SW::@builtin_hswish
                     inputs(%in_tile0_cmx as %arg0: memref<1x1x1x1000xf16, [@CMX_NN, 0]>)
                     outputs(%out_tile0_cmx as %arg1: memref<1x1x1x1000xf16, [@CMX_NN, 0]>)
@@ -105,7 +107,7 @@ func.func @main(%in0: memref<1x1x1x1000xf16>, %in1: memref<1x1x1x1000xf16>) -> m
     }
 
     VPURT.Task waits(%b2  : !VPURT.Barrier) updates(%b3  : !VPURT.Barrier) {
-        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
                     @VPU.SW::@builtin_hswish
                     inputs(%in_tile1_cmx as %arg0: memref<1x1x1x1000xf16, [@CMX_NN, 0]>)
                     outputs(%out_tile1_cmx as %arg1: memref<1x1x1x1000xf16, [@CMX_NN, 0]>)
@@ -135,7 +137,7 @@ func.func @main(%in0: memref<1x1x1x1000xf16>, %in1: memref<1x1x1x1000xf16>) -> m
     }
 
     VPURT.Task waits(%b4  : !VPURT.Barrier) updates(%b5  : !VPURT.Barrier) {
-        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
                     @VPU.SW::@builtin_hswish
                     inputs(%in_tile2_cmx as %arg0: memref<1x1x1x1000xf16, [@CMX_NN, 0]>)
                     outputs(%out_tile2_cmx as %arg1: memref<1x1x1x1000xf16, [@CMX_NN, 0]>)

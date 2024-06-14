@@ -1,14 +1,9 @@
 //
-// Copyright (C) Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
-#include <vpu_ov2_layer_test.hpp>
-
-#include <ov_models/builders.hpp>
-#include <ov_models/utils/ov_helpers.hpp>
-#include <shared_test_classes/base/layer_test_utils.hpp>
-#include "subgraph_tests/nce_tasks.hpp"
+#include "shared_test_classes/subgraph/nce_tasks.hpp"
 
 namespace ov::test {
 
@@ -39,15 +34,35 @@ class PermuteQuantizeTestCommon :
         function = preProc.build();
         rel_threshold = 0.5f;
     }
+
+public:
+    static std::string getTestCaseName(
+            const testing::TestParamInfo<
+                    std::tuple<ov::Shape, ov::element::Type, ov::element::Type, ov::Layout, ov::Layout>>& obj) {
+        const std::string sep = "_";
+        std::ostringstream result;
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
+        result << "TestIdx=" << obj.index << sep;
+        return result.str();
+    };
 };
 
 class PermuteQuantizeTest_NPU3720 : public PermuteQuantizeTestCommon {};
+class PermuteQuantizeTest_NPU4000 : public PermuteQuantizeTestCommon {};
 
 TEST_P(PermuteQuantizeTest_NPU3720, HW) {
     setDefaultHardwareMode();
     configuration["PERFORMANCE_HINT"] = "LATENCY";
     configuration["NPU_DPU_GROUPS"] = "2";
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
+}
+
+TEST_P(PermuteQuantizeTest_NPU4000, HW) {
+    setDefaultHardwareMode();
+    configuration["PERFORMANCE_HINT"] = "THROUGHPUT";
+    configuration["NPU_DPU_GROUPS"] = "1";
+    configuration["NPU_DMA_ENGINES"] = "1";
+    run(Platform::NPU4000);
 }
 
 const std::vector<ov::Shape> inputShapes = {
@@ -57,6 +72,12 @@ const std::vector<ov::Shape> inputShapes = {
 INSTANTIATE_TEST_SUITE_P(smoke_PermuteQuantizeTest, PermuteQuantizeTest_NPU3720,
                          ::testing::Combine(::testing::ValuesIn(inputShapes), ::testing::Values(ov::element::f16),
                                             ::testing::Values(ov::element::f16), ::testing::Values(ov::Layout("NCHW")),
-                                            ::testing::Values(ov::Layout("NHWC"))));
+                                            ::testing::Values(ov::Layout("NHWC"))),
+                         PermuteQuantizeTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_PermuteQuantizeTest, PermuteQuantizeTest_NPU4000,
+                         ::testing::Combine(::testing::ValuesIn(inputShapes), ::testing::Values(ov::element::f16),
+                                            ::testing::Values(ov::element::f16), ::testing::Values(ov::Layout("NCHW")),
+                                            ::testing::Values(ov::Layout("NHWC"))),
+                         PermuteQuantizeTest_NPU4000::getTestCaseName);
 
 }  // namespace ov::test

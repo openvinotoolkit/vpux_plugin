@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022 Intel Corporation
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -105,9 +105,9 @@ Const::Content vpux::Const::ReverseAttr::transform(vpux::Const::Content& input) 
     } else if (inputElementType.isUnsignedInteger(8)) {
         return reverseImpl<uint8_t>(input, outputType, axis);
     } else if (inputElementType.isF16()) {
-        return reverseImpl<float16>(input, outputType, axis);
+        return reverseImpl<vpux::type::float16>(input, outputType, axis);
     } else if (inputElementType.isBF16()) {
-        return reverseImpl<bfloat16>(input, outputType, axis);
+        return reverseImpl<vpux::type::bfloat16>(input, outputType, axis);
     } else if (inputElementType.isF32()) {
         return reverseImpl<float>(input, outputType, axis);
     }

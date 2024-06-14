@@ -5,7 +5,7 @@
 
 #include <mlir/Transforms/DialectConversion.h>
 #include <vector>
-#include "vpux/compiler/dialect/VPUIP/utils.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
 #include "vpux/compiler/dialect/VPUMI37XX/passes.hpp"
 #include "vpux/compiler/dialect/VPUMI37XX/utils.hpp"
 
@@ -81,10 +81,33 @@ private:
 
 using TaskVector = std::vector<std::tuple<mlir::Operation*, nn_public::VpuTaskSchedulingBarrierConfig, unsigned int>>;
 
+// Below structure is used to gather information when
+// given barrier (VID) gets fully consumed. This will later be used
+// when setting clean_after field
+struct BarrierConsumptionEventData {
+    BarrierConsumptionEventData(int64_t numOfBarriers) {
+        barVidIndexToConsumptionEventIndexVec.resize(numOfBarriers, numOfBarriers - 1);
+        nextConsumptionEventIndex = 0;
+    };
+    void barrierVidConsumed(int64_t barVid) {
+        VPUX_THROW_WHEN(barVid >= static_cast<int64_t>(barVidIndexToConsumptionEventIndexVec.size()),
+                        "1 Wrong VID - '{0}'", barVid);
+        barVidIndexToConsumptionEventIndexVec[barVid] = nextConsumptionEventIndex++;
+    };
+
+    int64_t getConsumptionEventIndex(int64_t barVid) {
+        VPUX_THROW_WHEN(barVid >= static_cast<int64_t>(barVidIndexToConsumptionEventIndexVec.size()),
+                        "2 Wrong VID - '{0}'", barVid);
+        return barVidIndexToConsumptionEventIndexVec[barVid];
+    };
+    int64_t nextConsumptionEventIndex;
+    SmallVector<int64_t> barVidIndexToConsumptionEventIndexVec;
+};
+
 bool processSim(VirtualDependencyTracker& vdt_, const std::vector<nn_public::VpuBarrierCountConfig>& barriersConfig,
                 std::vector<nn_public::VpuBarrierCountConfig>& counts, const VirtualDependencyTracker::Dependency& dep,
                 nn_public::VpuTaskSchedulingBarrierConfig& bar_sched, unsigned short count,
-                std::vector<int64_t>& to_virtual) {
+                std::vector<int64_t>& to_virtual, BarrierConsumptionEventData& barrierConsumptionEventData) {
     auto barrierCheck = [&](bool dynamicCond) {
         return dynamicCond;
     };
@@ -131,6 +154,7 @@ bool processSim(VirtualDependencyTracker& vdt_, const std::vector<nn_public::Vpu
             bar_sched.start_after_ = std::max<uint32_t>(bar_sched.start_after_, v + 1);
 
             if (counts[v].consumer_count_ == 0) {
+                barrierConsumptionEventData.barrierVidConsumed(v);
                 to_virtual[r] = -1;
             }
         } else {
@@ -138,7 +162,9 @@ bool processSim(VirtualDependencyTracker& vdt_, const std::vector<nn_public::Vpu
         }
     }
 
-    bar_sched.clean_after_ = static_cast<uint32_t>(counts.size());
+    // Initialize clean_after with largest VID. Actual value will be configured
+    // at the end of simulation after all tasks and barriers are processed
+    bar_sched.clean_after_ = counts.empty() ? 0 : static_cast<uint32_t>(counts.size() - 1);
 
     for (unsigned int i = 0; i < dep.producer_.second; ++i) {
         unsigned v = vdt_.id(dep.producer_.first + i);
@@ -150,7 +176,6 @@ bool processSim(VirtualDependencyTracker& vdt_, const std::vector<nn_public::Vpu
             }
             counts[v].producer_count_ -= count;
             bar_sched.start_after_ = std::max<uint32_t>(bar_sched.start_after_, v + 1);
-            bar_sched.clean_after_ = std::min<uint32_t>(bar_sched.clean_after_, v);
         } else {
             VPUX_THROW("r = {0} to_virtual.size() = {1}", static_cast<int>(r), to_virtual.size());
         }
@@ -164,6 +189,8 @@ void simulateBarriers(const std::vector<nn_public::VpuBarrierCountConfig>& barri
                       VirtualDependencyTracker& vdt_) {
     auto counts = barriersConfigs;
     std::vector<int64_t> to_virtual(nn_barriers_, -1);
+
+    BarrierConsumptionEventData barrierConsumptionEventData(counts.size());
 
     auto dmaCurr0 = dmas0.begin();
     auto dmaCurr1 = dmas1.begin();
@@ -183,7 +210,7 @@ void simulateBarriers(const std::vector<nn_public::VpuBarrierCountConfig>& barri
             const auto barrierHitsCount =
                     mlir::dyn_cast<vpux::VPUMI37XX::ExecutableTaskOpInterface>(op).getBarrierHitsCount();
             if (!processSim(vdt_, barriersConfigs, counts, vdt_.dep(dependencyIndex), barrierConfig, barrierHitsCount,
-                            to_virtual)) {
+                            to_virtual, barrierConsumptionEventData)) {
                 break;
             }
         }
@@ -211,6 +238,31 @@ void simulateBarriers(const std::vector<nn_public::VpuBarrierCountConfig>& barri
             VPUX_THROW("Did not progress");
         }
     }
+
+    // Traverse tasks again to configure clean_after field based
+    // on stored order of each barrier (VID) consumption event (consumer count gets decremented to 0)
+
+    auto updateCleanAfterField = [&](TaskVector& tasks) {
+        for (auto& task : tasks) {
+            auto& barrierConfig = std::get<1>(task);
+            const auto dependencyIndex = std::get<2>(task);
+            for (unsigned int i = 0; i < vdt_.dep(dependencyIndex).producer_.second; ++i) {
+                unsigned v = vdt_.id(vdt_.dep(dependencyIndex).producer_.first + i);
+
+                // In case task updates multiple barriers pick the one with earliest
+                // consumption event
+                if (barrierConsumptionEventData.getConsumptionEventIndex(v) <
+                    barrierConsumptionEventData.getConsumptionEventIndex(barrierConfig.clean_after_)) {
+                    barrierConfig.clean_after_ = v;
+                }
+            }
+        }
+    };
+
+    updateCleanAfterField(dmas0);
+    updateCleanAfterField(dmas1);
+    updateCleanAfterField(dpus);
+    updateCleanAfterField(acts);
 }
 
 class BarrierComputationPass final : public VPUMI37XX::BarrierComputationBase<BarrierComputationPass> {

@@ -6,7 +6,7 @@
 #pragma once
 
 #include <numeric>
-#include "vpux/compiler/dialect/IE/ops.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 
 namespace vpux {
 namespace IE {

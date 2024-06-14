@@ -1,7 +1,7 @@
 // RUN: vpux-translate --vpu-arch=%arch% --export-ELF %s | FileCheck %s
 // REQUIRES: arch-VPUX37XX
 
-module @Test attributes {VPU.arch = #VPU.arch_kind<VPUX37XX>, VPU.compilationMode = #VPU.compilation_mode<DefaultHW>} {
+module @Test attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilationMode = #VPU.compilation_mode<DefaultHW>} {
   IE.TileResource 2 of @NCE at 1.300000e+03 MHz {
     IE.MemoryResource 1784217 bytes of @CMX_NN_FragmentationAware
     IE.MemoryResource 1982464 bytes of @CMX_NN {VPU.bandwidth = 32 : i64, VPU.derateFactor = 1.000000e+00 : f64}
@@ -10,7 +10,7 @@ module @Test attributes {VPU.arch = #VPU.arch_kind<VPUX37XX>, VPU.compilationMod
     IE.ExecutorResource 1 of @DPU
   }
   IE.ExecutorResource 2 of @DMA_NN
-  IE.MemoryResource 2306867200 bytes of @DDR {VPU.bandwidth = 8 : i64, VPU.derateFactor = 6.000000e-01 : f64}
+  IE.MemoryResource 4194304000 bytes of @DDR {VPU.bandwidth = 8 : i64, VPU.derateFactor = 6.000000e-01 : f64}
   IE.CNNNetwork entryPoint : @main inputsInfo : {
     DataInfo "Input" : tensor<1x1024xui8>
   } outputsInfo : {

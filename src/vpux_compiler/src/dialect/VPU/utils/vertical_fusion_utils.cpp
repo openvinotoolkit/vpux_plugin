@@ -5,6 +5,12 @@
 
 #include "vpux/compiler/dialect/VPU/utils/vertical_fusion_utils.hpp"
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
+#include "vpux/compiler/dialect/VPU/transforms/factories/vf_axis_increment.hpp"
+#include "vpux/compiler/dialect/VPU/utils/generate_tiling.hpp"
+#include "vpux/compiler/dialect/VPU/utils/manual_strategy_utils.hpp"
+#include "vpux/compiler/utils/VPU/tile_utils.hpp"
+
+#include "llvm/ADT/SetOperations.h"
 
 using namespace vpux;
 using namespace VPU;
@@ -50,7 +56,12 @@ mlir::FailureOr<TilingStorage> vpux::VPU::calculateTilingRegions(mlir::Operation
     TilingStorage storage;
 
     if (auto tilingInfoInterface = mlir::dyn_cast<VPU::TilingInfoOpInterface>(operation)) {
-        if (!tilingInfoInterface.isSupportedTiling(tiles, TilingMode::ISOLATED, log)) {
+        try {
+            if (!isMultiClusterCompatibleForTiling(operation, tiles, log) ||
+                !tilingInfoInterface.isSupportedTiling(tiles, TilingMode::ISOLATED, log)) {
+                return mlir::failure();
+            }
+        } catch (Exception&) {
             return mlir::failure();
         }
     }
@@ -58,7 +69,7 @@ mlir::FailureOr<TilingStorage> vpux::VPU::calculateTilingRegions(mlir::Operation
     for (const auto& item : tiles | indexed) {
         auto tile = item.value();
 
-        auto inputTiling = TilingInfo(ArrayRef({item.value()}));
+        auto inputTiling = TilingInfo(ArrayRef({tile}));
         if (auto tilingBuilderOp = mlir::dyn_cast<VPU::TilingBuilderOpInterface>(operation)) {
             inputTiling = tilingBuilderOp.backInferTileInfo(tile, log);
         } else if (auto tilingViewLikeOp = mlir::dyn_cast<VPU::TilingViewLikeOpInterface>(operation)) {
@@ -114,19 +125,21 @@ mlir::FailureOr<TilingStorage> vpux::VPU::calculateTilingRegions(VPU::VerticalFu
 }
 
 int64_t vpux::VPU::getTilingLimit(Dim axis, ArrayRef<mlir::Operation*> operations) {
-    const auto axisLengths = to_small_vector(operations | transformed([&](auto* op) {
-                                                 return getShape(op->getResult(0))[axis];
-                                             }));
-    auto minAxisLength = std::min_element(axisLengths.begin(), axisLengths.end());
+    const auto axisLengths =
+            to_small_vector(operations | transformed([&](auto* op) {
+                                auto limit = getMaxNumTiles(op)[axis.ind()];
+                                if (axis.ind() >= Dims4D::Act::getSpatialDim(0).ind()) {
+                                    limit /= MINIMUM_LENGTH_TILING;
+                                }
 
-    VPUX_THROW_WHEN(minAxisLength == axisLengths.end(), "Unable to get minimum of axis length");
+                                limit = std::min(limit, VPU::NCEInvariant::VPU_DIMENSION_LIMIT / MINIMUM_LENGTH_TILING);
+                                return limit;
+                            }));
 
-    const auto minTilingLength = MINIMUM_LENGTH_TILING *
-                                 IE::getTileExecutor(operations.front()->getParentOfType<mlir::ModuleOp>()).getCount();
+    auto axisIncrement = getVFAxisIncrement(axis);
+    VPUX_THROW_WHEN(axisIncrement == nullptr, "Cannot get functions to get values for axis {0}", axis);
 
-    const auto minLength = *minAxisLength;
-
-    return minLength <= minTilingLength ? 1 : minLength / minTilingLength;
+    return axisIncrement->getLimitValue(axisLengths);
 }
 
 // get a valid tiling strategy for VF block between the given range of tiling strategy
@@ -144,6 +157,9 @@ mlir::FailureOr<SmallVector<int64_t>> getValidTilingStrategyFromRange(
         return closeToUpperLimit ? value >= lowerLimit : value <= upperLimit;
     };
 
+    auto axisIncrement = getVFAxisIncrement(tilingAxis);
+    VPUX_THROW_WHEN(axisIncrement == nullptr, "Cannot get functions to get values for axis {0}", tilingAxis);
+
     while (notBeyondBoundary(validTilingStrategy[tilingAxis.ind()], lowerTilingStrategy[tilingAxis.ind()],
                              upperTilingStrategy[tilingAxis.ind()], closeToUpperLimit)) {
         auto curOpStorage = std::make_unique<TilingOperationStorage>();
@@ -154,10 +170,16 @@ mlir::FailureOr<SmallVector<int64_t>> getValidTilingStrategyFromRange(
             return validTilingStrategy;
         }
 
+        auto currentValue = validTilingStrategy[tilingAxis.ind()];
+
         if (closeToUpperLimit) {
-            --validTilingStrategy[tilingAxis.ind()];
+            axisIncrement->decreasedValue(validTilingStrategy[tilingAxis.ind()], lowerTilingStrategy[tilingAxis.ind()]);
         } else {
-            ++validTilingStrategy[tilingAxis.ind()];
+            axisIncrement->increasedValue(validTilingStrategy[tilingAxis.ind()], upperTilingStrategy[tilingAxis.ind()]);
+        }
+
+        if (currentValue == validTilingStrategy[tilingAxis.ind()]) {
+            return mlir::failure();
         }
     }
 
@@ -208,27 +230,22 @@ mlir::FailureOr<Dim> vpux::VPU::getVFTilingDim(ArrayRef<int64_t> tilingStrategy,
     return allowedDims.front();
 }
 
-SmallVector<mlir::Operation*> vpux::VPU::getVFOperations(VPU::VerticalFusionOp op) {
-    SmallVector<mlir::Operation*> operations;
-    const auto getOpPointer = [](auto& op) -> mlir::Operation* {
-        return &op;
-    };
-    llvm::copy(op.getBody()->without_terminator() | transformed(getOpPointer), std::back_inserter(operations));
-
-    return operations;
-}
-
 DimArr vpux::VPU::getAllowedDims(ArrayRef<mlir::Operation*> operations, Logger log) {
-    const auto dimComparator = [](Dim lhs, Dim rhs) -> bool {
-        auto order = DimsOrder::NHWC;
+    auto order = DimsOrder::NHWC;
+    const auto dimComparator = [&](Dim lhs, Dim rhs) -> bool {
         return order.hasDim(lhs) && order.hasDim(rhs) && order.dimPos(lhs) < order.dimPos(rhs);
     };
-    DimArr allowedDims = DimsOrder::NHWC.toPermutation();
+
+    DimArr allowedDims = order.toPermutation();
     for (auto tiledOperation : operations) {
         auto currentTiling = getTileDimOrder(tiledOperation, TilingMode::ISOLATED, log);
+        llvm::sort(currentTiling, dimComparator);
         DimArr intersect;
-        std::set_intersection(allowedDims.begin(), allowedDims.end(), currentTiling.begin(), currentTiling.end(),
-                              std::back_inserter(intersect), dimComparator);
+        for (auto dim : currentTiling) {
+            if (llvm::find(allowedDims, dim) != allowedDims.end()) {
+                intersect.push_back(dim);
+            }
+        }
         allowedDims = std::move(intersect);
     }
 
@@ -259,46 +276,8 @@ mlir::FailureOr<int64_t> vpux::VPU::getValidTilingLimit(VPU::VerticalFusionOp op
     return validTilingMaxStrategy.value()[tilingAxis.ind()];
 }
 
-mlir::Operation* vpux::VPU::getLargestOp(VPU::VerticalFusionOp op) {
-    auto operations = op.getBody()->without_terminator();
-
-    const auto sumTypes = [&](const Byte& sum, mlir::Value value) {
-        return sum + value.getType().cast<vpux::NDTypeInterface>().getTotalAllocSize();
-    };
-
-    const auto getAllocationSize = [&](auto valueList) -> Byte {
-        return std::accumulate(valueList.begin(), valueList.end(), Byte(0), sumTypes);
-    };
-
-    auto largestOperation = std::max_element(operations.begin(), operations.end(), [&](auto& op1, auto& op2) {
-        return getAllocationSize(op1.getOperands()) + getAllocationSize(op1.getResults()) <
-               getAllocationSize(op2.getOperands()) + getAllocationSize(op2.getResults());
-    });
-
-    if (largestOperation == operations.end()) {
-        return nullptr;
-    }
-
-    return &(*largestOperation);
-}
-
-bool vpux::VPU::isVFPipelinePattern(VPU::VerticalFusionOp op) {
-    // Only support VF Pipeline when the VF subgraph contains DPU->SW->DPU tasks
-    // More generic cases will be supported in the future
-    // Track [E#95184]
-    const auto getPoint = [](auto& op) {
-        return &op;
-    };
-    auto operations = to_small_vector(op.getBody()->without_terminator() | transformed(getPoint));
-    if (operations.size() != VF_PIPELINE_LENGTH) {
-        return false;
-    }
-    return mlir::isa<VPU::NCEOpInterface>(operations[0]) && mlir::isa<VPU::SWOpInterface>(operations[1]) &&
-           mlir::isa<VPU::NCEOpInterface>(operations[2]);
-}
-
-void vpux::VPU::fuseOpsInBlock(mlir::PatternRewriter& rewriter, VPU::VerticalFusionOp vfOp, mlir::Operation* prevOp,
-                               mlir::ArrayAttr tilingInfo /*nullptr*/) {
+VPU::VerticalFusionOp vpux::VPU::fuseOpsInBlock(mlir::PatternRewriter& rewriter, VPU::VerticalFusionOp vfOp,
+                                                mlir::Operation* prevOp, mlir::ArrayAttr tilingInfo /*nullptr*/) {
     SmallVector<mlir::Operation*> prevOperations;
     auto prevOperands = prevOp->getOperands();
     SmallVector<mlir::Value> prevBlockArgs = prevOp->getOperands();
@@ -404,8 +383,275 @@ void vpux::VPU::fuseOpsInBlock(mlir::PatternRewriter& rewriter, VPU::VerticalFus
         tilingInfo = vfOp.getTilingStrategy();
     }
 
-    auto newVFOp = rewriter.create<VPU::VerticalFusionOp>(vfOp.getLoc(), vfOp->getResultTypes(), newOperands,
-                                                          bodyBuilder, tilingInfo);
+    return rewriter.create<VPU::VerticalFusionOp>(vfOp.getLoc(), vfOp->getResultTypes(), newOperands, bodyBuilder,
+                                                  tilingInfo);
+}
 
-    rewriter.replaceOp(vfOp, newVFOp.getResult(0));
+VPUNNCostParameters fillInCostParam(mlir::Operation* operation, const OutputTiling& tiling,
+                                    const SmallVector<TileInfo>& inputTiles, const bool enablePrefetching, Logger log) {
+    auto mcStrategy = VPU::MultiClusterStrategy::Clustering;
+    if (auto mcOperation = mlir::dyn_cast<VPU::ClusteredOpInterface>(operation)) {
+        mcStrategy = mcOperation.getMultiClusterStrategy().value_or(mcStrategy);
+    }
+
+    auto mode = TilingMode::ISOLATED;
+    if (auto tilingBuilder = mlir::dyn_cast<VPU::TilingBuilderOpInterface>(operation)) {
+        // cache it in the storage E-121580
+        mode = getTilingSupportedMode(tilingBuilder, enablePrefetching, log);
+    }
+    SmallVector<OutputTiling> inputAllTiles;
+    if (!inputTiles.empty()) {
+        inputAllTiles.push_back(inputTiles);
+    }
+    return VPUNNCostParameters(mcStrategy, tiling, mode, inputAllTiles);
+}
+
+VPUNNCostParameters fillInCostParam(mlir::Operation* operation,
+                                    const std::unique_ptr<TilingOperationStorage>& opStorage, size_t index, Logger log,
+                                    bool enablePrefetching) {
+    auto inputOutputTiling = opStorage->get(operation, index);
+
+    VPUX_THROW_WHEN(!inputOutputTiling.has_value(), "Couldn't find tile information for operation {0} and tile {1}",
+                    *operation, index);
+    const auto inputOutputTilingPair = inputOutputTiling.value();
+
+    return fillInCostParam(operation, {inputOutputTilingPair.second}, inputOutputTilingPair.first.tiles,
+                           enablePrefetching, log);
+}
+
+void existedVFSpilling(mlir::Operation* operation, const std::unique_ptr<TilingOperationStorage>& opStorage,
+                       SmallVector<mlir::Operation*>& users, size_t index) {
+    auto inputTiling = opStorage->get(operation, index);
+
+    VPUX_THROW_WHEN(!inputTiling.has_value(), "Couldn't find tile information for operation {0} and tile {1}",
+                    operation, index);
+    const auto inputTilingPair = inputTiling.value();
+
+    auto outputOriginTiling = inputTilingPair.second;
+    llvm::copy_if(operation->getResult(0).getUsers(), std::back_inserter(users), [&](auto* user) {
+        auto vfTilingInfo = opStorage->get(user, index);
+
+        if (!vfTilingInfo.has_value()) {
+            return false;
+        }
+        const auto vfTiles = vfTilingInfo.value().first.tiles;
+
+        return llvm::find(vfTiles, outputOriginTiling) == vfTiles.end();
+    });
+}
+
+StrategyCost getVFCostPipelined(const int tilesNumber, VFConfig& config,
+                                const std::unique_ptr<TilingOperationStorage>& opStorage,
+                                const std::unique_ptr<VPU::LayerVPUNNCost>& costFunction, Logger log) {
+    StrategyCost pipelinedCost = 0;
+    // create a structure which reflects the execution order of the IR
+    // same way as scheduler does
+
+    auto pipelinedStructure = VFContainerPipelineStorage();
+
+    // first "tile" is fully filled as it is,
+    // next tile might be pipelined
+    auto& operations = config.getVFOperations();
+
+    // everything will be in one container with index 0 to simplify
+    int containerIndex = 0;
+
+    // storage size is flexible. minimum number of "containers" is a number of operations
+    auto storageSize = operations.size();
+    std::map<size_t, size_t> opStorageMapping;
+    for (auto index : irange(tilesNumber)) {
+        // first row should be presented in the container
+        // DPU -> SW -> DPU
+        // next line has to be pipelined
+        // DPU -> SW  -> DPU
+        //        DPU -> SW  -> DPU
+        // E#95184 for extending the case
+        if (index % 2 == 0) {
+            for (auto opIndex : irange(operations.size())) {
+                pipelinedStructure.insert(
+                        opIndex, containerIndex,
+                        VFPipelineContainer(operations[opIndex], fillInCostParam(operations[opIndex], opStorage, index,
+                                                                                 log, config.isPipelined())));
+            }
+            ++containerIndex;
+            continue;
+        }
+
+        for (auto opIndex : irange(operations.size())) {
+            auto tilingInfo = fillInCostParam(operations[opIndex], opStorage, index, log, config.isPipelined());
+            auto foundMapping = opStorageMapping.find(opIndex);
+            auto containerNumber = opIndex;
+            if (foundMapping != opStorageMapping.end()) {
+                containerNumber = foundMapping->second;
+            } else {
+                ++containerNumber;
+                do {
+                    auto currentPipeline = pipelinedStructure.get(containerNumber, containerIndex - 1);
+                    if (!currentPipeline.has_value() || currentPipeline.value().hasOperType(operations[opIndex])) {
+                        break;
+                    }
+                    ++containerNumber;
+                } while (containerNumber < storageSize);
+                opStorageMapping[opIndex] = containerNumber;
+            }
+
+            auto pipeline = pipelinedStructure.get(containerNumber, containerIndex);
+            if (!pipeline.has_value()) {
+                pipelinedStructure.insert(containerNumber, containerIndex,
+                                          VFPipelineContainer(operations[opIndex], tilingInfo));
+                ++storageSize;
+            } else {
+                pipeline.value().addOperation(operations[opIndex], tilingInfo);
+            }
+        }
+    }
+
+    // iterate through the structure, accumulate the cost for each "container", taking maximum from it.
+    for (auto opIndex : irange(storageSize)) {
+        StrategyCost cost = 0;
+        for (auto container : pipelinedStructure.gatherValue(opIndex)) {
+            cost = std::max(cost, container.maxCost(costFunction));
+        }
+        pipelinedCost += cost;
+    }
+
+    return pipelinedCost;
+}
+
+StrategyCost vpux::VPU::getVFCost(const std::unique_ptr<VPU::LayerVPUNNCost>& costFunction, VPU::VerticalFusionOp vfOp,
+                                  Logger log, bool prefetching /*true*/,
+                                  mlir::ArrayAttr tilingStrategyAttr /* nullptr */) {
+    StrategyCost fullCost = 0;
+    if (tilingStrategyAttr == nullptr) {
+        tilingStrategyAttr = vfOp.getTilingStrategy();
+    }
+
+    auto tilingDims = parseIntArrayAttr<int64_t>(tilingStrategyAttr);
+    VFConfig vfConfig(vfOp, prefetching);
+    auto operations = vfConfig.getVFOperations();
+
+    const auto dim = getVFTilingDim(tilingDims);
+
+    if (operations.size() == 1) {
+        auto* operation = operations.front();
+        OutputTiling tiles;
+        if (dim.has_value()) {
+            auto tiling = fillDividedTiles(operation, Shape(tilingDims), getShape(operation->getResult(0)));
+            VPUX_THROW_WHEN(mlir::failed(tiling), "Incorrect tiling {0} for vf {1}", tilingDims, vfOp);
+            tiles = tiling.value();
+        }
+
+        const auto costParameters = fillInCostParam(operation, tiles, {}, prefetching, log);
+        return costFunction->getStrategyCost(operation, costParameters);
+    }
+
+    auto operationStorage = std::make_unique<TilingOperationStorage>();
+    auto tilingStorage = calculateTilingRegions(vfOp, tilingDims, log, operationStorage);
+
+    VPUX_THROW_WHEN(mlir::failed(tilingStorage), "Incorrect tiles for vf {0}", vfOp);
+
+    const auto tileNum = dim.has_value() ? tilingDims[dim.value().ind()] : 1;
+
+    // we may get tiling strategy and merge VF for pipeline candidate without VF pipelining enabled
+    // validate CMX size to check if it's a real pipelining case, so that we can get accurate VF cost
+    if (vfConfig.isPipelined() && validateCMXSize(vfConfig, operationStorage, log)) {
+        VPUX_THROW_UNLESS(tileNum > 1, "Subgraph cannot be pipelined with {0} tiles", tileNum);
+        return getVFCostPipelined(tileNum, vfConfig, operationStorage, costFunction, log);
+    }
+
+    // sizes of dmas from cmx
+    for (auto* operation : operations) {
+        for (auto operand : operation->getOperands()) {
+            if (auto arg = operand.dyn_cast<mlir::BlockArgument>()) {
+                if (vfOp.getOperand(arg.getArgNumber()).getDefiningOp<Const::DeclareOp>()) {
+                    continue;
+                }
+                auto findOperand = [&](mlir::Value value) -> bool {
+                    return value == arg;
+                };
+                auto parentOp = vfOp.getOperand(arg.getArgNumber()).getDefiningOp();
+                if (parentOp && parentOp->hasAttr(tilingStrategy)) {
+                    const auto strategy = Shape(
+                            parseIntArrayAttr<int64_t>(parentOp->getAttr(tilingStrategy).cast<mlir::ArrayAttr>()));
+                    if (llvm::none_of(strategy,
+                                      [&](auto value) {
+                                          return value > 1;
+                                      }) &&
+                        !vfConfig.isPotentiallyPipelined()) {
+                        const auto userCostParam = fillInCostParam(operation, operationStorage, 0, log, prefetching);
+                        fullCost += costFunction->getSpillingReadCost(operation, userCostParam, parentOp, findOperand);
+                    }
+                }
+            }
+        }
+    }
+
+    for (auto index : irange(tileNum)) {
+        for (auto* op : operations) {
+            const auto costParameters = fillInCostParam(op, operationStorage, index, log, prefetching);
+
+            // isolated operation cost
+            fullCost += costFunction->getStrategyCost(op, costParameters);
+
+            SmallVector<mlir::Operation*> spillUsers;
+            existedVFSpilling(op, operationStorage, spillUsers, index);
+
+            if (!spillUsers.empty()) {
+                fullCost += costFunction->getSpillingWriteCost(op, costParameters);
+                for (auto* user : spillUsers) {
+                    const auto userCostParam = fillInCostParam(user, operationStorage, index, log, prefetching);
+                    fullCost += costFunction->getSpillingReadCost(user, userCostParam, op);
+                }
+            }
+        }
+    }
+
+    return fullCost;
+}
+
+bool vpux::VPU::validateCMXSize(VFConfig& config, const TilingOperationStorage::UPtr& opStorage, Logger log,
+                                Byte reservedMemory /*Byte(0)*/) {
+    auto* largest = config.getLargestOp();
+    // assuming almost all tiles are same
+    const auto index = 0;
+    auto inputSize = Byte(0);
+
+    for (auto op : config.getInputs()) {
+        auto tileInfo = opStorage->get(op, index);
+        VPUX_THROW_WHEN(!tileInfo.has_value(), "There is no information about tile {0} of operation {1}", index, *op);
+
+        auto tileTypes = getTileTypes(op, tileInfo.value().second, tileInfo.value().first);
+        VPUX_THROW_WHEN(tileTypes.empty(), "There are not enough types for tile of operation {0}", *op);
+        // exclude output type information
+        tileTypes.pop_back();
+        for (auto type : tileTypes) {
+            inputSize += type.getTotalAllocSize();
+        }
+    }
+
+    auto outputSize = Byte(0);
+
+    for (auto op : config.getOutputs()) {
+        auto tileInfo = opStorage->get(op, index);
+        VPUX_THROW_WHEN(!tileInfo.has_value(), "There is no information about tile {0} of operation {1}", index, *op);
+
+        auto tileTypes = getTileTypes(op, tileInfo.value().second, tileInfo.value().first);
+        VPUX_THROW_WHEN(tileTypes.empty(), "There is no output type for tile of operation {0}", *op);
+
+        auto type = tileTypes.back();
+        outputSize += type.getTotalAllocSize();
+    }
+
+    auto opTiling = opStorage->get(largest, index);
+    VPUX_THROW_WHEN(!opTiling.has_value(), "There is no information about tile {0} of operation {1}", index, *largest);
+    log.trace("Check for tile number {0}: inputs' size {1} outputs's size {2}", index, inputSize, outputSize);
+    const auto thresholdCMXSize = config.isPipelined() ? getTotalCMXVFPipelineFragmentationAwareSize(largest)
+                                                       : getTotalCMXFragmentationAwareSize(largest);
+    if (inputSize + outputSize + reservedMemory +
+                VPU::getRequiredCMX(largest, opTiling.value().second, log, opTiling.value().first) >=
+        thresholdCMXSize) {
+        return false;
+    }
+
+    return true;
 }

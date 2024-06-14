@@ -3,12 +3,16 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+//
+
 #include <array>
 
 #include <vpux_elf/accessor.hpp>
 #include <vpux_elf/reader.hpp>
 #include <vpux_elf/types/vpu_extensions.hpp>
 #include <vpux_elf/writer.hpp>
+
+#include "common_test_utils/test_assertions.hpp"
 
 #include <gtest/gtest.h>
 
@@ -47,13 +51,13 @@ std::vector<elf::Reader<elf::ELF_Bitness::Elf64>::Section> getSectionsByType(
 }  // namespace
 
 TEST(ELFWriter, ELFWriterConstructorDoesntThrow) {
-    ASSERT_NO_THROW(elf::Writer());
+    OV_ASSERT_NO_THROW(elf::Writer());
 }
 
 TEST(ELFWriter, ELFHeaderForEmptyELFIsCorrect) {
     elf::Writer writer;
     std::vector<uint8_t> blob;
-    ASSERT_NO_THROW(blob = writer.generateELF());
+    OV_ASSERT_NO_THROW(blob = writer.generateELF());
 
     auto accessor = elf::ElfDDRAccessManager(blob.data(), blob.size());
     elf::Reader<elf::ELF_Bitness::Elf64> reader(&accessor);
@@ -95,7 +99,7 @@ TEST(ELFWriter, BinaryDataSection) {
     refSection->appendData(val2);
 
     std::vector<uint8_t> blob;
-    ASSERT_NO_THROW(blob = writer.generateELF());
+    OV_ASSERT_NO_THROW(blob = writer.generateELF());
 
     auto accessor = elf::ElfDDRAccessManager(blob.data(), blob.size());
     elf::Reader<elf::ELF_Bitness::Elf64> reader(&accessor);
@@ -125,7 +129,7 @@ TEST(ELFWriter, EmptySection) {
     refSection->setSize(emptySectionSize);
 
     std::vector<uint8_t> blob;
-    ASSERT_NO_THROW(blob = writer.generateELF());
+    OV_ASSERT_NO_THROW(blob = writer.generateELF());
 
     auto accessor = elf::ElfDDRAccessManager(blob.data(), blob.size());
     elf::Reader<elf::ELF_Bitness::Elf64> reader(&accessor);
@@ -157,7 +161,7 @@ TEST(ELFWriter, SymbolSection) {
     refSymbol->setRelatedSection(emptySection);
 
     std::vector<uint8_t> blob;
-    ASSERT_NO_THROW(blob = writer.generateELF());
+    OV_ASSERT_NO_THROW(blob = writer.generateELF());
 
     auto accessor = elf::ElfDDRAccessManager(blob.data(), blob.size());
     elf::Reader<elf::ELF_Bitness::Elf64> reader(&accessor);
@@ -203,7 +207,7 @@ TEST(ELFWriter, SymbolSectionStableSort) {
     }
 
     std::vector<uint8_t> blob;
-    ASSERT_NO_THROW(blob = writer.generateELF());
+    OV_ASSERT_NO_THROW(blob = writer.generateELF());
 
     auto accessor = elf::ElfDDRAccessManager(blob.data(), blob.size());
     elf::Reader<elf::ELF_Bitness::Elf64> reader(&accessor);
@@ -260,7 +264,7 @@ TEST(ELFWriter, RelocationSection) {
     refRelocation->setAddend(0);
 
     std::vector<uint8_t> blob;
-    ASSERT_NO_THROW(blob = writer.generateELF());
+    OV_ASSERT_NO_THROW(blob = writer.generateELF());
 
     auto accessor = elf::ElfDDRAccessManager(blob.data(), blob.size());
     elf::Reader<elf::ELF_Bitness::Elf64> reader(&accessor);
@@ -318,7 +322,7 @@ TEST(ELFWriter, SpecialSymReloc) {
     refRelocation->setAddend(0);
 
     std::vector<uint8_t> blob;
-    ASSERT_NO_THROW(blob = writer.generateELF());
+    OV_ASSERT_NO_THROW(blob = writer.generateELF());
 
     auto accessor = elf::ElfDDRAccessManager(blob.data(), blob.size());
     elf::Reader<elf::ELF_Bitness::Elf64> reader(&accessor);
@@ -358,7 +362,7 @@ TEST(ELFWriter, Segment) {
     refSegment->addSection(section);
 
     std::vector<uint8_t> blob;
-    ASSERT_NO_THROW(blob = writer.generateELF());
+    OV_ASSERT_NO_THROW(blob = writer.generateELF());
 
     auto accessor = elf::ElfDDRAccessManager(blob.data(), blob.size());
     elf::Reader<elf::ELF_Bitness::Elf64> reader(&accessor);

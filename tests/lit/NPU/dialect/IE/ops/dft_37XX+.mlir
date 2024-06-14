@@ -1,0 +1,18 @@
+//
+// Copyright (C) 2024 Intel Corporation.
+// SPDX-License-Identifier: Apache 2.0
+//
+
+// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --canonicalize %s | FileCheck %s
+// REQUIRES: arch-VPUX37XX || arch-VPUX40XX
+
+// CHECK-LABEL: @DftConvertConstToAttrAndNormalize
+// CHECK-SAME:   ([[INPUT:%arg[0-9]]]: tensor<10x4x2xf32>) -> tensor<10x4x2xf32>
+func.func @DftConvertConstToAttrAndNormalize(%arg0: tensor<10x4x2xf32>) -> tensor<10x4x2xf32> {
+    %cst = const.Declare tensor<2xsi32> = dense<[0, 1]> : tensor<2xsi64>, [#const.ConvertElemType<si32>]
+    %0 = IE.DFT(%arg0, %cst) {operandSegmentSizes = array<i32: 1, 1, 0>} : tensor<10x4x2xf32>, tensor<2xsi32> -> tensor<10x4x2xf32>
+    return %0 : tensor<10x4x2xf32>
+
+    // CHECK: [[OUTPUT:%.+]] = IE.DFT([[INPUT]]) {axes_attr = [0, 1], operandSegmentSizes = array<i32: 1, 0, 0>, signal_size_attr = [-1, -1]} : tensor<10x4x2xf32> -> tensor<10x4x2xf32>
+    // CHECK: return [[OUTPUT]] : tensor<10x4x2xf32>
+}

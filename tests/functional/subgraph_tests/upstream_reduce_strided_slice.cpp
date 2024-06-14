@@ -1,13 +1,9 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022-2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include <vpu_ov2_layer_test.hpp>
-
-#include <ov_models/builders.hpp>
-#include <ov_models/utils/ov_helpers.hpp>
-#include <shared_test_classes/base/layer_test_utils.hpp>
 
 #include <random>
 
@@ -121,12 +117,12 @@ class UpstreamReduceStridedSliceSubGraphTest_NPU3700 :
             nodes.push_back(activationFq);
         }
 
-        const auto convSliceBeginConst = ngraph::builder::makeConstant<int64_t>(
-                ov::element::i64, {testParams._beginData[0].size()}, testParams._beginData[0], false);
-        const auto convSliceEndConst = ngraph::builder::makeConstant<int64_t>(
-                ov::element::i64, {testParams._endData[0].size()}, testParams._endData[0], false);
-        const auto convSliceStridesConst = ngraph::builder::makeConstant<int64_t>(
-                ov::element::i64, {testParams._beginData[0].size()}, {1, 1, 1, 1}, false);
+        const auto convSliceBeginConst = ov::op::v0::Constant::create(
+                ov::element::i64, ov::Shape{testParams._beginData[0].size()}, testParams._beginData[0]);
+        const auto convSliceEndConst = ov::op::v0::Constant::create(
+                ov::element::i64, ov::Shape{testParams._endData[0].size()}, testParams._endData[0]);
+        const auto convSliceStridesConst = ov::op::v0::Constant::create(
+                ov::element::i64, ov::Shape{testParams._beginData[0].size()}, {1, 1, 1, 1});
 
         const auto convStridedSlice = std::make_shared<ov::op::v1::StridedSlice>(
                 nodes[0], convSliceBeginConst, convSliceEndConst, convSliceStridesConst, testParams._beginMask[0],
@@ -135,8 +131,7 @@ class UpstreamReduceStridedSliceSubGraphTest_NPU3700 :
         // Adjust shape by doubling width and halfing channels
         const auto reshapePattern =
                 std::vector<int64_t>({0, -1, 0, static_cast<int64_t>(2 * nodes[1]->get_output_shape(0)[3])});
-        const auto newShape =
-                ngraph::builder::makeConstant<int64_t>(ov::element::i64, ov::Shape{4}, reshapePattern, false);
+        const auto newShape = ov::op::v0::Constant::create(ov::element::i64, ov::Shape{4}, reshapePattern);
         const auto reshape = std::make_shared<ov::op::v1::Reshape>(nodes[1], newShape, true);
 
         const auto add = std::make_shared<ov::op::v1::Add>(convStridedSlice, reshape);
@@ -151,12 +146,12 @@ class UpstreamReduceStridedSliceSubGraphTest_NPU3700 :
         const auto reluFq = std::make_shared<ov::op::v0::FakeQuantize>(relu, resultLowConst, resultHighConst,
                                                                        resultLowConst, resultHighConst, 256);
 
-        const auto addSliceBeginConst = ngraph::builder::makeConstant<int64_t>(
-                ov::element::i64, {testParams._beginData[1].size()}, testParams._beginData[1], false);
-        const auto addSliceEndConst = ngraph::builder::makeConstant<int64_t>(
-                ov::element::i64, {testParams._endData[1].size()}, testParams._endData[1], false);
-        const auto addSliceStridesConst = ngraph::builder::makeConstant<int64_t>(
-                ov::element::i64, {testParams._beginData[1].size()}, {1, 1, 1, 1}, false);
+        const auto addSliceBeginConst = ov::op::v0::Constant::create(
+                ov::element::i64, ov::Shape{testParams._beginData[1].size()}, testParams._beginData[1]);
+        const auto addSliceEndConst = ov::op::v0::Constant::create(
+                ov::element::i64, ov::Shape{testParams._endData[1].size()}, testParams._endData[1]);
+        const auto addSliceStridesConst = ov::op::v0::Constant::create(
+                ov::element::i64, ov::Shape{testParams._beginData[1].size()}, {1, 1, 1, 1});
 
         const auto addStridedSlice = std::make_shared<ov::op::v1::StridedSlice>(
                 reluFq, addSliceBeginConst, addSliceEndConst, addSliceStridesConst, testParams._beginMask[1],
@@ -167,16 +162,25 @@ class UpstreamReduceStridedSliceSubGraphTest_NPU3700 :
         function = std::make_shared<ov::Model>(results, params, "UpstreamReduceStridedSliceSubGraphTest");
         rel_threshold = 0.5f;
     }
+
+public:
+    static std::string getTestCaseName(const testing::TestParamInfo<UpstreamReduceStridedSliceTestParams>& obj) {
+        const std::string sep = "_";
+        std::ostringstream result;
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
+        result << "TestIdx=" << obj.index << sep;
+        return result.str();
+    };
 };
 
 TEST_P(UpstreamReduceStridedSliceSubGraphTest_NPU3700, SW) {
     setReferenceSoftwareMode();
-    run(VPUXPlatform::VPU3700);
+    run(Platform::NPU3700);
 }
 
 TEST_P(UpstreamReduceStridedSliceSubGraphTest_NPU3700, HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3700);
+    run(Platform::NPU3700);
 }
 
 INSTANTIATE_TEST_CASE_P(smoke_UpstreamReduceStridedSlice, UpstreamReduceStridedSliceSubGraphTest_NPU3700,
@@ -188,6 +192,7 @@ INSTANTIATE_TEST_CASE_P(smoke_UpstreamReduceStridedSlice, UpstreamReduceStridedS
                                 {{0, 0, 0, 0}, {0, 0, 0, 0}},      // end data
                                 {{1, 1, 0, 1}, {1, 1, 0, 1}},      // begin mask
                                 {{1, 1, 1, 1}, {1, 1, 1, 1}}       // end mask
-                        }));
+                        }),
+                        UpstreamReduceStridedSliceSubGraphTest_NPU3700::getTestCaseName);
 
 }  // namespace ov::test

@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -251,7 +251,7 @@ func.func @UnrollDistributedPermuteDMA() -> memref<1x3x24x24xf16, #NHWC, @DDR> {
       %40 = VPUIP.NNDMA inputs(%cst_0 : memref<16x1x1x4xsi32>) outputs(%24 : !VPUIP.DistributedBuffer<16x1x1x4xsi32, #NCHW, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>) -> !VPUIP.DistributedBuffer<16x1x1x4xsi32, #NCHW, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>
     }
     VPURT.Task waits(%0 : !VPURT.Barrier) updates(%1 : !VPURT.Barrier) attributes {isTrailingSWLayer = false} {
-      %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_Convert inputs(%15 as %arg2: memref<1x3x24x24xui8, [@CMX_NN, 0]>) outputs(%16 as %arg3: memref<1x3x24x24xf16, [@CMX_NN, 0]>) on tile 0 -> memref<1x3x24x24xf16, [@CMX_NN, 0]>{
+      %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Convert inputs(%15 as %arg2: memref<1x3x24x24xui8, [@CMX_NN, 0]>) outputs(%16 as %arg3: memref<1x3x24x24xf16, [@CMX_NN, 0]>) on tile 0 -> memref<1x3x24x24xf16, [@CMX_NN, 0]>{
         VPUIP.SW.Kernel.run(%arg2, %arg3) : memref<1x3x24x24xui8, [@CMX_NN, 0]>, memref<1x3x24x24xf16, [@CMX_NN, 0]>
       }
     }

@@ -38,12 +38,13 @@ public:
 private:
     void safeRunOnFunc() final;
 
-    SmallVector<std::pair<Strategy, StrategyCost>> getOperationOptions(mlir::Operation* operation);
+    SmallVector<std::pair<Strategy, StrategyCost>> getOperationOptions(mlir::Operation* operation, size_t numTiles);
     SmallVector<VPU::MultiClusterStrategy> getAvailiableStrategies(ArchKind arch) const;
     bool checkDefaultStrategy(MultiClusterStrategy strategy) const;
-    void exceptionalCases(SmallVector<VPU::MultiClusterStrategy>& strategies, mlir::Operation* operation) const;
     void fillInOptions(TilingOptions& options) const;
     bool mcTilingNeeded() const;
+    bool hasNoUsersOrAllViewLike(mlir::Operation* op) const;
+    bool lastOpExceptionCase(mlir::Operation* operation, MultiClusterStrategy strategy) const;
 
     std::shared_ptr<LayerVPUNNCost> _costModel;
     SmallVector<VPU::MultiClusterStrategy> _archStrategies;
@@ -57,6 +58,38 @@ void StrategyManagerImplPass::fillInOptions(TilingOptions& options) const {
 
 bool StrategyManagerImplPass::mcTilingNeeded() const {
     return _numTiles > 1;
+}
+
+bool StrategyManagerImplPass::hasNoUsersOrAllViewLike(mlir::Operation* op) const {
+    // Return true if the operation has no users
+    // For "ViewLike" users, recursively check if they also have no users or all "ViewLike" users.
+    return op->getUsers().empty() || llvm::all_of(op->getUsers(), [&](mlir::Operation* user) {
+               return VPU::isPureViewOp(user) && hasNoUsersOrAllViewLike(user);
+           });
+}
+
+/*
+If the op is last op emptying to DDR and strategy is HKSwitch then consider that as an exception case, and we need to
+delete HKSwitch as strategy from operation options.
+    * How to find last op :
+        1. Op has no users or only has Return op as users
+        2. All users of op are "ViewLike" operations or chain of view like ops or if all users' users have no users
+themselves or are Return ops.
+*/
+bool StrategyManagerImplPass::lastOpExceptionCase(mlir::Operation* operation, MultiClusterStrategy strategy) const {
+    if (strategy != MultiClusterStrategy::HKSwitch) {
+        return false;
+    }
+    auto userOps = operation->getResult(0).getUsers();
+    auto isUserReturnOp = [](mlir::Operation* op) {
+        return mlir::isa<mlir::func::ReturnOp>(op);
+    };
+    // check if the operation has no users or if all users are "ViewLike" operations (including chains of "ViewLike"
+    // operations) or all users are Return ops
+    if (llvm::all_of(userOps, isUserReturnOp) || hasNoUsersOrAllViewLike(operation)) {
+        return true;
+    }
+    return false;
 }
 
 mlir::LogicalResult StrategyManagerImplPass::initialize(mlir::MLIRContext* ctx) {
@@ -75,20 +108,8 @@ bool StrategyManagerImplPass::checkDefaultStrategy(MultiClusterStrategy strategy
     return strategy == MultiClusterStrategy::Clustering;
 }
 
-void StrategyManagerImplPass::exceptionalCases(SmallVector<VPU::MultiClusterStrategy>& strategies,
-                                               mlir::Operation* operation) const {
-    if (!mcTilingNeeded()) {
-        return;
-    }
-    llvm::TypeSwitch<mlir::Operation*, void>(operation)
-
-            .Case<NCEPermuteQuantizeOp>([&](NCEPermuteQuantizeOp) {
-                strategies.push_back(MultiClusterStrategy::SplitOverWidth);
-            });
-}
-
-SmallVector<std::pair<Strategy, StrategyCost>> StrategyManagerImplPass::getOperationOptions(
-        mlir::Operation* operation) {
+SmallVector<std::pair<Strategy, StrategyCost>> StrategyManagerImplPass::getOperationOptions(mlir::Operation* operation,
+                                                                                            size_t numTiles) {
     SmallVector<std::pair<Strategy, StrategyCost>> strategies;
     auto clusteredOp = mlir::dyn_cast<VPU::ClusteredOpInterface>(operation);
 
@@ -99,20 +120,21 @@ SmallVector<std::pair<Strategy, StrategyCost>> StrategyManagerImplPass::getOpera
     }
 
     auto operationStrategies = _archStrategies;
-    exceptionalCases(operationStrategies, operation);
 
     for (auto strategy : operationStrategies) {
         if (clusteredOp != nullptr) {
             if (!(isStrategyCompatibleShape(clusteredOp,
                                             TileInfo(getShape(clusteredOp->getResult(0)), ShapeRef(), ShapeRef()),
                                             strategy, _log) &&
-                  clusteredOp.checkStrategyCompatibility(strategy))) {
+                  clusteredOp.checkStrategyCompatibility(strategy, numTiles))) {
                 continue;
             }
         } else if (!checkDefaultStrategy(strategy)) {
             continue;
         }
-
+        if (lastOpExceptionCase(operation, strategy)) {
+            continue;  // Skip HKSwitch strategy for the last operation
+        }
         bool hasPrefetch = false;
         do {
             mlir::ArrayAttr tilingStrategy;
@@ -194,7 +216,7 @@ void StrategyManagerImplPass::safeRunOnFunc() {
     auto operationStrategies = std::make_shared<OperationStrategies>();
 
     const auto findStrategyCallback = [&](mlir::Operation* operation) {
-        auto strategies = getOperationOptions(operation);
+        auto strategies = getOperationOptions(operation, _numTiles);
 
         if (strategies.empty()) {
             return;
@@ -272,22 +294,6 @@ void StrategyManagerImplPass::safeRunOnFunc() {
     };
 
     func.walk(setStrategyCallback);
-
-    // E#81901 When assigning clustering strategy to ConvertOps for the following pattern(s) breaks the accuracy
-    // ConvertOp            ConvertOp
-    //     |                    |
-    //     IntermediateOp       |
-    //           |              |
-    //              Layer (Layers with multiple inputs)
-    // For such cases and strategies remove the strategy as a temporary measure
-    const auto callbackConvert = [&](VPU::ConvertOp convertOp) {
-        if (hasLayerWithMultipleInputs(convertOp)) {
-            _log.info("SW Operation '{0}' {1} removed strategy {2}", convertOp->getName(), convertOp->getLoc(),
-                      convertOp.getMultiClusterStrategy());
-            convertOp.removeMultiClusterStrategyAttr();
-        }
-    };
-    func.walk(callbackConvert);
 }
 
 }  // namespace

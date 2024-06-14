@@ -36,8 +36,25 @@ void vpux::globalLogCb(const formatv_object_base& msg) {
 static const char* logLevelPrintout[] = {"NONE", "FATAL", "ERROR", "WARNING", "INFO", "DEBUG", "TRACE"};
 
 Logger& vpux::Logger::global() {
-#ifdef VPUX_DEVELOPER_BUILD
-    static Logger log("global", LogLevel::Warning);
+#if defined(VPUX_DEVELOPER_BUILD) || !defined(NDEBUG)
+    LogLevel logLvl = LogLevel::Warning;
+    if (const auto env = std::getenv("OV_NPU_LOG_LEVEL")) {
+        auto logStr = std::string(env);
+        if (logStr == "LOG_NONE") {
+            logLvl = LogLevel::None;
+        } else if (logStr == "LOG_ERROR") {
+            logLvl = LogLevel::Error;
+        } else if (logStr == "LOG_WARNING") {
+            logLvl = LogLevel::Warning;
+        } else if (logStr == "LOG_INFO") {
+            logLvl = LogLevel::Info;
+        } else if (logStr == "LOG_DEBUG") {
+            logLvl = LogLevel::Debug;
+        } else if (logStr == "LOG_TRACE") {
+            logLvl = LogLevel::Trace;
+        }
+    }
+    static Logger log("global", logLvl);
 #else
     static Logger log("global", LogLevel::None);
 #endif
@@ -46,6 +63,11 @@ Logger& vpux::Logger::global() {
 }
 
 vpux::Logger::Logger(StringLiteral name, LogLevel lvl): _name(name), _logLevel(lvl) {
+#if defined(VPUX_DEVELOPER_BUILD) || !defined(NDEBUG)
+    if (const auto env = std::getenv("IE_NPU_LOG_FILTER")) {
+        _logFilterStr = std::string(env);
+    }
+#endif
 }
 
 Logger vpux::Logger::nest(size_t inc) const {
@@ -66,29 +88,35 @@ Logger vpux::Logger::unnest(size_t inc) const {
 }
 
 bool vpux::Logger::isActive(LogLevel msgLevel) const {
+#if !defined(NDEBUG)
+    if (llvm::DebugFlag && llvm::isCurrentDebugType(name().data())) {
+        return true;
+    }
+#endif
+
 #if defined(VPUX_DEVELOPER_BUILD) || !defined(NDEBUG)
-    static const auto logFilter = []() -> llvm::Regex {
-        if (const auto env = std::getenv("IE_NPU_LOG_FILTER")) {
-            const StringRef filter(env);
+    if (static_cast<int32_t>(msgLevel) > static_cast<int32_t>(_logLevel)) {
+        return false;
+    }
+
+    static const auto logFilter = [&]() -> llvm::Regex {
+        if (!_logFilterStr.empty()) {
+            const StringRef filter(_logFilterStr);
 
             if (!filter.empty()) {
                 return llvm::Regex(filter, llvm::Regex::IgnoreCase);
             }
         }
-
         return {};
     }();
 
-    if (logFilter.isValid() && logFilter.match(_name)) {
-        return true;
+    if (logFilter.isValid()) {
+        return logFilter.match(_name);
     }
-#endif
 
-#ifdef NDEBUG
-    return static_cast<int32_t>(msgLevel) <= static_cast<int32_t>(_logLevel);
+    return true;
 #else
-    return (static_cast<int32_t>(msgLevel) <= static_cast<int32_t>(_logLevel)) ||
-           (llvm::DebugFlag && llvm::isCurrentDebugType(name().data()));
+    return static_cast<int32_t>(msgLevel) <= static_cast<int32_t>(_logLevel);
 #endif
 }
 
@@ -126,11 +154,7 @@ llvm::WithColor vpux::Logger::getLevelStream(LogLevel msgLevel) {
     return llvm::WithColor(getBaseStream(), color, true, false, llvm::ColorMode::Auto);
 }
 
-void vpux::Logger::addEntryPacked(LogLevel msgLevel, const formatv_object_base& msg) const {
-    if (!isActive(msgLevel)) {
-        return;
-    }
-
+void vpux::Logger::addEntryPackedActive(LogLevel msgLevel, const formatv_object_base& msg) const {
     llvm::SmallString<512> tempBuf;
     llvm::raw_svector_ostream tempStream(tempBuf);
 

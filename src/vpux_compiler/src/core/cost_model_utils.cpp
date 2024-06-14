@@ -6,8 +6,8 @@
 #include "vpux/compiler/core/cost_model_utils.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/cost_model/cost_model.hpp"
-#include "vpux/compiler/dialect/VPUIP/attributes.hpp"
-#include "vpux/compiler/dialect/VPUIP/sw_utils.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/attributes.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/sw_utils.hpp"
 #include "vpux/compiler/utils/swizzling_utils.hpp"
 
 #include <bitset>
@@ -101,6 +101,7 @@ VPUNN::DPUWorkload vpux::getDPUWorkload(VPUIP::DPUTaskOp dpuTaskOp, VPU::ArchKin
     auto outputType = nceClusterOp->getResult(0).getType();
     auto inputTwoType = nceClusterOp->getNumOperands() > 1 ? nceClusterOp->getOperand(1).getType() : nullptr;
 
+    // E#73766: delete this check in the end of epic
     if (auto nceTilingParent = nceClusterOp->getParentOfType<VPUIP::NCEClusterTilingOp>()) {
         inputOneType = nceTilingParent.getInputs()[0].getType();
         outputType = nceTilingParent.getOutputs()[0].getType();
@@ -169,10 +170,10 @@ VPUNN::DPUWorkload vpux::getDPUWorkload(VPUIP::DPUTaskOp dpuTaskOp, VPU::ArchKin
         auto weightsType = nceClusterOp.getWeights().getType().cast<vpux::NDTypeInterface>();
         auto weightsElemType = weightsType.getElementType();
 
-        const auto compressionSchemeAttr = VPUIP::getCompressionSchemeAttr(weightsType);
-        VPUX_THROW_WHEN(compressionSchemeAttr == nullptr, "compression_schemeAttr shouldn't be a nullptr");
+        const auto sparsityCompressionAttr = VPUIP::getSparsityCompressionAttr(weightsType);
+        VPUX_THROW_WHEN(sparsityCompressionAttr == nullptr, "sparsity_compressionAttr shouldn't be a nullptr");
 
-        auto compressedSize = compressionSchemeAttr.getAllocSize(weightsElemType).count();
+        auto compressedSize = sparsityCompressionAttr.getAllocSize(weightsElemType).count();
         weightsSparsityRatio = vpux::getWeightsSparsityRatio(weightsType, compressedSize);
     }
 
@@ -314,17 +315,12 @@ size_t vpux::getDMACost(mlir::Value input, mlir::Value output, VPU::ArchKind arc
     auto inElemType = getElementType(inputType.cast<vpux::NDTypeInterface>().getElementType());
     auto outElemType = getElementType(outputType.cast<vpux::NDTypeInterface>().getElementType());
 
-    if (auto nceClusterTiling = output.getDefiningOp()->getParentOfType<VPUIP::NCEClusterTilingOp>()) {
-        auto parentInput = *nceClusterTiling.getInputs().begin();
-        auto parentOutput = *nceClusterTiling.getOutputs().begin();
+    if (inputType.dyn_cast<VPUIP::DistributedBufferType>() && extraDMAsRequired(input)) {
+        return calculateMultiClusterDMACost(input, inElemType, outElemType, archKind, costModel);
+    }
 
-        if (extraDMAsRequired(parentInput)) {
-            return calculateMultiClusterDMACost(parentInput, inElemType, outElemType, archKind, costModel);
-        }
-
-        if (extraDMAsRequired(parentOutput)) {
-            return calculateMultiClusterDMACost(parentOutput, inElemType, outElemType, archKind, costModel);
-        }
+    if (outputType.dyn_cast<VPUIP::DistributedBufferType>() && extraDMAsRequired(output)) {
+        return calculateMultiClusterDMACost(output, inElemType, outElemType, archKind, costModel);
     }
 
     auto inputShape = getShape(input);
@@ -349,6 +345,8 @@ size_t getSpillingCostForSegmented(vpux::NDTypeInterface tensorType, VPUNN::VPUD
     if (numDMAPorts > 1) {
         // For distributed segmented DMA, transaction will be split between ports and executing
         // in parallel when there are multiple DMA ports available.
+        // When enabling NPU40XX whose number of tiles is not equal to number of DMA ports, using
+        // simply the largest size in tiles to calculate cost is not accurate, see E#84432
         shapes.push_back(distributedTensorType.getLargestCompactShape());
     } else {
         shapes = distributedTensorType.getPerClusterComputeShapes();
@@ -585,21 +583,20 @@ std::map<std::string, std::function<std::unique_ptr<VPUNN::SWOperation>(
                 SW_KERNEL_NAME_TO_VPUNN_VEC_IN_ELEMENT("Equal", VPUNN::SHVEqual)};
 
 std::unique_ptr<VPUNN::SWOperation> queryKernelMap(const std::string& swKernelName, VPUNN::VPUDevice vpuDev,
-                                                   ArrayRef<mlir::Value> inputs, mlir::Value output) {
-    VPUX_THROW_WHEN(inputs.empty(), "No inputs identified for op {0}", swKernelName);
+                                                   ArrayRef<vpux::NDTypeInterface> inputNdTypes,
+                                                   vpux::NDTypeInterface outputNdType) {
+    VPUX_THROW_WHEN(inputNdTypes.empty(), "No inputs identified for op {0}", swKernelName);
 
-    auto outputNdType = output.getType().cast<vpux::NDTypeInterface>();
     auto outputTensor = getVPUNNTensor(outputNdType.getShape(), getElementType(outputNdType.getElementType()));
 
     if (swKernelNameToVpunn1InputFuncMap.find(swKernelName) != swKernelNameToVpunn1InputFuncMap.end()) {
-        auto input0NdType = inputs[0].getType().cast<vpux::NDTypeInterface>();
+        auto input0NdType = inputNdTypes.front();
         auto inputTensor = getVPUNNTensor(input0NdType.getShape(), getElementType(input0NdType.getElementType()));
 
         return swKernelNameToVpunn1InputFuncMap[swKernelName](vpuDev, inputTensor, outputTensor);
     } else if (swKernelNameToVpunnVecInputFuncMap.find(swKernelName) != swKernelNameToVpunnVecInputFuncMap.end()) {
         std::vector<VPUNN::VPUTensor> inputTensors;
-        for (auto& input : inputs) {
-            auto inputNd = input.getType().cast<vpux::NDTypeInterface>();
+        for (auto inputNd : inputNdTypes) {
             inputTensors.push_back(getVPUNNTensor(inputNd.getShape(), getElementType(inputNd.getElementType())));
         }
 
@@ -607,6 +604,16 @@ std::unique_ptr<VPUNN::SWOperation> queryKernelMap(const std::string& swKernelNa
     }
 
     return nullptr;
+}
+
+std::unique_ptr<VPUNN::SWOperation> queryKernelMap(const std::string& swKernelName, VPUNN::VPUDevice vpuDev,
+                                                   ArrayRef<mlir::Value> inputs, mlir::Value output) {
+    SmallVector<vpux::NDTypeInterface> inputTypes;
+    inputTypes.reserve(inputs.size());
+    llvm::transform(inputs, std::back_inserter(inputTypes), [](mlir::Value value) {
+        return value.getType().cast<vpux::NDTypeInterface>();
+    });
+    return queryKernelMap(swKernelName, vpuDev, inputTypes, output.getType().cast<vpux::NDTypeInterface>());
 }
 
 size_t getShaveActCycleForSwKernelFunc(const std::string& swKernelName, VPU::ArchKind arch,
@@ -623,6 +630,7 @@ size_t getShaveActCycleForSwKernelFunc(const std::string& swKernelName, VPU::Arc
 }
 
 std::unique_ptr<VPUNN::SWOperation> vpux::getVPUNNSWKernelOp(VPUIP::SwKernelOp swKernelOp) {
+    // E#73766: delete this check in the end of epic
     VPUX_THROW_WHEN(mlir::isa<VPUIP::NCEClusterTilingOp>(swKernelOp->getParentOp()),
                     "Only single cluster task is supported by this method, op - {0}", swKernelOp->getLoc());
     // Exclude strange sw ops produced by compiler like cache_flush_invalidate op
@@ -652,6 +660,17 @@ std::unique_ptr<VPUNN::SWOperation> vpux::getVPUNNSWKernelOp(VPU::SWOpInterface 
     return vpunnLayer;
 }
 
+std::unique_ptr<VPUNN::SWOperation> vpux::getVPUNNSWKernelOp(VPU::SWOpInterface operation,
+                                                             vpux::NDTypeInterface outputNDType,
+                                                             ArrayRef<vpux::NDTypeInterface> types) {
+    auto vpuDev = VPU::getVPUDeviceType(VPU::getArch(operation));
+    const auto operName = operation->getName().stripDialect().str();
+
+    std::unique_ptr<VPUNN::SWOperation> vpunnLayer = queryKernelMap(operName, vpuDev, types, outputNDType);
+
+    return vpunnLayer;
+}
+
 size_t vpux::calculateShaveActCycles(VPUIP::SwKernelOp swKernelOp,
                                      const std::shared_ptr<VPUNN::VPUCostModel>& costModel, VPU::ArchKind arch) {
     if (swKernelOp.getInputs().empty() || swKernelOp.getOutputBuffs().empty()) {
@@ -673,8 +692,7 @@ size_t vpux::calculateShaveActCycles(VPUIP::SwKernelOp swKernelOp,
     auto inputs = to_small_vector(swKernelOp.getInputs());
     auto outputs = to_small_vector(swKernelOp.getOutputBuffs());
 
-    // In case the parent is a TilingOp, the Layer could be distributed
-    // In such case updated the inputTensor and outputTensor with the biggest perCluster Shape
+    // E#73766: delete this check in the end of epic
     if (auto parentOp = mlir::dyn_cast<VPUIP::NCEClusterTilingOp>(swKernelOp->getParentOp())) {
         inputs = to_small_vector(parentOp.getInputs());
         outputs = to_small_vector(parentOp.getOutputBuffs());
@@ -715,6 +733,7 @@ size_t vpux::getDPUTaskOpCost(VPUIP::DPUTaskOp dpuTaskOp, const std::shared_ptr<
     auto inputOneType = nceOp->getOperand(0).getType();
     auto outputType = nceOp->getResult(0).getType();
 
+    // E#73766: delete this check in the end of epic
     if (auto nceTilingParent = nceOp->getParentOfType<VPUIP::NCEClusterTilingOp>()) {
         inputOneType = nceTilingParent.getInputs()[0].getType();
         outputType = nceTilingParent.getOutputs()[0].getType();

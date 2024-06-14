@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022 Intel Corporation
 // SPDX-License-Identifier: Apache 2.0
 //
 #include <vpux/hwtest/ops/act_shave_op.hpp>
 
-#include "vpux/compiler/dialect/VPUIP/sw_utils.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/sw_utils.hpp"
 
 namespace vpux {
 namespace hwtest {
@@ -17,23 +17,17 @@ VPUIP::KernelInfo getKernelInfo(nb::ActivationLayer activation, mlir::MLIRContex
 
     switch (activation.activationType) {
     case nb::ActivationType::HSwish:
-        return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{}, {"hswish_fp16"}, {"hswish_fp16.cpp"}};
+        return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{}, {"activation_hswish"}};
     case nb::ActivationType::Sigmoid:
-        return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{}, {"sigmoid_fp16"}, {"sigmoid_fp16.c"}};
+        return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{}, {"activation_sigmoid"}};
     case nb::ActivationType::Softmax:
-        return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{axisParamAttr, padSizeAttr},
-                                 {"singleShaveSoftmax"},
-                                 {"singleShaveSoftmax.cpp"}};
+        return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{axisParamAttr, padSizeAttr}, {"softmax"}};
     case nb::ActivationType::round_trip_b8h8_to_fp16:
-        return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{},
-                                 {"round_trip_b8h8_to_fp16"},
-                                 {"round_trip_b8h8_to_fp16.cpp"}};
+        return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{}, {"round_trip_b8h8_to_fp16"}};
     case nb::ActivationType::PopulateWeightTable: {
         const auto baseAttr = getIntAttr(ctx, activation.weightsOffset.value_or(0));
         const auto stepAttr = getIntAttr(ctx, activation.weightsPtrStep.value_or(0));
-        return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{baseAttr, stepAttr},
-                                 {"populate_weight_table"},
-                                 {"populate_weight_table.cpp"}};
+        return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{baseAttr, stepAttr}, {"populate_weight_table"}};
     }
     default:
         VPUX_THROW("Activation is not supported for ActShave tests");
@@ -81,7 +75,7 @@ void buildActShaveTask(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleO
                    });
 
     // first creating management kernel definition
-    VPUIP::createRuntimeKernelDefinition(module, log);
+    VPUIP::createRuntimeKernelDefinition(module, log, testDesc.getArchitecture());
 
     // Create built-in function ------------------------------------------------
 

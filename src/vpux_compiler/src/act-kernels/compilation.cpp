@@ -4,7 +4,8 @@
 //
 
 #include "vpux/compiler/act_kernels/compilation.h"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/utils/ELF/utils.hpp"
 
 #ifdef _MSC_VER
 #pragma warning(push)
@@ -31,28 +32,45 @@ flatbuffers::Offset<MVCNN::KernelData> buildKernelData(flatbuffers::FlatBufferBu
     return builder.Finish();
 }
 
-ActKernelDesc compileKernelForACTShave(const CompilationUnitDesc& unitDesc, VPU::ArchKind archKind) {
+ActKernelDesc compileKernelForACTShave(const CompilationUnitDesc& unitDesc, VPU::ArchKind archKind,
+                                       std::optional<VPU::RevisionID> revisionID, bool hasInputsInDDR) {
     auto& kernelInfo = ShaveBinaryResources::getInstance();
 
     std::string cpu;
 
     switch (archKind) {
-    case VPU::ArchKind::VPUX37XX:
+    case VPU::ArchKind::NPU40XX:
+        cpu = "4000xx";
+        break;
+    case VPU::ArchKind::NPU37XX:
         cpu = "3720xx";
         break;
     default:
         VPUX_THROW("Unsupported VPU arch type: '{0}'", archKind);
     }
 
-    auto textBinary = kernelInfo.getText(unitDesc.entry, cpu);
-    auto dataBinary = kernelInfo.getData(unitDesc.entry, cpu);
+    llvm::ArrayRef<uint8_t> textBinary;
+    llvm::ArrayRef<uint8_t> dataBinary;
+    if (archKind == VPU::ArchKind::NPU37XX && hasInputsInDDR) {
+        llvm::StringRef lsu0_wo = "lsu0_wo";
+        textBinary = kernelInfo.getText(unitDesc.entry, cpu, lsu0_wo);
+        dataBinary = kernelInfo.getData(unitDesc.entry, cpu, lsu0_wo);
+    } else if (archKind == VPU::ArchKind::NPU40XX && revisionID.has_value() &&
+               revisionID.value() >= VPU::RevisionID::REVISION_B) {
+        llvm::StringRef suffix = "B0";
+        textBinary = kernelInfo.getText(unitDesc.entry, cpu, suffix);
+        dataBinary = kernelInfo.getData(unitDesc.entry, cpu, suffix);
+    } else {
+        textBinary = kernelInfo.getText(unitDesc.entry, cpu);
+        dataBinary = kernelInfo.getData(unitDesc.entry, cpu);
+    }
 
     ActKernelDesc result;
     auto dataName = std::string(unitDesc.name) + ".data";
 
     // A copy is made for each vector in order not to modify their original content when padding is added
     result.text = {unitDesc.name.data(), to_small_vector(textBinary), textBinary.size()};
-    result.data = {dataName, to_small_vector(dataBinary), dataBinary.size()};
+    result.data = {std::move(dataName), to_small_vector(dataBinary), dataBinary.size()};
 
     // lets pad textBinary by 1K array at the end with FC CC FC CC
     for (int i = 0; i != 512; i++) {
@@ -75,7 +93,7 @@ const CompilationUnitDesc& managementKernelCompilationDesc() {
 ActKernelDesc compileManagementKernelForACTShave() {
     const auto& unitDesc = managementKernelCompilationDesc();
 
-    return compileKernelForACTShave(unitDesc, VPU::ArchKind::VPUX37XX);
+    return compileKernelForACTShave(unitDesc, VPU::ArchKind::NPU37XX, std::nullopt, false);
 }
 
 }  // namespace vpux

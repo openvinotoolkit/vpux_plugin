@@ -3,24 +3,30 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+//
+
 #include <algorithm>
 #include <cstring>
 #include <fstream>
-#include <ie_version.hpp>
 #include <iostream>
 
 #include <gflags/gflags.h>
 
 #include <flatbuffers/minireflect.h>
+#include "schema/profiling_generated.h"
 
-#include <schema/profiling_generated.h>
+#include "openvino/core/version.hpp"
 
-#include "vpux/utils/IE/profiling.hpp"
-#include "vpux/utils/plugin/profiling_meta.hpp"
-#include "vpux/utils/plugin/profiling_parser.hpp"
+#include "vpux/utils/core/error.hpp"
+#include "vpux/utils/profiling/metadata.hpp"
+#include "vpux/utils/profiling/parser/api.hpp"
+#include "vpux/utils/profiling/reports/api.hpp"
 
-using vpux::profiling::OutputType;
-using vpux::profiling::VerbosityLevel;
+using namespace vpux::profiling;
+
+namespace {
+
+enum class OutputFormat { TEXT, JSON, DEBUG };
 
 DEFINE_string(b, "", "Precompiled blob that was profiled");
 DEFINE_string(p, "", "Profiling result binary");
@@ -32,7 +38,7 @@ DEFINE_bool(vv, false, "Highest verbosity of tasks parsing (Currently same as -v
 DEFINE_bool(m, false, "Dump profiling metadata");
 DEFINE_bool(fast_clk, false, "Assume perf_clk of 400MHz");
 
-static bool validateFile(const char* flagName, const std::string& pathToFile) {
+bool validateFile(const char* flagName, const std::string& pathToFile) {
     if (pathToFile.empty()) {
         return false;
     }
@@ -48,7 +54,7 @@ static bool validateFile(const char* flagName, const std::string& pathToFile) {
     return isValid;
 }
 
-static VerbosityLevel getVerbosity() {
+VerbosityLevel getVerbosity() {
     if (FLAGS_vv) {
         return VerbosityLevel::HIGH;
     } else if (FLAGS_v) {
@@ -58,7 +64,7 @@ static VerbosityLevel getVerbosity() {
     }
 }
 
-static std::string verbosityToStr(VerbosityLevel verbosity) {
+std::string verbosityToStr(VerbosityLevel verbosity) {
     std::map<VerbosityLevel, std::string> labels = {
             {VerbosityLevel::LOW, "Low"},
             {VerbosityLevel::MEDIUM, "Medium"},
@@ -67,21 +73,23 @@ static std::string verbosityToStr(VerbosityLevel verbosity) {
     return labels[verbosity];
 }
 
-static OutputType getOutputFormat() {
+OutputFormat getOutputFormat() {
     if (FLAGS_f == "text") {
-        return OutputType::TEXT;
+        return OutputFormat::TEXT;
     } else if (FLAGS_f == "json") {
-        return OutputType::JSON;
+        return OutputFormat::JSON;
     } else if (FLAGS_f == "debug") {
-        return OutputType::DEBUG;
+        return OutputFormat::DEBUG;
     }
-    VPUX_THROW("Unknown output format: {0}. Valid formats: text, json", FLAGS_f);
+    VPUX_THROW("Unknown output format: {0}.", FLAGS_f);
 }
 
-static void parseCommandLine(int argc, char* argv[], const std::string& usage) {
+void parseCommandLine(int argc, char* argv[], const std::string& usage) {
     gflags::SetUsageMessage(usage);
     gflags::RegisterFlagValidator(&FLAGS_b, &validateFile);
-    gflags::SetVersionString(InferenceEngine::GetInferenceEngineVersion()->buildNumber);
+    std::ostringstream version;
+    version << ov::get_openvino_version();
+    gflags::SetVersionString(version.str());
 
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
@@ -90,7 +98,7 @@ static void parseCommandLine(int argc, char* argv[], const std::string& usage) {
     }
 }
 
-static void printCommandLineParameters() {
+void printCommandLineParameters() {
     std::cout << "Parameters:" << std::endl;
     std::cout << "    Network blob file:         " << FLAGS_b << std::endl;
     std::cout << "    Profiling result file:     " << FLAGS_p << std::endl;
@@ -103,16 +111,16 @@ static void printCommandLineParameters() {
     std::cout << std::endl;
 }
 
-static void dumpProfilingMetadata(const uint8_t* blobData, size_t blobSize) {
+void dumpProfilingMetadata(const uint8_t* blobData, size_t blobSize, std::ostream& output) {
     const uint8_t* sectionData = vpux::profiling::getProfilingSectionPtr(blobData, blobSize);
 
     const auto prettyProfilingMeta =
             flatbuffers::FlatBufferToString(sectionData, ProfilingFB::ProfilingMetaTypeTable(), /*multi_line*/ true,
                                             /*vector_delimited*/ false);
-    std::cout << prettyProfilingMeta << std::endl;
+    output << prettyProfilingMeta << std::endl;
 }
 
-std::vector<uint8_t> read_binary_file(std::string path) {
+std::vector<uint8_t> readBinaryFile(std::string path) {
     std::ifstream file;
     file.open(path, std::ios::in | std::ios::binary);
     file.seekg(0, file.end);
@@ -123,6 +131,35 @@ std::vector<uint8_t> read_binary_file(std::string path) {
     return data;
 }
 
+void writeProfilingOutput(const OutputFormat format, const uint8_t* blobData, size_t blobSize, const uint8_t* profData,
+                          size_t profSize, std::ostream& output, VerbosityLevel verbosity, bool fpga,
+                          bool highFreqPerfClk) {
+    if (format == OutputFormat::DEBUG) {
+        writeDebugProfilingInfo(output, blobData, blobSize, profData, profSize);
+        return;
+    }
+    std::vector<TaskInfo> taskProfiling =
+            getTaskInfo(blobData, blobSize, profData, profSize, verbosity, fpga, highFreqPerfClk);
+    std::vector<LayerInfo> layerProfiling = getLayerInfo(taskProfiling);
+
+    // Order tasks and layers by start time
+    std::sort(taskProfiling.begin(), taskProfiling.end(), profilingTaskStartTimeComparator<TaskInfo>);
+    std::sort(layerProfiling.begin(), layerProfiling.end(), profilingTaskStartTimeComparator<LayerInfo>);
+
+    switch (format) {
+    case OutputFormat::TEXT:
+        printProfilingAsText(taskProfiling, layerProfiling, output);
+        break;
+    case OutputFormat::JSON:
+        printProfilingAsTraceEvent(taskProfiling, layerProfiling, output);
+        break;
+    default:
+        VPUX_THROW("Unsupported profiling output type.");
+    }
+};
+
+}  // namespace
+
 int main(int argc, char** argv) {
     static const char* usage = "Usage: prof_parser -b <blob> -p <profiling.bin> [-f json|text] "
                                "[-o <output_file>] [-v|vv] [-g] [-m] [-fast_clk]";
@@ -130,25 +167,31 @@ int main(int argc, char** argv) {
         parseCommandLine(argc, argv, usage);
         printCommandLineParameters();
 
-        auto blob_bin = read_binary_file(FLAGS_b);
+        auto blob = readBinaryFile(FLAGS_b);
+
+        std::ofstream outfile;
+        const auto filename = FLAGS_o;
+        if (!filename.empty()) {
+            outfile.open(filename, std::ios::out | std::ios::trunc);
+            VPUX_THROW_WHEN(!outfile, "Cannot write to '{0}'", filename);
+        }
+
+        std::ostream& output = outfile.is_open() ? outfile : std::cout;
+        output.exceptions(std::ios::badbit | std::ios::failbit);
 
         if (FLAGS_m) {
-            if (!FLAGS_o.empty() || !FLAGS_p.empty()) {
-                throw std::runtime_error("-o|-p parameters have no effect when -m is specified");
+            if (!FLAGS_p.empty()) {
+                throw std::runtime_error("Cannot use -p when -m is specified");
             }
-
-            dumpProfilingMetadata(blob_bin.data(), blob_bin.size());
+            dumpProfilingMetadata(blob.data(), blob.size(), output);
             return 0;
         }
 
-        auto prof_output_bin = read_binary_file(FLAGS_p);
-
-        auto blobData = std::make_pair(blob_bin.data(), blob_bin.size());
-        auto profilingData = std::make_pair(prof_output_bin.data(), prof_output_bin.size());
+        auto profdata = readBinaryFile(FLAGS_p);
         auto format = getOutputFormat();
 
-        vpux::profiling::outputWriter(format, blobData, profilingData, FLAGS_o, getVerbosity(), FLAGS_g,
-                                      FLAGS_fast_clk);
+        writeProfilingOutput(format, blob.data(), blob.size(), profdata.data(), profdata.size(), output, getVerbosity(),
+                             FLAGS_g, FLAGS_fast_clk);
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;
         std::cerr << usage << std::endl;

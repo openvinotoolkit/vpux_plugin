@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --init-compiler="vpu-arch=%arch%" --resolve-strided-slice %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 // CHECK-LABEL: @ResolveStridedSliceWithStride
 func.func @ResolveStridedSliceWithStride(%arg0: tensor<1x10x20x30xf16>) -> tensor<1x5x5x5xf16> {
@@ -170,4 +170,12 @@ func.func @AdjustStridedSliceAttrsRank(%arg0: tensor<157x1x2048xf16>) -> tensor<
     // CHECK-SAME:  strides_attr = [2, 1, 1]
 }
 
+// CHECK-LABEL: @StridedSliceWith0dOutput
+func.func @StridedSliceWith0dOutput(%arg0: tensor<4xsi32>) -> tensor<1xsi32> {
+    %0 = IE.StridedSlice(%arg0) {begin_mask = [0], begins_attr = [3], ellipsis_mask = [0], end_mask = [0], ends_attr = [4], new_axis_mask = [0], operandSegmentSizes = array<i32: 1, 0, 0, 0>, shrink_axis_mask = [1], strides_attr = [1]} : tensor<4xsi32> -> tensor<1xsi32>
+    return %0 : tensor<1xsi32>
 
+    // CHECK:       [[VAL0:%.*]] = IE.Slice %arg0 [3] [1] : tensor<4xsi32> to tensor<1xsi32>
+    // CHECK:       [[VAL1:%.*]] = IE.Reshape([[VAL0]]) {shape_value = [1]} : tensor<1xsi32> -> tensor<1xsi32>
+    // CHECK:       return [[VAL1]]  : tensor<1xsi32>
+}

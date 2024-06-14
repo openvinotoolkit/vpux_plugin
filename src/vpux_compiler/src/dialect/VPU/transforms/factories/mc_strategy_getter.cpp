@@ -4,8 +4,9 @@
 //
 
 #include "vpux/compiler/dialect/VPU/transforms/factories/mc_strategy_getter.hpp"
+#include "vpux/compiler/NPU37XX/dialect/VPU/impl/mc_strategy_getter.hpp"
+#include "vpux/compiler/NPU40XX/dialect/VPU/impl/mc_strategy_getter.hpp"
 #include "vpux/compiler/VPU30XX/dialect/VPU/impl/mc_strategy_getter.hpp"
-#include "vpux/compiler/VPU37XX/dialect/VPU/impl/mc_strategy_getter.hpp"
 
 using namespace vpux::VPU;
 
@@ -15,11 +16,14 @@ std::unique_ptr<StrategyGetterBase> vpux::VPU::createMCStrategyGetter(ArchKind a
     }
 
     switch (arch) {
-    case ArchKind::VPUX30XX: {
+    case VPU::ArchKind::NPU30XX: {
         return std::make_unique<arch30xx::StrategyGetter>();
     }
-    case ArchKind::VPUX37XX: {
+    case VPU::ArchKind::NPU37XX: {
         return std::make_unique<arch37xx::StrategyGetter>();
+    }
+    case VPU::ArchKind::NPU40XX: {
+        return std::make_unique<arch40xx::StrategyGetter>(numClusters);
     }
     case ArchKind::UNKNOWN:
     default: {

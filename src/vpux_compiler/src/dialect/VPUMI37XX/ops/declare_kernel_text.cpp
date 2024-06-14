@@ -23,9 +23,7 @@ void vpux::VPUMI37XX::DeclareKernelTextOp::serialize(elf::writer::BinaryDataSect
     auto kernel = getKernelPath();
 
     const auto& kernelInfo = ShaveBinaryResources::getInstance();
-    const SmallString arch = ELFNPU37XX::getSwKernelArchString(VPU::getArch(this->getOperation()));
-
-    const auto elfBlob = kernelInfo.getElf(kernel, arch).vec();
+    const auto elfBlob = kernelInfo.getElf(kernel);
 
     auto secDataSizePair = vpux::ELFNPU37XX::getDataAndSizeOfElfSection(elfBlob, {".text"});
 
@@ -36,9 +34,7 @@ size_t vpux::VPUMI37XX::DeclareKernelTextOp::getBinarySize() {
     auto kernel = getKernelPath();
 
     const auto& kernelInfo = ShaveBinaryResources::getInstance();
-    const SmallString arch = ELFNPU37XX::getSwKernelArchString(VPU::getArch(this->getOperation()));
-
-    const auto elfBlob = kernelInfo.getElf(kernel, arch).vec();
+    const auto elfBlob = kernelInfo.getElf(kernel);
 
     auto secDataSizePair = vpux::ELFNPU37XX::getDataAndSizeOfElfSection(elfBlob, {".text"});
 

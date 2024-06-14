@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -278,8 +278,8 @@ func.func @MixedPrecision(%arg0: tensor<1x256x16x32xf16, {order =#NHWC}>) -> ten
         dense<10> : tensor<256x1x1x4xsi32>, [#const.Reorder<#NHWC>]
 
     %0 = VPU.NCE.DepthConvolution(%arg0, %w, %wt) {
-        pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, 
-        rawFilterShape = [256, 1, 1, 1], 
+        pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
+        rawFilterShape = [256, 1, 1, 1],
         strides = [1, 1]
     } -> tensor<1x256x16x32x!qElemType, {order = #NHWC}>
 
@@ -304,14 +304,14 @@ func.func @MixedPrecision(%arg0: tensor<1x256x16x32xf16, {order =#NHWC}>) -> ten
 
 // CHECK-LABEL: @I8WeightsMixedPrecision
 func.func @I8WeightsMixedPrecision(%arg0: tensor<1x16x16x32xf16, {order =#NHWC}>) -> tensor<1x16x16x32xf16, {order = #NHWC}> {
-    %w = const.Declare tensor<16x16x1x1x!qElemType, {order = #NHWC}> = 
+    %w = const.Declare tensor<16x16x1x1x!qElemType, {order = #NHWC}> =
         dense<1.000000e+00> : tensor<16x16x1x1xf16>, [#const.ConvertElemType<si8>, #const.QuantCast<!qElemType>, #const.Reorder<#NHWC>]
     %wt = const.Declare tensor<16x1x1x4xsi32, {order = #NHWC}> =
         dense<10> : tensor<16x1x1x4xsi32>, [#const.Reorder<#NHWC>]
 
     %0 = VPU.NCE.Convolution(%arg0, %w, %wt) {
-        pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, 
-        rawFilterShape = [16, 16, 1, 1], 
+        pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
+        rawFilterShape = [16, 16, 1, 1],
         strides = [1, 1]
     } -> tensor<1x16x16x32xf16, {order = #NHWC}>
 
@@ -335,14 +335,14 @@ func.func @I8WeightsMixedPrecision(%arg0: tensor<1x16x16x32xf16, {order =#NHWC}>
 // CHECK-LABEL: @PReluConv
 func.func @PReluConv(%arg0: tensor<1x1024x40x40xf16, {order =#NHWC}>) -> tensor<1x256x40x40xf16, {order = #NHWC}> {
     %cst = const.Declare tensor<256x1x1x4xsi32> = dense<1> : tensor<256x1x1x4xsi32>
-    %cst_0 = const.Declare tensor<256x1024x1x1xf16, {order = #NHWC}> = 
+    %cst_0 = const.Declare tensor<256x1024x1x1xf16, {order = #NHWC}> =
     dense<1.000000e+00> : tensor<256x1024x1x1xf16>, [#const.Reorder<#NHWC>]
 
     %0 = VPU.NCE.Convolution(%arg0, %cst_0, %cst) {pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
         ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-        lrelu_mult = 0 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>, 
+        lrelu_mult = 0 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
         rawFilterShape = [256, 1024, 1, 1], strides = [1, 1]} -> tensor<1x256x40x40xf16, {order = #NHWC}>
-   
+
     // CHECK:       [[CONV:%.+]] = VPU.NCE.Convolution(%arg0, %cst_0, %cst) {
     // CHECK-SAME:      ppe = #VPU.PPETask<
     // CHECK-SAME:          mode = <LPRELU>,

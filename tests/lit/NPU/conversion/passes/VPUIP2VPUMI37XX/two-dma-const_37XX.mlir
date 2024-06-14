@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -30,7 +30,7 @@ module @Convert {
     VPURT.Task waits(%bar_0 : !VPURT.Barrier) {
       %dma_1 = VPUIP.NNDMA {port = 0 : i64} inputs(%buf_0 : memref<1x100xui32, @DDR>) outputs(%arg1 : memref<1x100xui32, @DDR>) -> memref<1x100xui32, @DDR>
     }
-    // CHECK:       %[[VAL5:.*]] = VPUMI37XX.NNDMA {port = 0 : i64} inputs(%[[VAL2]] : memref<1x100xui32, @DDR>) outputs(%[[VAL6:.*]] : memref<1x100xui32, @DDR>) waits(%[[VAL1]] : !VPURegMapped.Index<0:0:0>) start_after(1) clean_after(1) acceleration_mode(<DISABLE>) -> !VPURegMapped.Index<0:0:1>
+    // CHECK:       %[[VAL5:.*]] = VPUMI37XX.NNDMA {port = 0 : i64} inputs(%[[VAL2]] : memref<1x100xui32, @DDR>) outputs(%[[VAL6:.*]] : memref<1x100xui32, @DDR>) waits(%[[VAL1]] : !VPURegMapped.Index<0:0:0>) start_after(1) clean_after(0) acceleration_mode(<DISABLE>) -> !VPURegMapped.Index<0:0:1>
     // CHECK:       %[[VAL4:.*]] = VPUMI37XX.NNDMA {port = 0 : i64} inputs(%[[VAL3]] : memref<1x100xui32>) outputs(%[[VAL2]] : memref<1x100xui32, @DDR>) nextDMAIdx(%[[VAL5]] : !VPURegMapped.Index<0:0:1>) updates(%[[VAL1]] : !VPURegMapped.Index<0:0:0>) start_after(1) clean_after(0) acceleration_mode(<DISABLE>) -> !VPURegMapped.Index<0:0:0>
 
     // CHECK:       %[[VAL7:.*]] = ELFNPU37XX.CreateSection secType(SHT_PROGBITS) secFlags("SHF_ALLOC|SHF_EXECINSTR|VPU_SHF_PROC_DMA") {secAddrAlign = 64 : i64, secInfo = 0 : i64, secName = ".text.dmaTasks0"} -> !ELFNPU37XX.Section

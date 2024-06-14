@@ -16,7 +16,10 @@ add_mlir_dialect_library(${TARGET_NAME}
         npu_elf
         inferenceStatic
         # E#98178: remove depedency on firmware headers
-        npu_37xx_firmware_headers)
+        npu_37xx_firmware_headers
+        npu_compiler_dialect_vpurt
+        npu_profiling_schema
+)
 add_dependencies(${TARGET_NAME} MLIRVPUXIncGenList)
 target_include_directories(${TARGET_NAME}
     SYSTEM PRIVATE
@@ -25,6 +28,5 @@ target_include_directories(${TARGET_NAME}
 target_include_directories(${TARGET_NAME}
     PRIVATE
         ${VPU_COMPILER_SRC_INCLUDE_DIR})
-add_src_target($<BUILD_INTERFACE:${TARGET_NAME}>)
-vpux_enable_clang_format(${TARGET_NAME})
+add_src_target(${TARGET_NAME})
 enable_warnings_as_errors(${TARGET_NAME} WIN_STRICT)

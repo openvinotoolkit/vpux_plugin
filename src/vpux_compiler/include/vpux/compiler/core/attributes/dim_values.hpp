@@ -327,6 +327,12 @@ public:
     }
 
 public:
+    // allow implicit conversion from NPU to MLIR shape type
+    operator BaseRef() const {
+        return _ref;
+    }
+
+public:
     void printFormat(llvm::raw_ostream& stream) const {
         printTo(stream, "{0}", raw());
     }

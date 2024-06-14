@@ -1,24 +1,24 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation
 // SPDX-License-Identifier: Apache 2.0
 //
 
 #include <gtest/gtest.h>
 
-#include "vpux/al/config/common.hpp"
-#include "vpux/al/config/runtime.hpp"
-#include "vpux/vpux_plugin_params.hpp"
+#include "intel_npu/al/config/common.hpp"
+#include "intel_npu/al/config/runtime.hpp"
 #include "vpux_backends.hpp"
 
-namespace ie = InferenceEngine;
+#include "test_utils/npu_backends_test.hpp"
 
 using VPUXBackendsUnitTests = ::testing::Test;
 
 TEST_F(VPUXBackendsUnitTests, notStopSearchingIfBackendThrow) {
-    std::shared_ptr<vpux::OptionsDesc> dummyOptions = std::make_shared<vpux::OptionsDesc>();
-    vpux::Config dummyConfig(dummyOptions);
-    const std::vector<std::string> dummyBackendRegistry = {"throw_test_backend", "vpu3700_test_backend"};
-    vpux::VPUXBackends backends(dummyBackendRegistry, dummyConfig);
+    const std::vector<std::string> dummyBackendRegistry = {"throw_test_backend", "npu3700_test_backend"};
+
+    vpux::NPUBackendsTest::Ptr test_backends;
+    test_backends = std::make_shared<vpux::NPUBackendsTest>(dummyBackendRegistry);
+    std::shared_ptr<vpux::VPUXBackends> backends = std::reinterpret_pointer_cast<vpux::VPUXBackends>(test_backends);
 
     auto options = std::make_shared<vpux::OptionsDesc>();
     vpux::registerCommonOptions(*options);
@@ -27,18 +27,19 @@ TEST_F(VPUXBackendsUnitTests, notStopSearchingIfBackendThrow) {
     vpux::Config config(options);
     config.update({{"LOG_LEVEL", "LOG_DEBUG"}});
 
-    backends.setup(config);
+    backends->setup(config);
 
-    auto device = backends.getDevice();
+    auto device = backends->getDevice();
     ASSERT_NE(nullptr, device);
-    ASSERT_EQ("DummyVPU3700Device", device->getName());
+    ASSERT_EQ("DummyNPU3700Device", device->getName());
 }
 
 TEST_F(VPUXBackendsUnitTests, notStopSearchingIfBackendNotExists) {
-    std::shared_ptr<vpux::OptionsDesc> dummyOptions = std::make_shared<vpux::OptionsDesc>();
-    vpux::Config dummyConfig(dummyOptions);
-    const std::vector<std::string> dummyBackendRegistry = {"not_exists_backend", "vpu3700_test_backend"};
-    vpux::VPUXBackends backends(dummyBackendRegistry, dummyConfig);
+    const std::vector<std::string> dummyBackendRegistry = {"not_exists_backend", "npu3700_test_backend"};
+
+    vpux::NPUBackendsTest::Ptr test_backends;
+    test_backends = std::make_shared<vpux::NPUBackendsTest>(dummyBackendRegistry);
+    std::shared_ptr<vpux::VPUXBackends> backends = std::reinterpret_pointer_cast<vpux::VPUXBackends>(test_backends);
 
     auto options = std::make_shared<vpux::OptionsDesc>();
     vpux::registerCommonOptions(*options);
@@ -47,156 +48,174 @@ TEST_F(VPUXBackendsUnitTests, notStopSearchingIfBackendNotExists) {
     vpux::Config config(options);
     config.update({{"LOG_LEVEL", "LOG_DEBUG"}});
 
-    backends.setup(config);
+    backends->setup(config);
 
-    auto device = backends.getDevice();
+    auto device = backends->getDevice();
     ASSERT_NE(nullptr, device);
-    ASSERT_EQ("DummyVPU3700Device", device->getName());
+    ASSERT_EQ("DummyNPU3700Device", device->getName());
 }
 
 TEST_F(VPUXBackendsUnitTests, canFindDeviceIfAtLeastOneBackendHasDevicesAvailable) {
-    std::shared_ptr<vpux::OptionsDesc> dummyOptions = std::make_shared<vpux::OptionsDesc>();
-    vpux::Config dummyConfig(dummyOptions);
-    const std::vector<std::string> dummyBackendRegistry = {"no_devices_test_backend", "vpu3700_test_backend"};
-    vpux::VPUXBackends backends(dummyBackendRegistry, dummyConfig);
+    const std::vector<std::string> dummyBackendRegistry = {"no_devices_test_backend", "npu3700_test_backend"};
 
-    auto device = backends.getDevice();
+    vpux::NPUBackendsTest::Ptr test_backends;
+    test_backends = std::make_shared<vpux::NPUBackendsTest>(dummyBackendRegistry);
+    std::shared_ptr<vpux::VPUXBackends> backends = std::reinterpret_pointer_cast<vpux::VPUXBackends>(test_backends);
+
+    auto device = backends->getDevice();
     ASSERT_NE(nullptr, device);
-    ASSERT_EQ("DummyVPU3700Device", device->getName());
+    ASSERT_EQ("DummyNPU3700Device", device->getName());
 }
 
 TEST_F(VPUXBackendsUnitTests, deviceReturnsNullptrIfNoBackends) {
-    std::shared_ptr<vpux::OptionsDesc> dummyOptions = std::make_shared<vpux::OptionsDesc>();
-    vpux::Config dummyConfig(dummyOptions);
-    vpux::VPUXBackends backends({}, dummyConfig);
-    ASSERT_EQ(nullptr, backends.getDevice());
+    const std::vector<std::string> dummyBackendRegistry = {};
+
+    vpux::NPUBackendsTest::Ptr test_backends;
+    test_backends = std::make_shared<vpux::NPUBackendsTest>(dummyBackendRegistry);
+    std::shared_ptr<vpux::VPUXBackends> backends = std::reinterpret_pointer_cast<vpux::VPUXBackends>(test_backends);
+
+    ASSERT_EQ(nullptr, backends->getDevice());
 }
 
 TEST_F(VPUXBackendsUnitTests, deviceReturnsNullptrIfPassedBackendsNotExist) {
-    std::shared_ptr<vpux::OptionsDesc> dummyOptions = std::make_shared<vpux::OptionsDesc>();
-    vpux::Config dummyConfig(dummyOptions);
-    vpux::VPUXBackends backends({"wrong_path", "one_more_wrong_path"}, dummyConfig);
-    ASSERT_EQ(nullptr, backends.getDevice());
+    const std::vector<std::string> dummyBackendRegistry = {"wrong_path", "one_more_wrong_path"};
+
+    vpux::NPUBackendsTest::Ptr test_backends;
+    test_backends = std::make_shared<vpux::NPUBackendsTest>(dummyBackendRegistry);
+    std::shared_ptr<vpux::VPUXBackends> backends = std::reinterpret_pointer_cast<vpux::VPUXBackends>(test_backends);
+
+    ASSERT_EQ(nullptr, backends->getDevice());
 }
 
 TEST_F(VPUXBackendsUnitTests, findDeviceAfterName) {
-    std::shared_ptr<vpux::OptionsDesc> dummyOptions = std::make_shared<vpux::OptionsDesc>();
-    vpux::Config dummyConfig(dummyOptions);
-    const std::vector<std::string> dummyBackendRegistry = {"vpu3700_test_backend"};
-    vpux::VPUXBackends backends(dummyBackendRegistry, dummyConfig);
+    const std::vector<std::string> dummyBackendRegistry = {"npu3700_test_backend"};
 
-    std::string deviceName = "DummyVPU3700Device";
-    auto device = backends.getDevice(deviceName);
+    vpux::NPUBackendsTest::Ptr test_backends;
+    test_backends = std::make_shared<vpux::NPUBackendsTest>(dummyBackendRegistry);
+    std::shared_ptr<vpux::VPUXBackends> backends = std::reinterpret_pointer_cast<vpux::VPUXBackends>(test_backends);
+
+    std::string deviceName = "DummyNPU3700Device";
+    auto device = backends->getDevice(deviceName);
     ASSERT_NE(nullptr, device);
     ASSERT_EQ(deviceName, device->getName());
 }
 
 TEST_F(VPUXBackendsUnitTests, noDeviceFoundedAfterName) {
-    std::shared_ptr<vpux::OptionsDesc> dummyOptions = std::make_shared<vpux::OptionsDesc>();
-    vpux::Config dummyConfig(dummyOptions);
-    const std::vector<std::string> dummyBackendRegistry = {"vpu3700_test_backend"};
-    vpux::VPUXBackends backends(dummyBackendRegistry, dummyConfig);
+    const std::vector<std::string> dummyBackendRegistry = {"npu3700_test_backend"};
+
+    vpux::NPUBackendsTest::Ptr test_backends;
+    test_backends = std::make_shared<vpux::NPUBackendsTest>(dummyBackendRegistry);
+    std::shared_ptr<vpux::VPUXBackends> backends = std::reinterpret_pointer_cast<vpux::VPUXBackends>(test_backends);
 
     std::string deviceName = "wrong_device";
-    ASSERT_EQ(nullptr, backends.getDevice(deviceName));
+    ASSERT_EQ(nullptr, backends->getDevice(deviceName));
 }
 
 TEST_F(VPUXBackendsUnitTests, findDeviceAfterParamMap) {
-    std::shared_ptr<vpux::OptionsDesc> dummyOptions = std::make_shared<vpux::OptionsDesc>();
-    vpux::Config dummyConfig(dummyOptions);
-    const std::vector<std::string> dummyBackendRegistry = {"vpu3700_test_backend"};
-    vpux::VPUXBackends backends(dummyBackendRegistry, dummyConfig);
+    const std::vector<std::string> dummyBackendRegistry = {"npu3700_test_backend"};
 
-    ie::ParamMap paramMap = {{ie::VPUX_PARAM_KEY(DEVICE_ID), 3700}};
-    auto device = backends.getDevice(paramMap);
+    vpux::NPUBackendsTest::Ptr test_backends;
+    test_backends = std::make_shared<vpux::NPUBackendsTest>(dummyBackendRegistry);
+    std::shared_ptr<vpux::VPUXBackends> backends = std::reinterpret_pointer_cast<vpux::VPUXBackends>(test_backends);
+
+    ov::AnyMap paramMap = {{ov::device::id.name(), 3700}};
+    auto device = backends->getDevice(paramMap);
     ASSERT_NE(nullptr, device);
-    ASSERT_EQ("DummyVPU3700Device", device->getName());
+    ASSERT_EQ("DummyNPU3700Device", device->getName());
 }
 
 TEST_F(VPUXBackendsUnitTests, noDeviceFoundedAfterParamMap) {
-    std::shared_ptr<vpux::OptionsDesc> dummyOptions = std::make_shared<vpux::OptionsDesc>();
-    vpux::Config dummyConfig(dummyOptions);
-    const std::vector<std::string> dummyBackendRegistry = {"vpu3700_test_backend"};
-    vpux::VPUXBackends backends(dummyBackendRegistry, dummyConfig);
+    const std::vector<std::string> dummyBackendRegistry = {"npu3700_test_backend"};
 
-    ie::ParamMap paramMap = {{ie::VPUX_PARAM_KEY(DEVICE_ID), 3000}};
-    ASSERT_EQ(nullptr, backends.getDevice(paramMap));
+    vpux::NPUBackendsTest::Ptr test_backends;
+    test_backends = std::make_shared<vpux::NPUBackendsTest>(dummyBackendRegistry);
+    std::shared_ptr<vpux::VPUXBackends> backends = std::reinterpret_pointer_cast<vpux::VPUXBackends>(test_backends);
+
+    ov::AnyMap paramMap = {{ov::device::id.name(), 3000}};
+    ASSERT_EQ(nullptr, backends->getDevice(paramMap));
 }
 
 TEST_F(VPUXBackendsUnitTests, getDeviceNamesSecondIsDummyName) {
-    std::shared_ptr<vpux::OptionsDesc> dummyOptions = std::make_shared<vpux::OptionsDesc>();
-    vpux::Config dummyConfig(dummyOptions);
-    const std::vector<std::string> dummyBackendRegistry = {"vpu3700_test_backend"};
-    vpux::VPUXBackends backends(dummyBackendRegistry, dummyConfig);
+    const std::vector<std::string> dummyBackendRegistry = {"npu3700_test_backend"};
 
-    std::vector<std::string> deviceNames = backends.getAvailableDevicesNames();
+    vpux::NPUBackendsTest::Ptr test_backends;
+    test_backends = std::make_shared<vpux::NPUBackendsTest>(dummyBackendRegistry);
+    std::shared_ptr<vpux::VPUXBackends> backends = std::reinterpret_pointer_cast<vpux::VPUXBackends>(test_backends);
 
-    ASSERT_EQ("DummyVPU3700Device", deviceNames[0]);
+    std::vector<std::string> deviceNames = backends->getAvailableDevicesNames();
+
+    ASSERT_EQ("DummyNPU3700Device", deviceNames[0]);
     ASSERT_EQ("noOtherDevice", deviceNames[1]);
 }
 
 TEST_F(VPUXBackendsUnitTests, getBackendName) {
-    std::shared_ptr<vpux::OptionsDesc> dummyOptions = std::make_shared<vpux::OptionsDesc>();
-    vpux::Config dummyConfig(dummyOptions);
-    const std::vector<std::string> dummyBackendRegistry = {"vpu3700_test_backend"};
-    vpux::VPUXBackends backends(dummyBackendRegistry, dummyConfig);
+    const std::vector<std::string> dummyBackendRegistry = {"npu3700_test_backend"};
 
-    std::string backendName = backends.getBackendName();
+    vpux::NPUBackendsTest::Ptr test_backends;
+    test_backends = std::make_shared<vpux::NPUBackendsTest>(dummyBackendRegistry);
+    std::shared_ptr<vpux::VPUXBackends> backends = std::reinterpret_pointer_cast<vpux::VPUXBackends>(test_backends);
 
-    ASSERT_EQ("VPU3700TestBackend", backendName);
+    std::string backendName = backends->getBackendName();
+
+    ASSERT_EQ("NPU3700TestBackend", backendName);
 }
 
 TEST_F(VPUXBackendsUnitTests, getCompilationPlatformByDeviceName) {
-    std::shared_ptr<vpux::OptionsDesc> dummyOptions = std::make_shared<vpux::OptionsDesc>();
-    vpux::Config dummyConfig(dummyOptions);
-    const std::vector<std::string> dummyBackendRegistry = {"vpu3720_test_backend"};
-    vpux::VPUXBackends backends(dummyBackendRegistry, dummyConfig);
+    const std::vector<std::string> dummyBackendRegistry = {"npu3720_test_backend"};
 
-    std::string compilationPlatform =
-            backends.getCompilationPlatform(ie::VPUXConfigParams::VPUXPlatform::AUTO_DETECT, "");
+    vpux::NPUBackendsTest::Ptr test_backends;
+    test_backends = std::make_shared<vpux::NPUBackendsTest>(dummyBackendRegistry);
+    std::shared_ptr<vpux::VPUXBackends> backends = std::reinterpret_pointer_cast<vpux::VPUXBackends>(test_backends);
+
+    std::string compilationPlatform = backends->getCompilationPlatform(ov::intel_npu::Platform::AUTO_DETECT, "");
 
     ASSERT_EQ("3720", compilationPlatform);
 }
 
 TEST_F(VPUXBackendsUnitTests, getCompilationPlatformByPlatform) {
-    std::shared_ptr<vpux::OptionsDesc> dummyOptions = std::make_shared<vpux::OptionsDesc>();
-    vpux::Config dummyConfig(dummyOptions);
-    const std::vector<std::string> dummyBackendRegistry = {"vpu3700_test_backend"};
-    vpux::VPUXBackends backends(dummyBackendRegistry, dummyConfig);
+    const std::vector<std::string> dummyBackendRegistry = {"npu3700_test_backend"};
 
-    std::string compilationPlatform3700 =
-            backends.getCompilationPlatform(ie::VPUXConfigParams::VPUXPlatform::VPU3700, "");
-    std::string compilationPlatform3720 =
-            backends.getCompilationPlatform(ie::VPUXConfigParams::VPUXPlatform::VPU3720, "");
+    vpux::NPUBackendsTest::Ptr test_backends;
+    test_backends = std::make_shared<vpux::NPUBackendsTest>(dummyBackendRegistry);
+    std::shared_ptr<vpux::VPUXBackends> backends = std::reinterpret_pointer_cast<vpux::VPUXBackends>(test_backends);
+
+    std::string compilationPlatform3700 = backends->getCompilationPlatform(ov::intel_npu::Platform::NPU3700, "");
+    std::string compilationPlatform3720 = backends->getCompilationPlatform(ov::intel_npu::Platform::NPU3720, "");
+    std::string compilationPlatform4000 = backends->getCompilationPlatform(ov::intel_npu::Platform::NPU4000, "");
 
     ASSERT_EQ("3700", compilationPlatform3700);
     ASSERT_EQ("3720", compilationPlatform3720);
+    ASSERT_EQ("4000", compilationPlatform4000);
 }
 
 TEST_F(VPUXBackendsUnitTests, getCompilationPlatformByDeviceId) {
-    std::shared_ptr<vpux::OptionsDesc> dummyOptions = std::make_shared<vpux::OptionsDesc>();
-    vpux::Config dummyConfig(dummyOptions);
-    const std::vector<std::string> dummyBackendRegistry = {"vpu3700_test_backend"};
-    vpux::VPUXBackends backends(dummyBackendRegistry, dummyConfig);
+    const std::vector<std::string> dummyBackendRegistry = {"npu3700_test_backend"};
+
+    vpux::NPUBackendsTest::Ptr test_backends;
+    test_backends = std::make_shared<vpux::NPUBackendsTest>(dummyBackendRegistry);
+    std::shared_ptr<vpux::VPUXBackends> backends = std::reinterpret_pointer_cast<vpux::VPUXBackends>(test_backends);
 
     std::string compilationPlatform3700 =
-            backends.getCompilationPlatform(ie::VPUXConfigParams::VPUXPlatform::AUTO_DETECT, "3700");
+            backends->getCompilationPlatform(ov::intel_npu::Platform::AUTO_DETECT, "3700");
     std::string compilationPlatform3720 =
-            backends.getCompilationPlatform(ie::VPUXConfigParams::VPUXPlatform::AUTO_DETECT, "3720");
+            backends->getCompilationPlatform(ov::intel_npu::Platform::AUTO_DETECT, "3720");
+    std::string compilationPlatform4000 =
+            backends->getCompilationPlatform(ov::intel_npu::Platform::AUTO_DETECT, "4000");
 
     ASSERT_EQ("3700", compilationPlatform3700);
     ASSERT_EQ("3720", compilationPlatform3720);
+    ASSERT_EQ("4000", compilationPlatform4000);
 }
 
 TEST_F(VPUXBackendsUnitTests, getCompilationPlatformByDeviceNameNoDevice) {
-    std::shared_ptr<vpux::OptionsDesc> dummyOptions = std::make_shared<vpux::OptionsDesc>();
-    vpux::Config dummyConfig(dummyOptions);
     const std::vector<std::string> dummyBackendRegistry = {"no_devices_test_backend"};
-    vpux::VPUXBackends backends(dummyBackendRegistry, dummyConfig);
+
+    vpux::NPUBackendsTest::Ptr test_backends;
+    test_backends = std::make_shared<vpux::NPUBackendsTest>(dummyBackendRegistry);
+    std::shared_ptr<vpux::VPUXBackends> backends = std::reinterpret_pointer_cast<vpux::VPUXBackends>(test_backends);
 
     try {
-        std::string compilationPlatform =
-                backends.getCompilationPlatform(ie::VPUXConfigParams::VPUXPlatform::AUTO_DETECT, "");
+        std::string compilationPlatform = backends->getCompilationPlatform(ov::intel_npu::Platform::AUTO_DETECT, "");
     } catch (const std::exception& ex) {
         std::string expectedMessage("No devices found - platform must be explicitly specified for compilation. "
                                     "Example: -d NPU.3700 instead of -d NPU.\n");
@@ -211,16 +230,16 @@ TEST_F(VPUXBackendsUnitTests, getCompilationPlatformByDeviceNameNoDevice) {
 }
 
 TEST_F(VPUXBackendsUnitTests, getCompilationPlatformByDeviceNameWrongNameFormat) {
-    std::shared_ptr<vpux::OptionsDesc> dummyOptions = std::make_shared<vpux::OptionsDesc>();
-    vpux::Config dummyConfig(dummyOptions);
-    const std::vector<std::string> dummyBackendRegistry = {"vpu3700_test_backend"};
-    vpux::VPUXBackends backends(dummyBackendRegistry, dummyConfig);
+    const std::vector<std::string> dummyBackendRegistry = {"npu3700_test_backend"};
+
+    vpux::NPUBackendsTest::Ptr test_backends;
+    test_backends = std::make_shared<vpux::NPUBackendsTest>(dummyBackendRegistry);
+    std::shared_ptr<vpux::VPUXBackends> backends = std::reinterpret_pointer_cast<vpux::VPUXBackends>(test_backends);
 
     try {
-        std::string compilationPlatform =
-                backends.getCompilationPlatform(ie::VPUXConfigParams::VPUXPlatform::AUTO_DETECT, "");
+        std::string compilationPlatform = backends->getCompilationPlatform(ov::intel_npu::Platform::AUTO_DETECT, "");
     } catch (const std::exception& ex) {
-        std::string expectedMessage("Unexpected device name: DummyVPU3700Device\n");
+        std::string expectedMessage("Unexpected device name: DummyNPU3700Device\n");
         std::string exceptionMessage(ex.what());
         // exception message contains information about path to file and line number, where the exception occurred.
         // We should ignore this part of the message on comparision step

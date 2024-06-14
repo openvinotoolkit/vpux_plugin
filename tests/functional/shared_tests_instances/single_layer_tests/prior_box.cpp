@@ -1,29 +1,38 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022-2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
-#include "single_layer_tests/prior_box.hpp"
-#include "vpu_ov1_layer_test.hpp"
+#include "single_op_tests/prior_box.hpp"
+#include "vpu_ov2_layer_test.hpp"
 
-namespace LayerTestsDefinitions {
+using namespace ov::test::utils;
 
-class PriorBoxLayerTest_NPU3700 : public PriorBoxLayerTest, virtual public LayerTestsUtils::VpuOv1LayerTestsCommon {};
-class PriorBoxLayerTestCommon : public PriorBoxLayerTest, virtual public LayerTestsUtils::VpuOv1LayerTestsCommon {
+namespace ov {
+
+namespace test {
+
+class PriorBoxLayerTestCommon : public PriorBoxLayerTest, virtual public VpuOv2LayerTest {
     // Cloned 'SetUp' from OpenVino, but with constant foldings enabled.
     void SetUp() override {
         priorBoxSpecificParams specParams;
-        std::tie(specParams, netPrecision, inPrc, outPrc, inLayout, outLayout, inputShapes, imageShapes, targetDevice) =
-                GetParam();
+        ov::element::Type modelType;
+        std::vector<InputShape> inputShapes;
+        std::vector<float> min_size, max_size, aspect_ratio, density, fixed_ratio, fixed_size, variance;
+        float step, offset, scale_all_sizes, min_max_aspect_ratios_order;
+        bool clip, flip;
+        std::tie(specParams, modelType, inputShapes, std::ignore) = GetParam();
 
         std::tie(min_size, max_size, aspect_ratio, density, fixed_ratio, fixed_size, clip, flip, step, offset, variance,
                  scale_all_sizes, min_max_aspect_ratios_order) = specParams;
 
-        auto ngPrc = FuncTestUtils::PrecisionUtils::convertIE2nGraphPrc(netPrecision);
-        ov::ParameterVector params{std::make_shared<ov::op::v0::Parameter>(ngPrc, ov::Shape(inputShapes)),
-                                   std::make_shared<ov::op::v0::Parameter>(ngPrc, ov::Shape(imageShapes))};
+        VpuOv2LayerTest::init_input_shapes(inputShapes);
 
-        ngraph::op::v8::PriorBox::Attributes attributes;
+        ov::ParameterVector params{
+                std::make_shared<ov::op::v0::Parameter>(modelType, VpuOv2LayerTest::inputDynamicShapes[0]),
+                std::make_shared<ov::op::v0::Parameter>(modelType, VpuOv2LayerTest::inputDynamicShapes[1])};
+
+        ov::op::v8::PriorBox::Attributes attributes;
         attributes.min_size = min_size;
         attributes.max_size = max_size;
         attributes.aspect_ratio = aspect_ratio;
@@ -36,34 +45,45 @@ class PriorBoxLayerTestCommon : public PriorBoxLayerTest, virtual public LayerTe
         attributes.clip = clip;
         attributes.flip = flip;
         attributes.scale_all_sizes = scale_all_sizes;
+
         attributes.min_max_aspect_ratios_order = min_max_aspect_ratios_order;
 
         auto shape_of_1 = std::make_shared<ov::op::v3::ShapeOf>(params[0]);
         auto shape_of_2 = std::make_shared<ov::op::v3::ShapeOf>(params[1]);
-        auto priorBox = std::make_shared<ngraph::op::v8::PriorBox>(shape_of_1, shape_of_2, attributes);
+        auto priorBox = std::make_shared<ov::op::v8::PriorBox>(shape_of_1, shape_of_2, attributes);
 
-        ngraph::ResultVector results{std::make_shared<ov::op::v0::Result>(priorBox)};
-        function = std::make_shared<ngraph::Function>(results, params, "PriorBoxFunction");
+        ov::ResultVector results{std::make_shared<ov::op::v0::Result>(priorBox)};
+        VpuOv2LayerTest::function = std::make_shared<ov::Model>(results, params, "PriorBoxFunction");
+    }
+    void TearDown() override {
+        VpuOv2LayerTest::TearDown();
     }
 };
 
+class PriorBoxLayerTest_NPU3700 : public PriorBoxLayerTestCommon {};
 class PriorBoxLayerTest_NPU3720 : public PriorBoxLayerTestCommon {};
+class PriorBoxLayerTest_NPU4000 : public PriorBoxLayerTestCommon {};
 
 TEST_P(PriorBoxLayerTest_NPU3700, HW) {
-    setPlatformVPU3700();
-    setDefaultHardwareModeMLIR();
-    Run();
+    VpuOv2LayerTest::setDefaultHardwareMode();
+    VpuOv2LayerTest::run(Platform::NPU3700);
 }
 
 TEST_P(PriorBoxLayerTest_NPU3720, SW) {
-    setPlatformVPU3720();
-    setReferenceSoftwareModeMLIR();
-    Run();
+    VpuOv2LayerTest::setReferenceSoftwareMode();
+    VpuOv2LayerTest::run(Platform::NPU3720);
 }
 
-}  // namespace LayerTestsDefinitions
+TEST_P(PriorBoxLayerTest_NPU4000, SW) {
+    VpuOv2LayerTest::setReferenceSoftwareMode();
+    VpuOv2LayerTest::run(Platform::NPU4000);
+}
 
-using namespace LayerTestsDefinitions;
+}  // namespace test
+
+}  // namespace ov
+
+using namespace ov::test;
 
 namespace {
 
@@ -133,73 +153,44 @@ const priorBoxSpecificParams param4 = {
         false                                    // min_max_aspect_ratios_order ?
 };
 
-const InferenceEngine::SizeVector inputShape1 = {24, 42};
-const InferenceEngine::SizeVector inputShape2 = {2, 2};
-const InferenceEngine::SizeVector inputShape3 = {1, 1};
-const InferenceEngine::SizeVector inputShape4 = {1, 1};
-
-const InferenceEngine::SizeVector imageShape1 = {348, 672};
-const InferenceEngine::SizeVector imageShape2 = {10, 10};
-const InferenceEngine::SizeVector imageShape3 = {300, 300};
-const InferenceEngine::SizeVector imageShape4 = {5, 5};
+const std::vector<ov::Shape> inputShape1 = {{24, 42}, {348, 672}};  // inputShape, imageShape
+const std::vector<ov::Shape> inputShape2 = {{2, 2}, {10, 10}};
+const std::vector<ov::Shape> inputShape3 = {{1, 1}, {300, 300}};
+const std::vector<ov::Shape> inputShape4 = {{1, 1}, {5, 5}};
 
 INSTANTIATE_TEST_CASE_P(smoke_PriorBox_1, PriorBoxLayerTest_NPU3700,
-                        testing::Combine(testing::Values(param1), testing::Values(InferenceEngine::Precision::FP16),
-                                         testing::Values(InferenceEngine::Precision::UNSPECIFIED),
-                                         testing::Values(InferenceEngine::Precision::UNSPECIFIED),
-                                         testing::Values(InferenceEngine::Layout::ANY),
-                                         testing::Values(InferenceEngine::Layout::ANY), testing::Values(inputShape1),
-                                         testing::Values(imageShape1),
-                                         testing::Values(LayerTestsUtils::testPlatformTargetDevice())),
+                        testing::Combine(testing::Values(param1), testing::Values(ov::element::f16),
+                                         testing::Values(static_shapes_to_test_representation(inputShape1)),
+                                         testing::Values(DEVICE_NPU)),
                         PriorBoxLayerTest_NPU3700::getTestCaseName);
 
 INSTANTIATE_TEST_CASE_P(smoke_PriorBox_2, PriorBoxLayerTest_NPU3700,
-                        testing::Combine(testing::Values(param2), testing::Values(InferenceEngine::Precision::FP16),
-                                         testing::Values(InferenceEngine::Precision::UNSPECIFIED),
-                                         testing::Values(InferenceEngine::Precision::UNSPECIFIED),
-                                         testing::Values(InferenceEngine::Layout::ANY),
-                                         testing::Values(InferenceEngine::Layout::ANY), testing::Values(inputShape2),
-                                         testing::Values(imageShape2),
-                                         testing::Values(LayerTestsUtils::testPlatformTargetDevice())),
+                        testing::Combine(testing::Values(param2), testing::Values(ov::element::f16),
+                                         testing::Values(static_shapes_to_test_representation(inputShape2)),
+                                         testing::Values(DEVICE_NPU)),
                         PriorBoxLayerTest_NPU3700::getTestCaseName);
 
 INSTANTIATE_TEST_CASE_P(smoke_PriorBox_3, PriorBoxLayerTest_NPU3700,
-                        testing::Combine(testing::Values(param3), testing::Values(InferenceEngine::Precision::FP16),
-                                         testing::Values(InferenceEngine::Precision::UNSPECIFIED),
-                                         testing::Values(InferenceEngine::Precision::UNSPECIFIED),
-                                         testing::Values(InferenceEngine::Layout::ANY),
-                                         testing::Values(InferenceEngine::Layout::ANY), testing::Values(inputShape3),
-                                         testing::Values(imageShape3),
-                                         testing::Values(LayerTestsUtils::testPlatformTargetDevice())),
+                        testing::Combine(testing::Values(param3), testing::Values(ov::element::f16),
+                                         testing::Values(static_shapes_to_test_representation(inputShape3)),
+                                         testing::Values(DEVICE_NPU)),
                         PriorBoxLayerTest_NPU3700::getTestCaseName);
 
-const auto paramsConfig1 = testing::Combine(
-        testing::Values(param1), testing::Values(InferenceEngine::Precision::FP16),
-        testing::Values(InferenceEngine::Precision::UNSPECIFIED),
-        testing::Values(InferenceEngine::Precision::UNSPECIFIED), testing::Values(InferenceEngine::Layout::ANY),
-        testing::Values(InferenceEngine::Layout::ANY), testing::Values(inputShape1), testing::Values(imageShape1),
-        testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+const auto paramsConfig1 = testing::Combine(testing::Values(param1), testing::Values(ov::element::f16),
+                                            testing::Values(static_shapes_to_test_representation(inputShape1)),
+                                            testing::Values(DEVICE_NPU));
 
-const auto paramsConfig2 = testing::Combine(
-        testing::Values(param2), testing::Values(InferenceEngine::Precision::FP16),
-        testing::Values(InferenceEngine::Precision::UNSPECIFIED),
-        testing::Values(InferenceEngine::Precision::UNSPECIFIED), testing::Values(InferenceEngine::Layout::ANY),
-        testing::Values(InferenceEngine::Layout::ANY), testing::Values(inputShape2), testing::Values(imageShape2),
-        testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+const auto paramsConfig2 = testing::Combine(testing::Values(param2), testing::Values(ov::element::f16),
+                                            testing::Values(static_shapes_to_test_representation(inputShape2)),
+                                            testing::Values(DEVICE_NPU));
 
-const auto paramsConfig3 = testing::Combine(
-        testing::Values(param3), testing::Values(InferenceEngine::Precision::FP16),
-        testing::Values(InferenceEngine::Precision::UNSPECIFIED),
-        testing::Values(InferenceEngine::Precision::UNSPECIFIED), testing::Values(InferenceEngine::Layout::ANY),
-        testing::Values(InferenceEngine::Layout::ANY), testing::Values(inputShape3), testing::Values(imageShape3),
-        testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+const auto paramsConfig3 = testing::Combine(testing::Values(param3), testing::Values(ov::element::f16),
+                                            testing::Values(static_shapes_to_test_representation(inputShape3)),
+                                            testing::Values(DEVICE_NPU));
 
-const auto paramsPrecommit = testing::Combine(
-        testing::Values(param4), testing::Values(InferenceEngine::Precision::FP16),
-        testing::Values(InferenceEngine::Precision::UNSPECIFIED),
-        testing::Values(InferenceEngine::Precision::UNSPECIFIED), testing::Values(InferenceEngine::Layout::ANY),
-        testing::Values(InferenceEngine::Layout::ANY), testing::Values(inputShape4), testing::Values(imageShape4),
-        testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+const auto paramsPrecommit = testing::Combine(testing::Values(param4), testing::Values(ov::element::f16),
+                                              testing::Values(static_shapes_to_test_representation(inputShape4)),
+                                              testing::Values(DEVICE_NPU));
 
 // ------ NPU3720 ------
 
@@ -214,5 +205,19 @@ INSTANTIATE_TEST_CASE_P(smoke_PriorBox_3, PriorBoxLayerTest_NPU3720, paramsConfi
 
 INSTANTIATE_TEST_CASE_P(smoke_precommit_PriorBox, PriorBoxLayerTest_NPU3720, paramsPrecommit,
                         PriorBoxLayerTest_NPU3720::getTestCaseName);
+
+// ------ NPU4000 ------
+
+INSTANTIATE_TEST_CASE_P(smoke_PriorBox_1, PriorBoxLayerTest_NPU4000, paramsConfig1,
+                        PriorBoxLayerTest_NPU4000::getTestCaseName);
+
+INSTANTIATE_TEST_CASE_P(smoke_PriorBox_2, PriorBoxLayerTest_NPU4000, paramsConfig2,
+                        PriorBoxLayerTest_NPU4000::getTestCaseName);
+
+INSTANTIATE_TEST_CASE_P(smoke_PriorBox_3, PriorBoxLayerTest_NPU4000, paramsConfig3,
+                        PriorBoxLayerTest_NPU4000::getTestCaseName);
+
+INSTANTIATE_TEST_CASE_P(smoke_precommit_PriorBox, PriorBoxLayerTest_NPU4000, paramsPrecommit,
+                        PriorBoxLayerTest_NPU4000::getTestCaseName);
 
 }  // namespace

@@ -1,12 +1,10 @@
-// Copyright (C) Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include <vpu_ov2_layer_test.hpp>
 
-#include <ov_models/builders.hpp>
-#include <ov_models/utils/ov_helpers.hpp>
-#include <shared_test_classes/base/layer_test_utils.hpp>
+#include "common_test_utils/node_builders/fake_quantize.hpp"
 
 namespace ov::test {
 
@@ -21,8 +19,8 @@ class QuantizedRemovalSubGraphTest_NPU3700 : public VpuOv2LayerTest {
         const size_t dataLevels = 256;
         const std::vector<float> inDataLow = {0.0f};
         const std::vector<float> inDataHigh = {100.0f};
-        const auto dataFq = ngraph::builder::makeFakeQuantize(params[0], ov::element::f32, dataLevels, {}, inDataLow,
-                                                              inDataHigh, inDataLow, inDataHigh);
+        const auto dataFq = ov::test::utils::make_fake_quantize(params[0], ov::element::f32, dataLevels, {}, inDataLow,
+                                                                inDataHigh, inDataLow, inDataHigh);
 
         const ov::Strides strides = {2, 2};
         const std::vector<size_t> pads_begin = {0, 0};
@@ -32,18 +30,17 @@ class QuantizedRemovalSubGraphTest_NPU3700 : public VpuOv2LayerTest {
         const ov::op::PadType padType = ov::op::PadType::AUTO;
         const ov::op::RoundingType roundingType = ov::op::RoundingType::FLOOR;
 
-        const auto pooling =
-                ngraph::builder::makePooling(dataFq, strides, pads_begin, pads_end, kernelSize, roundingType, padType,
-                                             false, ngraph::helpers::PoolingTypes::MAX);
+        const auto pooling = std::make_shared<ov::op::v1::MaxPool>(dataFq, strides, pads_begin, pads_end, kernelSize,
+                                                                   roundingType, padType);
 
-        const auto outDataFqPooling = ngraph::builder::makeFakeQuantize(pooling, ov::element::f32, dataLevels, {},
-                                                                        inDataLow, inDataHigh, inDataLow, inDataHigh);
+        const auto outDataFqPooling = ov::test::utils::make_fake_quantize(pooling, ov::element::f32, dataLevels, {},
+                                                                          inDataLow, inDataHigh, inDataLow, inDataHigh);
 
         const std::vector<float> outDataLow = {0.0f};
         const std::vector<float> outDataHigh = {200.0f};
 
-        const auto outDataFq = ngraph::builder::makeFakeQuantize(outDataFqPooling, ov::element::f32, dataLevels, {},
-                                                                 inDataLow, inDataHigh, outDataLow, outDataHigh);
+        const auto outDataFq = ov::test::utils::make_fake_quantize(outDataFqPooling, ov::element::f32, dataLevels, {},
+                                                                   inDataLow, inDataHigh, outDataLow, outDataHigh);
 
         const ov::ResultVector results{std::make_shared<ov::op::v0::Result>(outDataFq)};
         function = std::make_shared<ov::Model>(results, params, "QuantizedRemoval");
@@ -51,14 +48,14 @@ class QuantizedRemovalSubGraphTest_NPU3700 : public VpuOv2LayerTest {
     }
 };
 
-TEST_F(QuantizedRemovalSubGraphTest_NPU3700, SW) {
+TEST_F(QuantizedRemovalSubGraphTest_NPU3700, SW_TestKindSubgraph) {
     setReferenceSoftwareMode();
-    run(VPUXPlatform::VPU3700);
+    run(Platform::NPU3700);
 }
 
-TEST_F(QuantizedRemovalSubGraphTest_NPU3700, HW) {
+TEST_F(QuantizedRemovalSubGraphTest_NPU3700, HW_TestKindSubgraph) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3700);
+    run(Platform::NPU3700);
 }
 
 }  // namespace ov::test

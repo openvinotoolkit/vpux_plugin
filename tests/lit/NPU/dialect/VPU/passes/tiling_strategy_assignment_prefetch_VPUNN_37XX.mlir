@@ -42,7 +42,7 @@ func.func @GenericTiling(
     // CHECK-SAME:          -> tensor<1x144x20x20xf16, {order = #NHWC}>
 
     // CHECK:       [[OUTPUT:%.+]] = VPU.NCE.Convolution([[AND]], [[WEIGHTS2]], [[WEIGHTS_TABLE2]])
-    // CHECK-SAME:     {pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>, rawFilterShape = [576, 144, 3, 3], strides = [1, 1], tilingStrategy = [1, 1, 5, 1]}
+    // CHECK-SAME:     {pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>, rawFilterShape = [576, 144, 3, 3], strides = [1, 1], tilingStrategy = [1, 3, 1, 1]}
     // CHECK-SAME:          -> tensor<1x576x20x20xf16, {order = #NHWC}>
 
     // CHECK:       return [[OUTPUT]] : tensor<1x576x20x20xf16, {order = #NHWC}>
@@ -103,4 +103,3 @@ func.func @SplitNCEEltwise(
 
     // return [[ELTWISE_0]] : tensor<1x512x28x28xf16, {order = #NHWC}>
 }
-

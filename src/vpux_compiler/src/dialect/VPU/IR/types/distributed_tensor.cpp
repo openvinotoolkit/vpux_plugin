@@ -1,6 +1,6 @@
 //
-// Copyright (C) 2022 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
@@ -299,7 +299,8 @@ SmallVector<Shape> VPU::DistributedTensorType::getPerClusterMemoryShapes() const
     if (distribution.getMemoryShapes() == nullptr) {
         auto optionalPerClusterMemoryShapes = VPU::getPerClusterMemoryShapes(getShape(), distribution);
         VPUX_THROW_UNLESS(optionalPerClusterMemoryShapes.has_value(),
-                          "Cannot get per cluster memory shapes. Unsupported distribution: {0}", distribution);
+                          "Cannot get per cluster memory shapes. Shape {0}, Unsupported distribution: {1}", getShape(),
+                          distribution);
         return optionalPerClusterMemoryShapes.value();
     }
 

@@ -13,13 +13,13 @@ include "vpux/compiler/dialect/VPURT/dialect.td"
 // Base classes
 //
 
-class VPURT_I64EnumAttr <string name, string summary, list<I64EnumAttrCase> cases> : 
+class VPURT_I64EnumAttr <string name, string summary, list<I64EnumAttrCase> cases> :
         I64EnumAttr<name, summary, cases> {
     let cppNamespace = "vpux::VPURT";
     let genSpecializedAttr = 0;
 }
 
-class VPURT_EnumAttr <EnumAttrInfo enumInfo, string name = "", list <Trait> traits = []> : 
+class VPURT_EnumAttr <EnumAttrInfo enumInfo, string name = "", list <Trait> traits = []> :
         EnumAttr<VPURT_Dialect, enumInfo, name, traits> {
     let assemblyFormat = "`<`$value`>`";
 }

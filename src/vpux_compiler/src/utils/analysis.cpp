@@ -5,7 +5,7 @@
 
 #include "vpux/compiler/utils/analysis.hpp"
 
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 
 #include "vpux/utils/core/error.hpp"
 

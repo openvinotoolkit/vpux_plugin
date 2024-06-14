@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation
 // SPDX-License-Identifier: Apache 2.0
 //
 #include "common/utils.hpp"
@@ -131,8 +131,9 @@ TEST_F(StateProviderInterfaceTests, StateProvider_tests) {
     ASSERT_TRUE(func != nullptr);
 
     mlir::PassManager pm(module.get()->getName(), mlir::OpPassManager::Nesting::Implicit);
-    pm.addPass(vpux::VPU::createInitCompilerPass(ArchKind::VPUX37XX, vpux::VPU::CompilationMode::DefaultHW,
-                                                 std::nullopt, std::nullopt, vpux::Logger::global()));
+    auto initCompilerOptions = VPU::InitCompilerOptions(ArchKind::NPU37XX, VPU::CompilationMode::DefaultHW);
+
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, vpux::Logger::global());
 
     ASSERT_TRUE(mlir::succeeded(pm.run(module.get())));
 
@@ -235,8 +236,9 @@ TEST_F(StateProviderInterfaceTests, DefaultStateProvider_tests) {
     ASSERT_TRUE(func != nullptr);
 
     mlir::PassManager pm(module.get()->getName(), mlir::OpPassManager::Nesting::Implicit);
-    pm.addPass(vpux::VPU::createInitCompilerPass(ArchKind::VPUX37XX, vpux::VPU::CompilationMode::DefaultHW,
-                                                 std::nullopt, std::nullopt, vpux::Logger::global()));
+    auto initCompilerOptions = VPU::InitCompilerOptions(ArchKind::NPU37XX, VPU::CompilationMode::DefaultHW);
+
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, vpux::Logger::global());
 
     ASSERT_TRUE(mlir::succeeded(pm.run(module.get())));
 
@@ -301,7 +303,7 @@ TEST_F(StateProviderInterfaceTests, DefaultStateProvider_tests) {
     });
 }
 
-TEST_F(StateProviderInterfaceTests, StateProviderPermuteQuantize_tests) {
+TEST_F(StateProviderInterfaceTests, StateProviderNCEPermute_tests) {
     vpux::registerDialects(registry);
     vpux::registerCommonInterfaces(registry);
     mlir::MLIRContext ctx(registry);
@@ -313,44 +315,33 @@ TEST_F(StateProviderInterfaceTests, StateProviderPermuteQuantize_tests) {
 !qElemType1 = !quant.uniform<u8<0:254>:f16:0, {0.0035545640573726865:127,0.0042422878460621274:127,0.0049146836198221038:127,6.0496315008073346E-4:127,0.004828331508035735:127,0.001181764161492896:127,0.005209280749944251:127,8.2280633487100672E-4:127,2.8928686080016491E-4:127,0.0010465964322953713:127,0.002631273091308714:127,0.0080264891226460612:127,0.0041658934645765408:127,0.0041675689652210142:127,0.0038724478304855469:127,0.003833929150123296:127,0.0071884792620741473:127,0.0044150849965613661:127,0.0047772418795608163:127,0.0070094231545455811:127,0.0033757365125370777:127,0.0031073365624495379:127,0.0059386271191394233:127,0.0047132203898091951:127,0.0085115019730695583:127,5.3644256563637198E-4:127,0.0047396703029242088:127,0.0042686959889930067:127,0.0072794922693507876:127,5.1457282361083148E-4:127,0.0032727173932894007:127,0.010880531288507416:127}>
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
-#NWCH = affine_map<(d0, d1, d2, d3) -> (d0, d3, d1, d2)>
 
 #loc0 = loc(unknown)
-    module @main attributes {VPU.arch = #VPU.arch_kind<VPUX37XX>} {
+    module @main attributes {VPU.arch = #VPU.arch_kind<NPU37XX>} {
         func.func @main(%arg0: tensor<1x3x224x224xf16>) -> tensor<1x32x112x112x!qElemType0, {order = #NHWC}> {
         %cst = const.Declare tensor<32x1x1x32x!qElemType1, {order = #NHWC}> = dense<1.0> : tensor<32x1x1x32xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType1>, #const.Reorder<#NHWC>]
         %cst_0 = const.Declare tensor<32x1x1x4xsi32> = dense<0> : tensor<32x1x1x4xsi32>
         %cst_1 = const.Declare tensor<32x16x1x1x!qElemType1, {order = #NHWC}> = dense<1.0> : tensor<32x16x1x1xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType1>, #const.Reorder<#NHWC>]
 
-        %0 = VPU.Reshape(%arg0) {shape_value = [1, 224, 3, 224]} : tensor<1x3x224x224xf16> -> tensor<1x224x3x224xf16>
-        %1 = VPU.LayoutCast(%0) {dst_order = #NHWC} : tensor<1x224x3x224xf16> -> tensor<1x224x3x224xf16, {order = #NHWC}>
-        %2 = VPU.NCE.PermuteQuantize(%1)
-                {dstElemType = !qElemType0, dstOrder = #NWCH,
-                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 1 : i64>,
-                 ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = 0 : i64, clamp_high = 255 : i64,
-                 lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.0821799039840698 : f64>}
-                 -> tensor<1x224x4x224x!qElemType0, {order = #NWCH}>
-        %3 = VPU.LayoutCast(%2)
-               {dst_order = #NHWC} : tensor<1x224x4x224x!qElemType0, {order = #NWCH}>
-               -> tensor<1x224x4x224x!qElemType0, {order = #NHWC}>
-        %4 = VPU.AffineReshape(%3)
-               {dim_mapping = [[0], [1], [2], [3]], shape_value = [1, 4, 224, 224]}
-               : tensor<1x224x4x224x!qElemType0, {order = #NHWC}>
-               -> tensor<1x4x224x224x!qElemType0, {order = #NHWC}>
-        %5 = VPU.NCE.CompressConvolution(%4, %cst, %cst_0)
+        %0 = VPU.NCE.Permute(%arg0)
+                {dstElemType = !qElemType0, dstOrder = #NHWC, expandedChannels = 4 : i64,
+                ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
+                lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>}
+                -> tensor<1x4x224x224x!qElemType0, {order = #NHWC}>
+        %1 = VPU.NCE.CompressConvolution(%0, %cst, %cst_0)
                {cm_sp_pattern = 7 : i64,
                pad = #VPU.Padding<left = 0 : i64, right = 1 : i64, top = 0 : i64, bottom = 1 : i64>,
                ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = 0 : i64, clamp_high = 255 : i64,
                lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
                rawFilterShape = [32, 3, 3, 3], strides = [2, 2]}
                -> tensor<1x32x112x112x!qElemType0, {order = #NHWC}>
-        %6 = VPU.NCE.DepthConvolution(%5, %cst_1, %cst_0)
+        %2 = VPU.NCE.DepthConvolution(%1, %cst_1, %cst_0)
                {pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
                 ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = 0 : i64, clamp_high = 255 : i64,
                 lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
                 rawFilterShape = [32, 1, 3, 3], strides = [1, 1]}
                 -> tensor<1x32x112x112x!qElemType0, {order = #NHWC}>
-        return %6 : tensor<1x32x112x112x!qElemType0, {order = #NHWC}>
+        return %2 : tensor<1x32x112x112x!qElemType0, {order = #NHWC}>
     }
   }
 )";
@@ -362,8 +353,9 @@ TEST_F(StateProviderInterfaceTests, StateProviderPermuteQuantize_tests) {
 
     module.get()->removeAttr("VPU.arch");
     mlir::PassManager pm(module.get()->getName(), mlir::OpPassManager::Nesting::Implicit);
-    pm.addPass(vpux::VPU::createInitCompilerPass(ArchKind::VPUX37XX, vpux::VPU::CompilationMode::DefaultHW,
-                                                 std::nullopt, std::nullopt, vpux::Logger::global()));
+    auto initCompilerOptions = VPU::InitCompilerOptions(ArchKind::NPU37XX, VPU::CompilationMode::DefaultHW);
+
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, vpux::Logger::global());
 
     ASSERT_TRUE(mlir::succeeded(pm.run(module.get())));
 
@@ -372,7 +364,6 @@ TEST_F(StateProviderInterfaceTests, StateProviderPermuteQuantize_tests) {
     VPU::Strategy splitOverHStrategy(VPU::MultiClusterStrategy::SplitOverHeight, nullptr);
     VPU::Strategy splitOverHOverStrategy(VPU::MultiClusterStrategy::SplitOverHeightOverlapped, nullptr);
     VPU::Strategy splitOverKStrategy(VPU::MultiClusterStrategy::SplitOverKernel, nullptr);
-    VPU::Strategy splitOverWStrategy(VPU::MultiClusterStrategy::SplitOverWidth, nullptr);
     VPU::Strategy multiClusteringStrategy(VPU::MultiClusterStrategy::Clustering, nullptr);
 
     func->walk([&](VPU::NCECompressConvolutionOp convOp) {
@@ -397,13 +388,13 @@ TEST_F(StateProviderInterfaceTests, StateProviderPermuteQuantize_tests) {
         storage->setCurrentStrategy(depthSOK);
         storage->setBestStrategy(depthSOK);
     });
-    func->walk([&](VPU::NCEPermuteQuantizeOp pqOp) {
-        auto pqSOW = std::make_pair(pqOp, splitOverWStrategy);
+    func->walk([&](VPU::NCEPermuteOp permuteOp) {
+        auto permuteSOHOver = std::make_pair(permuteOp, splitOverHOverStrategy);
 
-        storage->addStrategy(pqSOW, 100352);
+        storage->addStrategy(permuteSOHOver, 100352);
 
-        storage->setCurrentStrategy(pqSOW);
-        storage->setBestStrategy(pqSOW);
+        storage->setCurrentStrategy(permuteSOHOver);
+        storage->setBestStrategy(permuteSOHOver);
     });
 
     const auto vpunnCostFunc = std::make_shared<LayerVPUNNCost>(func);
@@ -419,8 +410,8 @@ TEST_F(StateProviderInterfaceTests, StateProviderPermuteQuantize_tests) {
         EXPECT_EQ(splitOverHStrategy, storage->getBestStrategy(tanhOp));
     });
 
-    func->walk([&](VPU::NCEPermuteQuantizeOp pqOp) {
-        EXPECT_EQ(splitOverWStrategy, storage->getBestStrategy(pqOp));
+    func->walk([&](VPU::NCEPermuteOp pqOp) {
+        EXPECT_EQ(splitOverHOverStrategy, storage->getBestStrategy(pqOp));
     });
 }
 
@@ -478,8 +469,9 @@ TEST_F(StateProviderInterfaceTests, StateProviderMultiUsers_tests) {
     ASSERT_TRUE(func != nullptr);
 
     mlir::PassManager pm(module.get()->getName(), mlir::OpPassManager::Nesting::Implicit);
-    pm.addPass(vpux::VPU::createInitCompilerPass(ArchKind::VPUX37XX, vpux::VPU::CompilationMode::DefaultHW,
-                                                 std::nullopt, std::nullopt, vpux::Logger::global()));
+    auto initCompilerOptions = VPU::InitCompilerOptions(ArchKind::NPU37XX, VPU::CompilationMode::DefaultHW);
+
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, vpux::Logger::global());
 
     ASSERT_TRUE(mlir::succeeded(pm.run(module.get())));
 
@@ -572,8 +564,9 @@ TEST_F(StateProviderInterfaceTests, StateProvider_InitTemp) {
     ASSERT_TRUE(func != nullptr);
 
     mlir::PassManager pm(module.get()->getName(), mlir::OpPassManager::Nesting::Implicit);
-    pm.addPass(vpux::VPU::createInitCompilerPass(ArchKind::VPUX37XX, vpux::VPU::CompilationMode::DefaultHW,
-                                                 std::nullopt, std::nullopt, vpux::Logger::global()));
+    auto initCompilerOptions = VPU::InitCompilerOptions(ArchKind::NPU37XX, VPU::CompilationMode::DefaultHW);
+
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, vpux::Logger::global());
 
     ASSERT_TRUE(mlir::succeeded(pm.run(module.get())));
 

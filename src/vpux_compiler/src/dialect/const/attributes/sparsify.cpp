@@ -1,12 +1,11 @@
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022 Intel Corporation
 // SPDX-License-Identifier: Apache 2.0
 
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
-#include "vpux/compiler/dialect/VPUIP/attributes.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/attributes.hpp"
 #include "vpux/compiler/dialect/const/attributes/content.hpp"
 #include "vpux/compiler/utils/sparsity.hpp"
 
-#include "vpux/utils/IE/loop.hpp"
 #include "vpux/utils/core/numeric.hpp"
 
 #include <mlir/IR/DialectImplementation.h>
@@ -176,9 +175,9 @@ Const::Content Const::SparsifyAttr::transform(Const::Content& input) const {
     } else if (inputElementType.isUnsignedInteger(8)) {
         return sparsify<uint8_t>(input, sparsifyValue, inputType, outputType);
     } else if (inputElementType.isF16()) {
-        return sparsify<float16>(input, sparsifyValue, inputType, outputType);
+        return sparsify<vpux::type::float16>(input, sparsifyValue, inputType, outputType);
     } else if (inputElementType.isBF16()) {
-        return sparsify<bfloat16>(input, sparsifyValue, inputType, outputType);
+        return sparsify<vpux::type::bfloat16>(input, sparsifyValue, inputType, outputType);
     } else if (inputElementType.isF32()) {
         return sparsify<float>(input, sparsifyValue, inputType, outputType);
     }

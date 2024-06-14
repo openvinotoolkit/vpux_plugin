@@ -49,14 +49,10 @@ void vpux::ELFNPU37XX::CreateRelocationSectionOp::serialize(elf::Writer& writer,
 
         if (auto relocOp = llvm::dyn_cast<vpux::ELFNPU37XX::RelocOp>(op)) {
             relocOp.serialize(relocation, symbolMap, cache);
-        } else if (auto relocOp = llvm::dyn_cast<vpux::ELFNPU37XX::RelocImmOffsetOp>(op)) {
-            relocOp.serialize(relocation, symbolMap, cache);
         } else if (auto placeholder = llvm::dyn_cast<vpux::ELFNPU37XX::PutOpInSectionOp>(op)) {
             auto actualOp = placeholder.getInputArg().getDefiningOp();
 
             if (auto relocOp = llvm::dyn_cast<vpux::ELFNPU37XX::RelocOp>(actualOp)) {
-                relocOp.serialize(relocation, symbolMap, cache);
-            } else if (auto relocOp = llvm::dyn_cast<vpux::ELFNPU37XX::RelocImmOffsetOp>(actualOp)) {
                 relocOp.serialize(relocation, symbolMap, cache);
             }
         } else {

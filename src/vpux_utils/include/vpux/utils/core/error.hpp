@@ -4,8 +4,6 @@
 //
 
 //
-
-//
 // Error handling - helper macros to throw exceptions.
 //
 

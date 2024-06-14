@@ -247,11 +247,11 @@ mlir::Value createFilter(mlir::PatternRewriter& rewriter, mlir::Location loc, vp
     const auto numElemsAttr = mlir::DenseElementsAttr::get(numNonSparseElementsType, ArrayRef(numNonSparseElements));
     const auto axisAttr = getIntAttr(ctx, Dims4D::Filter::OC.ind());
     const auto alignmentAttr = getIntAttr(ctx, VPU::NCEInvariant::VPU_WEIGHT_SET_BYTE_ALIGNMENT);
-    auto compressionSchemeAttr = VPU::CompressionSchemeAttr::get(ctx, axisAttr, numElemsAttr, alignmentAttr);
+    auto sparsityCompressionAttr = VPU::SparsityCompressionAttr::get(ctx, axisAttr, numElemsAttr, alignmentAttr);
 
     auto groupOp =
             rewriter.create<VPU::GroupSparseTensorOp>(loc, filterConstOp.getOutput(), sparsityMapConstOp.getOutput(),
-                                                      /*is_weights=*/true, compressionSchemeAttr);
+                                                      /*is_weights=*/true, sparsityCompressionAttr);
 
     return groupOp.getOutput();
 }
@@ -330,7 +330,8 @@ mlir::LogicalResult rewriteSparsityOpWithConv(mlir::PatternRewriter& rewriter, m
     // TODO: add weights sparsity map to save compute
     VPU::PPETaskAttr ppeTaskAttr = nullptr;
     auto weightsTableVec = VPU::createWeightsTableData(origOp->getOperand(0), origOp->getResult(0), filter,
-                                                       /*bias=*/nullptr, OC, ppeTaskAttr, arch, /*postOpAttr=*/nullptr);
+                                                       /*bias=*/nullptr, OC, ppeTaskAttr, arch, /*postOpAttr=*/nullptr,
+                                                       /*constScale=*/nullptr);
     auto weightsTable = VPU::createWeightsTableTensor(rewriter, origOp->getLoc(), weightsTableVec);
 
     auto stridesAttr = getIntArrayAttr(ctx, SmallVector<int64_t>({1, 1}));

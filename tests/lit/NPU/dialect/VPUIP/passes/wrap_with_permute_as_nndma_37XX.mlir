@@ -1,9 +1,9 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
-// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW" --wrap-with-permute-as-nndma --canonicalize %s | FileCheck %s
+// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW" --wrap-with-permute-as-nndma %s | FileCheck %s
 // REQUIRES: arch-VPUX37XX
 
 // -----
@@ -21,7 +21,7 @@
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder_fp16.cpp", VPU.kernel_entry = "reorder_fp16"}
+    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder.cpp", VPU.kernel_entry = "reorder"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -33,7 +33,7 @@ func.func @WrapPermuteAsDMAWithClusterTiling(%arg0: memref<1x16x24x24xf16, @DDR>
     %0 = memref.alloc() : memref<1x16x24x24xf16, [@CMX_NN, 0]>
     %1 = VPUIP.Copy inputs(%arg0 : memref<1x16x24x24xf16, @DDR>) outputs(%0 : memref<1x16x24x24xf16, [@CMX_NN, 0]>) -> memref<1x16x24x24xf16, [@CMX_NN, 0]>
     %2 = memref.alloc() : memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>
-    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MemPermute inputs(%1 as %arg1: memref<1x16x24x24xf16, [@CMX_NN, 0]>) outputs(%2 as %arg2: memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>{
+    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute inputs(%1 as %arg1: memref<1x16x24x24xf16, [@CMX_NN, 0]>) outputs(%2 as %arg2: memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>{
        VPUIP.SW.Kernel.run {attrs = [[2, 0, 1, 3]]}(%arg1, %arg2) : memref<1x16x24x24xf16, [@CMX_NN, 0]>, memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>
     }
     %3 = memref.alloc() : memref<1x16x24x24xf16, #NHWC>
@@ -93,7 +93,7 @@ func.func @WrapPermuteAsDMAWithClusterTiling(%arg0: memref<1x16x24x24xf16, @DDR>
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder_fp16.cpp", VPU.kernel_entry = "reorder_fp16"}
+    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder.cpp", VPU.kernel_entry = "reorder"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -105,7 +105,7 @@ func.func @WrapPermuteAsDMAWithoutClusterTiling(%arg0: memref<1x16x24x24xf16, @D
     %0 = memref.alloc() : memref<1x16x24x24xf16, [@CMX_NN, 0]>
     %1 = VPUIP.Copy inputs(%arg0 : memref<1x16x24x24xf16, @DDR>) outputs(%0 : memref<1x16x24x24xf16, [@CMX_NN, 0]>) -> memref<1x16x24x24xf16, [@CMX_NN, 0]>
     %2 = memref.alloc() : memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>
-    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MemPermute inputs(%1 as %arg1: memref<1x16x24x24xf16, [@CMX_NN, 0]>) outputs(%2 as %arg2: memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>{
+    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute inputs(%1 as %arg1: memref<1x16x24x24xf16, [@CMX_NN, 0]>) outputs(%2 as %arg2: memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>{
        VPUIP.SW.Kernel.run {attrs = [[2, 0, 1, 3]]}(%arg1, %arg2) : memref<1x16x24x24xf16, [@CMX_NN, 0]>, memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>
     }
     %3 = memref.alloc() : memref<1x16x24x24xf16, #NHWC>
@@ -145,7 +145,7 @@ func.func @WrapPermuteAsDMAWithoutClusterTiling(%arg0: memref<1x16x24x24xf16, @D
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder_fp16.cpp", VPU.kernel_entry = "reorder_fp16"}
+    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder.cpp", VPU.kernel_entry = "reorder"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -155,7 +155,7 @@ func.func @NotFuseWithMemPermNWHC(%arg0 : memref<1x16x24x24xf16, #NCWH, @DDR>)
     %0 = memref.alloc() : memref<1x16x24x24xf16, #NCWH, [@CMX_NN, 0]>
     %1 = VPUIP.Copy inputs(%arg0 : memref<1x16x24x24xf16, #NCWH, @DDR>) outputs(%0 : memref<1x16x24x24xf16, #NCWH, [@CMX_NN, 0]>) -> memref<1x16x24x24xf16, #NCWH, [@CMX_NN, 0]>
     %2 = memref.alloc() : memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>
-    %3 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MemPermute inputs(%1 as %arg1: memref<1x16x24x24xf16, [@CMX_NN, 0]>) outputs(%2 as %arg2: memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>{
+    %3 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute inputs(%1 as %arg1: memref<1x16x24x24xf16, [@CMX_NN, 0]>) outputs(%2 as %arg2: memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>{
        VPUIP.SW.Kernel.run {attrs = [[2, 1, 0, 3]]}(%arg1, %arg2) : memref<1x16x24x24xf16, [@CMX_NN, 0]>, memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>
     }
     %4 = memref.alloc() : memref<1x16x24x24xf16, #NHWC, @DDR>
@@ -167,7 +167,7 @@ func.func @NotFuseWithMemPermNWHC(%arg0 : memref<1x16x24x24xf16, #NCWH, @DDR>)
     //CHECK:   [[VAR0:%.*]] = memref.alloc() : memref<1x16x24x24xf16, #NCWH, [@CMX_NN, 0]>
     //CHECK:   [[VAR1:%.*]] = VPUIP.Copy inputs(%arg0 : memref<1x16x24x24xf16, #NCWH, @DDR>) outputs([[VAR0]] : memref<1x16x24x24xf16, #NCWH, [@CMX_NN, 0]>) -> memref<1x16x24x24xf16, #NCWH, [@CMX_NN, 0]>
     //CHECK:   [[VAR2:%.*]] = memref.alloc() : memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>
-    //CHECK:   [[RESULT:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MemPermute inputs([[VAR1]] as %arg1: memref<1x16x24x24xf16, [@CMX_NN, 0]>) outputs([[VAR2]] as %arg2: memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>{
+    //CHECK:   [[RESULT:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute inputs([[VAR1]] as %arg1: memref<1x16x24x24xf16, [@CMX_NN, 0]>) outputs([[VAR2]] as %arg2: memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>{
     //CHECK:      VPUIP.SW.Kernel.run {attrs = [
     //CHECK:      [2, 1, 0, 3]
     //CHECK:      ]}(%arg1, %arg2) : memref<1x16x24x24xf16, [@CMX_NN, 0]>, memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>
@@ -189,7 +189,7 @@ func.func @NotFuseWithMemPermNWHC(%arg0 : memref<1x16x24x24xf16, #NCWH, @DDR>)
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_MemPermute(memref<*x!qElemType, [@CMX_NN, 0]>, memref<*x!qElemType, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder_fp16.cpp", VPU.kernel_entry = "reorder_fp16"}
+    func.func private @builtin_MemPermute(memref<*x!qElemType, [@CMX_NN, 0]>, memref<*x!qElemType, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder.cpp", VPU.kernel_entry = "reorder"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -201,7 +201,7 @@ func.func @WrapExpandAndPermuteWithClusterTiling(%arg0: memref<1x3x224x224x!qEle
    %2 = memref.alloc() : memref<1x16x224x224x!qElemType, [@CMX_NN, 0]>
    %3 = VPUIP.Copy inputs(%1 : memref<1x16x224x224x!qElemType>) outputs(%2 : memref<1x16x224x224x!qElemType, [@CMX_NN, 0]>) -> memref<1x16x224x224x!qElemType, [@CMX_NN, 0]>
    %4 = memref.alloc() : memref<1x16x224x224x!qElemType, #NHWC, [@CMX_NN, 0]>
-   %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MemPermute inputs(%3 as %arg2: memref<1x16x224x224x!qElemType, [@CMX_NN, 0]>) outputs(%4 as %arg3: memref<1x16x224x224x!qElemType, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x224x224x!qElemType, #NHWC, [@CMX_NN, 0]>{
+   %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute inputs(%3 as %arg2: memref<1x16x224x224x!qElemType, [@CMX_NN, 0]>) outputs(%4 as %arg3: memref<1x16x224x224x!qElemType, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x224x224x!qElemType, #NHWC, [@CMX_NN, 0]>{
      VPUIP.SW.Kernel.run {attrs = [[2, 0, 1, 3]]}(%arg2, %arg3) : memref<1x16x224x224x!qElemType, [@CMX_NN, 0]>, memref<1x16x224x224x!qElemType, #NHWC, [@CMX_NN, 0]>
    }
    %5 = memref.alloc() : memref<1x16x224x224x!qElemType, #NHWC>
@@ -230,7 +230,7 @@ func.func @WrapExpandAndPermuteWithClusterTiling(%arg0: memref<1x3x224x224x!qEle
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_MemPermute(memref<*x!qElemType, [@CMX_NN, 0]>, memref<*x!qElemType, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder_fp16.cpp", VPU.kernel_entry = "reorder_fp16"}
+    func.func private @builtin_MemPermute(memref<*x!qElemType, [@CMX_NN, 0]>, memref<*x!qElemType, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder.cpp", VPU.kernel_entry = "reorder"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -242,7 +242,7 @@ func.func @NotWrapExpandAndPermuteWHCWithClusterTiling(%arg0: memref<1x3x224x224
    %2 = memref.alloc() : memref<1x16x224x224x!qElemType, #NCWH, [@CMX_NN, 0]>
    %3 = VPUIP.Copy inputs(%1 : memref<1x16x224x224x!qElemType, #NCWH>) outputs(%2 : memref<1x16x224x224x!qElemType, #NCWH, [@CMX_NN, 0]>) -> memref<1x16x224x224x!qElemType, #NCWH, [@CMX_NN, 0]>
    %4 = memref.alloc() : memref<1x16x224x224x!qElemType, #NHWC, [@CMX_NN, 0]>
-   %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MemPermute inputs(%3 as %arg2: memref<1x16x224x224x!qElemType, [@CMX_NN, 0]>) outputs(%4 as %arg3: memref<1x16x224x224x!qElemType, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x224x224x!qElemType, #NHWC, [@CMX_NN, 0]>{
+   %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute inputs(%3 as %arg2: memref<1x16x224x224x!qElemType, [@CMX_NN, 0]>) outputs(%4 as %arg3: memref<1x16x224x224x!qElemType, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x224x224x!qElemType, #NHWC, [@CMX_NN, 0]>{
      VPUIP.SW.Kernel.run {attrs = [[2, 1, 0, 3]]}(%arg2, %arg3) : memref<1x16x224x224x!qElemType, [@CMX_NN, 0]>, memref<1x16x224x224x!qElemType, #NHWC, [@CMX_NN, 0]>
    }
    %5 = memref.alloc() : memref<1x16x224x224x!qElemType, #NHWC>
@@ -258,7 +258,7 @@ func.func @NotWrapExpandAndPermuteWHCWithClusterTiling(%arg0: memref<1x3x224x224
   //CHECK:  [[VAR1:%.*]] = memref.alloc() : memref<1x16x224x224x!qElemType, #NCWH, [@CMX_NN, 0]>
   //CHECK:  [[COPY0:%.*]] = VPUIP.Copy inputs([[EXPAND]] : memref<1x16x224x224x!qElemType, #NCWH>) outputs([[VAR1]] : memref<1x16x224x224x!qElemType, #NCWH, [@CMX_NN, 0]>) -> memref<1x16x224x224x!qElemType, #NCWH, [@CMX_NN, 0]>
   //CHECK:  [[VAR2:%.*]] = memref.alloc() : memref<1x16x224x224x!qElemType, #NHWC, [@CMX_NN, 0]>
-  //CHECK:  [[RESULTS:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MemPermute
+  //CHECK:  [[RESULTS:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute
   //CHECK-SAME: inputs([[COPY0]] as %arg1: memref<1x16x224x224x!qElemType, [@CMX_NN, 0]>)
   //CHECK-SAME: outputs([[VAR2]] as %arg2: memref<1x16x224x224x!qElemType, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x224x224x!qElemType, #NHWC, [@CMX_NN, 0]>{
   //CHECK:    VPUIP.SW.Kernel.run {attrs = [
@@ -284,7 +284,7 @@ func.func @NotWrapExpandAndPermuteWHCWithClusterTiling(%arg0: memref<1x3x224x224
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder_fp16.cpp", VPU.kernel_entry = "reorder_fp16"}
+    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder.cpp", VPU.kernel_entry = "reorder"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -296,7 +296,7 @@ func.func @CannotWrapExpandAndPermuteWithClusterTilingFP16(%arg0: memref<1x3x224
    %2 = memref.alloc() : memref<1x16x224x224xf16, [@CMX_NN, 0]>
    %3 = VPUIP.Copy inputs(%1 : memref<1x16x224x224xf16>) outputs(%2 : memref<1x16x224x224xf16, [@CMX_NN, 0]>) -> memref<1x16x224x224xf16, [@CMX_NN, 0]>
    %4 = memref.alloc() : memref<1x16x224x224xf16, #NHWC, [@CMX_NN, 0]>
-   %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MemPermute inputs(%3 as %arg2: memref<1x16x224x224xf16, [@CMX_NN, 0]>) outputs(%4 as %arg3: memref<1x16x224x224xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x224x224xf16, #NHWC, [@CMX_NN, 0]>{
+   %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute inputs(%3 as %arg2: memref<1x16x224x224xf16, [@CMX_NN, 0]>) outputs(%4 as %arg3: memref<1x16x224x224xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x224x224xf16, #NHWC, [@CMX_NN, 0]>{
      VPUIP.SW.Kernel.run {attrs = [[2, 0, 1, 3]]}(%arg2, %arg3) : memref<1x16x224x224xf16, [@CMX_NN, 0]>, memref<1x16x224x224xf16, #NHWC, [@CMX_NN, 0]>
    }
    %5 = memref.alloc() : memref<1x16x224x224xf16, #NHWC>
@@ -327,7 +327,7 @@ func.func @CannotWrapExpandAndPermuteWithClusterTilingFP16(%arg0: memref<1x3x224
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_MemPermute(memref<*x!qElemType, [@CMX_NN, 0]>, memref<*x!qElemType, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder_fp16.cpp", VPU.kernel_entry = "reorder_fp16"}
+    func.func private @builtin_MemPermute(memref<*x!qElemType, [@CMX_NN, 0]>, memref<*x!qElemType, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder.cpp", VPU.kernel_entry = "reorder"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -338,7 +338,7 @@ func.func @WrapExpandandPermuteWithoutClusterTiling(%arg0: memref<1x3x24x24x!qEl
    %2 = memref.alloc() : memref<1x16x24x24x!qElemType, [@CMX_NN, 0]>
    %3 = VPUIP.Copy inputs(%1 : memref<1x16x24x24x!qElemType>) outputs(%2 : memref<1x16x24x24x!qElemType, [@CMX_NN, 0]>) -> memref<1x16x24x24x!qElemType, [@CMX_NN, 0]>
    %4 = memref.alloc() : memref<1x16x24x24x!qElemType, #NHWC, [@CMX_NN, 0]>
-   %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MemPermute inputs(%3 as %arg1: memref<1x16x24x24x!qElemType, [@CMX_NN, 0]>) outputs(%4 as %arg2: memref<1x16x24x24x!qElemType, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x24x24x!qElemType, #NHWC, [@CMX_NN, 0]>{
+   %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute inputs(%3 as %arg1: memref<1x16x24x24x!qElemType, [@CMX_NN, 0]>) outputs(%4 as %arg2: memref<1x16x24x24x!qElemType, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x24x24x!qElemType, #NHWC, [@CMX_NN, 0]>{
      VPUIP.SW.Kernel.run {attrs = [[2, 0, 1, 3]]}(%arg1, %arg2) : memref<1x16x24x24x!qElemType, [@CMX_NN, 0]>, memref<1x16x24x24x!qElemType, #NHWC, [@CMX_NN, 0]>
    }
    %5 = memref.alloc() : memref<1x16x24x24x!qElemType, #NHWC>
@@ -361,7 +361,7 @@ func.func @WrapExpandandPermuteWithoutClusterTiling(%arg0: memref<1x3x24x24x!qEl
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_MemPermute(memref<*x!qElemType, [@CMX_NN, 0]>, memref<*x!qElemType, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder_fp16.cpp", VPU.kernel_entry = "reorder_fp16"}
+    func.func private @builtin_MemPermute(memref<*x!qElemType, [@CMX_NN, 0]>, memref<*x!qElemType, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder.cpp", VPU.kernel_entry = "reorder"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -372,7 +372,7 @@ func.func @NotWrapExpandandPermuteWHCWithCopy(%arg0: memref<1x3x24x24x!qElemType
    %2 = memref.alloc() : memref<1x16x24x24x!qElemType, #NCWH, [@CMX_NN, 0]>
    %3 = VPUIP.Copy inputs(%1 : memref<1x16x24x24x!qElemType, #NCWH>) outputs(%2 : memref<1x16x24x24x!qElemType, #NCWH, [@CMX_NN, 0]>) -> memref<1x16x24x24x!qElemType, #NCWH, [@CMX_NN, 0]>
    %4 = memref.alloc() : memref<1x16x24x24x!qElemType, [@CMX_NN, 0]>
-   %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MemPermute inputs(%3 as %arg1: memref<1x16x24x24x!qElemType, #NCWH, [@CMX_NN, 0]>) outputs(%4 as %arg2: memref<1x16x24x24x!qElemType, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x24x24x!qElemType, [@CMX_NN, 0]>{
+   %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute inputs(%3 as %arg1: memref<1x16x24x24x!qElemType, #NCWH, [@CMX_NN, 0]>) outputs(%4 as %arg2: memref<1x16x24x24x!qElemType, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x24x24x!qElemType, [@CMX_NN, 0]>{
      VPUIP.SW.Kernel.run {attrs = [[2, 1, 0, 3]]}(%arg1, %arg2) : memref<1x16x24x24x!qElemType, #NCWH, [@CMX_NN, 0]>, memref<1x16x24x24x!qElemType, #NHWC, [@CMX_NN, 0]>
    }
    %5 = memref.alloc() : memref<1x16x24x24x!qElemType, #NHWC>
@@ -386,7 +386,7 @@ func.func @NotWrapExpandandPermuteWHCWithCopy(%arg0: memref<1x3x24x24x!qElemType
    //CHECK:   [[VAR1:%.*]] = memref.alloc() : memref<1x16x24x24x!qElemType, #NCWH, [@CMX_NN, 0]>
    //CHECK:   [[COPY0:%.*]] = VPUIP.Copy inputs([[EXPAND]] : memref<1x16x24x24x!qElemType, #NCWH>) outputs([[VAR1]] : memref<1x16x24x24x!qElemType, #NCWH, [@CMX_NN, 0]>) -> memref<1x16x24x24x!qElemType, #NCWH, [@CMX_NN, 0]>
    //CHECK:   [[VAR2:%.*]] = memref.alloc() : memref<1x16x24x24x!qElemType, [@CMX_NN, 0]>
-   //CHECK:   [[RESULTS:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MemPermute
+   //CHECK:   [[RESULTS:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute
    //CHECK-SAME: inputs([[COPY0]] as %arg1: memref<1x16x24x24x!qElemType, #NCWH, [@CMX_NN, 0]>)
    //CHECK-SAME: outputs([[VAR2]] as %arg2: memref<1x16x24x24x!qElemType, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x24x24x!qElemType, [@CMX_NN, 0]>{
    //CHECK:    VPUIP.SW.Kernel.run {attrs = [
@@ -407,7 +407,7 @@ func.func @NotWrapExpandandPermuteWHCWithCopy(%arg0: memref<1x3x24x24x!qElemType
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder_fp16.cpp", VPU.kernel_entry = "reorder_fp16"}
+    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder.cpp", VPU.kernel_entry = "reorder"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -418,7 +418,7 @@ func.func @CannotWrapExpandandPermuteWithFP16(%arg0: memref<1x3x24x24xf16>) -> m
    %2 = memref.alloc() : memref<1x16x24x24xf16, [@CMX_NN, 0]>
    %3 = VPUIP.Copy inputs(%1 : memref<1x16x24x24xf16>) outputs(%2 : memref<1x16x24x24xf16, [@CMX_NN, 0]>) -> memref<1x16x24x24xf16, [@CMX_NN, 0]>
    %4 = memref.alloc() : memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>
-   %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MemPermute inputs(%3 as %arg1: memref<1x16x24x24xf16, [@CMX_NN, 0]>) outputs(%4 as %arg2: memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>{
+   %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute inputs(%3 as %arg1: memref<1x16x24x24xf16, [@CMX_NN, 0]>) outputs(%4 as %arg2: memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>{
      VPUIP.SW.Kernel.run {attrs = [[2, 0, 1, 3]]}(%arg1, %arg2) : memref<1x16x24x24xf16, [@CMX_NN, 0]>, memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>
    }
    %5 = memref.alloc() : memref<1x16x24x24xf16, #NHWC>
@@ -447,18 +447,18 @@ func.func @CannotWrapExpandandPermuteWithFP16(%arg0: memref<1x3x24x24xf16>) -> m
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_SpaceToDepthOp(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "single_shave_space_to_depth.cpp", VPU.kernel_entry = "single_shave_space_to_depth"}
+    func.func private @builtin_SpaceToDepthOp(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "space_to_depth.cpp", VPU.kernel_entry = "space_to_depth"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
-// CHECK-LABEL: @WrapSpaceToDepthAsDMAWithClusterTiling
-func.func @WrapSpaceToDepthAsDMAWithClusterTiling(%arg0: memref<1x4x48x48xf16, @DDR>)
+// CHECK-LABEL: @WrapSpaceToDepthAsDMAWithClusterTilingSegmented
+func.func @WrapSpaceToDepthAsDMAWithClusterTilingSegmented(%arg0: memref<1x4x48x48xf16, @DDR>)
         -> !OutputDistributedType {
     %0 = memref.alloc() : memref<1x4x48x48xf16, #NHWC, [@CMX_NN, 0]>
     %1 = VPUIP.Copy inputs(%arg0 : memref<1x4x48x48xf16, @DDR>) outputs(%0 : memref<1x4x48x48xf16, #NHWC, [@CMX_NN, 0]>) -> memref<1x4x48x48xf16, #NHWC, [@CMX_NN, 0]>
 
     %2 = memref.alloc() : memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>
-    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_SpaceToDepthOp inputs(%1 as %arg1: memref<1x4x48x48xf16, [@CMX_NN, 0]>) outputs(%2 as %arg2: memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>{
+    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_SpaceToDepthOp inputs(%1 as %arg1: memref<1x4x48x48xf16, [@CMX_NN, 0]>) outputs(%2 as %arg2: memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>{
        VPUIP.SW.Kernel.run {attrs = [2, 0]}(%arg1, %arg2) : memref<1x4x48x48xf16, [@CMX_NN, 0]>, memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>
     }
 
@@ -487,6 +487,57 @@ func.func @WrapSpaceToDepthAsDMAWithClusterTiling(%arg0: memref<1x4x48x48xf16, @
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
 !OutputDistributedType = !VPUIP.DistributedBuffer<
+    1x16x24x24xf16, #NHWC, @CMX_NN, {
+    mode = "OVERLAPPED",
+    num_tiles = [1, 1, 2, 1],
+    kernel = [3, 3],
+    pads = #VPU.Padding<left = 0 , right = 1, top = 0, bottom = 1>,
+    strides = [1, 1],
+    num_clusters = 2
+}>
+
+VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
+  module @VPU.SW {
+    func.func private @builtin_SpaceToDepthOp(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "space_to_depth.cpp", VPU.kernel_entry = "space_to_depth"}
+    func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
+  }
+
+// CHECK-LABEL: @WrapSpaceToDepthAsDMAWithClusterTilingOverlapped
+func.func @WrapSpaceToDepthAsDMAWithClusterTilingOverlapped(%arg0: memref<1x4x48x48xf16, @DDR>)
+        -> !OutputDistributedType {
+    %0 = memref.alloc() : memref<1x4x48x48xf16, #NHWC, [@CMX_NN, 0]>
+    %1 = VPUIP.Copy inputs(%arg0 : memref<1x4x48x48xf16, @DDR>) outputs(%0 : memref<1x4x48x48xf16, #NHWC, [@CMX_NN, 0]>) -> memref<1x4x48x48xf16, #NHWC, [@CMX_NN, 0]>
+
+    %2 = memref.alloc() : memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>
+    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_SpaceToDepthOp inputs(%1 as %arg1: memref<1x4x48x48xf16, [@CMX_NN, 0]>) outputs(%2 as %arg2: memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>{
+       VPUIP.SW.Kernel.run {attrs = [2, 0]}(%arg1, %arg2) : memref<1x4x48x48xf16, [@CMX_NN, 0]>, memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>
+    }
+
+    %3 = memref.alloc() : memref<1x16x24x24xf16, #NHWC>
+    %4 = VPUIP.Copy inputs(%results : memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>) outputs(%3 : memref<1x16x24x24xf16, #NHWC>) -> memref<1x16x24x24xf16, #NHWC>
+
+    %5 = VPURT.AllocDistributed -> !OutputDistributedType
+    %6 = VPUIP.NCEClusterTiling inputs(%4 as %arg1: memref<1x16x24x24xf16, #NHWC>) outputs(%5 as %arg2: memref<1x16x24x24xf16, #NHWC, @CMX_NN>) -> !OutputDistributedType {
+       %7 = VPUIP.Copy inputs(%arg1 : memref<1x16x24x24xf16, #NHWC>) outputs(%arg2 : memref<1x16x24x24xf16, #NHWC, @CMX_NN>) -> memref<1x16x24x24xf16, #NHWC, @CMX_NN>
+    }
+
+    return %6: !OutputDistributedType
+
+    //CHECK:   [[VAR0:%.*]] = memref.alloc() : memref<1x4x48x48xf16, #NHWC, [@CMX_NN, 0]>
+    //CHECK:   [[COPY_IN:%.*]] = VPUIP.Copy inputs(%arg0 : memref<1x4x48x48xf16, @DDR>) outputs([[VAR0]] : memref<1x4x48x48xf16, #NHWC, [@CMX_NN, 0]>) -> memref<1x4x48x48xf16, #NHWC, [@CMX_NN, 0]>
+
+    //CHECK:   [[VAR1:%.*]] = VPURT.AllocDistributed -> !VPUIP.DistributedBuffer<1x16x24x24xf16, #NHWC, @CMX_NN, {mode = "OVERLAPPED", num_tiles = [1, 1, 2, 1], kernel = [3, 3], pads = #VPU.Padding<left = 0 : i64, right = 1 : i64, top = 0 : i64, bottom = 1 : i64>, strides = [1, 1], num_clusters = 2 : i64}>
+    //CHECK:   [[SpaceToDepth:%.*]] = VPUIP.NCEClusterTiling inputs([[COPY_IN]] as %arg1: memref<1x4x48x48xf16, #NHWC, [@CMX_NN, 0]>) outputs([[VAR1]] as %arg2: memref<1x16x24x24xf16, #NHWC, @CMX_NN>) -> !VPUIP.DistributedBuffer<1x16x24x24xf16, #NHWC, @CMX_NN, {mode = "OVERLAPPED", num_tiles = [1, 1, 2, 1], kernel = [3, 3], pads = #VPU.Padding<left = 0 : i64, right = 1 : i64, top = 0 : i64, bottom = 1 : i64>, strides = [1, 1], num_clusters = 2 : i64}>
+    //CHECK:       VPUIP.SpaceToDepthDMA {block_size = 2 : i64, mode = #IE.space_to_depth_mode<BLOCKS_FIRST>} inputs(%arg1 : memref<1x4x48x48xf16, #NHWC, [@CMX_NN, 0]>) outputs(%arg2 : memref<1x16x24x24xf16, #NHWC, @CMX_NN>) -> memref<1x16x24x24xf16, #NHWC, @CMX_NN>
+    //CHECK:   }
+    //CHECK:   return [[SpaceToDepth]] : !VPUIP.DistributedBuffer<1x16x24x24xf16, #NHWC, @CMX_NN, {mode = "OVERLAPPED", num_tiles = [1, 1, 2, 1], kernel = [3, 3], pads = #VPU.Padding<left = 0 : i64, right = 1 : i64, top = 0 : i64, bottom = 1 : i64>, strides = [1, 1], num_clusters = 2 : i64}>
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+!OutputDistributedType = !VPUIP.DistributedBuffer<
     1x3x256x256xf16, #NHWC, @CMX_NN, {
     mode = "SEGMENTED",
     num_tiles = [1, 1, 2, 1],
@@ -495,7 +546,7 @@ func.func @WrapSpaceToDepthAsDMAWithClusterTiling(%arg0: memref<1x4x48x48xf16, @
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_DepthToSpaceOp(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "single_shave_depth_to_space.cpp", VPU.kernel_entry = "single_shave_depth_to_space"}
+    func.func private @builtin_DepthToSpaceOp(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "depth_to_space.cpp", VPU.kernel_entry = "depth_to_space"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -504,7 +555,7 @@ VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 409
 func.func @WrapDepthToSpaceAsMultiClusterDMACase1(%arg0: memref<1x12x128x128xf16, #NHWC, [@CMX_NN, 0]>)
         -> !OutputDistributedType {
     %0 = memref.alloc() : memref<1x3x256x256xf16, #NHWC, [@CMX_NN, 0]>
-    %1 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_DepthToSpaceOp inputs(%arg0 as %arg1: memref<1x12x128x128xf16, #NHWC, [@CMX_NN, 0]>) outputs(%0 as %arg2: memref<1x3x256x256xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x3x256x256xf16, #NHWC, [@CMX_NN, 0]> {
+    %1 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_DepthToSpaceOp inputs(%arg0 as %arg1: memref<1x12x128x128xf16, #NHWC, [@CMX_NN, 0]>) outputs(%0 as %arg2: memref<1x3x256x256xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x3x256x256xf16, #NHWC, [@CMX_NN, 0]> {
        VPUIP.SW.Kernel.run {attrs = [2, 0]}(%arg1, %arg2) : memref<1x12x128x128xf16, #NHWC, [@CMX_NN, 0]>, memref<1x3x256x256xf16, #NHWC, [@CMX_NN, 0]>
     }
     %2 = memref.alloc() : memref<1x3x256x256xf16, #NHWC>
@@ -544,7 +595,7 @@ func.func @WrapDepthToSpaceAsMultiClusterDMACase1(%arg0: memref<1x12x128x128xf16
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_DepthToSpaceOp(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "single_shave_depth_to_space.cpp", VPU.kernel_entry = "single_shave_depth_to_space"}
+    func.func private @builtin_DepthToSpaceOp(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "depth_to_space.cpp", VPU.kernel_entry = "depth_to_space"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -558,7 +609,7 @@ func.func @WrapDepthToSpaceAsMultiClusterDMACase2(%arg0: !InputDistributedType) 
     %3 = memref.alloc() : memref<1x12x128x128xf16, #NHWC, [@CMX_NN, 0]>
     %4 = VPUIP.Copy inputs(%1 : memref<1x12x128x128xf16, #NHWC>) outputs(%3 : memref<1x12x128x128xf16, #NHWC, [@CMX_NN, 0]>) -> memref<1x12x128x128xf16, #NHWC, [@CMX_NN, 0]>
     %5 = memref.alloc() : memref<1x3x256x256xf16, #NHWC, [@CMX_NN, 0]>
-    %6 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_DepthToSpaceOp inputs(%4 as %arg1: memref<1x12x128x128xf16, #NHWC, [@CMX_NN, 0]>) outputs(%5 as %arg2: memref<1x3x256x256xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x3x256x256xf16, #NHWC, [@CMX_NN, 0]> {
+    %6 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_DepthToSpaceOp inputs(%4 as %arg1: memref<1x12x128x128xf16, #NHWC, [@CMX_NN, 0]>) outputs(%5 as %arg2: memref<1x3x256x256xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x3x256x256xf16, #NHWC, [@CMX_NN, 0]> {
        VPUIP.SW.Kernel.run {attrs = [2, 0]}(%arg1, %arg2) : memref<1x12x128x128xf16, #NHWC, [@CMX_NN, 0]>, memref<1x3x256x256xf16, #NHWC, [@CMX_NN, 0]>
     }
 
@@ -599,7 +650,7 @@ func.func @WrapDepthToSpaceAsMultiClusterDMACase2(%arg0: !InputDistributedType) 
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_DepthToSpaceOp(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "single_shave_depth_to_space.cpp", VPU.kernel_entry = "single_shave_depth_to_space"}
+    func.func private @builtin_DepthToSpaceOp(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "depth_to_space.cpp", VPU.kernel_entry = "depth_to_space"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -614,7 +665,7 @@ func.func @WrapDepthToSpaceAsMultiClusterDMACase3(%arg0: !InputDistributedType)
     %3 = memref.alloc() : memref<1x12x128x128xf16, #NHWC, [@CMX_NN, 0]>
     %4 = VPUIP.Copy inputs(%1 : memref<1x12x128x128xf16, #NHWC>) outputs(%3 : memref<1x12x128x128xf16, #NHWC, [@CMX_NN, 0]>) -> memref<1x12x128x128xf16, #NHWC, [@CMX_NN, 0]>
     %5 = memref.alloc() : memref<1x3x256x256xf16, #NHWC, [@CMX_NN, 0]>
-    %6 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_DepthToSpaceOp inputs(%4 as %arg1: memref<1x12x128x128xf16, #NHWC, [@CMX_NN, 0]>) outputs(%5 as %arg2: memref<1x3x256x256xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x3x256x256xf16, #NHWC, [@CMX_NN, 0]> {
+    %6 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_DepthToSpaceOp inputs(%4 as %arg1: memref<1x12x128x128xf16, #NHWC, [@CMX_NN, 0]>) outputs(%5 as %arg2: memref<1x3x256x256xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x3x256x256xf16, #NHWC, [@CMX_NN, 0]> {
        VPUIP.SW.Kernel.run {attrs = [2, 0]}(%arg1, %arg2) : memref<1x12x128x128xf16, #NHWC, [@CMX_NN, 0]>, memref<1x3x256x256xf16, #NHWC, [@CMX_NN, 0]>
     }
     %7 = memref.alloc() : memref<1x3x256x256xf16, #NHWC>
@@ -662,7 +713,7 @@ func.func @WrapDepthToSpaceAsMultiClusterDMACase3(%arg0: !InputDistributedType)
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_DepthToSpaceOp(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "single_shave_depth_to_space.cpp", VPU.kernel_entry = "single_shave_depth_to_space"}
+    func.func private @builtin_DepthToSpaceOp(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "depth_to_space.cpp", VPU.kernel_entry = "depth_to_space"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -671,7 +722,7 @@ func.func @WrapDepthToSpaceAsMultiClusterDMAWithShapeCast(%arg0: memref<1x12x128
         -> !OutputDistributedType {
     // d2s cmx->cmx
     %0 = memref.alloc() : memref<1x3x256x256xf16, #NHWC, [@CMX_NN, 0]>
-    %1 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_DepthToSpaceOp inputs(%arg0 as %arg1: memref<1x12x128x128xf16, #NHWC, [@CMX_NN, 0]>) outputs(%0 as %arg2: memref<1x3x256x256xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x3x256x256xf16, #NHWC, [@CMX_NN, 0]> {
+    %1 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_DepthToSpaceOp inputs(%arg0 as %arg1: memref<1x12x128x128xf16, #NHWC, [@CMX_NN, 0]>) outputs(%0 as %arg2: memref<1x3x256x256xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x3x256x256xf16, #NHWC, [@CMX_NN, 0]> {
        VPUIP.SW.Kernel.run {attrs = [2, 0]}(%arg1, %arg2) : memref<1x12x128x128xf16, #NHWC, [@CMX_NN, 0]>, memref<1x3x256x256xf16, #NHWC, [@CMX_NN, 0]>
     }
     // copy out cmx->ddr
@@ -798,7 +849,7 @@ func.func @WrapExpandAsDMAWithCopy(%arg0: memref<1x1x24x24xf16, #NHWC>)
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder_fp16.cpp", VPU.kernel_entry = "reorder_fp16"}
+    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder.cpp", VPU.kernel_entry = "reorder"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -814,7 +865,7 @@ func.func @NotFuseClusterCopyWithMemPermuteForStridedInput()
     %2 = memref.alloc() : memref<1x16x24x24xf16, [@CMX_NN, 0]>
     %3 = VPUIP.Copy inputs(%0: memref<1x16x24x24xf16, @DDR>) outputs(%2 : memref<1x16x24x24xf16, [@CMX_NN, 0]>) -> memref<1x16x24x24xf16, [@CMX_NN, 0]>
     %4 = memref.alloc() : memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>
-    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MemPermute inputs(%3 as %arg1: memref<1x16x24x24xf16, [@CMX_NN, 0]>) outputs(%4 as %arg2: memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>{
+    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute inputs(%3 as %arg1: memref<1x16x24x24xf16, [@CMX_NN, 0]>) outputs(%4 as %arg2: memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>{
        VPUIP.SW.Kernel.run {attrs = [[2, 0, 1, 3]]}(%arg1, %arg2) : memref<1x16x24x24xf16, [@CMX_NN, 0]>, memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>
     }
 
@@ -828,7 +879,7 @@ func.func @NotFuseClusterCopyWithMemPermuteForStridedInput()
     // CHECK   [[BUF1:%.*]] = memref.alloc() : memref<1x16x24x24xf16, [@CMX_NN, 0]>
     // CHECK   [[COPY1:%.*]] = VPUIP.Copy inputs([[COPY0]] : memref<1x16x24x24xf16, @DDR>) outputs([[BUF1]] : memref<1x16x24x24xf16, [@CMX_NN, 0]>) -> memref<1x16x24x24xf16, [@CMX_NN, 0]>
     // CHECK   [[BUF2:%.*]] = memref.alloc() : memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>
-    // CHECK   [[PERMUTE:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MemPermute inputs([[COPY1]] as %arg0: memref<1x16x24x24xf16, [@CMX_NN, 0]>) outputs([[BUF2]] as %arg1: memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>{
+    // CHECK   [[PERMUTE:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute inputs([[COPY1]] as %arg0: memref<1x16x24x24xf16, [@CMX_NN, 0]>) outputs([[BUF2]] as %arg1: memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>{
     // CHECK                  VPUIP.SW.Kernel.run {attrs = [[2, 0, 1, 3]]}(%arg0, %arg1) : memref<1x16x24x24xf16, [@CMX_NN, 0]>, memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>
     // CHECK   }
     // CHECK   return [[PERMUTE]] : memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>
@@ -848,7 +899,7 @@ func.func @NotFuseClusterCopyWithMemPermuteForStridedInput()
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder_fp16.cpp", VPU.kernel_entry = "reorder_fp16"}
+    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder.cpp", VPU.kernel_entry = "reorder"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -864,7 +915,7 @@ func.func @FuseClusterCopyWithMemPermute()
     %2 = memref.alloc() : memref<1x16x24x24xf16, [@CMX_NN, 0]>
     %3 = VPUIP.Copy inputs(%0: memref<1x16x24x24xf16, @DDR>) outputs(%2 : memref<1x16x24x24xf16, [@CMX_NN, 0]>) -> memref<1x16x24x24xf16, [@CMX_NN, 0]>
     %4 = memref.alloc() : memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>
-    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MemPermute inputs(%3 as %arg1: memref<1x16x24x24xf16, [@CMX_NN, 0]>) outputs(%4 as %arg2: memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>{
+    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute inputs(%3 as %arg1: memref<1x16x24x24xf16, [@CMX_NN, 0]>) outputs(%4 as %arg2: memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>{
        VPUIP.SW.Kernel.run {attrs = [[2, 0, 1, 3]]}(%arg1, %arg2) : memref<1x16x24x24xf16, [@CMX_NN, 0]>, memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>
     }
 
@@ -891,7 +942,7 @@ func.func @FuseClusterCopyWithMemPermute()
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder_fp16.cpp", VPU.kernel_entry = "reorder_fp16"}
+    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder.cpp", VPU.kernel_entry = "reorder"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -907,7 +958,7 @@ func.func @NotFuseClusterCopyWithMemPermuteWHC()
     %2 = memref.alloc() : memref<1x16x24x24xf16, [@CMX_NN, 0]>
     %3 = VPUIP.Copy inputs(%0: memref<1x16x24x24xf16, @DDR>) outputs(%2 : memref<1x16x24x24xf16, [@CMX_NN, 0]>) -> memref<1x16x24x24xf16, [@CMX_NN, 0]>
     %4 = memref.alloc() : memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>
-    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MemPermute inputs(%3 as %arg1: memref<1x16x24x24xf16, [@CMX_NN, 0]>) outputs(%4 as %arg2: memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>{
+    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute inputs(%3 as %arg1: memref<1x16x24x24xf16, [@CMX_NN, 0]>) outputs(%4 as %arg2: memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>{
        VPUIP.SW.Kernel.run {attrs = [[2, 1, 0, 3]]}(%arg1, %arg2) : memref<1x16x24x24xf16, [@CMX_NN, 0]>, memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>
     }
 
@@ -921,7 +972,7 @@ func.func @NotFuseClusterCopyWithMemPermuteWHC()
     // CHECK:  [[BUFF1:%.*]] = memref.alloc() : memref<1x16x24x24xf16, [@CMX_NN, 0]>
     // CHECK:  [[COPY0:%.*]] = VPUIP.Copy inputs([[CLUSTERTILING]] : memref<1x16x24x24xf16, @DDR>) outputs([[BUFF1]] : memref<1x16x24x24xf16, [@CMX_NN, 0]>) -> memref<1x16x24x24xf16, [@CMX_NN, 0]>
     // CHECK:  [[BUFF2:%.*]] = memref.alloc() : memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>
-    // CHECK:  [[RESULTS:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MemPermute
+    // CHECK:  [[RESULTS:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute
     // CHECK-SAME: inputs([[COPY0]] as %arg0: memref<1x16x24x24xf16, [@CMX_NN, 0]>)
     // CHECK-SAME: outputs([[BUFF2]] as %arg1: memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>{
     // CHECK:    VPUIP.SW.Kernel.run {attrs = [
@@ -945,7 +996,7 @@ func.func @NotFuseClusterCopyWithMemPermuteWHC()
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder_fp16.cpp", VPU.kernel_entry = "reorder_fp16"}
+    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder.cpp", VPU.kernel_entry = "reorder"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -964,7 +1015,7 @@ func.func @NotFuseMultiUserClusterCopyWithMemPermute()
     %5 = memref.alloc() : memref<1x16x24x24xf16, [@CMX_NN, 0]>
     %6 = VPUIP.Copy inputs(%0: memref<1x16x24x24xf16, @DDR>) outputs(%5 : memref<1x16x24x24xf16, [@CMX_NN, 0]>) -> memref<1x16x24x24xf16, [@CMX_NN, 0]>
 
-    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MemPermute inputs(%3 as %arg1: memref<1x16x24x24xf16, [@CMX_NN, 0]>) outputs(%4 as %arg2: memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>{
+    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute inputs(%3 as %arg1: memref<1x16x24x24xf16, [@CMX_NN, 0]>) outputs(%4 as %arg2: memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>{
        VPUIP.SW.Kernel.run {attrs = [[2, 0, 1, 3]]}(%arg1, %arg2) : memref<1x16x24x24xf16, [@CMX_NN, 0]>, memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>
     }
 
@@ -980,7 +1031,7 @@ func.func @NotFuseMultiUserClusterCopyWithMemPermute()
     // CHECK   [[BUF2:%.*]] = memref.alloc() : memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>
     // CHECK   [[BUF3:%.*]] = memref.alloc() : memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>
     // CHECK   [[COPY2:%.*]] = VPUIP.Copy inputs([[COPY0]] : memref<1x16x24x24xf16, @DDR>) outputs([[BUF3]] : memref<1x16x24x24xf16, [@CMX_NN, 0]>) -> memref<1x16x24x24xf16, [@CMX_NN, 0]>
-    // CHECK   [[PERMUTE:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MemPermute inputs([[COPY1]] as %arg0: memref<1x16x24x24xf16, [@CMX_NN, 0]>) outputs([[BUF2]] as %arg1: memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>{
+    // CHECK   [[PERMUTE:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute inputs([[COPY1]] as %arg0: memref<1x16x24x24xf16, [@CMX_NN, 0]>) outputs([[BUF2]] as %arg1: memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>{
     // CHECK                  VPUIP.SW.Kernel.run {attrs = [[2, 0, 1, 3]]}(%arg0, %arg1) : memref<1x16x24x24xf16, [@CMX_NN, 0]>, memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>
     // CHECK   }
     // CHECK   return [[BUF3]] [[PERMUTE]] : memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>, memref<1x16x24x24xf16, #NHWC, [@CMX_NN, 0]>
@@ -1229,7 +1280,7 @@ func.func @FuseMemPermuteWithPermuteCastAndPropagateExplicitDistribution()
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_Tile(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "single_shave_tile.cpp", VPU.kernel_entry = "single_shave_tile"}
+    func.func private @builtin_Tile(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "tile.cpp", VPU.kernel_entry = "tile"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -1239,7 +1290,7 @@ func.func @FusePerAxisTileWithCopy(%arg0 : memref<1x1x64x1xf16, #NHWC>)
     %0 = memref.alloc() : memref<1x1x64x1xf16, #NHWC, [@CMX_NN, 0]>
     %1 = VPUIP.Copy inputs(%arg0 : memref<1x1x64x1xf16, #NHWC>) outputs(%0 : memref<1x1x64x1xf16, #NHWC, [@CMX_NN, 0]>) -> memref<1x1x64x1xf16, #NHWC, [@CMX_NN, 0]>
     %2 = memref.alloc() : memref<1x64x64x1xf16, #NHWC, [@CMX_NN, 0]>
-    %3 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_Tile inputs(%1 as %arg3: memref<1x1x64x1xf16, #NHWC, [@CMX_NN, 0]>) outputs(%2 as %arg4: memref<1x64x64x1xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x64x64x1xf16, #NHWC, [@CMX_NN, 0]>{
+    %3 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Tile inputs(%1 as %arg3: memref<1x1x64x1xf16, #NHWC, [@CMX_NN, 0]>) outputs(%2 as %arg4: memref<1x64x64x1xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x64x64x1xf16, #NHWC, [@CMX_NN, 0]>{
       VPUIP.SW.Kernel.run {attrs = [4, [1, 64, 1, 1]]}(%arg3, %arg4) : memref<1x1x64x1xf16, #NHWC, [@CMX_NN, 0]>, memref<1x64x64x1xf16, #NHWC, [@CMX_NN, 0]>
     }
     %4 = memref.alloc() : memref<1x64x64x1xf16, #NHWC>
@@ -1267,7 +1318,7 @@ func.func @FusePerAxisTileWithCopy(%arg0 : memref<1x1x64x1xf16, #NHWC>)
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_Tile(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "single_shave_tile.cpp", VPU.kernel_entry = "single_shave_tile"}
+    func.func private @builtin_Tile(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "tile.cpp", VPU.kernel_entry = "tile"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -1277,7 +1328,7 @@ func.func @FusePerAxisTileWithClusterCopy(%arg0 : memref<1x1x64x1xf16, #NHWC>)
     %0 = memref.alloc() : memref<1x1x64x1xf16, #NHWC, [@CMX_NN, 0]>
     %1 = VPUIP.Copy inputs(%arg0 : memref<1x1x64x1xf16, #NHWC>) outputs(%0 : memref<1x1x64x1xf16, #NHWC, [@CMX_NN, 0]>) -> memref<1x1x64x1xf16, #NHWC, [@CMX_NN, 0]>
     %2 = memref.alloc() : memref<1x64x64x1xf16, #NHWC, [@CMX_NN, 0]>
-    %3 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_Tile inputs(%1 as %arg3: memref<1x1x64x1xf16, #NHWC, [@CMX_NN, 0]>) outputs(%2 as %arg4: memref<1x64x64x1xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x64x64x1xf16, #NHWC, [@CMX_NN, 0]>{
+    %3 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Tile inputs(%1 as %arg3: memref<1x1x64x1xf16, #NHWC, [@CMX_NN, 0]>) outputs(%2 as %arg4: memref<1x64x64x1xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x64x64x1xf16, #NHWC, [@CMX_NN, 0]>{
       VPUIP.SW.Kernel.run {attrs = [4, [1, 64, 1, 1]]}(%arg3, %arg4) : memref<1x1x64x1xf16, #NHWC, [@CMX_NN, 0]>, memref<1x64x64x1xf16, #NHWC, [@CMX_NN, 0]>
     }
     %4 = memref.alloc() : memref<1x64x64x1xf16, #NHWC>
@@ -1308,7 +1359,7 @@ func.func @FusePerAxisTileWithClusterCopy(%arg0 : memref<1x1x64x1xf16, #NHWC>)
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_DepthToSpaceOp(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "single_shave_depth_to_space.cpp", VPU.kernel_entry = "single_shave_depth_to_space"}
+    func.func private @builtin_DepthToSpaceOp(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "depth_to_space.cpp", VPU.kernel_entry = "depth_to_space"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -1317,7 +1368,7 @@ VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 409
 func.func @NotWrapDepthToSpaceAsMultiClusterDMA(%arg0: memref<1x9x3x3xf16, #NHWC, [@CMX_NN, 0]>)
         -> !OutputDistributedType {
     %0 = memref.alloc() : memref<1x1x9x9xf16, #NHWC, [@CMX_NN, 0]>
-    %1 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_DepthToSpaceOp inputs(%arg0 as %arg1: memref<1x9x3x3xf16, #NHWC, [@CMX_NN, 0]>) outputs(%0 as %arg2: memref<1x1x9x9xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x1x9x9xf16, #NHWC, [@CMX_NN, 0]> {
+    %1 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_DepthToSpaceOp inputs(%arg0 as %arg1: memref<1x9x3x3xf16, #NHWC, [@CMX_NN, 0]>) outputs(%0 as %arg2: memref<1x1x9x9xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x1x9x9xf16, #NHWC, [@CMX_NN, 0]> {
        VPUIP.SW.Kernel.run {attrs = [2, 0]}(%arg1, %arg2) : memref<1x9x3x3xf16, #NHWC, [@CMX_NN, 0]>, memref<1x1x9x9xf16, #NHWC, [@CMX_NN, 0]>
     }
     %2 = memref.alloc() : memref<1x1x9x9xf16, #NHWC>
@@ -1330,7 +1381,7 @@ func.func @NotWrapDepthToSpaceAsMultiClusterDMA(%arg0: memref<1x9x3x3xf16, #NHWC
     return %5: !OutputDistributedType
 
     // CHECK: [[OUT_MEMREF:%.*]] = memref.alloc() : memref<1x1x9x9xf16, #NHWC, [@CMX_NN, 0]>
-    // CHECK: [[RESULT:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_DepthToSpaceOp inputs(%arg0 as %arg1: memref<1x9x3x3xf16, #NHWC, [@CMX_NN, 0]>) outputs([[OUT_MEMREF]] as %arg2: memref<1x1x9x9xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x1x9x9xf16, #NHWC, [@CMX_NN, 0]>
+    // CHECK: [[RESULT:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_DepthToSpaceOp inputs(%arg0 as %arg1: memref<1x9x3x3xf16, #NHWC, [@CMX_NN, 0]>) outputs([[OUT_MEMREF]] as %arg2: memref<1x1x9x9xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x1x9x9xf16, #NHWC, [@CMX_NN, 0]>
 }
 
 // -----
@@ -1355,4 +1406,449 @@ func.func @FuseUpsamplingAndExpand(%arg0: memref<1x24x320x320xf16, #NHWC>) -> me
     // CHECK-SAME:    inputs(%arg0 : memref<1x24x320x320xf16, #NHWC>)
     // CHECK-SAME:    outputs([[COPY]] : memref<1x32x640x640xf16, #NHWC>) -> memref<1x32x640x640xf16, #NHWC>
     // CHECK:       return [[UPS]] : memref<1x32x640x640xf16, #NHWC>
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+!OutputDistributed1 = !VPUIP.DistributedBuffer<
+    1x96x43x128xf16, #NHWC, @CMX_NN, {
+    mode = "SEGMENTED",
+    num_tiles = [1, 1, 2, 1],
+    num_clusters = 2 : i64
+}>
+
+!OutputDistributed2 = !VPUIP.DistributedBuffer<
+    1x96x42x128xf16, #NHWC, @CMX_NN, {
+    mode = "SEGMENTED",
+    num_tiles = [1, 1, 2, 1],
+    num_clusters = 2 : i64
+}>
+
+VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
+  module @VPU.SW {
+    func.func private @builtin_Tile(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "tile.cpp", VPU.kernel_entry = "tile"}
+    func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
+  }
+
+// CHECK-LABEL:  func.func @Fuse1x1SwKernelTileIntoClusterCopy
+// CHECK-SAME:    ([[INPUT:%.*]]: memref<1x96x1x1xf16, @DDR>)
+func.func @Fuse1x1SwKernelTileIntoClusterCopy(%arg0: memref<1x96x1x1xf16, @DDR>)
+        -> (!OutputDistributed1, !OutputDistributed1, !OutputDistributed2) {
+    %0 = VPUIP.PermuteCast {dst_order = #NHWC, mem_perm = #NHWC} inputs(%arg0 : memref<1x96x1x1xf16, @DDR>) -> memref<1x96x1x1xf16, #NHWC, @DDR>
+    %alloc = memref.alloc() : memref<1x96x1x1xf16, #NHWC, [@CMX_NN, 0]>
+    %1 = VPUIP.Copy inputs(%0 : memref<1x96x1x1xf16, #NHWC, @DDR>)
+                    outputs(%alloc : memref<1x96x1x1xf16, #NHWC, [@CMX_NN, 0]>)
+                        -> memref<1x96x1x1xf16, #NHWC, [@CMX_NN, 0]>
+    %alloc_0 = memref.alloc() : memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>
+    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Tile
+                    inputs(%1 as %arg3: memref<1x96x1x1xf16, #NHWC, [@CMX_NN, 0]>)
+                    outputs(%alloc_0 as %arg4: memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>) on tile 0
+                        -> memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>{
+        VPUIP.SW.Kernel.run {attrs = [4, [1, 1, 64, 128]]}(%arg3, %arg4) : memref<1x96x1x1xf16, #NHWC, [@CMX_NN, 0]>, memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>
+    }
+
+    %alloc_1 = memref.alloc() : memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>
+    %results_3 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Tile
+                    inputs(%1 as %arg3: memref<1x96x1x1xf16, #NHWC, [@CMX_NN, 0]>)
+                    outputs(%alloc_1 as %arg4: memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>) on tile 0
+                        -> memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>{
+        VPUIP.SW.Kernel.run {attrs = [4, [1, 1, 64, 128]]}(%arg3, %arg4) : memref<1x96x1x1xf16, #NHWC, [@CMX_NN, 0]>, memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>
+    }
+
+    %alloc_2 = memref.alloc() : memref<1x96x128x128xf16, #NHWC, @DDR>
+    %2 = VPUIP.SubView %alloc_2 [0, 0, 0, 0] [1, 96, 64, 128] : memref<1x96x128x128xf16, #NHWC, @DDR> to memref<1x96x64x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>
+    %3 = VPUIP.Copy inputs(%results : memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>)
+                    outputs(%2 : memref<1x96x64x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>)
+                        -> memref<1x96x64x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>
+    %4 = VPUIP.SubView %alloc_2 [0, 0, 64, 0] [1, 96, 64, 128] : memref<1x96x128x128xf16, #NHWC, @DDR> to memref<1x96x64x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>
+    %5 = VPUIP.Copy inputs(%results_3 : memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>)
+                    outputs(%4 : memref<1x96x64x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>)
+                        -> memref<1x96x64x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>
+    %6 = VPUIP.ConcatView
+                    inputs(%3, %5 : memref<1x96x64x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>, memref<1x96x64x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>)
+                    outputs(%alloc_2 : memref<1x96x128x128xf16, #NHWC, @DDR>)
+                        -> memref<1x96x128x128xf16, #NHWC, @DDR>
+    %7 = VPUIP.SubView %6 [0, 0, 0, 0] [1, 96, 43, 128] : memref<1x96x128x128xf16, #NHWC, @DDR> to memref<1x96x43x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>
+    %8 = VPURT.AllocDistributed -> !OutputDistributed1
+    %9 = VPUIP.NCEClusterTiling
+                    inputs(%7 as %arg3: memref<1x96x43x128xf16, #NHWC>)
+                    outputs(%8 as %arg4: memref<1x96x43x128xf16, #NHWC, @CMX_NN>)
+                        -> !OutputDistributed1 {
+        VPUIP.Copy  inputs(%arg3 : memref<1x96x43x128xf16, #NHWC>)
+                    outputs(%arg4 : memref<1x96x43x128xf16, #NHWC, @CMX_NN>)
+                        -> memref<1x96x43x128xf16, #NHWC, @CMX_NN>
+    }
+    %10 = VPUIP.SubView %6 [0, 0, 43, 0] [1, 96, 43, 128] : memref<1x96x128x128xf16, #NHWC, @DDR> to memref<1x96x43x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>
+    %11 = VPURT.AllocDistributed -> !OutputDistributed1
+    %12 = VPUIP.NCEClusterTiling
+                    inputs(%10 as %arg3: memref<1x96x43x128xf16, #NHWC>)
+                    outputs(%11 as %arg4: memref<1x96x43x128xf16, #NHWC, @CMX_NN>)
+                        -> !OutputDistributed1 {
+        VPUIP.Copy  inputs(%arg3 : memref<1x96x43x128xf16, #NHWC>)
+                    outputs(%arg4 : memref<1x96x43x128xf16, #NHWC, @CMX_NN>)
+                        -> memref<1x96x43x128xf16, #NHWC, @CMX_NN>
+    }
+    %13 = VPUIP.SubView %6 [0, 0, 86, 0] [1, 96, 42, 128] : memref<1x96x128x128xf16, #NHWC, @DDR> to memref<1x96x42x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>
+    %14 = VPURT.AllocDistributed -> !OutputDistributed2
+    %15 = VPUIP.NCEClusterTiling
+                    inputs(%13 as %arg3: memref<1x96x42x128xf16, #NHWC>)
+                    outputs(%14 as %arg4: memref<1x96x42x128xf16, #NHWC, @CMX_NN>)
+                        -> !OutputDistributed2 {
+        VPUIP.Copy  inputs(%arg3 : memref<1x96x42x128xf16, #NHWC>)
+                    outputs(%arg4 : memref<1x96x42x128xf16, #NHWC, @CMX_NN>)
+                        -> memref<1x96x42x128xf16, #NHWC, @CMX_NN>
+    }
+
+    return %9, %12, %15 : !OutputDistributed1, !OutputDistributed1, !OutputDistributed2
+
+    // CHECK:       [[PERMUTECAST:%.+]] = VPUIP.PermuteCast {dst_order = #NHWC, mem_perm = #NHWC} inputs([[INPUT]] : memref<1x96x1x1xf16, @DDR>) -> memref<1x96x1x1xf16, #NHWC, @DDR>
+
+    // CHECK:       [[ALLOC:%.+]] = memref.alloc() : memref<1x96x43x1xf16, #NHWC, @DDR>
+    // CHECK:       [[PERAXISTILEDMA:%.+]] = VPUIP.PerAxisTileDMA {axis = 2 : i64, tiles = 43 : i64}
+    // CHECK-SAME:          inputs([[PERMUTECAST]] : memref<1x96x1x1xf16, #NHWC, @DDR>)
+    // CHECK-SAME:          outputs([[ALLOC]] : memref<1x96x43x1xf16, #NHWC, @DDR>) -> memref<1x96x43x1xf16, #NHWC, @DDR>
+
+    // CHECK:       [[ALLOC_0:%.+]] = memref.alloc() : memref<1x96x43x1xf16, #NHWC, @DDR>
+    // CHECK:       [[PERAXISTILEDMA_0:%.+]] = VPUIP.PerAxisTileDMA {axis = 2 : i64, tiles = 43 : i64}
+    // CHECK-SAME:          inputs([[PERMUTECAST]] : memref<1x96x1x1xf16, #NHWC, @DDR>)
+    // CHECK-SAME:          outputs([[ALLOC_0]] : memref<1x96x43x1xf16, #NHWC, @DDR>) -> memref<1x96x43x1xf16, #NHWC, @DDR>
+
+    // CHECK:       [[ALLOC_1:%.+]] = memref.alloc() : memref<1x96x42x1xf16, #NHWC, @DDR>
+    // CHECK:       [[PERAXISTILEDMA_1:%.+]] = VPUIP.PerAxisTileDMA {axis = 2 : i64, tiles = 42 : i64}
+    // CHECK-SAME:          inputs([[PERMUTECAST]] : memref<1x96x1x1xf16, #NHWC, @DDR>)
+    // CHECK-SAME:          outputs([[ALLOC_1]] : memref<1x96x42x1xf16, #NHWC, @DDR>) -> memref<1x96x42x1xf16, #NHWC, @DDR>
+
+    // CHECK:       [[CMXBUF:%.+]] = VPURT.AllocDistributed -> !VPUIP.DistributedBuffer<1x96x43x128xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>
+    // CHECK:       [[CLUSTERTILING:%.+]] = VPUIP.NCEClusterTiling
+    // CHECK-SAME:          inputs([[PERAXISTILEDMA]] as [[ARG0:%[^:]+]]: memref<1x96x43x1xf16, #NHWC, @DDR>)
+    // CHECK-SAME:          outputs([[CMXBUF]] as [[ARG1:%[^:]+]]: memref<1x96x43x128xf16, #NHWC, @CMX_NN>) -> !VPUIP.DistributedBuffer<1x96x43x128xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
+    // CHECK:           VPUIP.PerAxisTileDMA {axis = 3 : i64, tiles = 128 : i64}
+    // CHECK-SAME:          inputs([[ARG0]] : memref<1x96x43x1xf16, #NHWC, @DDR>)
+    // CHECK-SAME:          outputs([[ARG1]] : memref<1x96x43x128xf16, #NHWC, @CMX_NN>) -> memref<1x96x43x128xf16, #NHWC, @CMX_NN>
+    // CHECK:       }
+
+    // CHECK:       [[CMXBUF_0:%.+]] = VPURT.AllocDistributed -> !VPUIP.DistributedBuffer<1x96x43x128xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>
+    // CHECK:       [[CLUSTERTILING_0:%.+]] = VPUIP.NCEClusterTiling
+    // CHECK-SAME:          inputs([[PERAXISTILEDMA_0]] as [[ARG2:%[^:]+]]: memref<1x96x43x1xf16, #NHWC, @DDR>)
+    // CHECK-SAME:          outputs([[CMXBUF_0]] as [[ARG3:%[^:]+]]: memref<1x96x43x128xf16, #NHWC, @CMX_NN>) -> !VPUIP.DistributedBuffer<1x96x43x128xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
+    // CHECK:           VPUIP.PerAxisTileDMA {axis = 3 : i64, tiles = 128 : i64}
+    // CHECK-SAME:          inputs([[ARG2]] : memref<1x96x43x1xf16, #NHWC, @DDR>)
+    // CHECK-SAME:          outputs([[ARG3]] : memref<1x96x43x128xf16, #NHWC, @CMX_NN>) -> memref<1x96x43x128xf16, #NHWC, @CMX_NN>
+    // CHECK:       }
+
+    // CHECK:       [[CMXBUF_1:%.+]] = VPURT.AllocDistributed -> !VPUIP.DistributedBuffer<1x96x42x128xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>
+    // CHECK:       [[CLUSTERTILING_1:%.+]] = VPUIP.NCEClusterTiling
+    // CHECK-SAME:          inputs([[PERAXISTILEDMA_1]] as [[ARG4:%[^:]+]]: memref<1x96x42x1xf16, #NHWC, @DDR>)
+    // CHECK-SAME:          outputs([[CMXBUF_1]] as [[ARG5:%[^:]+]]: memref<1x96x42x128xf16, #NHWC, @CMX_NN>) -> !VPUIP.DistributedBuffer<1x96x42x128xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
+    // CHECK:           VPUIP.PerAxisTileDMA {axis = 3 : i64, tiles = 128 : i64}
+    // CHECK-SAME:          inputs([[ARG4]] : memref<1x96x42x1xf16, #NHWC, @DDR>)
+    // CHECK-SAME:          outputs([[ARG5]] : memref<1x96x42x128xf16, #NHWC, @CMX_NN>) -> memref<1x96x42x128xf16, #NHWC, @CMX_NN>
+    // CHECK:       }
+
+    // CHECK:       return [[CLUSTERTILING]], [[CLUSTERTILING_0]], [[CLUSTERTILING_1]] :
+    // CHECK-SAME:          !VPUIP.DistributedBuffer<1x96x43x128xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>,
+    // CHECK-SAME:          !VPUIP.DistributedBuffer<1x96x43x128xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>,
+    // CHECK-SAME:          !VPUIP.DistributedBuffer<1x96x42x128xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+!OutputDistributed = !VPUIP.DistributedBuffer<
+    1x96x42x128xf16, #NHWC, @CMX_NN, {
+    mode = "SEGMENTED",
+    num_tiles = [1, 1, 2, 1],
+    num_clusters = 2 : i64
+}>
+
+VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
+  module @VPU.SW {
+    func.func private @builtin_Tile(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "tile.cpp", VPU.kernel_entry = "tile"}
+    func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
+  }
+
+// CHECK-LABEL:  func.func @Fuse2x2SwKernelTileIntoClusterCopy
+// CHECK-SAME:    ([[INPUT:%.*]]: memref<1x96x2x2xf16, @DDR>)
+func.func @Fuse2x2SwKernelTileIntoClusterCopy(%arg0: memref<1x96x2x2xf16, @DDR>)
+        -> (!OutputDistributed, !OutputDistributed, !OutputDistributed) {
+    %0 = VPUIP.PermuteCast {dst_order = #NHWC, mem_perm = #NHWC} inputs(%arg0 : memref<1x96x2x2xf16, @DDR>) -> memref<1x96x2x2xf16, #NHWC, @DDR>
+    %alloc = memref.alloc() : memref<1x96x2x2xf16, #NHWC, [@CMX_NN, 0]>
+    %1 = VPUIP.Copy inputs(%0 : memref<1x96x2x2xf16, #NHWC, @DDR>)
+                    outputs(%alloc : memref<1x96x2x2xf16, #NHWC, [@CMX_NN, 0]>)
+                        -> memref<1x96x2x2xf16, #NHWC, [@CMX_NN, 0]>
+    %alloc_0 = memref.alloc() : memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>
+    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Tile
+                    inputs(%1 as %arg3: memref<1x96x2x2xf16, #NHWC, [@CMX_NN, 0]>)
+                    outputs(%alloc_0 as %arg4: memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>) on tile 0
+                        -> memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>{
+        VPUIP.SW.Kernel.run {attrs = [4, [1, 1, 32, 64]]}(%arg3, %arg4) : memref<1x96x2x2xf16, #NHWC, [@CMX_NN, 0]>, memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>
+    }
+
+    %alloc_1 = memref.alloc() : memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>
+    %results_3 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Tile
+                    inputs(%1 as %arg3: memref<1x96x2x2xf16, #NHWC, [@CMX_NN, 0]>)
+                    outputs(%alloc_1 as %arg4: memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>) on tile 0
+                        -> memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>{
+        VPUIP.SW.Kernel.run {attrs = [4, [1, 1, 32, 64]]}(%arg3, %arg4) : memref<1x96x2x2xf16, #NHWC, [@CMX_NN, 0]>, memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>
+    }
+
+    %alloc_2 = memref.alloc() : memref<1x96x128x128xf16, #NHWC, @DDR>
+    %2 = VPUIP.SubView %alloc_2 [0, 0, 0, 0] [1, 96, 64, 128] : memref<1x96x128x128xf16, #NHWC, @DDR> to memref<1x96x64x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>
+    %3 = VPUIP.Copy inputs(%results : memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>)
+                    outputs(%2 : memref<1x96x64x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>)
+                        -> memref<1x96x64x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>
+    %4 = VPUIP.SubView %alloc_2 [0, 0, 64, 0] [1, 96, 64, 128] : memref<1x96x128x128xf16, #NHWC, @DDR> to memref<1x96x64x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>
+    %5 = VPUIP.Copy inputs(%results_3 : memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>)
+                    outputs(%4 : memref<1x96x64x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>)
+                        -> memref<1x96x64x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>
+    %6 = VPUIP.ConcatView
+                    inputs(%3, %5 : memref<1x96x64x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>, memref<1x96x64x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>)
+                    outputs(%alloc_2 : memref<1x96x128x128xf16, #NHWC, @DDR>)
+                        -> memref<1x96x128x128xf16, #NHWC, @DDR>
+    %7 = VPUIP.SubView %6 [0, 0, 0, 0] [1, 96, 42, 128] : memref<1x96x128x128xf16, #NHWC, @DDR> to memref<1x96x42x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>
+    %8 = VPURT.AllocDistributed -> !OutputDistributed
+    %9 = VPUIP.NCEClusterTiling
+                    inputs(%7 as %arg3: memref<1x96x42x128xf16, #NHWC>)
+                    outputs(%8 as %arg4: memref<1x96x42x128xf16, #NHWC, @CMX_NN>)
+                        -> !OutputDistributed {
+        VPUIP.Copy  inputs(%arg3 : memref<1x96x42x128xf16, #NHWC>)
+                    outputs(%arg4 : memref<1x96x42x128xf16, #NHWC, @CMX_NN>)
+                        -> memref<1x96x42x128xf16, #NHWC, @CMX_NN>
+    }
+    %10 = VPUIP.SubView %6 [0, 0, 42, 0] [1, 96, 42, 128] : memref<1x96x128x128xf16, #NHWC, @DDR> to memref<1x96x42x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>
+    %11 = VPURT.AllocDistributed -> !OutputDistributed
+    %12 = VPUIP.NCEClusterTiling
+                    inputs(%10 as %arg3: memref<1x96x42x128xf16, #NHWC>)
+                    outputs(%11 as %arg4: memref<1x96x42x128xf16, #NHWC, @CMX_NN>)
+                        -> !OutputDistributed {
+        VPUIP.Copy  inputs(%arg3 : memref<1x96x42x128xf16, #NHWC>)
+                    outputs(%arg4 : memref<1x96x42x128xf16, #NHWC, @CMX_NN>)
+                        -> memref<1x96x42x128xf16, #NHWC, @CMX_NN>
+    }
+    %13 = VPUIP.SubView %6 [0, 0, 86, 0] [1, 96, 42, 128] : memref<1x96x128x128xf16, #NHWC, @DDR> to memref<1x96x42x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>
+    %14 = VPURT.AllocDistributed -> !OutputDistributed
+    %15 = VPUIP.NCEClusterTiling
+                    inputs(%13 as %arg3: memref<1x96x42x128xf16, #NHWC>)
+                    outputs(%14 as %arg4: memref<1x96x42x128xf16, #NHWC, @CMX_NN>)
+                        -> !OutputDistributed {
+        VPUIP.Copy  inputs(%arg3 : memref<1x96x42x128xf16, #NHWC>)
+                    outputs(%arg4 : memref<1x96x42x128xf16, #NHWC, @CMX_NN>)
+                        -> memref<1x96x42x128xf16, #NHWC, @CMX_NN>
+    }
+
+    return %9, %12, %15 : !OutputDistributed, !OutputDistributed, !OutputDistributed
+
+    // CHECK:       [[PERMUTECAST:%.+]] = VPUIP.PermuteCast {dst_order = #NHWC, mem_perm = #NHWC} inputs([[INPUT]] : memref<1x96x2x2xf16, @DDR>) -> memref<1x96x2x2xf16, #NHWC, @DDR>
+
+    // CHECK:       [[ALLOC:%.+]] = memref.alloc() : memref<1x96x42x2xf16, #NHWC, @DDR>
+    // CHECK:       [[PERAXISTILEDMA:%.+]] = VPUIP.PerAxisTileDMA {axis = 2 : i64, tiles = 21 : i64}
+    // CHECK-SAME:          inputs([[PERMUTECAST]] : memref<1x96x2x2xf16, #NHWC, @DDR>)
+    // CHECK-SAME:          outputs([[ALLOC]] : memref<1x96x42x2xf16, #NHWC, @DDR>) -> memref<1x96x42x2xf16, #NHWC, @DDR>
+
+    // CHECK:       [[ALLOC_0:%.+]] = memref.alloc() : memref<1x96x42x2xf16, #NHWC, @DDR>
+    // CHECK:       [[PERAXISTILEDMA_0:%.+]] = VPUIP.PerAxisTileDMA {axis = 2 : i64, tiles = 21 : i64}
+    // CHECK-SAME:          inputs([[PERMUTECAST]] : memref<1x96x2x2xf16, #NHWC, @DDR>)
+    // CHECK-SAME:          outputs([[ALLOC_0]] : memref<1x96x42x2xf16, #NHWC, @DDR>) -> memref<1x96x42x2xf16, #NHWC, @DDR>
+
+    // CHECK:       [[ALLOC_1:%.+]] = memref.alloc() : memref<1x96x42x2xf16, #NHWC, @DDR>
+    // CHECK:       [[PERAXISTILEDMA_1:%.+]] = VPUIP.PerAxisTileDMA {axis = 2 : i64, tiles = 21 : i64}
+    // CHECK-SAME:          inputs([[PERMUTECAST]] : memref<1x96x2x2xf16, #NHWC, @DDR>)
+    // CHECK-SAME:          outputs([[ALLOC_1]] : memref<1x96x42x2xf16, #NHWC, @DDR>) -> memref<1x96x42x2xf16, #NHWC, @DDR>
+
+    // CHECK:       [[CMXBUF:%.+]] = VPURT.AllocDistributed -> !VPUIP.DistributedBuffer<1x96x42x128xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>
+    // CHECK:       [[CLUSTERTILING:%.+]] = VPUIP.NCEClusterTiling
+    // CHECK-SAME:          inputs([[PERAXISTILEDMA]] as [[ARG0:%[^:]+]]: memref<1x96x42x2xf16, #NHWC, @DDR>)
+    // CHECK-SAME:          outputs([[CMXBUF]] as [[ARG1:%[^:]+]]: memref<1x96x42x128xf16, #NHWC, @CMX_NN>) -> !VPUIP.DistributedBuffer<1x96x42x128xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
+    // CHECK:           VPUIP.PerAxisTileDMA {axis = 3 : i64, tiles = 64 : i64}
+    // CHECK-SAME:          inputs([[ARG0]] : memref<1x96x42x2xf16, #NHWC, @DDR>)
+    // CHECK-SAME:          outputs([[ARG1]] : memref<1x96x42x128xf16, #NHWC, @CMX_NN>) -> memref<1x96x42x128xf16, #NHWC, @CMX_NN>
+    // CHECK:       }
+
+    // CHECK:       [[CMXBUF_0:%.+]] = VPURT.AllocDistributed -> !VPUIP.DistributedBuffer<1x96x42x128xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>
+    // CHECK:       [[CLUSTERTILING_0:%.+]] = VPUIP.NCEClusterTiling
+    // CHECK-SAME:          inputs([[PERAXISTILEDMA_0]] as [[ARG2:%[^:]+]]: memref<1x96x42x2xf16, #NHWC, @DDR>)
+    // CHECK-SAME:          outputs([[CMXBUF_0]] as [[ARG3:%[^:]+]]: memref<1x96x42x128xf16, #NHWC, @CMX_NN>) -> !VPUIP.DistributedBuffer<1x96x42x128xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
+    // CHECK:           VPUIP.PerAxisTileDMA {axis = 3 : i64, tiles = 64 : i64}
+    // CHECK-SAME:          inputs([[ARG2]] : memref<1x96x42x2xf16, #NHWC, @DDR>)
+    // CHECK-SAME:          outputs([[ARG3]] : memref<1x96x42x128xf16, #NHWC, @CMX_NN>) -> memref<1x96x42x128xf16, #NHWC, @CMX_NN>
+    // CHECK:       }
+
+    // CHECK:       [[CMXBUF_1:%.+]] = VPURT.AllocDistributed -> !VPUIP.DistributedBuffer<1x96x42x128xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>
+    // CHECK:       [[CLUSTERTILING_1:%.+]] = VPUIP.NCEClusterTiling
+    // CHECK-SAME:          inputs([[PERAXISTILEDMA_1]] as [[ARG4:%[^:]+]]: memref<1x96x42x2xf16, #NHWC, @DDR>)
+    // CHECK-SAME:          outputs([[CMXBUF_1]] as [[ARG5:%[^:]+]]: memref<1x96x42x128xf16, #NHWC, @CMX_NN>) -> !VPUIP.DistributedBuffer<1x96x42x128xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
+    // CHECK:           VPUIP.PerAxisTileDMA {axis = 3 : i64, tiles = 64 : i64}
+    // CHECK-SAME:          inputs([[ARG4]] : memref<1x96x42x2xf16, #NHWC, @DDR>)
+    // CHECK-SAME:          outputs([[ARG5]] : memref<1x96x42x128xf16, #NHWC, @CMX_NN>) -> memref<1x96x42x128xf16, #NHWC, @CMX_NN>
+    // CHECK:       }
+
+    // CHECK:       return [[CLUSTERTILING]], [[CLUSTERTILING_0]], [[CLUSTERTILING_1]] :
+    // CHECK-SAME:          !VPUIP.DistributedBuffer<1x96x42x128xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>,
+    // CHECK-SAME:          !VPUIP.DistributedBuffer<1x96x42x128xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>,
+    // CHECK-SAME:          !VPUIP.DistributedBuffer<1x96x42x128xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+!OutputDistributed1 = !VPUIP.DistributedBuffer<
+    1x96x43x128xf16, #NHWC, @CMX_NN, {
+    mode = "SEGMENTED",
+    num_tiles = [1, 1, 2, 1],
+    num_clusters = 2 : i64
+}>
+
+!OutputDistributed2 = !VPUIP.DistributedBuffer<
+    1x96x42x128xf16, #NHWC, @CMX_NN, {
+    mode = "SEGMENTED",
+    num_tiles = [1, 1, 2, 1],
+    num_clusters = 2 : i64
+}>
+
+VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
+  module @VPU.SW {
+    func.func private @builtin_Tile(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "tile.cpp", VPU.kernel_entry = "tile"}
+    func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
+  }
+
+// CHECK-LABEL:  func.func @NotFuseSwKernelTileIntoClusterCopyForIncompatibleOutput
+// CHECK-SAME:    ([[INPUT:%.*]]: memref<1x96x2x2xf16, @DDR>)
+func.func @NotFuseSwKernelTileIntoClusterCopyForIncompatibleOutput(%arg0: memref<1x96x2x2xf16, @DDR>)
+        -> (!OutputDistributed1, !OutputDistributed1, !OutputDistributed2) {
+    %0 = VPUIP.PermuteCast {dst_order = #NHWC, mem_perm = #NHWC} inputs(%arg0 : memref<1x96x2x2xf16, @DDR>) -> memref<1x96x2x2xf16, #NHWC, @DDR>
+    %alloc = memref.alloc() : memref<1x96x2x2xf16, #NHWC, [@CMX_NN, 0]>
+    %1 = VPUIP.Copy inputs(%0 : memref<1x96x2x2xf16, #NHWC, @DDR>)
+                    outputs(%alloc : memref<1x96x2x2xf16, #NHWC, [@CMX_NN, 0]>)
+                        -> memref<1x96x2x2xf16, #NHWC, [@CMX_NN, 0]>
+    %alloc_0 = memref.alloc() : memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>
+    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Tile
+                    inputs(%1 as %arg3: memref<1x96x2x2xf16, #NHWC, [@CMX_NN, 0]>)
+                    outputs(%alloc_0 as %arg4: memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>) on tile 0
+                        -> memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>{
+        VPUIP.SW.Kernel.run {attrs = [4, [1, 1, 32, 64]]}(%arg3, %arg4) : memref<1x96x2x2xf16, #NHWC, [@CMX_NN, 0]>, memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>
+    }
+
+    %alloc_1 = memref.alloc() : memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>
+    %results_3 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Tile
+                    inputs(%1 as %arg3: memref<1x96x2x2xf16, #NHWC, [@CMX_NN, 0]>)
+                    outputs(%alloc_1 as %arg4: memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>) on tile 0
+                        -> memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>{
+        VPUIP.SW.Kernel.run {attrs = [4, [1, 1, 32, 64]]}(%arg3, %arg4) : memref<1x96x2x2xf16, #NHWC, [@CMX_NN, 0]>, memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>
+    }
+
+    %alloc_2 = memref.alloc() : memref<1x96x128x128xf16, #NHWC, @DDR>
+    %2 = VPUIP.SubView %alloc_2 [0, 0, 0, 0] [1, 96, 64, 128] : memref<1x96x128x128xf16, #NHWC, @DDR> to memref<1x96x64x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>
+    %3 = VPUIP.Copy inputs(%results : memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>)
+                    outputs(%2 : memref<1x96x64x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>)
+                        -> memref<1x96x64x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>
+    %4 = VPUIP.SubView %alloc_2 [0, 0, 64, 0] [1, 96, 64, 128] : memref<1x96x128x128xf16, #NHWC, @DDR> to memref<1x96x64x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>
+    %5 = VPUIP.Copy inputs(%results_3 : memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>)
+                    outputs(%4 : memref<1x96x64x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>)
+                        -> memref<1x96x64x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>
+    %6 = VPUIP.ConcatView
+                    inputs(%3, %5 : memref<1x96x64x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>, memref<1x96x64x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>)
+                    outputs(%alloc_2 : memref<1x96x128x128xf16, #NHWC, @DDR>)
+                        -> memref<1x96x128x128xf16, #NHWC, @DDR>
+    %7 = VPUIP.SubView %6 [0, 0, 0, 0] [1, 96, 43, 128] : memref<1x96x128x128xf16, #NHWC, @DDR> to memref<1x96x43x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>
+    %8 = VPURT.AllocDistributed -> !OutputDistributed1
+    %9 = VPUIP.NCEClusterTiling
+                    inputs(%7 as %arg3: memref<1x96x43x128xf16, #NHWC>)
+                    outputs(%8 as %arg4: memref<1x96x43x128xf16, #NHWC, @CMX_NN>)
+                        -> !OutputDistributed1 {
+        VPUIP.Copy  inputs(%arg3 : memref<1x96x43x128xf16, #NHWC>)
+                    outputs(%arg4 : memref<1x96x43x128xf16, #NHWC, @CMX_NN>)
+                        -> memref<1x96x43x128xf16, #NHWC, @CMX_NN>
+    }
+    %10 = VPUIP.SubView %6 [0, 0, 43, 0] [1, 96, 43, 128] : memref<1x96x128x128xf16, #NHWC, @DDR> to memref<1x96x43x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>
+    %11 = VPURT.AllocDistributed -> !OutputDistributed1
+    %12 = VPUIP.NCEClusterTiling
+                    inputs(%10 as %arg3: memref<1x96x43x128xf16, #NHWC>)
+                    outputs(%11 as %arg4: memref<1x96x43x128xf16, #NHWC, @CMX_NN>)
+                        -> !OutputDistributed1 {
+        VPUIP.Copy  inputs(%arg3 : memref<1x96x43x128xf16, #NHWC>)
+                    outputs(%arg4 : memref<1x96x43x128xf16, #NHWC, @CMX_NN>)
+                        -> memref<1x96x43x128xf16, #NHWC, @CMX_NN>
+    }
+    %13 = VPUIP.SubView %6 [0, 0, 86, 0] [1, 96, 42, 128] : memref<1x96x128x128xf16, #NHWC, @DDR> to memref<1x96x42x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>
+    %14 = VPURT.AllocDistributed -> !OutputDistributed2
+    %15 = VPUIP.NCEClusterTiling
+                    inputs(%13 as %arg3: memref<1x96x42x128xf16, #NHWC>)
+                    outputs(%14 as %arg4: memref<1x96x42x128xf16, #NHWC, @CMX_NN>)
+                        -> !OutputDistributed2 {
+        VPUIP.Copy  inputs(%arg3 : memref<1x96x42x128xf16, #NHWC>)
+                    outputs(%arg4 : memref<1x96x42x128xf16, #NHWC, @CMX_NN>)
+                        -> memref<1x96x42x128xf16, #NHWC, @CMX_NN>
+    }
+
+    return %9, %12, %15 : !OutputDistributed1, !OutputDistributed1, !OutputDistributed2
+
+    // CHECK:       [[PERMUTECAST:%.+]] = VPUIP.PermuteCast {dst_order = #NHWC, mem_perm = #NHWC} inputs([[INPUT]] : memref<1x96x2x2xf16, @DDR>) -> memref<1x96x2x2xf16, #NHWC, @DDR>
+
+    // CHECK:       [[ALLOC:%.+]] = memref.alloc() : memref<1x96x2x2xf16, #NHWC, [@CMX_NN, 0]>
+    // CHECK:       [[COPYIN:%.+]] = VPUIP.Copy
+    // CHECK-SAME:          inputs([[PERMUTECAST]] : memref<1x96x2x2xf16, #NHWC, @DDR>)
+    // CHECK-SAME:          outputs([[ALLOC]] : memref<1x96x2x2xf16, #NHWC, [@CMX_NN, 0]>) -> memref<1x96x2x2xf16, #NHWC, [@CMX_NN, 0]>
+    // CHECK:       [[ALLOC_0:%.+]] = memref.alloc() : memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>
+    // CHECK:       [[TILE_0:%.+]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Tile
+    // CHECK-SAME:          inputs([[COPYIN]] as [[ARG0:%[^:]+]]: memref<1x96x2x2xf16, #NHWC, [@CMX_NN, 0]>)
+    // CHECK-SAME:          outputs([[ALLOC_0]] as [[ARG1:%[^:]+]]: memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>{
+    // CHECK:       [[ALLOC_1:%.+]] = memref.alloc() : memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>
+    // CHECK:       [[TILE_1:%.+]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Tile
+    // CHECK-SAME:          inputs([[COPYIN]] as [[ARG2:%[^:]+]]: memref<1x96x2x2xf16, #NHWC, [@CMX_NN, 0]>)
+    // CHECK-SAME:          outputs([[ALLOC_1]] as [[ARG3:%[^:]+]]: memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>{
+
+    // CHECK:       [[CONCATBUF:%.+]] = memref.alloc() : memref<1x96x128x128xf16, #NHWC, @DDR>
+    // CHECK:       [[SUBVIEW_0:%.+]] = VPUIP.SubView [[CONCATBUF]] [0, 0, 0, 0] [1, 96, 64, 128] : memref<1x96x128x128xf16, #NHWC, @DDR> to memref<1x96x64x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>
+    // CHECK:       [[COPY_0:%.+]] = VPUIP.Copy
+    // CHECK-SAME:          inputs([[TILE_0]] : memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>)
+    // CHECK-SAME:          outputs([[SUBVIEW_0]] : memref<1x96x64x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>) -> memref<1x96x64x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>
+
+    // CHECK:       [[SUBVIEW_1:%.+]] = VPUIP.SubView [[CONCATBUF]] [0, 0, 64, 0] [1, 96, 64, 128] : memref<1x96x128x128xf16, #NHWC, @DDR> to memref<1x96x64x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>
+    // CHECK:       [[COPY_1:%.+]] = VPUIP.Copy
+    // CHECK-SAME:          inputs([[TILE_1]] : memref<1x96x64x128xf16, #NHWC, [@CMX_NN, 0]>)
+    // CHECK-SAME:          outputs([[SUBVIEW_1]] : memref<1x96x64x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>) -> memref<1x96x64x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>
+
+    // CHECK:       [[CONCAT:%.+]] = VPUIP.ConcatView
+    // CHECK-SAME:          inputs([[COPY_0]], [[COPY_1]] : memref<1x96x64x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>,
+    // CHECK-SAME:                                          memref<1x96x64x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>)
+    // CHECK-SAME:          outputs([[CONCATBUF]] : memref<1x96x128x128xf16, #NHWC, @DDR>) -> memref<1x96x128x128xf16, #NHWC, @DDR>
+
+    // CHECK:       [[SUBVIEW_2:%.+]] = VPUIP.SubView [[CONCAT]] [0, 0, 0, 0] [1, 96, 43, 128] : memref<1x96x128x128xf16, #NHWC, @DDR> to memref<1x96x43x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>
+    // CHECK:       [[ALLOC_DIST_0:%.+]] = VPURT.AllocDistributed -> !VPUIP.DistributedBuffer<1x96x43x128xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>
+    // CHECK:       [[CLUSTERCOPY0:%.+]] = VPUIP.NCEClusterTiling
+    // CHECK-SAME:          inputs([[SUBVIEW_2]] as [[ARG4:%[^:]+]]: memref<1x96x43x128xf16, #NHWC>)
+    // CHECK-SAME:          outputs([[ALLOC_DIST_0]] as [[ARG5:%[^:]+]]: memref<1x96x43x128xf16, #NHWC, @CMX_NN>) -> !VPUIP.DistributedBuffer<1x96x43x128xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
+    // CHECK:           VPUIP.Copy
+    // CHECK-SAME:          inputs([[ARG4]] : memref<1x96x43x128xf16, #NHWC>)
+    // CHECK-SAME:          outputs([[ARG5]] : memref<1x96x43x128xf16, #NHWC, @CMX_NN>) -> memref<1x96x43x128xf16, #NHWC, @CMX_NN>
+    // CHECK:       }
+
+    // CHECK:       [[SUBVIEW_3:%.+]] = VPUIP.SubView [[CONCAT]] [0, 0, 43, 0] [1, 96, 43, 128] : memref<1x96x128x128xf16, #NHWC, @DDR> to memref<1x96x43x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>
+    // CHECK:       [[ALLOC_DIST_1:%.+]] = VPURT.AllocDistributed -> !VPUIP.DistributedBuffer<1x96x43x128xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>
+    // CHECK:       [[CLUSTERCOPY1:%.+]] = VPUIP.NCEClusterTiling
+    // CHECK-SAME:          inputs([[SUBVIEW_3]] as [[ARG6:%[^:]+]]: memref<1x96x43x128xf16, #NHWC>)
+    // CHECK-SAME:          outputs([[ALLOC_DIST_1]] as [[ARG7:%[^:]+]]: memref<1x96x43x128xf16, #NHWC, @CMX_NN>) -> !VPUIP.DistributedBuffer<1x96x43x128xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
+    // CHECK:           VPUIP.Copy
+    // CHECK-SAME:          inputs([[ARG6]] : memref<1x96x43x128xf16, #NHWC>)
+    // CHECK-SAME:          outputs([[ARG7]] : memref<1x96x43x128xf16, #NHWC, @CMX_NN>) -> memref<1x96x43x128xf16, #NHWC, @CMX_NN>
+    // CHECK:       }
+
+    // CHECK:       [[SUBVIEW_4:%.+]] = VPUIP.SubView [[CONCAT]] [0, 0, 86, 0] [1, 96, 42, 128] : memref<1x96x128x128xf16, #NHWC, @DDR> to memref<1x96x42x128xf16, {order = #NHWC, strides = [1572864, 1, 12288, 96]}, @DDR>
+    // CHECK:       [[ALLOC_DIST_2:%.+]] = VPURT.AllocDistributed -> !VPUIP.DistributedBuffer<1x96x42x128xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>
+    // CHECK:       [[CLUSTERCOPY2:%.+]] = VPUIP.NCEClusterTiling
+    // CHECK-SAME:          inputs([[SUBVIEW_4]] as [[ARG8:%[^:]+]]: memref<1x96x42x128xf16, #NHWC>)
+    // CHECK-SAME:          outputs([[ALLOC_DIST_2]] as [[ARG9:%[^:]+]]: memref<1x96x42x128xf16, #NHWC, @CMX_NN>) -> !VPUIP.DistributedBuffer<1x96x42x128xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
+    // CHECK:           VPUIP.Copy
+    // CHECK-SAME:          inputs([[ARG8]] : memref<1x96x42x128xf16, #NHWC>)
+    // CHECK-SAME:          outputs([[ARG9]] : memref<1x96x42x128xf16, #NHWC, @CMX_NN>) -> memref<1x96x42x128xf16, #NHWC, @CMX_NN>
+    // CHECK:       }
+
+    // CHECK:       return [[CLUSTERCOPY0]], [[CLUSTERCOPY1]], [[CLUSTERCOPY2]] :
+    // CHECK-SAME:          !VPUIP.DistributedBuffer<1x96x43x128xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>,
+    // CHECK-SAME:          !VPUIP.DistributedBuffer<1x96x43x128xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>,
+    // CHECK-SAME:          !VPUIP.DistributedBuffer<1x96x42x128xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>
 }

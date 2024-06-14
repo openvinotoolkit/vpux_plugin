@@ -90,6 +90,28 @@ mlir::LogicalResult CopiesForNCEOp::matchAndRewrite(VPU::NCEOpInterface origOp, 
 }
 
 //
+// CopiesForM2iOp
+//
+
+class CopiesForM2iOp final : public mlir::OpRewritePattern<VPU::M2ITaskOp> {
+public:
+    CopiesForM2iOp(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<VPU::M2ITaskOp>(ctx), _log(log) {
+        setDebugName("CopiesForM2iOp");
+    }
+
+public:
+    mlir::LogicalResult matchAndRewrite(VPU::M2ITaskOp origOp, mlir::PatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+mlir::LogicalResult CopiesForM2iOp::matchAndRewrite(VPU::M2ITaskOp origOp, mlir::PatternRewriter& rewriter) const {
+    _log.trace("[{0}] Got '{1}' at '{2}'", getDebugName(), origOp->getName(), origOp->getLoc());
+    return insertCmxCopies(origOp, rewriter);
+}
+
+//
 // AdjustMemorySpacePass
 //
 
@@ -109,9 +131,9 @@ private:
 void AdjustMemorySpacePass::safeRunOnFunc() {
     auto& ctx = getContext();
 
-    // NCE operations are only legal if all their outputs and inputs (incl. weights) reside in CMX
+    // NCE/M2I operations are only legal if all their outputs and inputs (incl. weights) reside in CMX
     const auto isLegalOp = [](mlir::Operation* op) {
-        if (mlir::isa<VPU::NCEOpInterface>(op)) {
+        if (mlir::isa<VPU::NCEOpInterface, VPU::M2ITaskOp>(op)) {
             const auto verifyLocationInCmx = [](mlir::Value operand) {
                 return operand.getType().cast<vpux::NDTypeInterface>().getMemoryKind() == MemoryKind::CMX_NN;
             };
@@ -126,6 +148,7 @@ void AdjustMemorySpacePass::safeRunOnFunc() {
 
     mlir::RewritePatternSet patterns(&ctx);
     patterns.add<CopiesForNCEOp>(&ctx, _log);
+    patterns.add<CopiesForM2iOp>(&ctx, _log);
 
     auto func = getOperation();
     if (mlir::failed(mlir::applyPartialConversion(func, target, std::move(patterns)))) {

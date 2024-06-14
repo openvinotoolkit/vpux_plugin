@@ -1,12 +1,11 @@
-// Copyright (C) Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include <vpu_ov2_layer_test.hpp>
 
-#include <ov_models/builders.hpp>
-#include <ov_models/utils/ov_helpers.hpp>
-#include <shared_test_classes/base/layer_test_utils.hpp>
+#include "common_test_utils/node_builders/constant.hpp"
+#include "common_test_utils/node_builders/fake_quantize.hpp"
 
 using namespace ov::test;
 
@@ -50,17 +49,20 @@ class QuantizedConvSubGraphTestCommon :
         const std::vector<float> dataInHigh = {dataFQRanges.at(1)};
         const std::vector<float> dataOutLow = {dataFQRanges.at(2)};
         const std::vector<float> dataOutHigh = {dataFQRanges.at(3)};
-        const auto dataFq = ngraph::builder::makeFakeQuantize(params[0], ov::element::f32, dataLevels, {}, dataInLow,
-                                                              dataInHigh, dataOutLow, dataOutHigh);
+        const auto dataFq = ov::test::utils::make_fake_quantize(params[0], ov::element::f32, dataLevels, {}, dataInLow,
+                                                                dataInHigh, dataOutLow, dataOutHigh);
 
-        const auto weightsU8 = ngraph::builder::makeConstant<uint8_t>(ov::element::u8, weightsShape, {}, true, 254, 0);
+        const auto weightsU8 =
+                ov::test::utils::deprecated::make_constant<uint8_t>(ov::element::u8, weightsShape, {}, true, 254, 0);
 
         const auto weightsFP32 = std::make_shared<ov::op::v0::Convert>(weightsU8, ov::element::f32);
 
         const size_t weightsLevels = 255;
 
-        const auto weightsInLow = ngraph::builder::makeConstant<float>(ov::element::f32, {1}, {0.0f}, false);
-        const auto weightsInHigh = ngraph::builder::makeConstant<float>(ov::element::f32, {1}, {254.0f}, false);
+        const auto weightsInLow =
+                ov::op::v0::Constant::create(ov::element::f32, ov::Shape{1}, std::vector<float>{0.0f});
+        const auto weightsInHigh =
+                ov::op::v0::Constant::create(ov::element::f32, ov::Shape{1}, std::vector<float>{254.0f});
 
         std::vector<float> perChannelLow(weightsShape[0]);
         std::vector<float> perChannelHigh(weightsShape[0]);
@@ -70,10 +72,10 @@ class QuantizedConvSubGraphTestCommon :
             perChannelHigh[i] = 1.0f;
         }
 
-        const auto weightsOutLow = ngraph::builder::makeConstant<float>(ov::element::f32, {weightsShape[0], 1, 1, 1},
-                                                                        perChannelLow, false);
-        const auto weightsOutHigh = ngraph::builder::makeConstant<float>(ov::element::f32, {weightsShape[0], 1, 1, 1},
-                                                                         perChannelHigh, false);
+        const auto weightsOutLow = ov::test::utils::deprecated::make_constant<float>(
+                ov::element::f32, {weightsShape[0], 1, 1, 1}, perChannelLow, false);
+        const auto weightsOutHigh = ov::test::utils::deprecated::make_constant<float>(
+                ov::element::f32, {weightsShape[0], 1, 1, 1}, perChannelHigh, false);
 
         const auto weightsFq = std::make_shared<ov::op::v0::FakeQuantize>(weightsFP32, weightsInLow, weightsInHigh,
                                                                           weightsOutLow, weightsOutHigh, weightsLevels);
@@ -86,8 +88,8 @@ class QuantizedConvSubGraphTestCommon :
                 std::make_shared<ov::op::v1::Convolution>(dataFq, weightsFq, strides, pads_begin, pads_end, dilations);
         const std::vector<float> outDataLow = {0.0f};
         const std::vector<float> outDataHigh = {255.0f};
-        const auto outFq = ngraph::builder::makeFakeQuantize(conv, ov::element::f32, dataLevels, {}, outDataLow,
-                                                             outDataHigh, outDataLow, outDataHigh);
+        const auto outFq = ov::test::utils::make_fake_quantize(conv, ov::element::f32, dataLevels, {}, outDataLow,
+                                                               outDataHigh, outDataLow, outDataHigh);
 
         const ov::ResultVector results{std::make_shared<ov::op::v0::Result>(outFq)};
         function = std::make_shared<ov::Model>(results, params, "QuantizedConv");
@@ -100,31 +102,39 @@ public:
         std::vector<float> fqRanges;
         std::tie(ip, op, fqRanges) = obj.param;
 
+        const std::string sep = "_";
         std::ostringstream result;
-        result << "InputPrec=" << ip << "_";
-        result << "OutputPrec=" << op << "_";
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
+        result << "InputPrec=" << ip << sep;
+        result << "OutputPrec=" << op << sep;
         result << "FQ={" << fqRanges.at(0) << ", " << fqRanges.at(1) << ", " << fqRanges.at(2) << ", " << fqRanges.at(3)
-               << "}_";
+               << "}" << sep;
         return result.str();
     }
 };
 
 class QuantizedConvSubGraphTest_NPU3700 : public QuantizedConvSubGraphTestCommon {};
 class QuantizedConvSubGraphTest_NPU3720 : public QuantizedConvSubGraphTestCommon {};
+class QuantizedConvSubGraphTest_NPU4000 : public QuantizedConvSubGraphTestCommon {};
 
 TEST_P(QuantizedConvSubGraphTest_NPU3700, SW) {
     setReferenceSoftwareMode();
-    run(VPUXPlatform::VPU3700);
+    run(Platform::NPU3700);
 }
 
 TEST_P(QuantizedConvSubGraphTest_NPU3700, HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3700);
+    run(Platform::NPU3700);
 }
 
 TEST_P(QuantizedConvSubGraphTest_NPU3720, SW) {
     setReferenceSoftwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
+}
+
+TEST_P(QuantizedConvSubGraphTest_NPU4000, HW) {
+    setDefaultHardwareMode();
+    run(Platform::NPU4000);
 }
 
 std::vector<std::vector<float>> fqRanges = {
@@ -154,6 +164,9 @@ const auto basicCasesM = ::testing::Combine(::testing::ValuesIn(netPrecisionsM),
                                             ::testing::ValuesIn(netOutputPrecisionsM), ::testing::ValuesIn(fqRangesM));
 
 INSTANTIATE_TEST_SUITE_P(smoke_QuantizedConv, QuantizedConvSubGraphTest_NPU3720, basicCasesM,
+                         QuantizedConvSubGraphTestCommon::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(smoke_QuantizedConv, QuantizedConvSubGraphTest_NPU4000, basicCasesM,
                          QuantizedConvSubGraphTestCommon::getTestCaseName);
 
 }  // namespace

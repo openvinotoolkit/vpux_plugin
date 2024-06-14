@@ -14,7 +14,7 @@
 
 #include <transformations/utils/utils.hpp>
 
-#include "vpux/compiler/dialect/IE/ops.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 
 #include <vpux_headers/metadata.hpp>
 

@@ -1,11 +1,11 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 #include "vpux/compiler/conversion.hpp"
 #include "vpux/compiler/dialect/IERT/types.hpp"
-#include "vpux/compiler/dialect/VPUIP/sw_utils.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/sw_utils.hpp"
 #include "vpux/compiler/utils/logging.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 #include "vpux/utils/core/logger.hpp"

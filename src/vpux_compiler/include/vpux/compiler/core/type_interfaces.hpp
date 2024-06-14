@@ -31,12 +31,14 @@ struct TypeComponents {
     std::optional<mlir::Type> elementType = std::nullopt;
     std::optional<DimsOrder> dimsOrder = std::nullopt;
     std::optional<IndexedSymbolAttr> memSpace = std::nullopt;
+    std::optional<mlir::ArrayAttr> bounds = std::nullopt;
     std::optional<Strides> strides = std::nullopt;
 
     TypeComponents& setShape(ShapeRef newShape);
     TypeComponents& setElementType(mlir::Type newElementType);
     TypeComponents& setDimsOrder(DimsOrder newDimsOrder);
     TypeComponents& setMemSpace(IndexedSymbolAttr newMemSpace);
+    TypeComponents& setBounds(mlir::ArrayAttr newBounds);
     TypeComponents& setStrides(StridesRef newStrides);
 };
 
@@ -108,6 +110,12 @@ public:
                                           vpux::ShapeRef tileElemStrides) const;
     vpux::NDTypeInterface eraseTiledInfo(mlir::Type type) const;
     vpux::NDTypeInterface pad(mlir::Type type, vpux::ShapeRef padBefore, vpux::ShapeRef padAfter) const;
+};
+
+class TensorBoundedTypeInterface : public BoundedTypeInterface::FallbackModel<TensorBoundedTypeInterface> {
+public:
+    mlir::ArrayAttr getBounds(mlir::Type type) const;
+    vpux::BoundedTypeInterface changeBounds(mlir::Type type, mlir::ArrayAttr bounds) const;
 };
 
 }  // namespace vpux

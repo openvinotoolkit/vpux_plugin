@@ -6,7 +6,7 @@
 #pragma once
 
 #include "vpux/compiler/core/ops_interfaces.hpp"
-#include "vpux/compiler/dialect/IE/attributes.hpp"
+#include "vpux/compiler/dialect/IE/IR/attributes.hpp"
 
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/utils/core/array_ref.hpp"

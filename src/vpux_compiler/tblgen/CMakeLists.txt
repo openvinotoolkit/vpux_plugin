@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2023 Intel Corporation.
+# Copyright (C) 2023-2024 Intel Corporation.
 # SPDX-License-Identifier: Apache 2.0
 #
 
@@ -11,15 +11,25 @@ add_subdirectory(vpux/compiler/dialect/VPU)
 add_subdirectory(vpux/compiler/VPU30XX/conversion)
 add_subdirectory(vpux/compiler/VPU30XX/dialect/IE)
 add_subdirectory(vpux/compiler/VPU30XX/dialect/VPUIP)
-add_subdirectory(vpux/compiler/VPU37XX/conversion)
-add_subdirectory(vpux/compiler/VPU37XX/dialect/IE)
-add_subdirectory(vpux/compiler/VPU37XX/dialect/VPU)
-add_subdirectory(vpux/compiler/VPU37XX/dialect/VPUIP)
-add_subdirectory(vpux/compiler/VPU37XX/dialect/VPURT)
+add_subdirectory(vpux/compiler/NPU37XX/conversion)
+add_subdirectory(vpux/compiler/NPU37XX/dialect/IE)
+add_subdirectory(vpux/compiler/NPU37XX/dialect/VPU)
+add_subdirectory(vpux/compiler/NPU37XX/dialect/VPUIP)
+add_subdirectory(vpux/compiler/NPU37XX/dialect/VPUIPDPU)
+add_subdirectory(vpux/compiler/NPU37XX/dialect/VPURT)
+add_subdirectory(vpux/compiler/NPU40XX/dialect/VPU)
+add_subdirectory(vpux/compiler/NPU40XX/dialect/VPUIP)
+add_subdirectory(vpux/compiler/NPU40XX/dialect/VPURT)
 add_subdirectory(vpux/compiler/dialect/IERT)
 add_subdirectory(vpux/compiler/dialect/VPUIP)
+add_subdirectory(vpux/compiler/dialect/VPUIPDPU)
+add_subdirectory(vpux/compiler/NPU40XX/dialect/VPUIPDPU)
 add_subdirectory(vpux/compiler/dialect/VPURT)
 add_subdirectory(vpux/compiler/dialect/ELFNPU37XX)
 add_subdirectory(vpux/compiler/dialect/VPUMI37XX)
+add_subdirectory(vpux/compiler/dialect/VPUMI40XX)
 add_subdirectory(vpux/compiler/dialect/VPURegMapped)
-add_subdirectory(vpux/compiler/dialect/VPU37XX)
+add_subdirectory(vpux/compiler/dialect/VPUASM)
+add_subdirectory(vpux/compiler/NPU40XX/dialect/ELF)
+add_subdirectory(vpux/compiler/NPU37XX/dialect/NPUReg37XX)
+add_subdirectory(vpux/compiler/NPU40XX/dialect/NPUReg40XX)

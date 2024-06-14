@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -35,8 +35,8 @@ module @VPU.SW {
     // `memref` will be translated to `MemRefData`, while raw scalars will be translated as is.
     func.func private @builtin_gather_tree(%input : memref<*xf32>, %input : memref<*xf32>, %input : memref<*xf32>, %input : memref<*xf32>, %output : memref<*xf32>)
         attributes {
-            VPU.kernel_code = "single_shave_gather_tree.cpp",
-            VPU.kernel_entry = "single_shave_gather_tree"
+            VPU.kernel_code = "gather_tree.cpp",
+            VPU.kernel_entry = "gather_tree"
         }
 }
 
@@ -72,7 +72,7 @@ func.func @main(%0: memref<10x1x10xf32>, %1: memref<10x1x10xf32>, %2: memref<1xf
 
     // Genetic Kernel information for the scheduler.
     VPURT.Task waits(%b4  : !VPURT.Barrier) updates(%b3  : !VPURT.Barrier) {
-        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
                     @VPU.SW::@builtin_gather_tree            // The reference to the Kernel function.
                     inputs(%in_tile0_cmx as %arg0: memref<10x1x10xf32, [@CMX_NN, 0]>, %in_tile1_cmx as %arg1: memref<10x1x10xf32, [@CMX_NN, 0]>, %in_tile2_cmx as %arg2: memref<1xf32, [@CMX_NN, 0]>, %in_tile3_cmx as %arg3: memref<1xf32, [@CMX_NN, 0]>)     // Inputs/outputs buffers for generic operation interface
                     outputs(%out_tile0_cmx as %arg4: memref<10x1x10xf32, [@CMX_NN, 0]>)   // and their mapping to inner region.

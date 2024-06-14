@@ -6,7 +6,8 @@
 #pragma once
 
 #include "vpux/compiler/core/attributes/dims_order.hpp"
-#include "vpux/compiler/dialect/IE/ops.hpp"
+#include "vpux/compiler/core/type_interfaces.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/utils/permute_utils.hpp"
 
 using namespace vpux;
@@ -51,3 +52,6 @@ mlir::LogicalResult fusePermutations(PermOp permuteOp, mlir::PatternRewriter& re
 
     return mlir::success();
 }
+
+mlir::ArrayAttr permuteBounds(mlir::MLIRContext* ctx, vpux::BoundedTypeInterface boundedTensor, DimsOrder srcOrder,
+                              DimsOrder dstOrder, mlir::AffineMap memPerm);

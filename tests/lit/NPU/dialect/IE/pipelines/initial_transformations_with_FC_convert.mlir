@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --init-compiler="vpu-arch=%arch%" --initial-transformations="convert-fc-to-conv=true" %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 // CHECK-LABEL: @TransformPassesWithFC
 func.func @TransformPassesWithFC(%arg0: tensor<1x16xf32>) -> tensor<1x64xf32> {
@@ -29,6 +29,7 @@ func.func @TransformPassesWithFC(%arg0: tensor<1x16xf32>) -> tensor<1x64xf32> {
     // CHECK:       return [[VAL3]]
 }
 
+#CN = affine_map<(d0, d1) -> (d1, d0)>
 
 // CHECK-LABEL: @MatMul4dInputsTo2d
 func.func @MatMul4dInputsTo2d(%arg0: tensor<1x2x1x512xf32>) -> tensor<1x2x1x40xf32> {
@@ -37,10 +38,10 @@ func.func @MatMul4dInputsTo2d(%arg0: tensor<1x2x1x512xf32>) -> tensor<1x2x1x40xf
 
     return %0 : tensor<1x2x1x40xf32>
 
-    // CHECK-DAG:      [[CST_0:%.*]] = const.Declare tensor<40x512xf32> = dense<1.000000e+00> : tensor<1x2x512x40xf32>, [#const.SubView<[0, 1, 0, 0], [1, 1, 512, 40]>, #const.Reshape<[512, 40]>, #const.Transpose<#map>]
-    // CHECK-DAG:      [[CST_1:%.*]] = const.Declare tensor<40x512xf32> = dense<1.000000e+00> : tensor<1x2x512x40xf32>, [#const.SubView<[0, 0, 0, 0], [1, 1, 512, 40]>, #const.Reshape<[512, 40]>, #const.Transpose<#map>]
+    // CHECK-DAG:      [[CST_0:%.*]] = const.Declare tensor<40x512xf32> = dense<1.000000e+00> : tensor<1x2x512x40xf32>, [#const.SubView<[0, 1, 0, 0], [1, 1, 512, 40]>, #const.Reshape<[512, 40]>, #const.Transpose<#CN>]
+    // CHECK-DAG:      [[CST_1:%.*]] = const.Declare tensor<40x512xf32> = dense<1.000000e+00> : tensor<1x2x512x40xf32>, [#const.SubView<[0, 0, 0, 0], [1, 1, 512, 40]>, #const.Reshape<[512, 40]>, #const.Transpose<#CN>]
     // CHECK:          [[IN_1:%.*]] = IE.Slice %arg0 [0, 0, 0, 0] [1, 1, 1, 512] : tensor<1x2x1x512xf32> to tensor<1x1x1x512xf32>
-    // CHECK:          [[IN_1_2D:%.*]] = IE.AffineReshape([[IN_1]]) 
+    // CHECK:          [[IN_1_2D:%.*]] = IE.AffineReshape([[IN_1]])
     // CHECK-SAME{LITERAL}: {dim_mapping = [[0], [0], [0], [1]], shape_value = [1, 512]} : tensor<1x1x1x512xf32> -> tensor<1x512xf32>
     // CHECK:          [[IN_2:%.*]] = IE.Slice %arg0 [0, 1, 0, 0] [1, 1, 1, 512] : tensor<1x2x1x512xf32> to tensor<1x1x1x512xf32>
     // CHECK:          [[IN_2_2D:%.*]] = IE.AffineReshape([[IN_2]])
@@ -112,8 +113,10 @@ func.func @MatMulWithGroupQuant(%arg0: tensor<16x96xf32>) -> tensor<16x64xf32> {
     // CHECK: [[FQ_1:%.*]] = IE.FakeQuantize([[WEIGHTS_1]], [[IN_LOW]], [[IN_HIGH]], [[OUT_LOW_1]], [[OUT_HIGH_1]])
     // CHECK: [[FQ_2:%.*]] = IE.FakeQuantize([[WEIGHTS_2]], [[IN_LOW]], [[IN_HIGH]], [[OUT_LOW_2]], [[OUT_HIGH_2]])
 
-    %SHAPE_CST = const.Declare tensor<2xsi64> = dense<[96, 64]> : tensor<2xsi64>
-    %RESHAPE = IE.Reshape(%FQ, %SHAPE_CST) : tensor<3x32x64xf32>, tensor<2xsi64> -> tensor<96x64xf32>
+    %RESHAPE = IE.AffineReshape(%FQ) {
+        dim_mapping = [[0], [0], [1]],
+        shape_value = [96, 64]
+    } : tensor<3x32x64xf32> -> tensor<96x64xf32>
     // CHECK:   [[RESHAPE_FQ_0:%.*]] = IE.AffineReshape([[FQ_0]]) {
     // CHECK-SAME:      shape_value = [32, 64]
     // CHECK-SAME:  } : tensor<1x32x64xf32> -> tensor<32x64xf32>
@@ -126,7 +129,11 @@ func.func @MatMulWithGroupQuant(%arg0: tensor<16x96xf32>) -> tensor<16x64xf32> {
     // CHECK-SAME:      shape_value = [32, 64]
     // CHECK-SAME:  } : tensor<1x32x64xf32> -> tensor<32x64xf32>
 
-    %GEMM = IE.MatMul(%arg0, %RESHAPE) : tensor<16x96xf32>, tensor<96x64xf32> -> tensor<16x64xf32>
+    %TRANSPOSE_RHS = IE.Transpose(%RESHAPE) {
+        order_value = #CN
+    } : tensor<96x64xf32> -> tensor<64x96xf32>
+
+    %GEMM = IE.FullyConnected(%arg0, %TRANSPOSE_RHS) : tensor<16x96xf32>, tensor<64x96xf32> -> tensor<16x64xf32>
     // CHECK:   [[SLICE_0:%.*]] = IE.Slice %arg0 [0, 0] [16, 32] : tensor<16x96xf32> to tensor<16x32xf32>
     // CHECK:   [[SLICE_1:%.*]] = IE.Slice %arg0 [0, 32] [16, 32] : tensor<16x96xf32> to tensor<16x32xf32>
     // CHECK:   [[SLICE_2:%.*]] = IE.Slice %arg0 [0, 64] [16, 32] : tensor<16x96xf32> to tensor<16x32xf32>
@@ -158,8 +165,8 @@ func.func @MatMulWithGroupQuant(%arg0: tensor<16x96xf32>) -> tensor<16x64xf32> {
     // CHECK-SAME:  tensor<16x32x1x1xf32>, tensor<64x32x1x1xf32> -> tensor<16x64x1x1xf32>
     // CHECK:   [[GEMM_2_2D:%.*]] = IE.Reshape([[GEMM_2]]) {shape_value = [16, 64]} : tensor<16x64x1x1xf32> -> tensor<16x64xf32>
 
-    // CHECK:   [[ADD_0:%.*]] = IE.Add([[GEMM_0_2D]], [[GEMM_1_2D]])
-    // CHECK:   [[ADD_1:%.*]] = IE.Add([[ADD_0]], [[GEMM_2_2D]])
+    // CHECK:   [[ADD_0:%.*]] = IE.Accumulate([[GEMM_0_2D]], [[GEMM_1_2D]])
+    // CHECK:   [[ADD_1:%.*]] = IE.Accumulate([[ADD_0]], [[GEMM_2_2D]])
 
     return %GEMM : tensor<16x64xf32>
 }

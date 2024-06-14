@@ -8,10 +8,10 @@
 #include <mlir/Dialect/Quant/QuantTypes.h>
 
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
-#include "vpux/compiler/dialect/VPUIP/attributes.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/task.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/attributes.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/utils/VPU/ppe_utils.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
 #include "vpux/utils/core/error.hpp"
@@ -117,6 +117,8 @@ void buildEltwiseSparse(const nb::TestCaseJsonDescriptor& testDesc, mlir::Module
     // barrier config
     auto barrier0 = funcBuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 0);
     auto barrier1 = funcBuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 1);
+    // finalBarrier passed as production barrier to last DMA task
+    auto finalBarrier = funcBuilder.create<vpux::VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 2);
 
     // DMAs
     VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcBuilder, mlir::ValueRange(), mlir::ValueRange(barrier0.getBarrier()),
@@ -145,6 +147,7 @@ void buildEltwiseSparse(const nb::TestCaseJsonDescriptor& testDesc, mlir::Module
             /*weights_sparsity_map=*/weightsSMCmx.getOperation()->getResult(0),
             /*weightsTable=*/nullptr,
             /*instruction_table_list=*/nullptr,
+            /*spr_lookup_table*/ nullptr,
             /*activation_window=*/nullptr,
             /*parent_input=*/parentInputCmx.getOperation()->getResult(0),
             /*parent_input_sparsity_map=*/inputSMCmx.getOperation()->getResult(0),
@@ -207,15 +210,20 @@ void buildEltwiseSparse(const nb::TestCaseJsonDescriptor& testDesc, mlir::Module
     // the hardware; this corresponds to CUBOID_8x16.
     nceTask.addDPUTask(variantbuilder, start, outEnd, start, inEnd, pad, VPU::MPEMode::CUBOID_8x16);
 
-    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcBuilder, mlir::ValueRange(barrier1.getBarrier()), mlir::ValueRange(),
-                                          builder.getUnknownLoc(), outputCmx.getOperation()->getResult(0), funcOutput,
-                                          0);
+    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcBuilder, mlir::ValueRange(barrier1.getBarrier()),
+                                          mlir::ValueRange(finalBarrier.getBarrier()), builder.getUnknownLoc(),
+                                          outputCmx.getOperation()->getResult(0), funcOutput, 0);
 
     funcBuilder.create<mlir::func::ReturnOp>(builder.getUnknownLoc(), funcOutput);
 
     // set runtime resources
+    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
+
     mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    pm.addPass(VPU::createInitCompilerPass(arch, VPU::CompilationMode::DefaultHW, 1, std::nullopt, log));
+    auto initCompilerOptions = VPU::InitCompilerOptions(arch, VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.numberOfDPUGroups = 1;
+    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
 
     VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");
 

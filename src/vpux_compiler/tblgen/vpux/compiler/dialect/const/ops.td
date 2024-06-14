@@ -39,6 +39,7 @@ def Const_DeclareOp :
         Const_Op<
             "Declare",
             [
+                IsolatedFromAbove,
                 ConstantLike,
                 Pure,
                 DeclarationOp,
@@ -60,6 +61,7 @@ def Const_DeclareOp :
         AnyTypeOf<[AnyStaticShapeTensor, AnyStaticShapeMemRef]>:$output
     );
 
+    let hasCanonicalizer = 1;
     let hasFolder = 1;
     let hasVerifier = 1;
     let assemblyFormat = "attr-dict type($output) `=` $content";

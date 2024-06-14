@@ -4,23 +4,32 @@
 //
 
 #include "vpux/hwtest/hwtest.hpp"
-
 #include <llvm/Support/ToolOutputFile.h>
 #include <mlir/Dialect/Quant/QuantTypes.h>
 #include <mlir/IR/Verifier.h>
 #include <mlir/Support/DebugStringHelper.h>
 #include <mlir/Support/FileUtilities.h>
+#include "intel_npu/al/config/compiler.hpp"
 
-#include "vpux/compiler/VPU37XX/conversion.hpp"
+#include "vpux/compiler/NPU37XX/conversion.hpp"
+#include "vpux/compiler/NPU40XX/conversion.hpp"
+#include "vpux/compiler/NPU40XX/pipelines.hpp"
+#include "vpux/compiler/dialect/IE/utils/resources.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPUIP/graph-schema/export.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/init.hpp"
 #include "vpux/compiler/utils/types.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
 #include "vpux/utils/core/error.hpp"
 
+#include "vpux/compiler/NPU40XX/dialect/ELF/export.hpp"
+#include "vpux/compiler/NPU40XX/dialect/NPUReg40XX/ops.hpp"
 #include "vpux/compiler/dialect/ELFNPU37XX/export.hpp"
+
+#include "vpux/compiler/dialect/VPUMI37XX/dialect.hpp"
+#include "vpux/compiler/dialect/VPUMI40XX/dialect.hpp"
 
 namespace {
 
@@ -44,7 +53,9 @@ namespace vpux {
 mlir::OwningOpRef<mlir::ModuleOp> importHWTEST(llvm::StringRef sourceJson, mlir::MLIRContext* ctx) {
     ctx->loadDialect<VPUIP::VPUIPDialect>();
     ctx->loadDialect<VPURT::VPURTDialect>();
+    ctx->loadDialect<NPUReg40XX::NPUReg40XXDialect>();
     ctx->loadDialect<VPUMI37XX::VPUMI37XXDialect>();
+    ctx->loadDialect<VPUMI40XX::VPUMI40XXDialect>();
 
     auto module = mlir::ModuleOp::create(mlir::UnknownLoc::get(ctx), StringRef("mainModule"));
     auto log = Logger{"vpux-hwtest", LogLevel::Trace};
@@ -87,6 +98,10 @@ mlir::OwningOpRef<mlir::ModuleOp> importHWTEST(llvm::StringRef sourceJson, mlir:
     }
     case nb::CaseType::DMAcompressAct: {
         hwtest::buildDMACompressAct(jsonDesc, module, builder, log, input_types.front(), output_type);
+        break;
+    }
+    case nb::CaseType::GatherDMA: {
+        hwtest::buildGatherDMA(jsonDesc, module, builder, log, input_types.front(), output_type);
         break;
     }
     case nb::CaseType::ZMajorConvolution: {
@@ -144,6 +159,11 @@ mlir::OwningOpRef<mlir::ModuleOp> importHWTEST(llvm::StringRef sourceJson, mlir:
     case nb::CaseType::MultiClustersDPU: {
         hwtest::buildMultiClustersDPUTest(jsonDesc, module, builder, log, input_types.front(), weightTypes.front(),
                                           output_type);
+        break;
+    }
+    case nb::CaseType::HaloMultiClustering: {
+        hwtest::buildHaloMultiClusteringTest(jsonDesc, module, builder, log, input_types.front(), weightTypes.front(),
+                                             output_type);
         break;
     }
     case nb::CaseType::ActShave: {
@@ -206,6 +226,10 @@ mlir::OwningOpRef<mlir::ModuleOp> importHWTEST(llvm::StringRef sourceJson, mlir:
         hwtest::buildRaceConditionTest(jsonDesc, module, builder, log, input_types.front(), output_type);
         break;
     }
+    case nb::CaseType::M2iTask: {
+        hwtest::buildM2iTest(jsonDesc, module, builder, log, input_types.front(), output_type);
+        break;
+    }
     case nb::CaseType::StorageElementTableDPU: {
         hwtest::buildSETableTest(jsonDesc, module, builder, log, input_types.front(), weightTypes.front(), output_type);
         break;
@@ -224,25 +248,49 @@ mlir::OwningOpRef<mlir::ModuleOp> importHWTEST(llvm::StringRef sourceJson, mlir:
         break;
     };
 
+    // We need to add DMA profiling memory IE.MemoryResource
+    if (jsonDesc.getArchitecture() == vpux::VPU::ArchKind::NPU40XX) {
+        auto memSpaceAttr = mlir::SymbolRefAttr::get(ctx, stringifyEnum(VPU::MemoryKind::CMX_NN));
+        auto op = IE::setDmaProfilingReservedMemory(module, memSpaceAttr, VPUIP::HW_DMA_PROFILING_SIZE_BYTES_40XX);
+        const auto DMA_HWP_SCRATCH_BUFFER_OFFSET =
+                VPU::getTotalCMXSize(module).count() - VPUIP::HW_DMA_PROFILING_SIZE_BYTES_40XX;
+        op.setOffset(DMA_HWP_SCRATCH_BUFFER_OFFSET);
+    }
+
     // llvm::dbgs() << "Current module: " << mlir::debugString(module);
 
     VPUX_THROW_UNLESS(mlir::succeeded(mlir::verify(module)), "Failed to create a valid MLIR module for the IR model");
 
     const std::vector<std::shared_ptr<const ov::Node>> params;
     const std::vector<std::shared_ptr<const ov::Node>> results;
-    if (jsonDesc.getCompilerBackend() == nb::CompilerBackend::Flatbuffer) {
-        mlir::DefaultTimingManager tm;
-        auto timing = tm.getRootScope();
-        auto blob = VPUIP::exportToBlob(module, timing, params, results, log);
 
-        serialize(blob.data(), blob.size(), log);
-    } else if (jsonDesc.getCompilerBackend() == nb::CompilerBackend::ELF) {
+    if (jsonDesc.getCompilerBackend() == nb::CompilerBackend::ELF) {
         mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
 
-        vpux::arch37xx::buildLowerVPUIP2ELFPipeline(pm, log);
+        auto getLoweringPipeline = [&jsonDesc](vpux::VPU::ArchKind arch, mlir::OpPassManager& pm, Logger log) {
+            switch (arch) {
+            case vpux::VPU::ArchKind::NPU40XX: {
+                auto backendCompilationOptions40XX = BackendCompilationOptions40XX();
+                if (jsonDesc.getCaseType() == nb::CaseType::DMA && jsonDesc.getDMAparams().testMemSideCache == true &&
+                    jsonDesc.getDMAparams().cacheEnabled == false) {
+                    backendCompilationOptions40XX.enableMemorySideCache = false;
+                }
+                return vpux::arch40xx::buildLowerVPUIP2ELFPipeline(pm, backendCompilationOptions40XX, log);
+            }
+            default:
+                return vpux::arch37xx::buildLowerVPUIP2ELFPipeline(pm, log);
+            }
+        };
+        auto getExportToELFfunc = [](vpux::VPU::ArchKind arch) {
+            if (arch == vpux::VPU::ArchKind::NPU40XX)
+                return ELF::exportToELF;
+            return ELFNPU37XX::exportToELF;
+        };
+
+        getLoweringPipeline(jsonDesc.getArchitecture(), pm, log);
 
         VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Failed to lower test model to ELF");
-        auto blob = ELFNPU37XX::exportToELF(module, params, results, log);
+        auto blob = getExportToELFfunc(jsonDesc.getArchitecture())(module, params, results, log);
 
         serialize(blob.data(), blob.size(), log);
     } else {

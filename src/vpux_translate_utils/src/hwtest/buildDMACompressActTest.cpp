@@ -11,10 +11,11 @@
 
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/task.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
+#include "vpux/compiler/utils/compression_utils.hpp"
 #include "vpux/compiler/utils/types.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
 #include "vpux/utils/core/error.hpp"
@@ -42,6 +43,10 @@ void buildDMACompressAct(const nb::TestCaseJsonDescriptor& testDesc, mlir::Modul
     SmallVector<int64_t> inShape(input.shape.begin(), input.shape.end());
     SmallVector<int64_t> outShape(output.shape.begin(), output.shape.end());
 
+    if (testDesc.getArchitecture() == vpux::VPU::ArchKind::NPU40XX) {
+        VPUX_THROW_UNLESS(dmaParams.engine == 0, "buildDMACompressAct: DMA on NPU40XX should have 1 engine");
+    }
+
     // Activation compression enabled - Dense Mode
     // Compiler must ensure that the DDR allocation is capable of handling the worst case compressed size (which can be
     // more than the source)
@@ -53,8 +58,8 @@ void buildDMACompressAct(const nb::TestCaseJsonDescriptor& testDesc, mlir::Modul
             getElemTypeSize(inputType).count() < CHAR_BIT ? 1 : getElemTypeSize(inputType).count() / CHAR_BIT;
     const auto denseTensorSize = inShape[vpux::Dims4D::Act::C.ind()] * inShape[vpux::Dims4D::Act::W.ind()] *
                                  inShape[vpux::Dims4D::Act::H.ind()] * elementSizeBytes;
-    const auto denseSize = static_cast<uint64_t>(denseTensorSize * (static_cast<float>(65) / 64) + 1);
-    const auto DDRspilledCompShape = vpux::alignValUp(denseSize, static_cast<std::uint64_t>(alignment.count()));
+    const auto denseSize = static_cast<int64_t>(denseTensorSize * (static_cast<float>(65) / 64) + 1);
+    const SmallVector<int64_t> DDRspilledCompShape = {1, 1, 1, vpux::alignValUp(denseSize, alignment.count())};
 
     VPUX_THROW_UNLESS(!inShape.empty(), "buildDMACompressAct: Input rank is 0");
     VPUX_THROW_UNLESS(inShape == outShape, "buildDMACompressAct: in_shape and out_shape don't match");
@@ -62,10 +67,15 @@ void buildDMACompressAct(const nb::TestCaseJsonDescriptor& testDesc, mlir::Modul
 
     auto inputTotalSize = totalTensorSize(inShape, inputType);
 
-    const auto inType = getMemRefType(VPURT::BufferSection::NetworkInput, inShape, inputType, DimsOrder::NHWC);
-    const auto outType = getMemRefType(VPURT::BufferSection::NetworkOutput, outShape, outputType, DimsOrder::NHWC);
-    const auto DDRspilledCompType =
-            getMemRefType(VPURT::BufferSection::NetworkOutput, DDRspilledCompShape, inputType, DimsOrder::C);
+    SmallVector<int64_t> flatShape{1, 1, 1, denseTensorSize};
+    auto innerType = getUInt8Type(ctx);
+
+    const auto inType = getMemRefType(VPURT::BufferSection::NetworkInput, flatShape, innerType, DimsOrder::NHWC);
+    const auto outType = getMemRefType(VPURT::BufferSection::NetworkOutput, flatShape, innerType, DimsOrder::NHWC);
+    auto DDRspilledCompType =
+            getMemRefType(VPURT::BufferSection::NetworkOutput, DDRspilledCompShape, innerType, DimsOrder::NHWC);
+    DDRspilledCompType = setCompressionState(DDRspilledCompType, VPUIP::CompressionState::RuntimeCompressed)
+                                 .cast<mlir::MemRefType>();
 
     const auto funcType =
             builder.getFunctionType(ArrayRef(std::vector<mlir::Type>{inType, outType, DDRspilledCompType}),
@@ -85,7 +95,7 @@ void buildDMACompressAct(const nb::TestCaseJsonDescriptor& testDesc, mlir::Modul
 
     const auto sectionIdx = 0;
     auto CMXbuf0UncompType =
-            getMemRefType(VPURT::BufferSection::CMX_NN, sectionIdx, inShape, inputType, DimsOrder::NHWC);
+            getMemRefType(VPURT::BufferSection::CMX_NN, sectionIdx, flatShape, innerType, DimsOrder::NHWC);
     auto CMXbuf0Uncomp = createDeclareTensorOp(funcbuilder, CMXbuf0UncompType, VPURT::BufferSection::CMX_NN, sectionIdx,
                                                CMX0_AVAILABLE_OFFSET);
     CMX0_AVAILABLE_OFFSET += inputTotalSize;
@@ -99,13 +109,13 @@ void buildDMACompressAct(const nb::TestCaseJsonDescriptor& testDesc, mlir::Modul
     enum { actCompressionEntrySize = 32 };
     const auto elemType = getUInt8Type(ctx);
 
-    auto actCompressionEntryType = getMemRefType(VPURT::BufferSection::CMX_NN, sectionIdx,
-                                                 ShapeRef({actCompressionEntrySize}), elemType, DimsOrder::C);
+    auto actCompressionEntryType =
+            getMemRefType(VPURT::BufferSection::CMX_NN, sectionIdx, ShapeRef({1, 1, 1, actCompressionEntrySize}),
+                          elemType, DimsOrder::NHWC);
     auto actCompressionEntry = createDeclareTensorOp(funcbuilder, actCompressionEntryType, VPURT::BufferSection::CMX_NN,
                                                      sectionIdx, CMX0_AVAILABLE_OFFSET);
 
     CMX0_AVAILABLE_OFFSET += actCompressionEntrySize;
-
     // CMXbuf0Uncomp - DDRspilledComp
     auto DDRspilledComp = func.getArgument(2);
 
@@ -117,7 +127,7 @@ void buildDMACompressAct(const nb::TestCaseJsonDescriptor& testDesc, mlir::Modul
 
     // DDRspilledComp - CMXbuf1Uncomp
     auto CMXbuf1UncompType =
-            getMemRefType(VPURT::BufferSection::CMX_NN, sectionIdx, inShape, inputType, DimsOrder::NHWC);
+            getMemRefType(VPURT::BufferSection::CMX_NN, sectionIdx, flatShape, innerType, DimsOrder::NHWC);
     auto CMXbuf1Uncomp = createDeclareTensorOp(funcbuilder, CMXbuf1UncompType, VPURT::BufferSection::CMX_NN, sectionIdx,
                                                CMX0_AVAILABLE_OFFSET);
     CMX0_AVAILABLE_OFFSET += inputTotalSize;
@@ -130,23 +140,30 @@ void buildDMACompressAct(const nb::TestCaseJsonDescriptor& testDesc, mlir::Modul
 
     // CMXbuf1Uncomp - DDRoutput_uncomp
     auto DDRoutput_uncomp = func.getArgument(1);
+    // finalBarrier passed as production barrier to last DMA task
+    auto barrier3 = funcbuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), barrierNumber++);
 
-    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(barrier2.getBarrier()), mlir::ValueRange(),
-                                          builder.getUnknownLoc(), CMXbuf1Uncomp.getOperation()->getResult(0),
-                                          DDRoutput_uncomp, dmaParams.engine);
+    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(
+            funcbuilder, mlir::ValueRange(barrier2.getBarrier()), mlir::ValueRange(barrier3.getBarrier()),
+            builder.getUnknownLoc(), CMXbuf1Uncomp.getOperation()->getResult(0), DDRoutput_uncomp, dmaParams.engine);
 
     funcbuilder.create<mlir::func::ReturnOp>(builder.getUnknownLoc(),
                                              mlir::ValueRange{DDRoutput_uncomp, DDRspilledComp});
+
     // set runtime resources
+    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
+
     mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    pm.addPass(VPU::createInitCompilerPass(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW, 1, std::nullopt,
-                                           log));
+    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.numberOfDPUGroups = 1;
+    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
 
     VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");
     // IE.CNNNetwork
-    buildCNNOp(builder, func.getName(), {getTensorType(ShapeRef(inShape), inputType, DimsOrder::NHWC, nullptr)},
-               {getTensorType(ShapeRef(outShape), outputType, DimsOrder::NHWC, nullptr),
-                getTensorType(ShapeRef(DDRspilledCompShape), inputType, DimsOrder::C, nullptr)});
+    buildCNNOp(builder, func.getName(), {getTensorType(ShapeRef(flatShape), innerType, DimsOrder::NHWC, nullptr)},
+               {getTensorType(ShapeRef(flatShape), innerType, DimsOrder::NHWC, nullptr),
+                getTensorType(ShapeRef(DDRspilledCompShape), innerType, DimsOrder::NHWC, nullptr)});
 }
 
 }  // namespace hwtest

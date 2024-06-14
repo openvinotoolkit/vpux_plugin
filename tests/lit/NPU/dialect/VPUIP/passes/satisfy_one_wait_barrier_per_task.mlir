@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --satisfy-one-wait-barrier-per-task="max-variant-count=8" %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
@@ -177,6 +177,185 @@ func.func @NotLegalProducerCount() -> memref<1x16x1x1xf16, #NHWC, @DDR> {
 
     // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier)
 }
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @NotLegalProducerCountWithProducerCountGreaterThanHalfMaxSlotCount
+func.func @NotLegalProducerCountWithProducerCountGreaterThanHalfMaxSlotCount() -> memref<1x16x1x1xf16, #NHWC, @DDR> {
+    // barriers
+
+    %bar0 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+    %bar1 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+
+    // dummy buffers
+    %buf0 = VPURT.DeclareBuffer <DDR> <0> -> memref<1x16x1x1xf16, #NHWC, @DDR>
+    %buf1 = VPURT.DeclareBuffer <DDR> <32> -> memref<1x16x1x1xf16, #NHWC, @DDR>
+
+    // 0 1 2 3       7 8 9 10
+    //  4 5 6        11 12 13
+    //    |              |
+    //   bar0          bar1
+    //      \        /
+    //         14
+
+    VPURT.Task updates(%bar0: !VPURT.Barrier) {
+         VPUIP.NNDMA
+            inputs(%buf0: memref<1x16x1x1xf16, #NHWC, @DDR>)
+            outputs(%buf1: memref<1x16x1x1xf16, #NHWC, @DDR>)
+            -> memref<1x16x1x1xf16, #NHWC, @DDR>
+    }
+
+    VPURT.Task updates(%bar0: !VPURT.Barrier) {
+         VPUIP.NNDMA
+            inputs(%buf0: memref<1x16x1x1xf16, #NHWC, @DDR>)
+            outputs(%buf1: memref<1x16x1x1xf16, #NHWC, @DDR>)
+            -> memref<1x16x1x1xf16, #NHWC, @DDR>
+    }
+
+    VPURT.Task updates(%bar0: !VPURT.Barrier) {
+         VPUIP.NNDMA
+            inputs(%buf0: memref<1x16x1x1xf16, #NHWC, @DDR>)
+            outputs(%buf1: memref<1x16x1x1xf16, #NHWC, @DDR>)
+            -> memref<1x16x1x1xf16, #NHWC, @DDR>
+    }
+
+    VPURT.Task updates(%bar0: !VPURT.Barrier) {
+         VPUIP.NNDMA
+            inputs(%buf0: memref<1x16x1x1xf16, #NHWC, @DDR>)
+            outputs(%buf1: memref<1x16x1x1xf16, #NHWC, @DDR>)
+            -> memref<1x16x1x1xf16, #NHWC, @DDR>
+    }
+
+    VPURT.Task updates(%bar0: !VPURT.Barrier) {
+         VPUIP.NNDMA
+            inputs(%buf0: memref<1x16x1x1xf16, #NHWC, @DDR>)
+            outputs(%buf1: memref<1x16x1x1xf16, #NHWC, @DDR>)
+            -> memref<1x16x1x1xf16, #NHWC, @DDR>
+    }
+
+    VPURT.Task updates(%bar0: !VPURT.Barrier) {
+         VPUIP.NNDMA
+            inputs(%buf0: memref<1x16x1x1xf16, #NHWC, @DDR>)
+            outputs(%buf1: memref<1x16x1x1xf16, #NHWC, @DDR>)
+            -> memref<1x16x1x1xf16, #NHWC, @DDR>
+    }
+
+    VPURT.Task updates(%bar0: !VPURT.Barrier) {
+         VPUIP.NNDMA
+            inputs(%buf0: memref<1x16x1x1xf16, #NHWC, @DDR>)
+            outputs(%buf1: memref<1x16x1x1xf16, #NHWC, @DDR>)
+            -> memref<1x16x1x1xf16, #NHWC, @DDR>
+    }
+
+
+    VPURT.Task updates(%bar1: !VPURT.Barrier) {
+         VPUIP.NNDMA
+            inputs(%buf0: memref<1x16x1x1xf16, #NHWC, @DDR>)
+            outputs(%buf1: memref<1x16x1x1xf16, #NHWC, @DDR>)
+            -> memref<1x16x1x1xf16, #NHWC, @DDR>
+    }
+    VPURT.Task updates(%bar1: !VPURT.Barrier) {
+         VPUIP.NNDMA
+            inputs(%buf0: memref<1x16x1x1xf16, #NHWC, @DDR>)
+            outputs(%buf1: memref<1x16x1x1xf16, #NHWC, @DDR>)
+            -> memref<1x16x1x1xf16, #NHWC, @DDR>
+    }
+
+    VPURT.Task updates(%bar1: !VPURT.Barrier) {
+         VPUIP.NNDMA
+            inputs(%buf0: memref<1x16x1x1xf16, #NHWC, @DDR>)
+            outputs(%buf1: memref<1x16x1x1xf16, #NHWC, @DDR>)
+            -> memref<1x16x1x1xf16, #NHWC, @DDR>
+    }
+
+    VPURT.Task updates(%bar1: !VPURT.Barrier) {
+         VPUIP.NNDMA
+            inputs(%buf0: memref<1x16x1x1xf16, #NHWC, @DDR>)
+            outputs(%buf1: memref<1x16x1x1xf16, #NHWC, @DDR>)
+            -> memref<1x16x1x1xf16, #NHWC, @DDR>
+    }
+
+    VPURT.Task updates(%bar1: !VPURT.Barrier) {
+         VPUIP.NNDMA
+            inputs(%buf0: memref<1x16x1x1xf16, #NHWC, @DDR>)
+            outputs(%buf1: memref<1x16x1x1xf16, #NHWC, @DDR>)
+            -> memref<1x16x1x1xf16, #NHWC, @DDR>
+    }
+
+
+    VPURT.Task updates(%bar1: !VPURT.Barrier) {
+         VPUIP.NNDMA
+            inputs(%buf0: memref<1x16x1x1xf16, #NHWC, @DDR>)
+            outputs(%buf1: memref<1x16x1x1xf16, #NHWC, @DDR>)
+            -> memref<1x16x1x1xf16, #NHWC, @DDR>
+    }
+
+    VPURT.Task updates(%bar1: !VPURT.Barrier) {
+         VPUIP.NNDMA
+            inputs(%buf0: memref<1x16x1x1xf16, #NHWC, @DDR>)
+            outputs(%buf1: memref<1x16x1x1xf16, #NHWC, @DDR>)
+            -> memref<1x16x1x1xf16, #NHWC, @DDR>
+    }
+
+    // barrier consumer
+
+    VPURT.Task waits(%bar0, %bar1: !VPURT.Barrier, !VPURT.Barrier) {
+         VPUIP.NNDMA
+            inputs(%buf0: memref<1x16x1x1xf16, #NHWC, @DDR>)
+            outputs(%buf1: memref<1x16x1x1xf16, #NHWC, @DDR>)
+            -> memref<1x16x1x1xf16, #NHWC, @DDR>
+    }
+
+    return %buf1 : memref<1x16x1x1xf16, #NHWC, @DDR>
+
+    //  0 1 2 3
+    //    |
+    //   bar0
+    //    |
+    //   4 5 6
+    //    |
+    //   bar1
+    //    |
+    //   7 8 9 10
+    //    |
+    //   bar2
+    //    |
+    //   11 12 13
+    //    |
+    //   bar3
+    //    |
+    //   14
+
+
+    // CHECK: [[BAR0:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+    // CHECK: [[BAR1:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+    // CHECK: [[BAR2:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+    // CHECK: [[BAR3:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+
+    // CHECK: VPURT.Task updates([[BAR0]] : !VPURT.Barrier)
+    // CHECK: VPURT.Task updates([[BAR0]] : !VPURT.Barrier)
+    // CHECK: VPURT.Task updates([[BAR0]] : !VPURT.Barrier)
+    // CHECK: VPURT.Task updates([[BAR0]] : !VPURT.Barrier)
+
+    // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier) updates([[BAR1]] : !VPURT.Barrier)
+    // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier) updates([[BAR1]] : !VPURT.Barrier)
+    // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier) updates([[BAR1]] : !VPURT.Barrier)
+
+
+    // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) updates([[BAR2]] : !VPURT.Barrier)
+    // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) updates([[BAR2]] : !VPURT.Barrier)
+    // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) updates([[BAR2]] : !VPURT.Barrier)
+    // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) updates([[BAR2]] : !VPURT.Barrier)
+
+    // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier) updates([[BAR3]] : !VPURT.Barrier)
+    // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier) updates([[BAR3]] : !VPURT.Barrier)
+    // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier) updates([[BAR3]] : !VPURT.Barrier)
+}
+    // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier)
+
+
 
 // -----
 
@@ -617,7 +796,7 @@ func.func @LegalProducersWithOtherUsers() -> memref<1x16x1x1xf16, #NHWC, @DDR> {
 
     //     0 1    2 3
     //     / \    / \
-    //  bar0  bar2  bar1
+    //  bar0  bar1  bar2
     //   |     |     |
     //   4     5     6
 
@@ -625,15 +804,14 @@ func.func @LegalProducersWithOtherUsers() -> memref<1x16x1x1xf16, #NHWC, @DDR> {
     // CHECK: [[BAR1:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK: [[BAR2:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
 
-    // CHECK: VPURT.Task updates([[BAR0]], [[BAR2]] : !VPURT.Barrier, !VPURT.Barrier)
-    // CHECK: VPURT.Task updates([[BAR0]], [[BAR2]] : !VPURT.Barrier, !VPURT.Barrier)
-
-    // CHECK: VPURT.Task updates([[BAR1]], [[BAR2]] : !VPURT.Barrier, !VPURT.Barrier)
-    // CHECK: VPURT.Task updates([[BAR1]], [[BAR2]] : !VPURT.Barrier, !VPURT.Barrier)
+    // CHECK: VPURT.Task updates([[BAR0]], [[BAR1]] : !VPURT.Barrier, !VPURT.Barrier)
+    // CHECK: VPURT.Task updates([[BAR0]], [[BAR1]] : !VPURT.Barrier, !VPURT.Barrier)
+    // CHECK: VPURT.Task updates([[BAR2]], [[BAR1]] : !VPURT.Barrier, !VPURT.Barrier)
+    // CHECK: VPURT.Task updates([[BAR2]], [[BAR1]] : !VPURT.Barrier, !VPURT.Barrier)
 
     // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier)
-    // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier)
     // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier)
+    // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier)
 }
 
 // -----
@@ -833,11 +1011,11 @@ func.func @NotOrderedProducersWithOtherUsers() -> memref<1x16x1x1xf16, #NHWC, @D
 
     //      0 3    1 2
     //     /   \  /   \
-    //    /    bar1  bar0
+    //    /    bar1  bar2
     //   |      |     |
     //   |      4     7
     //    \   /   \
-    //     bar2   bar3
+    //     bar0   bar3
     //      |      |
     //      5      6
 
@@ -846,14 +1024,14 @@ func.func @NotOrderedProducersWithOtherUsers() -> memref<1x16x1x1xf16, #NHWC, @D
     // CHECK: [[BAR2:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK: [[BAR3:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
 
-    // CHECK: VPURT.Task updates([[BAR2]], [[BAR1]] : !VPURT.Barrier, !VPURT.Barrier)
-    // CHECK: VPURT.Task updates([[BAR0]], [[BAR1]] : !VPURT.Barrier, !VPURT.Barrier)
     // CHECK: VPURT.Task updates([[BAR0]], [[BAR1]] : !VPURT.Barrier, !VPURT.Barrier)
     // CHECK: VPURT.Task updates([[BAR2]], [[BAR1]] : !VPURT.Barrier, !VPURT.Barrier)
+    // CHECK: VPURT.Task updates([[BAR2]], [[BAR1]] : !VPURT.Barrier, !VPURT.Barrier)
+    // CHECK: VPURT.Task updates([[BAR0]], [[BAR1]] : !VPURT.Barrier, !VPURT.Barrier)
 
-    // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) updates([[BAR2]], [[BAR3]] : !VPURT.Barrier, !VPURT.Barrier)
+    // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) updates([[BAR0]], [[BAR3]] : !VPURT.Barrier, !VPURT.Barrier)
 
-    // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier)
-    // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier)
     // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier)
+    // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier)
+    // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier)
 }

@@ -68,7 +68,7 @@ target_include_directories(${TARGET_NAME}
 
 target_compile_definitions(npu_elf PUBLIC HOST_BUILD)
 
-ie_add_api_validator_post_build_step(TARGET ${TARGET_NAME})
+ov_add_api_validator_post_build_step(TARGET ${TARGET_NAME})
 
 #--------------------------------------------------------------------------------------------
 # npu_elf lib + loader lib
@@ -88,12 +88,17 @@ install(DIRECTORY "${LOADER_DIR_INC}/vpux_loader"
 #
 # hpi_component | -> common/ -> 2 hpp
 #               | -> 3720/   -> 1 hpp
+#               | -> 4000/   -> 1 hpp
 
 install(DIRECTORY "${LOADER_DIR_HPI_INC}/common"
         DESTINATION cid/vpux_elf/loader/include/
         COMPONENT ${CID_COMPONENT})
 
 install(DIRECTORY "${LOADER_DIR_HPI_INC}/3720"
+        DESTINATION cid/vpux_elf/loader/include/
+        COMPONENT ${CID_COMPONENT})
+
+install(DIRECTORY "${LOADER_DIR_HPI_INC}/4000"
         DESTINATION cid/vpux_elf/loader/include/
         COMPONENT ${CID_COMPONENT})
 
@@ -107,12 +112,18 @@ install(DIRECTORY "${LOADER_DIR_SRC}/"
 #
 # hpi_component | src | common -> 1 cpp
 #               |     |  3720  -> 1 cpp
+#               |     |  4000  -> 1 cpp
+
 
 install(DIRECTORY "${LOADER_DIR_HPI_SRC}/common"
         DESTINATION cid/vpux_elf/loader/src/
         COMPONENT ${CID_COMPONENT})
 
 install(DIRECTORY "${LOADER_DIR_HPI_SRC}/3720"
+        DESTINATION cid/vpux_elf/loader/src/
+        COMPONENT ${CID_COMPONENT})
+
+install(DIRECTORY "${LOADER_DIR_HPI_SRC}/4000"
         DESTINATION cid/vpux_elf/loader/src/
         COMPONENT ${CID_COMPONENT})
 

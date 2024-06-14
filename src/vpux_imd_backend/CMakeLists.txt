@@ -1,68 +1,63 @@
 #
-# Copyright (C) 2022 Intel Corporation.
+# Copyright (C) 2022-2024 Intel Corporation.
 # SPDX-License-Identifier: Apache 2.0
 #
+
+ov_dependent_option(IMD_BACKEND_USE_LINKS "Link IMD binaries" OFF "ENABLE_IMD_BACKEND" OFF)
 
 set(TARGET_NAME "npu_imd_backend")
 find_package(MLIR REQUIRED CONFIG)
 
+set(IMD_ARTIFACTS_SRC_DIR "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/artifacts/vpuip_2")
+set(IMD_ARTIFACTS_BIN_DIR "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/${CMAKE_CFG_INTDIR}/vpux")
+
+if(IMD_BACKEND_USE_LINKS)
+    set(ACTION "create_symlink")
+    # create_symlink does no create directories automatically
+    file(MAKE_DIRECTORY "${IMD_ARTIFACTS_BIN_DIR}/simulator/")
+    file(MAKE_DIRECTORY "${IMD_ARTIFACTS_BIN_DIR}/fpga")
+    file(MAKE_DIRECTORY "${IMD_ARTIFACTS_BIN_DIR}")
+else()
+    set(ACTION "copy")
+endif()
+
 add_custom_target("${TARGET_NAME}_copy_app" ALL
     COMMAND
-        ${CMAKE_COMMAND} -E copy_if_different
-        "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/artifacts/vpuip_2/simulator/InferenceManagerDemo_vpu_2_0.elf"
-        "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/${CMAKE_CFG_INTDIR}/vpux/simulator/InferenceManagerDemo_vpu_2_0.elf"
+        ${CMAKE_COMMAND} -E ${ACTION}
+        "${IMD_ARTIFACTS_SRC_DIR}/simulator/InferenceManagerDemo_vpu_2_0.elf"
+        "${IMD_ARTIFACTS_BIN_DIR}/simulator/InferenceManagerDemo_vpu_2_0.elf"
     COMMAND
-        ${CMAKE_COMMAND} -E copy_if_different
-        "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/artifacts/vpuip_2/fpga/InferenceManagerDemo_vpu_2_0.elf"
-        "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/${CMAKE_CFG_INTDIR}/vpux/fpga/InferenceManagerDemo_vpu_2_0.elf"
+        ${CMAKE_COMMAND} -E ${ACTION}
+        "${IMD_ARTIFACTS_SRC_DIR}/fpga/InferenceManagerDemo_vpu_2_0.elf"
+        "${IMD_ARTIFACTS_BIN_DIR}/fpga/InferenceManagerDemo_vpu_2_0.elf"
     COMMAND
-        ${CMAKE_COMMAND} -E copy_if_different
-        "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/artifacts/vpuip_2/silicon/InferenceManagerDemo_vpu_2_0.elf"
-        "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/${CMAKE_CFG_INTDIR}/vpux/silicon/InferenceManagerDemo_vpu_2_0.elf"
+        ${CMAKE_COMMAND} -E ${ACTION}
+        "${IMD_ARTIFACTS_SRC_DIR}/InferenceManagerDemo_vpu_2_0.elf"
+        "${IMD_ARTIFACTS_BIN_DIR}/InferenceManagerDemo_vpu_2_0.elf"
     COMMAND
-        ${CMAKE_COMMAND} -E copy_if_different
-        "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/artifacts/vpuip_2/simulator/InferenceManagerDemo_vpu_2_7.elf"
-        "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/${CMAKE_CFG_INTDIR}/vpux/simulator/InferenceManagerDemo_vpu_2_7.elf"
+        ${CMAKE_COMMAND} -E ${ACTION}
+        "${IMD_ARTIFACTS_SRC_DIR}/InferenceManagerDemo_vpu_2_7.elf"
+        "${IMD_ARTIFACTS_BIN_DIR}/InferenceManagerDemo_vpu_2_7.elf"
     COMMAND
-        ${CMAKE_COMMAND} -E copy_if_different
-        "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/artifacts/vpuip_2/fpga/InferenceManagerDemo_vpu_2_7.elf"
-        "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/${CMAKE_CFG_INTDIR}/vpux/fpga/InferenceManagerDemo_vpu_2_7.elf"
-    COMMAND
-        ${CMAKE_COMMAND} -E copy_if_different
-        "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/artifacts/vpuip_2/silicon/InferenceManagerDemo_vpu_2_7.elf"
-        "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/${CMAKE_CFG_INTDIR}/vpux/silicon/InferenceManagerDemo_vpu_2_7.elf"
-    COMMAND
-        ${CMAKE_COMMAND} -E copy_if_different
-        "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/artifacts/vpuip_2/simics/InferenceManagerDemo_vpu_4.elf"
-        "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/${CMAKE_CFG_INTDIR}/vpux/simics/InferenceManagerDemo_vpu_4.elf"
-    COMMAND
-        ${CMAKE_COMMAND} -E copy_if_different
-        "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/artifacts/vpuip_2/simics/InferenceManagerDemo_vpu_5.elf"
-        "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/${CMAKE_CFG_INTDIR}/vpux/simics/InferenceManagerDemo_vpu_5.elf"
-    COMMAND
-        ${CMAKE_COMMAND} -E copy_if_different
-        "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/artifacts/vpuip_2/fpga/InferenceManagerDemo_vpu_4.elf"
-        "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/${CMAKE_CFG_INTDIR}/vpux/fpga/InferenceManagerDemo_vpu_4.elf"
+        ${CMAKE_COMMAND} -E ${ACTION}
+        "${IMD_ARTIFACTS_SRC_DIR}/InferenceManagerDemo_vpu_4.elf"
+        "${IMD_ARTIFACTS_BIN_DIR}/InferenceManagerDemo_vpu_4.elf"
     COMMENT "[IMD] Copy InferenceManagerDemo application"
     VERBATIM
 )
 install(
     FILES
-        "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/artifacts/vpuip_2/simulator/InferenceManagerDemo_vpu_2_0.elf"
-        "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/artifacts/vpuip_2/fpga/InferenceManagerDemo_vpu_2_0.elf"
-        "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/artifacts/vpuip_2/silicon/InferenceManagerDemo_vpu_2_0.elf"
-        "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/artifacts/vpuip_2/simulator/InferenceManagerDemo_vpu_2_7.elf"
-        "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/artifacts/vpuip_2/fpga/InferenceManagerDemo_vpu_2_7.elf"
-        "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/artifacts/vpuip_2/silicon/InferenceManagerDemo_vpu_2_7.elf"
-        "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/artifacts/vpuip_2/simics/InferenceManagerDemo_vpu_4.elf"
-        "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/artifacts/vpuip_2/fpga/InferenceManagerDemo_vpu_4.elf"
+        "${IMD_ARTIFACTS_SRC_DIR}/simulator/InferenceManagerDemo_vpu_2_0.elf"
+        "${IMD_ARTIFACTS_SRC_DIR}/fpga/InferenceManagerDemo_vpu_2_0.elf"
+        "${IMD_ARTIFACTS_SRC_DIR}/InferenceManagerDemo_vpu_2_0.elf"
+        "${IMD_ARTIFACTS_SRC_DIR}/InferenceManagerDemo_vpu_2_7.elf"
+        "${IMD_ARTIFACTS_SRC_DIR}/InferenceManagerDemo_vpu_4.elf"
     DESTINATION "${OV_CPACK_RUNTIMEDIR}/vpux"
     COMPONENT    ${VPUX_PLUGIN_COMPONENT}
 )
 
-
 if(ENABLE_LTO)
-    ie_enable_lto()
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
 endif()
 
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS "*.cpp" "*.hpp")
@@ -76,17 +71,15 @@ add_dependencies(${TARGET_NAME} "${TARGET_NAME}_copy_app")
 enable_warnings_as_errors(${TARGET_NAME} WIN_STRICT)
 replace_noerror(${TARGET_NAME})
 
-vpux_enable_clang_format(${TARGET_NAME})
 
 target_compile_definitions(${TARGET_NAME}
     PRIVATE
-        IMPLEMENT_INFERENCE_ENGINE_PLUGIN
+        IMPLEMENT_OPENVINO_RUNTIME_PLUGIN
 )
 
 target_include_directories(${TARGET_NAME}
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
-        "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/include"
 )
 
 link_system_libraries(${TARGET_NAME}
@@ -98,7 +91,7 @@ link_system_libraries(${TARGET_NAME}
 
 target_link_libraries(${TARGET_NAME}
     PRIVATE
-        npu_al
+        openvino::npu_al
         npu_llvm_utils
         npu_ov_utils
         npu_profiling_utils
@@ -106,5 +99,5 @@ target_link_libraries(${TARGET_NAME}
 
 install(TARGETS ${TARGET_NAME}
     LIBRARY DESTINATION ${OV_CPACK_RUNTIMEDIR}
-    COMPONENT ${VPUX_PLUGIN_COMPONENT}
+    COMPONENT ${VPUX_INTERNAL_COMPONENT}
 )

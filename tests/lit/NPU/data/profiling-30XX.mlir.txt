@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -7,7 +7,7 @@
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 #loc0 = loc(unknown)
 #loc1 = loc("profiling_result")
-module @age_gender attributes {VPU.arch = #VPU.arch_kind<VPUX30XX>, VPU.compilationMode = #VPU.compilation_mode<DefaultHW>} {
+module @age_gender attributes {VPU.arch = #VPU.arch_kind<NPU30XX>, VPU.compilationMode = #VPU.compilation_mode<DefaultHW>} {
   module @UsedMemory {
     IE.MemoryResource 269120 bytes of @DDR loc(#loc0)
   } loc(#loc0)
@@ -27,7 +27,7 @@ module @age_gender attributes {VPU.arch = #VPU.arch_kind<VPUX30XX>, VPU.compilat
   } loc(#loc0)
   IE.ExecutorResource 16 of @SHAVE_UPA  loc(#loc0)
   IE.ExecutorResource 1 of @DMA_NN  loc(#loc0)
-  IE.MemoryResource 2306867200 bytes of @DDR {VPU.bandwidth = 8 : i64, VPU.derateFactor = 6.000000e-01 : f64} loc(#loc0)
+  IE.MemoryResource 4194304000 bytes of @DDR {VPU.bandwidth = 8 : i64, VPU.derateFactor = 6.000000e-01 : f64} loc(#loc0)
   IE.CNNNetwork entryPoint : @main inputsInfo : {
     DataInfo "data" : tensor<1x3x62x62xf32> loc(#loc0)
   } outputsInfo : {

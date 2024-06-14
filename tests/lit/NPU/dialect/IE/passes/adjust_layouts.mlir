@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --adjust-layouts --canonicalize %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 #NHCW = affine_map<(d0, d1, d2, d3) -> (d0, d2, d1, d3)>
 
@@ -331,4 +331,22 @@ func.func @main(%arg0: tensor<1x3x30x30xf16>) -> tensor<1x3x60x60xf16> {
 
     // CHECK        return [[INTERP]]
 }
+}
+
+// -----
+
+#HWC = affine_map<(d0, d1, d2) -> (d1, d2, d0)>
+#NC = affine_map<(d0, d1) -> (d0, d1)>
+
+// CHECK-LABEL: NonZeroMemoryLayout
+func.func  @NonZeroMemoryLayout(%arg0: tensor<1x3x3xsi32, {order = #HWC}>) -> tensor<3x?xsi32, {bounds = [3, 9], order = #NC}> {
+    // CHECK:       [[INPUT:%arg.*]]: tensor<1x3x3xsi32, {order = #HWC}>
+
+    %0 = IE.NonZero(%arg0) {dstElemType = si32} : tensor<1x3x3xsi32, {order = #HWC}> -> tensor<3x?xsi32, {bounds = [3, 9], order = #NC}>
+    return %0 : tensor<3x?xsi32, {bounds = [3, 9], order = #NC}>
+
+    // CHECK:       [[CHW_INPUT:%.*]] = IE.Reorder([[INPUT]])
+    // CHECK-SAME:     dstOrder = #CHW
+    // CHECK:       [[NON_ZERO:%.*]] = IE.NonZero([[CHW_INPUT]])
+    // CHECK:       return [[NON_ZERO]]
 }

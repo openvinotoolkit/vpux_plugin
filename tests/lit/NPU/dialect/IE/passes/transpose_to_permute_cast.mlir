@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --transpose-to-permute-cast %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 #map = affine_map<(d0, d1, d2, d3) -> (d0, d3, d1, d2)>
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
@@ -173,22 +173,23 @@ func.func @Transpose_d0_d1_d3_d2(%arg0: tensor<1x16x32x64xf16>) -> tensor<1x16x6
 // CHECK-LABEL-DAG: @TransposeWithPerAxisQuant
 // CHECK-DAG:   [[QUANT_IN:!.*]] = !quant.uniform<u8<0:254>:f16:1
 // CHECK-DAG:   [[QUANT_OUT:!.*]] = !quant.uniform<u8<0:254>:f16:3
+// CHECK-DAG: ([[DATA:%arg[0-9]]]: tensor<2x4x8x16x[[QUANT_IN]]>)
 func.func @TransposeWithPerAxisQuant(%arg0: tensor<2x4x8x16x!QUANT_IN>) -> tensor<2x8x16x4x!QUANT_OUT> {
     %TRANSPOSE = IE.Transpose(%arg0) {
         order_value = #NHWC
     } : tensor<2x4x8x16x!QUANT_IN> -> tensor<2x8x16x4x!QUANT_OUT>
 
-    // CHECK:   %0 = IE.PermuteCast(%arg0) {
+    // CHECK:   [[PERMUTE_CAST:%.*]] = IE.PermuteCast([[DATA]]) {
     // CHECK-SAME:      dst_order = #NWCH,
     // CHECK-SAME:      mem_perm = #NCHW
     // CHECK-SAME:  } : tensor<2x4x8x16x[[QUANT_IN]]>
     // CHECK-SAME:      -> tensor<2x8x16x4x[[QUANT_OUT]], {order = #NWCH}>
 
-    // CHECK:   %1 = IE.Reorder(%0) {
+    // CHECK:   [[REORDER:%.*]] = IE.Reorder([[PERMUTE_CAST]]) {
     // CHECK-SAME:      dstOrder = #NCHW
     // CHECK-SAME:  } : tensor<2x8x16x4x[[QUANT_OUT]], {order = #NWCH}>
     // CHECK-SAME:      -> tensor<2x8x16x4x[[QUANT_OUT]]>
 
     return %TRANSPOSE : tensor<2x8x16x4x!QUANT_OUT>
-    // CHECK:   return %1 : tensor<2x8x16x4x[[QUANT_OUT]]>
+    // CHECK:   return [[REORDER]] : tensor<2x8x16x4x[[QUANT_OUT]]>
 }

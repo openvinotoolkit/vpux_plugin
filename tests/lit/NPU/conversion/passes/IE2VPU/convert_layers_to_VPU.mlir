@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
-// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW" --convert-layers-to-VPU %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// RUN: vpux-opt --split-input-file --verify-diagnostics --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW" --convert-layers-to-VPU %s | FileCheck %s
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 // CHECK-LABEL: @SingleLayer
 func.func @SingleLayer(%arg0: tensor<1x1000xf16>) -> tensor<1x1000xf16> {
@@ -55,9 +55,9 @@ func.func @If(%cond: tensor<1xsi8>, %input1: tensor<1x1x4x4xf32>, %input2: tenso
       %mul2 = IE.Multiply(%mul1, %then_input_2) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x1x4x4xf16>, tensor<1x1x4x4xf16> -> tensor<1x1x4x4xf16>
       "IE.Yield"(%mul1, %mul2) : (tensor<1x1x4x4xf16>, tensor<1x1x4x4xf16>) -> ()
     } else_branch : {
-    ^bb0(%else_input_1: tensor<1x1x4x4xf16>, %else_input_2: tensor<1x1x4x4xf16>):
-      %add = IE.Add(%else_input_1, %else_input_2) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x1x4x4xf16>, tensor<1x1x4x4xf16> -> tensor<1x1x4x4xf16>
-      %pow = IE.Power(%add, %else_input_2) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x1x4x4xf16>, tensor<1x1x4x4xf16> -> tensor<1x1x4x4xf16>
+    ^bb0(%else_input_1: tensor<1x1x4x4xf16>):
+      %add = IE.Add(%else_input_1, %else_input_1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x1x4x4xf16>, tensor<1x1x4x4xf16> -> tensor<1x1x4x4xf16>
+      %pow = IE.Power(%add, %else_input_1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x1x4x4xf16>, tensor<1x1x4x4xf16> -> tensor<1x1x4x4xf16>
       "IE.Yield"(%add, %pow) : (tensor<1x1x4x4xf16>, tensor<1x1x4x4xf16>) -> ()
     }(%cond, %conv1, %conv2) : tensor<1xsi8>, tensor<1x1x4x4xf16>, tensor<1x1x4x4xf16> -> tensor<1x1x4x4xf16>, tensor<1x1x4x4xf16>
     %conv3 = IE.Convert(%ifOp#0) {dstElemType = f32} : tensor<1x1x4x4xf16> -> tensor<1x1x4x4xf32>
@@ -69,8 +69,8 @@ func.func @If(%cond: tensor<1xsi8>, %input1: tensor<1x1x4x4xf32>, %input2: tenso
     //  CHECK: [[POW1:%.+]]  = VPU.Power([[CONV1]], [[CONV2]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x1x4x4xf16>, tensor<1x1x4x4xf16> -> tensor<1x1x4x4xf16>
     //  CHECK: [[MUL1:%.+]]  = VPU.Multiply([[POW1]], [[CONV2]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x1x4x4xf16>, tensor<1x1x4x4xf16> -> tensor<1x1x4x4xf16>
     //  CHECK: [[MUL2:%.+]]  = VPU.Multiply([[MUL1]], [[CONV2]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x1x4x4xf16>, tensor<1x1x4x4xf16> -> tensor<1x1x4x4xf16>
-    //  CHECK: [[ADD:%.+]]   = VPU.Add([[CONV1]], [[CONV2]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x1x4x4xf16>, tensor<1x1x4x4xf16> -> tensor<1x1x4x4xf16>
-    //  CHECK: [[POW2:%.+]]  = VPU.Power([[ADD]], [[CONV2]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x1x4x4xf16>, tensor<1x1x4x4xf16> -> tensor<1x1x4x4xf16>
+    //  CHECK: [[ADD:%.+]]   = VPU.Add([[CONV1]], [[CONV1]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x1x4x4xf16>, tensor<1x1x4x4xf16> -> tensor<1x1x4x4xf16>
+    //  CHECK: [[POW2:%.+]]  = VPU.Power([[ADD]], [[CONV1]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x1x4x4xf16>, tensor<1x1x4x4xf16> -> tensor<1x1x4x4xf16>
     //  CHECK: [[CCOP1:%.+]] = VPU.ConditionalCopyOp([[COND]], [[MUL1]], [[ADD]]) : tensor<1xsi8>, tensor<1x1x4x4xf16>, tensor<1x1x4x4xf16> -> tensor<1x1x4x4xf16>
     //  CHECK: [[CCOP2:%.+]] = VPU.ConditionalCopyOp([[COND]], [[MUL2]], [[POW2]]) : tensor<1xsi8>, tensor<1x1x4x4xf16>, tensor<1x1x4x4xf16> -> tensor<1x1x4x4xf16>
     //  CHECK: [[CONV3:%.+]] = VPU.Convert([[CCOP1]]) {dstElemType = f32} : tensor<1x1x4x4xf16> -> tensor<1x1x4x4xf32>
@@ -690,4 +690,76 @@ func.func @TransposedConvWithBiasInput(%arg0: tensor<1x16x64x64xf16, {order = #N
     // CHECK-SAME:          strides = [2, 2]}
     // CHECK-SAME:      : tensor<1x16x64x64xf16, {order = #NHWC}>, tensor<16x16x2x2xf16, {order = #NHWC}>, tensor<1x16x1x1xf16> -> tensor<1x16x129x129xf16, {order = #NHWC}>
     // CHECK:       return [[TRANSPOSED_CONV]] : tensor<1x16x129x129xf16, {order = #NHWC}>
+}
+
+// -----
+
+// CHECK-LABEL: @Accumulate
+func.func @Accumulate(%LHS: tensor<1x16x32x64xf16>, %RHS: tensor<1x16x32x64xf16>) -> tensor<1x16x32x64xf16> {
+    // CHECK:   ([[LHS:%.*]]: tensor<1x16x32x64xf16>, [[RHS:%.*]]: tensor<1x16x32x64xf16>)
+
+    %ADD = IE.Accumulate(%LHS, %RHS) {
+        operandSegmentSizes = array<i32: 1, 1, 0, 0>
+    } : tensor<1x16x32x64xf16>, tensor<1x16x32x64xf16> -> tensor<1x16x32x64xf16>
+    // CHECK:   [[VPU_ADD:%.*]] = VPU.Add([[LHS]], [[RHS]]) {
+    // CHECK-SAME:      auto_broadcast = #IE.auto_broadcast_type<NONE_OR_EXPLICIT>
+    // CHECK-SAME:  } : tensor<1x16x32x64xf16>, tensor<1x16x32x64xf16> -> tensor<1x16x32x64xf16>
+
+    return %ADD : tensor<1x16x32x64xf16>
+    // CHECK:   return [[VPU_ADD]] : tensor<1x16x32x64xf16>
+}
+
+// -----
+
+// CHECK-LABEL: @AvgPoolInt32InputOutput
+func.func @AvgPoolInt32InputOutput(%arg0: tensor<1x1x16x8xsi32>) -> tensor<1x1x2x1xsi32> {
+    %1 = IE.AvgPool(%arg0) {exclude_pads, kernel_size = [8, 8], pads_begin = [0, 0], pads_end = [0, 0], rounding_type = #IE.rounding_type<FLOOR>, strides = [8, 1]} : tensor<1x1x16x8xsi32> -> tensor<1x1x2x1xsi32>
+    return %1 : tensor<1x1x2x1xsi32>
+
+    // CHECK: [[VAR0:%.+]] = VPU.AvgPool(%arg0) {exclude_pads, kernel_size = [8, 8], pads_begin = [0, 0], pads_end = [0, 0], rounding_type = #IE.rounding_type<FLOOR>, strides = [8, 1]} : tensor<1x1x16x8xsi32> -> tensor<1x1x2x1xsi32>
+    // CHECK: return [[VAR0]] : tensor<1x1x2x1xsi32>
+}
+
+// -----
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+
+// CHECK-LABEL: @ShapeOf
+func.func @ShapeOf(%arg0: tensor<1x8x?x?xf16, {bounds = [1, 8, 384, 384], order = #NCHW}>)
+    -> tensor<4xsi32> {
+    %SHAPE_OF = IE.ShapeOf(%arg0) {
+        dstElemType = si32
+    } : tensor<1x8x?x?xf16, {bounds = [1, 8, 384, 384], order = #NCHW}>
+        -> tensor<4xsi32>
+    // CHECK:   [[SHAPE_OF:%.*]] = VPU.ShapeOf(%arg0) :
+    // CHECK-SAME:  tensor<1x8x?x?xf16, {bounds = [1, 8, 384, 384], order = #NCHW}> -> tensor<4xsi32>
+
+    return %SHAPE_OF : tensor<4xsi32>
+    // CHECK:   return [[SHAPE_OF]] : tensor<4xsi32>
+}
+
+// -----
+
+// CHECK-LABEL: @MaxPoolInt32InputOutput
+func.func @MaxPoolInt32InputOutput(%arg0: tensor<1x1x16x8xsi32>) -> tensor<1x1x2x1xsi32> {
+    %1 = IE.MaxPool(%arg0) {exclude_pads, kernel_size = [8, 8], pads_begin = [0, 0], pads_end = [0, 0], rounding_type = #IE.rounding_type<FLOOR>, strides = [8, 1]} : tensor<1x1x16x8xsi32> -> tensor<1x1x2x1xsi32>
+    return %1 : tensor<1x1x2x1xsi32>
+
+    // CHECK: [[VAR0:%.+]] = VPU.MaxPool(%arg0) {kernel_size = [8, 8], pads_begin = [0, 0], pads_end = [0, 0], rounding_type = #IE.rounding_type<FLOOR>, strides = [8, 1]} : tensor<1x1x16x8xsi32> -> tensor<1x1x2x1xsi32>
+    // CHECK: return [[VAR0]] : tensor<1x1x2x1xsi32>
+}
+
+// -----
+
+func.func @DoNotConvertConvWithStaticScale(%arg: tensor<1x3x62x62xf32>) -> tensor<1x48x60x60xf32> {
+    %cst = const.Declare tensor<48x3x3x3xf32> = dense<1.0> : tensor<48x3x3x3xf32>
+    // expected-error@+1 {{failed to legalize operation 'IE.Convolution'}}
+    %0 = IE.Convolution(%arg, %cst) {
+        dilations = [1, 1],
+        pads_begin = [0, 0],
+        pads_end = [0, 0],
+        strides = [1, 1],
+        static_scale = 1.0 : f32
+    } : tensor<1x3x62x62xf32>, tensor<48x3x3x3xf32> -> tensor<1x48x60x60xf32>
+    return %0 : tensor<1x48x60x60xf32>
 }

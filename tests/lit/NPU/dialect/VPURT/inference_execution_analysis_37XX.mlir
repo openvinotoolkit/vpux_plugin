@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -16,7 +16,7 @@
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 #NWCH = affine_map<(d0, d1, d2, d3) -> (d0, d3, d1, d2)>
-module @dumpsubgraph attributes {VPU.arch = #VPU.arch_kind<VPUX37XX>, VPU.compilationMode = #VPU.compilation_mode<DefaultHW>} {
+module @dumpsubgraph attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilationMode = #VPU.compilation_mode<DefaultHW>} {
   module @UsedMemory {
     IE.MemoryResource 0 bytes of @DDR
   }
@@ -32,7 +32,7 @@ module @dumpsubgraph attributes {VPU.arch = #VPU.arch_kind<VPUX37XX>, VPU.compil
     IE.ExecutorResource 1 of @DPU
   }
   IE.ExecutorResource 2 of @DMA_NN
-  IE.MemoryResource 2306867200 bytes of @DDR {VPU.bandwidth = 8 : i64, VPU.derateFactor = 6.000000e-01 : f64}
+  IE.MemoryResource 4194304000 bytes of @DDR {VPU.bandwidth = 8 : i64, VPU.derateFactor = 6.000000e-01 : f64}
   IE.CNNNetwork entryPoint : @main inputsInfo : {
     //CHECK:       IE.CNNNetwork {inferenceTiming = {{[0-9]+}} : i64} entryPoint : @main inputsInfo : {
     DataInfo "result.1" : tensor<1x3x224x224xf16>

@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -12,6 +12,7 @@
 #include <openvino/pass/pattern/op/wrap_type.hpp>
 #include "openvino/core/node.hpp"
 #include "openvino/util/log.hpp"
+#include "vpux/utils/core/checked_cast.hpp"
 #include "vpux/utils/core/error.hpp"
 
 namespace vpux {
@@ -50,22 +51,22 @@ ConvertMVN6toMVN1::ConvertMVN6toMVN1() {
         OPENVINO_ASSERT(nullptr != const_axes);
         auto axes = const_axes->cast_vector<int32_t>();
 
-        const auto dims_count = input.get_partial_shape().get_shape().size();
+        const auto dims_count = input.get_partial_shape().get_max_shape().size();
         if (!(static_cast<int32_t>(dims_count) >= 2 && static_cast<int32_t>(dims_count) <= 4)) {
             OPENVINO_WARN << "MVN6->MVN1 conversion supports only 2D, 3D or 4D cases";
             return false;
         }
 
-        std::ostringstream ostr;
         for (auto& it : axes) {
-            ostr << it << ", ";
-            it = it < 0 ? it + dims_count : it;
+            it = it < 0 ? it + checked_cast<int32_t>(dims_count) : it;
         }
 
         std::sort(axes.begin(), axes.end());
 
         bool across_channels = false;
-        if ((dims_count == 2 || dims_count == 3) && axes.size() == 1 &&
+        auto inputShape = input.get_partial_shape().get_shape();
+        std::vector<size_t> newInShape;
+        if ((dims_count == 2 || dims_count == 3 || dims_count == 4) && axes.size() == 1 &&
             static_cast<uint32_t>(axes[0]) == (dims_count - 1)) {
             // clang-format off
             // For this case(calculate mean value on width), convert the 2D/3D MVN6 to MVN1 by the steps in below.
@@ -74,9 +75,15 @@ ConvertMVN6toMVN1::ConvertMVN6toMVN1() {
             // 3.Reshape 4D result to original 2D/3D shape.
             // clang-format on
             across_channels = false;
-            auto inputShape = input.get_partial_shape().get_shape();
-            std::vector<size_t> newInShape;
-            if (inputShape.size() == 3) {
+            if (inputShape.size() == 4) {
+                // Conversion from MVN6 -> MVN1 for 4D shape and axes.size() == 1, implicitly assumes H*W on the second
+                // position, due to the fact that MVN1 definition is more restrictive
+                newInShape.push_back(inputShape[0]);
+                newInShape.push_back(inputShape[1] * inputShape[2]);
+                newInShape.push_back(1);
+                newInShape.push_back(inputShape[3]);
+
+            } else if (inputShape.size() == 3) {
                 // CxHxW -> CxHxWx1
                 newInShape.push_back(inputShape[0]);
                 newInShape.push_back(inputShape[1]);

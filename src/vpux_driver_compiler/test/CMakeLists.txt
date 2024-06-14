@@ -8,17 +8,17 @@ add_subdirectory(functional)
 # compilerTest as somke test
 add_executable(compilerTest compilerTest.c)
 target_link_libraries(compilerTest PUBLIC vpux_driver_compiler)
-ie_add_api_validator_post_build_step(TARGET compilerTest)
+ov_add_api_validator_post_build_step(TARGET compilerTest)
 
 # profilingTest to check profiling API
 add_executable(profilingTest profilingTest.c)
 target_link_libraries(profilingTest PUBLIC vpux_driver_compiler)
-ie_add_api_validator_post_build_step(TARGET profilingTest)
+ov_add_api_validator_post_build_step(TARGET profilingTest)
 
 # loaderTest to check npu_elf
 add_executable(loaderTest loaderTest.cpp)
 target_link_libraries(loaderTest PUBLIC npu_elf npu_llvm_utils npu_ov_utils)
-ie_add_api_validator_post_build_step(TARGET loaderTest)
+ov_add_api_validator_post_build_step(TARGET loaderTest)
 
 # install tests to CiD component
 install(TARGETS compilerTest

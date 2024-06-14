@@ -3,8 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-#include "vpux/al/config/common.hpp"
-#include "vpux/al/config/compiler.hpp"
+#include "intel_npu/al/config/common.hpp"
+#include "intel_npu/al/config/compiler.hpp"
 
 #include "vpux/compiler/VPU30XX/pipeline_strategy.hpp"
 #include "vpux/compiler/VPU30XX/pipelines.hpp"
@@ -25,26 +25,23 @@ void PipelineStrategy30XX::buildPipeline(mlir::PassManager& pm, const Config& co
                                          Logger log) {
     auto buildTiming = rootTiming.nest("Build compilation pipeline");
 
-    const auto archKind = getArchKind(config);
+    const auto initCompilerOptions = getInitCompilerOptions(config);
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log.nest());
+
+    const auto enableProfiling = config.get<intel_npu::PERF_COUNT>();
     const auto compilationMode = getCompilationMode(config);
-    const auto enableProfiling = config.get<PERF_COUNT>();
-    const auto numOfDPUGroups = getNumberOfDPUGroups(config);
-    const auto numOfDMAPorts = getNumberOfDMAEngines(config);
-
-    pm.addPass(VPU::createInitCompilerPass(archKind, compilationMode, numOfDPUGroups, numOfDMAPorts, log.nest()));
-
     if (compilationMode == VPU::CompilationMode::ReferenceSW) {
-        const auto options = ReferenceSWOptions30XX::createFromString(config.get<COMPILATION_MODE_PARAMS>());
+        const auto options = ReferenceSWOptions30XX::createFromString(config.get<intel_npu::COMPILATION_MODE_PARAMS>());
         VPUX_THROW_UNLESS(options != nullptr, "buildPipeline failed to parse COMPILATION_MODE_PARAMS");
         options->enableProfiling = enableProfiling;
         buildReferenceSWModePipeline(pm, *options, log.nest());
     } else if (compilationMode == VPU::CompilationMode::ReferenceHW) {
-        const auto options = ReferenceHWOptions30XX::createFromString(config.get<COMPILATION_MODE_PARAMS>());
+        const auto options = ReferenceHWOptions30XX::createFromString(config.get<intel_npu::COMPILATION_MODE_PARAMS>());
         VPUX_THROW_UNLESS(options != nullptr, "buildPipeline failed to parse COMPILATION_MODE_PARAMS");
         options->enableProfiling = enableProfiling;
         buildReferenceHWModePipeline(pm, *options, log.nest());
     } else if (compilationMode == VPU::CompilationMode::DefaultHW) {
-        const auto options = DefaultHWOptions30XX::createFromString(config.get<COMPILATION_MODE_PARAMS>());
+        const auto options = DefaultHWOptions30XX::createFromString(config.get<intel_npu::COMPILATION_MODE_PARAMS>());
         VPUX_THROW_UNLESS(options != nullptr, "buildPipeline failed to parse COMPILATION_MODE_PARAMS");
         options->enableProfiling = enableProfiling;
 
@@ -54,4 +51,7 @@ void PipelineStrategy30XX::buildPipeline(mlir::PassManager& pm, const Config& co
     } else {
         VPUX_THROW("Unsupported compilation mode '{0}'", compilationMode);
     }
+}
+
+void PipelineStrategy30XX::buildELFPipeline(mlir::PassManager&, const Config&, mlir::TimingScope&, Logger) {
 }

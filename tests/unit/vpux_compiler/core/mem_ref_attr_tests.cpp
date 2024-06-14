@@ -3,8 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-#include "vpux/compiler/dialect/VPUIP/attributes.hpp"
-#include "vpux/compiler/dialect/VPUIP/dialect.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/attributes.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/dialect.hpp"
 #include "vpux/compiler/init.hpp"
 
 #include "common/utils.hpp"
@@ -44,7 +44,7 @@ TEST_F(MLIR_MemRefAttr, ImplicitConversionWorksOnNullptrHwSpecificFields) {
 
     // implicit conversion must not fail, even though the fields are not set
     auto implicitlyConvertedSwizzling = memRef.hwSpecificField<VPUIP::SwizzlingSchemeAttr>();
-    auto implicitlyConvertedCompression = memRef.hwSpecificField<VPUIP::CompressionSchemeAttr>();
+    auto implicitlyConvertedCompression = memRef.hwSpecificField<VPUIP::SparsityCompressionAttr>();
     ASSERT_EQ(implicitlyConvertedSwizzling, nullptr);
     ASSERT_EQ(implicitlyConvertedCompression, nullptr);
 }

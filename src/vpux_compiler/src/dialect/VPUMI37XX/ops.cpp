@@ -4,7 +4,7 @@
 //
 
 #include "vpux/compiler/dialect/VPUMI37XX/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/types.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/types.hpp"
 
 using namespace vpux;
 

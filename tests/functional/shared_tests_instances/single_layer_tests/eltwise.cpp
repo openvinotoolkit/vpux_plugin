@@ -1,22 +1,30 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022-2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
-#include "single_layer_tests/eltwise.hpp"
+#include "single_op_tests/eltwise.hpp"
+#include <common_test_utils/ov_tensor_utils.hpp>
 #include <vector>
-#include "ov_models/utils/ov_helpers.hpp"
 #include "vpu_ov2_layer_test.hpp"
 
-namespace ov::test::subgraph {
+using ov::test::utils::EltwiseTypes;
+using ov::test::utils::InputLayerType;
+using ov::test::utils::OpType;
+
+namespace ov {
+namespace test {
 
 class EltwiseLayerTestCommon : public EltwiseLayerTest, virtual public VpuOv2LayerTest {};
 
-class EltwiseLayerF32TestCommon : public EltwiseLayerTest, virtual public VpuOv2LayerTest {};
+class EltwiseLayerTestF32Common : public EltwiseLayerTestCommon {
+    void configure_model() override {
+        configuration[ov::intel_npu::compilation_mode_params.name()] = "convert-precision-to-fp16=false";
+    }
+};
 
-class EltwiseEmptyShapeInputTest : public EltwiseLayerTest, virtual public VpuOv2LayerTest {};
-
-using namespace ngraph::helpers;
+class EltwiseEmptyShapeInputLayerTest : public EltwiseLayerTest, virtual public VpuOv2LayerTest {};
+class EltwiseIntegerLayerTest : public EltwiseLayerTest, virtual public VpuOv2LayerTest {};
 
 TEST_P(EltwiseLayerTestCommon, NPU3700_SW) {
     setSkipCompilationCallback([](std::stringstream& skip) {
@@ -30,7 +38,7 @@ TEST_P(EltwiseLayerTestCommon, NPU3700_SW) {
     });
 
     setReferenceSoftwareMode();
-    run(VPUXPlatform::VPU3700);
+    run(Platform::NPU3700);
 }
 
 TEST_P(EltwiseLayerTestCommon, NPU3700_HW) {
@@ -45,12 +53,13 @@ TEST_P(EltwiseLayerTestCommon, NPU3700_HW) {
     });
 
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3700);
+    run(Platform::NPU3700);
 }
 
 TEST_P(EltwiseLayerTestCommon, NPU3720_SW) {
+    rel_threshold = 0.01;
     setReferenceSoftwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
 }
 
 TEST_P(EltwiseLayerTestCommon, NPU3720_HW) {
@@ -63,16 +72,28 @@ TEST_P(EltwiseLayerTestCommon, NPU3720_HW) {
         }
     });
 
+    rel_threshold = 0.01;
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
 }
 
-TEST_P(EltwiseLayerF32TestCommon, NPU3720_SW) {
+TEST_P(EltwiseLayerTestCommon, NPU4000_SW) {
+    rel_threshold = 0.01;
     setReferenceSoftwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU4000);
 }
 
-TEST_P(EltwiseLayerF32TestCommon, NPU3720_HW) {
+TEST_P(EltwiseLayerTestF32Common, NPU4000_SW) {
+    setReferenceSoftwareMode();
+    run(Platform::NPU4000);
+}
+
+TEST_P(EltwiseLayerTestF32Common, NPU3720_SW) {
+    setReferenceSoftwareMode();
+    run(Platform::NPU3720);
+}
+
+TEST_P(EltwiseLayerTestF32Common, NPU3720_HW) {
     setSkipCompilationCallback([](std::stringstream& skip) {
         const auto eltwiseType = std::get<1>(GetParam());
         const auto netPrecisions = std::get<4>(GetParam());
@@ -83,23 +104,71 @@ TEST_P(EltwiseLayerF32TestCommon, NPU3720_HW) {
     });
 
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
 }
 
-TEST_P(EltwiseEmptyShapeInputTest, NPU3720_HW) {
+TEST_P(EltwiseEmptyShapeInputLayerTest, NPU3720_HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
 }
 
-}  // namespace ov::test::subgraph
+TEST_P(EltwiseEmptyShapeInputLayerTest, NPU4000_HW) {
+    setDefaultHardwareMode();
+    run(Platform::NPU4000);
+}
+
+void setCommonSkipCompilationCallback(EltwiseIntegerLayerTest* test) {
+    test->setSkipCompilationCallback([test](std::stringstream& skip) {
+        const auto eltwiseType = std::get<1>(test->GetParam());
+        const auto netPrecisions = std::get<4>(test->GetParam());
+
+        // Define sets of unsupported types for specific precisions
+        static const std::unordered_set<EltwiseTypes> unsupportedTypesForU16 = {
+                EltwiseTypes::SUBTRACT, EltwiseTypes::FLOOR_MOD, EltwiseTypes::MULTIPLY, EltwiseTypes::DIVIDE,
+                EltwiseTypes::POWER};
+        static const std::unordered_set<EltwiseTypes> unsupportedTypesForU8 = {
+                EltwiseTypes::MULTIPLY, EltwiseTypes::DIVIDE, EltwiseTypes::POWER};
+        static const std::unordered_set<EltwiseTypes> unsupportedTypesForI16 = {EltwiseTypes::FLOOR_MOD};
+
+        // Check if the current combination of precision and eltwiseType is unsupported
+        bool isUnsupported = (netPrecisions == ov::element::u16 && unsupportedTypesForU16.count(eltwiseType)) ||
+                             (netPrecisions == ov::element::u8 && unsupportedTypesForU8.count(eltwiseType)) ||
+                             (netPrecisions == ov::element::i16 && unsupportedTypesForI16.count(eltwiseType));
+
+        if (isUnsupported) {
+            skip << eltwiseType << " SingleLayerTest is not enabled with precision: " << netPrecisions;
+        }
+    });
+}
+
+TEST_P(EltwiseIntegerLayerTest, NPU3720_SW) {
+    rel_threshold = 0.01;
+    setCommonSkipCompilationCallback(this);
+    setReferenceSoftwareMode();
+    run(Platform::NPU3720);
+}
+
+TEST_P(EltwiseIntegerLayerTest, NPU4000_SW) {
+    rel_threshold = 0.01;
+    setCommonSkipCompilationCallback(this);
+    setReferenceSoftwareMode();
+    run(Platform::NPU4000);
+}
+
+}  // namespace test
+}  // namespace ov
 
 namespace {
 
-using namespace ov::test::subgraph;
+using namespace ov::test;
 
 std::vector<ov::test::ElementType> netPrecisions = {
         ov::element::f16,
         ov::element::i32,
+};
+
+std::vector<ov::test::ElementType> netPrecisionsF16 = {
+        ov::element::f16,
 };
 
 std::vector<ov::test::ElementType> netPrecisionsF32 = {
@@ -125,7 +194,7 @@ std::set<EltwiseTypes> eltwiseTypes = {EltwiseTypes::ADD,       EltwiseTypes::MU
                                        EltwiseTypes::FLOOR_MOD, EltwiseTypes::MOD};
 
 std::set<EltwiseTypes> eltwiseTypesF32 = {EltwiseTypes::ADD, EltwiseTypes::MULTIPLY, EltwiseTypes::POWER,
-                                          EltwiseTypes::DIVIDE};
+                                          EltwiseTypes::DIVIDE, EltwiseTypes::SUBTRACT};
 
 std::vector<std::vector<ov::Shape>> bigShape = {{{1, 10, 256, 256}, {1, 10, 256, 256}}};
 
@@ -145,8 +214,26 @@ const auto typesParamsF32 = ::testing::Combine(
         ::testing::ValuesIn(netPrecisionsF32), ::testing::Values(ov::element::f32), ::testing::Values(ov::element::f32),
         ::testing::Values(ov::test::utils::DEVICE_NPU), ::testing::Values(ov::test::Config{}));
 
-INSTANTIATE_TEST_SUITE_P(precommit_EltwiseTypesF32, EltwiseLayerF32TestCommon, typesParamsF32,
-                         EltwiseLayerF32TestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(precommit_EltwiseTypesF32, EltwiseLayerTestF32Common, typesParamsF32,
+                         EltwiseLayerTestF32Common::getTestCaseName);
+
+//
+// Test Eltwise input broadcast
+//
+
+std::set<EltwiseTypes> broadcastTestEltwiseTypes = {EltwiseTypes::ADD};
+
+std::vector<std::vector<ov::Shape>> broadcastTestInputShape = {{{1, 320, 128, 128}, {1, 320, 1, 1}}};
+
+const auto broadcastTestParams =
+        ::testing::Combine(::testing::ValuesIn(ov::test::static_shapes_to_test_representation(broadcastTestInputShape)),
+                           ::testing::ValuesIn(broadcastTestEltwiseTypes), ::testing::ValuesIn(secondaryInputTypes),
+                           ::testing::ValuesIn(opTypes), ::testing::ValuesIn(netPrecisionsF16),
+                           ::testing::Values(ov::element::undefined), ::testing::Values(ov::element::undefined),
+                           ::testing::Values(ov::test::utils::DEVICE_NPU), ::testing::Values(ov::test::Config{}));
+
+INSTANTIATE_TEST_SUITE_P(precommit_InputBroadcastEltwise, EltwiseLayerTestCommon, broadcastTestParams,
+                         EltwiseLayerTestCommon::getTestCaseName);
 
 //
 // Scalar mode
@@ -176,8 +263,8 @@ const auto scalarParamsF32 =
                            ::testing::Values(ov::element::f32), ::testing::Values(ov::element::f32),
                            ::testing::Values(ov::test::utils::DEVICE_NPU), ::testing::Values(ov::test::Config{}));
 
-INSTANTIATE_TEST_SUITE_P(smoke_ScalarShapesNDF32, EltwiseLayerF32TestCommon, scalarParamsF32,
-                         EltwiseLayerF32TestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_ScalarShapesNDF32, EltwiseLayerTestF32Common, scalarParamsF32,
+                         EltwiseLayerTestF32Common::getTestCaseName);
 
 //
 // Vector mode
@@ -213,8 +300,8 @@ const auto vectorParamsF32 =
                            ::testing::Values(ov::element::f32), ::testing::Values(ov::element::f32),
                            ::testing::Values(ov::test::utils::DEVICE_NPU), ::testing::Values(ov::test::Config{}));
 
-INSTANTIATE_TEST_SUITE_P(smoke_VectorShapesNDF32, EltwiseLayerF32TestCommon, vectorParamsF32,
-                         EltwiseLayerF32TestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_VectorShapesNDF32, EltwiseLayerTestF32Common, vectorParamsF32,
+                         EltwiseLayerTestF32Common::getTestCaseName);
 
 //
 //  This case to test the support for empty shape input for Add and Multiply ops
@@ -232,7 +319,81 @@ const auto vectorParamsEmptyShapeInput =
                            ::testing::Values(ov::element::f32), ::testing::Values(ov::element::f32),
                            ::testing::Values(ov::test::utils::DEVICE_NPU), ::testing::Values(ov::test::Config{}));
 
-INSTANTIATE_TEST_SUITE_P(DISABLED_smoke_0DInputTest, EltwiseEmptyShapeInputTest, vectorParamsEmptyShapeInput,
-                         EltwiseEmptyShapeInputTest::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_0DInputTest, EltwiseEmptyShapeInputLayerTest, vectorParamsEmptyShapeInput,
+                         EltwiseEmptyShapeInputLayerTest::getTestCaseName);
+
+//
+// Bitwise
+//
+
+std::vector<std::vector<ov::Shape>> bitwiseInput = {{{1, 1, 256, 56}, {1, 1, 256, 56}},
+                                                    {{1, 1, 256, 56}, {1, 1, 256, 1}}};
+
+std::vector<ov::test::ElementType> bitwiseNetPrecisions = {ov::element::i32};
+
+std::set<EltwiseTypes> bitwiseTypes = {EltwiseTypes::BITWISE_AND, EltwiseTypes::BITWISE_OR, EltwiseTypes::BITWISE_XOR};
+
+const auto bitwiseParams =
+        ::testing::Combine(::testing::ValuesIn(ov::test::static_shapes_to_test_representation(bitwiseInput)),
+                           ::testing::ValuesIn(bitwiseTypes), ::testing::ValuesIn(secondaryInputTypes),
+                           ::testing::ValuesIn(opTypes), ::testing::ValuesIn(bitwiseNetPrecisions),
+                           ::testing::Values(ov::element::undefined), ::testing::Values(ov::element::undefined),
+                           ::testing::Values(ov::test::utils::DEVICE_NPU), ::testing::Values(ov::test::Config{}));
+
+INSTANTIATE_TEST_SUITE_P(precommit_Bitwise, EltwiseLayerTestCommon, bitwiseParams,
+                         EltwiseLayerTestCommon::getTestCaseName);
+
+std::vector<std::vector<ov::Shape>> bitwiseNotInput = {{{1, 1, 256, 56}, {}}};
+
+const auto bitwiseNotParams =
+        ::testing::Combine(::testing::ValuesIn(ov::test::static_shapes_to_test_representation(bitwiseNotInput)),
+                           ::testing::Values(EltwiseTypes::BITWISE_NOT), ::testing::Values(InputLayerType::CONSTANT),
+                           ::testing::ValuesIn(opTypes), ::testing::ValuesIn(bitwiseNetPrecisions),
+                           ::testing::Values(ov::element::undefined), ::testing::Values(ov::element::undefined),
+                           ::testing::Values(ov::test::utils::DEVICE_NPU), ::testing::Values(ov::test::Config{}));
+
+INSTANTIATE_TEST_SUITE_P(precommit_BitwiseNot, EltwiseLayerTestCommon, bitwiseNotParams,
+                         EltwiseLayerTestCommon::getTestCaseName);
+
+//
+// Test Unsigned Integer data types
+//
+
+std::vector<std::vector<ov::Shape>> inShape = {{{1, 5, 16, 32}, {1, 5, 16, 32}}};
+
+std::vector<ov::test::ElementType> netPrecisionsUnsigned = {ov::element::u8, ov::element::u16, ov::element::u32,
+                                                            ov::element::u64};
+
+std::set<EltwiseTypes> eltwiseTypesUnsigned = {EltwiseTypes::ADD,    EltwiseTypes::SUBTRACT, EltwiseTypes::MULTIPLY,
+                                               EltwiseTypes::DIVIDE, EltwiseTypes::POWER,    EltwiseTypes::FLOOR_MOD,
+                                               EltwiseTypes::MOD};
+
+const auto typesParamsUnsigned = ::testing::Combine(
+        ::testing::ValuesIn(ov::test::static_shapes_to_test_representation(inShape)),
+        ::testing::ValuesIn(eltwiseTypesUnsigned), ::testing::Values(InputLayerType::PARAMETER),
+        ::testing::Values(ov::test::utils::OpType::VECTOR), ::testing::ValuesIn(netPrecisionsUnsigned),
+        ::testing::Values(ov::element::undefined), ::testing::Values(ov::element::undefined),
+        ::testing::Values(ov::test::utils::DEVICE_NPU), ::testing::Values(ov::test::Config{}));
+
+INSTANTIATE_TEST_SUITE_P(smoke_Eltwise_Unsigned, EltwiseIntegerLayerTest, typesParamsUnsigned,
+                         EltwiseIntegerLayerTest::getTestCaseName);
+
+//
+// Test Integer data types
+//
+
+std::vector<ov::test::ElementType> netPrecisionsInteger = {ov::element::i8, ov::element::i16, ov::element::i32};
+
+std::set<EltwiseTypes> eltwiseTypesInteger = {EltwiseTypes::FLOOR_MOD, EltwiseTypes::MOD};
+
+const auto typesParamsInteger = ::testing::Combine(
+        ::testing::ValuesIn(ov::test::static_shapes_to_test_representation(inShape)),
+        ::testing::ValuesIn(eltwiseTypesInteger), ::testing::Values(InputLayerType::PARAMETER),
+        ::testing::Values(ov::test::utils::OpType::VECTOR), ::testing::ValuesIn(netPrecisionsInteger),
+        ::testing::Values(ov::element::undefined), ::testing::Values(ov::element::undefined),
+        ::testing::Values(ov::test::utils::DEVICE_NPU), ::testing::Values(ov::test::Config{}));
+
+INSTANTIATE_TEST_SUITE_P(smoke_Eltwise_Signed, EltwiseIntegerLayerTest, typesParamsInteger,
+                         EltwiseIntegerLayerTest::getTestCaseName);
 
 }  // namespace

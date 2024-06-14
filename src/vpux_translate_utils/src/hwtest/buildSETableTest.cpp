@@ -8,11 +8,11 @@
 
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/passes.hpp"
-#include "vpux/compiler/dialect/VPUIP/utils.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/task.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/transforms/passes.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
 #include "vpux/hwtest/test_case_json_parser.hpp"
@@ -38,15 +38,18 @@ std::vector<int32_t> computeSeTable(const nb::SETablePattern& seTablePattern, Ar
             for (int64_t w = 0; w < width; w++) {
                 const auto offsetLine0 = h * width + w;
                 const auto offsetLine1 = (h + 1) * width + w;
-                seTableContent[offsetLine0] = ((offsetLine1 * numBytesPerWidth) >> 4) << SHIFT_FOR_STORAGE_ELEMENT;
-                seTableContent[offsetLine1] = ((offsetLine0 * numBytesPerWidth) >> 4) << SHIFT_FOR_STORAGE_ELEMENT;
+                seTableContent[offsetLine0] =
+                        static_cast<int32_t>(((offsetLine1 * numBytesPerWidth) >> 4) << SHIFT_FOR_STORAGE_ELEMENT);
+                seTableContent[offsetLine1] =
+                        static_cast<int32_t>(((offsetLine0 * numBytesPerWidth) >> 4) << SHIFT_FOR_STORAGE_ELEMENT);
             }
         }
 
         if (height % 2 == 1) {
             for (int64_t w = 0; w < width; w++) {
                 const auto elemOffset = (height - 1) * width + w;
-                seTableContent[elemOffset] = ((elemOffset * numBytesPerWidth) >> 4) << SHIFT_FOR_STORAGE_ELEMENT;
+                seTableContent[elemOffset] =
+                        static_cast<int32_t>(((elemOffset * numBytesPerWidth) >> 4) << SHIFT_FOR_STORAGE_ELEMENT);
             }
         }
         break;
@@ -54,7 +57,8 @@ std::vector<int32_t> computeSeTable(const nb::SETablePattern& seTablePattern, Ar
         for (int64_t h = 0; h < height; h++) {
             for (int64_t w = 0; w < width; w++) {
                 const auto offset = h * width + w;
-                seTableContent[offset] = ((offset * numBytesPerWidth) >> 4) << SHIFT_FOR_STORAGE_ELEMENT;
+                seTableContent[offset] =
+                        static_cast<int32_t>(((offset * numBytesPerWidth) >> 4) << SHIFT_FOR_STORAGE_ELEMENT);
             }
         }
         break;
@@ -275,6 +279,7 @@ void buildSETableTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp
             fcnBuilder, mlir::ValueRange(waitBarrier.getBarrier()), mlir::ValueRange(updateBarrier.getBarrier()), loc,
             inputCMX.getBuffer(), sparsityMap, seTableCMX.getBuffer(), weightsCMX,
             /*weights_sparsity_map=*/nullptr, weightsTableCMX, /*instruction_list_table=*/nullptr,
+            /*spr_lookup_table*/ nullptr,
             /*activation_window=*/nullptr, inputCMX.getBuffer(), sparsityMapCMX.getBuffer(), seTableCMX.getBuffer(),
             outCMXBuffer, /*parent_output_sparsity_map=*/nullptr, outCMXBuffer,
             /*output_sparsity_map_buff=*/nullptr, /*profiling_data=*/nullptr, vpux::VPUIP::NCETaskType::CONV,
@@ -300,18 +305,27 @@ void buildSETableTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp
     nceTask.addDPUTask(fcnBuilder, start, outEnd, start, inEnd, pad, conv.cube_mode);
 
     waitBarrier = updateBarrier;
+    // finalBarrier passed as production barrier to last DMA task
+    auto finalBarrier = fcnBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, 2);
 
     // Create CMX2DDR DMAs from each cluster the output was broadcasted to
 
     auto functionOutput = function.getArgument(1);
-    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(fcnBuilder, mlir::ValueRange(waitBarrier.getBarrier()), mlir::ValueRange(),
-                                          loc, outCMXBuffer, functionOutput, 0);
+    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(fcnBuilder, mlir::ValueRange(waitBarrier.getBarrier()),
+                                          mlir::ValueRange(finalBarrier.getBarrier()), loc, outCMXBuffer,
+                                          functionOutput, 0);
 
     fcnBuilder.create<mlir::func::ReturnOp>(loc, SmallVector<mlir::Value>{functionOutput});
 
+    // set runtime resources
+    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
+
     mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    pm.addPass(VPU::createInitCompilerPass(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW, 1, std::nullopt,
-                                           log));
+    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.numberOfDPUGroups = 1;
+    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
+
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
     if (conv.compress) {
         pm.addPass(VPUIP::createCompressWeightsBTCPass(log));
     }

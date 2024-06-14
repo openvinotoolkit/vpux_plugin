@@ -5,16 +5,17 @@
 
 #include "vpux/compiler/utils/dot_graph_writer.hpp"
 
-#include "vpux/compiler/core/attributes/dims_order.hpp"
 #include "vpux/compiler/core/ops_interfaces.hpp"
 #include "vpux/compiler/core/type_interfaces.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/utils/strings.hpp"
 
 #include "vpux/utils/core/error.hpp"
 
 #include <mlir/Dialect/Async/IR/Async.h>
 #include <mlir/Dialect/MemRef/IR/MemRef.h>
+
+#include "vpux/compiler/dialect/VPUMI40XX/ops.hpp"
 
 #ifdef _MSC_VER
 #pragma warning(push)
@@ -33,35 +34,23 @@
 using namespace vpux;
 
 namespace {
-
 constexpr size_t MAX_ATTR_STR_SIZE = 80;
-
-enum class EdgeDir { EDGE_SKIP, EDGE_NORMAL, EDGE_REVERSE };
 
 // This is a optimized for VPUX copy of the LLVM GraphWriter (llvm/Support/GraphWriter.h).
 class GraphWriter final {
 public:
-    GraphWriter(mlir::Block& block, llvm::raw_ostream& os, const GraphWriterParams& params)
-            : _block(block), _os(os), _params(params) {
+    GraphWriter(llvm::raw_ostream& os, const GraphWriterParams& params): _params(params), _os(os) {
     }
 
-public:
-    void writeGraph() {
-        writeHeader();
-        writeNodes();
-        writeFooter();
-    }
-
-private:
     void writeHeader(StringRef title = {});
-    void writeNodes();
+    void writeNodes(mlir::Block& block);
 
     void writeFooter() {
         _os << "}\n";
     }
 
 private:
-    static EdgeDir getEdgeDirection(mlir::Operation* source, mlir::Operation* target);
+    static DOT::EdgeDir getEdgeDirection(mlir::Operation* source, mlir::Operation* target);
     bool isNodeHidden(mlir::Operation* op) const;
     static bool isTaskNode(mlir::Operation* op);
     static bool printNodeAttributes(mlir::Operation* op, llvm::raw_ostream& os);
@@ -71,14 +60,41 @@ private:
     void writeEdge(mlir::Operation* source, mlir::Operation* target);
     void emitEdge(const void* sourceID, const void* targetID);
 
-private:
-    mlir::Block& _block;
-    llvm::raw_ostream& _os;
-    GraphWriterParams _params;
-
     void appendShapeLabel(llvm::raw_string_ostream& os, ArrayRef<int64_t> shape, const mlir::Type& type,
                           const DimsOrder& dims) const;
+
+private:
+    GraphWriterParams _params;
+    llvm::raw_ostream& _os;
 };
+
+const std::string htmlEncode(StringRef data) {
+    std::string buffer;
+    buffer.reserve(data.size());
+    for (size_t pos = 0; pos != data.size(); ++pos) {
+        switch (data[pos]) {
+        case '&':
+            buffer.append("&amp;");
+            break;
+        case '\"':
+            buffer.append("&quot;");
+            break;
+        case '\'':
+            buffer.append("&apos;");
+            break;
+        case '<':
+            buffer.append("&lt;");
+            break;
+        case '>':
+            buffer.append("&gt;");
+            break;
+        default:
+            buffer.push_back(data[pos]);
+            break;
+        }
+    }
+    return buffer;
+}
 
 void GraphWriter::writeHeader(StringRef title) {
     if (title.empty()) {
@@ -92,7 +108,7 @@ void GraphWriter::writeHeader(StringRef title) {
     _os << "\n";
 }
 
-void GraphWriter::writeNodes() {
+void GraphWriter::writeNodes(mlir::Block& block) {
     llvm::DenseSet<mlir::Operation*> processedNodes;
 
     bool generating = _params.startAfter.empty();
@@ -106,7 +122,7 @@ void GraphWriter::writeNodes() {
         }
     };
 
-    for (auto& op : _block) {
+    for (auto& op : block) {
         const auto opName = vpux::stringifyPrimaryLocation(op.getLoc());
 
         if (generating) {
@@ -146,12 +162,17 @@ void GraphWriter::writeNodes() {
             }
         }
     }
-}  // namespace
+}
 
-EdgeDir GraphWriter::getEdgeDirection(mlir::Operation* source, mlir::Operation* target) {
+DOT::EdgeDir GraphWriter::getEdgeDirection(mlir::Operation* source, mlir::Operation* target) {
+    auto dotInterface = mlir::dyn_cast<DotInterface>(target);
+    if (dotInterface) {
+        return dotInterface.getEdgeDirection(source);
+    }
+
     auto sideEffectsOp = mlir::dyn_cast<mlir::MemoryEffectOpInterface>(target);
     if (sideEffectsOp == nullptr) {
-        return EdgeDir::EDGE_NORMAL;
+        return DOT::EdgeDir::EDGE_NORMAL;
     }
 
     const auto targetOperands = target->getOperands();
@@ -162,30 +183,27 @@ EdgeDir GraphWriter::getEdgeDirection(mlir::Operation* source, mlir::Operation* 
 
     const auto val = *it;
     if (sideEffectsOp.getEffectOnValue<mlir::MemoryEffects::Write>(val).has_value()) {
-        return EdgeDir::EDGE_REVERSE;
+        return DOT::EdgeDir::EDGE_REVERSE;
     }
 
-    return EdgeDir::EDGE_NORMAL;
+    return DOT::EdgeDir::EDGE_NORMAL;
 }
 
 bool GraphWriter::isNodeHidden(mlir::Operation* op) const {
-    if (_params.printOnlyAsyncExec) {
-        // print only async.exec ops
-        return !mlir::isa<mlir::async::ExecuteOp>(op);
-    }
-
-    if (_params.printOnlyTaskAndBarrier) {
-        // print only barriers and tasks
-        return !mlir::isa<VPURT::TaskOp, VPURT::DeclareVirtualBarrierOp>(op);
-    }
-
-    if (op->hasTrait<mlir::OpTrait::IsTerminator>()) {
-        return true;
-    }
-
-    if (op->hasTrait<mlir::OpTrait::ConstantLike>() && !_params.printConst) {
-        return true;
-    }
+    const auto exclusiveConditionChecks = [this](mlir::Operation* op) {
+        if (_params.printOnlyDotInterfaces) {
+            return !mlir::isa<DotInterface>(op);
+        }
+        if (_params.printOnlyAsyncExec) {
+            // print only async.exec ops
+            return !mlir::isa<mlir::async::ExecuteOp>(op);
+        }
+        if (_params.printOnlyTaskAndBarrier) {
+            // print only barriers and tasks
+            return !mlir::isa<VPURT::TaskOp, VPURT::DeclareVirtualBarrierOp, VPUMI40XX::ConfigureBarrierOp>(op);
+        }
+        return false;
+    };
 
     const auto isDeclarationOp = [](mlir::Operation* op) {
         if (op->hasTrait<mlir::OpTrait::ConstantLike>()) {
@@ -195,11 +213,21 @@ bool GraphWriter::isNodeHidden(mlir::Operation* op) const {
         return op->hasTrait<DeclarationOp>() || mlir::isa<mlir::memref::AllocOp>(op);
     };
 
-    if (isDeclarationOp(op) && !_params.printDeclarations) {
+    if (op->hasTrait<mlir::OpTrait::IsTerminator>()) {
         return true;
     }
 
-    return false;
+    bool res = exclusiveConditionChecks(op);
+
+    if (op->hasTrait<mlir::OpTrait::ConstantLike>() && !_params.printConst) {
+        return true || res;
+    }
+
+    if (isDeclarationOp(op) && !_params.printDeclarations) {
+        return true || res;
+    }
+
+    return res;
 }
 
 bool GraphWriter::isTaskNode(mlir::Operation* op) {
@@ -244,34 +272,6 @@ bool GraphWriter::printNodeAttributes(mlir::Operation* op, llvm::raw_ostream& os
     return false;
 }
 
-const std::string htmlEncode(StringRef data) {
-    std::string buffer;
-    buffer.reserve(data.size());
-    for (size_t pos = 0; pos != data.size(); ++pos) {
-        switch (data[pos]) {
-        case '&':
-            buffer.append("&amp;");
-            break;
-        case '\"':
-            buffer.append("&quot;");
-            break;
-        case '\'':
-            buffer.append("&apos;");
-            break;
-        case '<':
-            buffer.append("&lt;");
-            break;
-        case '>':
-            buffer.append("&gt;");
-            break;
-        default:
-            buffer.push_back(data[pos]);
-            break;
-        }
-    }
-    return buffer;
-}
-
 std::string GraphWriter::getNodeLabel(mlir::Operation* op) {
     std::string ostr;
     llvm::raw_string_ostream os(ostr);
@@ -288,14 +288,11 @@ std::string GraphWriter::getNodeLabel(mlir::Operation* op) {
     if (auto dotInterface = mlir::dyn_cast<DotInterface>(op)) {
         std::string temp_str;
         llvm::raw_string_ostream temp_os(temp_str);
-        // In case Operation implements custom attribute printer skip default attributes printing
-        if (dotInterface.printAttributes(temp_os)) {
-            if (_params.htmlLike) {
-                os << htmlBegin << temp_str << htmlEnd;
-            } else {
-                os << temp_str << "\n";
-            }
+        if (_params.htmlLike && dotInterface.printAttributes(temp_os, htmlBegin, htmlMiddle, htmlEnd)) {
+            os << temp_str;
             return os.str();
+        } else if (dotInterface.printAttributes(temp_os, "\n", "\t", "")) {
+            os << temp_str << "\n";
         }
     }
 
@@ -422,10 +419,10 @@ void GraphWriter::writeEdges(mlir::Operation* op) {
 
 void GraphWriter::writeEdge(mlir::Operation* source, mlir::Operation* target) {
     switch (getEdgeDirection(source, target)) {
-    case EdgeDir::EDGE_NORMAL:
+    case DOT::EdgeDir::EDGE_NORMAL:
         emitEdge(static_cast<const void*>(source), static_cast<const void*>(target));
         break;
-    case EdgeDir::EDGE_REVERSE:
+    case DOT::EdgeDir::EDGE_REVERSE:
         emitEdge(static_cast<const void*>(target), static_cast<const void*>(source));
         break;
     default:
@@ -441,7 +438,7 @@ void GraphWriter::emitEdge(const void* sourceID, const void* targetID) {
 
 }  // namespace
 
-mlir::LogicalResult vpux::writeDotGraph(mlir::Block& block, StringRef fileName, const GraphWriterParams& params) {
+mlir::LogicalResult vpux::writeDotGraph(mlir::func::FuncOp func, StringRef fileName, const GraphWriterParams& params) {
     int FD = -1;
     const auto EC =
             llvm::sys::fs::openFileForWrite(fileName, FD, llvm::sys::fs::CD_CreateAlways, llvm::sys::fs::OF_Text);
@@ -452,8 +449,12 @@ mlir::LogicalResult vpux::writeDotGraph(mlir::Block& block, StringRef fileName, 
 
     llvm::raw_fd_ostream os(FD, /*shouldClose=*/true);
 
-    GraphWriter writer(block, os, params);
-    writer.writeGraph();
+    GraphWriter writer(os, params);
+    writer.writeHeader();
+    for (auto& block : func.getBody()) {
+        writer.writeNodes(block);
+    }
+    writer.writeFooter();
 
     return mlir::success();
 }

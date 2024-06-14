@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -571,4 +571,3 @@ func.func @main(%arg0: memref<1x16x32x32xf16, #NHWC, @DDR>, %arg1: memref<1x32x3
 // CHECK:               workload_end_X: 31,
 // CHECK:               workload_end_Y: 31,
 // CHECK:               workload_end_Z: 31
-

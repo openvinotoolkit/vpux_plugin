@@ -12,6 +12,8 @@ include "vpux/compiler/dialect/VPU/attributes.td"
 include "vpux/compiler/dialect/VPU/type_interfaces.td"
 include "vpux/compiler/core/type_interfaces.td"
 
+include "mlir/IR/BuiltinTypeInterfaces.td"
+
 // Base class for VPU dialect types.
 class VPU_Type<string name, list<Trait> traits = []>
     : TypeDef<VPU_Dialect, name, traits> {
@@ -28,7 +30,8 @@ def VPU_DistributedTensor :
             [
                 DeclareTypeInterfaceMethods<NDTypeInterface>,
                 DeclareTypeInterfaceMethods<ClusterTypeInterface>,
-                VPU_DistributedTypeInterface
+                VPU_DistributedTypeInterface,
+                TensorTypeInterface
             ]
         > {
     let summary = "VPU tensor type to describe the tensor tiling";
@@ -49,6 +52,7 @@ def VPU_DistributedTensor :
 
         mlir::AffineMapAttr getOrder() const;
         DistributedTensorAttr getDistribution() const;
+        DistributedTensorType cloneWith(std::optional<mlir::ArrayRef<int64_t>> shape, mlir::Type elementType) const;
     }];
 
     let genVerifyDecl = 1;
@@ -64,6 +68,7 @@ def VPU_SparseTensor :
             "SparseTensor",
             [
                 GroupedTypeInterface,
+                TensorTypeInterface,
                 DeclareTypeInterfaceMethods<NDTypeInterface>,
                 DeclareTypeInterfaceMethods<VPU_DistributedTypeInterface,
                     ["containsDistributedTypes", "getDistributedTypes", "changeShapeForExplicitDistribution",
@@ -87,7 +92,7 @@ def VPU_SparseTensor :
         weights set size of the sparsity map (i.e. ICxKYxKW) needs to be aligned
         to 16 bytes for every output channel.
 
-        The `compressionScheme` attribute is utilized for weights sparsity to
+        The `sparsityCompression` attribute is utilized for weights sparsity to
         identify the number of elements per output channel that are present in
         the data after removing the sparse values.
     }];
@@ -97,7 +102,7 @@ def VPU_SparseTensor :
         "mlir::Type":$sparsityMap,
         "mlir::Type":$storageElementTable,
         "mlir::UnitAttr":$isWeights,
-        "VPU::CompressionSchemeAttr":$compressionScheme,
+        "VPU::SparsityCompressionAttr":$sparsityCompression,
         VPU_SEAttr:$seAttr
     );
 
@@ -108,12 +113,16 @@ def VPU_SparseTensor :
                 CArg<"mlir::Type", "{}">:$sparsityMap,
                 CArg<"mlir::Type", "{}">:$storageElementTable,
                 CArg<"mlir::UnitAttr", "{}">:$isWeights,
-                CArg<"VPU::CompressionSchemeAttr", "{}">:$compressionScheme,
+                CArg<"VPU::SparsityCompressionAttr", "{}">:$sparsityCompression,
                 CArg<"VPU::SEAttr", "{}">:$seAttr
             ), [{
-            return $_get(data.getContext(), data, sparsityMap, storageElementTable, isWeights, compressionScheme, seAttr);
+            return $_get(data.getContext(), data, sparsityMap, storageElementTable, isWeights, sparsityCompression, seAttr);
         }]>
     ];
+
+    let extraClassDeclaration = [{
+        SparseTensorType cloneWith(std::optional<mlir::ArrayRef<int64_t>> shape, mlir::Type elementType) const;
+    }];
 
     let skipDefaultBuilders = 1;
     let genVerifyDecl = 1;

@@ -11,6 +11,8 @@
 #include "vpux/compiler/utils/custom_pwl_table.hpp"
 #include "vpux/compiler/utils/permute_utils.hpp"
 
+#include <vpux/utils/core/numeric.hpp>
+
 namespace vpux {
 namespace VPU {
 
@@ -27,7 +29,8 @@ mlir::Value createActivationWindowTensor(mlir::OpBuilder& builder, mlir::Locatio
 
 std::vector<int32_t> createWeightsTableData(mlir::Value opInput, mlir::Value opOutput, mlir::Value weights,
                                             Const::ContentAttr bias, int64_t OC, vpux::VPU::PPETaskAttr ppeTaskAttr,
-                                            VPU::ArchKind _arch, vpux::IE::PostOpAttr postOpAttr) {
+                                            VPU::ArchKind _arch, vpux::IE::PostOpAttr postOpAttr,
+                                            mlir::FloatAttr constScale) {
     const auto weightPtrOffset = 0;
     const auto sparsityPtrOffset = 0;
     const auto weightPtrStep = VPU::NCESparsity::getWeightPtrStep(weights);
@@ -38,8 +41,8 @@ std::vector<int32_t> createWeightsTableData(mlir::Value opInput, mlir::Value opO
     const auto weightsElemType = weights ? weights.getType().cast<vpux::NDTypeInterface>().getElementType() : nullptr;
 
     return VPU::NCESparsity::getWeightsTable(inElemType, outElemType, weightPtrOffset, weightPtrStep, sparsityPtrOffset,
-                                             sparsityPtrStep, _arch, OC, weightsElemType, bias, ppeTaskAttr,
-                                             postOpAttr);
+                                             sparsityPtrStep, _arch, OC, weightsElemType, bias, ppeTaskAttr, postOpAttr,
+                                             constScale);
 }
 
 mlir::Value createWeightsTableTensor(mlir::OpBuilder& builder, mlir::Location loc, ArrayRef<int32_t> weightsTable) {
@@ -63,7 +66,7 @@ std::optional<SmallVector<int32_t>> createInstructionListTableData(mlir::Value o
         return std::nullopt;
     }
 
-    if (_arch == VPU::ArchKind::VPUX37XX) {
+    if (_arch == VPU::ArchKind::NPU37XX || _arch == VPU::ArchKind::NPU40XX) {
         return std::nullopt;
     }
 
@@ -155,7 +158,7 @@ Const::ContentAttr buildPadData(const mlir::Type type, ArrayRef<int64_t> shape) 
     } else {
         const auto ndType = mlir::RankedTensorType::get(shape, type).cast<vpux::NDTypeInterface>();
         const auto padType = ndType.changeDimsOrder(DimsOrder::NCHW).cast<mlir::RankedTensorType>();
-        const auto padValues = std::vector<ov::float16>(OC * alignment, 0.f);
+        const auto padValues = std::vector<vpux::type::float16>(OC * alignment, 0.f);
         const auto padAttr = mlir::DenseElementsAttr::get(padType, ArrayRef(padValues));
 
         return Const::ContentAttr::get(padAttr);
@@ -359,8 +362,8 @@ mlir::Value buildWeightsConst(vpux::ShapeRef weightsShape, DimsOrder weightsOrde
 Byte calculateAlignedBuffersMemoryRequirement(VPU::ArchKind arch, SmallVector<Byte>& bufferSizes) {
     Byte offsetAlignment = Byte(vpux::DEFAULT_CMX_ALIGNMENT);
     Byte sizeAlignment = Byte(1);
-    if (arch == VPU::ArchKind::VPUX37XX) {
-        offsetAlignment = Byte(getAddressAlignmentForSwizzling(SWIZZLING_KEY_5));
+    if (arch == VPU::ArchKind::NPU37XX || arch == VPU::ArchKind::NPU40XX) {
+        offsetAlignment = Byte(getAddressAlignmentForSwizzling(SWIZZLING_KEY_5, arch));
         sizeAlignment = Byte(vpux::getSizeAlignmentForSwizzling(arch));
     }
     return vpux::calculateAlignedBuffersMemoryRequirement(bufferSizes, offsetAlignment, sizeAlignment);
@@ -381,9 +384,9 @@ mlir::DenseElementsAttr wrapData(const mlir::RankedTensorType dataStorageType, A
     if (elemType.isF32()) {
         return mlir::DenseElementsAttr::get(dataStorageType, values);
     } else if (elemType.isF16()) {
-        SmallVector<ov::float16> valsFP16;
+        SmallVector<vpux::type::float16> valsFP16;
         std::transform(values.begin(), values.end(), std::back_inserter(valsFP16), [](float value) {
-            return ov::float16(value);
+            return vpux::type::float16(value);
         });
         return mlir::DenseElementsAttr::get(dataStorageType, ArrayRef(valsFP16));
     }
@@ -461,6 +464,57 @@ Const::DeclareOp createFloatConst(mlir::RankedTensorType constType, ArrayRef<flo
                       constType.getElementType());
 
     return rewriter.create<Const::DeclareOp>(loc, constType, Const::ContentAttr::get(denseElementVal));
+}
+
+mlir::Value createIntConst(ShapeRef constShape, DimsOrder constOrder, ArrayRef<int32_t> constData, mlir::Location loc,
+                           mlir::PatternRewriter& rewriter) {
+    VPUX_THROW_UNLESS(constData.size() == 1 || constShape.totalSize() == checked_cast<int64_t>(constData.size()),
+                      "Create int32 Const failed with unexpect data size");
+
+    const auto elemType =
+            mlir::IntegerType::get(rewriter.getContext(), 32, mlir::IntegerType::SignednessSemantics::Signed);
+    const auto dataStorageType = mlir::RankedTensorType::get(to_small_vector(constShape), elemType)
+                                         .cast<vpux::NDTypeInterface>()
+                                         .changeDimsOrder(constOrder);
+
+    auto dataAttr = mlir::DenseElementsAttr::get(dataStorageType.cast<mlir::RankedTensorType>(), constData);
+    auto contentAttr = Const::ContentAttr::get(dataAttr);
+    return rewriter.create<Const::DeclareOp>(loc, dataStorageType, contentAttr);
+}
+
+bool isLowPrecisionTypeRange(const Const::Content& low, const Const::Content& high, int64_t levels, bool isSigned,
+                             mlir::PatternRewriter& rewriter) {
+    int64_t qLow = 0;
+    int64_t qHigh = 0;
+    std::tie(qLow, qHigh, std::ignore) = getStorageParams(rewriter.getContext(), levels, isSigned);
+    float fLow = checked_cast<float>(qLow);
+    float fHigh = checked_cast<float>(qHigh);
+    // In order to decide if FakeQuantize input constant need to be requantized it is needed to check the FakeQuantize
+    // input range.
+    // Quantized weights have the content in the low precision data type - I/U 16,8,4...,1. For example, U8 quantized
+    // weights are stored in U8 constants. Because NPU compiler relies on legacy weights de-quantization representation
+    // which is: Const(FP16/32)->FakeQuantize(inLow = 0, inHigh = 255, ...), the WeightsDequantizeToFakeQuantize pass is
+    // required to be applied. After this pass weights constant is FP16/32 data type and its content is floating point
+    // values from 0.0 to 255.0 - just a cast of the U8 values - work in progress to keep the values in low precision
+    // storage type: E#107322. There are passes that alter the weights content or create artificial FakeQuantize
+    // (example: ConvertSubtractToAdd) and modify also FakeQuantize input range, which will no longer match the low
+    // precision storage type as it initially was. It is needed to threat also the case when FakeQuantize inLow ==
+    // inHigh, this is a special use case when re-quantization is not needed.
+    const auto isEqualToLowPrecisionTypeRange = [&](float lowVal, float highVal) -> bool {
+        return (isFloatEqual(lowVal, fLow) && isFloatEqual(highVal, fHigh)) || isFloatEqual(lowVal, highVal);
+    };
+
+    const auto lowVals = low.getValues<float>();
+    const auto highVals = high.getValues<float>();
+    VPUX_THROW_UNLESS(lowVals.size() == highVals.size(), "Sizes of valLow and valHigh arrays are not equal",
+                      lowVals.size(), highVals.size());
+
+    for (size_t i = 0; i < lowVals.size(); ++i) {
+        if (!isEqualToLowPrecisionTypeRange(lowVals[i], highVals[i])) {
+            return false;
+        }
+    }
+    return true;
 }
 
 }  // namespace VPU

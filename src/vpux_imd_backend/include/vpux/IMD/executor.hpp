@@ -5,26 +5,26 @@
 
 #pragma once
 
-#include "vpux.hpp"
+#include "npu.hpp"
+#include "npu_private_properties.hpp"
 #include "vpux/utils/core/logger.hpp"
 #include "vpux/utils/core/small_string.hpp"
 #include "vpux/utils/core/small_vector.hpp"
 #include "vpux/utils/core/string_ref.hpp"
-#include "vpux_private_properties.hpp"
 
 #include <string>
 
 namespace vpux {
 
-class IMDExecutor final : public Executor {
+class IMDExecutor final : public intel_npu::IExecutor {
 public:
     struct InferenceManagerDemo;
 
-    IMDExecutor(InferenceEngine::VPUXConfigParams::VPUXPlatform platform, const NetworkDescription::CPtr network,
-                const Config& config);
+    IMDExecutor(const std::string_view, const std::shared_ptr<const intel_npu::NetworkDescription>& network,
+                const intel_npu::Config& config);
 
-    const NetworkDescription& getNetworkDesc() {
-        return *_network.get();
+    std::shared_ptr<const intel_npu::NetworkDescription>& getNetworkDesc() {
+        return _network;
     }
 
     InferenceManagerDemo& getApp() {
@@ -41,17 +41,17 @@ public:
     };
 
 private:
-    std::string getMoviToolsPath(const Config& config);
-    std::string getSimicsPath(const Config& config);
+    std::string getMoviToolsPath(const intel_npu::Config& config);
+    std::string getSimicsPath(const intel_npu::Config& config);
     void setElfFile(const std::string& bin);
-    void setMoviSimRunArgs(InferenceEngine::VPUXConfigParams::VPUXPlatform platform, const Config& config);
-    void setMoviDebugRunArgs(InferenceEngine::VPUXConfigParams::VPUXPlatform platform, const Config& config);
-    void setSimicsRunArgs(InferenceEngine::VPUXConfigParams::VPUXPlatform platform, const Config& config);
+    void setMoviSimRunArgs(const std::string_view platform, const intel_npu::Config& config);
+    void setMoviDebugRunArgs(const std::string_view platform, const intel_npu::Config& config);
+    void setSimicsRunArgs(const std::string_view platform, const intel_npu::Config& config);
 
     static bool isValidElfSignature(StringRef filePath);
-    void parseAppConfig(InferenceEngine::VPUXConfigParams::VPUXPlatform platform, const Config& config);
+    void parseAppConfig(const std::string_view platform, const intel_npu::Config& config);
 
-    NetworkDescription::CPtr _network;
+    std::shared_ptr<const intel_npu::NetworkDescription> _network;
     Logger _log;
 
     InferenceManagerDemo _app;

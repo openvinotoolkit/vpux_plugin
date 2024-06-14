@@ -1,10 +1,13 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 #include "vpux/compiler/dialect/IE/utils/convert_op_types.hpp"
-#include "vpux/compiler/dialect/IE/ops.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
+
+#include "vpux/compiler/utils/IE/locations.hpp"
+#include "vpux/compiler/utils/rewriter.hpp"
 
 #include <mlir/IR/BuiltinOps.h>
 #include <mlir/IR/BuiltinTypes.h>
@@ -66,9 +69,14 @@ void vpux::IE::setupConvertPrecision(mlir::TypeConverter& typeConverter,
     });
 
     const auto convert = [](mlir::OpBuilder& builder, mlir::RankedTensorType type, mlir::ValueRange inputs,
-                            mlir::Location loc) -> mlir::Value {
+                            mlir::Location) -> mlir::Value {
+        // Ignore location of original operation, because this function is responsible for input/output network
+        // precision and location of source is more useful
         VPUX_THROW_UNLESS(inputs.size() == 1, "Got wrong number of inputs : {0}", inputs.size());
-        return builder.createOrFold<IE::ConvertOp>(loc, inputs[0], mlir::TypeAttr::get(type.getElementType()));
+        const auto dstType = mlir::TypeAttr::get(type.getElementType());
+        const auto baseLoc = IE::getValueLocation(inputs[0]);
+        const auto newLocation = appendLoc(baseLoc, "converted_to_{0}", dstType);
+        return builder.createOrFold<IE::ConvertOp>(newLocation, inputs[0], dstType);
     };
 
     typeConverter.addSourceMaterialization(convert);

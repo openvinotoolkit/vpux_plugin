@@ -1,12 +1,13 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // This file is shared between the compiler and profiling post-processing
 
+#include "vpux/utils/profiling/common.hpp"
+
 #include "vpux/utils/core/error.hpp"
-#include "vpux/utils/core/profiling.hpp"
 
 namespace vpux::profiling {
 
@@ -24,12 +25,14 @@ std::string convertExecTypeToName(ExecutorType execType) {
         return "upa";
     case ExecutorType::WORKPOINT:
         return "pll";
+    case ExecutorType::M2I:
+        return "m2i";
     default:
         VPUX_THROW("Unknown execType");
     };
 }
 
-ExecutorType convertDataInfoNameToExecType(StringRef name) {
+ExecutorType convertDataInfoNameToExecType(std::string_view name) {
     if (name == "actshave") {
         return ExecutorType::ACTSHAVE;
     } else if (name == "dmahw") {
@@ -42,6 +45,8 @@ ExecutorType convertDataInfoNameToExecType(StringRef name) {
         return ExecutorType::UPA;
     } else if (name == "pll") {
         return ExecutorType::WORKPOINT;
+    } else if (name == "m2i") {
+        return ExecutorType::M2I;
     }
     VPUX_THROW("Can not convert '{0}' to profiling::ExecutorType", name);
 }

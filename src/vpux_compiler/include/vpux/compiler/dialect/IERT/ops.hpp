@@ -6,9 +6,9 @@
 #pragma once
 
 #include "vpux/compiler/core/ops_interfaces.hpp"
-#include "vpux/compiler/dialect/IE/ops.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IERT/types.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops_interfaces.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops_interfaces.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 
 #include "vpux/utils/core/mem_size.hpp"

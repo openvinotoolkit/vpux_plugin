@@ -1,6 +1,6 @@
 //
-// Copyright (C) 2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include "timer.hpp"
@@ -13,7 +13,7 @@
 
 class WinTimer : public SleepTimer {
 public:
-    WinTimer();
+    WinTimer(bool disable_high_resolution_timer);
     void wait(std::chrono::microseconds time) override;
     ~WinTimer();
 
@@ -21,10 +21,11 @@ private:
     HANDLE m_handle = nullptr;
 };
 
-WinTimer::WinTimer() {
+WinTimer::WinTimer(bool disable_high_resolution_timer) {
     // FIXME: It should be called once.
     timeBeginPeriod(1);
-    m_handle = CreateWaitableTimerEx(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+    m_handle = CreateWaitableTimerEx(
+            NULL, NULL, disable_high_resolution_timer ? 0 : CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
 }
 
 void WinTimer::wait(std::chrono::microseconds time) {
@@ -59,9 +60,9 @@ void ChronoTimer::wait(std::chrono::microseconds time) {
     std::this_thread::sleep_for(time);
 }
 
-SleepTimer::Ptr SleepTimer::create() {
+SleepTimer::Ptr SleepTimer::create(bool disable_high_resolution_timer) {
 #if defined(_WIN32)
-    return std::make_shared<WinTimer>();
+    return std::make_shared<WinTimer>(disable_high_resolution_timer);
 #else
     return std::make_shared<ChronoTimer>();
 #endif

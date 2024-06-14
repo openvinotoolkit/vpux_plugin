@@ -1,12 +1,10 @@
-// Copyright (C) Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include <vpu_ov2_layer_test.hpp>
 
-#include <ov_models/builders.hpp>
-#include <ov_models/utils/ov_helpers.hpp>
-#include <shared_test_classes/base/layer_test_utils.hpp>
+#include "common_test_utils/node_builders/eltwise.hpp"
 
 namespace ov::test {
 
@@ -61,17 +59,26 @@ class ScheduleSubGraphSpillingTest_NPU3700 :
 
         const auto conv2 = std::make_shared<ov::op::v1::Convolution>(conv1, weights2FP32, strides, pads_begin, pads_end,
                                                                      dilations);
-        const auto eltwise = ngraph::builder::makeEltwise(pool, conv2, ngraph::helpers::EltwiseTypes::ADD);
+        const auto eltwise = ov::test::utils::make_eltwise(pool, conv2, ov::test::utils::EltwiseTypes::ADD);
 
         const ov::ResultVector results{std::make_shared<ov::op::v0::Result>(eltwise)};
         function = std::make_shared<ov::Model>(results, params, "ScheduleSubGraphSpillingTest");
         rel_threshold = 0.1f;
     }
+
+public:
+    static std::string getTestCaseName(const testing::TestParamInfo<ScheduleSubGraphSpillingTestParams>& obj) {
+        const std::string sep = "_";
+        std::ostringstream result;
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
+        result << "TestIdx=" << obj.index << sep;
+        return result.str();
+    };
 };
 
 TEST_P(ScheduleSubGraphSpillingTest_NPU3700, HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3700);
+    run(Platform::NPU3700);
 }
 
 INSTANTIATE_TEST_CASE_P(smoke_ScheduleSubGraphSpilling, ScheduleSubGraphSpillingTest_NPU3700,
@@ -82,6 +89,7 @@ INSTANTIATE_TEST_CASE_P(smoke_ScheduleSubGraphSpilling, ScheduleSubGraphSpilling
                                 {1, 1},           // strides
                                 {0, 0},           // pads_begin
                                 {0, 0},           // pads_end
-                        }));
+                        }),
+                        ScheduleSubGraphSpillingTest_NPU3700::getTestCaseName);
 
 }  // namespace ov::test

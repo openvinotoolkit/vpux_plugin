@@ -93,8 +93,8 @@ double getDmaBandwidthGBps(mlir::ModuleOp module);
  */
 double getDmaBandwidthGBps(ArchKind arch);
 
-uint32_t getMaxDPUClusterNum(ArchKind arch);
-uint32_t getMaxDPUClusterNum(mlir::Operation* op);
+uint32_t getMaxArchDPUClusterNum(ArchKind arch);
+uint32_t getMaxArchDPUClusterNum(mlir::Operation* op);
 uint32_t getMaxDMAPorts(ArchKind arch);
 
 /**
@@ -124,7 +124,8 @@ Byte getTotalCMXVFPipelineFragmentationAwareSize(mlir::Operation* op);
 //
 
 void setArch(mlir::ModuleOp module, ArchKind kind, std::optional<int> numOfDPUGroups = std::nullopt,
-             std::optional<int> numOfDMAPorts = std::nullopt, bool allowCustomChanges = false);
+             std::optional<int> numOfDMAPorts = std::nullopt,
+             std::optional<vpux::Byte> availableCMXMemory = std::nullopt, bool allowCustomValues = false);
 
 ArchKind getArch(mlir::Operation* op);
 bool isArchVPUX3XXX(VPU::ArchKind arch);
@@ -136,6 +137,14 @@ bool isArchVPUX3XXX(VPU::ArchKind arch);
 void setCompilationMode(mlir::ModuleOp module, CompilationMode compilationMode);
 bool hasCompilationMode(mlir::ModuleOp module);
 CompilationMode getCompilationMode(mlir::Operation* op);
+
+//
+// RevisionID
+//
+
+void setRevisionID(mlir::ModuleOp module, RevisionID revisionID);
+bool hasRevisionID(mlir::ModuleOp module);
+std::optional<RevisionID> getRevisionID(mlir::Operation* op);
 
 //
 // PaddingAttr
@@ -174,6 +183,40 @@ VPU::PPEMode getPPEMode(VPU::EltwiseType type);
 // DistributedTensorAttr
 //
 
+struct OverlapDistributionParams {
+    OverlapDistributionParams() = default;
+    OverlapDistributionParams(const OverlapDistributionParams&) = default;
+
+    OverlapDistributionParams& operator=(const OverlapDistributionParams&) = default;
+
+    ~OverlapDistributionParams() = default;
+
+    OverlapDistributionParams(mlir::ArrayAttr kernel, VPU::PaddingAttr pads, mlir::ArrayAttr stride,
+                              mlir::UnitAttr equalComputeAndMemoryView = nullptr)
+            : kernel(kernel), pads(pads), stride(stride), equalComputeAndMemoryView(equalComputeAndMemoryView){};
+
+    OverlapDistributionParams(mlir::ArrayAttr memoryShapes, mlir::ArrayAttr memoryOffsets,
+                              mlir::ArrayAttr computeShapes, mlir::ArrayAttr computeOffsets)
+            : memoryShapes(memoryShapes),
+              memoryOffsets(memoryOffsets),
+              computeShapes(computeShapes),
+              computeOffsets(computeOffsets){};
+
+    bool hasNonnullComputeAndMemoryShapesOffsets() const {
+        return (memoryShapes != nullptr) && (memoryOffsets != nullptr) && (computeShapes != nullptr) &&
+               (computeOffsets != nullptr);
+    }
+
+    mlir::ArrayAttr kernel = nullptr;
+    VPU::PaddingAttr pads = nullptr;
+    mlir::ArrayAttr stride = nullptr;
+    mlir::UnitAttr equalComputeAndMemoryView = nullptr;
+    mlir::ArrayAttr memoryShapes = nullptr;
+    mlir::ArrayAttr memoryOffsets = nullptr;
+    mlir::ArrayAttr computeShapes = nullptr;
+    mlir::ArrayAttr computeOffsets = nullptr;
+};
+
 mlir::LogicalResult verify(FuncRef<mlir::InFlightDiagnostic()> emitError, DistributedTensorAttr distributedAttr,
                            ArrayRef<int64_t> shape);
 mlir::LogicalResult canTheDistributionModesBeCompatible(DistributionMode sourceMode, DistributionMode targetMode);
@@ -187,24 +230,30 @@ SmallVector<Shape> getPerClusterMemoryShapeOffsets(ShapeRef shapeRef, Distribute
 SmallVector<PadInfo> getPerClusterPadding(DistributedTensorAttr distributionAttr, PadInfo kernelPadding);
 SmallVector<StridedShape> getPerClusterMemoryStridedShapes(ShapeRef shape, StridesRef strides, DimsOrder dimsOrder,
                                                            DistributionModeAttr mode, ArrayRef<Shape> memoryShapes);
+SmallVector<Shape> getOverlappedPerClusterNewMemoryShapes(ShapeRef newShape, ShapeRef origShape,
+                                                          DistributedTensorAttr distributionAttr);
+SmallVector<Shape> getOverlappedPerClusterNewMemoryShapeOffsets(ShapeRef shapeRef,
+                                                                DistributedTensorAttr distributionAttr);
 int64_t getDistributedTilingAxis(ArrayRef<int64_t> tilingScheme);
 bool isDistributedAttrWithExplicitShapesAndOffsets(DistributedTensorAttr distributionAttr);
+bool isUniformDistributedSegmentsSupported(mlir::Operation* op);
 SmallVector<Shape> arrayAttrToVecOfShapes(mlir::ArrayAttr arr);
 
 bool isSegmentedOverH(VPU::DistributedTensorAttr distAttr);
 bool isSegmentedOverC(VPU::DistributedTensorAttr distAttr);
+bool isSegmentedDuplicatedOverC(VPU::DistributedTensorAttr distAttr);
 bool isSegmentedOverN(VPU::DistributedTensorAttr distAttr);
 bool isOverlappedOverH(VPU::DistributedTensorAttr distAttr);
 
 //
-// CompressionSchemeAttr
+// SparsityCompressionAttr
 //
 
-VPU::CompressionSchemeAttr getCompressionSchemeAttr(mlir::Type type);
-mlir::Type setCompressionSchemeAttr(mlir::Type type, VPU::CompressionSchemeAttr compressionSchemeAttr);
+VPU::SparsityCompressionAttr getSparsityCompressionAttr(mlir::Type type);
+mlir::Type setSparsityCompressionAttr(mlir::Type type, VPU::SparsityCompressionAttr sparsityCompressionAttr);
 
-VPU::CompressionSchemeAttr tileCompressionScheme(VPU::CompressionSchemeAttr compressionScheme, ShapeRef tileOffsets,
-                                                 ShapeRef tileShape);
+VPU::SparsityCompressionAttr tileSparsityCompression(VPU::SparsityCompressionAttr sparsityCompression,
+                                                     ShapeRef tileOffsets, ShapeRef tileShape);
 
 //
 // Resource kind value getter
@@ -226,6 +275,23 @@ template <VPU::MemoryKind KIND>
 std::optional<VPU::MemoryKind> getMemKind(StringRef) {
     return KIND;
 }
+
+std::optional<SmallVector<Shape>> splitSegmentedShape(ArrayRef<int64_t> shape, ArrayRef<int64_t> tilingScheme,
+                                                      const int64_t numClusters, const int64_t axis,
+                                                      std::optional<ArrayRef<int64_t>> alignment,
+                                                      bool uniformDistributedSegments = false);
+
+// This is a temporary enum containing deprecated values of VPU::ArchKind, which are used only as a bridge for old
+// parameters of lit-tests.
+enum class DeprecatedArchKind : uint64_t {
+    UNKNOWN = 0,
+    VPUX30XX = 1,
+    VPUX37XX = 3,
+    VPUX40XX = 4,
+};
+
+std::optional<DeprecatedArchKind> symbolizeDeprecatedArchKind(StringRef);
+ArchKind mapDeprecatedArchKind(DeprecatedArchKind);
 
 }  // namespace VPU
 }  // namespace vpux

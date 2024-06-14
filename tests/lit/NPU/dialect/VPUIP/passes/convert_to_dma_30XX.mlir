@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -227,7 +227,7 @@ func.func @ConvertPerAxisTileToDMA(%arg0: memref<1x1x1x1xf16, #NHWC, @DDR>)
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder_fp16.cpp", VPU.kernel_entry = "reorder_fp16"}
+    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder.cpp", VPU.kernel_entry = "reorder"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
@@ -236,7 +236,7 @@ func.func @CannotConvertToPermuteDMA(%arg0: memref<1x16x4x76xf16, #NWHC, @DDR>)
     %0 = memref.alloc() : memref<1x16x4x76xf16, #NWHC, [@CMX_NN, 0]>
     %1 = VPUIP.Copy inputs(%arg0 : memref<1x16x4x76xf16, #NWHC, @DDR>) outputs(%0 : memref<1x16x4x76xf16, #NWHC, [@CMX_NN, 0]>) -> memref<1x16x4x76xf16, #NWHC, [@CMX_NN, 0]>
     %2 = memref.alloc() : memref<1x16x4x76xf16, [@CMX_NN, 0]>
-    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MemPermute inputs(%1 as %arg2: memref<1x16x4x76xf16, #NWHC, [@CMX_NN, 0]>) outputs(%2 as %arg3: memref<1x16x4x76xf16, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x4x76xf16, [@CMX_NN, 0]>{
+    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute inputs(%1 as %arg2: memref<1x16x4x76xf16, #NWHC, [@CMX_NN, 0]>) outputs(%2 as %arg3: memref<1x16x4x76xf16, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x4x76xf16, [@CMX_NN, 0]>{
        VPUIP.SW.Kernel.run {attrs = [[2, 1, 0, 3]]}(%arg2, %arg3) : memref<1x16x4x76xf16, #NWHC, [@CMX_NN, 0]>, memref<1x16x4x76xf16, [@CMX_NN, 0]>
     }
     %3 = memref.alloc() : memref<1x16x4x76xf16, @DDR>
@@ -246,7 +246,7 @@ func.func @CannotConvertToPermuteDMA(%arg0: memref<1x16x4x76xf16, #NWHC, @DDR>)
     // CHECK:   [[VAR0:%.*]] = memref.alloc() : memref<1x16x4x76xf16, #NWHC, [@CMX_NN, 0]>
     // CHECK:   [[VAR1:%.*]] = VPUIP.Copy inputs(%arg0 : memref<1x16x4x76xf16, #NWHC, @DDR>) outputs([[VAR0]] : memref<1x16x4x76xf16, #NWHC, [@CMX_NN, 0]>) -> memref<1x16x4x76xf16, #NWHC, [@CMX_NN, 0]>
     // CHECK:   [[VAR2:%.*]] = memref.alloc() : memref<1x16x4x76xf16, [@CMX_NN, 0]>
-    // CHECK:   [[RESULT:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MemPermute inputs([[VAR1]] as %arg1: memref<1x16x4x76xf16, #NWHC, [@CMX_NN, 0]>) outputs([[VAR2]] as %arg2: memref<1x16x4x76xf16, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x4x76xf16, [@CMX_NN, 0]>{
+    // CHECK:   [[RESULT:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute inputs([[VAR1]] as %arg1: memref<1x16x4x76xf16, #NWHC, [@CMX_NN, 0]>) outputs([[VAR2]] as %arg2: memref<1x16x4x76xf16, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x4x76xf16, [@CMX_NN, 0]>{
     // CHECK:     VPUIP.SW.Kernel.run {attrs = [
     // CHECK:     [2, 1, 0, 3]
     // CHECK:     ]}(%arg1, %arg2) : memref<1x16x4x76xf16, #NWHC, [@CMX_NN, 0]>, memref<1x16x4x76xf16, [@CMX_NN, 0]>

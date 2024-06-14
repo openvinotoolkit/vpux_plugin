@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -31,8 +31,8 @@ module @VPU.SW {
     // `memref` will be translated to `MemRefData`, while raw scalars will be translated as is.
     func.func private @builtin_hswish(%input : memref<*xf16>, %output : memref<*xf16>)
         attributes {
-            VPU.kernel_code = "hswish_fp16.cpp",
-            VPU.kernel_entry = "hswish_fp16"
+            VPU.kernel_code = "activation_hswish.cpp",
+            VPU.kernel_entry = "activation_hswish"
         }
 
     // management kernel definition
@@ -48,7 +48,7 @@ func.func @main(%in0: memref<1x1x1x1000xf16>, %in1: memref<1x1x1x1000xf16>) -> m
     %out_tile0_cmx = VPURT.DeclareBuffer <CMX_NN> [0] <2000> -> memref<1x1x1x1000xf16, [@CMX_NN, 0]>
 
     VPURT.Task {
-        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
                     @VPU.SW::@builtin_hswish
                     inputs(%in_tile0_cmx as %arg0: memref<1x1x1x1000xf16, [@CMX_NN, 0]>)
                     outputs(%out_tile0_cmx as %arg1: memref<1x1x1x1000xf16, [@CMX_NN, 0]>)
@@ -67,7 +67,7 @@ func.func @main(%in0: memref<1x1x1x1000xf16>, %in1: memref<1x1x1x1000xf16>) -> m
     %out_tile1_cmx = VPURT.DeclareBuffer <CMX_NN> [0] <4000> -> memref<1x1x1x1000xf16, [@CMX_NN, 0]>
 
     VPURT.Task {
-        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
                     @VPU.SW::@builtin_hswish
                     inputs(%in_tile1_cmx as %arg0: memref<1x1x1x1000xf16, [@CMX_NN, 0]>)
                     outputs(%out_tile1_cmx as %arg1: memref<1x1x1x1000xf16, [@CMX_NN, 0]>)
@@ -86,7 +86,7 @@ func.func @main(%in0: memref<1x1x1x1000xf16>, %in1: memref<1x1x1x1000xf16>) -> m
     %out_tile2_cmx = VPURT.DeclareBuffer <CMX_NN> [0] <8000> -> memref<1x1x1x1000xf16, [@CMX_NN, 0]>
 
     VPURT.Task {
-        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
                     @VPU.SW::@builtin_hswish
                     inputs(%in_tile2_cmx as %arg0: memref<1x1x1x1000xf16, [@CMX_NN, 0]>)
                     outputs(%out_tile2_cmx as %arg1: memref<1x1x1x1000xf16, [@CMX_NN, 0]>)

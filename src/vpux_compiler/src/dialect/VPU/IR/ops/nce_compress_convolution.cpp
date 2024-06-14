@@ -15,7 +15,7 @@
 #include "vpux/compiler/utils/empty_node.hpp"
 #include "vpux/compiler/utils/error.hpp"
 
-#include <openvino/core/validation_util.hpp>
+#include <openvino/op/convolution.hpp>
 
 using namespace vpux;
 
@@ -90,13 +90,19 @@ mlir::LogicalResult vpux::VPU::NCECompressConvolutionOp::verify() {
     const auto filterOrder = DimsOrder::fromValue(getFilter());
     const auto outputOrder = DimsOrder::fromValue(getOutput());
 
+    const auto filterShape = Shape(parseIntArrayAttr<int64_t>(getRawFilterShape()));
+    VPUX_THROW_UNLESS(filterShape[Dims4D::Filter::IC] <= vpux::VPU::NCEInvariant::VPU_COMPRESSED_INPUT_CHANNEL_NUM,
+                      "Filter input channels : [{0}] must be less than [{1}]", filterShape[Dims4D::Filter::IC],
+                      vpux::VPU::NCEInvariant::VPU_COMPRESSED_INPUT_CHANNEL_NUM);
+
     VPUX_THROW_UNLESS(inputOrder == DimsOrder::NHWC, "[{0}] Unsupported input layout [{1}], expected NHWC", getLoc(),
                       inputOrder);
     if (filterOrder != DimsOrder::OYXI) {
         return errorAt(op, "Unsupported 'filter' layout '{0}', expected OYXI", filterOrder);
     }
     const std::set<VPU::ArchKind> compatibleTargets = {
-            VPU::ArchKind::VPUX37XX,
+            VPU::ArchKind::NPU37XX,
+            VPU::ArchKind::NPU40XX,
     };
     if (compatibleTargets.count(arch) <= 0 && outputOrder != DimsOrder::NHWC) {
         return errorAt(op, "Unsupported 'output' layout '{0}', expected NHWC", outputOrder);
@@ -140,11 +146,14 @@ mlir::LogicalResult vpux::VPU::NCECompressConvolutionOp::inferReturnTypes(
     const auto dataPaddingBelow = ov::CoordinateDiff({padTop, padLeft});
     const auto dataPaddingAbove = ov::CoordinateDiff({padBottom, padRight});
 
-    const auto outputShapeNG = ov::infer_convolution_forward(
-            EmptyNode::instance(), ov::Shape(inShape.begin(), inShape.end()),
-            ov::Strides(windowStrides.size(), 1),  // dummy data dilations
-            dataPaddingBelow, dataPaddingAbove, ov::Shape(filterShape.begin(), filterShape.end()),
-            ov::Strides(windowStrides.begin(), windowStrides.end()), windowDilations);
+    const auto conv = ov::op::v1::Convolution(
+            std::make_shared<ov::op::v0::Parameter>(ov::element::i32, ov::Shape(inShape.begin(), inShape.end())),
+            std::make_shared<ov::op::v0::Parameter>(ov::element::i32,
+                                                    ov::Shape(filterShape.begin(), filterShape.end())),
+            ov::Strides(windowStrides.begin(), windowStrides.end()), dataPaddingBelow, dataPaddingAbove,
+            ov::Strides(windowDilations.begin(), windowDilations.end()));
+
+    const auto& outputShapeNG = conv.get_output_partial_shape(0);
 
     const auto outputShape = to_small_vector(outputShapeNG.get_shape() | transformed([](size_t val) {
                                                  return checked_cast<int64_t>(val);
@@ -224,18 +233,18 @@ SmallVector<int64_t> vpux::VPU::NCECompressConvolutionOp::getStridesVal() {
 // ClusteredOpInterface
 //
 
-bool vpux::VPU::NCECompressConvolutionOp::checkStrategyCompatibility(VPU::MultiClusterStrategy strategy) {
+bool vpux::VPU::NCECompressConvolutionOp::checkStrategyCompatibility(VPU::MultiClusterStrategy strategy, size_t) {
     return strategy == VPU::MultiClusterStrategy::SplitOverHeightOverlapped ||
            strategy == VPU::MultiClusterStrategy::Clustering;
 }
 
 vpux::VPU::DistributedTensorAttr vpux::VPU::NCECompressConvolutionOp::getExplicitDistributedTensorAttr(
         vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, mlir::ArrayAttr numTiles,
-        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::ArrayAttr kernel, vpux::VPU::PaddingAttr pad,
-        mlir::ArrayAttr stride, mlir::UnitAttr uniformDistributedSegments) {
+        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::UnitAttr uniformDistributedSegments,
+        const vpux::VPU::OverlapDistributionParams& overlapParams) {
     return VPU::getNCEExplicitDistributedTensorAttr(mlir::dyn_cast<VPU::NCEOpInterface>(getOperation()), shape,
-                                                    distributionMode, numTiles, numClusters, alignment, kernel, pad,
-                                                    stride, uniformDistributedSegments);
+                                                    distributionMode, numTiles, numClusters, alignment,
+                                                    uniformDistributedSegments, overlapParams);
 }
 
 // Each cluster should compute at least one output line. Therefore in order for a layer to be SOH
@@ -340,9 +349,10 @@ vpux::VPU::SparsitySupport vpux::VPU::NCECompressConvolutionOp::sparsitySupport(
     }
 
     switch (arch) {
-    case VPU::ArchKind::VPUX30XX:
+    case VPU::ArchKind::NPU30XX:
         VPUX_THROW("NCECompressConvolutionOp is not supported for {0}", arch);
-    case VPU::ArchKind::VPUX37XX:
+    case VPU::ArchKind::NPU37XX:
+    case VPU::ArchKind::NPU40XX:
         return VPU::SparsitySupport::SPARSE_OUTPUTS & excludeMode;
     default:
         VPUX_THROW("Unknown sparsity support mode for {0}", arch);

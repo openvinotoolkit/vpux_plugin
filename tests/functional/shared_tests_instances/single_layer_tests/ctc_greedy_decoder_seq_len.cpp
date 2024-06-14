@@ -1,14 +1,18 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022-2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include "single_op_tests/ctc_greedy_decoder_seq_len.hpp"
+
+#include <random>
 #include <vector>
+
 #include "vpu_ov2_layer_test.hpp"
 
-using namespace ov::test;
-namespace LayerTestsDefinitions {
+using namespace ov::test::utils;
+namespace ov {
+namespace test {
 
 // OpenVino CTCGreedyDecoderSeqLenLayerTest from OpenVino test infrastructire doesn't allow to create CTCDecoderSeqLen
 // layer without blankIndex input so we have to create our own test class which allows to do so
@@ -119,26 +123,33 @@ class CTCGreedyDecoderSeqLenLayerTestCommon :
 
 class CTCGreedyDecoderSeqLenLayerTest_NPU3700 : public CTCGreedyDecoderSeqLenLayerTestCommon {};
 class CTCGreedyDecoderSeqLenLayerTest_NPU3720 : public CTCGreedyDecoderSeqLenLayerTestCommon {};
+class CTCGreedyDecoderSeqLenLayerTest_NPU4000 : public CTCGreedyDecoderSeqLenLayerTestCommon {};
 
 TEST_P(CTCGreedyDecoderSeqLenLayerTest_NPU3700, HW) {
     setSkipInferenceCallback([this](std::stringstream& skip) {
         skip << "differs from the reference";
     });
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3700);
+    run(Platform::NPU3700);
 }
 
 TEST_P(CTCGreedyDecoderSeqLenLayerTest_NPU3720, HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
 }
 
-}  // namespace LayerTestsDefinitions
+TEST_P(CTCGreedyDecoderSeqLenLayerTest_NPU4000, HW) {
+    setDefaultHardwareMode();
+    run(Platform::NPU4000);
+}
 
-using namespace LayerTestsDefinitions;
+}  // namespace test
+}  // namespace ov
 
-const std::vector<ov::element::Type> probPrecisions = {ov::element::Type_t::f16};
-const std::vector<ov::element::Type> idxPrecisions = {ov::element::Type_t::i32};
+using namespace ov::test;
+
+const std::vector<ov::element::Type> probPrecisions = {ov::element::f16};
+const std::vector<ov::element::Type> idxPrecisions = {ov::element::i32};
 
 std::vector<bool> mergeRepeated{true, false};
 
@@ -151,7 +162,7 @@ const auto blankIndexes = std::vector<std::optional<int>>{0, 50, std::nullopt};
 const auto params = testing::Combine(::testing::ValuesIn(inputShape), ::testing::ValuesIn(sequenceLengths),
                                      ::testing::ValuesIn(probPrecisions), ::testing::ValuesIn(idxPrecisions),
                                      ::testing::ValuesIn(blankIndexes), ::testing::ValuesIn(mergeRepeated),
-                                     ::testing::Values(utils::DEVICE_NPU));
+                                     ::testing::Values(DEVICE_NPU));
 
 // NPU3700
 INSTANTIATE_TEST_SUITE_P(smoke_CTCGreedyDecoderSeqLenTests, CTCGreedyDecoderSeqLenLayerTest_NPU3700, params,
@@ -159,4 +170,8 @@ INSTANTIATE_TEST_SUITE_P(smoke_CTCGreedyDecoderSeqLenTests, CTCGreedyDecoderSeqL
 
 // NPU3720
 INSTANTIATE_TEST_SUITE_P(smoke_CTCGreedyDecoderSeqLenTests, CTCGreedyDecoderSeqLenLayerTest_NPU3720, params,
+                         NPUCTCGreedyDecoderSeqLenLayerTest::getTestCaseName);
+
+// NPU4000
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_CTCGreedyDecoderSeqLenTest, CTCGreedyDecoderSeqLenLayerTest_NPU4000, params,
                          NPUCTCGreedyDecoderSeqLenLayerTest::getTestCaseName);

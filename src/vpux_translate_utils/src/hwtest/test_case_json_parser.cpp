@@ -1,14 +1,16 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <vpux/utils/core/error.hpp>
 
 #include <llvm/Support/FormatVariadic.h>
 #include <llvm/Support/Regex.h>
+#include <mlir/IR/Location.h>
 
 #include "vpux/hwtest/test_case_json_parser.hpp"
 
@@ -192,6 +194,9 @@ nb::ActivationType nb::to_activation_type(StringRef str) {
     if (isEqual(str, "PopulateWeightTable")) {
         return nb::ActivationType::PopulateWeightTable;
     }
+    if (isEqual(str, "Rsqrt")) {
+        return nb::ActivationType::Rsqrt;
+    }
     return nb::ActivationType::Unknown;
 }
 
@@ -217,6 +222,8 @@ std::string nb::to_string(nb::ActivationType activationType) {
         return "round_trip_b8h8_to_fp16";
     case ActivationType::PopulateWeightTable:
         return "PopulateWeightTable";
+    case ActivationType::Rsqrt:
+        return "Rsqrt";
     default:
         return "Unknown";
     }
@@ -250,8 +257,12 @@ std::string nb::to_string(CaseType case_) {
         return "DifferentClustersDPU";
     case CaseType::MultiClustersDPU:
         return "MultiClustersDPU";
+    case CaseType::HaloMultiClustering:
+        return "HaloMultiClustering";
     case CaseType::ActShave:
         return "ActShave";
+    case CaseType::M2iTask:
+        return "M2iTask";
     case CaseType::ReadAfterWriteDPUDMA:
         return "ReadAfterWriteDPUDMA";
     case CaseType::ReadAfterWriteDMADPU:
@@ -290,6 +301,8 @@ nb::CaseType nb::to_case(StringRef str) {
         return CaseType::DMA;
     if (isEqual(str, "DMAcompressAct"))
         return CaseType::DMAcompressAct;
+    if (isEqual(str, "GatherDMA"))
+        return CaseType::GatherDMA;
     if (isEqual(str, "ZMajorConvolution"))
         return CaseType::ZMajorConvolution;
     if (isEqual(str, "SparseZMajorConvolution"))
@@ -312,8 +325,12 @@ nb::CaseType nb::to_case(StringRef str) {
         return CaseType::DifferentClustersDPU;
     if (isEqual(str, "MultiClustersDPU"))
         return CaseType::MultiClustersDPU;
+    if (isEqual(str, "HaloMultiClustering"))
+        return CaseType::HaloMultiClustering;
     if (isEqual(str, "ActShave"))
         return CaseType::ActShave;
+    if (isEqual(str, "M2iTask"))
+        return CaseType::M2iTask;
     if (isEqual(str, "ReadAfterWriteDPUDMA"))
         return CaseType::ReadAfterWriteDPUDMA;
     if (isEqual(str, "ReadAfterWriteDMADPU"))
@@ -347,23 +364,35 @@ nb::CaseType nb::to_case(StringRef str) {
     return CaseType::Unknown;
 };
 
-std::string nb::to_string(nb::CompilerBackend compilerBackend) {
-    switch (compilerBackend) {
-    case nb::CompilerBackend::Flatbuffer:
-        return "Flatbuffer";
-    case nb::CompilerBackend::ELF:
-        return "ELF";
-    default:
-        return "unknown";
-    }
+nb::M2iFmt nb::to_m2i_fmt(StringRef str) {
+    if (isEqual(str, "SP_NV12_8"))
+        return nb::M2iFmt::SP_NV12_8;
+    if (isEqual(str, "PL_YUV420_8"))
+        return nb::M2iFmt::PL_YUV420_8;
+    if (isEqual(str, "IL_RGB888"))
+        return nb::M2iFmt::IL_RGB888;
+    if (isEqual(str, "IL_BGR888"))
+        return nb::M2iFmt::IL_BGR888;
+    if (isEqual(str, "PL_RGB24"))
+        return nb::M2iFmt::PL_RGB24;
+    if (isEqual(str, "PL_FP16_RGB"))
+        return nb::M2iFmt::PL_FP16_RGB;
+    return M2iFmt::Unknown;
 }
 
-std::optional<nb::CompilerBackend> nb::to_compiler_backend(StringRef str) {
-    if (isEqual(str, "Flatbuffer"))
-        return nb::CompilerBackend::Flatbuffer;
-    if (isEqual(str, "ELF"))
-        return nb::CompilerBackend::ELF;
-    return {};
+nb::M2iInterp nb::to_m2i_interp(StringRef str) {
+    if (isEqual(str, "NEAREST"))
+        return nb::M2iInterp::NEAREST;
+    if (isEqual(str, "BILINEAR"))
+        return nb::M2iInterp::BILINEAR;
+    return nb::M2iInterp::UNKNOWN;
+}
+
+std::string nb::to_string(nb::CompilerBackend compilerBackend) {
+    if (compilerBackend == nb::CompilerBackend::ELF)
+        return "ELF";
+    else
+        return "unknown";
 }
 
 std::string nb::to_string(nb::SegmentationType segmentationType) {
@@ -454,6 +483,47 @@ nb::MultiClusterDPUParams nb::TestCaseJsonDescriptor::loadMultiClusterDPUParams(
 
     params.segmentation = segmentOptions.at(segmentation.value().str());
     params.broadcast = taskParams->getBoolean("broadcast").value();
+
+    return params;
+}
+
+nb::HaloParams nb::TestCaseJsonDescriptor::loadHaloTaskParams(llvm::json::Object* jsonObj) {
+    nb::HaloParams params;
+    auto* taskParams = jsonObj->getObject("HaloParams");
+
+    const auto* jsonTaskClusters = taskParams->getArray("task_clusters");
+    VPUX_THROW_UNLESS(jsonTaskClusters != nullptr, "loadHaloTaskParams: cannot find task_clusters config param");
+
+    params.taskClusters.resize(jsonTaskClusters->size());
+    for (size_t i = 0; i < jsonTaskClusters->size(); i++) {
+        params.taskClusters[i] = (*jsonTaskClusters)[i].getAsInteger().value();
+    }
+
+    const std::unordered_map<llvm::StringRef, SegmentationType> segmentOptions = {{"SOK", SegmentationType::SOK},
+                                                                                  {"SOH", SegmentationType::SOH},
+                                                                                  {"SOW", SegmentationType::SOW},
+                                                                                  {"SOHW", SegmentationType::SOHW},
+                                                                                  {"SOHK", SegmentationType::SOHK}};
+
+    auto segmentation = taskParams->getString("segmentation");
+    VPUX_THROW_UNLESS(segmentation.has_value() && segmentOptions.find(segmentation.value()) != segmentOptions.end(),
+                      "loadHaloTaskParams: failed to get valid segmentation type");
+
+    params.segmentation = segmentOptions.at(segmentation.value().str());
+
+    if (params.segmentation == SegmentationType::SOHW || params.segmentation == SegmentationType::SOHK) {
+        const auto* jsonClustersPerDim = taskParams->getArray("clusters_per_dim");
+        VPUX_THROW_UNLESS(jsonClustersPerDim != nullptr,
+                          "loadHaloTaskParams: cannot find clusters_per_dim config param");
+
+        params.clustersPerDim.resize(jsonClustersPerDim->size());
+        for (size_t i = 0; i < jsonClustersPerDim->size(); i++) {
+            params.clustersPerDim[i] = (*jsonClustersPerDim)[i].getAsInteger().value();
+        }
+    }
+
+    params.heightHaloSize = taskParams->getInteger("spatial_halo_h").value();
+    params.widthHaloSize = taskParams->getInteger("spatial_halo_w").value();
 
     return params;
 }
@@ -602,6 +672,96 @@ nb::DMAparams nb::TestCaseJsonDescriptor::loadDMAParams(llvm::json::Object* json
     auto dmaEngine = params->getInteger("dma_engine");
     VPUX_THROW_UNLESS(dmaEngine.has_value(), "DMA engine doesn't provided");
     result.engine = dmaEngine.value();
+
+    if (architecture_ == vpux::VPU::ArchKind::NPU40XX) {
+        auto actCompressDenseMode = params->getBoolean("actCompressDenseMode");
+        VPUX_THROW_UNLESS(actCompressDenseMode.has_value(), "Activation Compression wasn't provided");
+        result.actCompressDenseMode = actCompressDenseMode.value();
+        auto indicesMemLoc = params->getString("indicesMemoryLocation");
+        result.indicesLocation =
+                indicesMemLoc.has_value() ? to_memory_location(dstMemLoc.value()) : MemoryLocation::Unknown;
+        auto convertDatatypeEn = params->getBoolean("convert_datatype_en");
+        result.doConvert = convertDatatypeEn.has_value() ? convertDatatypeEn.value() : false;
+        auto testMemSideCache = params->getBoolean("memory_side_cache");
+        result.testMemSideCache = testMemSideCache.has_value() ? testMemSideCache.value() : false;
+        auto cacheTrashing = params->getBoolean("cache_trashing");
+        result.cacheTrashing = cacheTrashing.has_value() ? cacheTrashing.value() : false;
+        auto cacheEnabled = params->getBoolean("cache_enable");
+        result.cacheEnabled = cacheEnabled.has_value() ? cacheEnabled.value() : false;
+    }
+
+    return result;
+}
+
+nb::GatherIndices nb::TestCaseJsonDescriptor::loadGatherIndices(llvm::json::Object* jsonObj) {
+    nb::GatherIndices result;
+
+    auto* params = jsonObj->getObject("indices_input");
+    if (!params) {
+        VPUX_THROW("Indices input is not provided");
+    }
+
+    auto* shape = params->getArray("shape");
+    VPUX_THROW_UNLESS(shape != nullptr, "loadGatherIndices: missing shape");
+    auto nonOneDimension{0};
+    for (size_t i = 0; i < shape->size(); i++) {
+        result.shape[i] = (*shape)[i].getAsInteger().value();
+        if (result.shape[i] > 1) {
+            ++nonOneDimension;
+        }
+    }
+    result.dtype = to_dtype(params->getString("dtype").value().str());
+    VPUX_THROW_WHEN(nonOneDimension > 1, "loadGatherIndices: Incorrect shape, only 1 dimension can be larger than 1");
+    return result;
+}
+
+nb::M2iLayer nb::TestCaseJsonDescriptor::loadM2iLayer(llvm::json::Object* jsonObj) {
+    nb::M2iLayer result;
+
+    auto* params = jsonObj->getObject("m2i_params");
+    if (!params) {
+        VPUX_THROW("M2I params not provided");
+    }
+    const auto inputFmt = params->getString("input_fmt");
+    const auto outputFmt = params->getString("output_fmt");
+    const auto cscFlag = params->getBoolean("do_csc");
+    const auto normFlag = params->getBoolean("do_norm");
+    const auto tilingFlag = params->getBoolean("do_tiling");
+    const auto interp = params->getString("interp");
+
+    VPUX_THROW_UNLESS(inputFmt.has_value(), "input_fmt not provided !");
+    VPUX_THROW_UNLESS(outputFmt.has_value(), "output_fmt not provided !");
+    VPUX_THROW_UNLESS(cscFlag.has_value(), "do_csc not provided !");
+    VPUX_THROW_UNLESS(normFlag.has_value(), "do_norm not provided !");
+    VPUX_THROW_UNLESS(tilingFlag.has_value(), "do_tiling not provided !");
+    VPUX_THROW_UNLESS(interp.has_value(), "interp not provided !");
+
+    result.iFmt = to_m2i_fmt(inputFmt.value());  // str to enum
+    result.oFmt = to_m2i_fmt(outputFmt.value());
+    result.doCsc = cscFlag.value();
+    result.doNorm = normFlag.value();
+    result.doTiling = tilingFlag.value();
+    result.interp = to_m2i_interp(interp.value());
+
+    // Optional params for RESIZE and NORM
+    const auto* sizesVec = params->getArray("output_sizes");
+    const auto* coefsVec = params->getArray("norm_coefs");
+    VPUX_THROW_UNLESS(sizesVec != nullptr, "loadM2iLayer: missing sizesVec");
+    VPUX_THROW_UNLESS(coefsVec != nullptr, "loadM2iLayer: missing coefsVec");
+
+    for (size_t i = 0; i < sizesVec->size(); i++) {
+        auto elem = (*sizesVec)[i].getAsInteger();
+        if (elem.has_value()) {
+            result.outSizes.push_back(static_cast<int>(elem.value()));
+        }
+    }
+
+    for (size_t i = 0; i < coefsVec->size(); i++) {
+        auto elem = (*coefsVec)[i].getAsNumber();  // double
+        if (elem.has_value()) {
+            result.normCoefs.push_back(static_cast<float>(elem.value()));
+        }
+    }
 
     return result;
 }
@@ -805,9 +965,10 @@ nb::ProfilingParams nb::TestCaseJsonDescriptor::loadProfilingParams(llvm::json::
     bool dpuProfilingEnabled = jsonObj->getBoolean("dpu_profiling").value_or(false);
     bool dmaProfilingEnabled = jsonObj->getBoolean("dma_profiling").value_or(false);
     bool swProfilingEnabled = jsonObj->getBoolean("sw_profiling").value_or(false);
+    bool m2iProfilingEnabled = jsonObj->getBoolean("m2i_profiling").value_or(false);
     bool workpointEnabled = jsonObj->getBoolean("workpoint_profiling").value_or(false);
 
-    return {dpuProfilingEnabled, dmaProfilingEnabled, swProfilingEnabled, workpointEnabled};
+    return {dpuProfilingEnabled, dmaProfilingEnabled, swProfilingEnabled, m2iProfilingEnabled, workpointEnabled};
 }
 
 nb::SETableParams nb::TestCaseJsonDescriptor::loadSETableParams(llvm::json::Object* jsonObj) {
@@ -849,7 +1010,9 @@ void nb::TestCaseJsonDescriptor::parse(llvm::json::Object json_obj) {
     if (!architecture) {
         throw std::runtime_error{"Failed to get architecture"};
     }
+
     const auto architectureSymbol = vpux::VPU::symbolizeArchKind(architecture.value());
+
     if (!architectureSymbol.has_value()) {
         throw std::runtime_error{"Failed to parse architecture"};
     }
@@ -859,11 +1022,6 @@ void nb::TestCaseJsonDescriptor::parse(llvm::json::Object json_obj) {
     if (!compilerBackendStr) {
         throw std::runtime_error{"Failed to get compiler_backend"};
     }
-    const auto compilerBackendSymbol = nb::to_compiler_backend(compilerBackendStr.value());
-    if (!compilerBackendSymbol.has_value()) {
-        throw std::runtime_error{"Failed to parse compiler_backend"};
-    }
-    compilerBackend_ = compilerBackendSymbol.value();
 
     auto case_type = json_obj.getString("case_type");
     if (!case_type) {
@@ -879,6 +1037,9 @@ void nb::TestCaseJsonDescriptor::parse(llvm::json::Object json_obj) {
     // Load conv json attribute values. Similar implementation for ALL HW layers (DW, group conv, Av/Max pooling and
     // eltwise needed).
     switch (caseType_) {
+    case CaseType::GatherDMA:
+        gatherIndices_ = loadGatherIndices(&json_obj);
+        [[fallthrough]];
     case CaseType::DMAcompressAct:
     case CaseType::DMA: {
         DMAparams_ = loadDMAParams(&json_obj);
@@ -964,6 +1125,13 @@ void nb::TestCaseJsonDescriptor::parse(llvm::json::Object json_obj) {
         odu_permutation_ = to_odu_permutation(json_obj.getString("output_order").value());
         break;
     }
+    case CaseType::HaloMultiClustering: {
+        wtLayer_ = loadWeightLayer(&json_obj);
+        convLayer_ = loadConvLayer(&json_obj);
+        haloParams_ = loadHaloTaskParams(&json_obj);
+        profilingParams_ = loadProfilingParams(&json_obj);
+        break;
+    }
     case CaseType::EltwiseDense: {
         wtLayer_ = loadWeightLayer(&json_obj);
         eltwiseLayer_ = loadEltwiseLayer(&json_obj);
@@ -1008,6 +1176,11 @@ void nb::TestCaseJsonDescriptor::parse(llvm::json::Object json_obj) {
         break;
     }
     case CaseType::DualChannelDMA: {
+        break;
+    }
+    case CaseType::M2iTask: {
+        m2iLayer_ = loadM2iLayer(&json_obj);
+        profilingParams_ = loadProfilingParams(&json_obj);
         break;
     }
     case CaseType::StorageElementTableDPU: {

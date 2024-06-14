@@ -15,7 +15,8 @@ add_mlir_library(${TARGET_NAME}
         npu_llvm_utils
         npu_ov_utils
         flatbuffers
-        npu_elf)
+        npu_elf
+        npu_compiler_dialect_vpuip)
 add_dependencies(${TARGET_NAME} MLIRVPUXIncGenList)
 
 target_include_directories(${TARGET_NAME}
@@ -25,9 +26,13 @@ target_include_directories(${TARGET_NAME}
 target_include_directories(${TARGET_NAME}
     PRIVATE
         ${VPU_COMPILER_SRC_INCLUDE_DIR})
+
+target_include_directories(${TARGET_NAME}
+    PRIVATE
+        $<TARGET_PROPERTY:openvino::npu_al,INTERFACE_INCLUDE_DIRECTORIES>)
+
 link_system_libraries(${TARGET_NAME}
     PUBLIC
         npu_ngraph_transformations)
-add_src_target($<BUILD_INTERFACE:${TARGET_NAME}>)
-vpux_enable_clang_format(${TARGET_NAME})
+add_src_target(${TARGET_NAME})
 enable_warnings_as_errors(${TARGET_NAME} WIN_STRICT)

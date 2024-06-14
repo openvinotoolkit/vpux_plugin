@@ -9,11 +9,11 @@
 
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/passes.hpp"
-#include "vpux/compiler/dialect/VPUIP/utils.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/task.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/transforms/passes.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/utils/types.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
@@ -147,6 +147,8 @@ void buildDWConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp modu
     // barrier config
     auto barrier0 = funcbuilder.create<VPURT::ConfigureBarrierOp>(loc, 0);
     auto barrier1 = funcbuilder.create<VPURT::ConfigureBarrierOp>(loc, 1);
+    // finalBarrier passed as production barrier to last DMA task
+    auto barrier2 = funcbuilder.create<VPURT::ConfigureBarrierOp>(loc, 2);
 
     // DMAs
     vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(),
@@ -250,7 +252,7 @@ void buildDWConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp modu
     auto nceTask = vpux::VPURT::wrapIntoTaskOp<VPUIP::NCEClusterTaskOp>(
             funcbuilder, mlir::ValueRange(barrier0.getBarrier()), mlir::ValueRange(barrier1.getBarrier()), loc,
             outputcmx_type, inputcmx.getOperation()->getResult(0), wtData_cmx.getOperation()->getResult(0),
-            wtTbl_cmx.getOperation()->getResult(0), /*instruction_table_list*/ nullptr,
+            wtTbl_cmx.getOperation()->getResult(0), /*instruction_table_list*/ nullptr, /*spr_lookup_table*/ nullptr,
             actWindow_cmx.getOperation()->getResult(0), parent_inputcmx.getOperation()->getResult(0),
             parent_outputcmx.getOperation()->getResult(0), outputcmx.getOperation()->getResult(0),
             VPUIP::NCETaskType::DWCONV, filtersize, strides, kernel_padding, actChannelLength, /*is_continued*/ nullptr,
@@ -283,16 +285,20 @@ void buildDWConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp modu
     nceTask.addDPUTask(funcbuilder, start, outEnd, start, inEnd, pad, VPU::MPEMode::CUBOID_8x16);
 
     vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(barrier1.getBarrier()),
-                                                mlir::ValueRange(), loc, outputcmx.getOperation()->getResult(0),
-                                                funcoutput, 0);
+                                                mlir::ValueRange(barrier2.getBarrier()), loc,
+                                                outputcmx.getOperation()->getResult(0), funcoutput, 0);
 
     // TODO : return empty as func does not return anything
     /* auto returnOp = */ funcbuilder.create<mlir::func::ReturnOp>(builder.getUnknownLoc(), funcoutput);
 
     // set runtime resources
+    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
+
     mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    pm.addPass(VPU::createInitCompilerPass(arch, VPU::CompilationMode::DefaultHW, /*numOfDPUGroups=*/1, std::nullopt,
-                                           log));
+    auto initCompilerOptions = VPU::InitCompilerOptions(arch, VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.numberOfDPUGroups = 1;
+    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
 
     VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");
 

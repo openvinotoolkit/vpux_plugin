@@ -10,21 +10,6 @@
 
 namespace vpux {
 namespace VPU {
-struct OverlapDistributionParams {
-    OverlapDistributionParams(mlir::ArrayAttr kernel, VPU::PaddingAttr pads, mlir::ArrayAttr stride,
-                              mlir::UnitAttr equalComputeAndMemoryView = nullptr)
-            : kernel(kernel), pads(pads), stride(stride), equalComputeAndMemoryView(equalComputeAndMemoryView){};
-
-    OverlapDistributionParams(mlir::ArrayAttr memoryShapes, mlir::ArrayAttr memoryOffsets)
-            : memoryShapes(memoryShapes), memoryOffsets(memoryOffsets){};
-
-    mlir::ArrayAttr kernel = nullptr;
-    VPU::PaddingAttr pads = nullptr;
-    mlir::ArrayAttr stride = nullptr;
-    mlir::UnitAttr equalComputeAndMemoryView = nullptr;
-    mlir::ArrayAttr memoryShapes = nullptr;
-    mlir::ArrayAttr memoryOffsets = nullptr;
-};
 
 // Looks over the ops in opSubgraph and selects those that implement NCEOpInterface and are SOH-compatible. From that
 // subset, picks the Overlapped params with the largest kernel. Overlapped params are described by combinations of
@@ -51,14 +36,13 @@ OverlapDistributionParams getOverlappedDistributionParameters(mlir::MLIRContext*
 //
 // Resulting OverlappedParams: cluster 0 = [0, 0, 0, 0] -> [1, 15, 17, 17], cluster 1 = [0, 0, 14, 0] -> [1, 15, 27, 17]
 // OverlappedParams are described by explicit per cluster memory shapes and offsets.
-OverlapDistributionParams getOverlappedDistributionParameters(mlir::MLIRContext* ctx,
-                                                              VPU::ClusteredOpInterface producer,
-                                                              ArrayRef<VPU::ClusteredOpInterface> consumerSubgraph,
-                                                              const int64_t numClusters, ArrayRef<int64_t> numTiles,
-                                                              mlir::UnitAttr uniformDistributedSegments);
+OverlapDistributionParams getOverlappedDistributionParameters(
+        mlir::MLIRContext* ctx, NDTypeInterface tensorType, ArrayRef<VPU::ClusteredOpInterface> consumerSubgraph,
+        const int64_t numClusters, ArrayRef<int64_t> numTiles, mlir::UnitAttr uniformDistributedSegments,
+        const vpux::TileInfo& tileInfo = vpux::TileInfo(ShapeRef()));
 
 // In case of input being presented with explicit overlap lines with DPU,
-// we need to take into account all the siblings requirements
+// for VPUX4000 and beyond, we need to take into account all the siblings requirements
 // when it comes to kernel, pad and stride.
 //
 // For the best handling, to provide the output which can service all siblings
@@ -69,10 +53,27 @@ OverlapDistributionParams getOverlappedDistributionParameters(mlir::MLIRContext*
 // infrastructure to represent a mixed tiling mode. Only explicit shapes will help here.
 //
 OverlapDistributionParams getActivationOverlappedParams(VPU::ClusteredOpInterface clusteredOp,
-                                                        ArrayRef<int64_t> activationTensorNumTiles);
+                                                        ArrayRef<int64_t> activationTensorNumTiles,
+                                                        vpux::NDTypeInterface inType);
+
+// In case of input being presented with explicit overlap lines with DPU,
+// for VPUX4000 and beyond, we need to take into account all the siblings requirements
+// when it comes to kernel, pad and stride.
+//
+// For each clusteredOp, getActivationOverlappedParams gathers the siblings of clusteredOp that fit
+// the criteria, i.e. are valid multiclustered ops. It will return a set of Overlap params consisting
+// of explicit per cluster memory shapes and offsets. The per cluster memory view will define the chunks
+// of tensor needed in each cluster to satisfy all the input requirements of the sibling ops.
+OverlapDistributionParams getActivationOverlappedParams(VPU::ClusteredOpInterface clusteredOp,
+                                                        ArrayRef<int64_t> activationTensorNumTiles,
+                                                        mlir::UnitAttr uniformDistributedSegments,
+                                                        vpux::NDTypeInterface inputType = nullptr,
+                                                        const vpux::TileInfo& tileInfo = vpux::TileInfo(ShapeRef()));
+
+std::set<VPU::ClusteredOpInterface> getSiblingOps(mlir::Operation* op);
 
 // In case of output producing overlap lines with DPU
-// we need to take into account all the consumer requirements
+// for VPUX4000 and beyond, we need to take into account all the consumer requirements
 // when it comes to kernel, pad and stride.
 //
 // For the best handling, to provide the output which can service all consumers
@@ -84,7 +85,23 @@ OverlapDistributionParams getActivationOverlappedParams(VPU::ClusteredOpInterfac
 //
 OverlapDistributionParams getOutputOverlappedParams(VPU::ClusteredOpInterface clusteredOp,
                                                     ArrayRef<int64_t> outputTensorNumTiles,
-                                                    vpux::NDTypeInterface outputType);
+                                                    vpux::NDTypeInterface outputType,
+                                                    ArrayRef<int64_t> activationTensorNumTiles);
+
+// In case of output producing overlap lines with DPU
+// for VPUX4000 and beyond, we need to take into account all the consumer requirements
+// when it comes to kernel, pad and stride.
+//
+// For each clusteredOp, getOutputOverlappedParams gathers the consumers of clusteredOp that fit
+// the criteria, i.e. are valid multiclustered ops. It will return a set of Overlap params consisting
+// of explicit per cluster memory shapes and offsets. The per cluster memory view will define the chunks
+// of tensor needed in each cluster to satisfy all the input requirements of the consumer ops.
+
+OverlapDistributionParams getOutputOverlappedParams(VPU::ClusteredOpInterface clusteredOp,
+                                                    ArrayRef<int64_t> outputTensorNumTiles,
+                                                    mlir::UnitAttr uniformDistributedSegments,
+                                                    vpux::NDTypeInterface outputType,
+                                                    const vpux::TileInfo& tileInfo = vpux::TileInfo(ShapeRef()));
 
 }  // namespace VPU
 }  // namespace vpux

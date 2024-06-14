@@ -5,14 +5,13 @@
 
 #pragma once
 
+#include "vpux/compiler/dialect/VPU/interfaces/sparsity_constraint.hpp"
 #include "vpux/compiler/dialect/VPU/utils/sparsity_utils.hpp"
 
 #include <cstdint>
 
 namespace vpux {
 namespace VPU {
-
-int64_t getSESize(int64_t channels, const VPU::SparsityConstraint& sparsityConstraint);
 
 // SEInterpolateAttr
 constexpr int64_t SE_INTERPOLATE_FACTOR_H = 0;
@@ -32,6 +31,10 @@ constexpr int64_t SE_PAD_LEFT = 0;
 constexpr int64_t SE_PAD_TOP = 1;
 constexpr int64_t SE_PAD_RIGHT = 2;
 constexpr int64_t SE_PAD_BOTTOM = 3;
+
+// SERollAttr
+constexpr int64_t SE_ROLL_SPATIAL_H = 0;
+constexpr int64_t SE_ROLL_SPATIAL_W = 1;
 
 }  // namespace VPU
 }  // namespace vpux

@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --remove-quantdequant-seq %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 !qElemType = !quant.uniform<u8<1:255>:f16:0, {0.010680671751968504:128,0.0081200787401574797:128,0.010596087598425197:128}>
 !qElemType1 = !quant.uniform<u8:f16, 1.1534313725490195:128>
@@ -49,5 +49,21 @@ func.func @RemoveQuantReshapeDequantSequence(%arg0: tensor<1x4420x1x2xf16>, %arg
   //CHECK-SAME{LITERAL}: {dim_mapping = [[0], [0], [1, 2], [3]], shape_value = [1, 4420, 1, 2]} : tensor<1x1x4420x2xf16> -> tensor<1x4420x1x2xf16>
   //CHECK: [[VAL2:%.*]] = IE.Add([[VAL1]], %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x4420x1x2xf16>, tensor<1x4420x1x2xf16> -> tensor<1x4420x1x2xf16>
   //CHECK: return [[VAL2]]
+}
+
+// CHECK-LABEL: @RemoveQuantReshapeDequantMaxPool
+func.func @RemoveQuantReshapeDequantMaxPool(%arg0: tensor<1x64x40x112x112xf16>) -> tensor<1x64x40x112x112xf16> {
+  %0 = IE.Quantize(%arg0) {dstElemType = !qElemType1} : tensor<1x64x40x112x112xf16> -> tensor<1x64x40x112x112x!qElemType1>
+  %1 = IE.MaxPool(%0) {
+        kernel_size = [3, 3, 3],
+        pads_begin = [1, 1, 1],
+        pads_end = [1, 1, 1],
+        rounding_type = #IE.rounding_type<FLOOR>,
+        strides = [1, 1, 1]} : tensor<1x64x40x112x112x!qElemType1> -> tensor<1x64x40x112x112x!qElemType1>
+  %2 = IE.Dequantize(%1) {dstElemType = f16} : tensor<1x64x40x112x112x!qElemType1> -> tensor<1x64x40x112x112xf16>
+  return %2 : tensor<1x64x40x112x112xf16>
+
+    //CHECK: [[MAXPOOL:%.*]] = IE.MaxPool(%arg0) {kernel_size = [3, 3, 3], pads_begin = [1, 1, 1], pads_end = [1, 1, 1], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1, 1]} : tensor<1x64x40x112x112xf16> -> tensor<1x64x40x112x112xf16>
+    //CHECK: return [[MAXPOOL]] : tensor<1x64x40x112x112xf16>
 }
 

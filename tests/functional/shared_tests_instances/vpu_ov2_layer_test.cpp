@@ -1,16 +1,15 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022 Intel Corporation
 // SPDX-License-Identifier: Apache 2.0
 //
 
 #include "vpu_ov2_layer_test.hpp"
 #include <gtest/internal/gtest-internal.h>
+#include <npu_private_properties.hpp>
 #include <openvino/runtime/core.hpp>
 #include <openvino/runtime/make_tensor.hpp>
-#include <shared_test_classes/base/layer_test_utils.hpp>
 #include <sstream>
 #include <vpux/utils/IE/config.hpp>
-#include <vpux_private_properties.hpp>
 
 #include "vpu_test_report.hpp"
 
@@ -19,15 +18,17 @@ namespace ov::test::utils {
 const VpuTestEnvConfig& VpuOv2LayerTest::envConfig = VpuTestEnvConfig::getInstance();
 
 VpuOv2LayerTest::VpuOv2LayerTest(): testTool(envConfig) {
-    VPUX_THROW_UNLESS(core != nullptr, "ov::Core instance is null");
+    OPENVINO_ASSERT(core != nullptr, "ov::Core instance is null");
+
+    abs_threshold = 0.01;
 
     _log.setName("VPUTest");
     _log.setLevel(vpux::LogLevel::Info);
     this->targetDevice = ov::test::utils::DEVICE_NPU;
 
     if (!envConfig.IE_NPU_TESTS_LOG_LEVEL.empty()) {
-        const auto logLevel = vpux::OptionParser<vpux::LogLevel>::parse(envConfig.IE_NPU_TESTS_LOG_LEVEL);
-        _log.setLevel(logLevel);
+        const auto logLevel = vpux::OptionParser<ov::log::Level>::parse(envConfig.IE_NPU_TESTS_LOG_LEVEL);
+        _log.setLevel(vpux::getLogLevel(logLevel));
     }
 }
 
@@ -52,8 +53,8 @@ void VpuOv2LayerTest::exportInput() {
                                    return pair.first->get_friendly_name() == input.get_node()->get_friendly_name();
                                });
         if (it != inputs.end()) {
-            testTool.exportBlob(it->second, filesysName(testing::UnitTest::GetInstance()->current_test_info(), ext,
-                                                        !envConfig.IE_NPU_TESTS_LONG_FILE_NAME));
+            testTool.exportTensor(it->second, filesysName(testing::UnitTest::GetInstance()->current_test_info(), ext,
+                                                          !envConfig.IE_NPU_TESTS_LONG_FILE_NAME));
             continue;
         }
         OPENVINO_THROW("Compiled model input node was not found within generated inputs");
@@ -70,8 +71,8 @@ void VpuOv2LayerTest::importInput() {
                                    return pair.first->get_friendly_name() == input.get_node()->get_friendly_name();
                                });
         if (it != inputs.end()) {
-            testTool.importBlob(it->second, filesysName(testing::UnitTest::GetInstance()->current_test_info(), ext,
-                                                        !envConfig.IE_NPU_TESTS_LONG_FILE_NAME));
+            testTool.importTensor(it->second, filesysName(testing::UnitTest::GetInstance()->current_test_info(), ext,
+                                                          !envConfig.IE_NPU_TESTS_LONG_FILE_NAME));
             continue;
         }
         OPENVINO_THROW("Compiled model input node was not found within generated inputs");
@@ -82,9 +83,9 @@ void VpuOv2LayerTest::exportOutput() {
     for (const auto& output : compiledModel.outputs()) {
         const auto& output_name = output.get_node()->get_name();
         const auto ext = vpux::printToString(".{0}.{1}", output_name, "out");
-        testTool.exportBlob(inferRequest.get_tensor(output),
-                            filesysName(testing::UnitTest::GetInstance()->current_test_info(), ext,
-                                        !envConfig.IE_NPU_TESTS_LONG_FILE_NAME));
+        testTool.exportTensor(inferRequest.get_tensor(output),
+                              filesysName(testing::UnitTest::GetInstance()->current_test_info(), ext,
+                                          !envConfig.IE_NPU_TESTS_LONG_FILE_NAME));
     }
 }
 
@@ -95,8 +96,8 @@ void VpuOv2LayerTest::exportReference(const std::vector<ov::Tensor>& refs) {
 
         auto& ref = refs.at(i);
         const auto ext = vpux::printToString(".{0}.{1}", name, "ref");
-        testTool.exportBlob(ref, filesysName(testing::UnitTest::GetInstance()->current_test_info(), ext,
-                                             !envConfig.IE_NPU_TESTS_LONG_FILE_NAME));
+        testTool.exportTensor(ref, filesysName(testing::UnitTest::GetInstance()->current_test_info(), ext,
+                                               !envConfig.IE_NPU_TESTS_LONG_FILE_NAME));
     }
 }
 
@@ -107,14 +108,14 @@ std::vector<ov::Tensor> VpuOv2LayerTest::importReference() {
 
         auto ref = ov::Tensor{output.get_element_type(), output.get_shape()};
         const auto ext = vpux::printToString(".{0}.{1}", name, "ref");
-        testTool.importBlob(ref, filesysName(testing::UnitTest::GetInstance()->current_test_info(), ext,
-                                             !envConfig.IE_NPU_TESTS_LONG_FILE_NAME));
+        testTool.importTensor(ref, filesysName(testing::UnitTest::GetInstance()->current_test_info(), ext,
+                                               !envConfig.IE_NPU_TESTS_LONG_FILE_NAME));
         refs.push_back(ref);
     }
     return refs;
 }
 
-void VpuOv2LayerTest::run(VPUXPlatform platform) {
+void VpuOv2LayerTest::run(const std::string_view platform) {
     setPlatform(platform);
     run();
 }
@@ -328,54 +329,42 @@ void VpuOv2LayerTest::printNetworkConfig() const {
     _log.info("NPU Plugin config: {0}", ostr.str());
 }
 
-void VpuOv2LayerTest::setPlatform(VPUXPlatform platform) {
-    const auto platformString = [&]() {
-        switch (platform) {
-        case VPUXPlatform::VPU3700:
-            return "3700";
-        case VPUXPlatform::VPU3720:
-            return "3720";
-        default:
-            VPUX_THROW("Unsupported platform provided");
-            return "None";
-        }
-    }();
-
+void VpuOv2LayerTest::setPlatform(const std::string_view platform) {
     // [Track number: E#70404]
     // Multiple different ways of setting the platform
-    configuration[ov::intel_vpux::platform.name()] = platformString;
-    configuration[CONFIG_KEY(DEVICE_ID)] = platformString;
+    configuration[ov::intel_npu::platform.name()] = std::string(platform);
+    configuration[ov::device::id.name()] = std::string(platform);
 }
 
 void VpuOv2LayerTest::setReferenceSoftwareMode() {
-    configuration[ov::intel_vpux::compilation_mode.name()] = "ReferenceSW";
+    configuration[ov::intel_npu::compilation_mode.name()] = "ReferenceSW";
 }
 
 void VpuOv2LayerTest::setDefaultHardwareMode() {
-    configuration[ov::intel_vpux::compilation_mode.name()] = "DefaultHW";
+    configuration[ov::intel_npu::compilation_mode.name()] = "DefaultHW";
 }
 
 bool VpuOv2LayerTest::isReferenceSoftwareMode() const {
-    const auto compilationMode = configuration.at(ov::intel_vpux::compilation_mode.name()).as<std::string>();
+    const auto compilationMode = configuration.at(ov::intel_npu::compilation_mode.name()).as<std::string>();
     return compilationMode == "ReferenceSW";
 }
 
 bool VpuOv2LayerTest::isDefaultHardwareMode() const {
-    const auto compilationMode = configuration.at(ov::intel_vpux::compilation_mode.name()).as<std::string>();
+    const auto compilationMode = configuration.at(ov::intel_npu::compilation_mode.name()).as<std::string>();
     return compilationMode == "DefaultHW";
 }
 
 void VpuOv2LayerTest::setSingleClusterMode() {
-    configuration[ov::intel_vpux::dpu_groups.name()] = "1";
-    configuration[ov::intel_vpux::dma_engines.name()] = "1";
+    configuration[ov::intel_npu::dpu_groups.name()] = "1";
+    configuration[ov::intel_npu::dma_engines.name()] = "1";
 }
 
 void VpuOv2LayerTest::setPerformanceHintLatency() {
-    configuration[CONFIG_KEY(PERFORMANCE_HINT)] = "LATENCY";
+    configuration[ov::hint::performance_mode.name()] = "LATENCY";
 }
 
 void VpuOv2LayerTest::useELFCompilerBackend() {
-    configuration[ov::intel_vpux::use_elf_compiler_backend.name()] = CONFIG_VALUE(YES);
+    configuration[ov::intel_npu::use_elf_compiler_backend.name()] = "YES";
 }
 
 }  // namespace ov::test::utils

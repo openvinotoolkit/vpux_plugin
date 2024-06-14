@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -481,6 +481,210 @@ func.func @InplaceEltwiseFirstInputHas2Consumers(%in: memref<1x256x56x56xf16, #N
 // -----
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+#NWCH = affine_map<(d0, d1, d2, d3) -> (d0, d3, d1, d2)>
+
+!PermuteInDistributedType = !VPUIP.DistributedBuffer<1x56x256x56xf16, #NHWC, @CMX_NN, {
+    mode = "SEGMENTED",
+    num_tiles = [1, 1, 1, 2],
+    num_clusters = 2 : i64
+}>
+
+!PermuteOutDistributedType = !VPUIP.DistributedBuffer<1x56x256x56xf16, #NWCH, @CMX_NN, {
+    mode = "SEGMENTED",
+    num_tiles = [1, 1, 1, 2],
+    num_clusters = 2 : i64
+}>
+
+!EltwiseDistributedType = !VPUIP.DistributedBuffer<1x256x56x56xf16, #NHWC, @CMX_NN, {
+    mode = "SEGMENTED",
+    num_tiles = [1, 1, 2, 1],
+    num_clusters = 2 : i64
+}>
+
+// CHECK:    func @InplaceEltwiseFirstInput2ConsumersSecondInputFromNCEPermute
+// CHECK-SAME: ([[ARG0:%.*]]: memref<1x256x56x56xf16, #NHWC>)
+func.func @InplaceEltwiseFirstInput2ConsumersSecondInputFromNCEPermute(%in: memref<1x256x56x56xf16, #NHWC>) -> (!EltwiseDistributedType, !EltwiseDistributedType) {
+
+    %cst0 = const.Declare memref<1x256x56x56xf16, #NHWC> = dense<2.0> : tensor<1x256x56x56xf16>, [#const.Reorder<#NHWC>]
+    %cst1 = const.Declare memref<1x56x256x56xf16, #NHWC> = dense<1.0> : tensor<1x56x256x56xf16>, [#const.Reorder<#NHWC>]
+    %buf_0  = VPURT.AllocDistributed -> !EltwiseDistributedType
+    %buf_1  = VPURT.AllocDistributed -> !PermuteInDistributedType
+    %permute_out_buf  = VPURT.AllocDistributed -> !PermuteOutDistributedType
+    %buf_in = VPURT.AllocDistributed -> !EltwiseDistributedType
+    %buf_in_1 = VPURT.AllocDistributed -> !EltwiseDistributedType
+    %output_buf = VPURT.AllocDistributed -> !EltwiseDistributedType
+    %elt_in_place_out_buf = VPURT.AllocDistributed -> !EltwiseDistributedType
+
+    %0 = VPUIP.NCEClusterTiling
+        inputs(%cst0 as %arg2: memref<1x256x56x56xf16, #NHWC>)
+        outputs(%buf_0 as %arg3: memref<1x256x56x56xf16, #NHWC, @CMX_NN>)
+        -> !EltwiseDistributedType {
+            %internal_0 = VPUIP.Copy inputs(%arg2 : memref<1x256x56x56xf16, #NHWC>) outputs(%arg3 : memref<1x256x56x56xf16, #NHWC, @CMX_NN>) -> memref<1x256x56x56xf16, #NHWC, @CMX_NN>
+    }
+
+    %1 = VPUIP.NCEClusterTiling
+        inputs(%in as %arg2: memref<1x256x56x56xf16, #NHWC>)
+        outputs(%buf_in as %arg3: memref<1x256x56x56xf16, #NHWC, @CMX_NN>)
+        -> !EltwiseDistributedType {
+            %internal_1 = VPUIP.Copy inputs(%arg2 : memref<1x256x56x56xf16, #NHWC>) outputs(%arg3 : memref<1x256x56x56xf16, #NHWC, @CMX_NN>) -> memref<1x256x56x56xf16, #NHWC, @CMX_NN>
+    }
+
+    %2 = VPUIP.NCEClusterTiling
+    inputs(
+        %0 as %arg2: memref<1x256x56x56xf16, #NHWC, @CMX_NN>,
+        %1 as %arg3: memref<1x256x56x56xf16, #NHWC, @CMX_NN>)
+    outputs(
+        %output_buf as %arg4: memref<1x256x56x56xf16, #NHWC, @CMX_NN>)
+    -> !EltwiseDistributedType {
+        %internal_2 = VPUIP.NCEClusterTask
+            {activation_window_channel_length = 0 : i64, minimumHardwareExecutionCost = 31170 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
+            input(%arg2 : memref<1x256x56x56xf16, #NHWC, @CMX_NN>)
+            weights(%arg3 : memref<1x256x56x56xf16, #NHWC, @CMX_NN>)
+            parent_input(%arg2 : memref<1x256x56x56xf16, #NHWC, @CMX_NN>)
+            parent_output(%arg4 : memref<1x256x56x56xf16, #NHWC, @CMX_NN>)
+            outputs(%arg4 : memref<1x256x56x56xf16, #NHWC, @CMX_NN>)
+                -> memref<1x256x56x56xf16, #NHWC, @CMX_NN> variants : {
+            DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [55, 27, 255], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
+            DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [55, 55, 255], outStart = [0, 28, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
+            } PPE : {
+            PPETask <LRELU> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, fp_prelu_alpha = 1.000000e+00 : f64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00]}
+            }
+    }
+
+    %4 = VPUIP.NCEClusterTiling
+        inputs(%cst1 as %arg2: memref<1x56x256x56xf16, #NHWC>)
+        outputs(%buf_1 as %arg3: memref<1x56x256x56xf16, #NHWC, @CMX_NN>)
+        -> !PermuteInDistributedType {
+            %internal_4 = VPUIP.Copy inputs(%arg2 : memref<1x56x256x56xf16, #NHWC>) outputs(%arg3 : memref<1x56x256x56xf16, #NHWC, @CMX_NN>) -> memref<1x56x256x56xf16, #NHWC, @CMX_NN>
+    }
+
+    %5 = VPUIP.NCEClusterTiling
+        inputs(%4 as %arg2: memref<1x56x256x56xf16, #NHWC, @CMX_NN>)
+        outputs(%permute_out_buf as %arg3: memref<1x56x256x56xf16, #NWCH, @CMX_NN>)
+        -> !PermuteOutDistributedType {
+            %internal_5 = VPUIP.NCEClusterTask
+                {activation_window_channel_length = 0 : i64, is_permute_quantize, minimumHardwareExecutionCost = 17144 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
+                input(%arg2 : memref<1x56x256x56xf16, #NHWC, @CMX_NN>)
+                weights(%arg2 : memref<1x56x256x56xf16, #NHWC, @CMX_NN>)
+                parent_input(%arg2 : memref<1x56x256x56xf16, #NHWC, @CMX_NN>)
+                parent_output(%arg3 : memref<1x56x256x56xf16, #NWCH, @CMX_NN>)
+                outputs(%arg3 : memref<1x56x256x56xf16, #NWCH, @CMX_NN>)
+                    -> memref<1x56x256x56xf16, #NWCH, @CMX_NN> variants : {
+                DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [27, 255, 55], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
+                DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [27, 255, 55], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
+            } PPE : {
+              PPETask <ADD> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [5.000000e-01]}
+            }
+    }
+
+    %6 = VPUIP.NCEClusterTiling
+        inputs(%in as %arg2: memref<1x256x56x56xf16, #NHWC>)
+        outputs(%buf_in_1 as %arg3: memref<1x256x56x56xf16, #NHWC, @CMX_NN>)
+        -> !EltwiseDistributedType {
+            %internal_6 = VPUIP.Copy inputs(%arg2 : memref<1x256x56x56xf16, #NHWC>) outputs(%arg3 : memref<1x256x56x56xf16, #NHWC, @CMX_NN>) -> memref<1x256x56x56xf16, #NHWC, @CMX_NN>
+    }
+
+    %7 = VPUIP.ViewOp %5 : !PermuteOutDistributedType to !EltwiseDistributedType
+
+    %8 = VPUIP.NCEClusterTiling
+    inputs(
+        %6 as %arg2: memref<1x256x56x56xf16, #NHWC, @CMX_NN>,
+        %7 as %arg3: memref<1x256x56x56xf16, #NHWC, @CMX_NN>)
+    outputs(
+        %elt_in_place_out_buf as %arg4: memref<1x256x56x56xf16, #NHWC, @CMX_NN>)
+    -> !EltwiseDistributedType {
+        %internal_7 = VPUIP.NCEClusterTask
+            {activation_window_channel_length = 0 : i64, is_inplace = true, minimumHardwareExecutionCost = 31170 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
+            input(%arg2 : memref<1x256x56x56xf16, #NHWC, @CMX_NN>)
+            weights(%arg3 : memref<1x256x56x56xf16, #NHWC, @CMX_NN>)
+            parent_input(%arg2 : memref<1x256x56x56xf16, #NHWC, @CMX_NN>)
+            parent_output(%arg4 : memref<1x256x56x56xf16, #NHWC, @CMX_NN>)
+            outputs(%arg4 : memref<1x256x56x56xf16, #NHWC, @CMX_NN>)
+                -> memref<1x256x56x56xf16, #NHWC, @CMX_NN> variants : {
+            DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [55, 27, 255], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
+            DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [55, 55, 255], outStart = [0, 28, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
+            } PPE : {
+            PPETask <LRELU> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, fp_prelu_alpha = 1.000000e+00 : f64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00]}
+            }
+    }
+
+    return %2, %8 : !EltwiseDistributedType, !EltwiseDistributedType
+
+    // CHECK-DAG:       [[CST:%.*]] = const.Declare memref<1x256x56x56xf16, #NHWC> = dense<2.000000e+00> : tensor<1x256x56x56xf16>, [#const.Reorder<#NHWC>]
+    // CHECK-DAG:       [[CST_0:%.*]] = const.Declare memref<1x56x256x56xf16, #NHWC> = dense<1.000000e+00> : tensor<1x56x256x56xf16>, [#const.Reorder<#NHWC>]
+    // CHECK:       [[BUF_0:%.*]] = VPURT.AllocDistributed
+    // CHECK-SAME:       -> !VPUIP.DistributedBuffer<1x256x56x56xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>
+    // CHECK:       [[PERM_QUANT_IN:%.*]] = VPURT.AllocDistributed
+    // CHECK-SAME:       -> !VPUIP.DistributedBuffer<1x56x256x56xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 1, 2], num_clusters = 2 : i64}>
+    // CHECK:       [[PERM_QUANT_OUT:%.*]] = VPURT.AllocDistributed
+    // CHECK-SAME:       -> !VPUIP.DistributedBuffer<1x56x256x56xf16, #NWCH, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 1, 2], num_clusters = 2 : i64}>
+
+    // CHECK: [[VIEW0:%.*]] = VPUIP.ViewOp [[PERM_QUANT_OUT]] :
+    // CHECK-SAME: !VPUIP.DistributedBuffer<1x56x256x56xf16, #NWCH, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 1, 2], num_clusters = 2 : i64}>
+    // CHECK-SAME: to !VPUIP.DistributedBuffer<1x256x56x56xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>
+
+    // CHECK:       [[BUF_IN1:%.*]] = VPURT.AllocDistributed
+    // CHECK-SAME:       -> !VPUIP.DistributedBuffer<1x256x56x56xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>
+    // CHECK:       [[BUF_IN2:%.*]] = VPURT.AllocDistributed
+    // CHECK-SAME:       -> !VPUIP.DistributedBuffer<1x256x56x56xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>
+    // CHECK:       [[OUTPUT_BUF:%.*]] = VPURT.AllocDistributed
+    // CHECK-SAME:       -> !VPUIP.DistributedBuffer<1x256x56x56xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>
+    // CHECK-NOT:       VPURT.AllocDistributed
+
+    // CHECK:       [[COPY_IN0:%.*]] = VPUIP.NCEClusterTiling
+    // CHECK-SAME:       inputs([[CST]] as {{[^:]+}}: memref<1x256x56x56xf16, #NHWC>)
+    // CHECK-SAME:       outputs([[BUF_0]] as {{[^:]+}}: memref<1x256x56x56xf16, #NHWC, @CMX_NN>)
+    // CHECK-SAME:       -> !VPUIP.DistributedBuffer<1x256x56x56xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
+    // CHECK:            [[INNER:%.*]] = VPUIP.Copy
+
+    // CHECK:        [[COPY_IN1:%.*]]  = VPUIP.NCEClusterTiling
+    // CHECK-SAME:        inputs([[ARG0]] as {{[^:]+}}: memref<1x256x56x56xf16, #NHWC>)
+    // CHECK-SAME:        outputs([[BUF_IN1]] as {{[^:]+}}: memref<1x256x56x56xf16, #NHWC, @CMX_NN>)
+    // CHECK-SAME:        -> !VPUIP.DistributedBuffer<1x256x56x56xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
+    // CHECK:             [[INNER:%.*]] = VPUIP.Copy
+
+    // CHECK:        [[ELTW_RES:%.*]] = VPUIP.NCEClusterTiling
+    // CHECK-SAME:        inputs([[COPY_IN0]] as {{[^:]+}}: memref<1x256x56x56xf16, #NHWC, @CMX_NN>, [[COPY_IN1]] as {{[^:]+}}: memref<1x256x56x56xf16, #NHWC, @CMX_NN>)
+    // CHECK-SAME:        outputs([[OUTPUT_BUF]] as {{[^:]+}}: memref<1x256x56x56xf16, #NHWC, @CMX_NN>)
+    // CHECK-SAME:        -> !VPUIP.DistributedBuffer<1x256x56x56xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
+    // CHECK:             [[INNER:%.*]] = VPUIP.NCEClusterTask
+
+    // CHECK:        [[COPY_IN_PERM:%.*]] = VPUIP.NCEClusterTiling
+    // CHECK-SAME:        inputs([[CST_0]] as {{[^:]+}}: memref<1x56x256x56xf16, #NHWC>)
+    // CHECK-SAME:        outputs([[PERM_QUANT_IN]] as {{[^:]+}}: memref<1x56x256x56xf16, #NHWC, @CMX_NN>)
+    // CHECK-SAME:        -> !VPUIP.DistributedBuffer<1x56x256x56xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 1, 2], num_clusters = 2 : i64}> {
+    // CHECK:             [[INNER:%.*]] = VPUIP.Copy
+
+    // CHECK:        [[PERM_RES:%.*]] = VPUIP.NCEClusterTiling
+    // CHECK-SAME:        inputs([[COPY_IN_PERM]] as {{[^:]+}}: memref<1x56x256x56xf16, #NHWC, @CMX_NN>)
+    // CHECK-SAME:        outputs([[PERM_QUANT_OUT]] as {{[^:]+}}: memref<1x56x256x56xf16, #NWCH, @CMX_NN>)
+    // CHECK-SAME:        -> !VPUIP.DistributedBuffer<1x56x256x56xf16, #NWCH, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 1, 2], num_clusters = 2 : i64}> {
+    // CHECK:             [[INNER:%.*]] = VPUIP.NCEClusterTask
+    // CHECK-SAME:              is_permute_quantize
+
+    // CHECK:        [[COPY_IN3:%.*]] = VPUIP.NCEClusterTiling
+    // CHECK-SAME:        inputs([[ARG0]] as {{[^:]+}}: memref<1x256x56x56xf16, #NHWC>)
+    // CHECK-SAME:        outputs([[BUF_IN2]] as {{[^:]+}}: memref<1x256x56x56xf16, #NHWC, @CMX_NN>)
+    // CHECK-SAME:        -> !VPUIP.DistributedBuffer<1x256x56x56xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
+    // CHECK:             [[INNER:%.*]] = VPUIP.Copy
+
+    // CHECK:       [[VIEW1:%.*]] = VPUIP.ViewOp [[PERM_RES]] :
+    // CHECK-SAME:      !VPUIP.DistributedBuffer<1x56x256x56xf16, #NWCH, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 1, 2], num_clusters = 2 : i64}>
+    // CHECK-SAME:      to !VPUIP.DistributedBuffer<1x256x56x56xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>
+
+    // CHECK:        [[ELTW_RES_IN_PLACE:%.*]] = VPUIP.NCEClusterTiling
+    // CHECK-SAME:        inputs([[COPY_IN3]] as {{[^:]+}}: memref<1x256x56x56xf16, #NHWC, @CMX_NN>, [[VIEW1]] as {{[^:]+}}: memref<1x256x56x56xf16, #NHWC, @CMX_NN>)
+    // CHECK-SAME:        outputs([[VIEW0]] as {{[^:]+}}: memref<1x256x56x56xf16, #NHWC, @CMX_NN>)
+    // CHECK-SAME:        -> !VPUIP.DistributedBuffer<1x256x56x56xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
+    // CHECK:             [[INNER:%.*]] = VPUIP.NCEClusterTask
+    // CHECK-SAME:          is_inplace = true
+
+    // CHECK:        return [[ELTW_RES]], [[ELTW_RES_IN_PLACE]]
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
 !DistributedType1 = !VPUIP.DistributedBuffer<
     1x128x52x104xf16, #NHWC, @CMX_NN, {
@@ -498,7 +702,7 @@ func.func @InplaceEltwiseFirstInputHas2Consumers(%in: memref<1x256x56x56xf16, #N
 VPURT.SW.Runtime entryPoint: @VPU.SW::@runtime stack_configuration: [4096, 4096, 4096, 4096]
 
 module @VPU.SW {
-    func.func private @builtin_Interpolate(memref<*xf16, @CMX_NN>, memref<*xf16, @CMX_NN>, i64, i64, i64, i64, none, none, none, none, none) attributes {VPU.kernel_code = "single_shave_interpolate.cpp", VPU.kernel_entry = "singleShaveInterpolate"}
+    func.func private @builtin_Interpolate(memref<*xf16, @CMX_NN>, memref<*xf16, @CMX_NN>, i64, i64, i64, i64, none, none, none, none, none) attributes {VPU.kernel_code = "interpolate.cpp", VPU.kernel_entry = "interpolate"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
 }
 
@@ -528,7 +732,7 @@ func.func @InplaceEltwiseSubViewInterp(%in1: memref<1x128x104x104xf16, #NHWC>, %
     }
 
     %4 = VPUIP.NCEClusterTiling inputs(%3 as %arg4: memref<1x128x52x104xf16, #NHWC, @CMX_NN>) outputs(%output_buf as %arg5: memref<1x128x104x208xf16, #NHWC, @CMX_NN>) -> !VPUIP.DistributedBuffer<1x128x104x208xf16, #NHWC, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}> {
-        %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_Interpolate inputs(%arg4 as %arg6: memref<1x128x52x104xf16, #NHWC, @CMX_NN>) outputs(%arg5 as %arg7: memref<1x128x104x208xf16, #NHWC, @CMX_NN>) on tile 0 -> memref<1x128x104x208xf16, #NHWC, @CMX_NN>{
+        %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Interpolate inputs(%arg4 as %arg6: memref<1x128x52x104xf16, #NHWC, @CMX_NN>) outputs(%arg5 as %arg7: memref<1x128x104x208xf16, #NHWC, @CMX_NN>) on tile 0 -> memref<1x128x104x208xf16, #NHWC, @CMX_NN>{
         VPUIP.SW.Kernel.run {attrs = [0, 0, 1, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [128, 52, 104, 1], [128, 104, 208, 1], [2, 3], -7.500000e-01, [0, 0, 0, 0], [0, 0, 0, 0]]}(%arg6, %arg7) : memref<1x128x52x104xf16, #NHWC, @CMX_NN>, memref<1x128x104x208xf16, #NHWC, @CMX_NN>
         }
     }
@@ -547,7 +751,7 @@ func.func @InplaceEltwiseSubViewInterp(%in1: memref<1x128x104x104xf16, #NHWC>, %
     }
 
     %10 = VPUIP.NCEClusterTiling inputs(%9 as %arg4: memref<1x128x52x104xf16, #NHWC, @CMX_NN>) outputs(%output_buf_1 as %arg5: memref<1x128x104x208xf16, #NHWC, @CMX_NN>) -> !VPUIP.DistributedBuffer<1x128x104x208xf16, #NHWC, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}> {
-        %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_Interpolate inputs(%arg4 as %arg6: memref<1x128x52x104xf16, #NHWC, @CMX_NN>) outputs(%arg5 as %arg7: memref<1x128x104x208xf16, #NHWC, @CMX_NN>) on tile 0 -> memref<1x128x104x208xf16, #NHWC, @CMX_NN>{
+        %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Interpolate inputs(%arg4 as %arg6: memref<1x128x52x104xf16, #NHWC, @CMX_NN>) outputs(%arg5 as %arg7: memref<1x128x104x208xf16, #NHWC, @CMX_NN>) on tile 0 -> memref<1x128x104x208xf16, #NHWC, @CMX_NN>{
         VPUIP.SW.Kernel.run {attrs = [0, 0, 1, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [128, 52, 104, 1], [128, 104, 208, 1], [2, 3], -7.500000e-01, [0, 0, 0, 0], [0, 0, 0, 0]]}(%arg6, %arg7) : memref<1x128x52x104xf16, #NHWC, @CMX_NN>, memref<1x128x104x208xf16, #NHWC, @CMX_NN>
         }
     }

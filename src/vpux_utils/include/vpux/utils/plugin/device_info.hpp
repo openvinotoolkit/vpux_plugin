@@ -1,6 +1,6 @@
 //
-// Copyright (C) 2022 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022 Intel Corporation
+// SPDX-License-Identifier: Apache 2.0.
 //
 
 #pragma once
@@ -17,6 +17,7 @@ public:
     static const DeviceInfo VPUX30XX;
     static const DeviceInfo VPUX31XX;
     static const DeviceInfo VPUX37XX;
+    static const DeviceInfo VPUX40XX;
 
 public:
     explicit DeviceInfo(StringRef codeStr);

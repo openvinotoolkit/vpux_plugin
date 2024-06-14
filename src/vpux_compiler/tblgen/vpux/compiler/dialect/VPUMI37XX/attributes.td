@@ -13,18 +13,18 @@ include "vpux/compiler/dialect/VPUMI37XX/dialect.td"
 // Base classes
 //
 
-class VPUMI37XX_I64EnumAttr <string name, string summary, list<I64EnumAttrCase> cases> : 
+class VPUMI37XX_I64EnumAttr <string name, string summary, list<I64EnumAttrCase> cases> :
         I64EnumAttr<name, summary, cases> {
     let cppNamespace = "vpux::VPUMI37XX";
     let genSpecializedAttr = 0;
 }
 
-class VPUMI37XX_EnumAttr <EnumAttrInfo enumInfo, string name = "", list <Trait> traits = []> : 
+class VPUMI37XX_EnumAttr <EnumAttrInfo enumInfo, string name = "", list <Trait> traits = []> :
         EnumAttr<VPUMI37XX_Dialect, enumInfo, name, traits> {
     let assemblyFormat = "`<`$value`>`";
 }
 
-class VPUMI37XX_Attr<string name, list<Trait> traits = []> : 
+class VPUMI37XX_Attr<string name, list<Trait> traits = []> :
         AttrDef<VPUMI37XX_Dialect, name, traits> {
     let mnemonic = name;
 }

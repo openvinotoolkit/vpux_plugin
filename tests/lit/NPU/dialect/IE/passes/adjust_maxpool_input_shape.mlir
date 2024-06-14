@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
-// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --adjust-maxpool-input-shape --canonicalize %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --adjust-maxpool-input-shape %s | FileCheck %s
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 // CHECK-LABEL: @ReshapeInputForMaxPool
 func.func @ReshapeInputForMaxPool(%arg0 : tensor<1x512x512x1xf16>) -> (tensor<1x512x1x1xf16>) {
@@ -20,7 +20,7 @@ func.func @ReshapeInputForMaxPool(%arg0 : tensor<1x512x512x1xf16>) -> (tensor<1x
     // CHECK:       [[RESHAPE0:%.*]] = IE.AffineReshape(%arg0)
     // CHECK-SAME{{LITERAL}}:  {dim_mapping = [[0], [1], [2], [2, 3]], shape_value = [1, 512, 32, 16]} : tensor<1x512x512x1xf16> -> tensor<1x512x32x16xf16>
     // CHECK:       IE.MaxPool
-    // CHECK-SAME{{LITERAL}}:  {kernel_size = [32, 16], pads_begin = [0, 0], pads_end = [0, 0], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]} 
+    // CHECK-SAME{{LITERAL}}:  {kernel_size = [32, 16], pads_begin = [0, 0], pads_end = [0, 0], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]}
     // CHECK-SAME   tensor<1x512x32x16xf16> -> tensor<1x512x1x1xf16>
 }
 

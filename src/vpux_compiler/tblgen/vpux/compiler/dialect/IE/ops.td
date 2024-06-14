@@ -189,6 +189,69 @@ def IE_DataInfoOp :
 
 
 //
+// IE_PipelineOptionsOp
+//
+
+def IE_PipelineOptionsOp :
+        IE_Op<
+            "PipelineOptions",
+            [
+                SymbolTable,
+                Symbol
+            ]
+            # GraphRegionNoTerminator.traits
+        > {
+    let summary = "Parallel to config options used in the compiler to be exposed globally";
+
+    let description = [{
+        Options can include another PipelineOptionsOp or OptionsOp
+    }];
+
+    let arguments = (ins
+        SymbolNameAttr:$sym_name
+    );
+
+    let regions = (region
+        SizedRegion<1>:$options
+    );
+
+    let assemblyFormat = [{
+        attr-dict
+        $sym_name
+        custom<OptionalBlockRegion>($options)
+    }];
+}
+
+//
+// IE_OptionOp
+//
+
+def IE_OptionOp :
+        IE_Op<
+            "Option",
+            [
+                Symbol
+            ]
+            # GraphRegionNoTerminator.traits
+        > {
+    let summary = "Option to be added to the model/IR";
+
+    let description = [{
+        Concrete option values that will be added to IR, must have a sym_name for lookup
+    }];
+
+    let arguments = (ins
+        SymbolNameAttr:$sym_name,
+        IntAttr:$optionValue
+    );
+
+    let assemblyFormat = [{
+        $sym_name `:` $optionValue
+        attr-dict
+    }];
+}
+
+//
 // SparsityStatisticsOp
 //
 
@@ -468,6 +531,34 @@ def IE_TileResourceOp :
 }
 
 //
+// FakeConvertOp
+//
+
+def IE_FakeConvertOp :
+        IE_LayerOp<
+            "FakeConvert",
+            [
+                IE_EltwiseOp
+            ]
+        > {
+    let summary = "InferenceEngine FakeConvert layer";
+
+    let arguments = (ins
+        RankedTensorOf<[F16, F32]>:$input,
+        RankedTensorOf<[F16, F32]>:$scale,
+        Optional<RankedTensorOf<[F16, F32]>>:$shift,
+
+        TypeAttr:$dst_type
+    );
+
+    let results = (outs
+        RankedTensorOf<[F16, F32]>:$output
+    );
+
+    let hasVerifier = 1;
+}
+
+//
 // ConvertOp
 //
 
@@ -485,6 +576,36 @@ def IE_ConvertOp :
         AnyRankedTensor:$input,
 
         TypeAttr:$dstElemType
+    );
+
+    let results = (outs
+        AnyRankedTensor:$output
+    );
+
+    let hasCanonicalizer = 1;
+    let hasFolder = 1;
+
+    let hasVerifier = 1;
+}
+
+//
+// ConvertLikeOp
+//
+
+def IE_ConvertLikeOp:
+        IE_LayerOp<
+            "ConvertLike"
+        > {
+    let summary = "InferenceEngine ConvertLike layer";
+
+    let description = [{
+        This operator returns a tensor with the same shape as the data input
+        and same type as the like input
+    }];
+
+    let arguments = (ins
+        AnyRankedTensor:$input,
+        AnyRankedTensor:$like
     );
 
     let results = (outs
@@ -691,14 +812,14 @@ def IE_PowerOp :
     let summary = "InferenceEngine Power layer";
 
     let arguments = (ins
-        RankedTensorOf<[F16, F32, SI32, SI64]>:$input1,
-        RankedTensorOf<[F16, F32, SI32, SI64]>:$input2,
+        RankedTensorOf<[F16, F32, SI32, SI64, UI8, UI16, UI32, UI64]>:$input1,
+        RankedTensorOf<[F16, F32, SI32, SI64, UI8, UI16, UI32, UI64]>:$input2,
 
         IE_AutoBroadcastTypeAttr:$auto_broadcast
     );
 
     let results = (outs
-        RankedTensorOf<[F16, F32, SI32, SI64]>:$output
+        RankedTensorOf<[F16, F32, SI32, SI64, UI8, UI16, UI32, UI64]>:$output
     );
 }
 
@@ -717,8 +838,8 @@ def IE_AddOp :
     let summary = "InferenceEngine Add layer";
 
     let arguments = (ins
-        RankedTensorOf<[F16, F32, SI32, SI64, quant_QuantizedType]>:$input1,
-        RankedTensorOf<[F16, F32, SI32, SI64, quant_QuantizedType]>:$input2,
+        RankedTensorOf<[F16, F32, SI32, SI64, UI8, UI16, UI32, UI64, quant_QuantizedType]>:$input1,
+        RankedTensorOf<[F16, F32, SI32, SI64, UI8, UI16, UI32, UI64, quant_QuantizedType]>:$input2,
 
         IE_AutoBroadcastTypeAttr:$auto_broadcast,
         OptionalAttr<IE_PostOpAttr>:$post_op,
@@ -726,7 +847,7 @@ def IE_AddOp :
     );
 
     let results = (outs
-        RankedTensorOf<[F16, F32, SI32, SI64, quant_QuantizedType]>:$output
+        RankedTensorOf<[F16, F32, SI32, SI64, UI8, UI16, UI32, UI64, quant_QuantizedType]>:$output
     );
 
     let hasFolder = 1;
@@ -748,14 +869,14 @@ def IE_DivideOp :
     let summary = "InferenceEngine Divide layer";
 
     let arguments = (ins
-        RankedTensorOf<[F16, F32, SI32, SI64]>:$input1,
-        RankedTensorOf<[F16, F32, SI32, SI64]>:$input2,
+        RankedTensorOf<[F16, F32, SI32, SI64, UI8, UI16, UI32, UI64]>:$input1,
+        RankedTensorOf<[F16, F32, SI32, SI64, UI8, UI16, UI32, UI64]>:$input2,
 
         IE_AutoBroadcastTypeAttr:$auto_broadcast
     );
 
     let results = (outs
-        RankedTensorOf<[F16, F32, SI32, SI64]>:$output
+        RankedTensorOf<[F16, F32, SI32, SI64, UI8, UI16, UI32, UI64]>:$output
     );
 }
 
@@ -819,14 +940,14 @@ def IE_FloorModOp :
     let summary = "InferenceEngine FloorMod layer";
 
     let arguments = (ins
-        RankedTensorOf<[F16, F32, SI32, SI64]>:$input1,
-        RankedTensorOf<[F16, F32, SI32, SI64]>:$input2,
+        AnyRankedTensor:$input1,
+        AnyRankedTensor:$input2,
 
         IE_AutoBroadcastTypeAttr:$auto_broadcast
     );
 
     let results = (outs
-        RankedTensorOf<[F16, F32, SI32, SI64]>:$output
+        AnyRankedTensor:$output
     );
 }
 
@@ -844,14 +965,14 @@ def IE_ModOp :
     let summary = "InferenceEngine Mod layer";
 
     let arguments = (ins
-        RankedTensorOf<[F16, F32, SI32]>:$input1,
-        RankedTensorOf<[F16, F32, SI32]>:$input2,
+        AnyRankedTensor:$input1,
+        AnyRankedTensor:$input2,
 
         IE_AutoBroadcastTypeAttr:$auto_broadcast
     );
 
     let results = (outs
-        RankedTensorOf<[F16, F32, SI32]>:$output
+        AnyRankedTensor:$output
     );
 }
 
@@ -1044,8 +1165,8 @@ def IE_MultiplyOp :
     let summary = "InferenceEngine Multiply layer";
 
     let arguments = (ins
-        RankedTensorOf<[F16, F32, SI32, SI64, quant_QuantizedType]>:$input1,
-        RankedTensorOf<[F16, F32, SI32, SI64, quant_QuantizedType]>:$input2,
+        RankedTensorOf<[F16, F32, SI32, SI64, UI8, UI16, UI32, UI64, quant_QuantizedType]>:$input1,
+        RankedTensorOf<[F16, F32, SI32, SI64, UI8, UI16, UI32, UI64, quant_QuantizedType]>:$input2,
 
         IE_AutoBroadcastTypeAttr:$auto_broadcast,
         OptionalAttr<IE_PostOpAttr>:$post_op,
@@ -1053,7 +1174,7 @@ def IE_MultiplyOp :
     );
 
     let results = (outs
-        RankedTensorOf<[F16, F32, SI32, SI64, quant_QuantizedType]>:$output
+        RankedTensorOf<[F16, F32, SI32, SI64, UI8, UI16, UI32, UI64, quant_QuantizedType]>:$output
     );
 
     let hasFolder = 1;
@@ -1092,6 +1213,106 @@ def IE_AndOp :
 }
 
 //
+// BitwiseAndOp
+//
+
+def IE_BitwiseAndOp :
+        IE_LayerOp<
+            "BitwiseAnd",
+            [
+                Commutative,
+                IE_EltwiseOp
+            ]
+        > {
+    let summary = "InferenceEngine BitwiseAndOp layer";
+
+    let arguments = (ins
+        RankedTensorOf<[AnyInteger]>:$input1,
+        RankedTensorOf<[AnyInteger]>:$input2,
+
+        IE_AutoBroadcastTypeAttr:$auto_broadcast
+    );
+
+    let results = (outs
+        RankedTensorOf<[AnyInteger]>:$output
+    );
+}
+
+//
+// BitwiseOrOp
+//
+
+def IE_BitwiseOrOp :
+        IE_LayerOp<
+            "BitwiseOr",
+            [
+                Commutative,
+                IE_EltwiseOp
+            ]
+        > {
+    let summary = "InferenceEngine BitwiseOrOp layer";
+
+    let arguments = (ins
+        RankedTensorOf<[AnyInteger]>:$input1,
+        RankedTensorOf<[AnyInteger]>:$input2,
+
+        IE_AutoBroadcastTypeAttr:$auto_broadcast
+    );
+
+    let results = (outs
+        RankedTensorOf<[AnyInteger]>:$output
+    );
+}
+
+//
+// BitwiseXorOp
+//
+
+def IE_BitwiseXorOp :
+        IE_LayerOp<
+            "BitwiseXor",
+            [
+                Commutative,
+                IE_EltwiseOp
+            ]
+        > {
+    let summary = "InferenceEngine BitwiseXorOp layer";
+
+    let arguments = (ins
+        RankedTensorOf<[AnyInteger]>:$input1,
+        RankedTensorOf<[AnyInteger]>:$input2,
+
+        IE_AutoBroadcastTypeAttr:$auto_broadcast
+    );
+
+    let results = (outs
+        RankedTensorOf<[AnyInteger]>:$output
+    );
+}
+
+//
+// BitwiseNotOp
+//
+
+def IE_BitwiseNotOp :
+        IE_LayerOp<
+            "BitwiseNot",
+            [
+                IE_EltwiseOp
+            ]
+        > {
+    let summary = "InferenceEngine BitwiseNotOp layer";
+
+    let arguments = (ins
+        RankedTensorOf<[AnyInteger]>:$input1
+    );
+
+    let results = (outs
+        RankedTensorOf<[AnyInteger]>:$output
+    );
+}
+
+//
 // ConvolutionOp
 //
 
@@ -1112,7 +1333,8 @@ def IE_ConvolutionOp :
         I64ArrayAttr:$dilations,
 
         OptionalAttr<IE_PostOpAttr>:$post_op,
-        OptionalAttr<DictionaryAttr>:$clamp
+        OptionalAttr<DictionaryAttr>:$clamp,
+        OptionalAttr<F32Attr>:$static_scale // constant applied to the weights table
     );
 
     let results = (outs
@@ -1169,7 +1391,7 @@ def IE_AvgPoolOp :
     let summary = "InferenceEngine AvgPool layer";
 
     let arguments = (ins
-        RankedTensorOf<[F16, F32, quant_QuantizedType]>:$input,
+        RankedTensorOf<[F16, F32, quant_QuantizedType, SI32, SI8, UI8]>:$input,
 
         I64ArrayAttr:$kernel_size,
         I64ArrayAttr:$strides,
@@ -1183,7 +1405,7 @@ def IE_AvgPoolOp :
     );
 
     let results = (outs
-        RankedTensorOf<[F16, F32, quant_QuantizedType]>:$output
+        RankedTensorOf<[F16, F32, quant_QuantizedType, SI32, SI8, UI8]>:$output
     );
 
     let elemComparisonModes = [IE_TypeComparisonMode_ALLOW_QUANT_MIXED_PRECISION, IE_TypeComparisonMode_ALLOW_DIFFERENT_QUANT];
@@ -1200,7 +1422,7 @@ def IE_MaxPoolOp :
     let summary = "InferenceEngine MaxPool layer";
 
     let arguments = (ins
-        RankedTensorOf<[F16, F32, quant_QuantizedType]>:$input,
+        RankedTensorOf<[F16, F32, quant_QuantizedType, SI32, SI8, UI8]>:$input,
 
         I64ArrayAttr:$kernel_size,
         I64ArrayAttr:$strides,
@@ -1213,7 +1435,7 @@ def IE_MaxPoolOp :
     );
 
     let results = (outs
-        RankedTensorOf<[F16, F32, quant_QuantizedType]>:$output
+        RankedTensorOf<[F16, F32, quant_QuantizedType, SI32, SI8, UI8]>:$output
     );
 
     let elemComparisonModes = [IE_TypeComparisonMode_ALLOW_QUANT_MIXED_PRECISION, IE_TypeComparisonMode_ALLOW_DIFFERENT_QUANT];
@@ -1432,7 +1654,7 @@ def IE_IfOp :
     }];
 
     let arguments = (ins
-        1DTensorOf<[F32, F16, I32, I8, SI8, Bool8]>:$cond,
+        1DTensorOf<[Bool8, SI8]>:$cond,
         Variadic<AnyRankedTensor>:$inputs
     );
 
@@ -2120,6 +2342,14 @@ def IE_FakeQuantizeOp :
         > {
     let summary = "InferenceEngine FakeQuantize layer";
 
+    let description = [{
+        The operation works in two modes:
+         * integral quantization: specified by the 'levels' attribute
+         * floating-point quantization: specified by the 'low_fp_type' attribute, [f8E4M3FN | f8E5M2]
+
+        Only one of these attributes should be provided.
+    }];
+
     let arguments = (ins
         RankedTensorOf<[F16, F32]>:$input,
         RankedTensorOf<[F16, F32]>:$input_low,
@@ -2127,7 +2357,8 @@ def IE_FakeQuantizeOp :
         RankedTensorOf<[F16, F32]>:$output_low,
         RankedTensorOf<[F16, F32]>:$output_high,
 
-        IntAttr:$levels,
+        OptionalAttr<IntAttr>:$levels,
+        OptionalAttr<TypeAttr>:$low_fp_type,
         IE_AutoBroadcastTypeAttr:$auto_broadcast
     );
 
@@ -2136,6 +2367,7 @@ def IE_FakeQuantizeOp :
     );
 
     let hasFolder = 1;
+    let hasVerifier = 1;
 }
 
 //
@@ -2220,17 +2452,18 @@ def IE_QuantizeCastOp :
     let summary = "InferenceEngine Quantize Cast layer";
 
     let arguments = (ins
-        RankedTensorOf<[SI8, UI8, quant_QuantizedType]>:$input,
+        RankedTensorOf<[AnyInteger, quant_QuantizedType]>:$input,
 
         TypeAttr:$dstElemType
     );
 
     let results = (outs
-        RankedTensorOf<[SI8, UI8, quant_QuantizedType]>:$output
+        RankedTensorOf<[AnyInteger, quant_QuantizedType]>:$output
     );
 
     let hasCanonicalizer = 1;
     let hasFolder = 1;
+    let hasVerifier = 1;
 }
 
 //
@@ -2244,15 +2477,15 @@ def IE_MatMulOp:
     let summary = "InferenceEngine MatMul layer";
 
     let arguments = (ins
-        RankedTensorOf<[F16, F32]>:$input1,
-        RankedTensorOf<[F16, F32]>:$input2,
+        RankedTensorOf<[F16, F32, SI32]>:$input1,
+        RankedTensorOf<[F16, F32, SI32]>:$input2,
 
         UnitAttr:$transpose_a,
         UnitAttr:$transpose_b
     );
 
     let results = (outs
-        RankedTensorOf<[F16, F32]>:$output
+        RankedTensorOf<[F16, F32, SI32]>:$output
     );
 
     let hasCanonicalizer = 1;
@@ -4152,8 +4385,8 @@ def IE_SubtractOp :
     let summary = "InferenceEngine Subtract layer";
 
     let arguments = (ins
-        RankedTensorOf<[F16, F32, SI32, SI64]>:$input1,
-        RankedTensorOf<[F16, F32, SI32, SI64]>:$input2,
+        RankedTensorOf<[F16, F32, SI32, SI64, UI8, UI16, UI32, UI64]>:$input1,
+        RankedTensorOf<[F16, F32, SI32, SI64, UI8, UI16, UI32, UI64]>:$input2,
 
         IE_AutoBroadcastTypeAttr:$auto_broadcast,
         OptionalAttr<IE_PostOpAttr>:$post_op,
@@ -4161,7 +4394,7 @@ def IE_SubtractOp :
     );
 
     let results = (outs
-        RankedTensorOf<[F16, F32, SI32, SI64]>:$output
+        RankedTensorOf<[F16, F32, SI32, SI64, UI8, UI16, UI32, UI64]>:$output
     );
 
     let hasFolder = 1;
@@ -4306,7 +4539,7 @@ def IE_EqualOp :
     );
 
     let results = (outs
-        RankedTensorOf<[F16, F32, SI32, SI64]>:$output
+        RankedTensorOf<[Bool8]>:$output
     );
 }
 
@@ -4381,6 +4614,37 @@ def IE_SpaceToBatch :
         OptionalAttr<I64ArrayAttr>:$block_shape_value,
         OptionalAttr<I64ArrayAttr>:$pads_begin_value,
         OptionalAttr<I64ArrayAttr>:$pads_end_value
+    );
+
+    let results = (outs
+        AnyRankedTensor:$output
+    );
+
+    let hasCanonicalizer = 1;
+}
+
+//
+// BatchToSpace
+//
+
+def IE_BatchToSpace :
+        IE_LayerOp<
+            "BatchToSpace",
+            [
+                AttrSizedOperandSegments
+            ]
+        > {
+    let summary = "InferenceEngine BatchToSpace layer";
+
+    let arguments = (ins
+        AnyRankedTensor:$input,
+        Optional<1DTensorOf<[AnyInteger]>>:$block_shape,
+        Optional<1DTensorOf<[AnyInteger]>>:$crops_begin,
+        Optional<1DTensorOf<[AnyInteger]>>:$crops_end,
+
+        OptionalAttr<I64ArrayAttr>:$block_shape_value,
+        OptionalAttr<I64ArrayAttr>:$crops_begin_value,
+        OptionalAttr<I64ArrayAttr>:$crops_end_value
     );
 
     let results = (outs
@@ -4628,8 +4892,8 @@ def IE_RandomUniformOp :
     let summary = "InferenceEngine RandomUniform layer";
 
     let arguments = (ins
-        1DTensorOf<[F16, F32, SI32]>:$min,
-        1DTensorOf<[F16, F32, SI32]>:$max,
+        RankedTensorOf<[F16, F32, SI32]>:$min,
+        RankedTensorOf<[F16, F32, SI32]>:$max,
 
         I64ArrayAttr:$output_shape,
         TypeAttr:$outputType,
@@ -4640,6 +4904,8 @@ def IE_RandomUniformOp :
     let results = (outs
         RankedTensorOf<[F16, F32, SI32]>:$output
     );
+
+    let hasVerifier = 1;
 }
 
 //
@@ -4878,6 +5144,46 @@ def IE_GRUSequenceOp :
 }
 
 //
+// GRUSequenceLastPart
+//
+
+def IE_GRUSequenceLastPartOp :
+        IE_LayerOp<
+            "GRUSequenceLastPart"
+        > {
+    let summary = "GRUSequence can be split into two parts, GRUSequenceFirstPart and GRUSequenceLastPart.";
+
+    let description = [{
+        GRUSequenceOp has five inputs and two outputs, and it can be split into GRUSequenceFirstPart and
+        GRUSequenceLastPart. The calculation method of GRUSequenceFirstPart is similar to matrix multiply,
+        and GRUSequenceLastPart will use output of GRUSequenceFirstPart and other inputs of GRUSequence to
+        get outputs of GRUSequence.
+
+        The split solution can be used for performance improvement since GRUSequenceFirstPart can be converted
+        to HW convolution to utilize hardware feature of NPU, and can be used to meet CMX requirement when
+        feasible tiling strategy can't be generated.
+    }];
+
+    let arguments = (ins
+        4DTensorOf<[F16, F32]>:$first_part_output,
+        3DTensorOf<[F16, F32]>:$initial_hidden_state,
+        3DTensorOf<[F16, F32]>:$recurrence_weights,
+        2DTensorOf<[F16, F32]>:$biases,
+
+        IntAttr:$hidden_size,
+        IntAttr:$seq_length,
+        IE_RNNSequenceDirectionAttr:$direction,
+        UnitAttr:$should_linear_before_reset,
+        F64Attr:$clip
+    );
+
+    let results = (outs
+        4DTensorOf<[F16, F32]>:$middle_hidden_state,
+        3DTensorOf<[F16, F32]>:$output_hidden_state
+    );
+}
+
+//
 // DeformablePSROIPoolingOp
 //
 
@@ -5034,6 +5340,82 @@ def IE_LayoutCastOp :
     let hasFolder = 1;
 }
 
+//
+// LoopTerminatorOp
+//
+
+def IE_LoopTerminatorOp :
+        IE_Op<
+            "LoopTerminator",
+            [
+                HasParent<"TensorIteratorOp">,
+                DeclareOpInterfaceMethods<RegionBranchTerminatorOpInterface>,
+                Pure,
+                Terminator
+            ]
+        > {
+    let summary = "Terminator for wrapping tensor iterator body module";
+
+    let arguments = (ins
+        Variadic<AnyRankedTensor>:$operands
+    );
+
+    let builders = [OpBuilder<(ins), [{ /* nothing to do */ }]>];
+
+    let hasVerifier = 1;
+}
+
+//
+// TensorIteratorOp
+//
+
+def IE_TensorIteratorOp :
+        IE_LayerOp<
+            "TensorIterator",
+            [
+                DeclareOpInterfaceMethods<InferShapedTypeOpInterface,
+                                ["inferReturnTypeComponents"]>,
+                SingleBlockImplicitTerminator<"LoopTerminatorOp">,
+                RecursiveMemoryEffects
+            ]
+        > {
+    let summary = "InferenceEngine Tensor Iterator layer";
+
+    let description = [{
+    TensorIterator layer performs recurrent execution of the network, which is described in the body, iterating through the data along axis if given.
+    }];
+
+    let arguments = (ins
+        Variadic<AnyRankedTensor>:$inputs,
+        IntAttr:$num_iterations,
+        OptionalAttr<ArrayAttr>:$slice_input_descs,
+        OptionalAttr<ArrayAttr>:$invariant_input_descs,
+        OptionalAttr<ArrayAttr>:$feedback_input_descs,
+        OptionalAttr<ArrayAttr>:$concat_output_descs,
+        OptionalAttr<ArrayAttr>:$invariant_output_descs
+    );
+
+    let results = (outs
+        Variadic<AnyRankedTensor>:$output
+    );
+
+    let regions = (region
+        SizedRegion<1>:$body_module
+    );
+
+    let assemblyFormat = [{
+        `body_module` `:` $body_module `\n`
+        `num_iterations` `:` $num_iterations `\n`
+        `slice_input_descs` `:` $slice_input_descs `\n`
+        `invariant_input_descs` `:` $invariant_input_descs `\n`
+        `feedback_input_descs` `:` $feedback_input_descs `\n`
+        `concat_output_descs` `:` $concat_output_descs `\n`
+        `invariant_output_descs` `:` $invariant_output_descs `\n`
+        `(` operands `)` attr-dict `:` type(operands) `->` type(results)
+    }];
+
+    let hasVerifier = 1;
+}
 
 //
 // DFTOp
@@ -5148,6 +5530,94 @@ def IE_IRDFTOp :
         RankedTensorOf<[F16, F32]>:$output
     );
     let hasCanonicalizer = 1;
+}
+
+//
+// AccumulateOp
+//
+
+def IE_AccumulateOp :
+        IE_LayerOp<
+            "Accumulate",
+            [
+                AttrSizedOperandSegments,
+                IE_EltwiseOp
+            ]
+        > {
+    let summary = "Accumulates intermediate results of IE.MatMul";
+
+    let description = [{
+        This operation maintains the semantics of `IE.Add` except that it does not support any
+        hardware-specific features like permutations, post-ops, broadcasting.
+        ExpandActivationChannels, AdjustInputShapeForEltwise and other DPU specific passes do not
+        apply to `IE.Accumulate`.
+        The point of using `IE.Accumulate` instead of `IE.Add` is to be able to execute it as a
+        software operation in parallel to DPU tasks that perform `IE.MatMul` in group quantization case:
+        ```
+                     Input [N, G * H] -> Split
+                                        /     \
+                                  [N, H]  ...  [N, H]
+                                      |           |
+            IE.FQ [1, H, W] -> IE.MatMul ...  IE.MatMul <- IE.FQ
+                                       \          /
+                                      IE.Accumulate ([N, W], [N, W])
+        ```
+    }];
+
+    let arguments = (ins
+        RankedTensorOf<[F16, F32, SI32, SI64, quant_QuantizedType]>:$lhs,
+        RankedTensorOf<[F16, F32, SI32, SI64, quant_QuantizedType]>:$rhs,
+        Optional<RankedTensorOf<[F16, F32]>>:$lhsScale,
+        Optional<RankedTensorOf<[F16, F32]>>:$rhsScale
+    );
+
+    let results = (outs
+        RankedTensorOf<[F16, F32, SI32, SI64, quant_QuantizedType]>:$output
+    );
+
+    let hasVerifier = 1;
+}
+
+//
+// ShapeOfOp
+//
+
+def IE_ShapeOfOp :
+        IE_LayerOp<
+            "ShapeOf"
+        > {
+    let summary = "InferenceEngine ShapeOf layer";
+
+    let arguments = (ins
+        AnyRankedTensor:$input,
+
+        TypeAttr:$dstElemType
+    );
+
+    let results = (outs
+        1DTensorOf<[SI32, SI64]>:$output
+    );
+}
+
+//
+// NonZeroOp
+//
+
+def IE_NonZeroOp :
+        IE_LayerOp<
+            "NonZero"
+        > {
+    let summary = "InferenceEngine NonZero layer";
+
+    let arguments = (ins
+        RankedTensorOf<[F16, F32, SI32, SI64]>:$input,
+
+        TypeAttr:$dstElemType
+    );
+
+    let results = (outs
+        2DTensorOf<[SI32, SI64]>:$output
+    );
 }
 
 #endif

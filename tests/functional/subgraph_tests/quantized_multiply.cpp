@@ -1,12 +1,10 @@
-// Copyright (C) Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include <vpu_ov2_layer_test.hpp>
 
-#include <ov_models/builders.hpp>
-#include <ov_models/utils/ov_helpers.hpp>
-#include <shared_test_classes/base/layer_test_utils.hpp>
+#include "common_test_utils/node_builders/fake_quantize.hpp"
 
 using namespace ov::test;
 namespace {
@@ -52,8 +50,8 @@ class QuantizedMulSubGraphTest_NPU3700 :
             const std::vector<float> dataInHigh = {dataRanges.at(1)};
             const std::vector<float> dataOutLow = {dataRanges.at(2)};
             const std::vector<float> dataOutHigh = {dataRanges.at(3)};
-            return ngraph::builder::makeFakeQuantize(input, ov::element::f32, dataLevels, {}, dataInLow, dataInHigh,
-                                                     dataOutLow, dataOutHigh);
+            return ov::test::utils::make_fake_quantize(input, ov::element::f32, dataLevels, {}, dataInLow, dataInHigh,
+                                                       dataOutLow, dataOutHigh);
         };
 
         const auto data0Fq = makeFQdata(params[0], data0FQRanges);
@@ -69,27 +67,29 @@ class QuantizedMulSubGraphTest_NPU3700 :
     }
 
 public:
-    static std::string getTestCaseName(testing::TestParamInfo<std::tuple<std::vector<float>, std::vector<float>>> obj) {
+    static std::string getTestCaseName(const testing::TestParamInfo<QuantizedMulTestParams>& obj) {
         std::vector<float> fqRanges0, fqRanges1;
-        std::tie(fqRanges0, fqRanges1) = obj.param;
+        std::tie(std::ignore, std::ignore, fqRanges0, fqRanges1) = obj.param;
 
+        const std::string sep = "_";
         std::ostringstream result;
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
+        result << "TestIdx=" << obj.index << sep;
         result << "FQ0={" << fqRanges0.at(0) << ", " << fqRanges0.at(1) << ", " << fqRanges0.at(2) << ", "
-               << fqRanges0.at(3) << "}_"
-               << "FQ1={" << fqRanges1.at(0) << ", " << fqRanges1.at(1) << ", " << fqRanges1.at(2) << ", "
-               << fqRanges1.at(3) << "}_";
+               << fqRanges0.at(3) << "}" << sep << "FQ1={" << fqRanges1.at(0) << ", " << fqRanges1.at(1) << ", "
+               << fqRanges1.at(2) << ", " << fqRanges1.at(3) << "}" << sep;
         return result.str();
     }
 };
 
 TEST_P(QuantizedMulSubGraphTest_NPU3700, SW) {
     setReferenceSoftwareMode();
-    run(VPUXPlatform::VPU3700);
+    run(Platform::NPU3700);
 }
 
 TEST_P(QuantizedMulSubGraphTest_NPU3700, HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3700);
+    run(Platform::NPU3700);
 }
 
 std::vector<std::vector<float>> fqRanges = {
@@ -103,6 +103,7 @@ const std::vector<ov::element::Type> netPrecisions = {ov::element::u8, ov::eleme
 const auto basicCases = ::testing::Combine(::testing::ValuesIn(netPrecisions), ::testing::Values(ov::element::f32),
                                            ::testing::ValuesIn(fqRanges), ::testing::ValuesIn(fqRanges));
 
-INSTANTIATE_TEST_SUITE_P(smoke_QuantizedMul, QuantizedMulSubGraphTest_NPU3700, basicCases);
+INSTANTIATE_TEST_SUITE_P(smoke_QuantizedMul, QuantizedMulSubGraphTest_NPU3700, basicCases,
+                         QuantizedMulSubGraphTest_NPU3700::getTestCaseName);
 
 }  // namespace

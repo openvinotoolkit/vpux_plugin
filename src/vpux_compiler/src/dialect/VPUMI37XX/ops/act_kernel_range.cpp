@@ -5,6 +5,7 @@
 
 #include <mlir/IR/BuiltinTypes.h>
 #include "vpux/compiler/dialect/ELFNPU37XX/utils.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/sw_utils.hpp"
 #include "vpux/compiler/dialect/VPUMI37XX/ops.hpp"
 
 #include <npu_37xx_nnrt.hpp>
@@ -18,15 +19,7 @@ using namespace npu37xx;
 
 void vpux::VPUMI37XX::ActKernelRangeOp::serialize(elf::writer::BinaryDataSection<uint8_t>& binDataSection) {
     auto kernel_task_type = getKernelTaskType();
-    bool isCacheOp = false;
-    if (kernel_task_type.has_value()) {
-        auto taskType = VPU::symbolizeActShaveTaskType(kernel_task_type.value().getLeafReference().strref());
-        VPUX_THROW_UNLESS(taskType.has_value(), "Operation '{0}' has invalid task type '{1}'", this,
-                          kernel_task_type.value());
-        if (taskType != VPU::ActShaveTaskType::COMPUTE) {
-            isCacheOp = true;
-        }
-    }
+    bool isCacheOp = VPUIP::isCacheOpTaskType(kernel_task_type);
 
     size_t kernel_text_size;
     size_t kernel_args_size;
@@ -69,7 +62,7 @@ void vpux::VPUMI37XX::ActKernelRangeOp::serialize(elf::writer::BinaryDataSection
     if (!isCacheOp)
         actKernelRange.type = nn_public::VpuActWLType::WL_KERNEL;
     else {
-        auto taskType = VPU::symbolizeActShaveTaskType(kernel_task_type.value().getLeafReference().strref());
+        auto taskType = VPU::symbolizeActShaveTaskType(kernel_task_type.getLeafReference().strref());
         switch (taskType.value()) {
         case VPU::ActShaveTaskType::CACHE_FLUSH:
             actKernelRange.type = nn_public::VpuActWLType::WL_CACHE_OP_FLUSH;
@@ -81,7 +74,7 @@ void vpux::VPUMI37XX::ActKernelRangeOp::serialize(elf::writer::BinaryDataSection
             actKernelRange.type = nn_public::VpuActWLType::WL_CACHE_OP_FLUSHINV;
             break;
         default:
-            VPUX_THROW("Unrecognized Kernel Task Type '{0}'", kernel_task_type.value().getLeafReference());
+            VPUX_THROW("Unrecognized Kernel Task Type '{0}'", kernel_task_type.getLeafReference());
             break;
         }
     }
@@ -115,13 +108,23 @@ vpux::VPURT::BufferSection vpux::VPUMI37XX::ActKernelRangeOp::getMemorySpace() {
     return vpux::VPURT::BufferSection::DDR;
 }
 
-mlir::FailureOr<uint64_t> vpux::VPUMI37XX::ActKernelRangeOp::getOffsetOfWithinOperation(mlir::Value val) {
+size_t vpux::VPUMI37XX::ActKernelRangeOp::getOffsetOfWithinOperation(mlir::Value val) {
     if (val == getKernelTextIndex()) {
         return offsetof(nn_public::VpuActKernelRange, text_window_base);
-    } else if (val == getKernelArgsIndex()) {
-        // kernel_args operand needs to be moved to ActKernelInvocationOp (there is where it gets relocated)
-        return mlir::failure();
+    }
+    VPUX_THROW("Provided Value is not linked to the ActKernelRange Op or getOffset does not support it");
+}
+
+mlir::LogicalResult vpux::VPUMI37XX::ActKernelRangeOp::verify() {
+    auto taskType = getKernelTaskType();
+    auto taskTypeVal = VPU::symbolizeActShaveTaskType(taskType.getLeafReference().strref());
+    VPUX_THROW_UNLESS(taskTypeVal.has_value(), "VPU::ActShaveTaskType has no value.");
+
+    if (taskTypeVal == VPU::ActShaveTaskType::COMPUTE &&
+        !(getKernelTextIndex() && getKernelArgsIndex() && getKernelEntryIndex())) {
+        return errorAt(getOperation(),
+                       "ActKernelRange with COMPUTE taskType should have KernelText, KernelArgs, KernelEntry.");
     }
 
-    return mlir::failure();
+    return mlir::success();
 }

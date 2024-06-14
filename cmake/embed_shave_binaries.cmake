@@ -1,4 +1,4 @@
-# Copyright (C) 2022 Intel Corporation.
+# Copyright (C) 2022 Intel Corporation
 # SPDX-License-Identifier: Apache 2.0
 
 # Creates C resources file from files in given directory
@@ -7,14 +7,16 @@ function(create_resources dir output)
     file(WRITE ${output} "")
 
     file(WRITE ${output}
-        "#include <vector>\n"
+        "#include <utility>\n"
         "#include <unordered_map>\n"
         "#include <cstdint>\n"
         "#include <string>\n"
+        "\n"
+        "namespace {\n"
     )
 
     set(map_sym
-        "std::unordered_map<std::string, const std::vector<uint8_t>> shaveBinaryResourcesMap {\n"
+        "std::unordered_map<std::string, const std::pair<const uint8_t*, size_t>> shaveBinaryResourcesMap {\n"
     )
 
     # Iterate through input files
@@ -28,13 +30,14 @@ function(create_resources dir output)
         string(LENGTH "${filedata}" hex_string_length)
         if(${hex_string_length} GREATER 0)
             string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," filedata ${filedata})
+            # Append data to output file
+            file(APPEND ${output} "static const uint8_t ${filename}[] = {${filedata}};\n")
+            string(APPEND map_sym "{\"${filename}\", {${filename}, ${hex_string_length}}},\n")
         endif()
-        # Append data to output file
-        file(APPEND ${output} "const std::vector<uint8_t> ${filename} {${filedata}};\n")
-        string(APPEND map_sym "{\"${filename}\", ${filename}},\n")
     endforeach()
 
     string(APPEND map_sym "}\;\n")
+    file(APPEND ${output} "} // namespace\n")
     file(APPEND ${output} ${map_sym})
 endfunction()
 

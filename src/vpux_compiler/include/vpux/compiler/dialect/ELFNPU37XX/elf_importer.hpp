@@ -6,9 +6,9 @@
 #pragma once
 
 #include "vpux/compiler/dialect/ELFNPU37XX/ops.hpp"
-#include "vpux/compiler/dialect/IE/ops.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPUMI37XX/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/utils/logging.hpp"
 #include "vpux/utils/core/logger.hpp"
 
@@ -61,40 +61,40 @@ private:
     void parseUserInputsOutputs(OpBuilderLogger& builderLog, IE::CNNNetworkOp& cnnOp);
     void buildMainFunc();
 
-    void createSectionOp(mlir::OpBuilder& opsBuilder, const uint32_t sectionIdx, const mlir::Value& inputArg);
-    void createSectionOp(mlir::OpBuilder& opsBuilder, const uint32_t sectionIdx,
+    void createSectionOp(mlir::OpBuilder& opsBuilder, const size_t sectionIdx, const mlir::Value& inputArg);
+    void createSectionOp(mlir::OpBuilder& opsBuilder, const size_t sectionIdx,
                          const std::vector<mlir::Value>& inputArgs);
-    void createLogicalSectionOp(mlir::OpBuilder& opsBuilder, const uint32_t sectionIdx, const mlir::Value& inputArgs);
-    void createLogicalSectionOp(mlir::OpBuilder& opsBuilder, const uint32_t sectionIdx,
+    void createLogicalSectionOp(mlir::OpBuilder& opsBuilder, const size_t sectionIdx, const mlir::Value& inputArgs);
+    void createLogicalSectionOp(mlir::OpBuilder& opsBuilder, const size_t sectionIdx,
                                 const std::vector<mlir::Value>& inputArgs);
-    void createConfigureBarrierOp(mlir::OpBuilder& opsBuilder, const uint32_t noOfBarrierConfigs);
+    void createConfigureBarrierOp(mlir::OpBuilder& opsBuilder, const size_t noOfBarrierConfigs);
     void createSectionOpForMappedInferece(mlir::func::FuncOp& func, mlir::OpBuilder& opsBuilder);
     void createSectionOpForDMA(mlir::func::FuncOp& func, mlir::OpBuilder& opsBuilder,
                                const npu37xx::nn_public::VpuMappedInference* mappedInference);
-    void createSectionOpForActKernalRange(mlir::OpBuilder& opsBuilder, const uint32_t noOfActKRangeTasks);
-    void createSectionOpForActKernelInvocation(mlir::OpBuilder& opsBuilder, const uint32_t noOfActKInvocationTasks);
-    void createSectionOpForActKernelParams(mlir::OpBuilder& opsBuilder, const uint32_t actKInvocationSectionIdx);
+    void createSectionOpForActKernalRange(mlir::OpBuilder& opsBuilder, const size_t noOfActKRangeTasks);
+    void createSectionOpForActKernelInvocation(mlir::OpBuilder& opsBuilder, const size_t noOfActKInvocationTasks);
+    void createSectionOpForActKernelParams(mlir::OpBuilder& opsBuilder, const size_t actKInvocationSectionIdx);
     void createSectionOpForActKernelText(mlir::OpBuilder& opsBuilder, const std::vector<mlir::Value>& actKTextOps,
-                                         const uint32_t actKRangeSectionIdx);
+                                         const size_t actKRangeSectionIdx);
     void createSectionOpForActKernelData(mlir::OpBuilder& opsBuilder, const std::vector<mlir::Value>& actKDataOps);
     void createSectionOpForShaveRtConfigs(mlir::OpBuilder& opsBuilder, const bool isScheduleEmbeddedRtUsed,
                                           mlir::Value& actRtTextOpValue);
     void createSectionOpForActShaveStacks(mlir::OpBuilder& opsBuilder);
-    void createSectionOpForInvariants(mlir::OpBuilder& opsBuilder, const uint32_t noOfInvariantsTasks);
-    void createSectionOpForVariants(mlir::OpBuilder& opsBuilder, const uint32_t noOfVariantsTasks);
+    void createSectionOpForInvariants(mlir::OpBuilder& opsBuilder, const size_t noOfInvariantsTasks);
+    void createSectionOpForVariants(mlir::OpBuilder& opsBuilder, const size_t noOfVariantsTasks);
     void createGenericBuiltInRegion(mlir::OpBuilder& opsBuilder);
     std::vector<std::pair<unsigned int, ELFNPU37XX::SymbolOp>> createSymbolOp(
             mlir::func::FuncOp& func, mlir::OpBuilder& opsBuilder,
             const elf::Reader<elf::ELF_Bitness::Elf64>::Section& section);
     VPURT::DeclareBufferOp createDeclareBufferOp(mlir::OpBuilder& opsBuilder, const int64_t& bufferSize,
                                                  const bool isTypeDDR, const int64_t& byteOffset);
-    mlir::Value getSymbolValueBySecHeaderAndSymbolIdx(const uint32_t secHeaderIdx, const uint32_t symbolIndex);
+    mlir::Value getSymbolValueBySecHeaderAndSymbolIdx(const size_t secHeaderIdx, const size_t symbolIndex);
     void fillValueForWaitAndUpdateBarrierConfigs(const uint64_t& prodMask, const uint64_t& consMask,
                                                  mlir::ValueRange& updateBarriers, mlir::ValueRange& waitBarriers);
-    uint32_t getMappedInferenceSectionIndex();
-    uint32_t getSectionIndexBasedOnRelocAOffset(const uint32_t offset, const uint32_t shInfo);
-    mlir::Value getInputOrOutputValueForDmaTask(mlir::OpBuilder& opsBuilder, const uint32_t dmaSectionIdx,
-                                                const uint64_t& offset, const uint32_t bufferSize,
+    size_t getMappedInferenceSectionIndex();
+    size_t getSectionIndexBasedOnRelocAOffset(const size_t offset, const size_t shInfo);
+    mlir::Value getInputOrOutputValueForDmaTask(mlir::OpBuilder& opsBuilder, const size_t dmaSectionIdx,
+                                                const uint64_t& offset, const size_t bufferSize,
                                                 const elf::Elf_Xword& flag, const mlir::BlockArgument& funcArg);
 
     elf::AccessManager* _accessor = nullptr;
@@ -107,11 +107,11 @@ private:
 
     SmallVector<mlir::Type> _inputTypes;
     SmallVector<mlir::Type> _outputTypes;
-    uint32_t _mappedInferSectionIdx = 0;
+    size_t _mappedInferSectionIdx = 0;
 
     std::map<size_t, mlir::Value> _sectionOpByValue;
     std::map<size_t, std::vector<std::pair<unsigned int, ELFNPU37XX::SymbolOp>>> _symbolsOpByValue;
-    std::vector<std::pair<uint32_t, mlir::Value>> _barrierConfigsByRealId;
+    std::vector<std::pair<size_t, mlir::Value>> _barrierConfigsByRealId;
     std::map<size_t, std::vector<mlir::Value>> _nndmaOps;
     std::vector<VPUMI37XX::ActKernelRangeOp> _actKRangeOps;
     std::vector<VPUMI37XX::ActKernelInvocationOp> _actKInvocationOps;

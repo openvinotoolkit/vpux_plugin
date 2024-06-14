@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --canonicalize %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 // CHECK-LABEL: @UseFullyConnected
 func.func @UseFullyConnected(%arg0: tensor<1x16xf32>) -> tensor<1x64xf32> {
@@ -50,7 +50,7 @@ func.func @UseFullyConnectedWithTransposedWeights(%arg0: tensor<1x512xf32>) -> t
     return %1 : tensor<1x40xf32>
 
     // CHECK-DAG:       %[[WEIGHTS:.*]] = const.Declare tensor<40x512xf32> = dense<1.000000e+00>
-    // CHECK-SAME:      : tensor<512x40xf32>, [#const.Transpose<#map>]
+    // CHECK-SAME:      : tensor<512x40xf32>, [#const.Transpose<#CN>]
     // CHECK:       %[[FC_OUT:.*]] = IE.FullyConnected(%arg0, %[[WEIGHTS]]) : tensor<1x512xf32>, tensor<40x512xf32> -> tensor<1x40xf32>
     // CHECK:       return %[[FC_OUT]] : tensor<1x40xf32>
 }

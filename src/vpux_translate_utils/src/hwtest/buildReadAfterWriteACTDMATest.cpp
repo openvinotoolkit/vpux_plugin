@@ -3,8 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/task.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/utils/types.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
@@ -103,20 +103,30 @@ void buildReadAfterWriteACTDMATest(const nb::TestCaseJsonDescriptor& testDesc, m
         VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(waitBarrier.getBarrier()),
                                               mlir::ValueRange(updateBarrier.getBarrier()), loc,
                                               overwritingCMX.getOperation()->getResult(0),
-                                              rewritableCMX.getOperation()->getResult(0), 0, cluster);
+                                              rewritableCMX.getOperation()->getResult(0), 0,
+                                              testDesc.getArchitecture() == vpux::VPU::ArchKind::NPU40XX ? 0 : cluster);
         waitBarrier = updateBarrier;
     }
 
+    // finalBarrier passed as production barrier to last DMA task
+    auto finalBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, iterationCount);
+
     VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(waitBarrier.getBarrier()),
-                                          mlir::ValueRange(), loc, outputCMX.getOperation()->getResult(0),
-                                          functionOutput, 0);
+                                          mlir::ValueRange(finalBarrier.getBarrier()), loc,
+                                          outputCMX.getOperation()->getResult(0), functionOutput, 0);
 
     functionBuilder.create<mlir::func::ReturnOp>(loc, mlir::ValueRange{functionOutput});
 
     mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
     std::optional<int> numTiles = std::nullopt;
-    pm.addPass(VPU::createInitCompilerPass(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW, numTiles,
-                                           std::nullopt, log));
+    if (testDesc.getArchitecture() == vpux::VPU::ArchKind::NPU40XX) {
+        // E#77729
+        numTiles = 2;
+    }
+    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.setNumberOfDPUGroups(numTiles);
+
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
 
     VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");
 

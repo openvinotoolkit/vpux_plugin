@@ -3,8 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/task.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/utils/types.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
@@ -88,7 +88,8 @@ void buildReadAfterWriteDMAACTTest(const nb::TestCaseJsonDescriptor& testDesc, m
         VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(waitBarrier.getBarrier()),
                                               mlir::ValueRange(updateBarrier.getBarrier()), loc,
                                               inputCMXVec[0].getOperation()->getResult(0),
-                                              outputDMACMX.getOperation()->getResult(0), 0, cluster);
+                                              outputDMACMX.getOperation()->getResult(0), 0,
+                                              testDesc.getArchitecture() == vpux::VPU::ArchKind::NPU40XX ? 0 : cluster);
 
         waitBarrier = updateBarrier;
         updateBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, i + 1);
@@ -100,14 +101,25 @@ void buildReadAfterWriteDMAACTTest(const nb::TestCaseJsonDescriptor& testDesc, m
         waitBarrier = updateBarrier;
     }
 
+    // finalBarrier passed as production barrier to last DMA task
+    auto finalBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, iterationCount);
+
     VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(waitBarrier.getBarrier()),
-                                          mlir::ValueRange(), loc, outputDMACMX.getOperation()->getResult(0),
-                                          functionOutput, 0);
+                                          mlir::ValueRange(finalBarrier.getBarrier()), loc,
+                                          outputDMACMX.getOperation()->getResult(0), functionOutput, 0);
 
     functionBuilder.create<mlir::func::ReturnOp>(loc, mlir::ValueRange{functionOutput});
 
+    // set runtime resources
+    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
+
     mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    pm.addPass(VPU::createInitCompilerPass(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW, 1, 1, log));
+    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.numberOfDPUGroups = 1;
+    initCompilerOptions.numberOfDMAPorts = 1;
+    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
+
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
 
     VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");
 

@@ -55,7 +55,7 @@ void MultiClusterStrategyAssignmentPass::safeRunOnFunc() {
     VPUX_THROW_UNLESS(tileOp != nullptr, "Failed to get NCE_Cluster information");
 
     if (tileOp.getCount() > 1) {
-        StrategyManager strategyManager(func, _enablePrefetchTiling, _log.nest());
+        StrategyManager strategyManager(func, tileOp.getCount(), _enablePrefetchTiling, _log.nest());
         _log.trace("Greedy Strategy Assignment");
         auto module = func->getParentOfType<mlir::ModuleOp>();
         auto enableMultiClusterForSWLayer = IE::getAvailableExecutor(module, VPU::ExecutorKind::SHAVE_ACT) != nullptr;

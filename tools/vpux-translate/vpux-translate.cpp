@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#include "vpux/compiler/NPU40XX/dialect/ELF/export.hpp"
 #include "vpux/compiler/dialect/ELFNPU37XX/export.hpp"
 #include "vpux/compiler/dialect/ELFNPU37XX/import.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
@@ -40,10 +41,14 @@
 #include <mlir/Tools/mlir-translate/Translation.h>
 
 #include <openvino/runtime/core.hpp>
+#include <openvino/runtime/runtime.hpp>
 
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+
+#include <sstream>
+#include <string>
 
 using namespace vpux;
 
@@ -52,9 +57,24 @@ namespace {
 llvm::cl::opt<bool> vpuxProfiling("vpux-profiling", llvm::cl::desc("Add profilingOutput region to the imported IR"),
                                   llvm::cl::init(false));
 
+llvm::cl::opt<std::string> vpuxBounds("set-upper-bounds",
+                                      llvm::cl::desc("Set upper bounds for dynamic shapes. E.g: --set-upper-bounds=\"1 "
+                                                     "18 3 3\", no commas between bounds values"),
+                                      llvm::cl::init(""));
+
 llvm::cl::opt<bool> enableDummyOpReplacement{"dummy-op-replacement",
                                              llvm::cl::desc("Replace unsupported SW Kernel ops with Dummy ones"),
                                              llvm::cl::init(false)};
+
+llvm::cl::opt<bool> dynamicShapeToStatic{
+        "dynamic-shape-to-static",
+        llvm::cl::desc("If set, we immediately apply the bounds so that we "
+                       "have a static shape for further work. "
+                       "If not, we store the related information in TensorAttr and the IE representation looks "
+                       "like this: tensor<1x?x3xf32, {bounds = [1, 18, 3], ..}>."),
+        llvm::cl::init(false)};
+
+enum class NetworkIOType { INPUT, OUTPUT };
 
 //
 // import-IE
@@ -85,6 +105,27 @@ mlir::OwningOpRef<mlir::ModuleOp> importIE(llvm::SourceMgr& sourceMgr, mlir::MLI
         return nullptr;
     }
 
+    if (!vpuxBounds.empty()) {
+        std::stringstream stream(vpuxBounds);
+        std::vector<int> boundsFromAnOption;
+        int eachBoundValue = 0;
+        while (stream >> eachBoundValue) {
+            boundsFromAnOption.push_back(eachBoundValue);
+        }
+
+        std::map<ov::Output<ov::Node>, ov::PartialShape> newShapes;
+        for (const ov::Output<ov::Node>& input : model->inputs()) {
+            ov::PartialShape shape = input.get_partial_shape();
+            for (const auto& dim : shape | indexed) {
+                if (dim.value().is_dynamic()) {
+                    dim.value() = ov::Dimension(0, boundsFromAnOption[dim.index()]);
+                }
+            }
+            newShapes[input] = shape;
+        }
+        model->reshape(newShapes);
+    }
+
     mlir::OwningOpRef<mlir::ModuleOp> module;
 
     try {
@@ -97,11 +138,11 @@ mlir::OwningOpRef<mlir::ModuleOp> importIE(llvm::SourceMgr& sourceMgr, mlir::MLI
         // constants in MLIR protects the code from use-after-free errors.
         constexpr bool useSharedConstants = false;
 
-        // For VPUX37XX the graph transformations are different compared to the rest of the platforms
-        // because scales do not need to be aligned. Running with VPU::ArchKind::UNKNOWN will align scales, which can
-        // result in an accuracy drop for VPUX37XX.
+        // For VPUX37XX and VPUX40XX the graph transformations are different compared to the rest of the platforms
+        // because scales do not need to be aligned. Running with VPU::ArchKind::UNKNOWN will align scales, which
+        // can result in an accuracy drop for VPUX37XX and VPUX40XX.
         module = IE::importNetwork(ctx, model, useSharedConstants, rootTiming, vpuxProfiling, enableDummyOpReplacement,
-                                   VPU::ArchKind::UNKNOWN);
+                                   dynamicShapeToStatic, VPU::ArchKind::UNKNOWN);
     } catch (const std::exception& ex) {
         printTo(llvm::errs(), "Failed to translate IE IR {0} to MLIR : {1}", netFileName, ex.what());
         return nullptr;
@@ -193,8 +234,11 @@ mlir::LogicalResult exportELF(mlir::ModuleOp module, llvm::raw_ostream& output) 
 
     auto arch = VPU::getArch(module.getOperation());
 
-    if (arch == VPU::ArchKind::VPUX37XX) {
+    if (arch == VPU::ArchKind::NPU37XX) {
         const auto buf = ELFNPU37XX::exportToELF(module);
+        output.write(reinterpret_cast<const char*>(buf.data()), buf.size());
+    } else if (arch == VPU::ArchKind::NPU40XX) {
+        const auto buf = ELF::exportToELF(module);
         output.write(reinterpret_cast<const char*>(buf.data()), buf.size());
     } else {
         VPUX_THROW("ELF Flow not supported for ARCH {0}", VPU::stringifyArchKind(arch));

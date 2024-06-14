@@ -13,13 +13,15 @@ namespace vpux::VPU {
 
 struct VPUNNCostParameters {
     VPUNNCostParameters(VPU::MultiClusterStrategy strategy, const OutputTiling& tiling = {},
-                        TilingMode mode = TilingMode::ISOLATED)
-            : _strategy(strategy), _tiling(tiling), _mode(mode) {
+                        TilingMode mode = TilingMode::ISOLATED,
+                        const SmallVector<SmallVector<TileInfo>>& operandTiling = {})
+            : _strategy(strategy), _tiling(tiling), _mode(mode), _operandsTiling(operandTiling) {
     }
 
     VPU::MultiClusterStrategy _strategy;
     OutputTiling _tiling;
     TilingMode _mode;
+    SmallVector<SmallVector<TileInfo>> _operandsTiling;
 };
 
 class MultiClusterStrategySetter {
@@ -86,7 +88,8 @@ public:
      *  Get the cost of DMA reads from DDR
      */
     StrategyCost getSpillingReadCost(mlir::Operation* operation, const VPUNNCostParameters& parameters,
-                                     mlir::Operation* parentOp) const;
+                                     mlir::Operation* parentOp = nullptr,
+                                     std::function<bool(mlir::Value value)> findOperand = nullptr) const;
 
 private:
     /*

@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2021-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -429,7 +429,7 @@
   ]
 }
 
-// CHECK:   module @Test attributes {VPU.arch = #VPU.arch_kind<VPUX30XX>} {
+// CHECK:   module @Test attributes {VPU.arch = #VPU.arch_kind<NPU30XX>} {
 // CHECK-DAG:   {{  }}module @UsedMemory
 // CHECK-DAG:   {{    }}IE.MemoryResource 2048 bytes of @DDR
 // CHECK-DAG:   {{  }}IE.ExecutorResource 1 of @DMA_NN
@@ -439,7 +439,7 @@
 // CHECK-DAG:   {{      }}IE.MemoryResource 917504 bytes of @CMX_NN
 // CHECK-DAG:   {{    }}IE.ExecutorResource 5 of @DPU
 // CHECK-DAG:   {{    }}IE.MemoryResource 917504 bytes of @CMX_NN {VPU.bandwidth = 32 : i64, VPU.derateFactor = 1.000000e+00 : f64}
-// CHECK-DAG:   {{  }}IE.MemoryResource 2306867200 bytes of @DDR {VPU.bandwidth = 8 : i64, VPU.derateFactor = 6.000000e-01 : f64}
+// CHECK-DAG:   {{  }}IE.MemoryResource 4194304000 bytes of @DDR {VPU.bandwidth = 8 : i64, VPU.derateFactor = 6.000000e-01 : f64}
 
 // CHECK:   DataInfo "input" : tensor<1x1000xf32>
 // CHECK:   DataInfo "softmax" : tensor<1x1000xf32>

@@ -3,10 +3,11 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+//
+
 #include "vpux/utils/core/checked_cast.hpp"
 
 #include <gtest/gtest.h>
-#include <ie_common.h>
 
 using namespace vpux;
 

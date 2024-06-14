@@ -111,10 +111,13 @@ private:
     Logger _log;
 };
 
-VPU::MultiClusterStrategy getDefaultLayerStrategy(VPU::ClusteredOpInterface clusteredOp);
+std::optional<VPU::MultiClusterStrategy> getDefaultLayerStrategy(VPU::ClusteredOpInterface clusteredOp);
 
 bool isStrategyCompatibleShape(VPU::ClusteredOpInterface clusteredOp, const vpux::TileInfo& outputTile,
                                VPU::MultiClusterStrategy strategy, Logger log);
+
+bool isStrategySOXCompatible(VPU::ClusteredOpInterface clusteredOp, VPU::MultiClusterStrategy strategy,
+                             size_t numTiles);
 
 SmallVector<uint32_t> getDPUCostForNCEOp(VPU::NCEOpInterface nceOp, VPU::MultiClusterStrategy mcStrategy,
                                          const OutputTiling& outTiles,
@@ -131,13 +134,21 @@ SmallVector<uint32_t> getPerTileActivationDMACosts(VPU::NCEOpInterface nceOp,
                                                    ArrayRef<SmallVector<NDTypeInterface>> tilesTypes,
                                                    std::function<uint32_t(NDTypeInterface)> getSpillingReadCostFunc);
 
+SmallVector<uint32_t> getPerTileOutputDMACosts(VPU::NCEOpInterface nceOp,
+                                               ArrayRef<SmallVector<NDTypeInterface>> tilesTypes,
+                                               std::function<uint32_t(NDTypeInterface)> getSpillingReadCostFunc);
+
 uint32_t getWeightsDMACostForNCEOp(VPU::NCEOpInterface nceOp, const OutputTiling& outTiles,
-                                   ArrayRef<uint32_t> layerDPUCosts, ArrayRef<uint32_t> layerDMACosts,
+                                   SmallVector<uint32_t>& layerDPUCosts, ArrayRef<uint32_t> layerDMACosts,
                                    bool enablePrefetchTiling, vpux::Logger log);
 
 uint32_t getActivationDMACostForNCEOp(VPU::NCEOpInterface nceOp, const OutputTiling& outTiles,
-                                      ArrayRef<uint32_t> layerDPUCosts, ArrayRef<uint32_t> layerDMACosts,
+                                      SmallVector<uint32_t>& layerDPUCosts, ArrayRef<uint32_t> layerDMACosts,
                                       bool enablePrefetchTiling, vpux::Logger log);
+
+uint32_t getOutputDMACostForNCEOp(VPU::NCEOpInterface nceOp, const OutputTiling& outTiles,
+                                  SmallVector<uint32_t>& layerDPUCosts, ArrayRef<uint32_t> layerDMACosts,
+                                  bool enablePrefetchTiling, vpux::Logger log);
 
 size_t getNumNonConstantOperands(mlir::Operation* op);
 

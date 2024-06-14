@@ -62,6 +62,7 @@ private:
                                                     VPU::MultiClusterStrategy strategy,
                                                     const SubgraphOptConfig& config);
     void optimizeStrategyAvoidSpillingOnSubgraph(VPU::ClusteredOpInterface op);
+    void removeClusteringStrategyAvoidSpillingOnSubgraph(VPU::ClusteredOpInterface op);
 
     std::deque<VPU::ClusteredOpInterface> layersNeedRollback;
     std::map<VPU::ClusteredOpInterface, VPU::MultiClusterStrategy> layersWithRollbackStrategy;

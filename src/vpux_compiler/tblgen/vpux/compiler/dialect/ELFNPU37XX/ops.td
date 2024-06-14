@@ -300,38 +300,31 @@ def RelocOp :
             DeclareOpInterfaceMethods<ELFNPU37XX_RelocationObjectInterface>
         ]
     > {
-    let summary = "Reloc Op";
+    let summary = "Operation that describes a relocation";
 
-    let arguments = (ins
-          AnyType:$baseOp,
-          AnyType:$offsetOf,
-          ELFNPU37XX_RelocationTypeAttr:$relocationType,
-          ELFNPU37XX_Symbol:$sourceSymbol,
-          IntAttr:$addend
-        );
+    let description = [{
+        From a funtional point of view, the operation describes an ELF Relocation, having the following components:
+          * offset
+          * source symbol
+          * relocation type
+          * addend
 
-    let results = (outs);
-
-    let assemblyFormat = [{
-        `baseOp` `(` $baseOp `:` type($baseOp) `)`
-        `offsetOf` `(` $offsetOf `:` type($offsetOf) `)`
-        $relocationType $sourceSymbol $addend attr-dict}];
-}
-
-def RelocImmOffsetOp :
-    ELFNPU37XX_Op<"RelocImmOffset",
-        [
-            DeclareOpInterfaceMethods<ELFNPU37XX_RelocationObjectInterface>
-        ]
-    > {
-    let summary = "Immediate Value Reloc Op";
+        To enhance the ease of use, it also specifies 2 optional arguments:
+          * baseOpO - if provided, the specified numerical offset is considered to be with respect to
+                      the start of the binary representation of the baseOpOffset points to
+                    - if not provided, the numerical offset is considered to be with respect to the start
+                      of the target section of the relocation
+          * description - optional stringAttr which can be used to provide meta information about the relocation,
+                          such as specifying the goal of one specific relocation
+    }];
 
     let arguments = (ins
           Optional<VPURegMapped_IndexType>:$baseOp,
           IntAttr:$offset,
           ELFNPU37XX_RelocationTypeAttr:$relocationType,
           ELFNPU37XX_Symbol:$sourceSymbol,
-          IntAttr:$addend
+          IntAttr:$addend,
+          OptionalAttr<StrAttr>:$description
         );
 
     let results = (outs);
@@ -340,6 +333,11 @@ def RelocImmOffsetOp :
         (`baseOp` `(` $baseOp^ `:` type($baseOp) `)`)?
         `offset` `(` $offset `)`
         $relocationType $sourceSymbol $addend attr-dict}];
+
+    let builders = [
+        OpBuilder<(ins "mlir::Value":$baseOp, "int64_t":$offset, "vpux::ELFNPU37XX::RelocationType":$relocationType, "mlir::Value":$sourceSymbol, "int64_t":$addend, "llvm::StringRef":$description)>,
+        OpBuilder<(ins "mlir::Value":$baseOp, "int64_t":$offset, "vpux::ELFNPU37XX::RelocationType":$relocationType, "mlir::Value":$sourceSymbol, "int64_t":$addend)>
+    ];
     }
 
 //
@@ -413,7 +411,7 @@ def ABIVersionOp :
         attr-dict}];
 
     let builders = [
-        OpBuilder<(ins)>    
+        OpBuilder<(ins)>
         ];
 }
 

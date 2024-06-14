@@ -24,12 +24,12 @@ TEST_F(MLIR_Resources, UsedMemInFunction) {
                 IE.MemoryResource 1784217 bytes of @CMX_NN_FragmentationAware
                 IE.MemoryResource 1982464 bytes of @CMX_NN {VPU.bandwidth = 32 : i64, VPU.derateFactor = 1.000000e+00 : f64}
             }
-            IE.MemoryResource 2306867200 bytes of @DDR {VPU.bandwidth = 8 : i64, VPU.derateFactor = 6.000000e-01 : f64}
+            IE.MemoryResource 4194304000 bytes of @DDR {VPU.bandwidth = 8 : i64, VPU.derateFactor = 6.000000e-01 : f64}
 
             func.func @emptyFunc() -> () {
                 return
             }
-            
+
             func.func @twoModulesFunc() {
                 builtin.module @UsedMemory {
                     IE.MemoryResource 1000 bytes of @DDR
@@ -41,7 +41,7 @@ TEST_F(MLIR_Resources, UsedMemInFunction) {
 
                 return
             }
-            
+
             func.func @wrongModuleNameFunc() {
                 builtin.module @WrongName {
                     IE.MemoryResource 1000 bytes of @DDR

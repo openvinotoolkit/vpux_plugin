@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -7,36 +7,33 @@
 
 #include <gmock/gmock-matchers.h>
 
-#include "vpux/al/config/common.hpp"
-#include "vpux/al/config/runtime.hpp"
-#include "vpux/vpux_plugin_params.hpp"
+#include "intel_npu/al/config/common.hpp"
+#include "intel_npu/al/config/runtime.hpp"
 #include "vpux_metrics.hpp"
 
-namespace ie = InferenceEngine;
+#include "test_utils/npu_backends_test.hpp"
 
 using MetricsUnitTests = ::testing::Test;
 using ::testing::HasSubstr;
 
 TEST_F(MetricsUnitTests, getAvailableDevicesNames) {
-    std::shared_ptr<vpux::OptionsDesc> dummyOptions = std::make_shared<vpux::OptionsDesc>();
-    vpux::Config dummyConfig(dummyOptions);
-    const std::vector<std::string> dummyBackendRegistry = {"vpu3700_test_backend"};
-    vpux::VPUXBackends::Ptr backends;
-    backends = std::make_shared<vpux::VPUXBackends>(dummyBackendRegistry, dummyConfig);
+    const std::vector<std::string> dummyBackendRegistry = {"npu3720_test_backend"};
+    vpux::NPUBackendsTest::Ptr test_backends;
+    test_backends = std::make_shared<vpux::NPUBackendsTest>(dummyBackendRegistry);
+    std::shared_ptr<vpux::VPUXBackends> backends = std::reinterpret_pointer_cast<vpux::VPUXBackends>(test_backends);
     vpux::Metrics metrics(backends);
 
     std::vector<std::string> devicesNames = metrics.GetAvailableDevicesNames();
 
-    ASSERT_EQ("DummyVPU3700Device", devicesNames[0]);
+    ASSERT_EQ("3720.dummyDevice", devicesNames[0]);
     ASSERT_EQ("noOtherDevice", devicesNames[1]);
 }
 
 TEST_F(MetricsUnitTests, getFullDeviceName) {
-    std::shared_ptr<vpux::OptionsDesc> dummyOptions = std::make_shared<vpux::OptionsDesc>();
-    vpux::Config dummyConfig(dummyOptions);
-    const std::vector<std::string> dummyBackendRegistry = {"vpu3720_test_backend"};
-    vpux::VPUXBackends::Ptr backends;
-    backends = std::make_shared<vpux::VPUXBackends>(dummyBackendRegistry, dummyConfig);
+    const std::vector<std::string> dummyBackendRegistry = {"npu3720_test_backend"};
+    vpux::NPUBackendsTest::Ptr test_backends;
+    test_backends = std::make_shared<vpux::NPUBackendsTest>(dummyBackendRegistry);
+    std::shared_ptr<vpux::VPUXBackends> backends = std::reinterpret_pointer_cast<vpux::VPUXBackends>(test_backends);
     vpux::Metrics metrics(backends);
 
     auto device = backends->getDevice();
@@ -44,11 +41,10 @@ TEST_F(MetricsUnitTests, getFullDeviceName) {
 }
 
 TEST_F(MetricsUnitTests, getDeviceUuid) {
-    std::shared_ptr<vpux::OptionsDesc> dummyOptions = std::make_shared<vpux::OptionsDesc>();
-    vpux::Config dummyConfig(dummyOptions);
-    const std::vector<std::string> dummyBackendRegistry = {"vpu3720_test_backend"};
-    vpux::VPUXBackends::Ptr backends;
-    backends = std::make_shared<vpux::VPUXBackends>(dummyBackendRegistry, dummyConfig);
+    const std::vector<std::string> dummyBackendRegistry = {"npu3720_test_backend"};
+    vpux::NPUBackendsTest::Ptr test_backends;
+    test_backends = std::make_shared<vpux::NPUBackendsTest>(dummyBackendRegistry);
+    std::shared_ptr<vpux::VPUXBackends> backends = std::reinterpret_pointer_cast<vpux::VPUXBackends>(test_backends);
     vpux::Metrics metrics(backends);
 
     ov::device::UUID testPattern = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
@@ -63,11 +59,10 @@ TEST_F(MetricsUnitTests, getDeviceUuid) {
 }
 
 TEST_F(MetricsUnitTests, getDeviceArchitecture) {
-    std::shared_ptr<vpux::OptionsDesc> dummyOptions = std::make_shared<vpux::OptionsDesc>();
-    vpux::Config dummyConfig(dummyOptions);
-    const std::vector<std::string> dummyBackendRegistry = {"vpu3720_test_backend"};
-    vpux::VPUXBackends::Ptr backends;
-    backends = std::make_shared<vpux::VPUXBackends>(dummyBackendRegistry, dummyConfig);
+    const std::vector<std::string> dummyBackendRegistry = {"npu3720_test_backend"};
+    vpux::NPUBackendsTest::Ptr test_backends;
+    test_backends = std::make_shared<vpux::NPUBackendsTest>(dummyBackendRegistry);
+    std::shared_ptr<vpux::VPUXBackends> backends = std::reinterpret_pointer_cast<vpux::VPUXBackends>(test_backends);
     vpux::Metrics metrics(backends);
 
     auto device = backends->getDevice();
@@ -75,12 +70,11 @@ TEST_F(MetricsUnitTests, getDeviceArchitecture) {
 }
 
 TEST_F(MetricsUnitTests, getBackendName) {
-    std::shared_ptr<vpux::OptionsDesc> dummyOptions = std::make_shared<vpux::OptionsDesc>();
-    vpux::Config dummyConfig(dummyOptions);
-    const std::vector<std::string> dummyBackendRegistry = {"vpu3720_test_backend"};
-    vpux::VPUXBackends::Ptr backends;
-    backends = std::make_shared<vpux::VPUXBackends>(dummyBackendRegistry, dummyConfig);
+    const std::vector<std::string> dummyBackendRegistry = {"npu3720_test_backend"};
+    vpux::NPUBackendsTest::Ptr test_backends;
+    test_backends = std::make_shared<vpux::NPUBackendsTest>(dummyBackendRegistry);
+    std::shared_ptr<vpux::VPUXBackends> backends = std::reinterpret_pointer_cast<vpux::VPUXBackends>(test_backends);
     vpux::Metrics metrics(backends);
 
-    ASSERT_EQ("VPU3720TestBackend", metrics.GetBackendName());
+    ASSERT_EQ("NPU3720TestBackend", metrics.GetBackendName());
 }

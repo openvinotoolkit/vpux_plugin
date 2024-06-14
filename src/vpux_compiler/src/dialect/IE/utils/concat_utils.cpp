@@ -4,6 +4,7 @@
 //
 
 #include "vpux/compiler/dialect/IE/utils/concat_utils.hpp"
+#include "vpux/compiler/dialect/IE/utils/slice_utils.hpp"
 
 namespace vpux {
 namespace IE {
@@ -91,6 +92,84 @@ SmallVector<int64_t> calculateInputShapeAfterSwitchConcatAndAffineReshape(mlir::
         }
     }
     return newShapeVec;
+}
+
+mlir::Value createPaddingConstForConcat(ArrayRef<int64_t> constShape, mlir::Location loc,
+                                        vpux::NDTypeInterface inputType, double padValue,
+                                        mlir::PatternRewriter& rewriter) {
+    const auto origElemType = inputType.getElementType();
+    const auto padDataStorageType =
+            mlir::RankedTensorType::get(constShape, mlir::Float32Type::get(rewriter.getContext()));
+    const auto padDataStorage = mlir::DenseElementsAttr::get(padDataStorageType, static_cast<float>(padValue));
+
+    const auto padDataType = mlir::RankedTensorType::get(constShape, origElemType);
+    const auto padDataAttr = Const::ContentAttr::get(padDataStorage).convertElemType(origElemType);
+
+    auto constant = rewriter.create<Const::DeclareOp>(loc, padDataType, padDataAttr);
+
+    const auto dataOrder = inputType.getDimsOrder();
+    const auto orderMap = dataOrder.toAffineMap(rewriter.getContext());
+    return rewriter.createOrFold<IE::ReorderOp>(loc, constant.getOutput(), orderMap);
+}
+
+const mlir::ArrayAttr inferOffsetsAttrWithAxis(IE::ConcatOp origOp, int64_t& axis) {
+    auto rank = origOp.getOutput().getType().cast<vpux::NDTypeInterface>().getRank();
+
+    SmallVector<SmallVector<int64_t>> finalOffsets;
+    finalOffsets.push_back(SmallVector<int64_t>(rank, 0));
+    int64_t correctAxis;
+    if (axis < 0) {
+        correctAxis = axis + rank;
+    } else {
+        correctAxis = axis;
+    }
+
+    for (auto input : origOp.getInputs() | indexed) {
+        auto inputShape = getShape(input.value());
+        auto offsets = SmallVector<int64_t>(rank, 0);
+        offsets[correctAxis] = inputShape[Dim(correctAxis)] + finalOffsets.back()[correctAxis];
+        finalOffsets.push_back(offsets);
+    }
+    finalOffsets.pop_back();
+
+    return getIntArrayOfArray(origOp.getContext(), finalOffsets);
+}
+
+std::optional<vpux::Dim> getConcatAxis(IE::ConcatOp concatOp) {
+    if (concatOp.getPerAxisAttr()) {
+        if (concatOp.getPerAxisAttr().getStride()) {
+            return std::nullopt;
+        }
+        return Dim(concatOp.getPerAxisAttr().getAxis().getValue().getSExtValue());
+    }
+
+    const auto concatAxes =
+            vpux::IE::getDiffInOutSizeDims(getShape(concatOp.getOperands()[0]), getShape(concatOp.getResult()));
+    if (concatAxes.empty() || concatAxes.size() != 1) {
+        return std::nullopt;
+    }
+
+    const auto concatAxis = concatAxes.front();
+    // Should to ensure there is no data overlapped
+    VPUX_THROW_UNLESS(concatOp.getStaticOffsetsAttr() != nullptr, "Cannot get StaticOffsetsAttr");
+    const auto allOffsets = concatOp.getStaticOffsetsAttr().getAsRange<mlir::ArrayAttr>();
+
+    int64_t accumulator = 0;
+    for (const auto& p : zip(concatOp.getInputs(), allOffsets)) {
+        const auto inputShape = getShape(std::get<0>(p));
+        const auto offsets = parseIntArrayAttr<int64_t>(std::get<1>(p));
+
+        if (accumulator != offsets[concatAxis.ind()]) {
+            return std::nullopt;
+        }
+        accumulator += inputShape[concatAxis];
+    }
+
+    if (accumulator != getShape(concatOp.getResult())[concatAxis]) {
+        return std::nullopt;
+    }
+
+    return concatAxis;
 }
 
 }  // namespace IE

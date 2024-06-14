@@ -10,7 +10,7 @@
 #include "vpux/compiler/dialect/VPU/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops_interfaces.hpp"
 #include "vpux/compiler/dialect/VPU/IR/types.hpp"
-#include "vpux/compiler/dialect/VPUIP/types.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/types.hpp"
 
 #include "vpux/utils/core/error.hpp"
 
@@ -124,6 +124,25 @@ mlir::LogicalResult sameLayout(VPUIP::DistributedBufferType inDistributedType,
 template <typename T, std::enable_if_t<or_<std::is_same<VPU::DistributedTensorType, T>,
                                            std::is_same<VPUIP::DistributedBufferType, T>>::value,
                                        bool> = true>
+bool arePerClusterMemoryShapeAndOffsetsEqual(T sourceType, T targetType) {
+    // Ensure the memory view for the source and target distributions are the same,
+    // no matter the attributes of the distribution.
+    // For example, given:
+    // sourceAttr = SEGMENTED across 2 clusters without uniformDistributedSegments
+    // targetAttr = SEGMENTED across 2 clusters with uniformDistributedSegments
+    // memory view will always be the same, so the distribution attrs are compatible.
+    auto srcMemoryOffsets = sourceType.getPerClusterMemoryShapeOffsets();
+    auto targetMemoryOffsets = targetType.getPerClusterMemoryShapeOffsets();
+
+    auto srcMemoryShapes = sourceType.getPerClusterMemoryShapes();
+    auto targetMemoryShapes = targetType.getPerClusterMemoryShapes();
+
+    return (srcMemoryOffsets == targetMemoryOffsets) && (srcMemoryShapes == targetMemoryShapes);
+}
+
+template <typename T, std::enable_if_t<or_<std::is_same<VPU::DistributedTensorType, T>,
+                                           std::is_same<VPUIP::DistributedBufferType, T>>::value,
+                                       bool> = true>
 mlir::LogicalResult areDistributionAttrsCompatible(T sourceType, T targetType,
                                                    const bool allowDifferentPerClusterMemoryView = false) {
     const auto sourceAttr = sourceType.getDistribution();
@@ -138,43 +157,12 @@ mlir::LogicalResult areDistributionAttrsCompatible(T sourceType, T targetType,
         }
     }
 
-    // Check if the distributed tensor has the full tensor on each cluster
-    auto isMemoryFullSizeMode = [&](VPU::DistributionMode mode) -> bool {
-        return VPU::bitEnumContainsAny(mode, VPU::DistributionMode::DUPLICATED) ||
-               VPU::bitEnumContainsAny(mode, VPU::DistributionMode::MULTICASTED);
-    };
-
-    // Only check the alignment when the tensor needs to split
-    // For FullSizeTensor, e.g., DUPLICATED and MULTICASTED, tensors might be compatible even though
-    // they have different alignment attributes. Because the tensors are aligned and the same on each cluster
-    // For tensors that need to split, the same alignments are required to make sure tensors compatible on each cluster
-    if (!(isMemoryFullSizeMode(inDistributionMode) && isMemoryFullSizeMode(outDistributionMode)) &&
-        sourceAttr.getAlignment() != targetAttr.getAlignment()) {
-        return mlir::failure();
-    }
-
     const auto inDistributionNumClusters = sourceAttr.getNumClusters();
     const auto outDistributionNumClusters = targetAttr.getNumClusters();
 
     if (VPU::areDistributionNumClustersCompatible(inDistributionNumClusters, outDistributionNumClusters).failed()) {
         return mlir::failure();
     }
-
-    // Ensure the memory view for the source and target distributions are the same,
-    // no matter the attributes of the distribution.
-    // For example, given:
-    // sourceAttr = SEGMENTED across 2 clusters without uniformDistributedSegments
-    // targetAttr = SEGMENTED across 2 clusters with uniformDistributedSegments
-    // memory view will always be the same, so the distribution attrs are compatible.
-    auto arePerClusterMemoryShapeAndOffsetsEqual = [&]() -> bool {
-        auto srcMemoryOffsets = sourceType.getPerClusterMemoryShapeOffsets();
-        auto targetMemoryOffsets = targetType.getPerClusterMemoryShapeOffsets();
-
-        auto srcMemoryShapes = sourceType.getPerClusterMemoryShapes();
-        auto targetMemoryShapes = targetType.getPerClusterMemoryShapes();
-
-        return (srcMemoryOffsets == targetMemoryOffsets) && (srcMemoryShapes == targetMemoryShapes);
-    };
 
     if ((inDistributionMode == VPU::DistributionMode::SEGMENTED ||
          inDistributionMode == VPU::DistributionMode::OVERLAPPED) &&
@@ -196,7 +184,7 @@ mlir::LogicalResult areDistributionAttrsCompatible(T sourceType, T targetType,
 
         // If source & target types are the type of a producer op's output and the type of a consumer op's input,
         // respectively, then as long as memory view is equal, the two distributed attributes are equivalent
-        return arePerClusterMemoryShapeAndOffsetsEqual() ? mlir::success() : mlir::failure();
+        return arePerClusterMemoryShapeAndOffsetsEqual(sourceType, targetType) ? mlir::success() : mlir::failure();
     }
 
     return mlir::success();

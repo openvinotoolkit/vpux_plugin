@@ -5,8 +5,8 @@
 
 #pragma once
 
-#include "vpux/compiler/dialect/IE/ops.hpp"
-#include "vpux/compiler/dialect/IE/passes.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
+#include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 #include "vpux/compiler/utils/types.hpp"
 
 namespace vpux {

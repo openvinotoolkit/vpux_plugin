@@ -25,6 +25,7 @@ TEST(DeviceInfo, CreateFromString_WrongFormat) {
     EXPECT_ANY_THROW(std::ignore = DeviceInfo("QQ"));
     EXPECT_ANY_THROW(std::ignore = DeviceInfo("30AB"));
     EXPECT_ANY_THROW(std::ignore = DeviceInfo("371"));
+    EXPECT_ANY_THROW(std::ignore = DeviceInfo("NPU4X1X"));
 }
 
 TEST(DeviceInfo, Compare) {

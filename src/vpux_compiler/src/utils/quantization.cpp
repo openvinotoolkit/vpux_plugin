@@ -10,7 +10,9 @@
 #include "vpux/compiler/utils/subspaces.hpp"
 #include "vpux/compiler/utils/types.hpp"
 
-#include "vpux/utils/IE/loop.hpp"
+#include "vpux/compiler/utils/loop.hpp"
+
+#include <mlir/IR/BuiltinTypes.h>
 
 #include <cmath>
 
@@ -46,11 +48,18 @@ mlir::LogicalResult vpux::validateQuantElemType(mlir::Location loc, vpux::NDType
 
 mlir::Type vpux::normalizeQuantStorageType(mlir::quant::QuantizedType qType) {
     auto elemType = qType.getStorageType();
-    const auto intType = elemType.dyn_cast_or_null<mlir::IntegerType>();
-    VPUX_THROW_UNLESS(intType, "Unsupported storage element type {0}", elemType);
+    if (const auto intType = elemType.dyn_cast_or_null<mlir::IntegerType>()) {
+        return mlir::IntegerType::get(intType.getContext(), intType.getWidth(),
+                                      qType.isSigned() ? mlir::IntegerType::Signed : mlir::IntegerType::Unsigned);
+    }
+    if (const auto lowFpType = elemType.dyn_cast_or_null<mlir::Float8E4M3FNType>()) {
+        return mlir::FloatType::getFloat8E4M3FN(lowFpType.getContext());
+    }
+    if (const auto lowFpType = elemType.dyn_cast_or_null<mlir::Float8E5M2Type>()) {
+        return mlir::FloatType::getFloat8E5M2(lowFpType.getContext());
+    }
 
-    return mlir::IntegerType::get(intType.getContext(), intType.getWidth(),
-                                  qType.isSigned() ? mlir::IntegerType::Signed : mlir::IntegerType::Unsigned);
+    VPUX_THROW("Unsupported storage element type {0}", elemType);
 }
 
 mlir::quant::UniformQuantizedPerAxisType vpux::expandScalesAndZP(mlir::quant::UniformQuantizedPerAxisType perAxisQType,
@@ -237,27 +246,19 @@ std::pair<Scales, ZeroPoints> vpux::extractScalesAndZeroPoints(mlir::Type tensor
     VPUX_THROW("Unsupported Quantized Type {0}", qType);
 }
 
-namespace {
+Scales vpux::exractWeightsScales(mlir::Type weightsElemType) {
+    if (weightsElemType == nullptr || !weightsElemType.isa<mlir::quant::QuantizedType>()) {
+        return SmallVector<double>{1.0};
+    }
 
-template <typename MultType>
-std::tuple<MultType, uint8_t, int8_t> approximate(uint8_t bits, double target) {
-    int exponent = 0;
-    const auto mantissa = std::frexp(target, &exponent);
-
-    const auto mult = checked_cast<MultType>(mantissa * std::pow(2, bits));
-    const auto shift = exponent > bits ? 0 : checked_cast<uint8_t>(bits - exponent);
-    const auto postShift = exponent > bits ? checked_cast<int8_t>(bits - exponent) : 0;
-
-    return std::make_tuple(mult, shift, postShift);
+    return extractScalesAndZeroPoints(weightsElemType).first;
 }
-
-}  // namespace
 
 vpux::QuantizationApproximation::QuantizationApproximation(VPU::ArchKind architecture, double target)
         : _mult(0), _shift(0), _postShift(0) {
     std::tie(_mult, _shift, _postShift) = approximate<decltype(_mult)>(15, target);
 
-    VPUX_THROW_WHEN(_postShift != 0 && architecture != VPU::ArchKind::VPUX30XX,
+    VPUX_THROW_WHEN(_postShift != 0 && architecture != VPU::ArchKind::NPU30XX,
                     "Encountered an attempt to approximate {0} as mult = {1}, shift = {2}, postShift = {3} on {4}, "
                     "but postShift is not supported",
                     target, mult(), shift(), postShift(), architecture);
@@ -343,7 +344,7 @@ QuantizationApproximation vpux::EltwiseQuantizationApproximation::output() const
 
 vpux::PReLUApproximation::PReLUApproximation(VPU::ArchKind architecture, double target): _mult(0), _shift(0) {
     // TODO return logic for 11 bits for quantized case VPUX37XX back as soon as it works.
-    const auto bits = architecture == VPU::ArchKind::VPUX30XX ? 7 : 11;
+    const auto bits = architecture == VPU::ArchKind::NPU30XX ? 7 : 11;
     int8_t postShift = 0;
     std::tie(_mult, _shift, postShift) = approximate<decltype(_mult)>(bits, target);
 
@@ -483,20 +484,60 @@ std::tuple<int64_t, int64_t, mlir::Type> vpux::getStorageParams(mlir::MLIRContex
     }
 }
 
+std::tuple<int64_t, int64_t, mlir::Type> vpux::getStorageParams(mlir::MLIRContext* ctx, mlir::Type lowFpType) {
+    if (lowFpType.isa<mlir::Float8E4M3FNType>()) {
+        return {mlir::quant::QuantizedType::getDefaultMinimumForF8E4M3FN(),
+                mlir::quant::QuantizedType::getDefaultMaximumForF8E4M3FN(), mlir::FloatType::getFloat8E4M3FN(ctx)};
+    } else if (lowFpType.isa<mlir::Float8E5M2Type>()) {
+        return {mlir::quant::QuantizedType::getDefaultMinimumForF8E5M2(),
+                mlir::quant::QuantizedType::getDefaultMaximumForF8E5M2(), mlir::FloatType::getFloat8E5M2(ctx)};
+    } else {
+        VPUX_THROW("Got unsupported FP8 type '{0}'", lowFpType);
+    }
+}
+
+mlir::FailureOr<std::tuple<float, float>> vpux::getFp8Range(mlir::Type lowFpType) {
+    if (lowFpType.isa<mlir::Float8E4M3FNType>()) {
+        return std::make_tuple(static_cast<float>(mlir::quant::QuantizedType::getDefaultMinimumForF8E4M3FN()),
+                               static_cast<float>(mlir::quant::QuantizedType::getDefaultMaximumForF8E4M3FN()));
+    }
+    if (lowFpType.isa<mlir::Float8E5M2Type>()) {
+        return std::make_tuple(static_cast<float>(mlir::quant::QuantizedType::getDefaultMinimumForF8E5M2()),
+                               static_cast<float>(mlir::quant::QuantizedType::getDefaultMaximumForF8E5M2()));
+    }
+    return mlir::failure();
+}
+
 mlir::quant::QuantizedType vpux::getQuantizedType(mlir::Attribute lowConstAttr, mlir::Attribute highConstAttr,
-                                                  int64_t levels, mlir::FloatType realType, bool isSigned,
-                                                  mlir::Location loc, IE::AutoBroadcastType broadcast) {
+                                                  std::optional<int64_t> levels, std::optional<mlir::Type> lowFpType,
+                                                  mlir::FloatType realType, bool isSigned, mlir::Location loc,
+                                                  IE::AutoBroadcastType broadcast, const Logger& log) {
+    const auto innerLog = log.nest("getQuantizedType");
+
     const auto lowConst = lowConstAttr.dyn_cast_or_null<Const::ContentAttr>();
     const auto highConst = highConstAttr.dyn_cast_or_null<Const::ContentAttr>();
     if (lowConst == nullptr || highConst == nullptr) {
         (void)errorAt(loc, "Got non constant quantization parameters (low and high values)");
         return nullptr;
     }
+    // If levels is greater then MAX_LEVELS then the quantization cannot be done on HW so FakeQuantize should not be
+    // split in Quantize->Dequantize
+    if (levels.has_value() && *levels > MAX_LEVELS) {
+        return nullptr;
+    }
 
     mlir::Type storageType;
     int64_t qMin = 0;
     int64_t qMax = 0;
-    std::tie(qMin, qMax, storageType) = getStorageParams(lowConst.getContext(), levels, isSigned);
+    if (levels.has_value()) {
+        std::tie(qMin, qMax, storageType) = getStorageParams(lowConst.getContext(), *levels, isSigned);
+    } else if (lowFpType.has_value()) {
+        std::tie(qMin, qMax, storageType) = getStorageParams(lowConst.getContext(), *lowFpType);
+        isSigned = true;
+    } else {
+        (void)errorAt(loc, "Got neither levels (for integer types) nor lowFpType (for float8 versions)");
+        return nullptr;
+    }
 
     const auto lowAttr = lowConst.fold();
     const auto highAttr = highConst.fold();
@@ -507,6 +548,12 @@ mlir::quant::QuantizedType vpux::getQuantizedType(mlir::Attribute lowConstAttr, 
         double scale = 0.0;
         int64_t zeroPoint = 0;
         std::tie(scale, zeroPoint) = calcScaleAndZeroPoint(qMin, qMax, low, high);
+
+        if (lowFpType.has_value() && zeroPoint != 0) {
+            innerLog.warning("HW unsupported zero point '{0}' for storage type '{1}', failed to create quantized type",
+                             zeroPoint, storageType);
+            return nullptr;
+        }
 
         return mlir::quant::UniformQuantizedType::getChecked(loc, isSigned ? mlir::quant::QuantizationFlags::Signed : 0,
                                                              storageType, realType, scale, zeroPoint, qMin, qMax);
@@ -551,9 +598,21 @@ mlir::quant::QuantizedType vpux::getQuantizedType(mlir::Attribute lowConstAttr, 
     SmallVector<double> scales(lows.size());
     SmallVector<int64_t> zeroPoints(lows.size());
 
-    loop_1d(LoopExecPolicy::Parallel, lows.size(), [&](size_t i) {
+    loop_1d(LoopExecPolicy::Parallel, lowConst.getContext(), lows.size(), [&](size_t i) {
         std::tie(scales[i], zeroPoints[i]) = calcScaleAndZeroPoint(qMin, qMax, lows[i], highs[i]);
     });
+
+    if (lowFpType.has_value()) {
+        const auto hasUnsupportedZP = llvm::any_of(zeroPoints, [](int64_t zp) {
+            return zp != 0;
+        });
+
+        if (hasUnsupportedZP) {
+            innerLog.warning("HW unsupported zero point (!= 0) for storage type '{1}', failed to create quantized type",
+                             storageType);
+            return nullptr;
+        }
+    }
 
     if (!std::equal(zeroPoints.begin() + 1, zeroPoints.end(), zeroPoints.begin())) {
         return nullptr;
@@ -590,10 +649,10 @@ void vpux::getFakeQuantParams(mlir::quant::UniformQuantizedPerAxisType qElemType
     rMinVals.resize(scales.size());
     rMaxVals.resize(scales.size());
 
-    loop_1d(LoopExecPolicy::Parallel, scales.size(), [&](size_t i) {
+    for (size_t i = 0; i < scales.size(); ++i) {
         rMinVals[i] = dequantize(qMin, scales[i], zeroPoints[i]);
         rMaxVals[i] = dequantize(qMax, scales[i], zeroPoints[i]);
-    });
+    }
 }
 
 void vpux::getFakeQuantParams(vpux::NDTypeInterface qType, int64_t& levels, mlir::RankedTensorType& attrType,
@@ -624,23 +683,6 @@ void vpux::getFakeQuantParams(vpux::NDTypeInterface qType, int64_t& levels, mlir
     } else {
         VPUX_THROW("Unsupported Quantized Type '{0}'", qElemType);
     }
-}
-
-//
-// Dequantize support
-//
-
-float vpux::dequantize(int64_t qVal, double scale, int64_t zeroPoint) {
-    return static_cast<float>((qVal - zeroPoint) * scale);
-}
-
-//
-// Convert real numbers to fixed point S16.16 format.
-//
-
-int32_t vpux::toFixedPoint(const double realVal) {
-    const double mult = 1 << 16;
-    return std::lround(realVal * mult);
 }
 
 mlir::Type vpux::rescaleUniformQuantizedType(const mlir::Type tensorType, const double factor) {

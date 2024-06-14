@@ -7,11 +7,10 @@
 #include "vpux/compiler/dialect/const/attributes/content.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/dilated_utils.hpp"
+#include "vpux/compiler/utils/loop.hpp"
 #include "vpux/compiler/utils/subspaces.hpp"
 
-#include "vpux/utils/IE/loop.hpp"
 #include "vpux/utils/core/format.hpp"
-#include "vpux/utils/core/func_ref.hpp"
 
 #include <mlir/Dialect/Quant/QuantTypes.h>
 
@@ -107,17 +106,18 @@ Const::Content vpux::Const::ExpandDilatedAttr::transform(vpux::Const::Content& i
     const auto dKY = outShape[vpux::Dims4D::Filter::KY];
     const auto dKX = outShape[vpux::Dims4D::Filter::KX];
 
-    loop_4d(LoopExecPolicy::Parallel, OC, IC, KY, KX, [&](int64_t oc, int64_t ic, int64_t ky, int64_t kx) {
-        const auto dky = ky + (dilations[0] - 1) * ky;
-        const auto dkx = kx + (dilations[1] - 1) * kx;
+    loop_4d(LoopExecPolicy::Parallel, input.getStorageElemType().getContext(), OC, IC, KY, KX,
+            [&](int64_t oc, int64_t ic, int64_t ky, int64_t kx) {
+                const auto dky = ky + (dilations[0] - 1) * ky;
+                const auto dkx = kx + (dilations[1] - 1) * kx;
 
-        const auto outRawInd = dkx + dky * dKX + ic * dKX * dKY + oc * dKX * dKY * IC;
-        const auto inRawInd = kx + ky * KX + ic * KX * KY + oc * KX * KY * IC;
+                const auto outRawInd = dkx + dky * dKX + ic * dKX * dKY + oc * dKX * dKY * IC;
+                const auto inRawInd = kx + ky * KX + ic * KX * KY + oc * KX * KY * IC;
 
-        std::copy_n(inBuf.data() + checked_cast<size_t>(inRawInd * elemSize.count()),
-                    checked_cast<size_t>(elemSize.count()),
-                    outBuf.data() + checked_cast<size_t>(outRawInd * elemSize.count()));
-    });
+                std::copy_n(inBuf.data() + checked_cast<size_t>(inRawInd * elemSize.count()),
+                            checked_cast<size_t>(elemSize.count()),
+                            outBuf.data() + checked_cast<size_t>(outRawInd * elemSize.count()));
+            });
 
     return output;
 }

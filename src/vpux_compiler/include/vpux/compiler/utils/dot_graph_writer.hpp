@@ -7,7 +7,7 @@
 
 #include "vpux/utils/core/string_ref.hpp"
 
-#include <mlir/IR/Block.h>
+#include <mlir/Dialect/Func/IR/FuncOps.h>
 
 namespace vpux {
 
@@ -16,11 +16,12 @@ struct GraphWriterParams final {
     std::string stopBefore;
     bool printConst = false;
     bool printDeclarations = false;
+    bool printOnlyDotInterfaces = false;
     bool printOnlyTaskAndBarrier = false;
     bool printOnlyAsyncExec = false;
     bool htmlLike = true;
 };
 
-mlir::LogicalResult writeDotGraph(mlir::Block& block, StringRef fileName, const GraphWriterParams& params);
+mlir::LogicalResult writeDotGraph(mlir::func::FuncOp func, StringRef fileName, const GraphWriterParams& params);
 
 }  // namespace vpux

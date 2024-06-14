@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW" --fuse-activation-ops="enable-fuse-clamp=true" %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 func.func @Conv2dWithClampTest(%arg0: tensor<1x16x4x4xf16>) -> tensor<1x16x3x3xf16> {
     %filters = const.Declare tensor<16x16x2x2xf16> = dense<1.0> : tensor<16x16x2x2xf16>
@@ -43,16 +43,16 @@ func.func @Conv2dWithClampTest(%arg0: tensor<1x16x4x4xf16>) -> tensor<1x16x3x3xf
 !qElemType2 = !quant.uniform<u8:f16, 0.15748031466614967:128>
 
 func.func @QuantizedConv2dWithClampTest(%arg0: tensor<1x16x20x20x!qElemType>) -> tensor<1x32x20x20x!qElemType2> {
-    %filters = const.Declare tensor<32x16x1x1x!qElemType1> = dense<1.0> : tensor<32x16x1x1xf32>, 
+    %filters = const.Declare tensor<32x16x1x1x!qElemType1> = dense<1.0> : tensor<32x16x1x1xf32>,
                     [#const.ConvertElemType<f16>, #const.ConvertElemType<ui8>, #const.QuantCast<!qElemType1>]
- 
-    %0 = IE.Convolution(%arg0, %filters) 
+
+    %0 = IE.Convolution(%arg0, %filters)
         {
-            dilations = [1, 1], 
-            pads_begin = [0, 0], 
-            pads_end = [0, 0], 
+            dilations = [1, 1],
+            pads_begin = [0, 0],
+            pads_end = [0, 0],
             strides = [1, 1]
-        } : 
+        } :
         tensor<1x16x20x20x!qElemType>, tensor<32x16x1x1x!qElemType1> -> tensor<1x32x20x20x!qElemType2>
 
     %1 = IE.Clamp(%0)

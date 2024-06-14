@@ -8,17 +8,19 @@
 #include "vcl_query_network.hpp"
 
 #include <openvino/openvino.hpp>
+#include <openvino/util/file_util.hpp>
 #include <transformations/utils/utils.hpp>
 
-#include "vpux/al/config/common.hpp"
-#include "vpux/al/config/compiler.hpp"
-#include "vpux/al/config/runtime.hpp"
-#include "vpux/al/opset/opset_version.hpp"
-#include "vpux_compiler.hpp"
-#include "vpux_private_properties.hpp"
+#include "intel_npu/al/config/common.hpp"
+#include "intel_npu/al/config/compiler.hpp"
+#include "intel_npu/al/config/runtime.hpp"
+#include "npu_private_properties.hpp"
+#include "vpux/compiler/compiler.hpp"
 
 #define xstr(s) str(s)
 #define str(s) #s
+
+using namespace vpux;
 
 namespace {
 
@@ -61,7 +63,7 @@ std::string rankToLegacyLayoutString(const size_t rank) {
  * @param inputLayouts The reference input layout values.
  * @param outputLayouts The reference output layout values.
  */
-std::shared_ptr<ov::Model> preprocessModel(std::shared_ptr<ov::Model>& model,
+std::shared_ptr<ov::Model> preprocessModel(const std::shared_ptr<ov::Model>& model,
                                            const std::unordered_map<std::string, ov::element::Type_t>& inputPrecisions,
                                            const std::unordered_map<std::string, ov::element::Type_t>& outputPrecisions,
                                            const std::unordered_map<std::string, std::string>& inputLayouts,
@@ -101,9 +103,11 @@ std::shared_ptr<ov::Model> preprocessModel(std::shared_ptr<ov::Model>& model,
     return preprocessor.build();
 }
 
-}  // namespace
+std::unique_ptr<CompilerImpl> createNPUCompiler() {
+    return std::make_unique<CompilerImpl>();
+}
 
-using namespace vpux;
+}  // namespace
 
 /// Compiler version contains the info of code commit, compiler API version
 static const char* COMPILER_VERSION =
@@ -114,7 +118,7 @@ namespace VPUXDriverCompiler {
 VPUXCompilerL0::VPUXCompilerL0(vcl_compiler_desc_t desc, const std::map<std::string, std::string>& config,
                                VCLLogger* vclLogger)
         : _options(std::make_shared<OptionsDesc>()), _compilerDesc(desc), _logger(vclLogger) {
-    /// Prepare default compilation configs
+    // Prepare default compilation configs
     registerCommonOptions(*_options);
     registerCompilerOptions(*_options);
     registerRunTimeOptions(*_options);
@@ -122,18 +126,16 @@ VPUXCompilerL0::VPUXCompilerL0(vcl_compiler_desc_t desc, const std::map<std::str
     Config parsedConfig(_options);
     parsedConfig.update(config, OptionMode::CompileTime);
 
-    /// Create compiler instance with the default config
-    _compiler = Compiler::create(parsedConfig);
+    // Create compiler instance with the default config
+    // COMPILER_TYPE DRIVER is assumed
+    _compiler = createNPUCompiler();
 
-    /// Update the compiler properties
+    // Update the compiler properties
     _compilerProp.id = COMPILER_VERSION;
     _compilerProp.version.major = VCL_COMPILER_VERSION_MAJOR;
     _compilerProp.version.minor = VCL_COMPILER_VERSION_MINOR;
 
-    // If ov::get_available_opsets is upgraded to support new opset, this may not be supported by mlir compiler
-    // Extract the latest int version from the opset string version, i.e., opset11 -> 11
-    uint32_t largestVersion = vpux::extractOpsetVersion();
-    _compilerProp.supportedOpsets = largestVersion;
+    _compilerProp.supportedOpsets = _compiler->getSupportedOpsetVersion();
 }
 
 std::pair<VPUXExecutableL0*, vcl_result_t> VPUXCompilerL0::importNetwork(BuildInfo& buildInfo) {
@@ -141,7 +143,7 @@ std::pair<VPUXExecutableL0*, vcl_result_t> VPUXCompilerL0::importNetwork(BuildIn
     VPUXExecutableL0* exe = nullptr;
     StopWatch stopWatch;
     if (buildInfo.enableProfiling) {
-        /// Output time cost on vcl level
+        // Output time cost on vcl level
         stopWatch.start();
     }
     try {
@@ -164,10 +166,13 @@ std::pair<VPUXExecutableL0*, vcl_result_t> VPUXCompilerL0::importNetwork(BuildIn
                                     buildInfo.inputLayouts, buildInfo.outputLayouts);
         }
 
-        /// Call compiler to compile the model and create blob
-        /// Create executable with the result NetworkDescription, profiling option and logger
-        exe = new VPUXExecutableL0(_compiler->compile(model, model->get_friendly_name(), buildInfo.parsedConfig),
-                                   buildInfo.enableProfiling, _logger);
+        // Call compiler to compile the model and create blob
+        // Create executable with the result NetworkDescription, profiling option and logger
+        // Note we rely on implicit move semantics thanks to compile result being an rvalue,
+        // failure to move here would lead to a blob copy!
+        auto network = std::make_shared<const NetworkDescription>(_compiler->compile(model, buildInfo.parsedConfig));
+
+        exe = new VPUXExecutableL0(network, buildInfo.enableProfiling, _logger);
     } catch (const std::exception& error) {
         _logger->outputError(formatv("{0}", error.what()));
         return std::pair<VPUXExecutableL0*, vcl_result_t>(nullptr, VCL_RESULT_ERROR_INVALID_ARGUMENT);
@@ -198,7 +203,7 @@ vcl_result_t VPUXCompilerL0::queryNetwork(const BuildInfo& buildInfo, VPUXQueryN
     }
     _logger->info("Successfully query supported layers!");
 
-    /// Serialize the result to predefined format
+    // Serialize the result to predefined format
     auto ret = pQueryNetwork->setQueryResult(queryNetworkResult);
     return ret;
 }

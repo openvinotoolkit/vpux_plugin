@@ -3,15 +3,13 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-#include "vpux/compiler/dialect/VPUIP/utils.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
 #include "vpux/compiler/dialect/const/attributes/content.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/quantization.hpp"
 #include "vpux/compiler/utils/subspaces.hpp"
 
-#include "vpux/utils/IE/loop.hpp"
 #include "vpux/utils/core/format.hpp"
-#include "vpux/utils/core/func_ref.hpp"
 #include "vpux/utils/core/range.hpp"
 
 #include <mlir/Dialect/Quant/QuantTypes.h>

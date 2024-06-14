@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=ReferenceHW" --split-conv-with-multiple-fq %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 // CHECK-LABEL: @SplitConvWithOnlyFakeQuantConsumers
 func.func @SplitConvWithOnlyFakeQuantConsumers(%input: tensor<1x3x62x62xf32>) -> (tensor<1x4x60x60xf32>, tensor<1x4x60x60xf32>, tensor<1x4x60x60xf32>) {

@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 #include "vpux/utils/core/logger.hpp"
 #include "vpux/utils/core/small_string.hpp"
 
@@ -37,9 +37,6 @@ SmallVector<vpux::NDTypeInterface> getTileTypes(VPU::NCEAveragePoolOp origOp, co
 SmallVector<vpux::NDTypeInterface> getTileTypes(VPU::GroupConvolutionOp origOp, const TileInfo& outTile,
                                                 const std::optional<InputTiling>& inputTiles = std::nullopt);
 SmallVector<vpux::NDTypeInterface> getTileTypes(VPU::NCEDepthConvolutionOp origOp, const TileInfo& outTile,
-                                                const std::optional<InputTiling>& inputTiles = std::nullopt);
-// PermuteQuantize
-SmallVector<vpux::NDTypeInterface> getTileTypes(VPU::NCEPermuteQuantizeOp origOp, const TileInfo& outTile,
                                                 const std::optional<InputTiling>& inputTiles = std::nullopt);
 
 SmallVector<vpux::NDTypeInterface> getTileTypes(VPU::DequantizeOp origOp, const TileInfo& outTile,
@@ -83,10 +80,10 @@ Byte getRequiredCMX(VPU::GroupConvolutionOp gConvOp, const vpux::TileInfo& tilin
 Byte getRequiredCMX(VPU::NCEDepthConvolutionOp dConvOp, const vpux::TileInfo& tiling,
                     const std::optional<InputTiling>& inputTiles = std::nullopt);
 
-Byte getRequiredCMX(VPU::NCEPermuteQuantizeOp pqOp, const vpux::TileInfo& tiling,
+Byte getRequiredCMX(VPU::NCEPermuteOp pqOp, const vpux::TileInfo& tiling,
                     const std::optional<InputTiling>& inputTiles = std::nullopt);
 
-Byte getRequiredCMXForWeight(VPU::NCEPermuteQuantizeOp op, const vpux::TileInfo& tiling,
+Byte getRequiredCMXForWeight(VPU::NCEPermuteOp op, const vpux::TileInfo& tiling,
                              const std::optional<InputTiling>& inputTiles = std::nullopt);
 
 Byte getRequiredCMXForWeight(VPU::MaxPoolOp op, const vpux::TileInfo& tiling,
@@ -150,5 +147,13 @@ Byte getRequiredCMXSize(ArrayRef<vpux::NDTypeInterface> operands);
 Byte getRequiredCMXSizeForNCEOps(ArrayRef<vpux::NDTypeInterface> operands, int64_t numChannels);
 
 Byte getRequiredCMXSizeForDefaultOps(mlir::Operation* op);
+
+OutputTiling getUniqueShapeTilingCandidates(mlir::Operation* op, const OutputTiling& origTiles, Logger log);
+
+struct TileShapeCompare {
+    bool operator()(const TileInfo& tile1, const TileInfo& tile2) const {
+        return tile1.shape < tile2.shape;
+    }
+};
 }  // namespace VPU
 }  // namespace vpux

@@ -1,35 +1,41 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022-2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
-#include "single_layer_tests/prior_box_clustered.hpp"
-#include "vpu_ov1_layer_test.hpp"
+#include "single_op_tests/prior_box_clustered.hpp"
+#include "vpu_ov2_layer_test.hpp"
 
-namespace LayerTestsDefinitions {
+using namespace ov::test::utils;
 
-class PriorBoxClusteredLayerTestCommon :
-        public PriorBoxClusteredLayerTest,
-        virtual public LayerTestsUtils::VpuOv1LayerTestsCommon {};
+namespace ov {
+namespace test {
+
+class PriorBoxClusteredLayerTestCommon : public PriorBoxClusteredLayerTest, virtual public VpuOv2LayerTest {};
 
 class PriorBoxClusteredLayerTest_NPU3700 : public PriorBoxClusteredLayerTestCommon {};
 class PriorBoxClusteredLayerTest_NPU3720 : public PriorBoxClusteredLayerTestCommon {};
+class PriorBoxClusteredLayerTest_NPU4000 : public PriorBoxClusteredLayerTestCommon {};
 
 TEST_P(PriorBoxClusteredLayerTest_NPU3700, HW) {
-    setPlatformVPU3700();
-    setDefaultHardwareModeMLIR();
-    Run();
+    setDefaultHardwareMode();
+    run(Platform::NPU3700);
 }
 
 TEST_P(PriorBoxClusteredLayerTest_NPU3720, SW) {
-    setPlatformVPU3720();
-    setReferenceSoftwareModeMLIR();
-    Run();
+    setReferenceSoftwareMode();
+    run(Platform::NPU3720);
 }
 
-}  // namespace LayerTestsDefinitions
+TEST_P(PriorBoxClusteredLayerTest_NPU4000, SW) {
+    setReferenceSoftwareMode();
+    run(Platform::NPU4000);
+}
 
-using namespace LayerTestsDefinitions;
+}  // namespace test
+}  // namespace ov
+
+using namespace ov::test;
 
 namespace {
 
@@ -57,11 +63,9 @@ const auto layerSpeficParams =
                          testing::ValuesIn(offsets), testing::ValuesIn(variances));
 
 const auto params = testing::Combine(
-        layerSpeficParams, testing::Values(InferenceEngine::Precision::FP16),
-        testing::Values(InferenceEngine::Precision::UNSPECIFIED),
-        testing::Values(InferenceEngine::Precision::UNSPECIFIED), testing::Values(InferenceEngine::Layout::ANY),
-        testing::Values(InferenceEngine::Layout::ANY), testing::Values(std::vector<size_t>({4, 4})),
-        testing::Values(std::vector<size_t>({50, 50})), testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+        layerSpeficParams, testing::Values(ov::element::f16),
+        testing::Values(static_shapes_to_test_representation(std::vector<ov::Shape>{{4, 4}, {50, 50}})),
+        testing::Values(DEVICE_NPU));
 
 const auto precommit_layerSpeficParams =
         testing::Combine(testing::ValuesIn(std::vector<std::vector<float>>{{2.56f, 7.3f, 6.75f}}),
@@ -70,11 +74,9 @@ const auto precommit_layerSpeficParams =
                          testing::ValuesIn(step), testing::ValuesIn(offsets), testing::ValuesIn(variances));
 
 const auto paramsPrecommit = testing::Combine(
-        precommit_layerSpeficParams, testing::Values(InferenceEngine::Precision::FP16),
-        testing::Values(InferenceEngine::Precision::UNSPECIFIED),
-        testing::Values(InferenceEngine::Precision::UNSPECIFIED), testing::Values(InferenceEngine::Layout::ANY),
-        testing::Values(InferenceEngine::Layout::ANY), testing::Values(std::vector<size_t>({4, 4})),
-        testing::Values(std::vector<size_t>({13, 13})), testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+        precommit_layerSpeficParams, testing::Values(ov::element::f16),
+        testing::Values(static_shapes_to_test_representation(std::vector<ov::Shape>{{4, 4}, {13, 13}})),
+        testing::Values(DEVICE_NPU));
 
 // ------ NPU3700 ------
 
@@ -88,5 +90,13 @@ INSTANTIATE_TEST_CASE_P(smoke_PriorBoxClustered, PriorBoxClusteredLayerTest_NPU3
 
 INSTANTIATE_TEST_CASE_P(smoke_precommit_PriorBoxClustered, PriorBoxClusteredLayerTest_NPU3720, paramsPrecommit,
                         PriorBoxClusteredLayerTest_NPU3720::getTestCaseName);
+
+// ------ NPU4000 ------
+
+INSTANTIATE_TEST_CASE_P(smoke_PriorBoxClustered, PriorBoxClusteredLayerTest_NPU4000, params,
+                        PriorBoxClusteredLayerTest_NPU4000::getTestCaseName);
+
+INSTANTIATE_TEST_CASE_P(smoke_precommit_PriorBoxClustered, PriorBoxClusteredLayerTest_NPU4000, paramsPrecommit,
+                        PriorBoxClusteredLayerTest_NPU4000::getTestCaseName);
 
 }  // namespace

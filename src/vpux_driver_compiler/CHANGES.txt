@@ -1,7 +1,19 @@
 Change Log:
 -----------
+VPUXCompilerL0 5.5.0:
+  - Add support for NPU_BATCH_MODE option.
+
+VPUXCompilerL0 5.4.1:
+  - Add NPU_TILES to replace NPU_DPU_GROUPS.
+
+VPUXCompilerL0 5.4.0:
+  - Add support for INFERENCE_PRECISION_HINT compiler options.
+
+VPUXCompilerL0 5.3.0:
+  - Add support for NPU_MAX_TILES and NPU_STEPPING compiler options.
+
 VPUXCompilerL0 5.2.0:
-  - Added support for the legacy set of values corresponding to the "model priority" configuration.
+  - Add support for the legacy set of values corresponding to the "model priority" configuration.
 
 VPUXCompilerL0 5.1.0:
   - Remove VPUXCompilerL0.h

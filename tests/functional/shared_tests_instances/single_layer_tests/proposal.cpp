@@ -1,19 +1,51 @@
 //
-// Copyright (C) 2022 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include <vector>
 
-#include "single_layer_tests/proposal.hpp"
-#include "vpu_ov1_layer_test.hpp"
+#include "single_op_tests/proposal.hpp"
+#include "vpu_ov2_layer_test.hpp"
 
-namespace LayerTestsDefinitions {
+using namespace ov::test::utils;
 
-class ProposalLayerTestCommon : public ProposalLayerTest, virtual public LayerTestsUtils::VpuOv1LayerTestsCommon {
+namespace ov {
+
+namespace test {
+
+class ProposalLayerTestCommon : public ProposalLayerTest, virtual public VpuOv2LayerTest {
 protected:
-    void Validate() override {
-        LayerTestsUtils::VpuOv1LayerTestsCommon::Validate();
+    void SetUp() override {
+        ProposalLayerTest::SetUp();
+        auto ops = function->get_ops();
+
+        // should replace hardcoded f32 element type for Constant op
+        for (const auto& op : ops) {
+            auto proposal = std::dynamic_pointer_cast<ov::op::v0::Proposal>(op);
+            if (proposal != nullptr) {
+                std::vector<float> img_info = {225.0f, 225.0f, 1.0f};
+                auto scores = proposal->input(0);
+                auto boxes = proposal->input(1);
+                auto image_shape =
+                        std::make_shared<ov::op::v0::Constant>(scores.get_element_type(), ov::Shape{3}, img_info);
+                proposal->set_arguments(ov::OutputVector{scores.get_source_output(), boxes.get_source_output(),
+                                                         image_shape->get_default_output()});
+                break;
+            }
+        }
+        ov::NodeVector nodeVector;
+        auto params = function->get_parameters();
+        for (const auto& op : params) {
+            nodeVector.push_back(std::dynamic_pointer_cast<ov::Node>(op));
+        }
+        std::vector<InputShape> inputShapes = static_shapes_to_test_representation(
+                std::vector<ov::Shape>{nodeVector[0]->get_shape(), nodeVector[1]->get_shape()});
+        init_input_shapes(inputShapes);
+    }
+
+    void validate() override {
+        VpuOv2LayerTest::validate();
     }
     int outputSize = 0;
     // "IoU = intersection area / union area" of two boxes A, B
@@ -116,34 +148,31 @@ protected:
     // overlap of 90%. This quarantee (I suppose) the the reference is corect, but can be imaginary situation when can
     // fail, even the reference is correct (base of significant number of threashold and computation made in floar for
     // reverence and in fp16 from npu).
-    void Compare(const std::vector<std::pair<ngraph::element::Type, std::vector<std::uint8_t>>>& expectedOutputs,
-                 const std::vector<InferenceEngine::Blob::Ptr>& actualOutputs) override {
+
+    void compare(const std::vector<ov::Tensor>& expectedOutputs,
+                 const std::vector<ov::Tensor>& actualOutputs) override {
         // box check
-        const auto& expected = expectedOutputs[0].second;
+        const auto& expected = expectedOutputs[0];
         const auto& actual = actualOutputs[0];
 
-        const auto& expectedBuffer = expected.data();
+        const auto* expectedBuffer = expected.data();
+        const auto* actualBuffer = actual.data();
 
-        auto memory = InferenceEngine::as<InferenceEngine::MemoryBlob>(actual);
-        IE_ASSERT(memory);
-        const auto lockedMemory = memory->rmap();
-        const auto actualBuffer = lockedMemory.as<const std::uint8_t*>();
-
-        const auto& precision = actual->getTensorDesc().getPrecision();
-        auto size = actual->size();
+        const auto& precision = actual.get_element_type();
+        auto size = actual.get_size();
 
         switch (precision) {
-        case InferenceEngine::Precision::BF16:
-            CompareIou(reinterpret_cast<const ngraph::bfloat16*>(expectedBuffer),
-                       reinterpret_cast<const ngraph::bfloat16*>(actualBuffer), size, ngraph::bfloat16(threshold));
+        case ov::element::bf16:
+            CompareIou(reinterpret_cast<const ov::bfloat16*>(expectedBuffer),
+                       reinterpret_cast<const ov::bfloat16*>(actualBuffer), size, ov::bfloat16(rel_threshold));
             break;
-        case InferenceEngine::Precision::FP16:
-            CompareIou(reinterpret_cast<const ngraph::float16*>(expectedBuffer),
-                       reinterpret_cast<const ngraph::float16*>(actualBuffer), size, ngraph::float16(threshold));
+        case ov::element::f16:
+            CompareIou(reinterpret_cast<const ov::float16*>(expectedBuffer),
+                       reinterpret_cast<const ov::float16*>(actualBuffer), size, ov::float16(rel_threshold));
             break;
-        case InferenceEngine::Precision::FP32:
+        case ov::element::f32:
             CompareIou<float>(reinterpret_cast<const float*>(expectedBuffer),
-                              reinterpret_cast<const float*>(actualBuffer), size, threshold);
+                              reinterpret_cast<const float*>(actualBuffer), size, rel_threshold);
             break;
         default:
             FAIL() << "Comparator for " << precision << " precision isn't supported";
@@ -153,19 +182,16 @@ protected:
         if (expectedOutputs.size() > 1) {
             // check if scores are decrescent value until the end of dynamic size
             const auto& scores = actualOutputs[1];
-            auto memoryScore = InferenceEngine::as<InferenceEngine::MemoryBlob>(scores);
-            IE_ASSERT(memoryScore);
-            const auto lockedMemoryScore = memoryScore->rmap();
-            const auto scoresBuffer = lockedMemoryScore.as<const std::uint8_t*>();
-            const auto& precisionScore = scores->getTensorDesc().getPrecision();
+            const auto scoresBuffer = scores.data();
+            const auto& precisionScore = scores.get_element_type();
             switch (precisionScore) {
-            case InferenceEngine::Precision::BF16:
-                CompareScores(reinterpret_cast<const ngraph::bfloat16*>(scoresBuffer), outputSize);
+            case ov::element::bf16:
+                CompareScores(reinterpret_cast<const ov::bfloat16*>(scoresBuffer), outputSize);
                 break;
-            case InferenceEngine::Precision::FP16:
-                CompareScores(reinterpret_cast<const ngraph::float16*>(scoresBuffer), outputSize);
+            case ov::element::f16:
+                CompareScores(reinterpret_cast<const ov::float16*>(scoresBuffer), outputSize);
                 break;
-            case InferenceEngine::Precision::FP32:
+            case ov::element::f32:
                 CompareScores(reinterpret_cast<const float*>(scoresBuffer), outputSize);
                 break;
             default:
@@ -178,95 +204,118 @@ protected:
 
 class ProposalLayerTest_NPU3700 : public ProposalLayerTestCommon {};
 class ProposalLayerTest_NPU3720 : public ProposalLayerTestCommon {};
+class ProposalLayerTest_NPU4000 : public ProposalLayerTestCommon {};
 
 TEST_P(ProposalLayerTest_NPU3700, HW) {
-    setPlatformVPU3700();
-    setDefaultHardwareModeMLIR();
-    Run();
+    setDefaultHardwareMode();
+    run(Platform::NPU3720);
 }
 
 TEST_P(ProposalLayerTest_NPU3720, HW) {
-    setPlatformVPU3720();
-    setDefaultHardwareModeMLIR();
-    Run();
+    setDefaultHardwareMode();
+    run(Platform::NPU3720);
 }
 
-}  // namespace LayerTestsDefinitions
+TEST_P(ProposalLayerTest_NPU4000, HW) {
+    setDefaultHardwareMode();
+    run(Platform::NPU4000);
+}
 
-using namespace ngraph::helpers;
-using namespace LayerTestsDefinitions;
+}  // namespace test
+
+}  // namespace ov
+
+using namespace ov::test;
 
 namespace {
 
 /* ============= Proposal ============= */
-const std::vector<base_size_type> base_size_ = {16};
-const std::vector<pre_nms_topn_type> pre_nms_topn_ = {100};
-const std::vector<post_nms_topn_type> post_nms_topn_ = {100};
-const std::vector<nms_thresh_type> nms_thresh_ = {0.7f};
-const std::vector<min_size_type> min_size_ = {1};
-const std::vector<ratio_type> ratio_ = {{1.0f, 2.0f}};
-const std::vector<scale_type> scale_ = {{1.2f, 1.5f}};
-const std::vector<clip_before_nms_type> clip_before_nms_ = {false};
-const std::vector<clip_after_nms_type> clip_after_nms_ = {false};
-
+const std::vector<size_t> base_size_ = {16};
+const std::vector<size_t> pre_nms_topn_ = {100};
+const std::vector<size_t> post_nms_topn_ = {100};
+const std::vector<float> nms_thresh_ = {0.7f};
+const std::vector<size_t> min_size_ = {1};
+const std::vector<std::vector<float>> ratio_ = {{1.0f, 2.0f}};
+const std::vector<std::vector<float>> scale_ = {{1.2f, 1.5f}};
+const std::vector<bool> clip_before_nms_ = {false};
+const std::vector<bool> clip_after_nms_ = {false};
 // empty string corresponds to Caffe framework
-const std::vector<framework_type> framework_ = {""};
+const std::vector<std::string> framework_ = {""};
 
-const auto proposalParams = ::testing::Combine(::testing::ValuesIn(base_size_), ::testing::ValuesIn(pre_nms_topn_),
-                                               ::testing::ValuesIn(post_nms_topn_), ::testing::ValuesIn(nms_thresh_),
-                                               ::testing::ValuesIn(min_size_), ::testing::ValuesIn(ratio_),
-                                               ::testing::ValuesIn(scale_), ::testing::ValuesIn(clip_before_nms_),
-                                               ::testing::ValuesIn(clip_after_nms_), ::testing::ValuesIn(framework_));
+const auto proposalParams0 = ::testing::Combine(::testing::ValuesIn(base_size_), ::testing::ValuesIn(pre_nms_topn_),
+                                                ::testing::ValuesIn(post_nms_topn_), ::testing::ValuesIn(nms_thresh_),
+                                                ::testing::ValuesIn(min_size_), ::testing::ValuesIn(ratio_),
+                                                ::testing::ValuesIn(scale_), ::testing::ValuesIn(clip_before_nms_),
+                                                ::testing::ValuesIn(clip_after_nms_), ::testing::ValuesIn(framework_));
+
+const auto proposalParams1 = ::testing::Combine(
+        ::testing::Combine(::testing::ValuesIn(std::vector<size_t>{32}),
+                           ::testing::ValuesIn(std::vector<size_t>{2147483647}),
+                           ::testing::ValuesIn(std::vector<size_t>{100}),
+                           ::testing::ValuesIn(std::vector<float>{0.69999998807907104f}),
+                           ::testing::ValuesIn(std::vector<size_t>{1}),
+                           ::testing::ValuesIn(std::vector<std::vector<float>>{{0.5f, 1.0f, 2.0f}}),
+                           ::testing::ValuesIn(std::vector<std::vector<float>>{{0.25f, 0.5f, 1.0f, 2.0f}}),
+                           ::testing::ValuesIn(std::vector<bool>{true}), ::testing::ValuesIn(std::vector<bool>{false}),
+                           ::testing::ValuesIn(std::vector<std::string>{"tensowflow"})),
+        ::testing::Values(ov::element::f16), ::testing::Values(DEVICE_NPU));
+
+const auto proposalParams2 = ::testing::Combine(
+        ::testing::Combine(::testing::ValuesIn(std::vector<size_t>{16}), ::testing::ValuesIn(std::vector<size_t>{6000}),
+                           ::testing::ValuesIn(std::vector<size_t>{300}),
+                           ::testing::ValuesIn(std::vector<float>{0.69999998807907104f}),
+                           ::testing::ValuesIn(std::vector<size_t>{16}),
+                           ::testing::ValuesIn(std::vector<std::vector<float>>{{0.5f, 1.0f, 2.0f}}),
+                           ::testing::ValuesIn(std::vector<std::vector<float>>{{8.0f, 16.0f, 32.0f}}),
+                           ::testing::ValuesIn(std::vector<bool>{true}), ::testing::ValuesIn(std::vector<bool>{false}),
+                           ::testing::ValuesIn(std::vector<std::string>{""})),
+        ::testing::Values(ov::element::f16), ::testing::Values(DEVICE_NPU));
+
+const auto proposalParams3 = ::testing::Combine(
+        ::testing::Combine(::testing::ValuesIn(std::vector<size_t>{4}), ::testing::ValuesIn(std::vector<size_t>{6000}),
+                           ::testing::ValuesIn(std::vector<size_t>{300}),
+                           ::testing::ValuesIn(std::vector<float>{0.69999998807907104f}),
+                           ::testing::ValuesIn(std::vector<size_t>{4}),
+                           ::testing::ValuesIn(std::vector<std::vector<float>>{{0.5f}}),
+                           ::testing::ValuesIn(std::vector<std::vector<float>>{{1.2f}}),
+                           ::testing::ValuesIn(std::vector<bool>{true}), ::testing::ValuesIn(std::vector<bool>{false}),
+                           ::testing::ValuesIn(std::vector<std::string>{""})),
+        ::testing::Values(ov::element::f16), ::testing::Values(DEVICE_NPU));
+
+const auto proposalParams4 = ::testing::Combine(
+        ::testing::Combine(::testing::ValuesIn(std::vector<size_t>{4}), ::testing::ValuesIn(std::vector<size_t>{6000}),
+                           ::testing::ValuesIn(std::vector<size_t>{300}),
+                           ::testing::ValuesIn(std::vector<float>{0.69999998807907104f}),
+                           ::testing::ValuesIn(std::vector<size_t>{4}),
+                           ::testing::ValuesIn(std::vector<std::vector<float>>{{1.0f}}),
+                           ::testing::ValuesIn(std::vector<std::vector<float>>{{1.5f}}),
+                           ::testing::ValuesIn(std::vector<bool>{true}), ::testing::ValuesIn(std::vector<bool>{false}),
+                           ::testing::ValuesIn(std::vector<std::string>{""})),
+        ::testing::Values(ov::element::f16), ::testing::Values(DEVICE_NPU));
 
 INSTANTIATE_TEST_SUITE_P(smoke_Proposal_tests, ProposalLayerTest_NPU3700,
-                         ::testing::Combine(proposalParams,
-                                            ::testing::Values(LayerTestsUtils::testPlatformTargetDevice())),
+                         ::testing::Combine(proposalParams0, ::testing::Values(ov::element::f16),
+                                            ::testing::Values(DEVICE_NPU)),
                          ProposalLayerTest_NPU3700::getTestCaseName);
+
 // conformance "Proposal_108377"
-INSTANTIATE_TEST_SUITE_P(
-        smoke_Proposal_tests_108377, ProposalLayerTest_NPU3700,
-        ::testing::Combine(::testing::Combine(::testing::ValuesIn(std::vector<base_size_type>{32}),
-                                              ::testing::ValuesIn(std::vector<pre_nms_topn_type>{2147483647}),
-                                              ::testing::ValuesIn(std::vector<post_nms_topn_type>{100}),
-                                              ::testing::ValuesIn(std::vector<nms_thresh_type>{0.69999998807907104f}),
-                                              ::testing::ValuesIn(std::vector<min_size_type>{1}),
-                                              ::testing::ValuesIn(std::vector<ratio_type>{{0.5f, 1.0f, 2.0f}}),
-                                              ::testing::ValuesIn(std::vector<scale_type>{{0.25f, 0.5f, 1.0f, 2.0f}}),
-                                              ::testing::ValuesIn(std::vector<clip_before_nms_type>{true}),
-                                              ::testing::ValuesIn(std::vector<clip_after_nms_type>{false}),
-                                              ::testing::ValuesIn(std::vector<framework_type>{"tensorflow"})),
-                           ::testing::Values(LayerTestsUtils::testPlatformTargetDevice())),
-        ProposalLayerTest_NPU3700::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_Proposal_conformance_108377, ProposalLayerTest_NPU3700, proposalParams1,
+                         ProposalLayerTest_NPU3700::getTestCaseName);
 
 // conformance "Proposal_129693"
-INSTANTIATE_TEST_SUITE_P(
-        smoke_Proposal_tests_129693, ProposalLayerTest_NPU3700,
-        ::testing::Combine(::testing::Combine(::testing::ValuesIn(std::vector<base_size_type>{16}),
-                                              ::testing::ValuesIn(std::vector<pre_nms_topn_type>{6000}),
-                                              ::testing::ValuesIn(std::vector<post_nms_topn_type>{300}),
-                                              ::testing::ValuesIn(std::vector<nms_thresh_type>{0.69999998807907104f}),
-                                              ::testing::ValuesIn(std::vector<min_size_type>{16}),
-                                              ::testing::ValuesIn(std::vector<ratio_type>{{0.5f, 1.0f, 2.0f}}),
-                                              ::testing::ValuesIn(std::vector<scale_type>{{8.0f, 16.0f, 32.0f}}),
-                                              ::testing::ValuesIn(std::vector<clip_before_nms_type>{true}),
-                                              ::testing::ValuesIn(std::vector<clip_after_nms_type>{false}),
-                                              ::testing::ValuesIn(std::vector<framework_type>{""})),
-                           ::testing::Values(LayerTestsUtils::testPlatformTargetDevice())),
-        ProposalLayerTest_NPU3700::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_Proposal_conformance_129693, ProposalLayerTest_NPU3700, proposalParams2,
+                         ProposalLayerTest_NPU3700::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(
-        smoke_Proposal_test, ProposalLayerTest_NPU3720,
-        ::testing::Combine(::testing::Combine(::testing::ValuesIn(std::vector<base_size_type>{4}),
-                                              ::testing::ValuesIn(std::vector<pre_nms_topn_type>{6000}),
-                                              ::testing::ValuesIn(std::vector<post_nms_topn_type>{300}),
-                                              ::testing::ValuesIn(std::vector<nms_thresh_type>{0.69999998807907104f}),
-                                              ::testing::ValuesIn(std::vector<min_size_type>{4}),
-                                              ::testing::ValuesIn(std::vector<ratio_type>{{0.5f}}),
-                                              ::testing::ValuesIn(std::vector<scale_type>{{1.2f}}),
-                                              ::testing::ValuesIn(std::vector<clip_before_nms_type>{true}),
-                                              ::testing::ValuesIn(std::vector<clip_after_nms_type>{false}),
-                                              ::testing::ValuesIn(std::vector<framework_type>{""})),
-                           ::testing::Values(LayerTestsUtils::testPlatformTargetDevice())),
-        ProposalLayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_Proposal_conformance_tf, ProposalLayerTest_NPU3720, proposalParams1,
+                         ProposalLayerTest_NPU3720::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_Proposal, ProposalLayerTest_NPU3720, proposalParams3,
+                         ProposalLayerTest_NPU3720::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(smoke_Proposal_conformance_tf, ProposalLayerTest_NPU4000, proposalParams1,
+                         ProposalLayerTest_NPU4000::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_Proposal, ProposalLayerTest_NPU4000, proposalParams4,
+                         ProposalLayerTest_NPU4000::getTestCaseName);
 
 }  // namespace

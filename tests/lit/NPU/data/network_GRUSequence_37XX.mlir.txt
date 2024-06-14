@@ -6,16 +6,16 @@
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 #loc = loc(unknown)
 #loc1 = loc("profiling_result")
-module @dumpsubgraph attributes {VPU.arch = #VPU.arch_kind<VPUX37XX>, VPU.compilationMode = #VPU.compilation_mode<DefaultHW>} {
+module @dumpsubgraph attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilationMode = #VPU.compilation_mode<DefaultHW>} {
   module @UsedMemory {
     IE.MemoryResource 3072 bytes of @DDR loc(#loc)
   } loc(#loc)
   VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096] loc(#loc)
   module @VPU.SW {
     func.func private @cache_flush_invalidate() attributes {VPU.task_type = @CACHE_INVALIDATE} loc(#loc)
-    func.func private @builtin_GRUSequenceLastPart(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, memref<*xf16>, memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, i64, i64, i64, i64, f64) attributes {VPU.kernel_code = "single_shave_gru_sequence_last_part.cpp", VPU.kernel_entry = "single_shave_gru_sequence_last_part", VPU.task_type = @COMPUTE} loc(#loc)
-    func.func private @builtin_GRUSequenceFirstPart(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16>, memref<*xf16, [@CMX_NN, 0]>, i64, i64, f64) attributes {VPU.kernel_code = "single_shave_gru_sequence_first_part.cpp", VPU.kernel_entry = "single_shave_gru_sequence_first_part", VPU.task_type = @COMPUTE} loc(#loc)
-    func.func private @builtin_Convert(memref<*xf32, @CMX_NN>, memref<*xf16, @CMX_NN>) attributes {VPU.kernel_code = "single_shave_convert.cpp", VPU.kernel_entry = "single_shave_convert", VPU.task_type = @COMPUTE} loc(#loc)
+    func.func private @builtin_GRUSequenceLastPart(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, memref<*xf16>, memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, i64, i64, i64, i64, f64) attributes {VPU.kernel_code = "gru_sequence_last_part.cpp", VPU.kernel_entry = "gru_sequence_last_part", VPU.task_type = @COMPUTE} loc(#loc)
+    func.func private @builtin_GRUSequenceFirstPart(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16>, memref<*xf16, [@CMX_NN, 0]>, i64, i64, f64) attributes {VPU.kernel_code = "gru_sequence_first_part.cpp", VPU.kernel_entry = "gru_sequence_first_part", VPU.task_type = @COMPUTE} loc(#loc)
+    func.func private @builtin_Convert(memref<*xf32, @CMX_NN>, memref<*xf16, @CMX_NN>) attributes {VPU.kernel_code = "convert.cpp", VPU.kernel_entry = "convert", VPU.task_type = @COMPUTE} loc(#loc)
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"} loc(#loc)
   } loc(#loc)
   IE.TileResource {activity_factor = 0.000000e+00 : f64} 2 of @NCE at 1.300000e+03 MHz {
@@ -34,7 +34,7 @@ module @dumpsubgraph attributes {VPU.arch = #VPU.arch_kind<VPUX37XX>, VPU.compil
     IE.ExecutorResource 1 of @DPU loc(#loc)
   } loc(#loc)
   IE.ExecutorResource 2 of @DMA_NN loc(#loc)
-  IE.MemoryResource 2306867200 bytes of @DDR {VPU.bandwidth = 8 : i64, VPU.derateFactor = 6.000000e-01 : f64} loc(#loc)
+  IE.MemoryResource 4194304000 bytes of @DDR {VPU.bandwidth = 8 : i64, VPU.derateFactor = 6.000000e-01 : f64} loc(#loc)
   IE.CNNNetwork {inferenceTiming = 27805 : i64} entryPoint : @main inputsInfo : {
     DataInfo "Parameter_214" : tensor<1x768xf32> loc(#loc)
   } outputsInfo : {
@@ -184,22 +184,22 @@ module @dumpsubgraph attributes {VPU.arch = #VPU.arch_kind<VPUX37XX>, VPU.compil
       %103 = VPUIP.NNDMA {port = 0 : i64, profilingMetadata = #VPUIP.DmaProfilingMetadataAttr<dataIndex = 1 : i64>} inputs(%68 : memref<1xui64, @Register>) outputs(%69 : memref<1xui64, [@CMX_NN, 0]>) -> memref<1xui64, [@CMX_NN, 0]> loc(#loc27)
     } loc(#loc27)
     VPURT.Task waits(%2 : !VPURT.Barrier) updates(%3 : !VPURT.Barrier) {
-      %results, %profiling_output = VPUIP.SW.Kernel {profilingMetadata = #VPUIP.SwProfilingMetadataAttr<bufferId = 0 : i64, bufferOffset = 0 : i64, clusterSize = 6 : i64, dataIndex = 0 : i64, tileId = 0 : i64, clusterId = 0 : i64>, resultSegmentSizes = array<i32: 1, 1>} @VPU.SW::@builtin_Convert inputs(%32 as %arg3: memref<1x1x1x384xf32, [@CMX_NN, 0]>) outputs(%36 as %arg4: memref<1x1x1x384xf16, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 0]>) profiling_data(%50 : memref<4xui32, [@CMX_NN, 0]>) on tile 0 -> (memref<1x1x1x384xf16, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 0]>, memref<4xui32, [@CMX_NN, 0]>){
+      %results, %profiling_output = VPUIP.SW.Kernel {profilingMetadata = #VPUIP.SwProfilingMetadataAttr<bufferId = 0 : i64, bufferOffset = 0 : i64, clusterSize = 6 : i64, dataIndex = 0 : i64, tileId = 0 : i64, clusterId = 0 : i64>, resultSegmentSizes = array<i32: 1, 0, 1>} @VPU.SW::@builtin_Convert inputs(%32 as %arg3: memref<1x1x1x384xf32, [@CMX_NN, 0]>) outputs(%36 as %arg4: memref<1x1x1x384xf16, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 0]>) profiling_data(%50 : memref<4xui32, [@CMX_NN, 0]>) on tile 0 -> (memref<1x1x1x384xf16, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 0]>, memref<4xui32, [@CMX_NN, 0]>){
         VPUIP.SW.Kernel.run(%arg3, %arg4) : memref<1x1x1x384xf32, [@CMX_NN, 0]>, memref<1x1x1x384xf16, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 0]> loc(#loc)
       } loc(#loc56)
     } loc(#loc56)
     VPURT.Task waits(%2 : !VPURT.Barrier) updates(%3 : !VPURT.Barrier) {
-      %results, %profiling_output = VPUIP.SW.Kernel {profilingMetadata = #VPUIP.SwProfilingMetadataAttr<bufferId = 0 : i64, bufferOffset = 0 : i64, clusterSize = 6 : i64, dataIndex = 0 : i64, tileId = 0 : i64, clusterId = 1 : i64>, resultSegmentSizes = array<i32: 1, 1>} @VPU.SW::@builtin_Convert inputs(%33 as %arg3: memref<1x1x1x384xf32, [@CMX_NN, 1]>) outputs(%37 as %arg4: memref<1x1x1x384xf16, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 1]>) profiling_data(%51 : memref<4xui32, [@CMX_NN, 1]>) on tile 1 -> (memref<1x1x1x384xf16, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 1]>, memref<4xui32, [@CMX_NN, 1]>){
+      %results, %profiling_output = VPUIP.SW.Kernel {profilingMetadata = #VPUIP.SwProfilingMetadataAttr<bufferId = 0 : i64, bufferOffset = 0 : i64, clusterSize = 6 : i64, dataIndex = 0 : i64, tileId = 0 : i64, clusterId = 1 : i64>, resultSegmentSizes = array<i32: 1, 0, 1>} @VPU.SW::@builtin_Convert inputs(%33 as %arg3: memref<1x1x1x384xf32, [@CMX_NN, 1]>) outputs(%37 as %arg4: memref<1x1x1x384xf16, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 1]>) profiling_data(%51 : memref<4xui32, [@CMX_NN, 1]>) on tile 1 -> (memref<1x1x1x384xf16, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 1]>, memref<4xui32, [@CMX_NN, 1]>){
         VPUIP.SW.Kernel.run(%arg3, %arg4) : memref<1x1x1x384xf32, [@CMX_NN, 1]>, memref<1x1x1x384xf16, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 1]> loc(#loc)
       } loc(#loc57)
     } loc(#loc57)
     VPURT.Task waits(%2 : !VPURT.Barrier) updates(%3 : !VPURT.Barrier) {
-      %results, %profiling_output = VPUIP.SW.Kernel {profilingMetadata = #VPUIP.SwProfilingMetadataAttr<bufferId = 0 : i64, bufferOffset = 0 : i64, clusterSize = 6 : i64, dataIndex = 1 : i64, tileId = 1 : i64, clusterId = 0 : i64>, resultSegmentSizes = array<i32: 1, 1>} @VPU.SW::@builtin_Convert inputs(%30 as %arg3: memref<1x1x1x384xf32, [@CMX_NN, 0]>) outputs(%34 as %arg4: memref<1x1x1x384xf16, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 0]>) profiling_data(%52 : memref<4xui32, [@CMX_NN, 0]>) on tile 0 -> (memref<1x1x1x384xf16, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 0]>, memref<4xui32, [@CMX_NN, 0]>){
+      %results, %profiling_output = VPUIP.SW.Kernel {profilingMetadata = #VPUIP.SwProfilingMetadataAttr<bufferId = 0 : i64, bufferOffset = 0 : i64, clusterSize = 6 : i64, dataIndex = 1 : i64, tileId = 1 : i64, clusterId = 0 : i64>, resultSegmentSizes = array<i32: 1, 0, 1>} @VPU.SW::@builtin_Convert inputs(%30 as %arg3: memref<1x1x1x384xf32, [@CMX_NN, 0]>) outputs(%34 as %arg4: memref<1x1x1x384xf16, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 0]>) profiling_data(%52 : memref<4xui32, [@CMX_NN, 0]>) on tile 0 -> (memref<1x1x1x384xf16, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 0]>, memref<4xui32, [@CMX_NN, 0]>){
         VPUIP.SW.Kernel.run(%arg3, %arg4) : memref<1x1x1x384xf32, [@CMX_NN, 0]>, memref<1x1x1x384xf16, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 0]> loc(#loc)
       } loc(#loc58)
     } loc(#loc58)
     VPURT.Task waits(%2 : !VPURT.Barrier) updates(%3 : !VPURT.Barrier) {
-      %results, %profiling_output = VPUIP.SW.Kernel {profilingMetadata = #VPUIP.SwProfilingMetadataAttr<bufferId = 0 : i64, bufferOffset = 0 : i64, clusterSize = 6 : i64, dataIndex = 1 : i64, tileId = 1 : i64, clusterId = 1 : i64>, resultSegmentSizes = array<i32: 1, 1>} @VPU.SW::@builtin_Convert inputs(%31 as %arg3: memref<1x1x1x384xf32, [@CMX_NN, 1]>) outputs(%35 as %arg4: memref<1x1x1x384xf16, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 1]>) profiling_data(%53 : memref<4xui32, [@CMX_NN, 1]>) on tile 1 -> (memref<1x1x1x384xf16, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 1]>, memref<4xui32, [@CMX_NN, 1]>){
+      %results, %profiling_output = VPUIP.SW.Kernel {profilingMetadata = #VPUIP.SwProfilingMetadataAttr<bufferId = 0 : i64, bufferOffset = 0 : i64, clusterSize = 6 : i64, dataIndex = 1 : i64, tileId = 1 : i64, clusterId = 1 : i64>, resultSegmentSizes = array<i32: 1, 0, 1>} @VPU.SW::@builtin_Convert inputs(%31 as %arg3: memref<1x1x1x384xf32, [@CMX_NN, 1]>) outputs(%35 as %arg4: memref<1x1x1x384xf16, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 1]>) profiling_data(%53 : memref<4xui32, [@CMX_NN, 1]>) on tile 1 -> (memref<1x1x1x384xf16, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 1]>, memref<4xui32, [@CMX_NN, 1]>){
         VPUIP.SW.Kernel.run(%arg3, %arg4) : memref<1x1x1x384xf32, [@CMX_NN, 1]>, memref<1x1x1x384xf16, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 1]> loc(#loc)
       } loc(#loc59)
     } loc(#loc59)
@@ -222,22 +222,22 @@ module @dumpsubgraph attributes {VPU.arch = #VPU.arch_kind<VPUX37XX>, VPU.compil
       %103 = VPUIP.NNDMA {port = 1 : i64, profilingMetadata = #VPUIP.DmaProfilingMetadataAttr<dataIndex = 7 : i64>} inputs(%76 : memref<1xui64, @Register>) outputs(%77 : memref<1xui64, [@CMX_NN, 0]>) -> memref<1xui64, [@CMX_NN, 0]> loc(#loc27)
     } loc(#loc27)
     VPURT.Task waits(%4 : !VPURT.Barrier) updates(%5 : !VPURT.Barrier) {
-      %results, %profiling_output = VPUIP.SW.Kernel {profilingMetadata = #VPUIP.SwProfilingMetadataAttr<bufferId = 0 : i64, bufferOffset = 0 : i64, clusterSize = 6 : i64, dataIndex = 2 : i64, tileId = 0 : i64, clusterId = 0 : i64>, resultSegmentSizes = array<i32: 1, 1>} @VPU.SW::@builtin_GRUSequenceFirstPart inputs(%19 as %arg3: memref<1x1x768xf16, [@CMX_NN, 0]>, %cst_0 as %arg4: memref<1x2304x768xf16>) outputs(%20 as %arg5: memref<1x1x1x2304xf16, [@CMX_NN, 0]>) profiling_data(%39 : memref<4xui32, [@CMX_NN, 0]>) on tile 0 -> (memref<1x1x1x2304xf16, [@CMX_NN, 0]>, memref<4xui32, [@CMX_NN, 0]>){
+      %results, %profiling_output = VPUIP.SW.Kernel {profilingMetadata = #VPUIP.SwProfilingMetadataAttr<bufferId = 0 : i64, bufferOffset = 0 : i64, clusterSize = 6 : i64, dataIndex = 2 : i64, tileId = 0 : i64, clusterId = 0 : i64>, resultSegmentSizes = array<i32: 1, 0, 1>} @VPU.SW::@builtin_GRUSequenceFirstPart inputs(%19 as %arg3: memref<1x1x768xf16, [@CMX_NN, 0]>, %cst_0 as %arg4: memref<1x2304x768xf16>) outputs(%20 as %arg5: memref<1x1x1x2304xf16, [@CMX_NN, 0]>) profiling_data(%39 : memref<4xui32, [@CMX_NN, 0]>) on tile 0 -> (memref<1x1x1x2304xf16, [@CMX_NN, 0]>, memref<4xui32, [@CMX_NN, 0]>){
         VPUIP.SW.Kernel.run {attrs = [768, 1, 0.000000e+00]}(%arg3, %arg4, %arg5) : memref<1x1x768xf16, [@CMX_NN, 0]>, memref<1x2304x768xf16>, memref<1x1x1x2304xf16, [@CMX_NN, 0]> loc(#loc)
       } loc(#loc60)
     } loc(#loc27)
     VPURT.Task waits(%5 : !VPURT.Barrier) updates(%6 : !VPURT.Barrier) {
-      VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 0, 0>} @VPU.SW::@cache_flush_invalidate inputs() outputs() on tile 0{
+      VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 0, 0, 0>} @VPU.SW::@cache_flush_invalidate inputs() outputs() on tile 0{
         VPUIP.SW.Kernel.run loc(#loc)
       } loc(#loc61)
     } loc(#loc61)
     VPURT.Task waits(%6 : !VPURT.Barrier) updates(%7 : !VPURT.Barrier) {
-      %results:2, %profiling_output = VPUIP.SW.Kernel {profilingMetadata = #VPUIP.SwProfilingMetadataAttr<bufferId = 0 : i64, bufferOffset = 0 : i64, clusterSize = 6 : i64, dataIndex = 3 : i64, tileId = 0 : i64, clusterId = 0 : i64>, resultSegmentSizes = array<i32: 2, 1>} @VPU.SW::@builtin_GRUSequenceLastPart inputs(%20 as %arg3: memref<1x1x1x2304xf16, [@CMX_NN, 0]>, %21 as %arg4: memref<1x1x768xf16, [@CMX_NN, 0]>, %cst_0 as %arg5: memref<1x2304x768xf16>, %22 as %arg6: memref<1x3072xf16, [@CMX_NN, 0]>) outputs(%23 as %arg7: memref<1x1x1x768xf16, [@CMX_NN, 0]>, %24 as %arg8: memref<1x1x768xf16, [@CMX_NN, 0]>) profiling_data(%40 : memref<4xui32, [@CMX_NN, 0]>) on tile 0 -> (memref<1x1x1x768xf16, [@CMX_NN, 0]>, memref<1x1x768xf16, [@CMX_NN, 0]>, memref<4xui32, [@CMX_NN, 0]>){
+      %results:2, %profiling_output = VPUIP.SW.Kernel {profilingMetadata = #VPUIP.SwProfilingMetadataAttr<bufferId = 0 : i64, bufferOffset = 0 : i64, clusterSize = 6 : i64, dataIndex = 3 : i64, tileId = 0 : i64, clusterId = 0 : i64>, resultSegmentSizes = array<i32: 2, 0, 1>} @VPU.SW::@builtin_GRUSequenceLastPart inputs(%20 as %arg3: memref<1x1x1x2304xf16, [@CMX_NN, 0]>, %21 as %arg4: memref<1x1x768xf16, [@CMX_NN, 0]>, %cst_0 as %arg5: memref<1x2304x768xf16>, %22 as %arg6: memref<1x3072xf16, [@CMX_NN, 0]>) outputs(%23 as %arg7: memref<1x1x1x768xf16, [@CMX_NN, 0]>, %24 as %arg8: memref<1x1x768xf16, [@CMX_NN, 0]>) profiling_data(%40 : memref<4xui32, [@CMX_NN, 0]>) on tile 0 -> (memref<1x1x1x768xf16, [@CMX_NN, 0]>, memref<1x1x768xf16, [@CMX_NN, 0]>, memref<4xui32, [@CMX_NN, 0]>){
         VPUIP.SW.Kernel.run {attrs = [768, 0, 1, 1, 0.000000e+00]}(%arg3, %arg4, %arg5, %arg6, %arg7, %arg8) : memref<1x1x1x2304xf16, [@CMX_NN, 0]>, memref<1x1x768xf16, [@CMX_NN, 0]>, memref<1x2304x768xf16>, memref<1x3072xf16, [@CMX_NN, 0]>, memref<1x1x1x768xf16, [@CMX_NN, 0]>, memref<1x1x768xf16, [@CMX_NN, 0]> loc(#loc)
       } loc(#loc62)
     } loc(#loc28)
     VPURT.Task waits(%7 : !VPURT.Barrier) updates(%8 : !VPURT.Barrier) {
-      VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 0, 0>} @VPU.SW::@cache_flush_invalidate inputs() outputs() on tile 0{
+      VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 0, 0, 0>} @VPU.SW::@cache_flush_invalidate inputs() outputs() on tile 0{
         VPUIP.SW.Kernel.run loc(#loc)
       } loc(#loc63)
     } loc(#loc63)
@@ -272,22 +272,22 @@ module @dumpsubgraph attributes {VPU.arch = #VPU.arch_kind<VPUX37XX>, VPU.compil
       %103 = VPUIP.NNDMA {port = 0 : i64, profilingMetadata = #VPUIP.DmaProfilingMetadataAttr<dataIndex = 3 : i64>} inputs(%90 : memref<1xui64, @Register>) outputs(%91 : memref<1xui64, [@CMX_NN, 0]>) -> memref<1xui64, [@CMX_NN, 0]> loc(#loc29)
     } loc(#loc29)
     VPURT.Task waits(%9 : !VPURT.Barrier) updates(%10 : !VPURT.Barrier) {
-      %results, %profiling_output = VPUIP.SW.Kernel {profilingMetadata = #VPUIP.SwProfilingMetadataAttr<bufferId = 0 : i64, bufferOffset = 0 : i64, clusterSize = 6 : i64, dataIndex = 4 : i64, tileId = 0 : i64, clusterId = 0 : i64>, resultSegmentSizes = array<i32: 1, 1>} @VPU.SW::@builtin_Convert inputs(%43 as %arg3: memref<1x1x1x384xf16, [@CMX_NN, 0]>) outputs(%47 as %arg4: memref<1x1x1x384xf32, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 0]>) profiling_data(%54 : memref<4xui32, [@CMX_NN, 0]>) on tile 0 -> (memref<1x1x1x384xf32, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 0]>, memref<4xui32, [@CMX_NN, 0]>){
+      %results, %profiling_output = VPUIP.SW.Kernel {profilingMetadata = #VPUIP.SwProfilingMetadataAttr<bufferId = 0 : i64, bufferOffset = 0 : i64, clusterSize = 6 : i64, dataIndex = 4 : i64, tileId = 0 : i64, clusterId = 0 : i64>, resultSegmentSizes = array<i32: 1, 0, 1>} @VPU.SW::@builtin_Convert inputs(%43 as %arg3: memref<1x1x1x384xf16, [@CMX_NN, 0]>) outputs(%47 as %arg4: memref<1x1x1x384xf32, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 0]>) profiling_data(%54 : memref<4xui32, [@CMX_NN, 0]>) on tile 0 -> (memref<1x1x1x384xf32, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 0]>, memref<4xui32, [@CMX_NN, 0]>){
         VPUIP.SW.Kernel.run(%arg3, %arg4) : memref<1x1x1x384xf16, [@CMX_NN, 0]>, memref<1x1x1x384xf32, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 0]> loc(#loc)
       } loc(#loc64)
     } loc(#loc64)
     VPURT.Task waits(%9 : !VPURT.Barrier) updates(%10 : !VPURT.Barrier) {
-      %results, %profiling_output = VPUIP.SW.Kernel {profilingMetadata = #VPUIP.SwProfilingMetadataAttr<bufferId = 0 : i64, bufferOffset = 0 : i64, clusterSize = 6 : i64, dataIndex = 4 : i64, tileId = 0 : i64, clusterId = 1 : i64>, resultSegmentSizes = array<i32: 1, 1>} @VPU.SW::@builtin_Convert inputs(%44 as %arg3: memref<1x1x1x384xf16, [@CMX_NN, 1]>) outputs(%48 as %arg4: memref<1x1x1x384xf32, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 1]>) profiling_data(%55 : memref<4xui32, [@CMX_NN, 1]>) on tile 1 -> (memref<1x1x1x384xf32, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 1]>, memref<4xui32, [@CMX_NN, 1]>){
+      %results, %profiling_output = VPUIP.SW.Kernel {profilingMetadata = #VPUIP.SwProfilingMetadataAttr<bufferId = 0 : i64, bufferOffset = 0 : i64, clusterSize = 6 : i64, dataIndex = 4 : i64, tileId = 0 : i64, clusterId = 1 : i64>, resultSegmentSizes = array<i32: 1, 0, 1>} @VPU.SW::@builtin_Convert inputs(%44 as %arg3: memref<1x1x1x384xf16, [@CMX_NN, 1]>) outputs(%48 as %arg4: memref<1x1x1x384xf32, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 1]>) profiling_data(%55 : memref<4xui32, [@CMX_NN, 1]>) on tile 1 -> (memref<1x1x1x384xf32, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 1]>, memref<4xui32, [@CMX_NN, 1]>){
         VPUIP.SW.Kernel.run(%arg3, %arg4) : memref<1x1x1x384xf16, [@CMX_NN, 1]>, memref<1x1x1x384xf32, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 1]> loc(#loc)
       } loc(#loc65)
     } loc(#loc65)
     VPURT.Task waits(%9 : !VPURT.Barrier) updates(%10 : !VPURT.Barrier) {
-      %results, %profiling_output = VPUIP.SW.Kernel {profilingMetadata = #VPUIP.SwProfilingMetadataAttr<bufferId = 0 : i64, bufferOffset = 0 : i64, clusterSize = 6 : i64, dataIndex = 5 : i64, tileId = 1 : i64, clusterId = 0 : i64>, resultSegmentSizes = array<i32: 1, 1>} @VPU.SW::@builtin_Convert inputs(%41 as %arg3: memref<1x1x1x384xf16, [@CMX_NN, 0]>) outputs(%45 as %arg4: memref<1x1x1x384xf32, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 0]>) profiling_data(%56 : memref<4xui32, [@CMX_NN, 0]>) on tile 0 -> (memref<1x1x1x384xf32, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 0]>, memref<4xui32, [@CMX_NN, 0]>){
+      %results, %profiling_output = VPUIP.SW.Kernel {profilingMetadata = #VPUIP.SwProfilingMetadataAttr<bufferId = 0 : i64, bufferOffset = 0 : i64, clusterSize = 6 : i64, dataIndex = 5 : i64, tileId = 1 : i64, clusterId = 0 : i64>, resultSegmentSizes = array<i32: 1, 0, 1>} @VPU.SW::@builtin_Convert inputs(%41 as %arg3: memref<1x1x1x384xf16, [@CMX_NN, 0]>) outputs(%45 as %arg4: memref<1x1x1x384xf32, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 0]>) profiling_data(%56 : memref<4xui32, [@CMX_NN, 0]>) on tile 0 -> (memref<1x1x1x384xf32, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 0]>, memref<4xui32, [@CMX_NN, 0]>){
         VPUIP.SW.Kernel.run(%arg3, %arg4) : memref<1x1x1x384xf16, [@CMX_NN, 0]>, memref<1x1x1x384xf32, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 0]> loc(#loc)
       } loc(#loc66)
     } loc(#loc66)
     VPURT.Task waits(%9 : !VPURT.Barrier) updates(%10 : !VPURT.Barrier) {
-      %results, %profiling_output = VPUIP.SW.Kernel {profilingMetadata = #VPUIP.SwProfilingMetadataAttr<bufferId = 0 : i64, bufferOffset = 0 : i64, clusterSize = 6 : i64, dataIndex = 5 : i64, tileId = 1 : i64, clusterId = 1 : i64>, resultSegmentSizes = array<i32: 1, 1>} @VPU.SW::@builtin_Convert inputs(%42 as %arg3: memref<1x1x1x384xf16, [@CMX_NN, 1]>) outputs(%46 as %arg4: memref<1x1x1x384xf32, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 1]>) profiling_data(%57 : memref<4xui32, [@CMX_NN, 1]>) on tile 1 -> (memref<1x1x1x384xf32, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 1]>, memref<4xui32, [@CMX_NN, 1]>){
+      %results, %profiling_output = VPUIP.SW.Kernel {profilingMetadata = #VPUIP.SwProfilingMetadataAttr<bufferId = 0 : i64, bufferOffset = 0 : i64, clusterSize = 6 : i64, dataIndex = 5 : i64, tileId = 1 : i64, clusterId = 1 : i64>, resultSegmentSizes = array<i32: 1, 0, 1>} @VPU.SW::@builtin_Convert inputs(%42 as %arg3: memref<1x1x1x384xf16, [@CMX_NN, 1]>) outputs(%46 as %arg4: memref<1x1x1x384xf32, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 1]>) profiling_data(%57 : memref<4xui32, [@CMX_NN, 1]>) on tile 1 -> (memref<1x1x1x384xf32, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 1]>, memref<4xui32, [@CMX_NN, 1]>){
         VPUIP.SW.Kernel.run(%arg3, %arg4) : memref<1x1x1x384xf16, [@CMX_NN, 1]>, memref<1x1x1x384xf32, {order = #NCHW, strides = [768, 768, 768, 1]}, [@CMX_NN, 1]> loc(#loc)
       } loc(#loc67)
     } loc(#loc67)
@@ -383,4 +383,3 @@ module @dumpsubgraph attributes {VPU.arch = #VPU.arch_kind<VPUX37XX>, VPU.compil
 #loc67 = loc(fused<{name = "output", type = "Output"}>[#loc6, #loc9, #loc22])
 #loc68 = loc(fused[#loc8, #loc24])
 #loc69 = loc(fused[#loc8, #loc25])
-

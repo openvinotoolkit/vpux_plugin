@@ -8,7 +8,10 @@
 #include "vpux/compiler/dialect/VPURegMapped/ops_interfaces.hpp"
 #include "vpux/compiler/dialect/VPURegMapped/passes.hpp"
 
+#include "vpux/utils/core/checked_cast.hpp"
 #include "vpux/utils/core/range.hpp"
+
+using vpux::checked_cast;
 
 namespace vpux {
 
@@ -31,7 +34,10 @@ void VPURegMapped::ResolveTaskLocationPass::createTaskLocationBuffers() {
 
             for (auto i : irange(sizePerList)) {
                 auto declareTaskBufferOp = builder.create<VPURegMapped::DeclareTaskBufferOp>(
-                        function.getLoc(), vpux::VPURegMapped::IndexType::get(context, tile, list, i), type);
+                        function.getLoc(),
+                        vpux::VPURegMapped::IndexType::get(context, checked_cast<uint32_t>(tile),
+                                                           checked_cast<uint32_t>(list), checked_cast<uint32_t>(i)),
+                        type);
                 metadataBuffersPerTaskType[list].push_back(declareTaskBufferOp);
             }
         }
@@ -46,6 +52,7 @@ void VPURegMapped::ResolveTaskLocationPass::createTaskLocationBuffers() {
         populateTaskBuffers(tile, VPURegMapped::TaskType::ActKernelRange, sizesPerTaskType);
         populateTaskBuffers(tile, VPURegMapped::TaskType::ActKernelInvocation, sizesPerTaskType);
         populateTaskBuffers(tile, VPURegMapped::TaskType::DMA, sizesPerTaskType);
+        populateTaskBuffers(tile, VPURegMapped::TaskType::M2I, sizesPerTaskType);
     }
 
     for (auto task : function.getOps<VPURegMapped::TaskOpInterface>()) {

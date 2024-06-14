@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -9,10 +9,10 @@
 include "mlir/Pass/PassBase.td"
 
 //
-// InitCompiler
+// InitResources
 //
 
-def InitCompiler : PassBase<"init-compiler", "vpux::ModulePass"> {
+def InitResources : PassBase<"init-resources", "vpux::ModulePass"> {
     let summary = "Initializes compiler for VPU platforms";
 
     let description = [{
@@ -20,7 +20,7 @@ def InitCompiler : PassBase<"init-compiler", "vpux::ModulePass"> {
         initializes **IERT Dialect** run-time resources information.
     }];
 
-    let constructor = "vpux::VPU::createInitCompilerPass()";
+    let constructor = "vpux::VPU::createInitResourcesPass()";
 
     let options = [
         Option<
@@ -34,6 +34,11 @@ def InitCompiler : PassBase<"init-compiler", "vpux::ModulePass"> {
             "[Optional] Set compilation mode as `ReferenceSW`, `ReferenceHW` or `DefaultHW`"
         >,
         Option<
+            "revisionIDOpt", "revision-id",
+            "int", "",
+            "[Optional] Revision ID of the platform"
+        >,
+        Option<
             "numberOfDPUGroupsOpt", "num-of-dpu-groups",
             "int", "",
             "[Optional] Number of available DPU groups"
@@ -42,6 +47,11 @@ def InitCompiler : PassBase<"init-compiler", "vpux::ModulePass"> {
             "numberOfDMAPortsOpt", "num-of-dma-ports",
             "int", "",
             "[Optional] Number of available DMA ports"
+        >,
+        Option<
+            "availableCMXMemoryOpt", "available-cmx-memory",
+            "int", "",
+            "[Optional] Available CMX memory"
         >,
         Option<
             "allowCustomValues", "allow-custom-values",
@@ -53,6 +63,39 @@ def InitCompiler : PassBase<"init-compiler", "vpux::ModulePass"> {
     let dependentDialects = [
         "vpux::IERT::IERTDialect",
         "vpux::VPU::VPUDialect"
+    ];
+}
+
+//
+// OutputPipelineTiling
+//
+
+def OutputPipelineTiling : PassBase<"output-pipeline-tiling", "vpux::FunctionPass"> {
+    let summary = "Increase the number of tiles so that sub-tiles can be executed in parallel";
+
+    let description = [{
+        Originally, tiling pipeline created tiles for a conv based operation to fit below operands on CMX with PIPELINING tiling mode:
+        1) Activation of current tile
+        2) Weights of current tile
+        3) Result of current tile
+        4) Activation or weights of next tile for prefetching
+
+        As a result, DPU computation of next tile has to wait for previous tile's output spilling
+        when there's no enough CMX memory size left for the next tile's result.
+
+        Output pipelining is introduced in to optimize such case by creating more and smaller tiles
+        to fit all operands of 2 sub-tiles on CMX at the same time.
+        This allows for better overlap between the cost of DMA data transmission and DPU computation.
+    }];
+
+    let constructor = "vpux::VPU::createOutputPipelineTilingPass()";
+
+    let options = [
+        Option<
+            "tilingMode", "tiling-mode",
+            "std::string", "",
+            "[Optional] Set tiling mode as `ISOLATED` or `PREFETCH`"
+        >
     ];
 }
 
@@ -108,28 +151,39 @@ def WrapVPUOpsInNCEClusterTiling : PassBase<"wrap-vpu-ops-in-ncecluster-tiling",
 }
 
 //
-// Tile over H for the following vertical fusion
+// WrapDistributedOpsInNCEClusterTiling
 //
 
-def TileOverHForVF : PassBase<"tile-over-h-for-vf", "vpux::FunctionPass"> {
-    let summary = "Assign tiling strategy over H for the following vertical fusion";
+def WrapDistributedOpsInNCEClusterTiling : PassBase<"wrap-distributed-ops-in-nceclustertiling", "vpux::FunctionPass"> {
+    let summary = "Wraps operations that have distributed types in NCEClusterTiling";
 
     let description = [{
-        This pass tiles candidate vertical fusion operations over H for the following vertical fusion passes.
+        This pass finds operations that have distributed types as inputs or outputs and wraps them into NCEClusterTiling.
+        Only VPU.ClusteredOpInterface and VPU.Copy operations are covered, so that view-like operations can still use distributed types.
     }];
 
-    let constructor = "vpux::VPU::createTileOverHForVFPass()";
+    let constructor = "vpux::VPU::createWrapDistributedOpsInNCEClusterTiling()";
 
     let dependentDialects = [
         "vpux::VPU::VPUDialect"
     ];
+}
 
-    let options = [
-        Option<
-            "tilingMode", "tiling-mode",
-            "std::string", "",
-            "[Optional] Set tiling mode as `ISOLATED` or `PREFETCH`"
-        >
+//
+// Reorder IR to archive more efficient order for scheduler
+//
+
+def EfficientIROrder : PassBase<"efficient-ir-order", "vpux::FunctionPass"> {
+    let summary = "Change the IR order to execute operation more efficiently";
+
+    let description = [{
+        Reorder IR around eltwise pattern in order to reach better performance on scheduling stage
+    }];
+
+    let constructor = "vpux::VPU::createEfficientIROrderPass()";
+
+    let dependentDialects = [
+        "vpux::VPU::VPUDialect"
     ];
 }
 
@@ -183,7 +237,7 @@ def MergeVfSubgraphs : PassBase<"merge-vertical-fusion-subgraphs", "vpux::Functi
 
     let description = [{
         Merge VF blocks and add operations to them recalculating tiling information
-        in following cases:
+        and halo regions in following cases:
         1. Number of operations which might increase computational cost does not exceed limit
         2. All operations have same multicluster strategy or don't have them at all
         3. Region which is supposed to be added doesn't have any other users except current region or
@@ -204,6 +258,12 @@ def MergeVfSubgraphs : PassBase<"merge-vertical-fusion-subgraphs", "vpux::Functi
             "enableVerticalFusionPipelining", "enable-vertical-fusion-pipelining",
             "bool", "false",
             "Flag to enable vertical fusion pipelining"
+        >,
+
+        Option<
+            "tilingMode", "tiling-mode",
+            "std::string", [{"PREFETCH"}],
+            "[Optional] Set tiling mode as `ISOLATED` or `PREFETCH`. `PREFETCH` is set by default"
         >
     ];
 }
@@ -249,64 +309,6 @@ def UnrollUnusedVerticalFusionRegion : PassBase<"unroll-unused-vertical-fusion",
 
     let dependentDialects = [
         "vpux::VPU::VPUDialect"
-    ];
-}
-
-//
-// Roll back the H-prioritized tiling strategy if unused
-//
-
-def RollBackTilingStrategy : PassBase<"roll-back-tiling-strategy", "vpux::FunctionPass"> {
-    let summary = "Roll back the H-prioritized tiling strategy if unused";
-
-    let description = [{
-        If the tiling strategy is changed to H dimension to enable vertical fusion but at last not vertical-fused
-        roll back to the original tiling strategy
-    }];
-
-    let constructor = "vpux::VPU::createRollBackTilingStrategyPass()";
-
-    let dependentDialects = [
-        "vpux::VPU::VPUDialect"
-    ];
-
-    let options = [
-        Option<
-            "tilingMode", "tiling-mode",
-            "std::string", "",
-            "[Optional] Set tiling mode as `ISOLATED` or `PREFETCH`"
-        >
-    ];
-}
-
-//
-// Adjust tiling strategy for VF
-//
-
-def AdjustVFTilingStrategy : PassBase<"adjust-vf-tiling-strategy", "vpux::FunctionPass"> {
-    let summary = "Adjust tiling strategy in order to make sure that all subgraphs fit in CMX";
-
-    let description = [{
-        Take into account conditions in order to avoid additional spills
-        In case some of them breaks, increase number of tiles
-        Following buffers should fit in CMX for each VF tile
-        1. Input tensors of VF tile
-        2. Output of VF tile
-        3. Largest operation in the block
-    }];
-
-    let constructor = "vpux::VPU::createAdjustVFTilingStrategyPass()";
-
-    let dependentDialects = [
-        "vpux::VPU::VPUDialect"
-    ];
-
-    let options = [
-        Option<
-            "enableVerticalFusionPipelining", "enable-vertical-fusion-pipelining",
-            "bool", "false",
-            "Flag to enable vertical fusion pipelining"
-        >
     ];
 }
 
@@ -433,6 +435,27 @@ def ResolveEltwiseWithZTiledWorkloads : PassBase<"resolve-eltwise-with-z-tiled-w
 }
 
 //
+// ShiftOutputWorkloadsForHalo
+//
+
+def ShiftOutputWorkloadsForHalo : PassBase<"shift-dpu-workloads-start", "vpux::FunctionPass"> {
+    let summary = "Adjust output workload start for each dpu task according to halo information";
+
+    let description = [{
+        For arch 40XX, output workload start offsets are computed relative to the full tensor. The start offsets need to be
+        adjusted to reflect position in the cluster that computes the current section of output.
+
+        In addition to that, in case of output Distributed OVERLAPPED, this pass will take care to shift the offsets to
+        make space for any halo that needs to be put at the beginning of any dimension.
+    }];
+
+    let constructor = "vpux::VPU::createShiftOutputWorkloadsForHaloPass()";
+    let dependentDialects = [
+        "vpux::VPU::VPUDialect"
+    ];
+}
+
+//
 // AdjustMemorySpace
 //
 
@@ -454,6 +477,39 @@ def AdjustMemorySpace : PassBase<"adjust-memory-space", "vpux::FunctionPass"> {
 }
 
 //
+// OptimizeSharedInputCopyForConcat
+//
+
+def OptimizeSharedInputCopyForConcat : PassBase<"optimize-shared-input-copy-for-concat", "vpux::FunctionPass"> {
+    let summary = "Optimize duplicated input copy for concat";
+
+    let constructor = "vpux::VPU::createOptimizeSharedInputCopyForConcatPass()";
+
+    let description = [{
+        Convert pattern:
+        ```
+                                  / Concat -> Slice - Copy(DDR2CMX)
+            Copy(CMX2DDR) -> Concat
+                                  \ Concat -> Slice - Copy(DDR2CMX)
+        ```
+        as
+        ```
+                                  / Slice -> Copy(DDR2CMX) -> CMXConcat
+            Copy(CMX2DDR) -> Concat
+                                  \ Slice ->  Copy(DDR2CMX) -> CMXConcat
+        ```
+        The original subgraph will try to copy to DDR multi times, and after this converion,
+        the CMX2DDR copy will be reduced to only once.
+    }];
+
+    let dependentDialects = [
+        "vpux::VPU::VPUDialect"
+    ];
+}
+
+
+
+//
 // CMXConcat
 //
 
@@ -465,6 +521,26 @@ def CMXConcat : PassBase<"cmx-concat", "vpux::FunctionPass"> {
     let description = [{
         This pass will try to check if a Concat operation can fit in NNCMX
         with few restrictions and if so move the concat from DDR to NNCMX.
+    }];
+
+    let dependentDialects = [
+        "vpux::VPU::VPUDialect"
+    ];
+}
+
+//
+// SplitDDRConcatIntoCMX
+//
+
+def SplitDDRConcatIntoCMX : PassBase<"split-ddr-concat", "vpux::FunctionPass"> {
+    let summary = "Split a big concat executed in DDR into a set of smaller sub concats executed in CMX and later concatenated in DDR";
+
+    let constructor = "vpux::VPU::createSplitDDRConcatIntoCMXPass()";
+
+    let description = [{
+        This pass will try to check if a Concat operation in DDR can be split into a set of sub concats that can fit in NNCMX
+        with few restrictions and if so move the sub concats from DDR to NNCMX and execute a final Concat in DDR.
+        This allows to reduce considerably the number of DMA copies in case the concatenation inputs are a lot of small tensors.
     }];
 
     let dependentDialects = [
@@ -592,7 +668,7 @@ def FuseSparsityOps : PassBase<"fuse-sparsity-ops", "vpux::FunctionPass"> {
 def OptimizeSparsifyDesparsifyPairs : PassBase<"optimize-sparsify-desparsify-pairs", "vpux::FunctionPass"> {
     let summary = "Optimize common patterns of subsequent sparsify-desparsify ops to remove redundant conversions";
 
-    let constructor = "vpux::VPU::createOptimizeSparsifyDesparsifyPairsPass(vpux::VPU::symbolizeEnum<VPU::ActivationSparsityProfile>)";
+    let constructor = "vpux::VPU::createOptimizeSparsifyDesparsifyPairsPass()";
 
     let dependentDialects = [
         "vpux::VPU::VPUDialect"
@@ -744,6 +820,19 @@ def SplitSEOps : PassBase<"split-se-ops", "vpux::FunctionPass"> {
     let dependentDialects = [
         "vpux::VPU::VPUDialect"
     ];
+
+    let options = [
+        Option<
+            "seOpsEnabled", "se-ops-enabled",
+            "bool", "false",
+            "Flag to identify whether operations that can be executed using the Storage Element hardware feature are enabled"
+        >,
+        Option<
+            "seExperimentalOpsEnabled", "se-experimental-ops-enabled",
+            "bool", "false",
+            "This flag identifies operations that are still a work in progress and can be executed using the Storage Element hardware feature."
+        >
+    ];
 }
 
 //
@@ -779,6 +868,19 @@ def LowerOpsToSENCE : PassBase<"lower-ops-to-se-nce", "vpux::FunctionPass"> {
 
     let dependentDialects = [
         "vpux::VPU::VPUDialect"
+    ];
+
+    let options = [
+        Option<
+            "seOpsEnabled", "se-ops-enabled",
+            "bool", "false",
+            "Flag to identify whether operations that can be executed using the Storage Element hardware feature are enabled"
+        >,
+        Option<
+            "seExperimentalOpsEnabled", "se-experimental-ops-enabled",
+            "bool", "false",
+            "This flag identifies operations that are still a work in progress and can be executed using the Storage Element hardware feature."
+        >
     ];
 }
 
@@ -845,6 +947,11 @@ def TilingStrategyAssignment : PassBase<"tiling-strategy-assignment", "vpux::Fun
             "vpunnCost", "vpunn-cost",
             "bool", "false",
             "Use VPUNN cost model to get the best tiling strategy"
+        >,
+        Option<
+            "enableShaveDDRAccessOptimization", "enable-shave-ddr-access-optimization",
+            "std::string", [{"true"}],
+            "SHAVE DDR access optimization option (true, false or auto)"
         >
     ];
 }
@@ -889,17 +996,14 @@ def DetectionOutputDecomposition : PassBase<"detection-output-decomposition", "v
         │BoxLogits│  │PriorBoxes│        │ClassPredictions│
         └───────┬─┘  └─┬────────┘        └───────┬────────┘
                 │      │                         │
-        ┌───────┴──────┴───────────┐  ┌──────────┴────────────┐
-        │DetectionOutputDecodeBoxes│  │DetectionOutputSortTopK│
-        └───────────────────┬──────┘  └───┬──┬─────┬─┬────────┘
-                            │             │  │     │ │
-                      ┌─────┴─────────────┴──┴───┐ │ │
-                      │DetectionOutputSelectBoxes│ │ │
-                      └─────────────┬────────────┘ │ │
-                                    │              │ │
-                                  ┌─┴──────────────┴─┴────┐
-                                  │DetectionOutputNmsCaffe│
-                                  └────┬─┬─┬──────────────┘
+        ┌───────┴──────┴───────────┐  ┌──────────┴────────┐
+        │DetectionOutputDecodeBoxes│  │DetectionOutputSort│
+        └───────────────────────┬──┘  └──┬───┬───┬────────┘
+                                │        │   │   │
+                                │        │   │   │
+                             ┌──┴────────┴───┴───┴───┐
+                             │DetectionOutputNmsCaffe│
+                             └─────────┬─┬─┬─────────┘
                                        │ │ │
                           ┌────────────┴─┴─┴────────────┐
                           │DetectionOutputCollectResults│
@@ -918,7 +1022,7 @@ def DetectionOutputDecomposition : PassBase<"detection-output-decomposition", "v
 //
 
 def SetupPPEPass : PassBase<"setup-ppe", "vpux::FunctionPass"> {
-    let summary = "Sets activation function for VPU37XX PPE based on clamp range";
+    let summary = "Sets activation function for NPU37XX and VPUX40XX PPE based on clamp range";
 
     let description = [{
         Ensures the correct activation function and clamping is used for PPE.
@@ -978,26 +1082,6 @@ def FuseClampPass : PassBase<"fuse-clamp", "vpux::FunctionPass"> {
 }
 
 //
-// AdjustTilingForPermuteQuantizePass
-//
-
-def AdjustTilingForPermuteQuantizePass : PassBase<"adjust-tiling-for-permute-quantize", "vpux::FunctionPass"> {
-    let summary = "Adjust Slice and Concat position after tiling permute quantize";
-
-    let description = [{
-        This pass rewrites the operation sequence for `VPU.NCE.PermuteQuantize`.
-        After `ApplyTilingPass` `VPU.Slice` and `VPU.Concat` operations will be inserted next to `VPU.NCE.PermuteQuantize`,
-        but we want to slice and concatenate all the sequence (Reshape -> LayoutCast -> PermuteQuantize -> LayoutCast -> [optional Reshape]).
-    }];
-
-    let constructor = "vpux::VPU::createAdjustTilingForPermuteQuantizePass()";
-
-    let dependentDialects = [
-        "vpux::VPU::VPUDialect"
-    ];
-}
-
-//
 // OptimizeConcat
 //
 
@@ -1016,6 +1100,65 @@ def OptimizeConcat : PassBase<"optimize-concat", "vpux::FunctionPass"> {
     ];
 }
 
+//
+// SetupPerBarrierVariantConstraint
+//
+
+def SetupPerBarrierVariantConstraint : PassBase<"setup-per-barrier-variant-constraint", "vpux::ModulePass"> {
+    let summary = "Set per barrier variant constraints in the model/IR";
+
+    let description = [{
+        Creates a PipelineOptionsOp structure in the IR so the constraints could be exposed globally
+    }];
+
+    let constructor = "vpux::VPU::createSetupPerBarrierVariantConstraintPass()";
+
+    let options = [
+        Option<
+            "enablePartialWorkloadManagement", "enable-partial-workload-management",
+            "bool", "false",
+            "[Optional] Set partial workload management to true/false"
+        >,
+        Option<
+            "allowCustomValues", "allow-custom-values",
+            "bool", "",
+            "[Optional] Allows keep predefined values in IR"
+        >,
+        Option<
+            "wlmRollback", "wlm-rollback",
+            "bool", "false",
+            "[Optional] Indicates that compilation might rollback to wlm-disabled pipeline"
+        >
+    ];
+
+    let dependentDialects = [
+        "vpux::VPU::VPUDialect"
+    ];
+}
+
+//
+// ConvertOpToDMAForPerformantExecution
+//
+
+def ConvertOpToDMAForPerformantExecution : PassBase<"convert-op-to-dma-for-performant-execution", "vpux::FunctionPass"> {
+    let summary = "Move ops to DMA if possible and effiecient";
+
+    let description = [{
+        If op can be done with DMA efficiently this pass will, convert the op to DMA related op.
+        Only added to NPU40XX+ pipelines as only op converted via this pass is Gather and is only supported
+        on NPU40XX+ pipelines.
+
+        Currently GatherOp -> GatherDMAOp is supported ( on NPU40XX and newer architectures)
+        Gather -> Reshape + Convert + (Optional) Copy + GatherDMA + Reshape + Copy
+    }];
+
+    let constructor = "vpux::VPU::createConvertOpToDMAForPerformantExecutionPass()";
+
+    let dependentDialects = [
+        "vpux::VPU::VPUDialect"
+    ];
+}
+
 #endif
 
 //
@@ -1027,26 +1170,48 @@ def RemoveOutputSparseToAvoidSuboptimalDPUWorkloadsPass : PassBase<"remove-outpu
 
     let description = [{
         This pass removes SOK layer's output sparsity if
-        1. SOK layer has different split sizes on clusters excluding the last one. For example, we need to split OC = 128 on 6 tiles, 
-        the tiled size will be {32, 32, 16, 16, 16, 16}. If there's output sparsity, we need to split 32 into two pieces of 16 because 
+        1. SOK layer has different split sizes on clusters excluding the last one. For example, we need to split OC = 128 on 6 tiles,
+        the tiled size will be {32, 32, 16, 16, 16, 16}. If there's output sparsity, we need to split 32 into two pieces of 16 because
         we must have the same workload channel excluding the last one. However, two workloads with 16 channels have much worse
-        performance than a workload with 32 channels. If there's no sparsity, we can keep the workload with 32 channels. 
-        This is only relevant to the senario with more than 2 tiles so it doesn't exist for VPU37XX.
+        performance than a workload with 32 channels. If there's no sparsity, we can keep the workload with 32 channels.
+        This is only relevant to the senario with more than 2 tiles so it doesn't exist for NPU37XX.
         2. SOK layer's output is used by `VPU.Concat`
-        
+
         Conv1_1 (OC = 256, SOK)  Conv1_2 (OC = 256, SOK)
              \                               /
                          Concat on C
                               |
                             Conv2
-      
-       Take above graph as an example, we need to split OC = 256 on 6 tiles, the tiled size will be {48, 48, 48, 48, 48, 16}. 
-       After concatenation, the combined workloads will be {48, 48, 48, 48, 48, 16, 48, 48, 48, 48, 48, 16}. If there's output sparsity for Conv1_1 and Conv1_2, 
+
+       Take above graph as an example, we need to split OC = 256 on 6 tiles, the tiled size will be {48, 48, 48, 48, 48, 16}.
+       After concatenation, the combined workloads will be {48, 48, 48, 48, 48, 16, 48, 48, 48, 48, 48, 16}. If there's output sparsity for Conv1_1 and Conv1_2,
        we need to split 48 into three pieces of 16 because we must have the same workload channel excluding the last one. If there's no sparsity, we can
        keep the workload with 48 channels.
     }];
 
     let constructor = "vpux::VPU::createRemoveOutputSparseToAvoidSuboptimalDPUWorkloadsPass()";
+
+    let dependentDialects = [
+        "vpux::VPU::VPUDialect"
+    ];
+}
+
+//
+// AddExplicitPaddingBeforeNCEPermute
+//
+
+def AddExplicitPaddingBeforeNCEPermute : PassBase<"add-explicit-padding-before-nce-permute", "vpux::FunctionPass"> {
+    let summary = "Insert explicit padding before NCE Permute.";
+
+    let description = [{
+        When output element type of NCEPermuteOp is FP16 and expandedChannels is greater than Input Channels,
+        there is no explicit padding done here, and when the consumer op tries to use the whole output tensor
+        of the NCEPermuteOp we don't know if inside the memory for padding we have something allocated or
+        we have NaN values. This will cause accuracy issues. This pass insert explicit padding in order to
+        avoid such cases.
+    }];
+
+    let constructor = "vpux::VPU::createAddExplicitPaddingBeforeNCEPermutePass()";
 
     let dependentDialects = [
         "vpux::VPU::VPUDialect"

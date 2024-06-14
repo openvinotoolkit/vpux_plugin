@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -101,11 +101,12 @@ TEST_F(MLIR_VPU_LayerVPUNNCost, DPU_LayerCost) {
     auto func = module.get().lookupSymbol<mlir::func::FuncOp>("main");
     ASSERT_TRUE(func != nullptr);
 
-    const auto archKind = ArchKind::VPUX37XX;
+    const auto archKind = ArchKind::NPU37XX;
 
     mlir::PassManager pm(module.get()->getName(), mlir::OpPassManager::Nesting::Implicit);
-    pm.addPass(vpux::VPU::createInitCompilerPass(archKind, vpux::VPU::CompilationMode::DefaultHW, std::nullopt,
-                                                 std::nullopt, vpux::Logger::global()));
+    auto initCompilerOptions = VPU::InitCompilerOptions(archKind, VPU::CompilationMode::DefaultHW);
+
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, vpux::Logger::global());
 
     ASSERT_TRUE(mlir::succeeded(pm.run(module.get())));
 
@@ -161,11 +162,12 @@ TEST_F(MLIR_VPU_LayerVPUNNCost, SWKernel_LayerCost) {
     auto func = module.get().lookupSymbol<mlir::func::FuncOp>("main");
     ASSERT_TRUE(func != nullptr);
 
-    const auto archKind = ArchKind::VPUX37XX;
+    const auto archKind = ArchKind::NPU37XX;
 
     mlir::PassManager pm(module.get()->getName(), mlir::OpPassManager::Nesting::Implicit);
-    pm.addPass(vpux::VPU::createInitCompilerPass(archKind, vpux::VPU::CompilationMode::DefaultHW, std::nullopt,
-                                                 std::nullopt, vpux::Logger::global()));
+    auto initCompilerOptions = VPU::InitCompilerOptions(archKind, VPU::CompilationMode::DefaultHW);
+
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, vpux::Logger::global());
 
     ASSERT_TRUE(mlir::succeeded(pm.run(module.get())));
 
@@ -211,8 +213,9 @@ TEST_F(MLIR_VPU_LayerVPUNNCost, SWKernel_SimpleCost) {
     ASSERT_TRUE(func != nullptr);
 
     mlir::PassManager pm(module.get()->getName(), mlir::OpPassManager::Nesting::Implicit);
-    pm.addPass(vpux::VPU::createInitCompilerPass(ArchKind::VPUX37XX, vpux::VPU::CompilationMode::DefaultHW,
-                                                 std::nullopt, std::nullopt, vpux::Logger::global()));
+    auto initCompilerOptions = VPU::InitCompilerOptions(ArchKind::NPU37XX, VPU::CompilationMode::DefaultHW);
+
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, vpux::Logger::global());
 
     ASSERT_TRUE(mlir::succeeded(pm.run(module.get())));
 
@@ -223,5 +226,73 @@ TEST_F(MLIR_VPU_LayerVPUNNCost, SWKernel_SimpleCost) {
                   getSimpleCost(kernelOp, module.get(), VPU::MultiClusterStrategy::Clustering));
         EXPECT_EQ(layerCost.getStrategyCost(kernelOp, VPU::MultiClusterStrategy::SplitOverHeight),
                   getSimpleCost(kernelOp, module.get(), VPU::MultiClusterStrategy::SplitOverHeight));
+    });
+}
+
+TEST_F(MLIR_VPU_LayerVPUNNCost, DMA_Cost) {
+    mlir::MLIRContext ctx(registry);
+    constexpr llvm::StringLiteral inputIR = R"(
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+#loc0 = loc(unknown)
+    module @main {
+        func.func @main(%arg0: tensor<1x16x16x16xf16, {order = #NHWC}>, %wt: tensor<16x1x1x4xsi32>, %weights: tensor<16x16x1x1xf16, {order = #NHWC}>) -> tensor<1x16x16x16xf16, {order = #NHWC}> {
+        %1 = VPU.NCE.Convolution(%arg0, %weights, %wt) {
+                pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
+                rawFilterShape = [16, 16, 1, 1],
+                strides = [1, 1]
+            } -> tensor<1x16x16x16xf16, {order = #NHWC}> loc(fused["Conv_100", "t_Convolution"])
+        %2 = VPU.MaxPool(%1) {
+            kernel_size = [3, 3],
+            pads_begin = [1, 1],
+            pads_end = [1, 1],
+            rounding_type = #IE.rounding_type<FLOOR>,
+            strides = [1, 1]
+        } : tensor<1x16x16x16xf16, {order = #NHWC}> -> tensor<1x16x16x16xf16, {order = #NHWC}> loc(fused["Maxpool_1", "t_Convolution", "fused"])
+
+        return %2 : tensor<1x16x16x16xf16, {order = #NHWC}>
+    }
+    }
+    )";
+    auto module = mlir::parseSourceString<mlir::ModuleOp>(inputIR, &ctx);
+    ASSERT_TRUE(module.get() != nullptr);
+
+    auto func = module.get().lookupSymbol<mlir::func::FuncOp>("main");
+    ASSERT_TRUE(func != nullptr);
+
+    const auto archKind = ArchKind::NPU37XX;
+
+    mlir::PassManager pm(module.get()->getName(), mlir::OpPassManager::Nesting::Implicit);
+    auto initCompilerOptions = VPU::InitCompilerOptions(archKind, VPU::CompilationMode::DefaultHW);
+
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, vpux::Logger::global());
+
+    ASSERT_TRUE(mlir::succeeded(pm.run(module.get())));
+
+    VPU::LayerVPUNNCost layerCost(func);
+
+    auto vpuDevice = VPU::getVPUDeviceType(archKind);
+    const auto vpunnCostFunction = VPU::createLayerCostModel(archKind);
+    const auto dmaPorts = IE::getAvailableExecutor(module.get(), VPU::ExecutorKind::DMA_NN).getCount();
+
+    func->walk([&](VPU::NCEConvolutionOp convOp) {
+        EXPECT_EQ(layerCost.getSpillingWriteCost(convOp.getOperation(), VPU::MultiClusterStrategy::Clustering),
+                  getDMACost(convOp.getResult().getType().cast<vpux::NDTypeInterface>(), vpuDevice, vpunnCostFunction,
+                             dmaPorts));
+    });
+
+    func->walk([&](VPU::NCEMaxPoolOp poolOp) {
+        const auto spillRefCost = getDMACost(poolOp.getOperand(0).getType().cast<vpux::NDTypeInterface>(), vpuDevice,
+                                             vpunnCostFunction, dmaPorts);
+        const auto findOperand = [](mlir::Value operand) {
+            return operand.getDefiningOp() != nullptr;
+        };
+
+        EXPECT_EQ(layerCost.getSpillingReadCost(poolOp.getOperation(), VPU::MultiClusterStrategy::Clustering,
+                                                poolOp.getOperand(0).getDefiningOp()),
+                  spillRefCost);
+        EXPECT_EQ(layerCost.getSpillingReadCost(poolOp.getOperation(), VPU::MultiClusterStrategy::Clustering, nullptr,
+                                                findOperand),
+                  spillRefCost);
     });
 }

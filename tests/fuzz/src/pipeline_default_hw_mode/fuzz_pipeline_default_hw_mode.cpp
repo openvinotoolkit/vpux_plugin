@@ -8,12 +8,10 @@
  * It receives an IE dialect IR that is passed through the InitCompiler pass, followed by the DefaultHWMode pipeline.
  */
 
-#include "vpux/compiler/VPU37XX/pipelines.hpp"
+#include "vpux/compiler/NPU37XX/pipelines.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/init.hpp"
-
-#include <ie_common.h>
 
 #include <llvm/ADT/StringRef.h>
 #include <mlir/IR/MLIRContext.h>
@@ -59,19 +57,17 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
         const auto log = vpux::Logger::global();
 
-        mlir::PassManager pm(&ctx, mlir::OpPassManager::Nesting::Implicit);
-        pm.addPass(VPU::createInitCompilerPass(VPU::ArchKind::VPUX37XX, VPU::CompilationMode::DefaultHW, std::nullopt,
-                                               std::nullopt, std::nullopt, log));
+        mlir::PassManager pm(moduleOp.get()->getName(), mlir::OpPassManager::Nesting::Implicit);
+        auto initCompilerOptions = VPU::InitCompilerOptions(VPU::ArchKind::NPU37XX, VPU::CompilationMode::DefaultHW);
+
+        VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log));
 
         const DefaultHWOptions37XX options;
         buildDefaultHWModePipeline(pm, options, log.nest());
 
         pm.run(*moduleOp);
-    } catch (const InferenceEngine::GeneralError&) {
-        // Ignore exceptions that are thrown explicitly (e.g. VPUX_THROW in verifiers)
-        return -1;
     } catch (const ov::Exception&) {
-        // Ignore OpenVINO exceptions (e.g. from nGraph shape infer functions used in return type infer of IE ops)
+        // Ignore OpenVINO exceptions (e.g. from OpenVINO shape infer functions used in return type infer of IE ops)
         return -1;
     } catch (const std::exception&) {
     }

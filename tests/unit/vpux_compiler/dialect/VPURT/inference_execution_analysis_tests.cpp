@@ -4,9 +4,9 @@
 //
 
 #include "vpux/compiler/core/cycle_cost_info.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/inference_execution_simulator.hpp"
-#include "vpux/compiler/dialect/VPURT/task.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/task.hpp"
+#include "vpux/compiler/dialect/VPURT/interfaces/inference_execution_simulator.hpp"
 #include "vpux/compiler/init.hpp"
 
 #include "common/utils.hpp"
@@ -31,6 +31,182 @@ void verifyCorrectCycles(SmallVector<vpux::VPURT::TaskConfig, 1>& tasks,
     }
 }
 
+TEST_F(MLIR_InferenceExecutionAnalysis, CheckCycleUpdateWith1ActShaveEngineOn1Cluster) {
+    mlir::MLIRContext ctx(registry);
+
+    // Below is an IR example with ActShave tasks
+    // Its intention is to verify that if there is only 1 ActShave engine on a cluster
+    // then those tasks will execute sequentially
+    //
+    // Below is a overview of execution
+    // ACT C0_0: [----------------]
+    // ACT C0_1:                   [----------------]
+
+    constexpr StringLiteral inputIR = R"(
+        module @test attributes {VPU.arch = #VPU.arch_kind<NPU40XX>, VPU.compilationMode = #VPU.compilation_mode<DefaultHW>} {
+            IE.TileResource 6 of @NCE at 1.700000e+03 MHz {
+                IE.MemoryResource 1327104 bytes of @CMX_NN_FragmentationAware
+                IE.MemoryResource 1474560 bytes of @CMX_NN {VPU.bandwidth = 64 : i64, VPU.derateFactor = 1.000000e+00 : f64}
+                IE.ExecutorResource 1 of @SHAVE_ACT
+                IE.ExecutorResource 1 of @DPU
+            }
+            IE.ExecutorResource 1 of @M2I
+            IE.ExecutorResource 1 of @DMA_NN
+            IE.MemoryResource 524288000 bytes of @DDR {VPU.bandwidth = 64 : i64, VPU.derateFactor = 6.000000e-01 : f64}
+
+            VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
+
+            module @VPU.SW  {
+                func.func private @builtin_TanhOp(memref<*xf16>, memref<*xf16>, i64) attributes {VPU.kernel_code = "activation_tanh.cpp", VPU.kernel_entry = "activation_tanh"}
+                func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
+            }
+
+            func.func @main(%arg0: memref<1x16x24x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, @DDR>, %arg1: memref<1x16x24x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, @DDR>) -> memref<1x16x24x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, @DDR> {
+
+                %netin = VPURT.DeclareBuffer <NetworkInput> [0] <0> -> memref<1x16x24x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, @DDR>
+
+                %buf_cmx0_1_Part0 = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>
+                %buf_cmx0_1_Part1 = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>
+
+                %buf_cmx0_2_Part0 = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>
+                %buf_cmx0_2_Part1 = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>
+
+                VPURT.Task {
+                    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_TanhOp inputs(%buf_cmx0_1_Part0 as %arg2: memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>) outputs(%buf_cmx0_2_Part0 as %arg3: memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>{
+                    VPUIP.SW.Kernel.run {attrs = [false, true, 1.0013580322265625E-5]}(%arg2, %arg3) : memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>, memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>
+                    }
+                }
+
+                VPURT.Task {
+                    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_TanhOp inputs(%buf_cmx0_1_Part1 as %arg2: memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>) outputs(%buf_cmx0_2_Part1 as %arg3: memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>{
+                    VPUIP.SW.Kernel.run {attrs = [false, true, 1.0013580322265625E-5]}(%arg2, %arg3) : memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>, memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>
+                    }
+                }
+
+                return %arg1 : memref<1x16x24x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, @DDR>
+            }
+        }
+    )";
+
+    Logger log("inference-simulator-test", LogLevel::Info);
+
+    auto module = mlir::parseSourceString<mlir::ModuleOp>(inputIR, &ctx);
+    ASSERT_TRUE(module.get() != nullptr);
+
+    auto funcOp = module.get().lookupSymbol<mlir::func::FuncOp>("main");
+    ASSERT_TRUE(funcOp != nullptr);
+
+    CycleCostInfo cycleCostInfo(funcOp);
+    VPURT::InferenceExecutionSimulator infSim(log, funcOp, cycleCostInfo);
+
+    infSim.runSim();
+
+    SmallVector<size_t> tasksCost;
+    for (auto taskOp : funcOp.getOps<VPURT::TaskOp>()) {
+        tasksCost.push_back(cycleCostInfo.getCycleCost(taskOp));
+    }
+
+    ASSERT_EQ(tasksCost.size(), 2);
+
+    auto tasksAndCycles = infSim.getTaskCycleConfig(VPU::ExecutorKind::SHAVE_ACT);
+
+    // Tasks execute sequentially so start time of second task is equal to cost of first task
+    SmallVector<std::pair<size_t, size_t>> actShaveTasksCycleBeginEndPairs = {
+            {0, tasksCost[0]},
+            {tasksCost[0], tasksCost[0] + tasksCost[1]}};
+
+    ASSERT_EQ(tasksAndCycles.size(), actShaveTasksCycleBeginEndPairs.size());
+
+    verifyCorrectCycles(tasksAndCycles, actShaveTasksCycleBeginEndPairs);
+}
+
+TEST_F(MLIR_InferenceExecutionAnalysis, CheckCycleUpdateWith2ActShaveEngineOn1Cluster) {
+    mlir::MLIRContext ctx(registry);
+
+    // Below is an IR example with ActShave tasks
+    // Its intention is to verify that if there are ActShave engine on a cluster
+    // then those tasks will be distributed and executed simultaneously on independent queues
+    //
+    // Below is a overview of execution
+    // ACT C0_0: [----------------]
+    // ACT C0_1: [----------------]
+
+    constexpr StringLiteral inputIR = R"(
+        module @test attributes {VPU.arch = #VPU.arch_kind<NPU40XX>, VPU.compilationMode = #VPU.compilation_mode<DefaultHW>} {
+            IE.TileResource 6 of @NCE at 1.700000e+03 MHz {
+                IE.MemoryResource 1327104 bytes of @CMX_NN_FragmentationAware
+                IE.MemoryResource 1474560 bytes of @CMX_NN {VPU.bandwidth = 64 : i64, VPU.derateFactor = 1.000000e+00 : f64}
+                IE.ExecutorResource 2 of @SHAVE_ACT
+                IE.ExecutorResource 1 of @DPU
+            }
+            IE.ExecutorResource 1 of @M2I
+            IE.ExecutorResource 1 of @DMA_NN
+            IE.MemoryResource 524288000 bytes of @DDR {VPU.bandwidth = 64 : i64, VPU.derateFactor = 6.000000e-01 : f64}
+
+            VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
+
+            module @VPU.SW  {
+                func.func private @builtin_TanhOp(memref<*xf16>, memref<*xf16>, i64) attributes {VPU.kernel_code = "activation_tanh.cpp", VPU.kernel_entry = "activation_tanh"}
+                func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
+            }
+
+            func.func @main(%arg0: memref<1x16x24x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, @DDR>, %arg1: memref<1x16x24x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, @DDR>) -> memref<1x16x24x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, @DDR> {
+
+                %netin = VPURT.DeclareBuffer <NetworkInput> [0] <0> -> memref<1x16x24x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, @DDR>
+
+                %buf_cmx0_1_Part0 = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>
+                %buf_cmx0_1_Part1 = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>
+
+                %buf_cmx0_2_Part0 = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>
+                %buf_cmx0_2_Part1 = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>
+
+                VPURT.Task {
+                    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_TanhOp inputs(%buf_cmx0_1_Part0 as %arg2: memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>) outputs(%buf_cmx0_2_Part0 as %arg3: memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>{
+                    VPUIP.SW.Kernel.run {attrs = [false, true, 1.0013580322265625E-5]}(%arg2, %arg3) : memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>, memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>
+                    }
+                }
+
+                VPURT.Task {
+                    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_TanhOp inputs(%buf_cmx0_1_Part1 as %arg2: memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>) outputs(%buf_cmx0_2_Part1 as %arg3: memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>{
+                    VPUIP.SW.Kernel.run {attrs = [false, true, 1.0013580322265625E-5]}(%arg2, %arg3) : memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>, memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>
+                    }
+                }
+
+                return %arg1 : memref<1x16x24x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, @DDR>
+            }
+        }
+    )";
+
+    Logger log("inference-simulator-test", LogLevel::Info);
+
+    auto module = mlir::parseSourceString<mlir::ModuleOp>(inputIR, &ctx);
+    ASSERT_TRUE(module.get() != nullptr);
+
+    auto funcOp = module.get().lookupSymbol<mlir::func::FuncOp>("main");
+    ASSERT_TRUE(funcOp != nullptr);
+
+    CycleCostInfo cycleCostInfo(funcOp);
+    VPURT::InferenceExecutionSimulator infSim(log, funcOp, cycleCostInfo);
+
+    infSim.runSim();
+
+    SmallVector<size_t> tasksCost;
+    for (auto taskOp : funcOp.getOps<VPURT::TaskOp>()) {
+        tasksCost.push_back(cycleCostInfo.getCycleCost(taskOp));
+    }
+
+    ASSERT_EQ(tasksCost.size(), 2);
+
+    auto tasksAndCycles = infSim.getTaskCycleConfig(VPU::ExecutorKind::SHAVE_ACT);
+
+    // Tasks execute in parallel so start time is 0 for both and their end time equal to their cost
+    SmallVector<std::pair<size_t, size_t>> actShaveTasksCycleBeginEndPairs = {{0, tasksCost[0]}, {0, tasksCost[1]}};
+
+    ASSERT_EQ(tasksAndCycles.size(), actShaveTasksCycleBeginEndPairs.size());
+
+    verifyCorrectCycles(tasksAndCycles, actShaveTasksCycleBeginEndPairs);
+}
+
 TEST_F(MLIR_InferenceExecutionAnalysis, CheckCycleUpdateOnMultiQueueIR) {
     mlir::MLIRContext ctx(registry);
 
@@ -49,7 +225,7 @@ TEST_F(MLIR_InferenceExecutionAnalysis, CheckCycleUpdateOnMultiQueueIR) {
     // ACT C1_0:                         [----------------]
     // ACT C1_1:                         [----------------]
     constexpr StringLiteral inputIR = R"(
-        module @test attributes {VPU.arch = #VPU.arch_kind<VPUX37XX>, VPU.compilationMode = #VPU.compilation_mode<DefaultHW>} {
+        module @test attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilationMode = #VPU.compilation_mode<DefaultHW>} {
             IE.TileResource 6 of @NCE at 1.700000e+03 MHz {
                 IE.MemoryResource 1327104 bytes of @CMX_NN_FragmentationAware
                 IE.MemoryResource 1474560 bytes of @CMX_NN {VPU.bandwidth = 64 : i64, VPU.derateFactor = 1.000000e+00 : f64}
@@ -62,7 +238,7 @@ TEST_F(MLIR_InferenceExecutionAnalysis, CheckCycleUpdateOnMultiQueueIR) {
             VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
 
             module @VPU.SW  {
-                func.func private @builtin_TanhOp(memref<*xf16>, memref<*xf16>, i64) attributes {VPU.kernel_code = "tanh_fp16.cpp", VPU.kernel_entry = "tanh_fp16"}
+                func.func private @builtin_TanhOp(memref<*xf16>, memref<*xf16>, i64) attributes {VPU.kernel_code = "activation_tanh.cpp", VPU.kernel_entry = "activation_tanh"}
                 func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
             }
 
@@ -159,25 +335,25 @@ TEST_F(MLIR_InferenceExecutionAnalysis, CheckCycleUpdateOnMultiQueueIR) {
                 }
 
                 VPURT.Task waits(%bar2 : !VPURT.Barrier) {
-                    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_TanhOp inputs(%buf_cmx0_1_Part0 as %arg2: memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>) outputs(%buf_cmx0_2_Part0 as %arg3: memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>{
+                    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_TanhOp inputs(%buf_cmx0_1_Part0 as %arg2: memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>) outputs(%buf_cmx0_2_Part0 as %arg3: memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>{
                     VPUIP.SW.Kernel.run {attrs = [false, true, 1.0013580322265625E-5]}(%arg2, %arg3) : memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>, memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>
                     }
                 }
 
                 VPURT.Task waits(%bar2 : !VPURT.Barrier) {
-                    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_TanhOp inputs(%buf_cmx0_1_Part1 as %arg2: memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>) outputs(%buf_cmx0_2_Part1 as %arg3: memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>{
+                    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_TanhOp inputs(%buf_cmx0_1_Part1 as %arg2: memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>) outputs(%buf_cmx0_2_Part1 as %arg3: memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>{
                     VPUIP.SW.Kernel.run {attrs = [false, true, 1.0013580322265625E-5]}(%arg2, %arg3) : memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>, memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>
                     }
                 }
 
                 VPURT.Task waits(%bar3 : !VPURT.Barrier) {
-                    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_TanhOp inputs(%buf_cmx1_1_Part0 as %arg2: memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 1]>) outputs(%buf_cmx1_2_Part0 as %arg3: memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 1]>) on tile 1 -> memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 1]>{
+                    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_TanhOp inputs(%buf_cmx1_1_Part0 as %arg2: memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 1]>) outputs(%buf_cmx1_2_Part0 as %arg3: memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 1]>) on tile 1 -> memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 1]>{
                     VPUIP.SW.Kernel.run {attrs = [false, true, 1.0013580322265625E-5]}(%arg2, %arg3) : memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 1]>, memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 1]>
                     }
                 }
 
                 VPURT.Task waits(%bar3 : !VPURT.Barrier) {
-                    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_TanhOp inputs(%buf_cmx1_1_Part1 as %arg2: memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 1]>) outputs(%buf_cmx1_2_Part1 as %arg3: memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 1]>) on tile 1 -> memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 1]>{
+                    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_TanhOp inputs(%buf_cmx1_1_Part1 as %arg2: memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 1]>) outputs(%buf_cmx1_2_Part1 as %arg3: memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 1]>) on tile 1 -> memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 1]>{
                     VPUIP.SW.Kernel.run {attrs = [false, true, 1.0013580322265625E-5]}(%arg2, %arg3) : memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 1]>, memref<1x16x12x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 1]>
                     }
                 }
@@ -283,7 +459,7 @@ TEST_F(MLIR_InferenceExecutionAnalysis, CheckCycleUpdateOnMultiQueueIR) {
 
 TEST_F(MLIR_InferenceExecutionAnalysis, CheckBarrierConfigClass) {
     // Create a barrier config and increment producer counter to 1
-    VPURT::BarrierConfig barrierConf;
+    VPURT::BarrierConfigInfo barrierConf;
     barrierConf.addProducer();
 
     // Producer count is still 1, barrier is not released and cannot get release cycle

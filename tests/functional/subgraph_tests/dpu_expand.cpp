@@ -1,16 +1,11 @@
-// Copyright (C) Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
-#include <vpu_ov2_layer_test.hpp>
-#include "subgraph_tests/nce_tasks.hpp"
-
-#include <ov_models/builders.hpp>
-#include <ov_models/utils/ov_helpers.hpp>
-#include <shared_test_classes/base/layer_test_utils.hpp>
+#include "openvino/opsets/opset1.hpp"
+#include "shared_test_classes/subgraph/nce_tasks.hpp"
 
 namespace ov::test {
-
 struct ShapeWithNumFilters {
     ShapeWithNumFilters(const ov::Shape& shape, const size_t filters, const bool bypassQuant)
             : _inShape(shape), _outFilters(filters), _bypassQuant(bypassQuant) {
@@ -46,11 +41,11 @@ class Conv2dWithExpandTest_NPU3720 :
     ov::Output<ov::Node> composeFloatWeights(const ov::Shape& weightsShape) const {
         const size_t totalSize =
                 std::accumulate(weightsShape.begin(), weightsShape.end(), 1, std::multiplies<size_t>());
-        std::vector<float> weights(totalSize, 0.f);
+        std::vector<ov::float16> weights(totalSize, 0.f);
         for (size_t i = 0; i < weights.size(); i++) {
             weights.at(i) = std::cos(i * 3.14 / 6);
         }
-        const auto weightsConst = ov::op::v0::Constant::create(ov::element::Type_t::f32, weightsShape, weights);
+        const auto weightsConst = ov::op::v0::Constant::create(ov::element::Type_t::f16, weightsShape, weights);
         return weightsConst->output(0);
     }
     ov::Output<ov::Node> composeQuantWeights(const ov::Shape& weightsShape) const {
@@ -60,7 +55,7 @@ class Conv2dWithExpandTest_NPU3720 :
         const size_t strideOC = strideIC * weightsShape[1];
         const size_t totalSize =
                 std::accumulate(weightsShape.begin(), weightsShape.end(), 1, std::multiplies<size_t>());
-        std::vector<float> weights(totalSize, 0.f);
+        std::vector<ov::float16> weights(totalSize, 0.f);
         for (size_t oc = 0; oc < weightsShape[0]; oc++) {
             const size_t ic = oc % weightsShape[1];
             for (size_t ky = 0; ky < weightsShape[2]; ky++) {
@@ -70,7 +65,7 @@ class Conv2dWithExpandTest_NPU3720 :
                 }
             }
         }
-        const auto weightsConst = ov::op::v0::Constant::create(ov::element::Type_t::f32, weightsShape, weights);
+        const auto weightsConst = ov::op::v0::Constant::create(ov::element::Type_t::f16, weightsShape, weights);
         const auto quantWeightsRange = std::array<float, 4>{-127.f, 127.f, -1.f, 1.f};
         const auto convWeights = quantizeValue(weightsConst->output(0), false, quantWeightsRange, 255);
 
@@ -101,7 +96,10 @@ class Conv2dWithExpandTest_NPU3720 :
                 std::make_shared<ov::op::v0::Parameter>(ov::element::f32, inputDynamicShapes.front())};
 
         const auto quantInputRange = std::array<float, 4>{-128.f, 127.f, -128.f, 127.f};
-        const auto convInput = quantizeValue(params.at(0), bypassQuant, quantInputRange, 256);
+        // need to convert param type to f16 explicitly
+        const auto toF16 = std::make_shared<ov::opset1::Convert>(params.at(0), ov::element::f16);
+        const auto convInput = quantizeValue(toF16->output(0), bypassQuant, quantInputRange, 256);
+
         const auto convWeights = composeWeights(bypassQuant, outputChannels, inputChannels);
 
         const auto conv = std::make_shared<ov::op::v1::Convolution>(
@@ -111,8 +109,9 @@ class Conv2dWithExpandTest_NPU3720 :
 
         const auto quantOutputRange = std::array<float, 4>{-128.f, 127.f, -128.f, 127.f};
         const auto convOutput = quantizeValue(conv->output(0), bypassQuant, quantOutputRange, 256);
+        const auto toF32ConvOut = std::make_shared<ov::opset1::Convert>(convOutput, ov::element::f32);
 
-        const ov::ResultVector results{std::make_shared<ov::op::v0::Result>(convOutput)};
+        const ov::ResultVector results{std::make_shared<ov::op::v0::Result>(toF32ConvOut)};
 
         function = std::make_shared<ov::Model>(results, params, "Conv2dWithExpandTest");
         auto preProc = ov::preprocess::PrePostProcessor(function);
@@ -123,29 +122,32 @@ class Conv2dWithExpandTest_NPU3720 :
         function = preProc.build();
         rel_threshold = 0.5f;
     }
+
+public:
+    static std::string getTestCaseName(
+            const testing::TestParamInfo<std::tuple<ShapeWithNumFilters, ov::element::Type>>& obj) {
+        const std::string sep = "_";
+        std::ostringstream result;
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
+        result << "TestIdx=" << obj.index << sep;
+        return result.str();
+    };
 };
 
 TEST_P(Conv2dWithExpandTest_NPU3720, HW) {
+    abs_threshold = 0.02;
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
 }
 
 const std::vector<ShapeWithNumFilters> shapes = {
-        ShapeWithNumFilters({1, 3, 112, 224}, 16, true),
-        ShapeWithNumFilters({1, 1, 19, 80}, 16, true),
-        ShapeWithNumFilters({1, 24, 64, 112}, 32, true),
-};
-
-const std::vector<ShapeWithNumFilters> shapesFailed = {
-        ShapeWithNumFilters({1, 3, 112, 224}, 16, false),
-        ShapeWithNumFilters({1, 1, 19, 80}, 16, false),
-        ShapeWithNumFilters({1, 24, 64, 112}, 32, false),
+        ShapeWithNumFilters({1, 3, 112, 224}, 16, true), ShapeWithNumFilters({1, 1, 19, 80}, 16, true),
+        ShapeWithNumFilters({1, 24, 64, 112}, 32, true), ShapeWithNumFilters({1, 3, 112, 224}, 16, false),
+        ShapeWithNumFilters({1, 1, 19, 80}, 16, false),  ShapeWithNumFilters({1, 24, 64, 112}, 32, false),
 };
 
 INSTANTIATE_TEST_SUITE_P(conv2d_with_expand, Conv2dWithExpandTest_NPU3720,
-                         ::testing::Combine(::testing::ValuesIn(shapes), ::testing::Values(ov::element::f16)));
-// This cases are working in OV1 but in OV2 has threshold error
-INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_conv2d_with_expand_failing, Conv2dWithExpandTest_NPU3720,
-                         ::testing::Combine(::testing::ValuesIn(shapesFailed), ::testing::Values(ov::element::f16)));
+                         ::testing::Combine(::testing::ValuesIn(shapes), ::testing::Values(ov::element::f16)),
+                         Conv2dWithExpandTest_NPU3720::getTestCaseName);
 
 }  // namespace ov::test

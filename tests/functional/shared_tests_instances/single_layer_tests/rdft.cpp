@@ -1,81 +1,104 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022-2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
-#include "single_layer_tests/rdft.hpp"
+#include "single_op_tests/rdft.hpp"
 #include <algorithm>
+#include <common_test_utils/ov_tensor_utils.hpp>
 #include <vector>
-#include "vpu_ov1_layer_test.hpp"
+#include "common_test_utils/node_builders/rdft.hpp"
+#include "vpu_ov2_layer_test.hpp"
 
-namespace LayerTestsDefinitions {
+using namespace ov::test::utils;
 
-class RdftLayerTestCommon : public RDFTLayerTest, virtual public LayerTestsUtils::VpuOv1LayerTestsCommon {
+namespace ov {
+namespace test {
+
+class RdftLayerTestCommon : public RDFTLayerTest, virtual public VpuOv2LayerTest {
+    // C#125993
+    // Reduce resolution of ov::float16 data generation to prevent NaN values
+    void generate_inputs(const std::vector<ov::Shape>& targetInputStaticShapes) override {
+        VpuOv2LayerTest::inputs.clear();
+        const auto& funcInputs = VpuOv2LayerTest::function->inputs();
+        ov::Tensor tensorData =
+                create_and_fill_tensor(funcInputs[0].get_element_type(), targetInputStaticShapes[0], 10, 1, 100);
+        VpuOv2LayerTest::inputs.insert({funcInputs[0].get_node_shared_ptr(), tensorData});
+    }
     void SetUp() override {
-        InferenceEngine::SizeVector inputShapes;
-        InferenceEngine::Precision inputPrecision;
+        std::vector<size_t> inputShape;
+        ov::element::Type modelType;
         std::vector<int64_t> axes;
         std::vector<int64_t> signalSize;
-        ngraph::helpers::DFTOpType opType;
-        std::tie(inputShapes, inputPrecision, axes, signalSize, opType, targetDevice) = this->GetParam();
-        // fp16 preciosion is 0.1 not 0.01 as fp32.
-        // And increase for every axes where need intermediate value to keep in fp16
-        // Extra increase of precision decrease in fp16 is added by convert to fp16 the precalculated twiddle factors.
-        // In this case depend by shape[axes] size. Consider 0.15 cover 64 line width.
-        if (inputPrecision == InferenceEngine::Precision::FP16) {
-            threshold = 0.15f * axes.size();
+        ov::test::utils::DFTOpType opType;
+        std::tie(inputShape, modelType, axes, signalSize, opType, std::ignore) = this->GetParam();
+        VpuOv2LayerTest::init_input_shapes(static_shapes_to_test_representation({inputShape}));
+
+        auto param = std::make_shared<ov::op::v0::Parameter>(modelType, VpuOv2LayerTest::inputDynamicShapes.front());
+        auto rdft = ov::test::utils::make_rdft(param, axes, signalSize, opType);
+        VpuOv2LayerTest::function = std::make_shared<ov::Model>(rdft->outputs(), ov::ParameterVector{param}, "RDFT");
+
+        if (modelType == ov::element::f16) {
+            VpuOv2LayerTest::abs_threshold = 0.15f * axes.size();
+            VpuOv2LayerTest::rel_threshold = 0.15f * axes.size();
         }
-        RDFTLayerTest::SetUp();
+    }
+    void TearDown() override {
+        VpuOv2LayerTest::TearDown();
     }
 };
 
 TEST_P(RdftLayerTestCommon, NPU3720) {
-    setPlatformVPU3720();
-    setDefaultHardwareModeMLIR();
-    Run();
+    VpuOv2LayerTest::abs_threshold = 1.0;
+    VpuOv2LayerTest::setDefaultHardwareMode();
+    VpuOv2LayerTest::run(Platform::NPU3720);
 }
 
-}  // namespace LayerTestsDefinitions
+TEST_P(RdftLayerTestCommon, NPU4000) {
+    VpuOv2LayerTest::abs_threshold = 1.0;
+    VpuOv2LayerTest::setDefaultHardwareMode();
+    VpuOv2LayerTest::run(Platform::NPU4000);
+}
+
+}  // namespace test
+}  // namespace ov
+
+using namespace ov::test;
 
 namespace {
 
-using namespace LayerTestsDefinitions;
-
-const std::vector<ngraph::helpers::DFTOpType> opTypes = {
-        ngraph::helpers::DFTOpType::FORWARD,
-        ngraph::helpers::DFTOpType::INVERSE,
+const std::vector<DFTOpType> opTypes = {
+        DFTOpType::FORWARD,
+        DFTOpType::INVERSE,
 };
 
-const std::vector<InferenceEngine::Precision> inputPrecisions = {
+const std::vector<ov::element::Type> modelTypes = {
         // disable FP32  tests as default compiler pipelines pass createConvertPrecisionToFP16Pass will convert anyway
         // to fp16 the operation, so test precision will be precision for fp16
-        // InferenceEngine::Precision::FP32,
-        InferenceEngine::Precision::FP16,
+        // ov::element::f32,
+        ov::element::f16,
+
 };
 
-const auto combine = [](const std::vector<InferenceEngine::SizeVector>& inputShapes,
+const auto combine = [](const std::vector<std::vector<size_t>>& inputShapes,
                         const std::vector<std::vector<int64_t>>& axes,
                         const std::vector<std::vector<int64_t>>& signalSizes) {
-    return testing::Combine(testing::ValuesIn(inputShapes), testing::ValuesIn(inputPrecisions), testing::ValuesIn(axes),
-                            testing::ValuesIn(signalSizes), testing::ValuesIn(opTypes),
-                            testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+    return testing::Combine(testing::ValuesIn(inputShapes), testing::ValuesIn(modelTypes), testing::ValuesIn(axes),
+                            testing::ValuesIn(signalSizes), testing::ValuesIn(opTypes), testing::Values(DEVICE_NPU));
 };
 
 // RDFT can support 1d
 INSTANTIATE_TEST_SUITE_P(smoke_RDFT_1d, RdftLayerTestCommon,
-                         testing::Combine(testing::Values(InferenceEngine::SizeVector{10}),
-                                          testing::ValuesIn(inputPrecisions), testing::Values(std::vector<int64_t>{0}),
-                                          testing::Values(std::vector<int64_t>{}),
-                                          testing::Values(ngraph::helpers::DFTOpType::FORWARD),
-                                          testing::Values(LayerTestsUtils::testPlatformTargetDevice())),
+                         testing::Combine(testing::Values(std::vector<size_t>{10}), testing::ValuesIn(modelTypes),
+                                          testing::Values(std::vector<int64_t>{0}),
+                                          testing::Values(std::vector<int64_t>{}), testing::Values(DFTOpType::FORWARD),
+                                          testing::Values(DEVICE_NPU)),
                          RDFTLayerTest::getTestCaseName);
 
 INSTANTIATE_TEST_SUITE_P(smoke_RDFT_2d, RdftLayerTestCommon,
-                         testing::Combine(testing::Values(InferenceEngine::SizeVector{10, 2}),
-                                          testing::ValuesIn(inputPrecisions),
+                         testing::Combine(testing::Values(std::vector<size_t>{10, 2}), testing::ValuesIn(modelTypes),
                                           testing::ValuesIn(std::vector<std::vector<int64_t>>{{{0}}}),
                                           testing::ValuesIn(std::vector<std::vector<int64_t>>{{}, {3}, {12}}),
-                                          testing::Values(ngraph::helpers::DFTOpType::FORWARD),
-                                          testing::Values(LayerTestsUtils::testPlatformTargetDevice())),
+                                          testing::Values(DFTOpType::FORWARD), testing::Values(DEVICE_NPU)),
                          RDFTLayerTest::getTestCaseName);
 
 INSTANTIATE_TEST_SUITE_P(smoke_RDFT_2dx, RdftLayerTestCommon,
@@ -110,30 +133,23 @@ INSTANTIATE_TEST_SUITE_P(smoke_RDFT_4d_single_axis, RdftLayerTestCommon,
 
 // IRDFT can support 5d
 INSTANTIATE_TEST_SUITE_P(smoke_precommit_RDFT_5d, RdftLayerTestCommon,
-                         testing::Combine(testing::Values(InferenceEngine::SizeVector{10, 4, 8, 2, 2}),
-                                          testing::ValuesIn(inputPrecisions),
+                         testing::Combine(testing::Values(std::vector<size_t>{10, 4, 8, 2, 2}),
+                                          testing::ValuesIn(modelTypes),
                                           testing::ValuesIn(std::vector<std::vector<int64_t>>{{{0, 1, 2, 3}}}),
                                           testing::ValuesIn(std::vector<std::vector<int64_t>>{{}, {3, 10, 8, 6}}),
-                                          testing::Values(ngraph::helpers::DFTOpType::INVERSE),
-                                          testing::Values(LayerTestsUtils::testPlatformTargetDevice())),
+                                          testing::Values(DFTOpType::INVERSE), testing::Values(DEVICE_NPU)),
                          RDFTLayerTest::getTestCaseName);
-
 INSTANTIATE_TEST_SUITE_P(smoke_RDFT_tile_FORWARD, RdftLayerTestCommon,
-                         testing::Combine(testing::Values(InferenceEngine::SizeVector{1, 80, 64, 64}),
-                                          testing::ValuesIn(inputPrecisions),
-                                          testing::Values(std::vector<int64_t>{2, 3}),
-                                          testing::Values(std::vector<int64_t>{}),
-                                          testing::Values(ngraph::helpers::DFTOpType::FORWARD),
-                                          testing::Values(LayerTestsUtils::testPlatformTargetDevice())),
+                         testing::Combine(testing::Values(std::vector<size_t>{1, 80, 64, 64}),
+                                          testing::ValuesIn(modelTypes), testing::Values(std::vector<int64_t>{2, 3}),
+                                          testing::Values(std::vector<int64_t>{}), testing::Values(DFTOpType::FORWARD),
+                                          testing::Values(DEVICE_NPU)),
                          RDFTLayerTest::getTestCaseName);
-
 INSTANTIATE_TEST_SUITE_P(smoke_RDFT_tile_INVERSE, RdftLayerTestCommon,
-                         testing::Combine(testing::Values(InferenceEngine::SizeVector{1, 120, 64, 33, 2}),
-                                          testing::ValuesIn(inputPrecisions),
-                                          testing::Values(std::vector<int64_t>{2, 3}),
-                                          testing::Values(std::vector<int64_t>{}),
-                                          testing::Values(ngraph::helpers::DFTOpType::INVERSE),
-                                          testing::Values(LayerTestsUtils::testPlatformTargetDevice())),
+                         testing::Combine(testing::Values(std::vector<size_t>{1, 120, 64, 33, 2}),
+                                          testing::ValuesIn(modelTypes), testing::Values(std::vector<int64_t>{2, 3}),
+                                          testing::Values(std::vector<int64_t>{}), testing::Values(DFTOpType::INVERSE),
+                                          testing::Values(DEVICE_NPU)),
                          RDFTLayerTest::getTestCaseName);
 
 }  // namespace

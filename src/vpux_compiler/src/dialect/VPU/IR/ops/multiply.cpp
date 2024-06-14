@@ -41,7 +41,7 @@ mlir::LogicalResult vpux::VPU::MultiplyOp::inferReturnTypes(mlir::MLIRContext* c
 // ClusteredOpInterface
 //
 
-bool vpux::VPU::MultiplyOp::checkStrategyCompatibility(VPU::MultiClusterStrategy strategy) {
+bool vpux::VPU::MultiplyOp::checkStrategyCompatibility(VPU::MultiClusterStrategy strategy, size_t) {
     return strategy == VPU::MultiClusterStrategy::Clustering ||
            strategy == VPU::MultiClusterStrategy::SplitOverHeight ||
            strategy == VPU::MultiClusterStrategy::SplitOverKernel ||
@@ -50,8 +50,8 @@ bool vpux::VPU::MultiplyOp::checkStrategyCompatibility(VPU::MultiClusterStrategy
 
 vpux::VPU::DistributedTensorAttr vpux::VPU::MultiplyOp::getExplicitDistributedTensorAttr(
         vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, mlir::ArrayAttr numTiles,
-        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::ArrayAttr /*kernel*/,
-        vpux::VPU::PaddingAttr /*pad*/, mlir::ArrayAttr /*stride*/, mlir::UnitAttr uniformDistributedSegments) {
+        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::UnitAttr uniformDistributedSegments,
+        const vpux::VPU::OverlapDistributionParams& /*overlapParams*/) {
     return VPU::getSWExplicitDistributedTensorAttr(mlir::dyn_cast<VPU::SWOpInterface>(getOperation()), shape,
                                                    distributionMode, numTiles, numClusters, alignment,
                                                    uniformDistributedSegments);

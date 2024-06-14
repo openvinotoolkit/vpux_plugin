@@ -8,7 +8,7 @@
 #include "vpux/compiler/dialect/VPU/IR/ops_interfaces.hpp"
 #include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/sparsity_utils.hpp"
-#include "vpux/compiler/dialect/VPUIP/dpu_tiler.hpp"
+#include "vpux/compiler/dialect/VPUIP/interfaces/dpu_tiler.hpp"
 
 #include "vpux/compiler/core/layers.hpp"
 #include "vpux/compiler/utils/error.hpp"
@@ -48,10 +48,8 @@ void vpux::VPU::WorkloadSplitterBase::correctInvalidWorkload(const VPU::Sparsity
         }
 
         const auto invalidDepthwiseOps = findInvalidDepthwiseOps(producerNCEOps);
-        const auto invalidPermuteQuantizeOps = findInvalidPermuteQuantizeOps(producerNCEOps);
         const auto invalidNCEPermuteOps = findInvalidNCEPermuteOps(producerNCEOps);
-        if (invalidSparseOps.empty() && invalidDepthwiseOps.empty() && invalidPermuteQuantizeOps.empty() &&
-            invalidNCEPermuteOps.empty()) {
+        if (invalidSparseOps.empty() && invalidDepthwiseOps.empty() && invalidNCEPermuteOps.empty()) {
             return;
         }
 
@@ -66,14 +64,12 @@ void vpux::VPU::WorkloadSplitterBase::correctInvalidWorkload(const VPU::Sparsity
 
             auto isInvalidDepthwise = invalidDepthwiseOps.contains(op);
             auto isInvalidSparsity = invalidSparseOps.contains(op);
-            auto isInvalidPermuteQuantizeOp = invalidPermuteQuantizeOps.contains(op);
             auto isInvalidNCEPermuteOp = invalidNCEPermuteOps.contains(op);
             _log.trace("Correcting workloads for operation '{0}' at '{1}'. Necessary corrections: depthwise "
-                       "'{2}', sparsity '{3}' ({4}/{5}), remove padding ({6}/{7})",
+                       "'{2}', sparsity '{3}' ({4}/{5}), remove padding '{6}'",
                        op->getName(), op->getLoc(), isInvalidDepthwise, isInvalidSparsity, opIdx++,
-                       producerNCEOps.size(), isInvalidPermuteQuantizeOp, isInvalidNCEPermuteOp);
+                       producerNCEOps.size(), isInvalidNCEPermuteOp);
 
-            const auto offsetsCorrectionForPermuteQuantize = getPerClusterOffsetsCorrection(nceOp);
             const auto offsetsCorrectionNeeded = isNCEPermuteOffsetsCorrectionNeeded(nceOp);
             if (isInvalidNCEPermuteOp) {
                 channelPadding = op->getResult(0).getType().cast<NDTypeInterface>().getShape()[Dims4D::Act::C] -
@@ -87,8 +83,7 @@ void vpux::VPU::WorkloadSplitterBase::correctInvalidWorkload(const VPU::Sparsity
                     continue;
                 }
 
-                splitWorkload(workloadOp, supportedChannels, /*removePadding=*/isInvalidPermuteQuantizeOp,
-                              offsetsCorrectionForPermuteQuantize, isInvalidNCEPermuteOp, channelPadding,
+                splitWorkload(workloadOp, supportedChannels, isInvalidNCEPermuteOp, channelPadding,
                               offsetsCorrectionNeeded, _log);
             }
 
@@ -267,7 +262,7 @@ mlir::DenseSet<mlir::Operation*> vpux::VPU::WorkloadSplitterBase::findProducersF
 
 // Invariants that produce sparse activations must satisfy two conditions:
 // - all variants must produce the same number of channels
-// - the number of channels is a power of two (for VPU30XX and VPU37XX)
+// - the number of channels is a power of two (for NPU30XX and NPU37XX)
 // Additionally, in case a consumer operation has its input produced by multiple NCE operations,
 // all of the producer ops need to have the same number of channels for their variants.
 mlir::DenseSet<mlir::Operation*> vpux::VPU::WorkloadSplitterBase::findInvalidSparseOps(
@@ -322,50 +317,6 @@ mlir::DenseSet<mlir::Operation*> vpux::VPU::WorkloadSplitterBase::findInvalidDep
         }
     }
     return invalidDepthwiseOps;
-}
-
-mlir::DenseSet<mlir::Operation*> vpux::VPU::WorkloadSplitterBase::findInvalidPermuteQuantizeOps(
-        const mlir::DenseSet<mlir::Operation*>& nceOps) {
-    mlir::DenseSet<mlir::Operation*> invalidPermuteQuantizeOps;
-    for (auto op : nceOps) {
-        if (!mlir::isa<VPU::NCEPermuteQuantizeOp>(op)) {
-            continue;
-        }
-        auto nceOp = mlir::dyn_cast<VPU::NCEOpInterface>(op);
-        VPUX_THROW_UNLESS(nceOp != nullptr, "Expected NCE op, got '{0}'", op);
-        const auto workloads = nceOp.getWorkloads().getOps<VPU::DPUWorkloadOp>();
-        const auto nonZeroPadding = llvm::any_of(workloads, [&](VPU::DPUWorkloadOp workload) -> bool {
-            const auto pads = workload.getPad();
-            const auto top = pads.getTop().getInt();
-            const auto bottom = pads.getBottom().getInt();
-            const auto left = pads.getLeft().getInt();
-            const auto right = pads.getRight().getInt();
-            const auto zeroPadding = top == 0 && bottom == 0 && left == 0 && right == 0;
-            const auto wlOffsets = parseIntArrayAttr<int64_t>(workload.getOutOffsetsAttr());
-            const auto isZeroPredicate = [](const int64_t value) -> bool {
-                return value == 0;
-            };
-            // Zero offsets are actually helpful when it comes to tiling of PermuteQuantize.
-            // Tile over width in segmented mode works properly with the following setup:
-            // Parent input buffer shape:    [1, 3, 224, 224]
-            // Parent output buffer shape:   [1, 4, 224, 224]
-            //
-            // Tile 1 DDR2CMX DMA:  offsets = [0, 0,   0, 0] sizes = [1,   3, 112, 224]
-            // Tile 1 workload:     offsets = [0, 0,   0, 0] sizes = [1, 224,   3, 112]
-            // Tile 1 CMX2DDR DMA:  offsets = [0, 0,   0, 0] sizes = [1, 224,   4, 112]
-            //
-            // Tile 2 DDR2CMX DMA:  offsets = [0, 0, 112, 0] sizes = [1,   3, 112, 224]
-            // Tile 2 workload:     offsets = [0, 0,   0, 0] sizes = [1, 224,   3, 112]
-            // Tile 2 CMX2DDR DMA:  offsets = [0, 0,   0, 0] sizes = [1, 224,   4, 112]
-            const bool zeroOffsets = std::all_of(wlOffsets.begin(), wlOffsets.end(), isZeroPredicate);
-            return !zeroPadding || !zeroOffsets;
-        });
-        if (nonZeroPadding) {
-            invalidPermuteQuantizeOps.insert(op);
-        }
-    }
-
-    return invalidPermuteQuantizeOps;
 }
 
 mlir::DenseSet<mlir::Operation*> vpux::VPU::WorkloadSplitterBase::findInvalidNCEPermuteOps(
@@ -497,33 +448,12 @@ SmallVector<int64_t> vpux::VPU::WorkloadSplitterBase::getSupportedChannels(
 // is provided. Additionally, removes the padding and spatial offsets from the workload based on the `removePadding`
 // flag
 void vpux::VPU::WorkloadSplitterBase::splitWorkload(VPU::DPUWorkloadOp dpuWorkloadOp,
-                                                    ArrayRef<int64_t> supportedChannels, const bool removePadding,
-                                                    ArrayRef<Shape> offsetsCorrectionForPermuteQuantize,
+                                                    ArrayRef<int64_t> supportedChannels,
                                                     const bool isInvalidNCEPermuteOp, int64_t channelPadding,
                                                     bool isNCEPermuteOffsetsCorrectionNeeded, Logger log) {
     auto wlSizes = parseIntArrayAttr<int64_t>(dpuWorkloadOp.getOutSizesAttr());
     auto wlOffsets = parseIntArrayAttr<int64_t>(dpuWorkloadOp.getOutOffsetsAttr());
     auto padsAttr = dpuWorkloadOp.getPad();
-    if (removePadding) {
-        const auto pads = dpuWorkloadOp.getPad();
-        const auto top = pads.getTop().getInt();
-        const auto bottom = pads.getBottom().getInt();
-        const auto left = pads.getLeft().getInt();
-        const auto right = pads.getRight().getInt();
-        wlSizes[Dims4D::Act::H.ind()] -= (top + bottom);
-        wlSizes[Dims4D::Act::W.ind()] -= (left + right);
-        if (!offsetsCorrectionForPermuteQuantize.empty()) {
-            const auto clusterId = dpuWorkloadOp.getClusterId().value();
-            const auto offsetsCorrectionPerCluster = offsetsCorrectionForPermuteQuantize[clusterId].raw();
-            std::transform(wlOffsets.begin(), wlOffsets.end(), offsetsCorrectionPerCluster.begin(), wlOffsets.begin(),
-                           std::minus<int64_t>());
-            log.nest().trace("Applied offset correction {0}", offsetsCorrectionForPermuteQuantize);
-        }
-
-        padsAttr = VPU::getPaddingAttr(pads.getContext(), PadInfo(0, 0, 0, 0));
-
-        log.nest().trace("Removed padding from workload '{0}'", dpuWorkloadOp);
-    }
 
     mlir::OpBuilder builder(dpuWorkloadOp);
     if (isInvalidNCEPermuteOp) {

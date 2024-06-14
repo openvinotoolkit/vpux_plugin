@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -41,8 +41,8 @@ module @VPU.SW {
     // `memref` will be translated to `MemRefData`, while raw scalars will be translated as is.
     func.func private @builtin_roipooling(%input0 : memref<*xf16>, %input1 : memref<*xf16>, %output : memref<*xf16>)
         attributes {
-            VPU.kernel_code = "single_shave_roipooling.cpp",
-            VPU.kernel_entry = "single_shave_roipooling"
+            VPU.kernel_code = "roi_pooling.cpp",
+            VPU.kernel_entry = "roi_pooling"
         }
 
     // management kernel definition
@@ -70,7 +70,7 @@ func.func @main(%1: memref<1x3x8x8xf16>, %2: memref<1x5xf16>, %3: memref<1x3x2x2
 
     VPURT.Task waits(%b0 : !VPURT.Barrier) updates(%b1 : !VPURT.Barrier) {
         VPUIP.SW.Kernel
-                    {resultSegmentSizes = array<i32: 1, 0>}
+                    {resultSegmentSizes = array<i32: 1, 0, 0>}
                     @VPU.SW::@builtin_roipooling           // The reference to the Kernel function.
                     inputs(%in0_tile0_cmx as %arg0: memref<1x3x8x8xf16, [@CMX_NN, 0]>, %in1_tile0_cmx as %arg1: memref<1x5xf16, [@CMX_NN, 0]>)
                     outputs(%out_tile0_cmx as %arg2: memref<1x3x2x2xf16, [@CMX_NN, 0]>)   //

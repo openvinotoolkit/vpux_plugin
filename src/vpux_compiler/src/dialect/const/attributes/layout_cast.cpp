@@ -1,0 +1,90 @@
+//
+// Copyright (C) 2024 Intel Corporation.
+// SPDX-License-Identifier: Apache 2.0
+//
+
+#include "vpux/compiler/dialect/const/attributes/content.hpp"
+#include "vpux/compiler/dialect/const/utils/transformations.hpp"
+
+#include "vpux/utils/core/func_ref.hpp"
+
+#include <mlir/IR/DialectImplementation.h>
+
+using namespace vpux;
+
+//
+// LayoutCastAttr::verify
+//
+
+mlir::LogicalResult vpux::Const::LayoutCastAttr::verify(FuncRef<mlir::InFlightDiagnostic()> emitError,
+                                                        mlir::AffineMapAttr dstOrder) {
+    if (dstOrder == nullptr) {
+        return printTo(emitError(), "Got NULL 'dstOrder' in 'LayoutCastAttr'");
+    }
+
+    if (!dstOrder.getValue().isPermutation()) {
+        return printTo(emitError(), "Got non permutation 'dstOrder' in 'LayoutCastAttr'");
+    }
+
+    return mlir::success();
+}
+
+//
+// LayoutCastAttr::print
+//
+
+void vpux::Const::LayoutCastAttr::print(mlir::AsmPrinter& printer) const {
+    printer << "<";
+    printer.printAttribute(getDstOrder());
+    printer << ">";
+}
+
+//
+// LayoutCastAttr::parse
+//
+
+mlir::Attribute vpux::Const::LayoutCastAttr::parse(mlir::AsmParser& parser, mlir::Type) {
+    if (mlir::failed(parser.parseLess())) {
+        return nullptr;
+    }
+
+    mlir::AffineMapAttr order;
+    if (mlir::failed(parser.parseAttribute(order))) {
+        return nullptr;
+    }
+
+    if (mlir::failed(parser.parseGreater())) {
+        return nullptr;
+    }
+
+    return parser.getChecked<Const::LayoutCastAttr>(order);
+}
+
+//
+// LayoutCastAttr::inferOutputType
+//
+
+vpux::NDTypeInterface vpux::Const::LayoutCastAttr::inferOutputType(vpux::NDTypeInterface input) const {
+    const auto order = DimsOrder::fromAffineMap(getDstOrder().getValue());
+    VPUX_THROW_UNLESS(order.numDims() == checked_cast<size_t>(input.getRank()),
+                      "DimsOrder '{0}' doesn't match type '{1}'", order, input);
+    return input.changeDimsOrder(order);
+}
+
+//
+// LayoutCastAttr::transform
+//
+
+Const::Content vpux::Const::LayoutCastAttr::transform(vpux::Const::Content& input) const {
+    return Const::Content::moveBuffer(inferOutputType(input.getType()), std::move(input));
+}
+
+//
+// ContentAttr::transpose
+//
+
+Const::ContentAttr vpux::Const::ContentAttr::layoutCast(DimsOrder dstOrder) const {
+    return ContentAttr::addTransformation(
+            *this, Const::LayoutCastAttr::get(mlir::AffineMapAttr::get(dstOrder.toAffineMap(getContext())))
+                           .cast<Const::TransformAttrInterface>());
+}

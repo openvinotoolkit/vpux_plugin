@@ -1,11 +1,11 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 #include "vpux/compiler/conversion.hpp"
 #include "vpux/compiler/dialect/IERT/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/sw_utils.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/sw_utils.hpp"
 #include "vpux/compiler/utils/logging.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 #include "vpux/utils/core/logger.hpp"
@@ -95,13 +95,14 @@ void ConvertAffine2LLVMPass::convertPackedParamsAndExtractParam(mlir::func::Func
     // Create a struct type, corresponding to the struct below, which is
     //   the LLVM IR equivalent of an mlir::MemRef. More exactly,
     //   struct<(ptr<f16>, ptr<f16>, i64, array<1 x i64>, array<1 x i64>
-    auto llvmF16Type = mlir::Float16Type::get(ctx);
     auto llvmI64Type = mlir::IntegerType::get(ctx, 64);
     llvm::SmallVector<mlir::Type, 5> fields;
 
-    auto ptrLLVMF16Type = mlir::LLVM::LLVMPointerType::get(llvmF16Type);
-    fields.push_back(ptrLLVMF16Type);
-    fields.push_back(ptrLLVMF16Type);
+    // generic opaque pointer type
+    auto ptrType = mlir::LLVM::LLVMPointerType::get(ctx);
+
+    fields.push_back(ptrType);
+    fields.push_back(ptrType);
     fields.push_back(llvmI64Type);
     // We put the number of dimensions of the memref as the dimension of the array.
     auto arrayType = mlir::LLVM::LLVMArrayType::get(
@@ -110,9 +111,7 @@ void ConvertAffine2LLVMPass::convertPackedParamsAndExtractParam(mlir::func::Func
     fields.push_back(arrayType);
     mlir::Type memrefStructType = mlir::LLVM::LLVMStructType::getLiteral(ctx, fields);
 
-    auto ptrMemrefType = mlir::LLVM::LLVMPointerType::get(memrefStructType);
-
-    newFuncArgTypes.push_back(ptrMemrefType);
+    newFuncArgTypes.push_back(ptrType);
     mlir::FunctionType newFuncType =
             mlir::FunctionType::get(ctx, newFuncArgTypes, mlir::TypeRange(funcOpType.getResults()));
 
@@ -121,7 +120,7 @@ void ConvertAffine2LLVMPass::convertPackedParamsAndExtractParam(mlir::func::Func
     mlir::OpBuilder builder(ctx);
 
     // We add a new argument, besides the IERT.PackedParams type argument to funcOp
-    funcOp.getBlocks().front().addArgument(ptrMemrefType, funcOp.getLoc());
+    funcOp.getBlocks().front().addArgument(ptrType, funcOp.getLoc());
 
     int indexCounter = 0;
 
@@ -130,12 +129,16 @@ void ConvertAffine2LLVMPass::convertPackedParamsAndExtractParam(mlir::func::Func
 
         auto ctIndex = builder.create<mlir::LLVM::ConstantOp>(funcOp.getLoc(), builder.getI64Type(),
                                                               builder.getI64IntegerAttr(indexCounter));
-        indexCounter++;
 
-        auto gepOp = builder.create<mlir::LLVM::GEPOp>(funcOp.getLoc(), ptrMemrefType,
-                                                       funcOp.getBlocks().front().getArgument(1), ctIndex.getResult());
+        ++indexCounter;
 
-        auto loadOp = builder.create<mlir::LLVM::LoadOp>(funcOp.getLoc(), gepOp);
+        // The naming of the arguments of the constructor might be a bit confusing because resultType is the
+        // now opaque pointer type and elementType is the type of the returned value.
+        auto gepOp = builder.create<mlir::LLVM::GEPOp>(funcOp.getLoc(), ptrType, memrefStructType,
+                                                       funcOp.getBlocks().front().getArgument(1),
+                                                       SmallVector<mlir::LLVM::GEPArg>{ctIndex.getResult()});
+
+        auto loadOp = builder.create<mlir::LLVM::LoadOp>(funcOp.getLoc(), memrefStructType, gepOp);
 
         auto specialCastOp = builder.create<IERT::SpecialCastOp>(funcOp.getLoc(), funcOp.getResultTypes().front(),
                                                                  loadOp.getOperation()->getResult(0));
@@ -186,7 +189,6 @@ void ConvertAffine2LLVMPass::safeRunOnModule() {
     auto module = getOperation();
 
     mlir::LowerToLLVMOptions options(&ctx);
-    options.useOpaquePointers = false;  // E#105505: change the compiler's behavior instead to use opaque pointers
     mlir::LLVMTypeConverter typeConverter(&ctx, options);
 
     // static constexpr StringLiteral vpuSwModuleName{"VPU.SW"};

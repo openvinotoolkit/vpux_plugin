@@ -6,7 +6,7 @@
 #pragma once
 
 #include "vpux/compiler/core/pipelines_options.hpp"
-#include "vpux/compiler/dialect/IE/ops.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IERT/ops.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/IR/dialect.hpp"
@@ -79,12 +79,19 @@ struct TilingOptions : mlir::PassPipelineOptions<TilingOptions> {
                                llvm::cl::desc("Use VPUNN cost model to get the best tiling strategy"),
                                llvm::cl::init(false)};
 
+    BoolOption enableOutputPipelining{*this, "output-pipelining", llvm::cl::desc("Enable output pipelining"),
+                                      llvm::cl::init(false)};
+
     BoolOption enableVerticalFusion{*this, "vertical-fusion", llvm::cl::desc("Enable vertical fusion feature"),
                                     llvm::cl::init(false)};
 
     BoolOption enableVerticalFusionPipelining{*this, "vertical-fusion-pipelining",
                                               llvm::cl::desc("Enable vertical fusion pipelining"),
                                               llvm::cl::init(false)};
+
+    StrOption enableShaveDDRAccessOptimization{
+            *this, "enable-shave-ddr-access-optimization",
+            llvm::cl::desc("SHAVE DDR access optimization option (true, false or auto)"), llvm::cl::init("true")};
 
     // Extended Tiling options - Incremental Pipeline
     BoolOption readStrategyFromJson{*this, "read-strategy-from-json",
@@ -101,10 +108,99 @@ struct TilingOptions : mlir::PassPipelineOptions<TilingOptions> {
     explicit TilingOptions(const OtherOptions& options) {
         enablePrefetchTiling = options.enablePrefetching;
         enableVPUNNCost = options.enableVPUNNCost;
+        enableOutputPipelining = options.enableOutputPipelining;
         enableVerticalFusion = options.enableVerticalFusion;
         enableVerticalFusionPipelining = options.enablePipelining;
+        enableShaveDDRAccessOptimization = options.enableShaveDDRAccessOptimization;
         readStrategyFromJson = options.readStrategyFromJson;
         writeStrategyToJson = options.writeStrategyToJson;
+    }
+};
+
+//
+// InitCompiler options
+//
+
+struct InitCompilerOptions : mlir::PassPipelineOptions<InitCompilerOptions> {
+    // InitResources pass options
+    StrOption arch{*this, "vpu-arch", ::llvm::cl::desc("VPU architecture to compile for")};
+    StrOption compilationMode{
+            *this, "compilation-mode",
+            ::llvm::cl::desc("[Optional] Set compilation mode as `ReferenceSW`, `ReferenceHW` or `DefaultHW`"),
+            ::llvm::cl::init("DefaultHW")};
+    IntOption revisionID{*this, "revision-id", ::llvm::cl::desc("[Optional] Revision ID of the platform")};
+    IntOption numberOfDPUGroups{*this, "num-of-dpu-groups",
+                                ::llvm::cl::desc("[Optional] Number of available DPU groups")};
+    IntOption numberOfDMAPorts{*this, "num-of-dma-ports", ::llvm::cl::desc("[Optional] Number of available DMA ports")};
+    IntOption availableCMXMemory{*this, "available-cmx-memory", ::llvm::cl::desc("[Optional] Available CMX memory")};
+    BoolOption allowCustomValues{*this, "allow-custom-values",
+                                 ::llvm::cl::desc("[Optional] Allows keep predefined values in IR")};
+
+    // SetupBarrierVariantConstraints pass options
+    BoolOption enablePartialWorkloadManagement{*this, "enable-partial-workload-management",
+                                               llvm::cl::desc("Enable partial workload management"),
+                                               llvm::cl::init(false)};
+    BoolOption wlmRollback{
+            *this, "wlm-rollback",
+            llvm::cl::desc("When compilation with WLM fails, automatically switches to WLM-disabled pipeline"),
+            llvm::cl::init(true)};
+
+    InitCompilerOptions() = default;
+
+    template <class OtherOptions>
+    InitCompilerOptions(ArchKind archParam, CompilationMode compilationModeParam, const OtherOptions& options) {
+        arch = std::string(VPU::stringifyEnum(archParam));
+        compilationMode = std::string(VPU::stringifyEnum(compilationModeParam));
+
+        const auto setOptionValue = [](auto& option, const auto& otherOption) {
+            if (otherOption.hasValue()) {
+                option = otherOption;
+            }
+        };
+
+        setOptionValue(revisionID, options.revisionID);
+        setOptionValue(numberOfDPUGroups, options.numberOfDPUGroups);
+        setOptionValue(numberOfDMAPorts, options.numberOfDMAPorts);
+        setOptionValue(availableCMXMemory, options.availableCMXMemory);
+        setOptionValue(allowCustomValues, options.allowCustomValues);
+        setOptionValue(wlmRollback, options.wlmRollback);
+    }
+
+    InitCompilerOptions(ArchKind archParam, CompilationMode compilationModeParam,
+                        std::optional<int> revisionIDParam = std::nullopt,
+                        std::optional<int> numberOfDPUGroupsParam = std::nullopt,
+                        std::optional<int> numberOfDMAPortsParam = std::nullopt,
+                        std::optional<bool> wlmRollbackParam = std::nullopt) {
+        arch = std::string(VPU::stringifyEnum(archParam));
+        compilationMode = std::string(VPU::stringifyEnum(compilationModeParam));
+
+        maybeSetValue(revisionID, revisionIDParam);
+        maybeSetValue(numberOfDPUGroups, numberOfDPUGroupsParam);
+        maybeSetValue(numberOfDMAPorts, numberOfDMAPortsParam);
+        maybeSetValue(wlmRollback, wlmRollbackParam);
+    }
+
+public:
+    void setAvailableCMXMemory(std::optional<Byte> maybeAvailableCMXMemory) {
+        if (maybeAvailableCMXMemory.has_value()) {
+            availableCMXMemory = maybeAvailableCMXMemory.value().count();
+        }
+    }
+
+    void setNumberOfDPUGroups(std::optional<int> maybeNumberOfDPUGroups) {
+        maybeSetValue(numberOfDPUGroups, maybeNumberOfDPUGroups);
+    }
+
+    void setNumberOfDMAPorts(std::optional<int> maybeNumberOfDMAPorts) {
+        maybeSetValue(numberOfDMAPorts, maybeNumberOfDMAPorts);
+    }
+
+private:
+    template <typename OptionType, typename ValType>
+    void maybeSetValue(OptionType& option, std::optional<ValType> value) {
+        if (value.has_value()) {
+            option = value.value();
+        }
     }
 };
 
@@ -112,17 +208,19 @@ struct TilingOptions : mlir::PassPipelineOptions<TilingOptions> {
 // Passes
 //
 
-std::unique_ptr<mlir::Pass> createInitCompilerPass();
-std::unique_ptr<mlir::Pass> createInitCompilerPass(ArchKind arch, CompilationMode compilationMode,
-                                                   std::optional<int> numOfDPUGroups = std::nullopt,
-                                                   std::optional<int> numOfDMAPorts = std::nullopt,
-                                                   Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createInitResourcesPass();
+std::unique_ptr<mlir::Pass> createInitResourcesPass(const InitCompilerOptions& initCompilerOptions,
+                                                    Logger log = Logger::global());
 
+std::unique_ptr<mlir::Pass> createOptimizeSharedInputCopyForConcatPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createCMXConcatPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createSplitDDRConcatIntoCMXPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createSplitNCEOpsOntoWorkloadsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createResolveEltwiseWithZTiledWorkloadsPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createShiftOutputWorkloadsForHaloPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createWrapVPUOpsInNCEClusterTilingPass(bool enableExplicitDistributedTensorAttr = false,
                                                                    Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createWrapDistributedOpsInNCEClusterTiling(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createAdjustMemorySpacePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createMultiClusterStrategyAssignmentPass(bool enablePrefetchTiling = true,
                                                                      Logger log = Logger::global());
@@ -132,12 +230,24 @@ std::unique_ptr<mlir::Pass> createManualStrategyUtilsPass(bool writeStrategyToJS
                                                           bool readStrategyFromJSON = false,
                                                           StringRef readStrategyFileLocation = "strategy_in.json",
                                                           Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createManualStrategyUtilsPass(bool writeStrategyToJSON,
+                                                          StringRef writeStrategyFileLocation = "strategy_out.json",
+                                                          bool readStrategyFromJSON = false,
+                                                          StringRef readStrategyFileLocation = "strategy_in.json",
+                                                          bool updateStrategyForOutputPipelining = false,
+                                                          Logger log = Logger::global());
 
 std::unique_ptr<mlir::Pass> createResolvePWLPostOpsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createDetectionOutputDecompositionPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createSplitGRUSequencePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createDetectInPlaceEltwisePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createFuseNCEInterpolateConsumersPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createAddExplicitPaddingBeforeNCEPermutePass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createOutputPipelineTilingPass(bool enablePrefetchTiling = true,
+                                                           Logger log = Logger::global());
+
+void buildInitCompilerPipeline(mlir::OpPassManager& pm, const VPU::InitCompilerOptions& options,
+                               Logger log = Logger::global());
 
 //
 // Sparsity
@@ -149,8 +259,9 @@ std::unique_ptr<mlir::Pass> createSparsifyWeightsPass(
 std::unique_ptr<mlir::Pass> createRecomputeSparsityPtrsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createFuseSparsityOpsPass(std::optional<bool> fuseSparsify = std::nullopt,
                                                       Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createOptimizeSparsifyDesparsifyPairsPass(SparsityProfileCreateFunc sparsityProfileCreateCb,
-                                                                      Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createOptimizeSparsifyDesparsifyPairsPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createAndInitOptimizeSparsifyDesparsifyPairsPass(StringRef actSparsityProfile,
+                                                                             Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createOptimizeSparsityOpsPass(SparsityProfileCreateFunc sparsityProfileCreateCb,
                                                           Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createWrapOpsInSparsifyDesparsifyPairsPass();
@@ -160,37 +271,39 @@ std::unique_ptr<mlir::Pass> createWrapOpsInSparsifyDesparsifyPairsPass(
 std::unique_ptr<mlir::Pass> createAddSparsityMapToSparseActivationsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createLowerSparsityOpsPass(std::optional<bool> fakeSparsify = std::nullopt,
                                                        Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createSplitSEOpsPass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createLowerOpsToSENCEPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createSplitSEOpsPass(const bool seOpsEnabled = false,
+                                                 const bool enableExperimentalSEPtrsOperations = false,
+                                                 Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createLowerOpsToSENCEPass(const bool seOpsEnabled = false,
+                                                      const bool enableExperimentalSEPtrsOperations = false,
+                                                      Logger log = Logger::global());
+
+std::unique_ptr<mlir::Pass> createConvertOpToDMAForPerformantExecutionPass(Logger log = Logger::global());
 
 //
 // Tiling
 //
 
 std::unique_ptr<mlir::Pass> createTilingStrategyAssignmentPass(bool enablePrefetchTiling = true, bool vpunnCost = false,
+                                                               StringRef enableShaveDDRAccessOptimization = "true",
                                                                Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createApplyTilingPass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createTileOverHForVFPass(bool enablePrefetchTiling = true, Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createWrapVerticalFusionRegionPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createMoveViewOpsToVerticalFusionPass(Logger log = Logger::global());
 // Tracking number [E#76838]
 // Turn on the enableVerticalFusionPipelining when VF pipelining is enabled
 std::unique_ptr<mlir::Pass> createMergeVfSubgraphsPass(bool enableVerticalFusionPipelining = false,
-                                                       Logger log = Logger::global());
+                                                       bool enablePrefetchTiling = true, Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createVfTilingPass(bool enableVerticalFusionPipelining = false,
                                                Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createUnrollUnusedVerticalFusionRegionPass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createRollBackTilingStrategyPass(bool enablePrefetchTiling = true,
-                                                             Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createAdjustVFTilingStrategyPass(bool enableVerticalFusionPipelining = false,
-                                                             Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createSetupPPEPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createEnsureNCEOpsSizeRequirementsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createFuseClampPass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createAdjustTilingForPermuteQuantizePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createOptimizeConcatPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createStrategyManagerImplPass(bool enablePrefetchTiling = true,
                                                           Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createEfficientIROrderPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createRemoveOutputSparseToAvoidSuboptimalDPUWorkloadsPass(Logger log = Logger::global());
 
 void buildActivationSparsityPipeline(mlir::OpPassManager& pm, const VPU::ActivationSparsityOptions& options,
@@ -207,6 +320,14 @@ void buildTilingPipeline(mlir::OpPassManager& pm, const VPU::TilingOptions& opti
 void buildVFPipeline(mlir::OpPassManager& pm, const VPU::TilingOptions& options, Logger log = Logger::global());
 void buildSMPipeline(mlir::OpPassManager& pm, const vpux::MCAndTilingOptionsBase& options,
                      Logger log = Logger::global());
+
+//
+// Barrier Variant Constraints
+//
+
+std::unique_ptr<mlir::Pass> createSetupPerBarrierVariantConstraintPass();
+std::unique_ptr<mlir::Pass> createSetupPerBarrierVariantConstraintPass(const InitCompilerOptions& initCompilerOptions,
+                                                                       Logger log = Logger::global());
 
 //
 // DefaultHWOptions(for all devices)
@@ -238,6 +359,10 @@ struct DefaultHWOptionsDialectBase : public virtual vpux::DefaultHWOptionsBase {
     BoolOption writeStrategyToJson{*this, "write-strategy-to-json",
                                    llvm::cl::desc("Write the multiclustering and tiling strategy to a JSON file"),
                                    llvm::cl::init(false)};
+
+    StrOption enableShaveDDRAccessOptimization{
+            *this, "enable-shave-ddr-access-optimization",
+            llvm::cl::desc("SHAVE DDR access optimization option (true, false or auto)"), llvm::cl::init("true")};
 };
 
 //

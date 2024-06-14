@@ -58,7 +58,7 @@ mlir::LogicalResult vpux::VPU::NormalizeL2Op::verify() {
     return mlir::success();
 }
 
-bool vpux::VPU::NormalizeL2Op::checkStrategyCompatibility(VPU::MultiClusterStrategy strategy) {
+bool vpux::VPU::NormalizeL2Op::checkStrategyCompatibility(VPU::MultiClusterStrategy strategy, size_t) {
     const auto inputType = getData().getType().cast<vpux::NDTypeInterface>();
     const auto inShape = inputType.getShape();
 
@@ -96,8 +96,8 @@ bool VPU::NormalizeL2Op::doesLayerFitIntoCMX(VPU::MultiClusterStrategy strategy,
 
 vpux::VPU::DistributedTensorAttr vpux::VPU::NormalizeL2Op::getExplicitDistributedTensorAttr(
         vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, mlir::ArrayAttr numTiles,
-        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::ArrayAttr /*kernel*/,
-        vpux::VPU::PaddingAttr /*pad*/, mlir::ArrayAttr /*stride*/, mlir::UnitAttr uniformDistributedSegments) {
+        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::UnitAttr uniformDistributedSegments,
+        const vpux::VPU::OverlapDistributionParams& /*overlapParams*/) {
     return vpux::VPU::getSWExplicitDistributedTensorAttr(mlir::dyn_cast<VPU::SWOpInterface>(getOperation()), shape,
                                                          distributionMode, numTiles, numClusters, alignment,
                                                          uniformDistributedSegments);

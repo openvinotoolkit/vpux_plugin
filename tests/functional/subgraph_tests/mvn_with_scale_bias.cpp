@@ -1,11 +1,8 @@
-// Copyright (C) Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include <vpu_ov2_layer_test.hpp>
-
-#include <shared_test_classes/base/layer_test_utils.hpp>
-#include "ov_models/builders.hpp"
 
 namespace ov::test {
 
@@ -23,8 +20,14 @@ class MVNWithScaleBiasTest_NPU3720 : public VpuOv2LayerTest, public testing::Wit
         auto acrossChanels = false;
         auto normalizeVariance = true;
         float epsilonF = 0.0001;
-        auto mvn = std::dynamic_pointer_cast<ov::op::v0::MVN>(
-                ngraph::builder::makeMVN(params[0], acrossChanels, normalizeVariance, epsilonF));
+        auto mvn = std::make_shared<ov::op::v0::MVN>(params[0], acrossChanels, normalizeVariance, epsilonF);
+        // OpenVINO MVN implementation implicitly adds 0th dimension to reduction axes set which is not valid behavior
+        ov::AxisSet axes;
+        const size_t startAxis = acrossChanels ? 1 : 2;
+        const size_t numOfDims = params[0]->get_partial_shape().size();
+        for (size_t i = startAxis; i < numOfDims; i++)
+            axes.insert(i);
+        mvn->set_reduction_axes(axes);
 
         const size_t scaleShiftSize = inputShape[3];
         std::vector<double> multiplyData(scaleShiftSize, 0.078740157480314959);
@@ -53,10 +56,19 @@ class MVNWithScaleBiasTest_NPU3720 : public VpuOv2LayerTest, public testing::Wit
         function = preProc.build();
         rel_threshold = 0.95f;
     }
+
+public:
+    static std::string getTestCaseName(const testing::TestParamInfo<std::vector<int64_t>>& obj) {
+        const std::string sep = "_";
+        std::ostringstream result;
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
+        result << "TestIdx=" << obj.index << sep;
+        return result.str();
+    };
 };
 
-TEST_F(MVNWithScaleBiasTest_NPU3720, HW) {
+TEST_F(MVNWithScaleBiasTest_NPU3720, HW_TestKindSubgraph) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
 }
 }  // namespace ov::test

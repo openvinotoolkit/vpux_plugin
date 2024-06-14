@@ -1,59 +1,99 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022-2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
-#include "single_layer_tests/activation.hpp"
+#include "single_op_tests/activation.hpp"
 
 #include <vector>
 
 #include <common/functions.h>
+#include "common_test_utils/node_builders/activation.hpp"
 #include "common_test_utils/test_constants.hpp"
-#include "vpu_ov1_layer_test.hpp"
+#include "vpu_ov2_layer_test.hpp"
 
-namespace LayerTestsDefinitions {
+using namespace ov::test::utils;
+using ov::test::ActivationParamLayerTest;
 
-class ActivationLayerTestCommon : public ActivationLayerTest, virtual public LayerTestsUtils::VpuOv1LayerTestsCommon {};
+namespace ov {
+namespace test {
+
+class ActivationLayerTestCommon : public ActivationLayerTest, virtual public VpuOv2LayerTest {};
+
+class ActivationLayerTest_FP32 : public ActivationLayerTestCommon {
+    void configure_model() override {
+        configuration[ov::intel_npu::compilation_mode_params.name()] = "convert-precision-to-fp16=false";
+    }
+};
 
 class ActivationLayerTest_NPU3700 : public ActivationLayerTestCommon {};
-class ActivationLayerTest_NPU3720 : public ActivationLayerTestCommon {};
-using ActivationLayerTest_NPU3720_ELF = ActivationLayerTest_NPU3720;
 
-class ActivationTilingTest_NPU3720 : public ActivationLayerTestCommon {};
+class ActivationLayerTest_SW_FP16 : public ActivationLayerTestCommon {};
+class ActivationLayerTest_HW_FP16 : public ActivationLayerTestCommon {};
 
+class ActivationLayerTest_SW_FP32 : public ActivationLayerTest_FP32 {};
+class ActivationLayerTest_HW_FP32 : public ActivationLayerTest_FP32 {};
+
+// 3700
 TEST_P(ActivationLayerTest_NPU3700, HW) {
-    setPlatformVPU3700();
-    setDefaultHardwareModeMLIR();
-    Run();
+    setDefaultHardwareMode();
+    run(Platform::NPU3700);
 }
 
-TEST_P(ActivationLayerTest_NPU3720, SW) {
-    setPlatformVPU3720();
-    setReferenceSoftwareModeMLIR();
-    Run();
+// 3720
+// SW
+TEST_P(ActivationLayerTest_SW_FP16, NPU3720) {
+    abs_threshold = 0.006;
+    setReferenceSoftwareMode();
+    run(Platform::NPU3720);
 }
 
-TEST_P(ActivationTilingTest_NPU3720, HW) {
-    setPlatformVPU3720();
-    setDefaultHardwareModeMLIR();
-    Run();
+TEST_P(ActivationLayerTest_SW_FP32, NPU3720) {
+    abs_threshold = 0.006;
+    setReferenceSoftwareMode();
+    run(Platform::NPU3720);
 }
 
-TEST_P(ActivationLayerTest_NPU3720_ELF, SW) {
-    setPlatformVPU3720();
-    setReferenceSoftwareModeMLIR();
-    useELFCompilerBackend();
-    Run();
+// HW
+TEST_P(ActivationLayerTest_HW_FP16, NPU3720) {
+    abs_threshold = 0.006;
+    setDefaultHardwareMode();
+    run(Platform::NPU3720);
 }
 
-}  // namespace LayerTestsDefinitions
+TEST_P(ActivationLayerTest_HW_FP32, NPU3720) {
+    setDefaultHardwareMode();
+    run(Platform::NPU3720);
+}
 
-using namespace LayerTestsDefinitions;
-using namespace ngraph::helpers;
+// 4000
+// SW
+TEST_P(ActivationLayerTest_SW_FP16, NPU4000) {
+    abs_threshold = 0.006;
+    setReferenceSoftwareMode();
+    run(Platform::NPU4000);
+}
+
+TEST_P(ActivationLayerTest_SW_FP32, NPU4000) {
+    abs_threshold = 0.006;
+    setReferenceSoftwareMode();
+    run(Platform::NPU4000);
+}
+
+// HW
+TEST_P(ActivationLayerTest_HW_FP32, NPU4000) {
+    setDefaultHardwareMode();
+    run(Platform::NPU4000);
+}
+
+}  // namespace test
+}  // namespace ov
+
+using namespace ov::test;
 
 namespace {
 
-const std::vector<InferenceEngine::Precision> netPrecisions = {InferenceEngine::Precision::FP16};
+const std::vector<ov::element::Type> netPrecisions = {ov::element::f16};
 
 const std::map<ActivationTypes, std::vector<std::vector<float>>> activationTypes = {
         {Sigmoid, {{1.0f}}},     {Sign, {{1.0f}}},         {Tanh, {{1.0f}}},
@@ -70,9 +110,13 @@ const std::map<ActivationTypes, std::vector<std::vector<float>>> activationTypes
         {Ceiling, {{1.0f}}},     {Tan, {{1.0f}}},
 };
 
-const std::map<ActivationTypes, std::vector<std::vector<float>>> activationParamTypes = {
+const std::map<ActivationTypes, std::vector<std::vector<float>>> preluTypes = {
         {PReLu, {{0.01f}}},
         {LeakyRelu, {{0.01f}}},
+};
+
+const std::map<ActivationTypes, std::vector<std::vector<float>>> activationTypes2D = {
+        {HSigmoid, {{1.0f}}},
 };
 
 const std::map<ActivationTypes, std::vector<std::vector<float>>> activationTypesND = {
@@ -80,95 +124,88 @@ const std::map<ActivationTypes, std::vector<std::vector<float>>> activationTypes
         {Elu, {{1.0f}}},     {Clamp, {{-1.0f, 1.0f}}}, {HSwish, {{1.0f}}}, {Exp, {{1.0f}}},
 };
 
-const std::map<ActivationTypes, std::vector<std::vector<float>>> activationTypesFP16Only = {
-        {Ceiling, {{1.0f}}},
-};
-
 const std::map<ActivationTypes, std::vector<std::vector<float>>> activationTypesTiling = {
         {Sigmoid, {{1.0f}}},      {Elu, {{1.0f}}},       {Sqrt, {{1.0f}}},       {Exp, {{1.0f}}},
         {Clamp, {{-1.0f, 1.0f}}}, {Tanh, {{1.0f}}},      {LeakyRelu, {{0.01f}}}, {Log, {{1.0f}}},
         {Relu, {{1.0f}}},         {Negative, {{0.01f}}}, {Ceiling, {{1.0f}}}};
 
-const std::map<ActivationTypes, std::vector<std::vector<float>>> activationTypes2D = {
-        {HSigmoid, {{1.0f}}},
-};
-
-const std::map<ActivationTypes, std::vector<std::vector<float>>> activationTypesFP32 = {
-        {Relu, {{1.0f}}},
+const std::map<ActivationTypes, std::vector<std::vector<float>>> activationTypesHWFP32 = {
         {Log, {{1.0f}}},
+        {Abs, {{1.0f}}},
+        {Sqrt, {{1.0f}}},
 };
 
-std::map<std::vector<size_t>, std::vector<std::vector<size_t>>> basic = {{{1, 50, 1, 1}, {{}}}, {{1, 128, 1, 1}, {{}}}};
-
-std::map<std::vector<size_t>, std::vector<std::vector<size_t>>> preluBasic = {
-        {{1, 50, 1, 1}, {{1}, {50}}},
-        {{1, 128, 1, 1}, {{1}, {128}}},
-        {{1, 32, 96, 96}, {{1}, {32}}},
-        {{1, 9, 80, 1280}, {{9}}},
+const std::map<ActivationTypes, std::vector<std::vector<float>>> activationTypesSWFP32 = {
+        {Log, {{1.0f}}},
+        {Relu, {{1.0f}}},
 };
 
-std::map<std::vector<size_t>, std::vector<std::vector<size_t>>> basicNDCase = {
-        {{1, 50}, {{}}},
-        {{1, 128, 1}, {{}}},
+std::map<std::vector<ov::Shape>, std::vector<ov::Shape>> basic = {{{{1, 50, 1, 1}}, {}}, {{{1, 128, 1, 1}}, {}}};
+
+std::map<std::vector<ov::Shape>, std::vector<ov::Shape>> preluBasic = {
+        {{{1, 50, 1, 1}}, {{50}}},
+        {{{1, 128, 1, 1}}, {{128}}},
+        {{{1, 32, 96, 96}}, {{32}}},
+        {{{1, 9, 80, 1280}}, {{9}}},
 };
 
-std::map<std::vector<size_t>, std::vector<std::vector<size_t>>> basic2DShape = {
-        {{120, 50}, {{}}}, {{90, 128}, {{}}}, {{21, 30}, {{}}}};
+std::map<std::vector<ov::Shape>, std::vector<ov::Shape>> basic2DShape = {
+        {{{120, 50}}, {}}, {{{90, 128}}, {}}, {{{21, 30}}, {}}};
 
-std::map<std::vector<size_t>, std::vector<std::vector<size_t>>> basicTiling = {{{1, 8, 80, 1280}, {{}}}};
+std::map<std::vector<ov::Shape>, std::vector<ov::Shape>> basicNDCase = {
+        {{{1, 50}}, {}},
+        {{{1, 128, 1}}, {}},
+};
 
-const auto basicCases = ::testing::Combine(
-        ::testing::ValuesIn(ov::test::utils::combineParams(activationTypes)), ::testing::ValuesIn(netPrecisions),
-        ::testing::Values(InferenceEngine::Precision::FP16), ::testing::Values(InferenceEngine::Precision::FP16),
-        ::testing::Values(InferenceEngine::Layout::ANY), ::testing::Values(InferenceEngine::Layout::ANY),
-        ::testing::ValuesIn(ov::test::utils::combineParams(basic)),
-        ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+std::map<std::vector<ov::Shape>, std::vector<ov::Shape>> basicTiling = {{{{1, 8, 80, 1280}}, {}},
+                                                                        {{{1, 320, 1, 1280}}, {}}};
+
+auto static_shapes_param_transform =
+        [](const std::vector<std::pair<std::vector<ov::Shape>, ov::Shape>>& original_shapes) {
+            std::vector<std::pair<std::vector<ov::test::InputShape>, ov::Shape>> new_shapes;
+            for (const auto& shape_element : original_shapes) {
+                new_shapes.emplace_back(ov::test::static_shapes_to_test_representation(shape_element.first),
+                                        shape_element.second);
+            }
+            return new_shapes;
+        };
+
+const auto basicCases =
+        ::testing::Combine(::testing::ValuesIn(::combineParams(activationTypes)),  // Activation type and constant
+                           ::testing::ValuesIn(netPrecisions),                     // Model type
+                           ::testing::ValuesIn(static_shapes_param_transform(
+                                   ov::test::utils::combineParams(basic))),  // Input shapes and input const shape
+                           ::testing::Values(DEVICE_NPU));                   // Target device name
+
+const auto basicCasesSWFP32 = ::testing::Combine(
+        ::testing::ValuesIn(ov::test::utils::combineParams(activationTypesSWFP32)), ::testing::Values(ov::element::f32),
+        ::testing::ValuesIn(static_shapes_param_transform(ov::test::utils::combineParams(basic))),
+        ::testing::Values(DEVICE_NPU));
+
+const auto basicCasesHWFP32 = ::testing::Combine(
+        ::testing::ValuesIn(ov::test::utils::combineParams(activationTypesHWFP32)), ::testing::Values(ov::element::f32),
+        ::testing::ValuesIn(static_shapes_param_transform(ov::test::utils::combineParams(basicTiling))),
+        ::testing::Values(DEVICE_NPU));
 
 const auto basicPReluCases = ::testing::Combine(
-        ::testing::ValuesIn(ov::test::utils::combineParams(activationParamTypes)), ::testing::ValuesIn(netPrecisions),
-        ::testing::Values(InferenceEngine::Precision::FP16), ::testing::Values(InferenceEngine::Precision::FP16),
-        ::testing::Values(InferenceEngine::Layout::ANY), ::testing::Values(InferenceEngine::Layout::ANY),
-        ::testing::ValuesIn(ov::test::utils::combineParams(preluBasic)),
-        ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
-
-const auto basicNDCases = ::testing::Combine(
-        ::testing::ValuesIn(ov::test::utils::combineParams(activationTypesND)), ::testing::ValuesIn(netPrecisions),
-        ::testing::Values(InferenceEngine::Precision::UNSPECIFIED),
-        ::testing::Values(InferenceEngine::Precision::UNSPECIFIED), ::testing::Values(InferenceEngine::Layout::ANY),
-        ::testing::Values(InferenceEngine::Layout::ANY),
-        ::testing::ValuesIn(ov::test::utils::combineParams(basicNDCase)),
-        ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
-
-// For operations that only support FP16 input values in 'vpuip_2'
-const auto basicFP16OnlyCases = ::testing::Combine(
-        ::testing::ValuesIn(ov::test::utils::combineParams(activationTypesFP16Only)),
-        ::testing::ValuesIn(netPrecisions), ::testing::Values(InferenceEngine::Precision::FP16),
-        ::testing::Values(InferenceEngine::Precision::UNSPECIFIED), ::testing::Values(InferenceEngine::Layout::ANY),
-        ::testing::Values(InferenceEngine::Layout::ANY), ::testing::ValuesIn(ov::test::utils::combineParams(basic)),
-        ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+        ::testing::ValuesIn(::combineParams(preluTypes)), ::testing::ValuesIn(netPrecisions),
+        ::testing::ValuesIn(static_shapes_param_transform(ov::test::utils::combineParams(preluBasic))),
+        ::testing::Values(DEVICE_NPU));
 
 const auto basicCases2D = ::testing::Combine(
-        ::testing::ValuesIn(ov::test::utils::combineParams(activationTypes2D)),
-        ::testing::Values(InferenceEngine::Precision::FP16), ::testing::Values(InferenceEngine::Precision::FP16),
-        ::testing::Values(InferenceEngine::Precision::FP16), ::testing::Values(InferenceEngine::Layout::ANY),
-        ::testing::Values(InferenceEngine::Layout::ANY),
-        ::testing::ValuesIn(ov::test::utils::combineParams(basic2DShape)),
-        ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+        ::testing::ValuesIn(::combineParams(activationTypes2D)), ::testing::Values(ov::element::f16),
+        ::testing::ValuesIn(static_shapes_param_transform(ov::test::utils::combineParams(basic2DShape))),
+        ::testing::Values(DEVICE_NPU));
+
+const auto basicCasesND = ::testing::Combine(
+        ::testing::ValuesIn(::combineParams(activationTypesND)), ::testing::ValuesIn(netPrecisions),
+        ::testing::ValuesIn(static_shapes_param_transform(ov::test::utils::combineParams(basicNDCase))),
+        ::testing::Values(DEVICE_NPU));
 
 const auto basicTilingCases = ::testing::Combine(
-        ::testing::ValuesIn(ov::test::utils::combineParams(activationTypesTiling)),
-        ::testing::Values(InferenceEngine::Precision::FP16), ::testing::Values(InferenceEngine::Precision::FP16),
-        ::testing::Values(InferenceEngine::Precision::FP16), ::testing::Values(InferenceEngine::Layout::ANY),
-        ::testing::Values(InferenceEngine::Layout::ANY),
-        ::testing::ValuesIn(ov::test::utils::combineParams(basicTiling)),
-        ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
-
-const auto basicCasesFP32 = ::testing::Combine(
-        ::testing::ValuesIn(ov::test::utils::combineParams(activationTypesFP32)),
-        ::testing::Values(InferenceEngine::Precision::FP32), ::testing::Values(InferenceEngine::Precision::FP32),
-        ::testing::Values(InferenceEngine::Precision::FP32), ::testing::Values(InferenceEngine::Layout::ANY),
-        ::testing::Values(InferenceEngine::Layout::ANY), ::testing::ValuesIn(ov::test::utils::combineParams(basic)),
-        ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+        ::testing::ValuesIn(::combineParams(activationTypesTiling)), ::testing::Values(ov::element::f16),
+        ::testing::ValuesIn(static_shapes_param_transform(ov::test::utils::combineParams(basicTiling))),
+        ::testing::Values(DEVICE_NPU));
 
 // ------ NPU3700 ------
 
@@ -178,35 +215,35 @@ INSTANTIATE_TEST_SUITE_P(smoke_Activation_Test, ActivationLayerTest_NPU3700, bas
 INSTANTIATE_TEST_SUITE_P(smoke_Activation_Test_PRelu, ActivationLayerTest_NPU3700, basicPReluCases,
                          ActivationLayerTest::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_Activation_Test_ND, ActivationLayerTest_NPU3700, basicNDCases,
+INSTANTIATE_TEST_SUITE_P(smoke_Activation_Test_ND, ActivationLayerTest_NPU3700, basicCasesND,
                          ActivationLayerTest::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_Activation_Test_FP16Only, ActivationLayerTest_NPU3700, basicFP16OnlyCases,
+// ------ NPU3720/4000 SW FP16 ------
+
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_Activation, ActivationLayerTest_SW_FP16, basicCases,
                          ActivationLayerTest::getTestCaseName);
 
-// ------ NPU3720 ------
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_Activation_Test, ActivationLayerTest_NPU3720, basicCases,
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_Activation_PRelu, ActivationLayerTest_SW_FP16, basicPReluCases,
                          ActivationLayerTest::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_Activation_Test_PRelu, ActivationLayerTest_NPU3720, basicPReluCases,
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_Activation_2D, ActivationLayerTest_SW_FP16, basicCases2D,
                          ActivationLayerTest::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_Activation_Test_2D, ActivationLayerTest_NPU3720, basicCases2D,
+INSTANTIATE_TEST_SUITE_P(smoke_tiling_Activation, ActivationLayerTest_SW_FP16, basicTilingCases,
                          ActivationLayerTest::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_tiling_Activation_Test, ActivationTilingTest_NPU3720, basicTilingCases,
+// ------ NPU3720 HW FP16 ------
+
+INSTANTIATE_TEST_SUITE_P(smoke_tiling_Activation, ActivationLayerTest_HW_FP16, basicTilingCases,
                          ActivationLayerTest::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_Activation_FP32_Test, ActivationTilingTest_NPU3720, basicCasesFP32,
+// ------ NPU3720/4000 SW FP32 ------
+
+INSTANTIATE_TEST_SUITE_P(smoke_Activation, ActivationLayerTest_SW_FP32, basicCasesSWFP32,
                          ActivationLayerTest::getTestCaseName);
 
-// ------ ELF ------
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_Activation_Test_PRelu, ActivationLayerTest_NPU3720_ELF, basicPReluCases,
-                         ActivationLayerTest::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_Activation_Test, ActivationLayerTest_NPU3720_ELF, basicCases,
+// ------ NPU3720/4000 HW FP32 ------
+INSTANTIATE_TEST_SUITE_P(smoke_Activation, ActivationLayerTest_HW_FP32, basicCasesHWFP32,
                          ActivationLayerTest::getTestCaseName);
 
 }  // namespace

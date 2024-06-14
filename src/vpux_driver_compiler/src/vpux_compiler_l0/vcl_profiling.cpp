@@ -5,6 +5,9 @@
 
 #include "vcl_profiling.hpp"
 
+#include "vpux/utils/profiling/parser/api.hpp"
+#include "vpux/utils/profiling/reports/api.hpp"
+
 using namespace vpux;
 
 namespace VPUXDriverCompiler {
@@ -41,11 +44,7 @@ vcl_result_t VPUXProfilingL0::getLayerInfo(p_vcl_profiling_output_t profOutput) 
 
     if (_layerInfo.empty()) {
         try {
-            if (_taskInfo.empty()) {
-                _taskInfo = profiling::getTaskInfo(_blobData, _blobSize, _profData, _profSize,
-                                                   profiling::VerbosityLevel::HIGH, false);
-            }
-            _layerInfo = profiling::getLayerInfo(_taskInfo);
+            _layerInfo = profiling::getLayerProfilingInfoHook(_profData, _profSize, _blobData, _blobSize);
         } catch (const std::exception& error) {
             _logger->outputError(error.what());
             return VCL_RESULT_ERROR_UNKNOWN;

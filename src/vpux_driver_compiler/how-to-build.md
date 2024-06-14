@@ -27,31 +27,27 @@
     cmake ^
         -D CMAKE_BUILD_TYPE=Release ^
         -D BUILD_SHARED_LIBS=OFF ^
-        -D IE_EXTRA_MODULES=%VPUX_PLUGIN_HOME% ^
+        -D OPENVINO_EXTRA_MODULES=%VPUX_PLUGIN_HOME% ^
         -D ENABLE_TESTS=ON ^
         -D ENABLE_BLOB_DUMP=OFF ^
         -D ENABLE_HETERO=OFF ^
         -D ENABLE_MULTI=OFF ^
         -D ENABLE_AUTO_BATCH=OFF ^
         -D ENABLE_TEMPLATE=OFF ^
-        -D ENABLE_IR_V7_READER=OFF ^
         -D ENABLE_OV_ONNX_FRONTEND=OFF ^
+        -D ENABLE_OV_PYTORCH_FRONTEND=OFF ^
         -D ENABLE_OV_PADDLE_FRONTEND=OFF ^
         -D ENABLE_OV_TF_FRONTEND=OFF ^
         -D ENABLE_OV_TF_LITE_FRONTEND=OFF ^
-        -D ENABLE_GAPI_PREPROCESSING=OFF ^
         -D ENABLE_INTEL_CPU=OFF ^
         -D ENABLE_INTEL_GPU=OFF ^
-        -D ENABLE_ONEDNN_FOR_GPU=OFF ^
-        -D ENABLE_INTEL_GNA=OFF ^
         -D ENABLE_OV_IR_FRONTEND=ON ^
         -D BUILD_COMPILER_FOR_DRIVER=ON ^
-        -D ENABLE_CLANG_FORMAT=ON ^
         -D ENABLE_TBBBIND_2_5=OFF ^
         -D THREADING=TBB ^
         ..
 
-    cmake --build . --config Release --target ie_dev_targets compilerTest profilingTest vpuxCompilerL0Test loaderTest -j 8
+    cmake --build . --config Release --target ov_dev_targets compilerTest profilingTest vpuxCompilerL0Test loaderTest -j 8
     ```
 
 # Linux
@@ -82,31 +78,27 @@
     cmake \
         -D CMAKE_BUILD_TYPE=Release \
         -D BUILD_SHARED_LIBS=OFF \
-        -D IE_EXTRA_MODULES=$VPUX_PLUGIN_HOME \
+        -D OPENVINO_EXTRA_MODULES=$VPUX_PLUGIN_HOME \
         -D ENABLE_TESTS=ON \
         -D ENABLE_BLOB_DUMP=OFF \
         -D ENABLE_HETERO=OFF \
         -D ENABLE_MULTI=OFF \
         -D ENABLE_AUTO_BATCH=OFF \
         -D ENABLE_TEMPLATE=OFF \
-        -D ENABLE_IR_V7_READER=OFF \
         -D ENABLE_OV_ONNX_FRONTEND=OFF \
+        -D ENABLE_OV_PYTORCH_FRONTEND=OFF \
         -D ENABLE_OV_PADDLE_FRONTEND=OFF \
         -D ENABLE_OV_TF_FRONTEND=OFF \
         -D ENABLE_OV_TF_LITE_FRONTEND=OFF \
-        -D ENABLE_GAPI_PREPROCESSING=OFF \
         -D ENABLE_INTEL_CPU=OFF \
         -D ENABLE_INTEL_GPU=OFF \
-        -D ENABLE_ONEDNN_FOR_GPU=OFF \
-        -D ENABLE_INTEL_GNA=OFF \
         -D ENABLE_OV_IR_FRONTEND=ON \
         -D BUILD_COMPILER_FOR_DRIVER=ON \
-        -D ENABLE_CLANG_FORMAT=ON \
         -D ENABLE_TBBBIND_2_5=OFF \
         -D THREADING=TBB \
         ..
 
-    cmake --build . --config Release --target ie_dev_targets compilerTest profilingTest vpuxCompilerL0Test loaderTest -j 8
+    cmake --build . --config Release --target ov_dev_targets compilerTest profilingTest vpuxCompilerL0Test loaderTest -j 8
     ```
 
 > Notice: If you want to build static CiD package or onecore version of windows library, please follow commands in applications.ai.vpu-accelerators.flex-cid-tools repo.

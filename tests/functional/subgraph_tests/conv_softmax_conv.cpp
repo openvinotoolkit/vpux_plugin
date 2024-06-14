@@ -1,10 +1,7 @@
-// Copyright (C) Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
-#include <ov_models/builders.hpp>
-#include <ov_models/utils/ov_helpers.hpp>
-#include <shared_test_classes/base/layer_test_utils.hpp>
 #include <vpu_ov2_layer_test.hpp>
 
 namespace ov::test {
@@ -51,14 +48,29 @@ class ConvSoftmaxConvTestCommon :
 
         return conv2d_node;
     }
+
+public:
+    static std::string getTestCaseName(const testing::TestParamInfo<ConvSoftmaxConvTestParams>& obj) {
+        const std::string sep = "_";
+        std::ostringstream result;
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
+        result << "TestIdx=" << obj.index << sep;
+        return result.str();
+    };
 };
 
 TEST_P(ConvSoftmaxConvTestCommon, VPU3720_HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
+}
+
+TEST_P(ConvSoftmaxConvTestCommon, VPU4000_HW) {
+    setDefaultHardwareMode();
+    run(Platform::NPU4000);
 }
 
 INSTANTIATE_TEST_SUITE_P(smoke_ConvSoftmaxConv, ConvSoftmaxConvTestCommon,
-                         ::testing::Values(ConvSoftmaxConvTestParams{{1, 48, 8, 16}, 1, 77}));
+                         ::testing::Values(ConvSoftmaxConvTestParams{{1, 48, 8, 16}, 1, 77}),
+                         ConvSoftmaxConvTestCommon::getTestCaseName);
 
 }  // namespace ov::test

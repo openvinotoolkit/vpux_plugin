@@ -90,7 +90,7 @@ def NDTypeInterface : TypeInterface<"NDTypeInterface"> {
             "vpux::Byte", "getCompactAllocSize", (ins)
         >,
 
-       InterfaceMethod<
+        InterfaceMethod<
             "Returns the type with the new shape",
             "vpux::NDTypeInterface", "changeShape", (ins "vpux::ShapeRef":$shape)
         >,
@@ -125,7 +125,6 @@ def NDTypeInterface : TypeInterface<"NDTypeInterface"> {
             "vpux::NDTypeInterface", "changeTypeComponents", (ins "const vpux::TypeComponents&":$typeComponents)
         >,
 
-
         InterfaceMethod<
             "Returns a tile from the type",
             "vpux::NDTypeInterface", "extractDenseTile", (ins "vpux::ShapeRef":$tileOffsets, "vpux::ShapeRef":$tileShape)
@@ -144,7 +143,7 @@ def NDTypeInterface : TypeInterface<"NDTypeInterface"> {
         InterfaceMethod<
             "Returns the padded type",
             "vpux::NDTypeInterface", "pad", (ins "vpux::ShapeRef":$padBefore, "vpux::ShapeRef":$padAfter)
-        >,
+        >
     ];
 
     let extraClassDeclaration = [{
@@ -173,6 +172,31 @@ def GroupedTypeInterface : TypeInterface<"GroupedTypeInterface"> {
     }];
 
     let cppNamespace = "vpux";
+}
+
+//
+// BoundedTypeInterface
+//
+
+def BoundedTypeInterface :
+        TypeInterface<
+            "BoundedTypeInterface"
+        > {
+    let description = [{
+        Interface for extracting, setting and changing upper bounds for bounded dynamism support.
+    }];
+
+    let cppNamespace = "vpux";
+    let methods = [
+        InterfaceMethod<
+            "Returns upper bounds for a dynamic shape",
+            "mlir::ArrayAttr", "getBounds", (ins)
+        >,
+        InterfaceMethod<
+            "Returns the type with new upper bounds",
+            "vpux::BoundedTypeInterface", "changeBounds", (ins "mlir::ArrayAttr":$bounds)
+        >
+    ];
 }
 
 #endif

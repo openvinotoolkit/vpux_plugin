@@ -1,15 +1,15 @@
 //
-// Copyright (C) 2022 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #pragma once
 
 #include <gtest/gtest.h>
-#include <ie_common.h>
-#include <ie_core.hpp>
 #include <iostream>
+#include <openvino/runtime/core.hpp>
 #include <string>
+#include <string_view>
 #include "common/vpu_test_env_cfg.hpp"
 #include "vpux/utils/core/logger.hpp"
 
@@ -24,19 +24,26 @@ public:
 public:
     explicit VpuTestTool(const VpuTestEnvConfig& envCfg);
 
-    void exportNetwork(InferenceEngine::ExecutableNetwork& exeNet, const std::string& fsName);
     void exportModel(ov::CompiledModel& compiledModel, const std::string& fsName);
-    InferenceEngine::ExecutableNetwork importNetwork(const std::shared_ptr<InferenceEngine::Core>& core,
-                                                     const std::string& fsName);
     ov::CompiledModel importModel(const std::shared_ptr<ov::Core>& core, const std::string& fsName);
-    void exportBlob(const InferenceEngine::Blob::Ptr blob, const std::string& fsName);
-    void exportBlob(const ov::Tensor& tensor, const std::string& fsName);
-    void importBlob(InferenceEngine::Blob::Ptr blob, const std::string& fsName);
-    void importBlob(ov::Tensor& tensor, const std::string& fsName);
+    void exportTensor(const ov::Tensor& tensor, const std::string& fsName);
+    void importTensor(ov::Tensor& tensor, const std::string& fsName);
     std::string getDeviceMetric(std::string name);
 };
 
 std::string filesysName(const testing::TestInfo* testInfo, const std::string& ext, bool limitAbsPathLength);
+
+constexpr std::string_view testKind(std::string_view filePath) {
+    if (filePath.find("subgraph") != std::string::npos) {
+        return std::string_view("Subgraph");
+    } else if (filePath.find("single_layer") != std::string::npos) {
+        return std::string_view("SingleLayer");
+    } else if (filePath.find("behavior") != std::string::npos) {
+        return std::string_view("Behavior");
+    } else {
+        return std::string_view("Unknown");
+    }
+}
 
 }  // namespace ov::test::utils
 

@@ -5,27 +5,35 @@
 
 #include "vpux/utils/models/semantic_segmentation_helpers.hpp"
 
-#include "vpux/utils/models/blob.hpp"
+#include "vpux/utils/models/tensor.hpp"
 
-namespace ie = InferenceEngine;
+void utils::argMax_channels(const ov::Tensor& tensor, std::vector<uint8_t>& resultArgmax, const ov::Layout& layout) {
+    OPENVINO_ASSERT(layout == ov::Layout("NCHW") || layout == ov::Layout("NHWC"),
+                    "Unsupported layout: ", layout.to_string());
 
-void utils::argMax_channels(const InferenceEngine::MemoryBlob::Ptr blob, std::vector<uint8_t>& resultArgmax) {
-    const auto blobFP32 = vpux::toFP32(vpux::toDefLayout(blob));
-    const auto blobMem = blobFP32->rmap();
-    const auto blobPtr = blobMem.as<const float*>();
+    const ov::Tensor tensorFP32 = vpux::toFP32(tensor);
+    const auto dataBuffer = tensorFP32.data<const float>();
 
-    size_t C = blobFP32->getTensorDesc().getDims()[1];
-    size_t H = blobFP32->getTensorDesc().getDims()[2];
-    size_t W = blobFP32->getTensorDesc().getDims()[3];
+    const size_t C = tensorFP32.get_shape()[ov::layout::channels_idx(layout)];
+    const size_t H = tensorFP32.get_shape()[ov::layout::height_idx(layout)];
+    const size_t W = tensorFP32.get_shape()[ov::layout::width_idx(layout)];
 
     for (size_t h = 0; h < H; h++) {
         for (size_t w = 0; w < W; w++) {
             float argMax = 0.0f;
             uint8_t clsIdx = std::numeric_limits<uint8_t>::max();
             for (size_t c = 0; c < C; c++) {
-                if (argMax < blobPtr[c * H * W + h * W + w]) {
-                    argMax = blobPtr[c * H * W + h * W + w];
-                    clsIdx = c;
+                size_t offset;
+
+                if (layout == ov::Layout("NCHW")) {
+                    offset = c * H * W + h * W + w;
+                } else {
+                    offset = h * W * C + w * C + c;
+                }
+
+                if (argMax < dataBuffer[offset]) {
+                    argMax = dataBuffer[offset];
+                    clsIdx = static_cast<uint8_t>(c);
                 }
             }
             resultArgmax.push_back(clsIdx);

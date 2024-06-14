@@ -26,7 +26,7 @@ void vpux::VPUMI37XX::ActShaveRtOp::serialize(elf::writer::BinaryDataSection<uin
     const auto& kernelInfo = ShaveBinaryResources::getInstance();
     const SmallString arch = ELFNPU37XX::getSwKernelArchString(VPU::getArch(this->getOperation()));
 
-    const auto elfBlob = kernelInfo.getElf(kernel, arch).vec();
+    const auto elfBlob = kernelInfo.getElf(kernel, arch);
 
     auto secDataSizePair = vpux::ELFNPU37XX::getDataAndSizeOfElfSection(elfBlob, {".text"});
 
@@ -39,7 +39,7 @@ size_t vpux::VPUMI37XX::ActShaveRtOp::getBinarySize() {
     const auto& kernelInfo = ShaveBinaryResources::getInstance();
     const SmallString arch = ELFNPU37XX::getSwKernelArchString(VPU::getArch(this->getOperation()));
 
-    const auto elfBlob = kernelInfo.getElf(kernel, arch).vec();
+    const auto elfBlob = kernelInfo.getElf(kernel, arch);
 
     auto secDataSizePair = vpux::ELFNPU37XX::getDataAndSizeOfElfSection(elfBlob, {".text"});
 
@@ -52,7 +52,7 @@ uint32_t vpux::VPUMI37XX::ActShaveRtOp::getKernelEntry() {
     const auto& kernelInfo = ShaveBinaryResources::getInstance();
     const SmallString arch = ELFNPU37XX::getSwKernelArchString(VPU::getArch(this->getOperation()));
 
-    const auto elfBlob = kernelInfo.getElf(kernel, arch).vec();
+    const auto elfBlob = kernelInfo.getElf(kernel, arch);
 
     auto accessor = elf::ElfDDRAccessManager(elfBlob.data(), elfBlob.size());
     auto elf_reader = elf::Reader<elf::ELF_Bitness::Elf32>(&accessor);
@@ -67,7 +67,7 @@ uint32_t vpux::VPUMI37XX::ActShaveRtOp::getVersion() {
     const auto& kernelInfo = ShaveBinaryResources::getInstance();
     const SmallString arch = ELFNPU37XX::getSwKernelArchString(VPU::getArch(this->getOperation()));
 
-    const auto elfBlob = kernelInfo.getElf(kernel, arch).vec();
+    const auto elfBlob = kernelInfo.getElf(kernel, arch);
 
     auto secDataSizePair = vpux::ELFNPU37XX::getDataAndSizeOfElfSection(elfBlob, {".versiondata"});
 

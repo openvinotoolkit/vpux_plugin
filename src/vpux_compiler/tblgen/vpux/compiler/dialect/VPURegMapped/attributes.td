@@ -13,13 +13,13 @@ include "vpux/compiler/dialect/VPURegMapped/dialect.td"
 // Base classes
 //
 
-class VPURegMapped_I64EnumAttr <string name, string summary, list<I64EnumAttrCase> cases> : 
+class VPURegMapped_I64EnumAttr <string name, string summary, list<I64EnumAttrCase> cases> :
         I64EnumAttr<name, summary, cases> {
     let cppNamespace = "vpux::VPURegMapped";
     let genSpecializedAttr = 0;
 }
 
-class VPURegMapped_EnumAttr <EnumAttrInfo enumInfo, string name = "", list <Trait> traits = []> : 
+class VPURegMapped_EnumAttr <EnumAttrInfo enumInfo, string name = "", list <Trait> traits = []> :
         EnumAttr<VPURegMapped_Dialect, enumInfo, name, traits> {
     let assemblyFormat = "`<`$value`>`";
 }
@@ -57,7 +57,7 @@ def VPURegMapped_RegisterFieldAttr : VPURegMapped_Attr<"RegisterField"> {
     let parameters = (ins "vpux::VPURegMapped::RegFieldType":$regField);
 
     let genVerifyDecl = 1;
-    let hasCustomAssemblyFormat = 1;
+    let assemblyFormat = "`<` $regField `>`";
 }
 
 //
@@ -80,7 +80,7 @@ def VPURegMapped_RegisterAttr : VPURegMapped_Attr<"Register"> {
     let parameters = (ins "vpux::VPURegMapped::RegisterType":$reg);
 
     let genVerifyDecl = 1;
-    let hasCustomAssemblyFormat = 1;
+    let assemblyFormat = "`<` $reg `>`";
 }
 
 //
@@ -103,7 +103,7 @@ def VPURegMapped_RegisterMappedAttr : VPURegMapped_Attr<"RegisterMapped"> {
     let parameters = (ins "vpux::VPURegMapped::RegMappedType":$regMapped);
 
     let genVerifyDecl = 1;
-    let hasCustomAssemblyFormat = 1;
+    let assemblyFormat = "`<` $regMapped `>`";
 }
 
 //
@@ -119,7 +119,8 @@ def VPURegMapped_TaskType :
             I64EnumAttrCase<"ActKernelInvocation", 1>,
             I64EnumAttrCase<"ActKernelRange",      2>,
             I64EnumAttrCase<"DPUInvariant",        3>,
-            I64EnumAttrCase<"DPUVariant",          4>
+            I64EnumAttrCase<"DPUVariant",          4>,
+            I64EnumAttrCase<"M2I",                 5>
         ]
     > {
 }

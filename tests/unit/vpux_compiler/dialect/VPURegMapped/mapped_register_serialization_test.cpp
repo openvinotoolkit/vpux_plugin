@@ -10,8 +10,11 @@
 #include "vpux/compiler/dialect/VPURegMapped/ops.hpp"
 #include "vpux/compiler/dialect/VPURegMapped/types.hpp"
 
-#include "vpux/compiler/dialect/VPU37XX/ops.hpp"
-#include "vpux/compiler/dialect/VPU37XX/types.hpp"
+#include "vpux/compiler/NPU40XX/dialect/NPUReg40XX/ops.hpp"
+#include "vpux/compiler/NPU40XX/dialect/NPUReg40XX/types.hpp"
+
+#include "vpux/compiler/NPU37XX/dialect/NPUReg37XX/ops.hpp"
+#include "vpux/compiler/NPU37XX/dialect/NPUReg37XX/types.hpp"
 
 #include <mlir/IR/MLIRContext.h>
 #include <mlir/IR/Verifier.h>

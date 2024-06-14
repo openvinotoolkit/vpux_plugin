@@ -1,31 +1,33 @@
 //
-// Copyright (C) 2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2023-2024 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #pragma once
 
 #include <memory>
 
-#include <opencv2/gapi/gproto.hpp>  // cv::GCompileArgs
-
-#include "scenario/scenario_graph.hpp"
 #include "simulation/computation.hpp"
 #include "simulation/simulation.hpp"
 
-class PerformanceSimulation : public ISimulation {
+class PerformanceStrategy;
+class PerformanceSimulation : public Simulation {
 public:
     struct Options {
-        bool inference_only;
-        cv::util::optional<uint32_t> target_latency;
+        IRandomGenerator::Ptr global_initializer;
+        ModelsAttrMap<IRandomGenerator::Ptr> initializers_map;
+        ModelsAttrMap<std::string> input_data_map;
+        const bool inference_only;
+        std::optional<double> target_latency;
     };
-    explicit PerformanceSimulation(ScenarioGraph&& graph, const Options& opts);
+    explicit PerformanceSimulation(Simulation::Config&& cfg, Options&& opts);
 
-    std::shared_ptr<PipelinedCompiled> compilePipelined(const bool drop_frames, cv::GCompileArgs&& args) override;
-
-    virtual std::shared_ptr<SyncCompiled> compileSync(const bool drop_frames, cv::GCompileArgs&& args) override;
+    std::shared_ptr<PipelinedCompiled> compilePipelined(DummySources&& sources,
+                                                        cv::GCompileArgs&& compiler_args) override;
+    std::shared_ptr<SyncCompiled> compileSync(const bool drop_frames) override;
 
 private:
     Options m_opts;
+    std::shared_ptr<PerformanceStrategy> m_strategy;
     Computation m_comp;
 };

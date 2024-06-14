@@ -6,7 +6,7 @@
 #include "vpux/compiler/dialect/const/utils/content.hpp"
 
 #include "vpux/compiler/core/layers.hpp"
-#include "vpux/utils/IE/loop.hpp"
+#include "vpux/compiler/utils/loop.hpp"
 #include "vpux/utils/core/numeric.hpp"
 
 using namespace vpux;
@@ -118,10 +118,10 @@ void fillBuf(const Range& range, MutableArrayRef<char> buf) {
                       "Buffer with byte size '{0}' is not enough to hold actual elements with '{1}' byte size",
                       buf.size(), range.size() * VALUE_BYTE_SIZE);
 
-    loop_1d(LoopExecPolicy::Parallel, range.size(), [&](size_t i) {
+    for (size_t i = 0; i < range.size(); ++i) {
         auto* bufPtr = reinterpret_cast<value_type*>(buf.data() + i * VALUE_BYTE_SIZE);
         *bufPtr = range[i];
-    });
+    }
 }
 
 }  // namespace
@@ -131,14 +131,17 @@ void vpux::Const::Content::copySubByteContent(MutableArrayRef<char> targetData, 
         const Bit elemSize = vpux::getElemTypeSize(elemType);
         const auto numShifts = CHAR_BIT / elemSize.count();
         uint8_t byteValue = 0;
-        auto subByteValue = _data.front();
-
+        int8_t subByteValue = 0;
         // Previously, in the case of a splat boolean tensor, the value "true" was interpreted as 0x01
         // Now LLVM interprets the value as 0xff
         // This change helps to preserve the logic of handling constants on our end
         // More info here: https://reviews.llvm.org/D133743
+        // The _data can't correctly retrieve data when it is of type Float, but getValues can.
+        // However, getValues does not support subbytes storageElementType.
         if (_storageElemType.isInteger(1)) {
-            subByteValue &= 1;
+            subByteValue = _data.front() & 1;
+        } else {
+            subByteValue = getValues<int8_t>()[0];
         }
 
         for (int64_t shift = 0; shift < numShifts; shift++) {
@@ -157,7 +160,6 @@ void vpux::Const::Content::copySubByteContent(MutableArrayRef<char> targetData, 
         VPUX_THROW_UNLESS(_data.size() % targetData.size() == 0,
                           "Cannot pack sub-byte elements into buffer: source data size '{0}', target data size '{1}'",
                           _data.size(), targetData.size());
-
         auto sourceValues = getValues<int8_t>();
         const auto elemPerByte = sourceValues.size() / targetData.size();
         VPUX_THROW_UNLESS(elemPerByte <= CHAR_BIT && vpux::isPowerOfTwo(elemPerByte),
@@ -168,16 +170,14 @@ void vpux::Const::Content::copySubByteContent(MutableArrayRef<char> targetData, 
         for (size_t idx = 0; idx < sourceValues.size(); idx += elemPerByte) {
             uint8_t byte = 0;
             uint8_t shift = 0;
-            for (int64_t elemIdx = elemPerByte - 1; elemIdx >= 0; --elemIdx) {
+            for (uint64_t elemIdx = 0; elemIdx < elemPerByte; ++elemIdx) {
                 byte |= (sourceValues[idx + elemIdx] & mask) << shift;
                 shift += bits;
             }
             targetData[idx / elemPerByte] = byte;
         }
-
         return;
     }
-
     std::memcpy(targetData.data(), _data.data(), _data.size());
 }
 
@@ -185,7 +185,6 @@ void vpux::Const::Content::copyTo(MutableArrayRef<char> targetData) const {
     const auto elemType = getType().getElementType();
     const Bit elemSize = vpux::getElemTypeSize(elemType);
     const auto isSubByte = elemSize.count() < CHAR_BIT;
-
     if (isSubByte) {
         copySubByteContent(targetData, elemType);
         return;
@@ -225,23 +224,22 @@ void vpux::Const::Content::fillWithZero() {
         const auto W = outShape[Dims4D::Filter::KX];
 
         const auto zeroPoints = perAxisQType.getZeroPoints();
-        for (int i = 0; i < OC; ++i) {
-            const auto zp = zeroPoints[i];
+        loop_4d(LoopExecPolicy::Parallel, getType().getContext(), OC, IC, H, W,
+                [&](int64_t i, int64_t ic, int64_t h, int64_t w) {
+                    const auto zp = zeroPoints[i];
 
-            const auto fillChannel = [&](auto buffer) {
-                loop_3d(LoopExecPolicy::Parallel, IC, H, W, [&](int64_t ic, int64_t h, int64_t w) {
-                    using BufferType = std::decay_t<decltype(buffer)>;
-                    using ElemType = typename BufferType::value_type;
+                    const auto fillChannel = [&](auto buffer) {
+                        using BufferType = std::decay_t<decltype(buffer)>;
+                        using ElemType = typename BufferType::value_type;
 
-                    const auto inMemIndND = order.toMemoryOrder(Shape{i, ic, h, w});
-                    const auto inMemInd1D = getMemIndex1D(inMemIndND, outMemShape);
+                        const auto inMemIndND = order.toMemoryOrder(Shape{i, ic, h, w});
+                        const auto inMemInd1D = getMemIndex1D(inMemIndND, outMemShape);
 
-                    buffer[inMemInd1D] = checked_cast<ElemType>(zp);
+                        buffer[inMemInd1D] = checked_cast<ElemType>(zp);
+                    };
+
+                    mutate(fillChannel);
                 });
-            };
-
-            mutate(fillChannel);
-        }
 
     } else if (auto qType = getType().getElementType().dyn_cast_or_null<mlir::quant::UniformQuantizedType>()) {
         const auto zp = qType.getZeroPoint();

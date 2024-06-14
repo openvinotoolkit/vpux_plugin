@@ -7,7 +7,7 @@
 
 #include "vpux/compiler/core/attributes/shape.hpp"
 #include "vpux/compiler/core/attributes/stride_reqs.hpp"
-#include "vpux/compiler/dialect/VPURT/types.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/types.hpp"
 
 #include <llvm/ADT/TypeSwitch.h>
 

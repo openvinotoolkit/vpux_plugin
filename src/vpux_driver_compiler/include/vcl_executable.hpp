@@ -12,6 +12,8 @@
 
 #include "vcl_common.hpp"
 
+using intel_npu::NetworkDescription;
+
 namespace VPUXDriverCompiler {
 
 /**
@@ -20,7 +22,8 @@ namespace VPUXDriverCompiler {
  */
 class VPUXExecutableL0 final {
 public:
-    VPUXExecutableL0(const vpux::NetworkDescription::Ptr& networkDesc, bool enableProfiling, VCLLogger* vclLogger);
+    VPUXExecutableL0(const std::shared_ptr<const NetworkDescription>& networkDesc, bool enableProfiling,
+                     VCLLogger* vclLogger);
     /**
      * @brief Get compiled blob from net description
      *
@@ -50,9 +53,8 @@ public:
     }
 
 private:
-    vpux::NetworkDescription::Ptr _networkDesc;  ///< The compilation result of MLIR compiler
-    bool enableProfiling;                        ///< Calc time cost on VCL level
-    std::vector<char> _blob;                     ///< Store the final blob, can be got by multiple times
+    std::shared_ptr<const NetworkDescription> _networkDesc;  ///< The compilation result of MLIR compiler
+    bool enableProfiling;                                    ///< Calc time cost on VCL level
     VCLLogger* _logger;
 };
 

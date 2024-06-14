@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -9,7 +9,9 @@
 #include "vpux/compiler/utils/strings.hpp"
 
 #include "vpux/compiler/core/profiling_metadata.hpp"
-#include "vpux/compiler/profiling/generated/schema/profiling_generated.h"
+#include "vpux/compiler/dialect/VPUASM/ops.hpp"
+
+#include "schema/profiling_generated.h"
 
 using namespace vpux;
 
@@ -30,6 +32,10 @@ elf::DType ELFNPU37XX::createDType(mlir::Type type) {
         return elf::DType::DType_FP16;
     } else if (type.isBF16()) {
         return elf::DType::DType_BFP16;
+    } else if (type.isFloat8E5M2()) {
+        return elf::DType::DType_FP8;
+    } else if (type.isFloat8E4M3FN()) {
+        return elf::DType::DType_FP8;
     } else if (type.isSignedInteger(CHAR_BIT * sizeof(int64_t))) {
         return elf::DType::DType_I64;
     } else if (type.isSignedInteger(CHAR_BIT * sizeof(int32_t))) {
@@ -71,27 +77,40 @@ elf::TensorRef ELFNPU37XX::createTensorRef(vpux::NDTypeInterface type, StringRef
 
     // dims
     const auto shape = type.getShape();
-    out.dimensions_size = shape.size();
+    out.dimensions_size = checked_cast<uint32_t>(shape.size());
 
-    for (auto sh_pair : shape | indexed) {
+    bool isStatic = true;
+    for (const auto& sh_pair : shape | indexed) {
         const auto ind = checked_cast<uint32_t>(sh_pair.index());
-        auto sh = sh_pair.value();
-        out.dimensions[ind] = checked_cast<uint32_t>(sh);
+        auto dim = sh_pair.value();
+        if (dim > 0) {
+            out.dimensions[ind] = checked_cast<uint32_t>(dim);
+        } else if (dim == -1) {
+            out.dimensions[ind] = std::numeric_limits<uint32_t>::max();
+            isStatic = false;
+        } else {
+            VPUX_THROW_WHEN(shape.empty(),
+                            "Unexpected dim value. It must be a positive number or -1 to represent a dynamic dim");
+        }
     }
 
     // strides
-    auto strides = type.getStrides();
-    out.strides_size = strides.size();
+    // TODO: we can resolve strides as we have bounds information in tensors: E#88898
+    // this check can be removed after that
+    if (isStatic) {
+        auto strides = type.getStrides();
+        out.strides_size = checked_cast<uint32_t>(strides.size());
 
-    Strides temp;
-    temp.push_back(type.getElemTypeSize());
-    temp.append(strides.begin(), strides.end());
+        Strides temp;
+        temp.push_back(type.getElemTypeSize());
+        temp.append(strides.begin(), strides.end());
 
-    for (auto iterator : temp | indexed) {
-        auto val = iterator.value();
-        auto index = iterator.index();
+        for (auto iterator : temp | indexed) {
+            auto val = iterator.value();
+            auto index = iterator.index();
 
-        out.strides[index] = checked_cast<uint64_t>(val.count());
+            out.strides[index] = checked_cast<uint64_t>(val.count());
+        }
     }
 
     // dimsOrder
@@ -132,40 +151,85 @@ std::unique_ptr<elf::NetworkMetadata> ELFNPU37XX::constructMetadata(
 
     metadata.mProfilingOutputs.resize(profilingOutputsInfo.size());
 
-    // input
-    for (const auto& p : inputsInfo | indexed) {
-        const auto index = checked_cast<uint32_t>(p.index());
-        auto userInfo = p.value();
-        const auto val = netFunc.getArgument(index);
+    const auto architecture = VPU::getArch(module);
+    if (architecture == VPU::ArchKind::NPU40XX) {
+        auto ioBindings = VPUASM::IOBindingsOp::getFromModule(module);
+        auto inputDeclarations =
+                to_small_vector(ioBindings.getInputDeclarations().front().getOps<VPUASM::DeclareBufferOp>());
 
-        const auto userType = userInfo.getUserType().cast<vpux::NDTypeInterface>();
+        for (const auto& p : inputsInfo | indexed) {
+            const auto index = checked_cast<uint32_t>(p.index());
+            auto userInfo = p.value();
+            auto inputDeclaration = inputDeclarations[index];
 
-        metadata.mNetInputs[index] = createTensorRef(val, userInfo.getName());
-        metadata.mInTensorDescriptors[index] = createTensorRef(userType, userInfo.getName());
-    }
+            auto declaredInputType = inputDeclaration.getBufferType().getMemref().cast<vpux::NDTypeInterface>();
+            const auto userType = userInfo.getUserType().cast<vpux::NDTypeInterface>();
 
-    // output
-    for (const auto& p : outputsInfo | indexed) {
-        const auto index = p.index();
-        const auto funcArgIndex = inputsInfo.size() + index;
+            metadata.mNetInputs[index] = createTensorRef(declaredInputType, userInfo.getName());
+            metadata.mInTensorDescriptors[index] = createTensorRef(userType, userInfo.getName());
+        }
 
-        auto userInfo = p.value();
-        const auto val = netFunc.getArgument(checked_cast<uint32_t>(funcArgIndex));
+        auto outDeclarations =
+                to_small_vector(ioBindings.getOutputDeclarations().front().getOps<VPUASM::DeclareBufferOp>());
+        for (const auto& p : outputsInfo | indexed) {
+            const auto index = p.index();
+            auto userInfo = p.value();
+            auto outDeclaration = outDeclarations[index];
 
-        const auto userType = userInfo.getUserType().cast<vpux::NDTypeInterface>();
+            auto declaredOutType = outDeclaration.getBufferType().getMemref().cast<vpux::NDTypeInterface>();
+            const auto userType = userInfo.getUserType().cast<vpux::NDTypeInterface>();
+            metadata.mNetOutputs[index] = createTensorRef(declaredOutType, userInfo.getName());
+            metadata.mOutTensorDescriptors[index] = createTensorRef(userType, userInfo.getName());
+        }
 
-        metadata.mNetOutputs[index] = createTensorRef(val, userInfo.getName());
-        metadata.mOutTensorDescriptors[index] = createTensorRef(userType, userInfo.getName());
-    }
+        // profiling
+        auto profilingDeclarations =
+                to_small_vector(ioBindings.getProfilingBuffDeclarations().front().getOps<VPUASM::DeclareBufferOp>());
+        for (const auto& p : profilingOutputsInfo | indexed) {
+            const auto index = p.index();
+            auto profilingDeclaration = profilingDeclarations[index];
 
-    // profiling
-    for (const auto& p : profilingOutputsInfo | indexed) {
-        const auto index = p.index();
-        const auto funcArgInd = inputsInfo.size() + outputsInfo.size() + index;
+            auto declaredPorfileBuffType =
+                    profilingDeclaration.getBufferType().getMemref().cast<vpux::NDTypeInterface>();
 
-        const auto val = netFunc.getArgument(checked_cast<uint32_t>(funcArgInd));
+            metadata.mProfilingOutputs[index] = createTensorRef(declaredPorfileBuffType, p.value().getName());
+        }
+    } else {
+        // input
+        for (const auto& p : inputsInfo | indexed) {
+            const auto index = checked_cast<uint32_t>(p.index());
+            auto userInfo = p.value();
+            const auto val = netFunc.getArgument(index);
 
-        metadata.mProfilingOutputs[index] = createTensorRef(val, p.value().getName());
+            const auto userType = userInfo.getUserType().cast<vpux::NDTypeInterface>();
+
+            metadata.mNetInputs[index] = createTensorRef(val, userInfo.getName());
+            metadata.mInTensorDescriptors[index] = createTensorRef(userType, userInfo.getName());
+        }
+
+        // output
+        for (const auto& p : outputsInfo | indexed) {
+            const auto index = p.index();
+            const auto funcArgIndex = inputsInfo.size() + index;
+
+            auto userInfo = p.value();
+            const auto val = netFunc.getArgument(checked_cast<uint32_t>(funcArgIndex));
+
+            const auto userType = userInfo.getUserType().cast<vpux::NDTypeInterface>();
+
+            metadata.mNetOutputs[index] = createTensorRef(val, userInfo.getName());
+            metadata.mOutTensorDescriptors[index] = createTensorRef(userType, userInfo.getName());
+        }
+
+        // profiling
+        for (const auto& p : profilingOutputsInfo | indexed) {
+            const auto index = p.index();
+            const auto funcArgInd = inputsInfo.size() + outputsInfo.size() + index;
+
+            const auto val = netFunc.getArgument(checked_cast<uint32_t>(funcArgInd));
+
+            metadata.mProfilingOutputs[index] = createTensorRef(val, p.value().getName());
+        }
     }
 
     // ov parameters
@@ -184,17 +248,19 @@ std::unique_ptr<elf::NetworkMetadata> ELFNPU37XX::constructMetadata(
         copy_str(tmp_node.input_name, tmpInputName);
 
         const auto tmpTensorNames = node_val->get_output_tensor(0).get_names();
-        tmp_node.tensor_names_count = tmpTensorNames.size();
+        tmp_node.tensor_names_count = checked_cast<uint32_t>(tmpTensorNames.size());
         for (auto tensor_name : tmpTensorNames | indexed) {
             copy_str(tmp_node.tensor_names[tensor_name.index()], tensor_name.value());
         }
 
         // shape
-        auto shape = node_val->get_output_partial_shape(0).get_shape();
-        tmp_node.shape_size = shape.size();
+        auto shape = node_val->get_output_partial_shape(0);
+        tmp_node.shape_size = checked_cast<uint32_t>(shape.size());
 
         for (const auto& sh_iterator : shape | indexed) {
-            tmp_node.shape[sh_iterator.index()] = sh_iterator.value();
+            auto value = sh_iterator.value();
+            tmp_node.shape[sh_iterator.index()] =
+                    value.is_static() ? value.get_length() : std::numeric_limits<uint64_t>::max();
         }
 
         metadata.mOVParameters[index] = tmp_node;
@@ -217,16 +283,18 @@ std::unique_ptr<elf::NetworkMetadata> ELFNPU37XX::constructMetadata(
         copy_str(tmp_node.input_name, tmpInputName);
 
         const auto tmpTensorNames = node_val->get_output_tensor(0).get_names();
-        tmp_node.tensor_names_count = tmpTensorNames.size();
+        tmp_node.tensor_names_count = checked_cast<uint32_t>(tmpTensorNames.size());
         for (auto tensor_name : tmpTensorNames | indexed) {
             copy_str(tmp_node.tensor_names[tensor_name.index()], tensor_name.value());
         }
 
-        auto shape = node_val->get_output_partial_shape(0).get_shape();
-        tmp_node.shape_size = shape.size();
+        auto shape = node_val->get_output_partial_shape(0);
+        tmp_node.shape_size = checked_cast<uint32_t>(shape.size());
 
         for (const auto& sh_iterator : shape | indexed) {
-            tmp_node.shape[sh_iterator.index()] = sh_iterator.value();
+            auto value = sh_iterator.value();
+            tmp_node.shape[sh_iterator.index()] =
+                    value.is_static() ? value.get_length() : std::numeric_limits<uint64_t>::max();
         }
 
         metadata.mOVResults[index] = tmp_node;

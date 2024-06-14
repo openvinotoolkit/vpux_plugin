@@ -27,6 +27,49 @@ mlir::FailureOr<SmallVector<int64_t>> extractIntVector(mlir::Location loc, const
     return errorAt(loc, "Parameter were not provided");
 }
 
+mlir::Value createPadding(mlir::PatternRewriter& rewriter, IE::InterpolateOp origOp, mlir::Value input, Dim axis,
+                          int64_t forwardPad, int64_t backpad) {
+    auto inputShape = getShape(input);
+    auto forwardOffsets = SmallVector<int64_t>(inputShape.size(), 0);
+    auto backOffsets = SmallVector<int64_t>(inputShape.size(), 0);
+
+    auto forwardSizes = SmallVector<int64_t>(inputShape.begin(), inputShape.end());
+    auto backSizes = SmallVector<int64_t>(inputShape.begin(), inputShape.end());
+
+    if (forwardPad < 0) {
+        forwardSizes[axis.ind()] = forwardSizes[axis.ind()] + forwardPad;
+        forwardOffsets[axis.ind()] = -forwardPad;
+    } else {
+        forwardSizes[axis.ind()] = 1;
+        forwardOffsets[axis.ind()] = 0;
+    }
+
+    backOffsets[axis.ind()] = inputShape[axis] - 1;
+    backSizes[axis.ind()] = 1;
+    auto forwardSubSlice =
+            rewriter.create<IE::SliceOp>(origOp->getLoc(), input, getIntArrayAttr(origOp.getContext(), forwardOffsets),
+                                         getIntArrayAttr(origOp.getContext(), forwardSizes))
+                    .getResult();
+    auto backSubSlice =
+            rewriter.create<IE::SliceOp>(origOp->getLoc(), input, getIntArrayAttr(origOp.getContext(), backOffsets),
+                                         getIntArrayAttr(origOp.getContext(), backSizes))
+                    .getResult();
+
+    SmallVector<mlir::Value> subSlices;
+    if (forwardPad == 0) {
+        subSlices.push_back(input);
+    } else if (forwardPad < 0) {
+        subSlices.push_back(forwardSubSlice);
+    } else {
+        subSlices.push_back(input);
+        subSlices.insert(subSlices.begin(), forwardPad, forwardSubSlice);
+    }
+    if (backpad != 0) {
+        subSlices.insert(subSlices.end(), backpad, backSubSlice);
+    }
+    return rewriter.create<IE::ConcatOp>(origOp->getLoc(), subSlices, axis).getOutput();
+}
+
 mlir::FailureOr<SmallVector<double>> extractFPVector(mlir::Location loc, const mlir::Value value,
                                                      const std::optional<mlir::ArrayAttr>& attr) {
     if (attr.has_value() && attr.value() != nullptr) {
@@ -127,7 +170,7 @@ SmallVector<int64_t> inferInterpOutShape(mlir::Location loc, ArrayRef<int64_t> a
         const auto scalesVal = scales.value();
 
         if (scalesElemType.isF16()) {
-            inferedShape = inferOutputShapeWithScalesMode<float16>(origShape, scalesVal, axesVal, log);
+            inferedShape = inferOutputShapeWithScalesMode<vpux::type::float16>(origShape, scalesVal, axesVal, log);
         } else if (scalesElemType.isF32()) {
             inferedShape = inferOutputShapeWithScalesMode<float>(origShape, scalesVal, axesVal, log);
         } else if (scalesElemType.isF64()) {

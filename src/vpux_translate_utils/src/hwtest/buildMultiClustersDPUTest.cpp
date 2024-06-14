@@ -10,11 +10,11 @@
 #include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/passes.hpp"
-#include "vpux/compiler/dialect/VPUIP/utils.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/task.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/transforms/passes.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
@@ -557,7 +557,7 @@ void buildMultiClustersDPUTest(const nb::TestCaseJsonDescriptor& testDesc, mlir:
                 functionBuilder, mlir::ValueRange(waitBarrier.getBarrier()),
                 mlir::ValueRange(updateBarrier.getBarrier()), loc, inCMXBufferVec[idx].getBuffer(),
                 weightsCMXBufferVec[idx].getBuffer(), wtableCMXBufferVec[idx].getBuffer(),
-                /*instruction_table_list=*/nullptr,
+                /*instruction_table_list=*/nullptr, /*spr_lookup_table*/ nullptr,
                 /*activation_window=*/nullptr, inParentDistributedCMX.getBuffer(), outParentDistributedCMX.getBuffer(),
                 outCMXBufferVec[idx].getBuffer(), vpux::VPUIP::NCETaskType::CONV, kernelSize, kernelStrides,
                 kernelPaddings, /*activation_window_channel_length=*/nullptr, /*is_continued=*/nullptr,
@@ -586,7 +586,9 @@ void buildMultiClustersDPUTest(const nb::TestCaseJsonDescriptor& testDesc, mlir:
 
     // Create CMX2DDR DMAs to move outputs from each cluster to DDR
     auto functionOutputs = SmallVector<mlir::Value>(numClusters);
-    for (std::size_t idx = 0; idx < numClusters; idx++) {
+    // finalBarrier passed as production barrier to last DMA task
+    auto finalBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, 2);
+    for (unsigned int idx = 0; idx < static_cast<unsigned int>(numClusters); idx++) {
         auto functionOutput = function.getArgument(1 + idx);
         functionOutputs[idx] = functionOutput;
         const auto outShape =
@@ -596,14 +598,17 @@ void buildMultiClustersDPUTest(const nb::TestCaseJsonDescriptor& testDesc, mlir:
         auto outBuffer = createDeclareTensorOp(functionBuilder, outMemRefType, VPURT::BufferSection::CMX_NN,
                                                taskClusters[idx], OUTPUT_CMX_OFFSET);
         VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(waitBarrier.getBarrier()),
-                                              mlir::ValueRange(), loc, outBuffer->getResult(0), functionOutput, 0);
+                                              mlir::ValueRange(finalBarrier.getBarrier()), loc, outBuffer->getResult(0),
+                                              functionOutput, 0);
     }
 
     functionBuilder.create<mlir::func::ReturnOp>(loc, functionOutputs);
 
     mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    pm.addPass(VPU::createInitCompilerPass(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW, numClusters,
-                                           std::nullopt, log));
+    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.numberOfDPUGroups = numClusters;
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
+
     if (conv.compress) {
         pm.addPass(VPUIP::createCompressWeightsBTCPass(log));
     }

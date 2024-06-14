@@ -32,10 +32,27 @@ int readFile(const char* fileName, char** buffer, size_t* size) {
         return EXIT_FAILURE;
     }
 
-    const size_t numOfReadBytes = fread(binaryBuffer, 1, unsignedFileSize, file);
-    if (numOfReadBytes != unsignedFileSize) {
+    // Use fgetc to read from the file into the buffer
+    int ch;
+    size_t bytesRead = 0;
+
+    while ((ch = fgetc(file)) != EOF && bytesRead < unsignedFileSize - 1) {
+        if (ch >= 32 && ch <= 126) {
+            binaryBuffer[bytesRead++] = (char)ch;
+        } else {
+            free(binaryBuffer);
+            fprintf(stderr, "Can't character is a printable ASCII character.");
+            fclose(file);
+            return EXIT_FAILURE;
+        }
+    }
+
+    // Null-terminate the buffer
+    buffer[bytesRead] = '\0';
+
+    if (bytesRead <= 0) {
         free(binaryBuffer);
-        fprintf(stderr, "Can't read whole file %s.", fileName);
+        fprintf(stderr, "Binary buffer is empty");
         fclose(file);
         return EXIT_FAILURE;
     }

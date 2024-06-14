@@ -5,8 +5,8 @@
 
 #pragma once
 
-#include "vpux/compiler/dialect/IE/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/dpu_tiler.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/interfaces/dpu_tiler.hpp"
 
 namespace vpux {
 
@@ -37,6 +37,8 @@ vpux::Byte getSwKernelRunTotalAllocSize(VPUIP::SwKernelRun swKernelRun, ArrayRef
                                         SmallVector<mlir::Value>& outputsForKernelRun);
 std::unique_ptr<VPUNN::SWOperation> getVPUNNSWKernelOp(VPUIP::SwKernelOp swKernelOp);
 std::unique_ptr<VPUNN::SWOperation> getVPUNNSWKernelOp(VPU::SWOpInterface operation);
+std::unique_ptr<VPUNN::SWOperation> getVPUNNSWKernelOp(VPU::SWOpInterface operation, vpux::NDTypeInterface outputNDType,
+                                                       ArrayRef<vpux::NDTypeInterface> inputTiles);
 size_t getDPUTaskOpCost(VPUIP::DPUTaskOp dpuTaskOp, const std::shared_ptr<VPUNN::VPUCostModel>& costModel,
                         VPU::ArchKind arch, vpux::Logger log);
 

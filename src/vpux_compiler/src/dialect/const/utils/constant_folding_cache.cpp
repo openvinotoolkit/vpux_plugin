@@ -27,31 +27,17 @@ Const::FoldingRequest Const::ConstantFoldingCache::getRequest() {
     return result;
 }
 
-void Const::ConstantFoldingCache::setRequestState(Const::ContentAttr attr, const Const::FoldingRequestState& state) {
-    std::unique_lock<std::mutex> lock(_mtxState);
-
-    Const::details::ContentMap::accessor accessor;
-    // Insert will update the accessor to point to the element in the map which corresponds to the attribute.
-    // It will create a new element in the map if one does not already exist
-    _cache.insert(accessor, attr);
-    VPUX_THROW_WHEN(accessor.empty(), "Failed to set state for request");
-    accessor->second.state = state;
-
-    _cvState.notify_all();
-}
-
-std::optional<Const::FoldingRequestState> Const::ConstantFoldingCache::getRequestState(Const::ContentAttr attr) {
-    if (Const::details::ContentMap::const_accessor accessor; _cache.find(accessor, attr) && !accessor.empty()) {
-        return accessor->second.state;
-    }
-    return std::nullopt;
+bool Const::ConstantFoldingCache::hasContent(Const::ContentAttr attr) {
+    Const::details::ContentMap::const_accessor accessor;
+    return _cache.find(accessor, attr) && !accessor.empty();
 }
 
 void Const::ConstantFoldingCache::addContent(Const::ContentAttr attr, const Const::Content& content) {
     Const::details::ContentMap::accessor accessor;
     _cache.insert(accessor, attr);
     VPUX_THROW_WHEN(accessor.empty(), "Failed to add folding request to cache");
-    accessor->second.content = content;
+    accessor->second = content;
+    accessor.release();
 
     if (_collectStatistics) {
         _statistics.numElementsAddedToCache++;
@@ -67,6 +53,7 @@ void Const::ConstantFoldingCache::removeContent(Const::ContentAttr attr) {
     Const::details::ContentMap::accessor accessor;
     if (_cache.find(accessor, attr) && !accessor.empty()) {
         _cache.erase(accessor);
+        accessor.release();
 
         if (_collectStatistics) {
             _statistics.numElementsErasedFromCache++;
@@ -78,35 +65,32 @@ void Const::ConstantFoldingCache::removeContent(Const::ContentAttr attr) {
 }
 
 std::optional<Const::Content> Const::ConstantFoldingCache::getContent(Const::ContentAttr attr) {
-    // In case the request is currently being processed by a thread (i.e. it has the PENDING state),
-    // wait for it to be marked as COMPLETED
-    auto state = getRequestState(attr);
-    if (!state.has_value()) {
-        if (_collectStatistics) {
-            _statistics.numCacheMisses++;
-        }
-        return std::nullopt;
-    }
-    if (state != Const::FoldingRequestState::COMPLETED) {
-        std::unique_lock<std::mutex> lock(_mtxState);
-        _cvState.wait(lock, [&] {
-            return getRequestState(attr) == Const::FoldingRequestState::COMPLETED;
-        });
-    }
-
     // Return the value from the cache if it contains it
     Const::details::ContentMap::const_accessor accessor;
     if (_cache.find(accessor, attr) && !accessor.empty()) {
         if (_collectStatistics) {
             _statistics.numCacheHits++;
         }
-        return accessor->second.content;
+        return accessor->second;
     }
 
     if (_collectStatistics) {
         _statistics.numCacheMisses++;
     }
     return std::nullopt;
+}
+
+bool Const::ConstantFoldingCache::replaceContentAttr(Const::ContentAttr originalAttr, Const::ContentAttr newAttr) {
+    Const::details::ContentMap::accessor originalAttrAccessor;
+    if (_cache.find(originalAttrAccessor, originalAttr) && !originalAttrAccessor.empty()) {
+        Const::details::ContentMap::accessor newAttrAccessor;
+        _cache.insert(newAttrAccessor, newAttr);
+        VPUX_THROW_WHEN(newAttrAccessor.empty(), "Failed to add folding request to cache");
+        newAttrAccessor->second = std::move(originalAttrAccessor->second);
+        _cache.erase(originalAttrAccessor);
+        return true;
+    }
+    return false;
 }
 
 void Const::ConstantFoldingCache::enableStatisticsCollection() {

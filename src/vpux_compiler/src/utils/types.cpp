@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -7,9 +7,9 @@
 
 #include "vpux/compiler/core/attributes/stride_reqs.hpp"
 #include "vpux/compiler/core/attributes/strides.hpp"
-#include "vpux/compiler/dialect/IE/attributes.hpp"
-#include "vpux/compiler/dialect/VPUIP/attributes.hpp"
-#include "vpux/compiler/dialect/VPUIP/types.hpp"
+#include "vpux/compiler/dialect/IE/IR/attributes.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/attributes.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/types.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/quantization.hpp"
 #include "vpux/compiler/utils/swizzling_utils.hpp"
@@ -168,7 +168,8 @@ std::optional<int32_t> vpux::getQuantizedAxis(int32_t axis, ShapeRef prevShape, 
 
 mlir::MemRefType vpux::getMemRefType(ShapeRef shape, mlir::Type elemType, DimsOrder order, IndexedSymbolAttr memSpace,
                                      StridesRef strides, VPUIP::SwizzlingSchemeAttr swizzlingSchemeAttr,
-                                     VPUIP::CompressionSchemeAttr compressionSchemeAttr) {
+                                     VPUIP::SparsityCompressionAttr sparsityCompressionAttr,
+                                     mlir::IntegerAttr allocSizeAttr, VPUIP::CompressionStateAttr compressionState) {
     VPUX_THROW_UNLESS(order.numDims() == shape.size(), "Shape '{0}' doesn't match order '{1}'", shape, order);
     VPUX_THROW_UNLESS(strides.empty() || shape.size() == strides.size(), "Strides '{0}' doesn't match shape '{1}'",
                       strides, shape);
@@ -194,11 +195,13 @@ mlir::MemRefType vpux::getMemRefType(ShapeRef shape, mlir::Type elemType, DimsOr
 
     mlir::MemRefType::Builder builder(shape.raw(), elemType);
     builder.setMemorySpace(memSpace);
-    if (stridesAttr == nullptr && swizzlingSchemeAttr == nullptr && compressionSchemeAttr == nullptr) {
+    if (stridesAttr == nullptr && swizzlingSchemeAttr == nullptr && sparsityCompressionAttr == nullptr &&
+        allocSizeAttr == nullptr && compressionState == nullptr) {
         builder.setLayout(orderAttr);
     } else {
-        const auto layoutAttr = vpux::MemRefAttr::get(orderAttr, stridesAttr, /*allocSize=*/nullptr,
-                                                      {swizzlingSchemeAttr, compressionSchemeAttr}, ctx);
+        const auto layoutAttr =
+                vpux::MemRefAttr::get(orderAttr, stridesAttr, allocSizeAttr,
+                                      {swizzlingSchemeAttr, sparsityCompressionAttr, compressionState}, ctx);
         builder.setLayout(layoutAttr.cast<mlir::MemRefLayoutAttrInterface>());
     }
     return builder;
@@ -223,10 +226,10 @@ mlir::SmallVector<float> vpux::getFloatStrides(StridesRef strides) {
 //
 
 mlir::RankedTensorType vpux::getTensorType(ShapeRef shape, mlir::Type elemType, DimsOrder order,
-                                           IndexedSymbolAttr memSpace) {
+                                           IndexedSymbolAttr memSpace, mlir::ArrayAttr bounds) {
     VPUX_THROW_UNLESS(order.numDims() == shape.size(), "DimsOrder '{0}' doesn't match to shape '{1}'", order, shape);
 
-    const auto tensorDesc = vpux::getTensorAttr(elemType.getContext(), order, memSpace);
+    const auto tensorDesc = vpux::getTensorAttr(elemType.getContext(), order, memSpace, bounds);
     const auto newType = mlir::RankedTensorType::get(shape.raw(), elemType, tensorDesc);
 
     const auto loc = mlir::UnknownLoc::get(elemType.getContext());
@@ -397,4 +400,10 @@ bool vpux::isQuantizedDimensionPermutation(mlir::quant::UniformQuantizedPerAxisT
 
 bool vpux::isSubByteType(mlir::Type elemType) {
     return getElemTypeSize(elemType).count() < CHAR_BIT;
+}
+
+bool vpux::isBufferType(mlir::Type type) {
+    // Note: BaseMemRefType covers MemRefType, UnrankedMemRefType,
+    // VPUIP::DistributedBufferType, VPUIP::SparseBufferType and VPUIP::BoundedBufferType
+    return mlir::isa<mlir::BaseMemRefType, VPUIP::BufferType>(type);
 }

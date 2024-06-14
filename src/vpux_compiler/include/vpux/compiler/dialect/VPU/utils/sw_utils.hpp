@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2023-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -27,6 +27,16 @@ VPU::DistributionMode getSWInputTensorDistributionMode(mlir::Operation* eltwiseO
                                                        vpux::NDTypeInterface inputType);
 VPU::DistributionMode getSWInputTensorDistributionMode(VPU::PReluOp preluOp, VPU::MultiClusterStrategy strategy,
                                                        vpux::NDTypeInterface inputType);
+VPU::DistributionMode getSWInputTensorDistributionMode(VPU::AccumulateOp accumulateOp,
+                                                       VPU::MultiClusterStrategy strategy,
+                                                       vpux::NDTypeInterface inputType);
+VPU::DistributionMode getSWInputTensorDistributionMode(VPU::DetectionOutputSortOp op,
+                                                       VPU::MultiClusterStrategy strategy,
+                                                       vpux::NDTypeInterface inputType);
+VPU::DistributionMode getSWInputTensorDistributionMode(VPU::MatMulOp op, VPU::MultiClusterStrategy strategy,
+                                                       vpux::NDTypeInterface inputType);
+VPU::DistributionMode getSWInputTensorDistributionMode(VPU::MVN1NormalizeOp op, VPU::MultiClusterStrategy strategy,
+                                                       vpux::NDTypeInterface inputType);
 
 SmallVector<int64_t> getSWInputTensorNumTiles(VPU::ClusteredOpInterface clusteredOp,
                                               int64_t numClustersAvailableForCompilation,
@@ -43,6 +53,15 @@ SmallVector<int64_t> getSWInputTensorNumTiles(VPU::InterpolateOp interpolateOp,
                                               int64_t numClustersAvailableForCompilation,
                                               VPU::MultiClusterStrategy strategy, vpux::NDTypeInterface inputType);
 SmallVector<int64_t> getSWInputTensorNumTiles(mlir::Operation* eltwiseOp, int64_t numClustersAvailableForCompilation,
+                                              VPU::MultiClusterStrategy strategy, vpux::NDTypeInterface inputType);
+SmallVector<int64_t> getSWInputTensorNumTiles(VPU::AccumulateOp accumulateOp,
+                                              int64_t numClustersAvailableForCompilation,
+                                              VPU::MultiClusterStrategy strategy, vpux::NDTypeInterface inputType);
+SmallVector<int64_t> getSWInputTensorNumTiles(VPU::DetectionOutputSortOp op, int64_t numClustersAvailableForCompilation,
+                                              VPU::MultiClusterStrategy strategy, vpux::NDTypeInterface inputType);
+SmallVector<int64_t> getSWInputTensorNumTiles(VPU::MatMulOp op, int64_t numClustersAvailableForCompilation,
+                                              VPU::MultiClusterStrategy strategy, vpux::NDTypeInterface inputType);
+SmallVector<int64_t> getSWInputTensorNumTiles(VPU::MVN1NormalizeOp op, int64_t numClustersAvailableForCompilation,
                                               VPU::MultiClusterStrategy strategy, vpux::NDTypeInterface inputType);
 }  // namespace VPU
 }  // namespace vpux

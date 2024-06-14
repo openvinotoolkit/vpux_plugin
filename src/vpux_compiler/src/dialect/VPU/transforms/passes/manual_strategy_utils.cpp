@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022 Intel Corporation
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -30,9 +30,12 @@ public:
             : _writeStrategyToJSON(false),
               _writeStrategyFileLocation(),
               _readStrategyFromJSON(false),
-              _readStrategyFileLocation(){};
+              _readStrategyFileLocation(),
+              _updateStrategyForOutputPipelining(false){};
     ManualStrategyUtilsPass(bool writeStrategyToJSON, StringRef writeStrategyFileLocation, bool readStrategyFromJSON,
                             StringRef readStrategyFileLocation, Logger log);
+    ManualStrategyUtilsPass(bool writeStrategyToJSON, StringRef writeStrategyFileLocation, bool readStrategyFromJSON,
+                            StringRef readStrategyFileLocation, bool updateStrategyForOutputPipelining, Logger log);
 
 private:
     mlir::LogicalResult initializeOptions(StringRef options) final;
@@ -43,16 +46,30 @@ private:
     std::string _writeStrategyFileLocation;
     bool _readStrategyFromJSON;
     std::string _readStrategyFileLocation;
+    bool _updateStrategyForOutputPipelining;
 };
 
 ManualStrategyUtilsPass::ManualStrategyUtilsPass(bool writeStrategyToJSON, StringRef writeStrategyFileLocation,
                                                  bool readStrategyFromJSON, StringRef readStrategyFileLocation,
                                                  Logger log)
-        // NOTE: currently called after two strategy passes, flags in both must match.
+        // NOTE: currently called after two/three strategy passes, flags in all must match.
         : _writeStrategyToJSON(writeStrategyToJSON),
           _writeStrategyFileLocation(writeStrategyFileLocation.str()),
           _readStrategyFromJSON(readStrategyFromJSON),
-          _readStrategyFileLocation(readStrategyFileLocation.str()) {
+          _readStrategyFileLocation(readStrategyFileLocation.str()),
+          _updateStrategyForOutputPipelining(false) {
+    Base::initLogger(log, Base::getArgumentName());
+}
+
+ManualStrategyUtilsPass::ManualStrategyUtilsPass(bool writeStrategyToJSON, StringRef writeStrategyFileLocation,
+                                                 bool readStrategyFromJSON, StringRef readStrategyFileLocation,
+                                                 bool updateStrategyForOutputPipelining, Logger log)
+        // NOTE: currently called after two/three strategy passes, flags in all must match.
+        : _writeStrategyToJSON(writeStrategyToJSON),
+          _writeStrategyFileLocation(writeStrategyFileLocation.str()),
+          _readStrategyFromJSON(readStrategyFromJSON),
+          _readStrategyFileLocation(readStrategyFileLocation.str()),
+          _updateStrategyForOutputPipelining(updateStrategyForOutputPipelining) {
     Base::initLogger(log, Base::getArgumentName());
 }
 
@@ -119,6 +136,7 @@ void ManualStrategyUtilsPass::safeRunOnFunc() {
 
     // store operations with Location as key to enable Location based mapping
     llvm::MapVector<mlir::Location, mlir::Operation*> operations;
+    llvm::MapVector<mlir::Location, mlir::Operation*> outputPipeliningOps;
 
     bool operationsWrappedInClusterTiling = false;
     bool operationsHaveTilingAttr = false;
@@ -153,36 +171,56 @@ void ManualStrategyUtilsPass::safeRunOnFunc() {
             _log.nest(2).trace("Tiled operations exist");
             operationsHaveTilingAttr = true;
         }
+
+        // collect all operations that have tilingStrategy attribute after the number of tiles increases for output
+        // pipelining
+        // at this stage, VF tiling has been applied and VF ops do not have tilingStrategy, so VF ops are not collected
+        // Layers' strategies will be saved into JSON file when _writeStrategyToJSON is 'true'
+        // Layers' strategies will be overwritten with manual attributes from JSON file when _readStrategyFromJSON is
+        // 'true'
+        if (_updateStrategyForOutputPipelining && op->hasAttr(tilingStrategy)) {
+            outputPipeliningOps.insert({opLoc, op.getOperation()});
+        }
     });
 
     if (_writeStrategyToJSON) {
-        _log.nest(1).trace("Writing strategy to JSON");
-        // pass attributes name and default value for creating JSON - filter
-        // currently supported attributes
-        //  - multiClusterStrategy
-        //  - tilingStrategy
-        //  - verticalFusion
-        //  - verticalFusionHash
-        //  - layerType
-        DenseMap<StringRef, StringRef> attributes = {{multiClusterStrategy, defaultNoValue},
-                                                     {tilingStrategy, defaultNoValue},
-                                                     {verticalFusion, "False"},
-                                                     {verticalFusionHash, defaultNoValue},
-                                                     {layerTypeName, defaultNoValue}};
-
         llvm::json::Value json(nullptr);
-        if (operationsWrappedInClusterTiling && operationsHaveTilingAttr) {
-            // read strategies from first strategy pass and append new strategies
-            _log.nest(2).trace("Appending to strategies from first strategy pass");
+        if (_updateStrategyForOutputPipelining) {
+            _log.nest(1).trace("Update strategy for output pipelining in JSON");
             auto expectedJson = readManualStrategyJSON(_writeStrategyFileLocation);
             if (expectedJson) {
                 json = expectedJson.get();
+                updateTilingStrategyInJSONForOperations(json, outputPipeliningOps);
+                writeManualStrategyJSON(_writeStrategyFileLocation, json);
             }
-        }
+        } else {
+            _log.nest(1).trace("Writing strategy to JSON");
+            // pass attributes name and default value for creating JSON - filter
+            // currently supported attributes
+            //  - multiClusterStrategy
+            //  - tilingStrategy
+            //  - verticalFusion
+            //  - verticalFusionHash
+            //  - layerType
+            DenseMap<StringRef, StringRef> attributes = {{multiClusterStrategy, defaultNoValue},
+                                                         {tilingStrategy, defaultNoValue},
+                                                         {verticalFusion, "False"},
+                                                         {verticalFusionHash, defaultNoValue},
+                                                         {layerTypeName, defaultNoValue}};
 
-        // writing current strategy to json from first pass
-        createStrategyJSONFromOperations(json, operations, attributes);
-        writeManualStrategyJSON(_writeStrategyFileLocation, json);
+            if (operationsWrappedInClusterTiling && operationsHaveTilingAttr) {
+                // read strategies from first strategy pass and append new strategies
+                _log.nest(2).trace("Appending to strategies from first strategy pass");
+                auto expectedJson = readManualStrategyJSON(_writeStrategyFileLocation);
+                if (expectedJson) {
+                    json = expectedJson.get();
+                }
+            }
+
+            // writing current strategy to json from first pass
+            createStrategyJSONFromOperations(json, operations, attributes);
+            writeManualStrategyJSON(_writeStrategyFileLocation, json);
+        }
     }
 
     if (_readStrategyFromJSON) {
@@ -191,7 +229,8 @@ void ManualStrategyUtilsPass::safeRunOnFunc() {
         if (expectedManualStrategy) {
             llvm::json::Value manualStrategy = expectedManualStrategy.get();
             Logger::global().warning("WARNING: Experimental mode - assigning manual strategies");
-            overwriteManualStrategy(manualStrategy, operations);
+            overwriteManualStrategy(manualStrategy,
+                                    _updateStrategyForOutputPipelining ? outputPipeliningOps : operations);
         }
     }
 }
@@ -212,4 +251,14 @@ std::unique_ptr<mlir::Pass> VPU::createManualStrategyUtilsPass(bool writeStrateg
                                                                StringRef readStrategyFileLocation, Logger log) {
     return std::make_unique<ManualStrategyUtilsPass>(writeStrategyToJSON, writeStrategyFileLocation,
                                                      readStrategyFromJSON, readStrategyFileLocation, log);
+}
+
+std::unique_ptr<mlir::Pass> VPU::createManualStrategyUtilsPass(bool writeStrategyToJSON,
+                                                               StringRef writeStrategyFileLocation,
+                                                               bool readStrategyFromJSON,
+                                                               StringRef readStrategyFileLocation,
+                                                               bool updateStrategyForOutputPipelining, Logger log) {
+    return std::make_unique<ManualStrategyUtilsPass>(writeStrategyToJSON, writeStrategyFileLocation,
+                                                     readStrategyFromJSON, readStrategyFileLocation,
+                                                     updateStrategyForOutputPipelining, log);
 }

@@ -52,13 +52,45 @@ def VPURegMapped_TaskOpInterface : OpInterface<"TaskOpInterface"> {
                     return nullptr;
             }]
         >,
+
+        InterfaceMethod<
+            "Get the previous task Value",
+            "mlir::Value", "getPreviousValue", (ins),
+            [{
+                return $_op.getPreviousTask();
+            }]
+        >,
+
         InterfaceMethod<
             "Set the previous task of this Op",
             "void", "setPreviousTask", (ins "mlir::Value":$previousTask), [{}], [{
                 $_op.getPreviousTaskMutable().assign(previousTask);
             }]
+        >,
+        InterfaceMethod<
+            "Set the state of the op to specify that it's previous task hard links to this task",
+            "void", "enableHardLink", (ins ), [{}], [{
+                $_op.getOperation()->setAttr("HardLinkedAttrName", mlir::UnitAttr::get($_op.getOperation()->getContext()));
+            }]
+        >,
+        InterfaceMethod<
+            "Disable the hardLinked state of this task",
+            "void", "disableHardLink", (ins), [{}], [{
+                $_op.getOperation()->removeAttr("HardLinkedAttrName");
+            }]
+        >,
+        InterfaceMethod<
+            "Returns true if this op is hard-linked by it's previous task",
+            "bool", "isHardLinked", (ins) , [{}], [{
+                return $_op.getOperation()->hasAttr("HardLinkedAttrName");
+            }]
+        >,
+        InterfaceMethod<
+            "Returns true if the underlying Op supports hard linking capabilities",
+            "bool", "supportsHardLink", (ins), [{}], [{
+                return false;
+            }]
         >
-
     ];
 }
 

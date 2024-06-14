@@ -14,7 +14,7 @@
 #include <mlir/IR/BuiltinOps.h>
 #include <mlir/IR/Operation.h>
 
-#include <llvm/ADT/BitVector.h>
+#include <llvm/ADT/DenseSet.h>
 
 namespace vpux {
 
@@ -30,14 +30,15 @@ public:
     size_t insertNewExecOpToDepsMap(mlir::async::ExecuteOp execOp);
     void preAllocateForNewOps(size_t numOfNewOps);
     mlir::async::ExecuteOp getExecuteOpAtIndex(size_t opIdx) const;
-    const llvm::BitVector& getOpDeps(size_t opIdx) const;
-    const llvm::BitVector& getConsumerOps(size_t opIdx) const;
+    const llvm::SmallVector<size_t> getOpDeps(size_t opIdx) const;
+    const llvm::SmallVector<size_t> getConsumerOps(size_t opIdx) const;
     std::unordered_map<size_t, size_t> calculateOpInDegreeTable() const;
     std::unordered_map<size_t, size_t> calculateOpOutDegreeTable() const;
     uint32_t getIndex(mlir::async::ExecuteOp execOp) const;
 
 private:
     void setIndex(mlir::async::ExecuteOp execOp, uint64_t index);
+    SmallVector<size_t> getDepsVec(const llvm::DenseSet<size_t>& deps) const;
 
 private:
     void buildDepsMap(mlir::func::FuncOp func);
@@ -51,8 +52,8 @@ private:
     SmallVector<mlir::async::ExecuteOp> _allExecOps;
 
     // indexOf(mlir::async::ExecuteOp) 'depends on' [ indexOf(mlir::async::ExecuteOp)... ].
-    SmallVector<llvm::BitVector> _depsMap;
-    SmallVector<llvm::BitVector> _consumerMap;
+    SmallVector<llvm::DenseSet<size_t>> _depsMap;
+    SmallVector<llvm::DenseSet<size_t>> _consumerMap;
     size_t _execOpCount = 0;
 };
 

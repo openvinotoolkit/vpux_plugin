@@ -1,14 +1,9 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022-2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include <vpu_ov2_layer_test.hpp>
-#include "subgraph_tests/nce_tasks.hpp"
-
-#include <ov_models/builders.hpp>
-#include <ov_models/utils/ov_helpers.hpp>
-#include <shared_test_classes/base/layer_test_utils.hpp>
 
 using namespace ov;
 using namespace element;
@@ -29,13 +24,12 @@ class IfTestCommon : public VpuOv2LayerTest, public testing::WithParamInterface<
         auto Xt = std::make_shared<op::v0::Parameter>(inType, PartialShape::dynamic());
         auto Yt = std::make_shared<op::v0::Parameter>(inType, PartialShape::dynamic());
         auto Xe = std::make_shared<op::v0::Parameter>(inType, PartialShape::dynamic());
-        auto Ye = std::make_shared<op::v0::Parameter>(inType, PartialShape::dynamic());
 
         auto then_op_1 = std::make_shared<op::v1::Power>(Xt, Yt);
         auto then_op_2 = std::make_shared<op::v1::Multiply>(then_op_1, Yt);
         auto then_op_3 = std::make_shared<op::v1::Multiply>(then_op_2, Yt);
-        auto else_op_1 = std::make_shared<op::v1::Add>(Xe, Ye);
-        auto else_op_2 = std::make_shared<op::v1::Power>(else_op_1, Ye);
+        auto else_op_1 = std::make_shared<op::v0::Cos>(Xe);
+        auto else_op_2 = std::make_shared<op::v0::Sin>(else_op_1);
         auto then_op_result_1 = std::make_shared<op::v0::Result>(then_op_2);
         auto then_op_result_2 = std::make_shared<op::v0::Result>(then_op_3);
         auto else_op_result_1 = std::make_shared<op::v0::Result>(else_op_1);
@@ -43,12 +37,12 @@ class IfTestCommon : public VpuOv2LayerTest, public testing::WithParamInterface<
         auto then_body =
                 std::make_shared<ov::Model>(OutputVector{then_op_result_1, then_op_result_2}, ParameterVector{Xt, Yt});
         auto else_body =
-                std::make_shared<ov::Model>(OutputVector{else_op_result_1, else_op_result_2}, ParameterVector{Xe, Ye});
+                std::make_shared<ov::Model>(OutputVector{else_op_result_1, else_op_result_2}, ParameterVector{Xe});
         auto if_op = std::make_shared<op::v8::If>(cond);
         if_op->set_then_body(then_body);
         if_op->set_else_body(else_body);
         if_op->set_input(X, Xt, Xe);
-        if_op->set_input(Y, Yt, Ye);
+        if_op->set_input(Y, Yt, nullptr);
 
         auto rs1 = if_op->set_output(then_op_result_1, else_op_result_1);
         auto rs2 = if_op->set_output(then_op_result_2, else_op_result_2);
@@ -57,19 +51,30 @@ class IfTestCommon : public VpuOv2LayerTest, public testing::WithParamInterface<
         auto result2 = std::make_shared<op::v0::Result>(rs2);
 
         function = std::make_shared<ov::Model>(OutputVector{result1, result2}, ParameterVector{cond, X, Y}, "IfTest");
+
+        rel_threshold = 0.1f;
     }
+
+public:
+    static std::string getTestCaseName(const testing::TestParamInfo<std::tuple<Type, ov::Shape>>& obj) {
+        const std::string sep = "_";
+        std::ostringstream result;
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
+        result << "TestIdx=" << obj.index << sep;
+        return result.str();
+    };
 };
 
 class IfTest_NPU3720 : public IfTestCommon {};
 
 TEST_P(IfTest_NPU3720, SW) {
     setReferenceSoftwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
 }
 
 TEST_P(IfTest_NPU3720, HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
 }
 
 const TypeVector inType = {
@@ -79,6 +84,7 @@ const TypeVector inType = {
 const std::vector<ov::Shape> inputShapes = {{1, 1, 4, 4}, {1, 2, 32, 64}};
 
 INSTANTIATE_TEST_SUITE_P(smoke_IfTest, IfTest_NPU3720,
-                         ::testing::Combine(::testing::ValuesIn(inType), ::testing::ValuesIn(inputShapes)));
+                         ::testing::Combine(::testing::ValuesIn(inType), ::testing::ValuesIn(inputShapes)),
+                         IfTestCommon::getTestCaseName);
 
 }  // namespace ov::test

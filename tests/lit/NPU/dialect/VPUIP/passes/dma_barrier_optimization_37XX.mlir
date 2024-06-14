@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -156,7 +156,7 @@ func.func @NoDMABarrierOptimization() -> !Output_DDR {
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
 module @VPU.SW {
-  func.func private @builtin_MVN(memref<*xf16, @CMX_NN>, memref<*xf16, @CMX_NN>, i1, i1, f64) attributes {VPU.kernel_code = "singleShaveMVN.cpp", VPU.kernel_entry = "singleShaveMVN"}
+  func.func private @builtin_MVN(memref<*xf16, @CMX_NN>, memref<*xf16, @CMX_NN>, i1, i1, f64) attributes {VPU.kernel_code = "mvn1.cpp", VPU.kernel_entry = "mvn1"}
   func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
 }
 
@@ -195,7 +195,7 @@ func.func @RemoveRedundantDependenciesForProducer() -> memref<1x16x1x1xf16, #NHW
     }
 
     VPURT.Task waits(%bar1 : !VPURT.Barrier) {
-         VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MVN
+         VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MVN
             inputs(%buf0 as %arg1: memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>)
             outputs(%buf1 as %arg2: memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>) on tile 0
             -> memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>{
@@ -227,7 +227,7 @@ func.func @RemoveRedundantDependenciesForProducer() -> memref<1x16x1x1xf16, #NHW
     // CHECK:                 VPUIP.NNDMA {port = 1 : i64} inputs([[BUF0]] : memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>) outputs([[BUF1]] : memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>) -> memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>
     // CHECK:  }
     // CHECK:  VPURT.Task waits([[BAR1]] : !VPURT.Barrier) {
-    // CHECK:                 VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MVN inputs([[BUF0]] as %arg0: memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>) outputs([[BUF1]] as %arg1: memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>
+    // CHECK:                 VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MVN inputs([[BUF0]] as %arg0: memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>) outputs([[BUF1]] as %arg1: memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>
     // CHECK:  }
     // CHECK:  return [[BUF1]] : memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>
 }
@@ -237,7 +237,7 @@ func.func @RemoveRedundantDependenciesForProducer() -> memref<1x16x1x1xf16, #NHW
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
 module @VPU.SW {
-  func.func private @builtin_MVN(memref<*xf16, @CMX_NN>, memref<*xf16, @CMX_NN>, i1, i1, f64) attributes {VPU.kernel_code = "singleShaveMVN.cpp", VPU.kernel_entry = "singleShaveMVN"}
+  func.func private @builtin_MVN(memref<*xf16, @CMX_NN>, memref<*xf16, @CMX_NN>, i1, i1, f64) attributes {VPU.kernel_code = "mvn1.cpp", VPU.kernel_entry = "mvn1"}
   func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
 }
 
@@ -276,7 +276,7 @@ func.func @RemoveRedundantDependenciesForConsumer() -> memref<1x16x1x1xf16, #NHW
     }
 
     VPURT.Task waits(%bar0, %bar1: !VPURT.Barrier, !VPURT.Barrier) {
-         VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MVN
+         VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MVN
             inputs(%buf0 as %arg1: memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>)
             outputs(%buf1 as %arg2: memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>) on tile 0
             -> memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>{
@@ -308,7 +308,7 @@ func.func @RemoveRedundantDependenciesForConsumer() -> memref<1x16x1x1xf16, #NHW
     // CHECK:                 VPUIP.NNDMA {port = 1 : i64} inputs([[BUF0]] : memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>) outputs([[BUF1]] : memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>) -> memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>
     // CHECK:  }
     // CHECK:  VPURT.Task waits([[BAR1]] : !VPURT.Barrier) {
-    // CHECK:                 VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MVN inputs([[BUF0]] as %arg0: memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>) outputs([[BUF1]] as %arg1: memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>
+    // CHECK:                 VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MVN inputs([[BUF0]] as %arg0: memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>) outputs([[BUF1]] as %arg1: memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>
     // CHECK:  }
     // CHECK:  return [[BUF1]] : memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>
 }
@@ -448,7 +448,7 @@ func.func @RemoveExplicitDependenciesWithSameTaskTypeConsumer() -> memref<1x16x1
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
 module @VPU.SW {
-  func.func private @builtin_MVN(memref<*xf16, @CMX_NN>, memref<*xf16, @CMX_NN>, i1, i1, f64) attributes {VPU.kernel_code = "singleShaveMVN.cpp", VPU.kernel_entry = "singleShaveMVN"}
+  func.func private @builtin_MVN(memref<*xf16, @CMX_NN>, memref<*xf16, @CMX_NN>, i1, i1, f64) attributes {VPU.kernel_code = "mvn1.cpp", VPU.kernel_entry = "mvn1"}
   func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
 }
 
@@ -483,7 +483,7 @@ func.func @MergeBarrierForCommonConsumers() -> memref<1x16x1x1xf16, #NHWC, [@CMX
     }
 
     VPURT.Task waits(%bar0, %bar1: !VPURT.Barrier, !VPURT.Barrier) {
-         VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MVN
+         VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MVN
             inputs(%buf0 as %arg1: memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>)
             outputs(%buf1 as %arg2: memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>) on tile 0
             -> memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>{
@@ -510,7 +510,7 @@ func.func @MergeBarrierForCommonConsumers() -> memref<1x16x1x1xf16, #NHWC, [@CMX
     // CHECK:                 VPUIP.NNDMA {port = 1 : i64} inputs([[BUF0]] : memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>) outputs([[BUF1]] : memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>) -> memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>
     // CHECK:  }
     // CHECK:  VPURT.Task waits([[BAR0]] : !VPURT.Barrier) {
-    // CHECK:                 VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MVN inputs([[BUF0]] as %arg0: memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>) outputs([[BUF1]] as %arg1: memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>
+    // CHECK:                 VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MVN inputs([[BUF0]] as %arg0: memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>) outputs([[BUF1]] as %arg1: memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>
     // CHECK:  }
     // CHECK:  return [[BUF1]] : memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>
 
@@ -522,7 +522,7 @@ func.func @MergeBarrierForCommonConsumers() -> memref<1x16x1x1xf16, #NHWC, [@CMX
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
 module @VPU.SW {
-  func.func private @builtin_MVN(memref<*xf16, @CMX_NN>, memref<*xf16, @CMX_NN>, i1, i1, f64) attributes {VPU.kernel_code = "singleShaveMVN.cpp", VPU.kernel_entry = "singleShaveMVN"}
+  func.func private @builtin_MVN(memref<*xf16, @CMX_NN>, memref<*xf16, @CMX_NN>, i1, i1, f64) attributes {VPU.kernel_code = "mvn1.cpp", VPU.kernel_entry = "mvn1"}
   func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
 }
 
@@ -564,7 +564,7 @@ func.func @MergeBarrierForCommonConsumersAndImplicitDependenceTaskConsumers() ->
     }
 
     VPURT.Task waits(%bar0, %bar1: !VPURT.Barrier, !VPURT.Barrier) {
-         VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MVN
+         VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MVN
             inputs(%buf0 as %arg1: memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>)
             outputs(%buf1 as %arg2: memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>) on tile 0
             -> memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>{
@@ -594,7 +594,7 @@ func.func @MergeBarrierForCommonConsumersAndImplicitDependenceTaskConsumers() ->
     // CHECK:                 VPUIP.NNDMA {port = 1 : i64} inputs([[BUF0]] : memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>) outputs([[BUF1]] : memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>) -> memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>
     // CHECK:  }
     // CHECK:  VPURT.Task waits([[BAR0]] : !VPURT.Barrier) {
-    // CHECK:                 VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MVN inputs([[BUF0]] as %arg0: memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>) outputs([[BUF1]] as %arg1: memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>
+    // CHECK:                 VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MVN inputs([[BUF0]] as %arg0: memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>) outputs([[BUF1]] as %arg1: memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>
     // CHECK:  }
     // CHECK:  return [[BUF1]] : memref<1x16x1x1xf16, #NHWC, [@CMX_NN, 0]>
 

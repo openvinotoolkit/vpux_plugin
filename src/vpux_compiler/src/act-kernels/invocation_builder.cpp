@@ -7,7 +7,7 @@
 
 #include <kernels/inc/common_types.h>
 
-#include <vpux/compiler/dialect/VPUIP/ops.hpp>
+#include <vpux/compiler/dialect/VPUIP/IR/ops.hpp>
 
 #include <mlir/IR/BuiltinAttributes.h>
 #include <mlir/IR/BuiltinTypes.h>
@@ -92,7 +92,7 @@ sw_params::DataType mvDTypeToDataType(const MVCNN::DType& mvDType) {
 }
 
 void InvocationBuilder::addTensorArg(mlir::Value value, const MVCNN::TensorReference* tensorRef,
-                                     vpux::VPU::ArchKind /*archKind*/) {
+                                     vpux::VPU::ArchKind archKind) {
     VPUX_THROW_UNLESS(tensorRef != nullptr, "Got NULL tensor reference");
 
     sw_params::MemRefData memrefData{};
@@ -144,8 +144,15 @@ void InvocationBuilder::addTensorArg(mlir::Value value, const MVCNN::TensorRefer
         auto mayBeIndex = memspace.getIndex();
         VPUX_THROW_UNLESS(mayBeIndex.has_value(), "Value '{0}' has no memspace index", value);
 
-        memrefData.dataAddr = checked_cast<uint32_t>(mvds::nce2p7::ACT_KERNEL_CMX_WINDOW +
-                                                     mayBeIndex.value() * mvds::nce2p7::CMX_SLICE_SIZE + addr);
+        const std::set<VPU::ArchKind> compatibleTargets = {
+                VPU::ArchKind::NPU40XX,
+        };
+        memrefData.dataAddr =
+                (compatibleTargets.count(archKind) > 0)
+                        ? mvds::nce2p7::ACT_KERNEL_CMX_WINDOW + checked_cast<uint32_t>(addr)
+                        : mvds::nce2p7::ACT_KERNEL_CMX_WINDOW +
+                                  checked_cast<uint32_t>(mayBeIndex.value()) * mvds::nce2p7::CMX_SLICE_SIZE +
+                                  checked_cast<uint32_t>(addr);
         memrefData.location = sw_params::NN_CMX;
         break;
     }

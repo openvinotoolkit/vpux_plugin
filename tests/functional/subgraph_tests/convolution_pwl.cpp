@@ -1,12 +1,11 @@
-// Copyright (C) Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include <vpu_ov2_layer_test.hpp>
 
-#include <ov_models/builders.hpp>
-#include <ov_models/utils/ov_helpers.hpp>
-#include <shared_test_classes/base/layer_test_utils.hpp>
+#include "common_test_utils/node_builders/constant.hpp"
+#include "common_test_utils/node_builders/fake_quantize.hpp"
 
 namespace ov::test {
 
@@ -20,7 +19,8 @@ class ConvPwlSubGraphTest_NPU3700 : public VpuOv2LayerTest, public testing::With
         const ov::ParameterVector params = {
                 std::make_shared<ov::op::v0::Parameter>(ov::element::f32, ov::Shape(inputShape))};
 
-        const auto weightsU8 = ngraph::builder::makeConstant<uint8_t>(ov::element::u8, weightsShape, {}, true, 255, 0);
+        const auto weightsU8 =
+                ov::test::utils::deprecated::make_constant<uint8_t>(ov::element::u8, weightsShape, {}, true, 255, 0);
         const auto weightsFP32 = std::make_shared<ov::op::v0::Convert>(weightsU8, ov::element::f32);
 
         const ov::Strides strides = {1, 1};
@@ -37,7 +37,8 @@ class ConvPwlSubGraphTest_NPU3700 : public VpuOv2LayerTest, public testing::With
         } else if (postOpType == PostOp::TANH) {
             postOp = std::make_shared<ov::op::v0::Tanh>(conv);
         } else if (postOpType == PostOp::PRELU) {
-            const auto negativeSlope = ngraph::builder::makeConstant<float>(ov::element::f32, {1}, {0.1}, false);
+            const auto negativeSlope =
+                    ov::op::v0::Constant::create(ov::element::f32, ov::Shape{1}, std::vector<float>{0.1f});
             postOp = std::make_shared<ov::op::v0::PRelu>(conv, negativeSlope);
         }
 
@@ -45,6 +46,15 @@ class ConvPwlSubGraphTest_NPU3700 : public VpuOv2LayerTest, public testing::With
         function = std::make_shared<ov::Model>(results, params, "ConvPwl");
         rel_threshold = 0.1f;
     }
+
+public:
+    static std::string getTestCaseName(const testing::TestParamInfo<PostOp>& obj) {
+        const std::string sep = "_";
+        std::ostringstream result;
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
+        result << "TestIdx=" << obj.index << sep;
+        return result.str();
+    };
 };
 
 class ConvPwlQuantizedSubGraphTest_NPU3700 : public VpuOv2LayerTest, public testing::WithParamInterface<PostOp> {
@@ -58,20 +68,23 @@ class ConvPwlQuantizedSubGraphTest_NPU3700 : public VpuOv2LayerTest, public test
                 std::make_shared<ov::op::v0::Parameter>(ov::element::f32, inputDynamicShapes.front())};
 
         const size_t dataLevels = 256;
-        const auto dataFq = ngraph::builder::makeFakeQuantize(params[0], ov::element::f32, dataLevels, {}, {-3.0},
-                                                              {3.0}, {-3.0}, {3.0});
+        const auto dataFq = ov::test::utils::make_fake_quantize(params[0], ov::element::f32, dataLevels, {}, {-3.0},
+                                                                {3.0}, {-3.0}, {3.0});
 
-        const auto weightsU8 = ngraph::builder::makeConstant<uint8_t>(ov::element::u8, weightsShape, {}, true, 255, 0);
+        const auto weightsU8 =
+                ov::test::utils::deprecated::make_constant<uint8_t>(ov::element::u8, weightsShape, {}, true, 255, 0);
         const auto weightsFP32 = std::make_shared<ov::op::v0::Convert>(weightsU8, ov::element::f32);
 
-        const auto weightsInLow = ngraph::builder::makeConstant<float>(ov::element::f32, {1}, {0.0f}, false);
-        const auto weightsInHigh = ngraph::builder::makeConstant<float>(ov::element::f32, {1}, {255.0f}, false);
+        const auto weightsInLow =
+                ov::op::v0::Constant::create(ov::element::f32, ov::Shape{1}, std::vector<float>{0.0f});
+        const auto weightsInHigh =
+                ov::op::v0::Constant::create(ov::element::f32, ov::Shape{1}, std::vector<float>{255.0f});
         std::vector<float> perChannelLow(weightsShape[0], 0.0f);
         std::vector<float> perChannelHigh(weightsShape[0], 1.0f);
-        const auto weightsOutLow = ngraph::builder::makeConstant<float>(ov::element::f32, {weightsShape[0], 1, 1, 1},
-                                                                        perChannelLow, false);
-        const auto weightsOutHigh = ngraph::builder::makeConstant<float>(ov::element::f32, {weightsShape[0], 1, 1, 1},
-                                                                         perChannelHigh, false);
+        const auto weightsOutLow =
+                ov::op::v0::Constant::create(ov::element::f32, ov::Shape{weightsShape[0], 1, 1, 1}, perChannelLow);
+        const auto weightsOutHigh =
+                ov::op::v0::Constant::create(ov::element::f32, ov::Shape{weightsShape[0], 1, 1, 1}, perChannelHigh);
 
         const size_t weightsLevels = 256;
         const auto weightsFq = std::make_shared<ov::op::v0::FakeQuantize>(weightsFP32, weightsInLow, weightsInHigh,
@@ -89,43 +102,53 @@ class ConvPwlQuantizedSubGraphTest_NPU3700 : public VpuOv2LayerTest, public test
         auto postOpType = GetParam();
         if (postOpType == PostOp::SIGMOID) {
             const auto postOp = std::make_shared<ov::op::v0::Sigmoid>(conv);
-            outputFq = ngraph::builder::makeFakeQuantize(postOp, ov::element::f32, outLevels, {}, {0.0}, {1.0}, {0.0},
-                                                         {1.0});
+            outputFq = ov::test::utils::make_fake_quantize(postOp, ov::element::f32, outLevels, {}, {0.0}, {1.0}, {0.0},
+                                                           {1.0});
         } else if (postOpType == PostOp::TANH) {
             const auto postOp = std::make_shared<ov::op::v0::Tanh>(conv);
-            outputFq = ngraph::builder::makeFakeQuantize(postOp, ov::element::f32, outLevels, {}, {-1.0}, {1.0}, {-1.0},
-                                                         {1.0});
+            outputFq = ov::test::utils::make_fake_quantize(postOp, ov::element::f32, outLevels, {}, {-1.0}, {1.0},
+                                                           {-1.0}, {1.0});
         } else if (postOpType == PostOp::PRELU) {
-            const auto negativeSlope = ngraph::builder::makeConstant<float>(ov::element::f32, {1}, {0.1}, false);
+            const auto negativeSlope =
+                    ov::op::v0::Constant::create(ov::element::f32, ov::Shape{1}, std::vector<float>{0.1f});
             const auto postOp = std::make_shared<ov::op::v0::PRelu>(conv, negativeSlope);
-            outputFq = ngraph::builder::makeFakeQuantize(postOp, ov::element::f32, outLevels, {}, {-128.0}, {127.0},
-                                                         {-128.0}, {127.0});
+            outputFq = ov::test::utils::make_fake_quantize(postOp, ov::element::f32, outLevels, {}, {-128.0}, {127.0},
+                                                           {-128.0}, {127.0});
         }
 
         const ov::ResultVector results{std::make_shared<ov::op::v0::Result>(outputFq)};
         function = std::make_shared<ov::Model>(results, params, "ConvPwlQuantized");
         rel_threshold = 0.1f;
     }
+
+public:
+    static std::string getTestCaseName(const testing::TestParamInfo<PostOp>& obj) {
+        const std::string sep = "_";
+        std::ostringstream result;
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
+        result << "TestIdx=" << obj.index << sep;
+        return result.str();
+    };
 };
 
 TEST_P(ConvPwlSubGraphTest_NPU3700, SW) {
     setReferenceSoftwareMode();
-    run(VPUXPlatform::VPU3700);
+    run(Platform::NPU3700);
 }
 
 TEST_P(ConvPwlSubGraphTest_NPU3700, HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3700);
+    run(Platform::NPU3700);
 }
 
 TEST_P(ConvPwlQuantizedSubGraphTest_NPU3700, SW) {
     setReferenceSoftwareMode();
-    run(VPUXPlatform::VPU3700);
+    run(Platform::NPU3700);
 }
 
 TEST_P(ConvPwlQuantizedSubGraphTest_NPU3700, HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3700);
+    run(Platform::NPU3700);
 }
 
 std::vector<PostOp> postOps = {PostOp::SIGMOID, PostOp::TANH, PostOp::PRELU};
@@ -137,9 +160,10 @@ std::vector<PostOp> quantPostOps = {
         //, PostOp::PRELU
 };
 
-INSTANTIATE_TEST_CASE_P(smoke_ConvPwl, ConvPwlSubGraphTest_NPU3700, ::testing::ValuesIn(postOps));
+INSTANTIATE_TEST_CASE_P(smoke_ConvPwl, ConvPwlSubGraphTest_NPU3700, ::testing::ValuesIn(postOps),
+                        ConvPwlSubGraphTest_NPU3700::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(smoke_ConvPwlQuantized, ConvPwlQuantizedSubGraphTest_NPU3700,
-                        ::testing::ValuesIn(quantPostOps));
+INSTANTIATE_TEST_CASE_P(smoke_ConvPwlQuantized, ConvPwlQuantizedSubGraphTest_NPU3700, ::testing::ValuesIn(quantPostOps),
+                        ConvPwlQuantizedSubGraphTest_NPU3700::getTestCaseName);
 
 }  // namespace ov::test

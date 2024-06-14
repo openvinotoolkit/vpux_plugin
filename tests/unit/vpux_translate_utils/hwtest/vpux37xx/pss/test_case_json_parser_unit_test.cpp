@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+//
+
 #include "vpux/hwtest/test_case_json_parser.hpp"
 
 #include <gtest/gtest.h>
@@ -11,7 +13,7 @@
 #include <llvm/Support/raw_ostream.h>
 
 void createCaseGeneratorHeaderJson(llvm::json::OStream& j) {
-    j.attribute("architecture", "VPUX37XX");
+    j.attribute("architecture", "NPU37XX");
     j.attribute("compiler_backend", "ELF");
     j.attribute("case_type", "ZMajorConvolution");
     j.attribute("network", "");

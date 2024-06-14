@@ -1,13 +1,13 @@
-// Copyright (C) Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #pragma once
 
 #include "base/ov_behavior_test_utils.hpp"
 #include "common/vpu_test_env_cfg.hpp"
+#include "common_test_utils/node_builders/constant.hpp"
 #include "functional_test_utils/ov_plugin_cache.hpp"
-#include "ov_models/builders.hpp"
 
 #include <gmock/gmock-matchers.h>
 #include <gmock/gmock.h>
@@ -20,7 +20,7 @@
 #include <openvino/runtime/compiled_model.hpp>
 #include <openvino/runtime/core.hpp>
 
-#include "vpux/al/config/common.hpp"
+#include "intel_npu/al/config/common.hpp"
 
 using CompilationParams = std::tuple<std::string,  // Device name
                                      ov::AnyMap    // Config
@@ -33,12 +33,12 @@ namespace ov {
 namespace test {
 namespace behavior {
 
-class UnsupportedTestOp : public ov::op::Op {
+class UnsupportedTestOperation : public ov::op::Op {
 public:
-    OPENVINO_OP("UnsupportedTestOp");
+    OPENVINO_OP("UnsupportedTestOperation");
 
-    UnsupportedTestOp() = default;
-    explicit UnsupportedTestOp(const ov::Output<ov::Node>& arg): Op({arg}) {
+    UnsupportedTestOperation() = default;
+    explicit UnsupportedTestOperation(const ov::Output<ov::Node>& arg): Op({arg}) {
         constructor_validate_and_infer_types();
     }
 
@@ -49,16 +49,11 @@ public:
         set_output_type(0, get_input_element_type(0), ov::PartialShape(output_shape));
     }
 
-    bool visit_attributes(AttributeVisitor& /*visitor*/) override {
-        return true;
-    }
+    bool visit_attributes(AttributeVisitor& /*visitor*/) override;
 
     std::shared_ptr<ov::Node> clone_with_new_inputs(const ov::OutputVector& new_args) const override {
-        if (new_args.size() != 1) {
-            throw ngraph::ngraph_error("Incorrect number of new arguments");
-        }
-
-        return std::make_shared<UnsupportedTestOp>(new_args.at(0));
+        OPENVINO_ASSERT(new_args.size() == 1, "Incorrect number of new arguments");
+        return std::make_shared<UnsupportedTestOperation>(new_args.at(0));
     }
 };
 
@@ -96,10 +91,6 @@ public:
         SKIP_IF_CURRENT_TEST_IS_DISABLED()
         OVPluginTestBase::SetUp();
         ov_model = createModelWithUnknownNode();
-        ov::AnyMap params;
-        for (auto&& v : configuration) {
-            params.emplace(v.first, v.second);
-        }
     }
 
     void TearDown() override {
@@ -115,8 +106,8 @@ private:
         const ov::element::Type precision = ov::element::f32;
 
         ov::ParameterVector params{std::make_shared<ov::op::v0::Parameter>(precision, ov::Shape{input_shape})};
-        auto constant = ngraph::builder::makeConstant(precision, {4096, 1024}, std::vector<float>{}, true);
-        auto custom_op = std::make_shared<UnsupportedTestOp>(constant);
+        auto constant = ov::test::utils::deprecated::make_constant(precision, {4096, 1024}, std::vector<float>{}, true);
+        auto custom_op = std::make_shared<UnsupportedTestOperation>(constant);
 
         ov::NodeVector results{custom_op};
         return std::make_shared<ov::Model>(results, ov::ParameterVector{params}, "CustomOpModel");
@@ -124,13 +115,14 @@ private:
 };
 
 TEST_P(FailGracefullyTest, OnUnsupprotedOperator) {
-    auto compilerType = configuration[ov::intel_vpux::compiler_type.name()].as<std::string>();
+    auto compilerType = configuration[ov::intel_npu::compiler_type.name()].as<std::string>();
     try {
         core->compile_model(ov_model, target_device, configuration);
     } catch (std::exception& ex) {
         // TODO: the below error messages will be improved in E#64716
         if (compilerType == "MLIR") {
-            EXPECT_THAT(ex.what(), AllOf(HasSubstr("Unsupported operation"), HasSubstr("with type UnsupportedTestOp")));
+            EXPECT_THAT(ex.what(),
+                        AllOf(HasSubstr("Unsupported operation"), HasSubstr("with type UnsupportedTestOperation")));
         } else if (compilerType == "DRIVER") {
             EXPECT_THAT(ex.what(), AllOf(HasSubstr("Failed to compile network")));
         }

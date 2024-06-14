@@ -23,6 +23,7 @@
 
 #include <llvm/ADT/STLExtras.h>
 #include <llvm/ADT/TypeSwitch.h>
+#include <mlir/Transforms/InliningUtils.h>
 
 #include <cstring>
 #include <exception>
@@ -30,6 +31,30 @@
 #include <utility>
 
 using namespace vpux;
+
+namespace {
+
+//
+// ConstInlinerInterface
+//
+
+struct ConstInlinerInterface : public mlir::DialectInlinerInterface {
+    using DialectInlinerInterface::DialectInlinerInterface;
+
+    bool isLegalToInline(mlir::Operation*, mlir::Operation*, bool) const final {
+        return true;
+    }
+
+    bool isLegalToInline(mlir::Operation*, mlir::Region*, bool, mlir::IRMapping&) const final {
+        return true;
+    }
+
+    bool isLegalToInline(mlir::Region*, mlir::Region*, bool, mlir::IRMapping&) const final {
+        return true;
+    }
+};
+
+}  // namespace
 
 //
 // Generated
@@ -52,6 +77,8 @@ void vpux::Const::ConstDialect::initialize() {
 #define GET_ATTRDEF_LIST
 #include <vpux/compiler/dialect/const/attributes.cpp.inc>
             >();
+
+    addInterfaces<ConstInlinerInterface>();
 }
 
 //

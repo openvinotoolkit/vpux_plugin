@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --canonicalize %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 // CHECK: #NCWH = affine_map<(d0, d1, d2, d3) -> (d0, d1, d3, d2)>
 
@@ -41,8 +41,6 @@ func.func @FuseTransposes(%arg0: tensor<1x16x2x3xf32>) -> tensor<1x3x16x2xf32> {
 
 // -----
 
-// CHECK: #map = affine_map<(d0, d1) -> (d1, d0)>
-
 func.func @FoldConstTranspose() -> tensor<40x512xf32> {
     %weights = const.Declare tensor<512x40xf32> = dense<1.0> : tensor<512x40xf32>
     %order = const.Declare tensor<2xsi64> = dense<[1, 0]> : tensor<2xsi64>
@@ -52,7 +50,7 @@ func.func @FoldConstTranspose() -> tensor<40x512xf32> {
 
     // CHECK-NOT:  IE.Transpose
     // CHECK-DAG:      [[VAL0:%.*]] = const.Declare tensor<40x512xf32>
-    // CHECK-SAME:     dense<1.000000e+00> : tensor<512x40xf32>, [#const.Transpose<#map>]
+    // CHECK-SAME:     dense<1.000000e+00> : tensor<512x40xf32>, [#const.Transpose<#CN>]
     // CHECK:      return [[VAL0]] : tensor<40x512xf32>
 
 }
@@ -211,10 +209,10 @@ func.func @FoldTrivial3dTranspose(%arg0: tensor<1x16x32xf16>) -> tensor<1x16x32x
 
 // -----
 
-#map = affine_map<(d0, d1) -> (d0, d1)>
+#CN = affine_map<(d0, d1) -> (d0, d1)>
 
 func.func @FoldTrivial2dTranspose(%arg0: tensor<1x16xf16>) -> tensor<1x16xf16> {
-    %0 = IE.Transpose(%arg0) {order_value = #map} : tensor<1x16xf16> -> tensor<1x16xf16>
+    %0 = IE.Transpose(%arg0) {order_value = #CN} : tensor<1x16xf16> -> tensor<1x16xf16>
 
     return %0 : tensor<1x16xf16>
 
@@ -249,14 +247,14 @@ func.func @DoNotFold3dTransposeWithSameShape(%arg0: tensor<1x32x32xf16>) -> tens
 
 // -----
 
-#map = affine_map<(d0, d1) -> (d1, d0)>
+#CN = affine_map<(d0, d1) -> (d1, d0)>
 
 func.func @DoNotFold2dTransposeWithSameShape(%arg0: tensor<32x32xf16>) -> tensor<32x32xf16> {
-    %0 = IE.Transpose(%arg0) {order_value = #map} : tensor<32x32xf16> -> tensor<32x32xf16>
+    %0 = IE.Transpose(%arg0) {order_value = #CN} : tensor<32x32xf16> -> tensor<32x32xf16>
 
     return %0 : tensor<32x32xf16>
 
-    // CHECK:   [[VAL0:%.*]] = IE.Transpose(%arg0) {order_value = #map} : tensor<32x32xf16> -> tensor<32x32xf16>
+    // CHECK:   [[VAL0:%.*]] = IE.Transpose(%arg0) {order_value = #CN} : tensor<32x32xf16> -> tensor<32x32xf16>
     // CHECK:   return [[VAL0]] : tensor<32x32xf16>
 }
 
@@ -270,7 +268,7 @@ func.func @ConvertTrivialTransposeToReshape(%arg0: tensor<1x160x1x55xf16>) -> te
     return %0 : tensor<1x160x55x1xf16>
 
     // CHECK-NOT:   IE.Transpose
-    // CHECK:       IE.AffineReshape 
+    // CHECK:       IE.AffineReshape
     // CHECK-SAME{LITERAL}:     {dim_mapping = [[0], [1], [1], [2, 3]], shape_value = [1, 160, 55, 1]}
     // CHECK-SAME:              tensor<1x160x1x55xf16> -> tensor<1x160x55x1xf16>
 }

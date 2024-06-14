@@ -162,7 +162,6 @@ Const::details::PositionRequirement Const::BitPackAttr::getPositionRequirement()
     let useDefaultAttributePrinterParser = 1;
 
     let extraClassDeclaration = [{
-        static void populateBufferizePatterns(mlir::RewritePatternSet& patterns, mlir::TypeConverter& typeConverter, vpux::Logger log);
         static void setupExtraInterfaces(mlir::DialectRegistry& registry);
     }];
 }

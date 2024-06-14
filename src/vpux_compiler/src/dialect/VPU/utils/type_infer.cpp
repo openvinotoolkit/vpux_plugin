@@ -7,6 +7,7 @@
 
 #include "vpux/compiler/core/attributes/dims_order.hpp"
 #include "vpux/compiler/core/type_interfaces.hpp"
+#include "vpux/compiler/dialect/IE/utils/permute_infer.hpp"
 #include "vpux/compiler/dialect/IE/utils/reduce_infer.hpp"
 #include "vpux/compiler/utils/error.hpp"
 #include "vpux/compiler/utils/permute_utils.hpp"
@@ -36,7 +37,7 @@ mlir::LogicalResult inferReduceReturnTypes(mlir::Location loc, mlir::Value input
     }
 
     // If axes contains all dimensions of input data, a single reduction value is calculated for the entire input tensor
-    if (outShape.size() == 0) {
+    if (outShape.empty()) {
         outShape = {1};
     }
 
@@ -62,8 +63,15 @@ void inferPermuteReturnTypes(mlir::Value input, mlir::AffineMap mem_perm, mlir::
     const auto inMemShape = inOrder.toMemoryOrder(inShape);
     const auto outMemShape = applyPerm(inMemShape, mem_perm);
     const auto outShape = outOrder.toLogicalOrder(outMemShape);
+    const auto outBoundsAttr = permuteBounds(input.getContext(), inType.dyn_cast_or_null<vpux::BoundedTypeInterface>(),
+                                             inOrder, outOrder, mem_perm);
 
-    const auto outType = inType.changeDimsOrder(outOrder).changeShape(outShape);
+    auto outType = inType.changeDimsOrder(outOrder).changeShape(outShape);
+
+    if (auto boundedOutType = outType.dyn_cast<vpux::BoundedTypeInterface>()) {
+        outType = boundedOutType.changeBounds(outBoundsAttr);
+    }
+
     inferredReturnTypes.push_back(outType);
 }
 

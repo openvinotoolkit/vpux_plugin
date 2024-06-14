@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+//
+
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/FormatVariadic.h>
 
@@ -21,6 +23,7 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <random>
 #include <vector>
 
@@ -67,6 +70,8 @@ llvm::cl::opt<size_t> memSize("size", llvm::cl::value_desc("memSize"), llvm::cl:
                               llvm::cl::desc("DEVELOPER ONLY: Maximum size of the allocated buffer on VPU side"
                                              "for the Loaded and linked hex-file. This value needs to reflect"
                                              "the InferenceManagerDemoHex application configuration"));
+
+llvm::cl::opt<bool> useFScache("useFScache", llvm::cl::desc("Use FS AccessManager"));
 
 llvm::cl::opt<bool> verbose("v", llvm::cl::desc("Set verbosity"));
 
@@ -269,24 +274,35 @@ int main(int argc, char* argv[]) {
             Logger::setGlobalLevel(LogLevel::LOG_DEBUG);
         }
 
-        std::ifstream inputStream(elfFilePath.data(), std::ios::binary);
-        std::vector<uint8_t> elfFile((std::istreambuf_iterator<char>(inputStream)), (std::istreambuf_iterator<char>()));
-        inputStream.close();
+        std::unique_ptr<AccessManager> accessor;
+        std::vector<uint8_t> elfFile;
+
+        if (useFScache.getValue()) {
+            accessor = std::make_unique<ElfFSAccessManager>(elfFilePath.data());
+        } else {
+            std::ifstream inputStream(elfFilePath.data(), std::ios::binary | std::ios::ate);
+            elfFile.resize(inputStream.tellg());
+            inputStream.seekg(0, inputStream.beg);
+            inputStream.read(reinterpret_cast<char*>(elfFile.data()), elfFile.size());
+            inputStream.close();
+
+            ElfDDRAccessManager::Config accessorConfig;
+            accessorConfig.mBufferManager = nullptr;
+            accessorConfig.mInPlaceConfig.mIsInPlaceEnabled = true;
+            accessorConfig.mInPlaceConfig.mIsAlignmentCheckEnabled = false;
+            accessor = std::make_unique<ElfDDRAccessManager>(elfFile.data(), elfFile.size(), accessorConfig);
+        }
 
         FlatHexBufferManager bufferManager(baseAddr, memSize);
-
         HexMappedInferenceEntry* hexEntry = reinterpret_cast<HexMappedInferenceEntry*>(
                 bufferManager.allocate(BufferSpecs(1, sizeof(HexMappedInferenceEntry), SHF_NONE)).cpu_addr());
-
-        ElfDDRAccessManager accessor(reinterpret_cast<const uint8_t*>(elfFile.data()), elfFile.size());
 
         auto start = high_resolution_clock::now();
 
         elf::HPIConfigs hpiConfigs;
-
         hpiConfigs.archKind = elf::platform::ArchKind::VPUX37XX;
 
-        HostParsedInference loader(&bufferManager, &accessor, hpiConfigs);
+        HostParsedInference loader(&bufferManager, accessor.get(), hpiConfigs);
         loader.load();
 
         auto end = high_resolution_clock::now();

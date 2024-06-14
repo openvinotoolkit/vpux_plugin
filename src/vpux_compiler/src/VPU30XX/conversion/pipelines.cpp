@@ -6,7 +6,7 @@
 #include "vpux/compiler/VPU30XX/conversion.hpp"
 #include "vpux/compiler/conversion.hpp"
 #include "vpux/compiler/core/passes.hpp"
-#include "vpux/compiler/dialect/VPUIP/passes.hpp"
+#include "vpux/compiler/dialect/VPUIP/transforms/passes.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
 #include <mlir/Transforms/Passes.h>
@@ -21,7 +21,7 @@ void vpux::arch30xx::buildLowerIE2VPUPipeline(mlir::OpPassManager& pm, Logger lo
     const auto grc = getDefaultGreedyRewriteConfig();
 
     pm.addPass(vpux::arch30xx::createConvertIEToVPUNCEPass(log));
-    pm.addPass(vpux::arch30xx::createConvertLayers2VPUPass(log));
+    pm.addPass(createConvertLayers2VPUPass(log));
     pm.addPass(mlir::createCanonicalizerPass(grc));
 }
 
@@ -32,14 +32,9 @@ void vpux::arch30xx::buildLowerIE2VPUPipeline(mlir::OpPassManager& pm, Logger lo
 void vpux::arch30xx::buildLowerVPU2VPUIPPipeline(mlir::OpPassManager& pm, Logger log) {
     const auto grc = getDefaultGreedyRewriteConfig();
 
-    pm.addPass(createBufferizeFuncAndReturnPass(log));
-    pm.addPass(createAddBuffersForNetResults(log));
-
     pm.addPass(createConvertSWLayers2VPUIPUPAPass(log));
-    pm.addPass(createConvertLayers2VPUIPPass(log));
-
-    pm.addPass(createConvertVPUNCEToVPUIPPass(log));
-    pm.addPass(createConvertNCEClusterTilingToVPUIPPass(log));
+    pm.addPass(createOneShotBufferizeVPU2VPUIPPass());
+    pm.addPass(createAddBuffersForNetResults(log));
     pm.addPass(mlir::createCanonicalizerPass(grc));
 }
 

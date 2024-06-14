@@ -1,12 +1,8 @@
-// Copyright (C) Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include <vpu_ov2_layer_test.hpp>
-
-#include <ov_models/builders.hpp>
-#include <ov_models/utils/ov_helpers.hpp>
-#include <shared_test_classes/base/layer_test_utils.hpp>
 
 namespace ov::test {
 
@@ -50,22 +46,32 @@ class TransposeWithConv2dTest_NPU3700 :
         function = std::make_shared<ov::Model>(results, params, "TransposeWithConv2dTest");
         rel_threshold = 0.5f;
     }
+
+public:
+    static std::string getTestCaseName(const testing::TestParamInfo<std::vector<int64_t>>& obj) {
+        const std::string sep = "_";
+        std::ostringstream result;
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
+        result << "TestIdx=" << obj.index << sep;
+        return result.str();
+    };
 };
 
 TEST_P(TransposeWithConv2dTest_NPU3700, SW) {
     setReferenceSoftwareMode();
-    run(VPUXPlatform::VPU3700);
+    run(Platform::NPU3700);
 }
 
 TEST_P(TransposeWithConv2dTest_NPU3700, HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3700);
+    run(Platform::NPU3700);
 }
 
 const std::vector<std::vector<int64_t>> transposes = {
         {0, 3, 1, 2}, {0, 3, 2, 1}, {0, 2, 1, 3}, {0, 2, 3, 1}, {0, 1, 3, 2},
 };
 
-INSTANTIATE_TEST_SUITE_P(transpose_conv2d, TransposeWithConv2dTest_NPU3700, ::testing::ValuesIn(transposes));
+INSTANTIATE_TEST_SUITE_P(transpose_conv2d, TransposeWithConv2dTest_NPU3700, ::testing::ValuesIn(transposes),
+                         TransposeWithConv2dTest_NPU3700::getTestCaseName);
 
 }  // namespace ov::test

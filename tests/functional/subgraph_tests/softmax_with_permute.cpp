@@ -1,12 +1,10 @@
 //
-// Copyright (C) 2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include "common_test_utils/ov_tensor_utils.hpp"
 #include "openvino/opsets/opset1.hpp"
-#include "shared_test_classes/base/layer_test_utils.hpp"
-#include "vpu_ov1_layer_test.hpp"
 #include "vpu_ov2_layer_test.hpp"
 
 using namespace ov::test::utils;
@@ -30,11 +28,13 @@ public:
         size_t softmaxChannelSize;
         std::tie(inputShape, axis, softmaxChannelSize) = obj.param;
 
+        const std::string sep = "_";
         std::ostringstream result;
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
         result << "inputShape={" << inputShape.at(0) << ", " << inputShape.at(1) << ", " << inputShape.at(2) << ", "
-               << inputShape.at(3) << "}_";
-        result << "axis={" << axis << "}_";
-        result << "softmaxChannelSize={" << softmaxChannelSize << "}_";
+               << inputShape.at(3) << "}" << sep;
+        result << "axis={" << axis << "}" << sep;
+        result << "softmaxChannelSize={" << softmaxChannelSize << "}" << sep;
         return result.str();
     }
 
@@ -52,7 +52,7 @@ public:
     }
 
     std::shared_ptr<ov::Node> buildConv(const ov::Output<ov::Node>& param, size_t softmaxChannelSize) {
-        const InferenceEngine::SizeVector inputShape = param.get_shape();
+        const ov::Shape inputShape = param.get_shape();
         const auto weightsSize = inputShape.at(1) * softmaxChannelSize * 1 * 1;
         std::vector<float> values(weightsSize, 0.0f);
         for (std::size_t i = 0; i < softmaxChannelSize; i++) {
@@ -102,9 +102,16 @@ public:
 
 class SoftmaxWithPermuteTest_NPU3720 : public SoftmaxWithPermuteTestCommon {};
 
+class SoftmaxWithPermuteTest_NPU4000 : public SoftmaxWithPermuteTestCommon {};
+
 TEST_P(SoftmaxWithPermuteTest_NPU3720, HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
+}
+
+TEST_P(SoftmaxWithPermuteTest_NPU4000, HW) {
+    setDefaultHardwareMode();
+    run(Platform::NPU4000);
 }
 
 std::vector<std::vector<size_t>> inputShape = {{1, 48, 4, 76}, {1, 64, 1, 448}};
@@ -115,6 +122,9 @@ const auto basicCases = ::testing::Combine(::testing::ValuesIn(inputShape), ::te
                                            ::testing::Values(softmaxChannelNum));
 
 INSTANTIATE_TEST_CASE_P(precommit, SoftmaxWithPermuteTest_NPU3720, basicCases,
+                        SoftmaxWithPermuteTestCommon::getTestCaseName);
+
+INSTANTIATE_TEST_CASE_P(precommit, SoftmaxWithPermuteTest_NPU4000, basicCases,
                         SoftmaxWithPermuteTestCommon::getTestCaseName);
 
 }  // namespace ov::test

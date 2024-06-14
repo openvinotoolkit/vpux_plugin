@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2022 Intel Corporation.
+# Copyright (C) 2022 Intel Corporation
 # SPDX-License-Identifier: Apache 2.0
 #
 
@@ -31,6 +31,6 @@ file_func.write_main_csv_file(dict_layers_per_IR, outputDir)
 
 for IR_file in list_of_IR_files:
     file_func.write_info_about_IR_into_csv_file(IR_file, outputDir)
-    
+
 print("\nData collection has been finished sucessfully.")
 print("Now You could import csv-files to spreadsheet.")

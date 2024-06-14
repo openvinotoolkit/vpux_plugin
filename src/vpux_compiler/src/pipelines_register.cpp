@@ -4,7 +4,8 @@
 //
 
 #include "vpux/compiler/VPU30XX/pipelines_register.hpp"
-#include "vpux/compiler/VPU37XX/pipelines_register.hpp"
+#include "vpux/compiler/NPU37XX/pipelines_register.hpp"
+#include "vpux/compiler/NPU40XX/pipelines_register.hpp"
 
 #include "vpux/utils/core/error.hpp"
 
@@ -16,10 +17,12 @@ using namespace vpux;
 
 std::unique_ptr<IPipelineRegistry> vpux::createPipelineRegistry(VPU::ArchKind arch) {
     switch (arch) {
-    case VPU::ArchKind::VPUX30XX:
+    case VPU::ArchKind::NPU30XX:
         return std::make_unique<PipelineRegistry30XX>();
-    case VPU::ArchKind::VPUX37XX:
+    case VPU::ArchKind::NPU37XX:
         return std::make_unique<PipelineRegistry37XX>();
+    case VPU::ArchKind::NPU40XX:
+        return std::make_unique<PipelineRegistry40XX>();
     default:
         VPUX_THROW("Unsupported arch kind: {0}", arch);
     }

@@ -3,11 +3,13 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-#include "vpux/compiler/dialect/IE/ops.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/explicit_distribution_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/generate_tiling.hpp"
+#include "vpux/compiler/dialect/VPU/utils/sw_utils.hpp"
 
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/error.hpp"
@@ -588,6 +590,96 @@ mlir::LogicalResult FuseConcatsWithDifferentAxes::matchAndRewrite(VPU::ConcatOp 
     if (std::none_of(concatViewInputs.begin(), concatViewInputs.end(), hasConcatProducer)) {
         return mlir::failure();
     }
+    SmallVector<VPU::ConcatOp> concatProducers;
+    for (const auto& input : concatViewInputs) {
+        if (hasConcatProducer(input)) {
+            concatProducers.push_back(input.getDefiningOp<VPU::ConcatOp>());
+        }
+    }
+
+    /*Do not fuse concat with subgraph below, since the fuse will prevent the concat to become cmx concat. The condition
+      check should be logically equal to the check in Pass OptimizeSharedInputCopyForConcat.
+                  NCE/SW Op
+                     |
+                   Concat
+                /          \
+             Concat      Concat
+               |            |
+             Slice        Slice
+               |            |
+           NCE/SW Op    NCE/SW Op
+
+    */
+    auto checkConcatPattern = [&](mlir::Operation* op) {
+        auto concatOp = mlir::dyn_cast<VPU::ConcatOp>(op);
+        if (concatOp == nullptr) {
+            return false;
+        }
+        if (!concatOp.getStaticOffsets().has_value()) {
+            return false;
+        }
+        auto concatAxes = getConcatAxesFromOffsets(concatOp, getShape(concatOp.getResult()));
+        if (concatAxes.size() != 1) {
+            return false;
+        }
+        return llvm::all_of(op->getUsers(), [&](const auto& user) {
+            auto sliceOp = mlir::dyn_cast<VPU::SliceOp>(user);
+            if (sliceOp == nullptr || !sliceOp->hasOneUse()) {
+                return false;
+            }
+            auto inShape = getShape(sliceOp.getSource());
+            auto outShape = getShape(sliceOp.getResult());
+            auto diffAxesNum = llvm::count_if(irange(inShape.size()), [&](auto idx) {
+                return inShape[Dim(idx)] != outShape[Dim(idx)];
+            });
+            if (diffAxesNum != 1) {
+                return false;
+            }
+
+            auto nextUser = *sliceOp->getUsers().begin();
+            if (!mlir::isa<VPU::NCEOpInterface, VPU::SWOpInterface>(nextUser)) {
+                return false;
+            };
+            // If the user of slice is NCE or SW op with multi cluster strategy, need to check if the tiling
+            // axis is in concat axes. If so, the cmx concat optimization can not be used, so the concat should
+            // keep fused in current rewriter.
+            auto clusteredOp = mlir::dyn_cast<VPU::ClusteredOpInterface>(nextUser);
+            if (clusteredOp == nullptr || !clusteredOp.getMultiClusterStrategy().has_value()) {
+                return true;
+            }
+
+            const auto strategy = clusteredOp.getMultiClusterStrategy().value();
+            const auto numCluster =
+                    clusteredOp.getOptimalNumClusters(getShape(clusteredOp->getResult(0)), strategy).getInt();
+            auto inType = sliceOp.getResult().getType();
+            SmallVector<int64_t> tilingScheme;
+            if (mlir::isa<VPU::SWOpInterface>(nextUser)) {
+                tilingScheme = VPU::getSWInputTensorNumTiles(clusteredOp, numCluster, strategy, inType);
+            } else {
+                auto nceOp = mlir::dyn_cast<VPU::NCEOpInterface>(nextUser);
+                auto isFilter = !mlir::isa<VPU::NCEEltwiseOp>(nceOp.getOperation()) &&
+                                nceOp.getWeightsOperand().getDefiningOp() == sliceOp;
+                tilingScheme = isFilter ? VPU::getWeightsTensorNumTiles(clusteredOp, inType, numCluster, strategy)
+                                        : VPU::getActivationTensorNumTiles(clusteredOp, numCluster, strategy);
+            }
+            auto tilingOnDifferentDim = llvm::all_of(concatAxes, [&](const auto& dim) {
+                return tilingScheme[dim.ind()] == 1;
+            });
+            return tilingOnDifferentDim;
+        });
+    };
+
+    auto isSlicedForNceOrSwOp = llvm::any_of(concatProducers, [&](auto producer) {
+        auto hasNceOrSwOpInput = llvm::any_of(producer.getInputs(), [](auto input) {
+            return mlir::isa_and_nonnull<VPU::NCEOpInterface, VPU::SWOpInterface>(input.getDefiningOp());
+        });
+        return hasNceOrSwOpInput && VPU::hasMultiBranches(producer) &&
+               llvm::all_of(producer->getUsers(), checkConcatPattern);
+    });
+
+    if (isSlicedForNceOrSwOp) {
+        return mlir::failure();
+    }
 
     // Fuse the inputs.
     const auto newInputs = flattenInputs(concatViewInputs);
@@ -786,7 +878,7 @@ mlir::LogicalResult vpux::VPU::ConcatOp::verify() {
 // NCEOpInterface
 //
 
-bool vpux::VPU::ConcatOp::checkStrategyCompatibility(VPU::MultiClusterStrategy strategy) {
+bool vpux::VPU::ConcatOp::checkStrategyCompatibility(VPU::MultiClusterStrategy strategy, size_t) {
     // cmx_concat has accuracy issue with SOH inputs and Height concatenate. Add a workaround here to avoid
     // it happens in strategy manager pass.
     auto outputType = getOutput().getType().cast<NDTypeInterface>();
@@ -806,10 +898,10 @@ bool vpux::VPU::ConcatOp::checkStrategyCompatibility(VPU::MultiClusterStrategy s
 
 vpux::VPU::DistributedTensorAttr vpux::VPU::ConcatOp::getExplicitDistributedTensorAttr(
         vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, mlir::ArrayAttr numTiles,
-        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::ArrayAttr kernel, vpux::VPU::PaddingAttr pad,
-        mlir::ArrayAttr stride, mlir::UnitAttr uniformDistributedSegments) {
+        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::UnitAttr uniformDistributedSegments,
+        const vpux::VPU::OverlapDistributionParams& overlapParams) {
     return vpux::VPU::getConcatExplicitDistributedAttr(shape, distributionMode, numTiles, numClusters, alignment,
-                                                       kernel, pad, stride, uniformDistributedSegments, getContext());
+                                                       uniformDistributedSegments, overlapParams, getContext());
 }
 
 bool VPU::ConcatOp::isOperationSplitOverHeightCompatible(const vpux::TileInfo& outputTile) {

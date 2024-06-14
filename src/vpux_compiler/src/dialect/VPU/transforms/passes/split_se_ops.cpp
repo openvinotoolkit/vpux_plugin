@@ -4,11 +4,17 @@
 //
 
 #include "vpux/compiler/dialect/IE/utils/interpolate_utils.hpp"
+#include "vpux/compiler/dialect/IE/utils/roll_utils.hpp"
+
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/IR/se_attributes.hpp"
+#include "vpux/compiler/dialect/VPU/transforms/factories/sparsity_constraint.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
+#include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_interpolate_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/se_roll_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/sparsity_utils.hpp"
+
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
@@ -17,6 +23,25 @@
 using namespace vpux;
 
 namespace {
+
+bool doesFitIntoCMX(mlir::Operation* op, NDTypeInterface inputType, NDTypeInterface outputType, int64_t seTableH,
+                    int64_t seTableW) {
+    auto arch = VPU::getArch(op);
+    auto sparsityConstraint = VPU::getSparsityConstraint(arch);
+    const auto inShape = inputType.getShape();
+    const auto inputC = inShape[Dims4D::Act::C];
+
+    const auto seSize = VPU::getSESize(inputC, sparsityConstraint);
+    const auto seDepth = inputC / seSize;
+    const auto sepType = mlir::IntegerType::get(op->getContext(), 32);
+
+    const auto inputDataSize = inputType.getTotalAllocSize().count();
+    const auto inputSMSize = (seTableH * seTableW * inputC) / CHAR_BIT;
+    const auto inputSESize = (seTableH * seTableW * seDepth * sepType.getWidth()) / CHAR_BIT;
+    const auto outputSize = outputType.getTotalAllocSize().count();
+    const auto requiredCMX = inputDataSize + inputSMSize + inputSESize + outputSize;
+    return requiredCMX < VPU::getTotalCMXSize(op).count();
+}
 
 //
 // SplitInterpolate
@@ -32,15 +57,14 @@ public:
     mlir::LogicalResult matchAndRewrite(VPU::InterpolateOp origOp, mlir::PatternRewriter& rewriter) const final;
 
 private:
-    bool isLegalAndBenifitSplitInterpolate(VPU::InterpolateOp origOp, NDTypeInterface inputType,
-                                           NDTypeInterface outputType, VPU::NCEInterpolateModeAttr modeAttr,
+    bool isLegalAndBenifitSplitInterpolate(NDTypeInterface inputType, NDTypeInterface outputType,
+                                           VPU::NCEInterpolateModeAttr modeAttr,
                                            IE::InterpolateCoordModeAttr coordModeAttr) const;
 
     Logger _log;
 };
 
-bool SplitInterpolate::isLegalAndBenifitSplitInterpolate(VPU::InterpolateOp origOp, NDTypeInterface inputType,
-                                                         NDTypeInterface outputType,
+bool SplitInterpolate::isLegalAndBenifitSplitInterpolate(NDTypeInterface inputType, NDTypeInterface outputType,
                                                          VPU::NCEInterpolateModeAttr modeAttr,
                                                          IE::InterpolateCoordModeAttr coordModeAttr) const {
     const auto inputElemType = inputType.getElementType();
@@ -54,35 +78,12 @@ bool SplitInterpolate::isLegalAndBenifitSplitInterpolate(VPU::InterpolateOp orig
     const auto scales = potentialScales.value();
 
     const auto factors = VPU::getNCEInterpolateFactors(scales, modeAttr, coordModeAttr);
-    const auto padsBegin = VPU::getNCEInterpolatePadsBegin(scales, modeAttr, coordModeAttr);
-    const auto padsEnd = VPU::getNCEInterpolatePadsEnd(scales, modeAttr, coordModeAttr);
-    const auto inShape = inputType.getShape();
-
-    // There is no precision cost function to guide when split is beneficial
-    // Interpolate shape size and factor size directly affects performance
-    // Here is a rough limitation when the NCEInterpolate size is larger than the CMX size
-    // and both factors on H and W are larger than 4, it is beneficial to split Interpolate.
-    const auto sepType = mlir::IntegerType::get(origOp.getContext(), 32);
-    const auto seTableH = inShape[Dims4D::Act::H] * factors[VPU::SE_INTERPOLATE_FACTOR_H] +
-                          padsBegin[Dims4D::PadsBegin::Top.ind()] + padsEnd[Dims4D::PadsEnd::Bottom.ind()];
-    const auto seTableW = inShape[Dims4D::Act::W] * factors[VPU::SE_INTERPOLATE_FACTOR_W] +
-                          padsBegin[Dims4D::PadsBegin::Left.ind()] + padsEnd[Dims4D::PadsEnd::Right.ind()];
-    auto arch = VPU::getArch(origOp);
-    auto sparsityConstraint = VPU::getSparsityConstraint(arch);
-    const int64_t seSize = VPU::getSESize(inShape[Dims4D::Act::C], sparsityConstraint);
-    const int64_t seDepth = inShape[Dims4D::Act::C] / seSize;
-
-    const auto inputDataSize = inputType.getTotalAllocSize().count();
-    const auto inputSMSize = (seTableH * seTableW * inShape[Dims4D::Act::C]) / CHAR_BIT;
-    const auto inputSESize = (seTableH * seTableW * seDepth * sepType.getWidth()) / CHAR_BIT;
-    const auto outputSize = outputType.getTotalAllocSize().count();
-    const auto requiredCMX = inputDataSize + inputSMSize + inputSESize + outputSize;
-    const auto doesFitIntoCMX = (requiredCMX < VPU::getTotalCMXSize(origOp).count());
 
     const auto areFactorsLarge = llvm::all_of(factors, [](const auto factor) {
         return factor >= 4;
     });
-    return !doesFitIntoCMX && areFactorsLarge;
+
+    return areFactorsLarge;
 }
 
 mlir::LogicalResult SplitInterpolate::matchAndRewrite(VPU::InterpolateOp origOp,
@@ -102,7 +103,7 @@ mlir::LogicalResult SplitInterpolate::matchAndRewrite(VPU::InterpolateOp origOp,
     const auto modeAttr = VPU::getNCEInterpolateModeAttr(origOp.getAttr().getMode());
     const auto coordModeAttr = origOp.getAttr().getCoordMode();
 
-    if (!isLegalAndBenifitSplitInterpolate(origOp, inputType, outputType, modeAttr, coordModeAttr)) {
+    if (!isLegalAndBenifitSplitInterpolate(inputType, outputType, modeAttr, coordModeAttr)) {
         return matchFailed(rewriter, origOp, "It is not beneficial to split");
     }
 
@@ -153,28 +154,137 @@ mlir::LogicalResult SplitInterpolate::matchAndRewrite(VPU::InterpolateOp origOp,
 }
 
 //
+// SplitRoll
+//
+
+class SplitRoll final : public mlir::OpRewritePattern<VPU::RollOp> {
+public:
+    SplitRoll(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<VPU::RollOp>(ctx), _log(log) {
+        setDebugName("SplitRoll");
+    }
+
+public:
+    mlir::LogicalResult matchAndRewrite(VPU::RollOp origOp, mlir::PatternRewriter& rewriter) const final;
+
+private:
+    bool isLegalAndBenifitSplitRoll(VPU::RollOp origOp, NDTypeInterface inputType, NDTypeInterface outputType,
+                                    ArrayRef<int64_t> shift) const;
+
+    Logger _log;
+};
+
+bool SplitRoll::isLegalAndBenifitSplitRoll(VPU::RollOp origOp, NDTypeInterface inputType, NDTypeInterface outputType,
+                                           ArrayRef<int64_t> shift) const {
+    const auto inShape = inputType.getShape();
+    const auto seTableH = inShape[Dims4D::Act::H];
+    const auto seTableW = inShape[Dims4D::Act::W];
+
+    const auto fitInCmx = doesFitIntoCMX(origOp, inputType, outputType, seTableH, seTableW);
+    const auto rollAtTwoDim = shift.size() == 2 && shift[0] != 0 && shift[1] != 0;
+    return !fitInCmx && rollAtTwoDim;
+}
+
+mlir::LogicalResult SplitRoll::matchAndRewrite(VPU::RollOp origOp, mlir::PatternRewriter& rewriter) const {
+    _log.trace("[{0}] Got '{1}' at '{2}'", getDebugName(), origOp->getName(), origOp->getLoc());
+
+    const auto logCb = [&](const formatv_object_base& msg) {
+        _log.trace("{0}", msg.str());
+    };
+
+    if (!VPU::isSupportedSEPRoll(origOp, logCb, /*checkLayout=*/true, /*checkChannelAlignment=*/true)) {
+        return matchFailed(rewriter, origOp, "It is not fit for NCE");
+    }
+
+    const auto inputType = origOp.getData().getType().cast<vpux::NDTypeInterface>();
+    const auto inputShape = inputType.getShape();
+    auto shiftAndAxesOrFail =
+            IE::getShiftAndAxesForRollOp(origOp.getLoc(), origOp.getShift(), origOp.getAxes(), inputShape);
+    if (mlir::failed(shiftAndAxesOrFail)) {
+        return mlir::failure();
+    }
+    const auto shiftAndAxes = shiftAndAxesOrFail.value();
+    const auto shift = shiftAndAxes.shift;
+    const auto axes = shiftAndAxes.axes;
+
+    const auto outputType = origOp.getOutput().getType().cast<vpux::NDTypeInterface>();
+    if (!isLegalAndBenifitSplitRoll(origOp, inputType, outputType, shift)) {
+        return matchFailed(rewriter, origOp, "It is not beneficial to split");
+    }
+
+    const auto axesDimOrder = origOp.getAxes().getType().cast<vpux::NDTypeInterface>().getDimsOrder();
+    const auto newAxesValue =
+            VPU::createIntConst(Shape{checked_cast<int64_t>(axes.size())}, axesDimOrder,
+                                {Dims4D::Act::H.ind(), Dims4D::Act::W.ind()}, origOp.getAxes().getLoc(), rewriter);
+
+    const auto shiftDimOrder = origOp.getShift().getType().cast<vpux::NDTypeInterface>().getDimsOrder();
+    const auto shiftLoc = origOp.getShift().getLoc();
+
+    auto createSingleDimRollOp = [&](Dim dim, ArrayRef<int32_t> newShift, mlir::Value inputVal) {
+        const auto shiftValue = VPU::createIntConst(Shape{checked_cast<int64_t>(newShift.size())}, shiftDimOrder,
+                                                    newShift, shiftLoc, rewriter);
+        auto newLoc = appendLoc(origOp.getLoc(), "_roll_on_Dim_{0}", dim.ind());
+        return rewriter.create<VPU::RollOp>(newLoc, inputVal, shiftValue, newAxesValue).getOutput();
+    };
+
+    auto rollW = createSingleDimRollOp(Dims4D::Act::W, {0, checked_cast<int32_t>(shift[VPU::SE_ROLL_SPATIAL_W])},
+                                       origOp.getData());
+    auto rollH =
+            createSingleDimRollOp(Dims4D::Act::H, {checked_cast<int32_t>(shift[VPU::SE_ROLL_SPATIAL_H]), 0}, rollW);
+
+    rewriter.replaceOp(origOp, rollH);
+    return mlir::success();
+}
+
+//
 // SplitSEOpsPass
 //
 
 class SplitSEOpsPass final : public VPU::SplitSEOpsBase<SplitSEOpsPass> {
 public:
-    explicit SplitSEOpsPass(Logger log): _log(log) {
+    explicit SplitSEOpsPass(const bool seOpsEnabled, const bool seExperimentalOpsEnabled, Logger log)
+            : _seOpsEnabled(seOpsEnabled), _seExperimentalOpsEnabled(seExperimentalOpsEnabled), _log(log) {
         _log.setName(Base::getArgumentName());
     }
+
+    mlir::LogicalResult initialize(mlir::MLIRContext* ctx) final;
 
 private:
     void safeRunOnFunc() final;
 
 private:
+    bool _seOpsEnabled;
+    bool _seExperimentalOpsEnabled;
     Logger _log;
 };
+
+mlir::LogicalResult SplitSEOpsPass::initialize(mlir::MLIRContext* ctx) {
+    if (mlir::failed(Base::initialize(ctx))) {
+        return mlir::failure();
+    }
+
+    // When this parameter has a value, it probably comes from LIT test.
+    // Override the default
+    if (seOpsEnabled.hasValue()) {
+        _seOpsEnabled = seOpsEnabled.getValue();
+    }
+    if (seExperimentalOpsEnabled.hasValue()) {
+        _seExperimentalOpsEnabled = seExperimentalOpsEnabled.getValue();
+    }
+
+    return mlir::success();
+}
 
 void SplitSEOpsPass::safeRunOnFunc() {
     auto& ctx = getContext();
     auto func = getOperation();
 
     mlir::RewritePatternSet patterns(&ctx);
-    patterns.add<SplitInterpolate>(&ctx, _log);
+    if (_seOpsEnabled) {
+        patterns.add<SplitInterpolate>(&ctx, _log);
+    }
+    if (_seExperimentalOpsEnabled) {
+        patterns.add<SplitRoll>(&ctx, _log);
+    }
 
     if (mlir::failed(mlir::applyPatternsAndFoldGreedily(func, std::move(patterns), getDefaultGreedyRewriteConfig()))) {
         signalPassFailure();
@@ -187,6 +297,7 @@ void SplitSEOpsPass::safeRunOnFunc() {
 // createSplitSEOpsPass
 //
 
-std::unique_ptr<mlir::Pass> vpux::VPU::createSplitSEOpsPass(Logger log) {
-    return std::make_unique<SplitSEOpsPass>(log);
+std::unique_ptr<mlir::Pass> vpux::VPU::createSplitSEOpsPass(const bool seOpsEnabled,
+                                                            const bool seExperimentalOpsEnabled, Logger log) {
+    return std::make_unique<SplitSEOpsPass>(seOpsEnabled, seExperimentalOpsEnabled, log);
 }

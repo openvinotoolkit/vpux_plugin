@@ -21,7 +21,8 @@ add_mlir_dialect_library(${TARGET_NAME}
         npu_compiler_dialect_vpu_interfaces
         npu_compiler_dialect_vpu_utils
         npu_compiler_vpu30xx
-        npu_compiler_vpu37xx
+        npu_compiler_npu37xx
+        npu_compiler_npu40xx
         inferenceStatic)
 add_dependencies(${TARGET_NAME} MLIRVPUXIncGenList)
 target_include_directories(${TARGET_NAME}
@@ -33,6 +34,5 @@ target_include_directories(${TARGET_NAME}
     PRIVATE
         ${VPU_COMPILER_SRC_INCLUDE_DIR})
 
-add_src_target($<BUILD_INTERFACE:${TARGET_NAME}>)
-vpux_enable_clang_format(${TARGET_NAME})
+add_src_target(${TARGET_NAME})
 enable_warnings_as_errors(${TARGET_NAME} WIN_STRICT)

@@ -58,18 +58,20 @@ void vpux::FunctionPass::initLogger(Logger log, StringLiteral passName) {
 }
 
 void vpux::FunctionPass::runOnOperation() {
-    if (getOperation().isExternal()) {
+    auto currentOp = getOperation();
+    if (currentOp.isExternal()) {
         return;
     }
 
+    auto passName = getName();
     try {
-        _log.trace("Run on Function '{0}'", getOperation().getName());
+        vpux::Logger::global().trace("Started {0} pass on function '{1}'", passName, currentOp.getName());
 
         _log = _log.nest();
         safeRunOnFunc();
         _log = _log.unnest();
     } catch (const std::exception& e) {
-        (void)errorAt(getOperation(), "{0} Pass failed : {1}", getName(), e.what());
+        (void)errorAt(currentOp, "{0} Pass failed : {1}", passName, e.what());
         signalPassFailure();
     }
 }
@@ -84,10 +86,13 @@ void vpux::ModulePass::initLogger(Logger log, StringLiteral passName) {
 }
 
 void vpux::ModulePass::runOnOperation() {
+    auto currentOp = getOperation();
+    auto passName = getName();
     try {
+        vpux::Logger::global().trace("Started {0} pass on module '{1}'", passName, currentOp.getName());
         safeRunOnModule();
     } catch (const std::exception& e) {
-        (void)errorAt(getOperation(), "{0} failed : {1}", getName(), e.what());
+        (void)errorAt(currentOp, "{0} failed : {1}", passName, e.what());
         signalPassFailure();
     }
 }

@@ -4,8 +4,6 @@
 //
 
 //
-
-//
 // Various numeric helper functions.
 //
 

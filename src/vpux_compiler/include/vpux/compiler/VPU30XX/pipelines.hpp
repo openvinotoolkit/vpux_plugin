@@ -5,9 +5,9 @@
 
 #pragma once
 
-#include "vpux/compiler/VPU30XX/dialect/IE/passes.hpp"
+#include "vpux/compiler/VPU30XX/dialect/IE/transforms/passes.hpp"
 #include "vpux/compiler/VPU30XX/dialect/VPU/transforms/passes.hpp"
-#include "vpux/compiler/VPU30XX/dialect/VPUIP/passes.hpp"
+#include "vpux/compiler/VPU30XX/dialect/VPUIP/transforms/passes.hpp"
 #include "vpux/compiler/core/pipelines_options.hpp"
 #include "vpux/compiler/utils/passes.hpp"
 
@@ -39,9 +39,9 @@ struct ReferenceHWOptions30XX final : public ReferenceHWOptions<ReferenceHWOptio
                                       llvm::cl::desc("Enable storage element pointer operations"),
                                       llvm::cl::init(false)};
 
-    BoolOption enableSEPTransposedConv{*this, "enable-sep-transposed-conv",
-                                       llvm::cl::desc("(Experimental) Enable SEP Transposed Conv"),
-                                       llvm::cl::init(false)};
+    BoolOption enableExperimentalSEPtrsOperations{*this, "enable-experimental-se-ptrs-operations",
+                                                  llvm::cl::desc("Enable the experimental operation of SEP"),
+                                                  llvm::cl::init(false)};
 
     BoolOption enableFuseClampOperations{*this, "enable-fuse-clamp-op", llvm::cl::desc("Enable fuse clamp operations"),
                                          llvm::cl::init(false)};
@@ -49,6 +49,9 @@ struct ReferenceHWOptions30XX final : public ReferenceHWOptions<ReferenceHWOptio
     BoolOption enableVPUNNCost{*this, "vpunn-cost",
                                llvm::cl::desc("Use VPUNN cost model to get the best tiling strategy"),
                                llvm::cl::init(false)};
+
+    BoolOption enableOutputPipelining{*this, "output-pipelining", llvm::cl::desc("Enable output pipelining"),
+                                      llvm::cl::init(false)};
 
     BoolOption enableExplicitDistributedTensorAttr{
             *this, "enable-explicit-distributed-attr",

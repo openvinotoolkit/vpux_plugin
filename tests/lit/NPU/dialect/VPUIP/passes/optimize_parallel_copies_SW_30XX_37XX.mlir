@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -8,7 +8,7 @@
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
 module @VPU.SW  {
-    func.func private @builtin_Convert(memref<*xf32>, memref<*xf16>) attributes {VPU.kernel_code = "single_shave_convert.cpp", VPU.kernel_entry = "single_shave_convert"}
+    func.func private @builtin_Convert(memref<*xf32>, memref<*xf16>) attributes {VPU.kernel_code = "convert.cpp", VPU.kernel_entry = "convert"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
 }
 
@@ -23,7 +23,7 @@ func.func @OptimizeParallelNonConstCopies(
     %act_win = const.Declare memref<1x1x1x16xui8, @CMX_NN> = dense<1> : tensor<1x1x1x16xui8>
     %0 = memref.alloc() : memref<1x16x112x112xf16, #NHWC, @DDR>
 
-    %1 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+    %1 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
         @VPU.SW::@builtin_Convert inputs(%input as %arg3: memref<1x16x112x112xf32, #NHWC>) outputs(%0 as %arg4: memref<1x16x112x112xf16, #NHWC, @DDR>) on tile 0 -> memref<1x16x112x112xf16, #NHWC, @DDR>  {
             VPUIP.SW.Kernel.run {attrs = [0]}(%arg3, %arg4) : memref<1x16x112x112xf32, #NHWC>, memref<1x16x112x112xf16, #NHWC, @DDR>
         }
@@ -93,7 +93,7 @@ func.func @OptimizeParallelNonConstCopies(
 
 // CHECK-LABEL: func.func @OptimizeParallelNonConstCopies
 
-// CHECK:       [[VAR0:%.+]] =  VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_Convert inputs(%arg0 as [[ARG3:%.*]]: memref<1x16x112x112xf32, #NHWC>)
+// CHECK:       [[VAR0:%.+]] =  VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Convert inputs(%arg0 as [[ARG3:%.*]]: memref<1x16x112x112xf32, #NHWC>)
 // CHECK:       [[VAR1:%.*]] =  VPUIP.Copy inputs([[VAR0]] : memref<1x16x112x112xf16, #NHWC, @DDR>)
 // CHECK:       [[VAR2:%.+]] =  VPUIP.NCEClusterTask
 // CHECK-SAME:       input([[VAR1]] : memref<1x16x112x112xf16, #NHWC, @CMX_NN>)
@@ -110,7 +110,7 @@ func.func @OptimizeParallelNonConstCopies(
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
 module @VPU.SW  {
-    func.func private @builtin_Convert(memref<*xf32>, memref<*xf16>) attributes {VPU.kernel_code = "single_shave_convert.cpp", VPU.kernel_entry = "single_shave_convert"}
+    func.func private @builtin_Convert(memref<*xf32>, memref<*xf16>) attributes {VPU.kernel_code = "convert.cpp", VPU.kernel_entry = "convert"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
 }
 
@@ -123,7 +123,7 @@ func.func @OptimizeParallelSubViewPatternCopies(
     %act_win = const.Declare memref<1x1x1x16xui8, @CMX_NN> = dense<1> : tensor<1x1x1x16xui8>
     %0 = memref.alloc() : memref<1x16x112x113xf16, #NHWC, @DDR>
 
-    %1 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+    %1 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
         @VPU.SW::@builtin_Convert inputs(%input as %arg3: memref<1x16x112x113xf32, #NHWC>) outputs(%0 as %arg4: memref<1x16x112x113xf16, #NHWC, @DDR>) on tile 0 -> memref<1x16x112x113xf16, #NHWC, @DDR>  {
             VPUIP.SW.Kernel.run {attrs = [0]}(%arg3, %arg4) : memref<1x16x112x113xf32, #NHWC>, memref<1x16x112x113xf16, #NHWC, @DDR>
         }
@@ -197,7 +197,7 @@ func.func @OptimizeParallelSubViewPatternCopies(
 
 // CHECK-LABEL: func.func @OptimizeParallelSubViewPatternCopies
 
-// CHECK:       [[VAR0:%.+]] =  VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_Convert inputs(%arg0 as [[ARG3:%.*]]: memref<1x16x112x113xf32, #NHWC>)
+// CHECK:       [[VAR0:%.+]] =  VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Convert inputs(%arg0 as [[ARG3:%.*]]: memref<1x16x112x113xf32, #NHWC>)
 // CHECK:       [[VAR1:%.*]] =  VPUIP.SubView [[VAR0]] [0, 0, 0, 0] [1, 16, 112, 112]
 // CHECK:       [[VAR2:%.*]] =  VPUIP.Copy
 // CHECK-SAME       inputs([[VAR1]] : memref<1x16x112x112xf16, {order = #NCHW, strides = [202496, 1, 1808, 16]}, @DDR>)
@@ -373,7 +373,7 @@ func.func @OptimizeMultiplyParallelSameInputsCopies()
     %15:2 = VPUIP.NCEClusterTiling inputs(%12 as %arg2: memref<1x1x54x4xf16, #NCHW, @CMX_NN>, %9 as %arg3: memref<1x1x54x4xf16, #NCHW, @CMX_NN>,
                                            %6 as %arg4: memref<1x1x52x4xf16, #NCHW, @CMX_NN>, %3 as %arg5: memref<1x1x52x4xf16, #NCHW, @CMX_NN>)
                                    outputs(%14 as %arg6: memref<1x1x54x4xf16, #NCHW, @CMX_NN>, %13 as %arg7: memref<1x1x52x4xf16, #NCHW, @CMX_NN>) -> (!FirstInputDistributed, !SecondInputDistributed) {
-        %results:2 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 2, 0>} @VPU.SW::@builtin_Multiply inputs(%arg2 as %arg8: memref<1x1x54x4xf16, #NCHW, @CMX_NN>, %arg3 as %arg9: memref<1x1x54x4xf16, #NCHW, @CMX_NN>, %arg4 as %arg10: memref<1x1x52x4xf16, #NCHW, @CMX_NN>, %arg5 as %arg11: memref<1x1x52x4xf16, #NCHW, @CMX_NN>) outputs(%arg6 as %arg12: memref<1x1x54x4xf16, #NCHW, @CMX_NN>, %arg7 as %arg13: memref<1x1x52x4xf16, #NCHW, @CMX_NN>) on tile 0 -> (memref<1x1x54x4xf16, #NCHW, @CMX_NN>, memref<1x1x52x4xf16, #NCHW, @CMX_NN>){
+        %results:2 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 2, 0, 0>} @VPU.SW::@builtin_Multiply inputs(%arg2 as %arg8: memref<1x1x54x4xf16, #NCHW, @CMX_NN>, %arg3 as %arg9: memref<1x1x54x4xf16, #NCHW, @CMX_NN>, %arg4 as %arg10: memref<1x1x52x4xf16, #NCHW, @CMX_NN>, %arg5 as %arg11: memref<1x1x52x4xf16, #NCHW, @CMX_NN>) outputs(%arg6 as %arg12: memref<1x1x54x4xf16, #NCHW, @CMX_NN>, %arg7 as %arg13: memref<1x1x52x4xf16, #NCHW, @CMX_NN>) on tile 0 -> (memref<1x1x54x4xf16, #NCHW, @CMX_NN>, memref<1x1x52x4xf16, #NCHW, @CMX_NN>){
         VPUIP.SW.Kernel.run {attrs = []}(%arg8, %arg9, %arg12) : memref<1x1x54x4xf16, #NCHW, @CMX_NN>, memref<1x1x54x4xf16, #NCHW, @CMX_NN>, memref<1x1x54x4xf16, #NCHW, @CMX_NN>
         VPUIP.SW.Kernel.run {attrs = []}(%arg10, %arg11, %arg13) : memref<1x1x52x4xf16, #NCHW, @CMX_NN>, memref<1x1x52x4xf16, #NCHW, @CMX_NN>, memref<1x1x52x4xf16, #NCHW, @CMX_NN>
         }
@@ -397,7 +397,7 @@ func.func @OptimizeMultiplyParallelSameInputsCopies()
     // CHECK-SAME:       inputs([[COPY1]] as [[ARG4:%[^:]+]]: memref<1x1x54x4xf16, @CMX_NN>, [[COPY1]] as [[ARG5:%[^:]+]]: memref<1x1x54x4xf16, @CMX_NN>,
     // CHECK-SAME:              [[COPY0]] as [[ARG6:%[^:]+]]: memref<1x1x52x4xf16, @CMX_NN>, [[COPY0]] as [[ARG7:%[^:]+]]: memref<1x1x52x4xf16, @CMX_NN>)
     // CHECK-SAME:       outputs([[OUTPUT_BUFFER1]] as [[ARG8:%[^:]+]]: memref<1x1x54x4xf16, @CMX_NN>, [[OUTPUT_BUFFER0]] as [[ARG9:%[^:]+]]: memref<1x1x52x4xf16, @CMX_NN>)
-    // CHECK:        %results:2 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 2, 0>} @VPU.SW::@builtin_Multiply
+    // CHECK:        %results:2 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 2, 0, 0>} @VPU.SW::@builtin_Multiply
     // CHECK-SAME:       inputs([[ARG4]] as [[ARG10:%[^:]+]]: memref<1x1x54x4xf16, @CMX_NN>, [[ARG5]] as [[ARG11:%[^:]+]]: memref<1x1x54x4xf16, @CMX_NN>,
     // CHECK-SAME:              [[ARG6]] as [[ARG12:%[^:]+]]: memref<1x1x52x4xf16, @CMX_NN>, [[ARG7]] as [[ARG13:%[^:]+]]: memref<1x1x52x4xf16, @CMX_NN>)
     // CHECK-SAME:       outputs([[ARG8]] as [[ARG14:%[^:]+]]: memref<1x1x54x4xf16, @CMX_NN>, [[ARG9]] as [[ARG15:%[^:]+]]: memref<1x1x52x4xf16, @CMX_NN>)

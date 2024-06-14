@@ -1,14 +1,12 @@
 //
-// Copyright (C) 2018-2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2018-2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include "functions.h"
-#include <functional_test_utils/precision_utils.hpp>
-#include <ov_models/builders.hpp>
-#include <ov_models/utils/ov_helpers.hpp>
-#include "base/ov_behavior_test_utils.hpp"
-#include "vpux/properties.hpp"
+#include "common/vpu_test_env_cfg.hpp"
+#include "openvino/op/softmax.hpp"
+#include "openvino/runtime/intel_npu/properties.hpp"
 
 std::shared_ptr<ov::Model> buildSingleLayerSoftMaxNetwork() {
     ov::Shape inputShape = {1, 3, 4, 3};
@@ -30,17 +28,11 @@ std::shared_ptr<ov::Model> buildSingleLayerSoftMaxNetwork() {
 }
 
 const std::string PlatformEnvironment::PLATFORM = []() -> std::string {
-    if (const auto var = std::getenv("IE_KMB_TESTS_PLATFORM")) {
+    const auto& var = ov::test::utils::VpuTestEnvConfig::getInstance().IE_NPU_TESTS_PLATFORM;
+    if (!var.empty()) {
         return var;
     } else {
-        IE_THROW() << "Environment variable not set: IE_KMB_TESTS_PLATFORM.";
+        std::cerr << "Environment variable is not set: IE_NPU_TESTS_PLATFORM! Exiting..." << std::endl;
+        exit(-1);
     }
 }();
-
-std::string getBackendName(const InferenceEngine::Core& core) {
-    return core.GetMetric("NPU", ov::intel_vpux::backend_name.name()).as<std::string>();
-}
-
-std::vector<std::string> getAvailableDevices(const InferenceEngine::Core& core) {
-    return core.GetMetric("NPU", METRIC_KEY(AVAILABLE_DEVICES)).as<std::vector<std::string>>();
-}

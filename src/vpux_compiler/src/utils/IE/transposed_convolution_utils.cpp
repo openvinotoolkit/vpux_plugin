@@ -13,6 +13,10 @@ mlir::FailureOr<Const::DeclareOp> getConstFilter(IE::TransposedConvolutionOp tra
         if (auto filterConst = filterFq.getInput().getDefiningOp<Const::DeclareOp>()) {
             return filterConst;
         }
+    } else if (auto filterDeq = transposedConv.getFilter().getDefiningOp<IE::DequantizeOp>()) {
+        if (auto filterConst = filterDeq.getInput().getDefiningOp<Const::DeclareOp>()) {
+            return filterConst;
+        }
     } else if (auto filterConst = transposedConv.getFilter().getDefiningOp<Const::DeclareOp>()) {
         return filterConst;
     }
@@ -49,7 +53,8 @@ auto createFQ(mlir::PatternRewriter& rewriter, mlir::Value input, IE::FakeQuanti
     const auto newOutputType = outputType.changeShape(getShape(input));
     return rewriter
             .create<IE::FakeQuantizeOp>(fq.getLoc(), newOutputType, input, fq.getInputLow(), fq.getInputHigh(),
-                                        fq.getOutputLow(), fq.getOutputHigh(), fq.getLevels(), fq.getAutoBroadcast())
+                                        fq.getOutputLow(), fq.getOutputHigh(), fq.getLevelsAttr(),
+                                        fq.getLowFpTypeAttr(), fq.getAutoBroadcast())
             .getOutput();
 }
 

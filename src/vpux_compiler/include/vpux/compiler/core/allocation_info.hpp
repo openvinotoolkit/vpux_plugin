@@ -31,6 +31,7 @@ std::tuple<LinearScanHandler, std::list<ScheduledOpOneResource>> runLinearScan(
 struct ScanResult {
     LinearScanHandler& linearScanHandler;
     std::list<ScheduledOpOneResource>& scheduledOpOneResource;
+    SmallVector<std::pair<AddressType, AddressType>> moduleReservedMemVec;
 };
 
 class AllocationInfo {
@@ -47,6 +48,7 @@ private:
 
     LinearScanHandler _linearScanHandler;
     std::list<ScheduledOpOneResource> _scheduledOpOneResource;
+    SmallVector<std::pair<AddressType, AddressType>> _moduleReservedMemVec;
 };
 
 }  // namespace vpux

@@ -5,6 +5,7 @@
 
 #include <mlir/IR/BuiltinTypes.h>
 #include "vpux/compiler/act_kernels/shave_binary_resources.h"
+#include "vpux/compiler/core/profiling.hpp"
 #include "vpux/compiler/dialect/ELFNPU37XX/utils.hpp"
 #include "vpux/compiler/dialect/VPUMI37XX/ops.hpp"
 #include "vpux/utils/core/mem_size.hpp"
@@ -50,7 +51,7 @@ constexpr uint32_t defaultActRtEntry = 0x1C000000;
 //
 //  [27] FRC_DURATION_EN
 //  [28] FRC_TIMESTAMP_EN
-constexpr uint32_t defaultPerfMetricsMask = 0x183C0001;
+constexpr uint32_t defaultPerfMetricsMask = 0x183C000F;
 
 }  // namespace VPUMI37XX
 }  // namespace vpux
@@ -60,6 +61,10 @@ constexpr uint32_t defaultPerfMetricsMask = 0x183C0001;
 //
 
 void vpux::VPUMI37XX::MappedInferenceOp::serialize(elf::writer::BinaryDataSection<uint8_t>& binDataSection) {
+    auto moduleOp = getOperation()->getParentOfType<mlir::ModuleOp>();
+    bool isActShaveProfilingEnabled =
+            vpux::getProfilingSection(moduleOp, profiling::ExecutorType::ACTSHAVE).has_value();
+
     nn_public::VpuMappedInference mi;
     memset(reinterpret_cast<void*>(&mi), 0, getBinarySize());
 
@@ -83,7 +88,7 @@ void vpux::VPUMI37XX::MappedInferenceOp::serialize(elf::writer::BinaryDataSectio
         mi.shv_rt_configs.code_window_buffer_size = VPUMI37XX::defaultActRtCodeSectionSize;
         mi.shv_rt_configs.runtime_version = 0;
         mi.shv_rt_configs.runtime_entry = VPUMI37XX::defaultActRtEntry;
-        mi.shv_rt_configs.perf_metrics_mask = VPUMI37XX::defaultPerfMetricsMask;
+        mi.shv_rt_configs.perf_metrics_mask = isActShaveProfilingEnabled ? VPUMI37XX::defaultPerfMetricsMask : 0;
 
         auto actShvRtOp = mlir::dyn_cast<VPUMI37XX::ActShaveRtOp>(getActShaveRt().getDefiningOp());
         if (actShvRtOp) {
@@ -130,7 +135,7 @@ vpux::VPURT::BufferSection vpux::VPUMI37XX::MappedInferenceOp::getMemorySpace() 
     return vpux::VPURT::BufferSection::DDR;
 }
 
-mlir::FailureOr<uint64_t> vpux::VPUMI37XX::MappedInferenceOp::getOffsetOfWithinOperation(mlir::Value val) {
+size_t vpux::VPUMI37XX::MappedInferenceOp::getOffsetOfWithinOperation(mlir::Value val) {
     if (val == getBarrierTasks()) {
         return offsetof(nn_public::VpuMappedInference, barrier_configs) +
                offsetof(nn_public::VpuTaskReference<nn_public::VpuBarrierCountConfig>, address);
@@ -167,5 +172,5 @@ mlir::FailureOr<uint64_t> vpux::VPUMI37XX::MappedInferenceOp::getOffsetOfWithinO
         }
     }
 
-    return 0;
+    VPUX_THROW("Provided Value is not linked to the MappedInference Op or getOffset does not support it");
 }

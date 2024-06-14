@@ -1,18 +1,15 @@
-// Copyright (C) Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include <base/ov_behavior_test_utils.hpp>
-#include <ie_core.hpp>
 #include <string>
 #include <vector>
 #include "common/functions.h"
 #include "common/utils.hpp"
 #include "common/vpu_test_env_cfg.hpp"
-#include "ov_models/builders.hpp"
-#include "ov_models/utils/ov_helpers.hpp"
-#include "vpux/al/config/common.hpp"
-#include "vpux_private_properties.hpp"
+#include "intel_npu/al/config/common.hpp"
+#include "npu_private_properties.hpp"
 
 namespace {
 
@@ -54,16 +51,28 @@ TEST_P(ElfConfigTests, CompilationWithSpecificConfig) {
     }
     SKIP_IF_CURRENT_TEST_IS_DISABLED() {
         const auto& ov_model = buildSingleLayerSoftMaxNetwork();
-        ASSERT_NO_THROW(auto compiled_model = core->compile_model(ov_model, target_device, configuration));
+        OV_ASSERT_NO_THROW(auto compiled_model = core->compile_model(ov_model, target_device, configuration));
     }
 }
 
 const std::vector<ov::AnyMap> configs = {
-        {{ov::intel_vpux::platform(ov::intel_vpux::VPUXPlatform::VPU3720)},
-         {ov::intel_vpux::use_elf_compiler_backend(ov::intel_vpux::ElfCompilerBackend::NO)}}};
+        {{ov::intel_npu::platform(ov::intel_npu::Platform::NPU3720)},
+         {ov::intel_npu::use_elf_compiler_backend(ov::intel_npu::ElfCompilerBackend::NO)}}};
 
-INSTANTIATE_TEST_SUITE_P(smoke_ELF, ElfConfigTests,
+// Driver compiler type config
+const std::vector<ov::AnyMap> driverCompilerConfigs = {
+        {{ov::intel_npu::platform(ov::intel_npu::Platform::NPU3720)},
+         {ov::intel_npu::use_elf_compiler_backend(ov::intel_npu::ElfCompilerBackend::NO)},
+         ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::DRIVER)}};
+
+INSTANTIATE_TEST_SUITE_P(smoke_BehaviorTest_ELF, ElfConfigTests,
                          ::testing::Combine(::testing::Values(ov::test::utils::DEVICE_NPU),
                                             ::testing::ValuesIn(configs)),
+                         ElfConfigTests::getTestCaseName);
+
+// Driver compiler type test suite
+INSTANTIATE_TEST_SUITE_P(smoke_BehaviorTest_ELF_Driver, ElfConfigTests,
+                         ::testing::Combine(::testing::Values(ov::test::utils::DEVICE_NPU),
+                                            ::testing::ValuesIn(driverCompilerConfigs)),
                          ElfConfigTests::getTestCaseName);
 }  // namespace

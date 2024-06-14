@@ -19,12 +19,12 @@ function(vpux_add_flatc_target FLATC_TARGET_NAME)
     file(GLOB FLATC_SOURCES "${FLATC_SRC_DIR}/*.fbs")
     source_group(TREE ${FLATC_SRC_DIR} FILES ${FLATC_SOURCES})
 
-    file(MAKE_DIRECTORY ${FLATC_DST_DIR})
+    file(MAKE_DIRECTORY "${FLATC_DST_DIR}/schema")
 
     set(dst_files)
     foreach(src_file IN LISTS FLATC_SOURCES)
         get_filename_component(file_name_we ${src_file} NAME_WE)
-        set(dst_file "${FLATC_DST_DIR}/${file_name_we}_generated.h")
+        set(dst_file "${FLATC_DST_DIR}/schema/${file_name_we}_generated.h")
         list(APPEND dst_files ${dst_file})
     endforeach()
 
@@ -32,7 +32,7 @@ function(vpux_add_flatc_target FLATC_TARGET_NAME)
         OUTPUT
             ${dst_files}
         COMMAND
-            ${flatc_COMMAND} -o ${FLATC_DST_DIR} --cpp ${FLATC_ARGS} ${FLATC_SOURCES}
+            ${flatc_COMMAND} -o "${FLATC_DST_DIR}/schema" --cpp ${FLATC_ARGS} ${FLATC_SOURCES}
         DEPENDS
             ${FLATC_SOURCES}
             ${flatc_COMMAND}
@@ -42,7 +42,8 @@ function(vpux_add_flatc_target FLATC_TARGET_NAME)
         VERBATIM
     )
 
-    add_custom_target(${FLATC_TARGET_NAME}
+    set(FLATC_GEN_TARGET "${FLATC_TARGET_NAME}_gen")
+    add_custom_target(${FLATC_GEN_TARGET}
         DEPENDS
             ${dst_files}
             ${flatc_TARGET}
@@ -50,7 +51,16 @@ function(vpux_add_flatc_target FLATC_TARGET_NAME)
             ${FLATC_SOURCES}
     )
 
-    vpux_gf_version_generate(${FLATC_SRC_DIR} ${FLATC_DST_DIR})
+    # Add interface library target to propagate build dependency and includes
+    add_library(${FLATC_TARGET_NAME} INTERFACE)
+    add_dependencies(${FLATC_TARGET_NAME} ${FLATC_GEN_TARGET})
+    target_include_directories(${FLATC_TARGET_NAME}
+        INTERFACE
+            $<TARGET_PROPERTY:flatbuffers,INTERFACE_INCLUDE_DIRECTORIES>
+            ${FLATC_DST_DIR}
+    )
+
+    vpux_gf_version_generate(${FLATC_SRC_DIR} "${FLATC_DST_DIR}/schema")
 
 endfunction()
 
@@ -70,8 +80,7 @@ function(vpux_gf_version_generate SRC_DIR DST_DIR)
     string(REGEX REPLACE "^v[0-9]+\\.([0-9]+).*" "\\1" VERSION_MINOR "${GIT_DESCRIBE_DIRTY}")
     string(REGEX REPLACE "^v[0-9]+\\.[0-9]+\\.([0-9]+).*" "\\1" VERSION_PATCH "${GIT_DESCRIBE_DIRTY}")
 
-    file(WRITE ${DST_DIR}/gf_version.h
-"
+    set(content "
 #ifndef GF_VERSION_H
 #define GF_VERSION_H
 
@@ -80,5 +89,21 @@ function(vpux_gf_version_generate SRC_DIR DST_DIR)
 #define MVCNN_VERSION_PATCH ${VERSION_PATCH}
 
 #endif")
-endfunction()
+    set(dst_file "${DST_DIR}/gf_version.h")
 
+    # tracking of rewrite is required to avoid rebuild of big part of the product
+    # in case of cmake rerun. Need to rebuild only if GF version is changed
+    set(rewrite_file ON)
+    if(EXISTS ${dst_file})
+        file(READ ${dst_file} current_content)
+        string(SHA256 current_hash "${current_content}")
+        string(SHA256 new_hash "${content}")
+        if(current_hash STREQUAL new_hash)
+            set(rewrite_file OFF)
+        endif()
+    endif()
+
+    if(rewrite_file)
+        file(WRITE ${dst_file} "${content}")
+    endif()
+endfunction()

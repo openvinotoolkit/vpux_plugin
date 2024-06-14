@@ -5,12 +5,11 @@
 
 #include "vpux/compiler/dialect/const/attributes/content.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
+#include "vpux/compiler/utils/loop.hpp"
 #include "vpux/compiler/utils/quantization.hpp"
 #include "vpux/compiler/utils/subspaces.hpp"
 
-#include "vpux/utils/IE/loop.hpp"
 #include "vpux/utils/core/format.hpp"
-#include "vpux/utils/core/func_ref.hpp"
 #include "vpux/utils/core/range.hpp"
 
 #include <mlir/Dialect/Quant/QuantTypes.h>
@@ -70,9 +69,9 @@ Const::Content vpux::Const::RescaleAttr::transform(vpux::Const::Content& input) 
 
     const auto scale = static_cast<float>(getScale().getValue().convertToDouble());
 
-    loop_1d(LoopExecPolicy::Parallel, scaledVals.size(), [&](size_t i) {
+    for (size_t i = 0; i < scaledVals.size(); ++i) {
         scaledVals[i] = values[i] * scale;
-    });
+    }
 
     return output;
 }

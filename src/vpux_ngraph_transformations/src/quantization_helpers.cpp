@@ -13,7 +13,9 @@
 #include <openvino/reference/autobroadcast_binop.hpp>
 #include <stack>
 #include <vector>
+#include "vpux/utils/core/checked_cast.hpp"
 #include "vpux/utils/core/numeric.hpp"
+#include "vpux/utils/core/type/float16.hpp"
 
 using namespace vpux;
 
@@ -43,9 +45,8 @@ std::vector<int64_t> calculateZeroPoints(const std::vector<double>& low, const s
     std::vector<int64_t> out(high.size());
 
     for (size_t i = 0; i < out.size(); ++i) {
-        out[i] = calculateZeroPoint(low[i], high[i], levels, elemType);
+        out[i] = calculateZeroPoint(checked_cast<float>(low[i]), checked_cast<float>(high[i]), levels, elemType);
     }
-
     return out;
 }
 
@@ -62,7 +63,7 @@ std::vector<double> calculateScales(const std::vector<double>& low, const std::v
     std::vector<double> out(high.size());
 
     for (size_t i = 0; i < out.size(); ++i) {
-        out[i] = calculateScale(low[i], high[i], levels);
+        out[i] = calculateScale(checked_cast<float>(low[i]), checked_cast<float>(high[i]), levels);
     }
 
     return out;
@@ -74,8 +75,8 @@ double clamp(double val, double low, double high) {
 }
 
 void align_zp(float& min, float& max, const int max_levels) {
-    double zp = calculateZeroPoint(min, max, max_levels, ov::element::u8);
-    double scale = calculateScale(min, max, max_levels);
+    auto zp = calculateZeroPoint(min, max, max_levels, ov::element::u8);
+    auto scale = calculateScale(min, max, max_levels);
     min = static_cast<float>((0.0 - zp) * scale);
     max = static_cast<float>((max_levels - 1.0 - zp) * scale);
 }
@@ -103,7 +104,7 @@ void replace_node_if_changed(const std::shared_ptr<ov::op::v0::Constant>& node, 
     }
     if (node->get_element_type() == ov::element::f16) {
         new_node = std::make_shared<ov::op::v0::Constant>(node->get_element_type(), node->get_shape(),
-                                                          new_node->cast_vector<ov::float16>().data());
+                                                          new_node->cast_vector<vpux::type::float16>().data());
     }
     if (node->get_element_type() == ov::element::u8) {
         new_node = std::make_shared<ov::op::v0::Constant>(node->get_element_type(), node->get_shape(),

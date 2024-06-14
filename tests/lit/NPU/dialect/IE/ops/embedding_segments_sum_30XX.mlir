@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -17,4 +17,3 @@ func.func @ConvertConstToAttrVPUX30XX(%arg0: tensor<5x6x4xsi32>) -> tensor<7x6x4
     // CHECK-SAME: indices_value = [0, 1, 2, 2, 3], num_segments_value = 7 : si32, operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0>, per_sample_weights_value = [1.000000e+00, 5.000000e+00, 1.000000e+01, 8.000000e+00, 1.000000e+01], segment_ids_value = [0, 1, 2, 3, 4]} : tensor<5x6x4xsi32> -> tensor<7x6x4xsi32>
     // CHECK: return [[VAR0]] : tensor<7x6x4xsi32>
 }
-
