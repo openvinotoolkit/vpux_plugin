@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -8,10 +8,10 @@
 
 // CHECK-LABEL: @RecalculateUPACycle
 func.func @RecalculateUPACycle(%arg0: memref<1x1x1x100xf16>, %arg1: memref<1x1x1x100xf16>) -> (memref<1x1x1x100xf16>, memref<1x1x1x100xf16>) {
-    
+
     %buf0 = memref.alloc() : memref<1x1x1x100xf16>
     %buf1 = memref.alloc() : memref<1x1x1x100xf16>
-    %buf2 = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x1x1x100xf16, [@CMX_NN, 0]> 
+    %buf2 = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x1x1x100xf16, [@CMX_NN, 0]>
     %buf3 = memref.alloc() : memref<1x1x1x100xf16>
     %buf4 = memref.alloc() : memref<1x1x1x100xf16>
 
@@ -32,7 +32,7 @@ func.func @RecalculateUPACycle(%arg0: memref<1x1x1x100xf16>, %arg1: memref<1x1x1
       async.yield %2 : memref<1x1x1x100xf16, [@CMX_NN, 0]>
     }
     // Copy from NNCMX to DDR
-    %t3, %r3 = async.execute [%t2] (%r2 as %0 : !async.value<memref<1x1x1x100xf16, [@CMX_NN, 0]>>) 
+    %t3, %r3 = async.execute [%t2] (%r2 as %0 : !async.value<memref<1x1x1x100xf16, [@CMX_NN, 0]>>)
         -> !async.value<memref<1x1x1x100xf16>> attributes {VPUIP.executor = @DMA_NN, "async-deps-index" = 3 : i64, cycleBegin = 200 : i64, cycleCost = 100 : i64, cycleEnd = 300 : i64} {
       %3 = VPUIP.Copy inputs(%0 : memref<1x1x1x100xf16, [@CMX_NN, 0]>) outputs(%buf3 : memref<1x1x1x100xf16>) -> memref<1x1x1x100xf16>
       async.yield %3 : memref<1x1x1x100xf16>
@@ -55,9 +55,9 @@ func.func @RecalculateUPACycle(%arg0: memref<1x1x1x100xf16>, %arg1: memref<1x1x1
 
 // CHECK-LABEL: @RecalculateUPANoDepsCycle
 func.func @RecalculateUPANoDepsCycle(%arg0: memref<1x1x1x100xf16>, %arg1: memref<1x1x1x100xf16>) -> (memref<1x1x1x100xf16>, memref<1x1x1x100xf16>) {
-    
+
     %buf1 = memref.alloc() : memref<1x1x1x100xf16>
-    %buf2 = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x1x1x100xf16, [@CMX_NN, 0]> 
+    %buf2 = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x1x1x100xf16, [@CMX_NN, 0]>
     %buf3 = memref.alloc() : memref<1x1x1x100xf16>
     %buf4 = memref.alloc() : memref<1x1x1x100xf16>
 
@@ -65,7 +65,7 @@ func.func @RecalculateUPANoDepsCycle(%arg0: memref<1x1x1x100xf16>, %arg1: memref
     %t1, %r1 = async.execute -> !async.value<memref<1x1x1x100xf16>> attributes {VPUIP.executor = @SHAVE_UPA, "async-deps-index" = 0 : i64, cycleBegin = 100 : i64, cycleCost = 1 : i64, cycleEnd = 101 : i64} {
       %0 = VPUIP.ReLUUPA inputs(%arg0 : memref<1x1x1x100xf16>) outputs(%buf1 : memref<1x1x1x100xf16>) -> memref<1x1x1x100xf16>
       async.yield %0 : memref<1x1x1x100xf16>
-    }    
+    }
 
     // Copy from DDR to NNCMX
     %t2, %r2 = async.execute -> !async.value<memref<1x1x1x100xf16, [@CMX_NN, 0]>> attributes {VPUIP.executor = @DMA_NN, "async-deps-index" = 1 : i64, cycleBegin = 100 : i64, cycleCost = 100 : i64, cycleEnd = 200 : i64} {
@@ -73,7 +73,7 @@ func.func @RecalculateUPANoDepsCycle(%arg0: memref<1x1x1x100xf16>, %arg1: memref
       async.yield %2 : memref<1x1x1x100xf16, [@CMX_NN, 0]>
     }
     // Copy from NNCMX to DDR
-    %t3, %r3 = async.execute [%t2] (%r2 as %0 : !async.value<memref<1x1x1x100xf16, [@CMX_NN, 0]>>) 
+    %t3, %r3 = async.execute [%t2] (%r2 as %0 : !async.value<memref<1x1x1x100xf16, [@CMX_NN, 0]>>)
         -> !async.value<memref<1x1x1x100xf16>> attributes {VPUIP.executor = @DMA_NN, "async-deps-index" = 2 : i64, cycleBegin = 200 : i64, cycleCost = 100 : i64, cycleEnd = 300 : i64} {
       %3 = VPUIP.Copy inputs(%0 : memref<1x1x1x100xf16, [@CMX_NN, 0]>) outputs(%buf3 : memref<1x1x1x100xf16>) -> memref<1x1x1x100xf16>
       async.yield %3 : memref<1x1x1x100xf16>
@@ -96,10 +96,10 @@ func.func @RecalculateUPANoDepsCycle(%arg0: memref<1x1x1x100xf16>, %arg1: memref
 
 // CHECK-LABEL: @RecalculateUPANoConsCycle
 func.func @RecalculateUPANoConsCycle(%arg0: memref<1x1x1x100xf16>, %arg1: memref<1x1x1x100xf16>) -> (memref<1x1x1x100xf16>, memref<1x1x1x100xf16>) {
-    
+
     %buf0 = memref.alloc() : memref<1x1x1x100xf16>
     %buf1 = memref.alloc() : memref<1x1x1x100xf16>
-    %buf2 = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x1x1x100xf16, [@CMX_NN, 0]> 
+    %buf2 = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x1x1x100xf16, [@CMX_NN, 0]>
     %buf3 = memref.alloc() : memref<1x1x1x100xf16>
     %buf4 = memref.alloc() : memref<1x1x1x100xf16>
 
@@ -120,7 +120,7 @@ func.func @RecalculateUPANoConsCycle(%arg0: memref<1x1x1x100xf16>, %arg1: memref
       async.yield %2 : memref<1x1x1x100xf16, [@CMX_NN, 0]>
     }
     // Copy from NNCMX to DDR
-    %t3, %r3 = async.execute [%t2] (%r2 as %0 : !async.value<memref<1x1x1x100xf16, [@CMX_NN, 0]>>) 
+    %t3, %r3 = async.execute [%t2] (%r2 as %0 : !async.value<memref<1x1x1x100xf16, [@CMX_NN, 0]>>)
         -> !async.value<memref<1x1x1x100xf16>> attributes {VPUIP.executor = @DMA_NN, "async-deps-index" = 3 : i64, cycleBegin = 200 : i64, cycleCost = 100 : i64, cycleEnd = 300 : i64} {
       %3 = VPUIP.Copy inputs(%0 : memref<1x1x1x100xf16, [@CMX_NN, 0]>) outputs(%buf3 : memref<1x1x1x100xf16>) -> memref<1x1x1x100xf16>
       async.yield %3 : memref<1x1x1x100xf16>

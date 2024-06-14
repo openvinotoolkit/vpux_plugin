@@ -1,10 +1,8 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022-2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
-#include <ov_models/builders.hpp>
-#include <ov_models/utils/ov_helpers.hpp>
 #include <vpu_ov2_layer_test.hpp>
 #include "shared_test_classes/single_op/concat.hpp"
 
@@ -21,12 +19,13 @@ class ConcatSoftmaxSubGraphTest_NPU3700 : public VpuOv2LayerTest, public ConcatL
         init_input_shapes(inputShape);
 
         ov::ParameterVector params;
-        for (auto&& shape : inputShape) {
-            params.push_back(std::make_shared<ov::op::v0::Parameter>(inType, shape.second[0]));
+        ov::NodeVector paramsNodes;
+        for (const auto& shape : inputDynamicShapes) {
+            auto param = std::make_shared<ov::op::v0::Parameter>(inType, shape);
+            params.push_back(param);
+            paramsNodes.push_back(param);
         }
-        auto paramOuts =
-                ngraph::helpers::convert2OutputVector(ngraph::helpers::castOps2Nodes<ngraph::op::Parameter>(params));
-        auto concat = std::make_shared<ov::op::v0::Concat>(paramOuts, axis);
+        auto concat = std::make_shared<ov::op::v0::Concat>(paramsNodes, axis);
 
         auto softMax = std::make_shared<ov::op::v1::Softmax>(concat, axis);
         ov::ResultVector results{std::make_shared<ov::op::v0::Result>(softMax)};
@@ -34,11 +33,22 @@ class ConcatSoftmaxSubGraphTest_NPU3700 : public VpuOv2LayerTest, public ConcatL
 
         rel_threshold = 0.1f;
     }
+
+public:
+    static std::string getTestCaseName(const testing::TestParamInfo<concatParamsTuple>& obj) {
+        const std::string sep = "_";
+        std::ostringstream result;
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
+        result << "TestIdx=" << obj.index << sep;
+        result << ConcatLayerTest::getTestCaseName(obj) << sep;
+
+        return result.str();
+    }
 };
 
 TEST_P(ConcatSoftmaxSubGraphTest_NPU3700, HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3700);
+    run(Platform::NPU3700);
 }
 
 std::vector<ov::element::Type> netPrecisions = {
@@ -59,7 +69,8 @@ std::vector<std::vector<ov::Shape>> inShapes4d = {
 INSTANTIATE_TEST_SUITE_P(smoke4d_tensors, ConcatSoftmaxSubGraphTest_NPU3700,
                          ::testing::Combine(::testing::ValuesIn(axes4d),
                                             ::testing::ValuesIn(static_shapes_to_test_representation(inShapes4d)),
-                                            ::testing::ValuesIn(netPrecisions), ::testing::Values(DEVICE_NPU)));
+                                            ::testing::ValuesIn(netPrecisions), ::testing::Values(DEVICE_NPU)),
+                         ConcatSoftmaxSubGraphTest_NPU3700::getTestCaseName);
 
 // 3d cases
 std::vector<int> axes3d = {1, 2};
@@ -71,7 +82,8 @@ std::vector<std::vector<ov::Shape>> inShapes3d = {
 INSTANTIATE_TEST_SUITE_P(smoke3d_tensors, ConcatSoftmaxSubGraphTest_NPU3700,
                          ::testing::Combine(::testing::ValuesIn(axes3d),
                                             ::testing::ValuesIn(static_shapes_to_test_representation(inShapes4d)),
-                                            ::testing::ValuesIn(netPrecisions), ::testing::Values(DEVICE_NPU)));
+                                            ::testing::ValuesIn(netPrecisions), ::testing::Values(DEVICE_NPU)),
+                         ConcatSoftmaxSubGraphTest_NPU3700::getTestCaseName);
 
 // Check parameters from squeezenet1_1
 std::vector<int> axes_squeeznet1_1 = {1};
@@ -85,6 +97,7 @@ INSTANTIATE_TEST_SUITE_P(
         smoke_squeeznet1_1_tensors, ConcatSoftmaxSubGraphTest_NPU3700,
         ::testing::Combine(::testing::ValuesIn(axes_squeeznet1_1),
                            ::testing::ValuesIn(static_shapes_to_test_representation(inShapes_squeeznet1_1)),
-                           ::testing::ValuesIn(netPrecisions), ::testing::Values(DEVICE_NPU)));
+                           ::testing::ValuesIn(netPrecisions), ::testing::Values(DEVICE_NPU)),
+        ConcatSoftmaxSubGraphTest_NPU3700::getTestCaseName);
 
 }  // namespace ConcatSoftmaxSubGraphTestsDefinitions

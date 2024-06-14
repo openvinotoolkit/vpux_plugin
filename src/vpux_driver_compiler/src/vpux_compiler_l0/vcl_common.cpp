@@ -13,8 +13,8 @@
 #include <unordered_set>
 #include <utility>
 
+#include "intel_npu/al/config/compiler.hpp"
 #include "vcl_compiler.hpp"
-#include "vpux/al/config/compiler.hpp"
 
 namespace {
 
@@ -268,9 +268,9 @@ vcl_result_t BuildInfo::prepareBuildFlags(const std::string& descOptions) {
         // As a consequence of complying to the conventions established in the 2.0 OV API, the set of values
         // corresponding to the "model priority" key has been modified. The change was introduced in the 5.2 version of
         // the driver->compiler adapter.
-        const auto& getTargetRegex = [](const ov::intel_vpux::LegacyPriority& priorityValue) -> std::regex {
+        const auto& getTargetRegex = [](const ov::intel_npu::LegacyPriority& priorityValue) -> std::regex {
             std::ostringstream result;
-            result << ov::intel_vpux::legacy_model_priority.name() << KEY_VALUE_SEPARATOR << VALUE_DELIMITER
+            result << ov::intel_npu::legacy_model_priority.name() << KEY_VALUE_SEPARATOR << VALUE_DELIMITER
                    << priorityValue << VALUE_DELIMITER;
             return std::regex(result.str());
         };
@@ -282,11 +282,11 @@ vcl_result_t BuildInfo::prepareBuildFlags(const std::string& descOptions) {
         };
 
         // E.g. (valid as of writing this): MODEL_PRIORITY="MODEL_PRIORITY_MED" -> MODEL_PRIORITY="MEDIUM"
-        content = std::regex_replace(content, getTargetRegex(ov::intel_vpux::LegacyPriority::LOW),
+        content = std::regex_replace(content, getTargetRegex(ov::intel_npu::LegacyPriority::LOW),
                                      getStringReplacement(ov::hint::Priority::LOW));
-        content = std::regex_replace(content, getTargetRegex(ov::intel_vpux::LegacyPriority::MEDIUM),
+        content = std::regex_replace(content, getTargetRegex(ov::intel_npu::LegacyPriority::MEDIUM),
                                      getStringReplacement(ov::hint::Priority::MEDIUM));
-        content = std::regex_replace(content, getTargetRegex(ov::intel_vpux::LegacyPriority::HIGH),
+        content = std::regex_replace(content, getTargetRegex(ov::intel_npu::LegacyPriority::HIGH),
                                      getStringReplacement(ov::hint::Priority::HIGH));
 
         std::stringstream input(content);
@@ -360,20 +360,24 @@ vcl_result_t BuildInfo::prepareBuildFlags(const std::string& descOptions) {
     }
 
     /// Foce to use MLIR compiler.
-    config[ov::intel_vpux::compiler_type.name()] = "MLIR";
+    config[ov::intel_npu::compiler_type.name()] = "MLIR";
 
     // Use platform information provided by driver if platform config is either not found or set on AUTO_DETECT
-    if (config.find(ov::intel_vpux::platform.name()) == config.end() ||
-        "AUTO_DETECT" == config[ov::intel_vpux::platform.name()]) {
+    if (config.find(ov::intel_npu::platform.name()) == config.end() ||
+        "AUTO_DETECT" == config[ov::intel_npu::platform.name()]) {
         // Set platform
         switch (pvc->getCompilerDesc().platform) {
         case VCL_PLATFORM_VPU3700:
-            config[ov::intel_vpux::platform.name()] = "3700";
+            config[ov::intel_npu::platform.name()] = "3700";
             config[ov::device::id.name()] = "3700";
             break;
         case VCL_PLATFORM_VPU3720:
-            config[ov::intel_vpux::platform.name()] = "3720";
+            config[ov::intel_npu::platform.name()] = "3720";
             config[ov::device::id.name()] = "3720";
+            break;
+        case VCL_PLATFORM_VPU4000:
+            config[ov::intel_npu::platform.name()] = "4000";
+            config[ov::device::id.name()] = "4000";
             break;
         default:
             logger->outputError(formatv("Unrecognized platform! {0}", pvc->getCompilerDesc().platform));
@@ -401,7 +405,7 @@ vcl_result_t BuildInfo::prepareBuildFlags(const std::string& descOptions) {
 
     /// If user sepecify preferred log level, update our logger
     if (iter != config.end()) {
-        logger->setLevel(parsedConfig.get<LOG_LEVEL>());
+        logger->setLevel(getLogLevel(parsedConfig));
     }
 
     /// Show compiler ID which helps to find the commit of compiler
@@ -488,9 +492,9 @@ vcl_result_t BuildInfo::prepareModel(const uint8_t* modelIR, uint64_t modelIRSiz
     /// Deserialize the model
     try {
         std::string modelData(buffer, buffer + bufferSize);
-        ov::runtime::Tensor weightsTensor;
+        ov::Tensor weightsTensor;
         if (weightsSize > 0)
-            weightsTensor = ov::runtime::Tensor(ov::element::u8, {weightsSize}, const_cast<uint8_t*>(weights));
+            weightsTensor = ov::Tensor(ov::element::u8, {weightsSize}, const_cast<uint8_t*>(weights));
         ov::Core core;
 
         StopWatch stopWatch;

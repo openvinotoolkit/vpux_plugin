@@ -38,28 +38,21 @@ macro(replace_noerror TARGET_NAME)
     endif()
 endmacro()
 
-# use flag /zi to solve debug size issue in debug variant on MSVC
-# use flag /fs to solve 'cannot open program database' MSVC issue
 if(MSVC)
-    foreach(flag_var CMAKE_C_FLAGS_DEBUG CMAKE_CXX_FLAGS_DEBUG CMAKE_C_FLAGS_RELWITHDEBINFO CMAKE_CXX_FLAGS_RELWITHDEBINFO)
-        string(REGEX MATCH "/Zi+|/FS+|/Z7+" CHECK_FLAGS "${${flag_var}}")
-
-        # Remove all appearance of '/Zi' '/Z7' '/FS' (so that we get rid of all the duplications)
-        string(REGEX REPLACE "/Z7|/Zi|/FS" "" ${flag_var} "${${flag_var}}")
-
-        # Add the only appearance of '/Zi /FS'
-        string(CONCAT ${flag_var} "${${flag_var}}" " /Zi /FS")
-
-        # Get rid of leftovers (spaces) after replacements
-        string(REGEX REPLACE " +" " " ${flag_var} "${${flag_var}}")
-
+    # Wile cmake default is /Zi OV, overrides /Zi with /Z7
+    # We need /Z7 to avoid pdb creation issues with Ninja build and/or ccache
+    # Add /debug:fastlink to link step to avoid pdb files exceeding 4GB limit
+    # Note with fastlink object files are required for full debug information!
+    foreach(link_flag_var
+        CMAKE_EXE_LINKER_FLAGS_DEBUG
+        CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO
+        CMAKE_MODULE_LINKER_FLAGS_DEBUG
+        CMAKE_MODULE_LINKER_FLAGS_RELWITHDEBINFO
+        CMAKE_SHARED_LINKER_FLAGS_DEBUG
+        CMAKE_SHARED_LINKER_FLAGS_RELWITHDEBINFO
+        )
+        string(REGEX REPLACE "/debug" "/debug:fastlink" ${link_flag_var} "${${link_flag_var}}")
     endforeach()
-
-    if(NOT CHECK_FLAGS STREQUAL "")
-        message ("[FYI]: In order to prevent errors related to the storage format of debug information cmake flag '/Z7' or '/Zi' has been changed to '/Zi /FS'")
-    else()
-        message ("[FYI]: In order to prevent errors related to the storage format of debug information cmake flags '/Zi /FS' have been added")
-    endif()
 
     # Optimize global data
     add_compile_options(/Zc:inline /Gw)
@@ -125,23 +118,6 @@ function(link_system_libraries TARGET_NAME)
     endforeach()
 endfunction()
 
-function(vpux_enable_clang_format TARGET_NAME)
-    add_clang_format_target("${TARGET_NAME}_clang_format"
-        FOR_TARGETS ${TARGET_NAME}
-        ${ARGN}
-    )
-
-    if(ENABLE_DEVELOPER_BUILD)
-        if(TARGET "${TARGET_NAME}_clang_format_fix")
-            add_dependencies(${TARGET_NAME} "${TARGET_NAME}_clang_format_fix")
-        endif()
-    else()
-        if(TARGET "${TARGET_NAME}_clang_format")
-            add_dependencies(${TARGET_NAME} "${TARGET_NAME}_clang_format")
-        endif()
-    endif()
-endfunction()
-
 macro(set_llvm_flags)
     set(LLVM_ENABLE_WARNINGS OFF CACHE BOOL "")
     set(LLVM_ENABLE_BINDINGS OFF CACHE BOOL "" FORCE)
@@ -165,4 +141,18 @@ macro(set_llvm_flags)
     # makes cmake complains about long path on Windows
     set(LLVM_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     set(LLVM_INCLUDE_EXAMPLES OFF CACHE BOOL "" FORCE)
+endmacro()
+
+macro(enable_split_dwarf)
+    if ((CMAKE_BUILD_TYPE STREQUAL "Debug") OR (CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo"))
+        if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+            add_compile_options(-gsplit-dwarf)
+            if (COMMAND check_linker_flag)
+                check_linker_flag(CXX "-Wl,--gdb-index" LINKER_SUPPORTS_GDB_INDEX)
+                append_if(LINKER_SUPPORTS_GDB_INDEX "-Wl,--gdb-index"
+                CMAKE_EXE_LINKER_FLAGS CMAKE_MODULE_LINKER_FLAGS CMAKE_SHARED_LINKER_FLAGS)
+            endif()
+            set(LLVM_USE_SPLIT_DWARF ON)
+        endif()
+    endif()
 endmacro()

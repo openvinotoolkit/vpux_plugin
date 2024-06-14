@@ -8,8 +8,9 @@
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/error.hpp"
+#include "vpux/compiler/utils/infer_output_shape.hpp"
 
-#include <openvino/op/convolution.hpp>
+#include "openvino/op/group_conv.hpp"
 
 using namespace vpux;
 
@@ -55,26 +56,9 @@ mlir::LogicalResult vpux::VPU::TransposedConvolutionOp::inferReturnTypes(
         auto outType = featureType.changeShape(Shape(mlirOutputShape));
         inferredReturnTypes.push_back(outType);
     } else {
-        const std::vector<ov::Dimension> nDataShape(std::next(featureShape.begin(), 2), featureShape.end());
-        const std::vector<ov::Dimension> nFilterShape(std::next(filterShape.begin(), 2), filterShape.end());
-
-        ov::op::v1::ConvolutionBackpropData ov_op;
-        std::vector<ov::Dimension> spatialShape;
-        ov_op.infer_conv_backprop_output_spatial_shape(
-                nDataShape,                                                            // data_shape
-                nFilterShape,                                                          // filter_sahpe
-                ov::Strides(windowStrides.begin(), windowStrides.end()),               // strides
-                ov::Strides(windowDilations.begin(), windowDilations.end()),           // dilations
-                ov::CoordinateDiff(dataPaddingBelow.begin(), dataPaddingBelow.end()),  // pads_begin
-                ov::CoordinateDiff(dataPaddingAbove.begin(), dataPaddingAbove.end()),  // pads_end
-                ov::CoordinateDiff(outputPadding.begin(), outputPadding.end()),        // output_padding
-                spatialShape);
-        const auto resultShape = ov::PartialShape(std::move(spatialShape)).get_shape();
-
-        SmallVector<int64_t> mlirOutputShape;
-        mlirOutputShape.push_back(featureShape[Dims4D::Act::N.ind()]);
-        mlirOutputShape.push_back(filterShape[Dims4D::Filter::OC.ind()]);
-        std::copy(resultShape.begin(), resultShape.end(), std::back_inserter(mlirOutputShape));
+        const auto mlirOutputShape =
+                inferTransposedConvBackpropOutputShape(featureShape, filterShape, windowStrides, dataPaddingBelow,
+                                                       dataPaddingAbove, windowDilations, outputPadding);
 
         auto outType = featureType.changeShape(Shape(mlirOutputShape));
         inferredReturnTypes.push_back(outType);

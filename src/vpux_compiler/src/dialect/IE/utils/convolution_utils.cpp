@@ -6,13 +6,13 @@
 #include "vpux/compiler/dialect/IE/utils/convolution_utils.hpp"
 #include "vpux/compiler/dialect/IE/utils/const_attributes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/conv_utils.hpp"
-#include "vpux/compiler/dialect/VPUIP/nce_invariant.hpp"
+#include "vpux/compiler/dialect/VPUIP/interfaces/nce_invariant.hpp"
 #include "vpux/utils/core/logger.hpp"
 
 namespace vpux {
 namespace IE {
 
-mlir::LogicalResult canConvertGroupConvToConv(IE::GroupConvolutionOp groupconv) {
+mlir::LogicalResult canConvertGroupConvToConv(IE::GroupConvolutionOp groupconv, bool isAttrCheckEnabled) {
     LogCb logCb = globalLogCb;
     if (!groupconv.getGroups().has_value()) {
         logCb(formatv("Grouped convolution does not have groups attribute"));
@@ -56,18 +56,22 @@ mlir::LogicalResult canConvertGroupConvToConv(IE::GroupConvolutionOp groupconv) 
     // Channel alignment is not checked here because experiments show that NCE is still able to provide better
     // performance than SHAVE even if channel expand is done.
 
-    const auto arch = vpux::VPU::getArch(groupconv.getOperation());
-    const auto KY = filterShape[Dims4D::Filter::KY];
-    const auto KX = filterShape[Dims4D::Filter::KX];
+    // GroupConv with large kernels, padding, or strides may benefit from being converted to Convolution
+    // to efficiently handle these parameters
+    if (isAttrCheckEnabled) {
+        const auto arch = vpux::VPU::getArch(groupconv.getOperation());
+        const auto KY = filterShape[Dims4D::Filter::KY];
+        const auto KX = filterShape[Dims4D::Filter::KX];
 
-    const auto kernelStrides = parseIntArrayAttr<int64_t>(groupconv.getStrides());
-    const auto kernelStridesShape = Shape(kernelStrides);
-    const auto SY = kernelStridesShape[Dims4D::Strides::Y];
-    const auto SX = kernelStridesShape[Dims4D::Strides::X];
-    const auto pads = PadInfo(groupconv.getPadsBegin(), groupconv.getPadsEnd());
-    if (!VPU::NCEInvariant::isAttrsSupported(arch, KY, KX, SY, SX, pads.top, pads.bottom, pads.left, pads.right,
-                                             logCb)) {
-        return mlir::failure();
+        const auto kernelStrides = parseIntArrayAttr<int64_t>(groupconv.getStrides());
+        const auto kernelStridesShape = Shape(kernelStrides);
+        const auto SY = kernelStridesShape[Dims4D::Strides::Y];
+        const auto SX = kernelStridesShape[Dims4D::Strides::X];
+        const auto pads = PadInfo(groupconv.getPadsBegin(), groupconv.getPadsEnd());
+        if (!VPU::NCEInvariant::isAttrsSupported(arch, KY, KX, SY, SX, pads.top, pads.bottom, pads.left, pads.right,
+                                                 logCb)) {
+            return mlir::failure();
+        }
     }
 
     return mlir::success();
@@ -122,12 +126,12 @@ mlir::LogicalResult FuseConvAndBias::matchAndRewrite(IE::ScaleShiftOp biasOp, ml
     // For those Convolutions/GroupConvolutions/TransposedConvolutions cannot convert to NCE task should not fuse
     // ScaleShift as Bias. Because SW kernel will not support any Post Ops.
     if (auto convOp = mlir::dyn_cast<IE::ConvolutionOp>(op)) {
-        if (VPUIP::NCEInvariant::verifyKernel(convOp).failed()) {
+        if (VPU::NCEConvolutionOp::verifyKernel(convOp).failed()) {
             return matchFailed(rewriter, convOp, "Conv cannot convert to NCE, not fuse ScaleShift");
         }
     }
     if (auto grConvOp = mlir::dyn_cast<IE::GroupConvolutionOp>(op)) {
-        if (VPUIP::NCEInvariant::verifyKernel(grConvOp).failed() &&
+        if (VPU::NCEDepthConvolutionOp::verifyKernel(grConvOp).failed() &&
             mlir::failed(IE::canConvertGroupConvToConv(grConvOp))) {
             return matchFailed(rewriter, grConvOp, "GroupConv cannot convert to NCE, not fuse ScaleShift");
         }

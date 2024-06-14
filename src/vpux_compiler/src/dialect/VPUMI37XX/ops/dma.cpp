@@ -265,7 +265,7 @@ void vpux::VPUMI37XX::NNDMAOp::serialize(elf::writer::BinaryDataSection<uint8_t>
     case vpux::VPUIP::DMAAccMode::DISABLE:
         break;
     default:
-        VPUX_THROW("{0} acceleration mode is not supported by DMA for VPU37XX arch", getAccelerationMode());
+        VPUX_THROW("{0} acceleration mode is not supported by DMA for NPU37XX arch", getAccelerationMode());
     }
 
     auto& barrierConsMask =
@@ -288,7 +288,7 @@ size_t vpux::VPUMI37XX::NNDMAOp::getAlignmentRequirements() {
     return alignof(nn_public::VpuDMATask);
 }
 
-mlir::FailureOr<uint64_t> vpux::VPUMI37XX::NNDMAOp::getOffsetOfWithinOperation(mlir::Value val) {
+size_t vpux::VPUMI37XX::NNDMAOp::getOffsetOfWithinOperation(mlir::Value val) {
     if (val == getInput()) {
         return offsetof(nn_public::VpuDMATask, transaction_) + offsetof(vpu_dma_descriptor_t, src);
     } else if (val == getOutputBuffs()[0]) {
@@ -297,7 +297,7 @@ mlir::FailureOr<uint64_t> vpux::VPUMI37XX::NNDMAOp::getOffsetOfWithinOperation(m
         return offsetof(nn_public::VpuDMATask, transaction_);
     }
 
-    return mlir::failure();
+    VPUX_THROW("Provided Value is not linked to the DMA Op or getOffset does not support it");
 }
 
 vpux::VPURT::BufferSection vpux::VPUMI37XX::NNDMAOp::getMemorySpace() {

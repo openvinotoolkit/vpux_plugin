@@ -1,23 +1,24 @@
 //
-// Copyright (C) 2022 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include "shared_test_classes/subgraph/multiple_outputs.hpp"
-#include "ov_models/builders.hpp"
+#include "common_test_utils/data_utils.hpp"
+#include "common_test_utils/node_builders/convolution.hpp"
 
-namespace SubgraphTestsDefinitions {
+using namespace ov::test::utils;
+namespace ov::test {
 
 std::string MultioutputTest::getTestCaseName(testing::TestParamInfo<multiOutputTestParams> obj) {
-    InferenceEngine::Precision netPrecision;
-    std::string targetDevice;
+    ov::element::Type modelType;
     std::map<std::string, std::string> configuration;
     size_t outputChannels;
     convParams convolutionParams;
     std::vector<size_t> inputShape;
     std::vector<size_t> kernelShape;
     size_t stride;
-    std::tie(netPrecision, targetDevice, configuration, convolutionParams, outputChannels) = obj.param;
+    std::tie(modelType, std::ignore, configuration, convolutionParams, outputChannels) = obj.param;
     std::tie(inputShape, kernelShape, stride) = convolutionParams;
 
     std::ostringstream result;
@@ -25,38 +26,38 @@ std::string MultioutputTest::getTestCaseName(testing::TestParamInfo<multiOutputT
     result << "KS=" << ov::test::utils::vec2str(kernelShape) << "_";
     result << "S=" << stride << "_";
     result << "OC=" << outputChannels << "_";
-    result << "netPRC=" << netPrecision.name() << "_";
-    result << "targetDevice=" << targetDevice;
+    result << "modelType=" << modelType << "_";
     for (auto const& configItem : configuration) {
         result << "_configItem=" << configItem.first << "_" << configItem.second;
     }
     return result.str();
 }
 
-InferenceEngine::Blob::Ptr MultioutputTest::GenerateInput(const InferenceEngine::InputInfo& info) const {
-    InferenceEngine::Blob::Ptr blob = make_blob_with_precision(info.getTensorDesc());
-    blob->allocate();
-    auto precision = info.getPrecision();
+void MultioutputTest::generate_inputs(const std::vector<ov::Shape>& targetInputStaticShapes) {
+    inputs.clear();
+    const auto& funcInputs = function->inputs();
+    const auto& inputStaticShape = targetInputStaticShapes[0];
+    const auto totalSize =
+            std::accumulate(inputStaticShape.begin(), inputStaticShape.end(), 1, std::multiplies<size_t>());
+    auto inputTensor = ov::Tensor{ov::element::f16, inputStaticShape};
+    auto inputData = inputTensor.data<ov::element_type_traits<ov::element::f16>::value_type>();
 
-    auto* rawBlobDataPtr = blob->buffer().as<float*>();
-    for (size_t i = 0; i < blob->size(); i++) {
+    for (size_t i = 0; i < totalSize; i++) {
         float value = i % 16;
-        if (typeid(precision) ==
-            typeid(typename InferenceEngine::PrecisionTrait<InferenceEngine::Precision::FP16>::value_type)) {
-            rawBlobDataPtr[i] = ngraph::float16(value).to_bits();
-        } else {
-            rawBlobDataPtr[i] = value;
-        }
+        auto f16 = static_cast<ov::fundamental_type_for<ov::element::f16>>(value);
+        inputData[i] = f16.to_bits();
     }
-    return blob;
+    inputs = {
+            {funcInputs[0].get_node_shared_ptr(), inputTensor},
+    };
 }
 
 void MultioutputTest::SetUp() {
-    InferenceEngine::Precision netPrecision;
+    ov::element::Type modelType;
     std::map<std::string, std::string> tempConfig;
     convParams convolutionParams;
     size_t outputChannels;
-    std::tie(netPrecision, targetDevice, tempConfig, convolutionParams, outputChannels) = this->GetParam();
+    std::tie(modelType, std::ignore, tempConfig, convolutionParams, outputChannels) = this->GetParam();
     configuration.insert(tempConfig.begin(), tempConfig.end());
 
     std::vector<size_t> inputShape;
@@ -64,30 +65,26 @@ void MultioutputTest::SetUp() {
     size_t stride;
     std::tie(inputShape, kernelShape, stride) = convolutionParams;
 
-    auto ngPrc = FuncTestUtils::PrecisionUtils::convertIE2nGraphPrc(netPrecision);
-
     // input
-    auto params = std::make_shared<ov::op::v0::Parameter>(ngPrc, ov::Shape(inputShape));
+    auto params = std::make_shared<ov::op::v0::Parameter>(modelType, ov::Shape(inputShape));
     // conv 1
-    auto conv1Weights = ov::test::utils::generate_float_numbers(
-            outputChannels * inputShape[1] * kernelShape[0] * kernelShape[1], -0.2f, 0.2f);
-    auto conv1 = ngraph::builder::makeConvolution(params, ngPrc, {kernelShape[0], kernelShape[1]}, {stride, stride},
-                                                  {1, 1}, {1, 1}, {1, 1}, ngraph::op::PadType::VALID, outputChannels,
-                                                  false, conv1Weights);
+    auto conv1Weights =
+            generate_float_numbers(outputChannels * inputShape[1] * kernelShape[0] * kernelShape[1], -0.2f, 0.2f);
+    auto conv1 = make_convolution(params, modelType, {kernelShape[0], kernelShape[1]}, {stride, stride}, {1, 1}, {1, 1},
+                                  {1, 1}, ov::op::PadType::VALID, outputChannels, false, conv1Weights);
     // conv 2
     std::vector<size_t> conv2InputShape = {1, outputChannels, inputShape[2], inputShape[3]};
-    auto conv2Weights = ov::test::utils::generate_float_numbers(
-            outputChannels * conv2InputShape[1] * kernelShape[0] * kernelShape[1], -0.2f, 0.2f);
-    auto conv2 = ngraph::builder::makeConvolution(conv1, ngPrc, {kernelShape[0], kernelShape[1]}, {stride, stride},
-                                                  {0, 0}, {0, 0}, {1, 1}, ngraph::op::PadType::VALID, outputChannels,
-                                                  true, conv2Weights);
+    auto conv2Weights =
+            generate_float_numbers(outputChannels * conv2InputShape[1] * kernelShape[0] * kernelShape[1], -0.2f, 0.2f);
+    auto conv2 = make_convolution(conv1, modelType, {kernelShape[0], kernelShape[1]}, {stride, stride}, {0, 0}, {0, 0},
+                                  {1, 1}, ov::op::PadType::VALID, outputChannels, true, conv2Weights);
     // max pool
-    auto pool = ngraph::builder::makePooling(conv2, {1, 1}, {0, 0}, {0, 0}, {2, 2}, ngraph::op::RoundingType::FLOOR,
-                                             ngraph::op::PadType::VALID, false, ngraph::helpers::PoolingTypes::MAX);
+    auto pool =
+            std::make_shared<ov::op::v1::MaxPool>(conv2, ov::Strides{1, 1}, ov::Shape{0, 0}, ov::Shape{0, 0},
+                                                  ov::Shape{2, 2}, ov::op::RoundingType::FLOOR, ov::op::PadType::VALID);
 
-    ngraph::ResultVector results{std::make_shared<ngraph::op::Result>(conv1),
-                                 std::make_shared<ngraph::op::Result>(pool)};
-    function = std::make_shared<ngraph::Function>(results, ov::ParameterVector{params}, "MultioutputTest");
+    ov::ResultVector results{std::make_shared<ov::op::v0::Result>(conv1), std::make_shared<ov::op::v0::Result>(pool)};
+    function = std::make_shared<ov::Model>(results, ov::ParameterVector{params}, "MultioutputTest");
 }
 
-}  // namespace SubgraphTestsDefinitions
+}  // namespace ov::test

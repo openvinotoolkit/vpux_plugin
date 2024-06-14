@@ -1,15 +1,18 @@
-// Copyright (C) 2019 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2019 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #pragma once
 
-#include "shared_test_classes/single_layer/activation.hpp"
-#include "vpu_ov1_layer_test.hpp"
+#include "vpu_ov2_layer_test.hpp"
 
-namespace SubgraphTestsDefinitions {
+namespace ov {
 
-typedef std::tuple<InferenceEngine::Precision,         // Network Precision
+namespace test {
+
+using namespace ov::test::utils;
+
+typedef std::tuple<ov::element::Type,                  // Network Precision
                    std::string,                        // Target Device
                    std::map<std::string, std::string>  // Configuration
                    >
@@ -17,7 +20,7 @@ typedef std::tuple<InferenceEngine::Precision,         // Network Precision
 
 class mobilenetV2SlicedTest :
         public testing::WithParamInterface<mobilenetV2SlicedParameters>,
-        virtual public LayerTestsUtils::LayerTestsCommon {
+        virtual public VpuOv2LayerTest {
 public:
     static std::string getTestCaseName(const testing::TestParamInfo<mobilenetV2SlicedParameters>& obj);
 
@@ -25,4 +28,5 @@ protected:
     void SetUp() override;
 };
 
-}  // namespace SubgraphTestsDefinitions
+}  // namespace test
+}  // namespace ov

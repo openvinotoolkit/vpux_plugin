@@ -6,11 +6,11 @@
 #include "vpux/compiler/dialect/VPUIP/graph-schema/blob_reader.hpp"
 
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPUIP/graph-schema/import.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/utils.hpp"
-#include "vpux/compiler/dialect/VPURT/attributes.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/attributes.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/types.hpp"
 
@@ -248,12 +248,14 @@ VPU::ArchKind vpux::VPUIP::BlobReader::parseDeviceRevision(const MVCNN::SummaryH
     case MVCNN::TargetDevice_VPUX30XX:
         switch (header->device_revision()) {
         case MVCNN::TargetDeviceRevision::TargetDeviceRevision_B0:
-            return VPU::ArchKind::VPUX30XX;
+            return VPU::ArchKind::NPU30XX;
         default:
             VPUX_THROW("Unsupported VPUX30XX Revision '{0}'", header->device_revision());
         }
     case MVCNN::TargetDevice::TargetDevice_VPUX37XX:
-        return VPU::ArchKind::VPUX37XX;
+        return VPU::ArchKind::NPU37XX;
+    case MVCNN::TargetDevice::TargetDevice_VPUX40XX:
+        return VPU::ArchKind::NPU40XX;
     default:
         VPUX_THROW("Unsupported TargetDevice '{0}'", header->device());
     }

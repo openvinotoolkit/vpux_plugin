@@ -5,14 +5,19 @@
 
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 
+#include "vpux/compiler/core/type_interfaces.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/empty_node.hpp"
+#include "vpux/compiler/utils/infer_output_shape.hpp"
 
 #include "vpux/utils/core/checked_cast.hpp"
+#include "vpux/utils/core/error.hpp"
+#include "vpux/utils/core/logger.hpp"
 #include "vpux/utils/core/range.hpp"
+#include "vpux/utils/core/small_vector.hpp"
 
-#include <ngraph/validation_util.hpp>
-#include <vpux/utils/core/logger.hpp>
+#include <cstdint>
+#include <optional>
 
 using namespace vpux;
 
@@ -24,16 +29,17 @@ struct StridedSliceInputData final {
     SmallVector<int64_t> strides;
 };
 
-mlir::FailureOr<StridedSliceInputData> extractData(VPU::StridedSliceOpAdaptor stridedSlice) {
-    if (stridedSlice.getBeginsAttr()) {
-        auto begins = parseIntArrayAttr<int64_t>(stridedSlice.getBeginsAttr());
-        auto ends = parseIntArrayAttr<int64_t>(stridedSlice.getEndsAttr());
-        auto strides = parseIntArrayAttr<int64_t>(stridedSlice.getStridesAttr().value());
+StridedSliceInputData extractData(VPU::StridedSliceOpAdaptor stridedSlice) {
+    auto begins = stridedSlice.getBeginsAttr().has_value()
+                          ? parseIntArrayAttr<int64_t>(stridedSlice.getBeginsAttr().value())
+                          : SmallVector<int64_t>{};
+    auto ends = stridedSlice.getEndsAttr().has_value() ? parseIntArrayAttr<int64_t>(stridedSlice.getEndsAttr().value())
+                                                       : SmallVector<int64_t>{};
+    auto strides = stridedSlice.getStridesAttr().has_value()
+                           ? parseIntArrayAttr<int64_t>(stridedSlice.getStridesAttr().value())
+                           : SmallVector<int64_t>{};
 
-        return StridedSliceInputData{std::move(begins), std::move(ends), std::move(strides)};
-    }
-
-    return mlir::failure();
+    return StridedSliceInputData{std::move(begins), std::move(ends), std::move(strides)};
 }
 
 }  // namespace
@@ -49,50 +55,47 @@ mlir::LogicalResult vpux::VPU::StridedSliceOp::inferReturnTypes(
         return mlir::failure();
     }
 
-    const auto getAxisSetArr = [](mlir::ArrayAttr attr) {
-        ov::AxisSet axisSet;
-
-        const auto arr = parseIntArrayAttr<int64_t>(attr);
-        for (const auto& p : arr | indexed) {
-            if (p.value() == 1) {
-                axisSet.emplace(p.index());
-            }
-        }
-
-        return axisSet;
-    };
-
     const auto inDataType = slice.getInput().getType().cast<vpux::NDTypeInterface>();
-    const auto inDataShape = inDataType.getShape();
+    const auto inDataShape = inDataType.getShape().raw();
 
     const auto inputData = extractData(slice);
+    const auto beginsShape =
+            slice.getBegins() != nullptr
+                    ? SmallVector<int64_t>(slice.getBegins().getType().cast<mlir::ShapedType>().getShape())
+                    : SmallVector<int64_t>{};
+    const auto endsShape = slice.getEnds() != nullptr
+                                   ? SmallVector<int64_t>(slice.getEnds().getType().cast<mlir::ShapedType>().getShape())
+                                   : SmallVector<int64_t>{};
+    const auto stridesShape =
+            slice.getStrides() != nullptr
+                    ? SmallVector<int64_t>(slice.getStrides().getType().cast<mlir::ShapedType>().getShape())
+                    : SmallVector<int64_t>{};
 
-    const auto begins = to_std_vector(inputData.value().begins);
-    const auto ends = to_std_vector(inputData.value().ends);
-    const auto strides = to_std_vector(inputData.value().strides);
+    const auto beginMask = parseIntArrayAttr<int64_t>(slice.getBeginMask());
+    const auto endMask = parseIntArrayAttr<int64_t>(slice.getEndMask());
+    const auto newAxisMask = parseIntArrayAttr<int64_t>(slice.getNewAxisMask());
+    const auto shrinkAxisMask = parseIntArrayAttr<int64_t>(slice.getShrinkAxisMask());
+    const auto ellipsisMask = parseIntArrayAttr<int64_t>(slice.getEllipsisMask());
 
-    const auto beginMask = getAxisSetArr(slice.getBeginMask());
-    const auto endMask = getAxisSetArr(slice.getEndMask());
-    const auto newAxisMask = getAxisSetArr(slice.getNewAxisMask());
-    const auto shrinkAxisMask = getAxisSetArr(slice.getShrinkAxisMask());
-    const auto ellipsisMask = getAxisSetArr(slice.getEllipsisMask());
+    auto outputShapeInfo = inferStridedSliceOutputShape(inDataShape, inputData.begins, inputData.ends,
+                                                        inputData.strides, beginsShape, endsShape, stridesShape,
+                                                        beginMask, endMask, newAxisMask, shrinkAxisMask, ellipsisMask);
 
-    const auto outputShape =
-            ngraph::infer_slice_shape(EmptyNode::instance(), ov::Shape(inDataShape.begin(), inDataShape.end()), begins,
-                                      ends, strides, beginMask, endMask, newAxisMask, shrinkAxisMask, ellipsisMask);
-
-    const auto shapeI64 = to_small_vector(outputShape.get_shape() | transformed([](size_t val) {
-                                              return checked_cast<int64_t>(val);
-                                          }));
-
-    const auto newShape = Shape(shapeI64);
+    const auto newShape = Shape(outputShapeInfo.shape);
     auto outType = inDataType.changeShape(newShape);
+    if (!outputShapeInfo.bounds.empty()) {
+        outType = outType.cast<vpux::BoundedTypeInterface>().changeBounds(getIntArrayAttr(ctx, outputShapeInfo.bounds));
+    }
     inferredReturnTypes.push_back(outType);
 
     return mlir::success();
 }
 
 bool vpux::VPU::StridedSliceOp::isSimplified() {
+    if (getBegins() != nullptr || getEnds() != nullptr) {
+        return false;
+    }
+
     auto isZero = [](auto val) {
         return val == 0;
     };
@@ -105,8 +108,8 @@ bool vpux::VPU::StridedSliceOp::isSimplified() {
             llvm::all_of(parseIntArrayAttr<int64_t>(getEllipsisMask()), isZero) &&
             llvm::all_of(parseIntArrayAttr<int64_t>(getBeginMask()), isZero) &&
             llvm::all_of(parseIntArrayAttr<int64_t>(getEndMask()), isZero) &&
-            llvm::all_of(parseIntArrayAttr<int64_t>(getBeginsAttr()), isPositive) &&
-            llvm::all_of(parseIntArrayAttr<int64_t>(getEndsAttr()), isPositive));
+            llvm::all_of(parseIntArrayAttr<int64_t>(getBeginsAttr().value()), isPositive) &&
+            llvm::all_of(parseIntArrayAttr<int64_t>(getEndsAttr().value()), isPositive));
 }
 
 InputTiling vpux::VPU::StridedSliceOp::backInferTileInfo(const vpux::TileInfo& outputTile, vpux::Logger /*log*/) {
@@ -125,9 +128,14 @@ InputTiling vpux::VPU::StridedSliceOp::backInferTileInfo(const vpux::TileInfo& o
 }
 
 void vpux::VPU::StridedSliceOp::adjustAttrs(const TilingInfo& inputTiling, const TileInfo& /*outputTile*/) {
+    // TODO: [E#115695]: the logic of tiling needs to be updated for
+    // the case of non-const begins and ends
+    VPUX_THROW_UNLESS(getBeginsAttr().has_value(), "begins_attr is null");
+    VPUX_THROW_UNLESS(getEndsAttr().has_value(), "ends_attr is null");
+
     const auto inShape = getShape(getInput());
-    auto ends = parseIntArrayAttr<int64_t>(getEndsAttr());
-    auto begins = parseIntArrayAttr<int64_t>(getBeginsAttr());
+    auto ends = parseIntArrayAttr<int64_t>(getEndsAttr().value());
+    auto begins = parseIntArrayAttr<int64_t>(getBeginsAttr().value());
     for (auto ind : irange(inShape.size())) {
         begins[ind] = 0;
         ends[ind] = inputTiling.tiles[0].shape[Dim(ind)];

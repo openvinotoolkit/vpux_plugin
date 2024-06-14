@@ -1,11 +1,12 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 #include "vpux/compiler/utils/strings.hpp"
-#include "vpux/compiler/core/profiling.hpp"
 #include "vpux/utils/IE/prefix.hpp"
+#include "vpux/utils/core/error.hpp"
+#include "vpux/utils/profiling/location.hpp"
 
 #include <iostream>
 

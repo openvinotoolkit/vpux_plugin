@@ -1,33 +1,43 @@
 //
-// Copyright (C) 2018-2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2018-2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
-#include "single_layer_tests/gru_cell.hpp"
+#include "single_op_tests/gru_cell.hpp"
 #include <vector>
-#include "vpu_ov1_layer_test.hpp"
+#include "vpu_ov2_layer_test.hpp"
 
-namespace LayerTestsDefinitions {
+using namespace ov::test::utils;
 
-class GRUCellLayerTestCommon : public GRUCellTest, virtual public LayerTestsUtils::VpuOv1LayerTestsCommon {};
+namespace ov {
+namespace test {
+
+class GRUCellLayerTestCommon : public GRUCellTest, virtual public VpuOv2LayerTest {};
 class GRUCellLayerTest_NPU3720 : public GRUCellLayerTestCommon {
     void SetUp() override {
-        inPrc = InferenceEngine::Precision::FP16;
-        outPrc = InferenceEngine::Precision::FP16;
+        inType = ov::element::f16;
+        outType = ov::element::f16;
         GRUCellTest::SetUp();
     }
 };
+class GRUCellLayerTest_NPU4000 : public GRUCellLayerTestCommon {};
 
 TEST_P(GRUCellLayerTest_NPU3720, HW) {
-    threshold = 0.06;
-    setPlatformVPU3720();
-    setDefaultHardwareModeMLIR();
-    Run();
+    rel_threshold = 0.06;
+    setDefaultHardwareMode();
+    run(Platform::NPU3720);
 }
 
-}  // namespace LayerTestsDefinitions
+TEST_P(GRUCellLayerTest_NPU4000, SW) {
+    rel_threshold = 0.06;
+    setReferenceSoftwareMode();
+    run(Platform::NPU4000);
+}
 
-using namespace LayerTestsDefinitions;
+}  // namespace test
+}  // namespace ov
+
+using namespace ov::test;
 
 namespace {
 
@@ -38,16 +48,19 @@ const std::vector<size_t> inputSize{3};
 const std::vector<std::vector<std::string>> activations = {{"sigmoid", "tanh"}};
 const std::vector<float> clip{0.f};
 const std::vector<bool> shouldLinearBeforeReset{true, false};
-const std::vector<InferenceEngine::Precision> netPrecisions = {InferenceEngine::Precision::FP16};
-const std::vector<ngraph::helpers::InputLayerType> WRBLayerTypes = {ngraph::helpers::InputLayerType::CONSTANT};
+const std::vector<ov::element::Type> modelTypes = {ov::element::f16};
+const std::vector<InputLayerType> WRBLayerTypes = {InputLayerType::CONSTANT};
 
 const auto gruCellParams = testing::Combine(
         ::testing::ValuesIn(shouldDecompose), ::testing::ValuesIn(batch), ::testing::ValuesIn(hiddenSize),
         ::testing::ValuesIn(inputSize), ::testing::ValuesIn(activations), ::testing::ValuesIn(clip),
         ::testing::ValuesIn(shouldLinearBeforeReset), ::testing::ValuesIn(WRBLayerTypes),
-        ::testing::ValuesIn(WRBLayerTypes), ::testing::ValuesIn(WRBLayerTypes), ::testing::ValuesIn(netPrecisions),
-        ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+        ::testing::ValuesIn(WRBLayerTypes), ::testing::ValuesIn(WRBLayerTypes), ::testing::ValuesIn(modelTypes),
+        ::testing::Values(DEVICE_NPU));
 
 INSTANTIATE_TEST_SUITE_P(smoke_GRUCell, GRUCellLayerTest_NPU3720, gruCellParams, GRUCellTest::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_GRUCell, GRUCellLayerTest_NPU4000, gruCellParams,
+                         GRUCellTest::getTestCaseName);
 
 }  // namespace

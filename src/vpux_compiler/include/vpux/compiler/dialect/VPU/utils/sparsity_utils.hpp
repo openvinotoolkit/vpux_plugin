@@ -6,6 +6,7 @@
 #pragma once
 
 #include <vpux/compiler/utils/passes.hpp>
+#include "vpux/compiler/dialect/VPU/interfaces/sparsity_constraint.hpp"
 #include "vpux/compiler/dialect/VPU/utils/explicit_distribution_utils.hpp"
 
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
@@ -19,43 +20,7 @@ EnableActivationSparsityMode getActSparsityMode(std::string enableActivationSpar
 EnableActivationSparsityMode getActSparsityMode(const StrOption& enableActivationSparsityOption);
 bool isActSparsityEnabled(const StrOption& enableActivationSparsityOption);
 
-//
-// SparsityConstraint
-//
-
-struct SparsityConstraint {
-    template <typename T>
-    SparsityConstraint(T t) noexcept: self{std::make_unique<Model<T>>(std::move(t))} {
-    }
-
-    // Checks whether the given channel size can be configured to be the storage element size
-    bool areChannelsFitForSESize(int64_t channels) const;
-    bool areChannelsFitForSESize(mlir::Type inputType, int64_t channels) const;
-
-private:
-    struct Concept {
-        virtual ~Concept() = default;
-        virtual bool areChannelsFitForSESize(int64_t channels) const = 0;
-        virtual bool areChannelsFitForSESize(mlir::Type inputType, int64_t channels) const = 0;
-    };
-
-    template <typename T>
-    struct Model : Concept {
-        Model(T s) noexcept: self{std::move(s)} {
-        }
-        bool areChannelsFitForSESize(int64_t channels) const override {
-            return self.areChannelsFitForSESize(channels);
-        }
-        bool areChannelsFitForSESize(mlir::Type inputType, int64_t channels) const override {
-            return self.areChannelsFitForSESize(inputType, channels);
-        }
-        T self;
-    };
-
-    std::unique_ptr<Concept> self;
-};
-
-VPU::SparsityConstraint getSparsityConstraint(VPU::ArchKind arch);
+int64_t getSESize(int64_t channels, const VPU::SparsityConstraint& sparsityConstraint);
 
 /*
     Effective sparse output type is the actual tensor IDU sees at its input after applying SETable over the data.
@@ -108,6 +73,8 @@ NDTypeInterface getEffectiveSparseOutputType(T sparseType) {
     return dataNDType.template cast<VPU::DistributedTypeInterface>().changeShapeForExplicitDistribution(
             outShape, distributionForEffectiveType);
 }
+
+bool shouldRemoveOutputSparsity(VPU::NCEOpInterface nceOp);
 
 }  // namespace VPU
 }  // namespace vpux

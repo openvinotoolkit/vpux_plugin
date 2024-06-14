@@ -9,7 +9,7 @@ find_package(gflags REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(OpenVINO REQUIRED COMPONENTS Runtime)
 find_package(Threads REQUIRED)
-find_package(OpenCV 4.8.0 REQUIRED COMPONENTS gapi)
+find_package(OpenCV 4.9.0 REQUIRED COMPONENTS gapi)
 
 set(DEPENDENCIES
         Threads::Threads

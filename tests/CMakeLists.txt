@@ -4,10 +4,8 @@
 #
 
 if(NOT ENABLE_NPU_MONO)
-    add_definitions(-DIE_BUILD_POSTFIX=${IE_BUILD_POSTFIX_VAR})
+    add_definitions(-DOV_BUILD_POSTFIX=${OV_BUILD_POSTFIX_VAR})
 endif()
-
-add_subdirectory(libs)
 
 add_subdirectory(unit)
 

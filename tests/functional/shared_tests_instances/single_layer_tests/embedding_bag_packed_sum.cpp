@@ -1,44 +1,58 @@
 //
-// Copyright (C) 2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
-#include "single_layer_tests/embedding_bag_packed_sum.hpp"
-#include "vpu_ov1_layer_test.hpp"
+#include "single_op_tests/embedding_bag_packed_sum.hpp"
+#include "vpu_ov2_layer_test.hpp"
 
-namespace LayerTestsDefinitions {
+using namespace ov::test::utils;
 
-class EmbeddingBagPackedSumLayerTestCommon :
-        public EmbeddingBagPackedSumLayerTest,
-        virtual public LayerTestsUtils::VpuOv1LayerTestsCommon {};
+namespace ov {
+namespace test {
+
+class EmbeddingBagPackedSumLayerTestCommon : public EmbeddingBagPackedSumLayerTest, virtual public VpuOv2LayerTest {};
 
 class EmbeddingBagPackedSumLayerTest_NPU3720 : public EmbeddingBagPackedSumLayerTestCommon {};
+class EmbeddingBagPackedSumLayerTest_NPU4000 : public EmbeddingBagPackedSumLayerTestCommon {};
 
 TEST_P(EmbeddingBagPackedSumLayerTest_NPU3720, HW) {
-    setPlatformVPU3720();
-    setDefaultHardwareModeMLIR();
-    Run();
+    setDefaultHardwareMode();
+    run(Platform::NPU3720);
 }
 
-}  // namespace LayerTestsDefinitions
+TEST_P(EmbeddingBagPackedSumLayerTest_NPU4000, SW) {
+    setReferenceSoftwareMode();
+    run(Platform::NPU4000);
+}
 
-using namespace LayerTestsDefinitions;
+}  // namespace test
+}  // namespace ov
+
+using namespace ov::test;
 
 namespace {
 
-const std::vector<size_t> embTableShape = {5, 10};
+const std::vector<std::vector<ov::Shape>> embTableShape = {{{5, 10}}};
 const std::vector<std::vector<size_t>> indices = {{0, 2}, {1, 2}, {3, 4}};
 const std::vector<bool> withWeights = {true, false};
-const auto params = testing::Combine(::testing::Values(embTableShape), ::testing::Values(indices),
-                                     ::testing::ValuesIn(withWeights));
+const auto params = ::testing::Combine(::testing::Values(indices), ::testing::ValuesIn(withWeights));
 
-const InferenceEngine::Precision embeddingTablePrecision = InferenceEngine::Precision::FP16;
-const InferenceEngine::Precision indicesPrecisions = InferenceEngine::Precision::I32;
+const ov::element::Type embeddingTablePrecision = ov::element::f16;
+const ov::element::Type indicesPrecisions = ov::element::i32;
 
 INSTANTIATE_TEST_SUITE_P(smoke_precommit_EmbeddingBagPackedSum, EmbeddingBagPackedSumLayerTest_NPU3720,
-                         ::testing::Combine(params, ::testing::Values(embeddingTablePrecision),
-                                            ::testing::Values(indicesPrecisions),
-                                            ::testing::Values(LayerTestsUtils::testPlatformTargetDevice())),
+                         ::testing::Combine(params,
+                                            ::testing::ValuesIn(static_shapes_to_test_representation(embTableShape)),
+                                            ::testing::Values(embeddingTablePrecision),
+                                            ::testing::Values(indicesPrecisions), ::testing::Values(DEVICE_NPU)),
+                         EmbeddingBagPackedSumLayerTest::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_EmbeddingBagPackedSum, EmbeddingBagPackedSumLayerTest_NPU4000,
+                         ::testing::Combine(params,
+                                            ::testing::ValuesIn(static_shapes_to_test_representation(embTableShape)),
+                                            ::testing::Values(embeddingTablePrecision),
+                                            ::testing::Values(indicesPrecisions), ::testing::Values(DEVICE_NPU)),
                          EmbeddingBagPackedSumLayerTest::getTestCaseName);
 
 }  // namespace

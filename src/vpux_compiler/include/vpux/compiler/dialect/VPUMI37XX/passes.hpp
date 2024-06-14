@@ -8,7 +8,7 @@
 #include "vpux/compiler/dialect/VPUMI37XX/ops.hpp"
 #include "vpux/compiler/dialect/VPUMI37XX/types.hpp"
 
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/utils/passes.hpp"
 
 #include "vpux/utils/core/logger.hpp"
@@ -27,6 +27,7 @@ namespace VPUMI37XX {
 //
 
 std::unique_ptr<mlir::Pass> createBarrierComputationPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createAssignFullKernelPathPass(Logger log = Logger::global());
 
 //
 // Generated

@@ -43,7 +43,7 @@ public:
 
 class FunctionOutlinerNaive final : IFunctionOutliner {
 public:
-    FunctionOutlinerNaive(size_t numSplits);
+    FunctionOutlinerNaive(size_t numSplits, Logger log);
 
     // Returns a list of targets for function outlining
     // In case the intention is to split the IR into separate individual functions, each OutliningInstance will have one
@@ -52,6 +52,22 @@ public:
 
 private:
     size_t _numSplits;
+    Logger _log;
+};
+
+//
+// FunctionOutlinerRepeatingBlocks
+//
+
+class FunctionOutlinerRepeatingBlocks final : IFunctionOutliner {
+public:
+    FunctionOutlinerRepeatingBlocks(size_t minOpsInBlock, size_t maxNumIterations, Logger log);
+
+    SmallVector<OutliningInstance> getOutliningTargets(mlir::func::FuncOp mainFunction) override;
+
+private:
+    size_t _minOpsInBlock;
+    size_t _maxNumIterations;
     Logger _log;
 };
 

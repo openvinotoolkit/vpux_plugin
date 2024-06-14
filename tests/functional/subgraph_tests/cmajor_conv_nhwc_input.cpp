@@ -1,14 +1,12 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022-2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include <vpu_ov2_layer_test.hpp>
 #include "common/functions.h"
 
-#include <ov_models/builders.hpp>
-#include <ov_models/utils/ov_helpers.hpp>
-#include <shared_test_classes/base/layer_test_utils.hpp>
+#include "common_test_utils/node_builders/constant.hpp"
 
 namespace ov::test {
 
@@ -35,7 +33,8 @@ class CMajorConvNHWCTest_NPU3700 :
         ov::ParameterVector params{
                 std::make_shared<ov::op::v0::Parameter>(ov::element::f32, inputDynamicShapes.front())};
 
-        const auto weightsU8 = ngraph::builder::makeConstant<uint8_t>(ov::element::u8, weightsShape, {}, true, 255, 0);
+        const auto weightsU8 =
+                ov::test::utils::deprecated::make_constant<uint8_t>(ov::element::u8, weightsShape, {}, true, 255, 0);
         const auto weightsFP32 = std::make_shared<ov::op::v0::Convert>(weightsU8, ov::element::f32);
 
         const auto conv = std::make_shared<ov::op::v1::Convolution>(params.at(0), weightsFP32, strides, pads.first,
@@ -84,6 +83,7 @@ public:
         const std::string sep = "_";
         std::ostringstream result;
 
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
         result << "InputPrec=" << ip << sep;
         result << "OutputPrec=" << op << sep;
         result << "InShape=" << VectorToString(inputShape) << sep;
@@ -91,14 +91,13 @@ public:
         result << "Strides=" << VectorToString(strides) << sep;
         result << "Dilations=" << VectorToString(dilations) << sep;
         result << "Padding=" << VectorToString(pads.first) << "," << VectorToString(pads.second);
-
         return result.str();
     }
 };
 
 TEST_P(CMajorConvNHWCTest_NPU3700, HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3700);
+    run(Platform::NPU3700);
 }
 
 const std::vector<ov::element::Type> prec = {ov::element::f16, ov::element::f32, ov::element::u8};

@@ -24,4 +24,20 @@ def BarrierComputation : PassBase<"barrier-computation-VPUMI37XX", "vpux::Functi
 
 }
 
+//
+// AssignFullKernelPath
+//
+
+def AssignFullKernelPath : PassBase<"assign-full-kernel-path-VPUMI37XX", "vpux::FunctionPass"> {
+    let summary = "Assign the full kernel path";
+
+    let description = [{
+        This pass assigns the full kernel path to SHAVE operations.
+        The full kernel path is the concatenation between the kernel entry, the arch and any extra arguments needed to select
+        the right kernel binary during serialization.
+    }];
+
+    let constructor = "vpux::VPUMI37XX::createAssignFullKernelPathPass()";
+}
+
 #endif

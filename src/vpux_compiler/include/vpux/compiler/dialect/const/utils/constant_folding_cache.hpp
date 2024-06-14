@@ -38,23 +38,10 @@ struct FoldingRequest {
 };
 
 //
-// FoldingRequestState
-//
-// State PENDING means that the request has been received by a thread and is currently being folded, while COMPLETED
-// means that the folding has been done and the result has been added to the cache
-
-enum class FoldingRequestState { PENDING, COMPLETED };
-
-//
 // details
 //
 
 namespace details {
-
-struct CacheContent {
-    FoldingRequestState state = FoldingRequestState::PENDING;
-    Const::Content content;
-};
 
 struct ContentAttrHash {
     static size_t hash(Const::ContentAttr attr) {
@@ -67,7 +54,7 @@ struct ContentAttrHash {
 };
 
 using RequestQueue = tbb::concurrent_bounded_queue<FoldingRequest>;
-using ContentMap = tbb::concurrent_hash_map<Const::ContentAttr, CacheContent, ContentAttrHash>;
+using ContentMap = tbb::concurrent_hash_map<Const::ContentAttr, Const::Content, ContentAttrHash>;
 
 struct CacheStatistics {
     std::atomic<size_t> memoryUsedCache = 0;
@@ -118,19 +105,11 @@ public:
     FoldingRequest getRequest();
 
     /**
-     * @brief Sets the state of a folding request
+     * @brief Checks whether the given attribute is found in the cache
      * @details This method is thread-safe
-     * @param `attr`: the folding request whose state should be set
-     * @param `state`: the new state to be set for the request
+     * @return true if the attribute has been found
      */
-    void setRequestState(Const::ContentAttr attr, const Const::FoldingRequestState& state);
-
-    /**
-     * @brief Tries to get the state of a folding request, if the request has been received
-     * @details This method is thread-safe
-     * @return The state of the request if it exists or an empty optional otherwise
-     */
-    std::optional<Const::FoldingRequestState> getRequestState(Const::ContentAttr attr);
+    bool hasContent(Const::ContentAttr attr);
 
     /**
      * @brief Adds a folding result to the cache
@@ -149,13 +128,22 @@ public:
 
     /**
      * @brief Tries to get the folding result from the cache for the given request (represented as an attribute). In
-     * case the request is marked as PENDING, the function will wait until it is marked as COMPLETED and then the value
-     * is returned. In case the request has no state set, the function will return nothing
+     * case the cache does not contain the result, the function will return nothing
      * @details This method is thread-safe
      * @param `attr`: the folding request whose folding result should be obtained from the cache
      * @return The folding result if it has been found or an empty optional otherwise
      */
     std::optional<Const::Content> getContent(Const::ContentAttr attr);
+
+    /**
+     * @brief Replaces the original attribute from the cache with a new one, while keeping the same folded content.
+     * In case the original attribute is not found in the cache, nothing is done and false is returned
+     * @details This method is thread-safe
+     * @param `originalAttr`: the attribute from the cache that should be replaced
+     * @param `newAttr`: the attribute which should replace the original one
+     * @return true if the replacement has been done successfully
+     */
+    bool replaceContentAttr(Const::ContentAttr originalAttr, Const::ContentAttr newAttr);
 
     /**
      * @brief Enable the collection of statistics for the cache
@@ -189,9 +177,6 @@ private:
 
     bool _collectStatistics = false;
     Const::details::CacheStatistics _statistics{};
-
-    std::mutex _mtxState{};
-    std::condition_variable _cvState{};
 };
 
 //

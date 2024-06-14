@@ -111,3 +111,66 @@ TEST(MLIR_ControlEdgeGenerator, TestMemOverlapEdgesWithSubViewTest2) {
         EXPECT_EQ(controlEdges[i]._sink, expectedControlEdges[i]._sink);
     }
 }
+
+TEST(MLIR_ControlEdgeGenerator, TestMemOverlapEdgesWithSubViewTest3) {
+    ScheduledOpOneResource::ResourceView resView0({{0}, {1}, {1}});
+    ScheduledOpOneResource::ResourceView resView1({{1}, {1}, {1}});
+
+    // Create example schedule where operations execute in sequence and either produce
+    // or consume certain range of memory
+    std::vector<ScheduledOpOneResource> scheduledOpsResources = {
+            ScheduledOpOneResource(0, 0, 100, ScheduledOpOneResource::EResRelation::PRODUCER, resView0),
+            ScheduledOpOneResource(1, 0, 150, ScheduledOpOneResource::EResRelation::PRODUCER, resView0),
+            ScheduledOpOneResource(2, 0, 150, ScheduledOpOneResource::EResRelation::PRODUCER, resView1),
+    };
+
+    // For above configuration expected inserted memory control edges are:
+    // 0 -> 1
+    // 0 -> 2
+    SmallVector<ControlEdge> expectedControlEdges = {{0, 1}, {0, 2}};
+
+    ControlEdgeSet controlEdges;
+    ControlEdgeGenerator controlEdgeGenerator;
+    // Generate control edges for overlapping memory regions
+    controlEdgeGenerator.generateControlEdges(scheduledOpsResources.begin(), scheduledOpsResources.end(), controlEdges);
+
+    ASSERT_EQ(controlEdges.size(), expectedControlEdges.size());
+
+    for (size_t i = 0; i < controlEdges.size(); i++) {
+        EXPECT_EQ(controlEdges[i]._source, expectedControlEdges[i]._source);
+        EXPECT_EQ(controlEdges[i]._sink, expectedControlEdges[i]._sink);
+    }
+}
+
+TEST(MLIR_ControlEdgeGenerator, TestMemOverlapEdgesWithSubViewTest4) {
+    ScheduledOpOneResource::ResourceView resView0({{0}, {1}, {1}});
+    ScheduledOpOneResource::ResourceView resView1({{1}, {1}, {1}});
+
+    // Create example schedule where operations execute in sequence and either produce
+    // or consume certain range of memory
+    std::vector<ScheduledOpOneResource> scheduledOpsResources = {
+            ScheduledOpOneResource(0, 0, 100, ScheduledOpOneResource::EResRelation::PRODUCER, resView0),
+            ScheduledOpOneResource(1, 101, 150, ScheduledOpOneResource::EResRelation::PRODUCER, resView0),
+            ScheduledOpOneResource(2, 0, 100, ScheduledOpOneResource::EResRelation::CONSUMER, resView0),
+            ScheduledOpOneResource(3, 0, 150, ScheduledOpOneResource::EResRelation::PRODUCER, resView0),
+            ScheduledOpOneResource(4, 0, 150, ScheduledOpOneResource::EResRelation::PRODUCER, resView1),
+    };
+
+    // For above configuration expected inserted memory control edges are:
+    // 0 -> 2
+    // 1,2 -> 3
+    // 1,2 -> 4
+    SmallVector<ControlEdge> expectedControlEdges = {{0, 2}, {2, 3}, {1, 3}, {1, 4}, {2, 4}};
+
+    ControlEdgeSet controlEdges;
+    ControlEdgeGenerator controlEdgeGenerator;
+    // Generate control edges for overlapping memory regions
+    controlEdgeGenerator.generateControlEdges(scheduledOpsResources.begin(), scheduledOpsResources.end(), controlEdges);
+
+    ASSERT_EQ(controlEdges.size(), expectedControlEdges.size());
+
+    for (size_t i = 0; i < controlEdges.size(); i++) {
+        EXPECT_EQ(controlEdges[i]._source, expectedControlEdges[i]._source);
+        EXPECT_EQ(controlEdges[i]._sink, expectedControlEdges[i]._sink);
+    }
+}

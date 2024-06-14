@@ -1,16 +1,16 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --convert-strided-slice-to-conv %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 
-// CHECK-LABEL: @ConvertStridedSlice2Conv
-func.func @ConvertStridedSlice2Conv(%arg0: tensor<1x3x640x640xf16, {order = #NHWC}>) -> tensor<1x3x320x640xf16, {order = #NHWC}> {
+// CHECK-LABEL: @ConvertStridedSlice2ConvOnH
+func.func @ConvertStridedSlice2ConvOnH(%arg0: tensor<1x3x640x640xf16, {order = #NHWC}>) -> tensor<1x3x320x640xf16, {order = #NHWC}> {
     %1 = IE.StridedSlice(%arg0) {begin_mask = [0, 0, 0, 0], begins_attr = [0, 0, 0, 0], ellipsis_mask = [0, 0, 0, 0], end_mask = [0, 0, 0, 0], ends_attr = [1, 3, 640, 640], new_axis_mask = [0, 0, 0, 0], operandSegmentSizes = array<i32: 1, 0, 0, 0>, shrink_axis_mask = [0, 0, 0, 0], strides_attr = [1, 1, 2, 1]} : tensor<1x3x640x640xf16, {order = #NHWC}> -> tensor<1x3x320x640xf16, {order = #NHWC}>
     return %1 : tensor<1x3x320x640xf16, {order = #NHWC}>
 
@@ -43,14 +43,13 @@ func.func @ConvertForUnalignedChannels(%arg0: tensor<1x3x320x640xf16, {order = #
 
 // -----
 
-// CHECK-LABEL: @ConvertStridedSlice2ConvWithStrides
-func.func @ConvertStridedSlice2ConvWithStrides(%arg0: tensor<1x3x416x416xf16>) -> tensor<1x3x208x208xf16> {
+// CHECK-LABEL: @ConvertStridedSlice2ConvWithStridesOnWH
+func.func @ConvertStridedSlice2ConvWithStridesOnWH(%arg0: tensor<1x3x416x416xf16>) -> tensor<1x3x208x208xf16> {
     %0 = IE.StridedSlice(%arg0) {begin_mask = [0, 0, 0, 0], begins_attr = [0, 0, 0, 0], ellipsis_mask = [0, 0, 0, 0], end_mask = [0, 0, 0, 0], ends_attr = [1, 3, 416, 416], new_axis_mask = [0, 0, 0, 0], operandSegmentSizes = array<i32: 1, 0, 0, 0>, shrink_axis_mask = [0, 0, 0, 0], strides_attr = [1, 1, 2, 2]} : tensor<1x3x416x416xf16> -> tensor<1x3x208x208xf16>
     %1 = IE.StridedSlice(%arg0) {begin_mask = [0, 0, 0, 0], begins_attr = [0, 0, 1, 0], ellipsis_mask = [0, 0, 0, 0], end_mask = [0, 0, 0, 0], ends_attr = [1, 3, 416, 416], new_axis_mask = [0, 0, 0, 0], operandSegmentSizes = array<i32: 1, 0, 0, 0>, shrink_axis_mask = [0, 0, 0, 0], strides_attr = [1, 1, 2, 2]} : tensor<1x3x416x416xf16> -> tensor<1x3x208x208xf16>
     %2 = IE.Add(%0, %1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x3x208x208xf16>, tensor<1x3x208x208xf16> -> tensor<1x3x208x208xf16>
 
     return %2 : tensor<1x3x208x208xf16>
-
 
     // CHECK:            [[CST0:%.*]] = const.Declare tensor<3x3x1x1xf16> = dense<
     // CHECK-SAME{LITERAL}: [[[[1.000000e+00]], [[0.000000e+00]], [[0.000000e+00]]],
@@ -102,6 +101,20 @@ func.func @NotConvertStridedSliceIfOutputNCHWToResult(%arg0: tensor<1x3x640x640x
 
     // CHECK: [[SLICE:%.*]] = IE.StridedSlice(%arg0) {begin_mask = [0, 0, 0, 0], begins_attr = [0, 0, 0, 0], ellipsis_mask = [0, 0, 0, 0], end_mask = [0, 0, 0, 0], ends_attr = [1, 3, 640, 640], new_axis_mask = [0, 0, 0, 0], operandSegmentSizes = array<i32: 1, 0, 0, 0>, shrink_axis_mask = [0, 0, 0, 0], strides_attr = [1, 1, 2, 1]} : tensor<1x3x640x640xf16, {order = #NCHW}> -> tensor<1x3x320x640xf16>
     // CHECK: return [[SLICE]] : tensor<1x3x320x640xf16
+}
+
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @NotConvertStridedSliceIfInputTypeSI32
+func.func @NotConvertStridedSliceIfInputTypeSI32(%arg0: tensor<1x3x640x640xsi32, {order = #NHWC}>) -> tensor<1x3x320x640xsi32, {order = #NHWC}> {
+    %1 = IE.StridedSlice(%arg0) {begin_mask = [0, 0, 0, 0], begins_attr = [0, 0, 0, 0], ellipsis_mask = [0, 0, 0, 0], end_mask = [0, 0, 0, 0], ends_attr = [1, 3, 640, 640], new_axis_mask = [0, 0, 0, 0], operandSegmentSizes = array<i32: 1, 0, 0, 0>, shrink_axis_mask = [0, 0, 0, 0], strides_attr = [1, 1, 2, 1]} : tensor<1x3x640x640xsi32, {order = #NHWC}> -> tensor<1x3x320x640xsi32, {order = #NHWC}>
+    return %1 : tensor<1x3x320x640xsi32, {order = #NHWC}>
+
+    // CHECK: [[SLICE:%.*]] = IE.StridedSlice(%arg0) {begin_mask = [0, 0, 0, 0], begins_attr = [0, 0, 0, 0], ellipsis_mask = [0, 0, 0, 0], end_mask = [0, 0, 0, 0], ends_attr = [1, 3, 640, 640], new_axis_mask = [0, 0, 0, 0], operandSegmentSizes = array<i32: 1, 0, 0, 0>, shrink_axis_mask = [0, 0, 0, 0], strides_attr = [1, 1, 2, 1]} : tensor<1x3x640x640xsi32, {order = #NHWC}> -> tensor<1x3x320x640xsi32, {order = #NHWC}>
+    // CHECK: return [[SLICE]] : tensor<1x3x320x640xsi32, {order = #NHWC}>
 }
 
 // -----
@@ -179,3 +192,22 @@ func.func @NotConvertParallelStridedSlicesToConv(%arg0: tensor<1x3x416x416xf16>)
 
     // CHECK: return [[CONCAT]] : tensor<1x3x208x832xf16>
 }
+
+// -----
+
+// CHECK-LABEL: @NotConvertParallelStridedSlicesToConvWitnInputTypeSI32
+func.func @NotConvertParallelStridedSlicesToConvWitnInputTypeSI32(%arg0: tensor<1x3x416x416xsi32>) -> tensor<1x12x208x208xsi32> {
+    %0 = IE.StridedSlice(%arg0) {begin_mask = [0, 0, 0, 0], begins_attr = [0, 0, 0, 0], ellipsis_mask = [0, 0, 0, 0], end_mask = [0, 0, 0, 0], ends_attr = [1, 3, 416, 416], new_axis_mask = [0, 0, 0, 0], operandSegmentSizes = array<i32: 1, 0, 0, 0>, shrink_axis_mask = [0, 0, 0, 0], strides_attr = [1, 1, 2, 2]} : tensor<1x3x416x416xsi32> -> tensor<1x3x208x208xsi32>
+    %1 = IE.StridedSlice(%arg0) {begin_mask = [0, 0, 0, 0], begins_attr = [0, 0, 1, 0], ellipsis_mask = [0, 0, 0, 0], end_mask = [0, 0, 0, 0], ends_attr = [1, 3, 416, 416], new_axis_mask = [0, 0, 0, 0], operandSegmentSizes = array<i32: 1, 0, 0, 0>, shrink_axis_mask = [0, 0, 0, 0], strides_attr = [1, 1, 2, 2]} : tensor<1x3x416x416xsi32> -> tensor<1x3x208x208xsi32>
+    %2 = IE.StridedSlice(%arg0) {begin_mask = [0, 0, 0, 0], begins_attr = [0, 0, 0, 1], ellipsis_mask = [0, 0, 0, 0], end_mask = [0, 0, 0, 0], ends_attr = [1, 3, 416, 416], new_axis_mask = [0, 0, 0, 0], operandSegmentSizes = array<i32: 1, 0, 0, 0>, shrink_axis_mask = [0, 0, 0, 0], strides_attr = [1, 1, 2, 2]} : tensor<1x3x416x416xsi32> -> tensor<1x3x208x208xsi32>
+    %3 = IE.StridedSlice(%arg0) {begin_mask = [0, 0, 0, 0], begins_attr = [0, 0, 1, 1], ellipsis_mask = [0, 0, 0, 0], end_mask = [0, 0, 0, 0], ends_attr = [1, 3, 416, 416], new_axis_mask = [0, 0, 0, 0], operandSegmentSizes = array<i32: 1, 0, 0, 0>, shrink_axis_mask = [0, 0, 0, 0], strides_attr = [1, 1, 2, 2]} : tensor<1x3x416x416xsi32> -> tensor<1x3x208x208xsi32>
+    %4 = IE.Concat(%0, %1, %2, %3) {static_offsets = [[0, 0, 0, 0], [0, 3, 0, 0], [0, 6, 0, 0], [0, 9, 0, 0]]} : tensor<1x3x208x208xsi32>, tensor<1x3x208x208xsi32>, tensor<1x3x208x208xsi32>, tensor<1x3x208x208xsi32> -> tensor<1x12x208x208xsi32>
+    return %4 : tensor<1x12x208x208xsi32>
+
+    // CHECK: IE.StridedSlice
+    // CHECK: IE.StridedSlice
+    // CHECK: IE.StridedSlice
+    // CHECK: IE.StridedSlice
+}
+
+// -----

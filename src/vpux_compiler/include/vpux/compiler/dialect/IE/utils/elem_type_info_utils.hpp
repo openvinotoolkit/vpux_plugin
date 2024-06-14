@@ -101,6 +101,31 @@ public:
     }
 };
 
+class ElemTypeInfoMaxPoolOpModel final : public IE::ElemTypeInfoOpInterface::FallbackModel<ElemTypeInfoMaxPoolOpModel> {
+public:
+    static void inferElemTypeInfo(mlir::Operation* op, LayerDataInfo<mlir::Type>& info) {
+        auto origOp = mlir::dyn_cast<IE::MaxPoolOp>(op);
+        VPUX_THROW_WHEN(origOp == nullptr, "Expected MaxPoolOp, got {0} at loc {1}", op->getName(), op->getLoc());
+
+        if (VPU::NCEMaxPoolOp::isSupported(origOp, emptyLogCb, /*checkLayout=*/false,
+                                           /*checkChannelAlignment=*/false)) {
+            propagateElementTypeDown(info);
+        }
+    }
+    static void inferElemTypeInfoUp(mlir::Operation* op, LayerDataInfo<mlir::Type>& info) {
+        auto origOp = mlir::dyn_cast<IE::MaxPoolOp>(op);
+        VPUX_THROW_WHEN(origOp == nullptr, "Expected MaxPoolOp, got {0} at loc {1}", op->getName(), op->getLoc());
+
+        if (VPU::NCEMaxPoolOp::isSupported(origOp, emptyLogCb, /*checkLayout=*/false,
+                                           /*checkChannelAlignment=*/false)) {
+            propagateElementTypeUp(info);
+        }
+    }
+    static LayerDataInfo<mlir::Type> getElemTypeInfo(mlir::Operation* op) {
+        return vpux::IE::getElemTypeInfo(op);
+    }
+};
+
 class ElemTypeInfoReorderOpModel final : public IE::ElemTypeInfoOpInterface::FallbackModel<ElemTypeInfoReorderOpModel> {
 public:
     static void inferElemTypeInfo(mlir::Operation* op, LayerDataInfo<mlir::Type>& info) {

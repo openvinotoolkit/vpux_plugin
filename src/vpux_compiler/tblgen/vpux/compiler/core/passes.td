@@ -31,6 +31,12 @@ def PrintDot : PassBase<"print-dot", "vpux::ModulePass"> {
 
     let options = [
         Option<
+            "printOnlyDotInterfaceOpt", "print-only-dot-interfaces",
+            "bool", "",
+            "Print only ops that have dotInterface implementations"
+        >,
+
+        Option<
             "printDeclarationsOpt", "print-declarations",
             "bool", "",
             "Print declare memory operations"
@@ -73,6 +79,29 @@ def PrintDot : PassBase<"print-dot", "vpux::ModulePass"> {
     ];
 
     let constructor = "vpux::createPrintDotPass()";
+}
+
+
+//
+// SetupLocationVerifier
+//
+
+def SetupLocationVerifier : PassBase<"setup-location-verifier", "vpux::ModulePass"> {
+    let summary = "Set location names verifier state to enabled or disabled";
+
+    let description = [{
+        This pass attaches or detaches attribute to mark verifier state
+    }];
+
+    let options = [
+        Option<
+            "mode", "mode",
+            "std::string", "",
+            "Enable location verification"
+        >
+    ];
+
+    let constructor = "vpux::createSetupLocationVerifierPass()";
 }
 
 #endif

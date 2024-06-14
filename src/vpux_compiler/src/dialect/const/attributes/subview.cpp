@@ -5,13 +5,12 @@
 
 #include "vpux/compiler/dialect/const/attributes/content.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
+#include "vpux/compiler/utils/loop.hpp"
 #include "vpux/compiler/utils/quantization.hpp"
 #include "vpux/compiler/utils/subspaces.hpp"
 #include "vpux/compiler/utils/types.hpp"
 
-#include "vpux/utils/IE/loop.hpp"
 #include "vpux/utils/core/format.hpp"
-#include "vpux/utils/core/func_ref.hpp"
 #include "vpux/utils/core/range.hpp"
 
 #include <mlir/IR/DialectImplementation.h>
@@ -103,10 +102,6 @@ mlir::Attribute vpux::Const::SubViewAttr::parse(mlir::AsmParser& parser, mlir::T
 //
 
 vpux::NDTypeInterface vpux::Const::SubViewAttr::inferOutputType(vpux::NDTypeInterface input) const {
-    const auto typeSizeInBits = input.getElemTypeSize().count();
-    VPUX_THROW_UNLESS(typeSizeInBits >= CHAR_BIT || typeSizeInBits == 1,
-                      "SubViewAttr does not support sub-byte element types except i1, got {0}", input.getElementType());
-
     const auto shape = parseIntArrayAttr<int64_t>(getShape());
     const auto offset = parseIntArrayAttr<int64_t>(getOffset());
 
@@ -121,6 +116,11 @@ vpux::NDTypeInterface vpux::Const::SubViewAttr::inferOutputType(vpux::NDTypeInte
 //
 
 Const::Content vpux::Const::SubViewAttr::transform(vpux::Const::Content& input) const {
+    const auto storageElemTypeSize = vpux::getElemTypeSize(input.getStorageElemType()).count();
+    VPUX_THROW_UNLESS(storageElemTypeSize >= CHAR_BIT || storageElemTypeSize == 1,
+                      "SubViewAttr does not support sub-byte element types except i1, got {0}",
+                      input.getStorageElemType());
+
     auto output = Const::Content::allocTempBuffer(inferOutputType(input.getType()), input.getStorageElemType(),
                                                   input.isSplat());
 
@@ -194,17 +194,18 @@ Const::Content vpux::Const::SubViewAttr::transform(vpux::Const::Content& input) 
             const auto off0 = memOffset[md0];
             const auto off1 = memOffset[md1];
 
-            loop_2d(LoopExecPolicy::Parallel, OUT0, OUT1, [&](int64_t out0, int64_t out1) {
-                const auto in0 = out0 + off0;
-                const auto in1 = out1 + off1;
+            loop_2d(LoopExecPolicy::Parallel, input.getStorageElemType().getContext(), OUT0, OUT1,
+                    [&](int64_t out0, int64_t out1) {
+                        const auto in0 = out0 + off0;
+                        const auto in1 = out1 + off1;
 
-                const auto outRawInd = out1 + out0 * OUT1;
-                const auto inRawInd = in1 + in0 * IN1;
+                        const auto outRawInd = out1 + out0 * OUT1;
+                        const auto inRawInd = in1 + in0 * IN1;
 
-                std::copy_n(inBuf.data() + checked_cast<size_t>(inRawInd * elemSize.count()),
-                            checked_cast<size_t>(elemSize.count()),
-                            outBuf.data() + checked_cast<size_t>(outRawInd * elemSize.count()));
-            });
+                        std::copy_n(inBuf.data() + checked_cast<size_t>(inRawInd * elemSize.count()),
+                                    checked_cast<size_t>(elemSize.count()),
+                                    outBuf.data() + checked_cast<size_t>(outRawInd * elemSize.count()));
+                    });
         } else if (memOffset.size() == 3) {
             // Opitimized 3D case
 
@@ -223,18 +224,19 @@ Const::Content vpux::Const::SubViewAttr::transform(vpux::Const::Content& input) 
             const auto off1 = memOffset[md1];
             const auto off2 = memOffset[md2];
 
-            loop_3d(LoopExecPolicy::Parallel, OUT0, OUT1, OUT2, [&](int64_t out0, int64_t out1, int64_t out2) {
-                const auto in0 = out0 + off0;
-                const auto in1 = out1 + off1;
-                const auto in2 = out2 + off2;
+            loop_3d(LoopExecPolicy::Parallel, input.getStorageElemType().getContext(), OUT0, OUT1, OUT2,
+                    [&](int64_t out0, int64_t out1, int64_t out2) {
+                        const auto in0 = out0 + off0;
+                        const auto in1 = out1 + off1;
+                        const auto in2 = out2 + off2;
 
-                const auto outRawInd = out2 + out1 * OUT2 + out0 * OUT2 * OUT1;
-                const auto inRawInd = in2 + in1 * IN2 + in0 * IN2 * IN1;
+                        const auto outRawInd = out2 + out1 * OUT2 + out0 * OUT2 * OUT1;
+                        const auto inRawInd = in2 + in1 * IN2 + in0 * IN2 * IN1;
 
-                std::copy_n(inBuf.data() + checked_cast<size_t>(inRawInd * elemSize.count()),
-                            checked_cast<size_t>(elemSize.count()),
-                            outBuf.data() + checked_cast<size_t>(outRawInd * elemSize.count()));
-            });
+                        std::copy_n(inBuf.data() + checked_cast<size_t>(inRawInd * elemSize.count()),
+                                    checked_cast<size_t>(elemSize.count()),
+                                    outBuf.data() + checked_cast<size_t>(outRawInd * elemSize.count()));
+                    });
         } else if (memOffset.size() == 4) {
             // Opitimized 4D case
 
@@ -257,7 +259,7 @@ Const::Content vpux::Const::SubViewAttr::transform(vpux::Const::Content& input) 
             const auto off2 = memOffset[md2];
             const auto off3 = memOffset[md3];
 
-            loop_4d(LoopExecPolicy::Parallel, OUT0, OUT1, OUT2, OUT3,
+            loop_4d(LoopExecPolicy::Parallel, getContext(), OUT0, OUT1, OUT2, OUT3,
                     [&](int64_t out0, int64_t out1, int64_t out2, int64_t out3) {
                         const auto in0 = out0 + off0;
                         const auto in1 = out1 + off1;
@@ -274,26 +276,27 @@ Const::Content vpux::Const::SubViewAttr::transform(vpux::Const::Content& input) 
         } else {
             // Generic case
 
-            loop_1d(LoopExecPolicy::Parallel, output.getType().getNumElements(), [&](int64_t outMemInd1D) {
-                const auto outMemIndND = getMemIndexND(outMemInd1D, outMemShape);
+            loop_1d(LoopExecPolicy::Parallel, getContext(), output.getType().getNumElements(),
+                    [&](int64_t outMemInd1D) {
+                        const auto outMemIndND = getMemIndexND(outMemInd1D, outMemShape);
 
-                MemShape inMemIndND(outMemIndND.size());
-                for (auto ind : irange(inMemIndND.size())) {
-                    const auto md = MemDim(ind);
-                    inMemIndND[md] = outMemIndND[md] + memOffset[md];
-                }
+                        MemShape inMemIndND(outMemIndND.size());
+                        for (auto ind : irange(inMemIndND.size())) {
+                            const auto md = MemDim(ind);
+                            inMemIndND[md] = outMemIndND[md] + memOffset[md];
+                        }
 
-                const auto inMemInd1D = getMemIndex1D(inMemIndND, inMemShape);
+                        const auto inMemInd1D = getMemIndex1D(inMemIndND, inMemShape);
 
-                const auto inMemRawInd = checked_cast<size_t>(inMemInd1D * elemSize.count());
-                VPUX_THROW_UNLESS(inMemRawInd < inBuf.size(), "Out-of-bound access in 'SubViewAttr'");
+                        const auto inMemRawInd = checked_cast<size_t>(inMemInd1D * elemSize.count());
+                        VPUX_THROW_UNLESS(inMemRawInd < inBuf.size(), "Out-of-bound access in 'SubViewAttr'");
 
-                const auto outMemRawInd = checked_cast<size_t>(outMemInd1D * elemSize.count());
-                VPUX_THROW_UNLESS(outMemRawInd < outBuf.size(), "Out-of-bound access in 'SubViewAttr'");
+                        const auto outMemRawInd = checked_cast<size_t>(outMemInd1D * elemSize.count());
+                        VPUX_THROW_UNLESS(outMemRawInd < outBuf.size(), "Out-of-bound access in 'SubViewAttr'");
 
-                std::copy_n(inBuf.data() + inMemRawInd, checked_cast<size_t>(elemSize.count()),
-                            outBuf.data() + outMemRawInd);
-            });
+                        std::copy_n(inBuf.data() + inMemRawInd, checked_cast<size_t>(elemSize.count()),
+                                    outBuf.data() + outMemRawInd);
+                    });
         }
     }
 

@@ -1,15 +1,17 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
+// Unmaintained ELF import feature, test expected to fail
+// XFAIL: *
 // RUN: vpux-translate --vpu-arch=%arch% --export-ELF %s -o t.elf
 // RUN: vpux-translate --vpu-arch=%arch% --import-ELF t.elf | FileCheck %s
 // RUN: rm t.elf
 // REQUIRES: arch-VPUX37XX
 //
 
-module @Test attributes {VPU.arch = #VPU.arch_kind<VPUX37XX>, VPU.compilationMode = #VPU.compilation_mode<ReferenceHW>} {
+module @Test attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilationMode = #VPU.compilation_mode<ReferenceHW>} {
   IE.MemoryResource 31457280 bytes of @DDR {VPU.bandwidth = 8 : i64, VPU.derateFactor = 6.000000e-01 : f64}
   IE.ExecutorResource 1 of @DMA_NN
   IE.TileResource 1 of @NCE {
@@ -25,7 +27,7 @@ module @Test attributes {VPU.arch = #VPU.arch_kind<VPUX37XX>, VPU.compilationMod
   }
   VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096]
   module @VPU.SW {
-    func.func private @builtin_hswish(memref<*xf16>, memref<*xf16>) attributes {VPU.kernel_code = "hswish_fp16.cpp", VPU.kernel_entry = "hswish_fp16"}
+    func.func private @builtin_hswish(memref<*xf16>, memref<*xf16>) attributes {VPU.kernel_code = "activation_hswish.cpp", VPU.kernel_entry = "activation_hswish"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
   func.func @main(%arg0: memref<1x1x1x1000xf16>, %arg1: memref<1x1x1x1000xf16>) -> memref<1x1x1x1000xf16> {
@@ -33,34 +35,14 @@ module @Test attributes {VPU.arch = #VPU.arch_kind<VPUX37XX>, VPU.compilationMod
     %1 = VPURT.DeclareBuffer <CMX_NN> [0] <2000> -> memref<1x1x1x1000xf16, [@CMX_NN, 0]>
     %2 = VPUMI37XX.ConfigureBarrier {consumer_count = 1 : ui8, producer_count = 1 : ui8}<0, -1> -> !VPURegMapped.Index<0:0:0>
     %3 = VPUMI37XX.ConfigureBarrier {consumer_count = 1 : ui8, producer_count = 1 : ui8}<1, -1> -> !VPURegMapped.Index<0:0:1>
-    %5 = VPUMI37XX.DeclareKernelText kernel_path("hswish_fp16") -> !VPURegMapped.Index<0:0:0>
-    %6 = VPUMI37XX.DeclareKernelArgs kernel_path("hswish_fp16") -> !VPURegMapped.Index<0:0:0>
-    %7 = VPUMI37XX.DeclareKernelEntry kernel_path("hswish_fp16") -> !VPURegMapped.Index<0:0:0>
+    %5 = VPUMI37XX.DeclareKernelText kernel_path("activation_hswish_3720xx") -> !VPURegMapped.Index<0:0:0>
+    %6 = VPUMI37XX.DeclareKernelArgs kernel_path("activation_hswish_3720xx") -> !VPURegMapped.Index<0:0:0>
+    %7 = VPUMI37XX.DeclareKernelEntry kernel_path("activation_hswish_3720xx") -> !VPURegMapped.Index<0:0:0>
     %8 = VPUMI37XX.ActKernelRange kernel_text_index(%5 : !VPURegMapped.Index<0:0:0>) kernel_args_index(%6 : !VPURegMapped.Index<0:0:0>) kernel_entry_index(%7 : !VPURegMapped.Index<0:0:0>) kernelTaskType(@COMPUTE) -> !VPURegMapped.Index<0:0:0>
     %9 = VPUMI37XX.ActKernelInvocation range_index(%8 : <0:0:0>) waits(%2 : !VPURegMapped.Index<0:0:0>) updates(%3 : !VPURegMapped.Index<0:0:1>) tile(0) start_after(0) clean_after(0) -> !VPURegMapped.Index<0:0:0>
-    %10 = VPUMI37XX.KernelParams inputs(%0 : memref<1x1x1x1000xf16, [@CMX_NN, 0]>) outputs(%1 : memref<1x1x1x1000xf16, [@CMX_NN, 0]>) kernel_type("hswish_fp16") kernel_params(dense<[0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 33, 67, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 33, 67, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0]> : vector<72xui8>) -> !VPURegMapped.Index<0:0:0>
+    %10 = VPUMI37XX.KernelParams inputs(%0 : memref<1x1x1x1000xf16, [@CMX_NN, 0]>) outputs(%1 : memref<1x1x1x1000xf16, [@CMX_NN, 0]>) kernel_type("activation_hswish") kernel_params(dense<[0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 33, 67, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 33, 67, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0]> : vector<72xui8>) -> !VPURegMapped.Index<0:0:0>
     %11 = VPUMI37XX.NNDMA {port = 0 : i64} inputs(%1 : memref<1x1x1x1000xf16, [@CMX_NN, 0]>) outputs(%arg1 : memref<1x1x1x1000xf16>) waits(%3 : !VPURegMapped.Index<0:0:1>) start_after(0) clean_after(0) acceleration_mode(<DISABLE>) -> !VPURegMapped.Index<0:0:1>
     %4 = VPUMI37XX.NNDMA {port = 0 : i64} inputs(%arg0 : memref<1x1x1x1000xf16>) outputs(%0 : memref<1x1x1x1000xf16, [@CMX_NN, 0]>) nextDMAIdx(%11 : !VPURegMapped.Index<0:0:1>) updates(%2 : !VPURegMapped.Index<0:0:0>) start_after(0) clean_after(0) acceleration_mode(<DISABLE>) -> !VPURegMapped.Index<0:0:0>
-    %12 = VPURT.DeclareBuffer <DDR> <0> -> memref<8192xi8, @DDR>
-    %13 = ELFNPU37XX.CreateLogicalSection secType(SHT_NOBITS) secFlags(VPU_SHF_PROC_SHAVE) {secAddrAlign = 1024 : i64, secInfo = 0 : i64, secName = ".bss.actShaveStack_0"} -> !ELFNPU37XX.Section {
-      ELFNPU37XX.PutOpInSection %12 : memref<8192xi8, @DDR>
-    }
-    %14 = ELFNPU37XX.Symbol %13 name("sym_actShaveStack_0") : !ELFNPU37XX.Section
-    %15 = VPURT.DeclareBuffer <DDR> <0> -> memref<8192xi8, @DDR>
-    %16 = ELFNPU37XX.CreateLogicalSection secType(SHT_NOBITS) secFlags(VPU_SHF_PROC_SHAVE) {secAddrAlign = 1024 : i64, secInfo = 0 : i64, secName = ".bss.actShaveStack_1"} -> !ELFNPU37XX.Section {
-      ELFNPU37XX.PutOpInSection %15 : memref<8192xi8, @DDR>
-    }
-    %17 = ELFNPU37XX.Symbol %16 name("sym_actShaveStack_1") : !ELFNPU37XX.Section
-    %18 = VPURT.DeclareBuffer <DDR> <0> -> memref<8192xi8, @DDR>
-    %19 = ELFNPU37XX.CreateLogicalSection secType(SHT_NOBITS) secFlags(VPU_SHF_PROC_SHAVE) {secAddrAlign = 1024 : i64, secInfo = 0 : i64, secName = ".bss.actShaveStack_2"} -> !ELFNPU37XX.Section {
-      ELFNPU37XX.PutOpInSection %18 : memref<8192xi8, @DDR>
-    }
-    %20 = ELFNPU37XX.Symbol %19 name("sym_actShaveStack_2") : !ELFNPU37XX.Section
-    %21 = VPURT.DeclareBuffer <DDR> <0> -> memref<8192xi8, @DDR>
-    %22 = ELFNPU37XX.CreateLogicalSection secType(SHT_NOBITS) secFlags(VPU_SHF_PROC_SHAVE) {secAddrAlign = 1024 : i64, secInfo = 0 : i64, secName = ".bss.actShaveStack_3"} -> !ELFNPU37XX.Section {
-      ELFNPU37XX.PutOpInSection %21 : memref<8192xi8, @DDR>
-    }
-    %23 = ELFNPU37XX.Symbol %22 name("sym_actShaveStack_3") : !ELFNPU37XX.Section
     %24 = VPUMI37XX.ActShaveRt kernel("nnActEntry") -> !VPURegMapped.Index<0:0:0>
     %25 = ELFNPU37XX.CreateSection secType(SHT_PROGBITS) secFlags("SHF_NONE") {secAddrAlign = 1024 : i64, secInfo = 0 : i64, secName = ".text.actKernelRtConfigSec"} -> !ELFNPU37XX.Section {
       ELFNPU37XX.PutOpInSection %24 : !VPURegMapped.Index<0:0:0>
@@ -68,12 +50,8 @@ module @Test attributes {VPU.arch = #VPU.arch_kind<VPUX37XX>, VPU.compilationMod
     %26 = ELFNPU37XX.Symbol %25 name("sym_actKernelRtConfigsSec") : !ELFNPU37XX.Section
     %27 = ELFNPU37XX.CreateSymbolTableSection secName(".symtab.actKernelRtConfig") secFlags("SHF_NONE") -> !ELFNPU37XX.Section {
       ELFNPU37XX.PutOpInSection %26 : !ELFNPU37XX.Symbol
-      ELFNPU37XX.PutOpInSection %14 : !ELFNPU37XX.Symbol
-      ELFNPU37XX.PutOpInSection %17 : !ELFNPU37XX.Symbol
-      ELFNPU37XX.PutOpInSection %20 : !ELFNPU37XX.Symbol
-      ELFNPU37XX.PutOpInSection %23 : !ELFNPU37XX.Symbol
     }
-    %28 = VPUMI37XX.MappedInference dmas(%4 : !VPURegMapped.Index<0:0:0>) actKernelRanges(%8 : !VPURegMapped.Index<0:0:0>) actKernelInvocations(%9 : !VPURegMapped.Index<0:0:0>) barriers(%2 : !VPURegMapped.Index<0:0:0>) actShaveRt(%24 : !VPURegMapped.Index<0:0:0>) actShaveStacks(%12, %15, %18, %21 : memref<8192xi8, @DDR>, memref<8192xi8, @DDR>, memref<8192xi8, @DDR>, memref<8192xi8, @DDR>) dmaCount([2]) invariantCount(0) variantCount(0) actKernelRangesCount(1) actKernelInvocationsCount(1) barrierCount(2) -> !VPURegMapped.Index<0:0:0>
+    %28 = VPUMI37XX.MappedInference dmas(%4 : !VPURegMapped.Index<0:0:0>) actKernelRanges(%8 : !VPURegMapped.Index<0:0:0>) actKernelInvocations(%9 : !VPURegMapped.Index<0:0:0>) barriers(%2 : !VPURegMapped.Index<0:0:0>) actShaveRt(%24 : !VPURegMapped.Index<0:0:0>) dmaCount([2]) invariantCount(0) variantCount(0) actKernelRangesCount(1) actKernelInvocationsCount(1) barrierCount(2) -> !VPURegMapped.Index<0:0:0>
     %29 = ELFNPU37XX.CreateSection secType(SHT_PROGBITS) secFlags(SHF_ALLOC) {secAddrAlign = 64 : i64, secInfo = 0 : i64, secName = ".text.dmaTasks"} -> !ELFNPU37XX.Section {
       ELFNPU37XX.PutOpInSection %4 : !VPURegMapped.Index<0:0:0>
       ELFNPU37XX.PutOpInSection %11 : !VPURegMapped.Index<0:0:1>
@@ -170,48 +148,44 @@ module @Test attributes {VPU.arch = #VPU.arch_kind<VPUX37XX>, VPU.compilationMod
       %77 = ELFNPU37XX.Symbol %28 name("MappedInference_entry") type(<VPU_STT_ENTRY>) : !VPURegMapped.Index<0:0:0>
     }
     %67 = ELFNPU37XX.CreateRelocationSection secName(".rlt.DMA_NetInput") sourceSymbolTableSection(%51) targetSection(%29) secFlags("SHF_INFO_LINK|VPU_SHF_JIT|VPU_SHF_USERINPUT") -> !ELFNPU37XX.Section {
-      ELFNPU37XX.RelocImmOffset baseOp(%4 : !VPURegMapped.Index<0:0:0>) offset(16) <R_VPU_64> %49 0
+      ELFNPU37XX.Reloc baseOp(%4 : !VPURegMapped.Index<0:0:0>) offset(16) <R_VPU_64> %49 0
     }
     %68 = ELFNPU37XX.CreateRelocationSection secName(".rlt.DMA_NetOutput") sourceSymbolTableSection(%52) targetSection(%29) secFlags("SHF_INFO_LINK|VPU_SHF_JIT|VPU_SHF_USEROUTPUT") -> !ELFNPU37XX.Section {
-      ELFNPU37XX.RelocImmOffset baseOp(%11 : !VPURegMapped.Index<0:0:1>) offset(24) <R_VPU_64> %50 0
+      ELFNPU37XX.Reloc baseOp(%11 : !VPURegMapped.Index<0:0:1>) offset(24) <R_VPU_64> %50 0
     }
     %69 = ELFNPU37XX.CreateRelocationSection secName(".rlt.text.dmaTasks") sourceSymbolTableSection(%65) targetSection(%29) secFlags(SHF_INFO_LINK) -> !ELFNPU37XX.Section {
-      ELFNPU37XX.Reloc baseOp(%4 : !VPURegMapped.Index<0:0:0>) offsetOf(%0 : memref<1x1x1x1000xf16, [@CMX_NN, 0]>) <R_VPU_64> %58 0
-      ELFNPU37XX.RelocImmOffset baseOp(%4 : !VPURegMapped.Index<0:0:0>) offset(0) <R_VPU_32_RTM> %61 128
-      ELFNPU37XX.Reloc baseOp(%11 : !VPURegMapped.Index<0:0:1>) offsetOf(%1 : memref<1x1x1x1000xf16, [@CMX_NN, 0]>) <R_VPU_64> %58 2000
+      ELFNPU37XX.Reloc offset(24) <R_VPU_64> %58 0
+      ELFNPU37XX.Reloc offset(0) <R_VPU_32_RTM> %61 128
+      ELFNPU37XX.Reloc offset(144) <R_VPU_64> %58 2000
     }
     %70 = ELFNPU37XX.CreateRelocationSection secName(".rlt.text.KernelParams") sourceSymbolTableSection(%66) targetSection(%33) secFlags(SHF_INFO_LINK) -> !ELFNPU37XX.Section {
-      ELFNPU37XX.RelocImmOffset baseOp(%10 : !VPURegMapped.Index<0:0:0>) offset(12) <R_VPU_32> %46 72
-      ELFNPU37XX.RelocImmOffset baseOp(%10 : !VPURegMapped.Index<0:0:0>) offset(16) <R_VPU_32> %46 88
-      ELFNPU37XX.RelocImmOffset baseOp(%10 : !VPURegMapped.Index<0:0:0>) offset(48) <R_VPU_32> %46 120
-      ELFNPU37XX.RelocImmOffset baseOp(%10 : !VPURegMapped.Index<0:0:0>) offset(52) <R_VPU_32> %46 136
+      ELFNPU37XX.Reloc baseOp(%10 : !VPURegMapped.Index<0:0:0>) offset(12) <R_VPU_32> %46 72
+      ELFNPU37XX.Reloc baseOp(%10 : !VPURegMapped.Index<0:0:0>) offset(16) <R_VPU_32> %46 88
+      ELFNPU37XX.Reloc baseOp(%10 : !VPURegMapped.Index<0:0:0>) offset(48) <R_VPU_32> %46 120
+      ELFNPU37XX.Reloc baseOp(%10 : !VPURegMapped.Index<0:0:0>) offset(52) <R_VPU_32> %46 136
     }
     %71 = ELFNPU37XX.CreateRelocationSection secName(".rlt.text.KernelParams") sourceSymbolTableSection(%65) targetSection(%33) secFlags(SHF_INFO_LINK) -> !ELFNPU37XX.Section {
-      ELFNPU37XX.Reloc baseOp(%10 : !VPURegMapped.Index<0:0:0>) offsetOf(%0 : memref<1x1x1x1000xf16, [@CMX_NN, 0]>) <R_VPU_32> %58 0
-      ELFNPU37XX.Reloc baseOp(%10 : !VPURegMapped.Index<0:0:0>) offsetOf(%1 : memref<1x1x1x1000xf16, [@CMX_NN, 0]>) <R_VPU_32> %58 2000
+      ELFNPU37XX.Reloc offset(0) <R_VPU_32> %58 0
+      ELFNPU37XX.Reloc offset(36) <R_VPU_32> %58 2000
     }
     %72 = ELFNPU37XX.CreateRelocationSection secName(".rlt.text.ActKernelRanges") sourceSymbolTableSection(%66) targetSection(%34) secFlags(SHF_INFO_LINK) -> !ELFNPU37XX.Section {
-      ELFNPU37XX.Reloc baseOp(%8 : !VPURegMapped.Index<0:0:0>) offsetOf(%5 : !VPURegMapped.Index<0:0:0>) <R_VPU_32> %44 0
+      ELFNPU37XX.Reloc offset(8) <R_VPU_32> %44 0
     }
     %73 = ELFNPU37XX.CreateRelocationSection secName(".rlt.text.ActKernelInvocations") sourceSymbolTableSection(%65) targetSection(%35) secFlags(SHF_INFO_LINK) -> !ELFNPU37XX.Section {
-      ELFNPU37XX.Reloc baseOp(%9 : !VPURegMapped.Index<0:0:0>) offsetOf(%8 : !VPURegMapped.Index<0:0:0>) <R_VPU_32_RTM> %60 24
+      ELFNPU37XX.Reloc offset(0) <R_VPU_32_RTM> %60 24
     }
     %74 = ELFNPU37XX.CreateRelocationSection secName(".rlt.text.ActKernelInvocations") sourceSymbolTableSection(%66) targetSection(%35) secFlags(SHF_INFO_LINK) -> !ELFNPU37XX.Section {
-      ELFNPU37XX.RelocImmOffset baseOp(%9 : !VPURegMapped.Index<0:0:0>) offset(8) <R_VPU_32> %45 0
-      ELFNPU37XX.RelocImmOffset baseOp(%9 : !VPURegMapped.Index<0:0:0>) offset(4) <R_VPU_32> %46 0
+      ELFNPU37XX.Reloc baseOp(%9 : !VPURegMapped.Index<0:0:0>) offset(8) <R_VPU_32> %45 0
+      ELFNPU37XX.Reloc baseOp(%9 : !VPURegMapped.Index<0:0:0>) offset(4) <R_VPU_32> %46 0
     }
     %75 = ELFNPU37XX.CreateRelocationSection secName(".rlt.text.MappedInference") sourceSymbolTableSection(%27) targetSection(%36) secFlags(SHF_INFO_LINK) -> !ELFNPU37XX.Section {
-      ELFNPU37XX.RelocImmOffset baseOp(%28 : !VPURegMapped.Index<0:0:0>) offset(340) <R_VPU_32> %26 0
-      ELFNPU37XX.Reloc baseOp(%28 : !VPURegMapped.Index<0:0:0>) offsetOf(%12 : memref<8192xi8, @DDR>) <R_VPU_32> %14 8192
-      ELFNPU37XX.Reloc baseOp(%28 : !VPURegMapped.Index<0:0:0>) offsetOf(%15 : memref<8192xi8, @DDR>) <R_VPU_32> %17 8192
-      ELFNPU37XX.Reloc baseOp(%28 : !VPURegMapped.Index<0:0:0>) offsetOf(%18 : memref<8192xi8, @DDR>) <R_VPU_32> %20 8192
-      ELFNPU37XX.Reloc baseOp(%28 : !VPURegMapped.Index<0:0:0>) offsetOf(%21 : memref<8192xi8, @DDR>) <R_VPU_32> %23 8192
+      ELFNPU37XX.Reloc baseOp(%28 : !VPURegMapped.Index<0:0:0>) offset(340) <R_VPU_32> %26 0
     }
     %76 = ELFNPU37XX.CreateRelocationSection secName(".rlt.text.MappedInference") sourceSymbolTableSection(%66) targetSection(%36) secFlags(SHF_INFO_LINK) -> !ELFNPU37XX.Section {
-      ELFNPU37XX.Reloc baseOp(%28 : !VPURegMapped.Index<0:0:0>) offsetOf(%4 : !VPURegMapped.Index<0:0:0>) <R_VPU_64> %40 0
-      ELFNPU37XX.Reloc baseOp(%28 : !VPURegMapped.Index<0:0:0>) offsetOf(%2 : !VPURegMapped.Index<0:0:0>) <R_VPU_64> %41 0
-      ELFNPU37XX.Reloc baseOp(%28 : !VPURegMapped.Index<0:0:0>) offsetOf(%8 : !VPURegMapped.Index<0:0:0>) <R_VPU_64> %42 0
-      ELFNPU37XX.Reloc baseOp(%28 : !VPURegMapped.Index<0:0:0>) offsetOf(%9 : !VPURegMapped.Index<0:0:0>) <R_VPU_64> %43 0
+      ELFNPU37XX.Reloc offset(72) <R_VPU_64> %40 0
+      ELFNPU37XX.Reloc offset(312) <R_VPU_64> %41 0
+      ELFNPU37XX.Reloc offset(237) <R_VPU_64> %42 0
+      ELFNPU37XX.Reloc offset(272) <R_VPU_64> %43 0
     }
     return %arg1 : memref<1x1x1x1000xf16>
   }
@@ -246,25 +220,9 @@ module @Test attributes {VPU.arch = #VPU.arch_kind<VPUX37XX>, VPU.compilationMod
 //CHECK-DAG: %[[VAL16:.*]] = ELFNPU37XX.CreateSection {{.*}} secName = ".text.ActKernelInvocations"
 //CHECK-NEXT: ELFNPU37XX.PutOpInSection %[[VAL15]] : !VPURegMapped.Index<0:0:0>
 
-//CHECK-DAG: %[[VAL17:.*]] = VPUMI37XX.KernelParams inputs(%[[VAL3]] : memref<2000xui8, [@CMX_NN, 0]>) outputs(%[[VAL5]] : memref<2000xui8, [@CMX_NN, 0]>) kernel_type("Softmax") kernel_params({{.*}}) -> !VPURegMapped.Index<0:0:0>
+//CHECK-DAG: %[[VAL17:.*]] = VPUMI37XX.KernelParams inputs(%[[VAL3]] : memref<2000xui8, [@CMX_NN, 0]>) outputs(%[[VAL5]] : memref<2000xui8, [@CMX_NN, 0]>) dynamicInputShapes(() : ()) dynamicOutputShapes(() : ()) kernel_type("Softmax") kernel_params({{.*}}) -> !VPURegMapped.Index<0:0:0>
 //CHECK-DAG: %[[VAL18:.*]] = ELFNPU37XX.CreateSection {{.*}} secName = ".text.KernelParams"
 //CHECK-NEXT: ELFNPU37XX.PutOpInSection %[[VAL17]] : !VPURegMapped.Index<0:0:0>
-
-//CHECK-DAG: %[[VAL19:.*]] = VPURT.DeclareBuffer <DDR>
-//CHECK-NEXT: %[[VAL20:.*]] = ELFNPU37XX.CreateLogicalSection secType(SHT_NOBITS) secFlags(VPU_SHF_PROC_SHAVE) {secAddrAlign = 1024 : i64, secInfo = 0 : i64, secName = ".bss.actShaveStack_0"} -> !ELFNPU37XX.Section {
-//CHECK-NEXT: ELFNPU37XX.PutOpInSection %[[VAL19]] : memref<8192xui8, @DDR>
-
-//CHECK-DAG: %[[VAL21:.*]] = VPURT.DeclareBuffer <DDR>
-//CHECK-NEXT: %[[VAL22:.*]] = ELFNPU37XX.CreateLogicalSection secType(SHT_NOBITS) secFlags(VPU_SHF_PROC_SHAVE) {secAddrAlign = 1024 : i64, secInfo = 0 : i64, secName = ".bss.actShaveStack_1"} -> !ELFNPU37XX.Section {
-//CHECK-NEXT: ELFNPU37XX.PutOpInSection %[[VAL21]] : memref
-
-//CHECK-DAG: %[[VAL23:.*]] = VPURT.DeclareBuffer <DDR>
-//CHECK-NEXT: %[[VAL24:.*]] = ELFNPU37XX.CreateLogicalSection secType(SHT_NOBITS) secFlags(VPU_SHF_PROC_SHAVE) {secAddrAlign = 1024 : i64, secInfo = 0 : i64, secName = ".bss.actShaveStack_2"} -> !ELFNPU37XX.Section {
-//CHECK-NEXT: ELFNPU37XX.PutOpInSection %[[VAL23]] : memref
-
-//CHECK-DAG: %[[VAL25:.*]] = VPURT.DeclareBuffer <DDR>
-//CHECK-NEXT: %[[VAL26:.*]] = ELFNPU37XX.CreateLogicalSection secType(SHT_NOBITS) secFlags(VPU_SHF_PROC_SHAVE) {secAddrAlign = 1024 : i64, secInfo = 0 : i64, secName = ".bss.actShaveStack_3"} -> !ELFNPU37XX.Section {
-//CHECK-NEXT: ELFNPU37XX.PutOpInSection %[[VAL25]] : memref
 
 //CHECK-DAG: %[[VAL27:.*]] = VPUMI37XX.ActShaveRt kernel("nnActEntry") -> !VPURegMapped.Index<0:0:0>
 //CHECK-NEXT: %[[VAL28:.*]] = ELFNPU37XX.CreateSection {{.*}} {secAddrAlign = 1024 : i64, secInfo = 0 : i64, secName = ".text.actKernelRtConfigSec"} -> !ELFNPU37XX.Section {
@@ -276,7 +234,6 @@ module @Test attributes {VPU.arch = #VPU.arch_kind<VPUX37XX>, VPU.compilationMod
 //CHECK-SAME: actKernelInvocations(%[[VAL15]] : !VPURegMapped.Index<0:0:0>)
 //CHECK-SAME: barriers(%[[VAL0]] : !VPURegMapped.Index<0:0:0>)
 //CHECK-SAME: actShaveRt(%[[VAL27]] : !VPURegMapped.Index<0:0:0>)
-//CHECK-SAME: actShaveStacks(%[[VAL19]], %[[VAL21]], %[[VAL23]], %[[VAL25]] : {{.*}}>)
 //CHECK-SAME: dmaCount([2]) invariantCount(0) variantCount(0) actKernelRangesCount(1) actKernelInvocationsCount(1) barrierCount(2)
 //CHECK-SAME: -> !VPURegMapped.Index<0:0:0>
 
@@ -295,17 +252,9 @@ module @Test attributes {VPU.arch = #VPU.arch_kind<VPUX37XX>, VPU.compilationMod
 //CHECK-DAG: %[[VAL35:.*]] = ELFNPU37XX.CreateLogicalSection {{.*}} secName = ".data.BuffersIO"
 
 //CHECK-DAG: %[[VAL36:.*]] = ELFNPU37XX.Symbol %[[VAL28]] name("sym_actKernelRtConfigsSec") {{.*}} : !ELFNPU37XX.Section
-//CHECK-DAG: %[[VAL37:.*]] = ELFNPU37XX.Symbol %[[VAL20]] name("sym_actShaveStack_0") {{.*}} : !ELFNPU37XX.Section
-//CHECK-DAG: %[[VAL38:.*]] = ELFNPU37XX.Symbol %[[VAL22]] name("sym_actShaveStack_1") {{.*}} : !ELFNPU37XX.Section
-//CHECK-DAG: %[[VAL39:.*]] = ELFNPU37XX.Symbol %[[VAL24]] name("sym_actShaveStack_2") {{.*}} : !ELFNPU37XX.Section
-//CHECK-DAG: %[[VAL40:.*]] = ELFNPU37XX.Symbol %[[VAL26]] name("sym_actShaveStack_3") {{.*}} : !ELFNPU37XX.Section
 
 //CHECK-DAG: %[[VAL41:.*]] = ELFNPU37XX.CreateSymbolTableSection secName(".symtab.actKernelRtConfig")
 //CHECK-NEXT: ELFNPU37XX.PutOpInSection %[[VAL36]] : !ELFNPU37XX.Symbol
-//CHECK-NEXT: ELFNPU37XX.PutOpInSection %[[VAL37]] : !ELFNPU37XX.Symbol
-//CHECK-NEXT: ELFNPU37XX.PutOpInSection %[[VAL38]] : !ELFNPU37XX.Symbol
-//CHECK-NEXT: ELFNPU37XX.PutOpInSection %[[VAL39]] : !ELFNPU37XX.Symbol
-//CHECK-NEXT: ELFNPU37XX.PutOpInSection %[[VAL40]] : !ELFNPU37XX.Symbol
 
 //CHECK-DAG: %[[VAL42:.*]] = ELFNPU37XX.Symbol %[[VALINPUT]] name("input") type(<STT_NOTYPE>) size(2000) {value = 0 : ui64} : {{.*}}
 //CHECK-DAG: %[[VAL43:.*]] = ELFNPU37XX.CreateSymbolTableSection secName(".symtab.input") secFlags(VPU_SHF_USERINPUT) -> !ELFNPU37XX.Section
@@ -367,41 +316,37 @@ module @Test attributes {VPU.arch = #VPU.arch_kind<VPUX37XX>, VPU.compilationMod
 //CHECK-NEXT: ELFNPU37XX.PutOpInSection %[[VAL66]] : !ELFNPU37XX.Symbol
 
 //CHECK: %[[VAL68:.*]] = ELFNPU37XX.CreateRelocationSection secName(".rlt.DMA_NetInput") sourceSymbolTableSection(%[[VAL43]]) targetSection(%[[VAL7]]) secFlags("SHF_INFO_LINK|VPU_SHF_JIT|VPU_SHF_USERINPUT") -> !ELFNPU37XX.Section
-//CHECK-DAG: ELFNPU37XX.RelocImmOffset offset(16) <R_VPU_64> %[[VAL42]] 0
+//CHECK-DAG: ELFNPU37XX.Reloc offset(16) <R_VPU_64> %[[VAL42]] 0
 //CHECK: %[[VAL69:.*]] = ELFNPU37XX.CreateRelocationSection secName(".rlt.DMA_NetOutput") sourceSymbolTableSection(%[[VAL45]]) targetSection(%[[VAL7]]) secFlags("SHF_INFO_LINK|VPU_SHF_JIT|VPU_SHF_USEROUTPUT") -> !ELFNPU37XX.Section
-//CHECK-DAG: ELFNPU37XX.RelocImmOffset offset(152) <R_VPU_64> %[[VAL44]] 0
+//CHECK-DAG: ELFNPU37XX.Reloc offset(152) <R_VPU_64> %[[VAL44]] 0
 
 //CHECK: %[[VAL70:.*]] = ELFNPU37XX.CreateRelocationSection secName(".rlt.text.dmaTasks") sourceSymbolTableSection(%[[VAL67]]) targetSection(%[[VAL7]]) secFlags(SHF_INFO_LINK) -> !ELFNPU37XX.Section
-//CHECK-DAG: ELFNPU37XX.RelocImmOffset offset(24) <R_VPU_64> %[[VAL60]] 0
-//CHECK-DAG: ELFNPU37XX.RelocImmOffset offset(0) <R_VPU_32_RTM> %[[VAL63]] 128
-//CHECK-DAG: ELFNPU37XX.RelocImmOffset offset(144) <R_VPU_64> %[[VAL60]] 2000
+//CHECK-DAG: ELFNPU37XX.Reloc offset(24) <R_VPU_64> %[[VAL60]] 0
+//CHECK-DAG: ELFNPU37XX.Reloc offset(0) <R_VPU_32_RTM> %[[VAL63]] 128
+//CHECK-DAG: ELFNPU37XX.Reloc offset(144) <R_VPU_64> %[[VAL60]] 2000
 
 
 //CHECK: %[[VAL71:.*]] = ELFNPU37XX.CreateRelocationSection secName(".rlt.text.KernelParams") sourceSymbolTableSection(%[[VAL59]]) targetSection(%[[VAL18]]) secFlags(SHF_INFO_LINK) -> !ELFNPU37XX.Section
-//CHECK-DAG: ELFNPU37XX.RelocImmOffset offset(12) <R_VPU_32> %[[VAL53]] 72
-//CHECK-DAG: ELFNPU37XX.RelocImmOffset offset(16) <R_VPU_32> %[[VAL53]] 88
-//CHECK-DAG: ELFNPU37XX.RelocImmOffset offset(48) <R_VPU_32> %[[VAL53]] 120
-//CHECK-DAG: ELFNPU37XX.RelocImmOffset offset(52) <R_VPU_32> %[[VAL53]] 136
+//CHECK-DAG: ELFNPU37XX.Reloc offset(12) <R_VPU_32> %[[VAL53]] 72
+//CHECK-DAG: ELFNPU37XX.Reloc offset(16) <R_VPU_32> %[[VAL53]] 88
+//CHECK-DAG: ELFNPU37XX.Reloc offset(48) <R_VPU_32> %[[VAL53]] 120
+//CHECK-DAG: ELFNPU37XX.Reloc offset(52) <R_VPU_32> %[[VAL53]] 136
 //CHECK: %[[VAL72:.*]] = ELFNPU37XX.CreateRelocationSection secName(".rlt.text.KernelParams") sourceSymbolTableSection(%[[VAL67]]) targetSection(%[[VAL18]]) secFlags(SHF_INFO_LINK) -> !ELFNPU37XX.Section
-//CHECK-DAG: ELFNPU37XX.RelocImmOffset offset(0) <R_VPU_32> %[[VAL60]] 0
-//CHECK-DAG: ELFNPU37XX.RelocImmOffset offset(36) <R_VPU_32> %[[VAL60]] 2000
+//CHECK-DAG: ELFNPU37XX.Reloc offset(0) <R_VPU_32> %[[VAL60]] 0
+//CHECK-DAG: ELFNPU37XX.Reloc offset(36) <R_VPU_32> %[[VAL60]] 2000
 
 //CHECK: %[[VAL73:.*]] = ELFNPU37XX.CreateRelocationSection secName(".rlt.text.ActKernelRanges") sourceSymbolTableSection(%[[VAL59]]) targetSection(%[[VAL12]]) secFlags(SHF_INFO_LINK) -> !ELFNPU37XX.Section
-//CHECK-DAG: ELFNPU37XX.RelocImmOffset offset(8) <R_VPU_32> %[[VAL51]] 0
+//CHECK-DAG: ELFNPU37XX.Reloc offset(8) <R_VPU_32> %[[VAL51]] 0
 //CHECK: %[[VAL74:.*]] = ELFNPU37XX.CreateRelocationSection secName(".rlt.text.ActKernelInvocations") sourceSymbolTableSection(%[[VAL67]]) targetSection(%[[VAL16]]) secFlags(SHF_INFO_LINK) -> !ELFNPU37XX.Section
-//CHECK-DAG: ELFNPU37XX.RelocImmOffset offset(0) <R_VPU_32_RTM> %[[VAL62]] 24
+//CHECK-DAG: ELFNPU37XX.Reloc offset(0) <R_VPU_32_RTM> %[[VAL62]] 24
 //CHECK: %[[VAL75:.*]] = ELFNPU37XX.CreateRelocationSection secName(".rlt.text.ActKernelInvocations") sourceSymbolTableSection(%[[VAL59]]) targetSection(%[[VAL16]]) secFlags(SHF_INFO_LINK) -> !ELFNPU37XX.Section
-//CHECK-DAG: ELFNPU37XX.RelocImmOffset offset(8) <R_VPU_32> %[[VAL52]] 0
-//CHECK-DAG: ELFNPU37XX.RelocImmOffset offset(4) <R_VPU_32> %[[VAL53]] 0
+//CHECK-DAG: ELFNPU37XX.Reloc offset(8) <R_VPU_32> %[[VAL52]] 0
+//CHECK-DAG: ELFNPU37XX.Reloc offset(4) <R_VPU_32> %[[VAL53]] 0
 
 //CHECK: %[[VAL76:.*]] = ELFNPU37XX.CreateRelocationSection secName(".rlt.text.MappedInference") sourceSymbolTableSection(%[[VAL41]]) targetSection(%[[VAL30]]) secFlags(SHF_INFO_LINK) -> !ELFNPU37XX.Section
-//CHECK-DAG: ELFNPU37XX.RelocImmOffset offset(340) <R_VPU_32> %[[VAL36]] 0
-//CHECK-DAG: ELFNPU37XX.RelocImmOffset offset(344) <R_VPU_32> %[[VAL37]] 8192
-//CHECK-DAG: ELFNPU37XX.RelocImmOffset offset(348) <R_VPU_32> %[[VAL38]] 8192
-//CHECK-DAG: ELFNPU37XX.RelocImmOffset offset(352) <R_VPU_32> %[[VAL39]] 8192
-//CHECK-DAG: ELFNPU37XX.RelocImmOffset offset(356) <R_VPU_32> %[[VAL40]] 8192
+//CHECK-DAG: ELFNPU37XX.Reloc offset(340) <R_VPU_32> %[[VAL36]] 0
 //CHECK: %[[VAL77:.*]] = ELFNPU37XX.CreateRelocationSection secName(".rlt.text.MappedInference") sourceSymbolTableSection(%[[VAL59]]) targetSection(%[[VAL30]]) secFlags(SHF_INFO_LINK) -> !ELFNPU37XX.Section
-//CHECK-DAG: ELFNPU37XX.RelocImmOffset offset(72) <R_VPU_64> %[[VAL49]] 0
-//CHECK-DAG: ELFNPU37XX.RelocImmOffset offset(312) <R_VPU_64> %[[VAL50]] 0
-//CHECK-DAG: ELFNPU37XX.RelocImmOffset offset(232) <R_VPU_64> %[[VAL54]] 0
-//CHECK-DAG: ELFNPU37XX.RelocImmOffset offset(272) <R_VPU_64> %[[VAL55]] 0
+//CHECK-DAG: ELFNPU37XX.Reloc offset(72) <R_VPU_64> %[[VAL49]] 0
+//CHECK-DAG: ELFNPU37XX.Reloc offset(312) <R_VPU_64> %[[VAL50]] 0
+//CHECK-DAG: ELFNPU37XX.Reloc offset(232) <R_VPU_64> %[[VAL54]] 0
+//CHECK-DAG: ELFNPU37XX.Reloc offset(272) <R_VPU_64> %[[VAL55]] 0

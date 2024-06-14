@@ -3,8 +3,10 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/types.hpp"
+//
+
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/types.hpp"
 #include "vpux/compiler/init.hpp"
 
 #include "vpux/utils/core/mem_size.hpp"
@@ -265,19 +267,19 @@ TEST_F(MLIR_NDTypeInterface, CompressedSegmentedDistributedBufferType) {
 
     const int64_t compressionAxis = 0;
     const int64_t alignment = 16;
-    const auto compressionScheme = VPUIP::CompressionSchemeAttr::get(&ctx, getIntAttr(&ctx, compressionAxis),
-                                                                     numElemsAttr, getIntAttr(&ctx, alignment));
+    const auto sparsityCompression = VPUIP::SparsityCompressionAttr::get(&ctx, getIntAttr(&ctx, compressionAxis),
+                                                                         numElemsAttr, getIntAttr(&ctx, alignment));
 
     const auto ndType = VPUIP::DistributedBufferType::get(&ctx, shape, elemType, layout, dimsSpace, distributedAttr,
-                                                          compressionScheme)
+                                                          sparsityCompression)
                                 .dyn_cast<vpux::NDTypeInterface>();
     ASSERT_TRUE(ndType != nullptr) << "Buffer is not of vpux::NDTypeInterface type";
 
     EXPECT_EQ(ndType.getNumElements(), std::accumulate(numElems.begin(), numElems.end(), static_cast<int64_t>(0)));
     EXPECT_EQ(ndType.getTotalAllocSize().count(),
-              (64 / 4) * (15 * sizeof(float16) + 2));  // weight-set size aligned to 16 bytes
+              (64 / 4) * (15 * sizeof(vpux::type::float16) + 2));  // weight-set size aligned to 16 bytes
     EXPECT_EQ(ndType.getCompactAllocSize().count(),
-              (64 / 4) * (15 * sizeof(float16) + 2));  // weight-set size aligned to 16 bytes
+              (64 / 4) * (15 * sizeof(vpux::type::float16) + 2));  // weight-set size aligned to 16 bytes
 
     const SmallVector<int64_t> tileOffsets({0, 0, 0, 0});
     const SmallVector<int64_t> tileShape({32, 16, 1, 1});
@@ -285,7 +287,7 @@ TEST_F(MLIR_NDTypeInterface, CompressedSegmentedDistributedBufferType) {
     EXPECT_EQ(tiledType.getShape(), ShapeRef(tileShape));
     const auto distTiledType = tiledType.dyn_cast<VPUIP::DistributedBufferType>();
     ASSERT_TRUE(distTiledType != nullptr);
-    auto tiledNumElems = distTiledType.getCompressionScheme().getNumElems().getValues<int64_t>();
+    auto tiledNumElems = distTiledType.getSparsityCompression().getNumElems().getValues<int64_t>();
     EXPECT_EQ(tiledNumElems.size(), tileShape[compressionAxis]);
 }
 
@@ -317,11 +319,11 @@ TEST_F(MLIR_NDTypeInterface, CompressedDuplicatedDistributedBufferType) {
     const auto numElemsAttr = mlir::DenseElementsAttr::get(numElemsType, ArrayRef(numElems));
     const int64_t compressionAxis = 0;
     const int64_t alignment = 16;
-    const auto compressionScheme = VPUIP::CompressionSchemeAttr::get(&ctx, getIntAttr(&ctx, compressionAxis),
-                                                                     numElemsAttr, getIntAttr(&ctx, alignment));
+    const auto sparsityCompression = VPUIP::SparsityCompressionAttr::get(&ctx, getIntAttr(&ctx, compressionAxis),
+                                                                         numElemsAttr, getIntAttr(&ctx, alignment));
 
     const auto ndType = VPUIP::DistributedBufferType::get(&ctx, shape, elemType, layout, dimsSpace, distributedAttr,
-                                                          compressionScheme)
+                                                          sparsityCompression)
                                 .dyn_cast<vpux::NDTypeInterface>();
     ASSERT_TRUE(ndType != nullptr) << "Buffer is not of vpux::NDTypeInterface type";
 
@@ -329,7 +331,7 @@ TEST_F(MLIR_NDTypeInterface, CompressedDuplicatedDistributedBufferType) {
 
     int64_t totalByteSize = 0;
     for (auto elems : numElems) {
-        int64_t weightSetByteSize = elems * sizeof(float16);
+        int64_t weightSetByteSize = elems * sizeof(vpux::type::float16);
         totalByteSize += vpux::alignValUp(weightSetByteSize, alignment);
     }
     EXPECT_EQ(ndType.getTotalAllocSize().count(), totalByteSize);
@@ -341,7 +343,7 @@ TEST_F(MLIR_NDTypeInterface, CompressedDuplicatedDistributedBufferType) {
     EXPECT_EQ(tiledType.getShape(), ShapeRef(tileShape));
     const auto distTiledType = tiledType.dyn_cast<VPUIP::DistributedBufferType>();
     ASSERT_TRUE(distTiledType != nullptr);
-    auto tiledNumElems = distTiledType.getCompressionScheme().getNumElems().getValues<int64_t>();
+    auto tiledNumElems = distTiledType.getSparsityCompression().getNumElems().getValues<int64_t>();
     EXPECT_EQ(tiledNumElems.size(), tileShape[compressionAxis]);
 }
 

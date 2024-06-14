@@ -6,7 +6,7 @@
 #pragma once
 
 #include "vpux/compiler/core/barrier_info.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 
 namespace vpux {
 namespace VPURT {
@@ -18,7 +18,8 @@ std::map<VPURT::TaskQueueType, SmallVector<uint32_t>> getTaskOpQueues(
         std::optional<VPU::ExecutorKind> targetExecutorKind = std::nullopt);
 void postProcessBarrierOps(mlir::func::FuncOp func);
 void verifyBarrierSlots(mlir::func::FuncOp func, Logger log);
-void orderExecutionTasksAndBarriers(mlir::func::FuncOp funcOp, BarrierInfo& barrierInfo);
+void orderExecutionTasksAndBarriers(mlir::func::FuncOp funcOp, BarrierInfo& barrierInfo,
+                                    bool orderByConsumption = false);
 
 }  // namespace VPURT
 }  // namespace vpux

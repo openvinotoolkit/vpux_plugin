@@ -9,12 +9,12 @@
 
 #include <functional>
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
-#include "vpux/compiler/dialect/VPUIP/attributes.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/passes.hpp"
-#include "vpux/compiler/dialect/VPUIP/utils.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/task.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/attributes.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/transforms/passes.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/utils/VPU/ppe_utils.hpp"
 #include "vpux/compiler/utils/types.hpp"
@@ -58,8 +58,8 @@ void buildDualChannelDMATest(const nb::TestCaseJsonDescriptor& testDesc, mlir::M
     VPUX_THROW_UNLESS(!inShape.empty(), "buildRaceConditionDMATest: Got empty inputShape");
     VPUX_THROW_UNLESS(!outShape.empty(), "buildRaceConditionDMATest: Got empty outputShape");
 
-    auto CMX_0_OFFSET = 0;
-    auto CMX_1_OFFSET = 0;
+    size_t CMX_0_OFFSET = 0;
+    size_t CMX_1_OFFSET = 0;
 
     auto inputTotalSize = totalTensorSize(inShape, inputType);
 
@@ -103,6 +103,8 @@ void buildDualChannelDMATest(const nb::TestCaseJsonDescriptor& testDesc, mlir::M
 
     auto barrier_0 = funcBuilder.create<VPURT::ConfigureBarrierOp>(loc, 0);
     auto barrier_1 = funcBuilder.create<VPURT::ConfigureBarrierOp>(loc, 1);
+    // finalBarrier passed as production barrier to last DMA task
+    auto barrier_2 = funcBuilder.create<VPURT::ConfigureBarrierOp>(loc, 2);
 
     // transactions from ProgrammableInput to CMX
     vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcBuilder, mlir::ValueRange(),
@@ -132,19 +134,20 @@ void buildDualChannelDMATest(const nb::TestCaseJsonDescriptor& testDesc, mlir::M
 
     // transactions from CMX to ProgrammableOutput
     vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcBuilder, mlir::ValueRange(barrier_1.getBarrier()),
-                                                mlir::ValueRange(), loc, outputCMX_0.getOperation()->getResult(0),
-                                                funcOutput_0, 0);
+                                                mlir::ValueRange(barrier_2.getBarrier()), loc,
+                                                outputCMX_0.getOperation()->getResult(0), funcOutput_0, 0);
 
     vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcBuilder, mlir::ValueRange(barrier_1.getBarrier()),
-                                                mlir::ValueRange(), loc, outputCMX_1.getOperation()->getResult(0),
-                                                funcOutput_1, 1);
+                                                mlir::ValueRange(barrier_2.getBarrier()), loc,
+                                                outputCMX_1.getOperation()->getResult(0), funcOutput_1, 1);
 
     funcBuilder.create<mlir::func::ReturnOp>(loc,
                                              mlir::ValueRange{funcOutput_0, funcOutput_1, funcOutput_2, funcOutput_3});
 
     mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    pm.addPass(VPU::createInitCompilerPass(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW, 2, std::nullopt,
-                                           log));
+    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.numberOfDPUGroups = 2;
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
 
     VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");
 

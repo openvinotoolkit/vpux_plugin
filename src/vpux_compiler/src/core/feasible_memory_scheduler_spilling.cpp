@@ -5,9 +5,9 @@
 
 #include "vpux/compiler/core/feasible_memory_scheduler_spilling.hpp"
 #include "vpux/compiler/core/cost_model_utils.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/utils.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
 #include "vpux/compiler/utils/dma.hpp"
@@ -189,6 +189,7 @@ void FeasibleMemorySchedulerSpilling::removeComputeOpRelocationSpills(
             auto& origOp = scheduledOps[origOpIndex.value()];
             auto& spillWriteOp = scheduledOps[spillWriteIndex];
             auto& spillReadOp = scheduledOps[spillReadIndex.value()];
+            auto spillBuf = spillReadOp.getOutputBuffer(0);
 
             // Check if operation writes just to part of buffer. In that case optimization cannot
             // be performed as operation is not a sole owner of full buffer
@@ -210,7 +211,7 @@ void FeasibleMemorySchedulerSpilling::removeComputeOpRelocationSpills(
                                           rootBuffers.size());
                         const auto rootBuffer = *rootBuffers.begin();
 
-                        if (rootBuffer != spillReadOp.getOutputBuffer(0)) {
+                        if (rootBuffer != spillBuf) {
                             // This is not an output that is going to be spilled. Move
                             // to next one
                             continue;
@@ -248,10 +249,75 @@ void FeasibleMemorySchedulerSpilling::removeComputeOpRelocationSpills(
             // First find matching buffer that was spilled
             bool foundMatchingBuffer = false;
             for (size_t i = 0; i < origOp.numOfOutputResources(); i++) {
-                if (origOp.getOutputBuffer(i) == spillReadOp.getOutputBuffer(0)) {
+                if (origOp.getOutputBuffer(i) == spillBuf) {
+                    // Check if same buffer is also used as operation input. This is the case
+                    // for eltwise inplace op
+                    bool isInplaceOp = false;
+                    for (size_t j = 0; j < origOp.numOfInputResources(); j++) {
+                        if (origOp.getInputBuffer(j) == spillBuf) {
+                            isInplaceOp = true;
+                            break;
+                        }
+                    }
+
                     // Found matching resource index. Update assigned range
                     origOp.outputResourceInfo_[i].begin_ = spillReadOp.outputResourceInfo_[0].begin_;
                     origOp.outputResourceInfo_[i].end_ = spillReadOp.outputResourceInfo_[0].end_;
+
+                    // In case of spilling inplace operation need to create new buffer for output
+                    // and remove inplace attribute
+                    if (isInplaceOp) {
+                        auto allocOpInsertionPoint =
+                                _depsInfo.getExecuteOpAtIndex(scheduledOps.begin()->op_).getOperation();
+
+                        auto origExecOp = _depsInfo.getExecuteOpAtIndex(origOp.op_);
+                        mlir::Operation* origExecInnerOp = nullptr;
+
+                        auto* bodyBlock = origExecOp.getBody();
+
+                        for (auto& op : bodyBlock->getOperations()) {
+                            if (VPUIP::isPureViewOp(&op)) {
+                                continue;
+                            }
+                            origExecInnerOp = &op;
+                            break;
+                        }
+
+                        VPUX_THROW_UNLESS(origExecInnerOp, "No inner op located for '{0}'", origOp.op_);
+
+                        if (auto nceOp = mlir::dyn_cast<VPUIP::NCEClusterTaskOp>(origExecInnerOp)) {
+                            nceOp.removeIsInplaceAttr();
+                        }
+
+                        // Create allocation operation for new output buffer as the old one is also used
+                        // as operation input and this code should not modify this allocation
+                        mlir::OpBuilder builder(allocOpInsertionPoint);
+                        auto newBufferOp = builder.clone(*spillBuf.getDefiningOp());
+                        auto newBufferResult = newBufferOp->getResult(0);
+
+                        // Update buffer data in scheduledOps
+                        origOp.outputResourceInfo_[i].buffer_ = newBufferResult;
+
+                        // Assign new buffer to operand of operation
+                        for (auto operand : origExecInnerOp->getOperands() | indexed) {
+                            if (operand.value() == spillBuf) {
+                                origExecInnerOp->setOperand(operand.index(), newBufferResult);
+                            }
+                        }
+
+                        // Update aliases info for newly created root buffer
+                        _aliasInfo.removeAlias(origExecInnerOp->getResult(0));
+                        _aliasInfo.removeAlias(origExecOp.getBodyResults()[0]);
+
+                        _aliasInfo.addAlias(newBufferResult, newBufferResult);
+                        _aliasInfo.addAlias(newBufferResult, origExecOp.getBodyResults()[0]);
+                        _aliasInfo.addAlias(newBufferResult, origExecInnerOp->getResult(0));
+
+                        // Configure address as prepared by scheduler.
+                        // Since it is a new buffer it was not assigned before
+                        _scan.handler().setAddress(newBufferResult, origOp.outputResourceInfo_[i].begin_);
+                    }
+
                     foundMatchingBuffer = true;
                     break;
                 }
@@ -608,25 +674,10 @@ mlir::async::ExecuteOp FeasibleMemorySchedulerSpilling::insertSpillWriteDmaOp(ml
     builder.setInsertionPointToStart(bodyBlock);
 
     // Build body of spill write async exec op
-    if (bufferToSpill.getType().isa<VPUIP::DistributedBufferType>()) {
-        // Create NCEClusterTiling with DmaOp in the body of new AsyncExecOp
-        SmallVector<mlir::Value> inputsOutputOperands = {bufferToSpill, newBufferResult};
-
-        const auto bodyBuilder = [&](mlir::OpBuilder& builder, mlir::Location loc, mlir::ValueRange newOperands) {
-            spillWriteDmaOp = builder.create<VPUIP::NNDMAOp>(loc, newOperands[0], newOperands[1]);
-            spillWriteDmaOp.setSpillId(spillId);
-        };
-
-        auto clusterTilingOp = builder.create<VPUIP::NCEClusterTilingOp>(spillWriteNameLoc, spillBufferType,
-                                                                         inputsOutputOperands, bodyBuilder);
-        builder.create<mlir::async::YieldOp>(spillWriteNameLoc, clusterTilingOp.getResults()[0]);
-        _aliasInfo.addAlias(newBufferResult, clusterTilingOp.getResults()[0]);
-    } else {
-        // Create DmaOp in the body of new AsyncExecOp
-        spillWriteDmaOp = builder.create<VPUIP::NNDMAOp>(spillWriteNameLoc, bufferToSpill, newBufferResult);
-        spillWriteDmaOp.setSpillId(spillId);
-        builder.create<mlir::async::YieldOp>(spillWriteNameLoc, spillWriteDmaOp->getResults());
-    }
+    // Create DmaOp in the body of new AsyncExecOp
+    spillWriteDmaOp = builder.create<VPUIP::NNDMAOp>(spillWriteNameLoc, bufferToSpill, newBufferResult);
+    spillWriteDmaOp.setSpillId(spillId);
+    builder.create<mlir::async::YieldOp>(spillWriteNameLoc, spillWriteDmaOp->getResults());
 
     // Update aliases for spillWrite result
     _aliasInfo.addAlias(newBufferResult, spillWriteDmaOp.getOutput());
@@ -717,25 +768,10 @@ mlir::async::ExecuteOp FeasibleMemorySchedulerSpilling::insertSpillReadDmaOp(mli
     builder.setInsertionPointToStart(bodyBlock);
 
     // Build body of spill read async exec op
-    if (bufferToSpill.getType().isa<VPUIP::DistributedBufferType>()) {
-        // Create NCEClusterTiling with DmaOp in the body of new AsyncExecOp
-        SmallVector<mlir::Value> inputsOutputOperands = {innerAsyncArgForSpill, newBufferResult};
-
-        const auto bodyBuilder = [&](mlir::OpBuilder& builder, mlir::Location loc, mlir::ValueRange newOperands) {
-            spillReadDmaOp = builder.create<VPUIP::NNDMAOp>(loc, newOperands[0], newOperands[1]);
-            spillReadDmaOp.setSpillId(spillId);
-        };
-
-        auto clusterTilingOp = builder.create<VPUIP::NCEClusterTilingOp>(spillReadNameLoc, bufferToSpill.getType(),
-                                                                         inputsOutputOperands, bodyBuilder);
-        builder.create<mlir::async::YieldOp>(spillReadNameLoc, clusterTilingOp.getResults()[0]);
-        _aliasInfo.addAlias(newBufferResult, clusterTilingOp.getResults()[0]);
-    } else {
-        // Create DmaOp in the body of new AsyncExecOp
-        spillReadDmaOp = builder.create<VPUIP::NNDMAOp>(spillReadNameLoc, innerAsyncArgForSpill, newBufferResult);
-        spillReadDmaOp.setSpillId(spillId);
-        builder.create<mlir::async::YieldOp>(spillReadNameLoc, spillReadDmaOp->getResults());
-    }
+    // Create DmaOp in the body of new AsyncExecOp
+    spillReadDmaOp = builder.create<VPUIP::NNDMAOp>(spillReadNameLoc, innerAsyncArgForSpill, newBufferResult);
+    spillReadDmaOp.setSpillId(spillId);
+    builder.create<mlir::async::YieldOp>(spillReadNameLoc, spillReadDmaOp->getResults());
 
     // Update alias for spillRead result
     _aliasInfo.addAlias(newBufferResult, spillReadDmaOp.getOutput());
@@ -861,10 +897,7 @@ void FeasibleMemorySchedulerSpilling::SpillUsersUpdate::updateSpillBufferUsers(m
                 user = *user->getUsers().begin();
             }
 
-            if (auto nceClusterTilingOp = mlir::dyn_cast<VPUIP::NCEClusterTilingOp>(user)) {
-                nceClusterTask = nceClusterTilingOp.getInnerTaskOpOfType<VPUIP::NCEClusterTaskOp>();
-                possibleInplaceOpResult = nceClusterTilingOp.getResults()[0];
-            } else if (mlir::isa<VPUIP::NCEClusterTaskOp>(user)) {
+            if (mlir::isa<VPUIP::NCEClusterTaskOp>(user)) {
                 nceClusterTask = mlir::dyn_cast<VPUIP::NCEClusterTaskOp>(user);
                 possibleInplaceOpResult = nceClusterTask.getResults()[0];
             }

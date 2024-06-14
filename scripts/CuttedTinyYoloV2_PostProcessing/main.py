@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2022 Intel Corporation.
+# Copyright (C) 2022 Intel Corporation
 # SPDX-License-Identifier: Apache 2.0
 #
 
@@ -7,7 +7,7 @@
 
 import tensorflow as tf
 import PIL
-from PIL import Image 
+from PIL import Image
 import numpy as np
 import cv2
 import copy
@@ -35,13 +35,13 @@ def restore_bbox_coords(bbox, orig_width, orig_height):
 
 def convert_yolo_output(x):
     #x = (x.astype(np.int) - 221) * 0.3371347486972809
-    
-    
+
+
     x = x.reshape(1,13,13,128)
     print("after 1x13x13x128 :  ")
     print(x.shape)
     print("\n")
-   
+
     #print("This is the output tensor shape: {}".format(x.shape))
     x = x[..., 0:125]
     print("This is the output tensor shape after removing the last 3 : {}".format(x.shape))
@@ -58,14 +58,14 @@ def print_box_info(boxes):
         i = 0
         for box in boxes:
             print("Bounding box #" + str(i) )
-            i+=1 
+            i+=1
             print("Object : " + labels[box.get_label() ] )
-            print("Probability = " + str(box.get_score()) )           
+            print("Probability = " + str(box.get_score()) )
             print("Coordinates (x_min, y_min - x_max, y_max) : " + str(int(box.xmin) ) + ", " + str(int(box.ymin) ) + " - " +
                 str( int(box.xmax) ) + ", " + str( int(box.ymax) ) )
             print()
     return # end of function print_box_info( )
-    
+
 # Start of main script
 
 if len(sys.argv) == 1:
@@ -74,7 +74,7 @@ if len(sys.argv) == 1:
 elif len(sys.argv) == 2:
     imageFileName = sys.argv[1]
     probabilityForObjectDetection = 0.4
-elif len(sys.argv) == 3:    
+elif len(sys.argv) == 3:
     imageFileName = sys.argv[1]
     probabilityForObjectDetection = float(sys.argv[2])
 
@@ -109,7 +109,7 @@ interpreter.invoke()
 
 output = interpreter.get_tensor(output_details[0]['index'])
 
-#call function that dequantize and reshape output-0.bin 
+#call function that dequantize and reshape output-0.bin
 x = convert_yolo_output(output)
 # determining the labels that have a confidence score higher than value of probabilityForObjectDetection
 #and suppressing boxes that overlap and have the same label
@@ -122,12 +122,3 @@ print_box_info(boxes)
 image = draw_boxes(image, boxes, labels)
 outputImageFileName = imageFileName[ :-4] + "_result." + imageFileName[-3: ]
 cv2.imwrite( outputImageFileName, image )
-
-
-
-
-
-
-
-
-

@@ -4,8 +4,8 @@
 //
 
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/task.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/utils/types.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
@@ -74,20 +74,24 @@ void buildActShave(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mo
     auto funcbuilder = mlir::OpBuilder::atBlockBegin(func.addEntryBlock(), builder.getListener());
 
     SmallVector<mlir::Value> funcinputs;
-    for (std::size_t idx = 0; idx < inputList.size(); idx++) {
+    for (unsigned int idx = 0; idx < static_cast<unsigned int>(inputList.size()); idx++) {
         auto funcinput = func.getArgument(idx);
         funcinputs.push_back(funcinput);
     }
-    auto funcoutput = func.getArgument(inputList.size());
-    auto profoutput = profilingParams.profilingEnabled() ? func.getArgument(inputList.size() + 1) : nullptr;
+    auto funcoutput = func.getArgument(static_cast<unsigned int>(inputList.size()));
+    auto profoutput = profilingParams.profilingEnabled()
+                              ? func.getArgument(static_cast<unsigned int>(inputList.size()) + 1)
+                              : nullptr;
 
     //  Build main function: barriers
     auto barrier0 = funcbuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 0);
     auto barrier1 = funcbuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 1);
+    // finalBarrier passed as production barrier to last DMA task
+    auto barrier2 = funcbuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 2);
 
     //  Build main function: input/output cmx
     SmallVector<vpux::VPURT::DeclareBufferOp> inputCmxVec;
-    auto inputCmxOffset = 0;
+    size_t inputCmxOffset = 0;
     for (std::size_t idx = 0; idx < inputList.size(); idx++) {
         auto inputCmxType =
                 getMemRefType(VPURT::BufferSection::CMX_NN, 0, inShapes[idx], inputTypes[idx], DimsOrder::NHWC);
@@ -129,14 +133,14 @@ void buildActShave(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mo
 
     //  Build main function: DMA CMX output -> func output
     vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(barrier1.getBarrier()),
-                                                mlir::ValueRange(), builder.getUnknownLoc(), getTensorResult(outputCmx),
-                                                funcoutput, 0);
+                                                mlir::ValueRange(barrier2.getBarrier()), builder.getUnknownLoc(),
+                                                getTensorResult(outputCmx), funcoutput, 0);
 
     if (profilingParams.swProfilingEnabled) {
         // copy profiling data into DDR
-        VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(barrier1.getBarrier()), mlir::ValueRange(),
-                                              builder.getUnknownLoc(), getTensorResult(profOutputCmx),
-                                              getTensorResult(profOutputDdr), 0);
+        VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(barrier1.getBarrier()),
+                                              mlir::ValueRange(barrier2.getBarrier()), builder.getUnknownLoc(),
+                                              getTensorResult(profOutputCmx), getTensorResult(profOutputDdr), 0);
     }
 
     //  Build main function: returnOp
@@ -147,9 +151,17 @@ void buildActShave(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mo
     }
     funcbuilder.create<mlir::func::ReturnOp>(builder.getUnknownLoc(), funcOutputs);
 
+    // set runtime resources
+    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
+
     //  Pass Manager
     mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    pm.addPass(VPU::createInitCompilerPass(testDesc.getArchitecture(), VPU::CompilationMode::ReferenceHW, 1, 1, log));
+
+    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::ReferenceHW);
+    initCompilerOptions.numberOfDMAPorts = 1;
+    initCompilerOptions.numberOfDPUGroups = 1;
+    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
 
     VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");
 

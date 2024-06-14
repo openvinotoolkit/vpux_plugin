@@ -350,10 +350,10 @@ public:
   bool customMethod(int x);
 ```
 
-The definition of `customMethod` can be provided externally. For example, the following definition can be set in `src/vpux_compiler/src/dialect/IE/ops/getting_started.cpp`:
+The definition of `customMethod` can be provided externally. For example, the following definition can be set in `src/vpux_compiler/src/dialect/IE/IR/ops/getting_started.cpp`:
 
 ```C++
-#include "vpux/compiler/dialect/IE/ops.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 
 bool vpux::IE::GettingStartedOp::customMethod(int x) {
     return x >= 0;
@@ -583,7 +583,7 @@ The following method declaration will be added to the operation's generated clas
 static void build(::mlir::OpBuilder &odsBuilder, ::mlir::OperationState &odsState, mlir::Type type, mlir::Value input, mlir::IntegerAttr myInt, mlir::ArrayAttr myIntArray, vpux::IE::GettingStartedAttr gettingStarted);
 ```
 
-The method should also be defined in `src/vpux_compiler/src/dialect/IE/ops/getting_started.cpp`:
+The method should also be defined in `src/vpux_compiler/src/dialect/IE/IR/ops/getting_started.cpp`:
 
 ```C++
 void vpux::IE::GettingStartedOp::build(mlir::OpBuilder& /*odsBuilder*/, mlir::OperationState& odsState, mlir::Type output,
@@ -743,7 +743,7 @@ add_vpux_type(IE)
  */
 #pragma once
 
-#include "vpux/compiler/dialect/IE/dialect.hpp"
+#include "vpux/compiler/dialect/IE/IR/dialect.hpp"
 
 #define GET_TYPEDEF_CLASSES
 #include <vpux/compiler/dialect/IE/types.hpp.inc>
@@ -1120,7 +1120,7 @@ def HandleGettingStarted : PassBase<"handle-getting-started", "mlir::OperationPa
 }
 ```
 
-The constructor that was mentioned in TableGen format also has to be declared & defined. It can be declared in the [IE/passes.hpp](../../src/vpux_compiler/include/vpux/compiler/dialect/IE/passes.hpp) file:
+The constructor that was mentioned in TableGen format also has to be declared & defined. It can be declared in the [IE/transforms/passes.hpp](../../src/vpux_compiler/include/vpux/compiler/dialect/IE/transforms/passes.hpp) file:
 
 ```C++
 // This declaration has to be added before `IE/passes.hpp.inc` is included in the same file,
@@ -1131,8 +1131,8 @@ std::unique_ptr<mlir::Pass> createHandleGettingStartedPass();
 Now, let's define the pass itself. The TableGen code provided the base class (`HandleGettingStartedBase`) which can be used to define the logic of the pass. Create a file `src/vpux_compiler/src/dialect/IE/passes/handle_getting_started.cpp` with the following content:
 
 ```C++
-#include "vpux/compiler/dialect/IE/ops.hpp"
-#include "vpux/compiler/dialect/IE/passes.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
+#include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 
 #include <mlir/IR/BuiltinAttributes.h>
 
@@ -1222,8 +1222,8 @@ The previous example was a small pass where we manually iterate over some operat
 Let's see this with an example. Replace the code pass with the following:
 
 ```C++
-#include "vpux/compiler/dialect/IE/ops.hpp"
-#include "vpux/compiler/dialect/IE/passes.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
+#include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 
 #include <mlir/IR/BuiltinAttributes.h>
 #include <mlir/Transforms/GreedyPatternRewriteDriver.h>
@@ -1352,8 +1352,8 @@ Beside the conversion target, the conversion mode is also something that has to 
 To see this in practice, replace the pass code with the following:
 
 ```C++
-#include "vpux/compiler/dialect/IE/ops.hpp"
-#include "vpux/compiler/dialect/IE/passes.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
+#include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 
 #include <mlir/IR/BuiltinAttributes.h>
 
@@ -1447,7 +1447,7 @@ def IE_GettingStartedOp :
 }
 ```
 
-This will add a `getCanonicalizationPatterns` method in the class declaration of the operation which has to be manually defined. Let's try using the same greedy rewriter from the previous example as a canonicalizer. Add the following code in `src/vpux_compiler/src/dialect/IE/ops/getting_started.cpp`:
+This will add a `getCanonicalizationPatterns` method in the class declaration of the operation which has to be manually defined. Let's try using the same greedy rewriter from the previous example as a canonicalizer. Add the following code in `src/vpux_compiler/src/dialect/IE/IR/ops/getting_started.cpp`:
 
 ```C++
 // The same rewriter used in a previous example, which decrements the `myInt` value until number zero is reached

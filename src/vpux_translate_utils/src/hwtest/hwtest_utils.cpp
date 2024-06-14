@@ -5,11 +5,11 @@
 
 #include "vpux/hwtest/hwtest_utils.hpp"
 
-#include "vpux/compiler/dialect/VPUIP/attributes.hpp"
-#include "vpux/compiler/dialect/VPUIP/utils.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/attributes.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/types.hpp"
-#include "vpux/utils/IE/float16.hpp"
+#include "vpux/utils/core/custom_float.hpp"
 #include "vpux/utils/core/error.hpp"
 
 #include <mlir/Dialect/Quant/QuantTypes.h>
@@ -27,20 +27,35 @@ mlir::Type parseType(mlir::OpBuilder builder, mlir::Type ty, const nb::QuantPara
     }
 
     auto intTy = ty.dyn_cast<mlir::IntegerType>();
-    if (!intTy) {
+    auto float8E5M2Ty = ty.dyn_cast<mlir::Float8E5M2Type>();
+    auto float8E4M3Ty = ty.dyn_cast<mlir::Float8E4M3FNType>();
+    if (!intTy && !float8E5M2Ty && !float8E4M3Ty) {
         return ty;
     }
 
+    auto lowRange = qp.low_range;
+    auto highRange = qp.high_range;
+    auto outputType = builder.getF32Type();
+    auto flags = intTy && intTy.isSigned() ? mlir::quant::QuantizationFlags::Signed : 0;
+    if (float8E5M2Ty != nullptr) {
+        lowRange = std::numeric_limits<vpux::type::float8_e5m2>::lowest();
+        highRange = std::numeric_limits<vpux::type::float8_e5m2>::max();
+        flags = mlir::quant::QuantizationFlags::Signed;
+    } else if (float8E4M3Ty != nullptr) {
+        lowRange = std::numeric_limits<vpux::type::float8_e4m3>::lowest();
+        highRange = std::numeric_limits<vpux::type::float8_e4m3>::max();
+        flags = mlir::quant::QuantizationFlags::Signed;
+    }
+
     if (qp.scale.size() == 1) {
-        return mlir::quant::UniformQuantizedType::get(intTy.isSigned() ? mlir::quant::QuantizationFlags::Signed : 0, ty,
-                                                      builder.getF32Type(), qp.scale.front(), qp.zeropoint,
-                                                      qp.low_range, qp.high_range);
+        return mlir::quant::UniformQuantizedType::get(flags, ty, outputType, qp.scale.front(), qp.zeropoint, lowRange,
+                                                      highRange);
     }
 
     std::vector<int64_t> zeropoint(qp.scale.size(), qp.zeropoint);
-    return mlir::quant::UniformQuantizedPerAxisType::get(
-            intTy.isSigned() ? mlir::quant::QuantizationFlags::Signed : 0, ty, builder.getF32Type(), qp.scale,
-            zeropoint, (DimsOrder::NCHW).dimPos(vpux::Dims4D::Act::C), qp.low_range, qp.high_range);
+    return mlir::quant::UniformQuantizedPerAxisType::get(flags, ty, outputType, qp.scale, zeropoint,
+                                                         (DimsOrder::NCHW).dimPos(vpux::Dims4D::Act::C), lowRange,
+                                                         highRange);
 }
 
 mlir::Type convertToMLIRType(mlir::OpBuilder builder, nb::DType dtype) {
@@ -167,15 +182,15 @@ mlir::DenseElementsAttr generateWeights(llvm::ArrayRef<int64_t> shape, mlir::Typ
     } else if (type.isInteger(8)) {
         return generateWeights<std::uint8_t>(stream, wtData_ddr_valueType, vecSize);
     } else if (type.isF16()) {
-        return generateWeights<float16>(stream, wtData_ddr_valueType, vecSize);
+        return generateWeights<vpux::type::float16>(stream, wtData_ddr_valueType, vecSize);
     } else if (type.isBF16()) {
-        return generateWeights<bfloat16>(stream, wtData_ddr_valueType, vecSize);
+        return generateWeights<vpux::type::bfloat16>(stream, wtData_ddr_valueType, vecSize);
     } else if (type.isF32()) {
         return generateWeights<float>(stream, wtData_ddr_valueType, vecSize);
     } else if (type.isFloat8E5M2()) {
-        return generateWeights<float>(stream, wtData_ddr_valueType, vecSize);
+        return generateWeights<vpux::type::float8_e5m2>(stream, wtData_ddr_valueType, vecSize);
     } else if (type.isFloat8E4M3FN()) {
-        return generateWeights<float>(stream, wtData_ddr_valueType, vecSize);
+        return generateWeights<vpux::type::float8_e4m3>(stream, wtData_ddr_valueType, vecSize);
     } else {
         VPUX_THROW("Unexpected weights data type: {0}", type);
     }
@@ -194,6 +209,85 @@ vpux::Const::ContentAttr generateDefaultWeightsAttr(mlir::DenseElementsAttr weig
     }
 
     return weightsAttribute;
+}
+
+std::vector<uint16_t> computeRsqrtLookupTable() {
+    // LUT Data; Following values (fp16) are synced with numerics-bench rsqrt LUT
+
+    // Saturation/bypass regions, from l-to-r:
+    // upper threshold (ru)
+    // lower threshold (rl)
+    // saturation value (y value to be set if x value in above interval)
+    const std::vector<std::vector<uint16_t>> rsqrtSaturationTableLut = {
+            {1024, 0, 65535},      {31744, 30719, 0},     {64512, 32768, 65535}, {65535, 65535, 65534},
+            {65535, 65535, 65534}, {65535, 65535, 65534}, {65535, 65535, 65534}, {65535, 65535, 65534}};
+
+    // Linear funcion approximations, from l-to-r:
+    // slope
+    // intercept
+    const std::vector<std::vector<uint16_t>> rsqrtSlopeInterceptLut = {
+            {51561, 16808}, {51443, 16765}, {51342, 16725}, {51253, 16689}, {51151, 16655}, {51013, 16624},
+            {50890, 16595}, {50780, 16568}, {50682, 16542}, {50593, 16519}, {50512, 16496}, {50438, 16475},
+            {50371, 16455}, {50310, 16436}, {50253, 16418}, {50201, 16400}, {53158, 17408}, {52993, 17347},
+            {52849, 17291}, {52724, 17239}, {52613, 17192}, {52516, 17148}, {52429, 17107}, {52351, 17068},
+            {52282, 17032}, {52213, 16998}, {52099, 16967}, {51995, 16937}, {51900, 16908}, {51813, 16881},
+            {51733, 16856}, {51660, 16831}};
+
+    // Table containing base addresses and exponents for LUT address generation
+    // Each numer a single fp16 data point, represented by :|<- n->|<- base address ->|
+    //                                                      |6 bits|<-   10 bits     >|
+    //
+    //  - base/start LUT address for each input exponent stored in LUT_CFG table
+    //  - n: number of linear segments (l), a power of 2 i.e. l = 2^n^ , where n = 0, 1, 2, 3, 4,...
+
+    // Address generation (S-sign, E-exponent, M-mantissa):
+    //    fp32 input:     S    EEEEEEEE    MMMMMMMMMMMMMMMMMMMMMM
+    //                         |      |    |...|- n MSB of mantissa
+    //                     exp16=exp32-112    |
+    //                             V          V
+    //                          LUT_CFG ----> + -> LUT address
+    //                                b. addr
+    const std::vector<uint16_t> rsqrtCfgLUT = {137, 133, 133, 132, 132, 131, 131, 130, 130, 129, 129, 128, 128,
+                                               127, 127, 126, 126, 125, 125, 124, 124, 123, 123, 122, 122, 121,
+                                               121, 120, 120, 119, 119, 0,   255, 134, 133, 133, 132, 132, 131,
+                                               131, 130, 130, 129, 129, 128, 128, 127, 127, 126, 126, 125, 125,
+                                               124, 124, 123, 123, 122, 122, 121, 121, 120, 120, 119, 0};
+
+    // LUT creation/formatting
+    std::vector<uint16_t> rsqrtSprLookUpTableContent;
+
+    // saturation regions
+    for (uint32_t index = 0; index < NUM_LUT_SAT_REGS; ++index) {
+        rsqrtSprLookUpTableContent.push_back(rsqrtSaturationTableLut[index][2]);
+        rsqrtSprLookUpTableContent.push_back(rsqrtSaturationTableLut[index][1]);
+        rsqrtSprLookUpTableContent.push_back(rsqrtSaturationTableLut[index][0]);
+    }
+
+    // SYM_B = 0 (pos 128)
+    // RCP = 0 (pos 129)
+    // RSQRT = 1 (pos 130)
+    rsqrtSprLookUpTableContent.push_back(0X0004);
+
+    // reserved region
+    for (uint32_t index = 0; index < NUM_LUT_RESERVED_REGS; ++index) {
+        rsqrtSprLookUpTableContent.push_back(0x0000);
+    }
+
+    // lut cfg region
+    for (uint32_t index = 0; index < NUM_LUT_CFG_REGS; ++index) {
+        rsqrtSprLookUpTableContent.push_back(rsqrtCfgLUT[index]);
+    }
+
+    // lut data region
+    if (size(rsqrtSlopeInterceptLut) > NUM_LUT_DATA_REGS)
+        VPUX_THROW("Size of lut data {0} is bigger than allowed size of {1}", size(rsqrtSlopeInterceptLut),
+                   NUM_LUT_DATA_REGS);
+    for (uint32_t index = 0; index < size(rsqrtSlopeInterceptLut); ++index) {
+        rsqrtSprLookUpTableContent.push_back(rsqrtSlopeInterceptLut[index][0]);
+        rsqrtSprLookUpTableContent.push_back(rsqrtSlopeInterceptLut[index][1]);
+    }
+
+    return rsqrtSprLookUpTableContent;
 }
 
 std::size_t totalTensorSize(llvm::ArrayRef<int64_t> shape, mlir::Type elementType) {
@@ -333,7 +427,7 @@ mlir::DenseElementsAttr splitWeightsOverC(mlir::DenseElementsAttr wt_vec, ArrayR
                 printToString("splitWeightsOverC only supports weight data type fp16 or uint8; got {0}", dtype)};
 
     if (dtype.isF16()) {
-        float16 elementType = 0;
+        vpux::type::float16 elementType = 0;
         return splitWeightsOverCLoop(wt_vec, wt_shape, dtype, elementType, ctx, start_C, end_C);
     } else {
         uint8_t elementType = 0;

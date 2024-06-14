@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -8,7 +8,7 @@
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
 module @VPU.SW {
-    func.func private @builtin_TanhOp(memref<*xf16>, memref<*xf16>, i64) attributes {VPU.kernel_code = "tanh_fp16.cpp", VPU.kernel_entry = "tanh_fp16"}
+    func.func private @builtin_TanhOp(memref<*xf16>, memref<*xf16>, i64) attributes {VPU.kernel_code = "activation_tanh.cpp", VPU.kernel_entry = "activation_tanh"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
 }
 
@@ -109,7 +109,7 @@ func.func @ExceedingVariantCount(%arg0: memref<1x16x32x32xf16, #NHWC>, %arg1: me
     // parallel barrier producers with DPU task
 
     VPURT.Task waits(%bar0 : !VPURT.Barrier) updates(%bar2 : !VPURT.Barrier) {
-        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
             @VPU.SW::@builtin_TanhOp
             inputs(%buf16  as %arg2: memref<1x4x256x1xf16, [@CMX_NN, 0]>)
             outputs(%buf18 as %arg3: memref<1x4x256x1xf16, [@CMX_NN, 0]>) on tile 0
@@ -120,7 +120,7 @@ func.func @ExceedingVariantCount(%arg0: memref<1x16x32x32xf16, #NHWC>, %arg1: me
     }
 
     VPURT.Task waits(%bar0 : !VPURT.Barrier) updates(%bar2 : !VPURT.Barrier) {
-        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
             @VPU.SW::@builtin_TanhOp
             inputs(%buf17  as %arg2: memref<1x4x256x1xf16, [@CMX_NN, 0]>)
             outputs(%buf19 as %arg3: memref<1x4x256x1xf16, [@CMX_NN, 0]>) on tile 1

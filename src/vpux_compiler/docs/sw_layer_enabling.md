@@ -33,7 +33,7 @@
 - [IE → IERT lowering](#ie--iert-lowering)
   - [IE → IERT lowering lit-test](#ie--iert-lowering-lit-test)
 # Introduction
-This instruction will guide you through steps of adding a new software layer to the MLIR compiler. It has step-by-step plan of actions using `CTCGreedyDecoder` layer as an example.
+This instruction will guide you through steps of adding a new NPU3700 software layer to the MLIR compiler. It has step-by-step plan of actions using `CTCGreedyDecoder` layer as an example. For NPU3720 software layer, please refer [npu2_7_sw_layer_enabling.md](../docs/npu2_7_sw_layer_enabling.md)
 > Be aware, that MLIR compiler is in a rapid development and code snippets might be out of date.
 
 # Debugging tips and tricks
@@ -76,7 +76,7 @@ Outputs:
 Add OpenVINO single layer test. Copy test suites from the MKLDNN plugin for initial setup.
 
 A simple test will be useful to have for debugging. Run it to see the build/compilation issues.
-Make sure to derive `LayerTest` from `LayerTestsUtils::VpuOv1LayerTestsCommon`.
+Make sure to derive `LayerTest` from `VpuOv2LayerTest`.
 
 Useful links:
 [How to run tests](../../../guides/how-to-test.md)
@@ -84,23 +84,25 @@ Useful links:
 ## Create a new file with a test
 [tests/functional/shared_tests_instances/single_layer_tests/ctc_greedy_decoder.cpp](../../../tests/functional/shared_tests_instances/single_layer_tests/ctc_greedy_decoder.cpp)
 ```cpp
-#include "single_layer_tests/ctc_greedy_decoder.hpp"
+#include "single_op_tests/ctc_greedy_decoder.hpp"
+#include "vpu_ov2_layer_test.hpp"
 #include <vector>
-#include "kmb_layer_test.hpp"
+
+using namespace ov::test;
+using namespace ov::test::utils;
 
 namespace LayerTestsDefinitions {
 class CTCGreedyDecoderLayerTestCommon :
         public CTCGreedyDecoderLayerTest,
-        virtual public LayerTestsUtils::VpuOv1LayerTestsCommon {};
+        virtual public VpuOv2LayerTest {};
 
 class CTCGreedyDecoderLayerTest_NPU3700 :
         public CTCGreedyDecoderLayerTestCommon {
 };
 
 TEST_P(CTCGreedyDecoderLayerTest_NPU3700, HW) { // HW to reflect which pipeline is used, in this case it is DefaultHW
-    setPlatformVPU3700();
-    setDefaultHardwareModeMLIR();
-    Run();
+    setDefaultHardwareMode();
+    run(Platform::NPU3700);
 }
 
 }  // namespace LayerTestsDefinitions
@@ -110,26 +112,22 @@ using namespace LayerTestsDefinitions;
 
 namespace {
 
-const std::vector<InferenceEngine::Precision> netPrecisions = {
-    InferenceEngine::Precision::FP32,
+const std::vector<ov::element::Type> modelType = {
+    ov::element::f32,
 };
 
 const std::vector<bool> mergeRepeated = {true, false};
 
-const std::vector<InferenceEngine::SizeVector> inputShapes = {
-    InferenceEngine::SizeVector { 88, 1, 71 },
-    InferenceEngine::SizeVector { 10, 1, 16 },
+const std::vector<std::vector<ov::Shape>> inputShapes = {
+    std::vector<ov::Shape>{{ 88, 1, 71 }},
+    std::vector<ov::Shape>{{ 10, 1, 16 }},
 };
 
 const auto params = testing::Combine(
-    testing::ValuesIn(netPrecisions),
-    testing::Values(InferenceEngine::Precision::UNSPECIFIED),
-    testing::Values(InferenceEngine::Precision::UNSPECIFIED),
-    testing::Values(InferenceEngine::Layout::ANY),
-    testing::Values(InferenceEngine::Layout::ANY),
-    testing::ValuesIn(inputShapes),
+    testing::ValuesIn(modelType),
+    testing::ValuesIn(static_shapes_to_test_representation(inputShapes)),
     testing::ValuesIn(mergeRepeated),
-    testing::Values(LayerTestsUtils::testPlatformTargetDevice())
+    testing::Values(DEVICE_NPU)
 );
 
 INSTANTIATE_TEST_CASE_P(
@@ -203,7 +201,7 @@ public:
     }
 
     // Declare parser for ov operation
-    void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<opset_latest::CTCGreedyDecoder>& origNode);
+    void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::CTCGreedyDecoder>& origNode);
 }
 ```
 Check input tensors and parse ov operation.
@@ -211,7 +209,7 @@ Check input tensors and parse ov operation.
 [src/vpux_compiler/src/frontend/IE.cpp#L1167](../src/frontend/IE.cpp#L1167)
 ```cpp
 void NGraphImporter::parseNode(mlir::OpBuilder& builder,
-                               const std::shared_ptr<opset_latest::CTCGreedyDecoder>& origNode) {
+                               const std::shared_ptr<ov::opset7::CTCGreedyDecoder>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::CTCGreedyDecoder>::value,
                   "opset operation mismatch");
     const auto inputs = getInputs(origNode);
@@ -233,7 +231,7 @@ mlir::func::FuncOp NGraphImporter::buildMainFunc(mlir::OpBuilder& moduleBuilder,
 
     static const DispatchMap dispatchMap{
 
-            MAP_ENTRY(ov::opset_latest::CTCGreedyDecoder),
+            MAP_ENTRY(ov::ov::opset7::CTCGreedyDecoder),
     };
 }
 ```
@@ -241,7 +239,7 @@ mlir::func::FuncOp NGraphImporter::buildMainFunc(mlir::OpBuilder& moduleBuilder,
 ## IE Output shape resolver
 Create a new file that defines the `vpux::IE::<OpName>::inferReturnTypeComponents` function.
 Given input tensors and layer parameters, this function computes output shapes and types of the operation.
-[(new) src/vpux_compiler/src/dialect/IE/ops/ctc_greedy_decoder.cpp](../src/dialect/IE/ops/ctc_greedy_decoder.cpp)
+[(new) src/vpux_compiler/src/dialect/IE/IR/ops/ctc_greedy_decoder.cpp](../src/dialect/IE/IR/ops/ctc_greedy_decoder.cpp)
 ```cpp
 mlir::LogicalResult vpux::IE::CTCGreedyDecoderOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, Optional<mlir::Location> optLoc, mlir::ValueRange operands, mlir::DictionaryAttr attrs,
@@ -318,7 +316,7 @@ Such manipulation should be done on IE Dialect level, not ngraph parser, because
 Most used case is converting inputs (e.g. parameters from weights) into attributes. In this case we will simplify our graph (less edges between constant and layer) and simplify approach how to work with attributes (because in case of working / manipulating with inputs, we need first check, that it's constant, then transform it, etc.)
 
 Swish operation canonicalizer example
-[src/vpux_compiler/src/dialect/IE/ops/swish.cpp#L41](../src/dialect/IE/ops/swish.cpp#L41)
+[src/vpux_compiler/src/dialect/IE/IR/ops/swish.cpp#L41](../src/dialect/IE/IR/ops/swish.cpp#L41)
 ```cpp
 //
 // ConvertConstToAttr
@@ -414,7 +412,7 @@ def ConvertConv1DToConv2D : PassBase<"convert-conv1d-to-conv2d", "vpux::Function
 ```
 Declare a function, that will instantiate custom pass.
 
-[src/vpux_compiler/include/vpux/compiler/dialect/IE/passes.hpp](../include/vpux/compiler/dialect/IE/passes.hpp)
+[src/vpux_compiler/include/vpux/compiler/dialect/IE/transforms/passes.hpp](../include/vpux/compiler/dialect/IE/transforms/passes.hpp)
 ```cpp
 // Adjust IE Dialect IR for VPU target.
 ...
@@ -425,7 +423,7 @@ std::unique_ptr<mlir::Pass> createConvertMultiplyToLegacyPowerPass(Logger log = 
 Create pass implementation file. Define rewriter pass and derive from `mlir::OpRewritePattern`.
 There is also more sophisticated `mlir::OpConversionPattern` you might use. https://mlir.llvm.org/docs/DialectConversion/#conversion-patterns
 
-[src/vpux_compiler/src/dialect/IE/passes/convert_conv1d_to_conv2d.cpp](../src/dialect/IE/passes/convert_conv1d_to_conv2d.cpp)
+[src/vpux_compiler/src/dialect/IE/transforms/passes/convert_conv1d_to_conv2d.cpp](../src/dialect/IE/transforms/passes/convert_conv1d_to_conv2d.cpp)
 ```cpp
 //
 // ConvolutionExpansion
@@ -447,7 +445,7 @@ private:
 ```
 Write main pass logic that `matchesAndRewrites` desired operations
 
-[src/vpux_compiler/src/dialect/IE/passes/convert_conv1d_to_conv2d.cpp](../src/dialect/IE/passes/convert_conv1d_to_conv2d.cpp)
+[src/vpux_compiler/src/dialect/IE/transforms/passes/convert_conv1d_to_conv2d.cpp](../src/dialect/IE/transforms/passes/convert_conv1d_to_conv2d.cpp)
 ```cpp
 mlir::LogicalResult ConvolutionExpansion::matchAndRewrite(IE::ConvolutionOp origOp,
                                                           mlir::PatternRewriter& rewriter) const {
@@ -485,7 +483,7 @@ After defining a match and rewite pattern, create `safeRunOnFunc()` function.
 4. Add convertion patterns that will try to legalize all `DynamicallyLegalOps`.
 5. Use `applyPartialConversion` function to run the pass. More conversion modes could be found in the [Dialect Conversion](https://mlir.llvm.org/docs/DialectConversion/) documentation.
 
-[src/vpux_compiler/src/dialect/IE/passes/convert_conv1d_to_conv2d.cpp](../src/dialect/IE/passes/convert_conv1d_to_conv2d.cpp)
+[src/vpux_compiler/src/dialect/IE/transforms/passes/convert_conv1d_to_conv2d.cpp](../src/dialect/IE/transforms/passes/convert_conv1d_to_conv2d.cpp)
 ```cpp
 //
 // ConvertConv1DToConv2DPass
@@ -538,7 +536,7 @@ std::unique_ptr<mlir::Pass> vpux::IE::createConvertConv1DToConv2DPass(Logger log
 ```
 Add pass to the pipeline. Most of the transormations should be added to `buildAdjustForVPUPipeline` because they are specific to VPU platform.
 
-[src/vpux_compiler/src/dialect/IE/pipelines.cpp](../src/dialect/IE/pipelines.cpp)
+[src/vpux_compiler/src/dialect/IE/transforms/pipelines.cpp](../src/dialect/IE/transforms/pipelines.cpp)
 ```cppvoid vpux::IE::buildAdjustForVPUPipeline(mlir::OpPassManager& pm, Logger log) {
     ...
     pm.addPass(IE::createConvertConv1DToConv2DPass(log));
@@ -721,14 +719,14 @@ GraphFile-schema is a common layer between compiler and runtime. It is a tool fo
 Before lowering to the VPUIP dialect, make sure that graphFile-schema repository has your operation included. For debugging purposes, you can checkout NPU-plugin schema to the custom branch with the new operation added.
 
 ```bash
-cd thirdparty/graphFile-schema
+cd thirdparty/elf
 git checkout custom_branch
 ```
 or you can manually add your layer to the existing schema
 
 > graphFile-schema is a submodule that we can't link with a relative path. Please find files below after thirdparty initialization.
 
-In relative file path is `thirdparty/graphFile-schema/src/schema/software.fbs` from line `446`
+In relative file path is `thirdparty/elf/src/schema/software.fbs` from line `446`
 ```cpp
 table CTCDecoderParams {
   ctc_merge_repeated: bool;
@@ -1015,7 +1013,7 @@ mlir::LogicalResult LayerRewrite::matchAndRewrite(mlir::Operation* origOp, Array
 ```
 ### IE → IERT lowering lit-test
 
-The bufferization logic will be tested by creating a lit-test in [bufferize_IE_30XX_37XX.mlir](../../../tests/lit/NPU/conversion/passes/IE2IERT/bufferize_IE_30XX_37XX.mlir):
+The bufferization logic will be tested by creating a lit-test in [bufferize_IE_30XX_37XX_40XX.mlir](../../../tests/lit/NPU/conversion/passes/IE2IERT/bufferize_IE_30XX_37XX_40XX.mlir):
 
 ```cpp
 // CHECK-LABEL: @CTCGreedyDecoder

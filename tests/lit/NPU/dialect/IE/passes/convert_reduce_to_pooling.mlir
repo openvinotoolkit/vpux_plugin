@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW" --convert-reduce-to-pooling %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 // CHECK-LABEL: @ConvertReduceMeanToPooling4D
 func.func @ConvertReduceMeanToPooling4D(%arg0: tensor<1x1x1x50xf16>) -> tensor<1x1x1x1xf16> {
@@ -122,7 +122,7 @@ func.func @ConvertReduceSumToPooling3D(%arg0: tensor<256x7x7xf16>) -> tensor<256
   return %0 : tensor<256x1x7xf16>
 
   // CHECK:       %0 = IE.Reshape(%arg0) {shape_value = [1, 256, 7, 7]} : tensor<256x7x7xf16> -> tensor<1x256x7x7xf16>
-  // CHECK-NOT:   ReduceSum  
+  // CHECK-NOT:   ReduceSum
   // CHECK:       %1 = IE.AvgPool(%0) {exclude_pads, kernel_size = [7, 1], pads_begin = [0, 0], pads_end = [0, 0], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]} : tensor<1x256x7x7xf16> -> tensor<1x256x1x7xf16>
   // CHECK-DAG:   %cst = const.Declare tensor<1xf16> = dense<7.000000e+00> : tensor<1xf16>
   // CHECK:       %2 = IE.Multiply(%1, %cst) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x256x1x7xf16>, tensor<1xf16> -> tensor<1x256x1x7xf16>
@@ -151,13 +151,15 @@ func.func @ConvertReduceSumToPoolingAvoidingExpand(%arg0: tensor<1x12x368x480xf1
   %0 = IE.ReduceSum(%arg0) {axes_value = [1], keep_dims} : tensor<1x12x368x480xf16> -> tensor<1x1x368x480xf16>
   return %0 : tensor<1x1x368x480xf16>
 
-  // CHECK:       %0 = IE.Reshape(%arg0) {shape_value = [1, 12, 16, 11040]} : tensor<1x12x368x480xf16> -> tensor<1x12x16x11040xf16>
   // CHECK-NOT:   ReduceSum
-  // CHECK:       %1 = IE.Transpose(%0) {order_value = #NHCW} : tensor<1x12x16x11040xf16> -> tensor<1x16x12x11040xf16>
-  // CHECK:       %2 = IE.AvgPool(%1) {exclude_pads, kernel_size = [12, 1], pads_begin = [0, 0], pads_end = [0, 0], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]} : tensor<1x16x12x11040xf16> -> tensor<1x16x1x11040xf16>
-  // CHECK-DAG:   %cst = const.Declare tensor<1xf16> = dense<1.200000e+01> : tensor<1xf16>
-  // CHECK:       %3 = IE.Multiply(%2, %cst) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x16x1x11040xf16>, tensor<1xf16> -> tensor<1x16x1x11040xf16>
-  // CHECK:       %4 = IE.Reshape(%3) {shape_value = [1, 1, 368, 480]} : tensor<1x16x1x11040xf16> -> tensor<1x1x368x480xf16>
+  // CHECK:       [[RESHAPE0:%.*]] = IE.Reshape({{[^:]+}}) {shape_value = [1, 12, 11040, 16]} : tensor<1x12x368x480xf16> -> tensor<1x12x11040x16xf16>
+  // CHECK:       [[TRANSPOSE0:%.*]] = IE.Transpose([[RESHAPE0]]) {order_value = #NWCH} : tensor<1x12x11040x16xf16> -> tensor<1x16x12x11040xf16>
+  // CHECK:       [[AVGPOOL0:%.*]] = IE.AvgPool([[TRANSPOSE0]]) {exclude_pads, kernel_size = [12, 1], pads_begin = [0, 0], pads_end = [0, 0], 
+  // CHECK-SAME:    rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]} : tensor<1x16x12x11040xf16> -> tensor<1x16x1x11040xf16>
+  // CHECK:       [[MULTIPLY0:%.*]] = IE.Multiply([[AVGPOOL0]], {{[^:]+}}) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x16x1x11040xf16>, tensor<1xf16> -> tensor<1x16x1x11040xf16>
+  // CHECK:       [[TRANSPOSE1:%.*]] = IE.Transpose([[MULTIPLY0]]) {order_value = #NHWC} : tensor<1x16x1x11040xf16> -> tensor<1x1x11040x16xf16>
+  // CHECK:       [[RESHAPE1:%.*]] = IE.Reshape([[TRANSPOSE1]]) {shape_value = [1, 1, 368, 480]} : tensor<1x1x11040x16xf16> -> tensor<1x1x368x480xf16>
+  // CHECK:       return [[RESHAPE1]] : tensor<1x1x368x480xf16>
 }
 
 // CHECK-LABEL: @ConvertReduceSumToPoolingAvoidingExpand2
@@ -165,11 +167,13 @@ func.func @ConvertReduceSumToPoolingAvoidingExpand2(%arg0: tensor<1x12x44x44xf16
   %1 = IE.ReduceMax(%arg0) {axes_value = [1], keep_dims} : tensor<1x12x44x44xf16> -> tensor<1x1x44x44xf16>
   return %1 : tensor<1x1x44x44xf16>
 
-  // CHECK:       [[RESHAPE0:%.*]] = IE.Reshape(%arg0) {shape_value = [1, 12, 16, 121]} : tensor<1x12x44x44xf16> -> tensor<1x12x16x121xf16>
   // CHECK-NOT:   ReduceMax
-  // CHECK:       [[TRANSPOSE0:%.*]] = IE.Transpose([[RESHAPE0]]) {order_value = #NHCW} : tensor<1x12x16x121xf16> -> tensor<1x16x12x121xf16>
-  // CHECK:       [[MAXPOOL0:%.*]] = IE.MaxPool([[TRANSPOSE0]]) {kernel_size = [12, 1], pads_begin = [0, 0], pads_end = [0, 0], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]} : tensor<1x16x12x121xf16> -> tensor<1x16x1x121xf16>
-  // CHECK:       [[RESHAPE1:%.*]] = IE.Reshape([[MAXPOOL0]]) {shape_value = [1, 1, 44, 44]} : tensor<1x16x1x121xf16> -> tensor<1x1x44x44xf16>
+  // CHECK:       [[RESHAPE0:%.*]] = IE.Reshape({{[^:]+}}) {shape_value = [1, 12, 121, 16]} : tensor<1x12x44x44xf16> -> tensor<1x12x121x16xf16>
+  // CHECK:       [[TRANSPOSE0:%.*]] = IE.Transpose([[RESHAPE0]]) {order_value = #NWCH} : tensor<1x12x121x16xf16> -> tensor<1x16x12x121xf16>
+  // CHECK:       [[MAXPOOL0:%.*]] = IE.MaxPool([[TRANSPOSE0]]) {kernel_size = [12, 1], pads_begin = [0, 0], pads_end = [0, 0], 
+  // CHECK-SAME:    rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]} : tensor<1x16x12x121xf16> -> tensor<1x16x1x121xf16>
+  // CHECK:       [[TRANSPOSE1:%.*]] = IE.Transpose([[MAXPOOL0]]) {order_value = #NHWC} : tensor<1x16x1x121xf16> -> tensor<1x1x121x16xf16>
+  // CHECK:       [[RESHAPE1:%.*]] = IE.Reshape([[TRANSPOSE1]]) {shape_value = [1, 1, 44, 44]} : tensor<1x1x121x16xf16> -> tensor<1x1x44x44xf16>
   // CHECK:       return [[RESHAPE1]] : tensor<1x1x44x44xf16>
 }
 
@@ -198,14 +202,34 @@ func.func @ConvertReduceMinToPoolingKernelSize(%arg0: tensor<1x32x112x112xf16>) 
 }
 
 // CHECK-LABEL: @ConvertReduceMinToPoolingKernelSizeWithMultiAxis
-func.func @ConvertReduceMinToPoolingKernelSizeWithMultiAxis(%arg0: tensor<1x8x4x76xf16>) -> tensor<1x1x1x1xf16> {
-  %0 = IE.ReduceMin(%arg0) {axes_value = [0, 1, 2, 3], keep_dims} : tensor<1x8x4x76xf16> -> tensor<1x1x1x1xf16>
+func.func @ConvertReduceMinToPoolingKernelSizeWithMultiAxis(%arg0: tensor<1x2x4x9xf16>) -> tensor<1x1x1x1xf16> {
+  %0 = IE.ReduceMin(%arg0) {axes_value = [0, 1, 2, 3], keep_dims} : tensor<1x2x4x9xf16> -> tensor<1x1x1x1xf16>
   return %0 : tensor<1x1x1x1xf16>
 
   // CHECK:       [[RESHAPE:%.*]] = IE.Reshape(%arg0) {
-  // CHECK-DAG:       shape_value = [1, 1, 64, 38]} : tensor<1x8x4x76xf16> -> tensor<1x1x64x38xf16>
-  // CHECK:       [[NEGATIVE_0:%.*]] = IE.Negative([[RESHAPE]]) : tensor<1x1x64x38xf16> -> tensor<1x1x64x38xf16>
+  // CHECK-DAG:       shape_value = [1, 1, 9, 8]} : tensor<1x2x4x9xf16> -> tensor<1x1x9x8xf16>
+  // CHECK:       [[NEGATIVE_0:%.*]] = IE.Negative([[RESHAPE]]) : tensor<1x1x9x8xf16> -> tensor<1x1x9x8xf16>
   // CHECK:       [[MAXPOOL:%.*]] = IE.MaxPool([[NEGATIVE_0]]) {
-  // CHECK-DAG:       kernel_size = [64, 38], pads_begin = [0, 0], pads_end = [0, 0], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]} : tensor<1x1x64x38xf16> -> tensor<1x1x1x1xf16>
+  // CHECK-DAG:       kernel_size = [9, 8], pads_begin = [0, 0], pads_end = [0, 0], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]} : tensor<1x1x9x8xf16> -> tensor<1x1x1x1xf16>
   // CHECK:       [[NEGATIVE_1:%.*]] = IE.Negative([[MAXPOOL]]) : tensor<1x1x1x1xf16> -> tensor<1x1x1x1xf16>
+}
+
+// CHECK-LABEL: @DoNotConvertReduceMinToPoolingKernelSizeWithMultiAxis
+func.func @DoNotConvertReduceMinToPoolingKernelSizeWithMultiAxis(%arg0: tensor<1x8x4x76xf16>) -> tensor<1x1x1x1xf16> {
+  %0 = IE.ReduceMin(%arg0) {axes_value = [0, 1, 2, 3], keep_dims} : tensor<1x8x4x76xf16> -> tensor<1x1x1x1xf16>
+  return %0 : tensor<1x1x1x1xf16>
+
+  // CHECK:       [[OUTPUT:%.*]] = IE.ReduceMin(%arg0) {
+  // CHECK-DAG:       axes_value = [0, 1, 2, 3], keep_dims} : tensor<1x8x4x76xf16> -> tensor<1x1x1x1xf16>
+  // CHECK:       return [[OUTPUT:%.*]] : tensor<1x1x1x1xf16>
+}
+
+// CHECK-LABEL: @DoNotConvertReduceMinToPoolingF32
+func.func @DoNotConvertReduceMinToPoolingF32(%arg0: tensor<1x256x7x7xf32>) -> tensor<1x256x1x1xf32> {
+  %0 = IE.ReduceMin(%arg0) {axes_value = [2, 3], keep_dims} : tensor<1x256x7x7xf32> -> tensor<1x256x1x1xf32>
+  return %0 : tensor<1x256x1x1xf32>
+
+  // CHECK:       [[OUTPUT:%.*]] = IE.ReduceMin(%arg0) {
+  // CHECK-DAG:       axes_value = [2, 3], keep_dims} : tensor<1x256x7x7xf32> -> tensor<1x256x1x1xf32>
+  // CHECK:       return [[OUTPUT:%.*]] : tensor<1x256x1x1xf32>
 }

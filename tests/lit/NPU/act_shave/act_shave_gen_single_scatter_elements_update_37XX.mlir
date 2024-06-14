@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -14,7 +14,7 @@
 // check for regressions in the VPUIP dialect.
 //
 
-module @Test attributes {VPU.arch = #VPU.arch_kind<VPUX37XX>, VPU.compilationMode = #VPU.compilation_mode<ReferenceHW>} {
+module @Test attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilationMode = #VPU.compilation_mode<ReferenceHW>} {
 IE.CNNNetwork
     entryPoint : @main
     inputsInfo : {
@@ -42,8 +42,8 @@ module @VPU.SW {
     // `memref` will be translated to `MemRefData`, while raw scalars will be translated as is.
     func.func private @builtin_ScatterElementsUpdate(memref<*xf16, [@CMX_NN, 0]>, memref<*xsi32, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, i64)
         attributes {
-            VPU.kernel_code = "single_shave_scatter_elements_update.cpp",
-            VPU.kernel_entry = "single_shave_scatter_elements_update"
+            VPU.kernel_code = "scatter_elements_update.cpp",
+            VPU.kernel_entry = "scatter_elements_update"
         }
     // management kernel definition
     func.func private @runtime()
@@ -72,7 +72,7 @@ func.func @main(%arg0: memref<2x3x4xf16>, %arg1: memref<1x3x1xf16>, %arg2: memre
 
     // Genetic Kernel information for the scheduler.
     VPURT.Task waits(%b0  : !VPURT.Barrier) updates(%b1  : !VPURT.Barrier) {
-        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
                     @VPU.SW::@builtin_ScatterElementsUpdate            // The reference to the Kernel function.
                     inputs(%in_tile0_cmx as %0: memref<2x3x4xf16, [@CMX_NN, 0]>, %in_tile1_cmx as %1: memref<1x3x1xf16, [@CMX_NN, 0]>)     // Inputs/outputs buffers for generic operation interface
                     outputs(%out_tile0_cmx as %2: memref<2x3x4xf16, [@CMX_NN, 0]>)   // and their mapping to inner region.

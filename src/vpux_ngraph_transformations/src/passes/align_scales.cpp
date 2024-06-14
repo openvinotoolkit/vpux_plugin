@@ -12,6 +12,9 @@
 #include <openvino/op/ops.hpp>
 
 #include "vpux/quantization_helpers.hpp"
+#include "vpux/utils/core/checked_cast.hpp"
+
+using vpux::checked_cast;
 
 namespace vpux {
 namespace passes {
@@ -149,7 +152,8 @@ static void align_fq(std::set<std::shared_ptr<ov::Node>>& fqs, const float min, 
         if (no_concat_consumers_around_fqs(fqs)) {
             // Can align for Eltwises only
             for (size_t c = 0; c < fq_data1.size(); c++) {
-                double zp = calculateZeroPoint(fq_data1[c], fq_data2[c], max_levels, ov::element::u8);
+                auto zp =
+                        checked_cast<double>(calculateZeroPoint(fq_data1[c], fq_data2[c], max_levels, ov::element::u8));
                 double scale = range / (max_levels - 1.0);
                 fq_data1[c] = static_cast<float>((0.0 - zp) * scale);
                 fq_data2[c] = static_cast<float>((max_levels - 1.0 - zp) * scale);
@@ -191,7 +195,7 @@ static void align_fq(std::set<std::shared_ptr<ov::Node>>& fqs, const float min, 
 static void adjust_fqs_to_align(std::set<std::shared_ptr<ov::Node>>& fqs) {
     float min_range = std::numeric_limits<float>::max();
     std::set<std::shared_ptr<ov::Node>> filtered_fqs;
-    unsigned child_node_num = 0;
+    size_t child_node_num = 0;
     const float max_fq_range_ratio = 5.0;
 
     for (auto fq_node : fqs) {

@@ -8,8 +8,8 @@
 #include "vpux/compiler/utils/quantization.hpp"
 #include "vpux/compiler/utils/types.hpp"
 
-#include "vpux/utils/IE/float16.hpp"
 #include "vpux/utils/core/checked_cast.hpp"
+#include "vpux/utils/core/custom_float.hpp"
 #include "vpux/utils/core/error.hpp"
 #include "vpux/utils/core/mem_size.hpp"
 
@@ -40,18 +40,34 @@ struct CvtHelper final {
 };
 
 template <>
-struct CvtHelper<float16> final {
+struct CvtHelper<vpux::type::float16> final {
     template <typename InT>
-    static float16 cvt(InT val) {
-        return float16(checked_cast<float>(val));
+    static vpux::type::float16 cvt(InT val) {
+        return vpux::type::float16(checked_cast<float>(val));
     }
 };
 
 template <>
-struct CvtHelper<bfloat16> final {
+struct CvtHelper<vpux::type::bfloat16> final {
     template <typename InT>
-    static bfloat16 cvt(InT val) {
-        return bfloat16(checked_cast<float>(val));
+    static vpux::type::bfloat16 cvt(InT val) {
+        return vpux::type::bfloat16(checked_cast<float>(val));
+    }
+};
+
+template <>
+struct CvtHelper<vpux::type::float8_e4m3> final {
+    template <typename InT>
+    static vpux::type::float8_e4m3 cvt(InT val) {
+        return vpux::type::float8_e4m3(checked_cast<float>(val));
+    }
+};
+
+template <>
+struct CvtHelper<vpux::type::float8_e5m2> final {
+    template <typename InT>
+    static vpux::type::float8_e5m2 cvt(InT val) {
+        return vpux::type::float8_e5m2(checked_cast<float>(val));
     }
 };
 
@@ -177,7 +193,7 @@ public:
     void getValues() && = delete;
 
     template <typename OutT>
-    std::vector<OutT> vec() {
+    std::vector<OutT> vec() const {
         auto allocSize = getType().getTotalAllocSize().count();
         auto outTsize = sizeof(OutT);
         VPUX_THROW_UNLESS(allocSize % outTsize == 0, "size of Content is expected to be multiple of {0} but found {1}",
@@ -218,10 +234,8 @@ public:
     MutableArrayRef<OutT> getTempBuf() & {
         VPUX_THROW_UNLESS(_tempBuf != nullptr, "Temp buffer was not allocated");
 
-        const Byte storageElemSize = vpux::getElemTypeSize(_storageElemType);
-        VPUX_THROW_UNLESS(storageElemSize.count() == sizeof(OutT),
-                          "Temp buffer type '{0}' mismatch with storage element size '{1}'", llvm::getTypeName<OutT>(),
-                          storageElemSize);
+        VPUX_THROW_UNLESS(_data.size() % sizeof(OutT) == 0,
+                          "Size of tempBuf needs to be multiple of '{0}' but is '{1}'", sizeof(OutT), _data.size());
 
         return MutableArrayRef<OutT>(reinterpret_cast<OutT*>(_tempBuf.get()), _data.size() / sizeof(OutT));
     }
@@ -241,6 +255,14 @@ public:
     }
 
     ArrayRef<char> getRawStorageBuf() && = delete;
+
+    template <typename OutT>
+    ArrayRef<OutT> getStorageBuf() const& {
+        VPUX_THROW_UNLESS(_data.size() % sizeof(OutT) == 0, "Size of buffer needs to be multiple of '{0}' but is '{1}'",
+                          sizeof(OutT), _data.size());
+
+        return ArrayRef<OutT>(reinterpret_cast<const OutT*>(_data.data()), _data.size() / sizeof(OutT));
+    }
 
     MutableArrayRef<char> getRawTempBuf() & {
         VPUX_THROW_UNLESS(_tempBuf != nullptr, "Temp buffer was not allocated");
@@ -277,9 +299,13 @@ private:
         } else if (elemType.isF64()) {
             return caller(double(0));
         } else if (elemType.isF16()) {
-            return caller(float16(0.0f));
+            return caller(vpux::type::float16(0.0f));
         } else if (elemType.isBF16()) {
-            return caller(bfloat16(0.0f));
+            return caller(vpux::type::bfloat16(0.0f));
+        } else if (elemType.isFloat8E4M3FN()) {
+            return caller(vpux::type::float8_e4m3(0.0f));
+        } else if (elemType.isFloat8E5M2()) {
+            return caller(vpux::type::float8_e5m2(0.0f));
         } else if (const auto qType = elemType.dyn_cast<mlir::quant::QuantizedType>()) {
             const auto quantStorageType = vpux::normalizeQuantStorageType(qType);
             if (quantStorageType.isSignedInteger(8)) {
@@ -290,6 +316,10 @@ private:
                 return caller(int8_t(0));
             } else if (quantStorageType.isUnsignedInteger(4)) {
                 return caller(uint8_t(0));
+            } else if (quantStorageType.isFloat8E4M3FN()) {
+                return caller(vpux::type::float8_e4m3(0.0f));
+            } else if (quantStorageType.isFloat8E5M2()) {
+                return caller(vpux::type::float8_e5m2(0.0f));
             } else {
                 VPUX_THROW("Unsupported quantized storage type '{0}'", quantStorageType);
             }

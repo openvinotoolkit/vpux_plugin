@@ -153,7 +153,7 @@ def IE_LayoutInfoOpInterface : OpInterface<"LayoutInfoOpInterface"> {
         InterfaceMethod<
             "Infer supported Data Layouts from inputs to outputs or describe the supported combination",
             "void", "inferLayoutInfo",
-            (ins "vpux::IE::LayerLayoutInfo&":$info, "const bool":$seOpsEnabled, "const bool":$seTransposedConvEnabled)
+            (ins "vpux::IE::LayerLayoutInfo&":$info, "const bool":$seOpsEnabled, "const bool":$seExperimentalOpsEnabled)
         >,
 
         InterfaceMethod<

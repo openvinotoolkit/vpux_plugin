@@ -57,22 +57,22 @@ public:
 
     void runBeforePipeline(std::optional<mlir::OperationName> name, const PipelineParentInfo&) final {
         if (name.has_value()) {
-            _log.trace("Start Pass Pipeline {0}", *name);
+            _log.debug("Start Pass Pipeline {0}", *name);
         }
     }
 
     void runAfterPipeline(std::optional<mlir::OperationName> name, const PipelineParentInfo&) final {
         if (name.has_value()) {
-            _log.trace("End Pass Pipeline {0}", *name);
+            _log.debug("End Pass Pipeline {0}", *name);
         }
     }
 
     void runBeforePass(mlir::Pass* pass, mlir::Operation* op) final {
-        _log.trace("Start Pass {0} on Operation {1}", pass->getName(), op->getLoc());
+        _log.debug("Start Pass {0} on Operation {1}", pass->getName(), op->getLoc());
     }
 
     void runAfterPass(mlir::Pass* pass, mlir::Operation* op) override {
-        _log.trace("End Pass {0} on Operation {1}", pass->getName(), op->getLoc());
+        _log.debug("End Pass {0} on Operation {1}", pass->getName(), op->getLoc());
     }
 
     void runAfterPassFailed(mlir::Pass* pass, mlir::Operation* op) override {

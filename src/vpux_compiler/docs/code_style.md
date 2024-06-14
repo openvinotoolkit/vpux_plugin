@@ -416,7 +416,7 @@ This method is useful when you iterate through a list of objects and you need to
         ....
 
         auto groupOp = builder.create<VPUIP::GroupSparseBufferOp>(op->getLoc(), dataResult, smResult, seTableResult,
-                                                                  isWeightsAttr, compressionSchemeAttr);
+                                                                  isWeightsAttr, sparsityCompressionAttr);
         op->getResult(0).replaceAllUsesExcept(groupOp.output(), llvm::SmallPtrSet<mlir::Operation*, 1>{groupOp});
         op->erase();
     }
@@ -426,7 +426,7 @@ This method is useful when you iterate through a list of objects and you need to
         ....
 
         auto groupOp = builder.create<VPUIP::GroupSparseBufferOp>(op->getLoc(), dataResult, smResult, seTableResult,
-                                                              isWeightsAttr, compressionSchemeAttr);
+                                                              isWeightsAttr, sparsityCompressionAttr);
         op->getResult(0).replaceAllUsesExcept(groupOp.output(), llvm::SmallPtrSet<mlir::Operation*, 1>{groupOp});
         op->erase();
     });
@@ -526,6 +526,82 @@ TEST_F(MLIR_IndexedSymbolAttr, CheckNestedAttr) {
 ```
 
 ## Pipelines and passes
+
+### Adding rewriter to a pass
+
+The IR traversal within a pass usually follows a specific direction: it is
+either "top-down" (usual in programming e.g. in C++) or "bottom-up" (from the
+end of the IR to the beginning). When adding a new rewriter to an existing pass
+(or creating a new pass together with the rewriter), the rewriter's traversal
+direction must match the pass' traversal direction.
+
+```cpp
+// IR structure to consider:
+// func.func @foo(...) -> !outType {
+//  %0 = VPUIP.NCEClusterTask(...)
+//  %alloc = memref.alloc(): !outType
+//  %1 = VPUIP.Copy inputs(%0) outputs(%alloc)
+//  return %1
+// }
+
+struct MyBottomUpRewriter;
+struct MyTopDownRewriter;
+void MyTopDownPass::safeRunOnFunc() {
+    auto& ctx = getContext();
+
+    mlir::RewritePatternSet patterns(&ctx);
+    patterns.add<MyBottomUpRewriter>(&ctx); // BAD: see below
+    patterns.add<MyTopDownRewriter>(&ctx);  // OK
+
+    auto func = getOperation();
+    auto config = getDefaultGreedyRewriteConfig();
+    config.useTopDownTraversal = true;
+    if (mlir::failed(mlir::applyPatternsAndFoldGreedily(func, std::move(patterns), config))) {
+        signalPassFailure();
+    }
+}
+
+// BAD: the pass would first read the NCEClusterTask and only then CopyOp;
+//      some other rewriter may end up changing the code *before* this
+//      rewriter would be able to process the CopyOp!
+struct MyBottomUpRewriter : mlir::OpRewritePattern<VPUIP::CopyOp> {
+    MyBottomUpRewriter(mlir::MLIRContext* ctx)
+        : mlir::OpRewritePattern<VPUIP::CopyOp>(ctx) {}
+
+    mlir::LogicalResult matchAndRewrite(VPUIP::CopyOp copyOp, mlir::PatternRewriter& rewriter) const final {
+        // Remove a copy:
+        //  NCEClusterTask          NCEClusterTask
+        //        |          =>            |
+        //       Copy
+        //        |
+
+        // ...
+        return mlir::success();
+    }
+};
+
+// OK: the pass would first read the NCEClusterTask and MyTopDownRewriter
+//     would process this operation immediately.
+struct MyTopDownRewriter : mlir::OpRewritePattern<VPUIP::NCEClusterTaskOp> {
+    MyTopDownRewriter(mlir::MLIRContext* ctx)
+        : mlir::OpRewritePattern<VPUIP::NCEClusterTaskOp>(ctx) {}
+
+    mlir::LogicalResult matchAndRewrite(VPUIP::NCEClusterTaskOp taskOp, mlir::PatternRewriter& rewriter) const final {
+        // Remove a copy:
+        //  NCEClusterTask          NCEClusterTask
+        //        |          =>            |
+        //       Copy
+        //        |
+
+        // ...
+        return mlir::success();
+    }
+};
+```
+
+For a more sophisticated example and reasoning of why this is important,
+consider reading through [MLIR's good practices about
+rewriters](./guides/mlir_good_practices.md#running-multiple-rewriters-within-one-pass).
 
 ### Pass integration
 - Passes must be integrated as a part of a pipeline. Exceptions to this flow must be covered in comment and ticket

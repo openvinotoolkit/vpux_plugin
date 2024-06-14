@@ -1,6 +1,6 @@
 //
-// Copyright (C) 2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #pragma once
@@ -9,45 +9,49 @@
 #include <string>
 #include <vector>
 
-#include <opencv2/gapi/gcommon.hpp>  // cv::GCompileArgs
-
-#include "parser/config.hpp"
 #include "scenario/criterion.hpp"
+#include "scenario/inference.hpp"
 #include "scenario/scenario_graph.hpp"
 
 struct StreamDesc {
+    // NB: Commons parameters for all modes
     std::string name;
+    uint32_t frames_interval_in_ms;
     ScenarioGraph graph;
+    InferenceParamsMap infer_params_map;
     ITermCriterion::Ptr criterion;
-    cv::GCompileArgs compile_args;
-    cv::util::optional<uint32_t> target_latency;
-    cv::util::optional<std::filesystem::path> per_iter_outputs_path;
+    // Mode specific params
+    ModelsAttrMap<IAccuracyMetric::Ptr> metrics_map;
+    ModelsAttrMap<IRandomGenerator::Ptr> initializers_map;
+    ModelsAttrMap<std::string> input_data_map;
+    ModelsAttrMap<std::string> output_data_map;
+    std::optional<double> target_latency;
+    std::optional<std::filesystem::path> per_iter_outputs_path;
 };
 
 struct ScenarioDesc {
     std::string name;
     std::vector<StreamDesc> streams;
+    bool disable_high_resolution_timer;
+};
+
+struct Config {
+    IRandomGenerator::Ptr initializer;
+    IAccuracyMetric::Ptr metric;
+    bool disable_high_resolution_timer;
+    std::vector<ScenarioDesc> scenarios;
 };
 
 struct IScenarioParser {
-    virtual std::vector<ScenarioDesc> parseScenarios() = 0;
+    virtual Config parseScenarios() = 0;
     virtual ~IScenarioParser() = default;
 };
 
-// NB: There is only one parser so far.
-// In fact it's not even a parser split it on parser and builder later.
 class ScenarioParser : public IScenarioParser {
 public:
-    ScenarioParser(const std::string& filepath, const bool use_ov_old_api);
-
-    std::vector<ScenarioDesc> parseScenarios() override;
-
-private:
-    cv::gapi::GNetPackage createInferenceParams(const std::string& tag, const Network& network);
-    cv::gapi::GNetPackage createIEParams(const std::string& tag, const Network& network);
-    cv::gapi::GNetPackage createOVParams(const std::string& tag, const Network& network);
+    ScenarioParser(const std::string& filepath);
+    Config parseScenarios() override;
 
 private:
-    bool m_use_ov_old_api;
-    ScenarioConfig m_config;
+    std::string m_filepath;
 };

@@ -3,9 +3,84 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#include "vpux/compiler/dialect/IE/utils/resources.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
 
 using namespace vpux;
+
+bool isCompatibleWithMultiClusterNNDMA(VPU::SpaceToDepthOp op, vpux::ShapeRef numTilesOnDim) {
+    if (op.getMode() != IE::SpaceToDepthMode::BLOCKS_FIRST) {
+        return false;
+    }
+
+    const auto inputType = op.getInput().getType().cast<vpux::NDTypeInterface>();
+    const auto outputType = op.getOutput().getType().cast<vpux::NDTypeInterface>();
+    if (inputType.getDimsOrder() != DimsOrder::NHWC || outputType.getDimsOrder() != DimsOrder::NHWC) {
+        return false;
+    }
+
+    auto moduleOp = op->getParentOfType<mlir::ModuleOp>();
+    auto tileExecOp = IE::getTileExecutor(moduleOp);
+    const auto numAvailableTiles = tileExecOp.getCount();
+    if (numTilesOnDim.totalSize() > numAvailableTiles) {
+        return false;
+    }
+
+    mlir::DenseSet<VPU::MultiClusterStrategy> allowedStrategies = {
+            VPU::MultiClusterStrategy::SplitOverHeight,
+            VPU::MultiClusterStrategy::SplitOverHeightOverlapped,
+            VPU::MultiClusterStrategy::HKSwitch,
+    };
+
+    // Check next ops
+    VPU::DistributedTensorType userDistType = nullptr;
+    for (const auto& userOp : op->getUsers()) {
+        auto userNCEOp = mlir::dyn_cast<VPU::NCEOpInterface>(userOp);
+        auto userClusteredOp = mlir::dyn_cast<VPU::ClusteredOpInterface>(userOp);
+        if (userNCEOp == nullptr || userClusteredOp == nullptr) {
+            return false;
+        }
+        auto userStrategy = userClusteredOp.getMultiClusterStrategy();
+        if (!userStrategy.has_value() || !allowedStrategies.contains(userStrategy.value())) {
+            return false;
+        }
+        // Check distributed tensor types are aligned
+        auto userInputType = userOp->getOperand(0).getType().cast<NDTypeInterface>();
+        auto userOutputType = userOp->getResult(0).getType().cast<NDTypeInterface>();
+        auto numClusters =
+                VPU::getOptimalNumClusters(userOp, userOutputType.getShape()[Dims4D::Act::C], userStrategy.value());
+        auto userInputDistType =
+                getDistributedActivationTypeFromOp(userClusteredOp, userInputType, numClusters, userStrategy.value())
+                        .dyn_cast<VPU::DistributedTensorType>();
+        if (userInputDistType == nullptr) {
+            return false;
+        }
+        if (userDistType == nullptr) {
+            userDistType = userInputDistType;
+            continue;
+        }
+        if (areDistributionAttrsCompatible(userDistType, userInputDistType).failed()) {
+            return false;
+        }
+    }
+
+    if (userDistType == nullptr) {
+        return false;
+    }
+
+    // Currently MultiCluster S2D only supports SingleClusterCMX->MultiClusterCMX, so need to
+    // check if the first cluster fits in CMX.
+    const auto cmxAvailableBytes = vpux::VPU::getTotalCMXSize(op.getOperation()).to<Byte>().count();
+    // Input data is all on CMX0
+    const auto inputBytes = inputType.getShape().totalSize() * inputType.getElemTypeSize().to<Byte>().count();
+    // The only risk is CMX0 because input is also on it
+    const auto perClusterOutMemShape = userDistType.getPerClusterMemoryShapes();
+    const auto firstClusterOutputBytes =
+            perClusterOutMemShape.front().totalSize() * userDistType.getElemTypeSize().to<Byte>().count();
+
+    return (inputBytes + firstClusterOutputBytes) < cmxAvailableBytes;
+}
 
 mlir::LogicalResult vpux::VPU::SpaceToDepthOp::inferReturnTypes(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueRange operands,
@@ -157,6 +232,11 @@ mlir::FailureOr<OutputTiling> vpux::VPU::SpaceToDepthOp::getTilingStrategy(Tilin
         } else {
             VPUX_THROW("Unsupported dim to tile: {0}", dimToTile);
         }
+    }
+
+    // No need to tile if s2d will be converted to MultiClusterNNDMA
+    if (isCompatibleWithMultiClusterNNDMA(origOp, nTilesOnDimforSpaceToDepth)) {
+        nTilesOnDimforSpaceToDepth = Shape(outputShape.size(), 1);
     }
 
     auto origTiles = fillDividedTiles(op, nTilesOnDimforSpaceToDepth, outputShape);

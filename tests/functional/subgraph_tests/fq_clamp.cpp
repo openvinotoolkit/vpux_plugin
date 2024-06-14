@@ -1,13 +1,12 @@
-// Copyright (C) Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include <common_test_utils/ov_tensor_utils.hpp>
 #include <vpu_ov2_layer_test.hpp>
 
-#include <ov_models/builders.hpp>
-#include <ov_models/utils/ov_helpers.hpp>
-#include <shared_test_classes/base/layer_test_utils.hpp>
+#include "common_test_utils/node_builders/activation.hpp"
+#include "common_test_utils/node_builders/fake_quantize.hpp"
 
 using namespace ov::test::utils;
 
@@ -47,15 +46,15 @@ class FQClampSubGraphTestCommon : public VpuOv2LayerTest, public testing::WithPa
         const size_t dataLevels = 256;
         const std::vector<float> outDataLow = {outFQRanges.first};
         const std::vector<float> outDataHigh = {outFQRanges.second};
-        const auto outFq = ngraph::builder::makeFakeQuantize(params[0], ov::element::f32, dataLevels, {}, outDataLow,
-                                                             outDataHigh, outDataLow, outDataHigh);
+        const auto outFq = ov::test::utils::make_fake_quantize(params[0], ov::element::f32, dataLevels, {}, outDataLow,
+                                                               outDataHigh, outDataLow, outDataHigh);
 
         // Create Clamp
         const ov::Shape convOutShape{1, 32, 20, 20};
         auto clampRanges = outFQAndClampRanges[1];
         std::vector<float> constantsValue{clampRanges.first, clampRanges.second};
-        auto clamp = ngraph::builder::makeActivation(outFq, ov::element::f16, ngraph::helpers::Clamp, convOutShape,
-                                                     constantsValue);
+        auto clamp = ov::test::utils::make_activation(outFq, ov::element::f16, ov::test::utils::Clamp, convOutShape,
+                                                      constantsValue);
 
         const ov::ResultVector results{std::make_shared<ov::op::v0::Result>(clamp)};
         function = std::make_shared<ov::Model>(results, params, "FQClamp");
@@ -71,9 +70,11 @@ public:
         auto outFQRanges = outFQAndClampRanges[0];
         auto clampRanges = outFQAndClampRanges[1];
 
+        const std::string sep = "_";
         std::ostringstream result;
-        result << "InputPrec=" << ip << "_";
-        result << "OutputPrec=" << op << "_";
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
+        result << "InputPrec=" << ip << sep;
+        result << "OutputPrec=" << op << sep;
         result << "outFQ={" << outFQRanges.first << ", " << outFQRanges.second << ", " << outFQRanges.first << ", "
                << outFQRanges.second << "}_";
         result << "clamp={" << clampRanges.first << ", " << clampRanges.second << "}_";
@@ -85,7 +86,7 @@ class FQClampSubGraphTest_NPU3720 : public FQClampSubGraphTestCommon {};
 
 TEST_P(FQClampSubGraphTest_NPU3720, HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
 }
 
 }  // namespace LayerTestsDefinitions
@@ -102,14 +103,14 @@ std::vector<outFQAndClampRangesType> outFQAndClampRanges = {
 
 const std::vector<ov::element::Type> inPrecisions = {ov::element::f16};
 
-const std::vector<ov::element::Type> outrecisions = {
+const std::vector<ov::element::Type> outPrecisions = {
         // Convert layer will be inserted because of FP32 output, that allows:
         // - Propagate Dequantize through the Clamp, since if there is Return after the Clamp, then we cannot do
         // it(E#35846)
-        // - Avoid an error in ngraph::float16::ie_abs (C#101214)
+        // - Avoid an error in ov::float16::ie_abs (C#101214)
         ov::element::f32};
 
-const auto basicCases = ::testing::Combine(::testing::ValuesIn(inPrecisions), ::testing::ValuesIn(outrecisions),
+const auto basicCases = ::testing::Combine(::testing::ValuesIn(inPrecisions), ::testing::ValuesIn(outPrecisions),
                                            ::testing::ValuesIn(outFQAndClampRanges));
 
 INSTANTIATE_TEST_SUITE_P(precommit_FQClamp, FQClampSubGraphTest_NPU3720, basicCases,

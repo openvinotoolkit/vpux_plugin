@@ -1,43 +1,83 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022-2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include <vector>
 
-#include "common_test_utils/test_constants.hpp"
-#include "single_layer_tests/reverse_sequence.hpp"
-#include "vpu_ov1_layer_test.hpp"
+#include "common_test_utils/ov_tensor_utils.hpp"
+#include "single_op_tests/reverse_sequence.hpp"
+#include "vpu_ov2_layer_test.hpp"
 
-namespace LayerTestsDefinitions {
+using namespace ov::test::utils;
 
-class ReverseSequenceLayerTestCommon :
-        public ReverseSequenceLayerTest,
-        virtual public LayerTestsUtils::VpuOv1LayerTestsCommon {};
+namespace ov {
+namespace test {
+
+class ReverseSequenceLayerTestCommon : public ReverseSequenceLayerTest, virtual public VpuOv2LayerTest {
+    void TearDown() override {
+        VpuOv2LayerTest::TearDown();
+    }
+    void SetUp() override {
+        ov::element::Type modelType;
+        int64_t batchAxisIdx;
+        int64_t seqAxisIdx;
+        std::vector<size_t> inputShape;
+        std::vector<size_t> secondInputShape;
+        InputLayerType secondaryInputType;
+
+        std::tie(batchAxisIdx, seqAxisIdx, inputShape, secondInputShape, secondaryInputType, modelType, std::ignore) =
+                GetParam();
+
+        VpuOv2LayerTest::init_input_shapes(static_shapes_to_test_representation({inputShape, secondInputShape}));
+
+        ov::ParameterVector params{
+                std::make_shared<ov::op::v0::Parameter>(modelType, VpuOv2LayerTest::inputDynamicShapes.front())};
+        auto second_data_type = ov::element::i32;  // according to the specification
+        std::shared_ptr<ov::Node> secondary_input;
+        if (InputLayerType::CONSTANT == secondaryInputType) {
+            auto tensor = create_and_fill_tensor(second_data_type, secondInputShape);
+            secondary_input = std::make_shared<ov::op::v0::Constant>(tensor);
+        } else if (InputLayerType::PARAMETER == secondaryInputType) {
+            secondary_input = std::make_shared<ov::op::v0::Parameter>(second_data_type, ov::Shape(secondInputShape));
+            params.push_back(std::dynamic_pointer_cast<ov::op::v0::Parameter>(secondary_input));
+        } else {
+            throw std::runtime_error("Unsupported input type");
+        }
+
+        auto reverse =
+                std::make_shared<ov::op::v0::ReverseSequence>(params[0], secondary_input, batchAxisIdx, seqAxisIdx);
+        VpuOv2LayerTest::function = std::make_shared<ov::Model>(reverse->outputs(), params, "ReverseSequence");
+    }
+};
 
 class ReverseSequenceLayerTest_NPU3700 : public ReverseSequenceLayerTestCommon {};
 class ReverseSequenceLayerTest_NPU3720 : public ReverseSequenceLayerTestCommon {};
+class ReverseSequenceLayerTest_NPU4000 : public ReverseSequenceLayerTestCommon {};
 
 TEST_P(ReverseSequenceLayerTest_NPU3700, HW) {
-    setPlatformVPU3700();
-    setDefaultHardwareModeMLIR();
-    Run();
+    VpuOv2LayerTest::setDefaultHardwareMode();
+    VpuOv2LayerTest::run(Platform::NPU3700);
 }
 
 TEST_P(ReverseSequenceLayerTest_NPU3720, HW) {
-    setPlatformVPU3720();
-    setDefaultHardwareModeMLIR();
-    Run();
+    VpuOv2LayerTest::setDefaultHardwareMode();
+    VpuOv2LayerTest::run(Platform::NPU3720);
 }
 
-}  // namespace LayerTestsDefinitions
+TEST_P(ReverseSequenceLayerTest_NPU4000, SW) {
+    VpuOv2LayerTest::setReferenceSoftwareMode();
+    VpuOv2LayerTest::run(Platform::NPU4000);
+}
 
-using namespace LayerTestsDefinitions;
+}  // namespace test
+}  // namespace ov
+
+using namespace ov::test;
 
 namespace {
 
-const std::vector<InferenceEngine::Precision> netPrecisions = {InferenceEngine::Precision::FP16,
-                                                               InferenceEngine::Precision::U8};
+const std::vector<ov::element::Type> netPrecisions = {ov::element::f16, ov::element::u8};
 
 const std::vector<int64_t> batchAxisIndices = {0L};
 
@@ -49,25 +89,30 @@ const std::vector<std::vector<size_t>> inputShapesNPU3720 = {{3, 10}, {3, 10, 12
 
 const std::vector<std::vector<size_t>> reversSeqLengthsVecShapes = {{3}};
 
-const std::vector<ngraph::helpers::InputLayerType> secondaryInputTypes = {ngraph::helpers::InputLayerType::CONSTANT,
-                                                                          ngraph::helpers::InputLayerType::PARAMETER};
+const std::vector<InputLayerType> secondaryInputTypes = {InputLayerType::CONSTANT, InputLayerType::PARAMETER};
 
 INSTANTIATE_TEST_SUITE_P(smoke_Basic, ReverseSequenceLayerTest_NPU3700,
                          ::testing::Combine(::testing::ValuesIn(batchAxisIndices), ::testing::ValuesIn(seqAxisIndices),
                                             ::testing::ValuesIn(inputShapes),
                                             ::testing::ValuesIn(reversSeqLengthsVecShapes),
                                             ::testing::ValuesIn(secondaryInputTypes),
-                                            ::testing::ValuesIn(netPrecisions),
-                                            ::testing::Values(LayerTestsUtils::testPlatformTargetDevice())),
+                                            ::testing::ValuesIn(netPrecisions), ::testing::Values(DEVICE_NPU)),
                          ReverseSequenceLayerTest_NPU3700::getTestCaseName);
 
 INSTANTIATE_TEST_SUITE_P(smoke_ReverseSequence, ReverseSequenceLayerTest_NPU3720,
                          ::testing::Combine(::testing::ValuesIn(batchAxisIndices), ::testing::ValuesIn(seqAxisIndices),
                                             ::testing::ValuesIn(inputShapesNPU3720),
                                             ::testing::ValuesIn(reversSeqLengthsVecShapes),
-                                            ::testing::Values(ngraph::helpers::InputLayerType::PARAMETER),
-                                            ::testing::ValuesIn(netPrecisions),
-                                            ::testing::Values(LayerTestsUtils::testPlatformTargetDevice())),
+                                            ::testing::Values(InputLayerType::PARAMETER),
+                                            ::testing::ValuesIn(netPrecisions), ::testing::Values(DEVICE_NPU)),
                          ReverseSequenceLayerTest_NPU3720::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(smoke_ReverseSequence, ReverseSequenceLayerTest_NPU4000,
+                         ::testing::Combine(::testing::ValuesIn(batchAxisIndices), ::testing::ValuesIn(seqAxisIndices),
+                                            ::testing::ValuesIn(inputShapes),
+                                            ::testing::ValuesIn(reversSeqLengthsVecShapes),
+                                            ::testing::Values(InputLayerType::PARAMETER),
+                                            ::testing::Values(ov::element::f16), ::testing::Values(DEVICE_NPU)),
+                         ReverseSequenceLayerTest_NPU4000::getTestCaseName);
 
 }  // namespace

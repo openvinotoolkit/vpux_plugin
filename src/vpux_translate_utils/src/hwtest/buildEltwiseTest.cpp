@@ -8,12 +8,13 @@
 #include <mlir/Dialect/Quant/QuantTypes.h>
 
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
-#include "vpux/compiler/dialect/VPUIP/attributes.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/task.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/attributes.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/utils/VPU/ppe_utils.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
+#include "vpux/utils/core/custom_float.hpp"
 #include "vpux/utils/core/error.hpp"
 
 namespace vpux {
@@ -44,7 +45,9 @@ void buildEltwise(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
     const auto INPUT0_CMX_OFFSET = OUTPUT_CMX_OFFSET + outputTotalSize;
     const auto INPUT1_CMX_OFFSET = INPUT0_CMX_OFFSET + inputTotalSize;
 
-    VPUX_THROW_UNLESS((inputType == weightsType), "Eltwise expects inputs of same type");
+    if (arch == vpux::VPU::ArchKind::NPU40XX || arch == vpux::VPU::ArchKind::NPU37XX) {
+        VPUX_THROW_UNLESS((inputType == weightsType), "Eltwise expects inputs of same type");
+    }
 
     SmallVector<mlir::Type> inputTypes;
     inputTypes.push_back(getMemRefType(VPURT::BufferSection::NetworkInput, inShape, inputType, DimsOrder::NHWC));
@@ -87,6 +90,8 @@ void buildEltwise(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
     // barrier config
     auto barrier0 = funcbuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 0);
     auto barrier1 = funcbuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 1);
+    // finalBarrier passed as production barrier to last DMA task
+    auto finalBarrier = funcbuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 2);
 
     // DMAs
     VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(), mlir::ValueRange(barrier0.getBarrier()),
@@ -94,9 +99,9 @@ void buildEltwise(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
     VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(), mlir::ValueRange(barrier0.getBarrier()),
                                           builder.getUnknownLoc(), funcweights, weightsCmx.getOperation()->getResult(0),
                                           0);
-    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(barrier1.getBarrier()), mlir::ValueRange(),
-                                          builder.getUnknownLoc(), outputCmx.getOperation()->getResult(0), funcoutput,
-                                          0);
+    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(barrier1.getBarrier()),
+                                          mlir::ValueRange(finalBarrier.getBarrier()), builder.getUnknownLoc(),
+                                          outputCmx.getOperation()->getResult(0), funcoutput, 0);
 
     mlir::Value wtTblValue;
     const auto qPerChType = outputType.dyn_cast_or_null<mlir::quant::UniformQuantizedPerAxisType>();
@@ -139,7 +144,7 @@ void buildEltwise(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
             funcbuilder, mlir::ValueRange(barrier0.getBarrier()), mlir::ValueRange(barrier1.getBarrier()),
             builder.getUnknownLoc(), outputCmxType, inputCmx.getOperation()->getResult(0),
             weightsCmx.getOperation()->getResult(0), wtTblValue,
-            /*instruction_table_list=*/nullptr, /*activation_window=*/nullptr,
+            /*instruction_table_list=*/nullptr, /*spr_lookup_table*/ nullptr, /*activation_window=*/nullptr,
             parentInputCmx.getOperation()->getResult(0), parentOutputCmx.getOperation()->getResult(0),
             outputCmx.getOperation()->getResult(0), VPUIP::NCETaskType::ELTWISE, mlir::ArrayAttr(), mlir::ArrayAttr(),
             VPU::PaddingAttr(), actChannelLength,
@@ -148,14 +153,13 @@ void buildEltwise(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
     auto eltwiseQuantScale = qPerChType ? 0
                                         : VPU::calculateQuantScaleVectorForEltwise(inputCmxType, weightsCmxType,
                                                                                    outputCmxType, arch, false);
+
     int64_t clampLow = std::numeric_limits<int32_t>::min();
     int64_t clampHigh = std::numeric_limits<int32_t>::max();
     int64_t bypassMult = 1;
     int64_t bypassShift = 0;
-
     if (auto outElemQType = outputType.template dyn_cast<mlir::quant::QuantizedType>()) {
         const auto zps = extractScalesAndZeroPoints(outputType).second;
-
         clampLow = outElemQType.getStorageTypeMin() - zps.front();
         clampHigh = outElemQType.getStorageTypeMax() - zps.front();
     }
@@ -191,8 +195,13 @@ void buildEltwise(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
     funcbuilder.create<mlir::func::ReturnOp>(builder.getUnknownLoc(), funcoutput);
 
     // set runtime resources
+    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
+
     mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    pm.addPass(VPU::createInitCompilerPass(arch, VPU::CompilationMode::DefaultHW, 1, std::nullopt, log));
+    auto initCompilerOptions = VPU::InitCompilerOptions(arch, VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.numberOfDPUGroups = 1;
+    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
 
     VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");
 

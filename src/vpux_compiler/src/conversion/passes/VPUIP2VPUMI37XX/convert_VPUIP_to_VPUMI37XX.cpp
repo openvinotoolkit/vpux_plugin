@@ -1,21 +1,23 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
 
 #include "vpux/compiler/conversion.hpp"
+#include "vpux/compiler/core/bounded_buffer.hpp"
 #include "vpux/compiler/core/profiling_metadata.hpp"
 #include "vpux/compiler/dialect/ELFNPU37XX/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/convert_to_dma_utils.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPUIP/graph-schema/blob_writer.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/convert_to_dma_utils.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/sw_utils.hpp"
 #include "vpux/compiler/dialect/VPUMI37XX/kernel_params_utils.hpp"
 #include "vpux/compiler/dialect/VPUMI37XX/ops.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 
-#include "vpux/utils/plugin/profiling_meta.hpp"
+#include "vpux/utils/profiling/metadata.hpp"
 
 #include <mlir/IR/IRMapping.h>
 #include <mlir/Transforms/DialectConversion.h>
@@ -396,9 +398,39 @@ private:
 
         auto tileIndex = op.getTileIndex().value_or(0);
 
+        const auto extractDynShapes = [](mlir::OperandRange dynShapes, std::optional<ArrayRef<int32_t>> dynShapesMap) {
+            if (!dynShapesMap.has_value()) {
+                return SmallVector<SmallVector<mlir::Value>>();
+            }
+            auto dynShapesBuffers = SmallVector<SmallVector<mlir::Value>>(dynShapesMap.value().size());
+
+            const auto getDynShapeValueByIndex = [&](const auto index) {
+                return (index == ABSENT_DIMS_FLAG) ? SmallVector<mlir::Value>{}
+                                                   : SmallVector<mlir::Value>{dynShapes[index]};
+            };
+            llvm::transform(dynShapesMap.value(), dynShapesBuffers.begin(), getDynShapeValueByIndex);
+
+            return dynShapesBuffers;
+        };
+
+        // mlir::ValueRange does not own data.
+        // Therefore, the array to store dynamic shapes must be allocated first.
+        // Then SmallVector<mlir::Value> must be casted to mlir::ValueRange.
+        const auto toValueRange = [](ArrayRef<mlir::Value> range) -> mlir::ValueRange {
+            return range;
+        };
+
+        auto dynInputShapes = extractDynShapes(op.getDynamicInputShapes(), op.getDynamicInputShapesMap());
+        auto dynInputShapesRange = SmallVector<mlir::ValueRange>();
+        llvm::transform(dynInputShapes, std::back_inserter(dynInputShapesRange), toValueRange);
+
+        auto dynOutputShapes = extractDynShapes(op.getDynamicOutputShapeBuffs(), op.getDynamicOutputShapesMap());
+        auto dynOutputShapesRange = SmallVector<mlir::ValueRange>();
+        llvm::transform(dynOutputShapes, std::back_inserter(dynOutputShapesRange), toValueRange);
+
         auto kernelParams = builderBlk.create<VPUMI37XX::KernelParamsOp>(
-                op->getLoc(), indexType, op.getInputs(), op.getOutputBuffs(),
-                /*input_dims*/ nullptr, /*output_dims*/ nullptr, mlir::StringAttr::get(ctx, kernel_elf),
+                op->getLoc(), indexType, op.getInputs(), op.getOutputBuffs(), dynInputShapesRange, dynOutputShapesRange,
+                mlir::StringAttr::get(ctx, kernel_elf),
                 mlir::DenseIntElementsAttr::get(mlir::VectorType::get({paramsSize}, uint8Type), paramsVector));
 
         builderBlk.create<VPUMI37XX::ActKernelInvocationOp>(op->getLoc(), indexType, /*taskLocation*/ nullptr,
@@ -441,9 +473,11 @@ private:
         SmallVector<uint8_t> paramsVectorDummy = {0xFF};
         long int paramsSize = (long int)(paramsVectorDummy.size());
 
+        SmallVector<mlir::ValueRange> dynInputShapes(0);
+        SmallVector<mlir::ValueRange> dynOutputShapes(0);
         auto kernelParams = builderBlk.create<VPUMI37XX::KernelParamsOp>(
-                op->getLoc(), indexType, mlir::ValueRange(), mlir::ValueRange(),
-                /*input_dims*/ nullptr, /*output_dims*/ nullptr, mlir::StringAttr::get(ctx, kernel_type),
+                op->getLoc(), indexType, mlir::ValueRange(), mlir::ValueRange(), dynInputShapes, dynOutputShapes,
+                mlir::StringAttr::get(ctx, kernel_type),
                 mlir::DenseIntElementsAttr::get(mlir::VectorType::get({paramsSize}, uint8Type), paramsVectorDummy));
 
         builderBlk.create<VPUMI37XX::ActKernelInvocationOp>(
@@ -490,21 +524,9 @@ private:
 
                 auto kernel_info_funcOp = moduleOp.lookupSymbol<mlir::func::FuncOp>(sw_kernel_symbol);
 
-                const auto kernelTaskType = kernel_info_funcOp->getAttrOfType<mlir::SymbolRefAttr>("VPU.task_type");
-
                 // Check if the task is a Cache handling op
-                bool isCacheOp = false;
-                if (kernelTaskType) {
-                    auto taskTypeVal = VPU::symbolizeActShaveTaskType(kernelTaskType.getLeafReference().strref());
-                    VPUX_THROW_UNLESS(taskTypeVal.has_value(),
-                                      "Operation '{0}' has invalid VPU.task_type attribute '{1}'", sw_kernel_symbol,
-                                      kernelTaskType.getLeafReference());
-
-                    if (taskTypeVal.value() != VPU::ActShaveTaskType::COMPUTE) {
-                        isCacheOp = true;
-                    }
-                }
-
+                const auto kernelTaskType = kernel_info_funcOp->getAttrOfType<mlir::SymbolRefAttr>("VPU.task_type");
+                bool isCacheOp = VPUIP::isCacheOpTaskType(kernelTaskType);
                 if (!isCacheOp) {
                     createComputeOpSwKernel(ctx, op, builderBlk, kernel_info_funcOp, wait_bars, update_bars, indexType,
                                             kernelTextEntryMap);
@@ -569,7 +591,7 @@ private:
                 auto cleanAfterAttr = builderBlk.getIntegerAttr(builderBlk.getIntegerType(64, false), 0);
 
                 auto dpuResults = unrollDistributedBuff(builderBlk, op.getOutputBuff());
-                auto inv = builderBlk.create<VPUMI37XX::DPUInvariantOp>(
+                auto invariant = builderBlk.create<VPUMI37XX::DPUInvariantOp>(
                         op->getLoc(), invariantIndex, /*taskLocation*/ nullptr, op.getInput(), op.getInputSparsityMap(),
                         op.getInputStorageElementTable(), op.getWeights(), op.getWeightsSparsityMap(),
                         op.getWeightTable(), op.getParentInput(), op.getParentInputSparsityMap(),
@@ -587,15 +609,24 @@ private:
                 for (auto dpuTaskOp : op.getVariants().getOps<VPUIP::DPUTaskOp>()) {
                     auto variantIndex = VPURegMapped::IndexType::get(ctx, variant_task_count);
                     builderBlk.create<VPUMI37XX::DPUVariantOp>(
-                            dpuTaskOp->getLoc(), variantIndex, /*taskLocation*/ nullptr, inv.getResult(),
+                            dpuTaskOp->getLoc(), variantIndex, /*taskLocation*/ nullptr, invariant.getResult(),
                             dpuTaskOp.getOutStartAttr(), dpuTaskOp.getOutEndAttr(), dpuTaskOp.getPadAttr(),
                             dpuTaskOp.getMpeModeAttr(), dpuTaskOp.getClusterIdAttr(), dpuTaskOp.getWorkloadIdAttr());
                     variant_task_count++;
                 }
 
-                if (op.getPpe().hasOneBlock()) {
-                    mlir::IRMapping mapper;
-                    op.getPpe().cloneInto(&inv.getPpe(), mapper);
+                {
+                    auto& ppeRegion = invariant.getPpe();
+                    ppeRegion.emplaceBlock();
+
+                    mlir::OpBuilder::InsertionGuard guard(builderBlk);
+                    builderBlk.setInsertionPointToEnd(&ppeRegion.front());
+
+                    for (auto ppe : op.getPpe().getOps<VPUIP::PPETaskOp>()) {
+                        builderBlk.create<VPUMI37XX::PPETaskOp>(builderBlk.getUnknownLoc(), ppe->getResultTypes(),
+                                                                ppe->getOperands(),
+                                                                ppe->getAttrDictionary().getValue());
+                    }
                 }
             }
 
@@ -774,9 +805,6 @@ public:
                     }
                 }
             }
-        }
-        if (origOp.getIsFinalBarrier()) {
-            consumer_count = 1;
         }
 
         mlir::IntegerType uint8Type = mlir::IntegerType::get(ctx, 8, mlir::IntegerType::Unsigned);

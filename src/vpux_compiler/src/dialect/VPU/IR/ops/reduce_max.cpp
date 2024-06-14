@@ -3,7 +3,13 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#include "vpux/compiler/core/tiling.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
+
+#include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/explicit_distribution_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/reduce_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/type_infer.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 
@@ -39,4 +45,77 @@ mlir::OpFoldResult vpux::VPU::ReduceMaxOp::fold(FoldAdaptor) {
     }
 
     return nullptr;
+}
+
+//
+// ClusteredOpInterface
+//
+
+bool vpux::VPU::ReduceMaxOp::checkStrategyCompatibility(VPU::MultiClusterStrategy strategy, size_t numTiles) {
+    const auto inputType = getInput().getType().cast<vpux::NDTypeInterface>();
+    const auto inShape = inputType.getShape();
+    const auto axesVec = parseIntArrayAttr<int64_t>(getAxesValueAttr());
+    return checkStrategyCompatibilityReduce(strategy, numTiles, inShape, axesVec);
+}
+
+vpux::VPU::DistributedTensorAttr vpux::VPU::ReduceMaxOp::getExplicitDistributedTensorAttr(
+        vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, mlir::ArrayAttr numTiles,
+        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::UnitAttr uniformDistributedSegments,
+        const vpux::VPU::OverlapDistributionParams& /*overlapParams*/) {
+    return vpux::VPU::getSWExplicitDistributedTensorAttr(mlir::dyn_cast<VPU::SWOpInterface>(getOperation()), shape,
+                                                         distributionMode, numTiles, numClusters, alignment,
+                                                         uniformDistributedSegments);
+}
+
+bool vpux::VPU::ReduceMaxOp::fitIntoCMX(llvm::ArrayRef<vpux::NDTypeInterface> buffers, Byte reservedMem) {
+    return fitIntoCMXReduce(getOperation(), buffers, reservedMem);
+}
+
+bool vpux::VPU::ReduceMaxOp::fitIntoCMX(llvm::ArrayRef<vpux::NDTypeInterface> buffers) {
+    return fitIntoCMXReduce(getOperation(), buffers);
+}
+
+bool vpux::VPU::ReduceMaxOp::supportCycleCostCalculation() {
+    return false;
+}
+
+//
+// TilingBuilderOpInterface
+//
+
+vpux::InputTiling vpux::VPU::ReduceMaxOp::backInferTileInfo(const vpux::TileInfo& outputTile, vpux::Logger /*log*/) {
+    const auto inShape = getInput().getType().cast<vpux::NDTypeInterface>().getShape();
+    const auto axesValue = getAxesValue();
+    const auto keepDims = getKeepDims();
+
+    return backInferReduceTile(outputTile, inShape, axesValue, keepDims);
+}
+
+void vpux::VPU::ReduceMaxOp::adjustAttrs(const TilingInfo& /*inputTiling*/, const TileInfo& /*outputTile*/) {
+}
+
+mlir::FailureOr<OutputTiling> vpux::VPU::ReduceMaxOp::getTilingStrategy(TilingMode tilingMode, Logger log) {
+    const auto op = getOperation();
+    const auto keepDims = getKeepDims();
+    SmallVector<int64_t> maxNumTiles;
+
+    if (keepDims) {
+        const auto axes = parseIntArrayAttr<int64_t>(getAxesValueAttr());
+        maxNumTiles = getMaxNumTilesWithAxesExclusion(op, axes);
+    } else {
+        const auto outputType = getOutput().getType().cast<vpux::NDTypeInterface>();
+        const auto outputShape = outputType.getShape();
+        maxNumTiles = to_small_vector(outputShape);
+    }
+
+    return vpux::getSWLayerTilingStrategy(op, tilingMode, log, maxNumTiles);
+}
+
+//
+// build
+//
+
+void vpux::VPU::ReduceMaxOp::build(::mlir::OpBuilder& builder, ::mlir::OperationState& state, ::mlir::Value input,
+                                   ::mlir::ArrayAttr axes_value, ::mlir::UnitAttr keep_dims) {
+    build(builder, state, input, axes_value, keep_dims, {});
 }

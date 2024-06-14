@@ -15,8 +15,8 @@ module @basicDMA {
   }
 }
 // CHECK: VPUMI37XX.NNDMA
-// CHECK-SAME: loc(#loc4)
-// CHECK: #loc4 = loc("BasicDMA")
+// CHECK-SAME: loc([[LOC_OP:#.+]])
+// CHECK: [[LOC_OP]] = loc("BasicDMA")
 
 // -----
 
@@ -34,8 +34,8 @@ module @expandDMA {
 }
 // CHECK-NOT: VPUIP.ExpandDMA
 // CHECK: VPUMI37XX.NNDMA
-// CHECK-SAME: loc(#loc6)
-// CHECK: #loc6 = loc("ExpandDMA")
+// CHECK-SAME: loc([[LOC_OP:#.+]])
+// CHECK: [[LOC_OP]] = loc("ExpandDMA")
 
 // -----
 
@@ -52,8 +52,8 @@ module @permuteDMA {
 }
 // CHECK-NOT: VPUIP.PermuteDMA
 // CHECK: VPUMI37XX.NNDMA
-// CHECK-SAME: loc(#loc6)
-// CHECK: #loc6 = loc("PermuteDMA")
+// CHECK-SAME: loc([[LOC_OP:#.+]])
+// CHECK: [[LOC_OP]] = loc("PermuteDMA")
 
 // -----
 
@@ -70,8 +70,8 @@ module @upsamplingDMA {
 }
 // CHECK-NOT: VPUIP.UpsamplingDMAOp
 // CHECK: VPUMI37XX.NNDMA
-// CHECK-SAME: loc(#loc6)
-// CHECK: #loc6 = loc("UpsamplingDMA")
+// CHECK-SAME: loc([[LOC_OP:#.+]])
+// CHECK: [[LOC_OP]] = loc("UpsamplingDMA")
 
 // -----
 
@@ -88,10 +88,12 @@ module @perAxisTileDMA {
 }
 // CHECK-NOT: VPUIP.PerAxisTileDMA
 // CHECK: VPUMI37XX.NNDMA
-// CHECK-SAME: loc(#loc6)
-// CHECK: #loc6 = loc("PerAxisTileDMA")
+// CHECK-SAME: loc([[LOC_OP:#.+]])
+// CHECK: [[LOC_OP]] = loc("PerAxisTileDMA")
 
 // -----
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 
  module @compressedDMA {
   IE.CNNNetwork entryPoint : @main inputsInfo : {
@@ -100,20 +102,20 @@ module @perAxisTileDMA {
     DataInfo "Convolution_145" : tensor<8x1x1x1xui8>
   }
 func.func @main(%arg0: memref<1x16x16x16xf16, @DDR>, %arg1: memref<8x1x1x1xui8, @DDR>) -> memref<8x1x1x1xui8, @DDR> {
-  %cst = const.Declare memref<8x1x1x1xui8> = dense<"0xDEADBEEFDEADBEEF"> : tensor<8x1x1x1xui8>
+  %cst = const.Declare memref<8x1x1x1xui8, {compression = #VPUIP.Compression<CompiletimeCompressed>, order = #NCHW}> = dense<"0xDEADBEEFDEADBEEF"> : tensor<8x1x1x1xui8>
   %1 = VPURT.DeclareBuffer <NetworkInput> [0] <0> -> memref<1x16x16x16xf16, @DDR>
   %2 = VPURT.DeclareBuffer <NetworkOutput> [0] <0> -> memref<8x1x1x1xui8, @DDR>
   %3 = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<8x1x1x1xui8, [@CMX_NN, 0]>
   VPURT.Task attributes {isTrailingSWLayer = false} {
-    %16 = VPUIP.DecompressDMAOp {port = 0 : i64} inputs(%cst : memref<8x1x1x1xui8>) outputs(%3 : memref<8x1x1x1xui8, [@CMX_NN, 0]>) -> memref<8x1x1x1xui8, [@CMX_NN, 0]> loc("DecompressDMA")
+    %16 = VPUIP.DecompressDMAOp {port = 0 : i64} inputs(%cst : memref<8x1x1x1xui8, {compression = #VPUIP.Compression<CompiletimeCompressed>, order = #NCHW}>) outputs(%3 : memref<8x1x1x1xui8, [@CMX_NN, 0]>) -> memref<8x1x1x1xui8, [@CMX_NN, 0]> loc("DecompressDMA")
   }
   return %arg1 : memref<8x1x1x1xui8, @DDR>
 }
 }
 // CHECK-NOT: VPURT.Task
 // CHECK: VPUMI37XX.NNDMA
-// CHECK-SAME: loc(#loc11)
-// CHECK: #loc11 = loc("DecompressDMA")
+// CHECK-SAME: loc([[LOC_OP:#.+]])
+// CHECK: [[LOC_OP]] = loc("DecompressDMA")
 
 // -----
 
@@ -131,8 +133,8 @@ module @spaceToDepth {
 }
 // CHECK-NOT: VPUIP.SpaceToDepth
 // CHECK: VPUMI37XX.NNDMA
-// CHECK-SAME: loc(#loc6)
-// CHECK: #loc6 = loc("SpaceToDepthDMA")
+// CHECK-SAME: loc([[LOC_OP:#.+]])
+// CHECK: [[LOC_OP]] = loc("SpaceToDepthDMA")
 
 // -----
 
@@ -150,8 +152,8 @@ module @depthToSpace {
 }
 // CHECK-NOT: VPUIP.DepthToSpace
 // CHECK: VPUMI37XX.NNDMA
-// CHECK-SAME: loc(#loc6)
-// CHECK: #loc6 = loc("DepthToSpaceDMA")
+// CHECK-SAME: loc([[LOC_OP:#.+]])
+// CHECK: [[LOC_OP]] = loc("DepthToSpaceDMA")
 
 // -----
 
@@ -204,7 +206,9 @@ func.func private @maxpool_f16_f16(%arg0: memref<1x64x16x16xf16, #NHWC, @DDR>, %
 
 // CHECK-NOT: VPURT.Task
 // CHECK: DPUInvariant
-// CHECK: loc(#loc17)
+// CHECK: VPUMI37XX.PPETask
+// CHECK: loc([[LOC_PPE:#.+]])
+// CHECK: loc([[LOC_OP:#.+]])
 
 // CHECK: VPUMI37XX.DPUVariant
 
@@ -213,4 +217,4 @@ func.func private @maxpool_f16_f16(%arg0: memref<1x64x16x16xf16, #NHWC, @DDR>, %
 // CHECK-NOT: VPURT.Task
 // CHECK: VPUMI37XX.NNDMA
 
-// CHECK: #loc17 = loc("NCEClusterTask")
+// CHECK: [[LOC_OP]] = loc("NCEClusterTask")

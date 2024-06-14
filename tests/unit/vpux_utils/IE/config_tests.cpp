@@ -1,15 +1,18 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
+//
+
 //
 
 #include "vpux/utils/IE/config.hpp"
 
-#include "vpux/al/config/common.hpp"
+#include "intel_npu/al/config/common.hpp"
 
 #include <gtest/gtest.h>
 
 using namespace vpux;
+using namespace intel_npu;
 
 struct SimpleOption : OptionBase<SimpleOption, bool> {
     static std::string_view key() {
@@ -31,7 +34,7 @@ struct PrivateOption : OptionBase<PrivateOption, int64_t> {
     }
 
     static void validateValue(int64_t val) {
-        VPUX_THROW_UNLESS(val >= 0, "Got negative value");
+        OPENVINO_ASSERT(val >= 0, "Got negative value");
     }
 
     static OptionMode mode() {
@@ -54,7 +57,7 @@ public:
     void SetUp() override {
         testing::Test::SetUp();
 
-        LoggerAdapter::setGlobalLevel(LogLevel::Warning);
+        intel_npu::Logger::global().setLevel(ov::log::Level::WARNING);
 
         options->add<SimpleOption>();
         options->add<PrivateOption>();
@@ -197,7 +200,7 @@ TEST_F(MLIR_ConfigSerializationTests, CanDumpConfigWithSpacesToString) {
 }
 
 TEST_F(MLIR_ConfigSerializationTests, CanDumpLogLevel) {
-    options->add<LOG_LEVEL>();
+    options->add<intel_npu::LOG_LEVEL>();
 
     conf.update({{"LOG_LEVEL", "LOG_TRACE"}});
     std::string expected = "LOG_LEVEL=\"LOG_TRACE\"";

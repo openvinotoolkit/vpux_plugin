@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -33,7 +33,7 @@ TEST_F(AlgorithmLibraryUnitTests, getFunctionMinimum) {
         ++counter;
     };
 
-    int temp = getCost(upperBound);
+    auto temp = getCost(upperBound);
 
     int bestState = std::numeric_limits<int>::max();
 
@@ -41,7 +41,8 @@ TEST_F(AlgorithmLibraryUnitTests, getFunctionMinimum) {
         bestState = state;
     };
 
-    EXPECT_EQ(vpux::algorithm::simulatedAnnealing<int>(temp, 1, getState, getCost, nullptr, successor, updateSolution),
+    EXPECT_EQ(vpux::algorithm::simulatedAnnealing<int>(static_cast<size_t>(temp), 1, getState, getCost, nullptr,
+                                                       successor, updateSolution),
               2);
     EXPECT_EQ(bestState, 2);
 
@@ -62,7 +63,7 @@ TEST_F(AlgorithmLibraryUnitTests, getFunctionGlobalMinimum) {
         return std::pow(shift, 4) + 4 * std::pow(shift, 3) - 8 * std::pow(shift, 2) + 130;
     };
 
-    int temperature = getCost(upperBound);
+    auto temperature = getCost(upperBound);
 
     auto getState = [&](int /* temp */, double& /*cost*/, const int* const state) -> int {
         if (state == nullptr) {
@@ -82,8 +83,8 @@ TEST_F(AlgorithmLibraryUnitTests, getFunctionGlobalMinimum) {
         temperature -= (upperBound - lowerBound);
     };
 
-    EXPECT_EQ(vpux::algorithm::simulatedAnnealing<int>(temperature, 1, getState, getCost, nullptr, nullptr, nullptr,
-                                                       stopCondition, changeTemp),
+    EXPECT_EQ(vpux::algorithm::simulatedAnnealing<int>(static_cast<size_t>(temperature), 1, getState, getCost, nullptr,
+                                                       nullptr, nullptr, stopCondition, changeTemp),
               1);
 }
 
@@ -109,5 +110,5 @@ TEST_F(AlgorithmLibraryUnitTests, getFunctionMultipleGlobalMinimum) {
         return rng(gen);
     };
 
-    EXPECT_EQ(vpux::algorithm::simulatedAnnealing<int>(temperature, 1, getState, getCost), 12);
+    EXPECT_EQ(vpux::algorithm::simulatedAnnealing<int>(static_cast<size_t>(temperature), 1, getState, getCost), 12);
 }

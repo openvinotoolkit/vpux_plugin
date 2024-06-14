@@ -26,7 +26,7 @@ IE.CNNNetwork
 module @VPU.SW {
     // The declaration should match C++ params structure in decomposed form.
     // `memref` will be translated to `MemRefData`, while raw scalars will be translated as is.
-    func.func private @builtin_GridSample(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, i64, i64, i64) attributes {VPU.kernel_code = "single_shave_grid_sample.cpp", VPU.kernel_entry = "single_shave_grid_sample"}
+    func.func private @builtin_GridSample(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, i64, i64, i64) attributes {VPU.kernel_code = "grid_sample.cpp", VPU.kernel_entry = "grid_sample"}
     func.func private @builtin_Convert(memref<*xf32, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>) attributes {VPU.kernel_code = "convert.cpp", VPU.kernel_entry = "convert"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
 }
@@ -37,7 +37,7 @@ module @VPU.SW {
     %2 = memref.alloc() : memref<1x1x2x3xf32, [@CMX_NN, 0]>
     %3 = VPUIP.Copy inputs(%arg0 : memref<1x1x2x3xf32>) outputs(%2 : memref<1x1x2x3xf32, [@CMX_NN, 0]>) -> memref<1x1x2x3xf32, [@CMX_NN, 0]>
     %4 = memref.alloc() : memref<1x1x2x3xf16, [@CMX_NN, 0]>
-    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_Convert inputs(%3 as %arg3: memref<1x1x2x3xf32, [@CMX_NN, 0]>) outputs(%4 as %arg4: memref<1x1x2x3xf16, [@CMX_NN, 0]>) on tile 0 -> memref<1x1x2x3xf16, [@CMX_NN, 0]>{
+    %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Convert inputs(%3 as %arg3: memref<1x1x2x3xf32, [@CMX_NN, 0]>) outputs(%4 as %arg4: memref<1x1x2x3xf16, [@CMX_NN, 0]>) on tile 0 -> memref<1x1x2x3xf16, [@CMX_NN, 0]>{
       VPUIP.SW.Kernel.run(%arg3, %arg4) : memref<1x1x2x3xf32, [@CMX_NN, 0]>, memref<1x1x2x3xf16, [@CMX_NN, 0]>
     }
     %5 = memref.alloc() : memref<1x1x2x3xf16>
@@ -45,7 +45,7 @@ module @VPU.SW {
     %7 = memref.alloc() : memref<1x1x3x2xf32, [@CMX_NN, 0]>
     %8 = VPUIP.Copy inputs(%arg1 : memref<1x1x3x2xf32>) outputs(%7 : memref<1x1x3x2xf32, [@CMX_NN, 0]>) -> memref<1x1x3x2xf32, [@CMX_NN, 0]>
     %9 = memref.alloc() : memref<1x1x3x2xf16, [@CMX_NN, 0]>
-    %results_0 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_Convert inputs(%8 as %arg3: memref<1x1x3x2xf32, [@CMX_NN, 0]>) outputs(%9 as %arg4: memref<1x1x3x2xf16, [@CMX_NN, 0]>) on tile 0 -> memref<1x1x3x2xf16, [@CMX_NN, 0]>{
+    %results_0 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Convert inputs(%8 as %arg3: memref<1x1x3x2xf32, [@CMX_NN, 0]>) outputs(%9 as %arg4: memref<1x1x3x2xf16, [@CMX_NN, 0]>) on tile 0 -> memref<1x1x3x2xf16, [@CMX_NN, 0]>{
       VPUIP.SW.Kernel.run(%arg3, %arg4) : memref<1x1x3x2xf32, [@CMX_NN, 0]>, memref<1x1x3x2xf16, [@CMX_NN, 0]>
     }
     %10 = memref.alloc() : memref<1x1x3x2xf16>
@@ -55,7 +55,7 @@ module @VPU.SW {
     %14 = memref.alloc() : memref<1x1x3x2xf16, [@CMX_NN, 0]>
     %15 = VPUIP.Copy inputs(%11 : memref<1x1x3x2xf16>) outputs(%14 : memref<1x1x3x2xf16, [@CMX_NN, 0]>) -> memref<1x1x3x2xf16, [@CMX_NN, 0]>
     %16 = memref.alloc() : memref<1x1x1x3xf16, [@CMX_NN, 0]>
-    %results_1 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_GridSample inputs(%13 as %arg3: memref<1x1x2x3xf16, [@CMX_NN, 0]>, %15 as %arg4: memref<1x1x3x2xf16, [@CMX_NN, 0]>) outputs(%16 as %arg5: memref<1x1x1x3xf16, [@CMX_NN, 0]>) on tile 0 -> memref<1x1x1x3xf16, [@CMX_NN, 0]>{
+    %results_1 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_GridSample inputs(%13 as %arg3: memref<1x1x2x3xf16, [@CMX_NN, 0]>, %15 as %arg4: memref<1x1x3x2xf16, [@CMX_NN, 0]>) outputs(%16 as %arg5: memref<1x1x1x3xf16, [@CMX_NN, 0]>) on tile 0 -> memref<1x1x1x3xf16, [@CMX_NN, 0]>{
       VPUIP.SW.Kernel.run {attrs = [1, 0, 1]}(%arg3, %arg4, %arg5) : memref<1x1x2x3xf16, [@CMX_NN, 0]>, memref<1x1x3x2xf16, [@CMX_NN, 0]>, memref<1x1x1x3xf16, [@CMX_NN, 0]>
     }
     %17 = memref.alloc() : memref<1x1x1x3xf16>
@@ -63,7 +63,7 @@ module @VPU.SW {
     %19 = memref.alloc() : memref<1x1x1x3xf16, [@CMX_NN, 0]>
     %20 = VPUIP.Copy inputs(%18 : memref<1x1x1x3xf16>) outputs(%19 : memref<1x1x1x3xf16, [@CMX_NN, 0]>) -> memref<1x1x1x3xf16, [@CMX_NN, 0]>
     %21 = memref.alloc() : memref<1x1x1x3xf32, [@CMX_NN, 0]>
-    %results_2 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_Convert inputs(%20 as %arg3: memref<1x1x1x3xf16, [@CMX_NN, 0]>) outputs(%21 as %arg4: memref<1x1x1x3xf32, [@CMX_NN, 0]>) on tile 0 -> memref<1x1x1x3xf32, [@CMX_NN, 0]>{
+    %results_2 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Convert inputs(%20 as %arg3: memref<1x1x1x3xf16, [@CMX_NN, 0]>) outputs(%21 as %arg4: memref<1x1x1x3xf32, [@CMX_NN, 0]>) on tile 0 -> memref<1x1x1x3xf32, [@CMX_NN, 0]>{
       VPUIP.SW.Kernel.run(%arg3, %arg4) : memref<1x1x1x3xf16, [@CMX_NN, 0]>, memref<1x1x1x3xf32, [@CMX_NN, 0]>
     }
     %22 = memref.alloc() : memref<1x1x1x3xf32>

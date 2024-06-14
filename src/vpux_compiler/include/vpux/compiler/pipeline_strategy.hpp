@@ -22,6 +22,9 @@ public:
     virtual void buildPipeline(mlir::PassManager& pm, const Config& config, mlir::TimingScope& rootTiming,
                                Logger log) = 0;
 
+    virtual void buildELFPipeline(mlir::PassManager& pm, const Config& config, mlir::TimingScope& rootTiming,
+                                  Logger log) = 0;
+
     virtual ~IPipelineStrategy() = default;
 };
 

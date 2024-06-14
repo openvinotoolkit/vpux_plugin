@@ -720,3 +720,17 @@ mlir::LogicalResult vpux::VPU::verifyNCEPermuteLayoutInfo(mlir::Operation* op) {
     }
     return mlir::success();
 }
+
+//
+// inferRollLayoutInfo
+//
+
+void vpux::VPU::inferRollLayoutInfo(mlir::Operation* /*op*/, IE::LayerLayoutInfo& info) {
+    VPU::inferLayoutInfoSameInOutSpecificDimsOrder(
+            info, {DimsOrder::NCHW, DimsOrder::NHWC, DimsOrder::CHW, DimsOrder::NC, DimsOrder::C});
+}
+
+mlir::LogicalResult vpux::VPU::verifyRollLayoutInfo(mlir::Operation* op) {
+    return VPU::verifySameInOutSpecificDimsOrder(
+            op, {DimsOrder::NCHW, DimsOrder::NHWC, DimsOrder::CHW, DimsOrder::NC, DimsOrder::C});
+}

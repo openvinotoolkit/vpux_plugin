@@ -1,6 +1,6 @@
 //
-// Copyright (C) 2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2023-2024 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include "dummy_source.hpp"
@@ -9,11 +9,12 @@
 
 #include "utils/utils.hpp"
 
-DummySource::DummySource(const uint32_t fps)
+DummySource::DummySource(const uint32_t frames_interval_in_ms, const bool drop_frames,
+                         const bool disable_high_resolution_timer)
         // NB: 0 is special value means no limit fps for source.
-        : m_latency_in_us(fps != 0 ? static_cast<uint32_t>(1000 * 1000 / fps) : 0),
-          m_drop_frames(false),
-          m_timer(SleepTimer::create()),
+        : m_latency_in_us(static_cast<uint64_t>(frames_interval_in_ms) * 1000),
+          m_drop_frames(drop_frames),
+          m_timer(SleepTimer::create(disable_high_resolution_timer)),
           // NB: Used for simulation, just return 1 byte.
           m_mat(utils::createRandom({1}, CV_8U)) {
 }
@@ -80,10 +81,6 @@ bool DummySource::pull(cv::gapi::wip::Data& data) {
 
 cv::GMetaArg DummySource::descr_of() const {
     return cv::GMetaArg{cv::descr_of(m_mat)};
-}
-
-void DummySource::enableDropFrames(const bool drop_frames) {
-    m_drop_frames = drop_frames;
 }
 
 void DummySource::reset() {

@@ -4,9 +4,16 @@
 //
 
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
-#include "vpux/compiler/utils/error.hpp"
+#include "vpux/compiler/utils/cast_utils.hpp"
 
 using namespace vpux;
+
+mlir::LogicalResult vpux::VPU::QuantizeCastOp::verify() {
+    const auto dstElemType = getDstElemType();
+    const auto inputType = getInput().getType().cast<vpux::NDTypeInterface>().getElementType();
+
+    return vpux::isQuantizeCastValid(getLoc(), inputType, dstElemType);
+}
 
 mlir::LogicalResult vpux::VPU::QuantizeCastOp::inferReturnTypes(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueRange operands,
@@ -49,4 +56,41 @@ mlir::LogicalResult vpux::VPU::QuantizeCastOp::inferReturnTypes(
     inferredReturnTypes.push_back(outType);
 
     return mlir::success();
+}
+
+//
+// TilingViewLikeOpInterface
+//
+
+vpux::InputTiling vpux::VPU::QuantizeCastOp::backInferTileInfo(const vpux::TileInfo& outputTile, vpux::Logger) {
+    SmallVector<TileInfo> inputTiles;
+    const auto inputShape = getShape(getInput());
+    VPUX_THROW_UNLESS(inputShape.size() == outputTile.shape.size(),
+                      "Can't tile QuantizeCast operation at '{0}', which has operands with different rank",
+                      this->getLoc());
+    inputTiles.push_back(outputTile);
+    return TilingInfo{inputTiles};
+}
+
+void vpux::VPU::QuantizeCastOp::adjustAttrs(const TilingInfo&, const TileInfo&, ShapeRef) {
+    // Do nothing
+}
+
+//
+// DistributedCastOpInterface
+//
+
+mlir::FailureOr<VPU::DistributedTypeInterface> vpux::VPU::QuantizeCastOp::inferCastedDistOutput(
+        VPU::DistributedTensorType inDistributedType) {
+    if (inDistributedType == nullptr || inDistributedType.getDistribution() == nullptr) {
+        return mlir::failure();
+    }
+    const auto ctx = getContext();
+    const auto origDistribution = inDistributedType.getDistribution();
+    const auto dstType = getOutput().getType().cast<NDTypeInterface>();
+    const auto dstDimsOrderAttr = mlir::AffineMapAttr::get(dstType.getDimsOrder().toAffineMap(ctx));
+    const auto newDistributionType =
+            DistributedTensorType::get(ctx, dstType.getShape().raw(), dstType.getElementType(), dstDimsOrderAttr,
+                                       dstType.getMemSpace(), origDistribution);
+    return newDistributionType.cast<VPU::DistributedTypeInterface>();
 }

@@ -94,4 +94,11 @@ mlir::ParseResult parseGroupOfOperands(mlir::OpAsmParser& parser, mlir::Operatio
                                        SmallVector<mlir::OpAsmParser::Argument>& blockArgs,
                                        SmallVector<mlir::Type>& blockTypes, mlir::StringRef groupName, int32_t& count);
 
+//
+// Dynamic tensor dims
+//
+
+mlir::ParseResult parseTensorDims(mlir::OpAsmParser& parser, mlir::OperationState& result, mlir::StringRef groupName,
+                                  int32_t& dimsCount);
+
 }  // namespace vpux

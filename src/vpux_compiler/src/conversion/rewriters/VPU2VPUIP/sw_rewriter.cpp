@@ -4,7 +4,7 @@
 //
 
 #include "vpux/compiler/conversion/rewriters/VPU2VPUIP/sw_rewriter.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 
 namespace vpux {
 
@@ -849,10 +849,7 @@ mlir::LogicalResult LayerRewrite::matchAndRewrite(mlir::Operation* origOp, Array
     VPUX_THROW_UNLESS(newOperands.size() == origOp->getNumOperands(), "Got wrong newOperands size : '{0}'",
                       newOperands.size());
 
-    auto* typeConverter = getTypeConverter();
-    VPUX_THROW_UNLESS(typeConverter != nullptr, "TypeConverter is not set");
-
-    const auto resultBufs = allocateBuffers(_log, origOp->getLoc(), rewriter, *typeConverter, origOp->getOpResults());
+    const auto resultBufs = allocateBuffers(_log, origOp->getLoc(), rewriter, origOp->getOpResults());
 
     SmallVector<mlir::Value> allBufs;
     allBufs.reserve(newOperands.size() + resultBufs.size());

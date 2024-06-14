@@ -4,7 +4,7 @@
 //
 
 #include <mlir/IR/Operation.h>
-#include "vpux/compiler/dialect/IE/ops.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 
 #pragma once
 

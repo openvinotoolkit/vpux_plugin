@@ -105,21 +105,8 @@ size_t vpux::VPUMI37XX::KernelParamsOp::getParamsStructSize() {
     return data_vector.size();
 }
 
-mlir::FailureOr<uint64_t> vpux::VPUMI37XX::KernelParamsOp::getOffsetOfWithinOperation(mlir::Value val) {
-    for (auto inputsIt : getInputs() | indexed) {
-        if (val == inputsIt.value()) {
-            return inputsIt.index() * sizeof(sw_params::MemRefData) + offsetof(sw_params::MemRefData, dataAddr);
-        }
-    }
-
-    for (auto outputsIt : getOutputs() | indexed) {
-        if (val == outputsIt.value()) {
-            return (getInputs().size() + outputsIt.index()) * sizeof(sw_params::MemRefData) +
-                   offsetof(sw_params::MemRefData, dataAddr);
-        }
-    }
-
-    return mlir::failure();
+size_t vpux::VPUMI37XX::KernelParamsOp::getOffsetOfWithinOperation(mlir::Value) {
+    VPUX_THROW("getOffset is not supported for KernelParams Op");
 }
 
 // The parameter structs for the sw layers must be 64Byte aligned as an ActShave requirement

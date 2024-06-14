@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --fold-relu-before-fq %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 // CHECK-LABEL: @ReLUFakeQuantizeFolded
 func.func @ReLUFakeQuantizeFolded(%arg0: tensor<1x3x30x30xf16>) -> tensor<1x3x30x30xf16> {
@@ -140,7 +140,7 @@ func.func @ReLUMultipleOutFakeQuantizeFolded(%arg0: tensor<1x3x30x30xf16>) -> te
         { auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 } :
         tensor<1x3x30x30xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16> -> tensor<1x3x30x30xf16>
 
-    %fq_2 = IE.FakeQuantize(%relu, %val_low, %val_high, %val_low, %val_high)  
+    %fq_2 = IE.FakeQuantize(%relu, %val_low, %val_high, %val_low, %val_high)
         { auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 } :
         tensor<1x3x30x30xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16> -> tensor<1x3x30x30xf16>
 
@@ -175,7 +175,7 @@ func.func @ReLUMultipleOutFakeQuantizeNotFolded(%arg0: tensor<1x3x30x30xf16>) ->
         { auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 } :
         tensor<1x3x30x30xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16> -> tensor<1x3x30x30xf16>
 
-    %fq_2 = IE.FakeQuantize(%relu, %val_low_neg, %val_high, %val_low_neg, %val_high)  
+    %fq_2 = IE.FakeQuantize(%relu, %val_low_neg, %val_high, %val_low_neg, %val_high)
         { auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 } :
         tensor<1x3x30x30xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16> -> tensor<1x3x30x30xf16>
 

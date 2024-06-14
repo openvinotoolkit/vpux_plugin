@@ -6,7 +6,7 @@
 #pragma once
 
 #include "vpux/compiler/core/profiling.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 
 #include <deque>
 

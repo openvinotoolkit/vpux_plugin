@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2021-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -10,8 +10,8 @@ module @Test {
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
 module @VPU.SW  {
-    func.func private @builtin_TanhOp(memref<*xf16>, memref<*xf16>, i64) attributes {VPU.kernel_code = "tanh_fp16.cpp", VPU.kernel_entry = "tanh_fp16"}
-    func.func private @builtin_Sigmoid(memref<*xf16>, memref<*xf16>) attributes {VPU.kernel_code = "sigmoid_fp16.c", VPU.kernel_entry = "sigmoid_fp16"}
+    func.func private @builtin_TanhOp(memref<*xf16>, memref<*xf16>, i64) attributes {VPU.kernel_code = "activation_tanh.cpp", VPU.kernel_entry = "activation_tanh"}
+    func.func private @builtin_Sigmoid(memref<*xf16>, memref<*xf16>) attributes {VPU.kernel_code = "activation_sigmoid.cpp", VPU.kernel_entry = "activation_sigmoid"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
 }
 
@@ -26,7 +26,7 @@ func.func @DontMergeACTAndDMA(%arg0: memref<16xf16>, %arg1: memref<16xf16>, %arg
     %t0, %f0 = async.execute
             -> !async.value<memref<16xf16>>
             attributes {VPUIP.executor = @SHAVE_ACT} {
-        %0 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+        %0 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
             @VPU.SW::@builtin_TanhOp inputs(%arg0 as %arg3: memref<16xf16>) outputs(%buf0 as %arg4: memref<16xf16>) on tile 0 -> memref<16xf16>  {
                 VPUIP.SW.Kernel.run {attrs = [0]}(%arg3, %arg4) : memref<16xf16>, memref<16xf16>
             }
@@ -36,7 +36,7 @@ func.func @DontMergeACTAndDMA(%arg0: memref<16xf16>, %arg1: memref<16xf16>, %arg
     %t1, %f1 = async.execute [%t0] (%f0 as %0: !async.value<memref<16xf16>>)
             -> !async.value<memref<16xf16>>
             attributes {VPUIP.executor = @SHAVE_ACT} {
-        %1 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+        %1 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
             @VPU.SW::@builtin_Sigmoid inputs(%0 as %arg3: memref<16xf16>) outputs(%buf1 as %arg4: memref<16xf16>) on tile 0 -> memref<16xf16>  {
                 VPUIP.SW.Kernel.run {attrs = [0]}(%arg3, %arg4) : memref<16xf16>, memref<16xf16>
             }
@@ -46,7 +46,7 @@ func.func @DontMergeACTAndDMA(%arg0: memref<16xf16>, %arg1: memref<16xf16>, %arg
     %t2, %f2 = async.execute [%t0] (%f0 as %0: !async.value<memref<16xf16>>)
             -> !async.value<memref<16xf16>>
             attributes {VPUIP.executor = @SHAVE_ACT} {
-        %2 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+        %2 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
             @VPU.SW::@builtin_Sigmoid inputs(%0 as %arg3: memref<16xf16>) outputs(%buf2 as %arg4: memref<16xf16>) on tile 0 -> memref<16xf16>  {
                 VPUIP.SW.Kernel.run {attrs = [0]}(%arg3, %arg4) : memref<16xf16>, memref<16xf16>
             }
@@ -76,19 +76,19 @@ func.func @DontMergeACTAndDMA(%arg0: memref<16xf16>, %arg1: memref<16xf16>, %arg
     // CHECK:       [[BUF2:%.*]] = memref.alloc() : memref<16xf16>
 
     // CHECK:       [[T0:%.+]], [[F0:%.+]] = async.execute
-    // CHECK:           [[VAR0:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_TanhOp inputs(%arg0 as [[ARG3:%.*]]: memref<16xf16>) outputs([[BUF0]] as [[ARG4:%.*]]: memref<16xf16>)
+    // CHECK:           [[VAR0:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_TanhOp inputs(%arg0 as [[ARG3:%.*]]: memref<16xf16>) outputs([[BUF0]] as [[ARG4:%.*]]: memref<16xf16>)
     // CHECK:           async.yield [[VAR0]]
 
     // CHECK:       [[T1:%.+]], [[F1:%.+]] = async.execute
     // CHECK-SAME:          [[T0]]
     // CHECK-SAME:          [[F0]] as [[VAR0_0:%.*]]: !async.value<memref<16xf16>>
-    // CHECK:           [[VAR1:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_Sigmoid inputs([[VAR0_0]] as [[ARG3:%.*]]: memref<16xf16>) outputs([[BUF1]] as [[ARG4:%.*]]: memref<16xf16>)
+    // CHECK:           [[VAR1:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Sigmoid inputs([[VAR0_0]] as [[ARG3:%.*]]: memref<16xf16>) outputs([[BUF1]] as [[ARG4:%.*]]: memref<16xf16>)
     // CHECK:           async.yield [[VAR1]]
 
     // CHECK:       [[T2:%.+]], [[F2:%.+]] = async.execute
     // CHECK-SAME:          [[T0]]
     // CHECK-SAME:          [[F0]] as [[VAR0_1:%.*]]: !async.value<memref<16xf16>>
-    // CHECK:           [[VAR2:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_Sigmoid inputs([[VAR0_1]] as [[ARG3:%.*]]: memref<16xf16>) outputs([[BUF2]] as [[ARG4:%.*]]: memref<16xf16>)
+    // CHECK:           [[VAR2:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Sigmoid inputs([[VAR0_1]] as [[ARG3:%.*]]: memref<16xf16>) outputs([[BUF2]] as [[ARG4:%.*]]: memref<16xf16>)
     // CHECK:           async.yield [[VAR2]]
 
     // CHECK:       [[T3:%.+]], [[F3:%.+]] = async.execute
@@ -116,7 +116,7 @@ module @Test {
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
 module @VPU.SW  {
-    func.func private @builtin_TanhOp(memref<*xf16>, memref<*xf16>, i64) attributes {VPU.kernel_code = "tanh_fp16.cpp", VPU.kernel_entry = "tanh_fp16"}
+    func.func private @builtin_TanhOp(memref<*xf16>, memref<*xf16>, i64) attributes {VPU.kernel_code = "activation_tanh.cpp", VPU.kernel_entry = "activation_tanh"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
 }
 
@@ -128,7 +128,7 @@ func.func @MergeDMAs(%arg0: memref<16xf16>, %arg1: memref<16xf16>, %arg2: memref
     %t0, %f0 = async.execute
             -> !async.value<memref<16xf16>>
             attributes {VPUIP.executor = @SHAVE_ACT} {
-        %0 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+        %0 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
             @VPU.SW::@builtin_TanhOp inputs(%arg0 as %arg3: memref<16xf16>) outputs(%buf as %arg4: memref<16xf16>) on tile 0 -> memref<16xf16>  {
                 VPUIP.SW.Kernel.run {attrs = [0]}(%arg3, %arg4) : memref<16xf16>, memref<16xf16>
             }
@@ -156,7 +156,7 @@ func.func @MergeDMAs(%arg0: memref<16xf16>, %arg1: memref<16xf16>, %arg2: memref
     // CHECK:       [[BUF:%.*]] = memref.alloc() : memref<16xf16>
 
     // CHECK:       [[T0:%.+]], [[F0:%.+]] = async.execute
-    // CHECK:           [[VAR0:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_TanhOp inputs(%arg0 as [[ARG3:%.*]]: memref<16xf16>) outputs([[BUF]] as [[ARG4:%.*]]: memref<16xf16>)
+    // CHECK:           [[VAR0:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_TanhOp inputs(%arg0 as [[ARG3:%.*]]: memref<16xf16>) outputs([[BUF]] as [[ARG4:%.*]]: memref<16xf16>)
     // CHECK:           async.yield [[VAR0]]
 
     // CHECK:       [[T1:%.+]], [[F1:%.+]]:2 = async.execute
@@ -180,7 +180,7 @@ module @Test {
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
 module @VPU.SW  {
-    func.func private @builtin_Sigmoid(memref<*xf16>, memref<*xf16>) attributes {VPU.kernel_code = "sigmoid_fp16.c", VPU.kernel_entry = "sigmoid_fp16"}
+    func.func private @builtin_Sigmoid(memref<*xf16>, memref<*xf16>) attributes {VPU.kernel_code = "activation_sigmoid.cpp", VPU.kernel_entry = "activation_sigmoid"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
 }
 
@@ -192,7 +192,7 @@ func.func @TaskWithExclusiveUsers(%arg0: memref<16xf16>, %arg1: memref<16xf16>, 
     %t0, %f0 = async.execute
             -> !async.value<memref<16xf16>>
             attributes {VPUIP.executor = @SHAVE_ACT} {
-        %0 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+        %0 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
             @VPU.SW::@builtin_Sigmoid inputs(%arg0 as %arg3: memref<16xf16>) outputs(%buf as %arg4: memref<16xf16>) on tile 0 -> memref<16xf16>  {
                 VPUIP.SW.Kernel.run {attrs = [0]}(%arg3, %arg4) : memref<16xf16>, memref<16xf16>
             }
@@ -202,7 +202,7 @@ func.func @TaskWithExclusiveUsers(%arg0: memref<16xf16>, %arg1: memref<16xf16>, 
     %t1, %f1 = async.execute
             -> !async.value<memref<16xf16>>
             attributes {VPUIP.executor = @SHAVE_ACT} {
-        %1 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+        %1 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
             @VPU.SW::@builtin_Sigmoid inputs(%arg0 as %arg3: memref<16xf16>) outputs(%arg1 as %arg4: memref<16xf16>) on tile 0 -> memref<16xf16>  {
                 VPUIP.SW.Kernel.run {attrs = [0]}(%arg3, %arg4) : memref<16xf16>, memref<16xf16>
             }
@@ -212,7 +212,7 @@ func.func @TaskWithExclusiveUsers(%arg0: memref<16xf16>, %arg1: memref<16xf16>, 
     %t2, %f2 = async.execute [%t0] (%f0 as %0: !async.value<memref<16xf16>>)
             -> !async.value<memref<16xf16>>
             attributes {VPUIP.executor = @SHAVE_ACT} {
-        %2 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+        %2 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
             @VPU.SW::@builtin_Sigmoid inputs(%0 as %arg3: memref<16xf16>) outputs(%arg2 as %arg4: memref<16xf16>) on tile 0 -> memref<16xf16>  {
                 VPUIP.SW.Kernel.run {attrs = [0]}(%arg3, %arg4) : memref<16xf16>, memref<16xf16>
             }
@@ -226,17 +226,17 @@ func.func @TaskWithExclusiveUsers(%arg0: memref<16xf16>, %arg1: memref<16xf16>, 
     // CHECK:       [[BUF:%.*]] = memref.alloc() : memref<16xf16>
 
     // CHECK:       [[T0:%.+]], [[F0:%.+]] = async.execute
-    // CHECK:           [[VAR0:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_Sigmoid
+    // CHECK:           [[VAR0:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Sigmoid
     // CHECK-SAME:          inputs(%arg0 as %arg3: memref<16xf16>)
     // CHECK-SAME:          outputs([[BUF]] as %arg4: memref<16xf16>)
     // CHECK:           async.yield [[VAR0]]
 
     // CHECK:       [[T1:%.+]], [[F1:%.+]]:2 = async.execute
     // CHECK-SAME:          ([[F0]] as [[VAR1:%.*]]: !async.value<memref<16xf16>>)
-    // CHECK:           [[VAR2:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_Sigmoid
+    // CHECK:           [[VAR2:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Sigmoid
     // CHECK-SAME:          inputs(%arg0 as %arg4: memref<16xf16>)
     // CHECK-SAME:          outputs(%arg1 as %arg5: memref<16xf16>)
-    // CHECK:           [[VAR3:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_Sigmoid
+    // CHECK:           [[VAR3:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Sigmoid
     // CHECK-SAME:          inputs([[VAR1]] as %arg4: memref<16xf16>)
     // CHECK-SAME:          outputs(%arg2 as %arg5: memref<16xf16>)
     // CHECK:           async.yield [[VAR2]], [[VAR3]]

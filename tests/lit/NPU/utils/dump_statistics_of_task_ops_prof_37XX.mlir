@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -10,14 +10,14 @@
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 #loc0 = loc(unknown)
 #loc2 = loc("profiling_result")
-module @age_gender attributes {VPU.arch = #VPU.arch_kind<VPUX37XX>, VPU.compilationMode = #VPU.compilation_mode<DefaultHW>} {
+module @age_gender attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilationMode = #VPU.compilation_mode<DefaultHW>} {
   module @UsedMemory {
     IE.MemoryResource 123008 bytes of @DDR loc(#loc0)
   } loc(#loc0)
   VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096] loc(#loc0)
   module @VPU.SW {
-    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder_fp16.cpp", VPU.kernel_entry = "reorder_fp16"} loc(#loc0)
-    func.func private @builtin_Convert(memref<*xf32, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>) attributes {VPU.kernel_code = "single_shave_convert.cpp", VPU.kernel_entry = "single_shave_convert"} loc(#loc0)
+    func.func private @builtin_MemPermute(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder.cpp", VPU.kernel_entry = "reorder"} loc(#loc0)
+    func.func private @builtin_Convert(memref<*xf32, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>) attributes {VPU.kernel_code = "convert.cpp", VPU.kernel_entry = "convert"} loc(#loc0)
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"} loc(#loc0)
   } loc(#loc0)
   IE.TileResource 2 of @NCE at 1.300000e+03 MHz {
@@ -185,7 +185,7 @@ module @age_gender attributes {VPU.arch = #VPU.arch_kind<VPUX37XX>, VPU.compilat
       %109 = VPUIP.NNDMA {port = 1 : i64, profilingMetadata = #VPUIP.DmaProfilingMetadataAttr<dataIndex = 11 : i64>} inputs(%68 : memref<1xui64, @Register>) outputs(%69 : memref<1xui64, [@CMX_NN, 0]>) -> memref<1xui64, [@CMX_NN, 0]> loc(#loc41)
     } loc(#loc41)
     VPURT.Task waits(%0 : !VPURT.Barrier) updates(%2 : !VPURT.Barrier) attributes {isTrailingSWLayer = false} {
-      %results, %profiling_output = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 1>} @VPU.SW::@builtin_Convert inputs(%16 as %arg3: memref<1x3x62x62xf32, [@CMX_NN, 0]>) outputs(%17 as %arg4: memref<1x3x62x62xf16, [@CMX_NN, 0]>) profiling_data(%45 : memref<4xui32, [@CMX_NN, 0]>) on tile 0 -> (memref<1x3x62x62xf16, [@CMX_NN, 0]>, memref<4xui32, [@CMX_NN, 0]>){
+      %results, %profiling_output = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 1>} @VPU.SW::@builtin_Convert inputs(%16 as %arg3: memref<1x3x62x62xf32, [@CMX_NN, 0]>) outputs(%17 as %arg4: memref<1x3x62x62xf16, [@CMX_NN, 0]>) profiling_data(%45 : memref<4xui32, [@CMX_NN, 0]>) on tile 0 -> (memref<1x3x62x62xf16, [@CMX_NN, 0]>, memref<4xui32, [@CMX_NN, 0]>){
         VPUIP.SW.Kernel.run(%arg3, %arg4) : memref<1x3x62x62xf32, [@CMX_NN, 0]>, memref<1x3x62x62xf16, [@CMX_NN, 0]> loc(#loc0)
       } loc(#loc61)
     } loc(#loc61)
@@ -292,7 +292,7 @@ module @age_gender attributes {VPU.arch = #VPU.arch_kind<VPUX37XX>, VPU.compilat
       %109 = VPUIP.NNDMA {port = 1 : i64, profilingMetadata = #VPUIP.DmaProfilingMetadataAttr<dataIndex = 11 : i64>} inputs(%98 : memref<1xui64, @Register>) outputs(%99 : memref<1xui64, [@CMX_NN, 0]>) -> memref<1xui64, [@CMX_NN, 0]> loc(#loc54)
     } loc(#loc54)
     VPURT.Task waits(%6 : !VPURT.Barrier) updates(%7 : !VPURT.Barrier) attributes {isTrailingSWLayer = false} {
-      %results, %profiling_output = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 1>} @VPU.SW::@builtin_Convert inputs(%40 as %arg3: memref<1x48x30x30xf16, [@CMX_NN, 0]>) outputs(%43 as %arg4: memref<1x48x30x30xf32, [@CMX_NN, 0]>) profiling_data(%57 : memref<4xui32, [@CMX_NN, 0]>) on tile 0 -> (memref<1x48x30x30xf32, [@CMX_NN, 0]>, memref<4xui32, [@CMX_NN, 0]>){
+      %results, %profiling_output = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 1>} @VPU.SW::@builtin_Convert inputs(%40 as %arg3: memref<1x48x30x30xf16, [@CMX_NN, 0]>) outputs(%43 as %arg4: memref<1x48x30x30xf32, [@CMX_NN, 0]>) profiling_data(%57 : memref<4xui32, [@CMX_NN, 0]>) on tile 0 -> (memref<1x48x30x30xf32, [@CMX_NN, 0]>, memref<4xui32, [@CMX_NN, 0]>){
         VPUIP.SW.Kernel.run(%arg3, %arg4) : memref<1x48x30x30xf16, [@CMX_NN, 0]>, memref<1x48x30x30xf32, [@CMX_NN, 0]> loc(#loc0)
       } loc(#loc73)
     } loc(#loc73)

@@ -1,26 +1,27 @@
-// Copyright (C) 2018-2022 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2018-2022 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include "behavior/ov_plugin/caching_tests.hpp"
+#include <utility>
 #include "common/utils.hpp"
 #include "common/vpu_test_env_cfg.hpp"
-#include "vpux/al/config/common.hpp"
+#include "intel_npu/al/config/common.hpp"
 
 using namespace ov::test::behavior;
 
 namespace {
-static const std::vector<ngraph::element::Type> nightly_precisionsKeemBay = {
-        ngraph::element::f32,
-        // ngraph::element::f16,
-        // ngraph::element::u8,
+static const std::vector<ov::element::Type> nightly_precisionsNPU = {
+        ov::element::f32,
+        // ov::element::f16,
+        // ov::element::u8,
 };
 
-static const std::vector<ngraph::element::Type> smoke_precisionsKeemBay = {
-        ngraph::element::f32,
+static const std::vector<ov::element::Type> smoke_precisionsNPU = {
+        ov::element::f32,
 };
 
-static const std::vector<std::size_t> batchSizesKeemBay = {1};
+static const std::vector<std::size_t> batchSizesNPU = {1};
 
 static std::vector<ovModelWithName> smoke_functions() {
     auto funcs = CompileModelCacheTestBase::getStandardFunctions();
@@ -30,7 +31,7 @@ static std::vector<ovModelWithName> smoke_functions() {
     return funcs;
 }
 
-static std::vector<ovModelWithName> keembay_functions() {
+static std::vector<ovModelWithName> NPU_functions() {
     auto funcs = CompileModelCacheTestBase::getStandardFunctions();
 
     std::vector<ovModelWithName>::iterator it = remove_if(funcs.begin(), funcs.end(), [](ovModelWithName func) {
@@ -45,21 +46,38 @@ static std::vector<ovModelWithName> keembay_functions() {
     return funcs;
 }
 
-INSTANTIATE_TEST_SUITE_P(smoke_CachingSupportCase_KeemBay, CompileModelCacheTestBase,
+INSTANTIATE_TEST_SUITE_P(smoke_BehaviorTests_CachingSupportCase_NPU, CompileModelCacheTestBase,
                          ::testing::Combine(::testing::ValuesIn(smoke_functions()),
-                                            ::testing::ValuesIn(smoke_precisionsKeemBay),
-                                            ::testing::ValuesIn(batchSizesKeemBay),
+                                            ::testing::ValuesIn(smoke_precisionsNPU),
+                                            ::testing::ValuesIn(batchSizesNPU),
                                             ::testing::Values(ov::test::utils::DEVICE_NPU),
                                             ::testing::Values(ov::AnyMap{})),
-                         CompileModelCacheTestBase::getTestCaseName);
+                         ov::test::utils::appendPlatformTypeTestName<CompileModelCacheTestBase>);
 
-INSTANTIATE_TEST_SUITE_P(nightly_CachingSupportCase_KeemBay, CompileModelCacheTestBase,
-                         ::testing::Combine(::testing::ValuesIn(keembay_functions()),
-                                            ::testing::ValuesIn(nightly_precisionsKeemBay),
-                                            ::testing::ValuesIn(batchSizesKeemBay),
+INSTANTIATE_TEST_SUITE_P(nightly_BehaviorTests_CachingSupportCase_NPU, CompileModelCacheTestBase,
+                         ::testing::Combine(::testing::ValuesIn(NPU_functions()),
+                                            ::testing::ValuesIn(nightly_precisionsNPU),
+                                            ::testing::ValuesIn(batchSizesNPU),
                                             ::testing::Values(ov::test::utils::DEVICE_NPU),
                                             ::testing::Values(ov::AnyMap{})),
-                         CompileModelCacheTestBase::getTestCaseName);
+                         ov::test::utils::appendPlatformTypeTestName<CompileModelCacheTestBase>);
+
+// Driver compiler type test suite
+INSTANTIATE_TEST_SUITE_P(
+        smoke_BehaviorTests_CachingSupportCase_NPU_Driver, CompileModelCacheTestBase,
+        ::testing::Combine(::testing::ValuesIn(smoke_functions()), ::testing::ValuesIn(smoke_precisionsNPU),
+                           ::testing::ValuesIn(batchSizesNPU), ::testing::Values(ov::test::utils::DEVICE_NPU),
+                           ::testing::Values(ov::AnyMap{
+                                   ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::DRIVER)})),
+        ov::test::utils::appendPlatformTypeTestName<CompileModelCacheTestBase>);
+
+INSTANTIATE_TEST_SUITE_P(
+        nightly_BehaviorTests_CachingSupportCase_NPU_Driver, CompileModelCacheTestBase,
+        ::testing::Combine(::testing::ValuesIn(NPU_functions()), ::testing::ValuesIn(nightly_precisionsNPU),
+                           ::testing::ValuesIn(batchSizesNPU), ::testing::Values(ov::test::utils::DEVICE_NPU),
+                           ::testing::Values(ov::AnyMap{
+                                   ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::DRIVER)})),
+        ov::test::utils::appendPlatformTypeTestName<CompileModelCacheTestBase>);
 
 static std::string getTestCaseName(testing::TestParamInfo<compileModelLoadFromFileParams> obj) {
     std::string testCaseName = CompileModelLoadFromFileTestBase::getTestCaseName(obj);
@@ -70,10 +88,10 @@ static std::string getTestCaseName(testing::TestParamInfo<compileModelLoadFromFi
 
 const std::vector<ov::AnyMap> LoadFromFileConfigs = {
         {ov::device::properties(ov::test::utils::DEVICE_NPU,
-                                ov::intel_vpux::compiler_type(ov::intel_vpux::CompilerType::DRIVER)),
+                                ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::DRIVER)),
          ov::hint::performance_mode(ov::hint::PerformanceMode::THROUGHPUT)},
         {ov::device::properties(ov::test::utils::DEVICE_NPU,
-                                ov::intel_vpux::compiler_type(ov::intel_vpux::CompilerType::DRIVER)),
+                                ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::DRIVER)),
          ov::hint::performance_mode(ov::hint::PerformanceMode::LATENCY)}};
 const std::vector<std::string> TestTargets = {
         ov::test::utils::DEVICE_AUTO,
@@ -81,20 +99,57 @@ const std::vector<std::string> TestTargets = {
         ov::test::utils::DEVICE_BATCH,
 };
 
-INSTANTIATE_TEST_SUITE_P(smoke_Auto_CachingSupportCase_KeemBay, CompileModelLoadFromFileTestBase,
+INSTANTIATE_TEST_SUITE_P(DISABLED_smoke_Auto_BehaviorTests_CachingSupportCase_NPU_Driver,
+                         CompileModelLoadFromFileTestBase,
                          ::testing::Combine(::testing::ValuesIn(TestTargets), ::testing::ValuesIn(LoadFromFileConfigs)),
                          getTestCaseName);
 
-const std::vector<ov::AnyMap> KEEMBAYLoadFromFileConfigs = {
-        {ov::intel_vpux::compiler_type(ov::intel_vpux::CompilerType::DRIVER),
+const std::vector<ov::AnyMap> NPULoadFromFileConfigs = {
+        {ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::DRIVER),
          ov::hint::performance_mode(ov::hint::PerformanceMode::THROUGHPUT)},
-        {ov::intel_vpux::compiler_type(ov::intel_vpux::CompilerType::DRIVER),
+        {ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::DRIVER),
          ov::hint::performance_mode(ov::hint::PerformanceMode::LATENCY)},
-        {ov::intel_vpux::compiler_type(ov::intel_vpux::CompilerType::DRIVER)},
+        {ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::DRIVER)},
 };
-INSTANTIATE_TEST_SUITE_P(smoke_CachingSupportCase_KeemBay, CompileModelLoadFromFileTestBase,
+
+const std::vector<std::pair<ov::AnyMap, std::string>> NPUCompiledKernelsCacheTest = {
+        std::make_pair<ov::AnyMap, std::string>(
+                {ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::DRIVER),
+                 ov::hint::performance_mode(ov::hint::PerformanceMode::THROUGHPUT),
+                 ov::intel_npu::use_elf_compiler_backend(ov::intel_npu::ElfCompilerBackend::NO)},
+                "blob"),
+        std::make_pair<ov::AnyMap, std::string>(
+                {ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::DRIVER),
+                 ov::hint::performance_mode(ov::hint::PerformanceMode::LATENCY),
+                 ov::intel_npu::use_elf_compiler_backend(ov::intel_npu::ElfCompilerBackend::NO)},
+                "blob"),
+        std::make_pair<ov::AnyMap, std::string>(
+                {ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::DRIVER),
+                 ov::intel_npu::use_elf_compiler_backend(ov::intel_npu::ElfCompilerBackend::NO)},
+                "blob"),
+        std::make_pair<ov::AnyMap, std::string>({ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::DRIVER),
+                                                 ov::hint::performance_mode(ov::hint::PerformanceMode::THROUGHPUT)},
+                                                "blob"),
+        std::make_pair<ov::AnyMap, std::string>({ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::DRIVER),
+                                                 ov::hint::performance_mode(ov::hint::PerformanceMode::LATENCY)},
+                                                "blob"),
+        std::make_pair<ov::AnyMap, std::string>({ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::DRIVER)},
+                                                "blob"),
+};
+
+INSTANTIATE_TEST_SUITE_P(smoke_BehaviorTests_CachingSupportCase_NPU_Driver, CompileModelLoadFromFileTestBase,
                          ::testing::Combine(::testing::Values(ov::test::utils::DEVICE_NPU),
-                                            ::testing::ValuesIn(KEEMBAYLoadFromFileConfigs)),
+                                            ::testing::ValuesIn(NPULoadFromFileConfigs)),
                          getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(smoke_BehaviorTests_CachingSupportCase_NPU_Driver, CompileModelLoadFromMemoryTestBase,
+                         ::testing::Combine(::testing::Values(ov::test::utils::DEVICE_NPU),
+                                            ::testing::ValuesIn(NPULoadFromFileConfigs)),
+                         ov::test::utils::appendPlatformTypeTestName<CompileModelLoadFromMemoryTestBase>);
+
+INSTANTIATE_TEST_SUITE_P(smoke_BehaviorTests_CachingSupportCase_NPU, CompiledKernelsCacheTest,
+                         ::testing::Combine(::testing::Values(ov::test::utils::DEVICE_NPU),
+                                            ::testing::ValuesIn(NPUCompiledKernelsCacheTest)),
+                         ov::test::utils::appendPlatformTypeTestName<CompiledKernelsCacheTest>);
 
 }  // namespace

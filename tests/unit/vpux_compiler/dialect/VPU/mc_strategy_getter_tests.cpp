@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -26,15 +26,27 @@ TEST_F(MLIR_MCStrategy_Getter, MCGetterList) {
 
     const auto numClusters = 2;
 
-    SmallVector<VPU::MultiClusterStrategy> strategyVPU37XXSet;
-    auto mcGetter = VPU::createMCStrategyGetter(VPU::ArchKind::VPUX37XX, numClusters);
+    SmallVector<VPU::MultiClusterStrategy> strategyNPU37XXSet;
+    auto mcGetter = VPU::createMCStrategyGetter(VPU::ArchKind::NPU37XX, numClusters);
 
-    mcGetter->getMCStrategies(strategyVPU37XXSet);
-    EXPECT_EQ(strategyVPU37XXSet.size(), 5);
+    mcGetter->getMCStrategies(strategyNPU37XXSet);
+    EXPECT_EQ(strategyNPU37XXSet.size(), 5);
 
-    SmallVector<VPU::MultiClusterStrategy> strategyVPU37XX1TileSet;
-    mcGetter = VPU::createMCStrategyGetter(VPU::ArchKind::VPUX37XX, 1);
+    SmallVector<VPU::MultiClusterStrategy> strategyNPU37XX1TileSet;
+    mcGetter = VPU::createMCStrategyGetter(VPU::ArchKind::NPU37XX, 1);
 
-    mcGetter->getMCStrategies(strategyVPU37XX1TileSet);
-    EXPECT_EQ(strategyVPU37XX1TileSet.size(), 1);
+    mcGetter->getMCStrategies(strategyNPU37XX1TileSet);
+    EXPECT_EQ(strategyNPU37XX1TileSet.size(), 1);
+
+    SmallVector<VPU::MultiClusterStrategy> strategyVPU40XX2TilesSet;
+    mcGetter = VPU::createMCStrategyGetter(VPU::ArchKind::NPU40XX, numClusters);
+
+    mcGetter->getMCStrategies(strategyVPU40XX2TilesSet);
+    EXPECT_EQ(strategyVPU40XX2TilesSet.size(), 6);
+
+    SmallVector<VPU::MultiClusterStrategy> strategyVPU40XX6TilesSet;
+    mcGetter = VPU::createMCStrategyGetter(VPU::ArchKind::NPU40XX, 6);
+
+    mcGetter->getMCStrategies(strategyVPU40XX6TilesSet);
+    EXPECT_EQ(strategyVPU40XX6TilesSet.size(), 8);
 }

@@ -7,10 +7,10 @@
 
 #include "vpux/compiler/core/attributes/stride_reqs.hpp"
 #include "vpux/compiler/core/tiling.hpp"
-#include "vpux/compiler/dialect/IE/attributes.hpp"
-#include "vpux/compiler/dialect/IE/ops.hpp"
+#include "vpux/compiler/dialect/IE/IR/attributes.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
-#include "vpux/compiler/dialect/VPUIP/utils.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
 #include "vpux/compiler/utils/analysis.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 
@@ -64,33 +64,39 @@ namespace {
 
 constexpr int VPUX30XX_MAX_DPU_GROUPS = 4;
 constexpr int VPUX37XX_MAX_DPU_GROUPS = 2;
+constexpr int VPUX40XX_MAX_DPU_GROUPS = 6;
 
 constexpr int VPUX30XX_MAX_DMA_PORTS = 1;
 constexpr int VPUX37XX_MAX_DMA_PORTS = 2;
+constexpr int VPUX40XX_MAX_DMA_PORTS = 2;
 
 }  // namespace
 
-uint32_t vpux::VPU::getMaxDPUClusterNum(ArchKind arch) {
+uint32_t vpux::VPU::getMaxArchDPUClusterNum(ArchKind arch) {
     switch (arch) {
-    case VPU::ArchKind::VPUX30XX:
+    case VPU::ArchKind::NPU30XX:
         return VPUX30XX_MAX_DPU_GROUPS;
-    case VPU::ArchKind::VPUX37XX:
+    case VPU::ArchKind::NPU37XX:
         return VPUX37XX_MAX_DPU_GROUPS;
+    case VPU::ArchKind::NPU40XX:
+        return VPUX40XX_MAX_DPU_GROUPS;
     default:
         VPUX_THROW("Unsupported architecture '{0}'", arch);
     }
 }
 
-uint32_t vpux::VPU::getMaxDPUClusterNum(mlir::Operation* op) {
-    return VPU::getMaxDPUClusterNum(VPU::getArch(op));
+uint32_t vpux::VPU::getMaxArchDPUClusterNum(mlir::Operation* op) {
+    return VPU::getMaxArchDPUClusterNum(VPU::getArch(op));
 }
 
 uint32_t vpux::VPU::getMaxDMAPorts(ArchKind arch) {
     switch (arch) {
-    case VPU::ArchKind::VPUX30XX:
+    case VPU::ArchKind::NPU30XX:
         return VPUX30XX_MAX_DMA_PORTS;
-    case VPU::ArchKind::VPUX37XX:
+    case VPU::ArchKind::NPU37XX:
         return VPUX37XX_MAX_DMA_PORTS;
+    case VPU::ArchKind::NPU40XX:
+        return VPUX40XX_MAX_DMA_PORTS;
     default:
         VPUX_THROW("Unsupported architecture '{0}'", arch);
     }
@@ -98,10 +104,12 @@ uint32_t vpux::VPU::getMaxDMAPorts(ArchKind arch) {
 
 double vpux::VPU::getDMABandwidth(ArchKind arch) {
     switch (arch) {
-    case VPU::ArchKind::VPUX30XX:
+    case VPU::ArchKind::NPU30XX:
         return 20000.0 / 700;
-    case VPU::ArchKind::VPUX37XX:
+    case VPU::ArchKind::NPU37XX:
         return 31200.0f / 1300;
+    case VPU::ArchKind::NPU40XX:
+        return 45000.0f / 1700;
     default:
         VPUX_THROW("Unsupported architecture '{0}'", arch);
     }
@@ -109,9 +117,11 @@ double vpux::VPU::getDMABandwidth(ArchKind arch) {
 
 double vpux::VPU::getNCEThroughput(ArchKind arch) {
     switch (arch) {
-    case VPU::ArchKind::VPUX30XX:
+    case VPU::ArchKind::NPU30XX:
         return 7168000.0;
-    case VPU::ArchKind::VPUX37XX:
+    case VPU::ArchKind::NPU37XX:
+        return 8000000.0;
+    case VPU::ArchKind::NPU40XX:
         return 8000000.0;
     default:
         VPUX_THROW("Unsupported architecture '{0}'", arch);
@@ -120,12 +130,16 @@ double vpux::VPU::getNCEThroughput(ArchKind arch) {
 
 unsigned int vpux::VPU::getDpuFrequency(vpux::VPU::ArchKind arch) {
     switch (arch) {
-    case VPU::ArchKind::VPUX30XX:
+    case VPU::ArchKind::NPU30XX:
         return VPUNN::get_dpu_fclk(VPUNN::VPUDevice::VPU_2_0);
-    case VPU::ArchKind::VPUX37XX:
+    case VPU::ArchKind::NPU37XX:
         return VPUNN::get_dpu_fclk(VPUNN::VPUDevice::VPU_2_7); /*!< The value 1300 corresponds to Highvcc of dpuclk.
                 (See VPUX37XX HAS #voltage-and-frequency-targets section).
                  */
+    case VPU::ArchKind::NPU40XX:
+        return VPUNN::get_dpu_fclk(VPUNN::VPUDevice::VPU_4_0); /*!< TODO: verify the correct value for VPUX40XX.
+                Value set to the maximal dpu_clk value from VPUX40XX HAS (See NPU40XX #clocks section)
+                */
     default:
         VPUX_THROW("Unsupported architecture '{0}'", arch);
     }
@@ -139,11 +153,14 @@ double vpux::VPU::getDmaBandwidthGBps(mlir::ModuleOp module) {
 double vpux::VPU::getDmaBandwidthGBps(vpux::VPU::ArchKind arch) {
     double BW = 0;
     switch (arch) {
-    case VPU::ArchKind::VPUX30XX:
+    case VPU::ArchKind::NPU30XX:
         BW = VPUNN::get_dram_bandwidth_MBps(VPUNN::VPUDevice::VPU_2_0);  // 20000 MB/s
         break;
-    case VPU::ArchKind::VPUX37XX:
+    case VPU::ArchKind::NPU37XX:
         BW = VPUNN::get_dram_bandwidth_MBps(VPUNN::VPUDevice::VPU_2_7);  // 27000 MB/s
+        break;
+    case VPU::ArchKind::NPU40XX:
+        BW = VPUNN::get_dram_bandwidth_MBps(VPUNN::VPUDevice::VPU_4_0);  // 45000 MB/s
         break;
     default:
         VPUX_THROW("Unsupported architecture '{0}'", arch);
@@ -164,7 +181,7 @@ Byte vpux::VPU::getTotalCMXSize(mlir::ModuleOp module) {
     // is still not disposed. Second buffer can be treated as an optimisation that prevents spilling.
     const int64_t profilingBufferSize =
             vpux::VPUIP::HW_DMA_PROFILING_MAX_BUFFER_SIZE + vpux::VPUIP::HW_DPU_PROFILING_MAX_BUFFER_SIZE +
-            ((arch != ArchKind::VPUX30XX) ? vpux::VPUIP::HW_ACT_SHAVE_PROFILING_MAX_BUFFER_SIZE : 0);
+            ((arch != VPU::ArchKind::NPU30XX) ? vpux::VPUIP::HW_ACT_SHAVE_PROFILING_MAX_BUFFER_SIZE : 0);
 
     return cmxRes.size() - Byte(2 * profilingBufferSize);
 }
@@ -187,7 +204,7 @@ Byte vpux::VPU::getTotalCMXFragmentationAwareSize(mlir::ModuleOp module) {
     // is still not disposed. Second buffer can be treated as an optimisation that prevents spilling.
     const int64_t profilingBufferSize =
             vpux::VPUIP::HW_DMA_PROFILING_MAX_BUFFER_SIZE + vpux::VPUIP::HW_DPU_PROFILING_MAX_BUFFER_SIZE +
-            ((arch == ArchKind::VPUX37XX) ? vpux::VPUIP::HW_ACT_SHAVE_PROFILING_MAX_BUFFER_SIZE : 0);
+            ((arch == VPU::ArchKind::NPU37XX) ? vpux::VPUIP::HW_ACT_SHAVE_PROFILING_MAX_BUFFER_SIZE : 0);
 
     return cmxRes.size() - Byte(2 * profilingBufferSize);
 }
@@ -208,7 +225,7 @@ namespace {
 
 constexpr StringLiteral archAttrName = "VPU.arch";
 
-constexpr Byte DDR_HEAP_SIZE = 2200_MB;
+constexpr Byte DDR_HEAP_SIZE = 4000_MB;
 
 constexpr Byte KMB_CMX_WORKSPACE_SIZE = Byte(896_KB);
 constexpr Byte KMB_CMX_WORKSPACE_FRAGMENTATION_AWARE_SIZE =
@@ -218,12 +235,19 @@ constexpr Byte VPUX37XX_CMX_WORKSPACE_SIZE = Byte(1936_KB);
 constexpr Byte VPUX37XX_CMX_WORKSPACE_FRAGMENTATION_AWARE_SIZE =
         Byte(static_cast<double>(VPUX37XX_CMX_WORKSPACE_SIZE.count()) * FRAGMENTATION_AVOID_RATIO);
 
+constexpr Byte VPUX40XX_CMX_WORKSPACE_SIZE =
+        Byte(1440_KB);  // Error from feasibleAllication if 1449_KB; See E62792 and E60873
+constexpr Byte VPUX40XX_CMX_WORKSPACE_FRAGMENTATION_AWARE_SIZE =
+        Byte(static_cast<double>(VPUX40XX_CMX_WORKSPACE_SIZE.count()) * FRAGMENTATION_AVOID_RATIO);
+
 struct Resources {
     std::optional<int> numOfDPUGroups = std::nullopt;
     std::optional<int> numOfDMAPorts = std::nullopt;
+    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
 
-    Resources(std::optional<int> numOfDPUGroups, std::optional<int> numOfDMAPorts)
-            : numOfDPUGroups(numOfDPUGroups), numOfDMAPorts(numOfDMAPorts) {
+    Resources(std::optional<int> numOfDPUGroups, std::optional<int> numOfDMAPorts,
+              std::optional<vpux::Byte> availableCMXMemory)
+            : numOfDPUGroups(numOfDPUGroups), numOfDMAPorts(numOfDMAPorts), availableCMXMemory(availableCMXMemory) {
     }
 };
 
@@ -270,6 +294,7 @@ void setArch(mlir::ModuleOp module, VPU::ArchKind kind, const Resources& res, co
 
     auto numOfDPUGroups = res.numOfDPUGroups;
     auto numOfDMAPorts = res.numOfDMAPorts;
+    auto availableCMXMemory = res.availableCMXMemory;
 
     const auto getNumOfDPUGroupsVal = [&](int maxDpuGroups) {
         int numOfDPUGroupsVal = numOfDPUGroups.has_value() ? numOfDPUGroups.value() : maxDpuGroups;
@@ -292,7 +317,14 @@ void setArch(mlir::ModuleOp module, VPU::ArchKind kind, const Resources& res, co
     const auto cmxFragAwareSymbolAttr = mlir::SymbolRefAttr::get(module.getContext(), VPU::CMX_NN_FragmentationAware);
 
     switch (kind) {
-    case VPU::ArchKind::VPUX30XX: {
+    case VPU::ArchKind::NPU30XX: {
+        const auto workspaceCMXSize =
+                availableCMXMemory.has_value() ? availableCMXMemory.value() : KMB_CMX_WORKSPACE_SIZE;
+        const auto workspaceFragmentationAwareSize =
+                availableCMXMemory.has_value()
+                        ? Byte(static_cast<double>(availableCMXMemory.value().count()) * FRAGMENTATION_AVOID_RATIO)
+                        : KMB_CMX_WORKSPACE_FRAGMENTATION_AWARE_SIZE;
+
         funcs.addMemoryWithAttrs(ddrSymbolAttr, DDR_HEAP_SIZE, 0.6, 8);
 
         funcs.addExecutor(VPU::ExecutorKind::DMA_NN, getNumOfDMAPortsVal(VPUX30XX_MAX_DMA_PORTS));
@@ -300,12 +332,19 @@ void setArch(mlir::ModuleOp module, VPU::ArchKind kind, const Resources& res, co
         nceCluster = funcs.addTileExecutor(getNumOfDPUGroupsVal(VPUX30XX_MAX_DPU_GROUPS));
         funcs.addSubExecutor(nceCluster, VPU::ExecutorKind::DPU, 5);
         funcs.addSubExecutor(nceCluster, VPU::ExecutorKind::SHAVE_NN, 5);
-        funcs.addInnerMemoryWithAttrs(nceCluster, cmxSymbolAttr, KMB_CMX_WORKSPACE_SIZE, 1.0, 32);
-        funcs.addInnerMemory(nceCluster, cmxFragAwareSymbolAttr, KMB_CMX_WORKSPACE_FRAGMENTATION_AWARE_SIZE);
+        funcs.addInnerMemoryWithAttrs(nceCluster, cmxSymbolAttr, workspaceCMXSize, 1.0, 32);
+        funcs.addInnerMemory(nceCluster, cmxFragAwareSymbolAttr, workspaceFragmentationAwareSize);
 
         break;
     }
-    case VPU::ArchKind::VPUX37XX: {
+    case VPU::ArchKind::NPU37XX: {
+        const auto workspaceCMXSize =
+                availableCMXMemory.has_value() ? availableCMXMemory.value() : VPUX37XX_CMX_WORKSPACE_SIZE;
+        const auto workspaceFragmentationAwareSize =
+                availableCMXMemory.has_value()
+                        ? Byte(static_cast<double>(availableCMXMemory.value().count()) * FRAGMENTATION_AVOID_RATIO)
+                        : VPUX37XX_CMX_WORKSPACE_FRAGMENTATION_AWARE_SIZE;
+
         funcs.addMemoryWithAttrs(ddrSymbolAttr, DDR_HEAP_SIZE, 0.6, 8);
 
         // Have NN_DMA as shared resource across clusters
@@ -314,8 +353,31 @@ void setArch(mlir::ModuleOp module, VPU::ArchKind kind, const Resources& res, co
         funcs.addSubExecutor(nceCluster, VPU::ExecutorKind::DPU, 1);
         funcs.addSubExecutor(nceCluster, VPU::ExecutorKind::SHAVE_NN, 1);
         funcs.addSubExecutor(nceCluster, VPU::ExecutorKind::SHAVE_ACT, 2);
-        funcs.addInnerMemoryWithAttrs(nceCluster, cmxSymbolAttr, VPUX37XX_CMX_WORKSPACE_SIZE, 1.0, 32);
-        funcs.addInnerMemory(nceCluster, cmxFragAwareSymbolAttr, VPUX37XX_CMX_WORKSPACE_FRAGMENTATION_AWARE_SIZE);
+        funcs.addInnerMemoryWithAttrs(nceCluster, cmxSymbolAttr, workspaceCMXSize, 1.0, 32);
+        funcs.addInnerMemory(nceCluster, cmxFragAwareSymbolAttr, workspaceFragmentationAwareSize);
+
+        break;
+    }
+    case VPU::ArchKind::NPU40XX: {
+        const auto workspaceCMXSize =
+                availableCMXMemory.has_value() ? availableCMXMemory.value() : VPUX40XX_CMX_WORKSPACE_SIZE;
+        const auto workspaceFragmentationAwareSize =
+                availableCMXMemory.has_value()
+                        ? Byte(static_cast<double>(availableCMXMemory.value().count()) * FRAGMENTATION_AVOID_RATIO)
+                        : VPUX40XX_CMX_WORKSPACE_FRAGMENTATION_AWARE_SIZE;
+
+        funcs.addMemoryWithAttrs(ddrSymbolAttr, DDR_HEAP_SIZE, 0.6, 64);
+
+        // Have NN_DMA as shared resource across clusters
+        auto numClusters = getNumOfDPUGroupsVal(VPUX40XX_MAX_DPU_GROUPS);
+        funcs.addExecutor(VPU::ExecutorKind::DMA_NN,
+                          getNumOfDMAPortsVal(std::min(numClusters, VPUX40XX_MAX_DMA_PORTS)));
+        funcs.addExecutor(VPU::ExecutorKind::M2I, 1);
+        nceCluster = funcs.addTileExecutor(numClusters);
+        funcs.addSubExecutor(nceCluster, VPU::ExecutorKind::DPU, 1);
+        funcs.addSubExecutor(nceCluster, VPU::ExecutorKind::SHAVE_ACT, 2);
+        funcs.addInnerMemoryWithAttrs(nceCluster, cmxSymbolAttr, workspaceCMXSize, 1.0, 64);
+        funcs.addInnerMemory(nceCluster, cmxFragAwareSymbolAttr, workspaceFragmentationAwareSize);
 
         break;
     }
@@ -334,7 +396,8 @@ void setArch(mlir::ModuleOp module, VPU::ArchKind kind, const Resources& res, co
 }  // namespace
 
 void vpux::VPU::setArch(mlir::ModuleOp module, ArchKind kind, std::optional<int> numOfDPUGroups,
-                        std::optional<int> numOfDMAPorts, bool allowCustomValues) {
+                        std::optional<int> numOfDMAPorts, std::optional<vpux::Byte> availableCMXMemory,
+                        bool allowCustomValues) {
     const auto addExecutor = [&](VPU::ExecutorKind kind, size_t count) {
         VPUX_THROW_WHEN(!allowCustomValues && IE::hasExecutor(module, kind),
                         "Available executor kind '{0}' was already added", kind);
@@ -407,7 +470,7 @@ void vpux::VPU::setArch(mlir::ModuleOp module, ArchKind kind, std::optional<int>
         }
     };
 
-    ::Resources res(numOfDPUGroups, numOfDMAPorts);
+    ::Resources res(numOfDPUGroups, numOfDMAPorts, availableCMXMemory);
     ::SetResoursesFuncs funcs(addExecutor, addTileExecutor, addSubExecutor, addAvailableMemory, addMemWithAttrs,
                               addInnerAvailableMemory, addInnerAvailableMemoryWithAttrs);
 
@@ -428,7 +491,7 @@ VPU::ArchKind vpux::VPU::getArch(mlir::Operation* op) {
 
 // To discern between VPUX3XXX and later on architectures
 bool vpux::VPU::isArchVPUX3XXX(VPU::ArchKind arch) {
-    return (arch == VPU::ArchKind::VPUX37XX) || (arch == VPU::ArchKind::VPUX30XX);
+    return (arch == VPU::ArchKind::NPU37XX) || (arch == VPU::ArchKind::NPU30XX);
 }
 
 //
@@ -461,6 +524,39 @@ VPU::CompilationMode vpux::VPU::getCompilationMode(mlir::Operation* op) {
 
     // Use DefaultHW as a default mode
     return VPU::CompilationMode::DefaultHW;
+}
+
+//
+// RevisionID
+//
+
+namespace {
+
+constexpr StringLiteral revisionIDAttrName = "VPU.revisionID";
+
+}  // namespace
+
+void vpux::VPU::setRevisionID(mlir::ModuleOp module, RevisionID revisionID) {
+    module->setAttr(revisionIDAttrName, VPU::RevisionIDAttr::get(module.getContext(), revisionID));
+}
+
+bool vpux::VPU::hasRevisionID(mlir::ModuleOp module) {
+    return module->hasAttr(revisionIDAttrName);
+}
+
+std::optional<VPU::RevisionID> vpux::VPU::getRevisionID(mlir::Operation* op) {
+    auto module = getModuleOp(op);
+
+    if (module->hasAttr(revisionIDAttrName)) {
+        if (auto attr = module->getAttr(revisionIDAttrName)) {
+            VPUX_THROW_UNLESS(attr.isa<VPU::RevisionIDAttr>(), "Module attribute '{0}' has unsupported value '{1}'",
+                              revisionIDAttrName, attr);
+
+            return attr.cast<VPU::RevisionIDAttr>().getValue();
+        }
+    }
+
+    return std::nullopt;
 }
 
 //
@@ -657,12 +753,14 @@ mlir::LogicalResult vpux::VPU::verify(FuncRef<mlir::InFlightDiagnostic()> emitEr
 
     if (hasComputeShapesOffsets &&
         !areShapesOffsetsValidForShape(distributedAttr.getComputeShapes(), distributedAttr.getComputeOffsets())) {
-        return printTo(emitError(), "Invalid compute shapes/offsets for tensor shape = {0}.", distributedAttr);
+        return printTo(emitError(), "Invalid compute shapes/offsets for tensor shape = {0}. Distribution = {1}", shape,
+                       distributedAttr);
     }
 
     if (hasMemoryShapesOffsets &&
         !areShapesOffsetsValidForShape(distributedAttr.getMemoryShapes(), distributedAttr.getMemoryOffsets())) {
-        return printTo(emitError(), "Invalid memory shapes/offsets for tensor shape.");
+        return printTo(emitError(), "Invalid memory shapes/offsets for tensor shape = {0}. Distribution = {1}", shape,
+                       distributedAttr);
     }
 
     const auto isTiledMode = [](VPU::DistributionMode mode) {
@@ -839,16 +937,20 @@ bool vpux::VPU::isDistributedAttrWithExplicitShapesAndOffsets(VPU::DistributedTe
     return hasComputeShapesOffsets && hasMemoryShapesOffsets;
 }
 
+bool vpux::VPU::isUniformDistributedSegmentsSupported(mlir::Operation* op) {
+    return !VPU::isArchVPUX3XXX(VPU::getArch(op));
+}
+
 //
 // Tiling utils
 //
 
 // Segmentation logic operates on schema and runtime assumption that a segmented tensor should be split equally
 // across the axis, with the remainder cluster possibly having a smaller tile.
-std::optional<SmallVector<Shape>> splitSegmentedShape(ArrayRef<int64_t> shape, ArrayRef<int64_t> tilingScheme,
-                                                      const int64_t numClusters, const int64_t axis,
-                                                      std::optional<ArrayRef<int64_t>> alignment,
-                                                      bool uniformDistributedSegments = false) {
+std::optional<SmallVector<Shape>> VPU::splitSegmentedShape(ArrayRef<int64_t> shape, ArrayRef<int64_t> tilingScheme,
+                                                           const int64_t numClusters, const int64_t axis,
+                                                           std::optional<ArrayRef<int64_t>> alignment,
+                                                           bool uniformDistributedSegments) {
     VPUX_THROW_UNLESS(axis < int64_t(shape.size()),
                       "An invalid split axis {0} specified, the shape tensor is {1} dimensional", axis, shape.size());
     VPUX_THROW_UNLESS(tilingScheme[axis] == numClusters,
@@ -927,8 +1029,8 @@ std::optional<SmallVector<DimRange>> getOverlappedInputTileDimRanges(
     // Alignment should only be considered for final input shape,
     // not the intermediary output shape
 
-    const auto segmentedShape =
-            splitSegmentedShape(outputShape, tilingScheme, numClusters, axis, std::nullopt, uniformDistributedSegments);
+    const auto segmentedShape = VPU::splitSegmentedShape(outputShape, tilingScheme, numClusters, axis, std::nullopt,
+                                                         uniformDistributedSegments);
 
     if (!segmentedShape.has_value()) {
         return std::nullopt;
@@ -991,8 +1093,9 @@ SmallVector<Shape> vpux::VPU::getPerClusterComputeShapes(ShapeRef shapeRef, Dist
         const auto axis = vpux::VPU::getDistributedTilingAxis(tilingScheme);
         VPUX_THROW_UNLESS(axis < int64_t(tilingScheme.size()), "Segmented tiling scheme requires at least 1 dimension "
                                                                "to be segmented but the tiling schema is [1, 1, 1, 1]");
-        const auto segmentedShape = splitSegmentedShape(shape, tilingScheme, numClusters, axis, optionalAlignment,
-                                                        distributionAttr.getUniformDistributedSegments() != nullptr);
+        const auto segmentedShape =
+                VPU::splitSegmentedShape(shape, tilingScheme, numClusters, axis, optionalAlignment,
+                                         distributionAttr.getUniformDistributedSegments() != nullptr);
         VPUX_THROW_UNLESS(segmentedShape.has_value(), "Improper split, '{0}' over '{1}' tiles", shape[axis],
                           tilingScheme[axis]);
         return segmentedShape.value();
@@ -1184,6 +1287,61 @@ SmallVector<Shape> vpux::VPU::getPerClusterMemoryShapeOffsets(ShapeRef shapeRef,
     VPUX_THROW("Cannot get per cluster memory shapes. Unsupported distribution: {0}", distributionAttr);
 }
 
+SmallVector<Shape> vpux::VPU::getOverlappedPerClusterNewMemoryShapes(ShapeRef newShape, ShapeRef origShape,
+                                                                     DistributedTensorAttr distributionAttr) {
+    auto shape = to_small_vector(newShape.raw());
+    auto originalShape = to_small_vector(origShape.raw());
+    const auto distributionMode = distributionAttr.getMode().getValue();
+    const auto numClusters = distributionAttr.getNumClusters().getInt();
+    auto tiledMemoryShapes = SmallVector<Shape>(numClusters);
+    const auto tilingScheme = parseIntArrayAttr<int64_t>(distributionAttr.getNumTiles());
+
+    VPUX_THROW_UNLESS(distributionMode == VPU::DistributionMode::OVERLAPPED,
+                      "Only support OVERLAPPED mode, current mode - {0}",
+                      VPU::stringifyDistributionMode(distributionMode));
+
+    VPUX_THROW_UNLESS(distributionAttr.getMemoryShapes() != nullptr,
+                      "Only support distributedAttr with explicit shapes and offsets");
+
+    for (auto dim : irange(originalShape.size())) {
+        VPUX_THROW_WHEN(tilingScheme[dim] > 1 && originalShape[dim] != shape[dim],
+                        "Shape change dim should not be on the same dim as tiling");
+    }
+
+    const auto origPerClusterShapes = parseIntArrayOfArrayAttr<int64_t>(distributionAttr.getMemoryShapes());
+    for (size_t cluster = 0; cluster < static_cast<size_t>(numClusters); cluster++) {
+        for (size_t dim = 0; dim < shape.size(); dim++) {
+            if (tilingScheme[dim] != 1) {
+                shape[dim] = origPerClusterShapes[cluster][dim];
+            }
+        }
+        tiledMemoryShapes[cluster] = Shape(shape);
+    }
+
+    return tiledMemoryShapes;
+}
+
+SmallVector<Shape> vpux::VPU::getOverlappedPerClusterNewMemoryShapeOffsets(ShapeRef shapeRef,
+                                                                           DistributedTensorAttr distributionAttr) {
+    const auto distributionMode = distributionAttr.getMode().getValue();
+    const auto numClusters = distributionAttr.getNumClusters().getInt();
+    auto tiledMemoryOffsets = SmallVector<Shape>(numClusters, Shape(shapeRef.size(), 0));
+
+    VPUX_THROW_UNLESS(distributionMode == VPU::DistributionMode::OVERLAPPED,
+                      "Only support OVERLAPPED mode, current mode - {0}",
+                      VPU::stringifyDistributionMode(distributionMode));
+
+    VPUX_THROW_UNLESS(distributionAttr.getMemoryOffsets() != nullptr,
+                      "Only support distributedAttr with explicit shapes and offsets");
+
+    auto offsets = parseIntArrayOfArrayAttr<int64_t>(distributionAttr.getMemoryOffsets());
+    for (auto cluster : irange(offsets.size())) {
+        tiledMemoryOffsets[cluster] = Shape(offsets[cluster]);
+    }
+
+    return tiledMemoryOffsets;
+}
+
 SmallVector<PadInfo> vpux::VPU::getPerClusterPadding(DistributedTensorAttr distributionAttr, PadInfo kernelPadding) {
     const auto mode = distributionAttr.getMode().getValue();
     VPUX_THROW_UNLESS(mode == VPU::DistributionMode::OVERLAPPED,
@@ -1277,6 +1435,18 @@ bool vpux::VPU::isSegmentedOverC(VPU::DistributedTensorAttr distAttr) {
     return true;
 }
 
+bool vpux::VPU::isSegmentedDuplicatedOverC(VPU::DistributedTensorAttr distAttr) {
+    if (distAttr.getMode().getValue() != (VPU::DistributionMode::SEGMENTED | VPU::DistributionMode::DUPLICATED)) {
+        return false;
+    }
+    const auto numTiles = parseIntArrayAttr<int64_t>(distAttr.getNumTiles());
+    if (numTiles.size() != 4 || numTiles[Dims4D::Act::N.ind()] > 1 || numTiles[Dims4D::Act::H.ind()] > 1 ||
+        numTiles[Dims4D::Act::W.ind()] > 1) {
+        return false;
+    }
+    return true;
+}
+
 bool vpux::VPU::isSegmentedOverN(VPU::DistributedTensorAttr distAttr) {
     if (distAttr.getMode().getValue() != VPU::DistributionMode::SEGMENTED) {
         return false;
@@ -1302,10 +1472,10 @@ bool vpux::VPU::isOverlappedOverH(VPU::DistributedTensorAttr distAttr) {
 }
 
 //
-// CompressionSchemeAttr
+// SparsityCompressionAttr
 //
 
-int64_t VPU::CompressionSchemeAttr::getTotalNumElems() const {
+int64_t VPU::SparsityCompressionAttr::getTotalNumElems() const {
     if (getNumElems().empty()) {
         return 0;
     }
@@ -1313,14 +1483,14 @@ int64_t VPU::CompressionSchemeAttr::getTotalNumElems() const {
     return std::accumulate(numElems.begin(), numElems.end(), static_cast<int64_t>(0));
 }
 
-int64_t VPU::CompressionSchemeAttr::getNumElemsInRange(int64_t startIdx, int64_t size) const {
+int64_t VPU::SparsityCompressionAttr::getNumElemsInRange(int64_t startIdx, int64_t size) const {
     const auto numElems = getNumElems().getValues<int64_t>();
     const auto startIt = numElems.begin() + startIdx;
     const auto endIt = startIt + size;
     return std::accumulate(startIt, endIt, static_cast<int64_t>(0));
 }
 
-Byte VPU::CompressionSchemeAttr::getAllocSize(mlir::Type elemType) const {
+Byte VPU::SparsityCompressionAttr::getAllocSize(mlir::Type elemType) const {
     const auto elemByteSize = getElemTypeSize(elemType).to<Byte>().count();
     const int64_t alignment = (getAlignment() != nullptr) ? getAlignment().getInt() : 1;
     const auto numElems = getNumElems().getValues<int64_t>();
@@ -1331,35 +1501,35 @@ Byte VPU::CompressionSchemeAttr::getAllocSize(mlir::Type elemType) const {
     return Byte(totalAllocSize);
 }
 
-VPU::CompressionSchemeAttr VPU::getCompressionSchemeAttr(mlir::Type type) {
+VPU::SparsityCompressionAttr VPU::getSparsityCompressionAttr(mlir::Type type) {
     if (auto sparseType = type.dyn_cast_or_null<VPU::SparseTensorType>()) {
-        return sparseType.getCompressionScheme();
+        return sparseType.getSparsityCompression();
     }
     return nullptr;
 }
 
-mlir::Type VPU::setCompressionSchemeAttr(mlir::Type type, VPU::CompressionSchemeAttr compressionSchemeAttr) {
+mlir::Type VPU::setSparsityCompressionAttr(mlir::Type type, VPU::SparsityCompressionAttr sparsityCompressionAttr) {
     if (auto sparseType = type.dyn_cast_or_null<VPU::SparseTensorType>()) {
         return VPU::SparseTensorType::get(sparseType.getData(), sparseType.getSparsityMap(),
                                           sparseType.getStorageElementTable(), sparseType.getIsWeights(),
-                                          compressionSchemeAttr);
+                                          sparsityCompressionAttr);
     }
     return type;
 }
 
-VPU::CompressionSchemeAttr VPU::tileCompressionScheme(VPU::CompressionSchemeAttr compressionScheme,
-                                                      ShapeRef tileOffsets, ShapeRef tileShape) {
-    if (compressionScheme == nullptr) {
+VPU::SparsityCompressionAttr VPU::tileSparsityCompression(VPU::SparsityCompressionAttr sparsityCompression,
+                                                          ShapeRef tileOffsets, ShapeRef tileShape) {
+    if (sparsityCompression == nullptr) {
         return nullptr;
     }
-    VPUX_THROW_UNLESS(compressionScheme.getAxis() != nullptr,
+    VPUX_THROW_UNLESS(sparsityCompression.getAxis() != nullptr,
                       "Cannot tile compression scheme that is not over an axis");
-    const size_t axis = compressionScheme.getAxis().getInt();
+    const size_t axis = sparsityCompression.getAxis().getInt();
     VPUX_THROW_UNLESS(axis < tileOffsets.size() && axis < tileShape.size(),
                       "Axis {0} outside the range of tile dimensions: offsets size {1}, shape size {2}", axis,
                       tileOffsets.size(), tileShape.size());
 
-    const auto numElems = compressionScheme.getNumElems().getValues<int64_t>();
+    const auto numElems = sparsityCompression.getNumElems().getValues<int64_t>();
     const auto dimOffset = tileOffsets[Dim(axis)];
     const auto dimShape = tileShape[Dim(axis)];
 
@@ -1367,17 +1537,60 @@ VPU::CompressionSchemeAttr VPU::tileCompressionScheme(VPU::CompressionSchemeAttr
     const auto endIt = startIt + dimShape;
     const auto tileNumElems = SmallVector<int64_t>(startIt, endIt);
 
-    auto ctx = compressionScheme.getContext();
+    auto ctx = sparsityCompression.getContext();
     const auto tileNumElemsType =
             mlir::RankedTensorType::get({static_cast<int64_t>(tileNumElems.size())}, getInt64Type(ctx));
     const auto tileNumElemsAttr = mlir::DenseElementsAttr::get(tileNumElemsType, ArrayRef(tileNumElems));
-    return VPU::CompressionSchemeAttr::get(ctx, compressionScheme.getAxis(), tileNumElemsAttr,
-                                           compressionScheme.getAlignment());
+    return VPU::SparsityCompressionAttr::get(ctx, sparsityCompression.getAxis(), tileNumElemsAttr,
+                                             sparsityCompression.getAlignment());
+}
+
+// DeprecatedArchKind
+
+namespace {
+StringRef stringifyDeprecatedArchKind(VPU::DeprecatedArchKind val) {
+    switch (val) {
+    case VPU::DeprecatedArchKind::UNKNOWN:
+        return "UNKNOWN";
+    case VPU::DeprecatedArchKind::VPUX30XX:
+        return "VPUX30XX";
+    case VPU::DeprecatedArchKind::VPUX37XX:
+        return "VPUX37XX";
+    case VPU::DeprecatedArchKind::VPUX40XX:
+        return "VPUX40XX";
+    }
+    return "";
+}
+}  // namespace
+
+std::optional<VPU::DeprecatedArchKind> vpux::VPU::symbolizeDeprecatedArchKind(StringRef str) {
+    return ::llvm::StringSwitch<::std::optional<VPU::DeprecatedArchKind>>(str)
+            .Case("UNKNOWN", VPU::DeprecatedArchKind::UNKNOWN)
+            .Case("VPUX30XX", VPU::DeprecatedArchKind::VPUX30XX)
+            .Case("VPUX37XX", VPU::DeprecatedArchKind::VPUX37XX)
+            .Case("VPUX40XX", VPU::DeprecatedArchKind::VPUX40XX)
+            .Default(::std::nullopt);
+}
+
+VPU::ArchKind vpux::VPU::mapDeprecatedArchKind(VPU::DeprecatedArchKind val) {
+    switch (val) {
+    case VPU::DeprecatedArchKind::UNKNOWN:
+        return VPU::ArchKind::UNKNOWN;
+    case VPU::DeprecatedArchKind::VPUX30XX:
+        return VPU::ArchKind::NPU30XX;
+    case VPU::DeprecatedArchKind::VPUX37XX:
+        return VPU::ArchKind::NPU37XX;
+    case VPU::DeprecatedArchKind::VPUX40XX:
+        return VPU::ArchKind::NPU40XX;
+    default:
+        VPUX_THROW("Unsupported deprecated arch kind {0}", stringifyDeprecatedArchKind(val));
+    }
 }
 
 //
 // Generated
 //
+
 #include <vpux/compiler/dialect/VPU/enums.cpp.inc>
 
 #define GET_ATTRDEF_CLASSES

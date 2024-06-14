@@ -1,24 +1,21 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 #pragma once
 
-#include "vpux/compiler/dialect/IE/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/task.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 #include "vpux/compiler/utils/strings.hpp"
-#include "vpux/utils/core/func_ref.hpp"
-#include "vpux/utils/core/profiling.hpp"
+#include "vpux/utils/profiling/common.hpp"
 
 namespace vpux {
 
 VPUIP::DpuProfilingMetadataAttr getDpuProfilingMetaAttr(mlir::MLIRContext* ctx, unsigned bufferId, unsigned taskId,
                                                         unsigned maxVariants, std::optional<unsigned> numVariants,
                                                         std::optional<unsigned> clusterId);
-
-vpux::profiling::ExecutorType convertDataInfoNameToExecType(StringRef name);
 
 VPUIP::DmaProfilingMetadataAttr getDmaProfilingMetaAttrBegin(mlir::MLIRContext* ctx);
 
@@ -31,6 +28,8 @@ VPUIP::SwProfilingMetadataAttr getSwProfilingMetaAttr(mlir::MLIRContext* ctx, si
 void attachSwProfilingMetadataToUpa(mlir::Operation* op, VPUIP::SwProfilingMetadataAttr attr);
 
 VPUIP::SwProfilingMetadataAttr getSwProfilingMetadataFromUpa(mlir::Operation* op);
+
+VPUIP::M2IProfilingMetadataAttr getM2IProfilingMetaAttr(mlir::MLIRContext* ctx, size_t bufferId, size_t bufferOffset);
 
 // Post processing of profiling is relay on uniqueness of locations, but this may be violated. To ensure that all names
 // are unique this class is used
@@ -52,7 +51,7 @@ public:
     }
 
 private:
-    vpux::Logger& _log;
+    vpux::Logger _log;
     std::map<std::string, size_t> _counter;
 };
 
@@ -92,6 +91,23 @@ bool isProfiledDmaTask(VPURT::TaskOp taskOp);
  * @param dmaHwpId - HWP id value. Set to 0 to ignore the profiling entry.
  */
 void setDmaHwpIdAttribute(mlir::MLIRContext* ctx, VPUIP::DMATypeOpInterface& op, int32_t dmaHwpId);
+/**
+ * @brief check whether HWP argument was used in any profiled DMA operation
+ * dma_hwp_id attribute set
+ *
+ * @return true if at least one profiled DMA operation has dma_hwp_id argument set, false otherwise.
+ */
+bool isDmaHwpUsedInVPURT(mlir::func::FuncOp& func);
+/**
+ * @brief check whether HWP argument was used in any profiled DMA operation
+ * dma_hwp_id attribute set
+ *
+ * @return false for architectures < VPUX40XX.
+ * For other architectures true if at least one profiled DMA operation has dma_hwp_id argument set,
+ * false otherwise.
+ *
+ */
+bool isDmaHwpUsedInVPURT(mlir::ModuleOp& module);
 
 /**
  * @brief check whether CNNNetworkOp defines profiling outputs

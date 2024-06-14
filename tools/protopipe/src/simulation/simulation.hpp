@@ -1,17 +1,19 @@
 //
-// Copyright (C) 2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2023-2024 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #pragma once
 
 #include <memory>
 
-#include <opencv2/gapi/gproto.hpp>  // cv::GCompileArgs
-
 #include "result.hpp"
 #include "scenario/criterion.hpp"
+#include "scenario/inference.hpp"
 #include "scenario/scenario_graph.hpp"
+#include "simulation/dummy_source.hpp"
+
+#include <opencv2/gapi/infer.hpp>  // cv::gapi::GNetPackage
 
 struct ICompiled {
     using Ptr = std::shared_ptr<ICompiled>;
@@ -21,12 +23,35 @@ struct ICompiled {
 struct PipelinedCompiled : public ICompiled {};
 struct SyncCompiled : public ICompiled {};
 
-struct ISimulation {
-    using Ptr = std::shared_ptr<ISimulation>;
+using DummySources = std::vector<DummySource::Ptr>;
 
-    virtual std::shared_ptr<PipelinedCompiled> compilePipelined(const bool drop_frames, cv::GCompileArgs&& args) = 0;
+class Simulation {
+public:
+    using Ptr = std::shared_ptr<Simulation>;
 
-    virtual std::shared_ptr<SyncCompiled> compileSync(const bool drop_frames, cv::GCompileArgs&& args) = 0;
+    struct Config {
+        std::string stream_name;
+        uint32_t frames_interval_in_ms;
+        bool disable_high_resolution_timer;
+        ScenarioGraph graph;
+        InferenceParamsMap params;
+    };
 
-    virtual ~ISimulation() = default;
+    explicit Simulation(Config&& cfg);
+
+    virtual std::shared_ptr<PipelinedCompiled> compilePipelined(const bool drop_frames);
+    virtual std::shared_ptr<SyncCompiled> compileSync(const bool drop_frames);
+
+    virtual ~Simulation() = default;
+
+protected:
+    virtual std::shared_ptr<PipelinedCompiled> compilePipelined(DummySources&& sources,
+                                                                cv::GCompileArgs&& compile_args);
+    virtual std::shared_ptr<SyncCompiled> compileSync(DummySources&& sources, cv::GCompileArgs&& compile_args);
+
+    std::vector<DummySource::Ptr> createSources(const bool drop_frames);
+    cv::gapi::GNetPackage getNetworksPackage() const;
+
+protected:
+    Config m_cfg;
 };

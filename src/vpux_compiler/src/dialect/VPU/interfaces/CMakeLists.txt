@@ -18,6 +18,7 @@ add_mlir_dialect_library(${TARGET_NAME}
         npu_compiler_dialect_vpu
         #TODO:#-95278 remove dependency on VPUIP
         npu_compiler_dialect_vpuip
+        npu_compiler_dialect_vpuip_interfaces
         npu_llvm_utils
         npu_ov_utils
         inferenceStatic)
@@ -31,6 +32,5 @@ target_include_directories(${TARGET_NAME}
     PRIVATE
         ${VPU_COMPILER_SRC_INCLUDE_DIR})
 
-add_src_target($<BUILD_INTERFACE:${TARGET_NAME}>)
-vpux_enable_clang_format(${TARGET_NAME})
+add_src_target(${TARGET_NAME})
 enable_warnings_as_errors(${TARGET_NAME} WIN_STRICT)

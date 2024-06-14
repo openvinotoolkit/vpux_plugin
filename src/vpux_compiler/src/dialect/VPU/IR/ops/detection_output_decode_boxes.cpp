@@ -1,3 +1,4 @@
+//
 // Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
@@ -40,6 +41,7 @@ InputTiling vpux::VPU::DetectionOutputDecodeBoxesOp::backInferTileInfo(const vpu
     // Use a whole priorBoxes tensor, except when we are tiling on H dimension
     priorBoxesTile.shape[Dims4D::Act::H] = outputTile.shape[Dims4D::Act::H];
     priorBoxesTile.offsets[Dims4D::Act::H] = outputTile.offsets[Dims4D::Act::H];
+    priorBoxesTile.axis[Dims4D::Act::H] = outputTile.axis[Dims4D::Act::H];
 
     return InputTiling{{outputTile, std::move(priorBoxesTile)}};
 }

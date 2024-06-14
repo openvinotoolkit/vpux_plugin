@@ -1,6 +1,6 @@
 //
-// Copyright (C) 2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include "utils.hpp"
@@ -23,6 +23,9 @@ void createNDMat(cv::Mat& mat, const std::vector<int>& dims, int depth) {
 void generateRandom(cv::Mat& out) {
     switch (out.depth()) {
     case CV_8U:
+        cv::randu(out, 0, 255);
+        break;
+    case CV_32S:
         cv::randu(out, 0, 255);
         break;
     case CV_32F:

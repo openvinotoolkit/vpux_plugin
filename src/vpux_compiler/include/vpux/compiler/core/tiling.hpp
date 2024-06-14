@@ -8,7 +8,7 @@
 #include "vpux/compiler/core/attributes/dims_order.hpp"
 #include "vpux/compiler/core/attributes/shape.hpp"
 #include "vpux/compiler/core/layers.hpp"
-#include "vpux/compiler/dialect/IE/attributes.hpp"
+#include "vpux/compiler/dialect/IE/IR/attributes.hpp"
 
 #include "vpux/utils/core/format.hpp"
 #include "vpux/utils/core/logger.hpp"
@@ -37,9 +37,12 @@ static constexpr double LARGE_CONST_THRESHOLD_RATIO = 0.25;
 // The purpose is to avoid excessive tiling.
 static constexpr int MAX_PREFETCH_TILING_TIME = 3;
 
+// Experimental number to avoid long compilation time caused by excessive tiling.
+static constexpr int MAX_EXCESSIVE_TILING_TIME = 3;
+
 // Track [E#87286]
 // Experimental number to avoid spilling in vertical fusion
-static constexpr double VF_WEIGHTS_RATIO = 0.5;
+static constexpr double VF_WEIGHTS_RATIO = 0.58;
 
 // Experimental number to avoid spilling in vertical fusion
 static constexpr double VF_LARGEST_OP_MEM_RATIO = 0.6;
@@ -50,6 +53,14 @@ static constexpr double FRAGMENTATION_AVOID_RATIO_VF_PIPELINING = 0.37;
 // Experimental number to get accurate NCEEltwise VPUNN cost
 // Track [E#98656]
 static constexpr double NCEELTWISE_DPU_COST_RATIO = 2.5;
+
+// Experimental number to get accurate NCEDWCONV VPUNN cost
+// Track [E#117314]
+static constexpr double NCEDWCONV_DPU_COST_RATIO = 2;
+
+// Experimental number to get accurate ACT-SPARSITY VPUNN cost
+// Track [E#117195]
+static constexpr double ACTSPARSE_DPU_COST_RATIO = 2;
 
 // Experimental number to use DDR access for GatherOp with large input but small output
 static constexpr double DDR_ACCESS_GATHER_IO_RATIO = 500;
@@ -216,13 +227,22 @@ InputTiling backInferPoolTile(const TileInfo& outputTile, ShapeRef origInputShap
                               mlir::ArrayAttr strides, const PadInfo& origPadding);
 
 //
+// Reduce tiling
+//
+
+InputTiling backInferReduceTile(const vpux::TileInfo& outputTile, ShapeRef inShape, mlir::ArrayAttr axesAttr,
+                                bool keepDims);
+
+//
 // Interpolate tiling
 //
 
 InputTiling backInferInterpolateTile(const vpux::TileInfo& outputTile, ArrayRef<int64_t> initialInputDims,
                                      ArrayRef<int64_t> initialOutputDims, ArrayRef<int64_t> initialInputOffsets,
-                                     ArrayRef<int64_t> initialOutputOffsets, vpux::IE::InterpolateCoordMode coordMode,
-                                     vpux::Logger log);
+                                     ArrayRef<int64_t> initialOutputOffsets, ArrayRef<int64_t> currentInputDims,
+                                     vpux::IE::InterpolateMode interpolateMode,
+                                     vpux::IE::InterpolateCoordMode coordMode,
+                                     vpux::IE::InterpolateNearestMode nearestMode, vpux::Logger log);
 
 //
 // Gather tiling
@@ -231,6 +251,17 @@ InputTiling backInferInterpolateTile(const vpux::TileInfo& outputTile, ArrayRef<
 InputTiling backInferGatherTile(const vpux::TileInfo& outputTile, const ShapeRef& origInputShape,
                                 const ShapeRef& origIndicesShape, int64_t axisValue, int64_t batchDims,
                                 bool hasAxisTensor, vpux::Logger log);
+
+//
+// Pad tiling
+//
+
+InputTiling backInferPadTile(const vpux::TileInfo& outputTile, const ShapeRef origInputShape,
+                             const ShapeRef origOutputShape, const ShapeRef origPadsBegin, const ShapeRef origPadsEnd,
+                             vpux::Logger log);
+
+void updatePadOpAttrsAfterTiling(const ShapeRef outShape, const TileInfo& outTile, SmallVector<int64_t>& padsBegin,
+                                 SmallVector<int64_t>& padsEnd);
 
 //
 // DepthToSpace tiling
@@ -351,7 +382,8 @@ bool isDimLeftToTile(ShapeRef curNumTiles, ArrayRef<int64_t> maxNumTiles, Dim te
  * Check if the tiling strategy is supported
  * Consider alignment, multi-cluster strategy and memory size
  */
-bool isSupportedTileSize(mlir::Operation* op, ShapeRef nTilesOnDim, TilingMode tilingMode, Logger log);
+mlir::FailureOr<OutputTiling> isSupportedTileSize(mlir::Operation* op, ShapeRef nTilesOnDim, TilingMode tilingMode,
+                                                  Logger log);
 
 /*
  * Get the required alignment information for the op

@@ -48,7 +48,7 @@ DimArr vpux::VPU::MVNOp::getNonNormDims() {
 // ClusteredOpInterface
 //
 
-bool vpux::VPU::MVNOp::checkStrategyCompatibility(VPU::MultiClusterStrategy strategy) {
+bool vpux::VPU::MVNOp::checkStrategyCompatibility(VPU::MultiClusterStrategy strategy, size_t) {
     if (strategy == VPU::MultiClusterStrategy::Clustering) {
         return true;
     }
@@ -62,8 +62,8 @@ bool vpux::VPU::MVNOp::checkStrategyCompatibility(VPU::MultiClusterStrategy stra
 
 vpux::VPU::DistributedTensorAttr vpux::VPU::MVNOp::getExplicitDistributedTensorAttr(
         vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, mlir::ArrayAttr numTiles,
-        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::ArrayAttr /*kernel*/,
-        vpux::VPU::PaddingAttr /*pad*/, mlir::ArrayAttr /*stride*/, mlir::UnitAttr uniformDistributedSegments) {
+        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::UnitAttr uniformDistributedSegments,
+        const vpux::VPU::OverlapDistributionParams& /*overlapParams*/) {
     return VPU::getSWExplicitDistributedTensorAttr(mlir::dyn_cast<VPU::SWOpInterface>(getOperation()), shape,
                                                    distributionMode, numTiles, numClusters, alignment,
                                                    uniformDistributedSegments);

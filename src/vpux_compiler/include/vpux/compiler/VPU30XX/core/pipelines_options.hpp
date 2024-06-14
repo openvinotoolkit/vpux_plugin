@@ -24,9 +24,9 @@ struct DefaultHWOptionsDeviceBase : public virtual vpux::DefaultHWOptionsBase {
                                       llvm::cl::desc("Enable storage element pointer operations"),
                                       llvm::cl::init(false)};
 
-    BoolOption enableSEPTransposedConv{*this, "enable-sep-transposed-conv",
-                                       llvm::cl::desc("(Experimental) Enable SEP Transposed Conv"),
-                                       llvm::cl::init(false)};
+    BoolOption enableExperimentalSEPtrsOperations{*this, "enable-experimental-se-ptrs-operations",
+                                                  llvm::cl::desc("Enable the experimental operation of SEP"),
+                                                  llvm::cl::init(false)};
 
     BoolOption enableExplicitDistributedTensorAttr{
             *this, "enable-explicit-distributed-attr",

@@ -11,7 +11,7 @@ This document is written on the basis of discussions taken as part of the task o
 
 ![NPU compilation pipeline](images/compilation_flow.png)
 
-Regardless of the device version, the compilation flow has the same appearance at the dialect level. These dialects represent different levels of detail. The IR is lowered from high level abstractions to more detailed representation step-by-step during compilation. The compilation pipeline consists of the "atomic“ passes. Each pass in compilation pipeline must represent one single transformation to reach one specific goal (either IR adaptation or IR optimization)..
+Regardless of the device version, the compilation flow has the same appearance at the dialect level. These dialects represent different levels of detail. The IR is lowered from high level abstractions to more detailed representation step-by-step during compilation. The compilation pipeline consists of the "atomic“ passes. Each pass in compilation pipeline must represent one single transformation to reach one specific goal (either IR adaptation or IR optimization). More information is available from the [Compiler HLD](https://docs.intel.com/documents/MovidiusExternal/vpu27/Common/SW/HLD/external/VPUX_NN_Compiler.html) or the [presentation](https://videoportal.intel.com/media/0_dnxf87in).
 
 It is also necessary to describe the dependence of dialects from an architectural point of view: 
 
@@ -47,8 +47,8 @@ These are fully HW-agnostic passes. This means you will get the same result for 
 
 Hardware specific passes are designed to work on a particular platform. And from development perspective, the only difference is that necessary to use appropriate HW folder. For example, 30XX-specific passes for IE dialect:
 - Declaration [path](../../tblgen/vpux/compiler/VPU30XX/dialect/IE/passes.td) in TableGen;
-- Declaration [path](../../include/vpux/compiler/VPU30XX/dialect/IE/passes.hpp) for constructor;
-- Implementation [folder](../../src/VPU30XX/dialect/IE/passes).
+- Declaration [path](../../include/vpux/compiler/VPU30XX/dialect/IE/transforms/passes.hpp) for constructor;
+- Implementation [folder](../../src/VPU30XX/dialect/IE/transforms/passes).
 
 You are allowed to reuse passes from an older HW version for a newer one if the required feature is a strict superset:
 
@@ -86,11 +86,14 @@ Following this approach, the development of a "mixed" pass is similar to a commo
 ```C++
 std::unique_ptr<IStrategyGetter> vpux::VPU::createMCStrategyGetter(ArchKind arch, int64_t numClusters) {
     switch (arch) {
-    case ArchKind::VPUX30XX: {
+    case VPU::ArchKind::NPU30XX: {
         return std::make_unique<arch30xx::StrategyGetter>();
     }
-    case ArchKind::VPUX37XX: {
+    case VPU::ArchKind::NPU37XX: {
         return std::make_unique<arch37xx::StrategyGetter>();
+    }
+    case VPU::ArchKind::NPU40XX: {
+        return std::make_unique<arch40xx::StrategyGetter>(numClusters);
     }
     case ArchKind::UNKNOWN:
     default: {
@@ -112,7 +115,7 @@ This approach is adopted as the main one, as it reduces duplication and decrease
 
 ![Rewriter-based approach scheme](images/rewriter_base.png)
 
-In this example, the different behavior of the pass for different HWs is achieved by adding special rewriters. To do this, we use the interface again: `UnrollClusterTilingPass` depends on `IGreedilyPassStrategy`. And here is possible implementation of `UnrollClusterTilingPass::safeRunOnFunc` method:
+In this example, the different behavior of the pass for different HWs is achieved by adding special rewriters. To do this, we use the interface again: `UnrollClusterTilingPass` depends on [`IGreedilyPassStrategy`](../../include/vpux/compiler/core/interfaces/rewriter_pattern_strategies.hpp). And here is possible implementation of `UnrollClusterTilingPass::safeRunOnFunc` method:
 
 ```C++
 void UnrollClusterTilingPass::safeRunOnFunc() {
@@ -158,17 +161,19 @@ void UnrollClusterTilingStrategy::addPatterns(mlir::RewritePatternSet& patterns)
 }
 ```
 
+[`IConversionPassStrategy`](../../include/vpux/compiler/core/interfaces/rewriter_pattern_strategies.hpp) also provides a  `markOpLegality` method, useful for setting up operation legality in passes which rely on the dialect conversion driver.
+
 Rewriters can also depend on interfaces to write them in the most general form — kind of combination with [Interface-based approach](#interface-based-approach). In this case, the necessary objects can be created directly in `addPatterns` method.
-This approach also helps reducing code duplication since allow not to register pass for each device. Then we can use the same name in `vpux-opt` and manage behavior of pass using only `vpu-arch`:
+This approach also helps reducing code duplication since it doesn't require passes to be registered for each device. Then we can use the same name in `vpux-opt` and manage behavior of pass using only `vpu-arch`:
 
 ```MLIR
-// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=VPUX37XX allow-custom-values=true" --unroll-cluster-tiling  %s | FileCheck %s
+// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=VPUX40XX allow-custom-values=true" --unroll-cluster-tiling  %s | FileCheck %s
 ```
 
 instead of, for example, duplicating the device version in the pass name:
 
 ```MLIR
-// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=VPUX37XX allow-custom-values=true" --unroll-cluster-tiling-VPUX37XX  %s | FileCheck %s
+// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=VPUX40XX allow-custom-values=true" --unroll-cluster-tiling-VPUX40XX  %s | FileCheck %s
 ```
 
 More detailed information about vpux-opt can be found in the [how-to-test](../../../../guides/how-to-test.md) document.
@@ -179,7 +184,7 @@ TODO: #-86282
 
 ## Pipelines
 
-Compiler has different pipeline for different HW generation. These pipelines are stored in appropriate HW folders: [VPU30XX](../include/vpux/compiler/VPU30XX/pipelines.cpp), [VPU37XX](../include/vpux/compiler/VPU37XX/pipelines.cpp), etc. To build a pipeline, it is also necessary to implement `IPipelineStrategy` interface for each device: 
+Compiler has different pipeline for different HW generation. These pipelines are stored in appropriate HW folders: [VPU30XX](../include/vpux/compiler/VPU30XX/pipelines.cpp), [NPU37XX](../include/vpux/compiler/NPU37XX/pipelines.cpp), etc. To build a pipeline, it is also necessary to implement `IPipelineStrategy` interface for each device: 
 
 ![Pipeline strategy class diagram](images/pipeline.png)
 
@@ -196,7 +201,7 @@ The main advantage of this approach is that we can easily hide the pipeline for 
 ```C++
 void MyPass::safeRunOnFunc() {
     // ...
-    if (arch != VPU::ArchKind::VPUX30XX) {
+    if (arch != VPU::ArchKind::NPU30XX) {
         return mlir::failure();
     }
     // ...
@@ -232,7 +237,7 @@ Some [recommendations](../code_style.md#pipelines-and-passes) are already writte
 
 ## Operation interfaces
 
-[Interfaces](https://mlir.llvm.org/docs/Interfaces/#attributeoperationtype-interfaces) and [External models](https://mlir.llvm.org/docs/Interfaces/#external-models-for-attribute-operation-and-type-interfaces) are powerful tools that allow us to add the necessary behavior for operations in runtime. A typical example is the [AdjustLayoutsPass](../../src/dialect/IE/passes/adjust_layouts.cpp) pass. It works with the [IE::LayoutInfoOpInterface](../../tblgen/vpux/compiler/dialect/IE/ops_interfaces.td) interface. For the same operation from IE dialect we want to have different results depending on the device version. For this purpose, different models can be implemented and then are attached for the same operation depending on device version:
+[Interfaces](https://mlir.llvm.org/docs/Interfaces/#attributeoperationtype-interfaces) and [External models](https://mlir.llvm.org/docs/Interfaces/#external-models-for-attribute-operation-and-type-interfaces) are powerful tools that allow us to add the necessary behavior for operations in runtime. A typical example is the [AdjustLayoutsPass](../../src/dialect/IE/transforms/passes/adjust_layouts.cpp) pass. It works with the [IE::LayoutInfoOpInterface](../../tblgen/vpux/compiler/dialect/IE/ops_interfaces.td) interface. For the same operation from IE dialect we want to have different results depending on the device version. For this purpose, different models can be implemented and then are attached for the same operation depending on device version:
 
 ```C++
 // 30XX:
@@ -266,6 +271,7 @@ There is no complex solution here yet. As a first step, operations are devided b
 In future we could proceed with HW-specific dialects if necessary:
 - VPUIP30XX_UPATaskOp
 - VPUIP37XX_SwKernelOp
+- VPUIP40XX_ConvertDMAOp
 - ..
 
 For example, we already have HW-specific dialects like [VPUMI37XX](../../tblgen/vpux/compiler/dialect/VPUMI37XX/dialect.td).
@@ -287,7 +293,7 @@ This scheme requires the developer to register a pass for each platform:
 
 ```MLIR
 // src/vpux_compiler/tblgen/vpux/compiler/VPU30XX/dialect/VPU/passes.td
-// The same for 37XX
+// The same for 37XX and 40XX
 def StrategyManagerPass : PassBase<"strategy-manager", "mlir::OperationPass<mlir::func::FuncOp>"> {
     // ...
     let constructor = "vpux::IE::arch30xx::createStrategyManagerPass()";
@@ -324,5 +330,5 @@ The advantage of this approach is that the HW library itself creates the necessa
 
 At the same time there are several cons:
 - Code duplication for declaration and implementation of the pass;
-- Impossible to reuse sub-pipelines: we can't have common sub-pipeline for 37xx with this pass;
-- It is easy to make a mistake when registering passes for vpux-opt. You get an error when trying to register passes for from 37XX at the same time, because two passes are registered with the same name.
+- Impossible to reuse sub-pipelines: we can't have common sub-pipeline for 37xx and 40xx with this pass;
+- It is easy to make a mistake when registering passes for vpux-opt. You get an error when trying to register passes for from 37XX and 40XX at the same time, because two passes are registered with the same name.

@@ -31,6 +31,12 @@ class DeclarationOp : public mlir::OpTrait::TraitBase<ConcreteOp, DeclarationOp>
 // DotInterface
 //
 
+namespace DOT {
+
+enum class EdgeDir { EDGE_SKIP, EDGE_NORMAL, EDGE_REVERSE };
+
+}
+
 enum class DotNodeColor { NONE, RED, GREEN, ORANGE, BLUE, AQUA, AQUAMARINE };
 
 }  // namespace vpux

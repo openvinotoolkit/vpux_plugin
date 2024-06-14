@@ -6,6 +6,7 @@
 #pragma once
 
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPU/interfaces/sparsity_constraint.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/utils/logging.hpp"
 
@@ -40,16 +41,15 @@ protected:
             mlir::Value value, mlir::DenseSet<mlir::Operation*> processedConsumerOps = {});
 
     mlir::DenseSet<mlir::Operation*> findInvalidDepthwiseOps(const mlir::DenseSet<mlir::Operation*>& nceOps);
-    mlir::DenseSet<mlir::Operation*> findInvalidPermuteQuantizeOps(const mlir::DenseSet<mlir::Operation*>& nceOps);
     mlir::DenseSet<mlir::Operation*> findInvalidNCEPermuteOps(const mlir::DenseSet<mlir::Operation*>& nceOps);
 
     // Get offset from start of the cluster
     virtual SmallVector<Shape> getPerClusterOffsetsCorrection(VPU::NCEOpInterface nceOp) = 0;
     virtual bool isNCEPermuteOffsetsCorrectionNeeded(VPU::NCEOpInterface nceOp) = 0;
 
-    void splitWorkload(VPU::DPUWorkloadOp dpuWorkloadOp, ArrayRef<int64_t> supportedChannels, const bool removePadding,
-                       ArrayRef<Shape> offsetsCorrectionForPermuteQuantize, const bool isInvalidNCEPermuteOp,
-                       int64_t channelPadding, bool isNCEPermuteOffsetsCorrectionNeeded, Logger log);
+    void splitWorkload(VPU::DPUWorkloadOp dpuWorkloadOp, ArrayRef<int64_t> supportedChannels,
+                       const bool isInvalidNCEPermuteOp, int64_t channelPadding,
+                       bool isNCEPermuteOffsetsCorrectionNeeded, Logger log);
 
 private:
     mlir::func::FuncOp _funcOp;
@@ -62,6 +62,17 @@ protected:
 class WorkloadSplitter37XX final : public WorkloadSplitterBase {
 public:
     WorkloadSplitter37XX(mlir::func::FuncOp funcOp, vpux::Logger log);
+
+protected:
+    SmallVector<Shape> getPerClusterOffsetsCorrection(VPU::NCEOpInterface nceOp) override;
+    bool isNCEPermuteOffsetsCorrectionNeeded(VPU::NCEOpInterface nceOp) override;
+};
+
+class WorkloadSplitter40XX final : public WorkloadSplitterBase {
+public:
+    WorkloadSplitter40XX(mlir::func::FuncOp funcOp, vpux::Logger log);
+    SmallVector<int64_t> getSupportedChannels(const mlir::DenseSet<mlir::Operation*>& nceOps,
+                                              const VPU::SparsityConstraint& sparsityConstraint) override;
 
 protected:
     SmallVector<Shape> getPerClusterOffsetsCorrection(VPU::NCEOpInterface nceOp) override;

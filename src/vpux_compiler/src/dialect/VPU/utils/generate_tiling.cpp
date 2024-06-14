@@ -1,19 +1,24 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
+
 #include <llvm/ADT/TypeSwitch.h>
 
 #include "vpux/compiler/core/attributes/dim.hpp"
 #include "vpux/compiler/core/tiling.hpp"
+#include "vpux/compiler/core/type_interfaces.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPU/transforms/factories/sparsity_constraint.hpp"
 #include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/generate_tiling.hpp"
 #include "vpux/compiler/dialect/VPU/utils/manual_strategy_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/se_roll_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/sparsity_utils.hpp"
-#include "vpux/compiler/dialect/VPUIP/dpu_tiler.hpp"
+#include "vpux/compiler/dialect/VPUIP/interfaces/dpu_tiler.hpp"
 
 #include <mlir/IR/IRMapping.h>
+#include <vpux/compiler/dialect/VPUIP/utils/convert_to_dma_utils.hpp>
 
 namespace vpux {
 namespace VPU {
@@ -158,9 +163,8 @@ mlir::LogicalResult applyTileStrategyTopK(VPU::TilingBuilderOpInterface origOp, 
 }
 
 // Function can be deleted when E#59993 related interface will be added.
-SmallVector<mlir::Value> reifyTilesDetectionOutputSortTopK(VPU::TilingBuilderOpInterface origOp,
-                                                           const TileInfo& outputTile, mlir::OpBuilder& builder,
-                                                           Logger log) {
+SmallVector<mlir::Value> reifyTilesMultiOutput(VPU::TilingBuilderOpInterface origOp, const TileInfo& outputTile,
+                                               mlir::OpBuilder& builder, Logger log) {
     log = log.nest(2);
     log.trace("{0}", outputTile);
 
@@ -198,14 +202,13 @@ SmallVector<mlir::Value> reifyTilesDetectionOutputSortTopK(VPU::TilingBuilderOpI
 
 // This is an attempt to implement multi-output tiling
 // Should be removed after a common approach will be implemented E#59993
-mlir::LogicalResult applyTileStrategyDetectionOutputSortTopK(VPU::TilingBuilderOpInterface origOp,
-                                                             const OutputTiling& tiles, mlir::PatternRewriter& rewriter,
-                                                             Logger log) {
+mlir::LogicalResult applyTileStrategyMultiOutput(VPU::TilingBuilderOpInterface origOp, const OutputTiling& tiles,
+                                                 mlir::PatternRewriter& rewriter, Logger log) {
     auto resultTileVals = SmallVector<SmallVector<mlir::Value>>(origOp->getNumResults());
     auto resultTileOffsets = SmallVector<SmallVector<Shape>>(origOp->getNumResults());
 
     for (const auto& outputTile : tiles) {
-        const auto values = reifyTilesDetectionOutputSortTopK(origOp, outputTile, rewriter, log);
+        const auto values = reifyTilesMultiOutput(origOp, outputTile, rewriter, log);
         const auto outputTiles = origOp.getOutputTiling(outputTile, log);
 
         for (const auto& p : zip(values, outputTiles)) {
@@ -282,12 +285,9 @@ mlir::LogicalResult applyTileStrategy(VPU::TilingBuilderOpInterface origOp, cons
     if (mlir::isa<VPU::TopKOp>(origOp)) {
         return applyTileStrategyTopK(origOp, tiles, rewriter, log);
     }
-    if (mlir::isa<VPU::GRUSequenceOp>(origOp)) {
-        auto gruSequenceOp = mlir::dyn_cast<VPU::GRUSequenceOp>(origOp.getOperation());
-        return gruSequenceOp.applyTileStrategyGRUSequence(origOp, tiles, rewriter, log);
-    }
-    if (mlir::isa<VPU::DetectionOutputSortTopKOp>(origOp)) {
-        return applyTileStrategyDetectionOutputSortTopK(origOp, tiles, rewriter, log);
+    if (mlir::isa<VPU::DetectionOutputSortOp>(origOp) || mlir::isa<VPU::DetectionOutputNmsCaffeOp>(origOp) ||
+        mlir::isa<VPU::GRUSequenceOp>(origOp) || mlir::isa<VPU::GRUSequenceLastPartOp>(origOp)) {
+        return applyTileStrategyMultiOutput(origOp, tiles, rewriter, log);
     }
 
     // apply the generated tiling strategy and create tiled operations
@@ -369,7 +369,7 @@ bool hasMultiBranches(mlir::Operation* op) {
     return false;
 }
 
-mlir::Operation* getParentTargetOp(mlir::Operation* op) {
+mlir::Operation* getParentComputeOp(mlir::Operation* op) {
     // for const prefetch ignore cases where activation is handled by
     // intermediate operations and causes a stall
     // prefetch is wanted from current op to parent op
@@ -377,8 +377,12 @@ mlir::Operation* getParentTargetOp(mlir::Operation* op) {
         if (auto nceEltwiseAnd = mlir::dyn_cast<VPU::NCEEltwiseOp>(op)) {
             return nceEltwiseAnd.getOpType() == VPU::EltwiseType::AND;
         }
-        return mlir::isa<IE::AndOp>(op) || mlir::isa<VPU::AndOp>(op) || mlir::isa<VPU::PermuteCastOp>(op) ||
-               mlir::isa<VPU::ReshapeOp>(op) || mlir::isa<VPU::GroupSparseTensorOp>(op);
+        if (mlir::isa<VPU::MemPermuteOp, VPU::DepthToSpaceOp, VPU::SpaceToDepthOp>(op) &&
+            !VPUIP::isLegalAndBeneficialConvertToDMA(op)) {
+            // don't ignore layers that will be converted to SW but not SWOpInterface now
+            return true;
+        }
+        return !mlir::isa<VPU::NCEOpInterface>(op) && !mlir::isa<VPU::SWOpInterface>(op);
     };
 
     mlir::Operation* parentOp = op->getOperand(0).getDefiningOp();
@@ -399,12 +403,12 @@ mlir::Operation* getParentTargetOp(mlir::Operation* op) {
 }
 
 bool prefetchTilingConditionSatisfied(mlir::Operation* op, Logger log) {
-    auto parentOp = getParentTargetOp(op);
+    auto parentOp = getParentComputeOp(op);
     if (parentOp == nullptr) {
         return false;
     }
     const auto arch = VPU::getArch(op);
-    if (arch == VPU::ArchKind::VPUX30XX) {
+    if (arch == VPU::ArchKind::NPU30XX) {
         if (!mlir::isa<VPU::NCEOpInterface>(parentOp)) {
             return false;
         }
@@ -512,7 +516,7 @@ bool largeConstPipelineConditionSatisfied(mlir::Operation* op, Logger log) {
 }
 
 bool archSupportsSwLayerTiling(VPU::ArchKind arch) {
-    return arch == VPU::ArchKind::VPUX37XX;
+    return arch == VPU::ArchKind::NPU37XX || arch == VPU::ArchKind::NPU40XX;
 }
 
 bool opNeedsTiling(mlir::Operation* op, bool enablePrefetchTiling, Logger log) {
@@ -532,7 +536,14 @@ bool opNeedsTiling(mlir::Operation* op, bool enablePrefetchTiling, Logger log) {
 
     if (auto iface = mlir::dyn_cast<VPU::TilingInfoOpInterface>(op)) {
         log.trace("Check: '{0}' at '{1}'", op->getName(), op->getLoc());
-        const auto resShape = getShape(op->getResult(0));
+        const auto resType = op->getResult(0).getType().cast<vpux::NDTypeInterface>();
+        Shape resShape = resType.getShape().toValues();
+        // TODO(E#113258): getShape needs to return shape based on upper bounds to avoid parsing bounds
+        if (auto boundedTensor = resType.dyn_cast_or_null<vpux::BoundedTypeInterface>();
+            boundedTensor != nullptr && boundedTensor.getBounds() != nullptr) {
+            const auto bounds = parseIntArrayAttr<int64_t>(boundedTensor.getBounds());
+            resShape = Shape(bounds.begin(), bounds.end());
+        }
         if (!iface.isSupportedTiling({TileInfo(resShape)}, TilingMode::ISOLATED, log.nest())) {
             log.nest().trace("ISOLATED tiling or PIPELINING tiling required");
             return true;
@@ -549,6 +560,63 @@ bool opNeedsTiling(mlir::Operation* op, bool enablePrefetchTiling, Logger log) {
         }
     }
     return false;
+}
+
+std::optional<size_t> getMaxWorkLoadNumberPerClusterForNCEWithSparseOutput(VPU::ArchKind arch,
+                                                                           ArrayRef<Shape> perClusterShapes,
+                                                                           ArrayRef<int64_t> supportedChannels) {
+    const auto getWorkloadNum = [&](int64_t channelSupported) {
+        size_t wlMaxNumPerCluster = 0;
+        for (const auto& perClusterShape : perClusterShapes) {
+            size_t wlNum;
+            const auto perClusterChannel = perClusterShape[vpux::Dims4D::Act::C];
+            if (perClusterChannel % channelSupported == 0) {
+                wlNum = perClusterChannel / channelSupported;
+            } else {
+                wlNum = divUp(perClusterChannel, channelSupported);
+            }
+
+            if (wlMaxNumPerCluster < wlNum) {
+                wlMaxNumPerCluster = wlNum;
+            }
+        }
+        return wlMaxNumPerCluster;
+    };
+
+    auto sparsityConstraint = VPU::getSparsityConstraint(arch);
+    for (const auto channelSupported : supportedChannels) {
+        if (!sparsityConstraint.areChannelsFitForSESize(channelSupported)) {
+            continue;
+        }
+
+        // Only the last cluster can have the not-even channels for workloads
+        // For exapmle, we need to split OC = 736 on 6 clusters, the tiled size will be
+        // { {64, 64}, {64, 64}, {64, 64}, {64, 64}, {64, 64}, {64 ,32} }.
+        //
+        size_t numOfClusterNotEven = 0;
+        size_t indexOfClusterNotEven = 0;
+        for (const auto index : irange(perClusterShapes.size())) {
+            if (perClusterShapes[index][vpux::Dims4D::Act::C] % channelSupported != 0) {
+                numOfClusterNotEven++;
+                indexOfClusterNotEven = index;
+            }
+        }
+
+        if (numOfClusterNotEven == 0) {
+            return getWorkloadNum(channelSupported);
+        } else if (numOfClusterNotEven == 1) {
+            if (indexOfClusterNotEven != perClusterShapes.size() - 1) {
+                continue;
+            }
+
+            const auto clusterChannel = perClusterShapes[indexOfClusterNotEven][vpux::Dims4D::Act::C];
+            const auto lastChannelNum = clusterChannel % channelSupported;
+            if (llvm::count(supportedChannels, lastChannelNum)) {
+                return getWorkloadNum(channelSupported);
+            }
+        }
+    }
+    return std::nullopt;
 }
 
 // All variants of a invariant update a single barrier, therefore the barrier count would be the number of variants.
@@ -598,37 +666,26 @@ bool doesNCEOpChannelSatisfyWorkload(mlir::Operation* nceOp, const TileInfo& out
         return getDataType(distributedType).cast<VPU::DistributedTensorType>().getPerClusterComputeShapes();
     };
 
-    // divide max available slots equally for producers and consumers to a barrier
-    // for a unified solution for all architectures
-    // TODO: E#107973: more bigger / relaxing availableSlot to decrease tiling
-    const auto maxAvailableSlots = VPUIP::getBarrierMaxVariantCount(nceOp);
-    const auto maxSlotsSum = VPUIP::getBarrierMaxVariantSum(nceOp);
-    const auto availableSlot = std::min(maxAvailableSlots, maxSlotsSum) / 2;
+    const auto perClusterShapes = getPerClusterShapes();
 
-    auto sparsityConstraint = VPU::getSparsityConstraint(getArch(nceOp));
+    // for some patterns, e.g. NCE(SOK and sparse output)->Concat->NCE, the sparse output would be removed in the
+    // following pass
+    auto nceOpIf = mlir::dyn_cast<VPU::NCEOpInterface>(nceOp);
+    const auto isSparseRemoved = nceOpIf != nullptr && VPU::shouldRemoveOutputSparsity(nceOpIf);
 
     size_t wlMaxNumPerCluster = 0;
-    for (auto& perClusterShape : getPerClusterShapes()) {
-        const auto perClusterChannel = perClusterShape[vpux::Dims4D::Act::C];
-        if (nceOp->getResult(0).getType().isa<VPU::SparseTensorType>()) {
-            // NCE operations with sparse outputs must have all variants with the same number of channels
-            const auto isChannelValid = llvm::any_of(supportedChannels, [&](int64_t channels) -> bool {
-                if (perClusterChannel % channels != 0) {
-                    return false;
-                }
-                if (!sparsityConstraint.areChannelsFitForSESize(channels)) {
-                    return false;
-                }
-                size_t wlNum = perClusterChannel / channels;
-                if (wlMaxNumPerCluster < wlNum) {
-                    wlMaxNumPerCluster = wlNum;
-                }
-                return true;
-            });
-            if (!isChannelValid) {
-                return false;
-            }
-        } else {
+    if (nceOp->getResult(0).getType().isa<VPU::SparseTensorType>() && !isSparseRemoved) {
+        // NCE operations with sparse outputs must have all variants with the same number of channels
+        // except of the last one which can have fewer channels than the rest
+        const auto maxWorkloadNum = getMaxWorkLoadNumberPerClusterForNCEWithSparseOutput(
+                getArch(nceOp), perClusterShapes, supportedChannels);
+        if (!maxWorkloadNum.has_value()) {
+            return false;
+        }
+        wlMaxNumPerCluster = maxWorkloadNum.value();
+    } else {
+        for (const auto& perClusterShape : perClusterShapes) {
+            const auto perClusterChannel = perClusterShape[vpux::Dims4D::Act::C];
             auto wlChannels = splitWorkloadChannel(perClusterChannel, supportedChannels);
             // There may be some invalid tileChannel passed into. For example, channel is 16 but supportedChannels is
             // [32]. We can't split it over C in that case.
@@ -643,7 +700,31 @@ bool doesNCEOpChannelSatisfyWorkload(mlir::Operation* nceOp, const TileInfo& out
         }
     }
 
+    // divide max available slots equally for producers and consumers to a barrier
+    // for a unified solution for all architectures
+    // TODO: E#107973: more bigger / relaxing availableSlot to decrease tiling
+    const auto maxAvailableSlots = VPUIP::getBarrierMaxVariantCount(nceOp);
+    const auto maxSlotsSum = VPUIP::getBarrierMaxVariantSum(nceOp);
+    const auto availableSlot = std::min(maxAvailableSlots, maxSlotsSum) / 2;
+
     return wlMaxNumPerCluster <= availableSlot;
+}
+
+std::optional<DimArr> getSEPConvTilingOrder(mlir::Operation* op) {
+    auto nceConv = mlir::dyn_cast<VPU::NCEConvolutionOp>(op);
+    if (nceConv == nullptr) {
+        return std::nullopt;
+    }
+    auto sparseInput = nceConv.getInput().getType().dyn_cast<VPU::SparseTensorType>();
+    if (sparseInput == nullptr) {
+        return std::nullopt;
+    }
+
+    auto seAttr = sparseInput.getSeAttr().dyn_cast_or_null<VPU::SERollAttr>();
+    if (seAttr != nullptr) {
+        return VPU::getRollSEPConvTilingOrder(seAttr);
+    }
+    return std::nullopt;
 }
 
 /*
@@ -668,7 +749,7 @@ SmallVector<OutputTiling> getOneDimIsolatedTilingStrategies(mlir::Operation* op,
         auto dimToTile = Dim(tileIndex);
         // iterate to search the supported tiling strategy
         auto findSupportedTileSize = isSupportedTileSize(op, nTilesOnDim, TilingMode::ISOLATED, log);
-        while (!findSupportedTileSize) {
+        while (mlir::failed(findSupportedTileSize)) {
             if (!isDimLeftToTile(nTilesOnDim, maxNumTiles, dimToTile)) {
                 break;
             }
@@ -680,9 +761,9 @@ SmallVector<OutputTiling> getOneDimIsolatedTilingStrategies(mlir::Operation* op,
             nTilesOnDim = nextTileSearchResult.value();
             findSupportedTileSize = isSupportedTileSize(op, nTilesOnDim, TilingMode::ISOLATED, log);
         }
-        if (findSupportedTileSize && nTilesOnDim[dimToTile] > 1) {
+        if (!mlir::failed(findSupportedTileSize) && nTilesOnDim[dimToTile] > 1) {
             // find an available isolated tiling strategy
-            supportedTilingStrategies.push_back(fillDividedTiles(op, nTilesOnDim, outputShape).value());
+            supportedTilingStrategies.push_back(findSupportedTileSize.value());
             log.trace("Got one-dimension isolated tiling strategy {0} for op {1}", nTilesOnDim, op->getLoc());
         }
     }
@@ -716,7 +797,7 @@ SmallVector<OutputTiling> getOneDimTilingStrategies(mlir::Operation* op, TilingM
                           "Isolated tiling strategy is not one-dimension but {0}, not supported.", nonOneDims.size());
         auto targetDim = *nonOneDims.begin();
         auto findSupportedTileSize = isSupportedTileSize(op, prefetchableTilesOnDim, tilingMode, log);
-        while (!findSupportedTileSize) {
+        while (mlir::failed(findSupportedTileSize)) {
             if (!isDimLeftToTile(prefetchableTilesOnDim, maxNumTiles, targetDim)) {
                 break;
             }
@@ -728,9 +809,9 @@ SmallVector<OutputTiling> getOneDimTilingStrategies(mlir::Operation* op, TilingM
             prefetchableTilesOnDim = nextTileSearchResult.value();
             findSupportedTileSize = isSupportedTileSize(op, prefetchableTilesOnDim, tilingMode, log);
         }
-        if (findSupportedTileSize) {
+        if (!mlir::failed(findSupportedTileSize)) {
             // find an available isolated tiling strategy
-            supportedTilingStrategies.push_back(fillDividedTiles(op, prefetchableTilesOnDim, outputShape).value());
+            supportedTilingStrategies.push_back(findSupportedTileSize.value());
             log.trace("Got one-dimension prefetching tiling strategy {0} for op {1}", prefetchableTilesOnDim,
                       op->getLoc());
         }
@@ -791,6 +872,25 @@ mlir::FailureOr<OutputTiling> getHWLayerTilingStrategyBasedOnCost(mlir::Operatio
     log.trace("Got best one-dimension tiling strategy {0} for op {1} at {2}", bestTilingStrategy, op->getName(),
               op->getLoc());
     return bestTilingStrategy;
+}
+
+static constexpr auto MODE_ON = "true";
+static constexpr auto MODE_OFF = "false";
+static constexpr auto MODE_AUTO = "auto";
+
+VPU::EnableShaveDDRAccessOptimization getShaveDDRAccessOptimizationMode(StringRef enableShaveDDRAccessOptimization) {
+    std::string strMode = enableShaveDDRAccessOptimization.str();
+    std::transform(strMode.begin(), strMode.end(), strMode.begin(), ::tolower);
+
+    if (strMode == MODE_ON) {
+        return VPU::EnableShaveDDRAccessOptimization::TRUE;
+    } else if (strMode == MODE_OFF) {
+        return VPU::EnableShaveDDRAccessOptimization::FALSE;
+    } else if (strMode == MODE_AUTO) {
+        VPUX_THROW("auto EnableShaveDDRAccessOptimization is not supported for now");
+    }
+
+    VPUX_THROW("Unknown value for the shave DDR access optimization mode: {0}", strMode);
 }
 
 }  // namespace VPU

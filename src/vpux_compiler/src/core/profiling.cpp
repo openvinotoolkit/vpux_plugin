@@ -7,7 +7,7 @@
 //
 
 #include "vpux/compiler/core/profiling.hpp"
-#include "vpux/compiler/dialect/VPUIP/utils.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
 
 using namespace vpux;
 
@@ -63,6 +63,11 @@ VPUIP::SwProfilingMetadataAttr vpux::getSwProfilingMetadataFromUpa(mlir::Operati
     return attr.cast<VPUIP::SwProfilingMetadataAttr>();
 }
 
+VPUIP::M2IProfilingMetadataAttr vpux::getM2IProfilingMetaAttr(mlir::MLIRContext* ctx, size_t bufferId,
+                                                              size_t bufferOffset) {
+    return VPUIP::M2IProfilingMetadataAttr::get(ctx, getIntAttr(ctx, bufferId), getIntAttr(ctx, bufferOffset));
+}
+
 mlir::BlockArgument vpux::addNewProfilingOutput(mlir::MLIRContext* ctx, mlir::func::FuncOp& netFunc,
                                                 IE::CNNNetworkOp& netOp, mlir::MemRefType outputType,
                                                 profiling::ExecutorType execType) {
@@ -109,6 +114,33 @@ bool vpux::isProfiledDmaTask(VPURT::TaskOp taskOp) {
 void vpux::setDmaHwpIdAttribute(mlir::MLIRContext* ctx, VPUIP::DMATypeOpInterface& op, int32_t dmaHwpId) {
     auto dmaHwpIdAttrib = mlir::IntegerAttr::get(mlir::IntegerType::get(ctx, 32, mlir::IntegerType::Signed), dmaHwpId);
     op.setDmaHwpIdAttr(dmaHwpIdAttrib);
+}
+
+bool vpux::isDmaHwpUsedInVPURT(mlir::func::FuncOp& func) {
+    bool dmaHwpEnabled = false;
+    func->walk([&](VPURT::TaskOp taskOp) {
+        if (!vpux::isProfiledDmaTask(taskOp)) {
+            return mlir::WalkResult::interrupt();
+        }
+
+        auto op = mlir::dyn_cast<VPUIP::DMATypeOpInterface>(taskOp.getInnerTaskOp());
+        if (op && op.getDmaHwpIdAttr() != nullptr) {
+            dmaHwpEnabled = true;
+            return mlir::WalkResult::interrupt();
+        }
+        return mlir::WalkResult::advance();
+    });
+    return dmaHwpEnabled;
+}
+
+bool vpux::isDmaHwpUsedInVPURT(mlir::ModuleOp& module) {
+    if (vpux::VPU::getArch(module) < vpux::VPU::ArchKind::NPU40XX) {
+        return false;
+    }
+    IE::CNNNetworkOp netOp;
+    mlir::func::FuncOp func;
+    IE::CNNNetworkOp::getFromModule(module, netOp, func);
+    return vpux::isDmaHwpUsedInVPURT(func);
 }
 
 bool vpux::isProfilingEnabled(IE::CNNNetworkOp netOp) {

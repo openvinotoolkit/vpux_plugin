@@ -1,10 +1,11 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 #pragma once
 
+#include "vpux/compiler/utils/options.hpp"
 #include "vpux/utils/core/logger.hpp"
 #include "vpux/utils/core/small_vector.hpp"
 
@@ -21,19 +22,6 @@ namespace vpux {
 
 constexpr StringLiteral writeStrategyFileLocation = "strategy_out.json";
 constexpr StringLiteral readStrategyFileLocation = "strategy_in.json";
-
-//
-// Options
-//
-
-using IntOption = mlir::detail::PassOptions::Option<int>;
-using StrOption = mlir::detail::PassOptions::Option<std::string>;
-using BoolOption = mlir::detail::PassOptions::Option<bool>;
-using DoubleOption = mlir::detail::PassOptions::Option<double>;
-
-std::optional<int> convertToOptional(const IntOption& intOption);
-std::optional<std::string> convertToOptional(const StrOption& strOption);
-bool isOptionEnabled(const BoolOption& option);
 
 //
 // PatternBenefit

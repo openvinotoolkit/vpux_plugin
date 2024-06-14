@@ -8,10 +8,10 @@
 #include <mlir/Dialect/Quant/QuantTypes.h>
 
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
-#include "vpux/compiler/dialect/VPUIP/attributes.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/task.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/attributes.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/utils/VPU/ppe_utils.hpp"
 #include "vpux/compiler/utils/types.hpp"
@@ -56,7 +56,7 @@ void buildRaceConditionDMATest(const nb::TestCaseJsonDescriptor& testDesc, mlir:
     const auto funcInput = func.getArgument(0);
     SmallVector<mlir::BlockArgument> funcOutputs;
 
-    for (std::size_t idx = 1; idx <= numClusters; ++idx) {
+    for (unsigned int idx = 1; idx <= static_cast<unsigned int>(numClusters); ++idx) {
         funcOutputs.push_back(func.getArgument(idx));
     }
 
@@ -71,7 +71,7 @@ void buildRaceConditionDMATest(const nb::TestCaseJsonDescriptor& testDesc, mlir:
     }
 
     VPURT::ConfigureBarrierOp lastBarrier;
-    for (std::size_t i = 0; i < iterationCount; ++i) {
+    for (std::size_t i = 0; i < iterationCount - 1; ++i) {
         auto updateBarrier = funcBuilder.create<VPURT::ConfigureBarrierOp>(loc, i);
 
         for (std::size_t clusterIdx = 0; clusterIdx < numClusters; clusterIdx += 2) {
@@ -84,22 +84,27 @@ void buildRaceConditionDMATest(const nb::TestCaseJsonDescriptor& testDesc, mlir:
                 vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(
                         funcBuilder, i == 0 ? mlir::ValueRange() : mlir::ValueRange(lastBarrier.getBarrier()),
                         mlir::ValueRange(updateBarrier.getBarrier()), loc, funcInput,
-                        outputs[clusterIdx + 1].getOperation()->getResult(0), 1);
+                        outputs[clusterIdx + 1].getOperation()->getResult(0),
+                        testDesc.getArchitecture() == vpux::VPU::ArchKind::NPU40XX ? 0 : 1);
             }
         }
 
         lastBarrier = updateBarrier;
     }
 
+    // finalBarrier passed as production barrier to last DMA task
+    auto finalBarrier = funcBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, iterationCount - 1);
+
     for (std::size_t clusterIdx = 0; clusterIdx < numClusters; clusterIdx += 2) {
         vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(
-                funcBuilder, mlir::ValueRange(lastBarrier.getBarrier()), mlir::ValueRange(), loc,
-                outputs[clusterIdx].getOperation()->getResult(0), funcOutputs[clusterIdx], 0);
+                funcBuilder, mlir::ValueRange(lastBarrier.getBarrier()), mlir::ValueRange(finalBarrier.getBarrier()),
+                loc, outputs[clusterIdx].getOperation()->getResult(0), funcOutputs[clusterIdx], 0);
 
         if (clusterIdx + 1 < numClusters) {
             vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(
-                    funcBuilder, mlir::ValueRange(lastBarrier.getBarrier()), mlir::ValueRange(), loc,
-                    outputs[clusterIdx].getOperation()->getResult(0), funcOutputs[clusterIdx + 1], 1);
+                    funcBuilder, mlir::ValueRange(lastBarrier.getBarrier()),
+                    mlir::ValueRange(finalBarrier.getBarrier()), loc, outputs[clusterIdx].getOperation()->getResult(0),
+                    funcOutputs[clusterIdx + 1], testDesc.getArchitecture() == vpux::VPU::ArchKind::NPU40XX ? 0 : 1);
         }
     }
 
@@ -109,8 +114,9 @@ void buildRaceConditionDMATest(const nb::TestCaseJsonDescriptor& testDesc, mlir:
     // set runtime resources
     mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
 
-    pm.addPass(VPU::createInitCompilerPass(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW,
-                                           /*numOfDPUGroups=*/numClusters, std::nullopt, log));
+    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.numberOfDPUGroups = numClusters;
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
 
     VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");
 

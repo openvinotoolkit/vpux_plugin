@@ -64,7 +64,9 @@ class ConstantFoldingInBackground : public testing::TestWithParam<size_t> {};
 void compile(mlir::MLIRContext* ctx, size_t numFoldingThreads, std::chrono::milliseconds sleepDuration,
              ContentAttrFunction contentAttrFn) {
     const auto collectStatistics = true;
-    const auto foldingThreads = Const::initBackgroundConstantFoldingThreads(ctx, numFoldingThreads, collectStatistics);
+
+    auto foldingListener =
+            std::make_unique<Const::BackgroundConstantFolding>(ctx, numFoldingThreads, collectStatistics);
 
     const auto [contentAttr, expectedValues] = contentAttrFn(ctx);
 
@@ -78,8 +80,6 @@ void compile(mlir::MLIRContext* ctx, size_t numFoldingThreads, std::chrono::mill
         const auto expectedValue = std::get<1>(values);
         EXPECT_EQ(resultValue, expectedValue);
     }
-
-    Const::stopBackgroundConstantFoldingThreads(ctx, foldingThreads, collectStatistics);
 }
 
 TEST_P(ConstantFoldingInBackground, CompilationFlow) {
@@ -87,10 +87,17 @@ TEST_P(ConstantFoldingInBackground, CompilationFlow) {
     vpux::registerDialects(registry);
     vpux::registerCommonInterfaces(registry);
 
+    const auto numFoldingThreads = GetParam();
+
     mlir::MLIRContext ctx(registry);
+    const size_t maxThreads = ctx.getThreadPool().getThreadCount();
+    llvm::ThreadPool newThreadPool(llvm::optimal_concurrency(std::max(2 * numFoldingThreads + 1, maxThreads)));
+
+    ctx.disableMultithreading();
+    ctx.setThreadPool(newThreadPool);
+
     ctx.loadDialect<Const::ConstDialect>();
 
-    const auto numFoldingThreads = GetParam();
     const auto sleepDuration = 100ms;
     compile(&ctx, numFoldingThreads, sleepDuration, createContentAttrSameTransformation);
 }
@@ -100,14 +107,27 @@ TEST_P(ConstantFoldingInBackground, MultipleCompilations) {
     vpux::registerDialects(registry);
     vpux::registerCommonInterfaces(registry);
 
+    const auto numFoldingThreads = GetParam();
+
     mlir::MLIRContext ctx1(registry);
+    const size_t maxThreadsCtx1 = ctx1.getThreadPool().getThreadCount();
+    llvm::ThreadPool newThreadPoolCtx1(llvm::optimal_concurrency(std::max(2 * numFoldingThreads + 1, maxThreadsCtx1)));
+
+    ctx1.disableMultithreading();
+    ctx1.setThreadPool(newThreadPoolCtx1);
+
     mlir::MLIRContext ctx2(registry);
+    const size_t maxThreadsCtx2 = ctx2.getThreadPool().getThreadCount();
+    llvm::ThreadPool newThreadPoolCtx2(llvm::optimal_concurrency(std::max(2 * numFoldingThreads + 1, maxThreadsCtx2)));
+
+    ctx2.disableMultithreading();
+    ctx2.setThreadPool(newThreadPoolCtx2);
+
     SmallVector<mlir::MLIRContext*> contexts = {&ctx1, &ctx2};
     for (auto ctx : contexts) {
         ctx->loadDialect<Const::ConstDialect>();
     }
 
-    const auto numFoldingThreads = GetParam();
     const SmallVector<std::chrono::milliseconds> sleepDurations{100ms, 300ms};
     const SmallVector<ContentAttrFunction> contentAttrFns = {createContentAttrSameTransformation,
                                                              createContentAttrMixedTransformations};
@@ -131,5 +151,45 @@ TEST_P(ConstantFoldingInBackground, MultipleCompilations) {
 std::vector<size_t> numThreads = {1, 2, 3, 4, 5};
 
 INSTANTIATE_TEST_SUITE_P(MLIRThreading, ConstantFoldingInBackground, testing::ValuesIn(numThreads));
+
+using ConstantFoldingInBackgroundUnit = MLIR_UnitBase;
+
+TEST_F(ConstantFoldingInBackgroundUnit, EquivalenceRequest) {
+    mlir::DialectRegistry registry;
+    vpux::registerDialects(registry);
+    vpux::registerCommonInterfaces(registry);
+
+    mlir::MLIRContext ctx(registry);
+    ctx.loadDialect<Const::ConstDialect>();
+
+    const auto numFoldingThreads = 2;
+    const auto collectStatistics = true;
+    auto foldingListener = Const::BackgroundConstantFolding(&ctx, numFoldingThreads, collectStatistics);
+
+    const size_t numElements = 100;
+    const float baseValue = 1.0f;
+    const auto baseType = mlir::RankedTensorType::get({numElements}, mlir::Float32Type::get(&ctx));
+    const auto baseAttr = mlir::DenseElementsAttr::get(baseType, baseValue);
+    auto contentAttr = Const::ContentAttr::get(baseAttr);
+
+    // `subview` sends folding requests to the background threads
+    auto contentAttr1 = contentAttr.subview(Shape({0}), Shape({50})).subview(Shape({10}), Shape({30}));
+
+    // Manually creating a ContentAttr will not sent a folding request, so an equivalence request is manually sent
+    auto optimizedSubviewTransformation = Const::SubViewAttr::get(getIntArrayAttr(&ctx, SmallVector<int64_t>({0})),
+                                                                  getIntArrayAttr(&ctx, SmallVector<int64_t>({30})));
+    auto contentAttr2 = Const::ContentAttr::get(baseAttr, {optimizedSubviewTransformation});
+    auto& cacheManager = Const::ConstantFoldingCacheManager::getInstance();
+    ASSERT_TRUE(cacheManager.contains(&ctx));
+    auto& cache = cacheManager.get(&ctx);
+    auto equivalenceRequest = Const::EquivalenceRequestAttr::get(&ctx, contentAttr1, contentAttr2);
+    cache.enqueueRequest(Const::FoldingRequest{equivalenceRequest, /*newTransformation=*/nullptr});
+
+    std::this_thread::sleep_for(100ms);
+
+    // contentAttr1 may or may not still be in cache, depending on whether it was added before contentAttr2,
+    // so only contentAttr2 is checked as it must be in the cache
+    EXPECT_TRUE(cache.hasContent(contentAttr2));
+}
 
 #endif

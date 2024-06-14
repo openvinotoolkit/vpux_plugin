@@ -10,6 +10,9 @@
 //
 
 void vpux::arch30xx::registerBufferizableOpInterfaces(mlir::DialectRegistry& registry) {
+    vpux::registerConstDeclareBufferizableOpInterfaces(registry);
     vpux::registerFuncAndReturnBufferizableOpInterfaces(registry);
     vpux::registerVpuNceBufferizableOpInterfaces(registry);
+    vpux::registerVPUBufferizableOpInterfaces(registry);
+    vpux::registerNCEClusterTilingBufferizableOpInterfaces(registry);
 }

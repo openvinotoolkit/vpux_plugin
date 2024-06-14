@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include "vpux/compiler/dialect/IE/dialect.hpp"
+#include "vpux/compiler/dialect/IE/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPU/IR/dialect.hpp"
 
 #include "vpux/compiler/utils/passes.hpp"
@@ -19,7 +19,6 @@ namespace arch30xx {
 //
 
 std::unique_ptr<mlir::Pass> createConvertIEToVPUNCEPass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createConvertLayers2VPUPass(Logger log = Logger::global());
 
 //
 // pipelines

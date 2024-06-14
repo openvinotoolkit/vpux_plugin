@@ -10,4 +10,3 @@ Usage:
 python3 to_md.py <path to root directory with IRs> <path to directory for results>
 ```
 `to_md.py` results should be uploaded to gitlab repository to be viewed
-

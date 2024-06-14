@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#include "vpux/compiler/core/tiling.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 
 #include "vpux/compiler/dialect/VPU/utils/type_infer.hpp"
@@ -40,4 +41,36 @@ mlir::OpFoldResult vpux::VPU::ReduceMinOp::fold(FoldAdaptor) {
     }
 
     return nullptr;
+}
+
+//
+// TilingBuilderOpInterface
+//
+
+vpux::InputTiling vpux::VPU::ReduceMinOp::backInferTileInfo(const vpux::TileInfo& outputTile, vpux::Logger /*log*/) {
+    const auto inShape = getInput().getType().cast<vpux::NDTypeInterface>().getShape();
+    const auto axesValue = getAxesValue();
+    const auto keepDims = getKeepDims();
+
+    return backInferReduceTile(outputTile, inShape, axesValue, keepDims);
+}
+
+void vpux::VPU::ReduceMinOp::adjustAttrs(const TilingInfo& /*inputTiling*/, const TileInfo& /*outputTile*/) {
+}
+
+mlir::FailureOr<OutputTiling> vpux::VPU::ReduceMinOp::getTilingStrategy(TilingMode tilingMode, Logger log) {
+    const auto op = getOperation();
+    const auto keepDims = getKeepDims();
+    SmallVector<int64_t> maxNumTiles;
+
+    if (keepDims) {
+        const auto axes = parseIntArrayAttr<int64_t>(getAxesValueAttr());
+        maxNumTiles = getMaxNumTilesWithAxesExclusion(op, axes);
+    } else {
+        const auto outputType = getOutput().getType().cast<vpux::NDTypeInterface>();
+        const auto outputShape = outputType.getShape();
+        maxNumTiles = to_small_vector(outputShape);
+    }
+
+    return vpux::getSWLayerTilingStrategy(op, tilingMode, log, maxNumTiles);
 }

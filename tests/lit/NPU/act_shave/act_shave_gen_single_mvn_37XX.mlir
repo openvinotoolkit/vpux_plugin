@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -16,7 +16,7 @@
 
 #NCWH = affine_map<(d0, d1, d2, d3) -> (d0, d1, d3, d2)>
 
-module @Test attributes {VPU.arch = #VPU.arch_kind<VPUX37XX>, VPU.compilationMode = #VPU.compilation_mode<ReferenceHW>} {
+module @Test attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilationMode = #VPU.compilation_mode<ReferenceHW>} {
 
 IE.MemoryResource 31457280 bytes of @DDR {VPU.bandwidth = 8 : i64, VPU.derateFactor = 6.000000e-01 : f64}
 IE.ExecutorResource 1 of @DMA_NN
@@ -57,8 +57,8 @@ module @VPU.SW {
     %eps : f32
     )
         attributes {
-            VPU.kernel_code = "singleShaveMVN.cpp",
-            VPU.kernel_entry = "singleShaveMVN"
+            VPU.kernel_code = "mvn1.cpp",
+            VPU.kernel_entry = "mvn1"
         }
 
     // management kernel definition
@@ -87,7 +87,7 @@ func.func @main(%1: memref<1x4x512x1xf16, {order = #NCWH}>,
 
     // Genetic Kernel information for the scheduler.
     VPURT.Task waits(%b0  : !VPURT.Barrier) updates(%b1  : !VPURT.Barrier) {
-        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
                     @VPU.SW::@builtin_mvn            // The reference to the Kernel function.
                     inputs(%in_tile0_cmx as %arg0: memref<1x4x512x1xf16, {order = #NCWH}, [@CMX_NN, 0]>)     // Inputs/outputs buffers for generic operation interface
                     outputs(%out_tile0_cmx as %arg1: memref<1x4x512x1xf16, {order = #NCWH}, [@CMX_NN, 0]>)   // and their mapping to inner region.

@@ -5,7 +5,7 @@
 
 #include <vpux_elf/writer.hpp>
 #include "vpux/compiler/dialect/ELFNPU37XX/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 
 void vpux::ELFNPU37XX::CreateLogicalSectionOp::serialize(elf::Writer& writer,
                                                          vpux::ELFNPU37XX::SectionMapType& sectionMap,

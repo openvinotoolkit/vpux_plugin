@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -94,35 +94,26 @@ module @DpuProfilingWithMulticlustering  {
   func.func @main(%arg0: !Input_CMX, %arg1: !Weights_CMX, %arg2: !WeightsTable_CMX, %arg3: !Output_DDR) -> !Output_DDR {
 
     %0 = VPURT.AllocDistributed -> !OutputDistributed
-    %1 = VPUIP.NCEClusterTiling
-        inputs(%arg0 as %arg4: !Input_CMX,
-               %arg1 as %arg5: !Weights_CMX,
-               %arg2 as %arg6: !WeightsTable_CMX)
-        outputs(%0 as %arg7: !Output_CMX)
-            -> !OutputDistributed {
-      %5 = VPUIP.NCEClusterTask {
-            kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-            kernel_size = [3, 3],
-            kernel_strides = [1, 1],
-            task_type = #VPUIP.nce_task_type<CONV>
-        } input(%arg4 : !Input_CMX)
-          weights(%arg5 : !Weights_CMX)
-          weight_table(%arg6 : !WeightsTable_CMX)
-          parent_input(%arg4 : !Input_CMX)
-          parent_output(%arg7 : !Output_CMX)
-          outputs(%arg7 : !Output_CMX)
-              -> !Output_CMX variants :  {
-        DPUTask {cluster_id = 0 : i64, outEnd = [59, 14, 47], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0]}
-        DPUTask {cluster_id = 1 : i64, outEnd = [59, 29, 47], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 15, 0]}
-        DPUTask {cluster_id = 2 : i64, outEnd = [59, 44, 47], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 30, 0]}
-        DPUTask {cluster_id = 3 : i64, outEnd = [59, 59, 47], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 45, 0]}
-      } PPE :  {
-      }
+    %1 = VPUIP.NCEClusterTask {
+          kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
+          kernel_size = [3, 3],
+          kernel_strides = [1, 1],
+          task_type = #VPUIP.nce_task_type<CONV>
+      } input(%arg0 : !Input_CMX)
+        weights(%arg1 : !Weights_CMX)
+        weight_table(%arg2 : !WeightsTable_CMX)
+        parent_input(%arg0 : !Input_CMX)
+        parent_output(%0 : !OutputDistributed)
+        outputs(%0 : !OutputDistributed)
+            -> !OutputDistributed variants :  {
+      DPUTask {cluster_id = 0 : i64, outEnd = [59, 14, 47], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0]}
+      DPUTask {cluster_id = 1 : i64, outEnd = [59, 29, 47], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 15, 0]}
+      DPUTask {cluster_id = 2 : i64, outEnd = [59, 44, 47], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 30, 0]}
+      DPUTask {cluster_id = 3 : i64, outEnd = [59, 59, 47], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 45, 0]}
+    } PPE :  {
     }
     %2 = memref.alloc() : !Output_DDR
-    %3 = VPUIP.NCEClusterTiling inputs(%1 as %arg4: !Output_CMX) outputs(%2 as %arg5: !Output_DDR) -> !Output_DDR {
-      %5 = VPUIP.Copy inputs(%arg4 : !Output_CMX) outputs(%arg5 : !Output_DDR) -> !Output_DDR
-    }
+    %3 = VPUIP.Copy inputs(%1 : !OutputDistributed) outputs(%2 : !Output_DDR) -> !Output_DDR
     %4 = VPUIP.Copy inputs(%3 : !Output_DDR) outputs(%arg3 : !Output_DDR) -> !Output_DDR
     return %4 : !Output_DDR
   }
@@ -216,29 +207,24 @@ module @DpuProfilingMultipleOps  {
     //CHECK-SAME:   workload_id = 3 : i64
 
     %15 = VPURT.AllocDistributed -> !OutputDistributed
-    %16 = VPUIP.NCEClusterTiling
-        inputs(%4 as %arg2: !Output1_CMX)
-        outputs(%15 as %arg3: !Output2_CMX)
-            -> !OutputDistributed {
-         %inner = VPUIP.NCEClusterTask {
-          activation_window_channel_length = 0 : i64,
-          task_type = #VPUIP.nce_task_type<ELTWISE>
-          }
-          input(%arg2 : !Output1_CMX)
-          weights(%arg2 : !Output1_CMX)
-          parent_input(%arg2 : !Output1_CMX)
-          parent_output(%arg3 : !Output2_CMX)
-          outputs(%arg3 : !Output2_CMX)
-          -> !Output2_CMX variants :  {
-        DPUTask {cluster_id = 0 : i64, outEnd = [54, 10, 31], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0]}
-        DPUTask {cluster_id = 0 : i64, outEnd = [54, 21, 31], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 11, 0]}
-        DPUTask {cluster_id = 0 : i64, outEnd = [54, 32, 31], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 22, 0]}
-        DPUTask {cluster_id = 0 : i64, outEnd = [54, 43, 31], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 33, 0]}
-        DPUTask {cluster_id = 1 : i64, outEnd = [54, 43, 31], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 33, 0]}
-        DPUTask {cluster_id = 2 : i64, outEnd = [54, 54, 31], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 44, 0]}
-      } PPE :  {
-        PPETask <AND> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64}
-      }
+    %16 = VPUIP.NCEClusterTask {
+        activation_window_channel_length = 0 : i64,
+        task_type = #VPUIP.nce_task_type<ELTWISE>
+        }
+        input(%4 : !Output0_CMX)
+        weights(%4 : !Output0_CMX)
+        parent_input(%4 : !Output0_CMX)
+        parent_output(%15 : !OutputDistributed)
+        outputs(%15 : !OutputDistributed)
+        -> !OutputDistributed variants :  {
+      DPUTask {cluster_id = 0 : i64, outEnd = [54, 10, 31], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0]}
+      DPUTask {cluster_id = 0 : i64, outEnd = [54, 21, 31], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 11, 0]}
+      DPUTask {cluster_id = 0 : i64, outEnd = [54, 32, 31], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 22, 0]}
+      DPUTask {cluster_id = 0 : i64, outEnd = [54, 43, 31], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 33, 0]}
+      DPUTask {cluster_id = 1 : i64, outEnd = [54, 43, 31], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 33, 0]}
+      DPUTask {cluster_id = 2 : i64, outEnd = [54, 54, 31], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 44, 0]}
+    } PPE :  {
+      PPETask <AND> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64}
     }
 
     //CHECK:        VPUIP.NCEClusterTask
@@ -262,11 +248,9 @@ module @DpuProfilingMultipleOps  {
     //CHECK-SAME:   workload_id = 0 : i64
 
     %17 = memref.alloc() : !Output_DDR
-    %18 = VPUIP.NCEClusterTiling inputs(%16 as %arg3: !Output2_CMX) outputs(%17 as %arg4: !Output_DDR) -> !Output_DDR {
-      %inner = VPUIP.Copy inputs(%arg3 : !Output2_CMX) outputs(%arg4 : !Output_DDR) -> !Output_DDR
-    }
+    %18 = VPUIP.Copy inputs(%16 : !OutputDistributed) outputs(%17 : !Output_DDR) -> !Output_DDR
     %19 = VPUIP.Copy inputs(%17 : !Output_DDR) outputs(%arg1 : !Output_DDR) -> !Output_DDR
-  
+
     return %19: !Output_DDR
 
   }

@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --optimize-unaligned-qdq-seq %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 // CHECK-LABEL: @OptimizeQuantDequantSequence
 func.func @OptimizeQuantDequantSequence(%arg0 : tensor<1x40x1x1xf16>, %arg1 : tensor<512x40x1x1xf16>) -> tensor<1x64x1x8xf16> {

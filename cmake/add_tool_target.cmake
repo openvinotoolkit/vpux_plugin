@@ -4,17 +4,17 @@
 #
 
 #[[
-Wrapper function over addIeTarget, that also the checks the tool's dependencies and
+Wrapper function over ov_add_target, that also the checks the tool's dependencies and
 installs the tool's executable.
 You could use in the following way:
-addIeTargetTest(NAME targetName
-                ROOT ${CMAKE_CURRENT_SOURCE_DIR}
-                COMPONENT cpack_component # default to `tests`
-                INSTALL_DESTINATION install/destination # defaults to `tools`
-                ENABLE_WARNINGS_AS_ERRORS
-                ENABLE_CLANG_FORMAT
-                INCLUDES includeOne IncludeTwo
-                LINK_LIBRARIES libOne libTwo
+ov_add_test_target(NAME targetName
+                   ROOT ${CMAKE_CURRENT_SOURCE_DIR}
+                   COMPONENT cpack_component # default to `tests`
+                   INSTALL_DESTINATION install/destination # defaults to `tools`
+                   ENABLE_WARNINGS_AS_ERRORS
+                   INCLUDES includeOne IncludeTwo
+                   LINK_LIBRARIES libOne libTwo
+                   DEPENDENCIES depOne depTwo
 )
 Important: pay attention to the multivalued arguments like LINK_LIBRARIES,
 otherwise any parameters that come after might be consumed.
@@ -41,6 +41,7 @@ function(add_tool_target)
 
     set(multiValueArgs
         LINK_LIBRARIES
+        DEPENDENCIES
     )
 
     cmake_parse_arguments(ARG "${options}" "${oneValueRequiredArgs};${oneValueOptionalArgs}" "${multiValueArgs}" ${ARGN})
@@ -58,7 +59,7 @@ function(add_tool_target)
     #
 
     set(MISSING_DEPENDENCIES "")
-    foreach(LIB ${ARG_LINK_LIBRARIES})
+    foreach(LIB ${ARG_LINK_LIBRARIES} ${ARG_DEPENDENCIES})
         if(NOT TARGET ${LIB})
             list(APPEND MISSING_DEPENDENCIES ${LIB})
         endif()
@@ -74,20 +75,20 @@ function(add_tool_target)
     #
 
     if (ARG_ADD_CPPLINT)
-        addIeTarget(ADD_CPPLINT
-                    TYPE EXECUTABLE
-                    NAME ${ARG_NAME}
-                    ROOT ${ARG_ROOT}
-                    DEPENDENCIES ${ARG_DEPENDENCIES}
-                    LINK_LIBRARIES ${ARG_LINK_LIBRARIES}
-                    ${ARG_UNPARSED_ARGUMENTS})
+        ov_add_target(ADD_CPPLINT
+                      TYPE EXECUTABLE
+                      NAME ${ARG_NAME}
+                      ROOT ${ARG_ROOT}
+                      DEPENDENCIES ${ARG_DEPENDENCIES}
+                      LINK_LIBRARIES ${ARG_LINK_LIBRARIES}
+                      ${ARG_UNPARSED_ARGUMENTS})
     else()
-        addIeTarget(TYPE EXECUTABLE
-                    NAME ${ARG_NAME}
-                    ROOT ${ARG_ROOT}
-                    DEPENDENCIES ${ARG_DEPENDENCIES}
-                    LINK_LIBRARIES ${ARG_LINK_LIBRARIES}
-                    ${ARG_UNPARSED_ARGUMENTS})
+        ov_add_target(TYPE EXECUTABLE
+                      NAME ${ARG_NAME}
+                      ROOT ${ARG_ROOT}
+                      DEPENDENCIES ${ARG_DEPENDENCIES}
+                      LINK_LIBRARIES ${ARG_LINK_LIBRARIES}
+                      ${ARG_UNPARSED_ARGUMENTS})
     endif()
 
     set_target_properties(${ARG_NAME} PROPERTIES
@@ -97,8 +98,6 @@ function(add_tool_target)
     if(ARG_ENABLE_WARNINGS_AS_ERRORS)
         enable_warnings_as_errors(${ARG_NAME} WIN_STRICT)
     endif()
-
-    vpux_enable_clang_format(${ARG_NAME})
 
     #
     # install the target

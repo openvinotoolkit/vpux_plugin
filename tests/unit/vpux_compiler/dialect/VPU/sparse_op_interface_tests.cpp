@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+//
+
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops_interfaces.hpp"
 #include "vpux/compiler/dialect/VPU/IR/types.hpp"
@@ -31,8 +33,9 @@ void testSparsitySupport(llvm::StringLiteral inputIR, ArchKind arch, bool suppor
     ASSERT_TRUE(func != nullptr);
 
     mlir::PassManager pm(module.get()->getName(), mlir::OpPassManager::Nesting::Implicit);
-    pm.addPass(vpux::VPU::createInitCompilerPass(arch, vpux::VPU::CompilationMode::DefaultHW, std::nullopt,
-                                                 std::nullopt, vpux::Logger::global()));
+    auto initCompilerOptions = vpux::VPU::InitCompilerOptions(arch, vpux::VPU::CompilationMode::DefaultHW);
+
+    vpux::VPU::buildInitCompilerPipeline(pm, initCompilerOptions, vpux::Logger::global());
 
     ASSERT_TRUE(mlir::succeeded(pm.run(module.get())));
 
@@ -62,8 +65,8 @@ TEST(MLIR_VPU_Sparsity, NCEZMajorConvSparsitySupport) {
             }
         }
     )";
-    testSparsitySupport(inputIR, ArchKind::VPUX30XX, /*input=*/false, /*output=*/false, /*weights=*/true);
-    testSparsitySupport(inputIR, ArchKind::VPUX37XX, /*input=*/true, /*output=*/true, /*weights=*/true);
+    testSparsitySupport(inputIR, ArchKind::NPU30XX, /*input=*/false, /*output=*/false, /*weights=*/true);
+    testSparsitySupport(inputIR, ArchKind::NPU37XX, /*input=*/true, /*output=*/true, /*weights=*/true);
 }
 
 TEST(MLIR_VPU_Sparsity, NCECMajorConvSparsitySupport) {
@@ -85,7 +88,7 @@ TEST(MLIR_VPU_Sparsity, NCECMajorConvSparsitySupport) {
             }
         }
     )";
-    testSparsitySupport(inputIR, ArchKind::VPUX30XX, /*input=*/false, /*output=*/false, /*weights=*/false);
+    testSparsitySupport(inputIR, ArchKind::NPU30XX, /*input=*/false, /*output=*/false, /*weights=*/false);
 }
 
 TEST(MLIR_VPU_Sparsity, NCEEltwiseSparsitySupport) {
@@ -99,8 +102,8 @@ TEST(MLIR_VPU_Sparsity, NCEEltwiseSparsitySupport) {
             }
         }
     )";
-    testSparsitySupport(inputIR, ArchKind::VPUX30XX, /*input=*/false, /*output=*/false, /*weights=*/false);
-    testSparsitySupport(inputIR, ArchKind::VPUX37XX, /*input=*/false, /*output=*/true, /*weights=*/false);
+    testSparsitySupport(inputIR, ArchKind::NPU30XX, /*input=*/false, /*output=*/false, /*weights=*/false);
+    testSparsitySupport(inputIR, ArchKind::NPU37XX, /*input=*/false, /*output=*/true, /*weights=*/false);
 }
 
 TEST(MLIR_VPU_Sparsity, NCEDepthconvSparsitySupport) {
@@ -126,8 +129,8 @@ TEST(MLIR_VPU_Sparsity, NCEDepthconvSparsitySupport) {
             }
         }
     )";
-    testSparsitySupport(inputIR, ArchKind::VPUX30XX, /*input=*/false, /*output=*/false, /*weights=*/false);
-    testSparsitySupport(inputIR, ArchKind::VPUX37XX, /*input=*/false, /*output=*/true, /*weights=*/false);
+    testSparsitySupport(inputIR, ArchKind::NPU30XX, /*input=*/false, /*output=*/false, /*weights=*/false);
+    testSparsitySupport(inputIR, ArchKind::NPU37XX, /*input=*/false, /*output=*/true, /*weights=*/false);
 }
 
 TEST(MLIR_VPU_Sparsity, NCEMaxpoolSparsitySupport) {
@@ -147,8 +150,8 @@ TEST(MLIR_VPU_Sparsity, NCEMaxpoolSparsitySupport) {
             }
         }
     )";
-    testSparsitySupport(inputIR, ArchKind::VPUX30XX, /*input=*/false, /*output=*/false, /*weights=*/false);
-    testSparsitySupport(inputIR, ArchKind::VPUX37XX, /*input=*/false, /*output=*/true, /*weights=*/false);
+    testSparsitySupport(inputIR, ArchKind::NPU30XX, /*input=*/false, /*output=*/false, /*weights=*/false);
+    testSparsitySupport(inputIR, ArchKind::NPU37XX, /*input=*/false, /*output=*/true, /*weights=*/false);
 }
 
 TEST(MLIR_VPU_Sparsity, NCEAvgpoolSparsitySupport) {
@@ -169,6 +172,6 @@ TEST(MLIR_VPU_Sparsity, NCEAvgpoolSparsitySupport) {
         }
     )";
     EXPECT_ANY_THROW(
-            testSparsitySupport(inputIR, ArchKind::VPUX30XX, /*input=*/false, /*output=*/false, /*weights=*/false));
-    testSparsitySupport(inputIR, ArchKind::VPUX37XX, /*input=*/false, /*output=*/true, /*weights=*/false);
+            testSparsitySupport(inputIR, ArchKind::NPU30XX, /*input=*/false, /*output=*/false, /*weights=*/false));
+    testSparsitySupport(inputIR, ArchKind::NPU37XX, /*input=*/false, /*output=*/true, /*weights=*/false);
 }

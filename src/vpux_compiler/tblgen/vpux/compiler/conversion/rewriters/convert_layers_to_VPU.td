@@ -256,13 +256,13 @@ def RewriteReduceL2 :
 def createFakeQuantizeOp :
         NativeCodeCall<[{
             $_builder.create<vpux::VPU::FakeQuantizeOp>(
-                $_loc, $0, $1, $2, $3, $4, $5, $6)
+                $_loc, $0, $1, $2, $3, $4, $5, $6, $7)
         }]>;
 
 def RewriteFakeQuantize :
         Pat<
-            (IE_FakeQuantizeOp $input, $input_low, $input_high, $output_low, $output_high, $levels, $auto_broadcast),
-            (createFakeQuantizeOp $input, $input_low, $input_high, $output_low, $output_high, $levels, $auto_broadcast)
+            (IE_FakeQuantizeOp $input, $input_low, $input_high, $output_low, $output_high, $levels, $fp_low_type, $auto_broadcast),
+            (createFakeQuantizeOp $input, $input_low, $input_high, $output_low, $output_high, $levels, $fp_low_type, $auto_broadcast)
         >;
 
 //
@@ -293,10 +293,15 @@ def createConvolutionOp :
                 $3, $4, $5, $6, $7)
         }]>;
 
+// Note: AttrConstraint is not allowed so cannot use IsNullAttr from OpBase.td
+class IsNull<string desc> : Constraint<CPred<"!$_self">, desc>;
 def RewriteConvolution :
         Pat<
-            (IE_ConvolutionOp $input, $filter, $bias, $strides, $pads_begin, $pads_end, $dilations, $post_op, $clamp),
-            (createConvolutionOp $input, $filter, $bias, $strides, $pads_begin, $pads_end, $dilations, $post_op, $clamp)
+            (IE_ConvolutionOp $input, $filter, $bias, $strides, $pads_begin, $pads_end, $dilations, $post_op, $clamp, $static_scale),
+            (createConvolutionOp $input, $filter, $bias, $strides, $pads_begin, $pads_end, $dilations, $post_op, $clamp, $static_scale),
+            [
+                (IsNull<"static_scale must be null">:$static_scale)
+            ]
         >;
 
 //
@@ -936,8 +941,8 @@ def RewritePerAxisTile :
         >;
 
 //
-// IE.[Add|Subtract|Multiply|Divide|SquaredDiff|Power|FloorMod|Mod|Min|Max|And|Equal|Less|LessEqual|NotEqual|Greater|GreaterEqual|LogicalOr|LogicalXor]Pool
-//     -> VPU.[Add|Subtract|Multiply|Divide|SquaredDiff|Power|FloorMod|Mod|Min|Max|And|Equal|Less|LessEqual|NotEqual|Greater|GreaterEqual|LogicalOr|LogicalXor]Pool
+// IE.[Add|Subtract|Multiply|Divide|SquaredDiff|Power|FloorMod|Mod|Min|Max|And|BitwiseAnd|BitwiseOr|BitwiseXor|Equal|Less|LessEqual|NotEqual|Greater|GreaterEqual|LogicalOr|LogicalXor]Pool
+//     -> VPU.[Add|Subtract|Multiply|Divide|SquaredDiff|Power|FloorMod|Mod|Min|Max|And|BitwiseAnd|BitwiseOr|BitwiseXor|Equal|Less|LessEqual|NotEqual|Greater|GreaterEqual|LogicalOr|LogicalXor]Pool
 //
 
 class createEltwiseOp<string type> :
@@ -1042,6 +1047,24 @@ def RewriteAnd :
             (createEltwiseOpWithPostOp<"And"> $input1, $input2, $auto_broadcast, $post_op, $clamp)
         >;
 
+def RewriteBitwiseAnd :
+        Pat<
+            (IE_BitwiseAndOp $input1, $input2, $auto_broadcast),
+            (createEltwiseOp<"BitwiseAnd"> $input1, $input2, $auto_broadcast)
+        >;
+
+def RewriteBitwiseOr :
+        Pat<
+            (IE_BitwiseOrOp $input1, $input2, $auto_broadcast),
+            (createEltwiseOp<"BitwiseOr"> $input1, $input2, $auto_broadcast)
+        >;
+
+def RewriteBitwiseXor :
+        Pat<
+            (IE_BitwiseXorOp $input1, $input2, $auto_broadcast),
+            (createEltwiseOp<"BitwiseXor"> $input1, $input2, $auto_broadcast)
+        >;
+
 def RewriteMinimum :
         Pat<
             (IE_MinimumOp $input1, $input2, $auto_broadcast),
@@ -1082,6 +1105,21 @@ def RewriteLogicalNot :
         >;
 
 //
+// IE.BitwiseNot -> VPU.BitwiseNot
+//
+
+def createBitwiseNotOp :
+        NativeCodeCall<[{
+            $_builder.create<vpux::VPU::BitwiseNotOp>($_loc, $0)
+        }]>;
+
+def RewriteBitwiseNot :
+        Pat<
+            (IE_BitwiseNotOp $input1),
+            (createBitwiseNotOp $input1)
+        >;
+
+//
 // IE.FullyConnected -> VPU.FullyConnected
 //
 
@@ -1096,6 +1134,22 @@ def RewriteFullyConnected :
         Pat<
             (IE_FullyConnectedOp $input, $weights, $bias),
             (createFullyConnectedOp $input, $weights, $bias)
+        >;
+
+//
+// IE.MatMul -> VPU.MatMul
+//
+
+def createMatMulOp :
+        NativeCodeCall<[{
+            $_builder.create<vpux::VPU::MatMulOp>(
+                $_loc, $0, $1, $2, $3)
+        }]>;
+
+def RewriteMatMul :
+        Pat<
+            (IE_MatMulOp $input1, $input2, $transpose_a, $transpose_b),
+            (createMatMulOp $input1, $input2, $transpose_a, $transpose_b)
         >;
 
 //
@@ -1352,7 +1406,10 @@ def createStridedSliceOp :
         NativeCodeCall<[{
             $_builder.create<vpux::VPU::StridedSliceOp>(
                 $_loc, $0,
-                $1, $2, $3, $4, $5, $6, $7, $8)
+                $1.size() == 1 ? $1[0] : nullptr,
+                $2.size() == 1 ? $2[0] : nullptr,
+                $3.size() == 1 ? $3[0] : nullptr,
+                $4, $5, $6, $7, $8, $9, $10, $11)
         }]>;
 
 def RewriteStridedSlice :
@@ -1360,7 +1417,7 @@ def RewriteStridedSlice :
             (IE_StridedSliceOp $input, $begins, $ends, $strides, $begins_attr,
                 $ends_attr, $strides_attr, $begin_mask, $end_mask,
                 $new_axis_mask, $shrink_mask, $ellipsis_mask),
-            (createStridedSliceOp $input, $begins_attr,
+            (createStridedSliceOp $input, $begins, $ends, $strides, $begins_attr,
                 $ends_attr, $strides_attr, $begin_mask, $end_mask,
                 $new_axis_mask, $shrink_mask, $ellipsis_mask)
         >;
@@ -1872,6 +1929,17 @@ def RewriteGRUSequence :
         >;
 
 //
+// IE.GRUSequenceLastPart -> VPU.GRUSequenceLastPart
+//
+
+def RewriteGRUSequenceLastPart :
+        Pat<
+            (IE_GRUSequenceLastPartOp $first_part_output, $initial_hidden_state, $recurrence_weights, $biases, $hidden_size, $seq_length, $direction, $should_linear_before_reset, $clip),
+            (VPU_GRUSequenceLastPartOp $first_part_output, $initial_hidden_state, $recurrence_weights, $biases, $hidden_size, $seq_length, $direction, $should_linear_before_reset, $clip)
+        >;
+
+
+//
 // IE.DeformablePSROIPooling -> VPU.DeformablePSROIPooling
 //
 def createDeformablePSROIPoolingOp :
@@ -1989,6 +2057,36 @@ def RewriteIRDFT :
         Pat<
             (IE_IRDFTOp $input, $axes, $signal_size, $axes_attr, $signal_size_attr),
             (createIRDFTOp $input, $axes_attr, $signal_size_attr)
+        >;
+
+//
+// IE.ShapeOf -> VPU.ShapeOf
+//
+
+def createShapeOfOp :
+        NativeCodeCall<[{
+            $_builder.create<vpux::VPU::ShapeOfOp>($_loc, $0)
+        }]>;
+
+def RewriteShapeOf :
+        Pat<
+            (IE_ShapeOfOp $input, $dstElemType),
+            (createShapeOfOp $input)
+        >;
+
+//
+// IE.NonZero -> VPU.NonZero
+//
+
+def createNonZeroOp :
+        NativeCodeCall<[{
+            $_builder.create<vpux::VPU::NonZeroOp>($_loc, $0)
+        }]>;
+
+def RewriteNonZero :
+        Pat<
+            (IE_NonZeroOp $input, $dstElemType),
+            (createNonZeroOp $input)
         >;
 
 #endif

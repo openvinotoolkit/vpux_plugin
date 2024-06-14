@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -43,7 +43,7 @@ module @Test {
     }
     %4 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     VPURT.Task waits(%3 : !VPURT.Barrier) updates(%4 : !VPURT.Barrier) {
-      %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_SpaceToBatch inputs(%0 as %arg3: memref<2x8x8x3xf16, [@CMX_NN, 0]>) outputs(%1 as %arg4: memref<48x2x2x3xf16, [@CMX_NN, 0]>) on tile 0 -> memref<48x2x2x3xf16, [@CMX_NN, 0]>{
+      %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_SpaceToBatch inputs(%0 as %arg3: memref<2x8x8x3xf16, [@CMX_NN, 0]>) outputs(%1 as %arg4: memref<48x2x2x3xf16, [@CMX_NN, 0]>) on tile 0 -> memref<48x2x2x3xf16, [@CMX_NN, 0]>{
         VPUIP.SW.Kernel.run {attrs = [[1, 6, 4, 1], [0, 1, 0, 0], [0, 3, 0, 0]]}(%arg3, %arg4) : memref<2x8x8x3xf16, [@CMX_NN, 0]>, memref<48x2x2x3xf16, [@CMX_NN, 0]>
       }
     }

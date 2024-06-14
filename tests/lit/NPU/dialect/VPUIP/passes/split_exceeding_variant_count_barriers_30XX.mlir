@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -214,7 +214,7 @@ func.func @ExceedingVariantCount(%arg0: memref<1x16x32x32xf16, #NHWC>, %arg1: me
     // CHECK: [[BAR4:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
 
     // New barriers introduced
-    
+
     // CHECK: [[BAR5:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK: [[BAR6:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK: [[BAR7:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
@@ -224,16 +224,16 @@ func.func @ExceedingVariantCount(%arg0: memref<1x16x32x32xf16, #NHWC>, %arg1: me
     // CHECK: VPURT.Task updates([[BAR1]], [[BAR2]], [[BAR3]] : !VPURT.Barrier, !VPURT.Barrier, !VPURT.Barrier)
     // CHECK: VPURT.Task updates([[BAR1]], [[BAR2]], [[BAR3]] : !VPURT.Barrier, !VPURT.Barrier, !VPURT.Barrier)
     // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) updates([[BAR4]], [[BAR5]] : !VPURT.Barrier, !VPURT.Barrier)
-    // CHECK: VPURT.Task waits([[BAR3]], [[BAR5]] : !VPURT.Barrier, !VPURT.Barrier) updates([[BAR7]] : !VPURT.Barrier)
-    
-    // DPU with 5 workloads seperated with DMAs
-    // CHECK: VPURT.Task waits([[BAR2]], [[BAR4]] : !VPURT.Barrier, !VPURT.Barrier) updates([[BAR6]] : !VPURT.Barrier)
-    
-    // CHECK: VPURT.Task waits([[BAR3]], [[BAR5]] : !VPURT.Barrier, !VPURT.Barrier) updates([[BAR7]] : !VPURT.Barrier)
-    // CHECK: VPURT.Task waits([[BAR3]], [[BAR5]] : !VPURT.Barrier, !VPURT.Barrier) updates([[BAR7]] : !VPURT.Barrier)
-    // CHECK: VPURT.Task waits([[BAR3]], [[BAR5]] : !VPURT.Barrier, !VPURT.Barrier) updates([[BAR7]] : !VPURT.Barrier)
+    // CHECK: VPURT.Task waits([[BAR3]], [[BAR5]] : !VPURT.Barrier, !VPURT.Barrier) updates([[BAR6]] : !VPURT.Barrier)
 
-    // CHECK: VPURT.Task waits([[BAR6]], [[BAR7]] : !VPURT.Barrier, !VPURT.Barrier) updates([[BAR8]] : !VPURT.Barrier)
+    // DPU with 5 workloads seperated with DMAs
+    // CHECK: VPURT.Task waits([[BAR2]], [[BAR4]] : !VPURT.Barrier, !VPURT.Barrier) updates([[BAR7]] : !VPURT.Barrier)
+
+    // CHECK: VPURT.Task waits([[BAR3]], [[BAR5]] : !VPURT.Barrier, !VPURT.Barrier) updates([[BAR6]] : !VPURT.Barrier)
+    // CHECK: VPURT.Task waits([[BAR3]], [[BAR5]] : !VPURT.Barrier, !VPURT.Barrier) updates([[BAR6]] : !VPURT.Barrier)
+    // CHECK: VPURT.Task waits([[BAR3]], [[BAR5]] : !VPURT.Barrier, !VPURT.Barrier) updates([[BAR6]] : !VPURT.Barrier)
+
+    // CHECK: VPURT.Task waits([[BAR7]], [[BAR6]] : !VPURT.Barrier, !VPURT.Barrier) updates([[BAR8]] : !VPURT.Barrier)
 
     // CHECK: VPURT.Task waits([[BAR8]] : !VPURT.Barrier)
 }

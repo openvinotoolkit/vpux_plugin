@@ -1,13 +1,13 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2023-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 #include "vpux/compiler/core/aliases_info.hpp"
 
 #include "vpux/compiler/core/ops_interfaces.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/types.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/types.hpp"
 
 #include "vpux/utils/core/error.hpp"
 #include "vpux/utils/core/format.hpp"
@@ -87,7 +87,7 @@ void AliasesInfoBase::visitOp(mlir::Operation* op, bool ignoreInnerRegions = fal
             return isBufferizedType(asyncType.getValueType());
         }
 
-        return type.isa<mlir::MemRefType, VPUIP::BufferType, VPUIP::DistributedBufferType, VPUIP::SparseBufferType>();
+        return isBufferType(type);
     };
 
     llvm::TypeSwitch<mlir::Operation*, void>(op)
@@ -261,8 +261,7 @@ void AliasesInfoBase::visitOp(mlir::Operation* op, bool ignoreInnerRegions = fal
 
 void AliasesInfoBase::addFuncArgAlias(mlir::Value funcArg) {
     _log.trace("Argument #{0}", getValueForLog(funcArg));
-    bool isValidArgType =
-            funcArg.getType().isa<mlir::MemRefType, VPUIP::SparseBufferType, VPUIP::DistributedBufferType>();
+    bool isValidArgType = isBufferType(funcArg.getType());
 
     VPUX_THROW_UNLESS(
             isValidArgType,
@@ -414,7 +413,25 @@ void AliasesInfo::addAlias(mlir::Value source, mlir::Value alias) {
     }
 }
 
-void AliasesInfo::removeAlias(mlir::Value val) {
+void AliasesInfo::removeAlias(mlir::Value alias) {
+    const auto roots = getRoots(alias);
+
+    auto rootsForAliasItr = _roots.find(alias);
+    if (rootsForAliasItr != _roots.end()) {
+        _roots.erase(rootsForAliasItr);
+    }
+
+    auto sourcesForAliasItr = _sources.find(alias);
+    if (sourcesForAliasItr != _sources.end()) {
+        _sources.erase(sourcesForAliasItr);
+    }
+
+    for (const auto& root : roots) {
+        _allAliases[root].erase(alias);
+    }
+}
+
+void AliasesInfo::remove(mlir::Value val) {
     _log.trace("Remove all info of a value '{0}''", getValueForLog(val));
 
     const auto roots = getRoots(val);

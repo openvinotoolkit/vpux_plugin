@@ -6,29 +6,30 @@
 #pragma once
 
 #include "infer_request.hpp"
-#include "vpux_private_properties.hpp"
+#include "npu_private_properties.hpp"
 
 namespace vpux {
 
-class IMDDevice final : public IDevice {
+class IMDDevice final : public intel_npu::IDevice {
 public:
-    explicit IMDDevice(InferenceEngine::VPUXConfigParams::VPUXPlatform platform);
+    explicit IMDDevice(const std::string_view platform);
 
 public:
-    std::shared_ptr<Executor> createExecutor(const NetworkDescription::CPtr network, const Config& config) override;
+    std::shared_ptr<intel_npu::IExecutor> createExecutor(
+            const std::shared_ptr<const intel_npu::NetworkDescription>& network,
+            const intel_npu::Config& config) override;
 
     std::string getName() const override;
     std::string getFullDeviceName() const override;
 
-    std::shared_ptr<SyncInferRequest> createInferRequest(
-            const std::shared_ptr<const ov::ICompiledModel> compiledModel,
-            const std::shared_ptr<const NetworkDescription> networkDescription, const Executor::Ptr executor,
-            const Config& config) override {
-        return std::make_shared<IMDInferRequest>(compiledModel, networkDescription, executor, config);
+    std::shared_ptr<intel_npu::SyncInferRequest> createInferRequest(
+            const std::shared_ptr<const intel_npu::ICompiledModel>& compiledModel,
+            const std::shared_ptr<intel_npu::IExecutor>& executor, const intel_npu::Config& config) override {
+        return std::make_shared<IMDInferRequest>(compiledModel, executor, config);
     }
 
 private:
-    InferenceEngine::VPUXConfigParams::VPUXPlatform _platform;
+    std::string _platform;
 };
 
 }  // namespace vpux

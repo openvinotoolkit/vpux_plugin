@@ -143,35 +143,6 @@ private:
 };
 
 //
-// NCEPermuteQuantizeRewriter
-//
-
-class NCEPermuteQuantizeRewriter final : public mlir::OpRewritePattern<NCEPermuteQuantizeOp> {
-public:
-    NCEPermuteQuantizeRewriter(mlir::MLIRContext* ctx, bool enableExplicitDistributedTensorAttr, Logger log)
-            : mlir::OpRewritePattern<NCEPermuteQuantizeOp>(ctx),
-              _enableExplicitDistributedTensorAttr(enableExplicitDistributedTensorAttr),
-              _log(log) {
-        setDebugName("NCEPermuteQuantizeRewriter");
-    }
-
-public:
-    mlir::LogicalResult matchAndRewrite(NCEPermuteQuantizeOp origOp, mlir::PatternRewriter& rewriter) const final;
-
-private:
-    NCEClusterTilingOp buildInputCopy(VPU::ClusteredOpInterface clusteredOp, mlir::Value input,
-                                      mlir::Type distType) const;
-    NCEClusterTilingOp buildOutputCopy(mlir::Operation* nceOp, mlir::Operation* clusterTilingOp) const;
-    mlir::Type fusePaddings(VPU::ClusteredOpInterface permQuantOp, const VPU::DistributedTensorType distType,
-                            mlir::Operation* nextConv) const;
-    VPU::WorkloadCastOp buildCast(VPU::ClusteredOpInterface permQuantOp, NCEClusterTilingOp copyOp,
-                                  const vpux::NDTypeInterface targetType, const mlir::ArrayAttr tileOverDim,
-                                  mlir::PatternRewriter& rewriter) const;
-    bool _enableExplicitDistributedTensorAttr = false;
-    Logger _log;
-};
-
-//
 // NCECompressConvolutionRewriterRewrite
 //
 

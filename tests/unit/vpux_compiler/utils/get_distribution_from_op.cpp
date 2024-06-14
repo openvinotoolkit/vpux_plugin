@@ -1,6 +1,8 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation
 // SPDX-License-Identifier: Apache 2.0
+//
+
 //
 
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
@@ -131,8 +133,7 @@ TEST_F(MLIR_GetDistributedTypeFromOpSOKAlignmentTest, SWOpSOKAlignmentDuringTili
     });
 }
 
-// Alignment is missing due to 64 being divisible by num_tiles * 16 = 48
-TEST_F(MLIR_GetDistributedTypeFromOpSOKAlignmentTest, SWOpSOKNoAlignmentAfterSlice) {
+TEST_F(MLIR_GetDistributedTypeFromOpSOKAlignmentTest, SWOpSOKAlignmentAfterSlice1) {
     constexpr llvm::StringLiteral inputIR = R"(
         #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
         module @test {
@@ -177,6 +178,7 @@ TEST_F(MLIR_GetDistributedTypeFromOpSOKAlignmentTest, SWOpSOKNoAlignmentAfterSli
 
     const auto numTiles = getIntArrayAttr(&ctx, SmallVector<int64_t>({1, 3, 1, 1}));
     const auto numClusters = getIntAttr(&ctx, 3);
+    auto expectedAlignment = getIntArrayAttr(&ctx, SmallVector<int64_t>({1, 16, 1, 1}));
 
     for (auto& op : func.getOps()) {
         if (mlir::isa<VPU::SWOpInterface>(op)) {
@@ -184,7 +186,7 @@ TEST_F(MLIR_GetDistributedTypeFromOpSOKAlignmentTest, SWOpSOKNoAlignmentAfterSli
 
             auto expectedDistribution = VPU::DistributedTensorAttr::get(
                     &ctx, VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::SEGMENTED), numTiles, nullptr,
-                    nullptr, nullptr, numClusters, /*alignment*/ nullptr, mlir::UnitAttr::get(&ctx), nullptr, nullptr,
+                    nullptr, nullptr, numClusters, expectedAlignment, mlir::UnitAttr::get(&ctx), nullptr, nullptr,
                     nullptr, nullptr, nullptr);
 
             testDType(&ctx, clusteredOp, expectedDistribution, numClusters, true);   // test activation distributed type
@@ -197,7 +199,6 @@ TEST_F(MLIR_GetDistributedTypeFromOpSOKAlignmentTest, SWOpSOKNoAlignmentAfterSli
         if (mlir::isa<VPU::NCEConvolutionOp>(op)) {
             auto clusteredOp = mlir::cast<VPU::ClusteredOpInterface>(op);
 
-            auto expectedAlignment = getIntArrayAttr(&ctx, SmallVector<int64_t>({1, 16, 1, 1}));
             auto expectedDistribution = VPU::DistributedTensorAttr::get(
                     &ctx, VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::SEGMENTED), numTiles, nullptr,
                     nullptr, nullptr, numClusters, expectedAlignment, mlir::UnitAttr::get(&ctx), nullptr, nullptr,
@@ -208,7 +209,7 @@ TEST_F(MLIR_GetDistributedTypeFromOpSOKAlignmentTest, SWOpSOKNoAlignmentAfterSli
     }
 }
 
-TEST_F(MLIR_GetDistributedTypeFromOpSOKAlignmentTest, SWOpSOKAlignmentAfterSlice) {
+TEST_F(MLIR_GetDistributedTypeFromOpSOKAlignmentTest, SWOpSOKAlignmentAfterSlice2) {
     constexpr llvm::StringLiteral inputIR = R"(
         #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
         module @test {
@@ -260,11 +261,6 @@ TEST_F(MLIR_GetDistributedTypeFromOpSOKAlignmentTest, SWOpSOKAlignmentAfterSlice
             nullptr, numClusters, expectedAlignment, mlir::UnitAttr::get(&ctx), nullptr, nullptr, nullptr, nullptr,
             nullptr);
 
-    auto expectedUnalignedDistribution = VPU::DistributedTensorAttr::get(
-            &ctx, VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::SEGMENTED), numTiles, nullptr, nullptr,
-            nullptr, numClusters, /*alignment*/ nullptr, mlir::UnitAttr::get(&ctx), nullptr, nullptr, nullptr, nullptr,
-            nullptr);
-
     for (auto& op : func.getOps()) {
         if (mlir::isa<VPU::MVNOp>(op)) {
             auto clusteredOp = mlir::cast<VPU::ClusteredOpInterface>(op);
@@ -272,20 +268,18 @@ TEST_F(MLIR_GetDistributedTypeFromOpSOKAlignmentTest, SWOpSOKAlignmentAfterSlice
             testDType(&ctx, clusteredOp, expectedAlignedDistribution, numClusters,
                       true);  // test activation distributed type
 
-            // At the moment there is no link between input and output channel alignment for SW ops.
-            // It does not cause issues because alignment is put only when each cluster gets the
-            // same number of channels. As a consequence, if producer NCE op does not have the same number of output
-            // channels per cluster, there will be a spill, even if following SWOp supports segmentation by K
-            testDType(&ctx, clusteredOp, expectedUnalignedDistribution, numClusters,
+            // At the moment if the SW op's input has alignment, the output should have alignment to avoid invaild
+            // tiling
+            testDType(&ctx, clusteredOp, expectedAlignedDistribution, numClusters,
                       false);  // test output distributed type
         }
 
         if (mlir::isa<VPU::HSwishOp>(op)) {
             auto clusteredOp = mlir::cast<VPU::ClusteredOpInterface>(op);
 
-            testDType(&ctx, clusteredOp, expectedUnalignedDistribution, numClusters,
+            testDType(&ctx, clusteredOp, expectedAlignedDistribution, numClusters,
                       true);  // test activation distributed type
-            testDType(&ctx, clusteredOp, expectedUnalignedDistribution, numClusters,
+            testDType(&ctx, clusteredOp, expectedAlignedDistribution, numClusters,
                       false);  // test output distributed type
         }
 
@@ -338,7 +332,7 @@ TEST_P(GetDistributedTypeFromSOKOpTests, SegmentedOverChannelsDistribution) {
             nullptr, numClusters, /*alignment*/ nullptr, mlir::UnitAttr::get(&ctx), nullptr, nullptr, nullptr, nullptr,
             nullptr);
 
-    auto expectedSwOutputDistribution =
+    auto expectedSwOpDistribution =
             isSwOpOutputDistributionAligned ? expectedAlignedDistribution : expectedUnalignedDistribution;
 
     func.walk([&](VPU::ClusteredOpInterface op) {
@@ -350,8 +344,8 @@ TEST_P(GetDistributedTypeFromSOKOpTests, SegmentedOverChannelsDistribution) {
             testDType(&ctx, op, expectedAlignedDistribution, numClusters, false);  // test output distributed type
         }
         if (mlir::isa<VPU::SWOpInterface>(op.getOperation())) {
-            testDType(&ctx, op, expectedUnalignedDistribution, numClusters, true);  // test activation distributed type
-            testDType(&ctx, op, expectedSwOutputDistribution, numClusters, false);  // test output distributed type
+            testDType(&ctx, op, expectedSwOpDistribution, numClusters, true);   // test activation distributed type
+            testDType(&ctx, op, expectedSwOpDistribution, numClusters, false);  // test output distributed type
         }
     });
 }

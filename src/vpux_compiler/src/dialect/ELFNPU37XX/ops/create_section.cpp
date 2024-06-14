@@ -5,12 +5,13 @@
 
 #include <vpux_elf/writer.hpp>
 #include "vpux/compiler/dialect/ELFNPU37XX/ops.hpp"
+#include "vpux/utils/core/checked_cast.hpp"
 
 void vpux::ELFNPU37XX::CreateSectionOp::serialize(elf::Writer& writer, vpux::ELFNPU37XX::SectionMapType& sectionMap,
                                                   vpux::ELFNPU37XX::SymbolMapType& symbolMap) {
     VPUX_UNUSED(symbolMap);
     const auto name = getSecName().str();
-    auto section = writer.addBinaryDataSection<uint8_t>(name, static_cast<uint64_t>(getSecType()));
+    auto section = writer.addBinaryDataSection<uint8_t>(name, static_cast<uint32_t>(getSecType()));
     section->maskFlags(static_cast<elf::Elf_Xword>(getSecFlags()));
     section->setAddrAlign(getSecAddrAlign());
 

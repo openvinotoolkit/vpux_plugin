@@ -1,0 +1,769 @@
+//
+// Copyright (C) 2024 Intel Corporation.
+// SPDX-License-Identifier: Apache 2.0
+//
+
+#include <gtest/gtest.h>
+
+#include <npu_40xx_nnrt.hpp>
+#include "common/utils.hpp"
+#include "vpux/compiler/NPU40XX/dialect/NPUReg40XX/types.hpp"
+
+using namespace npu40xx;
+
+#define CREATE_HW_DMA_DESC(field, value)                                                     \
+    [] {                                                                                     \
+        nn_public::VpuDPUInvariant hwDPUInvariantDesc;                                       \
+        memset(reinterpret_cast<void*>(&hwDPUInvariantDesc), 0, sizeof(hwDPUInvariantDesc)); \
+        hwDPUInvariantDesc.field = value;                                                    \
+        return hwDPUInvariantDesc;                                                           \
+    }()
+
+class NPUReg40XX_NpuDPUInvariantTest :
+        public MLIR_RegMappedNPUReg40XXUnitBase<nn_public::VpuDPUInvariant,
+                                                vpux::NPUReg40XX::RegMapped_DpuInvariantRegisterType> {};
+
+TEST_P(NPUReg40XX_NpuDPUInvariantTest, CheckFieldsConsistency) {
+    this->compare();
+}
+
+std::vector<std::pair<MappedRegValues, nn_public::VpuDPUInvariant>> dpuInvariantFieldSet = {
+        // cmx_slice0_low_addr ---------------------------------------------------------------------
+        {{
+                 {"cmx_slice0_low_addr", {{"cmx_slice0_low_addr", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.cmx_slice0_low_addr, 0xFFFFFFFF)},
+        // cmx_slice1_low_addr ---------------------------------------------------------------------
+        {{
+                 {"cmx_slice1_low_addr", {{"cmx_slice1_low_addr", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.cmx_slice1_low_addr, 0xFFFFFFFF)},
+        // cmx_slice2_low_addr ---------------------------------------------------------------------
+        {{
+                 {"cmx_slice2_low_addr", {{"cmx_slice2_low_addr", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.cmx_slice2_low_addr, 0xFFFFFFFF)},
+        // cmx_slice3_low_addr ---------------------------------------------------------------------
+        {{
+                 {"cmx_slice3_low_addr", {{"cmx_slice3_low_addr", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.cmx_slice3_low_addr, 0xFFFFFFFF)},
+        // cmx_slice_size ---------------------------------------------------------------------
+        {{
+                 {"cmx_slice_size", {{"cmx_slice_size", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.cmx_slice_size, 0xFFFFFFFF)},
+        // se_addr ---------------------------------------------------------------------
+        {{
+                 {"se_addr", {{"se_addr", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.se_addr, 0xFFFFFFFF)},
+        // sparsity_addr ---------------------------------------------------------------------
+        {{
+                 {"sparsity_addr", {{"sparsity_addr", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.sparsity_addr, 0xFFFFFFFF)},
+        // se_size ---------------------------------------------------------------------
+        {{
+                 {"se_size", {{"se_size", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.se_size, 0xFFFFFFFF)},
+        // z_config ---------------------------------------------------------------------
+        {{
+                 {"z_config", {{"se_z_split", 15}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.z_config.z_config_bf.se_z_split, 15)},
+        {{
+                 {"z_config", {{"num_ses_in_z_dir", 0x1FF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.z_config.z_config_bf.num_ses_in_z_dir, 0x1FF)},
+        {{
+                 {"z_config", {{"cm_sp_pattern", 0xFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.z_config.z_config_bf.cm_sp_pattern, 0xFFFF)},
+        {{
+                 {"z_config", {{"npo2_se_z_split_en", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.z_config.z_config_bf.npo2_se_z_split_enable, 1)},
+        {{
+                 {"z_config", {{"reserved", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.z_config.z_config_bf.reserved, 1)},
+        {{
+                 {"z_config", {{"addr_format_sel", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.z_config.z_config_bf.addr_format_sel, 1)},
+        // kernel_pad_cfg ---------------------------------------------------------------------
+        {{
+                 {"kernel_pad_cfg", {{"mpe_assign", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.kernel_pad_cfg.kernel_pad_cfg_bf.mpe_assign, 1)},
+        {{
+                 {"kernel_pad_cfg", {{"pad_right_en", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.kernel_pad_cfg.kernel_pad_cfg_bf.pad_right_en, 1)},
+        {{
+                 {"kernel_pad_cfg", {{"pad_left_en", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.kernel_pad_cfg.kernel_pad_cfg_bf.pad_left_en, 1)},
+        {{
+                 {"kernel_pad_cfg", {{"pad_bottom_en", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.kernel_pad_cfg.kernel_pad_cfg_bf.pad_bottom_en, 1)},
+        {{
+                 {"kernel_pad_cfg", {{"pad_top_en", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.kernel_pad_cfg.kernel_pad_cfg_bf.pad_top_en, 1)},
+        {{
+                 {"kernel_pad_cfg", {{"kernel_y", 0xF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.kernel_pad_cfg.kernel_pad_cfg_bf.kernel_y, 0xF)},
+        {{
+                 {"kernel_pad_cfg", {{"kernel_x", 0xF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.kernel_pad_cfg.kernel_pad_cfg_bf.kernel_x, 0xF)},
+        {{
+                 {"kernel_pad_cfg", {{"wt_plt_cfg", 3}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.kernel_pad_cfg.kernel_pad_cfg_bf.wt_plt_cfg, 3)},
+        {{
+                 {"kernel_pad_cfg", {{"act_dense", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.kernel_pad_cfg.kernel_pad_cfg_bf.act_dense, 1)},
+        {{
+                 {"kernel_pad_cfg", {{"wt_dense", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.kernel_pad_cfg.kernel_pad_cfg_bf.wt_dense, 1)},
+        {{
+                 {"kernel_pad_cfg", {{"stride_y_en", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.kernel_pad_cfg.kernel_pad_cfg_bf.stride_y_en, 1)},
+        {{
+                 {"kernel_pad_cfg", {{"stride_y", 7}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.kernel_pad_cfg.kernel_pad_cfg_bf.stride_y, 7)},
+        {{
+                 {"kernel_pad_cfg", {{"dynamic_bw_en", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.kernel_pad_cfg.kernel_pad_cfg_bf.dynamic_bw_en, 1)},
+        {{
+                 {"kernel_pad_cfg", {{"dw_wt_sp_ins", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.kernel_pad_cfg.kernel_pad_cfg_bf.dw_wt_sp_ins, 1)},
+        {{
+                 {"kernel_pad_cfg", {{"layer1_wt_sp_ins", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.kernel_pad_cfg.kernel_pad_cfg_bf.layer1_wt_sp_ins, 1)},
+        {{
+                 {"kernel_pad_cfg", {{"layer1_cmp_en", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.kernel_pad_cfg.kernel_pad_cfg_bf.layer1_cmp_en, 1)},
+        {{
+                 {"kernel_pad_cfg", {{"pool_opt_en", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.kernel_pad_cfg.kernel_pad_cfg_bf.pool_opt_en, 1)},
+        {{
+                 {"kernel_pad_cfg", {{"sp_se_tbl_segment", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.kernel_pad_cfg.kernel_pad_cfg_bf.sp_se_tbl_segment, 1)},
+        {{
+                 {"kernel_pad_cfg", {{"rst_ctxt", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.kernel_pad_cfg.kernel_pad_cfg_bf.rst_ctxt, 1)},
+        // tensor_size0 ---------------------------------------------------------------------
+        {{
+                 {"tensor_size0", {{"tensor_size_x", 0x3FFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.tensor_size0.tensor_size0_bf.tensor_size_x, 0x3FFF)},
+        {{
+                 {"tensor_size0", {{"tensor_size_y", 0x3FFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.tensor_size0.tensor_size0_bf.tensor_size_y, 0x3FFF)},
+        // tensor_size1 ---------------------------------------------------------------------
+        {{
+                 {"tensor_size1", {{"tensor_size_z", 0x3FFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.tensor_size1.tensor_size1_bf.tensor_size_z, 0x3FFF)},
+        {{
+                 {"tensor_size1", {{"npo2_se_size", 0x1FF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.tensor_size1.tensor_size1_bf.npo2_se_size, 0x1FF)},
+        // tensor_start ---------------------------------------------------------------------
+        {{
+                 {"tensor_start", {{"tensor_start", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.tensor_start, 0xFFFFFFFF)},
+        // tensor_mode ---------------------------------------------------------------------
+        {{
+                 {"tensor_mode", {{"wmode", 0xF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.tensor_mode.tensor_mode_bf.wmode, 0xF)},
+        {{
+                 {"tensor_mode", {{"amode", 0xF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.tensor_mode.tensor_mode_bf.amode, 0xF)},
+        {{
+                 {"tensor_mode", {{"stride", 7}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.tensor_mode.tensor_mode_bf.stride, 7)},
+        {{
+                 {"tensor_mode", {{"zm_input", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.tensor_mode.tensor_mode_bf.zm_input, 1)},
+        {{
+                 {"tensor_mode", {{"dw_input", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.tensor_mode.tensor_mode_bf.dw_input, 1)},
+        {{
+                 {"tensor_mode", {{"cm_input", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.tensor_mode.tensor_mode_bf.cm_input, 1)},
+        {{
+                 {"tensor_mode", {{"workload_operation", 3}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.tensor_mode.tensor_mode_bf.workload_operation, 3)},
+        {{
+                 {"tensor_mode", {{"pad_value", 0xFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.tensor_mode.tensor_mode_bf.pad_value, 0xFFFF)},
+        // elops_sparsity_addr ---------------------------------------------------------------------
+        {{
+                 {"elops_sparsity_addr", {{"elops_sparsity_addr", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.elops_sparsity_addr, 0xFFFFFFFF)},
+        // elops_se_addr ---------------------------------------------------------------------
+        {{
+                 {"elops_se_addr", {{"elops_se_addr", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.elops_se_addr, 0xFFFFFFFF)},
+        // elops_wload ---------------------------------------------------------------------
+        {{
+                 {"elops_wload", {{"elop_wload", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.elops_wload.elops_wload_bf.elop_wload, 1)},
+        {{
+                 {"elops_wload", {{"seed_wload", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.elops_wload.elops_wload_bf.seed_wload, 1)},
+        {{
+                 {"elops_wload", {{"fifo_wr_wload", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.elops_wload.elops_wload_bf.fifo_wr_wload, 1)},
+        {{
+                 {"elops_wload", {{"elop_wload_type", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.elops_wload.elops_wload_bf.elop_wload_type, 1)},
+        {{
+                 {"elops_wload", {{"pool_wt_data", 0xFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.elops_wload.elops_wload_bf.pool_wt_data, 0xFFFF)},
+        {{
+                 {"elops_wload", {{"pool_wt_rd_dis", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.elops_wload.elops_wload_bf.pool_wt_rd_dis, 1)},
+        // act_offset ---------------------------------------------------------------------
+        {{
+                 {"act_offset0", {{"act_offset0", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.act_offset[0], 0xFFFFFFFF)},
+        {{
+                 {"act_offset1", {{"act_offset1", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.act_offset[1], 0xFFFFFFFF)},
+        {{
+                 {"act_offset2", {{"act_offset2", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.act_offset[2], 0xFFFFFFFF)},
+        {{
+                 {"act_offset3", {{"act_offset3", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.act_offset[3], 0xFFFFFFFF)},
+        // base_offset_a ---------------------------------------------------------------------
+        {{
+                 {"base_offset_a", {{"base_offset_a", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.base_offset_a, 0xFFFFFFFF)},
+        // base_offset_b ---------------------------------------------------------------------
+        {{
+                 {"base_offset_b", {{"base_offset_2", 0x1FF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.base_offset_b.base_offset_b_bf.base_offset2, 0x1FF)},
+        {{
+                 {"base_offset_b", {{"base_offset_3", 0x1FF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.base_offset_b.base_offset_b_bf.base_offset3, 0x1FF)},
+        {{
+                 {"base_offset_b", {{"dw_opt_offset", 0x3F}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.base_offset_b.base_offset_b_bf.dw_opt_offset, 0x3F)},
+        {{
+                 {"base_offset_b", {{"dw_opt_en", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.base_offset_b.base_offset_b_bf.dw_opt_en, 1)},
+        {{
+                 {"base_offset_b", {{"dw_3x3s1_opt_dis", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.base_offset_b.base_offset_b_bf.dw_3x3s1_opt_dis, 1)},
+        // wt_offset ---------------------------------------------------------------------
+        {{
+                 {"wt_offset", {{"wt_offset", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.wt_offset, 0xFFFFFFFF)},
+        // odu_cfg ---------------------------------------------------------------------
+        {{
+                 {"odu_cfg", {{"dtype", 7}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.odu_cfg.odu_cfg_bf.dtype, 7)},
+        {{
+                 {"odu_cfg", {{"wcb_ac_mode", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.odu_cfg.odu_cfg_bf.wcb_ac_mode, 1)},
+        {{
+                 {"odu_cfg", {{"wcb_sp_mode", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.odu_cfg.odu_cfg_bf.wcb_sp_mode, 1)},
+        {{
+                 {"odu_cfg", {{"sp_value", 0xFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.odu_cfg.odu_cfg_bf.sp_value, 0xFF)},
+        {{
+                 {"odu_cfg", {{"sp_out_en", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.odu_cfg.odu_cfg_bf.sp_out_en, 1)},
+        {{
+                 {"odu_cfg", {{"cmx_port_muxing_disable", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.odu_cfg.odu_cfg_bf.cmx_port_muxing_disable, 1)},
+        {{
+                 {"odu_cfg", {{"write_sp", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.odu_cfg.odu_cfg_bf.write_sp, 1)},
+        {{
+                 {"odu_cfg", {{"write_pt", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.odu_cfg.odu_cfg_bf.write_pt, 1)},
+        {{
+                 {"odu_cfg", {{"write_ac", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.odu_cfg.odu_cfg_bf.write_ac, 1)},
+        {{
+                 {"odu_cfg", {{"mode", 3}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.odu_cfg.odu_cfg_bf.mode, 3)},
+        {{
+                 {"odu_cfg", {{"grid", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.odu_cfg.odu_cfg_bf.grid, 1)},
+        {{
+                 {"odu_cfg", {{"swizzle_key", 7}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.odu_cfg.odu_cfg_bf.swizzle_key, 7)},
+        {{
+                 {"odu_cfg", {{"wl_bp_on_start_en", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.odu_cfg.odu_cfg_bf.wl_bp_on_start_en, 1)},
+        {{
+                 {"odu_cfg", {{"nthw", 3}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.odu_cfg.odu_cfg_bf.nthw, 3)},
+        {{
+                 {"odu_cfg", {{"permutation", 7}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.odu_cfg.odu_cfg_bf.permutation, 7)},
+        {{
+                 {"odu_cfg", {{"wcb_stall_avoidance", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.odu_cfg.odu_cfg_bf.wcb_stall_avoidance, 1)},
+        {{
+                 {"odu_cfg", {{"wcb_bypass", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.odu_cfg.odu_cfg_bf.wcb_bypass, 1)},
+        // odu_be_size ---------------------------------------------------------------------
+        {{
+                 {"odu_be_size", {{"odu_be_size", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.odu_be_size, 0xFFFFFFFF)},
+        // odu_be_cnt ---------------------------------------------------------------------
+        {{
+                 {"odu_be_cnt", {{"odu_be_cnt", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.odu_be_cnt, 0xFFFFFFFF)},
+        // odu_se_size ---------------------------------------------------------------------
+        {{
+                 {"odu_se_size", {{"odu_se_size", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.odu_se_size, 0xFFFFFFFF)},
+        // te_dim0 ---------------------------------------------------------------------
+        {{
+                 {"te_dim0", {{"te_dim_y", 0x1FFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.te_dim0.te_dim0_bf.te_dim_y, 0x1FFF)},
+        {{
+                 {"te_dim0", {{"te_dim_z", 0x1FFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.te_dim0.te_dim0_bf.te_dim_z, 0x1FFF)},
+        // te_dim1 ---------------------------------------------------------------------
+        {{
+                 {"te_dim1", {{"te_dim_x", 0x1FFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.te_dim1.te_dim1_bf.te_dim_x, 0x1FFF)},
+        // pt_base ---------------------------------------------------------------------
+        {{
+                 {"pt_base", {{"pt_base", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.pt_base, 0xFFFFFFFF)},
+        // sp_base ---------------------------------------------------------------------
+        {{
+                 {"sp_base", {{"sp_base", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.sp_base, 0xFFFFFFFF)},
+        // mpe_cfg ---------------------------------------------------------------------
+        {{
+                 {"mpe_cfg", {{"mpe_wtbias", 0xFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.mpe_cfg.mpe_cfg_bf.mpe_wtbias, 0xFF)},
+        {{
+                 {"mpe_cfg", {{"mpe_actbias", 0xFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.mpe_cfg.mpe_cfg_bf.mpe_actbias, 0xFF)},
+        {{
+                 {"mpe_cfg", {{"mpe_mode", 7}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.mpe_cfg.mpe_cfg_bf.mpe_mode, 7)},
+        {{
+                 {"mpe_cfg", {{"mpe_dense", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.mpe_cfg.mpe_cfg_bf.mpe_dense, 1)},
+        {{
+                 {"mpe_cfg", {{"mrm_weight_dense", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.mpe_cfg.mpe_cfg_bf.mrm_weight_dense, 1)},
+        {{
+                 {"mpe_cfg", {{"mrm_act_dense", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.mpe_cfg.mpe_cfg_bf.mrm_act_dense, 1)},
+        {{
+                 {"mpe_cfg", {{"mpe_daz", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.mpe_cfg.mpe_cfg_bf.mpe_daz, 1)},
+        {{
+                 {"mpe_cfg", {{"mpe_ftz", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.mpe_cfg.mpe_cfg_bf.mpe_ftz, 1)},
+        // mpe_bus_data_sel ---------------------------------------------------------------------
+        {{
+                 {"mpe_bus_data_sel", {{"mpe_bus_data_sel", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.mpe_bus_data_sel, 0xFFFFFFFF)},
+        // elop_scale ---------------------------------------------------------------------
+        {{
+                 {"elop_scale", {{"elop_scale_b", 0xFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.elop_scale.elop_scale_bf.elop_scale_b, 0xFFFF)},
+        {{
+                 {"elop_scale", {{"elop_scale_a", 0xFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.elop_scale.elop_scale_bf.elop_scale_a, 0xFFFF)},
+        // ppe_cfg ---------------------------------------------------------------------
+        {{
+                 {"ppe_cfg", {{"ppe_g8_bias_c", 0x1FF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.ppe_cfg.ppe_cfg_bf.ppe_g8_bias_c, 0x1FF)},
+        {{
+                 {"ppe_cfg", {{"ppe_g8_bias_b", 0x1FF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.ppe_cfg.ppe_cfg_bf.ppe_g8_bias_b, 0x1FF)},
+        {{
+                 {"ppe_cfg", {{"ppe_g8_bias_a", 0x1FF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.ppe_cfg.ppe_cfg_bf.ppe_g8_bias_a, 0x1FF)},
+        // ppe_bias ---------------------------------------------------------------------
+        {{
+                 {"ppe_bias", {{"ppe_bias", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.ppe_bias, 0xFFFFFFFF)},
+        // ppe_scale ---------------------------------------------------------------------
+        {{
+                 {"ppe_scale", {{"ppe_scale_shift", 0x3F}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.ppe_scale.ppe_scale_bf.ppe_scale_shift, 0x3F)},
+        {{
+                 {"ppe_scale", {{"ppe_scale_round", 3}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.ppe_scale.ppe_scale_bf.ppe_scale_round, 3)},
+        {{
+                 {"ppe_scale", {{"ppe_scale_mult", 0xFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.ppe_scale.ppe_scale_bf.ppe_scale_mult, 0xFFFF)},
+        // ppe_scale_ctrl ---------------------------------------------------------------------
+        {{
+                 {"ppe_scale_ctrl", {{"ppe_scale_override", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.ppe_scale_ctrl.ppe_scale_ctrl_bf.ppe_scale_override, 1)},
+        {{
+                 {"ppe_scale_ctrl", {{"ppe_fp_scale_override", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.ppe_scale_ctrl.ppe_scale_ctrl_bf.ppe_fp_scale_override, 1)},
+        // ppe_prelu ---------------------------------------------------------------------
+        {{
+                 {"ppe_prelu", {{"ppe_prelu_shift", 0x1F}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.ppe_prelu.ppe_prelu_bf.ppe_prelu_shift, 0x1F)},
+        {{
+                 {"ppe_prelu", {{"ppe_prelu_mult", 0x7FF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.ppe_prelu.ppe_prelu_bf.ppe_prelu_mult, 0x7FF)},
+        // ppe_scale_hclamp ---------------------------------------------------------------------
+        {{
+                 {"ppe_scale_hclamp", {{"ppe_scale_hclamp", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.ppe_scale_hclamp, 0xFFFFFFFF)},
+        // ppe_scale_lclamp ---------------------------------------------------------------------
+        {{
+                 {"ppe_scale_lclamp", {{"ppe_scale_lclamp", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.ppe_scale_lclamp, 0xFFFFFFFF)},
+        // ppe_misc ---------------------------------------------------------------------
+        {{
+                 {"ppe_misc", {{"ppe_fp16_ftz", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.ppe_misc.ppe_misc_bf.ppe_fp16_ftz, 1)},
+        {{
+                 {"ppe_misc", {{"ppe_fp16_clamp", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.ppe_misc.ppe_misc_bf.ppe_fp16_clamp, 1)},
+        {{
+                 {"ppe_misc", {{"ppe_i32_convert", 3}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.ppe_misc.ppe_misc_bf.ppe_i32_convert, 3)},
+        // ppe_fp_bias ---------------------------------------------------------------------
+        {{
+                 {"ppe_fp_bias", {{"ppe_fp_bias", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.ppe_fp_bias, 0xFFFFFFFF)},
+        // ppe_fp_scale ---------------------------------------------------------------------
+        {{
+                 {"ppe_fp_scale", {{"ppe_fp_scale", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.ppe_fp_scale, 0xFFFFFFFF)},
+        // ppe_fp_prelu ---------------------------------------------------------------------
+        {{
+                 {"ppe_fp_prelu", {{"ppe_fp_prelu", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.ppe_fp_prelu, 0xFFFFFFFF)},
+        // ppe_fp_cfg ---------------------------------------------------------------------
+        {{
+                 {"ppe_fp_cfg", {{"ppe_fp_convert", 7}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.ppe_fp_cfg.ppe_fp_cfg_bf.ppe_fp_convert, 7)},
+        {{
+                 {"ppe_fp_cfg", {{"ppe_fp_bypass", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.ppe_fp_cfg.ppe_fp_cfg_bf.ppe_fp_bypass, 1)},
+        {{
+                 {"ppe_fp_cfg", {{"ppe_bf16_round", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.ppe_fp_cfg.ppe_fp_cfg_bf.ppe_bf16_round, 1)},
+        {{
+                 {"ppe_fp_cfg", {{"ppe_fp_prelu_en", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.ppe_fp_cfg.ppe_fp_cfg_bf.ppe_fp_prelu_en, 1)},
+        // odu_ac_base ---------------------------------------------------------------------
+        {{
+                 {"odu_ac_base", {{"ac_base", 0xFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.odu_ac_base.odu_ac_base_bf.ac_base, 0xFFFFFFF)},
+        // hwp_ctrl ---------------------------------------------------------------------
+        {{
+                 {"hwp_ctrl", {{"hwp_en", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.hwp_ctrl.hwp_ctrl_bf.hwp_en, 1)},
+        {{
+                 {"hwp_ctrl", {{"hwp_stat_mode", 7}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.hwp_ctrl.hwp_ctrl_bf.hwp_stat_mode, 7)},
+        {{
+                 {"hwp_ctrl", {{"local_timer_en", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.hwp_ctrl.hwp_ctrl_bf.local_timer_en, 1)},
+        {{
+                 {"hwp_ctrl", {{"local_timer_rst", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.hwp_ctrl.hwp_ctrl_bf.local_timer_rst, 1)},
+        //  TODO: E#80252
+        //  {{
+        //           {"hwp_ctrl", {{"unique_ID", 0xFFFF}}},
+        //  },
+        //  CREATE_HW_DMA_DESC(registers_.hwp_ctrl.hwp_ctrl_bf.unique_id, 0xFFFF)},
+        // hwp_cmx_mem_addr ---------------------------------------------------------------------
+        {{
+                 {"hwp_cmx_mem_addr", {{"hwp_cmx_mem_addr", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.hwp_cmx_mem_addr.hwp_cmx_mem_addr, 0xFFFFFFFF)},
+        // odu_cast0 ---------------------------------------------------------------------
+        {{
+                 {"odu_cast0", {{"cast_enable0", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.odu_cast[0].odu_cast_bf.cast_enable, 1)},
+        {{
+                 {"odu_cast0", {{"cast_offset0", 0xFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.odu_cast[0].odu_cast_bf.cast_offset, 0xFFFFFFF)},
+        // odu_cast1 ---------------------------------------------------------------------
+        {{
+                 {"odu_cast1", {{"cast_enable1", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.odu_cast[1].odu_cast_bf.cast_enable, 1)},
+        {{
+                 {"odu_cast1", {{"cast_offset1", 0xFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.odu_cast[1].odu_cast_bf.cast_offset, 0xFFFFFFF)},
+        // odu_cast2 ---------------------------------------------------------------------
+        {{
+                 {"odu_cast2", {{"cast_enable2", 1}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.odu_cast[2].odu_cast_bf.cast_enable, 1)},
+        {{
+                 {"odu_cast2", {{"cast_offset2", 0xFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.odu_cast[2].odu_cast_bf.cast_offset, 0xFFFFFFF)},
+        // nvar_tag ---------------------------------------------------------------------
+        {{
+                 {"nvar_tag", {{"nvar_tag", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.nvar_tag, 0xFFFFFFFF)},
+        // pallet ---------------------------------------------------------------------
+        {{
+                 {"pallet0", {{"pallet0", 0xFFFF}, {"pallet1", 0xFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.pallet[0], 0xFFFFFFFF)},
+        {{
+                 {"pallet1", {{"pallet2", 0xFFFF}, {"pallet3", 0xFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.pallet[1], 0xFFFFFFFF)},
+        {{
+                 {"pallet2", {{"pallet4", 0xFFFF}, {"pallet5", 0xFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.pallet[2], 0xFFFFFFFF)},
+        {{
+                 {"pallet3", {{"pallet6", 0xFFFF}, {"pallet7", 0xFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.pallet[3], 0xFFFFFFFF)},
+        {{
+                 {"pallet4", {{"pallet8", 0xFFFF}, {"pallet9", 0xFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.pallet[4], 0xFFFFFFFF)},
+        {{
+                 {"pallet5", {{"pallet10", 0xFFFF}, {"pallet11", 0xFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.pallet[5], 0xFFFFFFFF)},
+        {{
+                 {"pallet6", {{"pallet12", 0xFFFF}, {"pallet13", 0xFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.pallet[6], 0xFFFFFFFF)},
+        {{
+                 {"pallet7", {{"pallet14", 0xFFFF}, {"pallet15", 0xFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.pallet[7], 0xFFFFFFFF)},
+        // se_addr1 ---------------------------------------------------------------------
+        {{
+                 {"se_addr1", {{"se_addr1", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.se_addr1, 0xFFFFFFFF)},
+        // sparsity_addr1 ---------------------------------------------------------------------
+        {{
+                 {"sparsity_addr1", {{"sparsity_addr1", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.sparsity_addr1, 0xFFFFFFFF)},
+        // se_addr2 ---------------------------------------------------------------------
+        {{
+                 {"se_addr2", {{"se_addr2", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.se_addr2, 0xFFFFFFFF)},
+        // sparsity_addr2 ---------------------------------------------------------------------
+        {{
+                 {"sparsity_addr2", {{"sparsity_addr2", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.sparsity_addr2, 0xFFFFFFFF)},
+        // se_addr3 ---------------------------------------------------------------------
+        {{
+                 {"se_addr3", {{"se_addr3", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.se_addr3, 0xFFFFFFFF)},
+        // sparsity_addr3 ---------------------------------------------------------------------
+        {{
+                 {"sparsity_addr3", {{"sparsity_addr3", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.sparsity_addr3, 0xFFFFFFFF)},
+        // se_sp_size1 ---------------------------------------------------------------------
+        {{
+                 {"se_sp_size1", {{"se_sp_size1", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.se_sp_size1, 0xFFFFFFFF)},
+        // se_sp_size2 ---------------------------------------------------------------------
+        {{
+                 {"se_sp_size2", {{"se_sp_size2", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(registers_.se_sp_size2, 0xFFFFFFFF)},
+        // barriers_ ---------------------------------------------------------------------
+        {{
+                 {"barriers_wait_mask_hi_", {{"barriers_wait_mask_hi_", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(barriers_.wait_mask_hi_, 0xFFFFFFFF)},
+        {{
+                 {"barriers_wait_mask_lo_", {{"barriers_wait_mask_lo_", 0xFFFFFFFFFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(barriers_.wait_mask_lo_, 0xFFFFFFFFFFFFFFFF)},
+        {{
+                 {"barriers_post_mask_hi_", {{"barriers_post_mask_hi_", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(barriers_.post_mask_hi_, 0xFFFFFFFF)},
+        {{
+                 {"barriers_post_mask_lo_", {{"barriers_post_mask_lo_", 0xFFFFFFFFFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(barriers_.post_mask_lo_, 0xFFFFFFFFFFFFFFFF)},
+        {{
+                 {"barriers_group_mask_", {{"group_", 0xFF}}},
+         },
+         CREATE_HW_DMA_DESC(barriers_.group_, 0xFF)},
+        {{
+                 {"barriers_group_mask_", {{"mask_", 0xFF}}},
+         },
+         CREATE_HW_DMA_DESC(barriers_.mask_, 0xFF)},
+        // barriers_sched_ ---------------------------------------------------------------------
+        {{
+                 {"barriers_sched_", {{"start_after_", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(barriers_sched_.start_after_, 0xFFFFFFFF)},
+        {{
+                 {"barriers_sched_", {{"clean_after_", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(barriers_sched_.clean_after_, 0xFFFFFFFF)},
+        // output_sparsity_offset_ ---------------------------------------------------------------------
+        {{
+                 {"output_sparsity_offset_invariant_", {{"output_sparsity_offset_invariant_", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(output_sparsity_offset_, 0xFFFFFFFF)},
+        // hwp_cmx_base_offset_ ---------------------------------------------------------------------
+        {{
+                 {"hwp_cmx_base_offset_", {{"hwp_cmx_base_offset_", 0xFFFFFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(hwp_cmx_base_offset_, 0xFFFFFFFF)},
+        // variant_count_ ---------------------------------------------------------------------
+        {{
+                 {"variant_count_", {{"variant_count_", 0xFFFF}}},
+         },
+         CREATE_HW_DMA_DESC(variant_count_, 0xFFFF)},
+        // cluster_ ---------------------------------------------------------------------
+        {{
+                 {"cluster_invariant_", {{"cluster_invariant_", 0xFF}}},
+         },
+         CREATE_HW_DMA_DESC(cluster_, 0xFF)},
+        // is_cont_conv_ ---------------------------------------------------------------------
+        {{
+                 {"is_cont_conv_", {{"is_cont_conv_", 0xFF}}},
+         },
+         CREATE_HW_DMA_DESC(is_cont_conv_, 0xFF)},
+};
+
+INSTANTIATE_TEST_CASE_P(NPUReg40XX_MappedRegs, NPUReg40XX_NpuDPUInvariantTest, testing::ValuesIn(dpuInvariantFieldSet));

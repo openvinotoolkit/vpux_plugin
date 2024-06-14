@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -36,14 +36,14 @@ func.func @ShareParentChildBarriers() -> memref<1x16x1x1xf16, #NHWC, @DDR> {
             outputs(%buf1: memref<1x16x1x1xf16, #NHWC, @DDR>)
             -> memref<1x16x1x1xf16, #NHWC, @DDR>
     }
- 
+
     VPURT.Task waits(%bar0: !VPURT.Barrier) {
         %0 = VPUIP.NNDMA {port = 0 : i64}
             inputs(%buf0: memref<1x16x1x1xf16, #NHWC, @DDR>)
             outputs(%buf1: memref<1x16x1x1xf16, #NHWC, @DDR>)
             -> memref<1x16x1x1xf16, #NHWC, @DDR>
     }
-    
+
     VPURT.Task updates(%bar1: !VPURT.Barrier) {
         %0 = VPUIP.NNDMA {port = 0 : i64}
             inputs(%buf0: memref<1x16x1x1xf16, #NHWC, @DDR>)
@@ -82,7 +82,7 @@ func.func @DoNotShareParentChildBarriers() -> memref<1x16x1x1xf16, #NHWC, @DDR> 
             outputs(%buf1: memref<1x16x1x1xf16, #NHWC, @DDR>)
             -> memref<1x16x1x1xf16, #NHWC, @DDR>
     }
- 
+
     VPURT.Task waits(%bar0: !VPURT.Barrier) {
         %0 = VPUIP.NNDMA {port = 0 : i64}
             inputs(%buf0: memref<1x16x1x1xf16, #NHWC, @DDR>)

@@ -1,0 +1,778 @@
+//
+// Copyright (C) 2022 Intel Corporation.
+// SPDX-License-Identifier: Apache 2.0
+//
+
+#include "vpux/compiler/dialect/VPURT/interfaces/barrier_simulator.hpp"
+#include "vpux/compiler/dialect/IE/utils/resources.hpp"
+
+#include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/task.hpp"
+
+#include "vpux/compiler/utils/dma.hpp"
+
+#include "vpux/utils/core/enums.hpp"
+#include "vpux/utils/core/range.hpp"
+#include "vpux/utils/core/string_ref.hpp"
+
+using namespace vpux;
+
+//
+// Virtual ID manipulation
+//
+
+namespace {
+
+constexpr StringLiteral virtualIdAttrName = "VPURT.virtualId";
+
+void assignVirtualIds(mlir::Operation* parentOp) {
+    int64_t vid = 0;
+
+    parentOp->walk([&](mlir::Operation* op) {
+        if (mlir::isa<VPURT::DeclareVirtualBarrierOp, VPURT::ConfigureBarrierOp>(op)) {
+            VPUX_THROW_WHEN(vid >= std::numeric_limits<uint32_t>::max(), "Barrier virtual id '{0}' is too large", vid);
+
+            op->setAttr(virtualIdAttrName, getIntAttr(op->getContext(), vid++));
+        }
+    });
+}
+
+void cleanUpVirtualIds(mlir::Operation* parentOp) {
+    parentOp->walk([&](mlir::Operation* op) {
+        if (mlir::isa<VPURT::DeclareVirtualBarrierOp, VPURT::ConfigureBarrierOp>(op)) {
+            op->removeAttr(virtualIdAttrName);
+        }
+    });
+}
+
+int64_t getVirtualId(mlir::Operation* op) {
+    const auto attr = op->getAttr(virtualIdAttrName).dyn_cast_or_null<mlir::IntegerAttr>();
+    VPUX_THROW_WHEN(attr == nullptr, "The barrier operation at '{0}' doesn't have attribute '{1}'", op->getLoc(),
+                    virtualIdAttrName);
+
+    return attr.getValue().getSExtValue();
+}
+
+}  // namespace
+
+//
+// VirtualDependencyTracker
+//
+
+int64_t vpux::VPURT::VirtualDependencyTracker::add(VPURT::TaskOp taskOp) {
+    auto extract = [&](Range& range, mlir::ValueRange barriers) {
+        range.first = _ids.size();
+
+        for (const auto bar : barriers) {
+            const auto vid = getVirtualId(bar.getDefiningOp());
+            _ids.push_back(vid);
+            ++range.second;
+        }
+    };
+
+    Dependency d;
+    extract(d.consumer, taskOp.getWaitBarriers());
+    extract(d.producer, taskOp.getUpdateBarriers());
+
+    if (d.consumer.second != 0 || d.producer.second != 0) {
+        _deps.push_back(d);
+        return checked_cast<int64_t>(_deps.size() - 1);
+    }
+
+    return 0;
+}
+
+int64_t vpux::VPURT::VirtualDependencyTracker::add(ArrayRef<int64_t> waits, ArrayRef<int64_t> posts) {
+    auto extract = [&](Range& range, ArrayRef<int64_t> barriers) {
+        range.first = _ids.size();
+        range.second = barriers.size();
+        _ids.insert(_ids.end(), barriers.begin(), barriers.end());
+    };
+
+    if (!waits.empty() || !posts.empty()) {
+        Dependency d;
+        extract(d.consumer, waits);
+        extract(d.producer, posts);
+
+        _deps.push_back(d);
+        return checked_cast<int64_t>(_deps.size() - 1);
+    }
+
+    return 0;
+}
+
+int64_t vpux::VPURT::VirtualDependencyTracker::clone(int64_t i) {
+    _deps.push_back(dep(i));
+    return checked_cast<int64_t>(_deps.size() - 1);
+}
+
+void vpux::VPURT::VirtualDependencyTracker::print(Logger log) const {
+    log.trace("{0} dependencies:", _deps.size());
+
+    for (const auto& p : _deps | indexed) {
+        const auto& d = p.value();
+        const auto ind = p.index();
+
+        log.nest().trace("Dependency[{0}]: consumer: {1} - {2}, producer: {3} - {4}", ind, d.consumer.first,
+                         d.consumer.second, d.producer.first, d.producer.second);
+    }
+}
+
+//
+// BarrierSimulator
+//
+
+vpux::VPURT::BarrierSimulator::BarrierSimulator(mlir::func::FuncOp funcOp) {
+    _barrierProducerSlotCount = static_cast<int64_t>(VPUIP::getBarrierMaxVariantCount(funcOp));
+    _barrierTotalSlotCount = static_cast<int64_t>(VPUIP::getBarrierMaxVariantSum(funcOp));
+    _availableBarriers = VPUIP::getNumAvailableBarriers(funcOp);
+    _dmaTasks.resize(VPUIP::getNumberOfIndependentDmaQueues(funcOp));
+    assignVirtualIds(funcOp);
+    parseBarriers(funcOp);
+    parseTasks(funcOp);
+    cleanUpVirtualIds(funcOp);
+}
+
+const VPURT::BarrierConfig& vpux::VPURT::BarrierSimulator::getConfig(mlir::Value bar) const {
+    const auto it = _barriersMap.find(bar.getDefiningOp());
+    VPUX_THROW_WHEN(it == _barriersMap.end(), "Barrier at '{0}' was not covered by BarrierSimulator", bar.getLoc());
+    return _barriers[it->second];
+}
+
+void vpux::VPURT::BarrierSimulator::parseBarriers(mlir::Operation* parentOp) {
+    _isDynamicBarriers = false;
+
+    parentOp->walk([&](VPURT::DeclareVirtualBarrierOp barrierOp) {
+        _isDynamicBarriers = true;
+
+        const auto vid = getVirtualId(barrierOp);
+        VPUX_THROW_UNLESS(vid == checked_cast<int64_t>(_barriers.size()),
+                          "Got wrong virtual ID for the barrier at '{0}'", barrierOp->getLoc());
+
+        _barriersMap.insert({barrierOp, _barriers.size()});
+        _barrierVID.insert({_barriers.size(), barrierOp});
+        _barriers.emplace_back(barrierOp->getLoc());
+    });
+
+    parentOp->walk([&](VPURT::ConfigureBarrierOp barrierOp) {
+        VPUX_THROW_WHEN(_isDynamicBarriers, "Can't have both dynamic and static barriers at the same time");
+
+        const auto vid = getVirtualId(barrierOp);
+        VPUX_THROW_UNLESS(vid == checked_cast<int64_t>(_barriers.size()),
+                          "Got wrong virtual ID for the barrier at '{0}'", barrierOp->getLoc());
+
+        _barriersMap.insert({barrierOp, _barriers.size()});
+        _barriers.emplace_back(barrierOp->getLoc(), barrierOp.getId());
+
+        _usedBarriers = std::max(_usedBarriers, barrierOp.getId() + 1);
+    });
+}
+
+void vpux::VPURT::BarrierSimulator::parseTasks(mlir::Operation* parentOp) {
+    const auto updateBarrierConfigs = [&](VPURT::TaskOp taskOp, const int64_t count = 1) {
+        for (const auto bar : taskOp.getWaitBarriers()) {
+            const auto v = getVirtualId(bar.getDefiningOp());
+            _barriers[v].consumerCount += count;
+        }
+
+        for (const auto bar : taskOp.getUpdateBarriers()) {
+            const auto v = getVirtualId(bar.getDefiningOp());
+            _barriers[v].producerCount += count;
+        }
+    };
+
+    // Maintain internally information about already encountered DMA FIFO queues IDs
+    // which are composed of DMA port and channel. Depending on platform and settings
+    // there might be different independent DMA FIFOs to track as part of barrier handling
+    std::unordered_map<int64_t, int64_t> dmaQueueIdToIndexMap;
+
+    parentOp->walk([&](VPURT::TaskOp taskOp) {
+        auto* wrappedTaskOp = taskOp.getInnerTaskOp();
+        if (auto clusterTilingOp = mlir::dyn_cast<VPUIP::NCEClusterTilingOp>(wrappedTaskOp)) {
+            wrappedTaskOp = clusterTilingOp.getInnerTaskOp();
+        }
+
+        const auto virtualDep = _vdt.add(taskOp);
+
+        switch (taskOp.getExecutorKind()) {
+        case VPU::ExecutorKind::DMA_NN: {
+            const auto ports = VPURT::getDMATaskPorts(taskOp);
+            auto dmaTask = mlir::dyn_cast<VPUIP::DMATypeOpInterface>(wrappedTaskOp);
+            VPUX_THROW_WHEN(dmaTask == nullptr, "Not a DMA task");
+
+            SmallVector<DmaTaskIdx> dmaTaskIndexs;
+            for (auto& port : ports) {
+                // Find index of DMA FIFO that is analyzed by barrier simulator
+                // If this DMA task corresponds to a FIFO that was not already encountered
+                // then increase the size of tracked DMA FIFOs
+                int64_t dmaTasksQueueIndex;
+                auto dmaQueueId = getDMAQueueIdEncoding(port, dmaTask.getChannelType());
+
+                auto dmaQueueIt = dmaQueueIdToIndexMap.find(dmaQueueId);
+                if (dmaQueueIt == dmaQueueIdToIndexMap.end()) {
+                    dmaTasksQueueIndex = dmaQueueIdToIndexMap.size();
+                    dmaQueueIdToIndexMap[dmaQueueId] = dmaTasksQueueIndex;
+                } else {
+                    dmaTasksQueueIndex = dmaQueueIt->second;
+                }
+
+                VPUX_THROW_UNLESS(dmaTasksQueueIndex < static_cast<int64_t>(_dmaTasks.size()),
+                                  "NNDMAOp queue index '{0}' larger than maximum number of queues '{1}'",
+                                  dmaTasksQueueIndex, _dmaTasks.size());
+                auto dmaTaskIdx = std::make_pair(port, _dmaTasks[dmaTasksQueueIndex].size());
+                dmaTaskIndexs.push_back(dmaTaskIdx);
+                _dmaTasks[dmaTasksQueueIndex].emplace_back(virtualDep);
+            }
+            updateBarrierConfigs(taskOp);
+            if (dmaTaskIndexs.size() > 1) {
+                _multiQueueDmaTaskStatus.insert({dmaTaskIndexs, false});
+            }
+            break;
+        }
+
+        case VPU::ExecutorKind::DPU: {
+            auto nceOp = mlir::dyn_cast<VPUIP::NCEClusterTaskOp>(wrappedTaskOp);
+            VPUX_THROW_UNLESS(nceOp != nullptr, "Could not cast to NCE task");
+
+            _nceTasks.emplace_back(virtualDep, nceOp.getNumVariants());
+            updateBarrierConfigs(taskOp, nceOp.getNumVariants());
+            break;
+        }
+
+        case VPU::ExecutorKind::SHAVE_ACT: {
+            _actTasks.emplace_back(virtualDep);
+            updateBarrierConfigs(taskOp);
+            break;
+        }
+
+        case VPU::ExecutorKind::SHAVE_UPA: {
+            _upaTasks.emplace_back(virtualDep);
+            updateBarrierConfigs(taskOp);
+            break;
+        }
+
+        case VPU::ExecutorKind::M2I: {
+            _m2iTasks.emplace_back(virtualDep);
+            updateBarrierConfigs(taskOp);
+            break;
+        }
+
+        // TODO: Analyze and define executor type for funcOp - E#117624
+        // Using DMA is a temporary change
+        case VPU::ExecutorKind::UNKNOWN: {
+            _dmaTasks[0].emplace_back(virtualDep);
+            updateBarrierConfigs(taskOp);
+            break;
+        }
+
+        default:
+            VPUX_THROW("Unsupported executor '{0}'", taskOp.getExecutorKind());
+        }
+    });
+}
+
+//
+// The limitation is not related to HW capabilities or FIFO depth, but to the fact that the runtime needs to know when a
+// workload is completed, in order to replace it with another one in NN CMX.
+//
+// Since there's no other efficient feedback mechanism from DPU/SNN to LNN, LNN monitors the barrier production of DPU
+// tasks and recycles the storage when the corresponding barrier gets produced. The limitation comes from how many
+// invariants/variants can be stored in NN CMX at the same time. For single cluster inferences these counts are 64/512,
+// while for 4-cluster inferences 128/512. If too many invariants/variants contribute to the same barrier, the runtime
+// will not receive the confirmation that it may recycle the storage to bring in the next workloads, hence the deadlock.
+//
+// Since the storage area is double buffered, and the workloads in question may start at any index in the buffer, it's
+// only safe for at most <storage_size / 2 + 1> consecutive invariants/variants to produce the same barrier. So finally,
+// the limits are:
+//
+// On single cluster:
+//   32 + 1 invariants
+//   256 + 1 variants
+// On 4 clusters:
+//   64 + 1 invariants
+//   256 + 1 variants
+//
+mlir::LogicalResult vpux::VPURT::BarrierSimulator::checkProducerCount(Logger log) const {
+    for (auto vid : irange(_barriers.size())) {
+        const auto producerCount = _barriers[vid].producerCount;
+
+        if (producerCount > _barrierProducerSlotCount) {
+            log.error("Barrier {0} at '{1}' has {2} producers (max {3})", vid, _barriers[vid].loc, producerCount,
+                      _barrierProducerSlotCount);
+            return mlir::failure();
+        }
+    }
+
+    return mlir::success();
+}
+
+mlir::LogicalResult vpux::VPURT::BarrierSimulator::checkProducerAndConsumerCount(Logger log) const {
+    for (auto vid : irange(_barriers.size())) {
+        const auto producerCount = _barriers[vid].producerCount;
+        const auto consumerCount = _barriers[vid].consumerCount;
+
+        if (producerCount + consumerCount > _barrierTotalSlotCount) {
+            log.error("Barrier {0} at '{1}' has {2} producers and {3} consumers (max sum {4})", vid, _barriers[vid].loc,
+                      producerCount, consumerCount, _barrierTotalSlotCount);
+            return mlir::failure();
+        }
+    }
+
+    return mlir::success();
+}
+
+SmallVector<mlir::DenseSet<VPURT::DeclareVirtualBarrierOp>>
+vpux::VPURT::BarrierSimulator::getBarrierBatchesToLegalize() {
+    // convert id's to barriers
+    SmallVector<mlir::DenseSet<DeclareVirtualBarrierOp>> batches;
+    for (const auto& batch : _barrierBatchesToLegalize) {
+        mlir::DenseSet<DeclareVirtualBarrierOp> barrierBatch;
+
+        for (const auto& barrierVID : batch) {
+            auto barrierOp = mlir::dyn_cast<VPURT::DeclareVirtualBarrierOp>(_barrierVID[barrierVID]);
+            VPUX_THROW_UNLESS(barrierOp != nullptr, "Got invalid barrier type {0}", _barrierVID[barrierVID]);
+            if (barrierOp.getBarrier().use_empty()) {
+                // barrier will be removed
+                continue;
+            }
+            barrierBatch.insert(barrierOp);
+        }
+
+        if (barrierBatch.empty()) {
+            // case when all barriers have no use
+            continue;
+        }
+        batches.push_back(barrierBatch);
+    }
+    return batches;
+}
+
+mlir::LogicalResult vpux::VPURT::BarrierSimulator::simulateBarriers(Logger log, std::optional<int64_t> numBarriers,
+                                                                    std::optional<bool> barrierLegalization) {
+    if (numBarriers.has_value()) {
+        VPUX_THROW_UNLESS(numBarriers.value() <= _availableBarriers,
+                          "Provided number of barriers '{0}' is greater than HW limitation '{1}'", numBarriers,
+                          _availableBarriers);
+    }
+
+    auto activeBarrierLimit = checked_cast<size_t>(numBarriers.value_or(_availableBarriers));
+    SmallVector<int64_t> toVirtual(activeBarrierLimit, -1);
+    bool barrierLegalizationSim = barrierLegalization.value_or(false);
+
+    RingBuffer<int64_t> nextReal;
+    if (_isDynamicBarriers) {
+        nextReal.reset(toVirtual.size());
+
+        while (!nextReal.full()) {
+            nextReal.push(checked_cast<int64_t>(nextReal.size()));
+        }
+    }
+
+    size_t bar = 0;
+    SmallVector<size_t> dma(_dmaTasks.size(), 0);
+    size_t dpu = 0;
+    size_t act = 0;
+    size_t upa = 0;
+    size_t m2i = 0;
+    bool progressed = false;
+
+    log.trace("Simulating barrier flow ({0}) with {1} barries", _isDynamicBarriers ? "assignment" : "validation",
+              toVirtual.size());
+
+    auto isDmaFifoNotComplete = [&]() {
+        for (size_t i = 0; i < _dmaTasks.size(); i++) {
+            if (dma[i] < _dmaTasks[i].size()) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    auto getDmaProgressLog = [&]() {
+        std::string dmaLog = "";
+        for (size_t i = 0; i < _dmaTasks.size(); i++) {
+            dmaLog += " " + std::to_string(dma[i]) + " / " + std::to_string(_dmaTasks[i].size());
+        }
+        return dmaLog;
+    };
+
+    for (; bar < _barriers.size() || isDmaFifoNotComplete() || dpu < _nceTasks.size() || act < _actTasks.size() ||
+           upa < _upaTasks.size() || m2i < _m2iTasks.size();
+         progressed = false) {
+        log.nest(1).trace("DMA:{0}; DPU: {1} / {2}; ACT: {3} / {4}; UPA: {5} / {6}; M2I: {7} / "
+                          "{8}; BAR: {9} / {10}",
+                          getDmaProgressLog(), dpu, _nceTasks.size(), act, _actTasks.size(), upa, _upaTasks.size(), m2i,
+                          _m2iTasks.size(), bar, _barriers.size());
+
+        // Static vs dynamic barriers need a different loop exit condition
+        const auto hasBarriersToMap = [&]() {
+            if (_isDynamicBarriers) {
+                return !nextReal.empty();
+            } else {
+                return toVirtual[_barriers[bar].realId] == -1;
+            }
+        };
+
+        // Map new barriers
+        log.nest(2).trace("Map new barriers");
+        for (; bar < _barriers.size() && hasBarriersToMap(); ++bar, progressed = true) {
+            int64_t real = 0;
+
+            if (_isDynamicBarriers) {
+                real = nextReal.front();
+                nextReal.pop();
+
+                _barriers[bar].realId = real;
+            } else {
+                real = _barriers[bar].realId;
+            }
+
+            toVirtual[checked_cast<size_t>(real)] = checked_cast<int64_t>(bar);
+
+            log.nest(3).trace("VID[{0}]: PID {1}, producers {2}, consumers {3}", bar, real,
+                              _barriers[bar].producerCount, _barriers[bar].consumerCount);
+        }
+
+        // condition to create new batch of barriers
+        const auto isNewBatchNeeded = [&]() {
+            if (_barrierBatchesToLegalize.empty()) {
+                return true;
+            }
+
+            if (_barrierBatchesToLegalize.rbegin()->empty()) {
+                // do not create new batch if last one is empty
+                return false;
+            }
+
+            bool activeBarrierIsMapped = false;
+            for (const auto& activeBar : toVirtual) {
+                VPUX_THROW_WHEN(activeBar == -1, "Found not mapped barrier with exceeding barriers");
+                if (_barrierBatchesToLegalize.rbegin()->find(activeBar) != _barrierBatchesToLegalize.rbegin()->end()) {
+                    // check if last batch contains any current active barriers
+                    return false;
+                }
+                activeBarrierIsMapped = true;
+            }
+
+            return activeBarrierIsMapped;
+        };
+
+        // store barriers to legalize in batches, count also free barriers (-1) as during
+        // iteration barriers can be produced and consumed, but all need to be mapped
+        if (barrierLegalizationSim && toVirtual.size() > activeBarrierLimit) {
+            if (isNewBatchNeeded()) {
+                // create new batch
+                _barrierBatchesToLegalize.push_back({});
+            }
+            for (const auto& activeBar : toVirtual) {
+                VPUX_THROW_WHEN(activeBar == -1, "Found not mapped barrier with exceeding barriers");
+                _barrierBatchesToLegalize.rbegin()->insert(activeBar);
+            }
+        }
+
+        // Process DMAs
+        log.nest(2).trace("Process DMAs");
+        for (size_t e = 0; e < _dmaTasks.size(); ++e) {
+            for (; dma[e] < _dmaTasks[e].size(); ++dma[e], progressed = true) {
+                auto& dt = _dmaTasks[e][dma[e]];
+
+                auto isDMATaskInMultiQueues = [&]() {
+                    return llvm::find_if(_multiQueueDmaTaskStatus, [&](const auto& item) {
+                        const auto& multiTaskList = item.first;
+                        DmaTaskIdx currentDmaTaskIdx{e, dma[e]};
+                        return llvm::find(multiTaskList, currentDmaTaskIdx) != multiTaskList.end();
+                    });
+                };
+                auto iter = isDMATaskInMultiQueues();
+                // Check if dma task is processed in other task queue
+                if (iter == _multiQueueDmaTaskStatus.end() || !(iter->second)) {
+                    const auto status =
+                            processSim(_vdt.dep(dt.virtualDep), dt, dt.count, "DMA[" + std::to_string(e) + "]", dma[e],
+                                       toVirtual, nextReal, log.nest(3));
+
+                    if (status == Status::Fail) {
+                        return mlir::failure();
+                    }
+                    if (status == Status::Skip) {
+                        break;
+                    }
+                    log.nest(3).trace("DMA[{0}][{1}]: waits: {2}, posts: {3}", e, dma[e], dt.waits, dt.posts);
+                    if (iter != _multiQueueDmaTaskStatus.end()) {
+                        // mark task as processed
+                        iter->second = true;
+                    }
+                } else if (iter != _multiQueueDmaTaskStatus.end()) {
+                    log.trace("skip DMA[{0}][{1}] since it has been processed in other queue", e, dma[e]);
+                }
+            }
+        }
+
+        // Process DPUs
+        log.nest(2).trace("Process DPUs");
+        for (; dpu < _nceTasks.size(); ++dpu, progressed = true) {
+            auto& dt = _nceTasks[dpu];
+
+            const auto status =
+                    processSim(_vdt.dep(dt.virtualDep), dt, dt.count, "DPU", dpu, toVirtual, nextReal, log.nest(3));
+
+            if (status == Status::Fail) {
+                return mlir::failure();
+            }
+            if (status == Status::Skip) {
+                break;
+            }
+
+            log.nest(3).trace("DPU[{0}]: waits: {1}, posts: {2}, variants: {3}", dpu, dt.waits, dt.posts, dt.count);
+        }
+
+        // Process Act Kernels
+        log.nest(2).trace("Process Act Kernels");
+        for (; act < _actTasks.size(); ++act, progressed = true) {
+            auto& dt = _actTasks[act];
+
+            const auto status =
+                    processSim(_vdt.dep(dt.virtualDep), dt, dt.count, "ACT", act, toVirtual, nextReal, log.nest(3));
+
+            if (status == Status::Fail) {
+                return mlir::failure();
+            }
+            if (status == Status::Skip) {
+                break;
+            }
+
+            log.nest(3).trace("ACT[{0}]: waits: {1}, posts: {2}", act, dt.waits, dt.posts);
+        }
+
+        // Process UPA tasks
+        log.nest(2).trace("Process UPA tasks");
+        for (; upa < _upaTasks.size(); ++upa, progressed = true) {
+            auto& dt = _upaTasks[upa];
+
+            const auto status =
+                    processSim(_vdt.dep(dt.virtualDep), dt, dt.count, "UPA", upa, toVirtual, nextReal, log.nest(3));
+
+            if (status == Status::Fail) {
+                return mlir::failure();
+            }
+            if (status == Status::Skip) {
+                break;
+            }
+
+            log.nest(3).trace("UPA[{0}]: waits: {1}, posts: {2}", upa, dt.waits, dt.posts);
+        }
+
+        // Process M2I tasks
+        log.nest(2).trace("Process M2I tasks");
+        for (; m2i < _m2iTasks.size(); ++m2i, progressed = true) {
+            auto& dt = _m2iTasks[m2i];
+
+            const auto status =
+                    processSim(_vdt.dep(dt.virtualDep), dt, dt.count, "M2I", m2i, toVirtual, nextReal, log.nest(3));
+
+            if (status == Status::Fail) {
+                return mlir::failure();
+            }
+            if (status == Status::Skip) {
+                break;
+            }
+
+            log.nest(3).trace("M2I[{0}]: waits: {1}, posts: {2}", m2i, dt.waits, dt.posts);
+        }
+
+        if (barrierLegalizationSim) {
+            // update progress
+            log.nest(1).trace("Barrier Legalization: progressed={0}", progressed);
+            auto freeBarriers = checked_cast<size_t>(std::count(toVirtual.begin(), toVirtual.end(), -1));
+
+            const auto updateNextReal = [&]() {
+                nextReal.reset(toVirtual.size());
+                for (const auto& p : toVirtual | indexed) {
+                    if (p.value() == -1) {
+                        // find all indices equal to -1
+                        nextReal.push(checked_cast<int64_t>(p.index()));
+                    }
+                }
+            };
+
+            if (!progressed) {
+                VPUX_THROW_WHEN(freeBarriers > 0, "Simulation not progressed and there are '{0}' free barriers",
+                                freeBarriers);
+                log.nest(2).trace("There are {0} free barriers", freeBarriers);
+
+                // increase real barrier size
+                toVirtual.push_back(-1);
+                log.nest(3).trace("Increased real barrier size to {0} physical barriers", toVirtual.size());
+
+                progressed = true;
+                updateNextReal();
+            } else if (freeBarriers > 0 && toVirtual.size() > activeBarrierLimit) {
+                // decrease exceeding barriers when possible
+                log.nest(2).trace("Reduce exceeding active barrier count, there are {0} free barriers", freeBarriers);
+
+                size_t freeBarrierCount = 0;
+                for (const auto& p : toVirtual | indexed) {
+                    // remap barrier mapping
+                    if (p.value() != -1) {
+                        // not a free barrier, update _barriers[v].realId
+                        log.nest(4).trace("Remap '{0}' from '{1}' -> '{2}'", p.value(), _barriers[p.value()].realId,
+                                          p.index() - freeBarrierCount);
+                        _barriers[p.value()].realId = checked_cast<int64_t>(p.index() - freeBarrierCount);
+                        continue;
+                    }
+
+                    if (toVirtual.size() - freeBarrierCount > activeBarrierLimit) {
+                        // remaining free barriers will stay
+                        ++freeBarrierCount;
+                    }
+                }
+
+                // remove free barriers exceeding active barrier limit
+                auto indexItr = std::find(toVirtual.begin(), toVirtual.end(), -1);
+                while (indexItr != toVirtual.end() && toVirtual.size() > activeBarrierLimit) {
+                    toVirtual.erase(indexItr);
+                    indexItr = std::find(toVirtual.begin(), toVirtual.end(), -1);
+                }
+
+                updateNextReal();
+            }
+        }
+
+        if (!progressed) {
+            log.error("Barrier simulation blocked at DMA:{0}; DPU: {1} / {2}; ACT: {3} / {4}; UPA: "
+                      "{5} / {6}; M2I: {7} / {8}; BAR: {9} / {10}",
+                      getDmaProgressLog(), dpu, _nceTasks.size(), act, _actTasks.size(), upa, _upaTasks.size(), m2i,
+                      _m2iTasks.size(), bar, _barriers.size());
+
+            for (size_t b = 0; b < bar; ++b) {
+                if (_barriers[b].producerCount != 0 || _barriers[b].consumerCount != 0)
+                    log.error("Barrier {0} mapped to real {1} with remaining producers: {2}, consumers: {3}", b,
+                              _barriers[b].realId, _barriers[b].producerCount, _barriers[b].consumerCount);
+            }
+
+            return mlir::failure();
+        }
+    }
+
+    if (barrierLegalizationSim && !_barrierBatchesToLegalize.empty()) {
+        log.trace("Barrier Legalization: barrier batch to legalize {0}", _barrierBatchesToLegalize.size());
+        return mlir::failure();
+    }
+
+    return mlir::success();
+}
+
+VPURT::BarrierSimulator::Status vpux::VPURT::BarrierSimulator::processSim(
+        const VirtualDependencyTracker::Dependency& dep, BarrierUserConfig& user, int64_t count, StringRef taskType,
+        int64_t index, SmallVectorImpl<int64_t>& toVirtual, RingBuffer<int64_t>& nextReal, Logger log) {
+    const auto isBarrierMapped = [&](int64_t v, int64_t r) {
+        if (r < 0 || checked_cast<size_t>(r) >= toVirtual.size()) {
+            return false;
+        }
+        if (_isDynamicBarriers) {
+            return true;
+        }
+        return toVirtual[r] == v;
+    };
+
+    for (auto i : irange(dep.consumer.second)) {
+        const auto v = _vdt.id(dep.consumer.first + i);
+        const auto r = _barriers[v].realId;
+
+        if (!isBarrierMapped(v, r)) {
+            log.trace("{0}[{1}] is waiting for consumer barrier {2} to be mapped", taskType, index, v);
+            return Status::Skip;
+        }
+
+        if (_barriers[v].producerCount > 0) {
+            log.trace("{0}[{1}] waiting for barrier {2} to be produced, {3} remaining", taskType, index, v,
+                      _barriers[v].producerCount);
+            return Status::Skip;
+        }
+    }
+
+    for (auto i : irange(dep.producer.second)) {
+        const auto v = _vdt.id(dep.producer.first + i);
+        const auto r = _barriers[v].realId;
+
+        if (!isBarrierMapped(v, r)) {
+            log.trace("{0}[{1}] is waiting for producer barrier {2} to be mapped", taskType, index, v);
+            return Status::Skip;
+        }
+    }
+
+    user.startAfter = 0;
+
+    for (auto i : irange(dep.consumer.second)) {
+        const auto v = _vdt.id(dep.consumer.first + i);
+        const auto r = _barriers[v].realId;
+
+        if (isBarrierMapped(v, r)) {
+            // barrier not ready to be consumed
+            if ((_barriers[v].producerCount != 0) || (_barriers[v].consumerCount < count)) {
+                log.error(
+                        "Simulate barriers failed - barrier {0} not ready to be consumed (producers {1} consumers {2})",
+                        v, _barriers[v].producerCount, _barriers[v].consumerCount);
+                return Status::Fail;
+            }
+
+            _barriers[v].consumerCount -= count;
+            user.waits.insert(r);
+            user.startAfter = std::max(user.startAfter, v + 1);
+
+            if (_barriers[v].consumerCount == 0) {
+                toVirtual[r] = -1;
+
+                if (_isDynamicBarriers) {
+                    nextReal.push(r);
+                }
+            }
+        } else {
+            log.error("Virtual barrier {0} still not mapped", v);
+            return Status::Fail;
+        }
+    }
+
+    user.cleanAfter = _barriers.size();
+
+    for (auto i : irange(dep.producer.second)) {
+        const auto v = _vdt.id(dep.producer.first + i);
+        const auto r = _barriers[v].realId;
+
+        if (isBarrierMapped(v, r)) {
+            if (_barriers[v].producerCount < count) {
+                log.error("Simulate barriers failed - barrier {0} producer count ({1} is lower then number of tasks "
+                          "which are producing it ({2})",
+                          v, _barriers[v].producerCount, count);
+                return Status::Fail;
+            }
+
+            _barriers[v].producerCount -= count;
+            user.posts.insert(r);
+            user.startAfter = std::max(user.startAfter, v + 1);
+            user.cleanAfter = std::min(user.cleanAfter, v);
+        } else {
+            log.error("Virtual barrier {0} still not mapped", v);
+            return Status::Fail;
+        }
+    }
+
+    return Status::Success;
+}
+
+void vpux::VPURT::BarrierSimulator::linkNextIds(Logger log) {
+    log.trace("Create links to the next config of the same barrier");
+
+    for (auto i : irange(_barriers.size())) {
+        auto& current = _barriers[i];
+        current.nextSameId = -1;
+
+        for (auto j = i + 1; j < _barriers.size(); ++j)
+            if (_barriers[j].realId == current.realId) {
+                current.nextSameId = j;
+                break;
+            }
+
+        log.nest().trace("VID: {0}, PHYS ID: {1}, NEXT SAME PHYS ID: {2}", i, current.realId, current.nextSameId);
+    }
+}

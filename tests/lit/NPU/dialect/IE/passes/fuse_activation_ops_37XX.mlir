@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -211,6 +211,37 @@ func.func @SkipFakeQuantMultiplyWithLeakyReluFusedTest(%arg0: tensor<1x128x1x8xf
     // CHECK:       IE.LeakyRelu
     // CHECK-SAME:      negative_slope = 2.000000e-01 : f64
     // CHECK-SAME:  } : tensor<1x128x1x8xf16> -> tensor<1x128x1x8xf16>
+}
+
+// -----
+
+func.func @SkipMaxPoolWithReluTest(%arg0: tensor<1x16x4x4xf16>) -> tensor<1x16x3x3xf16> {
+    %0 = IE.MaxPool(%arg0)
+         {
+             kernel_size = [2, 2],
+             pads_begin = [0, 0],
+             pads_end = [0, 0],
+             strides = [1, 1],
+             rounding_type = #IE.rounding_type<CEIL>
+         } :
+         tensor<1x16x4x4xf16> -> tensor<1x16x3x3xf16>
+
+    %1 = IE.ReLU(%0) : tensor<1x16x3x3xf16> -> tensor<1x16x3x3xf16>
+
+    return %1 : tensor<1x16x3x3xf16>
+
+    // CHECK:       [[MAX_POOL:%.*]] = IE.MaxPool(%arg0) {
+    // CHECK-SAME:      kernel_size = [2, 2],
+    // CHECK-SAME:      pads_begin = [0, 0],
+    // CHECK-SAME:      pads_end = [0, 0],
+    // CHECK-SAME:      rounding_type = #IE.rounding_type<CEIL>,
+    // CHECK-SAME:      strides = [1, 1]
+    // CHECK-SAME:  } : tensor<1x16x4x4xf16> -> tensor<1x16x3x3xf16>
+
+    // CHECK:       [[RELU:%.*]] = IE.ReLU([[MAX_POOL]])
+    // CHECK-SAME:  : tensor<1x16x3x3xf16> -> tensor<1x16x3x3xf16>
+
+    // CHECK:       return [[RELU]] : tensor<1x16x3x3xf16>
 }
 
 // -----

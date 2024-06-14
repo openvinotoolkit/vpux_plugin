@@ -9,12 +9,12 @@
 
 #include <functional>
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
-#include "vpux/compiler/dialect/VPUIP/attributes.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/passes.hpp"
-#include "vpux/compiler/dialect/VPUIP/utils.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/task.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/attributes.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/transforms/passes.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/utils/VPU/ppe_utils.hpp"
 #include "vpux/compiler/utils/types.hpp"
@@ -64,8 +64,16 @@ void buildAvgpool(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
             weightsType = mlir::quant::UniformQuantizedType::get(mlir::quant::QuantizationFlags::FlagValue::Signed,
                                                                  getSInt8Type(ctx), builder.getF32Type(), scaleValue,
                                                                  zeroPoint, 0, 1);
+        } else if (inputStorageType.isFloat8E5M2()) {
+            weightsType = mlir::quant::UniformQuantizedType::get(mlir::quant::QuantizationFlags::FlagValue::Signed,
+                                                                 builder.getFloat8E5M2Type(), builder.getF32Type(),
+                                                                 scaleValue, zeroPoint, 0, 1);
+        } else if (inputStorageType.isFloat8E4M3FN()) {
+            weightsType = mlir::quant::UniformQuantizedType::get(mlir::quant::QuantizationFlags::FlagValue::Signed,
+                                                                 builder.getFloat8E4M3FNType(), builder.getF32Type(),
+                                                                 scaleValue, zeroPoint, 0, 1);
         } else {
-            VPUX_THROW("Unsupported storage type for input quantized type. I8 or U8 is supported only");
+            VPUX_THROW("Unsupported storage type for input quantized type. I8 or U8 or FP8 is supported only");
         }
     }
 
@@ -106,6 +114,8 @@ void buildAvgpool(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
     // barrier config
     auto barrier0 = funcBuilder.create<VPURT::ConfigureBarrierOp>(loc, 0);
     auto barrier1 = funcBuilder.create<VPURT::ConfigureBarrierOp>(loc, 1);
+    // finalBarrier passed as production barrier to last DMA task
+    auto barrier2 = funcBuilder.create<VPURT::ConfigureBarrierOp>(loc, 2);
 
     // DMA input-->cmx
     vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcBuilder, mlir::ValueRange(),
@@ -157,7 +167,7 @@ void buildAvgpool(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
     auto nceTask = vpux::VPURT::wrapIntoTaskOp<VPUIP::NCEClusterTaskOp>(
             funcBuilder, mlir::ValueRange(barrier0.getBarrier()), mlir::ValueRange(barrier1.getBarrier()), loc,
             outputCmxType, inputCmx.getOperation()->getResult(0), mlir::Value(), wtTblValue,
-            /*instruction_table_list*/ nullptr, /*activation_window=*/nullptr,
+            /*instruction_table_list*/ nullptr, /*spr_lookup_table*/ nullptr, /*activation_window=*/nullptr,
             parentInputCmx.getOperation()->getResult(0), parentOutputCmx.getOperation()->getResult(0),
             outputCmx.getOperation()->getResult(0), VPUIP::NCETaskType::AVEPOOL, filterSizeAttr, strides, kernelPadding,
             /*actChannelLength*/ nullptr, /*is_continued*/ nullptr, /*sp_pattern*/ nullptr);
@@ -198,14 +208,19 @@ void buildAvgpool(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
     createDPUTaskOp(funcBuilder, variantbuilder, outShape, inShape, paddingVec, VPU::MPEMode::CUBOID_16x16);
 
     vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcBuilder, mlir::ValueRange(barrier1.getBarrier()),
-                                                mlir::ValueRange(), loc, outputCmx.getOperation()->getResult(0),
-                                                funcOutput, 0);
+                                                mlir::ValueRange(barrier2.getBarrier()), loc,
+                                                outputCmx.getOperation()->getResult(0), funcOutput, 0);
 
     funcBuilder.create<mlir::func::ReturnOp>(loc, funcOutput);
 
     // set runtime resources
+    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
+
     mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    pm.addPass(VPU::createInitCompilerPass(arch, VPU::CompilationMode::DefaultHW, 1, std::nullopt, log));
+    auto initCompilerOptions = VPU::InitCompilerOptions(arch, VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.numberOfDPUGroups = 1;
+    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
 
     VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");
 

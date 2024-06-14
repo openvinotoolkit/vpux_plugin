@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW" --fuse-nce-interpolate-consumers %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
@@ -85,7 +85,7 @@ func.func @FuseInterpolateNearestWithConv(%arg0: tensor<1x16x3x3xf16, {order = #
     // CHECK-SAME:     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
     // CHECK-SAME:     rawFilterShape = [32, 16, 1, 1],
     // CHECK-SAME:     strides = [1, 1]
-    // CHECK-SAME: } -> tensor<1x32x6x6xf16, {order = #NHWC}> 
+    // CHECK-SAME: } -> tensor<1x32x6x6xf16, {order = #NHWC}>
     // CHECK:      return [[CONV_OUTPUT]]
 }
 

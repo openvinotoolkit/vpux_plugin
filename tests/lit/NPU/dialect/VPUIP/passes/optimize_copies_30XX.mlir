@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -77,14 +77,13 @@ func.func @NoChangesInputIsBlockArgument(%arg0: memref<1x2x4x4xf16>, %arg1: memr
 // -----
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
-#map = affine_map<(d0, d1, d2, d3) -> (d0 * 50 + d1 * 50 + d2 * 50 + d3)>
 
-func.func @FuseWithPermuteCast(%arg0: memref<1x50x1x1xf16>, %arg1: memref<1x50x1x1xf16, #NHWC, #map>) -> memref<1x50x1x1xf16, #NHWC, #map> {
+func.func @FuseWithPermuteCast(%arg0: memref<1x50x1x1xf16>, %arg1: memref<1x50x1x1xf16, #NHWC>) -> memref<1x50x1x1xf16, #NHWC> {
     %0 = memref.alloc() : memref<1x50x1x1xf16>
     %1 = VPUIP.SigmoidUPA inputs(%arg0 : memref<1x50x1x1xf16>) outputs(%0 : memref<1x50x1x1xf16>) -> memref<1x50x1x1xf16>
-    %2 = VPUIP.PermuteCast {dst_order = #NHWC, mem_perm = #NHWC} inputs(%1 : memref<1x50x1x1xf16>) -> memref<1x50x1x1xf16, #NHWC, #map>
-    %3 = VPUIP.Copy inputs(%2 : memref<1x50x1x1xf16, #NHWC, #map>) outputs(%arg1 : memref<1x50x1x1xf16, #NHWC, #map>) -> memref<1x50x1x1xf16, #NHWC, #map>
-    return %3 : memref<1x50x1x1xf16, #NHWC, #map>
+    %2 = VPUIP.PermuteCast {dst_order = #NHWC, mem_perm = #NHWC} inputs(%1 : memref<1x50x1x1xf16>) -> memref<1x50x1x1xf16, #NHWC>
+    %3 = VPUIP.Copy inputs(%2 : memref<1x50x1x1xf16, #NHWC>) outputs(%arg1 : memref<1x50x1x1xf16, #NHWC>) -> memref<1x50x1x1xf16, #NHWC>
+    return %3 : memref<1x50x1x1xf16, #NHWC>
 
     // CHECK-NOT: memref.alloc()
     // CHECK:     VPUIP.PermuteCast

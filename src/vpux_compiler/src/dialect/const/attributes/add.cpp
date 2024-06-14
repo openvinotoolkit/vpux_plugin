@@ -5,9 +5,7 @@
 
 #include "vpux/compiler/dialect/const/attributes/content.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
-
-#include "vpux/utils/IE/loop.hpp"
-#include "vpux/utils/core/func_ref.hpp"
+#include "vpux/compiler/utils/loop.hpp"
 
 #include <mlir/Dialect/Quant/QuantTypes.h>
 #include <mlir/IR/DialectImplementation.h>
@@ -66,9 +64,9 @@ Const::Content vpux::Const::AddAttr::transform(vpux::Const::Content& input) cons
 
     const auto bias = static_cast<float>(getBias().getValue().convertToDouble());
 
-    loop_1d(LoopExecPolicy::Parallel, shiftedVals.size(), [&](size_t i) {
+    for (size_t i = 0; i < shiftedVals.size(); ++i) {
         shiftedVals[i] = values[i] + bias;
-    });
+    }
 
     return output;
 }

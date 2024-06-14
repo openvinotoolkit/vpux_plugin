@@ -653,4 +653,87 @@ def IE_UpsamplingPadAttr : IE_Attr<"UpsamplingPad"> {
     );
 }
 
+//
+// PortMapAttr
+//
+
+def IE_SliceInputPortMapAttr : IE_Attr<"SliceInputPortMap"> {
+    let description = [{
+    This is the port map attribute for tensor iterator op.
+        external_port_id represents I/O layers'id ousides of tensor iterator op.
+        internal_layer_id represents I/O layers'id insides of tensor iterator body.
+        axis, start, stride, end, part_size are valid only for cases where input needs slicing or output need concating.
+    }];
+
+    let parameters = (ins
+        "mlir::IntegerAttr":$external_port_id,
+        "mlir::IntegerAttr":$internal_layer_id,
+        "mlir::IntegerAttr":$axis,
+        "mlir::IntegerAttr":$start,
+        "mlir::IntegerAttr":$stride,
+        "mlir::IntegerAttr":$part_size,
+        "mlir::IntegerAttr":$end
+    );
+}
+
+def IE_InvariantInputPortMapAttr : IE_Attr<"InvariantInputPortMap"> {
+    let description = [{
+    This is the port map attribute for tensor iterator op.
+        external_port_id represents I/O layers'id ousides of tensor iterator op.
+        internal_layer_id represents I/O layers'id insides of tensor iterator body.
+    }];
+
+    let parameters = (ins
+        "mlir::IntegerAttr":$external_port_id,
+        "mlir::IntegerAttr":$internal_layer_id
+    );
+}
+
+def IE_MergedInputPortMapAttr : IE_Attr<"MergedInputPortMap"> {
+    let description = [{
+    This is the port map attribute for tensor iterator op.
+        external_port_id represents I/O layers'id ousides of tensor iterator op.
+        internal_layer_id represents I/O layers'id insides of tensor iterator body.
+        body_input_index is valid only for cases where body output is the body param in the next iteration.
+    }];
+
+    let parameters = (ins
+        "mlir::IntegerAttr":$external_port_id,
+        "mlir::IntegerAttr":$internal_layer_id,
+        "mlir::IntegerAttr":$body_input_index
+    );
+}
+
+def IE_ConcatOutputPortMapAttr : IE_Attr<"ConcatOutputPortMap"> {
+    let description = [{
+    This is the port map attribute for tensor iterator op.
+        external_port_id represents I/O layers'id ousides of tensor iterator op.
+        internal_layer_id represents I/O layers'id insides of tensor iterator body.
+        axis, start, stride, end, part_size are valid only for cases where input needs slicing or output need concating.
+    }];
+
+    let parameters = (ins
+        "mlir::IntegerAttr":$external_port_id,
+        "mlir::IntegerAttr":$internal_layer_id,
+        "mlir::IntegerAttr":$axis,
+        "mlir::IntegerAttr":$start,
+        "mlir::IntegerAttr":$stride,
+        "mlir::IntegerAttr":$part_size,
+        "mlir::IntegerAttr":$end
+    );
+}
+
+def IE_InvariantOutputPortMapAttr : IE_Attr<"InvariantOutputPortMap"> {
+    let description = [{
+    This is the port map attribute for tensor iterator op.
+        external_port_id represents I/O layers'id ousides of tensor iterator op.
+        internal_layer_id represents I/O layers'id insides of tensor iterator body.
+    }];
+
+    let parameters = (ins
+        "mlir::IntegerAttr":$external_port_id,
+        "mlir::IntegerAttr":$internal_layer_id
+    );
+}
+
 #endif

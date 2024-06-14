@@ -10,7 +10,7 @@
 
 #include "vpux/utils/core/checked_cast.hpp"
 
-#include <ngraph/validation_util.hpp>
+#include "vpux/compiler/utils/infer_output_shape.hpp"
 
 using namespace vpux;
 
@@ -32,18 +32,10 @@ mlir::LogicalResult vpux::VPU::MaxPoolOp::inferReturnTypes(mlir::MLIRContext* ct
     const auto roundingType = maxPool.getRoundingType();
 
     const auto inType = maxPool.getInput().getType().cast<vpux::NDTypeInterface>();
-    const auto inShape = inType.getShape();
+    const auto inShape = inType.getShape().raw();
 
-    const auto outputShape = ngraph::infer_batched_pooling_forward(
-            EmptyNode::instance(), ov::Shape(inShape.begin(), inShape.end()),
-            ov::CoordinateDiff(dataPaddingBelow.begin(), dataPaddingBelow.end()),
-            ov::CoordinateDiff(dataPaddingAbove.begin(), dataPaddingAbove.end()),
-            ov::Shape(windowShape.begin(), windowShape.end()), ov::Strides(windowStrides.begin(), windowStrides.end()),
-            true, roundingType == IE::RoundingType::CEIL);
-
-    const auto shapeI64 = to_small_vector(outputShape.get_shape() | transformed([](size_t val) {
-                                              return checked_cast<int64_t>(val);
-                                          }));
+    const auto shapeI64 = inferMaxPoolOutputShape(inShape, windowStrides, dataPaddingBelow, dataPaddingAbove,
+                                                  windowShape, roundingType);
 
     const auto outType = inType.changeShape(Shape(shapeI64));
     inferredReturnTypes.push_back(outType);

@@ -12,4 +12,5 @@ namespace utils {
 
 float runPSNRMetric(std::vector<std::vector<float>>& actOutput, std::vector<std::vector<float>>& refOutput,
                     const size_t imgHeight, const size_t imgWidth, int scaleBorder, bool normalizedImage);
+
 }  // namespace utils

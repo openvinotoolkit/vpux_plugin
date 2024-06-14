@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW" --fuse-activation-ops="enable-fuse-clamp=false" %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 func.func @Conv2dWithReluTest(%arg0: tensor<1x16x4x4xf16>) -> tensor<1x16x3x3xf16> {
     %filters = const.Declare tensor<16x16x2x2xf16> = dense<1.0> : tensor<16x16x2x2xf16>
@@ -27,33 +27,6 @@ func.func @Conv2dWithReluTest(%arg0: tensor<1x16x4x4xf16>) -> tensor<1x16x3x3xf1
     // CHECK-SAME:     pads_begin = [0, 0]
     // CHECK-SAME:     pads_end = [0, 0]
     // CHECK-SAME:     post_op = #IE.PostOp<name = "IE.ReLU", attrs = {}>
-    // CHECK-SAME:     strides = [1, 1]
-    // CHECK-NOT:   IE.ReLU
-}
-
-// -----
-
-func.func @MaxPoolWithReluTest(%arg0: tensor<1x16x4x4xf16>) -> tensor<1x16x3x3xf16> {
-    %0 = IE.MaxPool(%arg0)
-         {
-             kernel_size = [2, 2],
-             pads_begin = [0, 0],
-             pads_end = [0, 0],
-             strides = [1, 1],
-             rounding_type = #IE.rounding_type<CEIL>
-         } :
-         tensor<1x16x4x4xf16> -> tensor<1x16x3x3xf16>
-
-    %1 = IE.ReLU(%0) :
-        tensor<1x16x3x3xf16> -> tensor<1x16x3x3xf16>
-
-    return %1 : tensor<1x16x3x3xf16>
-
-    // CHECK:       IE.MaxPool
-    // CHECK-SAME:     kernel_size = [2, 2]
-    // CHECK-SAME:     pads_begin = [0, 0]
-    // CHECK-SAME:     pads_end = [0, 0]
-    // CHECK-SAME:     rounding_type = #IE.rounding_type<CEIL>
     // CHECK-SAME:     strides = [1, 1]
     // CHECK-NOT:   IE.ReLU
 }

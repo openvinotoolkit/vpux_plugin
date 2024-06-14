@@ -83,8 +83,8 @@ def Const_ContentAttr : Const_Attr<"Content", [Const_RequestQueueAttrInterface]>
         vpux::Const::ContentAttr quantCast(mlir::quant::QuantizedType newElemType = nullptr) const;
         vpux::Const::ContentAttr dequantize() const;
         vpux::Const::ContentAttr rescale(double scale) const;
-        vpux::Const::ContentAttr relocateWeightsTablePointers(ArrayRef<int32_t> weightsPtr, uint64_t sparsityPtr, vpux::ShapeRef offsets,
-                                                              uint64_t weightsElemBitSize, VPUIP::CompressionSchemeAttr weightsCompression) const;
+        vpux::Const::ContentAttr relocateWeightsTablePointers(ArrayRef<uint32_t> weightsPtr, uint64_t sparsityPtr, vpux::ShapeRef offsets,
+                                                              uint64_t weightsTableSize, uint64_t weightsElemBitSize, VPUIP::SparsityCompressionAttr weightsCompression) const;
         vpux::Const::ContentAttr swizzleConstant(uint64_t swizzleKey, uint64_t arch) const;
         vpux::Const::ContentAttr add(double bias) const;
         vpux::Const::ContentAttr reshape(vpux::ShapeRef newShape) const;
@@ -94,10 +94,14 @@ def Const_ContentAttr : Const_Attr<"Content", [Const_RequestQueueAttrInterface]>
         vpux::Const::ContentAttr subview(vpux::ShapeRef offset, vpux::ShapeRef shape) const;
         vpux::Const::ContentAttr bitPack(int64_t width) const;
         vpux::Const::ContentAttr transpose(vpux::DimsOrder newOrder) const;
+        vpux::Const::ContentAttr memPermute(vpux::DimsOrder dstOrder, vpux::DimsOrder memPerm) const;
+        vpux::Const::ContentAttr layoutCast(vpux::DimsOrder dstOrder) const;
         vpux::Const::ContentAttr expandDilated(vpux::ShapeRef dilations) const;
         vpux::Const::ContentAttr getSparsityMap() const;
         vpux::Const::ContentAttr sparsify(bool compressOutputType, mlir::ElementsAttr numActualElements = nullptr) const;
         vpux::Const::ContentAttr changeShapeAndElemType(vpux::ShapeRef newShape, mlir::Type newElemType) const;
+        vpux::Const::ContentAttr fuse(mlir::RankedTensorType fusedTensorType, Const::ContentAttr weightsTable, Const::ContentAttr weights, Const::ContentAttr sparsity, Const::ContentAttr activations) const;
+        vpux::Const::ContentAttr scalarMultInverse() const;
 
         static vpux::Const::ContentAttr addTransformation(vpux::Const::ContentAttr input, vpux::Const::TransformAttrInterface transformation);
         static vpux::NDTypeInterface inferFinalType(mlir::ElementsAttr content, mlir::ArrayRef<vpux::Const::TransformAttrInterface> transformations);
@@ -109,6 +113,34 @@ def Const_ContentAttr : Const_Attr<"Content", [Const_RequestQueueAttrInterface]>
     let storageType = "vpux::Const::ContentAttr";
     let returnType = "vpux::Const::Content";
     let convertFromStorage = "$_self.fold()";
+}
+
+//
+// Const_EquivalenceRequestAttr
+//
+
+def Const_EquivalenceRequestAttr : Const_Attr<"EquivalenceRequest", [Const_RequestQueueAttrInterface]> {
+    let summary = "Marks two ContentAttr objects as being equivalent for background folding";
+
+    let description = [{
+        This attribute is meant to be used in the request queue for the background folding feature.
+
+        It is meant to represent that two ContentAttr objects are equivalent in terms of folding,
+        meaning that the `fold()` method will produce the same result for both attributes.
+        The main use-case for this attribute is to allow the list of transformations of a ContentAttr
+        to be optimized (e.g. produce the same result but with fewer transformations or less compute
+        per transformation), without losing the computation that was already performed.
+    }];
+
+    let mnemonic = "EquivalenceRequest";
+
+    let parameters = (ins
+        "vpux::Const::ContentAttr":$originalAttr,
+        "vpux::Const::ContentAttr":$newAttr
+    );
+
+    let storageNamespace = "details";
+    let assemblyFormat = "`<` $originalAttr `,` $newAttr `>`";
 }
 
 //
@@ -454,6 +486,59 @@ def Const_TransposeAttr : Const_Attr<"Transpose",
 }
 
 //
+// MemPermuteAttr
+//
+
+def Const_MemPermuteAttr : Const_Attr<"MemPermute",
+        [DeclareAttrInterfaceMethods<Const_TransformAttrInterface>]> {
+    let summary = "Permute constant content";
+
+    let parameters = (ins
+        "mlir::AffineMapAttr":$dstOrder,
+        "mlir::AffineMapAttr":$memPerm
+    );
+
+    let builders = [
+        AttrBuilderWithInferredContext<
+            (ins "mlir::AffineMapAttr":$dstOrder, "mlir::AffineMapAttr":$memPerm), [{
+                return $_get(dstOrder.getContext(), dstOrder, memPerm);
+            }]
+        >
+    ];
+
+    let storageNamespace = "details";
+    let genVerifyDecl = 1;
+    let skipDefaultBuilders = 1;
+    let hasCustomAssemblyFormat = 1;
+}
+
+//
+// LayoutCastAttr
+//
+
+def Const_LayoutCastAttr : Const_Attr<"LayoutCast",
+        [DeclareAttrInterfaceMethods<Const_TransformAttrInterface>]> {
+    let summary = "Change constant content layout";
+
+    let parameters = (ins
+        "mlir::AffineMapAttr":$dstOrder
+    );
+
+    let builders = [
+        AttrBuilderWithInferredContext<
+            (ins "mlir::AffineMapAttr":$dstOrder), [{
+                return $_get(dstOrder.getContext(), dstOrder);
+            }]
+        >
+    ];
+
+    let storageNamespace = "details";
+    let genVerifyDecl = 1;
+    let skipDefaultBuilders = 1;
+    let hasCustomAssemblyFormat = 1;
+}
+
+//
 // WeightsTablePtrs
 //
 
@@ -465,15 +550,16 @@ def Const_RelocateWeightsTableAttr : Const_Attr<"RelocateWeightsTable",
         "mlir::ArrayAttr":$weightsPtr,
         "mlir::IntegerAttr":$sparsityPtr,
         "mlir::ArrayAttr":$offsets,
+        "mlir::IntegerAttr":$weightsTableSize,
         "mlir::IntegerAttr":$weightsElemBitSize,
-        "VPUIP::CompressionSchemeAttr":$weightsCompression
+        "VPUIP::SparsityCompressionAttr":$weightsCompression
     );
 
     let builders = [
         AttrBuilderWithInferredContext<
-            (ins "mlir::ArrayAttr":$weightsPtr, "mlir::IntegerAttr":$sparsityPtr, "mlir::ArrayAttr":$offsets,
-                 "mlir::IntegerAttr":$weightsElemBitSize, "VPUIP::CompressionSchemeAttr":$weightsCompression), [{
-                return $_get(weightsPtr.getContext(), weightsPtr, sparsityPtr, offsets, weightsElemBitSize, weightsCompression);
+            (ins "mlir::ArrayAttr":$weightsPtr, "mlir::IntegerAttr":$sparsityPtr, "mlir::ArrayAttr":$offsets, "mlir::IntegerAttr":$weightsTableSize,
+                 "mlir::IntegerAttr":$weightsElemBitSize, "VPUIP::SparsityCompressionAttr":$weightsCompression), [{
+                return $_get(weightsPtr.getContext(), weightsPtr, sparsityPtr, offsets, weightsTableSize, weightsElemBitSize, weightsCompression);
             }]
         >
     ];
@@ -515,6 +601,30 @@ def Const_SwizzleConstantAttr : Const_Attr<"SwizzleConstant",
     let storageNamespace = "details";
     let skipDefaultBuilders = 1;
     let hasCustomAssemblyFormat = 1;
+}
+
+def Const_FuseAttr : Const_Attr<"Fuse",
+        [DeclareAttrInterfaceMethods<Const_TransformAttrInterface>]> {
+    let summary = "Fuse constants";
+
+    let parameters = (ins
+        "mlir::RankedTensorType":$fusedType,
+        "Const::ContentAttr":$weightsTable,
+        OptionalParameter<"Const::ContentAttr">:$weights,
+        OptionalParameter<"Const::ContentAttr">:$sparsity,
+        OptionalParameter<"Const::ContentAttr">:$activations
+    );
+
+    let storageNamespace = "details";
+    let assemblyFormat = [{
+        `<`
+        $fusedType
+        `,` `weightsTable` `=` `<` $weightsTable `>`
+        (`,` `weights` `=` `<` $weights^ `>`)?
+        (`,` `sparsity` `=` `<` $sparsity^ `>`)?
+        (`,` `activations` `=` `<` $activations^ `>`)?
+        `>`
+    }];
 }
 
 //
@@ -622,6 +732,11 @@ def Const_ChangeShapeAndElemTypeAttr : Const_Attr<"ChangeShapeAndElemType",
     let genVerifyDecl = 1;
     let skipDefaultBuilders = 1;
     let hasCustomAssemblyFormat = 1;
+}
+
+def Const_ScalarMultInverseAttr : Const_Attr<"ScalarMultInverse",
+        [DeclareAttrInterfaceMethods<Const_TransformAttrInterface>]> {
+    let summary = "Apply scalar multiplicative inverse to the constant content";
 }
 
 #endif

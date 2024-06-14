@@ -27,8 +27,8 @@ module @VPU.SW {
     // `memref` will be translated to `MemRefData`, while raw scalars will be translated as is.
     func.func private @builtin_OneHot(memref<*xsi32>, memref<*xf16>, i64, i64, f64, f64)
         attributes {
-            VPU.kernel_code = "single_shave_onehot.cpp",
-            VPU.kernel_entry = "single_shave_onehot"
+            VPU.kernel_code = "onehot.cpp",
+            VPU.kernel_entry = "onehot"
         }
 
     // management kernel definition
@@ -54,7 +54,7 @@ func.func @main(%arg0: memref<4xsi32, @DDR>, %arg1: memref<4x3xf16, @DDR>) -> me
 
     // Genetic Kernel information for the scheduler.
     VPURT.Task waits(%b0  : !VPURT.Barrier) updates(%b1  : !VPURT.Barrier) attributes {isTrailingSWLayer = false} {
-        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
                     @VPU.SW::@builtin_OneHot            // The reference to the Kernel function.
                     inputs(%in_tile0_cmx as %arg2: memref<4xsi32, [@CMX_NN, 0]>)     // Inputs/outputs buffers for generic operation interface
                     outputs(%out_tile0_cmx as %arg3: memref<4x3xf16, [@CMX_NN, 0]>)   // and their mapping to inner region.

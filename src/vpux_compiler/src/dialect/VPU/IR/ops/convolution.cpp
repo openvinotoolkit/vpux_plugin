@@ -12,7 +12,7 @@
 
 #include "vpux/utils/core/checked_cast.hpp"
 
-#include <openvino/core/validation_util.hpp>
+#include <openvino/op/convolution.hpp>
 
 using namespace vpux;
 
@@ -43,14 +43,16 @@ mlir::LogicalResult vpux::VPU::ConvolutionOp::inferReturnTypes(mlir::MLIRContext
                        inShape[ChanDim.ind()], filterShape[ChanDim.ind()]);
     }
 
-    const auto outputShape = ov::infer_convolution_forward(
-            EmptyNode::instance(), ov::Shape(inShape.begin(), inShape.end()),
-            ov::Strides(windowStrides.size(), 1),  // dummy data dilations
+    const auto op = ov::op::v1::Convolution(
+            std::make_shared<ov::op::v0::Parameter>(ov::element::i32, ov::Shape(inShape.begin(), inShape.end())),
+            std::make_shared<ov::op::v0::Parameter>(ov::element::i32,
+                                                    ov::Shape(filterShape.begin(), filterShape.end())),
+            ov::Strides(windowStrides.begin(), windowStrides.end()),
             ov::CoordinateDiff(dataPaddingBelow.begin(), dataPaddingBelow.end()),
             ov::CoordinateDiff(dataPaddingAbove.begin(), dataPaddingAbove.end()),
-            ov::Shape(filterShape.begin(), filterShape.end()), ov::Strides(windowStrides.begin(), windowStrides.end()),
             ov::Strides(windowDilations.begin(), windowDilations.end()));
 
+    const auto& outputShape = op.get_output_partial_shape(0);
     const auto shapeI64 = to_small_vector(outputShape.get_shape() | transformed([](size_t val) {
                                               return checked_cast<int64_t>(val);
                                           }));

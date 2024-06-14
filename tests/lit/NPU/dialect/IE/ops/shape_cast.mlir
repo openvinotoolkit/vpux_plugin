@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --canonicalize %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 // CHECK-LABEL: @Eliminate
 func.func @Eliminate(%arg0 : tensor<1x2x3x4xf16>) -> tensor<1x2x3x4xf16> {
@@ -82,7 +82,7 @@ func.func @ConstFoldQuantPerChannel() -> tensor<1x2x4x3xf16> {
     %cst = const.Declare tensor<1x2x3x4x!qElemType> = dense<1.000000e+00> : tensor<1x2x3x4xf16>, [#const.ConvertElemType<si8>, #const.QuantCast<!qElemType>]
     %1 = IE.ShapeCast { shape = [1, 2, 4, 3] } inputs(%cst : tensor<1x2x3x4x!qElemType>) -> tensor<1x2x4x3x!qElemType>
     %2 = IE.Dequantize(%1) {dstElemType = f16} : tensor<1x2x4x3x!qElemType> -> tensor<1x2x4x3xf16>
-    return %2 : tensor<1x2x4x3xf16>  
+    return %2 : tensor<1x2x4x3xf16>
 
     // CHECK:       [[CST_0:%.+]] = const.Declare tensor<1x2x3x4x!qElemType> = dense<1.000000e+00> : tensor<1x2x3x4xf16>, [#const.ConvertElemType<si8>, #const.QuantCast<!qElemType>]
     // CHECK:       [[VAR1:%.+]] = IE.ShapeCast {shape = [1, 2, 4, 3]} inputs([[CST_0]] : tensor<1x2x3x4x!qElemType>) -> tensor<1x2x4x3x!qElemType>
@@ -98,7 +98,7 @@ func.func @ConstFoldQuantPerTensor() -> tensor<2x3x2x2xf16> {
     %cst = const.Declare tensor<1x2x3x4x!qElemType> = dense<1.000000e+00> : tensor<1x2x3x4xf16>, [#const.ConvertElemType<si8>, #const.QuantCast<!qElemType>]
     %1 = IE.ShapeCast { shape = [2, 3, 2, 2] } inputs(%cst : tensor<1x2x3x4x!qElemType>) -> tensor<2x3x2x2x!qElemType>
     %2 = IE.Dequantize(%1) {dstElemType = f16} : tensor<2x3x2x2x!qElemType> -> tensor<2x3x2x2xf16>
-    return %2 : tensor<2x3x2x2xf16>  
+    return %2 : tensor<2x3x2x2xf16>
 
     // CHECK:       [[CST_0:%.+]] = const.Declare tensor<2x3x2x2x!qElemType> = dense<1.000000e+00> : tensor<1x2x3x4xf16>, [#const.ConvertElemType<si8>, #const.QuantCast<!qElemType>, #const.Reshape<[2, 3, 2, 2]>]
     // CHECK-NOT:   IE.ShapeCast

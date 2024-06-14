@@ -28,7 +28,7 @@ mlir::Value reifyTile(VPU::TilingBuilderOpInterface origOp, const TileInfo& outp
                       Logger log);
 mlir::LogicalResult applyTileStrategy(VPU::TilingBuilderOpInterface origOp, const OutputTiling& tiles,
                                       mlir::PatternRewriter& rewriter, Logger log);
-mlir::Operation* getParentTargetOp(mlir::Operation* op);
+mlir::Operation* getParentComputeOp(mlir::Operation* op);
 bool prefetchTilingConditionSatisfied(mlir::Operation* op, Logger log);
 bool largeConstPipelineConditionSatisfied(mlir::Operation* op, Logger log);
 bool hasMultiBranches(mlir::Operation* op);
@@ -36,6 +36,10 @@ bool hasMultiBranches(mlir::Operation* op);
 bool archSupportsSwLayerTiling(VPU::ArchKind arch);
 bool opNeedsTiling(mlir::Operation* op, bool enablePrefetchTiling, Logger log);
 bool doesNCEOpChannelSatisfyWorkload(mlir::Operation* nceOp, const TileInfo& outputTile);
+std::optional<DimArr> getSEPConvTilingOrder(mlir::Operation* op);
+std::optional<size_t> getMaxWorkLoadNumberPerClusterForNCEWithSparseOutput(VPU::ArchKind arch,
+                                                                           ArrayRef<Shape> perClusterShapes,
+                                                                           ArrayRef<int64_t> supportedChannels);
 
 /**
  * @brief Get the best tiling strategy based on the VPUNN cost model
@@ -57,6 +61,10 @@ mlir::FailureOr<OutputTiling> getHWLayerTilingStrategyBasedOnCost(mlir::Operatio
                                                                   DimArrRef tileDimOrder,
                                                                   const std::shared_ptr<LayerCostModel>& costModel,
                                                                   Logger log);
+
+enum class EnableShaveDDRAccessOptimization { TRUE, FALSE, AUTO };
+
+EnableShaveDDRAccessOptimization getShaveDDRAccessOptimizationMode(StringRef enableShaveDDRAccessOptimization);
 
 }  // namespace VPU
 }  // namespace vpux

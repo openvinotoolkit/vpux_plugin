@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --canonicalize %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 
@@ -14,6 +14,22 @@ func.func @FoldLayoutCast(%arg0: tensor<1x4x8x64xf32>) -> tensor<1x4x8x64xf32> {
     return %0 : tensor<1x4x8x64xf32>
 
     // CHECK-NOT:   IE.LayoutCast
+}
+
+// -----
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @ConstFold
+func.func @ConstFold() -> tensor<1x2x3x4xf32> {
+    %0 = const.Declare tensor<1x2x3x4xf32, {order = #NHWC}> = dense<5.0> : tensor<1x2x3x4xf32>, [#const.Reorder<#NHWC>]
+    %1 = IE.LayoutCast(%0) {dst_order = #NCHW} : tensor<1x2x3x4xf32, {order = #NHWC}> -> tensor<1x2x3x4xf32>
+    return %1 : tensor<1x2x3x4xf32>
+
+    // CHECK-NOT:   IE.LayoutCast
+    // CHECK:      const.Declare tensor<1x2x3x4xf32> = dense<5.000000e+00> : tensor<1x2x3x4xf32>,
+    // CHECK-SAME:      [#const.Reorder<#NHWC>, #const.LayoutCast<#NCHW>]
 }
 
 // -----

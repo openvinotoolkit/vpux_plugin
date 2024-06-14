@@ -9,6 +9,8 @@
 
 #include "vpux/utils/core/error.hpp"
 
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+
 #include <algorithm>
 
 using namespace vpux;
@@ -53,7 +55,8 @@ void vpux::MemLiveRangeInfo::buildRangeInfo(mlir::func::FuncOp funcOp) {
         return true;
     };
 
-    auto updateConsProdMap = [&](mlir::OperandRange buffers, OpToUsedBuffersMap& map, mlir::async::ExecuteOp& execOp) {
+    auto updateConsProdMap = [&](mlir::SmallVector<mlir::Value> buffers, OpToUsedBuffersMap& map,
+                                 mlir::async::ExecuteOp& execOp) {
         for (const auto& buffer : buffers) {
             if (_memKind.has_value() && !isTargetMemType(buffer)) {
                 continue;
@@ -74,8 +77,27 @@ void vpux::MemLiveRangeInfo::buildRangeInfo(mlir::func::FuncOp funcOp) {
                 auto* bodyBlock = curExecOp.getBody();
                 for (auto& innerOp : bodyBlock->getOperations()) {
                     if (auto layerOp = mlir::dyn_cast<VPUIP::LayerOpInterface>(innerOp)) {
-                        updateConsProdMap(layerOp.getInputs(), _opInputBuffersMap, curExecOp);
-                        updateConsProdMap(layerOp.getOutputs(), _opOutputBuffersMap, curExecOp);
+                        auto inputs = vpux::to_small_vector(layerOp.getInputs());
+                        if (auto nceTaskOp = mlir::dyn_cast<VPUIP::NCEClusterTaskOp>(innerOp)) {
+                            // in case of NCEClusterTaskOp we need to remove parent outputs from inputs
+                            // in order to make depenendcy calculation work correctly
+                            auto parentOutput = nceTaskOp.getParentOutput();
+                            auto parentOutputSparsityMap = nceTaskOp.getParentOutputSparsityMap();
+                            for (const auto& input : inputs) {
+                                if (parentOutput == input) {
+                                    inputs.erase(&input);
+                                }
+                            }
+                            for (const auto& input : inputs) {
+                                if (parentOutputSparsityMap == input) {
+                                    inputs.erase(&input);
+                                }
+                            }
+                        }
+                        auto outputs = layerOp.getOutputs();
+
+                        updateConsProdMap(std::move(inputs), _opInputBuffersMap, curExecOp);
+                        updateConsProdMap(outputs, _opOutputBuffersMap, curExecOp);
                     }
                 }
             }

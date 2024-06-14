@@ -1,17 +1,15 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2023-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
-#include "vpux/compiler/dialect/IE/ops.hpp"
-#include "vpux/utils/core/func_ref.hpp"
-#include "vpux/utils/core/profiling.hpp"
+#include "vpux/utils/profiling/common.hpp"
 
 #include "vpux/compiler/core/act_profiling.hpp"
 #include "vpux/compiler/core/profiling.hpp"
-#include "vpux/compiler/dialect/VPUIP/dialect.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/utils.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/dialect.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 #include "vpux/compiler/utils/strings.hpp"
 
@@ -19,6 +17,8 @@
 #include <iterator>
 #include <sstream>
 #include <string>
+
+// E#73766: merge NCETiledActShaveProfiler and UniformNonTiledActShaveProfiler in the end of epic
 
 namespace vpux {
 
@@ -75,9 +75,9 @@ void BaseActShaveProfiler::scheduleTask(VPUIP::SwKernelOp swOp) {
     // Trying to reuse last profiling buffer
     const auto currentBufferSize = _profilingBufferSizes.back();
     const auto newBufferSize = currentBufferSize + maxSwTasks;
-    bool isTiled = mlir::isa<VPUIP::NCEClusterTilingOp>(swOp->getParentOp());
-    _log.trace("Schedule '{0}' operation with '{1}' subtask, op: '{2}'", (isTiled ? "MultiCluster " : "SingleCluster "),
-               maxSwTasks, swOp->getLoc());
+    bool isDistributed = vpux::VPUIP::hasDistributedOperand(swOp);
+    _log.trace("Schedule '{0}' operation with '{1}' subtask, op: '{2}'",
+               (isDistributed ? "MultiCluster " : "SingleCluster "), maxSwTasks, swOp->getLoc());
     // If we can store profiling result of current task in last buffer without exceeding
     // max size - reuse it, otherwise - scheduling one more
     if (newBufferSize * _profilingWorkloadSize > VPUIP::HW_ACT_SHAVE_PROFILING_MAX_BUFFER_SIZE) {
@@ -142,16 +142,8 @@ void BaseActShaveProfiler::addProfilingOps(mlir::BlockArgument& profilingDdrResu
     for (auto& swTaskSignature : _swTaskSignatures) {
         auto swTaskOp = swTaskSignature._task;
 
-        auto* insertionPoint = swTaskOp.getOperation();
-        auto nceClusterTilingOp = mlir::dyn_cast<VPUIP::NCEClusterTilingOp>(swTaskOp->getParentOp());
-        bool isSingleCluster = true;
-        // In case NCE task is wrapped with NCEClusterTiling then inserting should be done
-        // at NCEClusterTiling op level and not inside it where NCEClusterTask op is
-        if (nceClusterTilingOp) {
-            isSingleCluster = false;
-            insertionPoint = nceClusterTilingOp.getOperation();
-        }
-        _builder.setInsertionPoint(insertionPoint);
+        bool isSingleCluster = !vpux::VPUIP::hasDistributedOperand(swTaskOp);
+        _builder.setInsertionPoint(swTaskOp.getOperation());
 
         const unsigned tasksCount = swTaskSignature._maxSubTasks * _clustersNum;
         auto profilingSamplesInCMX = countTasks(nceProfilingOutputs);
@@ -239,13 +231,14 @@ mlir::Value UniformNonTiledActShaveProfiler::copyToDdr(ProfilingResults profilin
 
     // Create DMA from CMX to Profiling Output
     auto copyLoc = mlir::NameLoc::get(mlir::StringAttr::get(
-            _ctx, mlir::StringRef("actshave") + PROFILING_CMX_2_DDR_OP_NAME + std::to_string(currentDDROffset)));
+            _ctx,
+            mlir::StringRef("actshave") + profiling::PROFILING_CMX_2_DDR_OP_NAME + std::to_string(currentDDROffset)));
     auto concatview = _builder.create<VPUIP::ConcatViewOp>(
             mlir::NameLoc::get(mlir::StringAttr::get(
                     _ctx, mlir::StringRef("actshaveProfilingConcat") + std::to_string(currentDDROffset))),
             concatInputs, cmxMemOp->getResult(0));
 
-    return _builder.create<VPUIP::CopyOp>(copyLoc, concatview.getOutput(), subDDR.getResult());
+    return _builder.create<VPUIP::NNDMAOp>(copyLoc, concatview.getOutput(), subDDR.getResult());
 }
 
 // Get a SubView of profiling buffer instance so that given ActShave task is given required chunk of it
@@ -352,21 +345,14 @@ mlir::Value NCETiledActShaveProfiler::copyToDdr(ProfilingResults profilingResult
 
     // Create DMA from CMX to Profiling Output
     auto copyLoc = mlir::NameLoc::get(mlir::StringAttr::get(
-            _ctx, mlir::StringRef("actshave") + PROFILING_CMX_2_DDR_OP_NAME + std::to_string(currentDDROffset)));
+            _ctx,
+            mlir::StringRef("actshave") + profiling::PROFILING_CMX_2_DDR_OP_NAME + std::to_string(currentDDROffset)));
     auto concatview = _builder.create<VPUIP::ConcatViewOp>(
             mlir::NameLoc::get(mlir::StringAttr::get(
                     _ctx, mlir::StringRef("actshaveProfilingConcat") + std::to_string(currentDDROffset))),
             concatInputs, cmxMemOp->getResult(0));
 
-    SmallVector<mlir::Value> inputsOutputOperands{concatview.getOutput(), subDDR.getResult()};
-
-    const auto bodyBuilder = [&](mlir::OpBuilder& builder, mlir::Location loc, mlir::ValueRange newOperands) {
-        builder.create<VPUIP::CopyOp>(loc, newOperands[0], newOperands[1]);
-    };
-
-    return _builder
-            .create<VPUIP::NCEClusterTilingOp>(copyLoc, subDDR.getResult().getType(), inputsOutputOperands, bodyBuilder)
-            .getResult(0);
+    return _builder.create<VPUIP::NNDMAOp>(copyLoc, concatview.getOutput(), subDDR.getResult());
 }
 
 // Get a SubView of profiling buffer instance so that given ActShave task is given required chunk of it
@@ -394,13 +380,8 @@ mlir::Value NCETiledActShaveProfiler::replaceOpWithProfiledOp(VPUIP::SwKernelOp 
     _log.trace("Replace op with new profiled task '{0}'", loc);
 
     auto profilingSlot = profilingBuffer;
-
-    auto nceClusterTilingOp = origSwTask->getParentOfType<VPUIP::NCEClusterTilingOp>();
-    // In case NCE task is wrapped with NCEClusterTiling then inserting should be done
-    // at NCEClusterTiling op level and not inside it where NCEClusterTask op is
-    if (nceClusterTilingOp) {
-        _builder.setInsertionPoint(nceClusterTilingOp.getOperation());
-    } else {
+    bool isDistributed = vpux::VPUIP::hasDistributedOperand(origSwTask);
+    if (!isDistributed) {
         auto viewOpName = appendLoc(loc, "_view_cast");
         auto viewOp = _builder.create<VPUIP::ViewOp>(viewOpName, getTimestampType(1), profilingBuffer);
         profilingSlot = viewOp.getResult();
@@ -411,62 +392,10 @@ mlir::Value NCETiledActShaveProfiler::replaceOpWithProfiledOp(VPUIP::SwKernelOp 
                                                      origSwTask.getTileIndexAttr(), origSwTask.getStridesAttr());
     swTask.setProfilingMetadataAttr(profMeta);
 
-    // Adjust profiling output to a compact type since later it will be wrapped in NCEClusterTiling
-    if (nceClusterTilingOp) {
-        auto distType = profilingSlot.getType().dyn_cast<VPUIP::DistributedBufferType>();
-        swTask.getProfilingOutput().setType(distType.getCompactType());
-    }
-
     swTask.getRegion().takeBody(origSwTask.getRegion());
     origSwTask->replaceAllUsesWith(swTask.getResults());
 
-    auto profilingOutput = swTask.getProfilingOutput();
-
-    // In case original ActShaveTask was wrapped with NCEClusterTiling then new ActShaveTask
-    // with additional profiling output should also be wrapped with NCEClusterTiling op whose
-    // list of operands and results were extended for profiling buffer
-    if (nceClusterTilingOp) {
-        _log.nest().trace("Wrap task with NCEClusterTiling");
-        // Operands of new NCEClusterTilingOp will be extended with profiling buffer
-        SmallVector<mlir::Value> newNceClusterTilingOperands(nceClusterTilingOp->getOperands());
-        newNceClusterTilingOperands.push_back(swTask.getProfilingData());
-
-        // Result of new NCEClusterTilingOp will be extended with profiling result
-        SmallVector<mlir::Type> newNceClusterTilingResultTypes(nceClusterTilingOp->getResultTypes());
-        newNceClusterTilingResultTypes.push_back(swTask.getProfilingData().getType());
-
-        const auto bodyBuilder = [&](mlir::OpBuilder& builder, mlir::Location loc, mlir::ValueRange newOperands) {
-            std::ignore = loc;
-            mlir::IRMapping mapper;
-
-            auto origArguments = nceClusterTilingOp.getBody().front().getArguments();
-
-            // Map original NCEClusterTiling argument to new corresponding operands and map
-            // profiling buffer to last operand
-            mapper.map(origArguments, newOperands.take_front(nceClusterTilingOp->getOperands().size()));
-            mapper.map(swTask.getProfilingData(), newOperands.take_back(1).front());
-
-            builder.clone(*swTask.getOperation(), mapper);
-        };
-
-        auto newNceClusterTilingOp = _builder.create<VPUIP::NCEClusterTilingOp>(
-                nceClusterTilingOp->getLoc(), newNceClusterTilingResultTypes, newNceClusterTilingOperands, bodyBuilder);
-
-        // Replace all uses of old NCEClusterTiling op with new one
-        // except newly added profiling output
-        auto newResults = newNceClusterTilingOp->getResults().drop_back(1);
-        nceClusterTilingOp->replaceAllUsesWith(newResults);
-        swTask->erase();
-
-        // Set new insertion point back at new NCEClusterTiling level
-        _builder.setInsertionPointAfter(newNceClusterTilingOp);
-
-        // Store information about profiling result which later is concatenated with rest of profiling data
-        // and copied from buffer in CMX to DDR
-        profilingOutput = newNceClusterTilingOp.getResult(newNceClusterTilingOp->getNumResults() - 1);
-    }
-
-    return profilingOutput;
+    return swTask.getProfilingOutput();
 }
 
 }  // namespace vpux

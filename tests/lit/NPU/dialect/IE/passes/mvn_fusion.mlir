@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --mvn-fusion --canonicalize %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX
+// REQUIRES: arch-VPUX37XX || arch-VPUX40XX
 
 func.func @FuseMVNInsideSqrt(%arg0: tensor<1x1500x512xf32>) -> tensor<1500x512xf32> {
     %1 = IE.Reshape(%arg0) {shape_value = [1500, 512]} : tensor<1x1500x512xf32> -> tensor<1500x512xf32>
@@ -33,7 +33,7 @@ func.func @FuseMVNInsideSqrt(%arg0: tensor<1x1500x512xf32>) -> tensor<1500x512xf
     // CHECK-NOT: IE.Subtract
     // CHECK-NOT: IE.ReduceMean
     // CHECK-NOT: IE.Divide
-    // CHECK-NOT: IE.Sqrt 
+    // CHECK-NOT: IE.Sqrt
     // CHECK:  [[PRE_RESHAPE:%.*]] = IE.AffineReshape(%arg0)
     // CHECK:        tensor<1x1500x512xf32> -> tensor<1x1500x512x1xf32>
     // CHECK:  [[MVN:%.*]] = IE.MVN([[PRE_RESHAPE]])
@@ -72,7 +72,7 @@ func.func @FuseMVNOutsideSqrt(%arg0: tensor<1500x512xf32>) -> tensor<1500x512xf3
     // CHECK-NOT: IE.Subtract
     // CHECK-NOT: IE.ReduceMean
     // CHECK-NOT: IE.Divide
-    // CHECK-NOT: IE.Sqrt 
+    // CHECK-NOT: IE.Sqrt
     // CHECK:  [[PRE_RESHAPE:%.*]] = IE.AffineReshape(%arg0)
     // CHECK:        tensor<1500x512xf32> -> tensor<1x1500x512x1xf32>
     // CHECK:  [[MVN:%.*]] = IE.MVN([[PRE_RESHAPE]])

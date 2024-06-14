@@ -80,21 +80,11 @@
             }
         },
         {
-            "name": "EnableModelsAndValidationSet",
-            "hidden": true,
-            "cacheVariables": {
-                "ENABLE_MODELS": true,
-                "ENABLE_VALIDATION_SET": true
-            }
-        },
-        {
             "name": "Disabler",
             "hidden": true,
             "description": "Disables options that are not used by default presets",
             "cacheVariables": {
                 "ENABLE_CPPLINT": false,
-                "ENABLE_MODELS": false,
-                "ENABLE_VALIDATION_SET": false,
                 "ENABLE_LTO": false
             }
         },
@@ -107,7 +97,7 @@
             "displayName": "vpuxDeveloper",
 
             "cacheVariables": {
-                "InferenceEngineDeveloperPackage_DIR": {
+                "OpenVINODeveloperPackage_DIR": {
                     "type": "FILEPATH",
                     "value": "$env{OPENVINO_HOME}/build-x86_64/Debug"
                 },
@@ -120,7 +110,6 @@
                 "CMAKE_EXPORT_COMPILE_COMMANDS" : true,
 
                 "ENABLE_DEVELOPER_BUILD": true,
-                "ENABLE_CLANG_FORMAT": true,
                 "ENABLE_IMD_BACKEND": true,
 
                 "ENABLE_ZEROAPI_BACKEND": true,
@@ -135,7 +124,7 @@
             "displayName": "vpuxRelease",
 
             "cacheVariables": {
-                "InferenceEngineDeveloperPackage_DIR": {
+                "OpenVINODeveloperPackage_DIR": {
                     "type": "FILEPATH",
                     "value": "$env{OPENVINO_HOME}/build-x86_64/Release"
                 },
@@ -157,13 +146,12 @@
 
                 "ENABLE_HETERO": true,
                 "ENABLE_INTEL_CPU": true,
-                "ENABLE_INTEL_GNA": false,
                 "ENABLE_INTEL_GPU": false,
                 "ENABLE_TEMPLATE": true,
 
-                "ENABLE_IR_V7_READER": false,
                 "ENABLE_OV_ONNX_FRONTEND": false,
                 "ENABLE_OV_PADDLE_FRONTEND": false,
+                "ENABLE_OV_PYTORCH_FRONTEND": false,
                 "ENABLE_OV_TF_FRONTEND": false,
                 "ENABLE_OV_TF_LITE_FRONTEND": false,
 
@@ -171,15 +159,13 @@
                     "type": "STRING",
                     "value": "TBB"
                 },
-                "ENABLE_DATA": false,
-                "ENABLE_GAPI_PREPROCESSING": false,
                 "ENABLE_LTO": false,
                 "ENABLE_OPENCV": true,
 
                 "ENABLE_TESTS": true,
                 "ENABLE_FUNCTIONAL_TESTS": true,
 
-                "IE_EXTRA_MODULES": {
+                "OPENVINO_EXTRA_MODULES": {
                     "type": "FILEPATH",
                     "value": "./modules/vpux"
                 }
@@ -199,6 +185,126 @@
             "binaryDir": "${sourceDir}/build-x86_64/Release",
             "displayName": "ovVpuxRelease",
             "inherits": ["OpenVINOWithVPUX", "vpuxRelease"]
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "UnitTests",
+            "configurePreset": "vpuxDeveloper",
+            "filter": {
+                "include": {
+                    "name": "(npuUnitTests|LIT-NPU-ALL$)"
+                }
+            },
+            "output": {
+                "verbosity": "verbose"
+            }
+        },
+        {
+            "name": "NPU4000",
+            "hidden": true,
+            "environment": {
+                "IE_KMB_TESTS_PLATFORM": "4000",
+                "IE_KMB_TESTS_DEVICE_NAME": "NPU.4000",
+                "SINGLE_IMAGE_TEST_CONFIG": "public_models_4000.json",
+                "SINGLE_IMAGE_TEST_TOOLS": "compile_tool;NetTest-CalcRef;NetTest-Validate",
+                "VPUX_PLUGIN_HOME": "${sourceDir}"
+            }
+        },
+        {
+            "name": "NPU3720",
+            "hidden": true,
+            "environment": {
+                "IE_KMB_TESTS_PLATFORM": "3720",
+                "IE_KMB_TESTS_DEVICE_NAME": "NPU.3720",
+                "SINGLE_IMAGE_TEST_CONFIG": "public_models_3720.json",
+                "SINGLE_IMAGE_TEST_TOOLS": "compile_tool;NetTest-CalcRef;NetTest-Validate",
+                "VPUX_PLUGIN_HOME": "${sourceDir}"
+            }
+        },
+        {
+            "name": "Simulator",
+            "hidden": true,
+            "environment": {
+                "IE_NPU_USE_IMD_BACKEND": "1",
+                "IE_NPU_IMD_LAUNCH_MODE": "VPUX_IMD_SIMULATOR"
+            }
+        },
+        {
+            "name": "Silicon",
+            "hidden": true,
+            "environment": {
+                "IE_NPU_USE_IMD_BACKEND": "1",
+                "IE_NPU_IMD_LAUNCH_MODE": "VPUX_IMD_MOVI_DEBUG"
+            }
+        },
+        {
+            "name": "NPU3720/Simulator",
+            "hidden": true,
+            "inherits": [
+                "NPU3720",
+                "Simulator"
+            ],
+            "configurePreset": "vpuxDeveloper",
+            "output": {
+                "verbosity": "verbose"
+            },
+            "filter": {
+                "include": {
+                    "name": "^(npuFuncTests-parallel|SingleImageTests)$"
+                }
+            }
+        },
+        {
+            "name": "NPU3720/Silicon",
+            "hidden": true,
+            "inherits": [
+                "NPU3720",
+                "Silicon"
+            ],
+            "configurePreset": "vpuxDeveloper",
+            "output": {
+                "verbosity": "verbose"
+            },
+            "filter": {
+                "include": {
+                    "name": "^(npuFuncTests|SingleImageTests)$"
+                }
+            }
+        },
+        {
+            "name": "NPU4000/Simulator",
+            "hidden": true,
+            "inherits": [
+                "NPU4000",
+                "Simulator"
+            ],
+            "configurePreset": "vpuxDeveloper",
+            "output": {
+                "verbosity": "verbose"
+            },
+            "filter": {
+                "include": {
+                    "name": "^(npuFuncTests-parallel|SingleImageTests)$"
+                }
+            }
+        },
+        {
+            "name": "NPU4000/Silicon",
+            "hidden": true,
+            "inherits": [
+                "NPU4000",
+                "Silicon"
+            ],
+            "configurePreset": "vpuxDeveloper",
+            "output": {
+                "verbosity": "verbose"
+            },
+            "filter": {
+                "include": {
+                    "name": "^(npuFuncTests|SingleImageTests)$"
+                }
+            }
         }
     ]
 }

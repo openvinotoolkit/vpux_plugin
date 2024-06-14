@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --verify-diagnostics %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 func.func @ParsePrintDenseConst() -> tensor<2xf16> {
     %cst = const.Declare tensor<2xf16> = dense<[1.0, 2.0]> : tensor<2xf16>
@@ -136,19 +136,19 @@ func.func @ParsePrintDenseResourceSplat() -> tensor<2x3x1x1xf32> {
 // -----
 
 func.func @ParsePrintDenseConstRelocateWeightsTable() -> memref<16x1x1x4xsi32> {
-    %cst = const.Declare memref<16x1x1x4xsi32> = dense<0> : tensor<16x1x1x4xsi32>, [#const.RelocateWeightsTable<[0], 56448 : i64, [0]>]
+    %cst = const.Declare memref<16x1x1x4xsi32> = dense<0> : tensor<16x1x1x4xsi32>, [#const.RelocateWeightsTable<weightsPtr=[0], sparsityPtr=56448 : i64, offsets=[0], weightsTableSize=0 : i64>]
 
     return %cst : memref<16x1x1x4xsi32>
 
-    // CHECK{LITERAL}:  #const.RelocateWeightsTable<[0], 56448 : i64, [0]>
+    // CHECK{LITERAL}:  #const.RelocateWeightsTable<weightsPtr=[0], sparsityPtr=56448 : i64, offsets=[0], weightsTableSize=0 : i64>
 }
 
 // -----
 
 func.func @ParsePrintDenseConstRelocateWeightsTableLong() -> memref<16x1x1x4xsi32> {
-    %cst = const.Declare memref<16x1x1x4xsi32> = dense<0> : tensor<16x1x1x4xsi32>, [#const.RelocateWeightsTable<[65536], 16777215 : i64, [0], 16 : i64>]
+    %cst = const.Declare memref<16x1x1x4xsi32> = dense<0> : tensor<16x1x1x4xsi32>, [#const.RelocateWeightsTable<weightsPtr=[65536], sparsityPtr=16777215 : i64, offsets=[0], weightsTableSize=0 : i64, weightsElemBitSize=16 : i64>]
 
     return %cst : memref<16x1x1x4xsi32>
 
-    // CHECK{LITERAL}:  #const.RelocateWeightsTable<[65536], 16777215 : i64, [0], 16 : i64>
+    // CHECK{LITERAL}:  #const.RelocateWeightsTable<weightsPtr=[65536], sparsityPtr=16777215 : i64, offsets=[0], weightsTableSize=0 : i64, weightsElemBitSize=16 : i64>
 }

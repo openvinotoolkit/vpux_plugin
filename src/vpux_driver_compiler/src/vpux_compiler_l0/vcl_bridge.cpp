@@ -14,7 +14,7 @@
 #include "vcl_profiling.hpp"
 #include "vcl_query_network.hpp"
 
-#include "vpux/al/config/compiler.hpp"
+#include "intel_npu/al/config/compiler.hpp"
 
 using namespace vpux;
 
@@ -47,30 +47,31 @@ DLLEXPORT vcl_result_t vclCompilerCreate(vcl_compiler_desc_t desc, vcl_compiler_
 
     /// Set all default configs here
     std::map<std::string, std::string> config;
-    config[ov::intel_vpux::compiler_type.name()] = "MLIR";
+    config[ov::intel_npu::compiler_type.name()] = "MLIR";
 
     /// Set default log level based on the compiler description passed by user
+    auto& log_level = config[ov::log::level.name()];
     switch (desc.debug_level) {
     case VCL_LOG_NONE:
-        config[ov::log::level.name()] = "LOG_NONE";
+        log_level = "LOG_NONE";
         break;
     case VCL_LOG_ERROR:
-        config[ov::log::level.name()] = "LOG_ERROR";
+        log_level = "LOG_ERROR";
         break;
     case VCL_LOG_WARNING:
-        config[ov::log::level.name()] = "LOG_WARNING";
+        log_level = "LOG_WARNING";
         break;
     case VCL_LOG_INFO:
-        config[ov::log::level.name()] = "LOG_INFO";
+        log_level = "LOG_INFO";
         break;
     case VCL_LOG_DEBUG:
-        config[ov::log::level.name()] = "LOG_DEBUG";
+        log_level = "LOG_DEBUG";
         break;
     case VCL_LOG_TRACE:
-        config[ov::log::level.name()] = "LOG_TRACE";
+        log_level = "LOG_TRACE";
         break;
     default:
-        config[ov::log::level.name()] = "LOG_ERROR";
+        log_level = "LOG_ERROR";
         desc.debug_level = VCL_LOG_ERROR;
     };
 
@@ -312,8 +313,14 @@ DLLEXPORT vcl_result_t VCL_APICALL vclProfilingCreate(p_vcl_profiling_input_t pr
     }
 
     *profilingHandle = reinterpret_cast<vcl_profiling_handle_t>(profHandle);
+
+    /// Create logger to save error msg, pass the handle here
+    if (logHandle != nullptr) {
+        *logHandle = reinterpret_cast<vcl_log_handle_t>(vclLogger);
+    }
     return VCL_RESULT_SUCCESS;
 }
+
 DLLEXPORT vcl_result_t VCL_APICALL vclGetDecodedProfilingBuffer(vcl_profiling_handle_t profilingHandle,
                                                                 vcl_profiling_request_type_t requestType,
                                                                 p_vcl_profiling_output_t profilingOutput) {
@@ -360,6 +367,9 @@ DLLEXPORT vcl_result_t VCL_APICALL vclProfilingGetProperties(vcl_profiling_handl
 }
 
 DLLEXPORT vcl_result_t vclLogHandleGetString(vcl_log_handle_t logHandle, size_t* logSize, char* log) {
+    if (!logHandle) {
+        return VCL_RESULT_ERROR_INVALID_ARGUMENT;
+    }
     VPUXDriverCompiler::VCLLogger* vclLogger = reinterpret_cast<VPUXDriverCompiler::VCLLogger*>(logHandle);
     return vclLogger->getString(logSize, log);
 }

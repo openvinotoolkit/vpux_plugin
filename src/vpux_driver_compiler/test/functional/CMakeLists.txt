@@ -16,6 +16,13 @@ if(ENABLE_BLOB_DUMP)
     target_compile_definitions(${FUNCTIONAL_TARGET} PUBLIC BLOB_DUMP=1)
 endif()
 
+set(MODULE_DIR "build-modules")
+if(${PROJECT_BINARY_DIR} MATCHES ${MODULE_DIR})
+    if(NOT TARGET gtest)
+        add_subdirectory(${OpenVINO_SOURCE_DIR}/thirdparty/gtest gtest)
+    endif()
+endif()
+
 if(WIN32)
     # Shlwapi.lib is to check file existence.
     target_link_libraries(${FUNCTIONAL_TARGET}
@@ -33,12 +40,18 @@ else()
     )
 endif()
 
+
+if(ENABLE_PREBUILT_LLVM_MLIR_LIBS)
+    find_package(MLIR REQUIRED CONFIG)
+endif()
+
 target_include_directories(${FUNCTIONAL_TARGET}
     SYSTEM PRIVATE
         $<BUILD_INTERFACE:${LLVM_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:${LLVM_BINARY_DIR}/include>
         ${LLVM_INCLUDE_DIRS}
 )
+
 target_link_libraries(${FUNCTIONAL_TARGET} PRIVATE LLVMSupport)
 
 target_include_directories(${FUNCTIONAL_TARGET}
@@ -46,26 +59,11 @@ target_include_directories(${FUNCTIONAL_TARGET}
         "${CMAKE_SOURCE_DIR}/src/core/include"
 )
 
-if(TARGET openvino::nlohmann_json)
-    target_include_directories(${FUNCTIONAL_TARGET}
-        PRIVATE
-        $<TARGET_PROPERTY:openvino::nlohmann_json,INTERFACE_INCLUDE_DIRECTORIES>)
-else()
-    find_package(nlohmann_json 3.9.0 QUIET)
-    if(nlohmann_json_FOUND)
-        target_include_directories(${FUNCTIONAL_TARGET}
-            PRIVATE
-            $<TARGET_PROPERTY:nlohmann_json::nlohmann_json,INTERFACE_INCLUDE_DIRECTORIES>)
-    else()
-        message(FATAL_ERROR "Failed to find system nlohmann_json in OpenVINO Developer Package and system libraries")
-    endif()
-endif()
-
-link_system_libraries(${FUNCTIONAL_TARGET} 
+link_system_libraries(${FUNCTIONAL_TARGET}
     PUBLIC
         openvino::runtime)
 
-ie_add_api_validator_post_build_step(TARGET vpuxCompilerL0Test)
+ov_add_api_validator_post_build_step(TARGET vpuxCompilerL0Test)
 
 install(TARGETS vpuxCompilerL0Test
         RUNTIME DESTINATION cid

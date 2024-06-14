@@ -15,7 +15,7 @@
 #include <transformations/utils/utils.hpp>
 
 #include "vpux/compiler/dialect/ELFNPU37XX/ops.hpp"
-#include "vpux/compiler/dialect/IE/ops.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 
 namespace vpux {
 namespace ELFNPU37XX {

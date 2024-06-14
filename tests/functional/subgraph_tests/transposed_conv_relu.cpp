@@ -1,14 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022-2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include <vpu_ov2_layer_test.hpp>
 #include "common/functions.h"
-
-#include <ov_models/builders.hpp>
-#include <ov_models/utils/ov_helpers.hpp>
-#include <shared_test_classes/base/layer_test_utils.hpp>
 
 namespace ov::test {
 
@@ -28,7 +24,7 @@ class TransposedConvReluTest_NPU3700 : public VpuOv2LayerTest {
 
         const ov::ParameterVector params = {
                 std::make_shared<ov::op::v0::Parameter>(ov::element::f16, inputDynamicShapes.front())};
-        const auto weights = ngraph::builder::makeConstant<float>(ov::element::f16, weightsShape, {-1.0f}, false);
+        const auto weights = ov::op::v0::Constant::create(ov::element::f16, weightsShape, std::vector<float>{-1.0f});
 
         const ov::Strides strides = {4, 4};
         const ov::CoordinateDiff pads_begin = {2, 2};
@@ -48,8 +44,8 @@ class TransposedConvReluTest_NPU3700 : public VpuOv2LayerTest {
     }
 };
 
-TEST_F(TransposedConvReluTest_NPU3700, HW) {
+TEST_F(TransposedConvReluTest_NPU3700, HW_TestKindSubgraph) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3700);
+    run(Platform::NPU3700);
 }
 }  // namespace ov::test

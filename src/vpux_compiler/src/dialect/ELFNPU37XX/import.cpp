@@ -5,7 +5,7 @@
 
 #include "vpux/compiler/dialect/ELFNPU37XX/import.hpp"
 #include "vpux/compiler/dialect/ELFNPU37XX/elf_importer.hpp"
-#include "vpux/compiler/dialect/IE/ops.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/utils/logging.hpp"
 
 using namespace vpux;

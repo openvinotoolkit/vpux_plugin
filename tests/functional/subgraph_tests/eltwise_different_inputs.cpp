@@ -1,12 +1,10 @@
-// Copyright (C) Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include <vpu_ov2_layer_test.hpp>
 
-#include <ov_models/builders.hpp>
-#include <ov_models/utils/ov_helpers.hpp>
-#include <shared_test_classes/base/layer_test_utils.hpp>
+#include "common_test_utils/node_builders/fake_quantize.hpp"
 
 namespace ov::test {
 
@@ -28,31 +26,40 @@ class EltwiseAddQuantizedSubGraphTest_NPU3720 :
         params[1]->set_friendly_name("input2");
 
         const size_t dataLevels = 256;
-        const auto dataFq = ngraph::builder::makeFakeQuantize(params[0], ov::element::f16, dataLevels, {}, {0.0},
-                                                              {12.583984375}, {0.0}, {12.583984375});
+        const auto dataFq = ov::test::utils::make_fake_quantize(params[0], ov::element::f16, dataLevels, {}, {0.0},
+                                                                {12.583984375}, {0.0}, {12.583984375});
 
         const size_t weightsLevels = 256;
-        const auto weightsFq = ngraph::builder::makeFakeQuantize(params[1], ov::element::f16, weightsLevels, {}, {0.0},
-                                                                 {2.583984375}, {0.0}, {2.583984375});
+        const auto weightsFq = ov::test::utils::make_fake_quantize(params[1], ov::element::f16, weightsLevels, {},
+                                                                   {0.0}, {2.583984375}, {0.0}, {2.583984375});
 
         const auto addOp = std::make_shared<ov::op::v1::Add>(dataFq, weightsFq);
 
         const size_t outLevels = 256;
-        const auto outputFq = ngraph::builder::makeFakeQuantize(addOp, ov::element::f16, outLevels, {}, {0.0},
-                                                                {13.583984375}, {0.0}, {13.583984375});
+        const auto outputFq = ov::test::utils::make_fake_quantize(addOp, ov::element::f16, outLevels, {}, {0.0},
+                                                                  {13.583984375}, {0.0}, {13.583984375});
 
         const ov::ResultVector results{std::make_shared<ov::op::v0::Result>(outputFq)};
         function = std::make_shared<ov::Model>(results, params, "EltwiseAddQuantized");
         rel_threshold = 0.1f;
     }
+
+public:
+    static std::string getTestCaseName(const testing::TestParamInfo<ov::element::Type>& obj) {
+        const std::string sep = "_";
+        std::ostringstream result;
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
+        result << "TestIdx=" << obj.index << sep;
+        return result.str();
+    };
 };
 
 TEST_P(EltwiseAddQuantizedSubGraphTest_NPU3720, HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
 }
 
 INSTANTIATE_TEST_CASE_P(smoke_EltwiseAddQuantized, EltwiseAddQuantizedSubGraphTest_NPU3720,
-                        ::testing::Values(ov::element::f16));
+                        ::testing::Values(ov::element::f16), EltwiseAddQuantizedSubGraphTest_NPU3720::getTestCaseName);
 
 }  // namespace ov::test

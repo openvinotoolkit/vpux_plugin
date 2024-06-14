@@ -9,9 +9,10 @@
 #include <mlir/IR/BuiltinAttributes.h>
 #include <mlir/IR/BuiltinOps.h>
 #include <mlir/IR/BuiltinTypes.h>
+#include <type_traits>
 
 #include "vpux/compiler/dialect/VPUIP/graph-schema/export.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/utils/logging.hpp"
 #include "vpux/hwtest/test_case_json_parser.hpp"
 
@@ -35,24 +36,34 @@ static constexpr auto PAD_NCETASK_TOP = 2;
 static constexpr auto PAD_NCETASK_BOTTOM = 3;
 
 // vpux::profiling::ExecutorType definition ref:
-// src/vpux_utils/include/vpux/utils/plugin/profiling_parser.hpp#L42
+// src/vpux_utils/include/vpux/utils/profiling/common.hpp
 static constexpr auto HWP_DPU_SECTION_EXEC_TYPE = 1;
 static constexpr auto HWP_SW_SECTION_EXEC_TYPE = 3;
 static constexpr auto HWP_WORKPOINT_SECTION_EXEC_TYPE = 5;
 static constexpr auto HWP_DMA_SECTION_EXEC_TYPE = 6;
+static constexpr auto HWP_M2I_SECTION_EXEC_TYPE = 7;
 
 // ref: src/vpux_compiler/include/vpux/compiler/dialect/VPUIP/utils.hpp
 static constexpr size_t HWP_DMA_PROFILING_MAX_BUFFER_SIZE = 512;
-static constexpr size_t HWP_DPU_BYTES_PER_ENTRY = 16;
-static constexpr size_t HWP_DMA_BYTES_PER_ENTRY = 8;
-static constexpr size_t HWP_ACTSHAVE_BYTES_PER_ENTRY = 16;
+static constexpr size_t HWP_DPU_BYTES_PER_ENTRY = 32;
+static constexpr size_t HWP_DMA_BYTES_PER_ENTRY = 64;
+static constexpr size_t HWP_ACTSHAVE_BYTES_PER_ENTRY = 32;
 static constexpr size_t HWP_PLL_WORKPOINT_BYTES_PER_ENTRY = 64;
+static constexpr size_t HWP_M2I_BYTES_PER_ENTRY = 64;
 
 struct ProfilingDataSection {
     int64_t execType;
     size_t offset;
     int64_t size;
 };
+
+static constexpr auto NUM_LUT_CFG_REGS = 64;
+static constexpr auto NUM_LUT_DATA_REGS = 256;
+static constexpr auto NUM_LUT_SAT_REGS = 8;
+static constexpr auto NUM_LUT_RESERVED_REGS = 7;
+static constexpr auto NUM_LUT_RANGES = 32;
+
+std::vector<uint16_t> computeRsqrtLookupTable();
 
 mlir::DenseElementsAttr generateWeights(llvm::ArrayRef<int64_t> wt_shape, mlir::Type dtype, mlir::MLIRContext* ctx,
                                         const char* weight_file_name);
@@ -75,6 +86,8 @@ void buildDMA(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module,
               mlir::Type inputType, mlir::Type outputType);
 void buildDMACompressAct(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module, mlir::OpBuilder builder,
                          Logger& log, mlir::Type inputType, mlir::Type outputType);
+void buildGatherDMA(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module, mlir::OpBuilder builder,
+                    Logger& log, mlir::Type inputType, mlir::Type outputType);
 void buildSimpleZMajorConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module, mlir::OpBuilder builder,
                            Logger& log, mlir::Type inputType, mlir::Type weightsType, mlir::Type outputType);
 void buildContinuedConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module, mlir::OpBuilder builder,
@@ -102,10 +115,15 @@ void buildDifferentClustersDPUTest(const nb::TestCaseJsonDescriptor& testDesc, m
 void buildMultiClustersDPUTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module,
                                mlir::OpBuilder builder, Logger& log, mlir::Type inputType, mlir::Type weightsType,
                                mlir::Type outputType);
+void buildHaloMultiClusteringTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module,
+                                  mlir::OpBuilder builder, Logger& log, mlir::Type inputType, mlir::Type weightsType,
+                                  mlir::Type outputType);
 void buildDWConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module, mlir::OpBuilder builder,
                  Logger& log, mlir::Type inputType, mlir::Type weightsType, mlir::Type outputType);
 void buildActShave(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module, mlir::OpBuilder builder,
                    Logger& log, const SmallVector<mlir::Type>& inputType, mlir::Type outputType);
+void buildM2iTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module, mlir::OpBuilder builder,
+                  Logger& log, mlir::Type inputType, mlir::Type outputType);
 void buildReadAfterWriteDPUDMATest(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module,
                                    mlir::OpBuilder builder, Logger& log, mlir::Type inputType, mlir::Type weightsType,
                                    mlir::Type outputType);

@@ -4,8 +4,8 @@
 //
 
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/task.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
 #include "vpux/hwtest/ops/act_shave_op.hpp"
@@ -104,7 +104,8 @@ void buildRaceConditionTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mo
 
         vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(
                 funcBuilder, mlir::ValueRange(), mlir::ValueRange(inputDataDMA.getBarrier()), builder.getUnknownLoc(),
-                funcInput, getTensorResult(inputCMXVec[0]), 0, cluster);
+                funcInput, getTensorResult(inputCMXVec[0]), 0,
+                testDesc.getArchitecture() == vpux::VPU::ArchKind::NPU40XX ? 0 : cluster);
 
         auto localOutputCMXOffset = outputCMXOffset;
         for (size_t unit = 0; unit < raceConditionParams.requestedUnits; ++unit) {
@@ -128,10 +129,12 @@ void buildRaceConditionTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mo
     }
 
     SmallVector<mlir::BlockArgument> returnOps;
+    // finalBarrier passed as production barrier to last DMA task
+    auto finalBarrier = funcBuilder.create<VPURT::ConfigureBarrierOp>(funcBuilder.getUnknownLoc(), barrierNumber++);
     for (size_t i = 0; i < outputs.size(); ++i) {
         vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcBuilder, mlir::ValueRange(llvm::ArrayRef(waitBarriers)),
-                                                    mlir::ValueRange(), builder.getUnknownLoc(),
-                                                    getTensorResult(outputs[i]),
+                                                    mlir::ValueRange(finalBarrier.getBarrier()),
+                                                    builder.getUnknownLoc(), getTensorResult(outputs[i]),
                                                     func.getArgument(static_cast<unsigned int>(i + 1)), 0);
         returnOps.emplace_back(func.getArgument(static_cast<unsigned int>(i + 1)));
     }
@@ -141,9 +144,11 @@ void buildRaceConditionTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mo
 
     //  Pass Manager
     mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    pm.addPass(VPU::createInitCompilerPass(testDesc.getArchitecture(), VPU::CompilationMode::ReferenceHW,
-                                           static_cast<int>(raceConditionParams.requestedClusters),
-                                           static_cast<int>(raceConditionParams.requestedClusters), log));
+    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::ReferenceHW);
+    initCompilerOptions.numberOfDPUGroups = static_cast<int>(raceConditionParams.requestedClusters);
+    initCompilerOptions.numberOfDMAPorts = static_cast<int>(raceConditionParams.requestedClusters);
+
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
     VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");
 
     //  CNN Operation

@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -11,7 +11,6 @@ module @SingleLayer {
 
 // CHECK:   module @UsedMemory
 // CHECK:           IE.MemoryResource 2048 bytes of @DDR
-
 // CHECK: IE.CNNNetwork
 IE.CNNNetwork
     entryPoint : @main
@@ -63,7 +62,6 @@ module @ConstantLayer {
 
 // CHECK:   module @UsedMemory
 // CHECK:           IE.MemoryResource 128 bytes of @DDR
-
 // CHECK: IE.CNNNetwork
 IE.CNNNetwork
     entryPoint : @main
@@ -148,7 +146,6 @@ func.func @main(%arg0: tensor<1x2x2x2xf16>) -> (tensor<1x2x2x2xf16>, tensor<1x2x
 
 // CHECK-LABEL: @OptimizeUselessSoftMaxFP32
 module @OptimizeUselessSoftMaxFP32 {
-
 IE.CNNNetwork
     entryPoint : @main
     inputsInfo : {
@@ -201,7 +198,6 @@ func.func @main() -> tensor<1x2x4x2xf16> {
 
 // CHECK-LABEL: @UPA_ReLU_BadLayout
 module @UPA_ReLU_BadLayout {
-
 IE.CNNNetwork
     entryPoint : @main
     inputsInfo : {

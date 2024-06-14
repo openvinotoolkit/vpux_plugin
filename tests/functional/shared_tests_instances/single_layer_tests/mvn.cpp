@@ -1,128 +1,93 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022-2024 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
-#include <ngraph/op/parameter.hpp>
+#include <common_test_utils/ov_tensor_utils.hpp>
 #include <openvino/op/mvn.hpp>
-#include <ov_models/builders.hpp>
-#include <shared_test_classes/single_layer/mvn.hpp>
-#include <single_layer_tests/mvn.hpp>
-#include "vpu_ov1_layer_test.hpp"
-#include "vpux_private_properties.hpp"
+#include <shared_test_classes/single_op/mvn.hpp>
+#include <single_op_tests/mvn.hpp>
+#include "vpu_ov2_layer_test.hpp"
 
-namespace LayerTestsDefinitions {
+using namespace ov::test::utils;
+
+namespace ov {
+namespace test {
 
 // -------------- MVN1 test classes
 
-class Mvn1LayerTest_NPU3700 : public Mvn1LayerTest, virtual public LayerTestsUtils::VpuOv1LayerTestsCommon {};
+class Mvn1LayerTest_NPU3700 : public Mvn1LayerTest, virtual public VpuOv2LayerTest {};
 
 TEST_P(Mvn1LayerTest_NPU3700, HW) {
-    setPlatformVPU3700();
-    setDefaultHardwareModeMLIR();
-    Run();
+    setDefaultHardwareMode();
+    run(Platform::NPU3700);
 }
 
-// order permutations in test representable notation
-enum class HWLayout : uint8_t {
-    ANY = 0,
-    NCHW = 1,
-    NHWC = 2,
-    NCWH = 201,
-    NWHC = 202,
-};
-
-typedef std::tuple<InferenceEngine::SizeVector,  // Input shapes
-                   InferenceEngine::Precision,   // Input precision
-                   HWLayout,                     // Input layout
-                   ngraph::AxisSet,              // Reduction axes
-                   bool,                         // Across channels
-                   bool,                         // Normalize variance
-                   double,                       // Epsilon
-                   std::string                   // Device name
+typedef std::tuple<std::vector<InputShape>,  // Input shapes
+                   ov::element::Type,        // Input precision
+                   ov::Layout,               // Input layout
+                   ov::AxisSet,              // Reduction axes
+                   bool,                     // Across channels
+                   bool,                     // Normalize variance
+                   double                    // Epsilon
                    >
         mvn2Params;  // MVN1 with layout params
 
 /**
- * For testing particular kernel with variable order currently there is no way to generalize that in KMBLayerTestCommon
+ * For testing particular kernel with variable order currently there is no way to generalize that in
+ LayerTestCommon
  */
-class Mvn1LayerTest_NPU3720 :
-        public LayerTestsUtils::VpuOv1LayerTestsCommon,
-        public testing::WithParamInterface<mvn2Params> {
-    void ConfigureNetwork() override {
-        cnnNetwork.getInputsInfo().begin()->second->setPrecision(InferenceEngine::Precision::FP16);
-        cnnNetwork.getOutputsInfo().begin()->second->setPrecision(InferenceEngine::Precision::FP16);
-        cnnNetwork.getInputsInfo().begin()->second->setLayout(InferenceEngine::Layout::NCHW);
-        cnnNetwork.getOutputsInfo().begin()->second->setLayout(InferenceEngine::Layout::NCHW);
-    }
+class Mvn1LayerTest_NPU3720 : public VpuOv2LayerTest, public testing::WithParamInterface<mvn2Params> {
     void SetUp() override {
-        InferenceEngine::SizeVector inputShapes;
-        InferenceEngine::Precision inputPrecision;
-        ngraph::AxisSet axes;
-        bool acrossChanels, normalizeVariance;
+        std::vector<InputShape> shapes;
+        ov::element::Type modelType;
+        ov::AxisSet axes;
+        ov::Layout order;
+        bool acrossChannels, normalizeVariance;
         double eps;
-        HWLayout hwl;
+        std::tie(shapes, modelType, order, axes, acrossChannels, normalizeVariance, eps) = this->GetParam();
+        init_input_shapes(shapes);
 
-        std::tie(inputShapes, inputPrecision, hwl, axes, acrossChanels, normalizeVariance, eps, targetDevice) =
-                this->GetParam();
+        auto param = std::make_shared<ov::op::v0::Parameter>(modelType, inputDynamicShapes.front());
 
-        auto make_transpose_order = [hwl]() -> std::vector<int64_t> {
-            switch (hwl) {
-            case HWLayout::NHWC:
-                return {0, 2, 3, 1};
-            case HWLayout::NWHC:
-                return {0, 3, 2, 1};
-            case HWLayout::NCWH:
-                return {0, 1, 3, 2};
-            default:
-                return {0, 1, 2, 3};
-            };
-        };
+        std::shared_ptr<ov::op::v0::MVN> mvn;
 
-        const ov::ParameterVector params{
-                std::make_shared<ov::op::v0::Parameter>(ngraph::element::f16, ov::Shape(inputShapes))};
-        const auto paramOuts =
-                ngraph::helpers::convert2OutputVector(ngraph::helpers::castOps2Nodes<ngraph::op::Parameter>(params));
+        if (axes.empty()) {
+            mvn = std::make_shared<ov::op::v0::MVN>(param, acrossChannels, normalizeVariance, eps);
 
-        // order handling
-        auto input_transpose_order = ov::op::v0::Constant::create(ngraph::element::i64, {4}, make_transpose_order());
-        auto input_transpose = std::make_shared<ov::op::v1::Transpose>(paramOuts[0], input_transpose_order);
+            // OpenVINO MVN implementation implicitly adds 0th dimension to reduction axes set which is not valid
+            // behavior
+            ov::AxisSet axes;
+            const size_t startAxis = acrossChannels ? 1 : 2;
+            const size_t numOfDims = param->output(0).get_partial_shape().size();
+            for (size_t i = startAxis; i < numOfDims; i++)
+                axes.insert(i);
+            mvn->set_reduction_axes(axes);
+        } else {
+            mvn = std::make_shared<ov::op::v0::MVN>(param, axes, normalizeVariance, eps);
+        }
 
-        auto make_mvn_kernel = [&]() {
-            if (!axes.empty()) {
-                return std::dynamic_pointer_cast<ngraph::op::MVN>(
-                        ngraph::builder::makeMVN(input_transpose, axes, normalizeVariance, eps));
-            }
-            return std::dynamic_pointer_cast<ngraph::op::MVN>(
-                    ngraph::builder::makeMVN(input_transpose, acrossChanels, normalizeVariance, eps));
-        };
-        ngraph::ResultVector results{std::make_shared<ov::op::v0::Result>(make_mvn_kernel())};
-        function = std::make_shared<ngraph::Function>(results, params, "MVN1");
+        auto result = std::make_shared<ov::op::v0::Result>(mvn);
+        function = std::make_shared<ov::Model>(result, ov::ParameterVector{param}, "MVN1");
+        auto preProc = ov::preprocess::PrePostProcessor(function);
+        preProc.input().tensor().set_layout(order);
+        preProc.input().model().set_layout(order);
+        preProc.output().tensor().set_layout(order);
+        preProc.output().model().set_layout(order);
+        function = preProc.build();
     }
 
 public:
     static std::string getTestCaseName(const testing::TestParamInfo<mvn2Params>& obj) {
         mvn1Params mvn1;
-        HWLayout hwl;
+        ov::Layout hwl;
 
         std::tie(std::get<0>(mvn1), std::get<1>(mvn1), hwl, std::get<2>(mvn1), std::get<3>(mvn1), std::get<4>(mvn1),
-                 std::get<5>(mvn1), std::get<6>(mvn1)) = obj.param;
-        auto layout_name = [hwl]() -> std::string {
-            switch (hwl) {
-            case HWLayout::NHWC:
-                return "NHWC";
-            case HWLayout::NWHC:
-                return "NWHC";
-            case HWLayout::NCWH:
-                return "NCWH";
-            default:
-                return "NCHW";
-            };
-        };
+                 std::get<5>(mvn1)) = obj.param;
 
         std::ostringstream resultName;
         resultName << Mvn1LayerTest::getTestCaseName(testing::TestParamInfo<mvn1Params>(mvn1, 0)) << "_";
-        resultName << "Layout=" << layout_name();
+        resultName << "Layout=" << hwl.to_string();
         return resultName.str();
     }
 };
@@ -130,68 +95,63 @@ public:
 /**
  * MVN1 Input=0 special case E#96869
  */
-class Mvn1ZeroInputLayerTestCommon : public Mvn1LayerTest, virtual public LayerTestsUtils::VpuOv1LayerTestsCommon {
-    InferenceEngine::Blob::Ptr GenerateInput(const InferenceEngine::InputInfo& inputInfo) const override {
-        return FuncTestUtils::createAndFillBlob(inputInfo.getTensorDesc(), 0, 0, 1, 0);
-    }
-};
+class Mvn1ZeroInputLayerTestCommon : public Mvn1LayerTest, virtual public VpuOv2LayerTest {};
 
 class Mvn1ZeroInputLayerTest_NPU3720 : public Mvn1ZeroInputLayerTestCommon {};
+class Mvn1ZeroInputLayerTest_NPU4000 : public Mvn1ZeroInputLayerTestCommon {};
+
+class Mvn1LayerTest_NPU4000 : public Mvn1LayerTest, virtual public VpuOv2LayerTest {};
 
 TEST_P(Mvn1LayerTest_NPU3720, HW) {
-    setPlatformVPU3720();
-    setDefaultHardwareModeMLIR();
-    Run();
+    setDefaultHardwareMode();
+    run(Platform::NPU3720);
+}
+
+TEST_P(Mvn1LayerTest_NPU4000, SW) {
+    abs_threshold = 0.03;
+    setReferenceSoftwareMode();
+    run(Platform::NPU4000);
 }
 
 TEST_P(Mvn1ZeroInputLayerTest_NPU3720, HW) {
-    setPlatformVPU3720();
-    setDefaultHardwareModeMLIR();
-    Run();
+    abs_threshold = 0.003;
+    setDefaultHardwareMode();
+    run(Platform::NPU3720);
+}
+
+TEST_P(Mvn1ZeroInputLayerTest_NPU4000, HW) {
+    abs_threshold = 0.003;
+    setDefaultHardwareMode();
+    run(Platform::NPU4000);
 }
 
 // -------------- MVN6 test classes
 
-class Mvn6LayerTestCommon : public Mvn6LayerTest, virtual public LayerTestsUtils::VpuOv1LayerTestsCommon {
-    // Avoid f32->f16 converts
-    void ConfigureNetwork() override {
-        cnnNetwork.getInputsInfo().begin()->second->setPrecision(InferenceEngine::Precision::FP16);
-        cnnNetwork.getOutputsInfo().begin()->second->setPrecision(InferenceEngine::Precision::FP16);
-    }
-};
+class Mvn6LayerTestCommon : public Mvn6LayerTest, virtual public VpuOv2LayerTest {};
 
 class Mvn6LayerTest_NPU3700 : public Mvn6LayerTestCommon {};
 class Mvn6LayerTest_NPU3720 : public Mvn6LayerTestCommon {};
-
-class Mvn6LayerTest_FP32 : public Mvn6LayerTest, virtual public LayerTestsUtils::VpuOv1LayerTestsCommon {
-    void ConfigureNetwork() override {
-        configuration[ov::intel_vpux::compilation_mode_params.name()] = "convert-precision-to-fp16=false";
-    }
-};
+class Mvn6LayerTest_NPU4000 : public Mvn6LayerTestCommon {};
 
 TEST_P(Mvn6LayerTest_NPU3700, HW) {
-    setPlatformVPU3700();
-    setDefaultHardwareModeMLIR();
-    Run();
+    setDefaultHardwareMode();
+    run(Platform::NPU3700);
 }
 
 TEST_P(Mvn6LayerTest_NPU3720, SW) {
-    setPlatformVPU3720();
-    setReferenceSoftwareModeMLIR();
-    Run();
+    setReferenceSoftwareMode();
+    run(Platform::NPU3720);
 }
 
-// -------------- MVN6 F32 tests
-
-TEST_P(Mvn6LayerTest_FP32, NPU3720) {
-    setPlatformVPU3720();
-    setReferenceSoftwareModeMLIR();
-    Run();
+TEST_P(Mvn6LayerTest_NPU4000, HW) {
+    setDefaultHardwareMode();
+    run(Platform::NPU4000);
 }
 
-}  // namespace LayerTestsDefinitions
+}  // namespace test
+}  // namespace ov
 
-using namespace LayerTestsDefinitions;
+using namespace ov::test;
 
 namespace {
 
@@ -202,179 +162,199 @@ const std::vector<bool> normalizeVariance = {true, false};
 const std::vector<double> epsilon = {0.000000001};
 const std::vector<float> epsilonF = {0.0001};
 const std::vector<std::string> epsMode = {"inside_sqrt", "outside_sqrt"};
-const std::vector<ngraph::AxisSet> emptyReductionAxes = {{}};
+const std::vector<ov::AxisSet> emptyReductionAxes = {{}};
 using AxesVec = std::vector<std::vector<int>>;
 
 /* ================================= MVN1 NPU3700 ================================= */
 
 // Accuracy problem for 3-dim input tensor when acrossChannels = false
 // Traced in Jira S#48579
-const std::vector<std::vector<size_t>> inputShapes3D = {{1, 32, 17}, {1, 37, 9}};
+const std::vector<std::vector<ov::Shape>> inputShapes3D = {{{1, 32, 17}}, {{1, 37, 9}}};
 
 const std::vector<bool> acrossChannels3D = {true};
 
-const std::vector<std::vector<size_t>> inputShapes = {
-        {1, 16, 5, 8},
+const std::vector<std::vector<ov::Shape>> inputShapes = {
+        {{1, 16, 5, 8}},
 #if 0
 // Test fails for accuracy when Number of channels > 1 (tracked in Jira S#48579)
-    {3, 32, 17},
-    {3, 37, 9},
+    {{3, 32, 17}},
+    {{3, 37, 9}},
 // Batch size > 1 is not supported by Soft and Custom Layer MVN implementation
-    {2, 19, 5, 10},
-    {7, 32, 2, 8},
-    {5, 8, 3, 5},
-    {4, 41, 6, 9},
+    {{2, 19, 5, 10}},
+    {{7, 32, 2, 8}},
+    {{5, 8, 3, 5}},
+    {{4, 41, 6, 9}},
 // Currently input dim > 4 is not supported by NPU-plugin
-    {1, 32, 8, 1, 6},
-    {1, 9, 1, 15, 9},
-    {6, 64, 6, 1, 18},
-    {2, 31, 2, 9, 1},
-    {10, 16, 5, 10, 6}
+    {{1, 32, 8, 1, 6}},
+    {{1, 9, 1, 15, 9}},
+    {{6, 64, 6, 1, 18}},
+    {{2, 31, 2, 9, 1}},
+    {{10, 16, 5, 10, 6}}
 #endif
 };
 
 INSTANTIATE_TEST_SUITE_P(smoke_TestsMVN_3D, Mvn1LayerTest_NPU3700,
-                         ::testing::Combine(::testing::ValuesIn(inputShapes3D),
-                                            ::testing::Values(InferenceEngine::Precision::FP32),
+                         ::testing::Combine(::testing::ValuesIn(static_shapes_to_test_representation(inputShapes3D)),
+                                            ::testing::Values(ov::element::f32),
                                             ::testing::ValuesIn(emptyReductionAxes),
                                             ::testing::ValuesIn(acrossChannels3D),
                                             ::testing::ValuesIn(normalizeVariance), ::testing::ValuesIn(epsilon),
-                                            ::testing::Values(LayerTestsUtils::testPlatformTargetDevice())),
+                                            ::testing::Values(DEVICE_NPU)),
                          Mvn1LayerTest_NPU3700::getTestCaseName);
 
 INSTANTIATE_TEST_SUITE_P(smoke_TestsMVN, Mvn1LayerTest_NPU3700,
-                         ::testing::Combine(::testing::ValuesIn(inputShapes),
-                                            ::testing::Values(InferenceEngine::Precision::FP32),
+                         ::testing::Combine(::testing::ValuesIn(static_shapes_to_test_representation(inputShapes)),
+                                            ::testing::Values(ov::element::f32),
                                             ::testing::ValuesIn(emptyReductionAxes),
                                             ::testing::ValuesIn(acrossChannels), ::testing::ValuesIn(normalizeVariance),
-                                            ::testing::ValuesIn(epsilon),
-                                            ::testing::Values(LayerTestsUtils::testPlatformTargetDevice())),
+                                            ::testing::ValuesIn(epsilon), ::testing::Values(DEVICE_NPU)),
                          Mvn1LayerTest_NPU3700::getTestCaseName);
 
 // MVN6 pseudo test (actually testing MVN1 op, as innermost-consecutive norm axes config trigger 'ConvertMVN6toMVN1')
 // MVN6 kernel not available on NPU3700
-INSTANTIATE_TEST_CASE_P(pseudo_MVN6_4D_MLIR, Mvn6LayerTest_NPU3700,
-                        ::testing::Combine(::testing::ValuesIn(std::vector<std::vector<size_t>>{{1, 10, 5, 17}}),
-                                           ::testing::Values(InferenceEngine::Precision::FP16),
-                                           ::testing::Values(InferenceEngine::Precision::I32),
-                                           ::testing::ValuesIn(std::vector<std::vector<int>>{
-                                                   {1, 2, 3}, {2, 3}, {-2, -1}, {-2, -1, -3}}),
-                                           ::testing::ValuesIn(normalizeVariance), ::testing::ValuesIn(epsilonF),
-                                           ::testing::Values("outside_sqrt"),
-                                           ::testing::Values(LayerTestsUtils::testPlatformTargetDevice())),
-                        Mvn6LayerTest_NPU3700::getTestCaseName);
+INSTANTIATE_TEST_CASE_P(
+        pseudo_MVN6_4D_MLIR, Mvn6LayerTest_NPU3700,
+        ::testing::Combine(
+                ::testing::Values(static_shapes_to_test_representation(std::vector<ov::Shape>{{1, 10, 5, 17}})),
+                ::testing::Values(ov::element::f16), ::testing::Values(ov::element::i32),
+                ::testing::ValuesIn(std::vector<std::vector<int>>{{1, 2, 3}, {2, 3}, {-2, -1}, {-2, -1, -3}}),
+                ::testing::ValuesIn(normalizeVariance), ::testing::ValuesIn(epsilonF),
+                ::testing::Values("outside_sqrt"), ::testing::Values(DEVICE_NPU)),
+        Mvn6LayerTest_NPU3700::getTestCaseName);
 
 /* ================================= Param builder utils ================================= */
 
 const auto genMvn6Params = [](auto shapes, auto axes, auto eps) {
-    return ::testing::Combine(::testing::ValuesIn(shapes), ::testing::Values(InferenceEngine::Precision::FP16),
-                              ::testing::Values(InferenceEngine::Precision::I32), ::testing::ValuesIn(axes),
-                              ::testing::ValuesIn(normalizeVariance), ::testing::ValuesIn(eps),
-                              ::testing::ValuesIn(epsMode),
-                              ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+    return ::testing::Combine(::testing::ValuesIn(static_shapes_to_test_representation(shapes)),
+                              ::testing::Values(ov::element::f16), ::testing::Values(ov::element::i32),
+                              ::testing::ValuesIn(axes), ::testing::ValuesIn(normalizeVariance),
+                              ::testing::ValuesIn(eps), ::testing::ValuesIn(epsMode), ::testing::Values(DEVICE_NPU));
 };
 
 // less test combinations
 const auto genMvn6LessParams = [](auto shape, auto axes, auto eps) {
     bool normVariance = true;  // typical configs
     const std::string epsMode = "inside_sqrt";
-    return ::testing::Combine(::testing::Values(shape), ::testing::Values(InferenceEngine::Precision::FP16),
-                              ::testing::Values(InferenceEngine::Precision::I32), ::testing::ValuesIn(axes),
-                              ::testing::Values(normVariance), ::testing::ValuesIn(eps), ::testing::Values(epsMode),
-                              ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+    return ::testing::Combine(::testing::ValuesIn(static_shapes_to_test_representation(shape)),
+                              ::testing::Values(ov::element::f16), ::testing::Values(ov::element::i32),
+                              ::testing::ValuesIn(axes), ::testing::Values(normVariance), ::testing::ValuesIn(eps),
+                              ::testing::Values(epsMode), ::testing::Values(DEVICE_NPU));
 };
 
-/* ============================ MVN1 tests (NPU3720) ============================= */
+/* ============================ MVN1 tests (NPU3720/NPU4000) ============================= */
 
-const std::vector<std::vector<size_t>> inputShapesForOrder = {{1, 4, 2, 1024}};
+const std::vector<std::vector<ov::Shape>> inputShapesForOrder = {{{1, 4, 2, 1024}}};
 
-const std::vector<std::vector<size_t>> inputShapes4D = {{1, 4, 512, 1}, {1, 999, 2, 3}, {1, 16, 5, 8}, {2, 19, 5, 10},
-                                                        {7, 32, 2, 8},  {5, 8, 3, 5},   {4, 41, 6, 9}
+const std::vector<std::vector<ov::Shape>> inputShapes4D = {{{1, 4, 512, 1}}, {{1, 999, 2, 3}}, {{1, 16, 5, 8}},
+                                                           {{2, 19, 5, 10}}, {{7, 32, 2, 8}},  {{5, 8, 3, 5}},
+                                                           {{4, 41, 6, 9}}
 #if 0  // extra shapes
-        {5, 2, 7, 3},   {1, 3, 17, 21}, {2, 5, 13, 27}, {1, 7, 55, 33}, {4, 9, 7, 2},  {3, 13, 9, 9}, {1, 16, 12, 11},
-        {1, 512, 3, 2},
+        {{5, 2, 7, 3}},   {{1, 3, 17, 21}}, {{2, 5, 13, 27}}, {{1, 7, 55, 33}}, {{4, 9, 7, 2}},  {{3, 13, 9, 9}}, {{1, 16, 12,
+        11}}, {{1, 512, 3, 2}},
 #endif
 };
-const std::vector<std::vector<size_t>> inputShapesForDecomposition = {{1, 1, 1, 515971}, {2, 3, 20, 35971}};
-const std::vector<std::vector<size_t>> inputShapesForNHWCOpt = {{1, 16, 4, 32}, {1, 32, 4, 16}};
-const std::vector<std::vector<size_t>> inputShapesForBigSize = {{1, 1, 8, 48}, {1, 2, 8, 128}};
+const std::vector<std::vector<ov::Shape>> inputShapesForDecomposition = {{{1, 1, 1, 515971}}, {{2, 3, 20, 35971}}};
+const std::vector<std::vector<ov::Shape>> inputShapesForNHWCOpt = {{{1, 16, 4, 32}}, {{1, 32, 4, 16}}};
+const std::vector<std::vector<ov::Shape>> inputShapesForBigSize = {{{1, 1, 8, 48}}, {{1, 2, 8, 128}}};
 
 // -------------- MVN1 - NPU3270
-
-INSTANTIATE_TEST_CASE_P(precommit_MVN1_order, Mvn1LayerTest_NPU3720,
-                        ::testing::Combine(::testing::ValuesIn(inputShapesForOrder),
-                                           ::testing::Values(InferenceEngine::Precision::FP16),
-                                           ::testing::ValuesIn({HWLayout::NCHW, HWLayout::NCWH, HWLayout::NWHC}),
-                                           ::testing::ValuesIn(emptyReductionAxes), ::testing::ValuesIn(acrossChannels),
-                                           ::testing::ValuesIn(normalizeVariance), ::testing::ValuesIn(epsilon),
-                                           ::testing::Values(LayerTestsUtils::testPlatformTargetDevice())),
-                        Mvn1LayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_CASE_P(
+        precommit_MVN1_order, Mvn1LayerTest_NPU3720,
+        ::testing::Combine(::testing::ValuesIn(static_shapes_to_test_representation(inputShapesForOrder)),
+                           ::testing::Values(ov::element::f16),
+                           ::testing::ValuesIn({ov::Layout("NCHW"), ov::Layout("NCWH"), ov::Layout("NWHC")}),
+                           ::testing::ValuesIn(emptyReductionAxes), ::testing::ValuesIn(acrossChannels),
+                           ::testing::ValuesIn(normalizeVariance), ::testing::ValuesIn(epsilon)),
+        Mvn1LayerTest_NPU3720::getTestCaseName);
 
 INSTANTIATE_TEST_CASE_P(smoke_MVN1, Mvn1LayerTest_NPU3720,
-                        ::testing::Combine(::testing::ValuesIn(inputShapes4D),
-                                           ::testing::Values(InferenceEngine::Precision::FP16),
-                                           ::testing::ValuesIn({HWLayout::NCHW}),
+                        ::testing::Combine(::testing::ValuesIn(static_shapes_to_test_representation(inputShapes4D)),
+                                           ::testing::Values(ov::element::f16), ::testing::Values(ov::Layout("NCHW")),
                                            ::testing::ValuesIn(emptyReductionAxes), ::testing::ValuesIn(acrossChannels),
-                                           ::testing::ValuesIn(normalizeVariance), ::testing::ValuesIn(epsilon),
-                                           ::testing::Values(LayerTestsUtils::testPlatformTargetDevice())),
+                                           ::testing::ValuesIn(normalizeVariance), ::testing::ValuesIn(epsilon)),
                         Mvn1LayerTest_NPU3720::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(precommit_MVN1_opt, Mvn1LayerTest_NPU3720,
-                        ::testing::Combine(::testing::ValuesIn(inputShapesForNHWCOpt),
-                                           ::testing::Values(InferenceEngine::Precision::FP16),
-                                           ::testing::ValuesIn({HWLayout::NHWC}),
-                                           ::testing::ValuesIn(emptyReductionAxes), ::testing::ValuesIn(acrossChannels),
-                                           ::testing::ValuesIn(normalizeVariance), ::testing::ValuesIn(epsilon),
-                                           ::testing::Values(LayerTestsUtils::testPlatformTargetDevice())),
-                        Mvn1LayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_CASE_P(
+        precommit_MVN1_opt, Mvn1LayerTest_NPU3720,
+        ::testing::Combine(::testing::ValuesIn(static_shapes_to_test_representation(inputShapesForNHWCOpt)),
+                           ::testing::Values(ov::element::f16), ::testing::Values(ov::Layout("NHWC")),
+                           ::testing::ValuesIn(emptyReductionAxes), ::testing::ValuesIn(acrossChannels),
+                           ::testing::ValuesIn(normalizeVariance), ::testing::ValuesIn(epsilon)),
+        Mvn1LayerTest_NPU3720::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(precommit_MVN1_bigsize, Mvn1LayerTest_NPU3720,
-                        ::testing::Combine(::testing::ValuesIn(inputShapesForBigSize),
-                                           ::testing::Values(InferenceEngine::Precision::FP16),
-                                           ::testing::ValuesIn({HWLayout::NCHW}),
-                                           ::testing::ValuesIn(emptyReductionAxes), ::testing::ValuesIn(acrossChannels),
-                                           ::testing::ValuesIn(normalizeVariance), ::testing::ValuesIn(epsilon),
-                                           ::testing::Values(LayerTestsUtils::testPlatformTargetDevice())),
-                        Mvn1LayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_CASE_P(
+        precommit_MVN1_bigsize, Mvn1LayerTest_NPU3720,
+        ::testing::Combine(::testing::ValuesIn(static_shapes_to_test_representation(inputShapesForBigSize)),
+                           ::testing::Values(ov::element::f16), ::testing::Values(ov::Layout("NCHW")),
+                           ::testing::ValuesIn(emptyReductionAxes), ::testing::ValuesIn(acrossChannels),
+                           ::testing::ValuesIn(normalizeVariance), ::testing::ValuesIn(epsilon)),
+        Mvn1LayerTest_NPU3720::getTestCaseName);
 
 // -------------- MVN1 Decomposition
 
-INSTANTIATE_TEST_CASE_P(smoke_MVN1_Decomposition, Mvn1LayerTest_NPU3720,
-                        ::testing::Combine(::testing::ValuesIn(inputShapesForDecomposition),
-                                           ::testing::Values(InferenceEngine::Precision::FP16),
-                                           ::testing::ValuesIn({HWLayout::NCHW}),
-                                           ::testing::ValuesIn(emptyReductionAxes), ::testing::ValuesIn(acrossChannels),
-                                           ::testing::ValuesIn(normalizeVariance), ::testing::ValuesIn(epsilon),
-                                           ::testing::Values(LayerTestsUtils::testPlatformTargetDevice())),
-                        Mvn1LayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_CASE_P(
+        smoke_MVN1_Decomposition, Mvn1LayerTest_NPU3720,
+        ::testing::Combine(::testing::ValuesIn(static_shapes_to_test_representation(inputShapesForDecomposition)),
+                           ::testing::Values(ov::element::f32), ::testing::Values(ov::Layout("NCHW")),
+                           ::testing::ValuesIn(emptyReductionAxes), ::testing::ValuesIn(acrossChannels),
+                           ::testing::ValuesIn(normalizeVariance), ::testing::ValuesIn(epsilon)),
+        Mvn1LayerTest_NPU3720::getTestCaseName);
+
+// -------------- MVN1 - NPU4000
+
+INSTANTIATE_TEST_CASE_P(smoke_MVN1, Mvn1LayerTest_NPU4000,
+                        ::testing::Combine(::testing::ValuesIn(static_shapes_to_test_representation(inputShapes4D)),
+                                           ::testing::Values(ov::element::f16), ::testing::ValuesIn(emptyReductionAxes),
+                                           ::testing::ValuesIn(acrossChannels), ::testing::ValuesIn(normalizeVariance),
+                                           ::testing::ValuesIn(epsilon), ::testing::Values(DEVICE_NPU)),
+                        Mvn1LayerTest_NPU4000::getTestCaseName);
+
+// -------------- MVN1 Decomposition
+
+INSTANTIATE_TEST_CASE_P(
+        smoke_MVN1_Decomposition, Mvn1LayerTest_NPU4000,
+        ::testing::Combine(::testing::ValuesIn(static_shapes_to_test_representation(inputShapesForDecomposition)),
+                           ::testing::Values(ov::element::f32), ::testing::ValuesIn(emptyReductionAxes),
+                           ::testing::ValuesIn(acrossChannels), ::testing::ValuesIn(normalizeVariance),
+                           ::testing::ValuesIn(epsilon), ::testing::Values(DEVICE_NPU)),
+        Mvn1LayerTest_NPU4000::getTestCaseName);
 
 // -------------- MVN6 'pseudo' tests : actually testing MVN1 op,
 // as innermost-consecutive norm axes config trigger 'ConvertMVN6toMVN1' to pass
 
-const auto pse2D = genMvn6LessParams(std::vector<size_t>{5, 17}, AxesVec{{1}}, epsilonF);
-const auto pse3D = genMvn6LessParams(std::vector<size_t>{10, 5, 17}, AxesVec{{2}}, epsilonF);
+const auto pse2D = genMvn6LessParams(std::vector<std::vector<ov::Shape>>{{{5, 17}}}, AxesVec{{1}}, epsilonF);
+const auto pse3D = genMvn6LessParams(std::vector<std::vector<ov::Shape>>{{{10, 5, 17}}}, AxesVec{{2}}, epsilonF);
+const auto pse4D = genMvn6LessParams(std::vector<std::vector<ov::Shape>>{{{1, 48, 48, 32}}}, AxesVec{{-1}}, epsilonF);
 
 INSTANTIATE_TEST_SUITE_P(pseudo_MVN6_2D, Mvn6LayerTest_NPU3720, pse2D, Mvn6LayerTest_NPU3720::getTestCaseName);
 INSTANTIATE_TEST_SUITE_P(pseudo_MVN6_3D, Mvn6LayerTest_NPU3720, pse3D, Mvn6LayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(pseudo_MVN6_4D, Mvn6LayerTest_NPU3720, pse4D, Mvn6LayerTest_NPU3720::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(pseudo_MVN6_2D, Mvn6LayerTest_NPU4000, pse2D, Mvn6LayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(pseudo_MVN6_3D, Mvn6LayerTest_NPU4000, pse3D, Mvn6LayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(pseudo_MVN6_4D, Mvn6LayerTest_NPU4000, pse4D, Mvn6LayerTest_NPU4000::getTestCaseName);
 
 // -------------- MVN1 Zero-Input test
 
 const auto zeroTestCfg = ::testing::Combine(
-        ::testing::Values(inputShapes4D[0]), ::testing::Values(InferenceEngine::Precision::FP16),
+        ::testing::Values(static_shapes_to_test_representation(inputShapes4D[0])), ::testing::Values(ov::element::f32),
         ::testing::ValuesIn(emptyReductionAxes), ::testing::ValuesIn(acrossChannels), ::testing::Values(true),
-        ::testing::ValuesIn(epsilon), ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+        ::testing::ValuesIn(epsilon), ::testing::Values(DEVICE_NPU));
 
 INSTANTIATE_TEST_CASE_P(zero_input, Mvn1ZeroInputLayerTest_NPU3720, zeroTestCfg,
                         Mvn1ZeroInputLayerTest_NPU3720::getTestCaseName);
 
-/* ============================= MVN6 tests (NPU3720) ============================ */
+INSTANTIATE_TEST_CASE_P(zero_input, Mvn1ZeroInputLayerTest_NPU4000, zeroTestCfg,
+                        Mvn1ZeroInputLayerTest_NPU4000::getTestCaseName);
+
+/* ============================= MVN6 tests (NPU3720/NPU4000) ============================ */
 
 const std::vector<float> bigEps = {0.5};
-std::vector<InferenceEngine::SizeVector> shapes1D = {{17}};
-std::vector<InferenceEngine::SizeVector> shapes2D = {{5, 17}};
-std::vector<InferenceEngine::SizeVector> shapes3D = {{10, 5, 17}};
-std::vector<InferenceEngine::SizeVector> shapes4D = {{4, 10, 5, 17}};
-std::vector<InferenceEngine::SizeVector> shapes5D = {{10, 16, 5, 10, 6}};
+std::vector<std::vector<ov::Shape>> shapes1D = {{{17}}};
+std::vector<std::vector<ov::Shape>> shapes2D = {{{5, 17}}};
+std::vector<std::vector<ov::Shape>> shapes3D = {{{10, 5, 17}}};
+std::vector<std::vector<ov::Shape>> shapes4D = {{{4, 10, 5, 17}}};
+std::vector<std::vector<ov::Shape>> shapes5D = {{{10, 16, 5, 10, 6}}};
 
 // axes values for corresponding ND shapes
 std::vector<std::vector<int>> axes1D = {{0}};
@@ -388,13 +368,17 @@ std::vector<std::vector<int>> axes5D = {{1}, {1, 2}, {1, 3, 4}, {0, 2, 3}, {0, 1
 const auto cfg1D = genMvn6Params(shapes1D, axes1D, bigEps);
 const auto cfg2D = genMvn6Params(shapes2D, axes2D, bigEps);
 const auto cfg3D = genMvn6Params(shapes3D, axes3D, bigEps);
-const auto cfg4D = genMvn6LessParams(shapes4D[0], axes4D, bigEps);
-const auto cfg5D = genMvn6LessParams(shapes5D[0], axes5D, bigEps);
+const auto cfg4D = genMvn6LessParams(shapes4D, axes4D, bigEps);
+const auto cfg5D = genMvn6LessParams(shapes5D, axes5D, bigEps);
 
 // tiling configs
-const auto cfgT0 = genMvn6LessParams(InferenceEngine::SizeVector{1, 512, 1219}, AxesVec{{1}}, bigEps);
-const auto cfgT1 = genMvn6LessParams(InferenceEngine::SizeVector{1, 64, 104, 104}, AxesVec{{2}}, bigEps);
-const auto cfgT2 = genMvn6LessParams(InferenceEngine::SizeVector{8, 16, 16, 16, 16}, AxesVec{{4}}, bigEps);
+const auto cfgT0 = genMvn6LessParams(std::vector<std::vector<ov::Shape>>{{{1, 512, 1219}}}, AxesVec{{1}}, bigEps);
+const auto cfgT1 = genMvn6LessParams(std::vector<std::vector<ov::Shape>>{{{1, 64, 104, 104}}}, AxesVec{{2}}, bigEps);
+const auto cfgT2 = genMvn6LessParams(std::vector<std::vector<ov::Shape>>{{{8, 16, 16, 16, 16}}}, AxesVec{{4}}, bigEps);
+
+// Multi-SHAVEs config
+const auto cfgMS = genMvn6LessParams(std::vector<std::vector<ov::Shape>>{{{4, 10, 5, 17}}, {{4, 1, 10, 17}}},
+                                     AxesVec{{0}}, bigEps);
 
 // -------------- MVN6 - NPU3720
 
@@ -408,13 +392,18 @@ INSTANTIATE_TEST_SUITE_P(tiling_MVN6_a, Mvn6LayerTest_NPU3720, cfgT0, Mvn6LayerT
 INSTANTIATE_TEST_SUITE_P(tiling_MVN6_b, Mvn6LayerTest_NPU3720, cfgT1, Mvn6LayerTest_NPU3720::getTestCaseName);
 INSTANTIATE_TEST_SUITE_P(tiling_MVN6_c, Mvn6LayerTest_NPU3720, cfgT2, Mvn6LayerTest_NPU3720::getTestCaseName);
 
-// -------------- MVN6 - f32 tests
-const auto cfgF32 =
-        ::testing::Combine(::testing::Values(shapes4D[0]), ::testing::Values(InferenceEngine::Precision::FP32),
-                           ::testing::Values(InferenceEngine::Precision::I32), ::testing::Values(axes4D[2]),
-                           ::testing::Values(true), ::testing::ValuesIn(bigEps), ::testing::ValuesIn(epsMode),
-                           ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+// -------------- MVN6 - NPU4000
 
-INSTANTIATE_TEST_SUITE_P(smoke_MVN6_fp32, Mvn6LayerTest_FP32, cfgF32, Mvn6LayerTest_FP32::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_MVN6_1D, Mvn6LayerTest_NPU4000, cfg1D, Mvn6LayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_MVN6_2D, Mvn6LayerTest_NPU4000, cfg2D, Mvn6LayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_MVN6_3D, Mvn6LayerTest_NPU4000, cfg3D, Mvn6LayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_MVN6_4D, Mvn6LayerTest_NPU4000, cfg4D, Mvn6LayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_MVN6_5D, Mvn6LayerTest_NPU4000, cfg5D, Mvn6LayerTest_NPU4000::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(tiling_MVN6_a, Mvn6LayerTest_NPU4000, cfgT0, Mvn6LayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(tiling_MVN6_b, Mvn6LayerTest_NPU4000, cfgT1, Mvn6LayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(tiling_MVN6_c, Mvn6LayerTest_NPU4000, cfgT2, Mvn6LayerTest_NPU4000::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(multi_SHAVEs_MVN6, Mvn6LayerTest_NPU4000, cfgMS, Mvn6LayerTest_NPU4000::getTestCaseName);
 
 }  // namespace

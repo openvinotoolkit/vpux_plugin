@@ -1,82 +1,86 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022-2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
-#include "shared_test_classes/single_layer/split.hpp"
+#include "single_op_tests/split.hpp"
 
 #include <vector>
 
 #include "common_test_utils/test_constants.hpp"
-#include "vpu_ov1_layer_test.hpp"
+#include "vpu_ov2_layer_test.hpp"
 
-namespace LayerTestsDefinitions {
+namespace ov {
 
-class SplitLayerTestCommon : public SplitLayerTest, virtual public LayerTestsUtils::VpuOv1LayerTestsCommon {};
-class SplitLayerTest_NPU3700 : public SplitLayerTestCommon {
-    void SkipBeforeInfer() override {
-        throw LayerTestsUtils::VpuSkipTestException(
-                "Issues with Runtime. Outputs is empty because runtime doesn't wait while dma is finished");
-    }
-};
+namespace test {
+
+class SplitLayerTestCommon : public SplitLayerTest, virtual public VpuOv2LayerTest {};
+class SplitLayerTest_NPU3700 : public SplitLayerTestCommon {};
 
 class SplitLayerTest_NPU3720 : public SplitLayerTestCommon {};
+class SplitLayerTest_NPU4000 : public SplitLayerTestCommon {};
 
 TEST_P(SplitLayerTest_NPU3700, HW) {
-    setPlatformVPU3700();
-    setDefaultHardwareModeMLIR();
-    Run();
+    setSkipInferenceCallback([](std::stringstream& str) {
+        str << "Issues with Runtime. Outputs is empty because runtime doesn't wait while dma is finished";
+    });
+    setDefaultHardwareMode();
+    run(Platform::NPU3700);
 }
 
 TEST_P(SplitLayerTest_NPU3720, HW) {
-    setPlatformVPU3720();
-    setDefaultHardwareModeMLIR();
-    Run();
+    setDefaultHardwareMode();
+    run(Platform::NPU3720);
 }
 
-}  // namespace LayerTestsDefinitions
+TEST_P(SplitLayerTest_NPU4000, HW) {
+    setDefaultHardwareMode();
+    run(Platform::NPU4000);
+}
 
-using namespace LayerTestsDefinitions;
+}  // namespace test
+
+}  // namespace ov
+
+using ov::test::SplitLayerTest_NPU3700;
+using ov::test::SplitLayerTest_NPU3720;
+using ov::test::SplitLayerTest_NPU4000;
 
 namespace {
-const std::vector<InferenceEngine::Precision> netPrecisions = {
-        InferenceEngine::Precision::FP32,  // Testing FP32/FP16 netPrecision functionality only for small scope of
-        InferenceEngine::Precision::FP16   // tests: GRNLayerTest, SplitLayerTest, CTCGreedyDecoderLayerTest
+const std::vector<ov::element::Type> modelTypes = {
+        ov::element::f32,  // Testing FP32/FP16 netPrecision functionality only for small scope of
+        ov::element::f16   // tests: GRNLayerTest, SplitLayerTest, CTCGreedyDecoderLayerTest
 };
 
 const auto paramsConfig1 =
-        testing::Combine(::testing::Values(2, 3), ::testing::Values(0, 1, 2, 3), ::testing::ValuesIn(netPrecisions),
-                         ::testing::Values(InferenceEngine::Precision::FP16, InferenceEngine::Precision::FP32),
-                         ::testing::Values(InferenceEngine::Precision::FP16, InferenceEngine::Precision::FP32),
-                         ::testing::Values(InferenceEngine::Layout::NCHW, InferenceEngine::Layout::NHWC),
-                         ::testing::Values(InferenceEngine::Layout::NCHW, InferenceEngine::Layout::NHWC),
-                         ::testing::Values(InferenceEngine::SizeVector({6, 6, 12, 24})),
-                         ::testing::Values(InferenceEngine::SizeVector({})),
-                         ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+        testing::Combine(::testing::Values(2, 3), ::testing::Values(0, 1, 2, 3), ::testing::ValuesIn(modelTypes),
+                         ::testing::ValuesIn(ov::test::static_shapes_to_test_representation(
+                                 std::vector<std::vector<ov::Shape>>({{{6, 6, 12, 24}}}))),
+                         ::testing::Values(std::vector<size_t>({})), ::testing::Values(ov::test::utils::DEVICE_NPU));
 const auto paramsConfig2 =
-        testing::Combine(::testing::Values(2, 3), ::testing::Values(1, 2, 3), ::testing::ValuesIn(netPrecisions),
-                         ::testing::Values(InferenceEngine::Precision::FP16, InferenceEngine::Precision::FP32),
-                         ::testing::Values(InferenceEngine::Precision::FP16, InferenceEngine::Precision::FP32),
-                         ::testing::Values(InferenceEngine::Layout::NCHW, InferenceEngine::Layout::NHWC),
-                         ::testing::Values(InferenceEngine::Layout::NCHW, InferenceEngine::Layout::NHWC),
-                         ::testing::Values(InferenceEngine::SizeVector({6, 6, 12, 24})),
-                         ::testing::Values(InferenceEngine::SizeVector({})),
-                         ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
-const auto paramsPrecommit = testing::Combine(
-        ::testing::Values(2, 3), ::testing::Values(0), ::testing::ValuesIn(netPrecisions),
-        ::testing::Values(InferenceEngine::Precision::FP16), ::testing::Values(InferenceEngine::Precision::FP32),
-        ::testing::Values(InferenceEngine::Layout::NCHW, InferenceEngine::Layout::NHWC),
-        ::testing::Values(InferenceEngine::Layout::NCHW, InferenceEngine::Layout::NHWC),
-        ::testing::Values(InferenceEngine::SizeVector({6, 6, 12, 24})),
-        ::testing::Values(InferenceEngine::SizeVector({})),
-        ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+        testing::Combine(::testing::Values(2, 3), ::testing::Values(1, 2, 3), ::testing::ValuesIn(modelTypes),
+                         ::testing::ValuesIn(ov::test::static_shapes_to_test_representation(
+                                 std::vector<std::vector<ov::Shape>>({{{6, 6, 12, 24}}}))),
+                         ::testing::Values(std::vector<size_t>({})), ::testing::Values(ov::test::utils::DEVICE_NPU));
+const auto paramsPrecommit =
+        testing::Combine(::testing::Values(2, 3), ::testing::Values(0), ::testing::ValuesIn(modelTypes),
+                         ::testing::ValuesIn(ov::test::static_shapes_to_test_representation(
+                                 std::vector<std::vector<ov::Shape>>({{{6, 6, 12, 24}}}))),
+                         ::testing::Values(std::vector<size_t>({})), ::testing::Values(ov::test::utils::DEVICE_NPU));
 
 // --------- NPU3700 ---------
 
-INSTANTIATE_TEST_SUITE_P(smoke_Split, SplitLayerTest_NPU3700, paramsConfig1, SplitLayerTest::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_Split, SplitLayerTest_NPU3700, paramsConfig1, SplitLayerTest_NPU3700::getTestCaseName);
 
 // --------- NPU3720 ---------
 
-INSTANTIATE_TEST_SUITE_P(smoke_Split, SplitLayerTest_NPU3720, paramsConfig1, SplitLayerTest::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_Split, SplitLayerTest_NPU3720, paramsConfig1, SplitLayerTest_NPU3720::getTestCaseName);
+
+// --------- NPU4000 ---------
+
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_Split, SplitLayerTest_NPU4000, paramsPrecommit,
+                         SplitLayerTest_NPU4000::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(smoke_Split, SplitLayerTest_NPU4000, paramsConfig2, SplitLayerTest_NPU4000::getTestCaseName);
 
 }  // namespace

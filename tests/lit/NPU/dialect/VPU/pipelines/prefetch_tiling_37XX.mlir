@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -894,11 +894,11 @@ func.func @LargeConstPipeliningSOKFor(
     // CHECK-DAG:       [[WEIGHTS_TABLE2:%.+]] = const.Declare tensor<256x1x1x4xsi32>
     // CHECK-SAME:          [#const.SubView<[256, 0, 0, 0], [256, 1, 1, 4]>]
     // CHECK-DAG:       [[WEIGHTS2:%.+]] = const.Declare tensor<256x256x3x3xf16, {order = #NHWC}>
-    // CHECK-SAME:          [#const.Reorder<#NHWC>, #const.SubView<[256, 0, 0, 0], [256, 256, 3, 3]>]
+    // CHECK-SAME:          [#const.SubView<[256, 0, 0, 0], [256, 256, 3, 3]>, #const.Reorder<#NHWC>]
     // CHECK-DAG:       [[WEIGHTS_TABLE1:%.+]] = const.Declare tensor<256x1x1x4xsi32>
     // CHECK-SAME:          [#const.SubView<[0, 0, 0, 0], [256, 1, 1, 4]>]
     // CHECK-DAG:       [[WEIGHTS1:%.+]] = const.Declare tensor<256x256x3x3xf16, {order = #NHWC}>
-    // CHECK-SAME:          [#const.Reorder<#NHWC>, #const.SubView<[0, 0, 0, 0], [256, 256, 3, 3]>]
+    // CHECK-SAME:          [#const.SubView<[0, 0, 0, 0], [256, 256, 3, 3]>, #const.Reorder<#NHWC>]
 
     // CHECK:       [[CONV1:%.+]] = VPU.NCE.Convolution([[INPUT]], [[WEIGHTS1]], [[WEIGHTS_TABLE1]])
     // CHECK-SAME:          multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverKernel>
@@ -1205,15 +1205,13 @@ func.func @SplitOverWForSOHCompatibility(%arg0: tensor<1x16x8x10001xf16, {order 
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
-// CHECK-LABEL: func.func @PrefetchingNCEToUPATask
-// CHECK-SAME:        [[INPUT:%arg[0-9]]]: tensor<1x64x80x80xf16>
-func.func @PrefetchingNCEToUPATask(%arg0: tensor<1x64x80x80xf16>) -> tensor<1x48x80x80xf16, {order = #NHWC}> {
+// CHECK-LABEL: func.func @PrefetchingNCEToSWTask
+// CHECK-SAME:        [[INPUT:%arg[0-9]]]: tensor<1x64x80x80xf16, {order = #NHWC}>
+func.func @PrefetchingNCEToSWTask(%arg0: tensor<1x64x80x80xf16, {order = #NHWC}>) -> tensor<1x48x80x80xf16, {order = #NHWC}> {
     %weights_0 = const.Declare tensor<48x64x5x5xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<48x64x5x5xf16>, [#const.Reorder<#NHWC>]
     %weights_table_0 = const.Declare tensor<48x1x1x4xsi32> = dense<1> : tensor<48x1x1x4xsi32>
-    %0 = VPU.MemPermute(%arg0) {
-        dst_order = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>,
-        mem_perm = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
-        } : tensor<1x64x80x80xf16> -> tensor<1x64x80x80xf16, {order = #NHWC}>
+
+    %0 = VPU.Tanh(%arg0) : tensor<1x64x80x80xf16, {order = #NHWC}> -> tensor<1x64x80x80xf16, {order = #NHWC}>
     %1 = VPU.NCE.Convolution(%0, %weights_0, %weights_table_0) {
         pad = #VPU.Padding<left = 2 : i64, right = 2 : i64, top = 2 : i64, bottom = 2 : i64>,
         rawFilterShape = [48, 64, 5, 5],
@@ -1229,25 +1227,25 @@ func.func @PrefetchingNCEToUPATask(%arg0: tensor<1x64x80x80xf16>) -> tensor<1x48
     // CHECK-DAG:       [[WT_0:%.+]] = const.Declare tensor<16x1x1x4xsi32> = dense<1>
     // CHECK-DAG:       [[WEIGHTS_0:%.+]] = const.Declare tensor<16x64x5x5xf16, {order = #NHWC}> = dense<1.000000e+00>
 
-    // CHECK:       [[MEMPERMUTE:%.+]] = VPU.MemPermute([[INPUT]]) {dst_order = #NHWC, mem_perm = #NHWC}
-    // CHECK-SAME:      : tensor<1x64x80x80xf16> -> tensor<1x64x80x80xf16, {order = #NHWC}>
+    // CHECK:       [[TANH:%.+]] = VPU.Tanh([[INPUT]])
+    // CHECK-SAME:      : tensor<1x64x80x80xf16, {order = #NHWC}> -> tensor<1x64x80x80xf16, {order = #NHWC}>
 
     // Tile 0
-    // CHECK:       [[CONV:%.+]] = VPU.NCE.Convolution([[MEMPERMUTE]], [[WEIGHTS_0]], [[WT_0]]) {
+    // CHECK:       [[CONV:%.+]] = VPU.NCE.Convolution([[TANH]], [[WEIGHTS_0]], [[WT_0]]) {
     // CHECK-SAME:      pad = #VPU.Padding<left = 2 : i64, right = 2 : i64, top = 2 : i64, bottom = 2 : i64>,
     // CHECK-SAME:      rawFilterShape = [16, 64, 5, 5],
     // CHECK-SAME:      strides = [1, 1]
     // CHECK-SAME:      -> tensor<1x16x80x80xf16, {order = #NHWC}>
 
     // Tile 1
-    // CHECK:       [[CONV1:%.+]] = VPU.NCE.Convolution([[MEMPERMUTE]], [[WEIGHTS_1]], [[WT_1]]) {
+    // CHECK:       [[CONV1:%.+]] = VPU.NCE.Convolution([[TANH]], [[WEIGHTS_1]], [[WT_1]]) {
     // CHECK-SAME:      pad = #VPU.Padding<left = 2 : i64, right = 2 : i64, top = 2 : i64, bottom = 2 : i64>,
     // CHECK-SAME:      rawFilterShape = [16, 64, 5, 5],
     // CHECK-SAME:      strides = [1, 1]
     // CHECK-SAME:      -> tensor<1x16x80x80xf16, {order = #NHWC}>
 
     // Tile 2
-    // CHECK:       [[CONV2:%.+]] = VPU.NCE.Convolution([[MEMPERMUTE]], [[WEIGHTS_2]], [[WT_2]]) {
+    // CHECK:       [[CONV2:%.+]] = VPU.NCE.Convolution([[TANH]], [[WEIGHTS_2]], [[WT_2]]) {
     // CHECK-SAME:      pad = #VPU.Padding<left = 2 : i64, right = 2 : i64, top = 2 : i64, bottom = 2 : i64>,
     // CHECK-SAME:      rawFilterShape = [16, 64, 5, 5],
     // CHECK-SAME:      strides = [1, 1]
@@ -1543,13 +1541,13 @@ func.func @SplitLogicalXorEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tens
 
 // -----
 
-func.func @SplitEqualEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xf16> {
-  %0 = VPU.Equal(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xf16>
-  return %0 : tensor<1x10x256x256xf16>
+func.func @SplitEqualEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xi8> {
+  %0 = VPU.Equal(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xi8>
+  return %0 : tensor<1x10x256x256xi8>
 }
 
 // CHECK-LABEL: @SplitEqualEltwiseSw
-// CHECK-SAME:      [[INPUT_0:%arg[0-9]]]: tensor<1x10x256x256xf16>, [[INPUT_1:%arg[0-9]]]: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xf16> {
+// CHECK-SAME:      [[INPUT_0:%arg[0-9]]]: tensor<1x10x256x256xf16>, [[INPUT_1:%arg[0-9]]]: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xi8> {
 
 // CHECK:       [[INPUT_TILE0:%.+]] = VPU.Slice [[INPUT_0]] [0, 0, 0, 0] [1, 10, 128, 256]
 // CHECK-SAME:   : tensor<1x10x256x256xf16> to tensor<1x10x128x256xf16>
@@ -1558,7 +1556,7 @@ func.func @SplitEqualEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tensor<1x
 // CHECK-SAME:   : tensor<1x10x256x256xf16> to tensor<1x10x128x256xf16>
 
 // CHECK:       [[OUTPUT_TILE0:%.+]] = VPU.Equal([[INPUT_TILE0]], [[INPUT_TILE1]]) {
-// CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x128x256xf16>, tensor<1x10x128x256xf16> -> tensor<1x10x128x256xf16>
+// CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x128x256xf16>, tensor<1x10x128x256xf16> -> tensor<1x10x128x256xi8>
 
 // CHECK:       [[INPUT_TILE2:%.+]] = VPU.Slice [[INPUT_0]] [0, 0, 128, 0] [1, 10, 128, 256]
 // CHECK-SAME:   : tensor<1x10x256x256xf16> to tensor<1x10x128x256xf16>
@@ -1567,13 +1565,13 @@ func.func @SplitEqualEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tensor<1x
 // CHECK-SAME:   : tensor<1x10x256x256xf16> to tensor<1x10x128x256xf16>
 
 // CHECK:       [[OUTPUT_TILE1:%.+]] = VPU.Equal([[INPUT_TILE2]], [[INPUT_TILE3]]) {
-// CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x128x256xf16>, tensor<1x10x128x256xf16> -> tensor<1x10x128x256xf16>
+// CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x128x256xf16>, tensor<1x10x128x256xf16> -> tensor<1x10x128x256xi8>
 
 // CHECK:       [[OUTPUT:%.+]] = VPU.Concat([[OUTPUT_TILE0]], [[OUTPUT_TILE1]])
 // CHECK-SAME:  [0, 0, 0, 0], [0, 0, 128, 0]
-// CHECK-SAME:  : tensor<1x10x128x256xf16>, tensor<1x10x128x256xf16> -> tensor<1x10x256x256xf16>
+// CHECK-SAME:  : tensor<1x10x128x256xi8>, tensor<1x10x128x256xi8> -> tensor<1x10x256x256xi8>
 
-// CHECK:       return [[OUTPUT]] : tensor<1x10x256x256xf16>
+// CHECK:       return [[OUTPUT]] : tensor<1x10x256x256xi8>
 
 // -----
 
@@ -2150,24 +2148,24 @@ func.func @SplitReduceSum(%arg0: tensor<1x12x368x480xf16>) -> tensor<1x1x368x480
     // CHECK-LABEL: @SplitReduceSum
     // CHECK-SAME:  [[INPUT:%arg[0-9]]]: tensor<1x12x368x480xf16>) -> tensor<1x1x368x480xf16> {
 
-    // CHECK:       [[INPUT_TILE0:%.+]] = VPU.Slice [[INPUT]] [0, 0, 0, 0] [1, 12, 123, 480]
-    // CHECK-SAME:   : tensor<1x12x368x480xf16> to tensor<1x12x123x480xf16>
+    // CHECK:       [[INPUT_TILE0:%.+]] = VPU.Slice [[INPUT]] [0, 0, 0, 0] [1, 12, 368, 160]
+    // CHECK-SAME:   : tensor<1x12x368x480xf16> to tensor<1x12x368x160xf16>
     // CHECK:       [[OUTPUT_TILE0:%.+]] = VPU.ReduceSum([[INPUT_TILE0]]) {
-    // CHECK-SAME:  axes_value = [1], keep_dims} : tensor<1x12x123x480xf16> -> tensor<1x1x123x480xf16>
+    // CHECK-SAME:  axes_value = [1], keep_dims} : tensor<1x12x368x160xf16> -> tensor<1x1x368x160xf16>
 
-    // CHECK:       [[INPUT_TILE1:%.+]] = VPU.Slice [[INPUT]] [0, 0, 123, 0] [1, 12, 123, 480]
-    // CHECK-SAME:   : tensor<1x12x368x480xf16> to tensor<1x12x123x480xf16>
+    // CHECK:       [[INPUT_TILE1:%.+]] = VPU.Slice [[INPUT]] [0, 0, 0, 160] [1, 12, 368, 160]
+    // CHECK-SAME:   : tensor<1x12x368x480xf16> to tensor<1x12x368x160xf16>
     // CHECK:       [[OUTPUT_TILE1:%.+]] = VPU.ReduceSum([[INPUT_TILE1]]) {
-    // CHECK-SAME:  axes_value = [1], keep_dims} : tensor<1x12x123x480xf16> -> tensor<1x1x123x480xf16>
+    // CHECK-SAME:  axes_value = [1], keep_dims} : tensor<1x12x368x160xf16> -> tensor<1x1x368x160xf16>
 
-    // CHECK:       [[INPUT_TILE2:%.+]] = VPU.Slice [[INPUT]] [0, 0, 246, 0] [1, 12, 122, 480]
-    // CHECK-SAME    : tensor<1x12x368x480xf16> to tensor<1x12x122x480xf16>
+    // CHECK:       [[INPUT_TILE2:%.+]] = VPU.Slice [[INPUT]] [0, 0, 0, 320] [1, 12, 368, 160]
+    // CHECK-SAME    : tensor<1x12x368x480xf16> to tensor<1x12x368x160xf16>
     // CHECK:       [[OUTPUT_TILE2:%.+]] = VPU.ReduceSum([[INPUT_TILE2]]) {
-    // CHECK-SAME:  axes_value = [1], keep_dims} : tensor<1x12x122x480xf16> -> tensor<1x1x122x480xf16>
+    // CHECK-SAME:  axes_value = [1], keep_dims} : tensor<1x12x368x160xf16> -> tensor<1x1x368x160xf16>
 
     // CHECK:       [[OUTPUT:%.+]] = VPU.Concat([[OUTPUT_TILE0]], [[OUTPUT_TILE1]], [[OUTPUT_TILE2]])
-    // CHECK-SAME:  [0, 0, 0, 0], [0, 0, 123, 0], [0, 0, 246, 0]
-    // CHECK-SAME:   : tensor<1x1x123x480xf16>, tensor<1x1x123x480xf16>, tensor<1x1x122x480xf16> -> tensor<1x1x368x480xf16>
+    // CHECK-SAME:  [0, 0, 0, 0], [0, 0, 0, 160], [0, 0, 0, 320]
+    // CHECK-SAME:   : tensor<1x1x368x160xf16>, tensor<1x1x368x160xf16>, tensor<1x1x368x160xf16> -> tensor<1x1x368x480xf16>
 
     // CHECK:       return [[OUTPUT]] : tensor<1x1x368x480xf16>
 }
@@ -2471,7 +2469,7 @@ func.func @SplitTopK(%arg0: tensor<1x5x512x512xf16>) -> (tensor<1x1x512x512xf32>
 // CHECK-LABEL: func.func @SplitStridedSliceOverW
 // CHECK-SAME:  [[INPUT:%arg[0-9]]]: tensor<1x8x80x1280xf16>
 func.func @SplitStridedSliceOverW(%arg0: tensor<1x8x80x1280xf16>) -> tensor<1x8x80x640xf16> {
-    %0 = VPU.StridedSlice(%arg0) {begin_mask = [0, 0, 0, 0], begins_attr = [0, 0, 0, 0], ellipsis_mask = [0, 0, 0, 0], end_mask = [0, 0, 0, 0], ends_attr = [1, 8, 80, 1280], new_axis_mask = [0, 0, 0, 0], shrink_axis_mask = [0, 0, 0, 0], strides_attr = [1, 1, 1, 2]} : tensor<1x8x80x1280xf16> -> tensor<1x8x80x640xf16>
+    %0 = VPU.StridedSlice(%arg0) {begin_mask = [0, 0, 0, 0], begins_attr = [0, 0, 0, 0], ellipsis_mask = [0, 0, 0, 0], end_mask = [0, 0, 0, 0], ends_attr = [1, 8, 80, 1280], new_axis_mask = [0, 0, 0, 0], operandSegmentSizes = array<i32: 1, 0, 0, 0>, shrink_axis_mask = [0, 0, 0, 0], strides_attr = [1, 1, 1, 2]} : tensor<1x8x80x1280xf16> -> tensor<1x8x80x640xf16>
     return %0 : tensor<1x8x80x640xf16>
   }
 
@@ -2538,9 +2536,9 @@ func.func @SplitNCEConvOverOCInputOversize(%arg0: tensor<1x512x32x64xf16, {order
   return %0 : tensor<1x256x32x64xf16, {order = #NHWC}>
 
   // CHECK-DAG:    [[CONST:%.+]] = const.Declare tensor<128x1x1x4xsi32> = dense<1> : tensor<256x1x1x4xsi32>, [#const.SubView<[128, 0, 0, 0], [128, 1, 1, 4]>]
-  // CHECK-DAG:    [[CONST_0:%.+]] = const.Declare tensor<128x512x3x3xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<256x512x3x3xf16>, [#const.Reorder<#NHWC>, #const.SubView<[128, 0, 0, 0], [128, 512, 3, 3]>]
+  // CHECK-DAG:    [[CONST_0:%.+]] = const.Declare tensor<128x512x3x3xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<256x512x3x3xf16>, [#const.SubView<[128, 0, 0, 0], [128, 512, 3, 3]>, #const.Reorder<#NHWC>]
   // CHECK-DAG:    [[CONST_1:%.+]] = const.Declare tensor<128x1x1x4xsi32> = dense<1> : tensor<256x1x1x4xsi32>, [#const.SubView<[0, 0, 0, 0], [128, 1, 1, 4]>]
-  // CHECK-DAG:    [[CONST_2:%.+]] = const.Declare tensor<128x512x3x3xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<256x512x3x3xf16>, [#const.Reorder<#NHWC>, #const.SubView<[0, 0, 0, 0], [128, 512, 3, 3]>]
+  // CHECK-DAG:    [[CONST_2:%.+]] = const.Declare tensor<128x512x3x3xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<256x512x3x3xf16>, [#const.SubView<[0, 0, 0, 0], [128, 512, 3, 3]>, #const.Reorder<#NHWC>]
   // CHECK:    [[SLICE0:%.+]] = VPU.Slice [[INPUT]] [0, 0, 0, 0] [1, 512, 8, 64] : tensor<1x512x32x64xf16, {order = #NHWC}> to tensor<1x512x8x64xf16, {order = #NHWC}>
   // CHECK:    [[CONV_0:%.+]] = VPU.NCE.Convolution([[SLICE0]], [[CONST_2]], [[CONST_1]])
   // CHECK-SAME:  {pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 0 : i64>,
@@ -2622,9 +2620,9 @@ func.func @SplitNCEConvOverOHFilterOversize(%arg0: tensor<1x512x64x64xf16, {orde
   return %0 : tensor<1x256x64x64xf16, {order = #NHWC}>
 
   // CHECK-DAG:       %cst = const.Declare tensor<128x1x1x4xsi32> = dense<1> : tensor<256x1x1x4xsi32>, [#const.SubView<[128, 0, 0, 0], [128, 1, 1, 4]>]
-  // CHECK-DAG:       %cst_0 = const.Declare tensor<128x512x3x3xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<256x512x3x3xf16>, [#const.Reorder<#NHWC>, #const.SubView<[128, 0, 0, 0], [128, 512, 3, 3]>]
+  // CHECK-DAG:       %cst_0 = const.Declare tensor<128x512x3x3xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<256x512x3x3xf16>, [#const.SubView<[128, 0, 0, 0], [128, 512, 3, 3]>, #const.Reorder<#NHWC>]
   // CHECK-DAG:       %cst_1 = const.Declare tensor<128x1x1x4xsi32> = dense<1> : tensor<256x1x1x4xsi32>, [#const.SubView<[0, 0, 0, 0], [128, 1, 1, 4]>]
-  // CHECK-DAG:       %cst_2 = const.Declare tensor<128x512x3x3xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<256x512x3x3xf16>, [#const.Reorder<#NHWC>, #const.SubView<[0, 0, 0, 0], [128, 512, 3, 3]>]
+  // CHECK-DAG:       %cst_2 = const.Declare tensor<128x512x3x3xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<256x512x3x3xf16>, [#const.SubView<[0, 0, 0, 0], [128, 512, 3, 3]>, #const.Reorder<#NHWC>]
   // CHECK:       %0 = VPU.Slice [[INPUT]] [0, 0, 0, 0] [1, 512, 9, 64] : tensor<1x512x64x64xf16, {order = #NHWC}> to tensor<1x512x9x64xf16, {order = #NHWC}>
   // CHECK:       %1 = VPU.NCE.Convolution(%0, %cst_2, %cst_1) {pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 0 : i64>, rawFilterShape = [128, 512, 3, 3], strides = [1, 1]} -> tensor<1x128x8x64xf16, {order = #NHWC}>
   // CHECK:       %2 = VPU.Slice [[INPUT]] [0, 0, 7, 0] [1, 512, 9, 64] : tensor<1x512x64x64xf16, {order = #NHWC}> to tensor<1x512x9x64xf16, {order = #NHWC}>
@@ -2694,13 +2692,13 @@ func.func  @SplitQuantNCEConvOverOCKeepInputShape(%arg0: tensor<1x1024x14x14x!qE
     // CHECK-SAME:      : tensor<1024x1x1x4xsi32>, [#const.SubView<[512, 0, 0, 0], [512, 1, 1, 4]>]
 
     // CHECK-DAG:        [[FILTER_TILE1:%.+]] = const.Declare tensor<512x1024x1x1x!qElemType2, {order = #NHWC}> = dense<1.000000e+00>
-    // CHECK-SAME:      : tensor<1024x1024x1x1xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType2>, #const.Reorder<#NHWC>, #const.SubView<[512, 0, 0, 0], [512, 1024, 1, 1]>]
+    // CHECK-SAME:      : tensor<1024x1024x1x1xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType2>, #const.SubView<[512, 0, 0, 0], [512, 1024, 1, 1]>, #const.Reorder<#NHWC>]
 
     // CHECK-DAG:        [[WEIGHTS_TABLE_TILE0:%.+]] = const.Declare tensor<512x1x1x4xsi32> = dense<10>
     // CHECK-SAME:      : tensor<1024x1x1x4xsi32>, [#const.SubView<[0, 0, 0, 0], [512, 1, 1, 4]>]
 
     // CHECK-DAG:        [[FILTER_TILE0:%.+]] = const.Declare tensor<512x1024x1x1x!qElemType2, {order = #NHWC}> = dense<1.000000e+00>
-    // CHECK-SAME:      : tensor<1024x1024x1x1xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType2>, #const.Reorder<#NHWC>, #const.SubView<[0, 0, 0, 0], [512, 1024, 1, 1]>]
+    // CHECK-SAME:      : tensor<1024x1024x1x1xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType2>, #const.SubView<[0, 0, 0, 0], [512, 1024, 1, 1]>, #const.Reorder<#NHWC>]
 
     // CHECK:       [[OUTPUT_TILE0:%.+]] = VPU.NCE.Convolution([[INPUT]], [[FILTER_TILE0]], [[WEIGHTS_TABLE_TILE0]])
     // CHECK-SAME:          pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
@@ -3019,164 +3017,23 @@ func.func @DistributedMVNTileOverNC(%arg0: tensor<2x2688x512x1xf16>) -> tensor<2
 
 // -----
 
-#map = affine_map<(d0, d1, d2) -> (d0, d2, d1)>
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
 // CHECK-LABEL:   func.func @MVN1NormalizeSplit
-func.func @MVN1NormalizeSplit(%arg0: tensor<1x1x1x520001xf16>, %arg1: tensor<1x1x2xf16, {order = #map}>) -> tensor<1x1x1x520001xf16> {
-    %0 = VPU.MVN1Normalize(%arg0, %arg1) {across_channels = false, normalize_variance = true} : tensor<1x1x1x520001xf16>, tensor<1x1x2xf16, {order = #map}> -> tensor<1x1x1x520001xf16>
+func.func @MVN1NormalizeSplit(%arg0: tensor<1x1x1x520001xf16>, %arg1: tensor<1x1x1x2xf16, {order = #NHWC}>) -> tensor<1x1x1x520001xf16> {
+    %0 = VPU.MVN1Normalize(%arg0, %arg1) {across_channels = false, normalize_variance = true} : tensor<1x1x1x520001xf16>, tensor<1x1x1x2xf16, {order = #NHWC}> -> tensor<1x1x1x520001xf16>
     return %0 : tensor<1x1x1x520001xf16>
 
     //CHECK:        [[INPUT_TILE_1:%.+]] = VPU.Slice %arg0 [0, 0, 0, 0] [1, 1, 1, 260001] : tensor<1x1x1x520001xf16> to tensor<1x1x1x260001xf16>
     // CHECK:       [[OUTPUT_TILE_1:%.+]] = VPU.MVN1Normalize([[INPUT_TILE_1]], %arg1)
-    // CHECK-SAME:     :  tensor<1x1x1x260001xf16>, tensor<1x1x2xf16, {order = #map}> -> tensor<1x1x1x260001xf16>
+    // CHECK-SAME:     :  tensor<1x1x1x260001xf16>, tensor<1x1x1x2xf16, {order = #NHWC}> -> tensor<1x1x1x260001xf16>
 
     //CHECK:        [[INPUT_TILE_2:%.+]] = VPU.Slice %arg0 [0, 0, 0, 260001] [1, 1, 1, 260000] : tensor<1x1x1x520001xf16> to tensor<1x1x1x260000xf16>
     // CHECK:       [[OUTPUT_TILE_2:%.+]] = VPU.MVN1Normalize([[INPUT_TILE_2]], %arg1)
-    // CHECK-SAME:     :  tensor<1x1x1x260000xf16>, tensor<1x1x2xf16, {order = #map}> -> tensor<1x1x1x260000xf16>
+    // CHECK-SAME:     :  tensor<1x1x1x260000xf16>, tensor<1x1x1x2xf16, {order = #NHWC}> -> tensor<1x1x1x260000xf16>
 
     // CHECK:       [[CONCAT:%.+]] = VPU.Concat([[OUTPUT_TILE_1]], [[OUTPUT_TILE_2]])
     // CHECK:       return [[CONCAT]] :  tensor<1x1x1x520001xf16>
-}
-
-// -----
-
-#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
-#NWCH = affine_map<(d0, d1, d2, d3) -> (d0, d3, d1, d2)>
-
-!qElemType = !quant.uniform<u8:f16, 1.000000e+00>
-
-// CHECK-LABEL: func.func @PermuteQuantize
-func.func @PermuteQuantize(%arg0: tensor<1x32x3x8208xf16, {order = #NHWC}>) -> tensor<1x32x4x8208x!qElemType, {order = #NWCH}> {
-    %0 = VPU.NCE.PermuteQuantize(%arg0) {
-        dstElemType = !qElemType,
-        dstOrder = #NWCH,
-        pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 1 : i64>,
-        ppe = #VPU.PPETask<
-            clamp_high = 255 : i64,
-            clamp_low = 0 : i64,
-            fp_prelu_alpha = 1.000000e+00 : f64,
-            lrelu_mult = 1 : i64,
-            lrelu_shift = 0 : i64,
-            mode = <NOOP>
-        >
-    } -> tensor<1x32x4x8208x!qElemType, {order = #NWCH}>
-
-    return %0 : tensor<1x32x4x8208x!qElemType, {order = #NWCH}>
-
-    // CHECK:       [[FIRST_SLICE:%.*]] = VPU.Slice %arg0 [0, 0, 0, 0] [1, 32, 3, 4104] :
-    // CHECK-SAME:      tensor<1x32x3x8208xf16, {order = #NHWC}> to tensor<1x32x3x4104xf16, {order = #NHWC}>
-
-    // CHECK:       [[FIRST_QUANT_PERM:%.*]] = VPU.NCE.PermuteQuantize([[FIRST_SLICE]])
-    // CHECK-SAME:      -> tensor<1x32x4x4104x!qElemType, {order = #NWCH}>
-
-    // CHECK:       [[SECOND_SLICE:%.*]] = VPU.Slice %arg0 [0, 0, 0, 4104] [1, 32, 3, 4104] :
-    // CHECK-SAME:      tensor<1x32x3x8208xf16, {order = #NHWC}> to tensor<1x32x3x4104xf16, {order = #NHWC}>
-
-    // CHECK:       [[SECOND_QUANT_PERM:%.*]] = VPU.NCE.PermuteQuantize([[SECOND_SLICE]])
-    // CHECK-SAME:      -> tensor<1x32x4x4104x!qElemType, {order = #NWCH}>
-
-    // CHECK:       [[CONCAT:%.*]] = VPU.Concat([[FIRST_QUANT_PERM]], [[SECOND_QUANT_PERM]]) {
-    // CHECK-SAME{LITERAL}:     static_offsets = [[0, 0, 0, 0], [0, 0, 0, 4104]]
-    // CHECK-SAME:  } :
-    // CHECK-SAME:  tensor<1x32x4x4104x!qElemType, {order = #NWCH}>,
-    // CHECK-SAME:  tensor<1x32x4x4104x!qElemType, {order = #NWCH}>
-    // CHECK-SAME:  -> tensor<1x32x4x8208x!qElemType, {order = #NWCH}>
-
-    // CHECK:       [[CONCAT]] : tensor<1x32x4x8208x!qElemType, {order = #NWCH}>
-}
-
-// -----
-
-#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
-#NWCH = affine_map<(d0, d1, d2, d3) -> (d0, d3, d1, d2)>
-
-!qElemType = !quant.uniform<u8:f16, 1.000000e+00>
-
-// CHECK-LABEL: func.func @PermuteQuantizeDoesNotFitCMX
-func.func @PermuteQuantizeDoesNotFitCMX(%arg0: tensor<1x32x16x2048xf16, {order = #NHWC}>) -> tensor<1x32x16x2048x!qElemType, {order = #NWCH}> {
-    %0 = VPU.NCE.PermuteQuantize(%arg0) {
-        dstElemType = !qElemType,
-        dstOrder = #NWCH,
-        pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-        ppe = #VPU.PPETask<
-            clamp_high = 255 : i64,
-            clamp_low = 0 : i64,
-            fp_prelu_alpha = 1.000000e+00 : f64,
-            lrelu_mult = 1 : i64,
-            lrelu_shift = 0 : i64,
-            mode = <NOOP>
-        >
-    } -> tensor<1x32x16x2048x!qElemType, {order = #NWCH}>
-
-    return %0 : tensor<1x32x16x2048x!qElemType, {order = #NWCH}>
-
-    // CHECK:       [[FIRST_SLICE:%.*]] = VPU.Slice %arg0 [0, 0, 0, 0] [1, 32, 16, 1024] :
-    // CHECK-SAME:      tensor<1x32x16x2048xf16, {order = #NHWC}> to tensor<1x32x16x1024xf16, {order = #NHWC}>
-
-    // CHECK:       [[FIRST_QUANT_PERM:%.*]] = VPU.NCE.PermuteQuantize([[FIRST_SLICE]])
-    // CHECK-SAME:      -> tensor<1x32x16x1024x!qElemType, {order = #NWCH}>
-
-    // CHECK:       [[SECOND_SLICE:%.*]] = VPU.Slice %arg0 [0, 0, 0, 1024] [1, 32, 16, 1024] :
-    // CHECK-SAME:      tensor<1x32x16x2048xf16, {order = #NHWC}> to tensor<1x32x16x1024xf16, {order = #NHWC}>
-
-    // CHECK:       [[SECOND_QUANT_PERM:%.*]] = VPU.NCE.PermuteQuantize([[SECOND_SLICE]])
-    // CHECK-SAME:      -> tensor<1x32x16x1024x!qElemType, {order = #NWCH}>
-
-    // CHECK:       [[CONCAT:%.*]] = VPU.Concat([[FIRST_QUANT_PERM]], [[SECOND_QUANT_PERM]]) {
-    // CHECK-SAME{LITERAL}:     static_offsets = [[0, 0, 0, 0], [0, 0, 0, 1024]]
-    // CHECK-SAME:  } :
-    // CHECK-SAME:  tensor<1x32x16x1024x!qElemType, {order = #NWCH}>,
-    // CHECK-SAME:  tensor<1x32x16x1024x!qElemType, {order = #NWCH}>
-    // CHECK-SAME:  -> tensor<1x32x16x2048x!qElemType, {order = #NWCH}>
-
-    // CHECK:       [[CONCAT]] : tensor<1x32x16x2048x!qElemType, {order = #NWCH}>
-}
-
-// -----
-
-#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
-#NWCH = affine_map<(d0, d1, d2, d3) -> (d0, d3, d1, d2)>
-
-!qElemType = !quant.uniform<u8:f16, 1.000000e+00>
-
-// CHECK-LABEL: func.func @TileByH
-func.func @TileByH(%arg0: tensor<1x32x8208x4xf16, {order = #NHWC}>) -> tensor<1x32x8208x4x!qElemType, {order = #NWCH}> {
-    %0 = VPU.NCE.PermuteQuantize(%arg0) {
-        dstElemType = !qElemType,
-        dstOrder = #NWCH,
-        pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-        ppe = #VPU.PPETask<
-            clamp_high = 255 : i64,
-            clamp_low = 0 : i64,
-            fp_prelu_alpha = 1.000000e+00 : f64,
-            lrelu_mult = 1 : i64,
-            lrelu_shift = 0 : i64,
-            mode = <NOOP>
-        >
-    } -> tensor<1x32x8208x4x!qElemType, {order = #NWCH}>
-
-    return %0 : tensor<1x32x8208x4x!qElemType, {order = #NWCH}>
-
-    // CHECK:       [[FIRST_SLICE:%.*]] = VPU.Slice %arg0 [0, 0, 0, 0] [1, 32, 8208, 2] :
-    // CHECK-SAME:      tensor<1x32x8208x4xf16, {order = #NHWC}> to tensor<1x32x8208x2xf16, {order = #NHWC}>
-
-    // CHECK:       [[FIRST_QUANT_PERM:%.*]] = VPU.NCE.PermuteQuantize([[FIRST_SLICE]])
-    // CHECK-SAME:      -> tensor<1x32x8208x2x!qElemType, {order = #NWCH}>
-
-    // CHECK:       [[SECOND_SLICE:%.*]] = VPU.Slice %arg0 [0, 0, 0, 2] [1, 32, 8208, 2] :
-    // CHECK-SAME:      tensor<1x32x8208x4xf16, {order = #NHWC}> to tensor<1x32x8208x2xf16, {order = #NHWC}>
-
-    // CHECK:       [[SECOND_QUANT_PERM:%.*]] = VPU.NCE.PermuteQuantize([[SECOND_SLICE]])
-    // CHECK-SAME:      -> tensor<1x32x8208x2x!qElemType, {order = #NWCH}>
-
-    // CHECK:       [[CONCAT:%.*]] = VPU.Concat([[FIRST_QUANT_PERM]], [[SECOND_QUANT_PERM]]) {
-    // CHECK-SAME{LITERAL}:     static_offsets = [[0, 0, 0, 0], [0, 0, 0, 2]]
-    // CHECK-SAME:  } :
-    // CHECK-SAME:  tensor<1x32x8208x2x!qElemType, {order = #NWCH}>,
-    // CHECK-SAME:  tensor<1x32x8208x2x!qElemType, {order = #NWCH}>
-    // CHECK-SAME:  -> tensor<1x32x8208x4x!qElemType, {order = #NWCH}>
-
-    // CHECK:       [[CONCAT]] : tensor<1x32x8208x4x!qElemType, {order = #NWCH}>
 }
 
 // -----
@@ -3267,4 +3124,97 @@ func.func @SplitNCEPermuteOverWidth(%arg0: tensor<1x2048x1x496xf16>) -> tensor<1
     // CHECK-SAME:      -> tensor<1x2048x1x496xf16, {order = #NHWC}>
 
     // CHECK:       [[CONCAT]] : tensor<1x2048x1x496xf16, {order = #NHWC}>
+}
+
+// -----
+
+// CHECK-LABEL: func.func @TilePadOverWidth
+// CHECK-SAME:        [[INPUT:%arg[0-9]]]: tensor<1x3x227x240xf16>
+
+func.func @TilePadOverWidth(%arg0: tensor<1x3x227x240xf16>) -> tensor<1x16x227x240xf16> {
+    %pad = VPU.Pad(%arg0)
+          {mode = #IE.pad_mode<CONSTANT>, pad_value_attr = 0.000000e+00 : f64,
+          pads_begin_attr = [0, 0, 0, 0], pads_end_attr = [0, 13, 0, 0]}
+          : tensor<1x3x227x240xf16> -> tensor<1x16x227x240xf16>
+
+    return %pad : tensor<1x16x227x240xf16>
+
+    // Tile 0
+
+    // CHECK:       [[SLICE0:%.*]] = VPU.Slice [[INPUT]] [0, 0, 0, 0] [1, 3, 227, 120]
+    // CHECK-SAME:      : tensor<1x3x227x240xf16> to tensor<1x3x227x120xf16>
+
+    // CHECK:       [[PAD0:%.*]] = VPU.Pad([[SLICE0]])
+    // CHECK-SAME:      {mode = #IE.pad_mode<CONSTANT>, pad_value_attr = 0.000000e+00 : f64,
+    // CHECK-SAME:      pads_begin_attr = [0, 0, 0, 0], pads_end_attr = [0, 13, 0, 0]}
+    // CHECK-SAME:      : tensor<1x3x227x120xf16> -> tensor<1x16x227x120xf16>
+
+    // Tile 1
+
+    // CHECK:       [[SLICE1:%.*]] = VPU.Slice [[INPUT]] [0, 0, 0, 120] [1, 3, 227, 120]
+    // CHECK-SAME:      : tensor<1x3x227x240xf16> to tensor<1x3x227x120xf16>
+
+    // CHECK:       [[PAD1:%.*]] = VPU.Pad([[SLICE1]]) {mode = #IE.pad_mode<CONSTANT>, pad_value_attr = 0.000000e+00 : f64,
+    // CHECK-SAME:      pads_begin_attr = [0, 0, 0, 0], pads_end_attr = [0, 13, 0, 0]}
+    // CHECK-SAME:      : tensor<1x3x227x120xf16> -> tensor<1x16x227x120xf16>
+
+    // Concat
+
+    // CHECK:       [[CONCAT:%.*]] = VPU.Concat([[PAD0]], [[PAD1]]) {static_offsets =
+    // CHECK-SAME:      [0, 0, 0, 0], [0, 0, 0, 120]
+    // CHECK-SAME:      : tensor<1x16x227x120xf16>, tensor<1x16x227x120xf16> -> tensor<1x16x227x240xf16>
+
+    // CHECK:       return [[CONCAT]] : tensor<1x16x227x240xf16>
+}
+
+// -----
+
+// CHECK-LABEL: func.func @TilePadOverPaddedWidth
+// CHECK-SAME:        [[INPUT:%arg[0-9]]]: tensor<1x3x227x580xf16>
+
+func.func @TilePadOverPaddedWidth(%arg0: tensor<1x3x227x580xf16>) -> tensor<1x16x227x600xf16> {
+    %pad = VPU.Pad(%arg0)
+          {mode = #IE.pad_mode<CONSTANT>, pad_value_attr = 0.000000e+00 : f64,
+          pads_begin_attr = [0, 0, 0, 10], pads_end_attr = [0, 13, 0, 10]}
+          : tensor<1x3x227x580xf16> -> tensor<1x16x227x600xf16>
+
+    return %pad : tensor<1x16x227x600xf16>
+
+    // Tile 0
+
+    // CHECK:       [[SLICE0:%.*]] = VPU.Slice [[INPUT]] [0, 0, 0, 0] [1, 3, 227, 190]
+    // CHECK-SAME:      : tensor<1x3x227x580xf16> to tensor<1x3x227x190xf16>
+
+    // CHECK:       [[PAD0:%.*]] = VPU.Pad([[SLICE0]])
+    // CHECK-SAME:      {mode = #IE.pad_mode<CONSTANT>, pad_value_attr = 0.000000e+00 : f64,
+    // CHECK-SAME:      pads_begin_attr = [0, 0, 0, 10], pads_end_attr = [0, 13, 0, 0]}
+    // CHECK-SAME:      : tensor<1x3x227x190xf16> -> tensor<1x16x227x200xf16>
+
+    // Tile 1
+
+    // CHECK:       [[SLICE1:%.*]] = VPU.Slice [[INPUT]] [0, 0, 0, 190] [1, 3, 227, 200]
+    // CHECK-SAME:      : tensor<1x3x227x580xf16> to tensor<1x3x227x200xf16>
+
+    // CHECK:       [[PAD1:%.*]] = VPU.Pad([[SLICE1]])
+    // CHECK-SAME:      {mode = #IE.pad_mode<CONSTANT>, pad_value_attr = 0.000000e+00 : f64,
+    // CHECK-SAME:      pads_begin_attr = [0, 0, 0, 0], pads_end_attr = [0, 13, 0, 0]}
+    // CHECK-SAME:      : tensor<1x3x227x200xf16> -> tensor<1x16x227x200xf16>
+
+    // Tile 2
+
+    // CHECK:       [[SLICE2:%.*]] = VPU.Slice [[INPUT]] [0, 0, 0, 390] [1, 3, 227, 190]
+    // CHECK-SAME:      : tensor<1x3x227x580xf16> to tensor<1x3x227x190xf16>
+
+    // CHECK:       [[PAD2:%.*]] = VPU.Pad([[SLICE2]])
+    // CHECK-SAME:      {mode = #IE.pad_mode<CONSTANT>, pad_value_attr = 0.000000e+00 : f64,
+    // CHECK-SAME:      pads_begin_attr = [0, 0, 0, 0], pads_end_attr = [0, 13, 0, 10]}
+    // CHECK-SAME:      : tensor<1x3x227x190xf16> -> tensor<1x16x227x200xf16>
+
+    // Concat
+
+    // CHECK:       [[CONCAT:%.*]] = VPU.Concat([[PAD0]], [[PAD1]], [[PAD2]]) {static_offsets =
+    // CHECK-SAME:      [0, 0, 0, 0], [0, 0, 0, 200], [0, 0, 0, 400]
+    // CHECK-SAME:       : tensor<1x16x227x200xf16>, tensor<1x16x227x200xf16>, tensor<1x16x227x200xf16> -> tensor<1x16x227x600xf16>
+
+    // CHECK:       return [[CONCAT]] : tensor<1x16x227x600xf16>
 }

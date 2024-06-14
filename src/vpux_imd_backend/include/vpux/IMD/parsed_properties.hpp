@@ -19,11 +19,33 @@ namespace vpux {
 
 struct MV_TOOLS_PATH final : OptionBase<MV_TOOLS_PATH, std::string> {
     static std::string_view key() {
-        return ov::intel_vpux::mv_tools_path.name();
+        return ov::intel_npu::mv_tools_path.name();
     }
 
     static std::string_view envVar() {
         return "IE_NPU_MV_TOOLS_PATH";
+    }
+
+    static bool isPublic() {
+        return false;
+    }
+
+    static OptionMode mode() {
+        return OptionMode::RunTime;
+    }
+};
+
+//
+// VPU4_SIMICS_DIR
+//
+
+struct VPU4_SIMICS_DIR final : OptionBase<VPU4_SIMICS_DIR, std::string> {
+    static std::string_view key() {
+        return ov::intel_npu::vpu4_simics_dir.name();
+    }
+
+    static std::string_view envVar() {
+        return "VPU4_SIMICS_DIR";
     }
 
     static bool isPublic() {
@@ -45,7 +67,7 @@ std::string_view stringifyEnum(LaunchMode val);
 
 struct LAUNCH_MODE final : OptionBase<LAUNCH_MODE, LaunchMode> {
     static std::string_view key() {
-        return ov::intel_vpux::launch_mode.name();
+        return ov::intel_npu::launch_mode.name();
     }
 
     static constexpr std::string_view getTypeName() {
@@ -73,7 +95,7 @@ struct LAUNCH_MODE final : OptionBase<LAUNCH_MODE, LaunchMode> {
 
 struct MV_RUN_TIMEOUT final : OptionBase<MV_RUN_TIMEOUT, std::chrono::seconds> {
     static std::string_view key() {
-        return ov::intel_vpux::mv_run_timeout.name();
+        return ov::intel_npu::mv_run_timeout.name();
     }
 
     static constexpr std::string_view getTypeName() {

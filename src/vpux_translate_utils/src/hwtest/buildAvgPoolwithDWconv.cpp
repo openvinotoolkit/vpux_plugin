@@ -10,11 +10,11 @@
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
-#include "vpux/compiler/dialect/VPUIP/attributes.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/utils.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/task.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/attributes.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/utils/types.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
@@ -110,11 +110,11 @@ void buildAvgpoolWithDwConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mo
     }
     mlir::DenseElementsAttr wt_data_valss;
     if (weightsType.isF16()) {
-        std::vector<float16> wt_vec(weightDataSize, static_cast<float>(scaleValue));
-        wt_data_valss = mlir::DenseElementsAttr::get(wtData_ddr_valueType, ArrayRef<float16>(wt_vec));
+        std::vector<vpux::type::float16> wt_vec(weightDataSize, static_cast<float>(scaleValue));
+        wt_data_valss = mlir::DenseElementsAttr::get(wtData_ddr_valueType, ArrayRef<vpux::type::float16>(wt_vec));
     } else if (weightsType.isBF16()) {
-        std::vector<bfloat16> wt_vec(weightDataSize, static_cast<float>(scaleValue));
-        wt_data_valss = mlir::DenseElementsAttr::get(wtData_ddr_valueType, ArrayRef<bfloat16>(wt_vec));
+        std::vector<vpux::type::bfloat16> wt_vec(weightDataSize, static_cast<float>(scaleValue));
+        wt_data_valss = mlir::DenseElementsAttr::get(wtData_ddr_valueType, ArrayRef<vpux::type::bfloat16>(wt_vec));
     } else {
         scaleValue = 1;
         if (weightsType.dyn_cast<mlir::quant::QuantizedType>().getFlags() & mlir::quant::QuantizationFlags::Signed) {
@@ -162,6 +162,8 @@ void buildAvgpoolWithDwConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mo
     // barrier config
     auto barrier0 = funcbuilder.create<VPURT::ConfigureBarrierOp>(loc, 0);
     auto barrier1 = funcbuilder.create<VPURT::ConfigureBarrierOp>(loc, 1);
+    // finalBarrier passed as production barrier to last DMA task
+    auto barrier2 = funcbuilder.create<VPURT::ConfigureBarrierOp>(loc, 2);
 
     // DMAs
     VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(), mlir::ValueRange(barrier0.getBarrier()), loc,
@@ -261,7 +263,7 @@ void buildAvgpoolWithDwConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mo
     auto nceTask = VPURT::wrapIntoTaskOp<VPUIP::NCEClusterTaskOp>(
             funcbuilder, mlir::ValueRange(barrier0.getBarrier()), mlir::ValueRange(barrier1.getBarrier()), loc,
             outputcmx_type, inputcmx.getOperation()->getResult(0), wtData_cmx.getOperation()->getResult(0),
-            wtTbl_cmx.getOperation()->getResult(0), /*instruction_table_list*/ nullptr,
+            wtTbl_cmx.getOperation()->getResult(0), /*instruction_table_list*/ nullptr, /*spr_lookup_table*/ nullptr,
             actWindow_cmx.getOperation()->getResult(0), parent_inputcmx.getOperation()->getResult(0),
             parent_outputcmx.getOperation()->getResult(0), outputcmx.getOperation()->getResult(0),
             VPUIP::NCETaskType::DWCONV, filtersize, strides, kernel_padding, actChannelLength, nullptr,
@@ -273,15 +275,20 @@ void buildAvgpoolWithDwConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mo
     auto variantbuilder = mlir::OpBuilder::atBlockBegin(&nceTask.getVariants().front(), builder.getListener());
     createDPUTaskOp(funcbuilder, variantbuilder, out_shape, in_shape, padding_vec, VPU::MPEMode::CUBOID_16x16);
 
-    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(barrier1.getBarrier()), mlir::ValueRange(), loc,
+    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(barrier1.getBarrier()),
+                                          mlir::ValueRange(barrier2.getBarrier()), loc,
                                           outputcmx.getOperation()->getResult(0), funcoutput, 0);
 
     funcbuilder.create<mlir::func::ReturnOp>(loc, funcoutput);
 
     // set runtime resources
+    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
+
     mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    pm.addPass(VPU::createInitCompilerPass(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW, 1, std::nullopt,
-                                           log));
+    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.numberOfDPUGroups = 1;
+    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
 
     VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");
 

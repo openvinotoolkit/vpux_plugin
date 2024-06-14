@@ -1,12 +1,12 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation
 // SPDX-License-Identifier: Apache 2.0
 //
 
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/IR/types.hpp"
-#include "vpux/compiler/dialect/VPUIP/dialect.hpp"
-#include "vpux/compiler/dialect/VPUIP/types.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/dialect.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/types.hpp"
 
 #include "common/utils.hpp"
 
@@ -584,10 +584,10 @@ TEST_F(MLIR_DistributedTypesIfMethodsForExplicitDistribution, SparseBufferTypeWe
     std::iota(numElems.begin(), numElems.end(), 0);
     const auto numElemsType = mlir::RankedTensorType::get({64}, getInt64Type(&ctx));
     const auto numElemsAttr = mlir::DenseElementsAttr::get(numElemsType, ArrayRef(numElems));
-    const auto compressionScheme = VPUIP::CompressionSchemeAttr::get(&ctx, getIntAttr(&ctx, compressionAxis),
-                                                                     numElemsAttr, getIntAttr(&ctx, alignment));
+    const auto sparsityCompression = VPUIP::SparsityCompressionAttr::get(&ctx, getIntAttr(&ctx, compressionAxis),
+                                                                         numElemsAttr, getIntAttr(&ctx, alignment));
 
-    auto distributedTypeIf = VPUIP::SparseBufferType::get(data, sparsityMap, nullptr, isWeights, compressionScheme)
+    auto distributedTypeIf = VPUIP::SparseBufferType::get(data, sparsityMap, nullptr, isWeights, sparsityCompression)
                                      .cast<VPU::DistributedTypeInterface>();
 
     {
@@ -1488,10 +1488,10 @@ TEST_F(MLIR_DistributedTypesIfMethodsForExplicitDistribution, SparseTensorTypeWe
     std::iota(numElems.begin(), numElems.end(), 0);
     const auto numElemsType = mlir::RankedTensorType::get({64}, getInt64Type(&ctx));
     const auto numElemsAttr = mlir::DenseElementsAttr::get(numElemsType, ArrayRef(numElems));
-    const auto compressionScheme = VPU::CompressionSchemeAttr::get(&ctx, getIntAttr(&ctx, compressionAxis),
-                                                                   numElemsAttr, getIntAttr(&ctx, alignment));
+    const auto sparsityCompression = VPU::SparsityCompressionAttr::get(&ctx, getIntAttr(&ctx, compressionAxis),
+                                                                       numElemsAttr, getIntAttr(&ctx, alignment));
 
-    auto distributedTypeIf = VPU::SparseTensorType::get(data, sparsityMap, nullptr, isWeights, compressionScheme)
+    auto distributedTypeIf = VPU::SparseTensorType::get(data, sparsityMap, nullptr, isWeights, sparsityCompression)
                                      .cast<VPU::DistributedTypeInterface>();
 
     {

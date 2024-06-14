@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --canonicalize %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 !qElemType = !quant.uniform<u8:f16:1, {1.0000000000000000E-1, 2.0000000000000000E-1}>
 
@@ -168,11 +168,11 @@ func.func @ConstInputsFoldforNCHW() -> tensor<1x6x8x1xf16> {
     return %0 : tensor<1x6x8x1xf16>
 
     // CHECK: [[cst:%.+]] = const.Declare tensor<1x6x8x1xf16> = dense<
-    // CHECK-SAME{LITERAL}:     [[[[1.000000e+00], [1.000000e+00], [1.000000e+00], [1.000000e+00], [1.000000e+00], [1.000000e+00], [1.000000e+00], [1.000000e+00]], 
-    // CHECK-SAME{LITERAL}:       [[2.000000e+00], [2.000000e+00], [2.000000e+00], [2.000000e+00], [2.000000e+00], [2.000000e+00], [2.000000e+00], [2.000000e+00]], 
+    // CHECK-SAME{LITERAL}:     [[[[1.000000e+00], [1.000000e+00], [1.000000e+00], [1.000000e+00], [1.000000e+00], [1.000000e+00], [1.000000e+00], [1.000000e+00]],
+    // CHECK-SAME{LITERAL}:       [[2.000000e+00], [2.000000e+00], [2.000000e+00], [2.000000e+00], [2.000000e+00], [2.000000e+00], [2.000000e+00], [2.000000e+00]],
     // CHECK-SAME{LITERAL}:       [[3.000000e+00], [3.000000e+00], [3.000000e+00], [3.000000e+00], [3.000000e+00], [3.000000e+00], [3.000000e+00], [3.000000e+00]],
-    // CHECK-SAME{LITERAL}:       [[4.000000e+00], [4.000000e+00], [4.000000e+00], [4.000000e+00], [4.000000e+00], [4.000000e+00], [4.000000e+00], [4.000000e+00]], 
-    // CHECK-SAME{LITERAL}:       [[5.000000e+00], [5.000000e+00], [5.000000e+00], [5.000000e+00], [5.000000e+00], [5.000000e+00], [5.000000e+00], [5.000000e+00]], 
+    // CHECK-SAME{LITERAL}:       [[4.000000e+00], [4.000000e+00], [4.000000e+00], [4.000000e+00], [4.000000e+00], [4.000000e+00], [4.000000e+00], [4.000000e+00]],
+    // CHECK-SAME{LITERAL}:       [[5.000000e+00], [5.000000e+00], [5.000000e+00], [5.000000e+00], [5.000000e+00], [5.000000e+00], [5.000000e+00], [5.000000e+00]],
     // CHECK-SAME{LITERAL}:       [[6.000000e+00], [6.000000e+00], [6.000000e+00], [6.000000e+00], [6.000000e+00], [6.000000e+00], [6.000000e+00], [6.000000e+00]]]]>
     // CHECK-SAME:                tensor<1x6x8x1xf16>
     // CHECK-NOT: IE.Concat
@@ -190,9 +190,9 @@ func.func @ConstInputsFoldWithDifferentDimValueForNCHW() -> tensor<1x5x8x1xf16> 
 
     // CHECK: [[cst:%.+]] = const.Declare tensor<1x5x8x1xf16> = dense<
     // CHECK-SAME{LITERAL}:     [[[[1.000000e+00], [1.000000e+00], [1.000000e+00], [1.000000e+00], [1.000000e+00], [1.000000e+00], [1.000000e+00], [1.000000e+00]],
-    // CHECK-SAME{LITERAL}:       [[2.000000e+00], [2.000000e+00], [2.000000e+00], [2.000000e+00], [2.000000e+00], [2.000000e+00], [2.000000e+00], [2.000000e+00]], 
-    // CHECK-SAME{LITERAL}:       [[3.000000e+00], [3.000000e+00], [3.000000e+00], [3.000000e+00], [3.000000e+00], [3.000000e+00], [3.000000e+00], [3.000000e+00]], 
-    // CHECK-SAME{LITERAL}:       [[4.000000e+00], [4.000000e+00], [4.000000e+00], [4.000000e+00], [4.000000e+00], [4.000000e+00], [4.000000e+00], [4.000000e+00]], 
+    // CHECK-SAME{LITERAL}:       [[2.000000e+00], [2.000000e+00], [2.000000e+00], [2.000000e+00], [2.000000e+00], [2.000000e+00], [2.000000e+00], [2.000000e+00]],
+    // CHECK-SAME{LITERAL}:       [[3.000000e+00], [3.000000e+00], [3.000000e+00], [3.000000e+00], [3.000000e+00], [3.000000e+00], [3.000000e+00], [3.000000e+00]],
+    // CHECK-SAME{LITERAL}:       [[4.000000e+00], [4.000000e+00], [4.000000e+00], [4.000000e+00], [4.000000e+00], [4.000000e+00], [4.000000e+00], [4.000000e+00]],
     // CHECK-SAME{LITERAL}:       [[5.000000e+00], [5.000000e+00], [5.000000e+00], [5.000000e+00], [5.000000e+00], [5.000000e+00], [5.000000e+00], [5.000000e+00]]]]>
     // CHECK-SAME:                tensor<1x5x8x1xf16>
     // CHECK-NOT: IE.Concat
@@ -316,12 +316,12 @@ func.func @ConstInputFoldWithDifferentInputAndOutputType() -> tensor<1x6x8x1xf16
     return %0 : tensor<1x6x8x1xf16>
 
     // CHECK: [[cst:%.+]] = const.Declare tensor<1x6x8x1xf16> = dense<
-    // CHECK-SAME{LITERAL}:     [[[[1.000000e+00], [1.000000e+00], [1.000000e+00], [1.000000e+00], [1.000000e+00], [1.000000e+00], [1.000000e+00], [1.000000e+00]], 
-    // CHECK-SAME{LITERAL}:       [[2.000000e+00], [2.000000e+00], [2.000000e+00], [2.000000e+00], [2.000000e+00], [2.000000e+00], [2.000000e+00], [2.000000e+00]], 
+    // CHECK-SAME{LITERAL}:     [[[[1.000000e+00], [1.000000e+00], [1.000000e+00], [1.000000e+00], [1.000000e+00], [1.000000e+00], [1.000000e+00], [1.000000e+00]],
+    // CHECK-SAME{LITERAL}:       [[2.000000e+00], [2.000000e+00], [2.000000e+00], [2.000000e+00], [2.000000e+00], [2.000000e+00], [2.000000e+00], [2.000000e+00]],
     // CHECK-SAME{LITERAL}:       [[3.000000e+00], [3.000000e+00], [3.000000e+00], [3.000000e+00], [3.000000e+00], [3.000000e+00], [3.000000e+00], [3.000000e+00]],
-    // CHECK-SAME{LITERAL}:       [[4.000000e+00], [4.000000e+00], [4.000000e+00], [4.000000e+00], [4.000000e+00], [4.000000e+00], [4.000000e+00], [4.000000e+00]], 
-    // CHECK-SAME{LITERAL}:       [[5.000000e+00], [5.000000e+00], [5.000000e+00], [5.000000e+00], [5.000000e+00], [5.000000e+00], [5.000000e+00], [5.000000e+00]], 
-    // CHECK-SAME{LITERAL}:       [[6.000000e+00], [6.000000e+00], [6.000000e+00], [6.000000e+00], [6.000000e+00], [6.000000e+00], [6.000000e+00], [6.000000e+00]]]]> 
+    // CHECK-SAME{LITERAL}:       [[4.000000e+00], [4.000000e+00], [4.000000e+00], [4.000000e+00], [4.000000e+00], [4.000000e+00], [4.000000e+00], [4.000000e+00]],
+    // CHECK-SAME{LITERAL}:       [[5.000000e+00], [5.000000e+00], [5.000000e+00], [5.000000e+00], [5.000000e+00], [5.000000e+00], [5.000000e+00], [5.000000e+00]],
+    // CHECK-SAME{LITERAL}:       [[6.000000e+00], [6.000000e+00], [6.000000e+00], [6.000000e+00], [6.000000e+00], [6.000000e+00], [6.000000e+00], [6.000000e+00]]]]>
     // CHECK-SAME{LITERAL}:       tensor<1x6x8x1xf16>
     // CHECK-NOT: IE.Concat
     // CHECK:     return [[cst]]
@@ -495,4 +495,40 @@ func.func @notFoldSliceConcatWhenNotRecoverParent(%arg0: tensor<1x128x96x64xf16>
   // CHECK:     [[SLICE_1:%.+]] = IE.Slice
   // CHECK:     [[CONCAT_RET:%.+]] = IE.Concat
   // CHECK:     return [[CONCAT_RET]]
+}
+
+// CHECK-LABEL: @NotfoldSliceConcatWhenDifferentAxis
+// CHECK-SAME:      [[INPUT:%.+]]: tensor<1x128x96x64xf16>
+func.func @NotfoldSliceConcatWhenDifferentAxis(%arg0 : tensor<1x128x96x64xf16>) -> tensor<1x64x96x128xf16> {
+    %slice_0 = IE.Slice %arg0 [0, 0, 0, 0] [1, 64, 96, 64] : tensor<1x128x96x64xf16> to tensor<1x64x96x64xf16>
+    %slice_1 = IE.Slice %arg0 [0, 64, 0, 0] [1, 64, 96, 64] : tensor<1x128x96x64xf16> to tensor<1x64x96x64xf16>
+    %ret = IE.Concat(%slice_0, %slice_1) {static_offsets = [[0, 0, 0, 0], [0, 0, 0, 64]]} : tensor<1x64x96x64xf16>, tensor<1x64x96x64xf16> -> tensor<1x64x96x128xf16>
+
+    return %ret : tensor<1x64x96x128xf16>
+
+    // CHECK:               [[SLICE_0:%.*]] = IE.Slice [[INPUT]] [0, 0, 0, 0] [1, 64, 96, 64] : tensor<1x128x96x64xf16> to tensor<1x64x96x64xf16>
+    // CHECK:               [[SLICE_1:%.*]] = IE.Slice [[INPUT]] [0, 64, 0, 0] [1, 64, 96, 64] : tensor<1x128x96x64xf16> to tensor<1x64x96x64xf16>
+    // CHECK:               [[CONCAT:%.*]] = IE.Concat([[SLICE_0]], [[SLICE_1]])
+    // CHECK-SAME{LITERAL}:     {static_offsets = [[0, 0, 0, 0], [0, 0, 0, 64]]} : tensor<1x64x96x64xf16>, tensor<1x64x96x64xf16> -> tensor<1x64x96x128xf16>
+    // CHECK:               return [[CONCAT]] : tensor<1x64x96x128xf16>
+}
+
+// CHECK-LABEL: @foldSliceConcatWhenDifferentAxis
+// CHECK-SAME:      [[INPUT_0:%.+]]: tensor<1x128x96x64xf16>
+// CHECK-SAME:      [[INPUT_1:%.+]]: tensor<1x64x96x128xf16>
+func.func @foldSliceConcatWhenDifferentAxis(%arg0 : tensor<1x128x96x64xf16>, %arg1 : tensor<1x64x96x128xf16>) -> tensor<1x64x96x256xf16> {
+    %slice_0 = IE.Slice %arg0 [0, 0, 0, 0] [1, 64, 96, 64] : tensor<1x128x96x64xf16> to tensor<1x64x96x64xf16>
+    %slice_1 = IE.Slice %arg0 [0, 64, 0, 0] [1, 64, 96, 64] : tensor<1x128x96x64xf16> to tensor<1x64x96x64xf16>
+    %slice_2 = IE.Slice %arg1 [0, 0, 0, 0] [1, 64, 96, 64] : tensor<1x64x96x128xf16> to tensor<1x64x96x64xf16>
+    %slice_3 = IE.Slice %arg1 [0, 0, 0, 64] [1, 64, 96, 64] : tensor<1x64x96x128xf16> to tensor<1x64x96x64xf16>
+    %ret = IE.Concat(%slice_0, %slice_1, %slice_2, %slice_3) {static_offsets = [[0, 0, 0, 0], [0, 0, 0, 64], [0, 0, 0, 128], [0, 0, 0, 192]]}
+                :tensor<1x64x96x64xf16>, tensor<1x64x96x64xf16>, tensor<1x64x96x64xf16>, tensor<1x64x96x64xf16> -> tensor<1x64x96x256xf16>
+
+    return %ret : tensor<1x64x96x256xf16>
+
+    // CHECK:               [[SLICE_0:%.*]] = IE.Slice [[INPUT_0]] [0, 0, 0, 0] [1, 64, 96, 64] : tensor<1x128x96x64xf16> to tensor<1x64x96x64xf16>
+    // CHECK:               [[SLICE_1:%.*]] = IE.Slice [[INPUT_0]] [0, 64, 0, 0] [1, 64, 96, 64] : tensor<1x128x96x64xf16> to tensor<1x64x96x64xf16>
+    // CHECK:               [[CONCAT:%.*]] = IE.Concat([[SLICE_0]], [[SLICE_1]], [[INPUT_1]])
+    // CHECK-SAME{LITERAL}:     {static_offsets = [[0, 0, 0, 0], [0, 0, 0, 64], [0, 0, 0, 128]]} : tensor<1x64x96x64xf16>, tensor<1x64x96x64xf16>, tensor<1x64x96x128xf16> -> tensor<1x64x96x256xf16>
+    // CHECK:               return [[CONCAT]] : tensor<1x64x96x256xf16>
 }

@@ -1,9 +1,9 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
-// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW" --detection-output-decomposition %s | FileCheck %s
+// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW" --detection-output-decomposition --mlir-elide-elementsattrs-if-larger 32 %s | FileCheck %s
 // REQUIRES: arch-VPUX37XX
 
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
@@ -49,17 +49,19 @@ func.func @FaceDetectionAdas(%arg0: tensor<1x40448xf16>, %arg1: tensor<1x20224xf
 // CHECK:       [[CONF_CWH:%.+]] = VPU.MemPermute([[CONFIDENCE]])
 // CHECK-SAME:      dst_order = #NCHW, mem_perm = #NCWH
 
-// CHECK:       [[TOPK_CONF:%.+]], [[INDICES:%.+]], [[SIZES:%.+]] = VPU.DetectionOutputSortTopK([[CONF_CWH]])
-// CHECK-SAME:      background_id = 0 : i64,
+// CHECK:       [[INDICES_CONST:%.+]] = const.Declare tensor<1x1x2x10112xsi32>
+// CHECK:       [[SORTING_BUFFER:%.+]] = const.Declare tensor<1x1x16x256xsi32>
+// CHECK:       [[CONF:%.+]], [[INDICES:%.+]], [[SIZES:%.+]] = VPU.DetectionOutputSort([[CONF_CWH]], [[INDICES_CONST]], [[SORTING_BUFFER]])
 // CHECK-SAME:      confidence_threshold = 1.000000e-03 : f64,
 // CHECK-SAME:      top_k = 400 : i64
 
-// CHECK:       [[BOXES:%.+]] = VPU.DetectionOutputSelectBoxes([[DECODED_BOXES]], [[INDICES]], [[SIZES]])
-// CHECK-SAME:      top_k = 400 : i64
+// CHECK:       [[TOPK_CONF:%.+]] = VPU.Slice [[CONF]] [0, 0, 0, 0] [1, 1, 2, 400]
+// CHECK:       [[TOPK_INDICES:%.+]] = VPU.Slice [[INDICES]] [0, 0, 0, 0] [1, 1, 2, 400]
+// CHECK:       [[SIZE_RESHAPED:%.+]] = VPU.Reshape([[SIZES]])
+// CHECK-SAME:      tensor<1x1x2x1xsi32> -> tensor<1x1x1x2xsi32>
 
-// CHECK:       [[BOXES_3D:%.+]] = VPU.Reshape([[BOXES]])
-// CHECK-SAME:      shape_value = [1, 2, 1600]
-// CHECK:       [[OUT_CONF:%.+]], [[OUT_BOXES:%.+]], [[OUT_SIZES:%.+]] = VPU.DetectionOutputNmsCaffe([[TOPK_CONF]], [[BOXES_3D]], [[SIZES]])
+// CHECK:       [[OUT_CONF:%.+]], [[OUT_BOXES:%.+]], [[OUT_SIZES:%.+]] = VPU.DetectionOutputNmsCaffe([[TOPK_CONF]], [[DECODED_BOXES]], [[TOPK_INDICES]], [[SIZE_RESHAPED]])
+// CHECK-SAME:      background_id = 0 : i64,
 // CHECK-SAME:      nms_threshold = 4.500000e-01 : f64
 
 // CHECK:       [[RESULT:%.+]] = VPU.DetectionOutputCollectResults([[OUT_CONF]], [[OUT_BOXES]], [[OUT_SIZES]])

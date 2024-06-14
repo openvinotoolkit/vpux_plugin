@@ -1,17 +1,15 @@
 //
-// Copyright (C) 2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
-#include <shared_test_classes/base/layer_test_utils.hpp>
 #include "common_test_utils/ov_tensor_utils.hpp"
 #include "openvino/opsets/opset1.hpp"
 #include "vpu_ov2_layer_test.hpp"
 
 namespace ov::test::subgraph {
 
-using ConvBackpropData2dWithBiasTestParams = std::tuple<InferenceEngine::SizeVector  // input shape
-                                                        >;
+using ConvBackpropData2dWithBiasTestParams = std::tuple<ov::Shape>;  // input shape
 
 class ConvBackpropData2dWithBiasTestCommon :
         public testing::WithParamInterface<ConvBackpropData2dWithBiasTestParams>,
@@ -20,7 +18,9 @@ public:
     static std::string getTestCaseName(testing::TestParamInfo<ConvBackpropData2dWithBiasTestParams> obj) {
         std::vector<size_t> inputShape = std::get<0>(obj.param);
 
+        const std::string sep = "_";
         std::ostringstream result;
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
         result << "inputShape={" << inputShape.at(0) << ", " << inputShape.at(1) << ", " << inputShape.at(2) << ", "
                << inputShape.at(3) << "}_";
         return result.str();
@@ -40,7 +40,7 @@ public:
     }
 
     std::shared_ptr<ov::Node> buildConvBackpropData2D(const ov::Output<ov::Node>& param, size_t channelNum) {
-        const InferenceEngine::SizeVector inputShape = param.get_shape();
+        const ov::Shape inputShape = param.get_shape();
 
         const ov::element::Type_t inputs_et = ov::element::f16;
         const auto weightsSize = inputShape.at(1) * channelNum * 2 * 2;
@@ -62,7 +62,7 @@ public:
     }
 
     std::shared_ptr<ov::Node> buildBias(const ov::Output<ov::Node>& param, size_t channelNum) {
-        const InferenceEngine::SizeVector inputShape = param.get_shape();
+        const ov::Shape inputShape = param.get_shape();
 
         std::vector<float> biases(channelNum, 1.0);
         for (std::size_t i = 0; i < biases.size(); i++) {
@@ -99,7 +99,7 @@ class ConvBackpropData2dWithBiasTest_NPU3720 : public ConvBackpropData2dWithBias
 
 TEST_P(ConvBackpropData2dWithBiasTest_NPU3720, HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
 }
 
 }  // namespace ov::test::subgraph
@@ -108,7 +108,7 @@ using namespace ov::test::subgraph;
 
 namespace {
 
-const std::vector<InferenceEngine::SizeVector> inputShapes = {
+const std::vector<ov::Shape> inputShapes = {
         {1, 3, 64, 64},
         {1, 16, 64, 64},
 };

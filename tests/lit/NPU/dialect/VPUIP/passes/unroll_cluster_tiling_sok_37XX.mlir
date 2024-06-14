@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -96,10 +96,8 @@ func.func @UnrollNNDMA(%input: !Input_DDR, %output: !Output_DDR) -> !Output_DDR 
 
     return %output: !Output_DDR
 
-    //CHECK:        [[WEIGHTS1_CST:%.*]] = const.Declare memref<16x16x1x1xf16, #NHWC> =
-    //CHECK-SAME:       dense<1.000000e+00> : tensor<32x16x1x1xf16>, [#const.Reorder<#NHWC>, #const.SubView<[0, 0, 0, 0], [16, 16, 1, 1]>]
-    //CHECK:        [[WEIGHTS2_CST:%.*]] = const.Declare memref<16x16x1x1xf16, #NHWC> =
-    //CHECK-SAME:       dense<1.000000e+00> : tensor<32x16x1x1xf16>, [#const.Reorder<#NHWC>, #const.SubView<[16, 0, 0, 0], [16, 16, 1, 1]>]
+    //CHECK-DAG:    [[WEIGHTS1_CST:%.*]] = const.Declare memref<16x16x1x1xf16, #NHWC> = dense<1.000000e+00> : tensor<32x16x1x1xf16>, [#const.SubView<[0, 0, 0, 0], [16, 16, 1, 1]>, #const.Reorder<#NHWC>]
+    //CHECK-DAG:    [[WEIGHTS2_CST:%.*]] = const.Declare memref<16x16x1x1xf16, #NHWC> = dense<1.000000e+00> : tensor<32x16x1x1xf16>, [#const.SubView<[16, 0, 0, 0], [16, 16, 1, 1]>, #const.Reorder<#NHWC>]
 
     //CHECK:        [[BAR0:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     //CHECK:        [[BAR1:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
@@ -259,15 +257,10 @@ func.func @UnrollNCE(%input: !Input_DDR, %output: !Output_DDR) -> !Output_DDR {
 
     return %output: !Output_DDR
 
-    //CHECK:        [[WEIGHTS_TABLE1_CST:%.*]] = const.Declare memref<16x1x1x4xsi32> =
-    //CHECK-SAME:       dense<1> : tensor<32x1x1x4xsi32>, [#const.SubView<[0, 0, 0, 0], [16, 1, 1, 4]>]
-    //CHECK:        [[WEIGHTS_TABLE2_CST:%.*]] = const.Declare memref<16x1x1x4xsi32> =
-    //CHECK-SAME:       dense<1> : tensor<32x1x1x4xsi32>, [#const.SubView<[16, 0, 0, 0], [16, 1, 1, 4]>]
-
-    //CHECK:        [[WEIGHTS1_CST:%.*]] = const.Declare memref<16x16x1x1xf16, #NHWC> =
-    //CHECK-SAME:       dense<1.000000e+00> : tensor<32x16x1x1xf16>, [#const.Reorder<#NHWC>, #const.SubView<[0, 0, 0, 0], [16, 16, 1, 1]>]
-    //CHECK:        [[WEIGHTS2_CST:%.*]] = const.Declare memref<16x16x1x1xf16, #NHWC> =
-    //CHECK-SAME:       dense<1.000000e+00> : tensor<32x16x1x1xf16>, [#const.Reorder<#NHWC>, #const.SubView<[16, 0, 0, 0], [16, 16, 1, 1]>]
+    //CHECK-DAG:    [[WEIGHTS_TABLE1_CST:%.*]] = const.Declare memref<16x1x1x4xsi32> = dense<1> : tensor<32x1x1x4xsi32>, [#const.SubView<[0, 0, 0, 0], [16, 1, 1, 4]>]
+    //CHECK-DAG:    [[WEIGHTS_TABLE2_CST:%.*]] = const.Declare memref<16x1x1x4xsi32> = dense<1> : tensor<32x1x1x4xsi32>, [#const.SubView<[16, 0, 0, 0], [16, 1, 1, 4]>]
+    //CHECK-DAG:    [[WEIGHTS1_CST:%.*]] = const.Declare memref<16x16x1x1xf16, #NHWC> = dense<1.000000e+00> : tensor<32x16x1x1xf16>, [#const.SubView<[0, 0, 0, 0], [16, 16, 1, 1]>, #const.Reorder<#NHWC>]
+    //CHECK-DAG:    [[WEIGHTS2_CST:%.*]] = const.Declare memref<16x16x1x1xf16, #NHWC> = dense<1.000000e+00> : tensor<32x16x1x1xf16>, [#const.SubView<[16, 0, 0, 0], [16, 16, 1, 1]>, #const.Reorder<#NHWC>]
 
     //CHECK:        [[BAR0:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     //CHECK:        [[BAR1:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
@@ -574,25 +567,15 @@ func.func @UnrollNCESequence(%input: !Input_DDR, %output: !Output_DDR) -> !Outpu
 
     return %output: !Output_DDR
 
-    //CHECK:        [[WEIGHTS_TABLE1_CST_2ND_TASK:%.*]] = const.Declare memref<8x1x1x4xsi32> =
-    //CHECK-SAME:       dense<1> : tensor<16x1x1x4xsi32>, [#const.SubView<[0, 0, 0, 0], [8, 1, 1, 4]>]
-    //CHECK:        [[WEIGHTS_TABLE2_CST_2ND_TASK:%.*]] = const.Declare memref<8x1x1x4xsi32> =
-    //CHECK-SAME:       dense<1> : tensor<16x1x1x4xsi32>, [#const.SubView<[8, 0, 0, 0], [8, 1, 1, 4]>]
+    //CHECK-DAG:    [[WEIGHTS_TABLE1_CST_2ND_TASK:%.*]] = const.Declare memref<8x1x1x4xsi32> = dense<1> : tensor<16x1x1x4xsi32>, [#const.SubView<[0, 0, 0, 0], [8, 1, 1, 4]>]
+    //CHECK-DAG:    [[WEIGHTS_TABLE2_CST_2ND_TASK:%.*]] = const.Declare memref<8x1x1x4xsi32> = dense<1> : tensor<16x1x1x4xsi32>, [#const.SubView<[8, 0, 0, 0], [8, 1, 1, 4]>]
+    //CHECK-DAG:    [[WEIGHTS1_CST_2ND_TASK:%.*]] = const.Declare memref<8x32x1x1xf16, #NHWC> = dense<1.000000e+00> : tensor<16x32x1x1xf16>, [#const.SubView<[0, 0, 0, 0], [8, 32, 1, 1]>, #const.Reorder<#NHWC>]
+    //CHECK-DAG:    [[WEIGHTS2_CST_2ND_TASK:%.*]] = const.Declare memref<8x32x1x1xf16, #NHWC> = dense<1.000000e+00> : tensor<16x32x1x1xf16>, [#const.SubView<[8, 0, 0, 0], [8, 32, 1, 1]>, #const.Reorder<#NHWC>]
 
-    //CHECK:        [[WEIGHTS1_CST_2ND_TASK:%.*]] = const.Declare memref<8x32x1x1xf16, #NHWC> =
-    //CHECK-SAME:       dense<1.000000e+00> : tensor<16x32x1x1xf16>, [#const.Reorder<#NHWC>, #const.SubView<[0, 0, 0, 0], [8, 32, 1, 1]>]
-    //CHECK:        [[WEIGHTS2_CST_2ND_TASK:%.*]] = const.Declare memref<8x32x1x1xf16, #NHWC> =
-    //CHECK-SAME:       dense<1.000000e+00> : tensor<16x32x1x1xf16>, [#const.Reorder<#NHWC>, #const.SubView<[8, 0, 0, 0], [8, 32, 1, 1]>]
-
-    //CHECK:        [[WEIGHTS_TABLE1_CST_1ST_TASK:%.*]] = const.Declare memref<16x1x1x4xsi32> =
-    //CHECK-SAME:       dense<1> : tensor<32x1x1x4xsi32>, [#const.SubView<[0, 0, 0, 0], [16, 1, 1, 4]>]
-    //CHECK:        [[WEIGHTS_TABLE2_CST_1ST_TASK:%.*]] = const.Declare memref<16x1x1x4xsi32> =
-    //CHECK-SAME:       dense<1> : tensor<32x1x1x4xsi32>, [#const.SubView<[16, 0, 0, 0], [16, 1, 1, 4]>]
-
-    //CHECK:        [[WEIGHTS1_CST_1ST_TASK:%.*]] = const.Declare memref<16x16x1x1xf16, #NHWC> =
-    //CHECK-SAME:       dense<1.000000e+00> : tensor<32x16x1x1xf16>, [#const.Reorder<#NHWC>, #const.SubView<[0, 0, 0, 0], [16, 16, 1, 1]>]
-    //CHECK:        [[WEIGHTS2_CST_1ST_TASK:%.*]] = const.Declare memref<16x16x1x1xf16, #NHWC> =
-    //CHECK-SAME:       dense<1.000000e+00> : tensor<32x16x1x1xf16>, [#const.Reorder<#NHWC>, #const.SubView<[16, 0, 0, 0], [16, 16, 1, 1]>]
+    //CHECK-DAG:    [[WEIGHTS_TABLE1_CST_1ST_TASK:%.*]] = const.Declare memref<16x1x1x4xsi32> = dense<1> : tensor<32x1x1x4xsi32>, [#const.SubView<[0, 0, 0, 0], [16, 1, 1, 4]>]
+    //CHECK-DAG:    [[WEIGHTS_TABLE2_CST_1ST_TASK:%.*]] = const.Declare memref<16x1x1x4xsi32> = dense<1> : tensor<32x1x1x4xsi32>, [#const.SubView<[16, 0, 0, 0], [16, 1, 1, 4]>]
+    //CHECK-DAG:    [[WEIGHTS1_CST_1ST_TASK:%.*]] = const.Declare memref<16x16x1x1xf16, #NHWC> = dense<1.000000e+00> : tensor<32x16x1x1xf16>, [#const.SubView<[0, 0, 0, 0], [16, 16, 1, 1]>, #const.Reorder<#NHWC>]
+    //CHECK-DAG:    [[WEIGHTS2_CST_1ST_TASK:%.*]] = const.Declare memref<16x16x1x1xf16, #NHWC> = dense<1.000000e+00> : tensor<32x16x1x1xf16>, [#const.SubView<[16, 0, 0, 0], [16, 16, 1, 1]>, #const.Reorder<#NHWC>]
 
     //CHECK:        [[BAR0:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     //CHECK:        [[BAR1:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
@@ -895,15 +878,10 @@ func.func @UnrollNCENonContiguousOutput(%input: !Input_DDR, %output: !Output_DDR
 
     return %output: !Output_DDR
 
-    //CHECK:        [[WEIGHTS_TABLE1_CST:%.*]] = const.Declare memref<8x1x1x4xsi32, @DDR> =
-    //CHECK-SAME:       dense<1> : tensor<16x1x1x4xsi32>, [#const.SubView<[0, 0, 0, 0], [8, 1, 1, 4]>]
-    //CHECK:        [[WEIGHTS_TABLE2_CST:%.*]] = const.Declare memref<8x1x1x4xsi32, @DDR> =
-    //CHECK-SAME:       dense<1> : tensor<16x1x1x4xsi32>, [#const.SubView<[8, 0, 0, 0], [8, 1, 1, 4]>]
-
-    //CHECK:        [[WEIGHTS1_CST:%.*]] = const.Declare memref<8x16x1x1xf16, #NHWC, @DDR> =
-    //CHECK-SAME:       dense<1.000000e+00> : tensor<16x16x1x1xf16>, [#const.Reorder<#NHWC>, #const.SubView<[0, 0, 0, 0], [8, 16, 1, 1]>]
-    //CHECK:        [[WEIGHTS2_CST:%.*]] = const.Declare memref<8x16x1x1xf16, #NHWC, @DDR> =
-    //CHECK-SAME:       dense<1.000000e+00> : tensor<16x16x1x1xf16>, [#const.Reorder<#NHWC>, #const.SubView<[8, 0, 0, 0], [8, 16, 1, 1]>]
+    //CHECK-DAG:    [[WEIGHTS_TABLE1_CST:%.*]] = const.Declare memref<8x1x1x4xsi32, @DDR> = dense<1> : tensor<16x1x1x4xsi32>, [#const.SubView<[0, 0, 0, 0], [8, 1, 1, 4]>]
+    //CHECK-DAG:    [[WEIGHTS_TABLE2_CST:%.*]] = const.Declare memref<8x1x1x4xsi32, @DDR> = dense<1> : tensor<16x1x1x4xsi32>, [#const.SubView<[8, 0, 0, 0], [8, 1, 1, 4]>]
+    //CHECK-DAG:    [[WEIGHTS1_CST:%.*]] = const.Declare memref<8x16x1x1xf16, #NHWC, @DDR> = dense<1.000000e+00> : tensor<16x16x1x1xf16>, [#const.SubView<[0, 0, 0, 0], [8, 16, 1, 1]>, #const.Reorder<#NHWC>]
+    //CHECK-DAG:    [[WEIGHTS2_CST:%.*]] = const.Declare memref<8x16x1x1xf16, #NHWC, @DDR> = dense<1.000000e+00> : tensor<16x16x1x1xf16>, [#const.SubView<[8, 0, 0, 0], [8, 16, 1, 1]>, #const.Reorder<#NHWC>]
 
     //CHECK:        [[BAR0:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     //CHECK:        [[BAR1:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
@@ -1029,7 +1007,7 @@ func.func @UnrollNCENonContiguousOutput(%input: !Input_DDR, %output: !Output_DDR
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
 module @VPU.SW {
-    func.func private @builtin_MVN(memref<*xf16, @CMX_NN>, memref<*xf16, @CMX_NN>, i1, i1, f64) attributes {VPU.kernel_code = "singleShaveMVN.cpp", VPU.kernel_entry = "singleShaveMVN"}
+    func.func private @builtin_MVN(memref<*xf16, @CMX_NN>, memref<*xf16, @CMX_NN>, i1, i1, f64) attributes {VPU.kernel_code = "mvn1.cpp", VPU.kernel_entry = "mvn1"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
 }
 
@@ -1050,7 +1028,7 @@ func.func @UnrollSWOpInterface(%input0: !Input_DDR, %output: !Output_DDR) -> !Ou
         %399 = VPUIP.NNDMA {port = 0 : i64} inputs(%395 : !Input_DDR) outputs(%300 : !typeCmxDistributed) -> !typeCmxDistributed
     }
     VPURT.Task waits(%bar0 : !VPURT.Barrier) updates(%bar1 : !VPURT.Barrier) attributes {isTrailingSWLayer = false} {
-        %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+        %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
           @VPU.SW::@builtin_MVN inputs(%300 as %arg4: !typeCmxDistributed) outputs(%301 as %arg5: !typeCmxDistributed) on tile 0 -> !typeCmxDistributed {
           VPUIP.SW.Kernel.run {
             attrs = [false, true, 1.0013580322265625E-5]}(%arg4, %arg5) : !typeCmxDistributed, !typeCmxDistributed

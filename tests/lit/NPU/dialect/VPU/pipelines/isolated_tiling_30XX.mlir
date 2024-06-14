@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -244,8 +244,8 @@ func.func @SplitNCEMaxPoolOverH(%arg0: tensor<1x16x125x125xf16, {order = #NHWC}>
     return %0 : tensor<1x16x125x125xf16, {order = #NHWC}>
 
     // CHECK:       [[WEIGHTS_TABLE:%.+]] = const.Declare tensor<16x1x1x4xsi32, {order = #NCHW}>
-    // CHECK-SAME:      = dense<10> : tensor<16x1x1x4xsi32>    
-    
+    // CHECK-SAME:      = dense<10> : tensor<16x1x1x4xsi32>
+
     // CHECK:       [[ACTIVATION_WINDOW:%.+]] = const.Declare tensor<1x1x1x16xui8, {order = #NCHW}>
     // CHECK-SAME:      = dense<1> : tensor<1x1x1x16xui8>
 

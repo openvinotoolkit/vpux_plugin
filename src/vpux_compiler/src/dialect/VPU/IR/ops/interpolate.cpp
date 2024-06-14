@@ -37,26 +37,19 @@ mlir::LogicalResult vpux::VPU::InterpolateOp::inferReturnTypes(mlir::MLIRContext
 // ClusteredOpInterface
 //
 
-bool vpux::VPU::InterpolateOp::checkStrategyCompatibility(VPU::MultiClusterStrategy strategy) {
-    if (strategy == VPU::MultiClusterStrategy::Clustering) {
+bool vpux::VPU::InterpolateOp::checkStrategyCompatibility(VPU::MultiClusterStrategy strategy, size_t) {
+    if (strategy == VPU::MultiClusterStrategy::Clustering ||
+        strategy == VPU::MultiClusterStrategy::SplitOverHeightOverlapped) {
         return true;
     }
-    const auto coordMode = getAttr().getCoordMode().getValue();
-    const auto mode = getAttr().getMode().getValue();
-    // E#67003, note that currenly only enable multi cluster when mode is linear_onnx and coord mode is half pixel
-    if (strategy == VPU::MultiClusterStrategy::SplitOverHeightOverlapped && mode == IE::InterpolateMode::LINEAR_ONNX &&
-        (coordMode == IE::InterpolateCoordMode::HALF_PIXEL || coordMode == IE::InterpolateCoordMode::ALIGN_CORNERS ||
-         coordMode == IE::InterpolateCoordMode::PYTORCH_HALF_PIXEL)) {
-        auto inputShape = getShape(getInput());
-        return inputShape[Dims4D::Act::H] > 1;
-    }
+
     return false;
 }
 
 vpux::VPU::DistributedTensorAttr vpux::VPU::InterpolateOp::getExplicitDistributedTensorAttr(
         vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, mlir::ArrayAttr numTiles,
-        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::ArrayAttr /*kernel*/,
-        vpux::VPU::PaddingAttr /*pad*/, mlir::ArrayAttr /*stride*/, mlir::UnitAttr uniformDistributedSegments) {
+        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::UnitAttr uniformDistributedSegments,
+        const vpux::VPU::OverlapDistributionParams& /*overlapParams*/) {
     return VPU::getSWExplicitDistributedTensorAttr(mlir::dyn_cast<VPU::SWOpInterface>(getOperation()), shape,
                                                    distributionMode, numTiles, numClusters, alignment,
                                                    uniformDistributedSegments);
@@ -148,8 +141,11 @@ InputTiling vpux::VPU::InterpolateOp::backInferTileInfo(const vpux::TileInfo& ou
 
     mlir::FailureOr<SmallVector<int64_t>> inferedInputTile;
     auto coordMode = getAttr().getCoordMode().getValue();
+    auto interpolateMode = getAttr().getMode().getValue();
+    auto nearestMode = getAttr().getNearestMode().getValue();
+    auto currentInputShape = to_small_vector(getShape(getInput()));
     auto inTiles = vpux::backInferInterpolateTile(outputTile, iShape, oShape, initialInputOffsets, initialOutputOffsets,
-                                                  coordMode, log);
+                                                  currentInputShape, interpolateMode, coordMode, nearestMode, log);
     auto newInputOffset = to_small_vector(inTiles.tiles[0].offsets);
 
     // Recalculate the backward scale based on the new input/output shape

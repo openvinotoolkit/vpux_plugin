@@ -4,7 +4,7 @@
 //
 
 #include "vpux/compiler/dialect/VPURT/utils/barrier_legalization_utils.hpp"
-#include "vpux/compiler/dialect/VPURT/barrier_simulator.hpp"
+#include "vpux/compiler/dialect/VPURT/interfaces/barrier_simulator.hpp"
 
 using namespace vpux;
 
@@ -77,12 +77,16 @@ void VPURT::verifyBarrierSlots(mlir::func::FuncOp func, Logger log) {
 
 // simulate execution of tasks an barriers to generate an order for tasks an barriers which will represent execution
 // order tasks and barriers in IR to match that order - required for virtual to physical barrier mapping
-void VPURT::orderExecutionTasksAndBarriers(mlir::func::FuncOp funcOp, BarrierInfo& barrierInfo) {
+// orderByConsumption = false, barriers are ordered based on first producer, orderByConsumption = true: barriers are
+// ordered based on consumer
+void VPURT::orderExecutionTasksAndBarriers(mlir::func::FuncOp funcOp, BarrierInfo& barrierInfo,
+                                           bool orderByConsumption) {
     barrierInfo.updateIR();
 
     auto taskOpQueues = VPURT::getTaskOpQueues(funcOp, barrierInfo);
     SmallVector<size_t> newTaskOpOrder;
     SmallVector<size_t> newBarrierOrder;
+    std::set<size_t> newBarrierOrderSet;
 
     // initialize front task from each FIFO
     std::map<VPURT::TaskQueueType, SmallVector<uint32_t>::iterator> frontTasks;
@@ -132,11 +136,21 @@ void VPURT::orderExecutionTasksAndBarriers(mlir::func::FuncOp funcOp, BarrierInf
         const auto updateBarriers = barrierInfo.getUpdateBarriers(readyOp);
         for (const auto& updateBarrier : updateBarriers) {
             auto barrierOp = barrierInfo.getBarrierOpAtIndex(updateBarrier);
-            barrierInfo.removeProducer(readyOp, barrierOp);
+            barrierInfo.removeProducer(barrierOp, readyOp);
+
+            // Order the barrier by producer to WA hang issue in runtime
+            // TODO: E#109198 find the root cause of runtime hang
+            // TODO: E#104375 add the catch such case in compiler simulation
+            if (!orderByConsumption && !newBarrierOrderSet.count(updateBarrier)) {
+                newBarrierOrder.push_back(updateBarrier);
+                newBarrierOrderSet.insert(updateBarrier);
+            }
 
             if (barrierInfo.getBarrierProducers(barrierOp).empty()) {
-                // barriers will be ordered by order of consumption
-                newBarrierOrder.push_back(updateBarrier);
+                if (orderByConsumption) {
+                    // barriers will be ordered by order of consumption, each barrier is consumed only once
+                    newBarrierOrder.push_back(updateBarrier);
+                }
                 barrierInfo.resetBarrier(barrierOp);
             }
         }
@@ -180,8 +194,18 @@ void VPURT::orderExecutionTasksAndBarriers(mlir::func::FuncOp funcOp, BarrierInf
         if (prevTaskOp != nullptr) {
             taskOp->moveAfter(prevTaskOp);
         } else {
-            auto lastDeclareBufferOp = to_small_vector(funcOp.getOps<VPURT::DeclareBufferOp>()).back();
-            taskOp->moveAfter(lastDeclareBufferOp);
+            auto declareBufferOps = to_small_vector(funcOp.getOps<VPURT::DeclareBufferOp>());
+            if (declareBufferOps.empty()) {
+                auto barrierOps = to_small_vector(funcOp.getOps<VPURT::DeclareVirtualBarrierOp>());
+                if (!barrierOps.empty()) {
+                    taskOp->moveAfter(barrierOps.back());
+                } else {
+                    auto& block = funcOp.getBody().front();
+                    taskOp->moveBefore(&block, block.begin());
+                }
+            } else {
+                taskOp->moveAfter(declareBufferOps.back());
+            }
         }
         prevTaskOp = taskOp;
     }

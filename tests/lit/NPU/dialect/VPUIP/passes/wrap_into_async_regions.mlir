@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --wrap-into-async-regions %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 // CHECK-LABEL: @LinearGraph
 func.func @LinearGraph(%arg0: memref<1x1x1x100xf16>, %arg1: memref<1x1x1x100xf16>) -> memref<1x1x1x100xf16> {
@@ -109,33 +109,33 @@ module @TwoFunctions {
     }
 
     func.func @foo1(%arg0: memref<1x8x60x60xf16, @DDR>, %arg1: memref<1x4x60x60xf16, @DDR>, %arg2: memref<1x2x60x60xf16, @DDR>) -> (memref<1x4x60x60xf16, @DDR>, memref<1x2x60x60xf16, @DDR>) {
-        %0 = VPUIP.SubView %arg0 [0, 2, 0, 0] [1, 4, 60, 60] : memref<1x8x60x60xf16, @DDR> to 
+        %0 = VPUIP.SubView %arg0 [0, 2, 0, 0] [1, 4, 60, 60] : memref<1x8x60x60xf16, @DDR> to
                             memref<1x4x60x60xf16, {order = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>, strides = [28800, 3600, 60, 1]}, @DDR>
-        %1 = VPUIP.SubView %arg0 [0, 4, 0, 0] [1, 2, 60, 60] : memref<1x8x60x60xf16, @DDR> to 
+        %1 = VPUIP.SubView %arg0 [0, 4, 0, 0] [1, 2, 60, 60] : memref<1x8x60x60xf16, @DDR> to
                             memref<1x2x60x60xf16, {order = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>, strides = [28800, 3600, 60, 1]}, @DDR>
-        %2 = VPUIP.NNDMA inputs(%0 : memref<1x4x60x60xf16, {order = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>, strides = [28800, 3600, 60, 1]}, @DDR>) 
+        %2 = VPUIP.NNDMA inputs(%0 : memref<1x4x60x60xf16, {order = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>, strides = [28800, 3600, 60, 1]}, @DDR>)
                             outputs(%arg1 : memref<1x4x60x60xf16, @DDR>) -> memref<1x4x60x60xf16, @DDR>
-        %3 = VPUIP.NNDMA inputs(%1 : memref<1x2x60x60xf16, {order = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>, strides = [28800, 3600, 60, 1]}, @DDR>) 
+        %3 = VPUIP.NNDMA inputs(%1 : memref<1x2x60x60xf16, {order = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>, strides = [28800, 3600, 60, 1]}, @DDR>)
                             outputs(%arg2 : memref<1x2x60x60xf16, @DDR>) -> memref<1x2x60x60xf16, @DDR>
         return %2, %3 : memref<1x4x60x60xf16, @DDR>, memref<1x2x60x60xf16, @DDR>
     }
-    
+
     func.func @foo2(%arg0: memref<1x4x60x60xf16, @DDR>, %arg1: memref<1x4x60x60xf16, @DDR>) -> memref<1x4x60x60xf16, @DDR> {
         %0 = VPUIP.NNDMA inputs(%arg0 : memref<1x4x60x60xf16, @DDR>) outputs(%arg1 : memref<1x4x60x60xf16, @DDR>) -> memref<1x4x60x60xf16, @DDR>
         return %0 : memref<1x4x60x60xf16, @DDR>
     }
 
-    // CHECK:       func.func @main([[ARG0:[^:]+]]: memref<1x8x60x60xf16, @DDR>, [[ARG1:[^:]+]]: memref<1x4x60x60xf16, @DDR>, [[ARG2:[^:]+]]: memref<1x2x60x60xf16, @DDR>) 
+    // CHECK:       func.func @main([[ARG0:[^:]+]]: memref<1x8x60x60xf16, @DDR>, [[ARG1:[^:]+]]: memref<1x4x60x60xf16, @DDR>, [[ARG2:[^:]+]]: memref<1x2x60x60xf16, @DDR>)
     // CHECK-SAME:      -> (memref<1x4x60x60xf16, @DDR>, memref<1x2x60x60xf16, @DDR>) {
     func.func @main(%arg0: memref<1x8x60x60xf16, @DDR>, %arg1: memref<1x4x60x60xf16, @DDR>, %arg2: memref<1x2x60x60xf16, @DDR>) -> (memref<1x4x60x60xf16, @DDR>, memref<1x2x60x60xf16, @DDR>) {
         %alloc = memref.alloc() : memref<1x4x60x60xf16, @DDR>
-        %0:2 = call @foo1(%arg0, %alloc, %arg2) : (memref<1x8x60x60xf16, @DDR>, memref<1x4x60x60xf16, @DDR>, memref<1x2x60x60xf16, @DDR>) 
+        %0:2 = call @foo1(%arg0, %alloc, %arg2) : (memref<1x8x60x60xf16, @DDR>, memref<1x4x60x60xf16, @DDR>, memref<1x2x60x60xf16, @DDR>)
                     -> (memref<1x4x60x60xf16, @DDR>, memref<1x2x60x60xf16, @DDR>)
         %1 = call @foo2(%0#0, %arg1) : (memref<1x4x60x60xf16, @DDR>, memref<1x4x60x60xf16, @DDR>) -> memref<1x4x60x60xf16, @DDR>
         return %1, %0#1 : memref<1x4x60x60xf16, @DDR>, memref<1x2x60x60xf16, @DDR>
 
         // CHECK:       [[ALLOC:%.+]] = memref.alloc() : memref<1x4x60x60xf16, @DDR>
-        // CHECK:       [[T1:%.+]], [[R1:%.+]]:2 = async.execute 
+        // CHECK:       [[T1:%.+]], [[R1:%.+]]:2 = async.execute
         // CHECK-SAME:         VPUIP.executor = @NCE
         // CHECK:                   func.call @foo1([[ARG0]], [[ALLOC]], [[ARG2]]) : (memref<1x8x60x60xf16, @DDR>, memref<1x4x60x60xf16, @DDR>, memref<1x2x60x60xf16, @DDR>)
 

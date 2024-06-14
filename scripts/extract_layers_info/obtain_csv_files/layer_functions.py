@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2022 Intel Corporation.
+# Copyright (C) 2022 Intel Corporation
 # SPDX-License-Identifier: Apache 2.0
 #
 
@@ -8,9 +8,9 @@ import xml.etree.ElementTree as ET
 import os
 
 # Fuction extract all layer types from IR-file
-def get_list_of_all_layer_types_in_IR_file(path_to_file):    
+def get_list_of_all_layer_types_in_IR_file(path_to_file):
     set_of_layer_types_in_CNN = set()
-    
+
     xml_root = ET.parse(path_to_file).getroot()
 
     for layers in xml_root.findall('layers'):
@@ -18,34 +18,34 @@ def get_list_of_all_layer_types_in_IR_file(path_to_file):
             set_of_layer_types_in_CNN.add(layer.attrib['type'])
 
     list_of_layer_types = sorted( list(set_of_layer_types_in_CNN) )
-    
+
     return list_of_layer_types
 
 
 # Function extract all layer types from list of IR-files found in root directory and subdirs
 def find_all_layer_types_in_all_IR_files(list_of_files):
     types_of_all_layers = set()
-    
+
     for fileName in list_of_files:
         list_of_layers_for_current_CNN = get_list_of_all_layer_types_in_IR_file(fileName)
-        
+
         # Collect all layer types in one set
         for layer in list_of_layers_for_current_CNN:
             types_of_all_layers.add(layer)
-    
+
     return sorted(list(types_of_all_layers))
 
-    
+
 # Function create dictionary networks names vs layers (network names - keys)
 def create_dictionary_network_names_vs_layers(list_of_files):
     neural_networks_to_layers_dictionary = dict()
-    
+
     list_of_all_layer_types = find_all_layer_types_in_all_IR_files(list_of_files)
-    
+
     for fileName in list_of_files:
         list_of_layers_for_current_CNN = get_list_of_all_layer_types_in_IR_file(fileName)
         # create record in dictionary for current IR
-        neural_networks_to_layers_dictionary[ os.path.basename(fileName)[:-4] ] = sorted(list_of_layers_for_current_CNN)  
+        neural_networks_to_layers_dictionary[ os.path.basename(fileName)[:-4] ] = sorted(list_of_layers_for_current_CNN)
 
     return neural_networks_to_layers_dictionary
 
@@ -55,7 +55,7 @@ def collect_data_attributes(layer_type, xml_root):
     set_of_layer_attributes = set()
     dict_one_layer_info = dict()
     layer_input_dimentions = set()
-    layer_output_dimentions = set()    
+    layer_output_dimentions = set()
     # get info from data attributes
     for layers in xml_root.findall('layers'):
         for layer in layers.findall('layer'):

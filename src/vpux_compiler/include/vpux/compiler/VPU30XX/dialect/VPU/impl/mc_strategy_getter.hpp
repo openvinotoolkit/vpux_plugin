@@ -10,7 +10,7 @@
 namespace vpux::VPU::arch30xx {
 
 /*
-   Class for getting strategies for VPU30XX
+   Class for getting strategies for NPU30XX
 */
 
 class StrategyGetter : public StrategyGetterBase {

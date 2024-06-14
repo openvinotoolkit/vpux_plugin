@@ -1,12 +1,10 @@
-// Copyright (C) Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include <vpu_ov2_layer_test.hpp>
 
-#include <ov_models/builders.hpp>
-#include <ov_models/utils/ov_helpers.hpp>
-#include <shared_test_classes/base/layer_test_utils.hpp>
+#include "common_test_utils/test_enums.hpp"
 
 using namespace ov::test::utils;
 namespace ov::test {
@@ -19,7 +17,7 @@ std::shared_ptr<ov::Node> build_activation_helper(const std::shared_ptr<ov::Node
     case ActivationTypes::Relu:
         return std::make_shared<ov::op::v0::Relu>(producer->output(0));
     default:
-        IE_THROW() << "build_activation_helper: unsupported activation type: " << act_type;
+        OPENVINO_THROW("build_activation_helper: unsupported activation type: ", act_type);
     }
 
     // execution must never reach this point
@@ -69,16 +67,25 @@ class Conv2dWithBiasTest_NPU3700 :
         function = std::make_shared<ov::Model>(results, params, "Conv2dWithBiasTest");
         rel_threshold = 0.5f;
     }
+
+public:
+    static std::string getTestCaseName(const testing::TestParamInfo<std::tuple<ov::Shape, ActivationTypes>>& obj) {
+        const std::string sep = "_";
+        std::ostringstream result;
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
+        result << "TestIdx=" << obj.index << sep;
+        return result.str();
+    };
 };
 
 TEST_P(Conv2dWithBiasTest_NPU3700, SW) {
     setReferenceSoftwareMode();
-    run(VPUXPlatform::VPU3700);
+    run(Platform::NPU3700);
 }
 
 TEST_P(Conv2dWithBiasTest_NPU3700, HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3700);
+    run(Platform::NPU3700);
 }
 
 const std::vector<ov::Shape> kernelShapes = {
@@ -94,6 +101,7 @@ const std::vector<ActivationTypes> activations = {
 };
 
 INSTANTIATE_TEST_SUITE_P(conv2d_with_act, Conv2dWithBiasTest_NPU3700,
-                         ::testing::Combine(::testing::ValuesIn(kernelShapes), ::testing::ValuesIn(activations)));
+                         ::testing::Combine(::testing::ValuesIn(kernelShapes), ::testing::ValuesIn(activations)),
+                         Conv2dWithBiasTest_NPU3700::getTestCaseName);
 
 }  // namespace ov::test

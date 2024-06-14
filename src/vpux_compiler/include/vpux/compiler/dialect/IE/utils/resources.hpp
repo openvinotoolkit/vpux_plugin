@@ -1,11 +1,11 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 #pragma once
 
-#include "vpux/compiler/dialect/IE/ops.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 
 namespace vpux {
 namespace IE {
@@ -84,6 +84,8 @@ static constexpr StringLiteral resMemModuleName = "ReservedMemory";
 
 SmallVector<IE::MemoryResourceOp> getReservedMemoryResources(mlir::ModuleOp mainModule, mlir::SymbolRefAttr memSpace);
 
+SmallVector<std::pair<uint64_t, uint64_t>> getReservedMemOffsetAndSizeVec(mlir::ModuleOp module,
+                                                                          mlir::SymbolRefAttr memSpaceAttr);
 //
 // DMA profiling reserved memory
 //
@@ -119,6 +121,24 @@ memory_resource_if<Enum> getCompressDmaReservedMemory(mlir::ModuleOp mainModule,
 }
 
 SmallVector<MemoryResourceOp> getCompressDmaReservedMemory(mlir::ModuleOp mainModule);
+
+//
+// SW Kernel prefetching reserved memory
+//
+static constexpr StringLiteral swKernelPrefetchingResMemModuleName = "SWKernelPrefetchingReservedMemory";
+
+IE::MemoryResourceOp setSWKernelPrefetchingReservedMemory(mlir::ModuleOp mainModule, mlir::SymbolRefAttr memSpace,
+                                                          int64_t size);
+
+IE::MemoryResourceOp getSWKernelPrefetchingReservedMemory(mlir::ModuleOp mainModule, mlir::SymbolRefAttr memSpace);
+
+template <typename Enum>
+memory_resource_if<Enum> getSWKernelPrefetchingReservedMemory(mlir::ModuleOp mainModule, Enum kind) {
+    return getSWKernelPrefetchingReservedMemory(mainModule,
+                                                mlir::SymbolRefAttr::get(mainModule.getContext(), stringifyEnum(kind)));
+}
+
+SmallVector<MemoryResourceOp> getSWKernelPrefetchingReservedMemory(mlir::ModuleOp mainModule);
 
 //
 // ExecutorResourceOp
@@ -169,6 +189,8 @@ TileResourceOp addTileExecutor(mlir::ModuleOp mainModule, size_t count);
 bool hasTileExecutor(mlir::ModuleOp mainModule);
 
 TileResourceOp getTileExecutor(mlir::ModuleOp mainModule);
+
+TileResourceOp getTileExecutor(mlir::func::FuncOp funcOp);
 
 }  // namespace IE
 }  // namespace vpux

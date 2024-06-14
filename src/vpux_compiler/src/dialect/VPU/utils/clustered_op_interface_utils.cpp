@@ -15,9 +15,36 @@ bool VPU::isOperationSplitOverHeightCompatible(mlir::Operation* op, const vpux::
         return false;
     }
 
+    auto moduleOp = op->getParentOfType<mlir::ModuleOp>();
+    auto tileOp = IE::getTileExecutor(moduleOp);
+    const auto numTiles = tileOp.getCount();
+    const auto minimumOutputHeightForSOH = numTiles;
+
+    const auto arch = VPU::getArch(clusteredOp);
+    auto isUniformDistributedSegments = VPU::isUniformDistributedSegmentsSupported(clusteredOp);
+
     auto outputShape = ShapeRef(outputTile.shape);
+    if (outputShape == ShapeRef()) {
+        outputShape = getShape(clusteredOp->getResult(0));
+    }
+
+    auto heightCompatibleCheck = [&](ShapeRef outputShape) {
+        const auto OH = outputShape[Dims4D::Act::H];
+        auto numClustersForSOH = VPU::getNumberOfClustersForSpatialDim(outputShape[Dims4D::Act::H], numTiles,
+                                                                       isUniformDistributedSegments);
+        // Each cluster should be used. When it is just with 3 or 2 clusters, there is an accuracy issue.
+        // TODO: Find the root cause for this accuracy regression, E#41297
+        auto isSOHCompatible = (OH >= minimumOutputHeightForSOH && numClustersForSOH == numTiles);
+        return isSOHCompatible;
+    };
+
+    auto isSOHCompatible = heightCompatibleCheck(outputShape);
+    if (!isSOHCompatible) {
+        return false;
+    }
+
     auto offset = ShapeRef(outputTile.offsets);
-    if (!outputShape.empty() && !offset.empty()) {
+    if (!offset.empty()) {
         const auto numClusters = vpux::VPU::getOptimalNumClusters(clusteredOp, outputShape[Dims4D::Act::C],
                                                                   clusteredOp.getMultiClusterStrategy().value());
         const auto outputType = clusteredOp->getResult(0).getType().cast<vpux::NDTypeInterface>();
@@ -42,6 +69,11 @@ bool VPU::isOperationSplitOverHeightCompatible(mlir::Operation* op, const vpux::
                 return false;
             }
             const auto& inputTile = inputTiles[0];
+
+            if (!heightCompatibleCheck(inputTile.shape)) {
+                return false;
+            }
+
             const auto inputType = clusteredOp->getOperand(0).getType().cast<vpux::NDTypeInterface>();
             const auto inputTileType = inputType.extractDenseTile(inputTile.offsets, inputTile.shape);
             auto inDistributedType = VPU::getDistributedActivationTypeFromOp(clusteredOp, inputTileType, numClusters);
@@ -61,27 +93,21 @@ bool VPU::isOperationSplitOverHeightCompatible(mlir::Operation* op, const vpux::
         }
     }
 
-    auto moduleOp = op->getParentOfType<mlir::ModuleOp>();
-    auto tileOp = IE::getTileExecutor(moduleOp);
-    const auto numTiles = tileOp.getCount();
-    const auto minimumOutputHeightForSOH = numTiles;
-
-    const auto arch = VPU::getArch(clusteredOp);
-    if (outputShape == ShapeRef()) {
-        outputShape = getShape(clusteredOp->getResult(0));
-    }
-    auto isUniformDistributedSegments = !VPU::isArchVPUX3XXX(arch);
-    auto heightCompatibleCheck = [&](ShapeRef outputShape) {
-        const auto OH = outputShape[Dims4D::Act::H];
-        auto numClustersForSOH = VPU::getNumberOfClustersForSpatialDim(outputShape[Dims4D::Act::H], numTiles,
-                                                                       isUniformDistributedSegments);
-        // Each cluster should be used. When it is just with 3 or 2 clusters, there is an accuracy issue.
-        // TODO: Find the root cause for this accuracy regression, E#41297
-        auto isSOHCompatible = (OH >= minimumOutputHeightForSOH && numClustersForSOH == numTiles);
-        return isSOHCompatible;
+    const std::set<VPU::ArchKind> compatibleTargets = {
+            VPU::ArchKind::NPU40XX,
     };
-
-    auto isSOHCompatible = heightCompatibleCheck(outputShape);
+    if (compatibleTargets.count(arch) > 0) {
+        // For VPUX40XX, H/W segmented output needs to have explicit halo regions defined.
+        // Thus the applicability of SOH on the current operation is tightly dependent
+        // if the consumer operations can be SOH themselves.
+        // If that's not the case and not all consumers are SOH compatible, we can't represent
+        // the output OVERLAP DistributedTensor in an correct manner.
+        for (auto consumer : clusteredOp->getResult(0).getUsers()) {
+            if (auto clusteredConsumer = mlir::dyn_cast<VPU::ClusteredOpInterface>(consumer)) {
+                isSOHCompatible &= heightCompatibleCheck(getShape(clusteredConsumer->getResult(0)));
+            }
+        }
+    }
 
     return isSOHCompatible;
 }
@@ -98,6 +124,7 @@ bool VPU::isOperationSplitOverWidthCompatible(mlir::Operation* op, ShapeRef outp
     const auto numTiles = tileOp.getCount();
     const auto minimumOutputWidthForSOW = numTiles;
 
+    const auto arch = VPU::getArch(clusteredOp);
     if (outputShape == ShapeRef()) {
         outputShape = getShape(clusteredOp->getResult(0));
     }
@@ -112,6 +139,22 @@ bool VPU::isOperationSplitOverWidthCompatible(mlir::Operation* op, ShapeRef outp
     };
 
     auto isSOWCompatible = widthCompatibleCheck(outputShape);
+
+    const std::set<VPU::ArchKind> compatibleTargets = {
+            VPU::ArchKind::NPU40XX,
+    };
+    if (compatibleTargets.count(arch) > 0) {
+        // For VPUX40XX, W segmented output needs to have explicit halo regions defined.
+        // Thus the applicability of SOW on the current operation is tightly dependent
+        // if the consumer operations can be SOW themselves.
+        // If that's not the case and not all consumers are SOW compatible, we can't represent
+        // the output OVERLAP DistributedTensor in an correct manner.
+        for (auto consumer : clusteredOp->getResult(0).getUsers()) {
+            if (auto clusteredConsumer = mlir::dyn_cast<VPU::ClusteredOpInterface>(consumer)) {
+                isSOWCompatible &= widthCompatibleCheck(getShape(clusteredConsumer->getResult(0)));
+            }
+        }
+    }
 
     return isSOWCompatible;
 }
@@ -158,7 +201,7 @@ bool VPU::isOperationSplitOverKernelCompatible(mlir::Operation* op, ShapeRef out
     // no split will have only sparse values inside, since that would lead to zero-sized weights
     auto weights = nceOp.getWeightsOperand();
     if (weights != nullptr && weights.getType().isa<VPU::SparseTensorType>()) {
-        if (const auto compressionScheme = weights.getType().cast<VPU::SparseTensorType>().getCompressionScheme()) {
+        if (const auto sparsityCompression = weights.getType().cast<VPU::SparseTensorType>().getSparsityCompression()) {
             // Create a new type with the new number of output channels
             // If the element type is quantized per-axis, it is replaced with a per-tensor type to avoid the
             // incompatibility between the number of elements per axis and the number of scales & zero-points
@@ -183,14 +226,14 @@ bool VPU::isOperationSplitOverKernelCompatible(mlir::Operation* op, ShapeRef out
                 int64_t startOC = computeOffsets[0][Dims4D::Filter::OC];
                 for (size_t i = 1; i < computeOffsets.size(); ++i) {
                     const int64_t sizeOC = computeOffsets[i][Dims4D::Filter::OC] - startOC;
-                    const auto numElems = compressionScheme.getNumElemsInRange(startOC, sizeOC);
+                    const auto numElems = sparsityCompression.getNumElemsInRange(startOC, sizeOC);
                     if (numElems == 0) {
                         return false;
                     }
                     startOC += sizeOC;
                 }
                 const auto remainingOC = OC - startOC;
-                const auto numElems = compressionScheme.getNumElemsInRange(startOC, remainingOC);
+                const auto numElems = sparsityCompression.getNumElemsInRange(startOC, remainingOC);
                 if (numElems == 0) {
                     return false;
                 }

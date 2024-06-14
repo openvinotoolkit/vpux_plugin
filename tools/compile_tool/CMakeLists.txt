@@ -1,5 +1,5 @@
-# Copyright (C) 2023 Intel Corporation.
-# SPDX-License-Identifier: Apache 2.0
+# Copyright (C) 2023 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
 #
 
 set(TARGET_NAME compile_tool)
@@ -7,6 +7,9 @@ set(TARGET_NAME compile_tool)
 find_package(gflags QUIET)
 # for cross-compilation with gflags
 find_package(Threads QUIET)
+
+file (GLOB SRC ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
+file (GLOB HDR ${CMAKE_CURRENT_SOURCE_DIR}/*.hpp)
 
 add_tool_target(
     ADD_CPPLINT
@@ -23,4 +26,3 @@ add_tool_target(
 if (CMAKE_COMPILER_IS_GNUCXX)
     target_compile_options(${TARGET_NAME} PRIVATE -Wall)
 endif()
-

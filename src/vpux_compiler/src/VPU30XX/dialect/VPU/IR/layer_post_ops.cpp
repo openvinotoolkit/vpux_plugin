@@ -6,7 +6,7 @@
 #include "vpux/compiler/VPU30XX/dialect/VPU/IR/ops_interfaces.hpp"
 
 #include "vpux/compiler/dialect/VPU/utils/layer_post_ops_utils.hpp"
-#include "vpux/compiler/dialect/VPUIP/nce_invariant.hpp"
+#include "vpux/compiler/dialect/VPUIP/interfaces/nce_invariant.hpp"
 #include "vpux/compiler/utils/custom_pwl_table.hpp"
 
 #include <llvm/ADT/TypeSwitch.h>
@@ -35,7 +35,7 @@ auto isSupportedHWPostOp(mlir::Operation* mainOp, mlir::Operation* postOp, const
                 }
                 return true;
             })
-            // TODO: remove option after E#83187
+            // TODO: remove option after E-83187
             .Case<IE::ClampOp>([&](IE::ClampOp clampOp) {
                 if (clampOp != nullptr) {
                     const auto minVal = clampOp.getMinAttr().getValueAsDouble();
@@ -55,15 +55,18 @@ auto isSupportedHWPostOp(mlir::Operation* mainOp, mlir::Operation* postOp, const
                     if (fakeQuantizeOp == nullptr) {
                         return nullptr;
                     }
-
+                    if (!fakeQuantizeOp.getLevels().has_value()) {
+                        return nullptr;
+                    }
                     auto outLoConst = fakeQuantizeOp.getOutputLow().getDefiningOp<Const::DeclareOp>();
                     auto outHiConst = fakeQuantizeOp.getOutputHigh().getDefiningOp<Const::DeclareOp>();
                     const auto realType = fakeQuantizeOp.getInput().getType().cast<vpux::NDTypeInterface>();
                     const auto realElemType = realType.getElementType().cast<mlir::FloatType>();
 
-                    const auto outElemType = getQuantizedType(
-                            outLoConst.getContentAttr(), outHiConst.getContentAttr(), fakeQuantizeOp.getLevels(),
-                            realElemType, false, fakeQuantizeOp.getLoc(), fakeQuantizeOp.getAutoBroadcast());
+                    const auto outElemType =
+                            getQuantizedType(outLoConst.getContentAttr(), outHiConst.getContentAttr(),
+                                             fakeQuantizeOp.getLevels(), fakeQuantizeOp.getLowFpType(), realElemType,
+                                             false, fakeQuantizeOp.getLoc(), fakeQuantizeOp.getAutoBroadcast());
                     return outElemType.dyn_cast<mlir::quant::UniformQuantizedType>();
                 };
 
@@ -132,7 +135,7 @@ public:
             return false;
         }
 
-        return VPUIP::NCEInvariant::verifyKernel(mlir::cast<MainOpType>(mainOp)).succeeded();
+        return VPU::NCEInvariant::verifyKernel(mlir::cast<MainOpType>(mainOp)).succeeded();
     }
 
     bool isSupportedClampOp(mlir::Operation* mainOp, mlir::Operation* clampOp, const LogCb& logCb) const {
@@ -144,7 +147,7 @@ public:
             return false;
         }
 
-        return VPUIP::NCEInvariant::verifyKernel(mlir::cast<MainOpType>(mainOp)).succeeded();
+        return VPU::NCEInvariant::verifyKernel(mlir::cast<MainOpType>(mainOp)).succeeded();
     }
 
     void setLayerClampOp(mlir::Operation* mainOp, mlir::Operation* activationOp) const {

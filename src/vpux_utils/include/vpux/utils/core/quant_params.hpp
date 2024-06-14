@@ -4,8 +4,6 @@
 //
 
 //
-
-//
 // Quantization parameters
 //
 

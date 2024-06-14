@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% allow-custom-values=true" --feasible-allocation="memory-space=CMX_NN second-level-memory-space=DDR" %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
@@ -303,7 +303,7 @@ func.func @main(%arg0: memref<1x16x4x4xf16, #NHWC, [@CMX_NN, 0]>, %arg1: memref<
         async.yield %0 : memref<1x16x4x4xf16, #NHWC, [@CMX_NN, 0]>
     }
 
-    %token_0, %results_1 = async.execute -> !async.value<memref<1x16x4x4xf16, #NHWC, [@CMX_NN, 0]>> 
+    %token_0, %results_1 = async.execute -> !async.value<memref<1x16x4x4xf16, #NHWC, [@CMX_NN, 0]>>
             attributes {VPUIP.executor = @DPU, VPUIP.num_units = 1 : i64, "async-deps-index" = 1 : i64}  {
         %1 = VPUIP.NCEClusterTask {
                 activation_window_channel_length = 27 : i64,

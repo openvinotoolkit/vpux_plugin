@@ -10,7 +10,7 @@
 #include "vpux/utils/core/checked_cast.hpp"
 #include "vpux/utils/core/range.hpp"
 
-#include <ngraph/validation_util.hpp>
+#include "vpux/compiler/utils/infer_output_shape.hpp"
 
 using namespace vpux;
 
@@ -32,19 +32,10 @@ mlir::LogicalResult vpux::VPU::AvgPoolOp::inferReturnTypes(mlir::MLIRContext* ct
     const auto roundingType = avgPool.getRoundingType();
 
     const auto inType = avgPool.getInput().getType().cast<vpux::NDTypeInterface>();
-    const auto inShape = inType.getShape();
+    const auto inShape = inType.getShape().raw();
 
-    const auto outputShape = ngraph::infer_batched_pooling_forward(
-            EmptyNode::instance(), ov::Shape(inShape.begin(), inShape.end()),
-            ov::CoordinateDiff(dataPaddingBelow.begin(), dataPaddingBelow.end()),
-            ov::CoordinateDiff(dataPaddingAbove.begin(), dataPaddingAbove.end()),
-            ov::Shape(windowShape.begin(), windowShape.end()), ov::Strides(windowStrides.begin(), windowStrides.end()),
-            true, /* It is only used during assertion. True will make it pass */
-            roundingType == vpux::IE::RoundingType::CEIL);
-
-    const auto shapeI64 = to_small_vector(outputShape.get_shape() | transformed([](size_t val) {
-                                              return checked_cast<int64_t>(val);
-                                          }));
+    const auto shapeI64 = inferAvgPoolOutputShape(inShape, windowStrides, dataPaddingBelow, dataPaddingAbove,
+                                                  windowShape, roundingType);
 
     const auto outType = inType.changeShape(Shape(shapeI64));
     inferredReturnTypes.push_back(outType);

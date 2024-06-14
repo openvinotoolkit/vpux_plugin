@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -27,13 +27,37 @@ void testExplicitDistributedAttr(llvm::StringLiteral inputIR, vpux::VPU::Distrib
     auto func = module.get().lookupSymbol<mlir::func::FuncOp>("main");
     ASSERT_TRUE(func != nullptr);
 
+    const auto mode = expectedDistributedAttr.getMode().getValue();
+    const auto numTiles = expectedDistributedAttr.getNumTiles();
+    const auto numClusters = expectedDistributedAttr.getNumClusters();
+    const auto alignment = expectedDistributedAttr.getAlignment();
+    const auto uniformDistributedSeg = expectedDistributedAttr.getUniformDistributedSegments();
+
     for (auto& op : func.getOps()) {
         if (auto clusterOp = mlir::dyn_cast<vpux::VPU::ClusteredOpInterface>(op)) {
+            auto overlapParams = vpux::VPU::OverlapDistributionParams();
+
+            // HW ops & Concat will receive their overlapped params explicitly.
+            if (mode == VPU::DistributionMode::OVERLAPPED &&
+                (mlir::isa<vpux::VPU::NCEOpInterface>(op) || mlir::isa<VPU::ConcatOp>(op))) {
+                const auto tempDistribution = VPU::DistributedTensorAttr::get(
+                        ctx, expectedDistributedAttr.getMode(), numTiles, expectedDistributedAttr.getKernel(),
+                        expectedDistributedAttr.getPads(), expectedDistributedAttr.getStrides(), numClusters, alignment,
+                        uniformDistributedSeg, nullptr, nullptr, nullptr, nullptr, nullptr);
+
+                const auto perClusterMemoryShapes = VPU::getPerClusterMemoryShapes(shape, tempDistribution).value();
+                const auto perClusterMemoryOffsets = VPU::getPerClusterMemoryShapeOffsets(shape, tempDistribution);
+                const auto perClusterComputeShapes = VPU::getPerClusterComputeShapes(shape, tempDistribution);
+                const auto perClusterComputeOffsets = VPU::getPerClusterComputeShapeOffsets(shape, tempDistribution);
+
+                overlapParams.memoryShapes = vpux::getIntArrayOfArray(ctx, perClusterMemoryShapes);
+                overlapParams.memoryOffsets = vpux::getIntArrayOfArray(ctx, perClusterMemoryOffsets);
+                overlapParams.computeShapes = vpux::getIntArrayOfArray(ctx, perClusterComputeShapes);
+                overlapParams.computeOffsets = vpux::getIntArrayOfArray(ctx, perClusterComputeOffsets);
+            }
+
             auto distributedAttr = clusterOp.getExplicitDistributedTensorAttr(
-                    shape, expectedDistributedAttr.getMode().getValue(), expectedDistributedAttr.getNumTiles(),
-                    expectedDistributedAttr.getNumClusters(), expectedDistributedAttr.getAlignment(),
-                    expectedDistributedAttr.getKernel(), expectedDistributedAttr.getPads(),
-                    expectedDistributedAttr.getStrides(), expectedDistributedAttr.getUniformDistributedSegments());
+                    shape, mode, numTiles, numClusters, alignment, uniformDistributedSeg, overlapParams);
 
             ASSERT_EQ(distributedAttr.getMemoryShapes(), expectedDistributedAttr.getMemoryShapes());
             ASSERT_EQ(distributedAttr.getMemoryOffsets(), expectedDistributedAttr.getMemoryOffsets());
@@ -315,36 +339,39 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, SparseHWSOKOp) {
     }
 }
 
-TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, PermuteQuantOp) {
+TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, NCEPermuteOp) {
     constexpr llvm::StringLiteral inputIR = R"(
         #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
-        #NWCH = affine_map<(d0, d1, d2, d3) -> (d0, d3, d1, d2)>
 
         !qElemType = !quant.uniform<u8:f16, 1.000000e+00>
-        module @test attributes {VPU.arch = #VPU.arch_kind<VPUX37XX>, VPU.compilationMode = #VPU.compilation_mode<DefaultHW>} {
-            func.func @main(%arg0: tensor<1x224x3x224xf16, {order = #NHWC}>) -> tensor<1x224x4x224x!qElemType, {order = #NWCH}> {
-                %0 = VPU.NCE.PermuteQuantize(%arg0) {
+        module @test attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilationMode =
+        #VPU.compilation_mode<DefaultHW>} {
+            func.func @main(%arg0: tensor<1x3x224x224xf16>) -> tensor<1x4x224x224x!qElemType, {order
+            = #NHWC}> {
+
+                %0 = VPU.NCE.Permute(%arg0) {
                     dstElemType = !qElemType,
-                    dstOrder = #NWCH,
-                    pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 1 : i64>,
+                    dstOrder = #NHWC,
+                    expandedChannels = 4 : i64,
                     ppe = #VPU.PPETask<
-                        clamp_high = 255 : i64,
-                        clamp_low = 0 : i64,
-                        fp_prelu_alpha = 1.000000e+00 : f64,
+                        mode = <NOOP>,
+                        clamp_low = -2147483648 : i64,
+                        clamp_high = 2147483647 : i64,
                         lrelu_mult = 1 : i64,
                         lrelu_shift = 0 : i64,
-                        mode = <NOOP>
+                        fp_prelu_alpha = 1.000000e+00 : f64
                     >
-                } -> tensor<1x224x4x224x!qElemType, {order = #NWCH}>
-                return %0 : tensor<1x224x4x224x!qElemType, {order = #NWCH}>
+                } -> tensor<1x4x224x224x!qElemType, {order = #NHWC}>
+
+                return %0 : tensor<1x4x224x224x!qElemType, {order = #NHWC}>
             }
         }
     )";
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<VPU::VPUDialect>();
-    vpux::Shape shape = {1, 224, 4, 224};
+    vpux::Shape shape = {1, 4, 224, 224};
 
-    const auto numTiles = getIntArrayAttr(&ctx, SmallVector<int64_t>({1, 1, 1, 2}));
+    const auto numTiles = getIntArrayAttr(&ctx, SmallVector<int64_t>({1, 1, 2, 1}));
     const auto numClusters = getIntAttr(&ctx, 2);
 
     {
@@ -354,18 +381,24 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, PermuteQuantOp) {
                                                 getIntAttr(&ctx, 1));
         const auto strides = getIntArrayAttr(&ctx, SmallVector<int64_t>({1, 1}));
 
-        const PerClusterShapesOffsetsVec expectedPerClusterShapes(numClusters.getInt(),
-                                                                  SmallVector<int64_t>{1, 224, 4, 113});
-        const PerClusterShapesOffsetsVec expectedPerClusterOffsets(
-                {SmallVector<int64_t>{0, 0, 0, 0}, SmallVector<int64_t>{0, 0, 0, 111}});
+        const PerClusterShapesOffsetsVec expectedPerClusterComputeShapes(numClusters.getInt(),
+                                                                         SmallVector<int64_t>{1, 4, 112, 224});
+        const PerClusterShapesOffsetsVec expectedPerClusterComputeOffsets(
+                {SmallVector<int64_t>{0, 0, 0, 0}, SmallVector<int64_t>{0, 0, 112, 0}});
+        const PerClusterShapesOffsetsVec expectedPerClusterMemoryShapes(numClusters.getInt(),
+                                                                        SmallVector<int64_t>{1, 4, 113, 224});
+        const PerClusterShapesOffsetsVec expectedPerClusterMemoryOffsets(
+                {SmallVector<int64_t>{0, 0, 0, 0}, SmallVector<int64_t>{0, 0, 111, 0}});
 
-        const auto expectedPerClusterShapesAttr = getIntArrayOfArray(&ctx, expectedPerClusterShapes);
-        const auto expectedPerClusterOffsetsAttr = getIntArrayOfArray(&ctx, expectedPerClusterOffsets);
+        const auto expectedPerClusterComputeShapesAttr = getIntArrayOfArray(&ctx, expectedPerClusterComputeShapes);
+        const auto expectedPerClusterComputeOffsetsAttr = getIntArrayOfArray(&ctx, expectedPerClusterComputeOffsets);
+        const auto expectedPerClusterMemoryShapesAttr = getIntArrayOfArray(&ctx, expectedPerClusterMemoryShapes);
+        const auto expectedPerClusterMemoryOffsetsAttr = getIntArrayOfArray(&ctx, expectedPerClusterMemoryOffsets);
 
         const auto overlappedDistributedAtr = VPU::DistributedTensorAttr::get(
                 &ctx, overlappedMode, numTiles, kernel, pads, strides, numClusters, nullptr, nullptr,
-                expectedPerClusterShapesAttr, expectedPerClusterOffsetsAttr, expectedPerClusterShapesAttr,
-                expectedPerClusterOffsetsAttr, nullptr);
+                expectedPerClusterComputeShapesAttr, expectedPerClusterComputeOffsetsAttr,
+                expectedPerClusterMemoryShapesAttr, expectedPerClusterMemoryOffsetsAttr, nullptr);
 
         testExplicitDistributedAttr(inputIR, overlappedDistributedAtr, shape, &ctx);
     }
@@ -373,9 +406,9 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, PermuteQuantOp) {
     {
         const auto segmentedMode = VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::SEGMENTED);
         const PerClusterShapesOffsetsVec expectedPerClusterShapes(numClusters.getInt(),
-                                                                  SmallVector<int64_t>{1, 224, 4, 112});
+                                                                  SmallVector<int64_t>{1, 4, 112, 224});
         const PerClusterShapesOffsetsVec expectedPerClusterOffsets(
-                {SmallVector<int64_t>{0, 0, 0, 0}, SmallVector<int64_t>{0, 0, 0, 112}});
+                {SmallVector<int64_t>{0, 0, 0, 0}, SmallVector<int64_t>{0, 0, 112, 0}});
 
         const auto expectedPerClusterShapesAttr = getIntArrayOfArray(&ctx, expectedPerClusterShapes);
         const auto expectedPerClusterOffsetsAttr = getIntArrayOfArray(&ctx, expectedPerClusterOffsets);
@@ -383,13 +416,14 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, PermuteQuantOp) {
                 &ctx, segmentedMode, numTiles, nullptr, nullptr, nullptr, numClusters, nullptr, nullptr,
                 expectedPerClusterShapesAttr, expectedPerClusterOffsetsAttr, expectedPerClusterShapesAttr,
                 expectedPerClusterOffsetsAttr, nullptr);
+
         testExplicitDistributedAttr(inputIR, segmentedDistributedAtr, shape, &ctx);
     }
 
     {
         const auto duplicatedMode = VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::DUPLICATED);
         const PerClusterShapesOffsetsVec expectedPerClusterShapes(numClusters.getInt(),
-                                                                  SmallVector<int64_t>{1, 224, 4, 224});
+                                                                  SmallVector<int64_t>{1, 4, 224, 224});
         const PerClusterShapesOffsetsVec expectedPerClusterOffsets(numClusters.getInt(),
                                                                    SmallVector<int64_t>{0, 0, 0, 0});
 
@@ -399,6 +433,7 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, PermuteQuantOp) {
                 &ctx, duplicatedMode, nullptr, nullptr, nullptr, nullptr, numClusters, nullptr, nullptr,
                 expectedPerClusterShapesAttr, expectedPerClusterOffsetsAttr, expectedPerClusterShapesAttr,
                 expectedPerClusterOffsetsAttr, nullptr);
+
         testExplicitDistributedAttr(inputIR, duplicatedDistributedAtr, shape, &ctx);
     }
 
@@ -406,11 +441,11 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, PermuteQuantOp) {
         const auto segDupMode = VPU::DistributionModeAttr::get(
                 &ctx, VPU::DistributionMode::SEGMENTED | VPU::DistributionMode::MULTICASTED);
         const PerClusterShapesOffsetsVec expectedPerClusterComputeShapes(numClusters.getInt(),
-                                                                         SmallVector<int64_t>{1, 224, 4, 112});
+                                                                         SmallVector<int64_t>{1, 4, 112, 224});
         const PerClusterShapesOffsetsVec expectedPerClusterComputeOffsets(
-                {SmallVector<int64_t>{0, 0, 0, 0}, SmallVector<int64_t>{0, 0, 0, 112}});
+                {SmallVector<int64_t>{0, 0, 0, 0}, SmallVector<int64_t>{0, 0, 112, 0}});
         const PerClusterShapesOffsetsVec expectedPerClusterMemoryShapes(numClusters.getInt(),
-                                                                        SmallVector<int64_t>{1, 224, 4, 224});
+                                                                        SmallVector<int64_t>{1, 4, 224, 224});
         const PerClusterShapesOffsetsVec expectedPerClusterMemoryOffsets(numClusters.getInt(),
                                                                          SmallVector<int64_t>{0, 0, 0, 0});
 

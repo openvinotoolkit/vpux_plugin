@@ -3,8 +3,10 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/types.hpp"
+//
+
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/types.hpp"
 
 #include <mlir/IR/MLIRContext.h>
 
@@ -17,7 +19,7 @@ protected:
     vpux::VPUIP::BlobWriter writer;
 
 public:
-    BlobWriterTests(): writer(Logger::global(), vpux::VPU::ArchKind::VPUX37XX) {
+    BlobWriterTests(): writer(Logger::global(), vpux::VPU::ArchKind::NPU37XX) {
     }
 };
 

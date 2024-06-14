@@ -5,7 +5,8 @@
 
 #pragma once
 
-#include <ie_blob.h>
+#include <openvino/core/layout.hpp>
+#include <openvino/runtime/tensor.hpp>
 
 #include <sstream>
 
@@ -23,27 +24,30 @@ struct BoundingBox final {
     }
 };
 
-std::vector<BoundingBox> parseYoloOutput(const InferenceEngine::Blob::Ptr& blob, size_t imgWidth, size_t imgHeight,
-                                         float confThresh, bool isTiny);
+std::vector<BoundingBox> parseYoloOutput(const ov::Tensor& tensor, const size_t imgWidth, const size_t imgHeight,
+                                         const float confThresh, const bool isTiny);
 
-std::vector<BoundingBox> parseYoloV3Output(const InferenceEngine::BlobMap& blobs, size_t imgWidth, size_t imgHeight,
-                                           int classes, int coords, int num, const std::vector<float>& anchors,
-                                           float confThresh, InferenceEngine::Layout layout);
+std::vector<BoundingBox> parseYoloV3Output(const std::map<std::string, ov::Tensor>& tensors, const size_t imgWidth,
+                                           const size_t imgHeight, const int classes, const int coords, const int num,
+                                           const std::vector<float>& anchors, const float confThresh,
+                                           const std::unordered_map<std::string, ov::Layout>& layouts);
 
-std::vector<BoundingBox> parseYoloV4Output(const InferenceEngine::BlobMap& blobs, size_t imgWidth, size_t imgHeight,
-                                           int classes, int coords, int num, const std::vector<float>& anchors,
-                                           float confThresh, InferenceEngine::Layout layout);
+std::vector<BoundingBox> parseYoloV4Output(const std::map<std::string, ov::Tensor>& tensors, const size_t imgWidth,
+                                           const size_t imgHeight, const int classes, const int coords, const int num,
+                                           const std::vector<float>& anchors, const float confThresh,
+                                           const std::unordered_map<std::string, ov::Layout>& layouts);
 
-std::vector<BoundingBox> parseYoloV3V4Output(const InferenceEngine::BlobMap& blobs, size_t imgWidth, size_t imgHeight,
-                                             int classes, int coords, int num, const std::vector<float>& anchors,
-                                             float confThresh, InferenceEngine::Layout layout,
+std::vector<BoundingBox> parseYoloV3V4Output(const std::map<std::string, ov::Tensor>& tensors, const size_t imgWidth,
+                                             const size_t imgHeight, const int classes, const int coords, const int num,
+                                             const std::vector<float>& anchors, const float confThresh,
+                                             const std::unordered_map<std::string, ov::Layout>& layouts,
                                              const std::function<float(const float)>& transformationFunc,
                                              const std::function<int(const size_t, const int)>& anchorFunc);
 
-std::vector<BoundingBox> parseSSDOutput(const InferenceEngine::Blob::Ptr& blob, size_t imgWidth, size_t imgHeight,
-                                        float confThresh);
+std::vector<BoundingBox> parseSSDOutput(const ov::Tensor& tensor, const size_t imgWidth, const size_t imgHeight,
+                                        const float confThresh);
 
-void printDetectionBBoxOutputs(std::vector<BoundingBox>& actualOutput, std::ostringstream& outputStream,
+void printDetectionBBoxOutputs(const std::vector<BoundingBox>& actualOutput, std::ostringstream& outputStream,
                                const std::vector<std::string>& labels = {});
 
 float boxIntersectionOverUnion(const Box& a, const Box& b);

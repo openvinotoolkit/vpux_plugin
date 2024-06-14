@@ -8,6 +8,8 @@
 #include "vpux/compiler/utils/error.hpp"
 #include "vpux/compiler/utils/factors.hpp"
 
+#include <mlir/Support/LogicalResult.h>
+
 #include <numeric>
 
 using namespace vpux;
@@ -128,7 +130,7 @@ mlir::FailureOr<SmallVector<int64_t>> vpux::IE::constInputToData(mlir::Location 
 
     auto valueConst = value.getDefiningOp<Const::DeclareOp>();
     if (valueConst == nullptr) {
-        return errorAt(loc, "Only constant input is supported");
+        return mlir::failure();
     }
 
     const auto valueContent = valueConst.getContent();

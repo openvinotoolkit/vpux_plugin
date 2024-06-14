@@ -1,0 +1,56 @@
+<?xml version="1.0"?>
+<net name="shape_of" version="11">
+	<layers>
+		<layer id="0" name="435_0" type="Parameter" version="opset1">
+			<data shape="1,8,128..384,128..384" element_type="f16" />
+			<rt_info>
+				<attribute name="fused_names" version="0" value="435_0" />
+			</rt_info>
+			<output>
+				<port id="0" precision="FP16" names="Parameter_2">
+					<dim>1</dim>
+					<dim>8</dim>
+					<dim>-1</dim>
+					<dim>-1</dim>
+					<rt_info>
+						<attribute name="layout" version="0" layout="[N,C,H,W]" />
+					</rt_info>
+				</port>
+			</output>
+		</layer>
+		<layer id="1" name="ShapeOf_626" type="ShapeOf" version="opset3">
+			<rt_info>
+				<attribute name="fused_names" version="0" value="ShapeOf_626" />
+			</rt_info>
+			<data output_type="i64"/>
+			<input>
+				<port id="0" precision="FP16">
+					<dim>1</dim>
+					<dim>8</dim>
+					<dim>-1</dim>
+					<dim>-1</dim>
+				</port>
+			</input>
+			<output>
+				<port id="1" precision="I64">
+					<dim>4</dim>
+				</port>
+			</output>
+		</layer>
+		<layer id="2" name="Result_18439" type="Result" version="opset1">
+			<rt_info>
+				<attribute name="fused_names" version="0" value="Result_18439" />
+			</rt_info>
+			<input>
+				<port id="0" precision="FP16">
+					<dim>4</dim>
+				</port>
+			</input>
+		</layer>
+	</layers>
+	<edges>
+		<edge from-layer="0" from-port="0" to-layer="1" to-port="0" />
+		<edge from-layer="1" from-port="1" to-layer="2" to-port="0" />
+	</edges>
+	<rt_info />
+</net>

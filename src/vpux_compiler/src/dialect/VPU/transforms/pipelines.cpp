@@ -60,6 +60,16 @@ std::optional<double> getWeightsSparsityThreshold(const DoubleOption& weightsSpa
 }  // namespace
 
 //
+// buildInitCompilerPipeline
+//
+
+void vpux::VPU::buildInitCompilerPipeline(mlir::OpPassManager& pm, const VPU::InitCompilerOptions& options,
+                                          Logger log) {
+    pm.addPass(VPU::createInitResourcesPass(options, log));
+    pm.addPass(VPU::createSetupPerBarrierVariantConstraintPass(options, log));
+}
+
+//
 // buildActivationSparsityPipeline
 //
 
@@ -76,7 +86,7 @@ void vpux::VPU::buildActivationSparsityPipeline(mlir::OpPassManager& pm, const V
         pm.addPass(VPU::createFuseSparsityOpsPass(/*fuseSparsify=*/false, log));
     }
 
-    pm.addPass(VPU::createOptimizeSparsifyDesparsifyPairsPass(profileCallback, log));
+    pm.addPass(VPU::createAndInitOptimizeSparsifyDesparsifyPairsPass(options.actSparsityProfile, log));
     pm.addPass(VPU::createFuseSparsityOpsPass(/*fuseSparsify=*/true, log));
     pm.addPass(VPU::createOptimizeSparsityOpsPass(profileCallback, log));
     pm.addPass(VPU::createAddSparsityMapToSparseActivationsPass(log));
@@ -96,6 +106,11 @@ void vpux::VPU::buildWeightsSparsityPipeline(mlir::OpPassManager& pm, const VPU:
 }
 
 void VPU::registerVPUPipelines() {
+    mlir::PassPipelineRegistration<VPU::InitCompilerOptions>(
+            "init-compiler", "Init compiler resorces and options",
+            [](mlir::OpPassManager& pm, const VPU::InitCompilerOptions& options) {
+                VPU::buildInitCompilerPipeline(pm, options);
+            });
     mlir::PassPipelineRegistration<VPU::ActivationSparsityOptions>(
             "enable-act-sparsity", "Enable activation sparsity",
             [](mlir::OpPassManager& pm, const VPU::ActivationSparsityOptions& options) {
@@ -115,15 +130,24 @@ void VPU::registerVPUPipelines() {
 void vpux::VPU::buildTilingPipeline(mlir::OpPassManager& pm, const VPU::TilingOptions& options, Logger log) {
     const auto grc = getDefaultGreedyRewriteConfig();
 
-    pm.addPass(VPU::createTilingStrategyAssignmentPass(options.enablePrefetchTiling, options.enableVPUNNCost, log));
+    pm.addPass(VPU::createTilingStrategyAssignmentPass(options.enablePrefetchTiling, options.enableVPUNNCost,
+                                                       options.enableShaveDDRAccessOptimization, log));
 
     // We call this as part of VF Pipeline, no need to call it here in such case
     if (!options.enableVerticalFusion) {
         pm.addPass(VPU::createManualStrategyUtilsPass(options.writeStrategyToJson, writeStrategyFileLocation,
                                                       options.readStrategyFromJson, readStrategyFileLocation, log));
     }
+    pm.addPass(VPU::createEfficientIROrderPass(log));
     if (options.enableVerticalFusion) {
         VPU::buildVFPipeline(pm, options, log);
+    }
+
+    if (options.enableOutputPipelining) {
+        pm.addPass(VPU::createOutputPipelineTilingPass(options.enablePrefetchTiling, log));
+        pm.addPass(VPU::createManualStrategyUtilsPass(options.writeStrategyToJson, writeStrategyFileLocation,
+                                                      options.readStrategyFromJson, readStrategyFileLocation,
+                                                      /*updateStrategyForOutputPipelining*/ true, log));
     }
     // manual strategy debug configuration
 
@@ -136,13 +160,11 @@ void vpux::VPU::buildTilingPipeline(mlir::OpPassManager& pm, const VPU::TilingOp
 //
 
 void vpux::VPU::buildVFPipeline(mlir::OpPassManager& pm, const VPU::TilingOptions& options, Logger log) {
-    pm.addPass(VPU::createTileOverHForVFPass(options.enablePrefetchTiling, log));
     pm.addPass(VPU::createWrapVerticalFusionRegionPass(log));
     pm.addPass(VPU::createMoveViewOpsToVerticalFusionPass(log));
-    pm.addPass(VPU::createMergeVfSubgraphsPass(options.enableVerticalFusionPipelining, log));
-    pm.addPass(VPU::createAdjustVFTilingStrategyPass(options.enableVerticalFusionPipelining, log));
+    pm.addPass(
+            VPU::createMergeVfSubgraphsPass(options.enableVerticalFusionPipelining, options.enablePrefetchTiling, log));
     pm.addPass(VPU::createUnrollUnusedVerticalFusionRegionPass(log));
-    pm.addPass(VPU::createRollBackTilingStrategyPass(options.enablePrefetchTiling, log));
     pm.addPass(VPU::createManualStrategyUtilsPass(options.writeStrategyToJson, writeStrategyFileLocation,
                                                   options.readStrategyFromJson, readStrategyFileLocation, log));
     pm.addPass(VPU::createVfTilingPass(options.enableVerticalFusionPipelining, log));
@@ -153,6 +175,7 @@ void vpux::VPU::buildSMPipeline(mlir::OpPassManager& pm, const vpux::MCAndTiling
     // Keep enableSMpipleline Option - false till SM pipeline is built
 
     pm.addPass(VPU::createStrategyManagerImplPass(options.enablePrefetching, log));
+    pm.addPass(VPU::createEfficientIROrderPass(log));
     if (options.enableVerticalFusion) {
         VPU::buildVFPipeline(pm, VPU::TilingOptions(options), log);
     }
@@ -163,6 +186,5 @@ void vpux::VPU::buildSMPipeline(mlir::OpPassManager& pm, const vpux::MCAndTiling
                                                       options.readStrategyFromJson, readStrategyFileLocation, log));
     }
     pm.addPass(VPU::createApplyTilingPass(log));
-    pm.addPass(VPU::createAdjustTilingForPermuteQuantizePass(log));
     pm.addPass(VPU::createWrapVPUOpsInNCEClusterTilingPass(options.enableExplicitDistributedTensorAttr, log));
 }

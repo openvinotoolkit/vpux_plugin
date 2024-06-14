@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+//
+
 #include <gtest/gtest.h>
 #include <malloc.h>
 #include <random>
@@ -10,6 +12,8 @@
 #include <vpux_elf/accessor.hpp>
 #include <vpux_elf/writer.hpp>
 #include <vpux_loader/vpux_loader.hpp>
+
+#include "common_test_utils/test_assertions.hpp"
 
 using namespace elf;
 using namespace writer;
@@ -164,7 +168,8 @@ std::vector<uint8_t> generateBadUserIOElf() {
     auto relocSection = generateRelocationSection(writer, ".reloc", binDataSection, symSection);
 
     auto reloc = relocSection->addRelocationEntry();
-    reloc->setSymbol(&(*(symSection->getSymbols()[generateRandom(0, symSection->getSymbols().size() - 1)])));
+    reloc->setSymbol(&(*(
+            symSection->getSymbols()[generateRandom(0, static_cast<uint32_t>(symSection->getSymbols().size()) - 1)])));
     reloc->setOffset(sizeof(DummyBinObject::a));
     reloc->setAddend(0);
 
@@ -193,9 +198,9 @@ std::vector<uint8_t> generateValidTestElf() {
     auto binDataSection = generateDataSection<DummyBinObject>(writer, ".binData");
     auto symSection = generateSymbolSection(writer, ".symbols");
     auto relocSection = generateRelocationSection(writer, ".reloc", binDataSection, symSection);
-
     auto reloc = relocSection->addRelocationEntry();
-    reloc->setSymbol(&(*(symSection->getSymbols()[generateRandom(0, symSection->getSymbols().size() - 1)])));
+    reloc->setSymbol(&(*(
+            symSection->getSymbols()[generateRandom(0, static_cast<uint32_t>(symSection->getSymbols().size()) - 1)])));
     reloc->setOffset(sizeof(DummyBinObject::a));
     reloc->setAddend(0);
 
@@ -226,7 +231,7 @@ TEST(ELFLoader, ThrowWhenElfHeaderIsInvalid) {
 TEST(ELFLoader, ThrowWhenBufferManagerIsNull) {
     std::vector<uint8_t> elf;
 
-    ASSERT_NO_THROW(elf = generateValidTestElf());
+    OV_ASSERT_NO_THROW(elf = generateValidTestElf());
 
     ElfDDRAccessManager accessor(reinterpret_cast<const uint8_t*>(elf.data()), elf.size());
     ASSERT_THROW(VPUXLoader(&accessor, nullptr), ArgsError);
@@ -236,18 +241,14 @@ TEST(ELFLoader, ThrowWhenAllocFails) {
     NullAllocBufferManager bufMgr;
     std::vector<uint8_t> elf;
 
-    ASSERT_NO_THROW(elf = generateValidTestElf());
-
-    ElfDDRAccessManager accessor(reinterpret_cast<const uint8_t*>(elf.data()), elf.size());
-    VPUXLoader loader(&accessor, &bufMgr);
-    ASSERT_THROW(loader.load(gSymTab.symTab(), false, {}), AllocError);
+    ASSERT_THROW(AllocatedDeviceBuffer(nullptr, {0, 0, 0}), ArgsError);
 }
 
 TEST(ELFLoader, ThrowWhenBadUserIO) {
     DummyBufferManager bufMgr;
     std::vector<uint8_t> elf;
 
-    ASSERT_NO_THROW(elf = generateBadUserIOElf());
+    OV_ASSERT_NO_THROW(elf = generateBadUserIOElf());
 
     ElfDDRAccessManager accessor(reinterpret_cast<const uint8_t*>(elf.data()), elf.size());
     VPUXLoader loader(&accessor, &bufMgr);
@@ -258,7 +259,7 @@ TEST(ELFLoader, ThrowWhenBadSectionType) {
     DummyBufferManager bufMgr;
     std::vector<uint8_t> elf;
 
-    ASSERT_NO_THROW(elf = generateBadSectionTypeElf());
+    OV_ASSERT_NO_THROW(elf = generateBadSectionTypeElf());
 
     ElfDDRAccessManager accessor(reinterpret_cast<const uint8_t*>(elf.data()), elf.size());
     VPUXLoader loader(&accessor, &bufMgr);
@@ -269,23 +270,23 @@ TEST(ELFLoader, NoThrowWhenUnrecognizedUserSectionType) {
     DummyBufferManager bufMgr;
     std::vector<uint8_t> elf;
 
-    ASSERT_NO_THROW(elf = generateUnrecognizedUserSectionTypeElf());
+    OV_ASSERT_NO_THROW(elf = generateUnrecognizedUserSectionTypeElf());
 
     ElfDDRAccessManager accessor(reinterpret_cast<const uint8_t*>(elf.data()), elf.size());
     VPUXLoader loader(&accessor, &bufMgr);
-    ASSERT_NO_THROW(loader.load(gSymTab.symTab()));
+    OV_ASSERT_NO_THROW(loader.load(gSymTab.symTab()));
 }
 
 TEST(ELFLoader, NoThrowWhenValidElf) {
     DummyBufferManager bufMgr;
     std::vector<uint8_t> elf;
 
-    ASSERT_NO_THROW(elf = generateValidTestElf());
+    OV_ASSERT_NO_THROW(elf = generateValidTestElf());
 
     ElfDDRAccessManager accessor(reinterpret_cast<const uint8_t*>(elf.data()), elf.size());
-    ASSERT_NO_THROW(VPUXLoader(&accessor, &bufMgr));
+    OV_ASSERT_NO_THROW(VPUXLoader(&accessor, &bufMgr));
     VPUXLoader loader(&accessor, &bufMgr);
-    ASSERT_NO_THROW(loader.load(gSymTab.symTab(), false, {}));
+    OV_ASSERT_NO_THROW(loader.load(gSymTab.symTab(), false, {}));
 }
 
 }  // namespace

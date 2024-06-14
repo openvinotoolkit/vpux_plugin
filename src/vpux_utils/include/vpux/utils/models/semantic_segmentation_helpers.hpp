@@ -5,13 +5,15 @@
 
 #pragma once
 
-#include <ie_blob.h>
+#include <openvino/core/layout.hpp>
+#include <openvino/runtime/tensor.hpp>
+
 #include <limits>
 #include <utility>
 
 namespace utils {
 
-void argMax_channels(const InferenceEngine::MemoryBlob::Ptr blob, std::vector<uint8_t>& resultArgmax);
+void argMax_channels(const ov::Tensor& tensor, std::vector<uint8_t>& resultArgmax, const ov::Layout& layout);
 
 template <typename T>
 std::vector<std::pair<bool, float>> mean_IoU(std::vector<T> actOutput, std::vector<T> refOutput, uint32_t classes,
@@ -39,7 +41,7 @@ std::vector<std::pair<bool, float>> mean_IoU(std::vector<T> actOutput, std::vect
 
     if (ignoreLabel != std::numeric_limits<uint32_t>::max()) {
         // Sanity check
-        IE_ASSERT(ignoreLabel < classes);
+        OPENVINO_ASSERT(ignoreLabel < classes);
         for (size_t i = 0; i < classes; i++) {
             hist[i][ignoreLabel] = 0;
             hist[ignoreLabel][i] = 0;

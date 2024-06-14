@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -19,7 +19,7 @@ func.func @CMXConcatWithSplitOverHeight(%arg0: tensor<1x16x4x8xf16, {order = #NH
     %1 = VPU.NCE.Convolution(%arg1, %cst_1, %cst1) {pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 1 : i64, bottom = 0 : i64>, rawFilterShape = [32, 16, 3, 3], strides = [2, 2]} -> tensor<1x32x2x4xf16, {order = #NHWC}>
 
     %2 = VPU.Concat(%0, %1) {static_offsets = [[0, 0, 0, 0], [0, 32, 0, 0]]} : tensor<1x32x2x4xf16, {order = #NHWC}>, tensor<1x32x2x4xf16, {order = #NHWC}> -> tensor<1x64x2x4xf16, {order = #NHWC}>
-    
+
     %cst2 = const.Declare tensor<16x1x1x4xsi32> = dense<10> : tensor<16x1x1x4xsi32>
     %cst_2 = const.Declare tensor<16x64x3x3xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<16x64x3x3xf16>, [#const.Reorder<#NHWC>]
     %3 = VPU.NCE.Convolution(%2, %cst_2, %cst2) {pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>, rawFilterShape = [16, 64, 3, 3], strides = [1, 1]} -> tensor<1x16x2x4xf16, {order = #NHWC}>
@@ -145,7 +145,7 @@ func.func @CMXConcatWithMultipleUsers(%arg0: tensor<1x16x8x8xf16, {order = #NHWC
     %1 = VPU.NCE.Convolution(%arg1, %cst_1, %cst1) {pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>, rawFilterShape = [16, 16, 3, 3], strides = [1, 1]} -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
     %2 = VPU.Concat(%0, %1) {static_offsets = [[0, 0, 0, 0], [0, 16, 0, 0]]} : tensor<1x16x8x8xf16, {order = #NHWC}>, tensor<1x16x8x8xf16, {order = #NHWC}> -> tensor<1x32x8x8xf16, {order = #NHWC}>
-    
+
     %cst2 = const.Declare tensor<32x1x1x4xsi32> = dense<10> : tensor<32x1x1x4xsi32>
     %cst_2 = const.Declare tensor<32x32x3x3xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<32x32x3x3xf16>, [#const.Reorder<#NHWC>]
     %3 = VPU.NCE.Convolution(%2, %cst_2, %cst2) {pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>, rawFilterShape = [32, 32, 3, 3], strides = [2, 2]} -> tensor<1x32x4x4xf16, {order = #NHWC}>
@@ -194,7 +194,7 @@ func.func @CMXConcatWithShortcut(%arg0: tensor<1x16x8x8xf16, {order = #NHWC}>) -
     %1 = VPU.NCE.Convolution(%0, %cst_1, %cst1) {pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>, rawFilterShape = [32, 16, 3, 3], strides = [1, 1]} -> tensor<1x32x8x8xf16, {order = #NHWC}>
 
     %2 = VPU.Concat(%0, %1) {static_offsets = [[0, 0, 0, 0], [0, 16, 0, 0]]} : tensor<1x16x8x8xf16, {order = #NHWC}>, tensor<1x32x8x8xf16, {order = #NHWC}> -> tensor<1x48x8x8xf16, {order = #NHWC}>
-    
+
     %cst2 = const.Declare tensor<32x1x1x4xsi32> = dense<10> : tensor<32x1x1x4xsi32>
     %cst_2 = const.Declare tensor<32x48x3x3xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<32x48x3x3xf16>, [#const.Reorder<#NHWC>]
     %3 = VPU.NCE.Convolution(%2, %cst_2, %cst2) {pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>, rawFilterShape = [32, 48, 3, 3], strides = [2, 2]} -> tensor<1x32x4x4xf16, {order = #NHWC}>

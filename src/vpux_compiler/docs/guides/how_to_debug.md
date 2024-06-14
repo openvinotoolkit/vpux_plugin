@@ -4,9 +4,11 @@ The compiler offers a number of debug capabilities. In order to benefit from all
 
 ## Logs
 
-The project offers a logging functionality, which different levels of verbosity (from traces to fatal errors) - see the `Logger` class for more information. During compilation, these logs can be printed by making use of the `IE_NPU_LOG_FILTER` environment variable.
+The project offers a logging functionality, which different levels of verbosity (from traces to fatal errors) - see the `Logger` class for more information. During compilation, these logs can be printed by making use of the `LOG_LEVEL` (default `LogLevel::None`) compiler config option, example:
+`LOG_LEVEL LOG_INFO`
+Alternative approach is to use `OV_NPU_LOG_LEVEL` env variable in which log level can be overridden. This is also the only way to set log level when running vpux-opt or unit tests.
 
-The majority of the logs have a name which can be used for filtering. For passes, the name corresponds to the pass argument name (e.g. `convert-layers-to-VPUIP`). This variable is also compatible with POSIX Regex, which allows capturing more than one pass. Examples of values for the variable:
+If only certain logs are to be printed `IE_NPU_LOG_FILTER` environment variable can be configured. The majority of the logs have a name which can be used for filtering. For passes, the name corresponds to the pass argument name (e.g. `convert-layers-to-VPUIP`). This variable is also compatible with POSIX Regex, which allows capturing more than one pass. Examples of values for the variable:
 
 ```sh
 export IE_NPU_LOG_FILTER=convert-layers-to-VPUIP
@@ -15,6 +17,8 @@ export IE_NPU_LOG_FILTER="convert-layers-to-VPU|convert-layers-to-VPUIP"
 ```
 
 The variable can be used with applications which follow the normal compilation flow (e.g. `compile_tool`), as well as tools such as `vpux-opt`.
+
+Level of logs that are printed when filter is applied is controlled by `LOG_LEVEL` compiler config option
 
 ### Pass Timings
 
@@ -36,7 +40,7 @@ One of the most useful debug features of MLIR is by printing the Intermediate Re
 - `IE_NPU_IR_PRINTING_FILTER`: accepts a POSIX Regex filter which describes what passes should have their IR printed
     - examples:
         - `export IE_NPU_IR_PRINTING_FILTER=ConvertLayersToVPUIP`
-        - `export IE_NPU_IR_PRINTING_FILTER="InitCompiler|ConvertLayers.*"`
+        - `export IE_NPU_IR_PRINTING_FILTER="InitResources|ConvertLayers.*"`
     - by default, it will print to stdout the IRs after the specified passes
 
 - `IE_NPU_IR_PRINTING_ORDER`: controls whether to print the IRs before or after the passes (case-insensitive)
@@ -146,6 +150,10 @@ The compiler contains a pass which can generate a Dot Graph representation of th
 - By default, declarations and constants are not included. To include them, add `print-declarations=true and print-const=true` to the pass options.
 - The `xdot` application can be used to visualize the dot graph. For big networks however, the application may fail to show the graph. The size of the graph can be reduced by specifying which operations should be included, with the `start-after` & `stop-before` pass options. They should be configured with the exact names of the operation from the compiler IR.
     - example: `start-after=pool2 stop-before=conv4/WithoutBiases`
+- In case the IR contains single function the name given for the output file will be appended with `_main`
+    - example: for `output=temp.dot` result will be available in `temp_main.dot`
+- In case the IR contains multiple functions, each function will be printed in a separate .dot file.
+    - example: for `output=temp.dot` printing two functions will generate `temp_main.dot`, `temp_foo1.dot`, `temp_foo2.dot`.
 
 ## Crash Reproducer
 
@@ -317,36 +325,7 @@ The resulting `scheduleTrace.json` file will contain an entry for each task of t
 
 ## Profiling inference performance
 
-The compiler supports generating blobs that can collect profiling information during the inference. The profiling feature can be enabled by using the following compilation option:
-
-```
-PERF_COUNT YES
-```
-
-There are three basic engines which can be independently enabled or disabled for profiling:
-- **DMA profiling**: measures the duration of each DMA operation during the inference by wrapping it with DMAs from free running counter
-    - it has an impact over the inference performance (up to 12% performance drop)
-    - can be disabled with `NPU_COMPILATION_MODE_PARAMS dma-profiling=false`
-- **DPU profiling**: measures the execution time of each DPU Task
-    - it has an impact over the inference performance (up to 4% performance drop)
-    - can be disabled with `NPU_COMPILATION_MODE_PARAMS dpu-profiling=false`
-- **SW tasks profiling**: measures the execution time of each software task and collects the active and stall (DDR access failure) cycles for it.
-    - affects performance similarly to DPU profiling
-    - can be disabled with `NPU_COMPILATION_MODE_PARAMS sw-profiling=false`
-
-For most platforms, all engines are enabled by default if the `PERF_COUNT` global profiling flag is set to enabled. Please check the value of the `dma-profiling`, `dpu-profiling` and `sw-profiling` pipeline options in order to see the default option for each platform.
-
-By default, the printing of profiling information is done only using the standard OpenVINO API and benchmark_app tool, which reports summarized information for layer in the network. Using the special flag `"NPU_PRINT_PROFILING":"YES"` in the benchmark_app config, the printing of the full internal report of profiling data can be printed. When using InferenceManagerDemo with a blob that has profiling enabled, an additional `profiling-0.bin` file  will be generated which can be parsed to the same full report using the following command: `./prof_parser test.blob profiling-0.bin`
-
-In order to enable profiling with `vpux-translate` & `vpux-opt`, use the `--vpux-profiling` option for `vpux-translate` and the `profiling=true` option for `vpux-opt`. For example:
-
-```sh
-./vpux-translate --vpu-arch=VPUX37XX --import-IE <path to OV IR> --vpux-profiling -o net.mlir
-./vpux-opt --vpu-arch=VPUX37XX --default-hw-mode="profiling=true" net.mlir -o net_out.mlir
-./vpux-translate --vpu-arch=VPUX37XX --export-VPUIP net_out.mlir > net.blob
-```
-
-More in-depth information can be found in the [how-to-use-profiling.md](../../../../guides/how-to-use-profiling.md) guide.
+Please refer to [how-to-use-profiling.md](../../../../guides/how-to-use-profiling.md) guide.
 
 ## VSCode
 

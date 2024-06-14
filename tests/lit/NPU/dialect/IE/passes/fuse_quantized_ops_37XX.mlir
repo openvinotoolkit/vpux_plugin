@@ -1,67 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --fuse-quantized-ops %s | FileCheck %s
 // REQUIRES: arch-VPUX37XX
-
-!qElemType = !quant.uniform<u8:f16, 0.57450980392156858>
-
-func.func @FuseQuantParamsIntoAvgPoolAsymmetricKernel(%arg0: tensor<1x3x16x16xf16>) -> tensor<1x3x15x14xf16> {
-  %1 = IE.Quantize(%arg0) {dstElemType = !qElemType} : tensor<1x3x16x16xf16> -> tensor<1x3x16x16x!qElemType>
-  %2 = IE.Dequantize(%1) {dstElemType = f16} : tensor<1x3x16x16x!qElemType> -> tensor<1x3x16x16xf16>
-  %3 = IE.AvgPool(%2) {kernel_size = [2, 3], pads_begin = [0, 0], pads_end = [0, 0], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]} : tensor<1x3x16x16xf16> -> tensor<1x3x15x14xf16>
-  %4 = IE.Quantize(%3) {dstElemType = !qElemType} : tensor<1x3x15x14xf16> -> tensor<1x3x15x14x!qElemType>
-  %5 = IE.Dequantize(%4) {dstElemType = f16} : tensor<1x3x15x14x!qElemType> -> tensor<1x3x15x14xf16>
-  return %5 : tensor<1x3x15x14xf16>
-
-  // CHECK: [[VAL0:%.*]] = IE.Quantize(%arg0) {dstElemType = !qElemType} : tensor<1x3x16x16xf16> -> tensor<1x3x16x16x!qElemType>
-  // CHECK: [[VAL1:%.*]] = IE.AvgPool([[VAL0]]) {kernel_size = [2, 3], pads_begin = [0, 0], pads_end = [0, 0], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]} : tensor<1x3x16x16x!qElemType> -> tensor<1x3x15x14x!qElemType>
-  // CHECK: [[VAL2:%.*]] = IE.Dequantize([[VAL1]]) {dstElemType = f16} : tensor<1x3x15x14x!qElemType> -> tensor<1x3x15x14xf16>
-  // CHECK: return [[VAL2]]
-}
-
-// -----
-
-!qElemType = !quant.uniform<u8:f16, 0.57450980392156858>
-
-func.func @FuseQuantParamsIntoAvgPoolSymmetricKernel(%arg0: tensor<1x3x16x16xf16>) -> tensor<1x3x14x14xf16> {
-  %1 = IE.Quantize(%arg0) {dstElemType = !qElemType} : tensor<1x3x16x16xf16> -> tensor<1x3x16x16x!qElemType>
-  %2 = IE.Dequantize(%1) {dstElemType = f16} : tensor<1x3x16x16x!qElemType> -> tensor<1x3x16x16xf16>
-  %3 = IE.AvgPool(%2) {kernel_size = [3, 3], pads_begin = [0, 0], pads_end = [0, 0], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]} : tensor<1x3x16x16xf16> -> tensor<1x3x14x14xf16>
-  %4 = IE.Quantize(%3) {dstElemType = !qElemType} : tensor<1x3x14x14xf16> -> tensor<1x3x14x14x!qElemType>
-  %5 = IE.Dequantize(%4) {dstElemType = f16} : tensor<1x3x14x14x!qElemType> -> tensor<1x3x14x14xf16>
-  return %5 : tensor<1x3x14x14xf16>
-
-  // CHECK: [[VAL0:%.*]] = IE.Quantize(%arg0) {dstElemType = !qElemType} : tensor<1x3x16x16xf16> -> tensor<1x3x16x16x!qElemType>
-  // CHECK: [[VAL1:%.*]] = IE.AvgPool([[VAL0]]) {kernel_size = [3, 3], pads_begin = [0, 0], pads_end = [0, 0], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]} : tensor<1x3x16x16x!qElemType> -> tensor<1x3x14x14x!qElemType>
-  // CHECK: [[VAL2:%.*]] = IE.Dequantize([[VAL1]]) {dstElemType = f16} : tensor<1x3x14x14x!qElemType> -> tensor<1x3x14x14xf16>
-  // CHECK: return [[VAL2]]
-}
-
-// -----
-
-!qElemType = !quant.uniform<u8:f16, 0.0039117518593283261>
-!qElemType1 = !quant.uniform<u8:f16, 0.0039005478223164878>
-
-func.func @DoNotFuseQuantParamsIntoAvgPoolWithExcludePadsAttr(%arg0: tensor<1x3x135x240x!qElemType>) -> tensor<1x3x68x120x!qElemType1> {
-  %0 = IE.Dequantize(%arg0) {dstElemType = f16} : tensor<1x3x135x240x!qElemType> -> tensor<1x3x135x240xf16>
-  %1 = IE.AvgPool(%0) {exclude_pads, kernel_size = [2, 2], pads_begin = [0, 0], pads_end = [1, 0], rounding_type = #IE.rounding_type<FLOOR>, strides = [2, 2]} : tensor<1x3x135x240xf16> -> tensor<1x3x68x120xf16>
-  %2 = IE.Quantize(%1) {dstElemType = !qElemType1} : tensor<1x3x68x120xf16> -> tensor<1x3x68x120x!qElemType1>
-  return %2 : tensor<1x3x68x120x!qElemType1>
-
-  // CHECK: [[DEQUANTIZE:%.*]] = IE.Dequantize(%arg0) {
-  // CHECK-SAME:      dstElemType = f16
-  // CHECK-SAME:      } : tensor<1x3x135x240x!qElemType> -> tensor<1x3x135x240xf16>
-  // CHECK: [[AVGPOOL:%.*]] = IE.AvgPool([[DEQUANTIZE]]) {exclude_pads, kernel_size = [2, 2], pads_begin = [0, 0], pads_end = [1, 0], rounding_type = #IE.rounding_type<FLOOR>, strides = [2, 2]} : tensor<1x3x135x240xf16> -> tensor<1x3x68x120xf16>
-  // CHECK: [[RESULT:%.*]] = IE.Quantize([[AVGPOOL]]) {
-  // CHECK-SAME:      dstElemType = !qElemType1
-  // CHECK-SAME:      } : tensor<1x3x68x120xf16> -> tensor<1x3x68x120x!qElemType1>
-  // CHECK: return [[RESULT]] : tensor<1x3x68x120x!qElemType1>
-}
-
-// -----
 
 !qElemType = !quant.uniform<u8:f16, 1.1534313725490195:128>
 !qElemType1 = !quant.uniform<u8:f16, 0.39320635328105852:128>

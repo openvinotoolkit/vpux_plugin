@@ -57,7 +57,7 @@ State simulatedAnnealing(size_t temperature, size_t iterations, StateGetter<Stat
     std::mt19937 randomEngine(0);
 
     double currentFullCost = 0;
-    auto currentState = getState(temperature, currentFullCost, nullptr);
+    auto currentState = getState(static_cast<int>(temperature), currentFullCost, nullptr);
     auto currentCost = getCost(currentState);
 
     // set default best state and cost and cost of full function.
@@ -86,7 +86,7 @@ State simulatedAnnealing(size_t temperature, size_t iterations, StateGetter<Stat
     while (!stopCondition(temperature)) {
         size_t index = iterations;
         while (index > 0) {
-            auto neighbour = getState(temperature, currentFullCost, &currentState);
+            auto neighbour = getState(static_cast<int>(temperature), currentFullCost, &currentState);
             const auto newCost = getCost(neighbour);
             const auto delta = newCost - currentCost;
             const double acceptance = dist(randomEngine);
@@ -113,7 +113,7 @@ State simulatedAnnealing(size_t temperature, size_t iterations, StateGetter<Stat
             }
 
             // get new state
-            currentState = getState(temperature, currentFullCost, nullptr);
+            currentState = getState(static_cast<int>(temperature), currentFullCost, nullptr);
             currentCost = getCost(currentState);
             --index;
         }

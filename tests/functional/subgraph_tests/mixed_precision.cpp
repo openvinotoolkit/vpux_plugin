@@ -1,13 +1,9 @@
-// Copyright (C) Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include <common_test_utils/ov_tensor_utils.hpp>
-#include <vpu_ov2_layer_test.hpp>
-#include "subgraph_tests/nce_tasks.hpp"
-#include "vpu_ov1_layer_test.hpp"
-
-#include <ov_models/builders.hpp>
+#include "shared_test_classes/subgraph/nce_tasks.hpp"
 
 using namespace ov::test::utils;
 namespace ov::test {
@@ -83,13 +79,17 @@ public:
         const std::string outPrecision = isOutputQuantized ? "outPRC=U8" : "outPRC=FP16";
         const auto opType = NCETasksHelpers::NCEOpTypeToString(nceOpType);
 
-        return inPrecision + "_" + outPrecision + "_" + opType;
+        const std::string sep = "_";
+        std::ostringstream result;
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
+        result << inPrecision << sep << outPrecision << sep << opType;
+        return result.str();
     }
 };
 
 TEST_P(NCEMixedPrecisionTest_NPU3720, HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
 }
 
 const std::vector<MixedMode> mixedMode = {FP16toU8, U8toFP16};

@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -14,8 +14,8 @@ module @mainModule {
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
 module @VPU.SW {
-  func.func private @builtin_Convert(memref<*xf16, [@CMX_NN, 0]>, memref<*xf32, [@CMX_NN, 0]>) attributes {VPU.kernel_code = "single_shave_convert.cpp", VPU.kernel_entry = "single_shave_convert"}
-  func.func private @builtin_MemPermute(memref<*x!qElemType, [@CMX_NN, 0]>, memref<*x!qElemType, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder_fp16.cpp", VPU.kernel_entry = "reorder_fp16"}
+  func.func private @builtin_Convert(memref<*xf16, [@CMX_NN, 0]>, memref<*xf32, [@CMX_NN, 0]>) attributes {VPU.kernel_code = "convert.cpp", VPU.kernel_entry = "convert"}
+  func.func private @builtin_MemPermute(memref<*x!qElemType, [@CMX_NN, 0]>, memref<*x!qElemType, [@CMX_NN, 0]>, none) attributes {VPU.kernel_code = "reorder.cpp", VPU.kernel_entry = "reorder"}
   func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
 }
 
@@ -61,7 +61,7 @@ func.func private @barrier_counters(%arg0: memref<1x32x32x32xf16, #NHWC, @DDR>, 
         }
     }
     VPURT.Task waits(%b3 : !VPURT.Barrier) attributes {isTrailingSWLayer = false} {
-      %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_Convert inputs(%m9 as %arg2: memref<1x1000xf16, [@CMX_NN, 0]>) outputs(%m10 as %arg3: memref<1x1000xf32, [@CMX_NN, 0]>) on tile 0 -> memref<1x1000xf32, [@CMX_NN, 0]>{
+      %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Convert inputs(%m9 as %arg2: memref<1x1000xf16, [@CMX_NN, 0]>) outputs(%m10 as %arg3: memref<1x1000xf32, [@CMX_NN, 0]>) on tile 0 -> memref<1x1000xf32, [@CMX_NN, 0]>{
         VPUIP.SW.Kernel.run(%arg2, %arg3) : memref<1x1000xf16, [@CMX_NN, 0]>, memref<1x1000xf32, [@CMX_NN, 0]>
       }
     }

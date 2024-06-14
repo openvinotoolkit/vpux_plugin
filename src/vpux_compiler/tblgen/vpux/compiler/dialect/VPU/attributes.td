@@ -46,8 +46,9 @@ def VPU_ArchKind :
             "Represents VPU architecture generation",
             [
                 I64EnumAttrCase<"UNKNOWN",  0>,
-                I64EnumAttrCase<"VPUX30XX", 1>,
-                I64EnumAttrCase<"VPUX37XX", 3>
+                I64EnumAttrCase<"NPU30XX", 1>,
+                I64EnumAttrCase<"NPU37XX", 3>,
+                I64EnumAttrCase<"NPU40XX", 4>
             ]
         > {
 }
@@ -86,7 +87,8 @@ def VPU_ActShaveTaskType:
                 I64EnumAttrCase<"COMPUTE",                0>,
                 I64EnumAttrCase<"CACHE_FLUSH",            1>,
                 I64EnumAttrCase<"CACHE_INVALIDATE",       2>,
-                I64EnumAttrCase<"CACHE_FLUSH_INVALIDATE", 3>
+                I64EnumAttrCase<"CACHE_FLUSH_INVALIDATE", 3>,
+                I64EnumAttrCase<"CACHE_PREFETCH",         4>
             ]
         > {
 }
@@ -107,7 +109,9 @@ def VPU_ExecutorKind :
                 I64EnumAttrCase<"DPU",       2>,
                 I64EnumAttrCase<"SHAVE_UPA", 3>,
                 I64EnumAttrCase<"SHAVE_NN",  4>,
-                I64EnumAttrCase<"SHAVE_ACT", 5>
+                I64EnumAttrCase<"SHAVE_ACT", 5>,
+                I64EnumAttrCase<"M2I",       6>,
+                I64EnumAttrCase<"UNKNOWN",   7>,
             ]
         > {
 }
@@ -132,6 +136,29 @@ def VPU_CompilationMode  :
 }
 
 def VPU_CompilationModeAttr : VPU_EnumAttr<VPU_CompilationMode, "compilation_mode">;
+
+//
+// RevisionID
+//
+
+def VPU_RevisionID  :
+        VPU_I64EnumAttr<
+            "RevisionID",
+            "Revision ID",
+            [
+                I64EnumAttrCase<"REVISION_A0",  0>,
+                I64EnumAttrCase<"REVISION_A1",  1>,
+                I64EnumAttrCase<"REVISION_A3",  2>,
+                I64EnumAttrCase<"REVISION_B",   3>,
+                I64EnumAttrCase<"REVISION_C",   4>,
+                I64EnumAttrCase<"REVISION_D",   5>,
+                I64EnumAttrCase<"REVISION_K",   6>,
+                I64EnumAttrCase<"REVISION_NONE",   7>
+            ]
+        > {
+}
+
+def VPU_RevisionIDAttr : VPU_EnumAttr<VPU_RevisionID, "revision_id">;
 
 //
 // SparsitySupport
@@ -396,9 +423,12 @@ def VPU_DistributionModeAttr : VPU_EnumAttr<VPU_DistributionMode, "tensor_distri
 //      not taking into account the overlap lines. This is possible for
 //      input tensors in VPUX3XXX since HW can read the overlap lines from
 //      neighboring clusters.
+//          * for VPUX40XX we continue to use SEGMENTED yet we take into account the overlap
+//          lines, this is intended to be improve in the future, for easier understanding
 //      * OVERLAPPED - data is split taking into account the overlap lines in
 //      memory, compute does not differ from SEGMENTED. This is done for VPUX3XXX for the
-//      layers which can't perform intercluster read accesses.
+//      layers which can't perform intercluster read accesses, and for all case in VPUX40XX
+//      and following.
 //      * DUPLICATED - both data and compute are duplicated on the specified clusters.
 //      * SEGMENTED | DUPLICATED - such a combination means compute is segmented across clusters
 //      but the data will be duplicated with the feature of broadcast.
@@ -444,7 +474,7 @@ def VPU_DistributionModeAttr : VPU_EnumAttr<VPU_DistributionMode, "tensor_distri
 //      * mutually exclusive with kernel/pad/strides
 // equal_memory_and_compute_view - used with OVERLAP mode
 //      * indicates compute view should be obtained by applying memory view calculations
-//      * necessary when having output OVERLAPPED
+//      * necessary when having output OVERLAPPED, but without proper halo support
 //
 /////////////////////////////
 
@@ -467,10 +497,10 @@ def VPU_DistributedTensorAttr : VPU_Attr<"DistributedTensor"> {
 }
 
 //
-// CompressionSchemeAttr
+// SparsityCompressionAttr
 //
 
-def VPU_CompressionSchemeAttr : VPU_Attr<"CompressionScheme"> {
+def VPU_SparsityCompressionAttr : VPU_Attr<"SparsityCompression"> {
     let description = [{
         Represents the compression as the number of elements along a specified axis.
 
@@ -595,6 +625,91 @@ def VPU_SEInterpolateAttr : VPU_Attr<"SEInterpolate", [
         OptionalParameter<"mlir::ArrayAttr">:$sizes,
         OptionalParameter<"mlir::ArrayAttr">:$initial_input_shape,
         OptionalParameter<"mlir::ArrayAttr">:$initial_output_shape
+    );
+
+    let assemblyFormat = "`<` struct(params) `>`";
+    let genVerifyDecl = 1;
+}
+
+//
+// SERollAttr
+//
+
+def VPU_SERollAttr : VPU_Attr<"SERoll", [
+        DeclareAttrInterfaceMethods<VPU_SEAttrInterface>
+    ] > {
+    let description = [{
+        Describes how the input data can be rolled on the spatial dimensions
+        by a Storage Element Table. The attribute is intended to be used with
+        the sparse input type for NCE operations, as well as in the Storage Element
+        Table operation itself.
+
+        The attribute contains the following parameters:
+        - `shift`: [H, W] - describes how many lines/columns should be rolled on
+          each spatial dimension
+        - `axes`: [H, W] - describes on which dimensions to roll
+        - `offsets` / `sizes`: [N, C, H, W] - describes what slice of the effective
+          output data represents the final output. The parameters above define how
+          the input data will be expanded. However, not all of the resulting data
+          might be required for the instance of sparse data (e.g. after tiling).
+          These two parameters allow extracting only a slice of the duplicated data.
+
+        An example:
+        ```
+        Starting from the following input data with shape [N, C, 3, 3]:
+            1 2 3
+            4 5 6
+            7 8 9
+        With the following configuration:
+          - shift: [1, 2]
+          - axes: [2, 3]
+        The data is rolled using the Storage Element pointers into:
+            8 9 7
+            2 3 1
+            5 6 4
+        The following sparsity map is utilized:
+            1 1 1
+            1 1 1
+            1 1 1
+        In order to generate the final data, this data can be further
+        sliced by using:
+          - offsets: [0, 0, 0, 0]
+          - sizes:   [N, C, 3, 3]
+        Resulting in:
+            8 9 7
+            2 3 1
+            5 6 4
+
+        Another example is extracting tile with output tile configuration:
+          - offsets: [0, 0, 0, 0]
+          - sizes:   [N, C, 2, 2]
+        The output tile data:
+            8 9
+            2 3
+        Then got the input tile:
+            2 3
+            5 6
+            8 9
+        The data is rolled with configuration:
+          - shift: [1, 0]
+          - axes: [2, 3]
+        The rolled output data:
+            8 9
+            2 3
+            5 6
+        Then sliced by using:
+          - offsets: [0, 0, 0, 0]
+          - sizes:   [N, C, 2, 2]
+        Resulting in:
+            8 9
+            2 3
+        ```
+    }];
+    let parameters = (ins
+        "mlir::ArrayAttr":$shift,
+        "mlir::ArrayAttr":$axes,
+        OptionalParameter<"mlir::ArrayAttr">:$offsets,
+        OptionalParameter<"mlir::ArrayAttr">:$sizes
     );
 
     let assemblyFormat = "`<` struct(params) `>`";
@@ -747,25 +862,67 @@ def VPU_SEPaddingAttr : VPU_Attr<"SEPadding", [
     let genVerifyDecl = 1;
 }
 
+
 //
-// ODUPermuteDataMode
+// M2I Color Formats
+//  PL_ = planar
+//  SP_ = semi-planar
+//  IL_ = interleaved
+//
+// PL_YUV444_8 = 0x00, // Planar 4:4:4 format (8-bit per component)
+// PL_YUV420_8 = 0x01, // Planar 8-bit 4:2:0 format
+// PL_RGB24 = 0x02,    // Planar 24-bit RGB data (8-bit per component)
+// PL_RGB30 = 0x03,    // Planar 30-bit RGB data (10-bit per component)
+// PL_GRAY8 = 0x04,    // 8-bit grayscale
+// PL_FP16_RGB = 0x05, // Planar RGB fp16 data
+// PL_FP16_YUV = 0x06, // Planar YUV fp16 data
+// PL_YUV422_8 = 0x07, // Planar 8 bit
+// SP_NV12_8 = 0x08,   // 8-bit YUV 4:2:0 semi planar
+// SP_NV12_10 = 0x09,  // 10-bit YUV 4:2:0 semi planar
+// SP_PO10 = 0x0A,     // 10-bit YUV 4:2:0 semi planar
+// IL_YUV422_8 = 0x18, // Interleaved 8 bit
+// IL_RGB8888 = 0x19,  // Interleaved 32-bit RGB data (8-bit per component)
+// IL_RGB888 = 0x1A,   // Interleaved 24-bit RGB data (8-bit per component)
+// IL_RGB30 = 0x1B     // Interleaved 30-bit RGB data (10-bit per component)
 //
 
-def VPU_ODUPermuteDataMode :
-        I32EnumAttr<
-            "ODUPermuteDataMode",
-            "ODU data permutation mode",
+def VPU_M2iColorFmt :
+        VPU_I64EnumAttr<
+            "M2iColorFmt",
+            "M2I color formats",
             [
-                I32EnumAttrCase<"PERMUTE_ZXY",  0>,
-                I32EnumAttrCase<"PERMUTE_ZYX",  1>,
-                I32EnumAttrCase<"PERMUTE_YZX",  2>,
-                I32EnumAttrCase<"PERMUTE_YXZ",  3>,
-                I32EnumAttrCase<"PERMUTE_XZY",  4>,
-                I32EnumAttrCase<"PERMUTE_XYZ",  5>
+                I64EnumAttrCase<"PL_YUV444_8", 0>,
+                I64EnumAttrCase<"PL_YUV420_8", 1>,
+                I64EnumAttrCase<"PL_RGB24",    2>,
+                I64EnumAttrCase<"PL_RGB30",    3>,
+                I64EnumAttrCase<"PL_GRAY8",    4>,
+                I64EnumAttrCase<"PL_FP16_RGB", 5>,
+                I64EnumAttrCase<"PL_FP16_YUV", 6>,
+                I64EnumAttrCase<"PL_YUV422_8", 7>,
+                I64EnumAttrCase<"SP_NV12_8",   8>,
+                I64EnumAttrCase<"SP_NV12_10",  9>,
+                I64EnumAttrCase<"SP_P010",     10>,
+                I64EnumAttrCase<"IL_YUV422_8", 24>,
+                I64EnumAttrCase<"IL_RGB8888",  25>,
+                I64EnumAttrCase<"IL_RGB888",   26>,
+                I64EnumAttrCase<"IL_RGB30",    27>
             ]
         > {
-    let cppNamespace = "vpux::VPU";
-    let genSpecializedAttr = 1;
 }
+
+def VPU_M2iColorFmtAttr : VPU_EnumAttr<VPU_M2iColorFmt, "m2i_color_fmt">;
+
+def VPU_M2iInterp :
+        VPU_I64EnumAttr<
+            "M2iInterp",
+            "M2I resize interpolation type",
+            [
+                I64EnumAttrCase<"NEAREST",  0>,
+                I64EnumAttrCase<"BILINEAR", 1>
+            ]
+        > {
+}
+
+def VPU_M2iInterpAttr : VPU_EnumAttr<VPU_M2iInterp, "m2i_interp">;
 
 #endif

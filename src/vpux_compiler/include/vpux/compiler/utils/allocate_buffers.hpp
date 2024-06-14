@@ -13,7 +13,7 @@
 #include <mlir/Dialect/Bufferization/Transforms/Bufferize.h>
 #include <mlir/IR/Value.h>
 
-#include "vpux/compiler/dialect/VPUIP/types.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/types.hpp"
 
 namespace vpux {
 
@@ -25,31 +25,9 @@ SmallVector<mlir::Value> allocateBuffersOfType(const Logger& log, mlir::Location
 //
 
 SmallVector<mlir::Value> allocateBuffersForValue(const Logger& log, mlir::Location loc, mlir::OpBuilder& builder,
-                                                 mlir::Value value,
-                                                 const mlir::bufferization::BufferizationOptions& options,
-                                                 bool individualBuffers = false);
+                                                 mlir::Value value, bool individualBuffers = false);
 
 SmallVector<mlir::Value> allocateBuffers(const Logger& log, mlir::Location loc, mlir::OpBuilder& builder,
-                                         mlir::ValueRange values,
-                                         const mlir::bufferization::BufferizationOptions& options,
-                                         bool individualBuffers = false);
-
-//
-// allocateBuffers & allocateBuffersForValue using typeConverter & allocateBuffersAdaptor
-// Note: remove after one-shot bufferization is fully implemented  E#102424
-//
-
-SmallVector<mlir::Value> allocateBuffersForValue(const Logger& log, mlir::Location loc, mlir::OpBuilder& builder,
-                                                 mlir::TypeConverter& typeConverter, mlir::Value value,
-                                                 bool individualBuffers = false);
-
-SmallVector<mlir::Value> allocateBuffers(const Logger& log, mlir::Location loc, mlir::OpBuilder& builder,
-                                         mlir::TypeConverter& typeConverter, mlir::ValueRange values,
-                                         bool individualBuffers = false);
-
-SmallVector<mlir::Value> allocateBuffersAdaptor(
-        const Logger& log, mlir::Location loc, mlir::OpBuilder& builder, mlir::ValueRange values,
-        const std::optional<mlir::bufferization::BufferizationOptions>& options,
-        std::optional<std::reference_wrapper<mlir::TypeConverter>> typeConverter, bool individualBuffers);
+                                         mlir::ValueRange values, bool individualBuffers = false);
 
 }  // namespace vpux

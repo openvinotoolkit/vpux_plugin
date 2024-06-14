@@ -85,12 +85,6 @@ void WrapVPUOpsInNCEClusterTilingPass::safeRunOnFunc() {
     if (mlir::failed(mlir::applyPartialConversion(func, target, std::move(patterns)))) {
         signalPassFailure();
     }
-
-    func->walk([](mlir::Operation* op) {
-        if (op->hasAttr(multiClusterStrategy)) {
-            op->removeAttr(multiClusterStrategy);
-        }
-    });
 }
 
 }  // namespace

@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+//
+
 #include <vpux/compiler/core/attributes/shape.hpp>
 #include <vpux/compiler/core/attributes/strides.hpp>
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
@@ -988,3 +990,246 @@ std::vector<SEPaddingAttrParams> paddingParams = {
 // clang-format on
 
 INSTANTIATE_TEST_CASE_P(unit, SEPaddingAttrTests, testing::ValuesIn(paddingParams));
+
+//
+// SERollAttr
+//
+
+struct SERollAttrParams {
+    // SERollAttr parameters
+    SmallVector<int64_t> shifts;
+    SmallVector<int64_t> axes;
+    SmallVector<int64_t> offsets;
+    SmallVector<int64_t> sizes;
+    // Input data
+    SmallVector<int64_t> dataShape;
+    SmallVector<Bit> dataStrides;
+    int64_t dataElemByteSize;
+    int64_t seSize;
+    SmallVector<int64_t> outputTileOffset;
+    SmallVector<int64_t> outputTileShape;
+
+    // Expected results
+    SmallVector<int64_t> expectedOutputShape;
+    SmallVector<int64_t> expectedBackInferredInputShape;
+    SmallVector<int64_t> expectedInputTileOffset;
+    SmallVector<int64_t> expectedInputTileShape;
+    SmallVector<int64_t> expectedAttrShifts;
+    SmallVector<int64_t> expectedAttrAxes;
+    SmallVector<int64_t> expectedAttrOffsets;
+    SmallVector<int64_t> expectedAttrSizes;
+    std::vector<std::vector<int64_t>> expectedInputCoords;
+    std::vector<int32_t> expectedSEOffsets;
+};
+
+class SERollAttrTests : public testing::TestWithParam<SERollAttrParams> {};
+
+TEST_P(SERollAttrTests, SEAttrInterface) {
+    mlir::DialectRegistry registry;
+    vpux::registerDialects(registry);
+
+    mlir::MLIRContext ctx(registry);
+    ctx.loadDialect<VPU::VPUDialect>();
+
+    const auto params = GetParam();
+
+    auto shiftsAttr = getIntArrayAttr(&ctx, params.shifts);
+    auto axesAttr = getIntArrayAttr(&ctx, params.axes);
+    auto offsetsAttr = params.offsets.empty() ? nullptr : getIntArrayAttr(&ctx, params.offsets);
+    auto sizesAttr = params.sizes.empty() ? nullptr : getIntArrayAttr(&ctx, params.sizes);
+    auto rollAttr = VPU::SERollAttr::get(&ctx, shiftsAttr, axesAttr, offsetsAttr, sizesAttr);
+
+    auto seAttrInterface = rollAttr.dyn_cast<VPU::SEAttr>();
+    ASSERT_TRUE(seAttrInterface != nullptr);
+
+    // inferOutputShape
+    const Shape dataShape(params.dataShape);
+    const auto outputShape = seAttrInterface.inferOutputShape(dataShape);
+    EXPECT_EQ(outputShape.raw(), params.expectedOutputShape);
+
+    // backInferInputShape
+    if (offsetsAttr == nullptr && sizesAttr == nullptr) {
+        const auto inputShape = seAttrInterface.backInferInputShape(outputShape);
+        EXPECT_EQ(inputShape.raw(), params.expectedBackInferredInputShape);
+    }
+
+    // backInferInputCoord
+    const auto offsets = params.offsets.empty() ? SmallVector<int64_t>(outputShape.size(), 0) : params.offsets;
+    const auto sizes = params.sizes.empty() ? SmallVector<int64_t>(outputShape.raw()) : params.sizes;
+
+    const auto outputH = sizes[Dims4D::Act::H.ind()];
+    const auto outputW = sizes[Dims4D::Act::W.ind()];
+    ASSERT_EQ(params.expectedInputCoords.size(), outputH * outputW);
+
+    for (auto h : irange(outputH)) {
+        for (auto w : irange(outputW)) {
+            const auto actualH = h + offsets[Dims4D::Act::H.ind()];
+            const auto actualW = w + offsets[Dims4D::Act::W.ind()];
+            const Shape outputCoord({0, 0, actualH, actualW});
+            const auto inputCoord = seAttrInterface.backInferInputCoord(outputCoord, dataShape);
+            const auto& expectedCoord = params.expectedInputCoords[h * outputW + w];
+            const Shape expectedInputCoord({0, 0, expectedCoord[0], expectedCoord[1]});
+            EXPECT_EQ(inputCoord, expectedInputCoord)
+                    << "Invalid input coordinates for output coordinate [" << actualH << ", " << actualW << "]";
+        }
+    }
+
+    // extractTile
+    if (!params.outputTileOffset.empty() && !params.outputTileShape.empty()) {
+        const Shape outputTileOffset(params.outputTileOffset);
+        const Shape outputTileShape(params.outputTileShape);
+        Shape inputTileOffset{};
+        Shape inputTileShape{};
+        auto newSEAttr = seAttrInterface.extractTile(outputTileOffset, outputTileShape, dataShape, inputTileOffset,
+                                                     inputTileShape);
+        auto newSERollAttr = newSEAttr.dyn_cast_or_null<VPU::SERollAttr>();
+        ASSERT_TRUE(newSERollAttr != nullptr);
+        EXPECT_EQ(inputTileOffset.raw(), params.expectedInputTileOffset);
+        EXPECT_EQ(inputTileShape.raw(), params.expectedInputTileShape);
+        const auto newAttrShifts = parseIntArrayAttr<int64_t>(newSERollAttr.getShift());
+        const auto newAttrAxes = parseIntArrayAttr<int64_t>(newSERollAttr.getAxes());
+        EXPECT_EQ(newAttrShifts, params.expectedAttrShifts);
+        EXPECT_EQ(newAttrAxes, params.expectedAttrAxes);
+
+        const auto newSERollAttrOffsets = parseIntArrayAttr<int64_t>(newSERollAttr.getOffsets());
+        const auto newSERollAttrSizes = parseIntArrayAttr<int64_t>(newSERollAttr.getSizes());
+        EXPECT_EQ(newSERollAttrOffsets, params.expectedAttrOffsets);
+        EXPECT_EQ(newSERollAttrSizes, params.expectedAttrSizes);
+    }
+
+    // computeSEOffsets
+    const Strides dataStrides(params.dataStrides);
+    const Byte elemSize(params.dataElemByteSize);
+    const auto seOffsets = seAttrInterface.computeSEOffsets(dataShape, dataStrides, elemSize, params.seSize);
+    EXPECT_EQ(seOffsets, params.expectedSEOffsets);
+}
+
+// clang-format off
+
+std::vector<SERollAttrParams> rollParams = {
+    {/*shifts=*/{2, 2}, /*axes=*/{2, 3}, /*offsets=*/{}, /*sizes=*/{},
+     /*dataShape=*/{1, 16, 4, 4}, /*dataStrides=*/{}, /*dataElemByteSize=*/1, /*seSize=*/16,
+     /*outputTileOffset=*/{0, 0, 1, 1}, /*outputTileShape=*/{1, 16, 3, 3},
+     /*expectedOutputShape*/{1, 16, 4, 4}, /*expectedBackInferredInputShape=*/{1, 16, 4, 4},
+     /*expectedInputTileOffset=*/{0, 0, 0, 0}, /*expectedInputTileShape=*/{1, 16, 4, 4},
+     /*expectedAttrShifts=*/{1, 1}, /*expectedAttrAxes=*/{2, 3},
+     /*expectedAttrOffsets=*/{0, 0, 0, 0}, /*expectedAttrSizes=*/{1, 16, 3, 3},
+     /*expectedInputCoords*/{{2, 2}, {2, 3}, {2, 0}, {2, 1}, \
+                             {3, 2}, {3, 3}, {3, 0}, {3, 1}, \
+                             {0, 2}, {0, 3}, {0, 0}, {0, 1}, \
+                             {1, 2}, {1, 3}, {1, 0}, {1, 1}},
+     /*expectedSEOffsets=*/{ 160, 176, 128, 144, \
+                             224, 240, 192, 208, \
+                              32,  48,   0,  16,  \
+                              96, 112,  64,  80}},
+
+    {/*shifts=*/{3, 3}, /*axes=*/{2, 3}, /*offsets=*/{}, /*sizes=*/{},
+     /*dataShape=*/{1, 16, 4, 4}, /*dataStrides=*/{}, /*dataElemByteSize=*/1, /*seSize=*/16,
+     /*outputTileOffset=*/{0, 0, 0, 0}, /*outputTileShape=*/{1, 16, 2, 2},
+     /*expectedOutputShape*/{1, 16, 4, 4}, /*expectedBackInferredInputShape=*/{1, 16, 4, 4},
+     /*expectedInputTileOffset=*/{0, 0, 1, 1}, /*expectedInputTileShape=*/{1, 16, 2, 2},
+     /*expectedAttrShifts=*/{3, 3}, /*expectedAttrAxes=*/{2, 3},
+     /*expectedAttrOffsets=*/{0, 0, 0, 0}, /*expectedAttrSizes=*/{1, 16, 2, 2},
+     /*expectedInputCoords*/{{1, 1}, {1, 2}, {1, 3}, {1, 0}, \
+                             {2, 1}, {2, 2}, {2, 3}, {2, 0}, \
+                             {3, 1}, {3, 2}, {3, 3}, {3, 0}, \
+                             {0, 1}, {0, 2}, {0, 3}, {0, 0}},
+     /*expectedSEOffsets=*/{  80,  96, 112,  64, \
+                             144, 160, 176, 128, \
+                             208, 224, 240, 192, \
+                              16,  32,  48,   0}},
+
+    {/*shifts=*/{1, 1}, /*axes=*/{2, 3}, /*offsets=*/{}, /*sizes=*/{},
+     /*dataShape=*/{1, 16, 4, 4}, /*dataStrides=*/{}, /*dataElemByteSize=*/1, /*seSize=*/16,
+     /*outputTileOffset=*/{0, 0, 2, 2}, /*outputTileShape=*/{1, 16, 2, 2},
+     /*expectedOutputShape*/{1, 16, 4, 4}, /*expectedBackInferredInputShape=*/{1, 16, 4, 4},
+     /*expectedInputTileOffset=*/{0, 0, 1, 1}, /*expectedInputTileShape=*/{1, 16, 2, 2},
+     /*expectedAttrShifts=*/{0, 0}, /*expectedAttrAxes=*/{2, 3},
+     /*expectedAttrOffsets=*/{0, 0, 0, 0}, /*expectedAttrSizes=*/{1, 16, 2, 2},
+     /*expectedInputCoords*/{{3, 3}, {3, 0}, {3, 1}, {3, 2}, \
+                             {0, 3}, {0, 0}, {0, 1}, {0, 2}, \
+                             {1, 3}, {1, 0}, {1, 1}, {1, 2}, \
+                             {2, 3}, {2, 0}, {2, 1}, {2, 2}},
+     /*expectedSEOffsets=*/{ 240, 192, 208, 224, \
+                              48,   0,  16,  32, \
+                             112,  64,  80,  96,  \
+                             176, 128, 144, 160}},
+
+    // offsets & sizes
+    {/*shifts=*/{1, 1}, /*axes=*/{2, 3}, /*offsets=*/{0, 0, 0, 0}, /*sizes=*/{1, 16, 4, 4},
+     /*dataShape=*/{1, 16, 4, 4}, /*dataStrides=*/{}, /*dataElemByteSize=*/1, /*seSize=*/16,
+     /*outputTileOffset=*/{0, 0, 1, 0}, /*outputTileShape=*/{1, 16, 2, 2},
+     /*expectedOutputShape*/{1, 16, 4, 4}, /*expectedBackInferredInputShape=*/{},
+     /*expectedInputTileOffset=*/{0, 0, 0, 0}, /*expectedInputTileShape=*/{1, 16, 2, 4},
+     /*expectedAttrShifts=*/{0, 1}, /*expectedAttrAxes=*/{2, 3},
+     /*expectedAttrOffsets=*/{0, 0, 0, 0}, /*expectedAttrSizes=*/{1, 16, 2, 2},
+     /*expectedInputCoords*/{{3, 3}, {3, 0}, {3, 1}, {3, 2}, \
+                             {0, 3}, {0, 0}, {0, 1}, {0, 2}, \
+                             {1, 3}, {1, 0}, {1, 1}, {1, 2}, \
+                             {2, 3}, {2, 0}, {2, 1}, {2, 2}},
+     /*expectedSEOffsets=*/{ 240, 192, 208, 224, \
+                              48,   0,  16,  32, \
+                             112,  64,  80,  96,  \
+                             176, 128, 144, 160}},
+    //
+    // Element byte sizes
+    //
+    {/*shifts=*/{1, 1}, /*axes=*/{2, 3}, /*offsets=*/{}, /*sizes=*/{},
+     /*dataShape=*/{1, 16, 4, 4}, /*dataStrides=*/{}, /*dataElemByteSize=*/2, /*seSize=*/16,
+     /*outputTileOffset=*/{0, 0, 0, 1}, /*outputTileShape=*/{1, 16, 4, 3},
+     /*expectedOutputShape*/{1, 16, 4, 4}, /*expectedBackInferredInputShape=*/{1, 16, 4, 4},
+     /*expectedInputTileOffset=*/{0, 0, 0, 0}, /*expectedInputTileShape=*/{1, 16, 4, 3},
+     /*expectedAttrShifts=*/{1, 0}, /*expectedAttrAxes=*/{2, 3},
+     /*expectedAttrOffsets=*/{0, 0, 0, 0}, /*expectedAttrSizes=*/{1, 16, 4, 3},
+     /*expectedInputCoords*/{{3, 3}, {3, 0}, {3, 1}, {3, 2}, \
+                             {0, 3}, {0, 0}, {0, 1}, {0, 2}, \
+                             {1, 3}, {1, 0}, {1, 1}, {1, 2}, \
+                             {2, 3}, {2, 0}, {2, 1}, {2, 2}},
+     /*expectedSEOffsets=*/{ 480, 384, 416, 448, \
+                              96,   0,  32,  64, \
+                             224, 128, 160, 192,  \
+                             352, 256, 288, 320}},
+
+
+    //
+    // Storage element sizes
+    //
+    {/*shifts=*/{2, 2}, /*axes=*/{2, 3}, /*offsets=*/{}, /*sizes=*/{},
+     /*dataShape=*/{1, 32, 4, 4}, /*dataStrides=*/{}, /*dataElemByteSize=*/1, /*seSize=*/16,
+     /*outputTileOffset=*/{0, 0, 1, 1}, /*outputTileShape=*/{1, 32, 3, 3},
+     /*expectedOutputShape*/{1, 32, 4, 4}, /*expectedBackInferredInputShape=*/{1, 32, 4, 4},
+     /*expectedInputTileOffset=*/{0, 0, 0, 0}, /*expectedInputTileShape=*/{1, 32, 4, 4},
+     /*expectedAttrShifts=*/{1, 1}, /*expectedAttrAxes=*/{2, 3},
+     /*expectedAttrOffsets=*/{0, 0, 0, 0}, /*expectedAttrSizes=*/{1, 32, 3, 3},
+     /*expectedInputCoords*/{{2, 2}, {2, 3}, {2, 0}, {2, 1}, \
+                             {3, 2}, {3, 3}, {3, 0}, {3, 1}, \
+                             {0, 2}, {0, 3}, {0, 0}, {0, 1}, \
+                             {1, 2}, {1, 3}, {1, 0}, {1, 1}},
+     /*expectedSEOffsets=*/{ 320, 336, 352, 368, 256, 272, 288, 304, \
+                             448, 464, 480, 496, 384, 400, 416, 432, \
+                              64,  80,  96, 112,   0,  16,  32,  48, \
+                             192, 208, 224, 240, 128, 144, 160, 176}},
+
+    //
+    // Shifts contain Zero
+    //
+    {/*shifts=*/{0, 2}, /*axes=*/{2, 3}, /*offsets=*/{}, /*sizes=*/{},
+     /*dataShape=*/{1, 16, 4, 4}, /*dataStrides=*/{}, /*dataElemByteSize=*/1, /*seSize=*/16,
+     /*outputTileOffset=*/{0, 0, 1, 0}, /*outputTileShape=*/{1, 16, 3, 3},
+     /*expectedOutputShape*/{1, 16, 4, 4}, /*expectedBackInferredInputShape=*/{1, 16, 4, 4},
+     /*expectedInputTileOffset=*/{0, 0, 1, 0}, /*expectedInputTileShape=*/{1, 16, 3, 4},
+     /*expectedAttrShifts=*/{0, 2}, /*expectedAttrAxes=*/{2, 3},
+     /*expectedAttrOffsets=*/{0, 0, 0, 0}, /*expectedAttrSizes=*/{1, 16, 3, 3},
+     /*expectedInputCoords*/{{0, 2}, {0, 3}, {0, 0}, {0, 1}, \
+                             {1, 2}, {1, 3}, {1, 0}, {1, 1}, \
+                             {2, 2}, {2, 3}, {2, 0}, {2, 1}, \
+                             {3, 2}, {3, 3}, {3, 0}, {3, 1}},
+     /*expectedSEOffsets=*/{  32,  48,   0,  16, \
+                              96, 112,  64,  80, \
+                             160, 176, 128, 144, \
+                             224, 240, 192, 208}}
+};
+
+// clang-format on
+
+INSTANTIATE_TEST_CASE_P(unit, SERollAttrTests, testing::ValuesIn(rollParams));

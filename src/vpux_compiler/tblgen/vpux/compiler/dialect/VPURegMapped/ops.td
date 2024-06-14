@@ -6,12 +6,15 @@
 #ifndef VPUX_COMPILER_DIALECT_VPUREGMAPPED_OPS
 #define VPUX_COMPILER_DIALECT_VPUREGMAPPED_OPS
 
+include "vpux/compiler/core/ops_interfaces.td"
 include "vpux/compiler/dialect/VPURegMapped/dialect.td"
 include "vpux/compiler/dialect/VPURegMapped/ops_interfaces.td"
 include "vpux/compiler/dialect/VPURegMapped/attributes.td"
 include "vpux/compiler/dialect/VPURegMapped/types.td"
+include "vpux/compiler/dialect/VPU/ops_interfaces.td"
 
 include "mlir/Interfaces/SideEffectInterfaces.td"
+include "mlir/IR/OpBase.td"
 
 //
 // Base classes
@@ -24,7 +27,7 @@ class VPURegMapped_Op<string mnemonic, list<Trait> traits = []> :
         >;
 
 def VPURegMapped_RegisterFieldWrapperOp :
-        VPURegMapped_Op<"RegisterFiledWrapper",
+        VPURegMapped_Op<"RegisterFieldWrapper",
             []
         > {
     let summary = "Register Field Wrapper Op";
@@ -78,15 +81,12 @@ def VPURegMapped_RegisterMappedWrapperOp :
 
 def VPURegMapped_FetchTaskOp:
         VPURegMapped_Op<"FetchTask", [
+            DeclareOpInterfaceMethods<DotInterface, ["getNodeColor", "printAttributes", "getEdgeDirection"]>,
             DeclareOpInterfaceMethods<VPURegMapped_TaskOpInterface, ["setTaskLocation", "getTaskLocation"]>,
             AttrSizedOperandSegments
         ]> {
 
     let summary = "Op to represent fetching of specific tasks";
-    let description = [{
-        FetchTaskOp is indicate copying task descriptor from DDR(blob) to CMX(meta section).
-        During IR transformations should be replaced to NNDMA task.
-    }];
 
     let arguments = (ins
         Optional<VPURegMapped_IndexType>:$previousTask,
@@ -116,17 +116,15 @@ def VPURegMapped_FetchTaskOp:
 
 def VPURegMapped_EnqueueOp:
         VPURegMapped_Op<"Enqueue", [
+            DeclareOpInterfaceMethods<DotInterface, ["getNodeColor", "printAttributes", "getEdgeDirection"]>,
+            AttrSizedOperandSegments
         ]> {
 
         let summary = "Op to represent actual enquement of a range of contigous tasks";
 
-        let description = [{
-            This operation is responsible for the transfer WorkItems from CMS to execution FIFO
-        }];
-
         let arguments = (ins
             Optional<VPURegMapped_IndexType>:$previousTaskIdx,
-            VPURegMapped_IndexType:$barrier,
+            Optional<VPURegMapped_IndexType>:$barrier,
             VPURegMapped_TaskTypeAttr:$taskType,
             VPURegMapped_IndexType:$start,
             VPURegMapped_IndexType:$end
@@ -138,7 +136,7 @@ def VPURegMapped_EnqueueOp:
 
         let assemblyFormat = [{
             (`previousTaskIdx` `(` $previousTaskIdx^ `:` type($previousTaskIdx) `)` )?
-            `at` `(` $barrier `:` type($barrier) `)`
+            (`at` `(` $barrier^ `:` type($barrier) `)`)?
             `(` $start `->` $end `:` type($start) `->` type($end) `)`
             `->` type(results)
 
@@ -188,8 +186,6 @@ def VPURegMapped_GroupYieldOp :
         AttrSizedOperandSegments
     ]> {
 
-    let summary = "Not physical operation which needed to unite ops in groups which potentially can be fetched together";
-
     let arguments = (ins
         Variadic<VPURegMapped_IndexType>:$listHeads,
         Variadic<VPURegMapped_IndexType>:$listTails
@@ -204,7 +200,6 @@ def VPURegMapped_GroupYieldOp :
 
 def DeclareTaskBufferOp :
         VPURegMapped_Op<"DeclareTaskBuffer", [
-            NoMemoryEffect
         ]> {
     let summary = "Buffer Op representing a discrete location of a task in runtime metadataBuffer";
 
@@ -243,6 +238,55 @@ def ViewTaskRangeOp : VPURegMapped_Op<"ViewTaskRange", [
     let assemblyFormat = [{
         `(` $first `->` $last `:` type($first) `->` type($last) `)` `->` type($memview)
         attr-dict
+    }];
+}
+
+//
+// DeclareTaskAddrBufferOp
+//
+
+def DeclareTaskAddrBufferOp : VPURegMapped_Op<"DeclareTaskAddrBuffer", [
+                                NoMemoryEffect
+                            ]> {
+    let summary = "Declare the buffer that would contain actual addresses of metadata elems";
+
+    let arguments = (ins
+        VPURegMapped_IndexType:$first,
+        VPURegMapped_IndexType:$last,
+        OptionalAttr<UI32Attr>:$offset
+    );
+
+    let results = (outs
+        MemRefRankOf<[UI32], [1]>:$output
+    );
+
+    let assemblyFormat = [{
+        `(` $first `->` $last `:` type($first) `->` type($last) `)` `->` type($output)
+        attr-dict
+    }];
+}
+
+//
+// TaskSinkOp
+//
+
+def TaskSinkOp : VPURegMapped_Op<"TaskSink", [
+                    NoMemoryEffect
+                ]> {
+    let summary = "Declare the sink where the task ptr will actually be copied";
+
+    let arguments = (ins
+        UI8Attr:$tile,
+        VPURegMapped_TaskTypeAttr:$taskType
+    );
+
+    let results = (outs
+        MemRefRankOf<[UI32], [1]>:$output
+    );
+
+    let assemblyFormat = [{
+        attr-dict
+        `tile` `(` $tile `)` `->` type($output)
     }];
 }
 

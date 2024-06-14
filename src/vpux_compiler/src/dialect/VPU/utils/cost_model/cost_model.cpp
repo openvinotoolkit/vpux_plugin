@@ -1,6 +1,6 @@
 //
-// Copyright (C) 2022 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include "vpux/compiler/dialect/VPU/utils/cost_model/cost_model.hpp"
@@ -15,9 +15,10 @@ namespace {
 
 ArrayRef<char> getCostModelData(VPU::ArchKind archKind, bool isFastModel) {
     switch (archKind) {
-    case VPU::ArchKind::VPUX30XX:
+    case VPU::ArchKind::NPU30XX:
         return ArrayRef(VPU::COST_MODEL_2_0, VPU::COST_MODEL_2_0_SIZE);
-    case VPU::ArchKind::VPUX37XX:
+    case VPU::ArchKind::NPU37XX:
+    case VPU::ArchKind::NPU40XX:
         if (isFastModel) {
             return ArrayRef(VPU::COST_MODEL_2_7_FAST, VPU::COST_MODEL_2_7_FAST_SIZE);
         }
@@ -99,19 +100,19 @@ float vpux::getWeightsSparsityRatio(vpux::NDTypeInterface weightsType, int64_t c
 /// alignment for weights sets.
 ///@details A storage element is allocated to a weights set (ICxHxW), which has 16 Bytes alignment HW constraint.
 /// Each weights set will be compressed to only include dense values and align to 16 B
-/// And the total compressed_size stored in compressionSchemeAttr, which is calculated by sparsify-weights pass.
+/// And the total compressed_size stored in sparsityCompressionAttr, which is calculated by sparsify-weights pass.
 /// So ratio can be calculated by 1 - (compressed_size / total_size)
 float vpux::VPU::getWeightsSparsityRatio(mlir::Value weights) {
     const auto sparseType = weights.getType().dyn_cast<VPU::SparseTensorType>();
     VPUX_THROW_WHEN(sparseType == nullptr, "Not a sparse type");
-    const auto compressionSchemeAttr = sparseType.getCompressionScheme();
-    VPUX_THROW_WHEN(compressionSchemeAttr == nullptr, "compression_schemeAttr shouldn't be a nullptr");
+    const auto sparsityCompressionAttr = sparseType.getSparsityCompression();
+    VPUX_THROW_WHEN(sparsityCompressionAttr == nullptr, "sparsity_compressionAttr shouldn't be a nullptr");
 
     auto log = vpux::Logger("[calculate-sparstiy-ratio-vpunn]", LogLevel::None);
     log.trace("Calculate weights sparsity ratio for Weights {0}", weights.getLoc());
     auto weightsType = weights.getType().cast<vpux::NDTypeInterface>();
     auto elemType = weightsType.getElementType();
-    auto compressedSize = compressionSchemeAttr.getAllocSize(elemType).count();
+    auto compressedSize = sparsityCompressionAttr.getAllocSize(elemType).count();
 
     auto weightsSparsityRatio = getWeightsSparsityRatio(weightsType, compressedSize);
 
@@ -121,10 +122,12 @@ float vpux::VPU::getWeightsSparsityRatio(mlir::Value weights) {
 
 VPUNN::VPUDevice vpux::VPU::getVPUDeviceType(VPU::ArchKind archKind) {
     switch (archKind) {
-    case VPU::ArchKind::VPUX30XX:
+    case VPU::ArchKind::NPU30XX:
         return VPUNN::VPUDevice::VPU_2_0;
-    case VPU::ArchKind::VPUX37XX:
+    case VPU::ArchKind::NPU37XX:
         return VPUNN::VPUDevice::VPU_2_7;
+    case VPU::ArchKind::NPU40XX:
+        return VPUNN::VPUDevice::VPU_4_0;
     default:
         VPUX_THROW("Unsupported VPU arch type: '{0}'", archKind);
     }
@@ -150,26 +153,27 @@ VPUNN::DataType vpux::VPU::getVPUNNElementType(mlir::Type type) {
     VPUX_THROW("Unsupported data type: '{0}'", type);
 }
 
-VPUNN::Layout vpux::VPU::getVPUNNLayout(VPU::ODUPermuteDataMode oduPermutation) {
+VPUNN::Layout vpux::VPU::getVPUNNLayout(VPUIPDPU::ODUPermuteDataMode oduPermutation) {
     switch (oduPermutation) {
-    case VPU::ODUPermuteDataMode::PERMUTE_ZXY:
+    case VPUIPDPU::ODUPermuteDataMode::PERMUTE_ZXY:
         return VPUNN::Layout::ZXY;
-    case VPU::ODUPermuteDataMode::PERMUTE_ZYX:
+    case VPUIPDPU::ODUPermuteDataMode::PERMUTE_ZYX:
         return VPUNN::Layout::ZYX;
-    case VPU::ODUPermuteDataMode::PERMUTE_YZX:
+    case VPUIPDPU::ODUPermuteDataMode::PERMUTE_YZX:
         return VPUNN::Layout::YZX;
-    case VPU::ODUPermuteDataMode::PERMUTE_YXZ:
+    case VPUIPDPU::ODUPermuteDataMode::PERMUTE_YXZ:
         return VPUNN::Layout::YXZ;
-    case VPU::ODUPermuteDataMode::PERMUTE_XZY:
+    case VPUIPDPU::ODUPermuteDataMode::PERMUTE_XZY:
         return VPUNN::Layout::XZY;
-    case VPU::ODUPermuteDataMode::PERMUTE_XYZ:
+    case VPUIPDPU::ODUPermuteDataMode::PERMUTE_XYZ:
         return VPUNN::Layout::XYZ;
     default:
         VPUX_THROW("Unsupported ODU permute mode: '{0}'", oduPermutation);
     }
 }
 
-VPUNN::VPUTensor vpux::VPU::getVPUTensor(ShapeRef shape, mlir::Type elemType, VPU::ODUPermuteDataMode oduPermutation) {
+VPUNN::VPUTensor vpux::VPU::getVPUTensor(ShapeRef shape, mlir::Type elemType,
+                                         VPUIPDPU::ODUPermuteDataMode oduPermutation) {
     return VPUNN::VPUTensor(
             {
                     static_cast<unsigned int>(shape[Dims4D::Act::W]),
@@ -322,7 +326,7 @@ VPUNN::DPUWorkload vpux::VPU::getDPUWorkload(const VPUIP::WorkloadCostParams& ti
 
     // [VPUNN error code fix] Correct pad and align compute shape for NCE.Permute workloads
     if (tileParams.nceTaskType == VPUIP::NCETaskType::ELTWISE &&
-        tileParams.oduPermutation == VPU::ODUPermuteDataMode::PERMUTE_YZX) {
+        tileParams.oduPermutation == VPUIPDPU::ODUPermuteDataMode::PERMUTE_YZX) {
         // Bottom_pad is for output channel alignment(align to 4/16) in NCE Permute
         // workloads. We don't need it in final workloads and must set zero before passing to VPUNN
         padsTileConf.bottom = 0;
@@ -363,7 +367,7 @@ VPUNN::DPUWorkload vpux::VPU::getDPUWorkload(const VPUIP::WorkloadCostParams& ti
             getExecutionMode(mpeMode)};
 
     // VPUNN model on KMB device is not maintained, keep original construction way
-    if (tileParams.arch == VPU::ArchKind::VPUX30XX) {
+    if (tileParams.arch == VPU::ArchKind::NPU30XX) {
         return vpunnDPUWorkload;
     }
 
@@ -372,10 +376,15 @@ VPUNN::DPUWorkload vpux::VPU::getDPUWorkload(const VPUIP::WorkloadCostParams& ti
 
     auto getISIStrategy = [&](VPU::MultiClusterStrategy layerStrategy) {
         if (layerStrategy == VPU::MultiClusterStrategy::HKSwitch) {
-            layerStrategy = VPU::MultiClusterStrategy::SplitOverHeight;
+            if (tileParams.arch == VPU::ArchKind::NPU40XX) {
+                layerStrategy = VPU::MultiClusterStrategy::SplitOverHeightOverlapped;
+            } else {
+                layerStrategy = VPU::MultiClusterStrategy::SplitOverHeight;
+            }
         }
 
         switch (layerStrategy) {
+        // Tile_input which has halos need map to SPLIT_OVER_H
         case VPU::MultiClusterStrategy::SplitOverHeight:
             return VPUNN::ISIStrategy::SPLIT_OVER_H;
         case VPU::MultiClusterStrategy::SplitOverHeightOverlapped:
@@ -478,7 +487,7 @@ VPUIP::WorkloadCostParams vpux::VPU::getWorkloadCostParam(VPU::NCEOpInterface nc
                 (numTilesIn[Dims4D::Act::H.ind()] > 1)) {
                 params.layerStrategy = VPU::MultiClusterStrategy::SplitOverHeight;
             } else if (modeIn == VPU::DistributionMode::OVERLAPPED) {
-                // Set SplitOverHeightOverlapped to be different from SplitOverHeight for VPUNN
+                // Set SplitOverHeightOverlapped to be different from SplitOverHeight for VPUNN even on VPUX40XX
                 params.layerStrategy = VPU::MultiClusterStrategy::SplitOverHeightOverlapped;
             } else if (modeOut == (VPU::DistributionMode::SEGMENTED | VPU::DistributionMode::MULTICASTED)) {
                 params.layerStrategy = VPU::MultiClusterStrategy::HKSwitch;
@@ -522,13 +531,9 @@ VPUIP::WorkloadCostParams vpux::VPU::getWorkloadCostParam(VPU::NCEOpInterface nc
             })
             // Only for VPUNN L1 DPU API
             // For L2 API, the strategy SOW is not supported by VPUNN, refer to #86188
-            .Case<VPU::NCEPermuteQuantizeOp>([&](VPU::NCEPermuteQuantizeOp) {
-                params.nceTaskType = VPUIP::NCETaskType::ELTWISE;
-                params.oduPermutation = VPU::ODUPermuteDataMode::PERMUTE_YZX;
-            })
             .Case<VPU::NCEPermuteOp>([&](VPU::NCEPermuteOp) {
                 params.nceTaskType = VPUIP::NCETaskType::ELTWISE;
-                params.oduPermutation = VPU::ODUPermuteDataMode::PERMUTE_YZX;
+                params.oduPermutation = VPUIPDPU::ODUPermuteDataMode::PERMUTE_YZX;
             })
             .Default([](mlir::Operation* op) {
                 VPUX_THROW("Unsupported NCE operation '{0}' at '{1}'", op->getName(), op->getLoc());

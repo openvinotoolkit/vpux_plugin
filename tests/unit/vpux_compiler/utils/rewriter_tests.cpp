@@ -6,7 +6,7 @@
 #include "common/utils.hpp"
 #include "vpux/compiler/core/attributes/dims_order.hpp"
 #include "vpux/compiler/core/attributes/indexed_symbol_attr.hpp"
-#include "vpux/compiler/dialect/VPUIP/dialect.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/dialect.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
@@ -65,7 +65,7 @@ TEST_P(MLIR_BufferizeTest, getBufferType) {
     const auto tensorValue = getTensorValue();
     const auto tensorNdType = mlir::cast<vpux::NDTypeInterface>(tensorValue.getType());
 
-    const auto memref = vpux::getBufferType(tensorValue, options);
+    const auto memref = vpux::getBufferType(tensorValue);
 
     ASSERT_EQ(memref.getShape(), tensorNdType.getShape());
     ASSERT_EQ(memref.getElementType(), tensorNdType.getElementType());
@@ -84,7 +84,7 @@ TEST_P(MLIR_BufferizeTest, getBuffer) {
     const auto tensorNdType = mlir::cast<vpux::NDTypeInterface>(tensorValue.getType());
 
     mlir::IRRewriter rewriter(&ctx);
-    const auto memrefValue = vpux::getBuffer(rewriter, tensorValue, options);
+    const auto memrefValue = vpux::getBuffer(rewriter, tensorValue);
     const auto memref = mlir::cast<vpux::NDTypeInterface>(memrefValue.getType());
 
     ASSERT_EQ(memref.getShape(), tensorNdType.getShape());

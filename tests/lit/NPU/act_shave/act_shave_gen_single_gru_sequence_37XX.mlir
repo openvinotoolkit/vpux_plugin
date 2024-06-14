@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -34,8 +34,8 @@ module @VPU.SW {
     // `memref` will be translated to `MemRefData`, while raw scalars will be translated as is.
     func.func private @builtin_GRUSequence(memref<*xf16>, memref<*xf16>, memref<*xf16>, memref<*xf16>, memref<*xf16>, memref<*xf16>, memref<*xf16>, i64, i64, i64, i64, f64)
         attributes {
-            VPU.kernel_code = "single_shave_gru_sequence.cpp",
-            VPU.kernel_entry = "single_shave_gru_sequence"
+            VPU.kernel_code = "gru_sequence.cpp",
+            VPU.kernel_entry = "gru_sequence"
         }
 
     // management kernel definition
@@ -83,7 +83,7 @@ func.func @main(%arg0: memref<2x1x10xf16, @DDR>, %arg1: memref<2x1x4xf16, @DDR>,
     }
 
     VPURT.Task waits(%0 : !VPURT.Barrier) updates(%1 : !VPURT.Barrier) attributes {isTrailingSWLayer = false} {
-        %results:2 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 2, 0>}
+        %results:2 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 2, 0, 0>}
                 @VPU.SW::@builtin_GRUSequence
                 inputs(%6 as %arg4: memref<2x1x10xf16, [@CMX_NN, 0]>, %7 as %arg5: memref<2x1x4xf16, [@CMX_NN, 0]>, %8 as %arg6: memref<1x12x10xf16, [@CMX_NN, 0]>, %9 as %arg7: memref<1x12x4xf16, [@CMX_NN, 0]>, %10 as %arg8: memref<1x16xf16, [@CMX_NN, 0]>)
                 outputs(%11 as %arg9: memref<2x1x1x4xf16, [@CMX_NN, 0]>, %12 as %arg10: memref<2x1x4xf16, [@CMX_NN, 0]>)

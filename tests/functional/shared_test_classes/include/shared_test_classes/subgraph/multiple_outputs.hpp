@@ -1,6 +1,6 @@
 //
-// Copyright (C) 2022 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #pragma once
@@ -10,11 +10,11 @@
 #include <tuple>
 #include <vector>
 
-#include "ov_models/builders.hpp"
-#include "ov_models/utils/ov_helpers.hpp"
-#include "shared_test_classes/base/layer_test_utils.hpp"
+#include "vpu_ov2_layer_test.hpp"
 
-namespace SubgraphTestsDefinitions {
+using namespace ov::test::utils;
+
+namespace ov::test {
 
 typedef std::tuple<std::vector<size_t>,  // Input Shapes
                    std::vector<size_t>,  // Kernel Shape
@@ -22,7 +22,7 @@ typedef std::tuple<std::vector<size_t>,  // Input Shapes
                    >
         convParams;
 
-typedef std::tuple<InferenceEngine::Precision,          // Network Precision
+typedef std::tuple<ov::element::Type,                   // Network Precision
                    std::string,                         // Target Device
                    std::map<std::string, std::string>,  // Configuration
                    convParams,                          // Convolution Params
@@ -30,15 +30,13 @@ typedef std::tuple<InferenceEngine::Precision,          // Network Precision
                    >
         multiOutputTestParams;
 
-class MultioutputTest :
-        public testing::WithParamInterface<multiOutputTestParams>,
-        virtual public LayerTestsUtils::LayerTestsCommon {
+class MultioutputTest : public testing::WithParamInterface<multiOutputTestParams>, virtual public VpuOv2LayerTest {
 public:
     static std::string getTestCaseName(testing::TestParamInfo<multiOutputTestParams> obj);
-    InferenceEngine::Blob::Ptr GenerateInput(const InferenceEngine::InputInfo& info) const override;
+    void generate_inputs(const std::vector<ov::Shape>& targetInputStaticShapes) override;
 
 protected:
     void SetUp() override;
 };
 
-}  // namespace SubgraphTestsDefinitions
+}  // namespace ov::test

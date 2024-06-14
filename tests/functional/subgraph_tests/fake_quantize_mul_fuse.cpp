@@ -1,12 +1,10 @@
-// Copyright (C) Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include <vpu_ov2_layer_test.hpp>
 
-#include <shared_test_classes/base/layer_test_utils.hpp>
-#include "ov_models/builders.hpp"
-#include "ov_models/utils/ov_helpers.hpp"
+#include "common_test_utils/node_builders/fake_quantize.hpp"
 
 namespace ov::test {
 
@@ -56,8 +54,8 @@ class FakeQuantizeMulFuseSubGraphTest1Common :
         const std::vector<float> dataInHigh = {dataFQRanges.at(1)};
         const std::vector<float> dataOutLow = {dataFQRanges.at(2)};
         const std::vector<float> dataOutHigh = {dataFQRanges.at(3)};
-        const auto dataFq = ngraph::builder::makeFakeQuantize(params[0], ov::element::f32, dataLevels, {}, dataInLow,
-                                                              dataInHigh, dataOutLow, dataOutHigh);
+        const auto dataFq = ov::test::utils::make_fake_quantize(params[0], ov::element::f32, dataLevels, {}, dataInLow,
+                                                                dataInHigh, dataOutLow, dataOutHigh);
 
         std::vector<float> scalesVal{0.53, 0.13, 0.32, 0.51};
         const auto scales =
@@ -75,8 +73,8 @@ class FakeQuantizeMulFuseSubGraphTest1Common :
         const auto conv =
                 std::make_shared<ov::op::v1::Convolution>(dataFq, mul, strides, pads_begin, pads_end, dilations);
 
-        const auto outFq = ngraph::builder::makeFakeQuantize(conv, ov::element::f32, dataLevels, {}, dataInLow,
-                                                             dataInHigh, dataOutLow, dataOutHigh);
+        const auto outFq = ov::test::utils::make_fake_quantize(conv, ov::element::f32, dataLevels, {}, dataInLow,
+                                                               dataInHigh, dataOutLow, dataOutHigh);
 
         const ov::ResultVector results{std::make_shared<ov::op::v0::Result>(outFq)};
         function = std::make_shared<ov::Model>(results, params, "FakeQuantizeMulFuse");
@@ -89,9 +87,11 @@ public:
         std::vector<float> fqRanges;
         std::tie(ip, op, fqRanges) = obj.param;
 
+        const std::string sep = "_";
         std::ostringstream result;
-        result << "InputPrec=" << ip << "_";
-        result << "OutputPrec=" << op << "_";
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
+        result << "InputPrec=" << ip << sep;
+        result << "OutputPrec=" << op << sep;
         result << "FQ={" << fqRanges.at(0) << ", " << fqRanges.at(1) << ", " << fqRanges.at(2) << ", " << fqRanges.at(3)
                << "}_";
         return result.str();
@@ -102,7 +102,7 @@ class FakeQuantizeMulFuseSubGraphTest1_NPU3720 : public FakeQuantizeMulFuseSubGr
 
 TEST_P(FakeQuantizeMulFuseSubGraphTest1_NPU3720, HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
 }
 
 std::vector<std::vector<float>> fqRangesM = {{0.0f, 255.0f, 0.0f, 255.0f}};

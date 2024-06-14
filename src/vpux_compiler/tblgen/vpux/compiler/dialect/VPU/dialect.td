@@ -25,7 +25,6 @@ def VPU_Dialect : Dialect {
     let extraClassDeclaration = [{
         void registerAttributes();
         void registerTypes();
-        static void setupExtraInterfaces(mlir::DialectRegistry& registry);
     }];
 
     let dependentDialects = [

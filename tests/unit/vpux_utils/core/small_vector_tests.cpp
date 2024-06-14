@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+//
+
 #include "vpux/utils/core/small_vector.hpp"
 
 #include <gtest/gtest.h>

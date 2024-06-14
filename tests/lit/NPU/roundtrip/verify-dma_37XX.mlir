@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -107,19 +107,19 @@ module @mainModule {
 //CHECK-NEXT:      ELFNPU37XX.PutOpInSection [[HW_REG]] : !ELFNPU37XX.Symbol
 
 //CHECK:    ELFNPU37XX.CreateRelocationSection secName(".rlt.DMA_NetInput0") sourceSymbolTableSection([[SYM_INPUT]]) targetSection([[DMA0_TEXT]]) secFlags("SHF_INFO_LINK|VPU_SHF_JIT|VPU_SHF_USERINPUT") -> !ELFNPU37XX.Section {
-//CHECK:      ELFNPU37XX.RelocImmOffset offset(16) <R_VPU_64> [[INPUT_0]] 0
+//CHECK:      ELFNPU37XX.Reloc offset(16) <R_VPU_64> [[INPUT_0]] 0
 
 //CHECK:    ELFNPU37XX.CreateRelocationSection secName(".rlt.DMA_NetOutput0") sourceSymbolTableSection([[SYM_OUTPUT]]) targetSection([[DMA0_TEXT]]) secFlags("SHF_INFO_LINK|VPU_SHF_JIT|VPU_SHF_USEROUTPUT") -> !ELFNPU37XX.Section {
-//CHECK:      ELFNPU37XX.RelocImmOffset offset(152) <R_VPU_64> [[OUTPUT_0]] 0
+//CHECK:      ELFNPU37XX.Reloc offset(152) <R_VPU_64> [[OUTPUT_0]] 0
 
 //CHECK:    ELFNPU37XX.CreateRelocationSection secName(".rlt.text.dmaTasks0") sourceSymbolTableSection([[SYMSEC_RT]]) targetSection([[DMA0_TEXT]]) secFlags(SHF_INFO_LINK) -> !ELFNPU37XX.Section {
-//CHECK:      ELFNPU37XX.RelocImmOffset offset(24) <R_VPU_64> [[SYM_BASE_ADDR]] 0
-//CHECK:      ELFNPU37XX.RelocImmOffset offset(0) <R_VPU_32_RTM> [[SYM_RTM_DMA0]] 128
-//CHECK:      ELFNPU37XX.RelocImmOffset offset(144) <R_VPU_64> [[SYM_BASE_ADDR]] 0
+//CHECK:      ELFNPU37XX.Reloc offset(24) <R_VPU_64> [[SYM_BASE_ADDR]] 0
+//CHECK:      ELFNPU37XX.Reloc offset(0) <R_VPU_32_RTM> [[SYM_RTM_DMA0]] 128
+//CHECK:      ELFNPU37XX.Reloc offset(144) <R_VPU_64> [[SYM_BASE_ADDR]] 0
 
 //CHECK:    ELFNPU37XX.CreateRelocationSection secName(".rlt.text.MappedInference") sourceSymbolTableSection(%36) targetSection([[MAPINFER_TEXT]]) secFlags(SHF_INFO_LINK) -> !ELFNPU37XX.Section {
-//CHECK:      ELFNPU37XX.RelocImmOffset offset(72) <R_VPU_64> [[SYM_DMA_0]] 0
-//CHECK:      ELFNPU37XX.RelocImmOffset offset(312) <R_VPU_64> [[SYM_BAR_SEC]] 0
+//CHECK:      ELFNPU37XX.Reloc offset(72) <R_VPU_64> [[SYM_DMA_0]] 0
+//CHECK:      ELFNPU37XX.Reloc offset(312) <R_VPU_64> [[SYM_BAR_SEC]] 0
 
 //CHECK:    return %arg1 : memref<9858xui8>
 }

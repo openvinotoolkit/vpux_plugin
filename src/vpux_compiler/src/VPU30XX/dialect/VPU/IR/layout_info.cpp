@@ -5,7 +5,7 @@
 
 #include "vpux/compiler/VPU30XX/dialect/VPU/IR/ops_interfaces.hpp"
 
-#include "vpux/compiler/dialect/IE/ops_interfaces.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops_interfaces.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/utils/layout_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
@@ -22,7 +22,7 @@ class ConvolutionDimsOrderOpModelForSW final :
         public IE::LayoutInfoOpInterface::FallbackModel<ConvolutionDimsOrderOpModelForSW> {
 public:
     static void inferLayoutInfo(mlir::Operation* op, IE::LayerLayoutInfo& info, const bool /*seOpsEnabled*/,
-                                const bool /*seTransposedConvEnabled*/) {
+                                const bool /*seExperimentalOpsEnabled*/) {
         auto expectedFilterLayout = mlir::isa<IE::GroupConvolutionOp>(op) ? DimsOrder::OIYX : DimsOrder::YXOI;
         info.setInput(0, DimsOrder::NCHW);
         info.setInput(1, expectedFilterLayout);
@@ -71,7 +71,7 @@ class NCEConvolutionWithCMajorDimsOrderOpModelForHW final :
         public IE::LayoutInfoOpInterface::FallbackModel<NCEConvolutionWithCMajorDimsOrderOpModelForHW> {
 public:
     static void inferLayoutInfo(mlir::Operation* op, IE::LayerLayoutInfo& info, const bool /*seOpsEnabled*/,
-                                const bool /*seTransposedConvEnabled*/) {
+                                const bool /*seExperimentalOpsEnabled*/) {
         const auto arch = VPU::getArch(op);
 
         const auto canUseCMajor = vpux::VPU::NCEInvariant::isChannelMajorCompatible(
@@ -95,7 +95,7 @@ public:
         }
 
         const auto canUseCMajor = vpux::VPU::NCEInvariant::isChannelMajorCompatible(
-                VPU::ArchKind::VPUX30XX, op->getOperand(0).getType().cast<vpux::NDTypeInterface>());
+                VPU::ArchKind::NPU30XX, op->getOperand(0).getType().cast<vpux::NDTypeInterface>());
 
         const auto input = layer.getInputs()[0];
         const auto filter = layer.getInputs()[1];
@@ -143,7 +143,8 @@ void redirectLayoutOpInterfacesForVPU(mlir::DialectRegistry& registry) {
         VPU::AvgPoolOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         VPU::AdaptiveAvgPoolOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         VPU::AdaptiveMaxPoolOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
-        VPU::RollOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
+        // TODO: E#115645 support HW/SW option for SEP VPU ops
+        VPU::RollOp::attachInterface<vpux::VPU::RollDimsOrderOpModelForSW>(*ctx);
         VPU::TanOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         VPU::SinOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         VPU::CosOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
@@ -175,6 +176,10 @@ void redirectLayoutOpInterfacesForVPU(mlir::DialectRegistry& registry) {
         VPU::MaximumOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         VPU::LogicalOrOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         VPU::LogicalXorOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
+        VPU::BitwiseAndOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
+        VPU::BitwiseOrOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
+        VPU::BitwiseXorOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
+        VPU::BitwiseNotOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         VPU::LessOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         VPU::LessEqualOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         VPU::NotEqualOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
@@ -203,6 +208,7 @@ void redirectLayoutOpInterfacesForVPU(mlir::DialectRegistry& registry) {
         VPU::RandomUniformOp::attachInterface<vpux::VPU::DefaultDimsOrderOpModelForSW>(*ctx);
         VPU::EyeOp::attachInterface<vpux::VPU::DefaultDimsOrderOpModelForSW>(*ctx);
         VPU::CTCGreedyDecoderSeqLenOp::attachInterface<vpux::VPU::DefaultDimsOrderOpModelForSW>(*ctx);
+        VPU::NonZeroOp::attachInterface<vpux::VPU::DefaultDimsOrderOpModelForSW>(*ctx);
 
         VPU::SigmoidOp::attachInterface<vpux::VPU::SameInOutDimsOrderOpModelForSW_CHW_HWC_NCHW_NHWC>(*ctx);
         VPU::ClampOp::attachInterface<vpux::VPU::SameInOutDimsOrderOpModelForSW_CHW_HWC_NCHW_NHWC>(*ctx);
@@ -259,11 +265,11 @@ void redirectLayoutOpInterfacesForVPU(mlir::DialectRegistry& registry) {
         VPU::MVNOp::attachInterface<vpux::VPU::SameInOutDimsOrderOpModelForSW_NCHW_NCWH_NHWC_NWHC>(*ctx);
         VPU::MVN6Op::attachInterface<vpux::VPU::SameInOutDimsOrderOpModelForSW_NCHW_NCWH_NHWC_NWHC>(*ctx);
 
-        VPU::DepthToSpaceOp::attachInterface<vpux::VPU::SameInOutDimsOrderOpModelForSW_NHWC>(*ctx);
+        VPU::DepthToSpaceOp::attachInterface<vpux::VPU::SameInOutDimsOrderOpModel_NHWC>(*ctx);
 
-        VPU::NCEMaxPoolOp::attachInterface<vpux::VPU::SameInOutDimsOrderOpModelForHW_NHWC>(*ctx);
-        VPU::NCEAveragePoolOp::attachInterface<vpux::VPU::SameInOutDimsOrderOpModelForHW_NHWC>(*ctx);
-        VPU::NCEInterpolateOp::attachInterface<vpux::VPU::SameInOutDimsOrderOpModelForHW_NHWC>(*ctx);
+        VPU::NCEMaxPoolOp::attachInterface<vpux::VPU::SameInOutDimsOrderOpModel_NHWC>(*ctx);
+        VPU::NCEAveragePoolOp::attachInterface<vpux::VPU::SameInOutDimsOrderOpModel_NHWC>(*ctx);
+        VPU::NCEInterpolateOp::attachInterface<vpux::VPU::SameInOutDimsOrderOpModel_NHWC>(*ctx);
 
         VPU::NCEEltwiseOp::attachInterface<vpux::VPU::SameMultipleInOutDimsOrderOpModelForHW_NHWC>(*ctx);
 
@@ -314,7 +320,6 @@ void redirectLayoutOpInterfacesForIE(mlir::DialectRegistry& registry) {
 
         IE::AdaptiveAvgPoolOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         IE::AdaptiveMaxPoolOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
-        IE::RollOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         IE::TanOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         IE::SinOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         IE::CosOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
@@ -328,7 +333,6 @@ void redirectLayoutOpInterfacesForIE(mlir::DialectRegistry& registry) {
         IE::TileOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         IE::PerAxisTileOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         IE::NegativeOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
-        IE::PadOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         IE::LSTMCellOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         IE::NormalizeL2Op::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         IE::NormalizeIEOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
@@ -346,6 +350,10 @@ void redirectLayoutOpInterfacesForIE(mlir::DialectRegistry& registry) {
         IE::MaximumOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         IE::LogicalOrOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         IE::LogicalXorOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
+        IE::BitwiseAndOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
+        IE::BitwiseOrOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
+        IE::BitwiseXorOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
+        IE::BitwiseNotOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         IE::LessOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         IE::LessEqualOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         IE::NotEqualOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
@@ -369,6 +377,7 @@ void redirectLayoutOpInterfacesForIE(mlir::DialectRegistry& registry) {
         IE::RandomUniformOp::attachInterface<vpux::VPU::DefaultDimsOrderOpModelForSW>(*ctx);
         IE::EyeOp::attachInterface<vpux::VPU::DefaultDimsOrderOpModelForSW>(*ctx);
         IE::CTCGreedyDecoderSeqLenOp::attachInterface<vpux::VPU::DefaultDimsOrderOpModelForSW>(*ctx);
+        IE::NonZeroOp::attachInterface<vpux::VPU::DefaultDimsOrderOpModelForSW>(*ctx);
 
         IE::SigmoidOp::attachInterface<vpux::VPU::SameInOutDimsOrderOpModelForSW_CHW_HWC_NCHW_NHWC>(*ctx);
         IE::ClampOp::attachInterface<vpux::VPU::SameInOutDimsOrderOpModelForSW_CHW_HWC_NCHW_NHWC>(*ctx);
@@ -426,7 +435,7 @@ void redirectLayoutOpInterfacesForIE(mlir::DialectRegistry& registry) {
         IE::MVNOp::attachInterface<vpux::VPU::SameInOutDimsOrderOpModelForSW_NCHW_NCWH_NHWC_NWHC>(*ctx);
         IE::MVN6Op::attachInterface<vpux::VPU::SameInOutDimsOrderOpModelForSW_NCHW_NCWH_NHWC_NWHC>(*ctx);
 
-        IE::DepthToSpaceOp::attachInterface<vpux::VPU::SameInOutDimsOrderOpModelForSW_NHWC>(*ctx);
+        IE::DepthToSpaceOp::attachInterface<vpux::VPU::SameInOutDimsOrderOpModel_NHWC>(*ctx);
 
         IE::ReduceMaxOp::attachInterface<vpux::VPU::ReduceDimsOrderOpModelForSW>(*ctx);
         IE::ReduceMeanOp::attachInterface<vpux::VPU::ReduceDimsOrderOpModelForSW>(*ctx);
@@ -462,11 +471,11 @@ void redirectLayoutOpInterfacesForIE(mlir::DialectRegistry& registry) {
         IE::MaxPoolOp::attachInterface<
                 vpux::VPU::LayoutInfoOpModelForHW<IE::MaxPoolOp,
                 /*FallbackSWImplOpType=*/vpux::VPU::SameInOutDimsOrderOpModelForSW_CHW_HWC_NCHW_NHWC,
-                /*FallbackHWImplOpType=*/vpux::VPU::SameInOutDimsOrderOpModelForHW_NHWC>>(*ctx);
+                /*FallbackHWImplOpType=*/vpux::VPU::SameInOutDimsOrderOpModel_NHWC>>(*ctx);
         IE::AvgPoolOp::attachInterface<
                 vpux::VPU::LayoutInfoOpModelForHW<IE::AvgPoolOp,
                 /*FallbackSWImplOpType=*/vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW,
-                /*FallbackHWImplOpType=*/vpux::VPU::SameInOutDimsOrderOpModelForHW_NHWC>>(*ctx);
+                /*FallbackHWImplOpType=*/vpux::VPU::SameInOutDimsOrderOpModel_NHWC>>(*ctx);
         IE::AddOp::attachInterface<
                 vpux::VPU::LayoutInfoOpModelForHW<IE::AddOp,
                 /*FallbackSWImplOpType=*/vpux::VPU::SameAnyDimsOrderOpModelForSW,
@@ -486,11 +495,19 @@ void redirectLayoutOpInterfacesForIE(mlir::DialectRegistry& registry) {
         IE::InterpolateOp::attachInterface<
                 vpux::VPU::LayoutInfoOpModelForHW<IE::InterpolateOp,
                 /*FallbackSWImplOpType=*/vpux::VPU::InterpolateDimsOrderOpModelForSW,
-                /*FallbackHWImplOpType=*/vpux::VPU::SameInOutDimsOrderOpModelForHW_NHWC>>(*ctx);
+                /*FallbackHWImplOpType=*/vpux::VPU::SameInOutDimsOrderOpModel_NHWC>>(*ctx);
         IE::TransposedConvolutionOp::attachInterface<
                 vpux::VPU::LayoutInfoOpModelForHW<IE::TransposedConvolutionOp,
                 /*FallbackSWImplOpType=*/ConvolutionDimsOrderOpModelForSW,
                 /*FallbackHWImplOpType=*/vpux::VPU::NCEConvolutionDimsOrderOpModelForHW>>(*ctx);
+        IE::PadOp::attachInterface<
+                vpux::VPU::LayoutInfoOpModelForHW<IE::PadOp,
+                /*FallbackSWImplOpType=*/vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW,
+                /*FallbackHWImplOpType=*/vpux::VPU::SameInOutDimsOrderOpModel_NHWC>>(*ctx);
+        IE::RollOp::attachInterface<
+                vpux::VPU::LayoutInfoOpModelForHW<IE::RollOp,
+                /*FallbackSWImplOpType=*/vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW,
+                /*FallbackHWImplOpType=*/vpux::VPU::RollDimsOrderOpModelForHW>>(*ctx);
         // clang-format on
     });
 }

@@ -9,15 +9,13 @@
 #include "vpux/utils/core/checked_cast.hpp"
 #include "vpux/utils/core/range.hpp"
 #include "vpux/utils/core/small_vector.hpp"
+#include "vpux/utils/core/type/float16.hpp"
 
 #include <mlir/IR/Builders.h>
 #include <mlir/IR/BuiltinAttributes.h>
 #include <mlir/IR/BuiltinTypes.h>
-#include <openvino/core/type/float16.hpp>
 
 namespace vpux {
-
-using ov::float16;
 
 //
 // get<Scalar>Attr
@@ -130,6 +128,20 @@ SmallVector<T> parseFPArrayAttr(mlir::ArrayAttr arr) {
 }
 
 //
+// parse<CustomizedAttr>ArrayAttr
+//
+
+template <typename T>
+SmallVector<T> parseCustomAttrArray(mlir::ArrayAttr arr) {
+    return to_small_vector(arr.getValue() | transformed([](mlir::Attribute attr) {
+                               const auto customAttr = attr.dyn_cast_or_null<T>();
+                               VPUX_THROW_UNLESS(customAttr != nullptr, "Got non-required Attribute '{0}' in Array",
+                                                 attr);
+                               return customAttr;
+                           }));
+}
+
+//
 // parseArrayOfArrayAttr
 //
 
@@ -168,7 +180,7 @@ inline mlir::DenseElementsAttr wrapData(const mlir::RankedTensorType dataStorage
     if (elemType.isF32()) {
         return mlir::DenseElementsAttr::get(dataStorageType, value);
     } else if (elemType.isF16()) {
-        const ov::float16 valFP16 = value;
+        const vpux::type::float16 valFP16 = value;
         return mlir::DenseElementsAttr::get(dataStorageType, valFP16);
     }
     VPUX_THROW("Unsupported element type '{0}'", elemType);
@@ -180,7 +192,7 @@ inline mlir::DenseElementsAttr wrapArrayRef(const mlir::RankedTensorType dataSto
         return mlir::DenseElementsAttr::get(dataStorageType, array);
     } else if (elemType.isF16()) {
         const auto arrayFP16 = to_small_vector(array | transformed([](float val) {
-                                                   return static_cast<float16>(val);
+                                                   return static_cast<vpux::type::float16>(val);
                                                }));
         return mlir::DenseElementsAttr::get(dataStorageType, ArrayRef(arrayFP16));
     }

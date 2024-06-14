@@ -47,7 +47,8 @@ mlir::IntegerAttr getIntAttrValue(mlir::Value operand, mlir::PatternRewriter& re
 
 mlir::FailureOr<Const::DeclareOp> getConstParentOp(mlir::Value input) {
     auto parent = input.getDefiningOp();
-    while (parent && mlir::isa<IE::FakeQuantizeOp, IE::TransposeOp, IE::NegativeOp>(parent)) {
+    while (parent && mlir::isa<IE::FakeQuantizeOp, IE::TransposeOp, IE::NegativeOp, IE::ReshapeOp, IE::BroadcastOp,
+                               IE::AffineReshapeOp>(parent)) {
         parent = parent->getOperand(0).getDefiningOp();
     }
     if (parent && mlir::isa<Const::DeclareOp>(parent)) {

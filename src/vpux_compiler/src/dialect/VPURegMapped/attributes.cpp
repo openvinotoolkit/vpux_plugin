@@ -58,32 +58,6 @@ mlir::ArrayAttr getVPURegMapped_RegisterArrayAttr(mlir::OpBuilder builder,
 }
 
 //
-// RegisterFieldAttr::print() and ::parse() methods
-//
-void vpux::VPURegMapped::RegisterFieldAttr::print(mlir::AsmPrinter& printer) const {
-    printer << "<";
-    printer.printType(getRegField());
-    printer << ">";
-}
-
-mlir::Attribute vpux::VPURegMapped::RegisterFieldAttr::parse(mlir::AsmParser& parser, mlir::Type) {
-    if (mlir::failed(parser.parseLess())) {
-        return nullptr;
-    }
-
-    vpux::VPURegMapped::RegFieldType elemType;
-    if (mlir::failed(parser.parseType(elemType))) {
-        return nullptr;
-    }
-
-    if (mlir::failed(parser.parseGreater())) {
-        return nullptr;
-    }
-
-    return parser.getChecked<vpux::VPURegMapped::RegisterFieldAttr>(parser.getContext(), elemType);
-}
-
-//
 // RegisterFieldAttr::verify
 //
 
@@ -103,32 +77,6 @@ mlir::LogicalResult vpux::VPURegMapped::RegisterFieldAttr::verify(
 }
 
 //
-// RegisterAttr::print() and ::parse() methods
-//
-void vpux::VPURegMapped::RegisterAttr::print(mlir::AsmPrinter& printer) const {
-    printer << "<";
-    printer.printType(getReg());
-    printer << ">";
-}
-
-mlir::Attribute vpux::VPURegMapped::RegisterAttr::parse(mlir::AsmParser& parser, mlir::Type) {
-    if (mlir::failed(parser.parseLess())) {
-        return nullptr;
-    }
-
-    vpux::VPURegMapped::RegisterType elemType;
-    if (mlir::failed(parser.parseType(elemType))) {
-        return nullptr;
-    }
-
-    if (mlir::failed(parser.parseGreater())) {
-        return nullptr;
-    }
-
-    return parser.getChecked<vpux::VPURegMapped::RegisterAttr>(parser.getContext(), elemType);
-}
-
-//
 // RegisterAttr::verify
 //
 
@@ -144,33 +92,6 @@ mlir::LogicalResult vpux::VPURegMapped::RegisterAttr::verify(
     }
 
     return mlir::success();
-}
-
-//
-// RegisterMappedAttr::print() and ::parse() methods
-//
-
-void vpux::VPURegMapped::RegisterMappedAttr::print(mlir::AsmPrinter& printer) const {
-    printer << "<";
-    printer.printType(getRegMapped());
-    printer << ">";
-}
-
-mlir::Attribute vpux::VPURegMapped::RegisterMappedAttr::parse(mlir::AsmParser& parser, mlir::Type) {
-    if (mlir::failed(parser.parseLess())) {
-        return nullptr;
-    }
-
-    vpux::VPURegMapped::RegMappedType elemType;
-    if (mlir::failed(parser.parseType(elemType))) {
-        return nullptr;
-    }
-
-    if (mlir::failed(parser.parseGreater())) {
-        return nullptr;
-    }
-
-    return parser.getChecked<vpux::VPURegMapped::RegisterMappedAttr>(parser.getContext(), elemType);
 }
 
 //

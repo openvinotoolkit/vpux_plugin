@@ -1,6 +1,8 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation
 // SPDX-License-Identifier: Apache 2.0
+//
+
 //
 
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
@@ -62,10 +64,9 @@ TEST_P(GetOverlapDistributionParamsTests, GetMemoryViewFromProducerConsumers) {
         consumers.push_back(op);
     });
 
-    const auto resOverlapParams = VPU::getOverlappedDistributionParameters(&ctx, producer, consumers, numClusters,
-                                                                           numTiles, mlir::UnitAttr::get(&ctx));
-    auto memoryShapes = parseIntArrayOfArrayAttr<int64_t>(resOverlapParams.memoryShapes);
-    auto memoryOffsets = parseIntArrayOfArrayAttr<int64_t>(resOverlapParams.memoryOffsets);
+    const auto resOverlapParams =
+            VPU::getOverlappedDistributionParameters(&ctx, producer->getResult(0).getType().cast<NDTypeInterface>(),
+                                                     consumers, numClusters, numTiles, mlir::UnitAttr::get(&ctx));
 
     EXPECT_EQ(resOverlapParams.memoryShapes, getIntArrayOfArray(&ctx, expectedMemoryShapes));
     EXPECT_EQ(resOverlapParams.memoryOffsets, getIntArrayOfArray(&ctx, expectedMemoryOffsets));
@@ -206,6 +207,179 @@ std::vector<OverlappedDistributionTestParams> consumerUnionIncludesProducerParam
 
 INSTANTIATE_TEST_SUITE_P(ConsumerUnionIncludesProducer, GetOverlapDistributionParamsTests,
                          testing::ValuesIn(consumerUnionIncludesProducerParams));
+
+// clang-format off
+
+llvm::StringLiteral poolwith2NCEInterpConsumers = R"(
+    #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+    module @test {
+        IE.TileResource 4 of @NCE at 6.000000e+02 MHz
+        func.func @main(%arg0: tensor<1x96x20x20xf16, {order = #NHWC}>)
+          -> (tensor<1x96x40x40xf16, {order = #NHWC}>, tensor<1x96x60x60xf16, {order = #NHWC}>) {
+            %w0 = const.Declare tensor<96x96x2x2xf16, {order = #NHWC}>
+                    = dense<1.0> : tensor<96x96x2x2xf16, {order = #NHWC}>
+            %w1 = const.Declare tensor<96x96x3x3xf16, {order = #NHWC}>
+                    = dense<1.0> : tensor<96x96x3x3xf16, {order = #NHWC}>
+            %weightsTable = const.Declare tensor<96x1x1x4xsi32> = dense<1> : tensor<96x1x1x4xsi32>
+
+            %sparseMap0 = const.Declare tensor<1x96x41x41xi1> = dense<1> : tensor<1x96x41x41xi1>
+            %sparseMap1 = const.Declare tensor<1x96x62x62xi1> = dense<1> : tensor<1x96x62x62xi1>
+
+            %storageElement0 = VPU.StorageElementTable {
+                dataElemType = i32, seDepth = 1, seSize = 96, dataShape = [1, 96, 20, 20],
+                seAttr = #VPU.SEInterpolate<mode = <BILINEAR>, coordinate_transformation_mode = <ASYMMETRIC>,
+                scale = [1.0, 1.0, 2.0, 2.0]>}
+                    -> tensor<1x1x41x41xi32, {order = #NHWC}>
+            %storageElement1 = VPU.StorageElementTable {
+                dataElemType = i32, seDepth = 1, seSize = 96, dataShape = [1, 96, 20, 20],
+                seAttr = #VPU.SEInterpolate<mode = <BILINEAR>, coordinate_transformation_mode = <ASYMMETRIC>,
+                scale = [1.0, 1.0, 3.0, 3.0]>}
+                    -> tensor<1x1x62x62xi32, {order = #NHWC}>
+
+            %0 = VPU.NCE.AveragePool(%arg0) {
+                kernel_size = [1, 1],
+                pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
+                ppe = #VPU.PPETask<mode = <LPRELU>,
+                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
+                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
+                quant_scale = [1.000000e+00],
+                fp_prelu_alpha = 0.01000213623046875 : f64>,
+                strides = [1, 1]}
+                    -> tensor<1x96x20x20xf16, {order = #NHWC}>
+
+            %input0 = VPU.GroupSparseTensor(%0, %sparseMap0, %storageElement0) {
+                seAttr = #VPU.SEInterpolate<
+                    mode = <BILINEAR>,
+                    coordinate_transformation_mode = <ASYMMETRIC>,
+                    scale = [1.0, 1.0, 2.0, 2.0]>
+            } -> !VPU.SparseTensor<data=tensor<1x96x20x20xf16, {order = #NHWC}>,
+                           sparsity_map=tensor<1x96x41x41xi1>,
+                           storage_element_table=tensor<1x1x41x41xi32, {order = #NHWC}>,
+                           #VPU.SEInterpolate<mode = <BILINEAR>, coordinate_transformation_mode = <ASYMMETRIC>,
+                                              scale = [1.0, 1.0, 2.0, 2.0]>>
+
+            %1 = VPU.NCE.Interpolate(%input0, %w0, %weightsTable) {
+                rawFilterShape = [96, 96, 2, 2],
+                strides = [1, 1],
+                mode = #VPU.nce_interpolate_mode<BILINEAR>,
+                scales_attr = [2, 2],
+                ppe = #VPU.PPETask<clamp_high = 2147483967, clamp_low = 0, lrelu_mult = 1, lrelu_shift = 0, mode = <NOOP>>}
+                    -> tensor<1x96x40x40xf16, {order = #NHWC}>
+
+            %input1 = VPU.GroupSparseTensor(%0, %sparseMap1, %storageElement1) {
+                seAttr = #VPU.SEInterpolate<
+                    mode = <BILINEAR>,
+                    coordinate_transformation_mode = <ASYMMETRIC>,
+                    scale = [1.0, 1.0, 3.0, 3.0]>
+            } -> !VPU.SparseTensor<data=tensor<1x96x20x20xf16, {order = #NHWC}>,
+                           sparsity_map=tensor<1x96x62x62xi1>,
+                           storage_element_table=tensor<1x1x62x62xi32, {order = #NHWC}>,
+                           #VPU.SEInterpolate<mode = <BILINEAR>, coordinate_transformation_mode = <ASYMMETRIC>,
+                                              scale = [1.0, 1.0, 3.0, 3.0]>>
+
+            %2 = VPU.NCE.Interpolate(%input1, %w1, %weightsTable) {
+                rawFilterShape = [96, 96, 3, 3],
+                strides = [1, 1],
+                mode = #VPU.nce_interpolate_mode<BILINEAR>,
+                scales_attr = [3, 3],
+                ppe = #VPU.PPETask<clamp_high = 2147483967, clamp_low = 0, lrelu_mult = 1, lrelu_shift = 0, mode = <NOOP>>}
+                    -> tensor<1x96x60x60xf16, {order = #NHWC}>
+
+            return %1, %2 : tensor<1x96x40x40xf16, {order = #NHWC}>, tensor<1x96x60x60xf16, {order = #NHWC}>
+        }
+})";
+
+llvm::StringLiteral poolWithNCEInterpAndConvConsumers = R"(
+    #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+    module @test {
+        IE.TileResource 4 of @NCE at 6.000000e+02 MHz
+        func.func @main(%arg0: tensor<1x96x20x20xf16, {order = #NHWC}>)
+          -> (tensor<1x96x40x40xf16, {order = #NHWC}>, tensor<1x96x20x20xf16, {order = #NHWC}>) {
+            %w0 = const.Declare tensor<96x96x2x2xf16, {order = #NHWC}>
+                    = dense<1.0> : tensor<96x96x2x2xf16, {order = #NHWC}>
+            %w1 = const.Declare tensor<96x96x3x3xf16, {order = #NHWC}>
+                    = dense<1.0> : tensor<96x96x3x3xf16, {order = #NHWC}>
+            %weightsTable = const.Declare tensor<96x1x1x4xsi32> = dense<1> : tensor<96x1x1x4xsi32>
+
+            %sparseMap0 = const.Declare tensor<1x96x41x41xi1> = dense<1> : tensor<1x96x41x41xi1>
+            %storageElement0 = VPU.StorageElementTable {
+                dataElemType = i32, seDepth = 1, seSize = 96, dataShape = [1, 96, 20, 20],
+                seAttr = #VPU.SEInterpolate<mode = <BILINEAR>, coordinate_transformation_mode = <ASYMMETRIC>,
+                scale = [1.0, 1.0, 2.0, 2.0]>}
+                    -> tensor<1x1x41x41xi32, {order = #NHWC}>
+
+            %0 = VPU.NCE.AveragePool(%arg0) {
+                kernel_size = [1, 1],
+                pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
+                ppe = #VPU.PPETask<mode = <LPRELU>,
+                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
+                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
+                quant_scale = [1.000000e+00],
+                fp_prelu_alpha = 0.01000213623046875 : f64>,
+                strides = [1, 1]}
+                    -> tensor<1x96x20x20xf16, {order = #NHWC}>
+
+            %input0 = VPU.GroupSparseTensor(%0, %sparseMap0, %storageElement0) {
+                seAttr = #VPU.SEInterpolate<
+                    mode = <BILINEAR>,
+                    coordinate_transformation_mode = <ASYMMETRIC>,
+                    scale = [1.0, 1.0, 2.0, 2.0]>
+            } -> !VPU.SparseTensor<data=tensor<1x96x20x20xf16, {order = #NHWC}>,
+                           sparsity_map=tensor<1x96x41x41xi1>,
+                           storage_element_table=tensor<1x1x41x41xi32, {order = #NHWC}>,
+                           #VPU.SEInterpolate<mode = <BILINEAR>, coordinate_transformation_mode = <ASYMMETRIC>,
+                                              scale = [1.0, 1.0, 2.0, 2.0]>>
+
+            %1 = VPU.NCE.Interpolate(%input0, %w0, %weightsTable) {
+                rawFilterShape = [96, 96, 2, 2],
+                strides = [1, 1],
+                mode = #VPU.nce_interpolate_mode<BILINEAR>,
+                scales_attr = [2, 2],
+                ppe = #VPU.PPETask<clamp_high = 2147483967, clamp_low = 0, lrelu_mult = 1, lrelu_shift = 0, mode = <NOOP>>}
+                    -> tensor<1x96x40x40xf16, {order = #NHWC}>
+
+            %2 = VPU.NCE.Convolution(%0, %w1, %weightsTable) {
+                pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
+                ppe = #VPU.PPETask<mode = <NOOP>,
+                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
+                lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
+                fp_prelu_alpha = 1.000000e+00 : f64>,
+                rawFilterShape = [96, 96, 3, 3],
+                strides = [1, 1]}
+                    -> tensor<1x96x20x20xf16, {order = #NHWC}>
+
+            return %1, %2 : tensor<1x96x40x40xf16, {order = #NHWC}>, tensor<1x96x20x20xf16, {order = #NHWC}>
+        }
+})";
+
+std::vector<OverlappedDistributionTestParams> distributedSeTableTensorsParams = {
+    {
+        poolwith2NCEInterpConsumers, /*numTiles=*/{1, 1, 4, 1},
+        /*memoryShapes=*/{{1, 96, 6, 20}, {1, 96, 6, 20}, {1, 96, 6, 20}, {1, 96, 5, 20}},
+        /*memoryOffsets=*/{{0, 0, 0, 0}, {0, 0, 5, 0}, {0, 0, 10, 0}, {0, 0, 15, 0}}
+    },
+    {
+        poolwith2NCEInterpConsumers, /*numTiles=*/{1, 1, 1, 4},
+        /*memoryShapes=*/{{1, 96, 20, 6}, {1, 96, 20, 6}, {1, 96, 20, 6}, {1, 96, 20, 5}},
+        /*memoryOffsets=*/{{0, 0, 0, 0}, {0, 0, 0, 5}, {0, 0, 0, 10}, {0, 0, 0, 15}}
+    },
+    {
+        poolWithNCEInterpAndConvConsumers, /*numTiles=*/{1, 1, 4, 1},
+        /*memoryShapes=*/{{1, 96, 6, 20}, {1, 96, 7, 20}, {1, 96, 7, 20}, {1, 96, 6, 20}},
+        /*memoryOffsets=*/{{0, 0, 0, 0}, {0, 0, 4, 0}, {0, 0, 9, 0}, {0, 0, 14, 0}}
+    },
+    {
+        poolWithNCEInterpAndConvConsumers, /*numTiles=*/{1, 1, 1, 4},
+        /*memoryShapes=*/{{1, 96, 20, 6}, {1, 96, 20, 7}, {1, 96, 20, 7}, {1, 96, 20, 6}},
+        /*memoryOffsets=*/{{0, 0, 0, 0}, {0, 0, 0, 4}, {0, 0, 0, 9}, {0, 0, 0, 14}}
+    }
+};
+
+// clang-format on
+
+// TODO: Enable again after E#112803 is implemented
+INSTANTIATE_TEST_SUITE_P(DISABLED_DistributedTensorWithSETable, GetOverlapDistributionParamsTests,
+                         testing::ValuesIn(distributedSeTableTensorsParams));
 
 // clang-format off
 

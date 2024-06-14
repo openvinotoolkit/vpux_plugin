@@ -2042,11 +2042,11 @@ def IERT_QuantizeCastOp :
     let summary = "InferenceEngine run-time Quantize Cast layer";
 
     let arguments = (ins
-        MemRefOf<[SI8, UI8, quant_QuantizedType]>:$input
+        MemRefOf<[AnyInteger, quant_QuantizedType]>:$input
     );
 
     let results = (outs
-        MemRefOf<[SI8, UI8, quant_QuantizedType]>:$output
+        MemRefOf<[AnyInteger, quant_QuantizedType]>:$output
     );
 
     let assemblyFormat = [{
@@ -2055,6 +2055,7 @@ def IERT_QuantizeCastOp :
         `->` type(results)
     }];
 
+    let hasVerifier = 1;
     let hasFolder = 1;
 }
 

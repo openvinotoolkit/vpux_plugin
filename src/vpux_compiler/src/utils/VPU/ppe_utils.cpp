@@ -4,6 +4,7 @@
 //
 
 #include "vpux/compiler/utils/VPU/ppe_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
 
 #include <numeric>
 
@@ -40,17 +41,24 @@ double calculateQuantScaleVectorForEltwise(vpux::NDTypeInterface input1ShapedTyp
     // floats in the compute pipeline are represented as S16.16 values
     // In order to convert from I32 to S16.16 and back, we need to multiply/divide by 1<<16
     // Depends on target hardware
-    const double fp16_scale = (VPU::ArchKind::VPUX37XX == arch) ? (1.0) : (1.0 / 65536);
+    const double fp16_scale =
+            (VPU::ArchKind::NPU37XX == arch || VPU::ArchKind::NPU40XX == arch) ? (1.0) : (1.0 / 65536);
 
     if (!input1ElementType.isa<mlir::quant::QuantizedType>() && !input2ElementType.isa<mlir::quant::QuantizedType>()) {
         scaleOutput = extractScalesAndZeroPoints(outputElementType).first.front();
         scaleInput1 = fp16_scale;
     } else if (!outputElementType.isa<mlir::quant::QuantizedType>()) {
-        scaleInput1 = extractScalesAndZeroPoints(input1ElementType).first.front();
+        scaleInput1 = input1ElementType.isa<mlir::quant::QuantizedType>()
+                              ? extractScalesAndZeroPoints(input1ElementType).first.front()
+                              : 1.0;
         scaleOutput = fp16_scale;
     } else {
-        scaleInput1 = extractScalesAndZeroPoints(input1ElementType).first.front();
-        scaleOutput = extractScalesAndZeroPoints(outputElementType).first.front();
+        scaleInput1 = input1ElementType.isa<mlir::quant::QuantizedType>()
+                              ? extractScalesAndZeroPoints(input1ElementType).first.front()
+                              : 1.0;
+        scaleOutput = outputElementType.isa<mlir::quant::QuantizedType>()
+                              ? extractScalesAndZeroPoints(outputElementType).first.front()
+                              : 1.0;
     }
 
     VPUX_THROW_UNLESS(scaleInput1 != 0, "Invalid input scale value '0'");
@@ -59,7 +67,9 @@ double calculateQuantScaleVectorForEltwise(vpux::NDTypeInterface input1ShapedTyp
     double ppeScale = 1.0;
 
     if (isMultiplyOp) {
-        const auto scaleInput2 = extractScalesAndZeroPoints(input2ElementType).first.front();
+        const auto scaleInput2 = input2ElementType.isa<mlir::quant::QuantizedType>()
+                                         ? extractScalesAndZeroPoints(input2ElementType).first.front()
+                                         : 1.0;
         VPUX_THROW_UNLESS(scaleInput2 != 0, "Invalid input scale value '0'");
         ppeScale = scaleInput1 * scaleInput2 / scaleOutput;
     } else {  // Add, Subtract, And
@@ -89,7 +99,8 @@ double calculateQuantScaleVectorForAvgPool(vpux::NDTypeInterface inputShapedType
     // floats in the compute pipeline are represented as S16.16 values
     // In order to convert from I32 to S16.16 and back, we need to multiply/divide by 1<<16
     // Depends on target hardware
-    const double fp16_scale = (VPU::ArchKind::VPUX37XX == arch) ? (1.0) : (1.0 / 65536);
+    const double fp16_scale =
+            (VPU::ArchKind::NPU37XX == arch || VPU::ArchKind::NPU40XX == arch) ? (1.0) : (1.0 / 65536);
 
     auto scaleInput = fp16_scale;
     auto scaleOutput = fp16_scale;
@@ -168,9 +179,10 @@ VPU::PPETaskAttr getNCEAveragePoolPPETaskAttr(vpux::NDTypeInterface inputType, m
     // later used during NCE task serialization
     auto quantScale = VPU::calculateQuantScaleVectorForAvgPool(inputType, outputType, kernelSize, arch);
     // Input datatype entirely decides the precision of the compute pipeline.
-    // Since VPU3720 we have a separation for float and integer compute pipelines
+    // Since NPU3720 we have a separation for float and integer compute pipelines
     // so it's best to make use of the correct pipeline.
-    if ((VPU::ArchKind::VPUX37XX == arch) && !inputElemType.isa<mlir::quant::QuantizedType>()) {
+    if ((VPU::ArchKind::NPU37XX == arch || VPU::ArchKind::NPU40XX == arch) &&
+        !inputElemType.isa<mlir::quant::QuantizedType>()) {
         ppeAttr =
                 getPPETaskAttr(ctx, ppeType, clampLow, clampHigh, LreluMult, LreluShift, ArrayRef<double>{quantScale});
     } else {
@@ -223,14 +235,19 @@ VPU::PPETaskAttr getNCEEltwisePPETaskAttr(vpux::NDTypeInterface input1Type, vpux
                                                                opType == VPU::EltwiseType::MULTIPLY);
     if (supportsPerInputEltwiseScale(arch)) {
         // Input datatype entirely decides the precision of the compute pipeline.
-        // Since VPU3720 we have a separation for float and integer compute pipelines
+        // Since NPU3720 we have a separation for float and integer compute pipelines
         // so it's best to make use of the correct pipeline.
-        if (!input1ElemType.isa<mlir::quant::QuantizedType>()) {
+        if (!input1ElemType.isa<mlir::quant::QuantizedType>() && !input2ElemType.isa<mlir::quant::QuantizedType>()) {
             return getPPETaskAttr(ctx, ppeType, clampLow, clampHigh, LreluMult, LreluShift,
                                   ArrayRef<double>{quantScale});
-        } else if (input2ElemType.isa<mlir::quant::QuantizedType>()) {
-            auto input1QuantScale = extractScalesAndZeroPoints(input1ElemType).first.front();
-            auto input2QuantScale = extractScalesAndZeroPoints(input2ElemType).first.front();
+        } else if (input1ElemType.isa<mlir::quant::QuantizedType>() ||
+                   input2ElemType.isa<mlir::quant::QuantizedType>()) {
+            auto input1QuantScale = input1ElemType.isa<mlir::quant::QuantizedType>()
+                                            ? extractScalesAndZeroPoints(input1ElemType).first.front()
+                                            : 1.0;
+            auto input2QuantScale = input2ElemType.isa<mlir::quant::QuantizedType>()
+                                            ? extractScalesAndZeroPoints(input2ElemType).first.front()
+                                            : 1.0;
             auto outputQuantScale = outputElemType.isa<mlir::quant::QuantizedType>()
                                             ? extractScalesAndZeroPoints(outputElemType).first.front()
                                             : 1.0;
@@ -327,8 +344,8 @@ std::optional<VPU::PostOpParams> parsePostOp(IE::PostOpAttr postOp, const mlir::
             clampLow = clampLowHigh.first;
             clampHigh = clampLowHigh.second;
         } else {
-            clampLow = vpux::toFixedPoint(clamp.getMin().convertToDouble());
-            clampHigh = vpux::toFixedPoint(clamp.getMax().convertToDouble());
+            clampLow = vpux::VPU::NCESparsity::toFixedPoint(clamp.getMin().convertToDouble());
+            clampHigh = vpux::VPU::NCESparsity::toFixedPoint(clamp.getMax().convertToDouble());
         }
 
         const int64_t LreluMult = 1;
@@ -337,7 +354,7 @@ std::optional<VPU::PostOpParams> parsePostOp(IE::PostOpAttr postOp, const mlir::
         return PostOpParams{VPU::PPEMode::NOOP, clampLow, clampHigh, LreluMult, LreluShift};
     } else if (postOp.getName().getValue() == IE::LeakyReluOp::getOperationName()) {
         // PWL case
-        if (arch != VPU::ArchKind::VPUX37XX && outElemQType != nullptr) {
+        if (arch != VPU::ArchKind::NPU37XX && arch != VPU::ArchKind::NPU40XX && outElemQType != nullptr) {
             return getCustomPwlPostOpParams(postOp, outElemType);
         }
 
@@ -346,7 +363,7 @@ std::optional<VPU::PostOpParams> parsePostOp(IE::PostOpAttr postOp, const mlir::
                           postOp.getAttrs(), postOp.getName());
 
         // On some architectures negative slope is applied before the clamping, there's no need to adjust bounds.
-        const bool skipAlpha = (arch == VPU::ArchKind::VPUX37XX);
+        const bool skipAlpha = (arch == VPU::ArchKind::NPU37XX || arch == VPU::ArchKind::NPU40XX);
         const auto alpha = leakyRelu.getNegativeSlope().convertToDouble();
         int32_t clampLow = skipAlpha ? std::numeric_limits<int32_t>::min()
                                      : static_cast<int32_t>(std::numeric_limits<int32_t>::min() / alpha);
@@ -376,7 +393,7 @@ std::optional<VPU::PostOpParams> parsePostOp(IE::PostOpAttr postOp, const mlir::
 }
 
 bool supportsPerInputEltwiseScale(const VPU::ArchKind arch) {
-    return arch == VPU::ArchKind::VPUX37XX;
+    return arch == VPU::ArchKind::NPU37XX || arch == VPU::ArchKind::NPU40XX;
 }
 
 }  // namespace VPU

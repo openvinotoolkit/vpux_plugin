@@ -1,89 +1,100 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation
 // SPDX-License-Identifier: Apache 2.0
 
-#include "single_layer_tests/select.hpp"
+#include "single_op_tests/select.hpp"
 #include <vector>
 #include "common_test_utils/test_constants.hpp"
-#include "vpu_ov1_layer_test.hpp"
+#include "vpu_ov2_layer_test.hpp"
 
-namespace LayerTestsDefinitions {
-class SelectLayerTestCommon : public SelectLayerTest, virtual public LayerTestsUtils::VpuOv1LayerTestsCommon {
+namespace ov {
+
+namespace test {
+
+class SelectLayerTestCommon : public SelectLayerTest, virtual public VpuOv2LayerTest {
     void SetUp() override {
-        std::vector<std::vector<size_t>> inputShapes(3);
-        InferenceEngine::Precision inputPrecision;
-        ngraph::op::AutoBroadcastSpec broadcast;
-        std::tie(inputShapes, inputPrecision, broadcast, targetDevice) = this->GetParam();
+        std::vector<InputShape> inputShapes(3);
+        ov::element::Type inputType;
+        ov::op::AutoBroadcastSpec broadcast;
+        std::tie(inputShapes, inputType, broadcast, targetDevice) = this->GetParam();
+        init_input_shapes(inputShapes);
 
-        auto inType = FuncTestUtils::PrecisionUtils::convertIE2nGraphPrc(inputPrecision);
         ov::ParameterVector inputs;
-        for (auto&& shape : inputShapes) {
-            inputs.push_back(std::make_shared<ov::op::v0::Parameter>(inType, ov::Shape(shape)));
+        for (auto&& shape : inputDynamicShapes) {
+            inputs.push_back(std::make_shared<ov::op::v0::Parameter>(inputType, shape));
         }
-        ngraph::OutputVector selectInputs;
-        auto boolInput = std::make_shared<ov::op::v0::Convert>(inputs[0], ngraph::element::boolean);
+        ov::OutputVector selectInputs;
+        auto boolInput = std::make_shared<ov::op::v0::Convert>(inputs[0], ov::element::boolean);
         selectInputs.push_back(boolInput);
-        for (size_t i = 1; i < inputShapes.size(); i++) {
+        for (size_t i = 1; i < inputDynamicShapes.size(); i++) {
             selectInputs.push_back(inputs[i]);
         }
 
         auto select =
-                std::dynamic_pointer_cast<ov::op::v1::Select>(ngraph::builder::makeSelect(selectInputs, broadcast));
-        ngraph::ResultVector results{std::make_shared<ov::op::v0::Result>(select)};
-        function = std::make_shared<ngraph::Function>(results, inputs, "select");
+                std::make_shared<ov::op::v1::Select>(selectInputs[0], selectInputs[1], selectInputs[2], broadcast);
+        ov::ResultVector results{std::make_shared<ov::op::v0::Result>(select)};
+        function = std::make_shared<ov::Model>(results, inputs, "select");
     }
 };
 
 class SelectLayerTest_NPU3700 : public SelectLayerTestCommon {};
 class SelectLayerTest_NPU3720 : public SelectLayerTestCommon {};
+class SelectLayerTest_NPU4000 : public SelectLayerTestCommon {};
 
 TEST_P(SelectLayerTest_NPU3700, SW) {
-    setPlatformVPU3700();
-    setReferenceSoftwareModeMLIR();
-    Run();
+    setReferenceSoftwareMode();
+    run(Platform::NPU3700);
 }
 
 TEST_P(SelectLayerTest_NPU3720, SW) {
-    setPlatformVPU3720();
-    setReferenceSoftwareModeMLIR();
-    Run();
+    setReferenceSoftwareMode();
+    run(Platform::NPU3720);
 }
 
-}  // namespace LayerTestsDefinitions
+TEST_P(SelectLayerTest_NPU4000, SW) {
+    setReferenceSoftwareMode();
+    run(Platform::NPU4000);
+}
 
-using namespace LayerTestsDefinitions;
+}  // namespace test
+
+}  // namespace ov
+
+using ov::test::SelectLayerTest_NPU3700;
+using ov::test::SelectLayerTest_NPU3720;
+using ov::test::SelectLayerTest_NPU4000;
 
 namespace {
-const std::vector<InferenceEngine::Precision> inputPrecision = {
-        InferenceEngine::Precision::FP16,
+const std::vector<ov::element::Type> inputTypes = {
+        ov::element::f16,
 };
 
-const std::vector<std::vector<std::vector<size_t>>> shapes = {
+const std::vector<std::vector<ov::Shape>> shapes = {
         {{1}, {1}, {1}},
         {{8}, {8}, {8}},
         {{4, 5}, {4, 5}, {4, 5}},
         {{3, 4, 5}, {3, 4, 5}, {3, 4, 5}},
 };
 
-const std::vector<std::vector<std::vector<size_t>>> shapesHighDims = {
+const std::vector<std::vector<ov::Shape>> shapesHighDims = {
         {{2, 3, 4, 5}, {2, 3, 4, 5}, {2, 3, 4, 5}},
         {{2, 3, 4, 5, 6}, {2, 3, 4, 5, 6}, {2, 3, 4, 5, 6}},
 };
 
-const std::vector<std::vector<std::vector<size_t>>> inShapes = {{{10, 2, 1, 1}, {10, 2, 1, 1}, {1, 2, 1, 1}}};
+const std::vector<std::vector<ov::Shape>> inShapes = {{{10, 2, 1, 1}, {10, 2, 1, 1}, {1, 2, 1, 1}}};
 
-const auto selectTestParams0 = ::testing::Combine(::testing::ValuesIn(shapes), ::testing::ValuesIn(inputPrecision),
-                                                  ::testing::Values(ov::op::AutoBroadcastType::NONE),
-                                                  ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+const auto selectTestParams0 = ::testing::Combine(
+        ::testing::ValuesIn(ov::test::static_shapes_to_test_representation(shapes)), ::testing::ValuesIn(inputTypes),
+        ::testing::Values(ov::op::AutoBroadcastType::NONE), ::testing::Values(ov::test::utils::DEVICE_NPU));
 
 const auto selectTestParams_highDims =
-        ::testing::Combine(::testing::ValuesIn(shapesHighDims), ::testing::ValuesIn(inputPrecision),
-                           ::testing::Values(ov::op::AutoBroadcastType::NONE),
-                           ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+        ::testing::Combine(::testing::ValuesIn(ov::test::static_shapes_to_test_representation(shapesHighDims)),
+                           ::testing::ValuesIn(inputTypes), ::testing::Values(ov::op::AutoBroadcastType::NONE),
+                           ::testing::Values(ov::test::utils::DEVICE_NPU));
 
-const auto selectTestParams1 = ::testing::Combine(::testing::ValuesIn(inShapes), ::testing::ValuesIn(inputPrecision),
-                                                  ::testing::Values(ov::op::AutoBroadcastType::NUMPY),
-                                                  ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+const auto selectTestParams1 = ::testing::Combine(
+        ::testing::ValuesIn(ov::test::static_shapes_to_test_representation(inShapes)), ::testing::ValuesIn(inputTypes),
+        ::testing::Values(ov::op::AutoBroadcastType::NUMPY), ::testing::Values(ov::test::utils::DEVICE_NPU));
 
 // --------- NPU3700 ---------
 
@@ -98,5 +109,10 @@ INSTANTIATE_TEST_CASE_P(DISABLED_smoke_select_highDims, SelectLayerTest_NPU3700,
 
 INSTANTIATE_TEST_CASE_P(smoke_Select, SelectLayerTest_NPU3720, selectTestParams1,
                         SelectLayerTest_NPU3720::getTestCaseName);
+
+// --------- NPU4000 ---------
+
+INSTANTIATE_TEST_CASE_P(smoke_precommit_Select, SelectLayerTest_NPU4000, selectTestParams1,
+                        SelectLayerTest_NPU4000::getTestCaseName);
 
 }  // namespace

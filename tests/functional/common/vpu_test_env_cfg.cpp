@@ -1,12 +1,10 @@
 //
-// Copyright (C) 2022 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include "common/vpu_test_env_cfg.hpp"
-
-#include <details/ie_exception.hpp>
-#include "vpux/al/config/common.hpp"
+#include "intel_npu/al/config/common.hpp"
 #include "vpux/utils/IE/config.hpp"
 
 #include <cstdlib>
@@ -153,6 +151,11 @@ std::string getTestsPlatformFromEnvironmentOr(const std::string& instead) {
     return (!VpuTestEnvConfig::getInstance().IE_NPU_TESTS_PLATFORM.empty())
                    ? VpuTestEnvConfig::getInstance().IE_NPU_TESTS_PLATFORM
                    : instead;
+}
+
+std::string getTestsPlatformCompilerInPlugin() {
+    return getTestsPlatformFromEnvironmentOr(
+            getTestsDeviceNameFromEnvironmentOr(std::string(ov::intel_npu::Platform::AUTO_DETECT)));
 }
 
 std::string getDeviceNameTestCase(const std::string& str) {

@@ -3,7 +3,9 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#include "vpux/compiler/core/layers.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPU/IR/tiling_info.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
 #include <mlir/IR/IRMapping.h>
@@ -196,131 +198,6 @@ void reverseTilesOrderForReverseMode(OutputTiling& tilesY, int64_t seqLengthTile
     }
 }
 
-SmallVector<mlir::Value> vpux::VPU::GRUSequenceOp::reifyTileGRUSequence(VPU::TilingBuilderOpInterface origOp,
-                                                                        const TileInfo& outputYTile,
-                                                                        const TileInfo& outputHoTile,
-                                                                        mlir::OpBuilder& builder, Logger log,
-                                                                        bool isInitialState, mlir::Value prevHo) {
-    log = log.nest(2);
-    log.trace("{0}", outputYTile);
-
-    auto inputTiling = origOp.backInferTileInfo(outputYTile, log);
-    auto& inTiles = inputTiling.tiles;
-    VPUX_THROW_UNLESS(!inTiles.empty(), "Got empty tile information");
-
-    mlir::IRMapping mapper;
-    for (auto p : origOp->getOperands() | indexed) {
-        auto origInput = p.value();
-        auto inputIdx = p.index();
-        const auto valName = printToString("input {0}", inputIdx);
-        if (inputIdx == 1 && !isInitialState) {
-            mapper.map(origInput, prevHo);
-        } else {
-            const auto tiledInput =
-                    vpux::VPU::makeTile(builder, origOp->getLoc(), origInput, inTiles[inputIdx], valName);
-            mapper.map(origInput, tiledInput);
-        }
-    }
-
-    const auto tileLoc = appendLoc(origOp->getLoc(), "output tile {0}", outputYTile.offsets, outputHoTile.offsets);
-    auto* tiledOp = builder.clone(*origOp, mapper);
-    tiledOp->setLoc(tileLoc);
-
-    auto tiledBuilderOp = mlir::dyn_cast<VPU::TilingBuilderOpInterface>(tiledOp);
-    VPUX_THROW_WHEN(tiledBuilderOp == nullptr, "Operation '{0}' doesn't implement TilingBuilderOpInterface",
-                    tiledBuilderOp->getName());
-    tiledBuilderOp.adjustAttrs(inputTiling, outputYTile);
-
-    SmallVector<mlir::Value> ret;
-    for (auto p : origOp->getResults() | indexed) {
-        auto idx = static_cast<uint32_t>(p.index());
-        const auto baseResType = origOp->getResult(idx).getType().cast<vpux::NDTypeInterface>();
-        const TileInfo& tileInfo = idx == 1 ? outputHoTile : outputYTile;
-        auto tiledResType = baseResType.extractDenseTile(tileInfo.offsets, tileInfo.shape);
-        auto tiledRes = tiledOp->getResult(idx);
-        tiledRes.setType(tiledResType);
-        ret.push_back(tiledRes);
-    }
-    return ret;
-}
-
-//
-// applyTileStrategyGRUSequence
-//
-
-mlir::LogicalResult vpux::VPU::GRUSequenceOp::applyTileStrategyGRUSequence(VPU::TilingBuilderOpInterface origOp,
-                                                                           OutputTiling tilesY,
-                                                                           mlir::PatternRewriter& rewriter,
-                                                                           Logger log) {
-    // apply the generated tiling strategy and create tiled operations
-    // insert the tiled pattern with a concat to the IR
-    auto gruSequenceOp = mlir::dyn_cast<VPU::GRUSequenceOp>(origOp.getOperation());
-    VPUX_THROW_UNLESS(gruSequenceOp != nullptr, "The function just for GRUSequence");
-    SmallVector<mlir::Value> resultTileYVals, resultTileHoVals;
-    SmallVector<ShapeRef> resultTileYOffsets, resultTileHoOffsets;
-    auto origOutputYShape = getShape(origOp->getResult(0));
-    auto origSeqLength = origOutputYShape[Dim(2)];
-    auto origDirection = gruSequenceOp.getDirectionAttr().getValue();
-
-    mlir::Value prevHo;
-    bool isInitialState = false;
-    const auto& seqLengthTile = (origSeqLength + tilesY[0].shape[Dim(2)] - 1) / tilesY[0].shape[Dim(2)];
-    // The order of tilesY for GRUSequence with FORWARD is same as the order of tilesY for GRUSequence with REVERSE.
-    // For example, if the shape of output equals [1, 1, 100000, 1], the tiling strategy equals [1, 1, 2, 1].
-    // So, the tilesY will be
-    // Tile 0: shape: [1, 1, 50000, 1],  offsets: [0, 0, 0, 0]
-    // Tile 1: shape: [1, 1, 50000, 1],  offsets: [0, 0, 50000, 0]
-    // The order of tilesY is correct order for FORWARD mode to generate two GRUSequence. But fail for REVERSE mode,
-    // because the initial_hidden_state of first tile GRUSequence is the outputHo of second tile GRUSequence
-    // when direction is REVERSE mode. The function can reverse order of tilesY for REVERSE mode to correct order:
-    // Tile 0: shape: [1, 1, 50000, 1],  offsets: [0, 0, 50000, 0]
-    // Tile 1: shape: [1, 1, 50000, 1],  offsets: [0, 0, 0, 0]
-    reverseTilesOrderForReverseMode(tilesY, seqLengthTile, origDirection);
-    const OutputTiling& tilesHo = inferOutputHoTile(tilesY);
-    for (auto p : tilesY | indexed) {
-        auto idx = p.index();
-        const auto& outputYTile = p.value();
-        const auto& outputHoTile = tilesHo[idx];
-        if (origDirection == IE::RNNSequenceDirection::BIDIRECTIONAL) {
-            isInitialState = (outputYTile.offsets[Dim(1)] == 0 && outputYTile.offsets[Dim(2)] == 0) ||
-                             (outputYTile.offsets[Dim(1)] == 1 &&
-                              origSeqLength - outputYTile.shape[Dim(2)] == outputYTile.offsets[Dim(2)]);
-        } else if (origDirection == IE::RNNSequenceDirection::FORWARD) {
-            isInitialState = outputYTile.offsets[Dim(2)] == 0;
-        } else if (origDirection == IE::RNNSequenceDirection::REVERSE) {
-            isInitialState = origSeqLength - outputYTile.shape[Dim(2)] == outputYTile.offsets[Dim(2)];
-        } else {
-            VPUX_THROW("Unsupported direction mode {0}.", origDirection);
-        }
-        const auto tiledRes = gruSequenceOp.reifyTileGRUSequence(origOp, outputYTile, outputHoTile, rewriter, log,
-                                                                 isInitialState, prevHo);
-        prevHo = tiledRes[1];
-
-        const auto tiledYShape = getShape(tiledRes[0]);
-        const auto tiledHoShape = getShape(tiledRes[1]);
-        VPUX_THROW_UNLESS(tiledYShape == outputYTile.shape,
-                          "Inferred tiled Y output shape '{0}' doesn't match with generated '{1}'", tiledYShape,
-                          outputYTile.shape);
-        VPUX_THROW_UNLESS(tiledHoShape == outputHoTile.shape,
-                          "Inferred tiled Ho output shape '{0}' doesn't match with generated '{1}'", tiledHoShape,
-                          outputHoTile.shape);
-        resultTileYVals.push_back(tiledRes[0]);
-        resultTileYOffsets.push_back(outputYTile.offsets);
-        if ((idx + 1) % seqLengthTile == 0) {
-            resultTileHoVals.push_back(tiledRes[1]);
-            resultTileHoOffsets.push_back(outputHoTile.offsets);
-        }
-    }
-
-    SmallVector<mlir::Value> opsConcat;
-    auto opConcatY = rewriter.create<VPU::ConcatOp>(origOp->getLoc(), origOp->getResult(0).getType(),
-                                                    mlir::ValueRange(resultTileYVals), ArrayRef(resultTileYOffsets));
-    opsConcat.push_back(opConcatY.getOutput());
-    auto opConcatHo = rewriter.create<VPU::ConcatOp>(origOp->getLoc(), origOp->getResult(1).getType(),
-                                                     mlir::ValueRange(resultTileHoVals), ArrayRef(resultTileHoOffsets));
-    opsConcat.push_back(opConcatHo.getOutput());
-
-    rewriter.replaceOp(origOp, opsConcat);
-
-    return mlir::success();
+OutputTiling vpux::VPU::GRUSequenceOp::getOutputTiling(const vpux::TileInfo& firstOutputTile, vpux::Logger /*log*/) {
+    return GRUSequenceOutputTiling(firstOutputTile);
 }

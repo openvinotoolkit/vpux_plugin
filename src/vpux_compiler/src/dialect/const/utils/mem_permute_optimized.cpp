@@ -5,7 +5,7 @@
 
 #include "vpux/compiler/dialect/const/utils/mem_permute_optimized.hpp"
 #include "vpux/compiler/dialect/const/attributes/content.hpp"
-#include "vpux/utils/IE/loop.hpp"
+#include "vpux/compiler/utils/loop.hpp"
 
 using namespace vpux;
 
@@ -56,7 +56,7 @@ struct OvLike5DStrides {
 };
 
 template <typename StorageType>
-void blob_copy_4d_t(vpux::Const::Content& input, vpux::Const::Content& output) {
+void blob_copy_4d_t(vpux::Const::Content& input, vpux::Const::Content& output, mlir::MLIRContext* ctx) {
     const StorageType* srcPtr = reinterpret_cast<const StorageType*>(input.getRawStorageBuf().data());
     StorageType* dstPtr = reinterpret_cast<StorageType*>(output.getRawTempBuf().data());
 
@@ -72,32 +72,28 @@ void blob_copy_4d_t(vpux::Const::Content& input, vpux::Const::Content& output) {
     const auto outputStrides = OvLike4DStrides(output.getType());
     const auto loopPolicy = LoopExecPolicy::Parallel;
     if (input.getType().getDimsOrder() == DimsOrder::NHWC) {
-        loop_1d(loopPolicy, N, [&](size_t n) {
-            for (size_t c = 0; c < C; c++) {
-                StorageType* dst_ptr_l = dstPtr + n * outputStrides.N + c * outputStrides.C;
-                const StorageType* src_ptr_l = srcPtr + n * inputStrides.N + c * inputStrides.C;
-                for (size_t h = 0; h < H; h++) {
-                    const StorageType* src_ptr_l_l = src_ptr_l + h * inputStrides.H;
-                    for (size_t w = 0; w < W; w++) {
-                        *dst_ptr_l = *src_ptr_l_l;
-                        src_ptr_l_l += inputStrides.W;
-                        dst_ptr_l++;
-                    }
+        loop_2d(loopPolicy, ctx, N, C, [&](size_t n, size_t c) {
+            StorageType* dst_ptr_l = dstPtr + n * outputStrides.N + c * outputStrides.C;
+            const StorageType* src_ptr_l = srcPtr + n * inputStrides.N + c * inputStrides.C;
+            for (size_t h = 0; h < H; h++) {
+                const StorageType* src_ptr_l_l = src_ptr_l + h * inputStrides.H;
+                for (size_t w = 0; w < W; w++) {
+                    *dst_ptr_l = *src_ptr_l_l;
+                    src_ptr_l_l += inputStrides.W;
+                    dst_ptr_l++;
                 }
             }
         });
     } else {
-        loop_1d(loopPolicy, N, [&](size_t n) {
-            for (size_t c = 0; c < C; c++) {
-                const StorageType* src_ptr_l = srcPtr + n * inputStrides.N + c * inputStrides.C;
-                StorageType* dst_ptr_l = dstPtr + n * outputStrides.N + c;
-                for (size_t h = 0; h < H; h++) {
-                    const StorageType* src_ptr_l_l = src_ptr_l + h * inputStrides.H;
-                    for (size_t w = 0; w < W; w++) {
-                        *dst_ptr_l = *src_ptr_l_l;
-                        dst_ptr_l += outputStrides.W;
-                        src_ptr_l_l++;
-                    }
+        loop_2d(loopPolicy, ctx, N, C, [&](size_t n, size_t c) {
+            const StorageType* src_ptr_l = srcPtr + n * inputStrides.N + c * inputStrides.C;
+            StorageType* dst_ptr_l = dstPtr + n * outputStrides.N + c;
+            for (size_t h = 0; h < H; h++) {
+                const StorageType* src_ptr_l_l = src_ptr_l + h * inputStrides.H;
+                for (size_t w = 0; w < W; w++) {
+                    *dst_ptr_l = *src_ptr_l_l;
+                    dst_ptr_l += outputStrides.W;
+                    src_ptr_l_l++;
                 }
             }
         });
@@ -111,13 +107,13 @@ inline void blob_copy_4d(vpux::Const::Content& input, vpux::Const::Content& outp
     const size_t elemSizeBytes = elemSize.to<Byte>().count();
     switch (elemSizeBytes) {
     case sizeof(float):
-        blob_copy_4d_t<float>(input, output);
+        blob_copy_4d_t<float>(input, output, input.getStorageElemType().getContext());
         break;
     case sizeof(uint16_t):
-        blob_copy_4d_t<uint16_t>(input, output);
+        blob_copy_4d_t<uint16_t>(input, output, input.getStorageElemType().getContext());
         break;
     case sizeof(uint8_t):
-        blob_copy_4d_t<uint8_t>(input, output);
+        blob_copy_4d_t<uint8_t>(input, output, input.getStorageElemType().getContext());
         break;
     default:
         VPUX_THROW("Unsupported blob 4D transformation for precision {0}", input.getStorageElemType());
@@ -125,7 +121,7 @@ inline void blob_copy_4d(vpux::Const::Content& input, vpux::Const::Content& outp
 }
 
 template <typename StorageType>
-void blob_copy_5d_t(vpux::Const::Content& input, vpux::Const::Content& output) {
+void blob_copy_5d_t(vpux::Const::Content& input, vpux::Const::Content& output, mlir::MLIRContext* ctx) {
     const StorageType* srcPtr = reinterpret_cast<const StorageType*>(input.getRawStorageBuf().data());
     StorageType* dstPtr = reinterpret_cast<StorageType*>(output.getRawTempBuf().data());
 
@@ -142,38 +138,28 @@ void blob_copy_5d_t(vpux::Const::Content& input, vpux::Const::Content& output) {
     const auto outputStrides = OvLike5DStrides(output.getType());
     const auto loopPolicy = LoopExecPolicy::Parallel;
     if (input.getType().getDimsOrder() == DimsOrder::NDHWC) {
-        loop_1d(loopPolicy, N, [&](size_t n) {
-            for (size_t c = 0; c < C; c++) {
-                for (size_t d = 0; d < D; d++) {
-                    StorageType* dst_ptr_l = dstPtr + n * outputStrides.N + c * outputStrides.C + d * outputStrides.D;
-                    const StorageType* src_ptr_l =
-                            srcPtr + n * inputStrides.N + c * inputStrides.C + d * inputStrides.D;
-                    for (size_t h = 0; h < H; h++) {
-                        const StorageType* src_ptr_l_l = src_ptr_l + h * inputStrides.H;
-                        for (size_t w = 0; w < W; w++) {
-                            *dst_ptr_l = *src_ptr_l_l;
-                            src_ptr_l_l += inputStrides.W;
-                            dst_ptr_l++;
-                        }
-                    }
+        loop_3d(loopPolicy, ctx, N, C, D, [&](size_t n, size_t c, size_t d) {
+            StorageType* dst_ptr_l = dstPtr + n * outputStrides.N + c * outputStrides.C + d * outputStrides.D;
+            const StorageType* src_ptr_l = srcPtr + n * inputStrides.N + c * inputStrides.C + d * inputStrides.D;
+            for (size_t h = 0; h < H; h++) {
+                const StorageType* src_ptr_l_l = src_ptr_l + h * inputStrides.H;
+                for (size_t w = 0; w < W; w++) {
+                    *dst_ptr_l = *src_ptr_l_l;
+                    src_ptr_l_l += inputStrides.W;
+                    dst_ptr_l++;
                 }
             }
         });
     } else {
-        loop_1d(loopPolicy, N, [&](size_t n) {
-            for (size_t c = 0; c < C; c++) {
-                for (size_t d = 0; d < D; d++) {
-                    const StorageType* src_ptr_l =
-                            srcPtr + n * inputStrides.N + c * inputStrides.C + d * inputStrides.D;
-                    StorageType* dst_ptr_l = dstPtr + n * outputStrides.N + c + d * outputStrides.D;
-                    for (size_t h = 0; h < H; h++) {
-                        const StorageType* src_ptr_l_l = src_ptr_l + h * inputStrides.H;
-                        for (size_t w = 0; w < W; w++) {
-                            *dst_ptr_l = *src_ptr_l_l;
-                            dst_ptr_l += outputStrides.W;
-                            src_ptr_l_l++;
-                        }
-                    }
+        loop_3d(loopPolicy, ctx, N, C, D, [&](size_t n, size_t c, size_t d) {
+            const StorageType* src_ptr_l = srcPtr + n * inputStrides.N + c * inputStrides.C + d * inputStrides.D;
+            StorageType* dst_ptr_l = dstPtr + n * outputStrides.N + c + d * outputStrides.D;
+            for (size_t h = 0; h < H; h++) {
+                const StorageType* src_ptr_l_l = src_ptr_l + h * inputStrides.H;
+                for (size_t w = 0; w < W; w++) {
+                    *dst_ptr_l = *src_ptr_l_l;
+                    dst_ptr_l += outputStrides.W;
+                    src_ptr_l_l++;
                 }
             }
         });
@@ -187,13 +173,13 @@ inline void blob_copy_5d(vpux::Const::Content& input, vpux::Const::Content& outp
     const size_t elemSizeBytes = elemSizeBits / CHAR_BIT;
     switch (elemSizeBytes) {
     case sizeof(float):
-        blob_copy_5d_t<float>(input, output);
+        blob_copy_5d_t<float>(input, output, input.getStorageElemType().getContext());
         break;
     case sizeof(uint16_t):
-        blob_copy_5d_t<uint16_t>(input, output);
+        blob_copy_5d_t<uint16_t>(input, output, input.getStorageElemType().getContext());
         break;
     case sizeof(uint8_t):
-        blob_copy_5d_t<uint8_t>(input, output);
+        blob_copy_5d_t<uint8_t>(input, output, input.getStorageElemType().getContext());
         break;
     default:
         VPUX_THROW("Unsupported blob 5D transformation for precision {0}", input.getStorageElemType());

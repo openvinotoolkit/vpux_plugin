@@ -23,13 +23,13 @@ mlir::LogicalResult vpux::VPU::MVN1SumOp::inferReturnTypes(mlir::MLIRContext* ct
     const auto outN = iShape[Dims4D::Act::N.ind()];
     auto outC = op.getAcrossChannels() ? 1 : iShape[Dims4D::Act::C.ind()];
     auto outW = op.getNormalizeVariance() ? 2 : 1;  // {sum, sqSum} or {sum}
-    SmallVector<int64_t> oShape{outN, outC, outW};
+    SmallVector<int64_t> oShape{outN, outC, 1, outW};
 
     // output-precision = f32, irrespective of input-precision
-    // output-layout = CWH, irrespective of input-layout (optimal for NHWC main tensor layout)
+    // output-layout = NHWC
     const auto typeComponents = TypeComponents()
                                         .setShape(Shape(oShape))
-                                        .setDimsOrder(DimsOrder::CWH)
+                                        .setDimsOrder(DimsOrder::NHWC)
                                         .setElementType(mlir::Float32Type::get(ctx));
 
     auto oType = iType.changeTypeComponents(typeComponents);

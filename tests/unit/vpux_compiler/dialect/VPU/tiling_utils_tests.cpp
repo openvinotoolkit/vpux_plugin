@@ -4,10 +4,16 @@
 //
 
 #include "vpux/compiler/core/tiling.hpp"
+#include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
+
+#include <mlir/Parser/Parser.h>
+#include "common/utils.hpp"
 
 #include <gtest/gtest.h>
 
+using vpux::VPU::ArchKind;
 using namespace vpux;
+using MLIR_VPU_doesTopKLayerFitIntoCMX = MLIR_UnitBase;
 
 const int64_t numDPUs = 5;
 
@@ -120,4 +126,78 @@ TEST(MLIR_VPU_TilingUtils, BackInferPadsTile) {
         compareInferredPads(inShape, padInfo, kernelSize, kernelStrides,
                             /*tileShape=*/{1, 16, 1, 7}, /*tileOffsets=*/{0, 0, 6, 0}, /*expectedPads=*/{2, 1, 0, 1});
     }
+}
+
+TEST_F(MLIR_VPU_doesTopKLayerFitIntoCMX, TopKfitsCMX) {
+    mlir::MLIRContext ctx(registry);
+    constexpr StringLiteral inputIR = R"(
+        #loc0 = loc(unknown)
+        module @main {
+            func.func @main(%arg0: tensor<1x1x1x100xf16>) -> tensor<1x1x1x1xsi32> {
+                %output_values, %target_shape = VPU.TopK(%arg0)
+                {axis = 3 : i64, element_type = si32, k_value = 1 : i64, mode = #IE.topk_mode<MAX>, sort =
+                #IE.topk_sort_type<NONE>} : tensor<1x1x1x100xf16> -> tensor<1x1x1x1xf16>, tensor<1x1x1x1xsi32>
+            return %target_shape : tensor<1x1x1x1xsi32>
+            }
+        }
+    )";
+
+    auto module = mlir::parseSourceString<mlir::ModuleOp>(inputIR, &ctx);
+    ASSERT_TRUE(module.get() != nullptr);
+
+    auto func = module.get().lookupSymbol<mlir::func::FuncOp>("main");
+    ASSERT_TRUE(func != nullptr);
+
+    const auto archKind = ArchKind::NPU37XX;
+
+    mlir::PassManager pm(module.get()->getName(), mlir::OpPassManager::Nesting::Implicit);
+    auto initCompilerOptions = VPU::InitCompilerOptions(archKind, VPU::CompilationMode::DefaultHW);
+
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, vpux::Logger::global());
+
+    ASSERT_TRUE(mlir::succeeded(pm.run(module.get())));
+
+    func->walk([&](VPU::TopKOp topk) {
+        auto strategy = VPU::MultiClusterStrategy::Clustering;
+        auto reservedMem = Byte(0);
+        auto doesLayerFitIntoCMX = topk.doesLayerFitIntoCMX(strategy, reservedMem);
+        EXPECT_EQ(doesLayerFitIntoCMX, true);
+    });
+}
+
+TEST_F(MLIR_VPU_doesTopKLayerFitIntoCMX, TopKdoesNotFitCMX) {
+    mlir::MLIRContext ctx(registry);
+    constexpr StringLiteral inputIR = R"(
+        #loc0 = loc(unknown)
+        module @main {
+            func.func @main(%arg0: tensor<1x1x200x32000xf16>) -> tensor<1x1x200x1xsi32> {
+                %output_values, %target_shape = VPU.TopK(%arg0)
+                {axis = 3 : i64, element_type = si32, k_value = 1 : i64, mode = #IE.topk_mode<MAX>, sort =
+                #IE.topk_sort_type<NONE>} : tensor<1x1x200x32000xf16> -> tensor<1x1x200x1xf16>, tensor<1x1x200x1xsi32>
+            return %target_shape : tensor<1x1x200x1xsi32>
+            }
+        }
+    )";
+
+    auto module = mlir::parseSourceString<mlir::ModuleOp>(inputIR, &ctx);
+    ASSERT_TRUE(module.get() != nullptr);
+
+    auto func = module.get().lookupSymbol<mlir::func::FuncOp>("main");
+    ASSERT_TRUE(func != nullptr);
+
+    const auto archKind = ArchKind::NPU37XX;
+
+    mlir::PassManager pm(module.get()->getName(), mlir::OpPassManager::Nesting::Implicit);
+    auto initCompilerOptions = VPU::InitCompilerOptions(archKind, VPU::CompilationMode::DefaultHW);
+
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, vpux::Logger::global());
+
+    ASSERT_TRUE(mlir::succeeded(pm.run(module.get())));
+
+    func->walk([&](VPU::TopKOp topk) {
+        auto strategy = VPU::MultiClusterStrategy::Clustering;
+        auto reservedMem = Byte(0);
+        auto doesLayerFitIntoCMX = topk.doesLayerFitIntoCMX(strategy, reservedMem);
+        EXPECT_EQ(doesLayerFitIntoCMX, false);
+    });
 }

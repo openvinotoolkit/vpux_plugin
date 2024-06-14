@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -82,6 +82,33 @@ func.func @FakeQuantConv2dWithLeakyRelu15Test(%arg0: tensor<1x16x4x4xf16>) -> te
     // CHECK-NOT:      post_op = #IE.PostOp<name = "IE.LeakyRelu", attrs = {negative_slope = 1.500000e-01 : f64}>
     // CHECK-SAME:     strides = [1, 1]
     // CHECK-NEXT:   IE.LeakyRelu
+}
+
+// -----
+
+func.func @MaxPoolWithReluTest(%arg0: tensor<1x16x4x4xf16>) -> tensor<1x16x3x3xf16> {
+    %0 = IE.MaxPool(%arg0)
+         {
+             kernel_size = [2, 2],
+             pads_begin = [0, 0],
+             pads_end = [0, 0],
+             strides = [1, 1],
+             rounding_type = #IE.rounding_type<CEIL>
+         } :
+         tensor<1x16x4x4xf16> -> tensor<1x16x3x3xf16>
+
+    %1 = IE.ReLU(%0) :
+        tensor<1x16x3x3xf16> -> tensor<1x16x3x3xf16>
+
+    return %1 : tensor<1x16x3x3xf16>
+
+    // CHECK:       IE.MaxPool
+    // CHECK-SAME:     kernel_size = [2, 2]
+    // CHECK-SAME:     pads_begin = [0, 0]
+    // CHECK-SAME:     pads_end = [0, 0]
+    // CHECK-SAME:     rounding_type = #IE.rounding_type<CEIL>
+    // CHECK-SAME:     strides = [1, 1]
+    // CHECK-NOT:   IE.ReLU
 }
 
 // -----

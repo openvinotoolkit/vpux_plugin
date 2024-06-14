@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -32,8 +32,8 @@ module @VPU.SW {
     // `memref` will be translated to `MemRefData`, while raw scalars will be translated as is.
     func.func private @builtin_YuvToRgb(%input : memref<*xf16>, %output : memref<*xf16>, %rgbFormat : i64)
         attributes {
-            VPU.kernel_code = "single_shave_convert_color_nv12_to_rgb_single_plane.cpp",
-            VPU.kernel_entry = "single_shave_convert_color_nv12_to_rgb_single_plane"
+            VPU.kernel_code = "convert_color_nv12_to_rgb_single_plane.cpp",
+            VPU.kernel_entry = "convert_color_nv12_to_rgb_single_plane"
         }
 }
 
@@ -51,7 +51,7 @@ func.func @main(%0: memref<1x360x320x1xf16>, %1: memref<1x240x320x3xf16>) -> mem
 
     // Genetic Kernel information for the scheduler.
     VPURT.Task waits(%b0  : !VPURT.Barrier) updates(%b1  : !VPURT.Barrier) {
-        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
                     @VPU.SW::@builtin_YuvToRgb            // The reference to the Kernel function.
                     inputs(%in_tile0_cmx as %arg0: memref<1x360x320x1xf16, [@CMX_NN, 0]>)     // Inputs/outputs buffers for generic operation interface
                     outputs(%out_tile0_cmx as %arg1: memref<1x240x320x3xf16, [@CMX_NN, 0]>)   // and their mapping to inner region.

@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -98,7 +98,7 @@ func.func @PermuteQuantizeIncompatibleArch(%arg0: tensor<1x3x224x224xf16>) -> te
 
     return %0 : tensor<1x4x224x224x!qElemType, {order = #NHWC}>
 
-    // CHECK-NOT:   VPU.NCE.PermuteQuantize
+    // CHECK-NOT:   VPU.NCE.Permute
     // CHECK-NOT:   VPU.Reshape
     // CHECK-NOT:   IE.AffineReshape
 

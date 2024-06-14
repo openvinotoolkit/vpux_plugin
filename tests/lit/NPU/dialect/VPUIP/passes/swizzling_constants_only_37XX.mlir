@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -15,17 +15,17 @@
 func.func @SetSwizzlingForConstantsOnly(%in : memref<1x16x56x56xf16, #NHWC, @DDR>) -> memref<1x16x56x56xf16, #NHWC, @DDR> {
     %weight_table = const.Declare !WeightsTable_DDR = dense<1> : tensor<16x1x1x4xsi32>, [#const.Reorder<#NHWC>]
     %weights = const.Declare !Weights_DDR = dense<1.0> : tensor<16x16x1x1xf16>, [#const.Reorder<#NHWC>]
-    
+
     %buf0 = memref.alloc() : memref<1x16x56x56xf16, #NHWC, @CMX_NN>
     %buf1 = memref.alloc() : memref<1x16x56x56xf16, #NHWC, @CMX_NN>
     %buf2 = memref.alloc() : memref<1x16x56x56xf16, #NHWC, @CMX_NN>
     %buf3 = memref.alloc() : memref<1x16x56x56xf16, #NHWC, @DDR>
     %buf5 = memref.alloc() : !WeightsTableStub_CMX
     %buf6 = memref.alloc() : !WeightsStub_CMX
-    
+
     %5 = VPUIP.Copy inputs(%weight_table : !WeightsTable_DDR) outputs(%buf5 : !WeightsTableStub_CMX) -> !WeightsTableStub_CMX
     %6 = VPUIP.Copy inputs(%weights : !Weights_DDR) outputs(%buf6 : !WeightsStub_CMX) -> !WeightsStub_CMX
-    
+
     %0 = VPUIP.Copy
             inputs(%in : memref<1x16x56x56xf16, #NHWC, @DDR>)
             outputs(%buf0 : memref<1x16x56x56xf16, #NHWC, @CMX_NN>)
@@ -93,12 +93,12 @@ func.func @SetSwizzlingForConstantsOnly(%in : memref<1x16x56x56xf16, #NHWC, @DDR
     return %3 : memref<1x16x56x56xf16, #NHWC, @DDR>
 
     // Verify that alignment is set only for constants
-    
-    // CHECK:   VPUIP.NCEClusterTask {activation_window_channel_length = 27 : i64, kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, kernel_size = [1, 1], kernel_strides = [1, 1], task_type = #VPUIP.nce_task_type<CONV>} 
-    // CHECK:   input({{[^:]+}} : memref<1x16x56x56xf16, #NHWC, @CMX_NN>) 
-    // CHECK:   weights({{[^:]+}} : memref<16x16x1x1xf16, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 512 : i64>}, @CMX_NN>) 
-    // CHECK:   weight_table({{[^:]+}} : memref<16x1x1x4xsi32, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 512 : i64>}, @CMX_NN>) 
-    // CHECK:   parent_input({{[^:]+}} : memref<1x16x56x56xf16, #NHWC, @CMX_NN>) 
-    // CHECK:   parent_output({{[^:]+}} : memref<1x16x56x56xf16, #NHWC, @CMX_NN>) 
+
+    // CHECK:   VPUIP.NCEClusterTask {activation_window_channel_length = 27 : i64, kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, kernel_size = [1, 1], kernel_strides = [1, 1], task_type = #VPUIP.nce_task_type<CONV>}
+    // CHECK:   input({{[^:]+}} : memref<1x16x56x56xf16, #NHWC, @CMX_NN>)
+    // CHECK:   weights({{[^:]+}} : memref<16x16x1x1xf16, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 512 : i64>}, @CMX_NN>)
+    // CHECK:   weight_table({{[^:]+}} : memref<16x1x1x4xsi32, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 512 : i64>}, @CMX_NN>)
+    // CHECK:   parent_input({{[^:]+}} : memref<1x16x56x56xf16, #NHWC, @CMX_NN>)
+    // CHECK:   parent_output({{[^:]+}} : memref<1x16x56x56xf16, #NHWC, @CMX_NN>)
     // CHECK:   outputs({{[^:]+}} : memref<1x16x56x56xf16, #NHWC, @CMX_NN>) -> memref<1x16x56x56xf16, #NHWC, @CMX_NN>
 }

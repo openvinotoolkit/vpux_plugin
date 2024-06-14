@@ -6,6 +6,7 @@
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 
 #include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/explicit_distribution_utils.hpp"
 #include "vpux/compiler/utils/attributes_utils.hpp"
 
@@ -125,7 +126,7 @@ mlir::FailureOr<OutputTiling> vpux::VPU::TopKOp::getTilingStrategy(TilingMode ti
 // ClusteredOpInterface
 //
 
-bool vpux::VPU::TopKOp::checkStrategyCompatibility(VPU::MultiClusterStrategy strategy) {
+bool vpux::VPU::TopKOp::checkStrategyCompatibility(VPU::MultiClusterStrategy strategy, size_t) {
     const auto inputType = getInput().getType().cast<vpux::NDTypeInterface>();
     const auto inShape = inputType.getShape();
     int64_t axis = getAxisAttr().getValue().getSExtValue();
@@ -155,11 +156,24 @@ bool vpux::VPU::TopKOp::checkStrategyCompatibility(VPU::MultiClusterStrategy str
 
 vpux::VPU::DistributedTensorAttr vpux::VPU::TopKOp::getExplicitDistributedTensorAttr(
         vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, mlir::ArrayAttr numTiles,
-        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::ArrayAttr /*kernel*/,
-        vpux::VPU::PaddingAttr /*pad*/, mlir::ArrayAttr /*stride*/, mlir::UnitAttr uniformDistributedSegments) {
+        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::UnitAttr uniformDistributedSegments,
+        const vpux::VPU::OverlapDistributionParams& /*overlapParams*/) {
     return vpux::VPU::getSWExplicitDistributedTensorAttr(mlir::dyn_cast<VPU::SWOpInterface>(getOperation()), shape,
                                                          distributionMode, numTiles, numClusters, alignment,
                                                          uniformDistributedSegments);
+}
+
+bool VPU::TopKOp::doesLayerFitIntoCMX(VPU::MultiClusterStrategy strategy, Byte reservedMem) {
+    auto topKOp = mlir::cast<VPU::TopKOp>(getOperation());
+    const auto outputType = topKOp->getResult(0).getType().cast<vpux::NDTypeInterface>();
+    auto numClusters = VPU::getOptimalNumClusters(topKOp, outputType.getShape()[Dims4D::Act::C], strategy);
+    auto distInput1Type =
+            getDistributedActivationTypeFromOp(topKOp, topKOp.getInput().getType(), numClusters, strategy);
+    auto distOutput1Type =
+            getDistributedOutputTypeFromOp(topKOp, topKOp.getOutputValues().getType(), numClusters, strategy);
+    auto distOutput2Type =
+            getDistributedOutputTypeFromOp(topKOp, topKOp.getTargetShape().getType(), numClusters, strategy);
+    return fitIntoCMX({distInput1Type, distOutput1Type, distOutput2Type}, reservedMem);
 }
 
 //

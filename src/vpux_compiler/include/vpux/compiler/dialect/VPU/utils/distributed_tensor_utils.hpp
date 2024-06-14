@@ -11,7 +11,7 @@
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
-#include "vpux/compiler/dialect/VPUIP/utils.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
 #include "vpux/compiler/utils/logging.hpp"
 #include "vpux/utils/core/checked_cast.hpp"
 #include "vpux/utils/core/numeric.hpp"
@@ -27,10 +27,15 @@ constexpr int64_t KMB_DPU_CHANNELS_ALIGNMENT = 16;
 constexpr StringLiteral multiClusterStrategy = "multiClusterStrategy";
 const SmallVector<int64_t> DISTRIBUTED_C_ALIGNMENT = SmallVector<int64_t>{1, 16, 1, 1};
 
-bool isSegmentedSWOp(mlir::Operation* op);
+VPU::DistributedTensorAttr updateSliceLikeOpsAlignment(mlir::MLIRContext* ctx, vpux::ShapeRef inShape,
+                                                       vpux::ShapeRef sliceShape,
+                                                       VPU::DistributedTensorAttr originDistribution);
+bool isSOCSegmentedOp(mlir::Operation* op);
+bool isSOCSegmentedSWOp(mlir::Operation* op);
+bool isSOCSegmentedNCEOp(mlir::Operation* op);
 bool inputProducersCompatible(mlir::Operation* op, mlir::DenseSet<mlir::Operation*> handledUsers = {});
 bool isSegmentedInputCompatible(mlir::Operation* op, mlir::DenseSet<mlir::Operation*> handledUsers = {});
-bool isSegmentedOutputCompatible(mlir::Operation* op);
+bool isSOKSegmentedOutputCompatible(mlir::Operation* op);
 int64_t getNumberOfClustersForSOKToAvoidAlignment(int64_t outputChannels, int64_t numClustersForCompilation,
                                                   bool uniformDistributedSegments = true);
 int64_t getNumberOfClustersForSpatialDim(int64_t outputSpatialDim, int64_t numClustersForCompilation,
@@ -79,68 +84,79 @@ NCEClusterTilingOp createDistributedCopyIn(VPU::ClusteredOpInterface clusteredOp
                                            mlir::ArrayAttr alignment, VPU::MultiClusterStrategy strategy,
                                            const bool hasExplicitDistributedAttr);
 
+vpux::NDTypeInterface getDistributedTypeFromInput(VPU::ClusteredOpInterface clusteredOp, mlir::Value input,
+                                                  DistributionMode distributionMode, mlir::ArrayAttr numTiles,
+                                                  mlir::ArrayAttr alignment, VPU::MultiClusterStrategy strategy,
+                                                  const bool hasExplicitDistributedAttr);
+
+mlir::UnitAttr getUniformDistributedSegments(VPU::ClusteredOpInterface clusteredOp, ArrayRef<int64_t> shape,
+                                             VPU::DistributionMode distributionMode, mlir::ArrayAttr numTiles,
+                                             mlir::ArrayAttr alignment);
+
 VPU::DistributedTensorType createExplicitDistributedTensorType(
         VPU::ClusteredOpInterface clusteredOp, vpux::NDTypeInterface inputType, DistributionMode distributionMode,
         mlir::ArrayAttr numTiles, mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment,
-        mlir::ArrayAttr kernel = nullptr, VPU::PaddingAttr pad = nullptr, mlir::ArrayAttr stride = nullptr);
+        mlir::UnitAttr uniformDistributedSegments, const VPU::OverlapDistributionParams& overlapParams);
 
-VPU::DistributedTensorType createDistributedTensorType(
-        VPU::ClusteredOpInterface clusteredOp, vpux::NDTypeInterface inputType, DistributionMode distributionMode,
-        mlir::ArrayAttr numTiles, mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment,
-        const bool hasExplicitDistributedAttr, mlir::ArrayAttr kernel = nullptr, VPU::PaddingAttr pad = nullptr,
-        mlir::ArrayAttr stride = nullptr, mlir::UnitAttr equalComputeAndMemoryView = nullptr);
+VPU::DistributedTensorType createDistributedTensorType(VPU::ClusteredOpInterface clusteredOp,
+                                                       vpux::NDTypeInterface inputType,
+                                                       DistributionMode distributionMode, mlir::ArrayAttr numTiles,
+                                                       mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment,
+                                                       mlir::UnitAttr uniformDistributedSegments,
+                                                       const bool hasExplicitDistributedAttr,
+                                                       const VPU::OverlapDistributionParams& overlapParams);
 
 VPU::DistributedTensorType createDistributedTensorType(VPU::NCEOpInterface nceOp, vpux::NDTypeInterface inputType,
                                                        DistributionMode distributionMode, mlir::ArrayAttr numTiles,
                                                        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment,
+                                                       mlir::UnitAttr uniformDistributedSegments,
                                                        mlir::ArrayAttr kernel = nullptr, VPU::PaddingAttr pad = nullptr,
                                                        mlir::ArrayAttr stride = nullptr,
                                                        mlir::UnitAttr equalComputeAndMemoryView = nullptr);
 
-VPU::SparseTensorType createSparseTensorDistributedType(
-        VPU::ClusteredOpInterface clusteredOp, VPU::SparseTensorType sparseInputType, DistributionMode distributionMode,
-        mlir::ArrayAttr numTiles, mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment,
-        const bool hasExplicitDistributedAttr, mlir::ArrayAttr kernelAttr = nullptr, VPU::PaddingAttr padAttr = nullptr,
-        mlir::ArrayAttr strideAttr = nullptr);
+VPU::SparseTensorType createSparseTensorDistributedType(VPU::ClusteredOpInterface clusteredOp,
+                                                        VPU::SparseTensorType sparseInputType,
+                                                        DistributionMode distributionMode, mlir::ArrayAttr numTiles,
+                                                        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment,
+                                                        mlir::UnitAttr uniformDistributedSegments,
+                                                        const bool hasExplicitDistributedAttr,
+                                                        const VPU::OverlapDistributionParams& overlapParams);
 
-DistributedTensorType createDistributedTensorType(VPU::ConcatOp viewLikeOp, vpux::NDTypeInterface inputType,
-                                                  DistributionMode distributionMode, mlir::ArrayAttr numTiles,
-                                                  mlir::IntegerAttr optimalNumberOfClusters, mlir::ArrayAttr alignment,
-                                                  mlir::ArrayAttr kernel = nullptr, VPU::PaddingAttr pad = nullptr,
-                                                  mlir::ArrayAttr stride = nullptr);
+VPU::DistributedTensorType createDistributedTensorType(mlir::Operation* viewLikeOp, vpux::NDTypeInterface inputType,
+                                                       DistributionMode distributionMode, mlir::ArrayAttr numTiles,
+                                                       mlir::IntegerAttr optimalNumberOfClusters,
+                                                       mlir::ArrayAttr alignment,
+                                                       mlir::UnitAttr uniformDistributedSegments,
+                                                       mlir::ArrayAttr kernel = nullptr, VPU::PaddingAttr pad = nullptr,
+                                                       mlir::ArrayAttr stride = nullptr);
 
 VPU::DistributedTensorType createDistributedTensorType(VPU::SWOpInterface swOp, vpux::NDTypeInterface inputType,
                                                        DistributionMode distributionMode, mlir::ArrayAttr numTiles,
-                                                       mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment);
+                                                       mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment,
+                                                       mlir::UnitAttr uniformDistributedSegments);
 
-VPU::DistributedTypeInterface getDistributedActivationTypeFromOp(VPU::ClusteredOpInterface clusteredOp,
-                                                                 vpux::NDTypeInterface inputType,
-                                                                 mlir::IntegerAttr numClusters,
-                                                                 vpux::NDTypeInterface outputType = nullptr);
+VPU::DistributedTypeInterface getDistributedActivationTypeFromOp(
+        VPU::ClusteredOpInterface clusteredOp, vpux::NDTypeInterface inputType, mlir::IntegerAttr numClusters,
+        vpux::NDTypeInterface outputType = nullptr, const vpux::TileInfo& tileInfo = vpux::TileInfo(ShapeRef()));
 VPU::DistributedTypeInterface getDistributedFilterTypeFromOp(VPU::NCEOpInterface nceOp, vpux::NDTypeInterface inputType,
                                                              mlir::IntegerAttr numClusters);
 
-VPU::DistributedTypeInterface getDistributedOutputTypeFromOp(VPU::ClusteredOpInterface clusteredOp,
-                                                             vpux::NDTypeInterface outputType,
-                                                             mlir::IntegerAttr numClusters,
-                                                             vpux::NDTypeInterface inputType = nullptr,
-                                                             const bool hasExplicitDistributedAttr = false);
+VPU::DistributedTypeInterface getDistributedOutputTypeFromOp(
+        VPU::ClusteredOpInterface clusteredOp, vpux::NDTypeInterface outputType, mlir::IntegerAttr numClusters,
+        vpux::NDTypeInterface inputType = nullptr, const vpux::TileInfo& tileInfo = vpux::TileInfo(ShapeRef()),
+        const bool hasExplicitDistributedAttr = false);
 
-VPU::DistributedTypeInterface getDistributedActivationTypeFromOp(VPU::ClusteredOpInterface clusteredOp,
-                                                                 vpux::NDTypeInterface inputType,
-                                                                 mlir::IntegerAttr numClusters,
-                                                                 VPU::MultiClusterStrategy customStrategy,
-                                                                 mlir::ArrayAttr customAlignment = nullptr,
-                                                                 vpux::NDTypeInterface outputType = nullptr);
+VPU::DistributedTypeInterface getDistributedActivationTypeFromOp(
+        VPU::ClusteredOpInterface clusteredOp, vpux::NDTypeInterface inputType, mlir::IntegerAttr numClusters,
+        VPU::MultiClusterStrategy customStrategy, mlir::ArrayAttr customAlignment = nullptr,
+        vpux::NDTypeInterface outputType = nullptr, const vpux::TileInfo& tileInfo = vpux::TileInfo(ShapeRef()));
 VPU::DistributedTypeInterface getDistributedFilterTypeFromOp(VPU::NCEOpInterface nceOp, vpux::NDTypeInterface inputType,
                                                              mlir::IntegerAttr numClusters,
                                                              VPU::MultiClusterStrategy customStrategy);
-VPU::DistributedTypeInterface getDistributedOutputTypeFromOp(VPU::ClusteredOpInterface clusteredOp,
-                                                             vpux::NDTypeInterface outputType,
-                                                             mlir::IntegerAttr numClusters,
-                                                             VPU::MultiClusterStrategy customStrategy,
-                                                             vpux::NDTypeInterface inputType = nullptr,
-                                                             const bool hasExplicitDistributedAttr = false);
+VPU::DistributedTypeInterface getDistributedOutputTypeFromOp(
+        VPU::ClusteredOpInterface clusteredOp, vpux::NDTypeInterface outputType, mlir::IntegerAttr numClusters,
+        VPU::MultiClusterStrategy customStrategy, vpux::NDTypeInterface inputType = nullptr,
+        const vpux::TileInfo& tileInfo = vpux::TileInfo(ShapeRef()), const bool hasExplicitDistributedAttr = false);
 
 vpux::NDTypeInterface getDistributedOutputTensorType(VPU::ClusteredOpInterface clusteredOp,
                                                      mlir::IntegerAttr numClusters, VPU::MultiClusterStrategy strategy,
@@ -149,6 +165,7 @@ vpux::NDTypeInterface getDistributedOutputTensorType(VPU::ClusteredOpInterface c
 
 bool isSegmentedOverlappedAxisSameAsSliceAxis(mlir::ArrayAttr numTiles, ArrayRef<int64_t> inputShape,
                                               ArrayRef<int64_t> sliceShape);
+mlir::Type getCompactTypeFromDistributed(mlir::Type originalType);
 
 Shape getLargestClusterOutputShape(VPU::ClusteredOpInterface clusteredOp, VPU::MultiClusterStrategy strategy);
 bool isDWOpAndNeedsAlign(ArchKind arch, VPUIP::NCETaskType nceTaskType);
@@ -163,8 +180,7 @@ bool isSWOpWithAlignedOutputChannelReq(VPU::ClusteredOpInterface swOp, vpux::NDT
 VPU::DistributedTensorType composeDistributedType(VPU::ClusteredOpInterface permuteOp,
                                                   const VPU::DistributedTensorType distType,
                                                   const vpux::NDTypeInterface ndType, const mlir::ArrayAttr tileOverDim,
-                                                  const mlir::ArrayAttr fusedKernel, const mlir::ArrayAttr fusedStrides,
-                                                  const PaddingAttr fusedPads,
+                                                  const OverlapDistributionParams& fusedOverlapParams,
                                                   bool enableExplicitDistributedTensorAttr = false,
                                                   const mlir::UnitAttr equalComputeAndMemoryView = nullptr);
 mlir::Operation* getNextCompressConv(mlir::Operation* nceOp);
@@ -187,5 +203,22 @@ mlir::Value getDistributedOperandFromNCEClusterTiling(T clusterOp, mlir::Value i
     return clusterOp.getOperand(operandNum);
 }
 
+inline bool isDuplicatedType(VPU::DistributionMode mode) {
+    return VPU::bitEnumContainsAny(mode, DistributionMode::DUPLICATED) ||
+           VPU::bitEnumContainsAny(mode, DistributionMode::MULTICASTED);
+}
+
+/**
+ * @brief Check if the distributed mode is SEGMENTED
+ *        or OVERLAPPED but no actual overlapped region
+ */
+bool isSegmentedLikeMode(VPU::DistributedTensorType distributedType);
+
+/**
+ * @brief OVERLAPPED cluster tiling is only supported for dimensions H and W
+ *        If it is actually SEGMENTED, this function can be used to replace the mode with SEGMENTED
+ */
+mlir::FailureOr<VPU::DistributedTensorAttr> legalizeCastedDistribution(VPU::DistributedTensorAttr castedDistribution,
+                                                                       mlir::MLIRContext* ctx);
 }  // namespace VPU
 }  // namespace vpux

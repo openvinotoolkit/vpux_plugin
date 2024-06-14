@@ -13,21 +13,21 @@ using namespace vpux;
 //
 
 void vpux::VPU::GroupSparseTensorOp::build(mlir::OpBuilder& builder, mlir::OperationState& state, mlir::Value data,
-                                           bool isWeights, VPU::CompressionSchemeAttr compressionScheme) {
-    build(builder, state, data, nullptr, nullptr, isWeights, compressionScheme);
+                                           bool isWeights, VPU::SparsityCompressionAttr sparsityCompression) {
+    build(builder, state, data, nullptr, nullptr, isWeights, sparsityCompression);
 }
 
 void vpux::VPU::GroupSparseTensorOp::build(mlir::OpBuilder& builder, mlir::OperationState& state, mlir::Value data,
                                            mlir::Value sparsityMap, bool isWeights,
-                                           VPU::CompressionSchemeAttr compressionScheme) {
-    build(builder, state, data, sparsityMap, nullptr, isWeights, compressionScheme);
+                                           VPU::SparsityCompressionAttr sparsityCompression) {
+    build(builder, state, data, sparsityMap, nullptr, isWeights, sparsityCompression);
 }
 
 void vpux::VPU::GroupSparseTensorOp::build(mlir::OpBuilder& builder, mlir::OperationState& state, mlir::Value data,
                                            mlir::Value sparsityMap, mlir::Value storageElementTable, bool isWeights,
-                                           VPU::CompressionSchemeAttr compressionScheme) {
+                                           VPU::SparsityCompressionAttr sparsityCompression) {
     const auto isWeightsAttr = isWeights ? mlir::UnitAttr::get(builder.getContext()) : nullptr;
-    build(builder, state, data, sparsityMap, storageElementTable, isWeightsAttr, compressionScheme, nullptr);
+    build(builder, state, data, sparsityMap, storageElementTable, isWeightsAttr, sparsityCompression, nullptr);
 }
 
 void vpux::VPU::GroupSparseTensorOp::build(mlir::OpBuilder& builder, mlir::OperationState& state, mlir::Value data,
@@ -60,7 +60,7 @@ mlir::LogicalResult vpux::VPU::GroupSparseTensorOp::inferReturnTypes(mlir::MLIRC
 
     inferredReturnTypes.push_back(
             VPU::SparseTensorType::get(dataType, sparsityMapType, storageElementTableType, groupOp.getIsWeightsAttr(),
-                                       groupOp.getCompressionSchemeAttr(), groupOp.getSeAttrAttr()));
+                                       groupOp.getSparsityCompressionAttr(), groupOp.getSeAttrAttr()));
 
     return mlir::success();
 }
@@ -124,10 +124,10 @@ mlir::LogicalResult MoveViewLikeOps::matchAndRewrite(VPU::GroupSparseTensorOp or
             const auto sliceSizes = parseIntArrayAttr<int64_t>(sliceUserOp.getStaticSizes());
 
             auto seAttr = origOp.getSeAttr().value_or(nullptr);
-            auto compressionSchemeAttr = origOp.getCompressionScheme().value_or(nullptr);
-            if (compressionSchemeAttr != nullptr) {
-                compressionSchemeAttr =
-                        VPU::tileCompressionScheme(compressionSchemeAttr, Shape(sliceOffsets), Shape(sliceSizes));
+            auto sparsityCompressionAttr = origOp.getSparsityCompression().value_or(nullptr);
+            if (sparsityCompressionAttr != nullptr) {
+                sparsityCompressionAttr =
+                        VPU::tileSparsityCompression(sparsityCompressionAttr, Shape(sliceOffsets), Shape(sliceSizes));
             }
 
             auto rewriteInput = [&](mlir::Value value, ShapeRef offsets, ShapeRef sizes) {
@@ -181,7 +181,7 @@ mlir::LogicalResult MoveViewLikeOps::matchAndRewrite(VPU::GroupSparseTensorOp or
             }
             rewriter.replaceOpWithNewOp<VPU::GroupSparseTensorOp>(sliceUserOp, newDataValue, newSparsityMapValue,
                                                                   newSETableValue, origOp.getIsWeightsAttr(),
-                                                                  compressionSchemeAttr, seAttr);
+                                                                  sparsityCompressionAttr, seAttr);
         }
     }
 
@@ -267,7 +267,7 @@ void vpux::VPU::GroupSparseTensorOp::adjustAttrs(const TilingInfo& inputTiling, 
                 getStorageElementTable() != nullptr ? getStorageElementTable().getType() : nullptr;
 
         auto newType = VPU::SparseTensorType::get(dataType, sparsityMapType, storageElementTableType,
-                                                  getIsWeightsAttr(), getCompressionSchemeAttr(), seAttr);
+                                                  getIsWeightsAttr(), getSparsityCompressionAttr(), seAttr);
 
         getOutput().setType(newType);
     }

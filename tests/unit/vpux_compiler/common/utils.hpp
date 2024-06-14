@@ -10,7 +10,8 @@
 #include <mlir/IR/Builders.h>
 #include <mlir/IR/MLIRContext.h>
 
-#include "vpux/compiler/dialect/VPU37XX/ops.hpp"
+#include "vpux/compiler/NPU37XX/dialect/NPUReg37XX/ops.hpp"
+#include "vpux/compiler/NPU40XX/dialect/NPUReg40XX/ops.hpp"
 #include "vpux/compiler/dialect/VPURegMapped/utils.hpp"
 #include "vpux/compiler/init.hpp"
 
@@ -58,10 +59,19 @@ public:
 };
 
 template <typename HW_REG_TYPE, typename REG_MAPPED_TYPE>
-class MLIR_RegMappedVPU37XXUnitBase : public MLIR_RegMappedUnitBase<HW_REG_TYPE, REG_MAPPED_TYPE> {
+class MLIR_RegMappedNPUReg37XXUnitBase : public MLIR_RegMappedUnitBase<HW_REG_TYPE, REG_MAPPED_TYPE> {
 public:
-    MLIR_RegMappedVPU37XXUnitBase() {
-        this->ctx->template loadDialect<vpux::VPU37XX::VPU37XXDialect>();
+    MLIR_RegMappedNPUReg37XXUnitBase() {
+        this->ctx->template loadDialect<vpux::NPUReg37XX::NPUReg37XXDialect>();
+        this->builder = std::make_unique<mlir::OpBuilder>(this->ctx.get());
+    }
+};
+
+template <typename HW_REG_TYPE, typename REG_MAPPED_TYPE>
+class MLIR_RegMappedNPUReg40XXUnitBase : public MLIR_RegMappedUnitBase<HW_REG_TYPE, REG_MAPPED_TYPE> {
+public:
+    MLIR_RegMappedNPUReg40XXUnitBase() {
+        this->ctx->template loadDialect<vpux::NPUReg40XX::NPUReg40XXDialect>();
         this->builder = std::make_unique<mlir::OpBuilder>(this->ctx.get());
     }
 };

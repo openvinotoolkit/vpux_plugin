@@ -64,7 +64,7 @@ FusePadding::FusePadding() {
                         pad_end_node->get_coordinate_diff_val(),
                         [&convolution](const ov::CoordinateDiff& begin, const ov::CoordinateDiff& end) {
                             convolution->set_pads_begin(begin);
-                            convolution->set_adding_above(end);
+                            convolution->set_pads_end(end);
                         })) {
                 convolution->set_auto_pad(ov::op::PadType::EXPLICIT);
             } else {
@@ -77,7 +77,7 @@ FusePadding::FusePadding() {
                         pad_end_node->get_coordinate_diff_val(),
                         [&group_conv](const ov::CoordinateDiff& begin, const ov::CoordinateDiff& end) {
                             group_conv->set_pads_begin(begin);
-                            group_conv->set_adding_above(end);
+                            group_conv->set_pads_end(end);
                         })) {
                 group_conv->set_auto_pad(ov::op::PadType::EXPLICIT);
             } else {
@@ -88,7 +88,7 @@ FusePadding::FusePadding() {
                                       pad_end_node->get_shape_val(),
                                       [&maxpool](const ov::Shape& begin, const ov::Shape& end) {
                                           maxpool->set_pads_begin(begin);
-                                          maxpool->set_adding_above(end);
+                                          maxpool->set_pads_end(end);
                                       })) {
                 maxpool->set_auto_pad(ov::op::PadType::EXPLICIT);
             } else {

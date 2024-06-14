@@ -8,7 +8,7 @@
 #include "vpux/compiler/core/attributes/shape.hpp"
 #include "vpux/compiler/core/tiling.hpp"
 #include "vpux/compiler/core/type_interfaces.hpp"
-#include "vpux/compiler/dialect/IE/ops.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
@@ -32,6 +32,9 @@ bool isSupportedSEPTransposedConv(IE::GroupTransposedConvolutionOp op, LogCb log
 
 bool isSupportedSEPTransposedConv(VPU::TransposedConvolutionOp op, LogCb logCb, bool checkLayout,
                                   bool checkChannelAlignment, bool supportsInputActCompression = false);
+
+std::optional<bool> isSEPConvCompatibleWithClusterStrategy(VPU::NCEConvolutionOp nceConv,
+                                                           VPU::MultiClusterStrategy strategy);
 
 mlir::LogicalResult verifyConvUtil(mlir::Location loc, VPU::ArchKind arch, Shape filterShape, Shape kernelStrides,
                                    PaddingAttr padAttr, ShapeRef weightsTableShape, mlir::Value output);

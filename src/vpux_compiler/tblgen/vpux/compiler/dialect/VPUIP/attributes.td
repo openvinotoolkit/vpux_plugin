@@ -82,14 +82,14 @@ def VPUIP_NCETaskType :
         "NCETaskType",
         "NCE task type",
         [
-            I64EnumAttrCase<"CONV",     0>,
-            I64EnumAttrCase<"DWCONV",   1>,
-            I64EnumAttrCase<"MAXPOOL",  2>,
-            I64EnumAttrCase<"AVEPOOL",  3>,
-            I64EnumAttrCase<"FCL",      4>,
-            I64EnumAttrCase<"ELTWISE",  5>,
-            I64EnumAttrCase<"IDENTITY", 6>,
-            I64EnumAttrCase<"CMCONV",   7>
+            I64EnumAttrCase<"CONV",             0>,
+            I64EnumAttrCase<"DWCONV",           1>,
+            I64EnumAttrCase<"MAXPOOL",          2>,
+            I64EnumAttrCase<"AVEPOOL",          3>,
+            I64EnumAttrCase<"FCL",              4>,
+            I64EnumAttrCase<"ELTWISE",          5>,
+            I64EnumAttrCase<"IDENTITY",         6>,
+            I64EnumAttrCase<"CMCONV",           7>,
         ]
     > {
 }
@@ -97,10 +97,10 @@ def VPUIP_NCETaskType :
 def VPUIP_NCETaskTypeAttr : VPUIP_EnumAttr<VPUIP_NCETaskType, "nce_task_type">;
 
 //
-// CompressionSchemeAttr
+// SparsityCompressionAttr
 //
 
-def VPUIP_CompressionSchemeAttr : VPUIP_Attr<"CompressionScheme", [DeclareAttrInterfaceMethods<HwSpecificMemRefFieldInterface>]> {
+def VPUIP_SparsityCompressionAttr : VPUIP_Attr<"SparsityCompression", [DeclareAttrInterfaceMethods<HwSpecificMemRefFieldInterface>]> {
     let description = [{
         Represents the compression as the number of elements along a specified axis.
 
@@ -190,6 +190,55 @@ def VPUIP_DmaChannelType :
 }
 
 //
+// DPUHaloRegionAttr
+//
+
+def VPUIP_DPUHaloRegionAttr : VPUIP_Attr<"DPUHaloRegion"> {
+    let parameters = (ins
+        "mlir::IntegerAttr":$xStart,
+        "mlir::IntegerAttr":$xEnd,
+        "mlir::IntegerAttr":$yStart,
+        "mlir::IntegerAttr":$yEnd,
+        "mlir::IntegerAttr":$zStart,
+        "mlir::IntegerAttr":$zEnd,
+        "mlir::IntegerAttr":$targetOffset,
+        "mlir::ArrayAttr":$targetClusters,
+        OptionalParameter<"mlir::IntegerAttr">:$sparsityOffset,
+        "mlir::IntegerAttr":$targetWidth
+    );
+}
+
+def DPUHaloRegionArrayAttr : TypedArrayAttrBase<VPUIP_DPUHaloRegionAttr, "Array of DPU Halo Regions">;
+
+//
+// HaloRegionAttr
+//
+
+def VPUIP_HaloRegionAttr : VPUIP_Attr<"HaloRegion"> {
+    let parameters = (ins
+        "mlir::ArrayAttr":$shape,
+        "mlir::ArrayAttr":$offset,
+        "mlir::IntegerAttr":$cluster_id
+    );
+}
+
+def HaloRegionArrayAttr : TypedArrayAttrBase<VPUIP_HaloRegionAttr, "Array of Halo Regions">;
+
+
+//
+// OutwardHaloRegionAttr
+//
+
+def VPUIP_OutwardHaloRegionAttr : VPUIP_Attr<"OutwardHaloRegion"> {
+    let parameters = (ins
+        "mlir::ArrayAttr":$shape,
+        "mlir::ArrayAttr":$offset,
+        "mlir::IntegerAttr":$cluster_id,
+        "mlir::ArrayAttr":$inwardHaloRegions
+    );
+}
+
+//
 // DMA Acceleration mode
 //
 
@@ -271,5 +320,41 @@ def VPUIP_SwProfilingMetadataAttr : VPUIP_Attr<"SwProfilingMetadata", [
 
     let assemblyFormat = "`<` struct(params) `>`";
 }
+
+//
+// M2IProfilingMetadata
+//
+
+def VPUIP_M2IProfilingMetadataAttr : VPUIP_Attr<"M2IProfilingMetadata", [
+        DeclareAttrInterfaceMethods<VPUIP_ProfilingMetadataAttrInterface>
+    ] > {
+    let description = [{
+        Attribute attached to opearion to keep M2I profiling information
+    }];
+
+    let parameters = (ins
+        "mlir::IntegerAttr":$bufferId,                      // ID of high level buffer
+        "mlir::IntegerAttr":$bufferOffset                   // Offset from beginning of profiling buffer to current
+    );
+
+    let assemblyFormat = "`<` struct(params) `>`";
+}
+
+def VPUIP_CompressionState : VPUIP_I64EnumAttr<"CompressionState", "Buffer compression state", [
+    I64EnumAttrCase<"NoCompression", 0>,
+    I64EnumAttrCase<"CompressionCandidate", 1>,
+    I64EnumAttrCase<"RuntimeCompressed", 2>,
+    I64EnumAttrCase<"CompiletimeCompressed", 3>
+    ]>{}
+
+def VPUIP_CompressionStateAttr : VPUIP_EnumAttr<VPUIP_CompressionState, "Compression", [
+        DeclareAttrInterfaceMethods<HwSpecificMemRefFieldInterface>
+    ]> {
+        let description = [{
+            This attribute is attached to the MemRef type to indicate if it was compressed.
+            Distinction is made between compile-time compression and runtime compression to account
+            for worst case scenario during runtime.
+        }];
+    }
 
 #endif

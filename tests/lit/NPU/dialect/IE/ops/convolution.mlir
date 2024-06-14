@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW" --canonicalize %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 // CHECK-LABEL: @FuseConvAndBias
 func.func @FuseConvAndBias(%arg0: tensor<1x3x300x300xf32>) -> tensor<1x16x300x300xf32> {
@@ -27,6 +27,72 @@ func.func @FuseConvAndBias(%arg0: tensor<1x3x300x300xf32>) -> tensor<1x16x300x30
 
     // CHECK-DAG:   %[[FILTERS:.*]] = const.Declare tensor<16x3x3x3xf32> = dense<1.000000e+00> : tensor<16x3x3x3xf32>
     // CHECK-DAG:   %[[BIAS:.*]] = const.Declare tensor<1x16x1x1xf32> = dense<1.000000e+00> : tensor<1x16x1x1xf32>
+    // CHECK:       %[[VAL0:.*]] = IE.Convolution(%arg0, %[[FILTERS]], %[[BIAS]])
+    // CHECK-SAME:      dilations = [1, 1]
+    // CHECK-SAME:      pads_begin = [1, 1]
+    // CHECK-SAME:      pads_end = [1, 1]
+    // CHECK-SAME:      strides = [1, 1]
+    // CHECK:       return %[[VAL0]]
+}
+
+// -----
+
+// CHECK-LABEL: @FuseConvAndBiasWithReshape
+func.func @FuseConvAndBiasWithReshape(%arg0: tensor<1x3x300x300xf32>) -> tensor<1x16x300x300xf32> {
+    %filters = const.Declare tensor<16x3x3x3xf32> = dense<1.0> : tensor<16x3x3x3xf32>
+    %0 = IE.Convolution(%arg0, %filters)
+        {
+            strides = [1, 1],
+            pads_begin = [1, 1],
+            pads_end = [1, 1],
+            dilations = [1, 1]
+        } :
+        tensor<1x3x300x300xf32>, tensor<16x3x3x3xf32> -> tensor<1x16x300x300xf32>
+
+    %bias = const.Declare tensor<1x1x1x16xf32> = dense<1.0> : tensor<1x1x1x16xf32>
+    %reshape = IE.Reshape(%bias) { shape_value = [1, 16, 1, 1] } : tensor<1x1x1x16xf32> -> tensor<1x16x1x1xf32>
+    %1 = IE.ScaleShift(%0, %reshape)
+        {operandSegmentSizes = array<i32: 1, 0, 1>} :
+        tensor<1x16x300x300xf32>, tensor<1x16x1x1xf32> -> tensor<1x16x300x300xf32>
+
+    return %1 : tensor<1x16x300x300xf32>
+
+    // CHECK-DAG:   %[[FILTERS:.*]] = const.Declare tensor<16x3x3x3xf32> = dense<1.000000e+00> : tensor<16x3x3x3xf32>
+    // CHECK-DAG:   %[[BIAS:.*]] = const.Declare tensor<1x16x1x1xf32> = dense<1.000000e+00> : tensor<1x1x1x16xf32>, [#const.Reshape<[1, 16, 1, 1]>]
+    // CHECK:       %[[VAL0:.*]] = IE.Convolution(%arg0, %[[FILTERS]], %[[BIAS]])
+    // CHECK-SAME:      dilations = [1, 1]
+    // CHECK-SAME:      pads_begin = [1, 1]
+    // CHECK-SAME:      pads_end = [1, 1]
+    // CHECK-SAME:      strides = [1, 1]
+    // CHECK:       return %[[VAL0]]
+}
+
+// -----
+
+// CHECK-LABEL: @FuseConvAndBiasWithBroadCast
+func.func @FuseConvAndBiasWithBroadCast(%arg0: tensor<1x3x64x64xf32>) -> tensor<1x16x64x64xf32> {
+    %filters = const.Declare tensor<16x3x3x3xf32> = dense<1.0> : tensor<16x3x3x3xf32>
+    %0 = IE.Convolution(%arg0, %filters)
+        {
+            strides = [1, 1],
+            pads_begin = [1, 1],
+            pads_end = [1, 1],
+            dilations = [1, 1]
+        } :
+        tensor<1x3x64x64xf32>, tensor<16x3x3x3xf32> -> tensor<1x16x64x64xf32>
+
+    %bias = const.Declare tensor<1x1x1x1xf32> = dense<1.0> : tensor<1x1x1x1xf32>
+    %bc_shape = const.Declare tensor<4xsi64> = dense<[1, 16, 1, 1]> : tensor<4xsi64>
+    %bc = IE.Broadcast(%bias, %bc_shape) {mode = #IE.broadcast_type<NUMPY>} : tensor<1x1x1x1xf32>, tensor<4xsi64> -> tensor<1x16x1x1xf32>
+
+    %1 = IE.ScaleShift(%0, %bc)
+        {operandSegmentSizes = array<i32: 1, 0, 1>} :
+        tensor<1x16x64x64xf32>, tensor<1x16x1x1xf32> -> tensor<1x16x64x64xf32>
+
+    return %1 : tensor<1x16x64x64xf32>
+
+    // CHECK-DAG:   %[[FILTERS:.*]] = const.Declare tensor<16x3x3x3xf32> = dense<1.000000e+00> : tensor<16x3x3x3xf32>
+    // CHECK-DAG:   %[[BIAS:.*]] = const.Declare tensor<1x16x1x1xf32> = dense<1.000000e+00> : tensor<1x1x1x1xf32>, [#const.Broadcast<1 : i64, 16 : i64>]
     // CHECK:       %[[VAL0:.*]] = IE.Convolution(%arg0, %[[FILTERS]], %[[BIAS]])
     // CHECK-SAME:      dilations = [1, 1]
     // CHECK-SAME:      pads_begin = [1, 1]
@@ -223,4 +289,72 @@ func.func @FuseTransposedConvAndBias(%arg0: tensor<1x3x64x64xf16>) -> tensor<1x1
     // CHECK-SAME:      -> tensor<1x16x129x129xf16>
 
     // CHECK:       return [[VAL0]] : tensor<1x16x129x129xf16>
+}
+
+// -----
+
+// CHECK-LABEL: @GroupsToAttrWithFQInput
+// CHECK-SAME:      [[INPUT:%.+]]: tensor<1x96x96x96xf32>
+func.func @GroupsToAttrWithFQInput(%arg0: tensor<1x96x96x96xf32>) -> tensor<1x96x96x96xf32> {
+    %cst = const.Declare tensor<3x32x32x3x3xf32> = dense<1.0> : tensor<3x32x32x3x3xf32>
+    %cst_0 = const.Declare tensor<1x1x1x1x1xf32> = dense<-1.270000e+02> : tensor<1x1x1x1x1xf32>
+    %cst_1 = const.Declare tensor<1x1x1x1x1xf32> = dense<1.270000e+02> : tensor<1x1x1x1x1xf32>
+    %cst_2 = const.Declare tensor<3x32x1x1x1xf32> = dense<-0.40> : tensor<3x32x1x1x1xf32>
+    %cst_3 = const.Declare tensor<3x32x1x1x1xf32> = dense<0.40> : tensor<3x32x1x1x1xf32>
+    %cst_4 = const.Declare tensor<1x1x1x1xf32> = dense<-1.0> : tensor<1x1x1x1xf32>
+    %cst_5 = const.Declare tensor<1x1x1x1xf32> = dense<1.0> : tensor<1x1x1x1xf32>
+    %cst_6 = const.Declare tensor<1x1x1x1xf32> = dense<-2.0> : tensor<1x1x1x1xf32>
+    %cst_7 = const.Declare tensor<1x1x1x1xf32> = dense<2.0> : tensor<1x1x1x1xf32>
+
+    %0 = IE.FakeQuantize(%arg0, %cst_4, %cst_5, %cst_6, %cst_7)
+        {
+            auto_broadcast = #IE.auto_broadcast_type<NUMPY>,
+            levels = 256 : i64
+        } :
+        tensor<1x96x96x96xf32>, tensor<1x1x1x1xf32>, tensor<1x1x1x1xf32>, tensor<1x1x1x1xf32>, tensor<1x1x1x1xf32> -> tensor<1x96x96x96xf32>
+    %1 = IE.FakeQuantize(%cst, %cst_0, %cst_1, %cst_2, %cst_3)
+        {
+            auto_broadcast = #IE.auto_broadcast_type<NUMPY>,
+            levels = 255 : i64
+        } :
+        tensor<3x32x32x3x3xf32>, tensor<1x1x1x1x1xf32>, tensor<1x1x1x1x1xf32>, tensor<3x32x1x1x1xf32>, tensor<3x32x1x1x1xf32> -> tensor<3x32x32x3x3xf32>
+    %2 = IE.GroupConvolution(%0, %1)
+        {
+            strides = [1, 1],
+            pads_begin = [1, 1],
+            pads_end = [1, 1],
+            dilations = [1, 1]
+        } :
+        tensor<1x96x96x96xf32>, tensor<3x32x32x3x3xf32> -> tensor<1x96x96x96xf32>
+
+    return %2 : tensor<1x96x96x96xf32>
+
+    // CHECK-DAG:       [[CST:%.*]] = const.Declare tensor<96x32x3x3xf32> = dense<1.000000e+00> : tensor<3x32x32x3x3xf32>, [#const.Reshape<[96, 32, 3, 3]>]
+    // CHECK-DAG:       [[CST_0:%.*]] = const.Declare tensor<1x1x1x1xf32> = dense<-1.270000e+02> : tensor<1x1x1x1x1xf32>, [#const.Reshape<[1, 1, 1, 1]>]
+    // CHECK-DAG:       [[CST_1:%.*]] = const.Declare tensor<1x1x1x1xf32> = dense<1.270000e+02> : tensor<1x1x1x1x1xf32>, [#const.Reshape<[1, 1, 1, 1]>]
+    // CHECK-DAG:       [[CST_2:%.*]] = const.Declare tensor<96x1x1x1xf32> = dense<-4.000000e-01> : tensor<3x32x1x1x1xf32>, [#const.Reshape<[96, 1, 1, 1]>]
+    // CHECK-DAG:       [[CST_3:%.*]] = const.Declare tensor<96x1x1x1xf32> = dense<4.000000e-01> : tensor<3x32x1x1x1xf32>, [#const.Reshape<[96, 1, 1, 1]>]
+    // CHECK-DAG:       [[CST_4:%.*]] = const.Declare tensor<1x1x1x1xf32> = dense<-1.000000e+00> : tensor<1x1x1x1xf32>
+    // CHECK-DAG:       [[CST_5:%.*]] = const.Declare tensor<1x1x1x1xf32> = dense<1.000000e+00> : tensor<1x1x1x1xf32>
+    // CHECK-DAG:       [[CST_6:%.*]] = const.Declare tensor<1x1x1x1xf32> = dense<-2.000000e+00> : tensor<1x1x1x1xf32>
+    // CHECK-DAG:       [[CST_7:%.*]] = const.Declare tensor<1x1x1x1xf32> = dense<2.000000e+00> : tensor<1x1x1x1xf32>
+
+    // CHECK:           [[INPUT_FQ:%.*]] = IE.FakeQuantize([[INPUT]], [[CST_4]], [[CST_5]], [[CST_6]], [[CST_7]]) {
+    // CHECK-SAME:          auto_broadcast = #IE.auto_broadcast_type<NUMPY>,
+    // CHECK-SAME:          levels = 256 : i64}
+    // CHECK-SAME           tensor<1x96x96x96xf32>, tensor<1x1x1x1xf32>, tensor<1x1x1x1xf32>, tensor<1x1x1x1xf32>, tensor<1x1x1x1xf32> -> tensor<1x96x96x96xf32>
+    // CHECK:           [[FILTER_FQ:%.*]] = IE.FakeQuantize([[CST]], [[CST_0]], [[CST_1]], [[CST_2]], [[CST_3]]) {
+    // CHECK-SAME:          auto_broadcast = #IE.auto_broadcast_type<NUMPY>,
+    // CHECK-SAME:          levels = 255 : i64}
+    // CHECK-SAME           tensor<96x32x3x3xf32>, tensor<1x1x1x1xf32>, tensor<1x1x1x1xf32>, tensor<96x1x1x1xf32>, tensor<96x1x1x1xf32> -> tensor<96x32x3x3xf32>
+
+    // CHECK:           [[GROUP_CONV:%.*]] = IE.GroupConvolution([[INPUT_FQ]], [[FILTER_FQ]]) {
+    // CHECK-SAME:          dilations = [1, 1],
+    // CHECK-SAME:          groups = 3 : i64,
+    // CHECK-SAME:          pads_begin = [1, 1]
+    // CHECK-SAME:          pads_end = [1, 1]
+    // CHECK-SAME:          strides = [1, 1]}
+    // CHECK-SAME:          tensor<1x96x96x96xf32>, tensor<96x32x3x3xf32> -> tensor<1x96x96x96xf32>
+
+    // CHECK:           return [[GROUP_CONV]] : tensor<1x96x96x96xf32>
 }

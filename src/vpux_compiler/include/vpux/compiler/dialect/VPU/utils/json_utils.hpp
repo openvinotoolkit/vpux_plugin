@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022 Intel Corporation
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -22,6 +22,8 @@ void createStrategyJSONFromOperations(llvm::json::Value& json,
 mlir::Attribute convertJSONToAttr(mlir::Attribute oldAttr, const llvm::json::Value& newAttrVal);
 void overwriteManualStrategy(llvm::json::Value& manualStrategy,
                              llvm::MapVector<mlir::Location, mlir::Operation*>& operations);
+void updateTilingStrategyInJSONForOperations(llvm::json::Value& json,
+                                             llvm::MapVector<mlir::Location, mlir::Operation*>& operations);
 
 }  // namespace VPU
 }  // namespace vpux

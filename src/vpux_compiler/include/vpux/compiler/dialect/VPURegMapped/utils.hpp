@@ -1,7 +1,4 @@
-//
-// Copyright Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
-//
+// {% copyright %}
 
 #pragma once
 
@@ -153,8 +150,16 @@ uint32_t checked_cast_reg(float src) {
     constexpr auto RF_TYPE = REG_TYPE::getRegFieldDataType();
     static_assert(BIT_WIDTH == 32 && RF_TYPE == VPURegMapped::RegFieldDataType::FP,
                   "checked_cast_reg: invalid RegField params");
-
     return llvm::bit_cast<uint32_t>(src);
+}
+
+template <typename REG_TYPE>
+uint16_t checked_cast_reg(vpux::type::float16 src) {
+    constexpr auto BIT_WIDTH = REG_TYPE::getRegFieldWidth();
+    constexpr auto RF_TYPE = REG_TYPE::getRegFieldDataType();
+    static_assert(BIT_WIDTH == 16 && RF_TYPE == VPURegMapped::RegFieldDataType::FP,
+                  "checked_cast_reg: invalid RegField params");
+    return llvm::bit_cast<uint16_t>(src);
 }
 
 }  // namespace VPURegMapped

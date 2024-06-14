@@ -20,8 +20,6 @@
 #include <mlir/IR/BuiltinTypes.h>
 #include <mlir/IR/Value.h>
 
-#include <ie_layouts.h>
-
 #include <functional>
 
 namespace vpux {
@@ -46,6 +44,7 @@ public:
 public:
     static const DimsOrder C;
     static const DimsOrder NC;
+    static const DimsOrder CN;
     static const DimsOrder CHW;
     static const DimsOrder HWC;
     static const DimsOrder HCW;

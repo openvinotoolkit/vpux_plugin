@@ -1,13 +1,11 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022-2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include <vpu_ov2_layer_test.hpp>
 
-#include <ov_models/builders.hpp>
-#include <ov_models/utils/ov_helpers.hpp>
-#include <shared_test_classes/base/layer_test_utils.hpp>
+#include "common_test_utils/node_builders/fake_quantize.hpp"
 
 namespace ov::test {
 
@@ -26,6 +24,13 @@ struct SubtractTestParams {
 
 class SubtractSubGraphTest_NPU3720 : public VpuOv2LayerTest, public testing::WithParamInterface<SubtractTestParams> {
 public:
+    static std::string getTestCaseName(const testing::TestParamInfo<SubtractTestParams>& obj) {
+        const std::string sep = "_";
+        std::ostringstream result;
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
+        result << "TestIdx=" << obj.index << sep;
+        return result.str();
+    };
     void SetUp() override {
         const auto test_params = GetParam();
 
@@ -50,20 +55,22 @@ public:
 
 TEST_P(SubtractSubGraphTest_NPU3720, HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
 }
 
 INSTANTIATE_TEST_SUITE_P(smoke_subtract_same_shape_const_inputs, SubtractSubGraphTest_NPU3720,
                          ::testing::Values(SubtractTestParams{
                                  {1, 1, 2, 2},  // input1 shape
                                  {1, 1, 2, 2},  // input2 shape
-                         }));
+                         }),
+                         SubtractSubGraphTest_NPU3720::getTestCaseName);
 
 INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_subtract_diff_shape_const_inputs, SubtractSubGraphTest_NPU3720,
                          ::testing::Values(SubtractTestParams{
                                  {1, 1, 2, 1},  // input1 shape
                                  {1, 1, 2, 4},  // input2 shape
-                         }));
+                         }),
+                         SubtractSubGraphTest_NPU3720::getTestCaseName);
 
 //
 //         [DeclareOp]
@@ -79,6 +86,13 @@ INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_subtract_diff_shape_const_inputs, Su
 
 class SubtractFqSubGraphTest_NPU3720 : public VpuOv2LayerTest, public testing::WithParamInterface<SubtractTestParams> {
 public:
+    static std::string getTestCaseName(const testing::TestParamInfo<SubtractTestParams>& obj) {
+        const std::string sep = "_";
+        std::ostringstream result;
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
+        result << "TestIdx=" << obj.index << sep;
+        return result.str();
+    };
     void SetUp() override {
         const auto test_params = GetParam();
 
@@ -94,14 +108,14 @@ public:
         const std::vector<float> dataLow = {0.0f};
         const std::vector<float> dataHigh = {255.0f};
 
-        const auto input1 = ngraph::builder::makeFakeQuantize(params[0], ov::element::f16, dataLevels, {}, dataLow,
-                                                              dataHigh, dataLow, dataHigh);
-        const auto input2 = ngraph::builder::makeFakeQuantize(params[0], ov::element::f16, dataLevels, {}, dataLow,
-                                                              dataHigh, dataLow, dataHigh);
+        const auto input1 = ov::test::utils::make_fake_quantize(params[0], ov::element::f16, dataLevels, {}, dataLow,
+                                                                dataHigh, dataLow, dataHigh);
+        const auto input2 = ov::test::utils::make_fake_quantize(params[0], ov::element::f16, dataLevels, {}, dataLow,
+                                                                dataHigh, dataLow, dataHigh);
 
         const auto subtract = std::make_shared<ov::op::v1::Subtract>(input2, input2);
-        const auto subtractFq = ngraph::builder::makeFakeQuantize(subtract, ov::element::f16, dataLevels, {}, dataLow,
-                                                                  dataHigh, dataLow, dataHigh);
+        const auto subtractFq = ov::test::utils::make_fake_quantize(subtract, ov::element::f16, dataLevels, {}, dataLow,
+                                                                    dataHigh, dataLow, dataHigh);
 
         const ov::ResultVector results{std::make_shared<ov::op::v0::Result>(subtractFq)};
 
@@ -112,20 +126,22 @@ public:
 
 TEST_P(SubtractFqSubGraphTest_NPU3720, HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
 }
 
 INSTANTIATE_TEST_SUITE_P(smoke_subtract_same_shape_const_fq_inputs, SubtractFqSubGraphTest_NPU3720,
                          ::testing::Values(SubtractTestParams{
                                  {1, 1, 2, 2},  // input1 shape
                                  {1, 1, 2, 2},  // input2 shape
-                         }));
+                         }),
+                         SubtractFqSubGraphTest_NPU3720::getTestCaseName);
 
 INSTANTIATE_TEST_SUITE_P(smoke_subtract_diff_shape_const_fq_inputs, SubtractFqSubGraphTest_NPU3720,
                          ::testing::Values(SubtractTestParams{
                                  {1, 1, 2, 4},  // input1 shape
                                  {1, 1, 2, 1},  // input2 shape
-                         }));
+                         }),
+                         SubtractFqSubGraphTest_NPU3720::getTestCaseName);
 
 //
 //         [DeclareOp]
@@ -141,6 +157,13 @@ class SubtractActInputsSubGraphTest_NPU3720 :
         public VpuOv2LayerTest,
         public testing::WithParamInterface<SubtractTestParams> {
 public:
+    static std::string getTestCaseName(const testing::TestParamInfo<SubtractTestParams>& obj) {
+        const std::string sep = "_";
+        std::ostringstream result;
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
+        result << "TestIdx=" << obj.index << sep;
+        return result.str();
+    };
     void SetUp() override {
         const auto test_params = GetParam();
 
@@ -168,20 +191,22 @@ public:
 
 TEST_P(SubtractActInputsSubGraphTest_NPU3720, HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
 }
 
 INSTANTIATE_TEST_SUITE_P(smoke_subtract_same_shapes_act_inputs, SubtractActInputsSubGraphTest_NPU3720,
                          ::testing::Values(SubtractTestParams{
                                  {1, 1, 2, 2},  // input1 shape
                                  {1, 1, 2, 2},  // input2 shape
-                         }));
+                         }),
+                         SubtractActInputsSubGraphTest_NPU3720::getTestCaseName);
 
 INSTANTIATE_TEST_SUITE_P(smoke_subtract_diff_shapes_act_inputs, SubtractActInputsSubGraphTest_NPU3720,
                          ::testing::Values(SubtractTestParams{
                                  {1, 1, 2, 4},  // input1 shape
                                  {1, 1, 2, 1},  // input2 shape
-                         }));
+                         }),
+                         SubtractActInputsSubGraphTest_NPU3720::getTestCaseName);
 
 //
 //         [DeclareOp]
@@ -201,6 +226,13 @@ class SubtractFqActInputsSubGraphTest_NPU3720 :
         public VpuOv2LayerTest,
         public testing::WithParamInterface<SubtractTestParams> {
 public:
+    static std::string getTestCaseName(const testing::TestParamInfo<SubtractTestParams>& obj) {
+        const std::string sep = "_";
+        std::ostringstream result;
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
+        result << "TestIdx=" << obj.index << sep;
+        return result.str();
+    };
     void SetUp() override {
         const auto test_params = GetParam();
 
@@ -219,16 +251,16 @@ public:
         const std::vector<float> dataHigh = {255.0f};
 
         const auto relu1 = std::make_shared<ov::op::v0::Relu>(params[0]);
-        const auto relu1Fq = ngraph::builder::makeFakeQuantize(relu1, ov::element::f16, dataLevels, {}, dataLow,
-                                                               dataHigh, dataLow, dataHigh);
+        const auto relu1Fq = ov::test::utils::make_fake_quantize(relu1, ov::element::f16, dataLevels, {}, dataLow,
+                                                                 dataHigh, dataLow, dataHigh);
 
         const auto relu2 = std::make_shared<ov::op::v0::Relu>(params[1]);
-        const auto relu2Fq = ngraph::builder::makeFakeQuantize(relu2, ov::element::f16, dataLevels, {}, dataLow,
-                                                               dataHigh, dataLow, dataHigh);
+        const auto relu2Fq = ov::test::utils::make_fake_quantize(relu2, ov::element::f16, dataLevels, {}, dataLow,
+                                                                 dataHigh, dataLow, dataHigh);
 
         const auto subtract = std::make_shared<ov::op::v1::Subtract>(relu1Fq->output(0), relu2Fq->output(0));
-        const auto outFq = ngraph::builder::makeFakeQuantize(subtract, ov::element::f16, dataLevels, {}, dataLow,
-                                                             dataHigh, dataLow, dataHigh);
+        const auto outFq = ov::test::utils::make_fake_quantize(subtract, ov::element::f16, dataLevels, {}, dataLow,
+                                                               dataHigh, dataLow, dataHigh);
 
         const ov::ResultVector results{std::make_shared<ov::op::v0::Result>(outFq)};
         function = std::make_shared<ov::Model>(results, params, "SubtractTest");
@@ -238,19 +270,21 @@ public:
 
 TEST_P(SubtractFqActInputsSubGraphTest_NPU3720, HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
 }
 
 INSTANTIATE_TEST_SUITE_P(smoke_subtract_same_shapes_fq_act_inputs, SubtractFqActInputsSubGraphTest_NPU3720,
                          ::testing::Values(SubtractTestParams{
                                  {1, 1, 2, 2},  // input1 shape
                                  {1, 1, 2, 2},  // input2 shape
-                         }));
+                         }),
+                         SubtractFqActInputsSubGraphTest_NPU3720::getTestCaseName);
 
 INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_subtract_diff_shapes_fq_act_inputs, SubtractFqActInputsSubGraphTest_NPU3720,
                          ::testing::Values(SubtractTestParams{
                                  {1, 1, 2, 1},  // input1 shape
                                  {1, 1, 2, 4},  // input2 shape
-                         }));
+                         }),
+                         SubtractFqActInputsSubGraphTest_NPU3720::getTestCaseName);
 
 }  // namespace ov::test

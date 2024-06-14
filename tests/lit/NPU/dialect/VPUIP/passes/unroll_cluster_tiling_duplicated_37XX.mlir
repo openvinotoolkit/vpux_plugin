@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -27,7 +27,7 @@
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
 module @VPU.SW {
-    func.func private @builtin_MVN(memref<*xf16, @CMX_NN>, memref<*xf16, @CMX_NN>, i1, i1, f64) attributes {VPU.kernel_code = "singleShaveMVN.cpp", VPU.kernel_entry = "singleShaveMVN"}
+    func.func private @builtin_MVN(memref<*xf16, @CMX_NN>, memref<*xf16, @CMX_NN>, i1, i1, f64) attributes {VPU.kernel_code = "mvn1.cpp", VPU.kernel_entry = "mvn1"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
 }
 
@@ -48,7 +48,7 @@ func.func @UnrollSWOpInterface(%input0: !Input_DDR, %output: !Output_DDR) -> !Ou
       %399 = VPUIP.NNDMA {port = 0 : i64} inputs(%395 : !Input_DDR) outputs(%300 : !typeCmxDistributed) -> !typeCmxDistributed
     }
     VPURT.Task waits(%bar0 : !VPURT.Barrier) updates(%bar1 : !VPURT.Barrier) attributes {isTrailingSWLayer = false} {
-      %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+      %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
         @VPU.SW::@builtin_MVN inputs(%300 as %arg4: !type_CMX_memref) outputs(%301 as %arg5: !typeCmxDistributed) on tile 0 -> !typeCmxDistributed {
         VPUIP.SW.Kernel.run {
           attrs = [false, true, 1.0013580322265625E-5]}(%arg4, %arg5) : !type_CMX_memref, !typeCmxDistributed
@@ -63,13 +63,13 @@ func.func @UnrollSWOpInterface(%input0: !Input_DDR, %output: !Output_DDR) -> !Ou
 
 
 //CHECK:    VPURT.Task waits(%0 : !VPURT.Barrier) updates(%1 : !VPURT.Barrier) {
-//CHECK:       %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MVN inputs(%4 as %arg2: memref<1x4x512x1xf16, #NCWH, [@CMX_NN, 0]>) outputs(%8 as %arg3: memref<1x4x512x1xf16, #NCWH, [@CMX_NN, 0]>) on tile 0 -> memref<1x4x512x1xf16, #NCWH, [@CMX_NN, 0]>{
+//CHECK:       %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MVN inputs(%4 as %arg2: memref<1x4x512x1xf16, #NCWH, [@CMX_NN, 0]>) outputs(%8 as %arg3: memref<1x4x512x1xf16, #NCWH, [@CMX_NN, 0]>) on tile 0 -> memref<1x4x512x1xf16, #NCWH, [@CMX_NN, 0]>{
 //CHECK:        VPUIP.SW.Kernel.run {attrs = [false, true, 1.0013580322265625E-5]}(%arg2, %arg3) : memref<1x4x512x1xf16, #NCWH, [@CMX_NN, 0]>, memref<1x4x512x1xf16, #NCWH, [@CMX_NN, 0]>
 //CHECK:      }
 //CHECK:    }
 
 //CHECK:    VPURT.Task waits(%0 : !VPURT.Barrier) updates(%1 : !VPURT.Barrier) {
-//CHECK:       %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>} @VPU.SW::@builtin_MVN inputs(%5 as %arg2: memref<1x4x512x1xf16, #NCWH, [@CMX_NN, 1]>) outputs(%9 as %arg3: memref<1x4x512x1xf16, #NCWH, [@CMX_NN, 1]>) on tile 1 -> memref<1x4x512x1xf16, #NCWH, [@CMX_NN, 1]>{
+//CHECK:       %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MVN inputs(%5 as %arg2: memref<1x4x512x1xf16, #NCWH, [@CMX_NN, 1]>) outputs(%9 as %arg3: memref<1x4x512x1xf16, #NCWH, [@CMX_NN, 1]>) on tile 1 -> memref<1x4x512x1xf16, #NCWH, [@CMX_NN, 1]>{
 //CHECK:        VPUIP.SW.Kernel.run {attrs = [false, true, 1.0013580322265625E-5]}(%arg2, %arg3) : memref<1x4x512x1xf16, #NCWH, [@CMX_NN, 1]>, memref<1x4x512x1xf16, #NCWH, [@CMX_NN, 1]>
 //CHECK:      }
 //CHECK:    }

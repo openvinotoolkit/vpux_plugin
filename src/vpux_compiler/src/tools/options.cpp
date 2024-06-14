@@ -7,21 +7,12 @@
 #include "vpux/compiler/utils/passes.hpp"
 #include "vpux/utils/core/error.hpp"
 
+#include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
+
 #include <llvm/Support/CommandLine.h>
 #include <mlir/Pass/PassOptions.h>
 
 using namespace vpux;
-
-// Use PassPipelineOptions to have access to a convenient API like "createFromString" method
-struct InitCompilerPassOptions : mlir::PassPipelineOptions<InitCompilerPassOptions> {
-    vpux::StrOption arch{*this, "vpu-arch", llvm::cl::desc("VPU architecture to compile for")};
-
-    // This options are only needed to avoid an error message from "Pass-Options-Parser": "no such option <option_name>"
-    vpux::StrOption compilationModeOpt{*this, "compilation-mode", ::llvm::cl::desc(""), ::llvm::cl::init("DefaultHW")};
-    vpux::IntOption numberOfDPUGroupsOpt{*this, "num-of-dpu-groups", ::llvm::cl::desc("")};
-    vpux::IntOption numberOfDMAPortsOpt{*this, "num-of-dma-ports", ::llvm::cl::desc("")};
-    vpux::BoolOption allowCustomValues{*this, "allow-custom-values", ::llvm::cl::desc("")};
-};
 
 //
 // parseArchKind
@@ -62,7 +53,15 @@ vpux::VPU::ArchKind vpux::parseArchKind(int argc, char* argv[], StringRef helpHe
 
     const auto getArchFromString = [](vpux::StringRef archOptStr) {
         auto archKind = vpux::VPU::symbolizeEnum<vpux::VPU::ArchKind>(archOptStr);
-        VPUX_THROW_UNLESS(archKind.has_value(), "Unknown VPU architecture : '{0}'", archOpt.getValue());
+
+        if (!archKind.has_value()) {
+            // TODO: Remove after #84053
+            auto deprecatedArchKind = vpux::VPU::symbolizeDeprecatedArchKind(archOptStr);
+            VPUX_THROW_UNLESS(deprecatedArchKind.has_value(), "Unknown VPU architecture : '{0}'", archOpt.getValue());
+
+            return mapDeprecatedArchKind(deprecatedArchKind.value());
+        }
+
         return archKind.value();
     };
 
@@ -70,7 +69,7 @@ vpux::VPU::ArchKind vpux::parseArchKind(int argc, char* argv[], StringRef helpHe
     if (!archOpt.empty()) {
         arch = getArchFromString(archOpt);
     } else {
-        const auto options = InitCompilerPassOptions::createFromString(initCompiler);
+        const auto options = VPU::InitCompilerOptions::createFromString(initCompiler);
         arch = getArchFromString(options->arch);
     }
 

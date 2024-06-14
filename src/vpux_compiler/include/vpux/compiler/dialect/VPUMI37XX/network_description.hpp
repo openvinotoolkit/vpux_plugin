@@ -5,16 +5,11 @@
 
 #pragma once
 
+#include "intel_npu/al/icompiler.hpp"
 #include "vpux/compiler/dialect/ELFNPU37XX/metadata.hpp"
-#include "vpux_compiler.hpp"
 
-namespace vpux {
-namespace VPUMI37XX {
+namespace vpux::VPUMI37XX {
 
-class NetworkDescription final : public INetworkDescription {
-public:
-    explicit NetworkDescription(std::vector<char> blob);
-};
+intel_npu::NetworkMetadata getNetworkMetadata(const std::vector<uint8_t>& blob);
 
-}  // namespace VPUMI37XX
-}  // namespace vpux
+}  // namespace vpux::VPUMI37XX

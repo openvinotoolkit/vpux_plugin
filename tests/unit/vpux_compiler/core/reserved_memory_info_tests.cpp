@@ -34,7 +34,7 @@ TEST_F(MLIR_ArgAllocationInfo, MultipleCallOps) {
                     IE.ExecutorResource 1 of @DPU
             }
             IE.ExecutorResource 2 of @DMA_NN
-            IE.MemoryResource 2306867200 bytes of @DDR {VPU.bandwidth = 8 : i64, VPU.derateFactor = 6.000000e-01 : f64}
+            IE.MemoryResource 4194304000 bytes of @DDR {VPU.bandwidth = 8 : i64, VPU.derateFactor = 6.000000e-01 : f64}
 
             IE.CNNNetwork entryPoint : @main
             inputsInfo : {
@@ -47,14 +47,14 @@ TEST_F(MLIR_ArgAllocationInfo, MultipleCallOps) {
             func.func private @foo1(%arg0: memref<1x8x60x60xf16, @DDR>, %arg1: memref<1x4x60x60xf16, @DDR>, %arg2: memref<1x2x60x60xf16, @DDR>) -> (memref<1x4x60x60xf16, @DDR>, memref<1x2x60x60xf16, @DDR>)
             func.func private @foo2(%arg0: memref<1x4x60x60xf16, @DDR>, %arg1: memref<1x3x60x60xf16, @DDR>, %arg2: memref<1x1x20x60xf16, @DDR>) -> (memref<1x3x60x60xf16, @DDR>, memref<1x1x20x60xf16, @DDR>)
             func.func private @foo3(%arg0: memref<1x3x60x60xf16, @DDR>, %arg2: memref<1x1x20x60xf16, @DDR>, %arg3: memref<1x4x60x60xf16, @DDR>) -> memref<1x4x60x60xf16, @DDR>
-            
+
             func.func @main(%arg0: memref<1x8x60x60xf16, @DDR>, %arg1: memref<1x4x60x60xf16, @DDR>, %arg2: memref<1x2x60x60xf16, @DDR>) -> (memref<1x4x60x60xf16, @DDR>, memref<1x2x60x60xf16, @DDR>) {
                 builtin.module @UsedMemory {
                     IE.MemoryResource 0 bytes of @CMX_NN
                 }
 
                 %alloc = memref.alloc() : memref<1x4x60x60xf16, @DDR>
-                %token, %bodyResults:2 = async.execute -> (!async.value<memref<1x4x60x60xf16, @DDR>>, !async.value<memref<1x2x60x60xf16, @DDR>>) 
+                %token, %bodyResults:2 = async.execute -> (!async.value<memref<1x4x60x60xf16, @DDR>>, !async.value<memref<1x2x60x60xf16, @DDR>>)
                                             attributes {VPUIP.executor = @NCE, "async-deps-index" = 0 : i64, cycleBegin = 0 : i64, cycleCost = 1 : i64, cycleEnd = 1 : i64} {
                     %2:2 = func.call @foo1(%arg0, %alloc, %arg2) : (memref<1x8x60x60xf16, @DDR>, memref<1x4x60x60xf16, @DDR>, memref<1x2x60x60xf16, @DDR>) -> (memref<1x4x60x60xf16, @DDR>, memref<1x2x60x60xf16, @DDR>)
                     async.yield %2#0, %2#1 : memref<1x4x60x60xf16, @DDR>, memref<1x2x60x60xf16, @DDR>
@@ -62,16 +62,16 @@ TEST_F(MLIR_ArgAllocationInfo, MultipleCallOps) {
 
                 %alloc_1 = memref.alloc() : memref<1x3x60x60xf16, @DDR>
                 %alloc_2 = memref.alloc() : memref<1x1x20x60xf16, @DDR>
-                %token_0, %bodyResults_1:2 = async.execute [%token] (%bodyResults#0 as %arg3: !async.value<memref<1x4x60x60xf16, @DDR>>) 
-                                                -> (!async.value<memref<1x3x60x60xf16, @DDR>>, !async.value<memref<1x1x20x60xf16, @DDR>>) 
+                %token_0, %bodyResults_1:2 = async.execute [%token] (%bodyResults#0 as %arg3: !async.value<memref<1x4x60x60xf16, @DDR>>)
+                                                -> (!async.value<memref<1x3x60x60xf16, @DDR>>, !async.value<memref<1x1x20x60xf16, @DDR>>)
                                             attributes {VPUIP.executor = @NCE, "async-deps-index" = 1 : i64, cycleBegin = 1 : i64, cycleCost = 1 : i64, cycleEnd = 2 : i64} {
                     %2:2 = func.call @foo2(%arg3, %alloc_1, %alloc_2) : (memref<1x4x60x60xf16, @DDR>, memref<1x3x60x60xf16, @DDR>,  memref<1x1x20x60xf16, @DDR>) -> (memref<1x3x60x60xf16, @DDR>, memref<1x1x20x60xf16, @DDR>)
                     async.yield %2#0, %2#1 : memref<1x3x60x60xf16, @DDR>, memref<1x1x20x60xf16, @DDR>
                 }
 
                 %token_1, %bodyResults_2 = async.execute [%token_0] (
-                                                %bodyResults_1#0 as %arg4: !async.value<memref<1x3x60x60xf16, @DDR>>, 
-                                                %bodyResults_1#1 as %arg5: !async.value<memref<1x1x20x60xf16, @DDR>>) -> !async.value<memref<1x4x60x60xf16, @DDR>> 
+                                                %bodyResults_1#0 as %arg4: !async.value<memref<1x3x60x60xf16, @DDR>>,
+                                                %bodyResults_1#1 as %arg5: !async.value<memref<1x1x20x60xf16, @DDR>>) -> !async.value<memref<1x4x60x60xf16, @DDR>>
                                             attributes {VPUIP.executor = @NCE, "async-deps-index" = 2 : i64, cycleBegin = 1 : i64, cycleCost = 1 : i64, cycleEnd = 2 : i64} {
                     %2 = func.call @foo3(%arg4, %arg5, %arg1) : (memref<1x3x60x60xf16, @DDR>, memref<1x1x20x60xf16, @DDR>, memref<1x4x60x60xf16, @DDR>) -> memref<1x4x60x60xf16, @DDR>
                     async.yield %2 : memref<1x4x60x60xf16, @DDR>

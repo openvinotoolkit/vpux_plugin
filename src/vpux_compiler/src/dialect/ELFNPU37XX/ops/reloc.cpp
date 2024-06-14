@@ -23,46 +23,6 @@ mlir::Value getTargetSectionOfRelocOp(mlir::Operation* op) {
 void vpux::ELFNPU37XX::RelocOp::serialize(elf::writer::Relocation* relocation,
                                           vpux::ELFNPU37XX::SymbolMapType& symbolMap,
                                           vpux::ELFNPU37XX::OffsetCache& cache) {
-    auto baseOpVal = getBaseOp();
-    auto symbolOp = getSourceSymbol().getDefiningOp();
-    auto actualSymbolOp = llvm::cast<vpux::ELFNPU37XX::SymbolOp>(symbolOp);
-    auto targetSection = getTargetSectionOfRelocOp(getOperation());
-
-    if (actualSymbolOp.getIsBuiltin()) {
-        auto symInputValue = actualSymbolOp.getInputArg();
-        auto const_val = llvm::cast<mlir::arith::ConstantOp>(symInputValue.getDefiningOp());
-        auto symValue = const_val.getValue().cast<mlir::IntegerAttr>().getInt();
-
-        relocation->setSpecialSymbol(static_cast<elf::Elf_Word>(symValue));
-    } else {
-        auto symbolMapEntry = symbolMap.find(symbolOp);
-        VPUX_THROW_UNLESS(symbolMapEntry != symbolMap.end(), "Unable to locate symbol entry for relocation");
-        auto symbolEntry = symbolMapEntry->second;
-        relocation->setSymbol(symbolEntry);
-    }
-
-    mlir::Operation* baseOperation = baseOpVal.getDefiningOp();
-    auto relocType = getRelocationType();
-    auto relocAddend = getAddend();
-
-    auto totalOffset = ELFNPU37XX::getOffsetOfOpInSection(baseOpVal, targetSection, cache);
-
-    auto getOffsetOfOpIf = mlir::dyn_cast<vpux::ELFNPU37XX::GetOffsetOfOpInterface>(baseOperation);
-    VPUX_THROW_UNLESS(
-            getOffsetOfOpIf,
-            "Value given as offsetOf parameter does not represent an Op that implements getOffsetOfOpInterface");
-    auto computedOffsetOf = getOffsetOfOpIf.getOffsetOfWithinOperation(getOffsetOf());
-
-    totalOffset += computedOffsetOf.value_or(0);
-
-    relocation->setType(static_cast<elf::Elf_Word>(relocType));
-    relocation->setOffset(totalOffset);
-    relocation->setAddend(relocAddend);
-}
-
-void vpux::ELFNPU37XX::RelocImmOffsetOp::serialize(elf::writer::Relocation* relocation,
-                                                   vpux::ELFNPU37XX::SymbolMapType& symbolMap,
-                                                   vpux::ELFNPU37XX::OffsetCache& cache) {
     auto symbolOp = getSourceSymbol().getDefiningOp();
     auto actualSymbolOp = llvm::cast<vpux::ELFNPU37XX::SymbolOp>(symbolOp);
 
@@ -92,4 +52,19 @@ void vpux::ELFNPU37XX::RelocImmOffsetOp::serialize(elf::writer::Relocation* relo
     relocation->setType(static_cast<elf::Elf_Word>(relocType));
     relocation->setOffset(relocOffset);
     relocation->setAddend(relocAddend);
+}
+
+void vpux::ELFNPU37XX::RelocOp::build(mlir::OpBuilder& odsBuilder, mlir::OperationState& odsState,
+                                      mlir::Value baseOpOffset, int64_t offset,
+                                      vpux::ELFNPU37XX::RelocationType relocationType, mlir::Value sourceSymbol,
+                                      int64_t addend, llvm::StringRef description) {
+    build(odsBuilder, odsState, baseOpOffset, offset, relocationType, sourceSymbol, addend,
+          odsBuilder.getStringAttr(description));
+}
+
+void vpux::ELFNPU37XX::RelocOp::build(mlir::OpBuilder& odsBuilder, mlir::OperationState& odsState,
+                                      mlir::Value baseOpOffset, int64_t offset,
+                                      vpux::ELFNPU37XX::RelocationType relocationType, ::mlir::Value sourceSymbol,
+                                      int64_t addend) {
+    build(odsBuilder, odsState, baseOpOffset, offset, relocationType, sourceSymbol, addend, "");
 }

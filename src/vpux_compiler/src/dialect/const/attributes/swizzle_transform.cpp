@@ -12,8 +12,6 @@
 
 #include <mlir/IR/DialectImplementation.h>
 #include <numeric>
-#include "vpux/utils/IE/loop.hpp"
-#include "vpux/utils/core/func_ref.hpp"
 
 using namespace vpux;
 using namespace vpux::BufferTransform;
@@ -44,7 +42,12 @@ void AddressTransform::setStaggerBits(uint32_t bits) {
     _shift = LOG2_RAM_CUT_BYTES - _staggerAddressBits;
 
     switch (_archKind) {
-    case VPU::ArchKind::VPUX37XX:
+    case VPU::ArchKind::NPU40XX:  // VPUX40XX - NN CMX ram cut data width = 32B
+        _shift++;
+        _log2RamCutDataWidth++;
+        _ramCutAddressMask = (1u << (LOG2_RAM_CUT_BYTES + 1)) - 1u;
+        break;
+    case VPU::ArchKind::NPU37XX:
         break;
     default:
         VPUX_THROW("Unsuported ArchKind {0}", _archKind);
@@ -126,10 +129,8 @@ mlir::Attribute vpux::Const::SwizzleConstantAttr::parse(mlir::AsmParser& parser,
 vpux::NDTypeInterface vpux::Const::SwizzleConstantAttr::inferOutputType(vpux::NDTypeInterface inputType) const {
     const uint32_t arch = static_cast<int32_t>(*getArch().getValue().getRawData());
     VPU::ArchKind archKind = static_cast<VPU::ArchKind>(arch);
-
     const auto newSize =
             alignSizeForSwizzling(inputType.getTotalAllocSize().count(), getSizeAlignmentForSwizzling(archKind));
-
     // Create a flat type with aligned size based on HW requirements
     if (inputType.getElemTypeSize().count() == 1) {
         // For sub-byte type (i1) use same type on output
@@ -138,7 +139,7 @@ vpux::NDTypeInterface vpux::Const::SwizzleConstantAttr::inferOutputType(vpux::ND
         return inputType.changeShape(newShape);
     } else if (inputType.getElementType().isF16()) {
         // For FP16 maintain same type
-        auto newShape = Shape({newSize / static_cast<int64_t>(sizeof(float16)), 1, 1, 1});
+        auto newShape = Shape({newSize / static_cast<int64_t>(sizeof(vpux::type::float16)), 1, 1, 1});
         return inputType.changeShape(newShape);
     } else {
         // For any other type use U8
@@ -148,25 +149,33 @@ vpux::NDTypeInterface vpux::Const::SwizzleConstantAttr::inferOutputType(vpux::ND
 }
 
 //
-//  Helper function for swizzling
+// SwizzleConstantAttr::transform
 //
 
-Const::Content swizzleValues(Const::Content& input, BufferSwizzleTransform& bufferSwizzleTransform,
-                             NDTypeInterface outputType, VPU::ArchKind archKind) {
-    const auto newSize =
-            alignSizeForSwizzling(input.getType().getTotalAllocSize().count(), getSizeAlignmentForSwizzling(archKind));
+Const::Content vpux::Const::SwizzleConstantAttr::transform(vpux::Const::Content& input) const {
+    const uint32_t swizzleKey = checked_cast<int32_t>(*getSwizzleKey().getValue().getRawData());
+    const uint32_t dataWidth = checked_cast<uint32_t>(input.getType().getElemTypeSize().count());
+    const uint32_t arch = static_cast<int32_t>(getArch().getValue().getSExtValue());
+    VPU::ArchKind archKind = static_cast<VPU::ArchKind>(arch);
+    auto outputType = inferOutputType(input.getType());
+
+    BufferSwizzleTransform bufferSwizzleTransform{swizzleKey, archKind};
+    auto inputTotalSize = checked_cast<size_t>(input.getType().getTotalAllocSize().count());
+    auto newSize = checked_cast<size_t>(
+            alignSizeForSwizzling(input.getType().getTotalAllocSize().count(), getSizeAlignmentForSwizzling(archKind)));
     auto output = Const::Content::allocTempBuffer(outputType, outputType.getElementType(), false, newSize);
 
     auto swizzledBuffer = output.getRawTempBuf();
 
-    // Create new buffer with required size. Fill it with input data
+    // the copyTo will not pack the input data when the copy buffer larger than _data.size().
+    // Therefore it needs to pass the TotalAllocSize of the input first, and then the copyTo function will pack the
+    // sub-bytes data. After that, resize the buffer to alignSize.
     std::vector<char> inputValues(newSize);
-    input.copyTo(MutableArrayRef(inputValues.data(), newSize));
+    input.copyTo(MutableArrayRef(inputValues.data(), inputTotalSize));
 
     // Pad if final aligned size is larger than input size
     // If input constant was splat then pad with the same value to allow
     // having splat constant also after swizzling transformation
-    auto inputTotalSize = input.getType().getTotalAllocSize().count();
     if (newSize > inputTotalSize) {
         char padVal = 0;
         if (input.isSplat()) {
@@ -178,6 +187,12 @@ Const::Content swizzleValues(Const::Content& input, BufferSwizzleTransform& buff
 
     VPUX_THROW_WHEN(inputValues.size() != swizzledBuffer.size(), "Mismatch of buffer sizes");
 
+    // Set storage element type to be equal to the sub-byte element type in order to have trivial storage
+    // This allows functionality such as copying the buffer to be done as a simple memcpy
+    if (dataWidth == 1) {
+        output.setStorageElemType(input.getStorageElemType());
+    }
+
     // If input is splat no need to performa actual swizzling transformation
     if (input.isSplat()) {
         std::memcpy(swizzledBuffer.data(), inputValues.data(), swizzledBuffer.size());
@@ -185,55 +200,6 @@ Const::Content swizzleValues(Const::Content& input, BufferSwizzleTransform& buff
     }
 
     bufferSwizzleTransform.swizzle<char>(inputValues, swizzledBuffer);
-
-    return output;
-}
-
-//
-// SwizzleConstantAttr::transform
-//
-
-Const::Content vpux::Const::SwizzleConstantAttr::transform(vpux::Const::Content& input) const {
-    const uint32_t swizzleKey = static_cast<int32_t>(*getSwizzleKey().getValue().getRawData());
-    const uint32_t dataWidth = static_cast<uint32_t>(input.getType().getElemTypeSize().count());
-    const uint32_t arch = static_cast<int32_t>(*getArch().getValue().getRawData());
-    VPU::ArchKind archKind = static_cast<VPU::ArchKind>(arch);
-    auto outputType = inferOutputType(input.getType());
-
-    BufferSwizzleTransform bufferSwizzleTransform{swizzleKey, archKind};
-
-    // Since vpux::Const::Content::copyTo works now with sub 8 bit datatypes we can
-    // get rid of the I1 specific code bellow and instead use copyTo in a generic way
-    // E#103418
-    if (dataWidth != 1) {
-        return swizzleValues(input, bufferSwizzleTransform, outputType, archKind);
-    }
-
-    // Handle i1 type differently.
-    // Convert constant to ui8 type before applying swizzling transformation
-    const auto inputType = input.getType();
-    VPUX_THROW_UNLESS(inputType.getNumElements() % CHAR_BIT == 0, "Elements cannot be packed in bytes");
-
-    const auto packedNumElems = inputType.getNumElements() / CHAR_BIT;
-    const auto packedElemType = getUInt8Type(inputType.getContext());
-    const auto packedInputType = inputType.changeShapeElemType(Shape({1, 1, 1, packedNumElems}), packedElemType);
-
-    ArrayRef<char> data = input.getRawStorageBuf();
-
-    // Handle cases where i1 constant has splat value of 1 which in case of
-    // ui8 as destination type should be converted to 0xFF
-    SmallVector<char> byteBuff0xFF = {(char)0xFF};
-    if (input.isSplat() && data[0] == 1) {
-        data = ArrayRef(byteBuff0xFF.data(), byteBuff0xFF.size());
-    }
-    auto packedInput = Const::Content::fromRawBuffer(packedInputType, data, packedElemType, input.isSplat());
-
-    auto packedOutput = swizzleValues(packedInput, bufferSwizzleTransform, outputType, archKind);
-    auto output = Const::Content::moveBuffer(outputType, std::move(packedOutput));
-
-    // Set storage element type to be equal to the sub-byte element type in order to have trivial storage
-    // This allows functionality such as copying the buffer to be done as a simple memcpy
-    output.setStorageElemType(input.getStorageElemType());
 
     return output;
 }

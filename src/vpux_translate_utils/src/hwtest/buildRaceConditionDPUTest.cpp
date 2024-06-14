@@ -8,10 +8,10 @@
 
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/passes.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/task.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/transforms/passes.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
 #include "vpux/hwtest/test_case_json_parser.hpp"
@@ -114,7 +114,7 @@ void buildRaceConditionDPUTest(const nb::TestCaseJsonDescriptor& testDesc, mlir:
     auto functionInput = function.getArgument(0);
 
     SmallVector<mlir::BlockArgument> functionOutputs;
-    for (std::size_t idx = 1; idx <= numClusters; ++idx) {
+    for (unsigned int idx = 1; idx <= static_cast<unsigned int>(numClusters); ++idx) {
         functionOutputs.push_back(function.getArgument(idx));
     }
 
@@ -199,14 +199,14 @@ void buildRaceConditionDPUTest(const nb::TestCaseJsonDescriptor& testDesc, mlir:
     const auto pad = VPU::getPaddingAttr(ctx, paddings[PAD_NCETASK_LEFT], paddings[PAD_NCETASK_RIGHT],
                                          paddings[PAD_NCETASK_TOP], paddings[PAD_NCETASK_BOTTOM]);
 
-    for (std::size_t i = 1; i < iterationCount; ++i) {
+    for (std::size_t i = 1; i < iterationCount - 1; ++i) {
         updateBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, i);
 
         for (std::size_t idx = 0; idx < numClusters; ++idx) {
             auto nceTask = VPURT::wrapIntoTaskOp<VPUIP::NCEClusterTaskOp>(
                     functionBuilder, mlir::ValueRange(waitBarrier.getBarrier()),
                     mlir::ValueRange(updateBarrier.getBarrier()), loc, inputsCMX[idx].getBuffer(),
-                    weightsCMX[idx].getBuffer(), weightsTablesCMX[idx].getBuffer(), nullptr, nullptr,
+                    weightsCMX[idx].getBuffer(), weightsTablesCMX[idx].getBuffer(), nullptr, nullptr, nullptr,
                     inputsCMX[idx].getBuffer(), outputsCMX[idx].getBuffer(), outputsCMX[idx].getBuffer(),
                     vpux::VPUIP::NCETaskType::CONV, kernelSize, strides, pad, nullptr, nullptr);
             nceTask.addDPUTask(functionBuilder, start, outEnd, start, inEnd, pad, conv.cube_mode);
@@ -214,10 +214,12 @@ void buildRaceConditionDPUTest(const nb::TestCaseJsonDescriptor& testDesc, mlir:
         waitBarrier = updateBarrier;
     }
 
+    // finalBarrier passed as production barrier to last DMA task
+    auto finalBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, iterationCount - 1);
     for (std::size_t idx = 0; idx < numClusters; ++idx) {
         VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(waitBarrier.getBarrier()),
-                                              mlir::ValueRange(), loc, outputsCMX[idx].getOperation()->getResult(0),
-                                              functionOutputs[idx], 0);
+                                              mlir::ValueRange(finalBarrier.getBarrier()), loc,
+                                              outputsCMX[idx].getOperation()->getResult(0), functionOutputs[idx], 0);
     }
     auto outputsRef = ArrayRef(functionOutputs);
     functionBuilder.create<mlir::func::ReturnOp>(loc, mlir::ValueRange{outputsRef});
@@ -225,8 +227,10 @@ void buildRaceConditionDPUTest(const nb::TestCaseJsonDescriptor& testDesc, mlir:
     module.dump();
 
     mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    pm.addPass(VPU::createInitCompilerPass(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW,
-                                           /*numOfDPUGroups=*/numClusters, std::nullopt, log));
+    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.numberOfDPUGroups = numClusters;
+
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
     if (conv.compress) {
         pm.addPass(VPUIP::createCompressWeightsBTCPass(log));
     }

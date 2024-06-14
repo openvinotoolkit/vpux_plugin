@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --canonicalize %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 
@@ -16,6 +16,24 @@ func.func @FoldMemPermute(%arg0: tensor<1x16x2x3xf32>) -> tensor<1x16x2x3xf32> {
 
     // CHECK-NOT: IE.MemPermute
     // CHECK:     return %arg0 : tensor<1x16x2x3xf32>
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+#NWCH = affine_map<(d0, d1, d2, d3) -> (d0, d3, d1, d2)>
+
+// CHECK-LABEL: @ConstFold
+func.func @ConstFold() -> tensor<1x2x3x4xf32> {
+    %0 = const.Declare tensor<1x2x3x4xf32, {order = #NHWC}> = dense<5.0> : tensor<1x2x3x4xf32>, [#const.Reorder<#NHWC>]
+    %1 = IE.MemPermute(%0) {dst_order = #NCHW, mem_perm = #NWCH} : tensor<1x2x3x4xf32, {order = #NHWC}> -> tensor<1x2x3x4xf32>
+    return %1 : tensor<1x2x3x4xf32>
+
+    // CHECK:       [[CST:%.*]] = const.Declare tensor<1x2x3x4xf32> = dense<5.000000e+00> : tensor<1x2x3x4xf32>,
+    // CHECK-SAME:        [#const.Reorder<#NHWC>, #const.MemPermute<#NCHW, #NWCH>]
+    // CHECK-NOT:   IE.MemPermute
+    // CHECK:       return [[CST]]
 }
 
 // -----
@@ -117,7 +135,7 @@ func.func @NotFuseMemPermute(%arg0: tensor<1x8x4x64xf16>) -> (tensor<1x64x8x4xf1
         tensor<1x64x8x4xf16> -> tensor<1x64x4x8xf16>
     %2 = IE.PermuteCast(%0) {dst_order = #NHWC, mem_perm = #NCHW} :
         tensor<1x64x8x4xf16> -> tensor<1x4x64x8xf16, {order = #NHWC}>
-            
+
     return %0, %1, %2 : tensor<1x64x8x4xf16>, tensor<1x64x4x8xf16>, tensor<1x4x64x8xf16, {order = #NHWC}>
 
     // CHECK:     %[[VAL_0:.*]] = IE.MemPermute(%arg0) {dst_order = #NCHW, mem_perm = #NWCH} : tensor<1x8x4x64xf16> -> tensor<1x64x8x4xf16>
@@ -141,7 +159,7 @@ func.func @FuseMemPermuteForAllUserMemPerm(%arg0: tensor<1x8x4x64xf16>) -> tenso
         tensor<1x64x8x4xf16> -> tensor<1x64x4x8xf16>
     %2 = IE.MemPermute(%0) {dst_order = #NHWC, mem_perm = #NCHW} :
         tensor<1x64x8x4xf16> -> tensor<1x4x64x8xf16, {order = #NHWC}>
-            
+
     return %0 : tensor<1x64x8x4xf16>
 
     // CHECK:     %[[VAL_0:.*]] = IE.MemPermute(%arg0) {dst_order = #NCHW, mem_perm = #NWCH} : tensor<1x8x4x64xf16> -> tensor<1x64x8x4xf16>
@@ -223,10 +241,10 @@ func.func @FuseMemPermThroughConcat(%arg0: tensor<1x16x2x3xf32>, %arg1: tensor<1
 
     // CHECK-NOT:     IE.MemPermute
 
-    // CHECK:     %[[VAL_0:.*]] = IE.Concat(%arg0, %arg1) 
+    // CHECK:     %[[VAL_0:.*]] = IE.Concat(%arg0, %arg1)
     // CHECK-SAME{LITERAL}:     {static_offsets = [[0, 0, 0, 0], [0, 0, 0, 3]]}
     // CHECK-SAME:     tensor<1x16x2x3xf32>, tensor<1x16x2x3xf32> -> tensor<1x16x2x6xf32>
-    
+
     // CHECK:     %[[VAL_1:.*]] = IE.MemPermute(%[[VAL_0:.*]]) {dst_order = #NCHW, mem_perm = #NHWC} : tensor<1x16x2x6xf32> -> tensor<1x2x6x16xf32>
     // CHECK:     return %[[VAL_1:.*]] : tensor<1x2x6x16xf32>
 }
@@ -244,16 +262,16 @@ func.func @FuseMemPermThroughExpand(%arg0: tensor<1x289x289x1xf16>) ->
     %1 = IE.Expand(%0) {pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 15, 0]} : tensor<1x1x289x289xf16> -> tensor<1x1x304x289xf16>
     %2 = IE.MemPermute(%1) {dst_order = #NCHW, mem_perm = #NCWH} : tensor<1x1x304x289xf16> -> tensor<1x1x289x304xf16>
 
-    return %2 : tensor<1x1x289x304xf16> 
+    return %2 : tensor<1x1x289x304xf16>
 
     // CHECK-NOT:     IE.MemPermute
 
-    // CHECK:     %[[VAL_0:.*]] = IE.Expand(%arg0) 
+    // CHECK:     %[[VAL_0:.*]] = IE.Expand(%arg0)
     // CHECK-SAME{LITERAL}:     {pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 15, 0]}
     // CHECK-SAME:     tensor<1x289x289x1xf16> -> tensor<1x289x304x1xf16>
 
     // CHECK:     %[[VAL_1:.*]] = IE.PermuteCast(%[[VAL_0]]) {dst_order = #NCHW, mem_perm = #NWCH} : tensor<1x289x304x1xf16> -> tensor<1x1x289x304xf16>
-    
+
     // CHECK:     return %[[VAL_1:.*]] : tensor<1x1x289x304xf16>
 }
 
@@ -270,20 +288,20 @@ func.func @NotFuseMemPermThroughExpandForNonTrivialCase(%arg0: tensor<1x289x289x
     %1 = IE.Expand(%0) {pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 15, 0]} : tensor<1x10x289x289xf16> -> tensor<1x10x304x289xf16>
     %2 = IE.MemPermute(%1) {dst_order = #NCHW, mem_perm = #NCWH} : tensor<1x10x304x289xf16> -> tensor<1x10x289x304xf16>
 
-    return %2 : tensor<1x10x289x304xf16> 
+    return %2 : tensor<1x10x289x304xf16>
 
-    // CHECK:     %[[VAL_0:.*]] = IE.MemPermute(%arg0) 
-    // CHECK-SAME{LITERAL}:     {dst_order = #NCHW, mem_perm = #NWHC}  
+    // CHECK:     %[[VAL_0:.*]] = IE.MemPermute(%arg0)
+    // CHECK-SAME{LITERAL}:     {dst_order = #NCHW, mem_perm = #NWHC}
     // CHECK-SAME:     tensor<1x289x289x10xf16> -> tensor<1x10x289x289xf16>
 
-    // CHECK:     %[[VAL_1:.*]] = IE.Expand(%[[VAL_0:.*]]) 
+    // CHECK:     %[[VAL_1:.*]] = IE.Expand(%[[VAL_0:.*]])
     // CHECK-SAME{LITERAL}:     {pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 15, 0]}
     // CHECK-SAME:     tensor<1x10x289x289xf16> -> tensor<1x10x304x289xf16>
-    
-    // CHECK:     %[[VAL_2:.*]] = IE.MemPermute(%[[VAL_1:.*]]) 
+
+    // CHECK:     %[[VAL_2:.*]] = IE.MemPermute(%[[VAL_1:.*]])
     // CHECK-SAME{LITERAL}:     {dst_order = #NCHW, mem_perm = #NCWH}
     // CHECK-SAME:     tensor<1x10x304x289xf16> -> tensor<1x10x289x304xf16>
-    
+
     // CHECK:     return %[[VAL_2:.*]] : tensor<1x10x289x304xf16>
 }
 

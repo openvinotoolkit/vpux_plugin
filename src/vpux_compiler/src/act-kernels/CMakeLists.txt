@@ -26,6 +26,5 @@ target_include_directories(${TARGET_NAME}
     PRIVATE
         ${VPU_COMPILER_SRC_INCLUDE_DIR})
 target_sources(${TARGET_NAME} PRIVATE $<TARGET_OBJECTS:act_shave_kernels_lib>)
-add_src_target($<BUILD_INTERFACE:${TARGET_NAME}>)
-vpux_enable_clang_format(${TARGET_NAME})
+add_src_target(${TARGET_NAME})
 enable_warnings_as_errors(${TARGET_NAME} WIN_STRICT)

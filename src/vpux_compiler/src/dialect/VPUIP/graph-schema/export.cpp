@@ -1,26 +1,27 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 #include "vpux/compiler/dialect/VPUIP/graph-schema/export.hpp"
 
+#include "vpux/compiler/compiler_version.hpp"
 #include "vpux/compiler/core/profiling.hpp"
 #include "vpux/compiler/core/profiling_metadata.hpp"
-#include "vpux/compiler/dialect/IE/ops.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
 #include "vpux/compiler/dialect/IERT/ops.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPUIP/generated/schema/gf_version.h"
 #include "vpux/compiler/dialect/VPUIP/graph-schema/blob_writer.hpp"
 #include "vpux/compiler/dialect/VPUIP/graph-schema/schema.hpp"
 #include "vpux/compiler/dialect/VPUIP/graph-schema/utils.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/utils.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 
 #include "vpux/compiler/dialect/VPU/utils/performance_metrics.hpp"
-#include "vpux/utils/IE/loop.hpp"
+#include "vpux/compiler/utils/loop.hpp"
 #include "vpux/utils/core/array_ref.hpp"
 #include "vpux/utils/core/checked_cast.hpp"
 #include "vpux/utils/core/enums.hpp"
@@ -29,16 +30,13 @@
 #include "vpux/utils/core/numeric.hpp"
 #include "vpux/utils/core/range.hpp"
 #include "vpux/utils/core/string_ref.hpp"
-#include "vpux/utils/plugin/profiling_meta.hpp"
-#include "vpux/utils/plugin/profiling_parser.hpp"
+#include "vpux/utils/profiling/metadata.hpp"
 
 #include <llvm/ADT/DenseMap.h>
 #include <mlir/IR/BuiltinOps.h>
 #include <mlir/IR/BuiltinTypes.h>
 
-#include <precision_utils.h>
 #include <transformations/utils/utils.hpp>
-#include <version.hpp>
 
 #include <unordered_map>
 
@@ -48,9 +46,9 @@ namespace {
 
 flatbuffers::Offset<MVCNN::Version> createVersion(VPUIP::BlobWriter& writer, Logger log) {
     log.info("Blob version: majorV={0}, minorV={1}, patch={2}, hash={3}, context={4}", MVCNN_VERSION_MAJOR,
-             MVCNN_VERSION_MINOR, MVCNN_VERSION_PATCH, VPUX_PLUGIN_VERSION, "NPU Compiler");
+             MVCNN_VERSION_MINOR, MVCNN_VERSION_PATCH, VPUX_COMPILER_VERSION, "NPU Compiler");
 
-    const auto serializedHash = writer.createString(VPUX_PLUGIN_VERSION);
+    const auto serializedHash = writer.createString(VPUX_COMPILER_VERSION);
     const auto serializedContext = writer.createString("NPU Compiler");
 
     MVCNN::VersionBuilder builder(writer);
@@ -138,8 +136,11 @@ flatbuffers::Offset<MVCNN::PerformanceMetrics> createPerformanceMetrics(VPUIP::B
                 MVCNN::CreateInferenceTimingByBandwidth(writer, writer.createVector(byBWTicks[i])));
     }
 
+    auto arch = vpux::VPU::getArch(module);
+    auto freqBase = VPU::getFreqBase(arch);
+    auto freqStep = VPU::getFreqStep(arch);
     return MVCNN::CreatePerformanceMetrics(
-            writer, VPU::getFreqBase(), VPU::getFreqStep(), VPU::getBWBase(), VPU::getBWStep(),
+            writer, freqBase, freqStep, VPU::getBWBase(), VPU::getBWStep(),
             MVCNN::CreateScalability(writer, writer.createVector(scaleByFreq)),
             MVCNN::CreateInferenceTiming(writer, writer.createVector(inferenceTimingByFreq)));
 }
@@ -159,6 +160,9 @@ flatbuffers::Offset<MVCNN::ActKernelRuntime> createActKernelRuntime(VPUIP::BlobW
 
     // TODO: always extract num shaves info from VPURT::SW.Runtime, which can be extracted from module
     auto maxShaves = 4;
+    if (vpux::VPU::getArch(module) == vpux::VPU::ArchKind::NPU40XX) {
+        maxShaves = 12;
+    }
     constexpr auto defaultStackSize = Byte(4_KB).count();
     constexpr auto alignmentReq = Byte(1_KB).count();
 
@@ -203,7 +207,9 @@ flatbuffers::Offset<MVCNN::ActKernelRuntime> createActKernelRuntime(VPUIP::BlobW
                 writer.createKernelDataRef("scratch_buffer", reservedOffset, scratchBufferSize, scratchBufferData);
     }
 
-    SmallVector<int8_t> counters = {MVCNN::ActKernelPerfCounter_STALL_CYCLE_CNT_EN};
+    SmallVector<int8_t> counters = {
+            MVCNN::ActKernelPerfCounter_STALL_CYCLE_CNT_EN, MVCNN::ActKernelPerfCounter_EXEC_INST_CNT_EN,
+            MVCNN::ActKernelPerfCounter_CLK_CYCLE_CNT_EN, MVCNN::ActKernelPerfCounter_BRANCH_TAKEN_CNT_EN};
     SmallVector<int8_t> stallFilters = {
             MVCNN::ActKernelPerfStallFilter_LSU0_DATA_WAIT, MVCNN::ActKernelPerfStallFilter_LSU1_DATA_WAIT,
             MVCNN::ActKernelPerfStallFilter_LSU0_ACCESS, MVCNN::ActKernelPerfStallFilter_LSU1_ACCESS};
@@ -227,6 +233,60 @@ flatbuffers::Offset<MVCNN::ActKernelRuntime> createActKernelRuntime(VPUIP::BlobW
     builder.add_perfConfig(perfConfig);
 
     return builder.Finish();
+}
+
+VPUIP::BlobWriter::TensorReference createDmaHwpBase(VPUIP::BlobWriter& writer, mlir::ModuleOp& module) {
+    auto maybeDmaSection = vpux::getProfilingSection(module, profiling::ExecutorType::DMA_HW);
+    VPUX_THROW_UNLESS(maybeDmaSection.has_value(), "Cannot find DMAHW section in profiling output");
+    auto dmaSection = maybeDmaSection.value();
+
+    VPUX_THROW_UNLESS((dmaSection.getOffset() % VPUIP::HW_DMA_PROFILING_SIZE_BYTES_40XX) == 0, "Unaligned HWP base");
+    VPUX_THROW_UNLESS((dmaSection.getSize() % VPUIP::HW_DMA_PROFILING_SIZE_BYTES_40XX) == 0, "Bad DMA section size");
+
+    auto ctx = module->getContext();
+    const auto outputType = getMemRefType({dmaSection.getSize() / 4}, getUInt32Type(ctx), DimsOrder::C,
+                                          VPURT::BufferSection::ProfilingOutput)
+                                    .cast<vpux::NDTypeInterface>();
+
+    return writer.createTensorRef("dma_hwp_base", outputType, VPURT::BufferSection::ProfilingOutput, 0,
+                                  dmaSection.getOffset());
+}
+
+VPUIP::BlobWriter::TensorReference createWorkpointSectionOutput(VPUIP::BlobWriter& writer, mlir::ModuleOp& module) {
+    if (VPU::getArch(module) != VPU::ArchKind::NPU40XX) {
+        return {};
+    }
+
+    auto ctx = module->getContext();
+    auto maybeCaptureSection = vpux::getProfilingSection(module, profiling::ExecutorType::WORKPOINT);
+    if (!maybeCaptureSection.has_value()) {
+        return {};
+    }
+
+    auto captureSection = maybeCaptureSection.value();
+    unsigned pllSizeBytes = checked_cast<unsigned>(captureSection.getSize());
+    VPUX_THROW_UNLESS(pllSizeBytes == profiling::WORKPOINT_BUFFER_SIZE, "Bad PLL section size: {0}", pllSizeBytes);
+
+    const auto outputType =
+            getMemRefType({pllSizeBytes / 4}, getUInt32Type(ctx), DimsOrder::C, VPURT::BufferSection::ProfilingOutput)
+                    .cast<vpux::NDTypeInterface>();
+
+    return writer.createTensorRef("workpoint_output", outputType, VPURT::BufferSection::ProfilingOutput, 0,
+                                  captureSection.getOffset());
+}
+
+VPUIP::BlobWriter::TensorReference createDmaHwpScratchBuffer(VPUIP::BlobWriter& writer, mlir::ModuleOp& module) {
+    auto ctx = module->getContext();
+    const auto outputType = getMemRefType({VPUIP::HW_DMA_PROFILING_SIZE_BYTES_40XX / 4}, getUInt32Type(ctx),
+                                          DimsOrder::C, VPU::MemoryKind::CMX_NN)
+                                    .cast<vpux::NDTypeInterface>();
+    int64_t dmaProfMemOffset = 0;
+    if (auto dmaProfMem = IE::getDmaProfilingReservedMemory(module, VPU::MemoryKind::CMX_NN)) {
+        VPUX_THROW_UNLESS(dmaProfMem.getOffset().has_value(), "No offset setting provided");
+        dmaProfMemOffset = dmaProfMem.getOffset().value();
+    }
+
+    return writer.createTensorRef("dma_hwp_scratch", outputType, VPURT::BufferSection::CMX_NN, 0, dmaProfMemOffset);
 }
 
 flatbuffers::Offset<MVCNN::SummaryHeader> createSummaryHeader(
@@ -342,7 +402,14 @@ flatbuffers::Offset<MVCNN::SummaryHeader> createSummaryHeader(
     const auto serializedActKernelsRuntime = createActKernelRuntime(writer, module, netFunc, log);
     const auto serializedPerformanceMetrics = createPerformanceMetrics(writer, module);
     VPUIP::BlobWriter::TensorReference serializedDmaHwpBase;
-    VPUIP::BlobWriter::TensorReference serializedWorkpointSectionOutput;
+    const bool isDmaHwpUsed = isDmaHwpUsedInVPURT(module);
+    if (isDmaHwpUsed) {
+        serializedDmaHwpBase = createDmaHwpBase(writer, module);
+    } else if (VPU::getArch(module) == VPU::ArchKind::NPU40XX) {
+        // Scratch DMA HWP buffer is required in VPUX40xx series
+        serializedDmaHwpBase = createDmaHwpScratchBuffer(writer, module);
+    }
+    VPUIP::BlobWriter::TensorReference serializedWorkpointSectionOutput = createWorkpointSectionOutput(writer, module);
 
     MVCNN::SummaryHeaderBuilder builder(writer);
     builder.add_version(serializedVersion);
@@ -362,7 +429,7 @@ flatbuffers::Offset<MVCNN::SummaryHeader> createSummaryHeader(
     builder.add_act_kernel_runtime(serializedActKernelsRuntime);
     builder.add_performance_metrics(serializedPerformanceMetrics);
     builder.add_profiling_data_mode(VPUIP::mapProfilingMode(VPU::getArch(module)));
-    builder.add_dma_hwp_enabled(false);
+    builder.add_dma_hwp_enabled(isDmaHwpUsed);
     builder.add_dma_hwp_base(serializedDmaHwpBase);
     builder.add_workpoint_output(serializedWorkpointSectionOutput);
     return builder.Finish();
@@ -418,9 +485,13 @@ void serializeTensorDecls(VPUIP::BlobWriter& writer, mlir::func::FuncOp netFunc,
                                      const std::optional<int64_t> storageElementOffset = std::nullopt,
                                      const std::optional<int64_t> storageElementSize = std::nullopt) {
         auto sectionIndex = bufOp.getNonEmptySectionIndex();
+        std::optional<uint64_t> descriptor;
+        if (auto value = bufOp->getAttr("DescriptorHandle").dyn_cast_or_null<mlir::IntegerAttr>()) {
+            descriptor = value.getUInt();
+        }
         writer.createTensorRef(bufOp.getBuffer(), printToString("temp-{0}", tempTensorInd), bufOp.getSection(),
                                sectionIndex, bufOp.getByteOffset(), sparsityMapOffset, storageElementOffset,
-                               storageElementSize, bufOp.getSwizzlingKey());
+                               storageElementSize, bufOp.getSwizzlingKey(), descriptor);
         tempTensorInd++;
     };
 
@@ -463,7 +534,7 @@ SmallVector<VPUIP::BlobWriter::BinaryData> serializeBinaryData(VPUIP::BlobWriter
 
     SmallVector<std::vector<uint64_t>> bufs(opsToSerializeCount);
 
-    loop_1d(LoopExecPolicy::Parallel, checked_cast<int64_t>(constOps.size()), [&](int64_t ind) {
+    loop_1d(LoopExecPolicy::Parallel, netFunc.getContext(), checked_cast<int64_t>(constOps.size()), [&](int64_t ind) {
         const auto attr = constOps[static_cast<size_t>(ind)].getContentAttr();
 
         const auto type = attr.getType();

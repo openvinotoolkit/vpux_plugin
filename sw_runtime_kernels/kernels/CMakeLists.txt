@@ -1,5 +1,4 @@
-
-# Copyright (C) 2022-2023 Intel Corporation.
+# Copyright (C) 2022-2023 Intel Corporation
 # SPDX-License-Identifier: Apache 2.0
 
 cmake_minimum_required(VERSION 3.13.4)
@@ -46,6 +45,7 @@ set(use_prebuilt_binaries OFF)
 
 if(ENABLE_JTAG_BINARIES_BUILD)
   set(IE_MAIN_VPUX_PLUGIN_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../..)
+  include(${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/cmake/mv_tools.cmake)
 endif()
 
 if(ENABLE_SHAVE_BINARIES_BUILD)
@@ -73,6 +73,20 @@ if(ENABLE_SHAVE_BINARIES_BUILD)
     "${MV_TOOLS_PATH}/common/moviCompile/lib/37xxxx/mlibc_lite.a"
     "${MV_TOOLS_PATH}/common/moviCompile/lib/37xxxx/mlibc_lite_lgpl.a"
     "${MV_TOOLS_PATH}/common/moviCompile/lib/37xxxx/mlibcrt.a"
+  )
+
+  set(link_libraries_list_VPU4000
+    "${MV_TOOLS_PATH}/common/moviCompile/lib/4010A0/mlibm.a"
+    "${MV_TOOLS_PATH}/common/moviCompile/lib/4010A0/mlibc_lite.a"
+    "${MV_TOOLS_PATH}/common/moviCompile/lib/4010A0/mlibc_lite_lgpl.a"
+    "${MV_TOOLS_PATH}/common/moviCompile/lib/4010A0/mlibcrt.a"
+  )
+
+  set(link_libraries_list_VPU4000_B0
+    "${MV_TOOLS_PATH}/common/moviCompile/lib/40xxxx/mlibm.a"
+    "${MV_TOOLS_PATH}/common/moviCompile/lib/40xxxx/mlibc_lite.a"
+    "${MV_TOOLS_PATH}/common/moviCompile/lib/40xxxx/mlibc_lite_lgpl.a"
+    "${MV_TOOLS_PATH}/common/moviCompile/lib/40xxxx/mlibcrt.a"
   )
 else()
   set(use_prebuilt_binaries ON)
@@ -148,6 +162,7 @@ foreach(kernel_descrip ${kernel_descrip_list})
   set(rt_kernel "${rt_kernel_default}")
   set(extra_src_list "")
   set(lsu0_wo "")
+  set(B_stepping_only "")
   set(link_script_file "${CMAKE_CURRENT_SOURCE_DIR}/prebuild/shave_kernel.ld")
 
   get_filename_component(kernel_descrip_path ${kernel_descrip} DIRECTORY)
@@ -162,6 +177,17 @@ foreach(kernel_descrip ${kernel_descrip_list})
   if(kernel_cpunum STREQUAL "3720")
     list(APPEND define_symbols_list "USE_3720_INTSTRUCTIONS")
     set(link_libraries_list ${link_libraries_list_VPU3720})
+  elseif(kernel_cpunum STREQUAL "4000")
+    list(APPEND define_symbols_list "USE_4000_INTSTRUCTIONS")
+    set(link_libraries_list ${link_libraries_list_VPU4000})
+    if(NOT B_stepping_only STREQUAL "yes")
+      list(APPEND cppflags_list
+        "-mllvm"
+        "-shave-vpu4-load-store-distance=9"
+        "-mllvm"
+        "--shave-has-LSU1-fu=false"
+      )
+    endif()
   endif()
 
   list(APPEND define_symbols_list "CONFIG_TARGET_SOC_${kernel_cpunum}")
@@ -213,6 +239,21 @@ foreach(kernel_descrip ${kernel_descrip_list})
 
       add_dependencies(act_shave_kernels_build "${kernel_name}${kernel_cpu_suffix}_kernel_copy")
 
+      # E#118643 : temp workaround to allow of IMD-backend with NPU_STEPPING option
+      if(kernel_cpunum STREQUAL "4000")
+        set(blob_text_file_B0 "${target_prefix}${kernel_name}${kernel_cpu_suffix}_B0${blob_text_suffix}")
+        set(blob_data_file_B0 "${target_prefix}${kernel_name}${kernel_cpu_suffix}_B0${blob_data_suffix}")
+        set(elf_file_B0 "${kernel_name}${kernel_cpu_suffix}_B0${elf_suffix}")
+        add_custom_target(
+          "${kernel_name}${kernel_cpu_suffix}_kernel_copy_b0"
+          COMMAND ${CMAKE_COMMAND} -E make_directory "${target_binary_dir}"
+          COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_SOURCE_DIR}/prebuild/act_shave_bin/${blob_text_file_B0}" "${target_binary_dir}"
+          COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_SOURCE_DIR}/prebuild/act_shave_bin/${blob_data_file_B0}" "${target_binary_dir}"
+          COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_SOURCE_DIR}/prebuild/act_shave_bin/${elf_file_B0}" "${target_binary_dir}")
+        add_dependencies(act_shave_kernels_build "${kernel_name}${kernel_cpu_suffix}_kernel_copy_b0")
+      endif()
+      # E#118643 workaround end
+
       continue()
     endif()
 
@@ -263,11 +304,19 @@ foreach(kernel_descrip ${kernel_descrip_list})
     endforeach()
   endif()
 
-  add_custom_command(
-    OUTPUT "${elf_path}"
-    DEPENDS ${obj_file_list}
-    COMMAND "${mv_tools_link}" --script "${link_script_file}" -entry "${kernel_entry}" --gc-sections --strip-debug --discard-all -zmax-page-size=16 ${obj_file_list} -EL ${link_libraries_list} --output "${elf_path}"
-  )
+  if(kernel_cpunum STREQUAL "4000" AND B_stepping_only STREQUAL "yes")
+    add_custom_command(
+      OUTPUT "${elf_path}"
+      DEPENDS ${obj_file_list}
+      COMMAND "${mv_tools_link}" --script "${link_script_file}" -entry "${kernel_entry}" --gc-sections --strip-debug --discard-all -zmax-page-size=16 ${obj_file_list} -EL ${link_libraries_list_VPU4000_B0} --output "${elf_path}"
+    )
+  else()
+    add_custom_command(
+      OUTPUT "${elf_path}"
+      DEPENDS ${obj_file_list}
+      COMMAND "${mv_tools_link}" --script "${link_script_file}" -entry "${kernel_entry}" --gc-sections --strip-debug --discard-all -zmax-page-size=16 ${obj_file_list} -EL ${link_libraries_list} --output "${elf_path}"
+    )
+  endif()
 
   # Delete extra sources after compile such that we can apply different optimizations if needed
   if(NOT extra_src_list STREQUAL "")
@@ -287,6 +336,76 @@ foreach(kernel_descrip ${kernel_descrip_list})
   )
 
   add_dependencies(act_shave_kernels_build "${blob_text_data_target}")
+
+  # NPU40XX B0 workaround removal binaries
+  # E-116865: We also need to support duplicating the same binary for B0 and A0 when workaround disabeled due to compiler limitation
+  if(kernel_cpunum STREQUAL "4000")
+    set(link_libraries_list ${link_libraries_list_VPU4000_B0})
+
+    set(blob_text_data_target "${target_prefix}${kernel_name}${kernel_cpu_suffix}_B0")
+    set(blob_text_file "${target_prefix}${kernel_name}${kernel_cpu_suffix}_B0${blob_text_suffix}")
+    set(blob_data_file "${target_prefix}${kernel_name}${kernel_cpu_suffix}_B0${blob_data_suffix}")
+
+    set(obj_file "${kernel_src}${kernel_cpu_suffix}_B0${obj_suffix}")
+    set(elf_file "${kernel_name}${kernel_cpu_suffix}_B0${elf_suffix}")
+    set(elf_path "${target_binary_dir}/${elf_file}")
+
+    add_custom_command(
+      OUTPUT "${obj_file}"
+      DEPENDS "${kernel_src_file}"
+      COMMAND "${mv_tools_compile}" -mcpu=${kernel_cpu} ${optimization_opts} ${include_dirs_list} ${define_symbols_list} ${shave_preemption_opt} -c "${kernel_src_path}" -o "${obj_file}"
+    )
+
+    set(obj_file_list "${obj_file}")
+
+    if(NOT extra_src_list STREQUAL "")
+      foreach(extra_src_file ${extra_src_list})
+        get_filename_component(src_name ${extra_src_file} NAME_WE)
+        get_filename_component(dir_name ${extra_src_file} DIRECTORY)
+
+        # Discard full path, just keep name of the dir the file is in
+        get_filename_component(dir_name ${dir_name} NAME_WE)
+
+        # Some extra_src files have the same filename so the .o files
+        # must be in separate directories to avoid overwriting.
+        file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/extra_src/${kernel_cpu}/${dir_name})
+        set(obj_file "${CMAKE_CURRENT_BINARY_DIR}/extra_src/${kernel_cpu}/${dir_name}/${src_name}.${kernel_cpu}_B0${obj_suffix}")
+
+        add_custom_command(
+          OUTPUT "${obj_file}"
+          DEPENDS "${kernel_src_file}"
+          COMMAND "${mv_tools_compile}" -mcpu=${kernel_cpu} ${optimization_opts} ${include_dirs_list} ${define_symbols_list} ${shave_preemption_opt} -c "${extra_src_file}" -o "${obj_file}"
+        )
+
+        list(APPEND obj_file_list "${obj_file}")
+      endforeach()
+    endif()
+
+    add_custom_command(
+      OUTPUT "${elf_path}"
+      DEPENDS ${obj_file_list}
+      COMMAND "${mv_tools_link}" --script "${link_script_file}" -entry "${kernel_entry}" --gc-sections --strip-debug --discard-all -zmax-page-size=16 ${obj_file_list} -EL ${link_libraries_list_VPU4000_B0} --output "${elf_path}"
+    )
+
+    # Delete extra sources after compile such that we can apply different optimizations if needed
+    if(NOT extra_src_list STREQUAL "")
+      foreach(extra_src_file ${extra_src_list})
+        get_filename_component(src_name ${extra_src_file} NAME_WE)
+        file(REMOVE_RECURSE "${CMAKE_CURRENT_BINARY_DIR}/extra_src/${kernel_cpu}/${dir_name}/${src_name}.${kernel_cpu}${obj_suffix}")
+      endforeach()
+    endif()
+
+      set(blob_text_path "${target_binary_dir}/${blob_text_file}")
+      set(blob_data_path "${target_binary_dir}/${blob_data_file}")
+
+    add_custom_target("${blob_text_data_target}"
+      COMMAND "${mv_tools_objcopy}" -O binary --only-section=.text "${elf_path}" "${blob_text_path}"
+      COMMAND "${mv_tools_objcopy}" -O binary --only-section=.data "${elf_path}" "${blob_data_path}"
+      DEPENDS "${elf_path}"
+    )
+
+    add_dependencies(act_shave_kernels_build "${blob_text_data_target}")
+  endif()
 endforeach()
 
 # Add file-level and target-level dependencies
@@ -296,3 +415,12 @@ add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated_shave_binary_re
 )
 
 add_library(act_shave_kernels_lib OBJECT "${CMAKE_CURRENT_BINARY_DIR}/generated_shave_binary_resources.cpp")
+
+# The library contains many large arrays, because of which it compiles slowly
+# if the compiler optimisations are enabled.
+target_compile_options(act_shave_kernels_lib PRIVATE -O0)
+
+if(ENABLE_JTAG_BINARIES_BUILD)
+  include(../jtag_tests/app/layer_tests/test_icv/build/jtag_build.cmake)
+  jtag_build()
+endif()

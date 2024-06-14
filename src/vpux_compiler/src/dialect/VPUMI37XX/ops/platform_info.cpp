@@ -40,5 +40,5 @@ vpux::ELFNPU37XX::SectionFlagsAttr vpux::VPUMI37XX::PlatformInfoOp::getUserProcs
 }
 
 void vpux::VPUMI37XX::PlatformInfoOp::build(::mlir::OpBuilder& odsBuilder, ::mlir::OperationState& odsState) {
-    build(odsBuilder, odsState, VPU::ArchKind::VPUX37XX);
+    build(odsBuilder, odsState, VPU::ArchKind::NPU37XX);
 }

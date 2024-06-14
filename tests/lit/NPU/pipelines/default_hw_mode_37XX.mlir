@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -51,7 +51,7 @@ module @Convolution {
         // CHECK:       VPUIP.NCEClusterTask
         // CHECK-SAME:          task_type = #VPUIP.nce_task_type<CONV>
         // CHECK-SAME:      [[input_0:%.*]] : memref<1x16x32x62xf16, #NHWC, [@CMX_NN, 0]>)
-        // CHECK-SAME:      [[weight_0:%.*]] : memref<48x16x3x3xf16, {compressionScheme = #VPUIP.CompressionSchemeAttr<axis = 0 : i64, numElems = dense<27> : tensor<48xi64>, alignment = 16 : i64>, order = #NHWC}, [@CMX_NN, 0]>)
+        // CHECK-SAME:      [[weight_0:%.*]] : memref<48x16x3x3xf16, {order = #NHWC, sparsityCompression = #VPUIP.SparsityCompressionAttr<axis = 0 : i64, numElems = dense<27> : tensor<48xi64>, alignment = 16 : i64>}, [@CMX_NN, 0]>)
         // CHECK-SAME:      [[weight_sm_0:%.*]] : memref<48x1x1x256xi1, [@CMX_NN, 0]>)
         // CHECK-SAME:      [[weight_table_0:%.*]] : memref<48x1x1x4xsi32, [@CMX_NN, 0]>)
         // CHECK-SAME:      [[parent_input_0:%.*]] : !VPUIP.DistributedBuffer<1x16x62x62xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64, alignment = [1, 1, 2, 1]}>)
@@ -63,7 +63,7 @@ module @Convolution {
         // CHECK:       VPUIP.NCEClusterTask
         // CHECK-SAME:          task_type = #VPUIP.nce_task_type<CONV>
         // CHECK-SAME:      [[input_1:%.*]] : memref<1x16x30x62xf16, #NHWC, [@CMX_NN, 1]>)
-        // CHECK-SAME:      [[weight_1:%.*]] : memref<48x16x3x3xf16, {compressionScheme = #VPUIP.CompressionSchemeAttr<axis = 0 : i64, numElems = dense<27> : tensor<48xi64>, alignment = 16 : i64>, order = #NHWC}, [@CMX_NN, 1]>)
+        // CHECK-SAME:      [[weight_1:%.*]] : memref<48x16x3x3xf16, {order = #NHWC, sparsityCompression = #VPUIP.SparsityCompressionAttr<axis = 0 : i64, numElems = dense<27> : tensor<48xi64>, alignment = 16 : i64>}, [@CMX_NN, 1]>)
         // CHECK-SAME:      [[weight_sm_1:%.*]] : memref<48x1x1x256xi1, [@CMX_NN, 1]>
         // CHECK-SAME:      [[weight_table_1:%.*]] : memref<48x1x1x4xsi32, [@CMX_NN, 1]>)
         // CHECK-SAME:      [[parent_input_1:%.*]] : !VPUIP.DistributedBuffer<1x16x62x62xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64, alignment = [1, 1, 2, 1]}>)

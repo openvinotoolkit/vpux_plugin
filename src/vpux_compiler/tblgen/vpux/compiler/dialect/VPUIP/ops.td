@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -87,7 +87,7 @@ def VPUIP_NNDMAOp :
     let summary = "NN DMA task";
 
     let arguments = (ins
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer]>:$input,
+        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_ITIBuffer]>:$input,
         AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer]>:$output_buff,
 
         OptionalAttr<IntAttr>:$port,
@@ -96,7 +96,8 @@ def VPUIP_NNDMAOp :
         OptionalAttr<IntAttr>:$spillId,
         OptionalAttr<UnitAttr>:$compress_candidate,
         OptionalAttr<IntAttr>:$dma_hwp_id,
-        OptionalAttr<VPUIP_DmaProfilingMetadataAttr>:$profilingMetadata
+        OptionalAttr<VPUIP_DmaProfilingMetadataAttr>:$profilingMetadata,
+        UnitAttr:$split_candidate
     );
 
     let results = (outs
@@ -121,6 +122,9 @@ def VPUIP_NNDMAOp :
         >,
         OpBuilder<
             (ins "mlir::Value":$input, "mlir::Value":$output_buff, "int64_t":$port, "bool":$is_out_of_order, "bool":$is_critical, "mlir::IntegerAttr":$spillId, "mlir::UnitAttr":$compress_candidate)
+        >,
+        OpBuilder<
+            (ins "mlir::Value":$input, "mlir::Value":$output_buff, "int64_t":$port, "bool":$is_out_of_order, "bool":$is_critical, "mlir::IntegerAttr":$spillId, "mlir::UnitAttr":$compress_candidate, "bool":$split_candidate)
         >,
     ];
 
@@ -209,6 +213,84 @@ def VPUIP_PermuteDMAOp :
 }
 
 //
+// GatherDMAOp
+//
+
+def VPUIP_GatherDMAOp :
+        VPUIP_TaskOp<1,"GatherDMA",
+            [
+                InferTypeOpInterface,
+                ViewLikeOpInterface,
+                VPUIP_DMATypeOpInterface,
+                DotInterface
+            ]
+        > {
+    let summary = [{
+        Represents a gather operation using gather addressing mode of DMA for NPU40XX.
+        See scatter-gather addressing in NPU40XX HAS for more information.
+    }];
+
+    let arguments = (ins
+        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_ITIBuffer]>:$input,
+        MemRefOf<[AnySignlessInteger, Index,I64,UI64]>:$indices,
+        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer]>:$outputBuff,
+
+
+        IntAttr:$elementSize,
+        IntAttr:$padding,
+
+        OptionalAttr<IntAttr>:$port,
+
+        OptionalAttr<VPUIP_DmaChannelType>:$channelType,
+        UnitAttr:$isOutOfOrder,
+        UnitAttr:$isCritical,
+
+        OptionalAttr<VPUIP_DMADescriptorAttr>:$DMADescriptor,
+        OptionalAttr<IntAttr>:$dmaHwpId,
+
+        OptionalAttr<VPUIP_DmaProfilingMetadataAttr>:$profilingMetadata
+    );
+
+    let results = (outs
+        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer]>:$output
+    );
+
+    let builders = [
+        OpBuilder<
+            (ins "mlir::Value":$input, "mlir::Value":$indices, "mlir::Value":$outputBuff,
+                 "mlir::IntegerAttr":$elementSize, "mlir::IntegerAttr":$padding,
+                 "int64_t":$port)
+        >,
+        OpBuilder<
+            (ins "mlir::Value":$input, "mlir::Value":$indices, "mlir::Value":$outputBuff,
+                 "int64_t":$elementSize, "int64_t":$padding,
+                 "int64_t":$port)
+        >
+    ];
+
+    let extraClassDeclaration = [{
+        static vpux::VPU::ExecutorKind getExecutorKind() {
+            return vpux::VPU::ExecutorKind::DMA_NN;
+        }
+
+        vpux::DotNodeColor getNodeColor() {
+            const auto memKind = getType().cast<vpux::NDTypeInterface>().getMemoryKind();
+            return memKind == vpux::VPU::MemoryKind::DDR ? vpux::DotNodeColor::RED : vpux::DotNodeColor::GREEN;
+        }
+    }] # commonExtraClassDeclaration;
+
+    let hasVerifier = 1;
+
+    let assemblyFormat = [{
+        attr-dict
+        `inputs` `(` $input `:` type($input) `)`
+        `indices` `(` $indices `:` type($indices) `)`
+        `outputs` `(` $outputBuff `:` type($outputBuff) `)`
+        `->` type(results)
+    }];
+}
+
+//
 // ConvertDMAOp
 //
 
@@ -225,7 +307,7 @@ def VPUIP_ConvertDMAOp :
     let summary = "NN DMA task which enables data conversion";
 
     let arguments = (ins
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer]>:$input,
+        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_ITIBuffer]>:$input,
         AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer]>:$output_buff,
 
         OptionalAttr<IntAttr>:$port,
@@ -2608,6 +2690,7 @@ def VPUIP_DPUTaskOp :
         VPU_PaddingAttr:$pad,
         VPU_MPEModeAttr:$mpe_mode,
         OptionalAttr<IntAttr>:$cluster_id,
+        OptionalAttr<DPUHaloRegionArrayAttr>: $haloRegions,
         OptionalAttr<IntAttr>:$workload_id
     );
 
@@ -2641,6 +2724,16 @@ def VPUIP_DPUTaskOp :
             "VPU::PaddingAttr":$pad,
             "VPU::MPEMode":$mpeMode,
             "mlir::IntegerAttr":$clusterId
+        )>,
+        OpBuilder<(ins
+            "mlir::ArrayAttr":$outStart,
+            "mlir::ArrayAttr":$outEnd,
+            "mlir::ArrayAttr":$inStart,
+            "mlir::ArrayAttr":$inEnd,
+            "VPU::PaddingAttr":$pad,
+            "VPU::MPEMode":$mpeMode,
+            "mlir::IntegerAttr":$clusterId,
+            "mlir::ArrayAttr":$haloRegions
         )>
     ];
 
@@ -2656,30 +2749,13 @@ def VPUIP_DPUTaskOp :
 //
 
 def VPUIP_PPETaskOp :
-        VPUIP_Op<
+        VPU_PPETaskOpBase<
+            VPUIP_Dialect,
             "PPETask",
             [
-                ParentOneOf<["vpux::VPUIP::NCEClusterTaskOp", "vpux::VPUMI37XX::DPUInvariantOp"]>
+                HasParent<"vpux::VPUIP::NCEClusterTaskOp">
             ]
-        > {
-    let summary = "PPE Type for NCE Task";
-
-    let arguments = (ins
-        VPU_PPEModeAttr:$ppe_layer_type,
-
-        OptionalAttr<AnyAttrOf<[IntAttr, F64Attr]>>:$clamp_low,
-        OptionalAttr<AnyAttrOf<[IntAttr, F64Attr]>>:$clamp_high,
-        OptionalAttr<IntAttr>:$lrelu_mult,
-        OptionalAttr<IntAttr>:$lrelu_shift,
-        OptionalAttr<I64ArrayAttr>:$quant_mult,
-        OptionalAttr<I64ArrayAttr>:$quant_shift,
-        OptionalAttr<IntAttr>:$quant_post_shift,
-        OptionalAttr<F64ArrayAttr>:$quant_scale,
-        OptionalAttr<I64ArrayAttr>:$in1_quant_mult,
-        OptionalAttr<I64ArrayAttr>:$in2_quant_mult,
-        OptionalAttr<F64Attr>:$fp_prelu_alpha
-    );
-
+         > {
     let builders = [
         OpBuilder<(ins
             CArg<"vpux::VPU::PPEMode", "vpux::VPU::PPEMode::NOOP">:$ppe_layer_type,
@@ -2731,15 +2807,24 @@ def VPUIP_PPETaskOp :
             "int64_t":$quant_shift,
             "int64_t":$quant_post_shift,
             "double":$quant_scale,
+            "double":$ppe_fp_scale,
+            "double":$ppe_fp_bias
+        )>,
+        OpBuilder<(ins
+            "vpux::VPU::PPEMode":$ppe_layer_type,
+            "int64_t":$clamp_low,
+            "int64_t":$clamp_high,
+            "int64_t":$lrelu_mult,
+            "int64_t":$lrelu_shift,
+            "int64_t":$quant_mult,
+            "int64_t":$quant_shift,
+            "int64_t":$quant_post_shift,
+            "double":$quant_scale,
             "int64_t":$in1_quant_mult,
             "int64_t":$in2_quant_mult,
             "double":$fp_prelu_alpha
         )>
     ];
-
-    let assemblyFormat = [{
-        $ppe_layer_type attr-dict
-    }];
 }
 
 //
@@ -2781,23 +2866,25 @@ def VPUIP_NCEClusterTaskOp :
     }];
 
     let arguments = (ins
-        AnyTypeOf<[MemRefOf<[F16, BF16, quant_QuantizedType]>, VPUIP_DistributedBuffer, VPUIP_Buffer]>:$input,
+        AnyTypeOf<[MemRefOf<[F16, BF16, quant_QuantizedType]>, VPUIP_DistributedBuffer, VPUIP_Buffer, VPUIP_ITIBuffer]>:$input,
         Optional<AnyTypeOf<[MemRefOf<[I1]>, VPUIP_DistributedBuffer]>>:$input_sparsity_map,
         Optional<AnyTypeOf<[MemRefOf<[I32]>, VPUIP_DistributedBuffer]>>:$input_storage_element_table,
         Optional<AnyTypeOf<[MemRefOf<[F16, BF16, quant_QuantizedType]>, VPUIP_DistributedBuffer, VPUIP_Buffer]>>:$weights,
         Optional<AnyTypeOf<[MemRefOf<[I1]>, VPUIP_DistributedBuffer]>>:$weights_sparsity_map,
         Optional<AnyTypeOf<[MemRefOf<[SI32]>, VPUIP_DistributedBuffer]>>:$weight_table,
         Optional<AnyTypeOf<[MemRefOf<[SI32]>, VPUIP_DistributedBuffer]>>:$instruction_list_table,
+        Optional<AnyTypeOf<[MemRefOf<[UI16]>, VPUIP_DistributedBuffer]>>:$spr_lookup_table,
         Optional<AnyTypeOf<[MemRefOf<[UI8]>, VPUIP_DistributedBuffer]>>:$activation_window,
 
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer]>:$parent_input,
+        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_ITIBuffer]>:$parent_input,
         Optional<AnyTypeOf<[MemRefOf<[I1]>, VPUIP_DistributedBuffer]>>:$parent_input_sparsity_map,
         Optional<AnyTypeOf<[MemRefOf<[I32]>, VPUIP_DistributedBuffer]>>:$parent_input_storage_element_table,
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer]>:$parent_output,
-        Optional<AnyTypeOf<[MemRefOf<[I1]>, VPUIP_DistributedBuffer]>>: $parent_output_sparsity_map,
+        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_ITIBuffer]>:$parent_output,
+        Optional<AnyTypeOf<[MemRefOf<[I1]>, VPUIP_DistributedBuffer, VPUIP_ITIBuffer]>>: $parent_output_sparsity_map,
+        Variadic<VPUIP_ITIBuffer>:$output_ITI_buff,
 
-        AnyTypeOf<[MemRefOf<[F16, F32, BF16, quant_QuantizedType]>, VPUIP_Buffer, VPUIP_DistributedBuffer]>:$output_buff,
-        Optional<AnyTypeOf<[MemRefOf<[I1]>, VPUIP_DistributedBuffer]>>:$output_sparsity_map_buff,
+        AnyTypeOf<[MemRefOf<[F16, F32, BF16, quant_QuantizedType]>, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_ITIBuffer]>:$output_buff,
+        Optional<AnyTypeOf<[MemRefOf<[I1]>, VPUIP_DistributedBuffer, VPUIP_ITIBuffer]>>:$output_sparsity_map_buff,
         Optional<AnyTypeOf<[MemRefOf<[UI64]>, VPUIP_DistributedBuffer]>>:$profiling_data,
 
         VPUIP_NCETaskTypeAttr:$task_type,
@@ -2820,8 +2907,8 @@ def VPUIP_NCEClusterTaskOp :
     );
 
     let results = (outs
-        AnyTypeOf<[MemRefOf<[F16, F32, BF16, quant_QuantizedType]>, VPUIP_Buffer, VPUIP_DistributedBuffer]>:$output,
-        Optional<AnyTypeOf<[MemRefOf<[I1]>, VPUIP_DistributedBuffer]>>:$output_sparsity_map,
+        AnyTypeOf<[MemRefOf<[F16, F32, BF16, quant_QuantizedType]>, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_ITIBuffer]>:$output,
+        Optional<AnyTypeOf<[MemRefOf<[I1]>, VPUIP_DistributedBuffer, VPUIP_ITIBuffer]>>:$output_sparsity_map,
         Optional<AnyTypeOf<[MemRefOf<[UI64]>, VPUIP_DistributedBuffer]>>:$profiling_output
     );
 
@@ -2841,7 +2928,7 @@ def VPUIP_NCEClusterTaskOp :
 
         OpBuilder<(ins
             "mlir::Value":$input, "mlir::Value":$weights, "mlir::Value":$weight_table,
-            "mlir::Value":$instruction_list_table, "mlir::Value":$activation_window,
+            "mlir::Value":$instruction_list_table, "mlir::Value":$spr_lookup_table, "mlir::Value":$activation_window,
             "mlir::Value":$parent_input, "mlir::Value":$parent_output,
             "mlir::Value":$output_buff,
             "vpux::VPUIP::NCETaskType":$task_type,
@@ -2863,7 +2950,7 @@ def VPUIP_NCEClusterTaskOp :
         OpBuilder<(ins
             "mlir::Type":$output,
             "mlir::Value":$input, "mlir::Value":$weights, "mlir::Value":$weight_table,
-            "mlir::Value":$instruction_list_table, "mlir::Value":$activation_window,
+            "mlir::Value":$instruction_list_table, "mlir::Value":$spr_lookup_table, "mlir::Value":$activation_window,
             "mlir::Value":$parent_input, "mlir::Value":$parent_output,
             "mlir::Value":$output_buff,
             "vpux::VPUIP::NCETaskType":$task_type,
@@ -2884,7 +2971,7 @@ def VPUIP_NCEClusterTaskOp :
 
         OpBuilder<(ins
             "mlir::Value":$input, "mlir::Value":$weights, "mlir::Value":$weight_table,
-            "mlir::Value":$instruction_list_table, "mlir::Value":$activation_window,
+            "mlir::Value":$instruction_list_table, "mlir::Value":$spr_lookup_table, "mlir::Value":$activation_window,
             "mlir::Value":$parent_input, "mlir::Value":$parent_output,
             "mlir::Value":$output_buff, "mlir::Value":$profiling_data,
             "vpux::VPUIP::NCETaskType":$task_type,
@@ -2906,7 +2993,7 @@ def VPUIP_NCEClusterTaskOp :
         OpBuilder<(ins
             "mlir::Type":$output, "mlir::Type":$profiling_output,
             "mlir::Value":$input, "mlir::Value":$weights, "mlir::Value":$weight_table,
-            "mlir::Value":$instruction_list_table, "mlir::Value":$activation_window,
+            "mlir::Value":$instruction_list_table, "mlir::Value":$spr_lookup_table, "mlir::Value":$activation_window,
             "mlir::Value":$parent_input, "mlir::Value":$parent_output,
             "mlir::Value":$output_buff, "mlir::Value":$profiling_data,
             "vpux::VPUIP::NCETaskType":$task_type,
@@ -2929,7 +3016,7 @@ def VPUIP_NCEClusterTaskOp :
             "mlir::Value":$input, "mlir::Value":$input_sparsity_map, "mlir::Value":$input_storage_element_table,
             "mlir::Value":$weights, "mlir::Value":$weights_sparsity_map,
             "mlir::Value":$weight_table,
-            "mlir::Value":$instruction_list_table, "mlir::Value":$activation_window,
+            "mlir::Value":$instruction_list_table, "mlir::Value":$spr_lookup_table, "mlir::Value":$activation_window,
             "mlir::Value":$parent_input, "mlir::Value":$parent_input_sparsity_map, "mlir::Value":$parent_input_storage_element_table,
             "mlir::Value":$parent_output, "mlir::Value":$parent_output_sparsity_map,
             "mlir::Value":$output_buff, "mlir::Value":$output_sparsity_map_buff, "mlir::Value":$profiling_data,
@@ -2954,9 +3041,34 @@ def VPUIP_NCEClusterTaskOp :
             "mlir::Value":$input, "mlir::Value":$input_sparsity_map, "mlir::Value":$input_storage_element_table,
             "mlir::Value":$weights, "mlir::Value":$weights_sparsity_map,
             "mlir::Value":$weight_table,
-            "mlir::Value":$instruction_list_table, "mlir::Value":$activation_window,
+            "mlir::Value":$instruction_list_table, "mlir::Value":$spr_lookup_table, "mlir::Value":$activation_window,
             "mlir::Value":$parent_input, "mlir::Value":$parent_input_sparsity_map, "mlir::Value":$parent_input_storage_element_table,
             "mlir::Value":$parent_output, "mlir::Value":$parent_output_sparsity_map,
+            "mlir::Value":$output_buff, "mlir::Value":$output_sparsity_map_buff, "mlir::Value":$profiling_data,
+            "vpux::VPUIP::NCETaskType":$task_type,
+            "mlir::ArrayAttr":$kernel_size, "mlir::ArrayAttr":$kernel_strides, "vpux::VPU::PaddingAttr":$kernel_padding,
+            "mlir::IntegerAttr":$activation_window_channel_length,
+            CArg<"mlir::UnitAttr", "nullptr">:$is_continued,
+            CArg<"mlir::IntegerAttr", "nullptr">:$cm_sp_pattern,
+            CArg<"mlir::UnitAttr", "nullptr">:$is_segmented,
+            CArg<"mlir::IntegerAttr", "nullptr">:$out_channel_offset,
+            CArg<"mlir::UnitAttr", "nullptr">:$input_channels_compression,
+            CArg<"mlir::UnitAttr", "nullptr">:$is_superdense,
+            CArg<"mlir::BoolAttr", "nullptr">:$is_inplace,
+            CArg<"mlir::IntegerAttr", "nullptr">:$input_se_size,
+            CArg<"mlir::IntegerAttr", "nullptr">:$output_se_size,
+            CArg<"mlir::UnitAttr", "nullptr">:$is_permute_quantize,
+            CArg<"mlir::UnitAttr", "nullptr">:$is_small_kernel_optimized
+        )>,
+
+        OpBuilder<(ins
+            "mlir::Type":$output, "mlir::Type":$output_sparsity_map, "mlir::Type":$profiling_output,
+            "mlir::Value":$input, "mlir::Value":$input_sparsity_map, "mlir::Value":$input_storage_element_table,
+            "mlir::Value":$weights, "mlir::Value":$weights_sparsity_map,
+            "mlir::Value":$weight_table,
+            "mlir::Value":$instruction_list_table, "mlir::Value":$spr_lookup_table, "mlir::Value":$activation_window,
+            "mlir::Value":$parent_input, "mlir::Value":$parent_input_sparsity_map, "mlir::Value":$parent_input_storage_element_table,
+            "mlir::Value":$parent_output, "mlir::Value":$parent_output_sparsity_map, "mlir::ValueRange":$output_ITI_buff,
             "mlir::Value":$output_buff, "mlir::Value":$output_sparsity_map_buff, "mlir::Value":$profiling_data,
             "vpux::VPUIP::NCETaskType":$task_type,
             "mlir::ArrayAttr":$kernel_size, "mlir::ArrayAttr":$kernel_strides, "vpux::VPU::PaddingAttr":$kernel_padding,
@@ -2984,12 +3096,14 @@ def VPUIP_NCEClusterTaskOp :
         (`weights_sparsity_map` `(` $weights_sparsity_map^  `:` type($weights_sparsity_map) `)`)?
         (`weight_table` `(` $weight_table^  `:` type($weight_table) `)`)?
         (`instruction_list_table` `(` $instruction_list_table^  `:` type($instruction_list_table) `)`)?
+        (`spr_lookup_table` `(` $spr_lookup_table^  `:` type($spr_lookup_table) `)`)?
         (`activation_window` `(` $activation_window^  `:` type($activation_window) `)`)?
         `parent_input` `(` $parent_input `:` type($parent_input) `)`
         (`parent_input_sparsity_map` `(` $parent_input_sparsity_map^  `:` type($parent_input_sparsity_map) `)`)?
         (`parent_input_storage_element_table` `(` $parent_input_storage_element_table^  `:` type($parent_input_storage_element_table) `)`)?
         `parent_output` `(` $parent_output `:` type($parent_output) `)`
         (`parent_output_sparsity_map` `(` $parent_output_sparsity_map^  `:` type($parent_output_sparsity_map) `)`)?
+        (`output_ITI_buff` `(` $output_ITI_buff^ `:` type($output_ITI_buff) `)`)?
         `outputs` `(` $output_buff `:` type($output_buff) `)`
         (`output_sparsity_map` `(` $output_sparsity_map_buff^  `:` type($output_sparsity_map_buff) `)`)?
         (`profiling_data` `(` $profiling_data^  `:` type($profiling_data) `)`)?
@@ -3005,6 +3119,11 @@ def VPUIP_NCEClusterTaskOp :
                                           mlir::ArrayAttr outStart, mlir::ArrayAttr outEnd,
                                           mlir::ArrayAttr inStart, mlir::ArrayAttr inEnd,
                                           vpux::VPU::PaddingAttr pad, vpux::VPU::MPEMode mpeMode, mlir::IntegerAttr clusterId = nullptr);
+        vpux::VPUIP::DPUTaskOp addDPUTask(mlir::OpBuilder& builder,
+                                          mlir::ArrayAttr outStart, mlir::ArrayAttr outEnd,
+                                          mlir::ArrayAttr inStart, mlir::ArrayAttr inEnd,
+                                          vpux::VPU::PaddingAttr pad, vpux::VPU::MPEMode mpeMode,
+                                          mlir::IntegerAttr clusterId, mlir::ArrayAttr haloRegions);
         vpux::VPUIP::DPUTaskOp addDPUTask(mlir::OpBuilder& builder,
                                           mlir::ArrayAttr outStart, mlir::ArrayAttr outEnd,
                                           vpux::VPU::PaddingAttr pad, vpux::VPU::MPEMode mpeMode, mlir::IntegerAttr clusterId = nullptr);
@@ -3183,7 +3302,7 @@ def VPUIP_SwKernelRun
     : VPUIP_Op<"SW.Kernel.run"> {
 
     let arguments  = (ins
-        Variadic<AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer]>>:$args,
+        Variadic<AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer, VPUIP_BoundedBuffer]>>:$args,
         OptionalAttr<ArrayAttr>:$attrs
     );
 
@@ -3212,13 +3331,29 @@ def VPUIP_SwKernelOp :
     let summary = "Software Layer Task";
 
     let description = [{
-        This operation defines Activation shave task
+        This operation defines Activation shave task.
+        There are two different modes or handling inputs with dynamic shapes
+        - In the first mode, dynamic inputs are accepted as BoundedBuffers, which combine data and dynamic shape into one type.
+        dynamicInputShapes and dynamicInputShapesMap are not used in that case:
+                inputs[3]: [BoundedBuffer, MemRef, BoundedBuffer]
+                dynamicInputShapes[]: []
+                dynamicInputShapesMap[]: nullptr
+        - In the second mode all BoundedBuffer's are unrolled by ungroup-bounded-buffers pass: E#111348.
+        Separate handling of dynamic data and dynamic shape is needed because feasible allocation doesn't support multiple root buffers per input
+                inputs[3]: [MemRef, MemRef, MemRef]
+                dynamicInputShapes[2]: [MemRef, MemRef]
+                dynamicInputShapesMap[3]: [0, -1, 1]
+        For outputs, the same applies.
     }];
 
     let arguments = (ins
         SymbolRefAttr:$kernelFunction,
-        Variadic<AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer]>>:$inputs,
-        Variadic<AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer]>>:$output_buffs,
+        Variadic<AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer, VPUIP_BoundedBuffer]>>:$inputs,
+        Variadic<MemRefOf<[SI32]>>:$dynamicInputShapes,
+        OptionalAttr<DenseI32ArrayAttr>:$dynamicInputShapesMap,
+        Variadic<AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer, VPUIP_BoundedBuffer]>>:$output_buffs,
+        Variadic<MemRefOf<[SI32]>>:$dynamicOutputShapeBuffs,
+        OptionalAttr<DenseI32ArrayAttr>:$dynamicOutputShapesMap,
         Optional<AnyTypeOf<[MemRefOf<[UI32]>, VPUIP_DistributedBuffer]>>:$profiling_data,
         OptionalAttr<IntAttr>:$tileIndex,
         OptionalAttr<I64ArrayOfArraysAttr>:$strides,
@@ -3226,7 +3361,8 @@ def VPUIP_SwKernelOp :
     );
 
     let results = (outs
-        Variadic<AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer]>>:$results,
+        Variadic<AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer, VPUIP_BoundedBuffer]>>:$results,
+        Variadic<MemRefOf<[SI32]>>:$dynamicOutputShapes,
         Optional<AnyTypeOf<[MemRefOf<[UI32]>, VPUIP_DistributedBuffer]>>:$profiling_output
     );
 
@@ -3258,6 +3394,50 @@ def VPUIP_SwKernelOp :
         OpBuilder<(ins
             "mlir::ValueRange":$inputs,
             "mlir::ValueRange":$output_buffs,
+            "mlir::Value":$profiling_data,
+            "mlir::SymbolRefAttr":$kernelFunction,
+            "mlir::IntegerAttr":$tileIndex,
+            "mlir::ArrayAttr":$strides
+        )>,
+        OpBuilder<(ins
+            "mlir::ValueRange":$inputs,
+            "mlir::ValueRange":$output_buffs,
+            "mlir::ValueRange":$dynamicInputShapes,
+            "llvm::ArrayRef<int32_t>":$dynamicInputShapesMap,
+            "mlir::ValueRange":$dynamicOutputShapeBuffs,
+            "llvm::ArrayRef<int32_t>":$dynamicOutputShapesMap,
+            "mlir::SymbolRefAttr":$kernelFunction,
+            "mlir::IntegerAttr":$tileIndex
+        )>,
+        OpBuilder<(ins
+            "mlir::ValueRange":$inputs,
+            "mlir::ValueRange":$output_buffs,
+            "mlir::ValueRange":$dynamicInputShapes,
+            "llvm::ArrayRef<int32_t>":$dynamicInputShapesMap,
+            "mlir::ValueRange":$dynamicOutputShapeBuffs,
+            "llvm::ArrayRef<int32_t>":$dynamicOutputShapesMap,
+            "mlir::Value":$profiling_data,
+            "mlir::SymbolRefAttr":$kernelFunction,
+            "mlir::IntegerAttr":$tileIndex
+        )>,
+        OpBuilder<(ins
+            "mlir::ValueRange":$inputs,
+            "mlir::ValueRange":$output_buffs,
+            "mlir::ValueRange":$dynamicInputShapes,
+            "llvm::ArrayRef<int32_t>":$dynamicInputShapesMap,
+            "mlir::ValueRange":$dynamicOutputShapeBuffs,
+            "llvm::ArrayRef<int32_t>":$dynamicOutputShapesMap,
+            "mlir::SymbolRefAttr":$kernelFunction,
+            "mlir::IntegerAttr":$tileIndex,
+            "mlir::ArrayAttr":$strides
+        )>,
+        OpBuilder<(ins
+            "mlir::ValueRange":$inputs,
+            "mlir::ValueRange":$output_buffs,
+            "mlir::ValueRange":$dynamicInputShapes,
+            "llvm::ArrayRef<int32_t>":$dynamicInputShapesMap,
+            "mlir::ValueRange":$dynamicOutputShapeBuffs,
+            "llvm::ArrayRef<int32_t>":$dynamicOutputShapesMap,
             "mlir::Value":$profiling_data,
             "mlir::SymbolRefAttr":$kernelFunction,
             "mlir::IntegerAttr":$tileIndex,
@@ -4241,6 +4421,65 @@ def VPUIP_YuvToRgbUPAOp :
 }
 
 //
+// M2ITaskOp
+//
+
+def VPUIP_M2ITaskOp :
+        VPUIP_TaskOp<1,"M2ITask",
+            [
+                MultiViewOpInterface
+            ]
+        > {
+    let summary = "M2I task op";
+
+    let arguments = (ins
+        MemRefOf<[UI8, F16]>:$input,
+        MemRefOf<[UI8, F16]>:$output_buff,
+        Optional<MemRefOf<[UI8]>>:$profiling_data,
+
+        BoolAttr:$do_csc,
+        BoolAttr:$do_norm,
+        VPU_M2iColorFmtAttr:$inFmt,
+        VPU_M2iColorFmtAttr:$outFmt,
+        UnitAttr:$chroma_in_reverse_channels,
+        UnitAttr:$chroma_out_reverse_channels,
+        UnitAttr:$luma_in_reverse_channels,
+        UnitAttr:$luma_out_reverse_channels,
+        UI32Attr:$scale_factor_x,
+        UI32Attr:$scale_factor_y,
+        OptionalAttr<F64ArrayAttr>:$norm,
+        OptionalAttr<UI32Attr>:$tile_offset_x,
+        OptionalAttr<UI32Attr>:$tile_offset_y,
+        OptionalAttr<VPUIP_M2IProfilingMetadataAttr>:$profilingMetadata,
+        DefaultValuedAttr<VPU_M2iInterpAttr, "vpux::VPU::M2iInterp::NEAREST">:$interp
+    );
+
+    let results = (outs
+        MemRefOf<[UI8, F16]>:$output,
+        Optional<MemRefOf<[UI8]>>:$profiling_output
+    );
+
+    let assemblyFormat = [{
+        attr-dict
+        `inputs` `(` $input `:` type($input) `)`
+        `outputs` `(` $output_buff `:` type($output_buff) `)`
+        (`profiling_data` `(` $profiling_data^  `:` type($profiling_data) `)`)?
+        `->` type(results)
+    }];
+
+    let extraClassDeclaration = [{
+        static vpux::VPU::ExecutorKind getExecutorKind() {
+            return vpux::VPU::ExecutorKind::M2I;
+        }
+
+        static mlir::LogicalResult inferReturnTypes(mlir::MLIRContext* ctx, std::optional<mlir::Location> loc,
+                                                    mlir::ValueRange operands, mlir::DictionaryAttr attrs, mlir::OpaqueProperties,
+                                                    mlir::RegionRange regions,
+                                                    mlir::SmallVectorImpl<mlir::Type>& inferredTypes);
+    }];
+}
+
+//
 // NCEClusterTiling
 //
 
@@ -4363,6 +4602,37 @@ def VPUIP_DistributedCastOp :
     let hasVerifier = 1;
 }
 
+//
+// NonDistributedCast
+//
+
+def VPUIP_NonDistributedCastOp:
+        VPUIP_Op<
+            "NonDistributedCastOp",
+            [
+                DeclareOpInterfaceMethods<ViewLikeOpInterface>,
+                Pure
+            ]
+        > {
+    let summary = "Operation that casts one DistributedBuffer type to non-distributed buffer type.";
+
+    let arguments = (ins
+        AnyTypeOf<[VPUIP_DistributedBuffer]>:$input
+    );
+
+    let results = (outs
+        AnyTypeOf<[AnyMemRef, VPUIP_Buffer]>:$output
+    );
+
+    let assemblyFormat = [{
+        attr-dict
+        `inputs` `(` $input `:` qualified(type($input)) `)`
+        `->` qualified(type(results))
+    }];
+
+    let hasVerifier = 1;
+}
+
 
 //
 // SubViewOp
@@ -4385,7 +4655,8 @@ def VPUIP_SubViewOp :
 
         I64ArrayAttr:$static_offsets,
         I64ArrayAttr:$static_sizes,
-        OptionalAttr<I64ArrayAttr>:$static_strides
+        OptionalAttr<I64ArrayAttr>:$static_strides,
+        OptionalAttr<I64ArrayOfArraysAttr>:$explicit_output_shapes
     );
 
     let results = (outs
@@ -4401,6 +4672,8 @@ def VPUIP_SubViewOp :
         vpux::DotNodeColor getNodeColor() {
             return vpux::DotNodeColor::ORANGE;
         }
+
+        Byte getByteOffset();
 
         static bool isCompatibleReturnTypes(mlir::TypeRange lhs, mlir::TypeRange rhs) {
             return vpux::areTypesCompatible(lhs, rhs,
@@ -4421,7 +4694,9 @@ def VPUIP_SubViewOp :
         OpBuilder<
             (ins "mlir::Value":$source, "mlir::ArrayAttr":$static_offsets, "mlir::ArrayAttr":$static_sizes)
         >,
-
+        OpBuilder<
+            (ins "mlir::Value":$source, "mlir::ArrayAttr":$static_offsets, "mlir::ArrayAttr":$static_sizes, "mlir::ArrayAttr":$static_strides)
+        >,
         OpBuilder<
             (ins "mlir::Value":$source, "vpux::ShapeRef":$static_offsets, "vpux::ShapeRef":$static_sizes, "vpux::ShapeRef":$static_strides)
         >,
@@ -4432,6 +4707,7 @@ def VPUIP_SubViewOp :
 
     let hasFolder = 1;
     let hasCanonicalizer = 1;
+    let hasVerifier = 1;
 }
 
 //
@@ -4450,12 +4726,12 @@ def VPUIP_ConcatViewOp :
     let summary = "VPUIP ConcatView layer. Dummy operation to maintain use-def chains.";
 
     let arguments = (ins
-        Variadic<AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_SparseBuffer]>>:$inputs,
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_SparseBuffer]>:$output_buff
+        Variadic<AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_SparseBuffer, VPUIP_BoundedBuffer]>>:$inputs,
+        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_SparseBuffer, VPUIP_BoundedBuffer]>:$output_buff
     );
 
     let results = (outs
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_SparseBuffer]>:$output
+        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_SparseBuffer, VPUIP_BoundedBuffer]>:$output
     );
 
     let assemblyFormat = [{
@@ -4530,11 +4806,11 @@ def VPUIP_QuantizeCastOp :
     let summary = "Operation that changes the quantization information of a buffer";
 
     let arguments = (ins
-        AnyTypeOf<[MemRefOf<[SI8, UI8, quant_QuantizedType]>, VPUIP_DistributedBuffer]>:$input
+        AnyTypeOf<[MemRefOf<[AnyInteger, quant_QuantizedType]>, VPUIP_DistributedBuffer]>:$input
     );
 
     let results = (outs
-        AnyTypeOf<[MemRefOf<[SI8, UI8, quant_QuantizedType]>, VPUIP_DistributedBuffer]>:$output
+        AnyTypeOf<[MemRefOf<[AnyInteger, quant_QuantizedType]>, VPUIP_DistributedBuffer]>:$output
     );
 
     let hasVerifier = 1;
@@ -4545,6 +4821,7 @@ def VPUIP_QuantizeCastOp :
         `->` type(results)
     }];
 
+    let hasVerifier = 1;
     let hasFolder = 1;
     let hasCanonicalizer = 1;
 }
@@ -4637,12 +4914,12 @@ def VPUIP_CopyOp :
     let summary = "Copy layer";
 
     let arguments = (ins
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_SparseBuffer]>:$input,
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_SparseBuffer]>:$output_buff
+        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_SparseBuffer, VPUIP_DistributedBuffer, VPUIP_BoundedBuffer]>:$input,
+        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_SparseBuffer, VPUIP_DistributedBuffer, VPUIP_BoundedBuffer]>:$output_buff
     );
 
     let results = (outs
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_SparseBuffer]>:$output
+        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_SparseBuffer, VPUIP_DistributedBuffer, VPUIP_BoundedBuffer]>:$output
     );
 
     let assemblyFormat = [{
@@ -4759,7 +5036,7 @@ def VPUIP_GroupSparseBufferOp :
         Optional<AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer]>>:$storageElementTable,
 
         UnitAttr:$is_weights,
-        OptionalAttr<VPUIP_CompressionSchemeAttr>:$compression_scheme,
+        OptionalAttr<VPUIP_SparsityCompressionAttr>:$sparsity_compression,
 
         OptionalAttr<VPU_SEAttr>:$seAttr
     );
@@ -4771,15 +5048,15 @@ def VPUIP_GroupSparseBufferOp :
     let builders = [
         OpBuilder<
             (ins "mlir::Value":$data,
-                CArg<"bool", "{}">:$is_weights, CArg<"VPUIP::CompressionSchemeAttr", "{}">:$compression_scheme)
+                CArg<"bool", "{}">:$is_weights, CArg<"VPUIP::SparsityCompressionAttr", "{}">:$sparsity_compression)
         >,
         OpBuilder<
             (ins "mlir::Value":$data, "mlir::Value":$sparsityMap,
-                CArg<"bool", "{}">:$is_weights, CArg<"VPUIP::CompressionSchemeAttr", "{}">:$compression_scheme)
+                CArg<"bool", "{}">:$is_weights, CArg<"VPUIP::SparsityCompressionAttr", "{}">:$sparsity_compression)
         >,
         OpBuilder<
             (ins "mlir::Value":$data, "mlir::Value":$sparsityMap, "mlir::Value":$storageElementTable,
-                CArg<"bool", "{}">:$is_weights, CArg<"VPUIP::CompressionSchemeAttr", "{}">:$compression_scheme)
+                CArg<"bool", "{}">:$is_weights, CArg<"VPUIP::SparsityCompressionAttr", "{}">:$sparsity_compression)
         >,
         OpBuilder<
             (ins "mlir::Value":$data, "mlir::Value":$sparsityMap, "mlir::Value":$storageElementTable,
@@ -5275,6 +5552,65 @@ def VPUIP_ProfilingSectionOp :
     }];
 
     let hasVerifier = 0;
+}
+
+//
+// GroupBoundedBufferOp
+//
+def VPUIP_GroupBoundedBufferOp :
+        VPUIP_Op<"GroupBoundedBuffer",
+            [
+                Pure,
+                DotInterface,
+                DeclareOpInterfaceMethods<GroupedViewOpInterface>,
+                DeclareOpInterfaceMethods<InferTypeOpInterface, ["inferReturnTypes"]>,
+            ]
+        > {
+    let summary = "Creates a BoundedBuffer type by combining upper-bounded data buffer and a buffer with dynamic shape";
+
+    let arguments = (ins
+        AnyTypeOf<[AnyMemRef]>:$data,
+        AnyTypeOf<[AnyMemRef]>:$dynamicShape
+    );
+
+    let results = (outs
+        VPUIP_BoundedBuffer:$output
+    );
+
+    let assemblyFormat = [{
+        `(` operands `)` attr-dict `:` type(operands) `->` type(results)
+    }];
+    let hasCanonicalizer = 1;
+}
+
+//
+// UngroupBoundedBufferOp
+//
+
+def VPUIP_UngroupBoundedBufferOp :
+        VPUIP_Op<
+            "UngroupBoundedBuffer",
+            [
+                Pure,
+                DotInterface,
+                DeclareOpInterfaceMethods<MultiViewOpInterface>,
+                DeclareOpInterfaceMethods<InferTypeOpInterface, ["inferReturnTypes"]>
+            ]
+        > {
+    let summary = "Unpacks BoundedBuffer type into upper-bounded buffer and its dynamic shape buffer";
+
+    let arguments = (ins
+        VPUIP_BoundedBuffer:$input
+    );
+
+    let results = (outs
+        AnyTypeOf<[AnyMemRef]>:$data,
+        AnyTypeOf<[AnyMemRef]>:$dynamicShape
+    );
+
+    let assemblyFormat = [{
+        `(` operands `)` attr-dict `:` type(operands) `->` type(results)
+    }];
 }
 
 #endif

@@ -4,6 +4,8 @@
 //
 
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
+#include "vpux/compiler/utils/permute_utils.hpp"
 
 using namespace vpux;
 
@@ -39,4 +41,40 @@ mlir::LogicalResult vpux::VPU::LayoutCastOp::verify() {
     }
 
     return mlir::success();
+}
+
+//
+// DistributedCastOpInterface
+//
+
+mlir::FailureOr<VPU::DistributedTypeInterface> vpux::VPU::LayoutCastOp::inferCastedDistOutput(
+        VPU::DistributedTensorType inDistributedType) {
+    if (inDistributedType == nullptr || inDistributedType.getDistribution() == nullptr) {
+        return mlir::failure();
+    }
+    const auto ctx = getContext();
+    const auto origDistribution = inDistributedType.getDistribution();
+    const auto srcType = getInput().getType().cast<NDTypeInterface>();
+    const auto dstType = getOutput().getType().cast<NDTypeInterface>();
+    const auto srcOrder = srcType.getDimsOrder();
+    const auto dstOrder = dstType.getDimsOrder();
+    const auto memPerm = getPermutationFromOrders(srcOrder, dstOrder, ctx);
+
+    auto castedOutputDistribution =
+            applyPermutationOnDistributedTensorAttr(origDistribution, memPerm, srcType.getDimsOrder(),
+                                                    dstType.getDimsOrder(), srcType.getShape(), dstType.getShape());
+    if (isSegmentedLikeMode(inDistributedType)) {
+        auto legalizeDistribution = legalizeCastedDistribution(castedOutputDistribution, ctx);
+        if (mlir::failed(legalizeDistribution)) {
+            return mlir::failure();
+        }
+
+        castedOutputDistribution = legalizeDistribution.value();
+    }
+
+    const auto dstDimsOrderAttr = mlir::AffineMapAttr::get(dstType.getDimsOrder().toAffineMap(ctx));
+    const auto newDistributionType =
+            DistributedTensorType::get(ctx, dstType.getShape().raw(), dstType.getElementType(), dstDimsOrderAttr,
+                                       inDistributedType.getMemSpace(), castedOutputDistribution);
+    return newDistributionType.cast<VPU::DistributedTypeInterface>();
 }

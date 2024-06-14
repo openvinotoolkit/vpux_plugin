@@ -73,10 +73,18 @@ def DotInterface : OpInterface<"DotInterface"> {
 
         InterfaceMethod<
             "If non empty overrides the default attributes in the dot graph",
-            "bool", "printAttributes", (ins "llvm::raw_ostream&":$os),
+            "bool", "printAttributes", (ins "llvm::raw_ostream&":$os, "llvm::StringRef":$head, "llvm::StringRef":$middle, "llvm::StringRef":$end),
             [{}],
             [{
                 return false;
+            }]
+        >,
+
+        InterfaceMethod<
+            "Get the edge direction from the particular source",
+            "DOT::EdgeDir", "getEdgeDirection", (ins "mlir::Operation*":$op),[{}],
+            [{
+                return DOT::EdgeDir::EDGE_NORMAL;
             }]
         >
     ];

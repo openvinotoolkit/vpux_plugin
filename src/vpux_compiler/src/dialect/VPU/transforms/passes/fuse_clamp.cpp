@@ -53,7 +53,7 @@ std::pair<int32_t, int32_t> ClampConverter::getTargetClamps(mlir::Type outElemTy
         const auto targetClampHigh = std::min(ppeClampHigh, checked_cast<int32_t>(quantizedHigh));
         return std::pair<int32_t, int32_t>{targetClampLow, targetClampHigh};
     } else if (outElemType.isF16()) {
-        const ov::float16 clampMaxF16 = static_cast<float>(clampMax);
+        const vpux::type::float16 clampMaxF16 = static_cast<float>(clampMax);
         const int16_t* clampMaxI16 = reinterpret_cast<const int16_t*>(&clampMaxF16);
         const int32_t clampMaxI32 = *clampMaxI16;
 
@@ -61,7 +61,7 @@ std::pair<int32_t, int32_t> ClampConverter::getTargetClamps(mlir::Type outElemTy
         const auto targetClampHigh = std::min(ppeClampHigh, clampMaxI32);
         return std::pair<int32_t, int32_t>{targetClampLow, targetClampHigh};
     } else if (outElemType.isBF16()) {
-        const ov::bfloat16 clampMaxF16 = static_cast<float>(clampMax);
+        const vpux::type::bfloat16 clampMaxF16 = static_cast<float>(clampMax);
         const int16_t* clampMaxI16 = reinterpret_cast<const int16_t*>(&clampMaxF16);
         const int32_t clampMaxI32 = *clampMaxI16;
 

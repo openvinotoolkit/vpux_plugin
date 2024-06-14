@@ -1,6 +1,6 @@
 //
-// Copyright (C) 2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #pragma once
@@ -17,7 +17,7 @@ struct IWaitable {
 
 struct SleepTimer : public IWaitable {
     using Ptr = std::shared_ptr<SleepTimer>;
-    static Ptr create();
+    static Ptr create(bool disable_high_resolution_timer = false);
 };
 
 struct BusyTimer : public IWaitable {

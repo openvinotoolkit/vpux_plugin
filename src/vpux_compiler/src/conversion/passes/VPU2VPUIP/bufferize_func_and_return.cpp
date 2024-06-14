@@ -5,6 +5,7 @@
 
 #include "vpux/compiler/conversion.hpp"
 #include "vpux/compiler/conversion/passes/VPU2VPUIP/bufferizable_ops_interface.hpp"
+#include "vpux/compiler/utils/func_dialect.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
 #include <mlir/Dialect/Bufferization/Transforms/FuncBufferizableOpInterfaceImpl.h>
@@ -20,21 +21,6 @@ using namespace vpux;
 //
 
 namespace {
-
-//
-// getCalledFunction
-//
-
-mlir::func::FuncOp getCalledFunction(mlir::CallOpInterface callOp) {
-    mlir::func::FuncOp funcOp = nullptr;
-    auto symRefAttr = callOp.mlir::CallOpInterface::getCallableForCallee().dyn_cast<mlir::SymbolRefAttr>();
-    if (symRefAttr) {
-        funcOp = mlir::dyn_cast_or_null<mlir::func::FuncOp>(
-                mlir::SymbolTable::lookupNearestSymbolFrom(callOp, symRefAttr));
-    }
-    VPUX_THROW_WHEN(funcOp == nullptr, "Expected CallOp to a FuncOp");
-    return funcOp;
-}
 
 //
 // getFuncOneShotAnalysisState
@@ -99,24 +85,21 @@ std::optional<int64_t> getEquivalentFuncArgIdx(mlir::func::FuncOp funcOp,
 // CallOpBufferizeModel
 //
 
-class CallOpBufferizeModel :
-        public mlir::bufferization::BufferizableOpInterface::ExternalModel<CallOpBufferizeModel, mlir::func::CallOp> {
+class CallOpBufferizeModel : public BufferizableOpInterfaceExternalModelBase<CallOpBufferizeModel, mlir::func::CallOp> {
 public:
-    bool bufferizesToMemoryRead(mlir::Operation* op, mlir::OpOperand& opOperand,
-                                const mlir::bufferization::AnalysisState& state) const;
-    bool bufferizesToMemoryWrite(mlir::Operation* op, mlir::OpOperand& opOperand,
-                                 const mlir::bufferization::AnalysisState& state) const;
-    mlir::bufferization::AliasingOpResultList getAliasingOpResults(
-            mlir::Operation* op, mlir::OpOperand& opOperand, const mlir::bufferization::AnalysisState& state) const;
-    // Rely on default implementation:
-    // mlir::bufferization::AliasingOpOperandList getAliasingOpOperands(
-    //         mlir::Operation* op, mlir::OpResult opResult, const mlir::bufferization::AnalysisState& state) const;
-    mlir::LogicalResult bufferize(mlir::Operation* op, mlir::RewriterBase& rewriter,
-                                  const mlir::bufferization::BufferizationOptions& options) const;
+    bool bufferizesToMemoryReadImpl(mlir::func::CallOp op, mlir::OpOperand& opOperand,
+                                    const mlir::bufferization::AnalysisState& state) const;
+    bool bufferizesToMemoryWriteImpl(mlir::func::CallOp op, mlir::OpOperand& opOperand,
+                                     const mlir::bufferization::AnalysisState& state) const;
+    mlir::bufferization::AliasingOpResultList getAliasingOpResultsImpl(
+            mlir::func::CallOp op, mlir::OpOperand& opOperand, const mlir::bufferization::AnalysisState& state) const;
+    mlir::LogicalResult bufferizeImpl(mlir::func::CallOp op, mlir::RewriterBase& rewriter,
+                                      const mlir::bufferization::BufferizationOptions& options,
+                                      mlir::func::CallOp::Adaptor adaptor) const;
 };
 
-bool CallOpBufferizeModel::bufferizesToMemoryRead(mlir::Operation* op, mlir::OpOperand& opOperand,
-                                                  const mlir::bufferization::AnalysisState& state) const {
+bool CallOpBufferizeModel::bufferizesToMemoryReadImpl(mlir::func::CallOp op, mlir::OpOperand& opOperand,
+                                                      const mlir::bufferization::AnalysisState& state) const {
     auto callOp = mlir::cast<mlir::func::CallOp>(op);
     auto funcOp = getCalledFunction(callOp);
 
@@ -128,8 +111,8 @@ bool CallOpBufferizeModel::bufferizesToMemoryRead(mlir::Operation* op, mlir::OpO
     return funcState.readBbArgs.lookup(funcOp).contains(opOperand.getOperandNumber());
 }
 
-bool CallOpBufferizeModel::bufferizesToMemoryWrite(mlir::Operation* op, mlir::OpOperand& opOperand,
-                                                   const mlir::bufferization::AnalysisState& state) const {
+bool CallOpBufferizeModel::bufferizesToMemoryWriteImpl(mlir::func::CallOp op, mlir::OpOperand& opOperand,
+                                                       const mlir::bufferization::AnalysisState& state) const {
     auto callOp = mlir::cast<mlir::func::CallOp>(op);
     auto funcOp = getCalledFunction(callOp);
 
@@ -142,8 +125,8 @@ bool CallOpBufferizeModel::bufferizesToMemoryWrite(mlir::Operation* op, mlir::Op
     return funcState.writtenBbArgs.lookup(funcOp).contains(opOperand.getOperandNumber());
 }
 
-mlir::bufferization::AliasingOpResultList CallOpBufferizeModel::getAliasingOpResults(
-        mlir::Operation* op, mlir::OpOperand& opOperand, const mlir::bufferization::AnalysisState& state) const {
+mlir::bufferization::AliasingOpResultList CallOpBufferizeModel::getAliasingOpResultsImpl(
+        mlir::func::CallOp op, mlir::OpOperand& opOperand, const mlir::bufferization::AnalysisState& state) const {
     auto callOp = mlir::cast<mlir::func::CallOp>(op);
     auto funcOp = getCalledFunction(callOp);
 
@@ -174,8 +157,12 @@ mlir::bufferization::AliasingOpResultList CallOpBufferizeModel::getAliasingOpRes
     return result;
 }
 
-mlir::LogicalResult CallOpBufferizeModel::bufferize(mlir::Operation* op, mlir::RewriterBase& rewriter,
-                                                    const mlir::bufferization::BufferizationOptions& options) const {
+mlir::LogicalResult CallOpBufferizeModel::bufferizeImpl(mlir::func::CallOp op, mlir::RewriterBase& rewriter,
+                                                        const mlir::bufferization::BufferizationOptions&,
+                                                        mlir::func::CallOp::Adaptor) const {
+    auto log = Logger::global().nest("one-shot-bufferize-CallOp", 0);
+    log.trace("Got '{0}' at '{1}'", op->getName(), op->getLoc());
+
     auto callOp = mlir::cast<mlir::func::CallOp>(op);
 
     // 1. Compute the result types of the new CallOp.
@@ -187,12 +174,12 @@ mlir::LogicalResult CallOpBufferizeModel::bufferize(mlir::Operation* op, mlir::R
             resultTypes.push_back(returnType);
             continue;
         }
-        auto resultType = vpux::getBufferType(result, options);
+        auto resultType = vpux::getBufferType(result);
         resultTypes.push_back(resultType);
     }
 
     // 2. Rewrite tensor operands as memrefs based on type of the already bufferized callee.
-    auto newOperands = vpux::bufferizeOperands(rewriter, callOp->getOperands(), options);
+    auto newOperands = vpux::bufferizeOperands(rewriter, callOp->getOperands());
 
     // 3. Create the new CallOp.
     auto funcOp = getCalledFunction(callOp);
@@ -214,12 +201,12 @@ mlir::LogicalResult CallOpBufferizeModel::bufferize(mlir::Operation* op, mlir::R
 
 namespace {
 
-template <typename MainOpType>
 class ReturnOpBufferizeModel :
-        public BufferizableOpInterfaceExternalModelBase<ReturnOpBufferizeModel<MainOpType>, MainOpType> {
+        public BufferizableOpInterfaceExternalModelBase<ReturnOpBufferizeModel, mlir::func::ReturnOp> {
 public:
-    mlir::LogicalResult bufferizeImpl(MainOpType, mlir::RewriterBase&, const mlir::bufferization::BufferizationOptions&,
-                                      mlir::ArrayRef<mlir::Value>) const {
+    mlir::LogicalResult bufferizeImpl(mlir::func::ReturnOp, mlir::RewriterBase&,
+                                      const mlir::bufferization::BufferizationOptions&,
+                                      mlir::func::ReturnOp::Adaptor) const {
         return mlir::success();
     }
 };
@@ -249,28 +236,28 @@ mlir::func::ReturnOp getAssumedUniqueReturnOp(mlir::func::FuncOp funcOp) {
 // FuncOpBufferizeModel
 //
 
-template <typename MainOpType>
-class FuncOpBufferizeModel :
-        public BufferizableOpInterfaceExternalModelBase<FuncOpBufferizeModel<MainOpType>, MainOpType> {
+class FuncOpBufferizeModel : public BufferizableOpInterfaceExternalModelBase<FuncOpBufferizeModel, mlir::func::FuncOp> {
 public:
     bool isWritable(mlir::Operation*, mlir::Value, const mlir::bufferization::AnalysisState&) const {
         return true;
     }
 
-    mlir::LogicalResult bufferizeImpl(MainOpType op, mlir::RewriterBase& rewriter,
+    mlir::LogicalResult bufferizeImpl(mlir::func::FuncOp op, mlir::RewriterBase& rewriter,
                                       const mlir::bufferization::BufferizationOptions& options,
-                                      mlir::ArrayRef<mlir::Value> bufferizedOperands) const;
+                                      mlir::func::FuncOp::Adaptor) const;
 };
 
-template <typename MainOpType>
-mlir::LogicalResult FuncOpBufferizeModel<MainOpType>::bufferizeImpl(
-        MainOpType funcOp, mlir::RewriterBase& rewriter, const mlir::bufferization::BufferizationOptions& options,
-        mlir::ArrayRef<mlir::Value> /*bufferizedOperands*/) const {
+mlir::LogicalResult FuncOpBufferizeModel::bufferizeImpl(mlir::func::FuncOp funcOp, mlir::RewriterBase& rewriter,
+                                                        const mlir::bufferization::BufferizationOptions&,
+                                                        mlir::func::FuncOp::Adaptor) const {
+    auto log = Logger::global().nest("one-shot-bufferize-FuncOp", 0);
+    log.trace("Got '{0}' at '{1}'", funcOp->getName(), funcOp->getLoc());
+
     // Construct the bufferized function type.
     SmallVector<mlir::Type> argTypes;
     auto& frontBlock = funcOp.getBody().front();
     for (auto& bbArg : frontBlock.getArguments()) {
-        argTypes.push_back(vpux::getBufferType(bbArg, options));
+        argTypes.push_back(vpux::getBufferType(bbArg));
     }
 
     auto returnOp = getAssumedUniqueReturnOp(funcOp);
@@ -319,7 +306,7 @@ mlir::LogicalResult FuncOpBufferizeModel<MainOpType>::bufferizeImpl(
         }
 
         rewriter.setInsertionPoint(returnOp);
-        auto resultType = vpux::getBufferType(returnVal, options);
+        auto resultType = vpux::getBufferType(returnVal);
         auto toMemrefVal = rewriter.create<mlir::bufferization::ToMemrefOp>(loc, resultType, returnVal).getResult();
         returnValues.push_back(toMemrefVal);
     }
@@ -341,68 +328,8 @@ mlir::LogicalResult FuncOpBufferizeModel<MainOpType>::bufferizeImpl(
 
 void vpux::registerFuncAndReturnBufferizableOpInterfaces(mlir::DialectRegistry& registry) {
     registry.addExtension(+[](mlir::MLIRContext* ctx, mlir::func::FuncDialect*) {
-        mlir::func::FuncOp::attachInterface<FuncOpBufferizeModel<mlir::func::FuncOp>>(*ctx);
-        mlir::func::ReturnOp::attachInterface<ReturnOpBufferizeModel<mlir::func::ReturnOp>>(*ctx);
+        mlir::func::FuncOp::attachInterface<FuncOpBufferizeModel>(*ctx);
+        mlir::func::ReturnOp::attachInterface<ReturnOpBufferizeModel>(*ctx);
         mlir::func::CallOp::attachInterface<CallOpBufferizeModel>(*ctx);
     });
-}
-
-//
-// Dialect-conversion based funcOp, ReturnOp and CallOp bufferization
-//
-
-namespace {
-
-//
-// BufferizeFuncAndReturn
-//
-
-class BufferizeFuncAndReturn final : public BufferizeFuncAndReturnBase<BufferizeFuncAndReturn> {
-public:
-    explicit BufferizeFuncAndReturn(Logger log) {
-        Base::initLogger(log, Base::getArgumentName());
-    }
-
-private:
-    void safeRunOnModule() final;
-};
-
-void BufferizeFuncAndReturn::safeRunOnModule() {
-    auto& ctx = getContext();
-
-    vpux::BufferizeTypeConverter typeConverter;
-
-    mlir::ConversionTarget target(ctx);
-    target.addLegalOp<mlir::ModuleOp>();
-    target.addDynamicallyLegalOp<mlir::func::FuncOp>([&](mlir::func::FuncOp op) {
-        return typeConverter.isSignatureLegal(op.getFunctionType()) && typeConverter.isLegal(&op.getBody());
-    });
-    target.markUnknownOpDynamicallyLegal([&](mlir::Operation* op) {
-        return mlir::isNotBranchOpInterfaceOrReturnLikeOp(op) ||
-               mlir::isLegalForReturnOpTypeConversionPattern(op, typeConverter);
-    });
-    target.addDynamicallyLegalOp<mlir::func::CallOp>([&](mlir::func::CallOp op) {
-        return typeConverter.isSignatureLegal(op.getCalleeType());
-    });
-    vpux::populateBufferizeMaterializationLegality(target);
-
-    mlir::RewritePatternSet patterns(&ctx);
-    mlir::populateFunctionOpInterfaceTypeConversionPattern<mlir::func::FuncOp>(patterns, typeConverter);
-    mlir::populateReturnOpTypeConversionPattern(patterns, typeConverter);
-    mlir::populateCallOpTypeConversionPattern(patterns, typeConverter);
-
-    auto module = getOperation();
-    if (mlir::failed(applyFullConversion(module, target, std::move(patterns)))) {
-        signalPassFailure();
-    }
-}
-
-}  // namespace
-
-//
-// createBufferizeFuncAndReturn
-//
-
-std::unique_ptr<mlir::Pass> vpux::createBufferizeFuncAndReturnPass(Logger log) {
-    return std::make_unique<BufferizeFuncAndReturn>(log);
 }

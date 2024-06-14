@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022 Intel Corporation
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -20,6 +20,9 @@ namespace Const {
 //
 
 std::unique_ptr<mlir::Pass> createConstantFoldingPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createApplySwizzlingPass();
+
+void registerConstPipelines();
 
 //
 // Generated

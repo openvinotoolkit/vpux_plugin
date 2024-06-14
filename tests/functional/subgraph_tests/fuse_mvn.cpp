@@ -1,16 +1,12 @@
-// Copyright (C) Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include "openvino/opsets/opset4.hpp"
 #include "openvino/opsets/opset6.hpp"
 
 #include "common_test_utils/ov_tensor_utils.hpp"
-#include "shared_test_classes/base/layer_test_utils.hpp"
-#include "vpu_ov1_layer_test.hpp"
 #include "vpu_ov2_layer_test.hpp"
-
-#include "ov_models/builders.hpp"
 
 namespace ov::test::subgraph {
 
@@ -20,7 +16,7 @@ using FuseMVNTestParams = std::tuple<std::vector<size_t>,  // input shape
                                      bool                  // eps inside or outside
                                      >;
 
-class VPUXFuseMVNTest : public VpuOv2LayerTest, public testing::WithParamInterface<FuseMVNTestParams> {
+class FuseMVNTestCommon : public VpuOv2LayerTest, public testing::WithParamInterface<FuseMVNTestParams> {
 public:
     static std::string getTestCaseName(testing::TestParamInfo<FuseMVNTestParams> obj) {
         ov::Shape inputShape;
@@ -29,11 +25,13 @@ public:
         bool isEpsInside;
         std::tie(inputShape, targetShape, axis, isEpsInside) = obj.param;
 
+        const std::string sep = "_";
         std::ostringstream result;
-        result << "inputShapeSize={" << inputShape.size() << "}_";
-        result << "targetShapeSize={" << targetShape.size() << "}_";
-        result << "axisSize={" << axis.size() << "}_";
-        result << "isEpsInside={" << isEpsInside << "}_";
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
+        result << "inputShapeSize={" << inputShape.size() << "}" << sep;
+        result << "targetShapeSize={" << targetShape.size() << "}" << sep;
+        result << "axisSize={" << axis.size() << "}" << sep;
+        result << "isEpsInside={" << isEpsInside << "}" << sep;
         return result.str();
     }
 
@@ -47,11 +45,9 @@ public:
 
         init_input_shapes(ov::test::static_shapes_to_test_representation({input_shape}));
         ov::ParameterVector params{std::make_shared<ov::opset6::Parameter>(ov::element::f32, ov::Shape(input_shape))};
-        const auto paramOuts =
-                ngraph::helpers::convert2OutputVector(ngraph::helpers::castOps2Nodes<ngraph::op::Parameter>(params));
 
         auto reshape1_const = ov::opset6::Constant::create(ov::element::i32, {target_shape.size()}, target_shape);
-        auto reshape1 = std::make_shared<ov::opset6::Reshape>(paramOuts[0], reshape1_const, false);
+        auto reshape1 = std::make_shared<ov::opset6::Reshape>(params[0], reshape1_const, false);
 
         auto mean1_axes = ov::opset6::Constant::create(ov::element::i32, {axis.size()}, axis);
         auto mean1 = std::make_shared<ov::opset6::ReduceMean>(reshape1, mean1_axes, true);
@@ -71,23 +67,30 @@ public:
             auto eps_inside_sqrt = std::make_shared<ov::opset6::Sqrt>(eps_inside_add);
             auto divide = std::make_shared<ov::opset6::Divide>(sub1, eps_inside_sqrt);
             auto results = ov::ResultVector{std::make_shared<ov::opset6::Result>(divide->output(0))};
-            function = std::make_shared<ov::Model>(results, params, "VPUXFuseMVNInsideEPS");
+            function = std::make_shared<ov::Model>(results, params, "FuseMVNInsideEPS");
         } else {
             auto eps_outside_sqrt = std::make_shared<ov::opset6::Sqrt>(sub2);
             auto eps_outside_add = std::make_shared<ov::opset6::Add>(eps_outside_sqrt, eps);
             auto divide = std::make_shared<ov::opset6::Divide>(sub1, eps_outside_add);
             auto results = ov::ResultVector{std::make_shared<ov::opset6::Result>(divide->output(0))};
-            function = std::make_shared<ov::Model>(results, params, "VPUXFuseMVNOutsideEPS");
+            function = std::make_shared<ov::Model>(results, params, "FuseMVNOutsideEPS");
         }
     }
 };
 
-class VPUXFuseMVNTest_VPU3720 : public VPUXFuseMVNTest {};
+class FuseMVNTest_NPU3720 : public FuseMVNTestCommon {};
+class FuseMVNTest_NPU4000 : public FuseMVNTestCommon {};
 
-TEST_P(VPUXFuseMVNTest_VPU3720, MLIR_HW) {
+TEST_P(FuseMVNTest_NPU3720, HW) {
     rel_threshold = 0.1f;
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
+}
+
+TEST_P(FuseMVNTest_NPU4000, HW) {
+    rel_threshold = 0.1f;
+    setDefaultHardwareMode();
+    run(Platform::NPU4000);
 }
 
 }  // namespace ov::test::subgraph
@@ -104,6 +107,8 @@ std::vector<bool> isEpsInside = {true, false};
 const auto epsCase = ::testing::Combine(::testing::Values(inputShape), ::testing::Values(targetShape),
                                         ::testing::Values(axis), ::testing::ValuesIn(isEpsInside));
 
-INSTANTIATE_TEST_CASE_P(precommit_FuseMVN, VPUXFuseMVNTest_VPU3720, epsCase, VPUXFuseMVNTest::getTestCaseName);
+INSTANTIATE_TEST_CASE_P(precommit_FuseMVN, FuseMVNTest_NPU3720, epsCase, FuseMVNTestCommon::getTestCaseName);
+
+INSTANTIATE_TEST_CASE_P(precommit_FuseMVN, FuseMVNTest_NPU4000, epsCase, FuseMVNTestCommon::getTestCaseName);
 
 }  // namespace

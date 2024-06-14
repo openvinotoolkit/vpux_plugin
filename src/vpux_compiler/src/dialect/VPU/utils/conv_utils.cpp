@@ -7,6 +7,7 @@
 
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
+#include "vpux/compiler/dialect/VPU/utils/se_roll_utils.hpp"
 #include "vpux/compiler/utils/error.hpp"
 
 using namespace vpux;
@@ -62,7 +63,8 @@ bool vpux::VPU::isNCEConvSupported(VPU::ArchKind arch, NDTypeInterface inputType
             return false;
         }
         const std::set<VPU::ArchKind> compatibleTargets = {
-                VPU::ArchKind::VPUX37XX,
+                VPU::ArchKind::NPU37XX,
+                VPU::ArchKind::NPU40XX,
         };
         if (compatibleTargets.count(arch) <= 0 && outputOrder != DimsOrder::NHWC) {
             logCb(formatv("Unsupported output layout '{0}'", outputOrder));
@@ -245,6 +247,20 @@ bool VPU::isSupportedSEPTransposedConv(VPU::TransposedConvolutionOp op, LogCb lo
                                             op.getDilations(), op.getPadsBegin(), op.getPadsEnd(),
                                             op.getOutputPadding(), logCb, checkLayout, checkChannelAlignment,
                                             supportsInputActCompression);
+}
+
+std::optional<bool> VPU::isSEPConvCompatibleWithClusterStrategy(VPU::NCEConvolutionOp nceConv,
+                                                                VPU::MultiClusterStrategy strategy) {
+    auto sparseInput = nceConv.getInput().getType().dyn_cast<VPU::SparseTensorType>();
+    if (sparseInput == nullptr) {
+        return std::nullopt;
+    }
+
+    auto seAttr = sparseInput.getSeAttr().dyn_cast_or_null<VPU::SERollAttr>();
+    if (seAttr != nullptr) {
+        return VPU::isRollSEPConvCompatibleWithClusterStrategy(seAttr, strategy);
+    }
+    return std::nullopt;
 }
 
 mlir::LogicalResult vpux::VPU::verifyConvUtil(mlir::Location loc, VPU::ArchKind arch, Shape filterShape,

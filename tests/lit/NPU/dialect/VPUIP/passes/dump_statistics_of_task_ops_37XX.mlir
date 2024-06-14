@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -38,16 +38,16 @@ module @DumpOpsStatisticsTest {
     func.func @CompressedWeightsAndNoUncompressedWeights(%arg0: memref<1x512x3x3x!qElemType>, %arg1: memref<1x512x3x3x!qElemType>) -> memref<1x512x3x3x!qElemType, [@CMX_NN, 0]> {
         %0 = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x512x3x3x!qElemType, [@CMX_NN, 0]>
 
-        %cst_1 = const.Declare memref<15200x1x1x1xui8> = dense<1> : tensor<15200x1x1x1xui8>
+        %cst_1 = const.Declare memref<15200x1x1x1xui8, {compression = #VPUIP.Compression<CompiletimeCompressed>, order = #NCHW}> = dense<1> : tensor<15200x1x1x1xui8>
         %2 = VPURT.DeclareBuffer <CMX_NN> <1605632> -> !VPUIP.DistributedBuffer<50176x1x1x1xui8, #NCHW, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>
         VPURT.Task attributes {isTrailingSWLayer = false} {
-            %4 = VPUIP.DecompressDMAOp inputs(%cst_1 : memref<15200x1x1x1xui8>) outputs(%2 : !VPUIP.DistributedBuffer<50176x1x1x1xui8, #NCHW, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>) -> !VPUIP.DistributedBuffer<50176x1x1x1xui8, #NCHW, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>
+            %4 = VPUIP.DecompressDMAOp inputs(%cst_1 : memref<15200x1x1x1xui8, {compression = #VPUIP.Compression<CompiletimeCompressed>, order = #NCHW}>) outputs(%2 : !VPUIP.DistributedBuffer<50176x1x1x1xui8, #NCHW, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>) -> !VPUIP.DistributedBuffer<50176x1x1x1xui8, #NCHW, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>
         }
 
-        %cst_2 = const.Declare memref<1408x1x1x1xui8> = dense<1> : tensor<1408x1x1x1xui8>
+        %cst_2 = const.Declare memref<1408x1x1x1xui8, {compression = #VPUIP.Compression<CompiletimeCompressed>, order = #NCHW}> = dense<1> : tensor<1408x1x1x1xui8>
         %3 = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<4608x1x1x1xui8, [@CMX_NN, 0]>
         VPURT.Task attributes {isTrailingSWLayer = false} {
-            %4 = VPUIP.DecompressDMAOp inputs(%cst_2 : memref<1408x1x1x1xui8>) outputs(%3 : memref<4608x1x1x1xui8, [@CMX_NN, 0]>) -> memref<4608x1x1x1xui8, [@CMX_NN, 0]>
+            %4 = VPUIP.DecompressDMAOp inputs(%cst_2 : memref<1408x1x1x1xui8, {compression = #VPUIP.Compression<CompiletimeCompressed>, order = #NCHW}>) outputs(%3 : memref<4608x1x1x1xui8, [@CMX_NN, 0]>) -> memref<4608x1x1x1xui8, [@CMX_NN, 0]>
         }
         return %0 : memref<1x512x3x3x!qElemType, [@CMX_NN, 0]>
     } // func
@@ -77,16 +77,16 @@ module @DumpOpsStatisticsTest {
     func.func @CompressedWeightsAndUncompressedWeights(%arg0: memref<1x512x3x3x!qElemType>, %arg1: memref<1x512x3x3x!qElemType>) -> memref<1x512x3x3x!qElemType, [@CMX_NN, 0]> {
         %0 = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x512x3x3x!qElemType, [@CMX_NN, 0]>
 
-        %cst_1 = const.Declare memref<15200x1x1x1xui8> = dense<1> : tensor<15200x1x1x1xui8>
+        %cst_1 = const.Declare memref<15200x1x1x1xui8, {compression = #VPUIP.Compression<CompiletimeCompressed>, order = #NCHW}> = dense<1> : tensor<15200x1x1x1xui8>
         %2 = VPURT.DeclareBuffer <CMX_NN> <1605632> -> !VPUIP.DistributedBuffer<50176x1x1x1xui8, #NCHW, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>
         VPURT.Task attributes {isTrailingSWLayer = false} {
-            %4 = VPUIP.DecompressDMAOp inputs(%cst_1 : memref<15200x1x1x1xui8>) outputs(%2 : !VPUIP.DistributedBuffer<50176x1x1x1xui8, #NCHW, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>) -> !VPUIP.DistributedBuffer<50176x1x1x1xui8, #NCHW, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>
+            %4 = VPUIP.DecompressDMAOp inputs(%cst_1 : memref<15200x1x1x1xui8, {compression = #VPUIP.Compression<CompiletimeCompressed>, order = #NCHW}>) outputs(%2 : !VPUIP.DistributedBuffer<50176x1x1x1xui8, #NCHW, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>) -> !VPUIP.DistributedBuffer<50176x1x1x1xui8, #NCHW, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>
         }
 
-        %cst_2 = const.Declare memref<1408x1x1x1xui8> = dense<1> : tensor<1408x1x1x1xui8>
+        %cst_2 = const.Declare memref<1408x1x1x1xui8, {compression = #VPUIP.Compression<CompiletimeCompressed>, order = #NCHW}> = dense<1> : tensor<1408x1x1x1xui8>
         %3 = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<4608x1x1x1xui8, [@CMX_NN, 0]>
         VPURT.Task attributes {isTrailingSWLayer = false} {
-            %4 = VPUIP.DecompressDMAOp inputs(%cst_2 : memref<1408x1x1x1xui8>) outputs(%3 : memref<4608x1x1x1xui8, [@CMX_NN, 0]>) -> memref<4608x1x1x1xui8, [@CMX_NN, 0]>
+            %4 = VPUIP.DecompressDMAOp inputs(%cst_2 : memref<1408x1x1x1xui8, {compression = #VPUIP.Compression<CompiletimeCompressed>, order = #NCHW}>) outputs(%3 : memref<4608x1x1x1xui8, [@CMX_NN, 0]>) -> memref<4608x1x1x1xui8, [@CMX_NN, 0]>
         }
         %cst_3 = const.Declare memref<1x512x3x3x!qElemType> = dense<1> : tensor<1x512x3x3xui8>, [#const.QuantCast<!qElemType>]
         VPURT.Task attributes {isTrailingSWLayer = false} {
@@ -186,16 +186,16 @@ module @VPU.SW {
     %normalize: i64,
     %eps : f32
     ) attributes {
-            VPU.kernel_code  = "singleShaveMVN.cpp",
-            VPU.kernel_entry = "singleShaveMVN"
+            VPU.kernel_code  = "mvn1.cpp",
+            VPU.kernel_entry = "mvn1"
         }
 
     // The declaration should match C++ params structure in decomposed form.
     // `memref` will be translated to `MemRefData`, while raw scalars will be translated as is.
     func.func private @builtin_clamp(%input : memref<*xf16>, %output : memref<*xf16>, %min : f16, %max : f16)
         attributes {
-            VPU.kernel_code = "clamp_fp16.cpp",
-            VPU.kernel_entry = "clamp_fp16"
+            VPU.kernel_code = "activation_clamp.cpp",
+            VPU.kernel_entry = "activation_clamp"
         }
 
 
@@ -228,7 +228,7 @@ func.func @main(%1: memref<1x4x512x1xf16, {order = #NCWH}>,
 
     // Genetic Kernel information for the scheduler.
     VPURT.Task waits(%b0  : !VPURT.Barrier) updates(%b1  : !VPURT.Barrier) {
-        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
                     @VPU.SW::@builtin_mvn            // The reference to the Kernel function.
                     inputs(%in_tile0_cmx as %arg0: memref<1x4x512x1xf16, {order = #NCWH}, [@CMX_NN, 0]>)     // Inputs/outputs buffers for generic operation interface
                     outputs(%out_tile0_cmx0 as %arg1: memref<1x4x512x1xf16, {order = #NCWH}, [@CMX_NN, 0]>)   // and their mapping to inner region.
@@ -244,7 +244,7 @@ func.func @main(%1: memref<1x4x512x1xf16, {order = #NCWH}>,
     }
 
     VPURT.Task waits(%b1  : !VPURT.Barrier) updates(%b2  : !VPURT.Barrier) {
-        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
                     @VPU.SW::@builtin_mvn            // The reference to the Kernel function.
                     inputs(%out_tile0_cmx0 as %arg0: memref<1x4x512x1xf16, {order = #NCWH}, [@CMX_NN, 0]>)     // Inputs/outputs buffers for generic operation interface
                     outputs(%out_tile0_cmx1 as %arg1: memref<1x4x512x1xf16, {order = #NCWH}, [@CMX_NN, 0]>)   // and their mapping to inner region.
@@ -260,7 +260,7 @@ func.func @main(%1: memref<1x4x512x1xf16, {order = #NCWH}>,
     }
 
     VPURT.Task waits(%b2  : !VPURT.Barrier) updates(%b3  : !VPURT.Barrier) {
-        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0>}
+        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
                     @VPU.SW::@builtin_clamp            // The reference to the Kernel function.
                     inputs(%out_tile0_cmx1 as %arg0: memref<1x4x512x1xf16, {order = #NCWH}, [@CMX_NN, 0]>)     // Inputs/outputs buffers for generic operation interface
                     outputs(%out_tile0_cmx2 as %arg1: memref<1x4x512x1xf16, {order = #NCWH}, [@CMX_NN, 0]>)   // and their mapping to inner region.

@@ -1,0 +1,139 @@
+//
+// Copyright (C) 2022 Intel Corporation.
+// SPDX-License-Identifier: Apache 2.0
+//
+
+#pragma once
+
+#include <vector>
+#include "vpux/compiler/NPU40XX/dialect/ELF/ops.hpp"
+#include "vpux/compiler/act_kernels/nce2p7.h"
+#include "vpux/compiler/dialect/VPUASM/types.hpp"
+#include "vpux/compiler/dialect/VPURegMapped/types.hpp"
+#include "vpux/compiler/utils/logging.hpp"
+#include "vpux/utils/core/error.hpp"
+#include "vpux_headers/platform.hpp"
+
+using namespace vpux;
+
+namespace llvm {
+using RelocKey = std::pair<ELF::ElfSectionInterface, ELF::CreateSymbolTableSectionOp>;
+template <>
+struct DenseMapInfo<RelocKey> {
+    static RelocKey getEmptyKey() {
+        void* pointer = llvm::DenseMapInfo<void*>::getEmptyKey();
+        return RelocKey(RelocKey::first_type::getFromOpaquePointer(pointer),
+                        RelocKey::second_type::getFromOpaquePointer(pointer));
+    }
+
+    static RelocKey getTombstoneKey() {
+        void* pointer = llvm::DenseMapInfo<void*>::getTombstoneKey();
+        return RelocKey(RelocKey::first_type::getFromOpaquePointer(pointer),
+                        RelocKey::second_type::getFromOpaquePointer(pointer));
+    }
+
+    static unsigned getHashValue(RelocKey val) {
+        auto h1 = hash_value(val.first.getAsOpaquePointer());
+        auto h2 = hash_value(val.second.getAsOpaquePointer());
+
+        return checked_cast<unsigned>(h1 * h2);
+    }
+
+    static bool isEqual(RelocKey lhs, RelocKey rhs) {
+        auto l1 = DenseMapInfo<mlir::Operation*>::isEqual(lhs.first.getOperation(), rhs.first.getOperation());
+        auto l2 = DenseMapInfo<mlir::Operation*>::isEqual(lhs.second.getOperation(), rhs.second.getOperation());
+
+        return l1 && l2;
+    }
+};
+}  // namespace llvm
+
+namespace vpux {
+namespace ELF {
+namespace math {
+
+size_t gcd(size_t a, size_t b);
+size_t lcm(size_t a, size_t b);
+
+}  // namespace math
+
+//
+// Platform Information
+//
+elf::platform::ArchKind mapVpuArchKindToElfArchKind(const VPU::ArchKind& archKind);
+
+ArrayRef<uint8_t> getKernelELF(mlir::Operation* operation, StringRef kernelPath, ArrayRef<StringRef> sectionNames = {});
+ArrayRef<uint8_t> getDataAndSizeOfElfSection(ArrayRef<uint8_t> elfBlob, ArrayRef<StringRef> possibleSecNames);
+
+class SymbolReferenceMap {
+public:
+    SymbolReferenceMap(vpux::ELF::MainOp elfMain, bool preLoadSymbols = false)
+            : _elfMainSymbolTable(elfMain.getOperation()) {
+        if (preLoadSymbols) {
+            walkAllSymbols();
+        }
+    }
+
+    mlir::Operation* lookupSymbol(mlir::SymbolRefAttr symRef);
+
+private:
+    void walkAllSymbols();
+    mlir::SymbolTable _elfMainSymbolTable;
+    mlir::DenseMap<mlir::StringAttr, mlir::SymbolTable> _sectionSymbolContainers;
+};
+
+ELF::MainOp getElfMainOp(mlir::func::FuncOp funcOp);
+
+size_t getOffsetOfSymRef(ELF::SymbolReferenceMap& symRefMap, mlir::SymbolRefAttr symRef);
+
+mlir::SymbolRefAttr composeSectionObjectSymRef(ELF::ElfSectionInterface sectionIface, mlir::Operation* op);
+
+constexpr size_t VPUX_SHAVE_ALIGNMENT = Byte(1_KB).count();
+constexpr size_t VPUX_DEFAULT_ALIGNMENT = (64_Byte).count();
+constexpr size_t VPUX_NO_ALIGNMENT = (1_Byte).count();
+
+template <class LHS>
+std::string generateSignatureImpl(LHS&& lhs, const std::string& rhs) {
+    return std::string(std::forward<LHS>(lhs)) + "." + rhs;
+}
+
+template <class LHS, class RHS>
+decltype(std::to_string(RHS{}), void(), std::string()) generateSignatureImpl(LHS&& lhs, RHS&& rhs) {
+    return generateSignatureImpl(std::forward<LHS>(lhs), std::to_string(std::forward<RHS>(rhs)));
+}
+
+template <class LHS, class RHS>
+decltype(stringifyEnum(RHS{}), void(), std::string()) generateSignatureImpl(LHS&& lhs, RHS&& rhs) {
+    return generateSignatureImpl(std::forward<LHS>(lhs), stringifyEnum(std::forward<RHS>(rhs)).str());
+}
+
+template <class LHS>
+std::string generateSignatureImpl(LHS&& lhs, VPURegMapped::IndexType index) {
+    const auto tileIndex = index.getTileIdx();
+    const auto listIndex = index.getListIdx();
+    auto signature = generateSignatureImpl(std::forward<LHS>(lhs), tileIndex);
+    return generateSignatureImpl(std::move(signature), listIndex);
+}
+
+template <class LHS>
+std::string generateSignatureImpl(LHS&& lhs, VPUASM::BufferType bufferType) {
+    const auto location = bufferType.getLocation();
+    const auto section = location.getSection();
+    const auto sectionIndex = location.getSectionIndex();
+    auto signature = generateSignatureImpl(std::forward<LHS>(lhs), section);
+    return generateSignatureImpl(std::move(signature), sectionIndex);
+}
+
+template <class T>
+std::string generateSignature(T&& signature) {
+    return std::forward<T>(signature);
+}
+
+template <class LHS, class RHS, class... Rest>
+std::string generateSignature(LHS&& lhs, RHS&& rhs, Rest&&... rest) {
+    return generateSignature(generateSignatureImpl(std::forward<LHS>(lhs), std::forward<RHS>(rhs)),
+                             std::forward<Rest>(rest)...);
+}
+
+}  // namespace ELF
+}  // namespace vpux

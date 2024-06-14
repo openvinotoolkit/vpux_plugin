@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --convert-precision-to-fp16 --canonicalize %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 //
 // The 'convert-precision-to-fp16' pass:
@@ -217,4 +217,43 @@ module @TwoFunctions {
         // CHECK: [[OUT2:%.+]] = call @foo2([[OUT1]]) : (tensor<1x48x60x60xf16>) -> tensor<1x48x60x60xf16>
         // CHECK: return [[OUT2]] : tensor<1x48x60x60xf16>
     }
+}
+
+// -----
+
+// CHECK-LABEL: @NotConvertBitWiseOp
+module @NotConvertBitWiseOp {
+
+IE.CNNNetwork
+    entryPoint : @main
+    inputsInfo : {
+        // CHECK: DataInfo "data" : tensor<1x1024xf16>
+        DataInfo "data" : tensor<1x1024xf16>
+    }
+    outputsInfo : {
+        // CHECK: DataInfo "prob" : tensor<1x1024xf16>
+        DataInfo "prob" : tensor<1x1024xf16>
+    }
+
+// CHECK: func.func @main([[ARG0:[^:]+]]: tensor<1x1024xf16>) -> tensor<1x1024xf16>
+func.func @main(%arg0: tensor<1x1024xf16>) -> tensor<1x1024xf16> {
+    %0 = IE.Convert(%arg0) {dstElemType = i8} : tensor<1x1024xf16> -> tensor<1x1024xi8>
+    %1 = IE.BitwiseNot(%0) : tensor<1x1024xi8> -> tensor<1x1024xi8>
+    %2 = IE.BitwiseAnd(%0, %1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x1024xi8>, tensor<1x1024xi8> -> tensor<1x1024xi8>
+    %3 = IE.BitwiseOr(%0, %2) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x1024xi8>, tensor<1x1024xi8> -> tensor<1x1024xi8>
+    %4 = IE.BitwiseXor(%0, %3) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x1024xi8>, tensor<1x1024xi8> -> tensor<1x1024xi8>
+    %5 = IE.Convert(%4) {dstElemType = f16} : tensor<1x1024xi8> -> tensor<1x1024xf16>
+    return %5 : tensor<1x1024xf16>
+    // CHECK:       [[CONVER:%.+]] = IE.Convert(%arg0) {dstElemType = i8} : tensor<1x1024xf16> -> tensor<1x1024xi8>
+
+    // CHECK:       [[BITWISENOT:%.+]] = IE.BitwiseNot([[CONVER]]) : tensor<1x1024xi8> -> tensor<1x1024xi8>
+    // CHECK:       [[BITWISEAND:%.+]] = IE.BitwiseAnd([[CONVER]], [[BITWISENOT]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x1024xi8>, tensor<1x1024xi8> -> tensor<1x1024xi8>
+    // CHECK:       [[BITWISEOR:%.+]] = IE.BitwiseOr([[CONVER]], [[BITWISEAND]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x1024xi8>, tensor<1x1024xi8> -> tensor<1x1024xi8>
+    // CHECK:       [[BITWISEXOR:%.+]] = IE.BitwiseXor([[CONVER]], [[BITWISEOR]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x1024xi8>, tensor<1x1024xi8> -> tensor<1x1024xi8>
+
+    // CHECK:       [[CONVER1:%.+]] = IE.Convert([[BITWISEXOR]]) {dstElemType = f16} : tensor<1x1024xi8> -> tensor<1x1024xf16>
+    // CHECK:       return [[CONVER1]] : tensor<1x1024xf16>
+
+}
+
 }

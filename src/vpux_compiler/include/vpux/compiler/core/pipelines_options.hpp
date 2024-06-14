@@ -7,6 +7,7 @@
 
 #include "vpux/compiler/utils/passes.hpp"
 
+#include "vpux/compiler/core/developer_build_utils.hpp"
 #include "vpux/utils/core/logger.hpp"
 
 #include <mlir/Pass/PassManager.h>
@@ -17,23 +18,20 @@
 namespace vpux {
 
 //
-// Common utilities
-//
-
-constexpr bool isDeveloperBuild() {
-#ifdef VPUX_DEVELOPER_BUILD
-    return true;
-#else
-    return false;
-#endif
-}
-
-//
 // ReferenceSWMode
 //
 
 template <typename T>
 struct ReferenceSWOptions : mlir::PassPipelineOptions<T> {
+    // InitCompiler
+    IntOption revisionID{*this, "revision-id", ::llvm::cl::desc("[Optional] Revision ID of the platform")};
+    IntOption numberOfDPUGroups{*this, "num-of-dpu-groups",
+                                ::llvm::cl::desc("[Optional] Number of available DPU groups")};
+    IntOption numberOfDMAPorts{*this, "num-of-dma-ports", ::llvm::cl::desc("[Optional] Number of available DMA ports")};
+    IntOption availableCMXMemory{*this, "available-cmx-memory", ::llvm::cl::desc("[Optional] Available CMX memory")};
+    BoolOption allowCustomValues{*this, "allow-custom-values",
+                                 ::llvm::cl::desc("[Optional] Allows keep predefined values in IR")};
+
     BoolOption enableDummyOpReplacement{*this, "dummy-op-replacement",
                                         llvm::cl::desc("Replace unsupported SW Kernel ops with Dummy ones"),
                                         llvm::cl::init(false)};
@@ -54,6 +52,11 @@ struct ReferenceSWOptions : mlir::PassPipelineOptions<T> {
                            "`constant-folding-in-background` is disabled."),
             llvm::cl::init(false)};
 
+    BoolOption wlmRollback{
+            *this, "wlm-rollback",
+            llvm::cl::desc("When compilation with WLM fails, automatically switches to WLM-disabled pipeline"),
+            llvm::cl::init(true)};
+
     BoolOption enableProfiling{*this, "profiling", llvm::cl::desc("Enable profiling"), llvm::cl::init(false)};
     BoolOption enableSWProfiling{*this, "sw-profiling", llvm::cl::desc("Enable SW task profiling"),
                                  llvm::cl::init(true)};
@@ -69,9 +72,9 @@ struct ReferenceSWOptions : mlir::PassPipelineOptions<T> {
                                       llvm::cl::desc("Enable storage element pointer operations"),
                                       llvm::cl::init(false)};
 
-    BoolOption enableSEPTransposedConv{*this, "enable-sep-transposed-conv",
-                                       llvm::cl::desc("(Experimental) Enable SEP Transposed Conv"),
-                                       llvm::cl::init(false)};
+    BoolOption enableExperimentalSEPtrsOperations{*this, "enable-experimental-se-ptrs-operations",
+                                                  llvm::cl::desc("Enable the experimental operation of SEP"),
+                                                  llvm::cl::init(false)};
 
     BoolOption enableFuseClampOperations{*this, "enable-fuse-clamp-op", llvm::cl::desc("Enable fuse clamp operations"),
                                          llvm::cl::init(false)};
@@ -80,10 +83,40 @@ struct ReferenceSWOptions : mlir::PassPipelineOptions<T> {
                                             llvm::cl::desc("Enable convert-precision-to-fp16 pass"),
                                             llvm::cl::init(true)};
 
+    BoolOption enableControlGraphSplit{*this, "enable-control-graph-split",
+                                       llvm::cl::desc("Enable split of control graph to simplify barrier scheduling"),
+                                       llvm::cl::init(true)};
+    IntOption controlGraphSplitBlockSize{
+            *this, "control-graph-split-block-size",
+            llvm::cl::desc("Maximal number of tasks in each block that control graph will be split into. Used to "
+                           "reduce memory consumption of barrier legalization pipeline for big models. Memory usage is "
+                           "roughly (control-graph-split-block-size)^2/8"),
+            llvm::cl::init(100000)};
+
+    StrOption computeLayersWithHigherPrecision{
+            *this, "compute-layers-with-higher-precision",
+            llvm::cl::desc("Enable compute layers with higher precision for the specified layer types"),
+            llvm::cl::init("")};
+
+    BoolOption enableSimpleSchedule{*this, "simple-schedule", llvm::cl::desc("Enable schedule simplification"),
+                                    llvm::cl::init(false)};
+
+    BoolOption shareWaitAndUpdateBarriers{*this, "share-wait-and-update-barriers",
+                                          llvm::cl::desc("Share wait and update barriers"), llvm::cl::init(true)};
+
+    BoolOption reduceParallelControlFlows{*this, "reduce-parallel-control-flows",
+                                          llvm::cl::desc("Reduce parallel overlapping control flows where possible"),
+                                          llvm::cl::init(true)};
+
+    BoolOption enableSWKernelPrefetchingReserveMem{
+            *this, "enable-sw-kernel-prefetching-reserve-mem",
+            ::llvm::cl::desc("Reserve memory at the end of CMX for SW Kernel data prefetching"),
+            ::llvm::cl::init(true)};
+
     bool enableForceZMajorConcat = false;
     bool enableSwapTransposeWithFQ = false;
     bool enableAlignScales = false;
-    // TODO: remove option after E#83187
+    // TODO: remove option after E-83187
     bool enableFuseClamp = false;
     bool enableConvertFCToConv = false;
     bool enableAdjustNonZeroFakeQuant = false;
@@ -93,11 +126,18 @@ struct ReferenceSWOptions : mlir::PassPipelineOptions<T> {
 // ReferenceHWMode
 //
 
+struct ReferenceHWOptions40XX;
+
 template <typename T>
 struct ReferenceHWOptions : mlir::PassPipelineOptions<T> {
-    IntOption numberOfDPUGroups{*this, "num-of-dpu-groups", llvm::cl::desc("Number of DPU groups")};
-
-    IntOption numberOfDMAPorts{*this, "num-of-dma-ports", llvm::cl::desc("Number of DMA ports")};
+    // InitCompiler
+    IntOption revisionID{*this, "revision-id", ::llvm::cl::desc("[Optional] Revision ID of the platform")};
+    IntOption numberOfDPUGroups{*this, "num-of-dpu-groups",
+                                ::llvm::cl::desc("[Optional] Number of available DPU groups")};
+    IntOption numberOfDMAPorts{*this, "num-of-dma-ports", ::llvm::cl::desc("[Optional] Number of available DMA ports")};
+    IntOption availableCMXMemory{*this, "available-cmx-memory", ::llvm::cl::desc("[Optional] Available CMX memory")};
+    BoolOption allowCustomValues{*this, "allow-custom-values",
+                                 ::llvm::cl::desc("[Optional] Allows keep predefined values in IR")};
 
     BoolOption enableConvertFCToConv{*this, "convert-fc-to-conv", llvm::cl::desc("Enable convert-fc-to-conv pass"),
                                      llvm::cl::init(true)};
@@ -183,8 +223,9 @@ struct ReferenceHWOptions : mlir::PassPipelineOptions<T> {
 
     BoolOption enableProfiling{*this, "profiling", llvm::cl::desc("Enable profiling"), llvm::cl::init(false)};
 
+    // Enable for 40XX once RT will be ready, follow up #E95864
     BoolOption enableDMAProfiling{*this, "dma-profiling", llvm::cl::desc("Enable DMA task profiling"),
-                                  llvm::cl::init(true)};
+                                  llvm::cl::init(!std::is_same<T, ReferenceHWOptions40XX>::value)};
 
     BoolOption enableDPUProfiling{*this, "dpu-profiling", llvm::cl::desc("Enable DPU task profiling"),
                                   llvm::cl::init(true)};
@@ -200,7 +241,7 @@ struct ReferenceHWOptions : mlir::PassPipelineOptions<T> {
 
     BoolOption enableDumpTaskStats{*this, "dump-task-stats",
                                    ::llvm::cl::desc("Enable dumping statistics of Task operations"),
-                                   ::llvm::cl::init(isDeveloperBuild())};
+                                   ::llvm::cl::init(vpux::isDeveloperBuild())};
 
     BoolOption enableDummyOpReplacement{*this, "dummy-op-replacement",
                                         llvm::cl::desc("Replace unsupported SW Kernel ops with Dummy ones"),
@@ -222,11 +263,17 @@ struct ReferenceHWOptions : mlir::PassPipelineOptions<T> {
                            "`constant-folding-in-background` is disabled."),
             llvm::cl::init(false)};
 
+    BoolOption wlmRollback{
+            *this, "wlm-rollback",
+            llvm::cl::desc("When compilation with WLM fails, automatically switches to WLM-disabled pipeline"),
+            llvm::cl::init(true)};
+
     BoolOption enableOptimizeReorders{*this, "optimize-reorders", llvm::cl::desc("Enable optimize-reorders pass"),
                                       llvm::cl::init(true)};
 
-    BoolOption enableConvertSliceToConvPass{*this, "convert-slice-to-conv",
-                                            llvm::cl::desc("Enable convert-slice-to-conv pass"), llvm::cl::init(false)};
+    BoolOption enableOptimizeSliceWithStride{*this, "optimize-slice-with-stride",
+                                             llvm::cl::desc("Enable optimize-slice-with-stride pass"),
+                                             llvm::cl::init(false)};
 
     BoolOption enableConvertExpandToConvPass{*this, "convert-expand-to-conv",
                                              llvm::cl::desc("Enable convert-expand-to-conv pass"),
@@ -267,9 +314,23 @@ struct ReferenceHWOptions : mlir::PassPipelineOptions<T> {
                                    llvm::cl::desc("Write the multiclustering and tiling strategy to a JSON file"),
                                    llvm::cl::init(false)};
 
+    StrOption enableShaveDDRAccessOptimization{
+            *this, "enable-shave-ddr-access-optimization",
+            llvm::cl::desc("SHAVE DDR access optimization option (true, false or auto)"), llvm::cl::init("true")};
+
     BoolOption enableOpsAsDMA{*this, "enable-ops-as-dma",
                               llvm::cl::desc("Force using DMA transformations instead of SW ops"),
                               llvm::cl::init(false)};
+
+    BoolOption enableControlGraphSplit{*this, "enable-control-graph-split",
+                                       llvm::cl::desc("Enable split of control graph to simplify barrier scheduling"),
+                                       llvm::cl::init(true)};
+    IntOption controlGraphSplitBlockSize{
+            *this, "control-graph-split-block-size",
+            llvm::cl::desc("Maximal number of tasks in each block that control graph will be split into. Used to "
+                           "reduce memory consumption of barrier legalization pipeline for big models. Memory usage is "
+                           "roughly (control-graph-split-block-size)^2/8"),
+            llvm::cl::init(100000)};
 
     BoolOption enableSimpleSchedule{*this, "simple-schedule", llvm::cl::desc("Enable schedule simplification"),
                                     llvm::cl::init(false)};
@@ -317,6 +378,16 @@ struct ReferenceHWOptions : mlir::PassPipelineOptions<T> {
     BoolOption enableConvertPrecisionToFP16{*this, "convert-precision-to-fp16",
                                             llvm::cl::desc("Enable convert-precision-to-fp16 pass"),
                                             llvm::cl::init(true)};
+
+    StrOption computeLayersWithHigherPrecision{
+            *this, "compute-layers-with-higher-precision",
+            llvm::cl::desc("Enable compute layers with higher precision for the specified layer types"),
+            llvm::cl::init("")};
+
+    BoolOption enableSWKernelPrefetchingReserveMem{
+            *this, "enable-sw-kernel-prefetching-reserve-mem",
+            ::llvm::cl::desc("Reserve memory at the end of CMX for SW Kernel data prefetching"),
+            ::llvm::cl::init(true)};
 };
 
 //
@@ -326,6 +397,10 @@ struct ReferenceHWOptions : mlir::PassPipelineOptions<T> {
 //
 
 struct DefaultHWOptionsBase : mlir::PassPipelineOptions<DefaultHWOptionsBase> {
+    BoolOption enableFunctionOutlining{*this, "function-outlining",
+                                       llvm::cl::desc("Divide the IR into multiple parts to compile them in parallel"),
+                                       llvm::cl::init(false)};
+
     BoolOption enableDummyOpReplacement{*this, "dummy-op-replacement",
                                         llvm::cl::desc("Replace unsupported SW Kernel ops with Dummy ones"),
                                         llvm::cl::init(false)};
@@ -346,9 +421,10 @@ struct DefaultHWOptionsBase : mlir::PassPipelineOptions<DefaultHWOptionsBase> {
                            "`constant-folding-in-background` is disabled."),
             llvm::cl::init(false)};
 
-    IntOption numberOfDPUGroups{*this, "num-of-dpu-groups", llvm::cl::desc("Number of DPU groups")};
-
-    IntOption numberOfDMAPorts{*this, "num-of-dma-ports", llvm::cl::desc("Number of DMA ports")};
+    BoolOption wlmRollback{
+            *this, "wlm-rollback",
+            llvm::cl::desc("When compilation with WLM fails, automatically switches to WLM-disabled pipeline"),
+            llvm::cl::init(true)};
 
     BoolOption enableScheduleTrace{*this, "enable-schedule-trace",
                                    llvm::cl::desc("Enable compile time schedule analysis and trace"),
@@ -370,7 +446,31 @@ struct DefaultHWOptionsBase : mlir::PassPipelineOptions<DefaultHWOptionsBase> {
                                 llvm::cl::desc("Enable vertical fusion pipelining pass and schedule pipelining"),
                                 llvm::cl::init(true)};
 
+    StrOption computeLayersWithHigherPrecision{
+            *this, "compute-layers-with-higher-precision",
+            llvm::cl::desc("Enable compute layers with higher precision for the specified layer types"),
+            llvm::cl::init("")};
+
+    // InitCompiler
+    IntOption revisionID{*this, "revision-id", ::llvm::cl::desc("[Optional] Revision ID of the platform")};
+    IntOption numberOfDPUGroups{*this, "num-of-dpu-groups",
+                                ::llvm::cl::desc("[Optional] Number of available DPU groups")};
+    IntOption numberOfDMAPorts{*this, "num-of-dma-ports", ::llvm::cl::desc("[Optional] Number of available DMA ports")};
+    IntOption availableCMXMemory{*this, "available-cmx-memory", ::llvm::cl::desc("[Optional] Available CMX memory")};
+    BoolOption allowCustomValues{*this, "allow-custom-values",
+                                 ::llvm::cl::desc("[Optional] Allows keep predefined values in IR")};
+
     // VPURT
+    BoolOption enableControlGraphSplit{*this, "enable-control-graph-split",
+                                       llvm::cl::desc("Enable split of control graph to simplify barrier scheduling"),
+                                       llvm::cl::init(true)};
+    IntOption controlGraphSplitBlockSize{
+            *this, "control-graph-split-block-size",
+            llvm::cl::desc("Maximal number of tasks in each block that control graph will be split into. Used to "
+                           "reduce memory consumption of barrier legalization pipeline for big models. Memory usage is "
+                           "roughly (control-graph-split-block-size)^2/8"),
+            llvm::cl::init(100000)};
+
     BoolOption enableSimpleSchedule{*this, "simple-schedule", llvm::cl::desc("Enable schedule simplification"),
                                     llvm::cl::init(true)};
 
@@ -380,6 +480,19 @@ struct DefaultHWOptionsBase : mlir::PassPipelineOptions<DefaultHWOptionsBase> {
     BoolOption reduceParallelControlFlows{*this, "reduce-parallel-control-flows",
                                           llvm::cl::desc("Reduce parallel overlapping control flows where possible"),
                                           llvm::cl::init(true)};
+    // Option to control locations verification. Possible options are:
+    // off - no verification
+    // fast - verifies locations only after last* pass by thorough algorithm
+    // full - verifies locations after each pass using fast algorithm and thorough after last* pass
+    // thorough - does thorough verification after each** pass
+    // This feature is in process of development, details: #E81319
+    // *last in sequence of fixed passes. Some passes is not fixed yet, so may break compilation because of locations
+    // reuse
+    // **each of fixed passes
+    StrOption locationsVerificationMode{
+            *this, "verify-locations",
+            llvm::cl::desc("Selects location verification mode. Possible options are off/fast/full/thorough"),
+            llvm::cl::init(vpux::isDeveloperBuild() ? "fast" : "off")};
 };
 
 //
@@ -408,6 +521,13 @@ struct MCAndTilingOptionsBase : mlir::PassPipelineOptions<MCAndTilingOptionsBase
                                llvm::cl::desc("Use VPUNN cost model to get the best tiling strategy"),
                                llvm::cl::init(false)};
 
+    BoolOption enableOutputPipelining{*this, "output-pipelining", llvm::cl::desc("Enable output pipelining"),
+                                      llvm::cl::init(false)};
+
+    StrOption enableShaveDDRAccessOptimization{
+            *this, "enable-shave-ddr-access-optimization",
+            llvm::cl::desc("SHAVE DDR access optimization option. (true, false or auto)"), llvm::cl::init("true")};
+
     BoolOption enableExplicitDistributedTensorAttr{
             *this, "enable-explicit-distributed-attr",
             llvm::cl::desc("Enable DistributedTensorAttr with explicit per cluster memory/compute shapes & offsets"),
@@ -421,6 +541,8 @@ struct MCAndTilingOptionsBase : mlir::PassPipelineOptions<MCAndTilingOptionsBase
         enableVerticalFusion = options.enableVerticalFusion;
         enablePipelining = options.enablePipelining;
         enableVPUNNCost = options.enableVPUNNCost;
+        enableOutputPipelining = options.enableOutputPipelining;
+        enableShaveDDRAccessOptimization = options.enableShaveDDRAccessOptimization;
         readStrategyFromJson = options.readStrategyFromJson;
         writeStrategyToJson = options.writeStrategyToJson;
         enableExplicitDistributedTensorAttr = options.enableExplicitDistributedTensorAttr;

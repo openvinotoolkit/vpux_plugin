@@ -4,11 +4,11 @@
 //
 
 #include "vpux/compiler/core/tiling.hpp"
-#include "vpux/compiler/dialect/IE/ops.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/cost_model/cost_model.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
-#include "vpux/compiler/dialect/VPUIP/dpu_tiler.hpp"
+#include "vpux/compiler/dialect/VPUIP/interfaces/dpu_tiler.hpp"
 
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/Support/FileSystem.h>
@@ -43,7 +43,7 @@ vpux::VPUIP::WorkloadCostParams buildWorkloadCost(const NceOpTensorShape& tensor
     costParams.kernelSize = {1, 1};
     costParams.kernelStride = {1, 1};
     costParams.nceTaskType = vpux::VPUIP::NCETaskType::CONV;
-    costParams.arch = vpux::VPU::ArchKind::VPUX30XX;
+    costParams.arch = vpux::VPU::ArchKind::NPU30XX;
     costParams.numDPU = numDPU;
     return costParams;
 }
@@ -56,7 +56,7 @@ TEST(MLIR_VPU_WorkloadCost, VPUNNCostInterface) {
     llvm::SmallVector<vpux::VPU::MPEMode> mpeModeList{vpux::VPU::MPEMode::VECTOR_FP16, vpux::VPU::MPEMode::VECTOR,
                                                       vpux::VPU::MPEMode::MATRIX};
 
-    const auto costModel = vpux::VPU::createCostModel(vpux::VPU::ArchKind::VPUX30XX);
+    const auto costModel = vpux::VPU::createCostModel(vpux::VPU::ArchKind::NPU30XX);
 
     llvm::SmallVector<NceOpTensorShape> testTensorLists;
     for (int64_t h = initDimensionValue; h < maxDimensionValue; h *= testStep) {

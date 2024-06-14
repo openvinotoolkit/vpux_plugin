@@ -1,20 +1,20 @@
 //
-// Copyright (C) 2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2023-2024 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include "performance_mode.hpp"
 
-#include <chrono>
-#include <regex>
-
-#include "simulation/computation.hpp"
+#include "simulation/computation_builder.hpp"
 #include "simulation/executor.hpp"
 #include "simulation/layers_data.hpp"
 #include "utils/logger.hpp"
 #include "utils/utils.hpp"
 
-#include "opencv2/gapi/infer/ov.hpp"
+#include <opencv2/gapi/gproto.hpp>    // cv::GCompileArgs
+#include <opencv2/gapi/infer/ov.hpp>  // ov::benchmark_mode{}
+
+#include <chrono>
 
 class PerformanceMetrics {
 public:
@@ -57,44 +57,76 @@ std::ostream& operator<<(std::ostream& os, const PerformanceMetrics& metrics) {
 
 namespace {
 
-struct PerformanceStrategy : public BuildStrategy {
-    explicit PerformanceStrategy(const bool _disable_copy): disable_copy(_disable_copy){};
-
-    BuildStrategy::ConstructInfo build(const InferDesc& infer) override {
-        std::vector<IDataProvider::Ptr> providers;
-        const auto& input_data = infer.input_data;
-        switch (input_data.index()) {
-        case LayerVariantAttr<std::string>::index_of<cv::util::monostate>(): {
-            LOG_INFO() << "Input data path for model: " << infer.tag
-                       << " hasn't been provided. Will be generated randomly" << std::endl;
-            providers = createRandomProviders(infer.input_layers, infer.generators);
-            break;
-        }
-        case LayerVariantAttr<std::string>::index_of<std::string>(): {
-            const std::filesystem::path path = cv::util::get<std::string>(input_data);
-            if (std::filesystem::exists(path)) {
-                LOG_INFO() << "Input data path: " << path << " for model: " << infer.tag
-                           << " exists - data will be uploaded" << std::endl;
-                auto layers_data = uploadData(path, infer.tag, infer.input_layers, LayersType::INPUT);
-                providers = createConstantProviders(std::move(layers_data), extractLayerNames(infer.input_layers));
-            } else {
-                LOG_INFO() << "Input data path: " << path << " for model: " << infer.tag
-                           << " provided but doesn't exist - will be generated randomly" << std::endl;
-                providers = createRandomProviders(infer.input_layers, infer.generators);
-            }
-            break;
-        }
-        default:
-            THROW_ERROR("Performance mode supports input data in form of either directory or single file!");
-        }  // switch
-        // NB: No special I/O meta for this mode
-        std::vector<Meta> inputs_meta(infer.input_layers.size(), Meta{});
-        std::vector<Meta> outputs_meta(infer.output_layers.size(), Meta{});
-        return {providers, inputs_meta, outputs_meta, disable_copy};
+struct InputDataVisitor {
+    InputDataVisitor(const InferDesc& _infer, const PerformanceSimulation::Options& _opts)
+            : infer(_infer), opts(_opts), providers(infer.input_layers.size()) {
     }
 
-    bool disable_copy;
+    void operator()(std::monostate);
+    void operator()(const std::string&);
+    void operator()(const LayerVariantAttr<std::string>&);
+
+    const InferDesc& infer;
+    const PerformanceSimulation::Options& opts;
+    std::vector<IDataProvider::Ptr> providers;
 };
+
+void InputDataVisitor::operator()(std::monostate) {
+    LOG_INFO() << "Input data path for model: " << infer.tag << " hasn't been provided. Will be generated randomly"
+               << std::endl;
+    auto initializers = opts.initializers_map.at(infer.tag);
+    auto default_initialzer =
+            opts.global_initializer ? opts.global_initializer : std::make_shared<UniformGenerator>(0.0, 255.0);
+    auto per_layer_initializers =
+            unpackWithDefault(initializers, extractLayerNames(infer.input_layers), default_initialzer);
+    providers = createRandomProviders(infer.input_layers, per_layer_initializers);
+};
+
+void InputDataVisitor::operator()(const std::string& path_str) {
+    const std::filesystem::path path{path_str};
+    if (std::filesystem::exists(path)) {
+        LOG_INFO() << "Input data path: " << path << " for model: " << infer.tag << " exists - data will be uploaded"
+                   << std::endl;
+        auto layers_data = uploadData(path, infer.tag, infer.input_layers, LayersType::INPUT);
+        providers = createConstantProviders(std::move(layers_data), extractLayerNames(infer.input_layers));
+    } else {
+        auto initializers = opts.initializers_map.at(infer.tag);
+        auto default_initialzer =
+                opts.global_initializer ? opts.global_initializer : std::make_shared<UniformGenerator>(0.0, 255.0);
+        auto per_layer_initializers =
+                unpackWithDefault(initializers, extractLayerNames(infer.input_layers), default_initialzer);
+        LOG_INFO() << "Input data path: " << path << " for model: " << infer.tag
+                   << " provided but doesn't exist - will be generated randomly" << std::endl;
+        providers = createRandomProviders(infer.input_layers, per_layer_initializers);
+    }
+}
+
+void InputDataVisitor::operator()(const LayerVariantAttr<std::string>&) {
+    THROW_ERROR("Performance mode supports input data in form of either directory or single file!");
+};
+
+}  // anonymous namespace
+
+struct PerformanceStrategy : public IBuildStrategy {
+    explicit PerformanceStrategy(const PerformanceSimulation::Options& opts);
+    IBuildStrategy::InferBuildInfo build(const InferDesc& infer) override;
+
+    const PerformanceSimulation::Options& opts;
+};
+
+PerformanceStrategy::PerformanceStrategy(const PerformanceSimulation::Options& _opts): opts(_opts){};
+
+IBuildStrategy::InferBuildInfo PerformanceStrategy::build(const InferDesc& infer) {
+    const auto& input_data = opts.input_data_map.at(infer.tag);
+    InputDataVisitor in_data_visitor{infer, opts};
+    std::visit(in_data_visitor, input_data);
+    // NB: No special I/O meta for this mode
+    std::vector<Meta> inputs_meta(infer.input_layers.size(), Meta{});
+    std::vector<Meta> outputs_meta(infer.output_layers.size(), Meta{});
+    return {std::move(in_data_visitor.providers), std::move(inputs_meta), std::move(outputs_meta), opts.inference_only};
+}
+
+namespace {
 
 class SyncSimulation : public SyncCompiled {
 public:
@@ -256,43 +288,57 @@ bool PipelinedSimulation::process(cv::GStreamingCompiled& pipeline) {
 
 }  // anonymous namespace
 
-PerformanceSimulation::PerformanceSimulation(ScenarioGraph&& graph, const PerformanceSimulation::Options& opts)
-        : m_opts(opts),
-          m_comp(Computation::build(std::move(graph), std::make_shared<PerformanceStrategy>(m_opts.inference_only),
-                                    true)) {
+PerformanceSimulation::PerformanceSimulation(Simulation::Config&& cfg, PerformanceSimulation::Options&& opts)
+        : Simulation(std::move(cfg)),
+          m_opts(std::move(opts)),
+          m_strategy(std::make_shared<PerformanceStrategy>(m_opts)),
+          m_comp(ComputationBuilder{m_strategy}.build(m_cfg.graph, m_cfg.params, {true /* add performance meta */})) {
 }
 
-std::shared_ptr<PipelinedCompiled> PerformanceSimulation::compilePipelined(const bool drop_frames,
+std::shared_ptr<PipelinedCompiled> PerformanceSimulation::compilePipelined(DummySources&& sources,
                                                                            cv::GCompileArgs&& compile_args) {
     if (m_opts.inference_only) {
+        // TODO: Extend also for ONNXRT backend
         compile_args += cv::compile_args(cv::gapi::wip::ov::benchmark_mode{});
     }
-    auto info = m_comp.compilePipelined(drop_frames, std::move(compile_args));
-    return std::make_shared<PipelinedSimulation>(std::move(info.compiled), std::move(info.sources),
-                                                 info.out_meta.size());
+    auto compiled = m_comp.compileStreaming(descr_of(sources), std::move(compile_args));
+    return std::make_shared<PipelinedSimulation>(std::move(compiled), std::move(sources), m_comp.getOutMeta().size());
 }
 
-std::shared_ptr<SyncCompiled> PerformanceSimulation::compileSync(const bool drop_frames,
-                                                                 cv::GCompileArgs&& compile_args) {
+std::shared_ptr<SyncCompiled> PerformanceSimulation::compileSync(const bool drop_frames) {
+    auto compile_args = cv::compile_args(getNetworksPackage());
     if (m_opts.inference_only) {
+        // TODO: Extend also for ONNXRT backend
         compile_args += cv::compile_args(cv::gapi::wip::ov::benchmark_mode{});
     }
-    auto info = m_comp.compileSync(drop_frames, std::move(compile_args));
 
+    const uint32_t max_parallel_branches = m_comp.getMaxParallelBranches();
+    if (max_parallel_branches > 1u) {
+        LOG_INFO() << "Found at most " << max_parallel_branches
+                   << " parallel branches in graph,"
+                      " so threaded executor will be used"
+                   << std::endl;
+        ;
+        compile_args += cv::compile_args(cv::use_threaded_executor{max_parallel_branches});
+    }
+
+    auto sources = createSources(drop_frames);
     SyncSimulation::Options options{0u};
     if (m_opts.target_latency.has_value()) {
         if (!drop_frames) {
             THROW_ERROR("Target latency for the stream is only supported when frames drop is enabled!");
         }
         // NB: There is no way to specify more than one source currently so assert if it happened.
-        ASSERT(info.sources.size() == 1u);
-        const uint32_t target_latency_val = m_opts.target_latency.value();
-        const uint32_t source_latency = info.sources.front()->getLatency();
-        if (target_latency_val > source_latency) {
+        ASSERT(sources.size() == 1u);
+        const double target_latency_in_ms = m_opts.target_latency.value();
+        const uint32_t source_latency_in_ms = m_cfg.frames_interval_in_ms;
+        if (target_latency_in_ms > source_latency_in_ms) {
             THROW_ERROR("Target latency must be less or equal than source latency!");
         }
-        options.after_iter_delay_in_us = (source_latency - target_latency_val) * 1000u;
+        options.after_iter_delay_in_us = (source_latency_in_ms - target_latency_in_ms) * 1000u;
     }
-    return std::make_shared<SyncSimulation>(std::move(info.compiled), std::move(info.sources), info.out_meta.size(),
+
+    auto compiled = m_comp.compile(descr_of(sources), std::move(compile_args));
+    return std::make_shared<SyncSimulation>(std::move(compiled), std::move(sources), m_comp.getOutMeta().size(),
                                             options);
 }

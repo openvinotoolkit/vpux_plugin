@@ -10,11 +10,11 @@
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/passes.hpp"
-#include "vpux/compiler/dialect/VPUIP/utils.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/task.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/transforms/passes.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/utils/quantization.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
@@ -150,7 +150,7 @@ void buildDoubleConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp 
             {nb::SwizzlingKey::key0, 16},   {nb::SwizzlingKey::key1, 1024}, {nb::SwizzlingKey::key2, 2048},
             {nb::SwizzlingKey::key3, 4096}, {nb::SwizzlingKey::key4, 8192}, {nb::SwizzlingKey::key5, 16384}};
 
-    const auto archMultiplier = 1;
+    const auto archMultiplier = architecture == VPU::ArchKind::NPU40XX ? 2 : 1;
     const auto swizzlingAligment = archMultiplier * swizzlingOffsets.at(activationSwizzlingKey);
 
     const auto weights0CMXSize = vpux::hwtest::totalTensorSize(paddedWeights0CMXShape, weightsType);
@@ -197,7 +197,7 @@ void buildDoubleConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp 
                       "WEIGHTSTABLE_CMX_OFFSET_CONV_1 must be multiple of {0}, got {1}", alignment,
                       WEIGHTSTABLE_CMX_OFFSET_CONV_1);
 
-    unsigned long INPUT_SM_CMX_OFFSET_CONV1;
+    size_t INPUT_SM_CMX_OFFSET_CONV1 = 0;
     if (conv.act_sparsity) {
         INPUT_SM_CMX_OFFSET_CONV1 = WEIGHTSTABLE_CMX_OFFSET_CONV_1 + weightsTableShapeCMXSize;
         VPUX_THROW_UNLESS(INPUT_SM_CMX_OFFSET_CONV1 % alignment == 0,
@@ -327,9 +327,9 @@ void buildDoubleConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp 
                                             outputLayout, ndOutput1CMXpadded.getStrides(), 0, OUTPUT_CMX_OFFSET_CONV_1);
 
     const auto getWeightsTableDDR = [&builder, &functionBuilder, &weightsTableShape, &int32, &inputType, &weightsType,
-                                     &outputType, &testDesc](llvm::SmallVector<std::int64_t> outputShape,
-                                                             unsigned long WEIGHTS_CMX_OFFSET,
-                                                             vpux::Bit weightsOutputChannelStrideInBits) {
+                                     &outputType,
+                                     &testDesc](llvm::SmallVector<std::int64_t> outputShape, size_t WEIGHTS_CMX_OFFSET,
+                                                vpux::Bit weightsOutputChannelStrideInBits) {
         const auto weightsTableDDRType = mlir::RankedTensorType::get(weightsTableShape, int32);
         const auto sparsityPtrStep = 0;
         const auto weightsTable = VPU::NCESparsity::getWeightsTable(
@@ -362,6 +362,8 @@ void buildDoubleConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp 
     auto barrier0 = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 0);
     auto barrier1 = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 1);
     auto barrier2 = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 2);
+    // finalBarrier passed as production barrier to last DMA task
+    auto barrier3 = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 3);
 
     VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(), mlir::ValueRange(barrier0.getBarrier()),
                                           builder.getUnknownLoc(), functionInput, inputCMX.getOperation()->getResult(0),
@@ -378,9 +380,9 @@ void buildDoubleConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp 
     VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(), mlir::ValueRange(barrier1.getBarrier()),
                                           builder.getUnknownLoc(), weights1TableDDR.getOperation()->getResult(0),
                                           weights1TableCMX.getOperation()->getResult(0), 0);
-    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(barrier2.getBarrier()), mlir::ValueRange(),
-                                          builder.getUnknownLoc(), output1CMX.getOperation()->getResult(0),
-                                          functionOutput, 0);
+    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(barrier2.getBarrier()),
+                                          mlir::ValueRange(barrier3.getBarrier()), builder.getUnknownLoc(),
+                                          output1CMX.getOperation()->getResult(0), functionOutput, 0);
 
     const auto strides = getIntArrayAttr(ctx, conv.stride);
     const auto kernelPaddings = VPU::getPaddingAttr(ctx, paddings[PAD_NCETASK_LEFT], paddings[PAD_NCETASK_RIGHT],
@@ -400,6 +402,7 @@ void buildDoubleConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp 
             /*weights_sparsity_map=*/nullptr,
             /*weightsTable=*/weights0TableCMX.getBuffer(),
             /*instruction_table_list=*/nullptr,
+            /*spr_lookup_table=*/nullptr,
             /*activation_window=*/nullptr,
             /*parent_input=*/paddedInputCMX.getBuffer(),
             /*parent_input_sparsity_map=*/nullptr,
@@ -447,6 +450,7 @@ void buildDoubleConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp 
             /*weights_sparsity_map=*/nullptr,
             /*weightsTable=*/weights1TableCMX.getBuffer(),
             /*instruction_table_list=*/nullptr,
+            /*spr_lookup_table=*/nullptr,
             /*activation_window=*/nullptr,
             /*parent_input=*/input1CMX.getBuffer(),
             /*parent_input_sparsity_map=*/output0SMBuffer,
@@ -472,9 +476,14 @@ void buildDoubleConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp 
 
     module.dump();
 
+    // set runtime resources
+    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
+
     mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    pm.addPass(VPU::createInitCompilerPass(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW, 1, std::nullopt,
-                                           log));
+    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.numberOfDPUGroups = 1;
+    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
     if (conv.compress) {
         pm.addPass(VPUIP::createCompressWeightsBTCPass(log));
     }

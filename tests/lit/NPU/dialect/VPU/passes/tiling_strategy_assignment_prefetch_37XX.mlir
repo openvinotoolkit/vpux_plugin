@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -845,15 +845,15 @@ func.func @SplitLogicalXorEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tens
 // -----
 
 // CHECK-LABEL: @SplitEqualEltwiseSw
-// CHECK-SAME:      [[INPUT_0:%arg[0-9]]]: tensor<1x10x256x256xf16>, [[INPUT_1:%arg[0-9]]]: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xf16>
-func.func @SplitEqualEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xf16> {
-    %0 = VPU.Equal(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xf16>
-    return %0 : tensor<1x10x256x256xf16>
+// CHECK-SAME:      [[INPUT_0:%arg[0-9]]]: tensor<1x10x256x256xf16>, [[INPUT_1:%arg[0-9]]]: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xi8>
+func.func @SplitEqualEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xi8> {
+    %0 = VPU.Equal(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xi8>
+    return %0 : tensor<1x10x256x256xi8>
 
     // CHECK:       [[OUTPUT:%.+]] = VPU.Equal([[INPUT_0]], [[INPUT_1]]) {
-    // CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>, tilingStrategy = [1, 1, 2, 1]} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xf16>
+    // CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>, tilingStrategy = [1, 1, 2, 1]} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xi8>
 
-    // CHECK:       return [[OUTPUT]] : tensor<1x10x256x256xf16>
+    // CHECK:       return [[OUTPUT]] : tensor<1x10x256x256xi8>
 }
 
 // -----
@@ -1121,7 +1121,7 @@ func.func @SplitReduceSum(%arg0: tensor<1x12x368x480xf16>) -> tensor<1x1x368x480
     return %0 : tensor<1x1x368x480xf16>
 
     // CHECK:       [[OUTPUT:%.+]] = VPU.ReduceSum([[INPUT]]) {
-    // CHECK-SAME:  axes_value = [1], keep_dims, tilingStrategy = [1, 1, 3, 1]} : tensor<1x12x368x480xf16> -> tensor<1x1x368x480xf16>
+    // CHECK-SAME:  axes_value = [1], keep_dims, tilingStrategy = [1, 1, 1, 3]} : tensor<1x12x368x480xf16> -> tensor<1x1x368x480xf16>
 
     // CHECK:       return [[OUTPUT]] : tensor<1x1x368x480xf16>
 }
@@ -1145,7 +1145,7 @@ func.func @SplitTopK(%arg0: tensor<1x5x512x512xf16>) -> (tensor<1x1x512x512xf32>
 // CHECK-LABEL: func.func @SplitStridedSliceOverW
 // CHECK-SAME:  [[INPUT:%arg[0-9]]]: tensor<1x8x80x1280xf16>
 func.func @SplitStridedSliceOverW(%arg0: tensor<1x8x80x1280xf16>) -> tensor<1x8x80x640xf16> {
-    %0 = VPU.StridedSlice(%arg0) {begin_mask = [0, 0, 0, 0], begins_attr = [0, 0, 0, 0], ellipsis_mask = [0, 0, 0, 0], end_mask = [0, 0, 0, 0], ends_attr = [1, 8, 80, 1280], new_axis_mask = [0, 0, 0, 0], shrink_axis_mask = [0, 0, 0, 0], strides_attr = [1, 1, 1, 2]} : tensor<1x8x80x1280xf16> -> tensor<1x8x80x640xf16>
+    %0 = VPU.StridedSlice(%arg0) {begin_mask = [0, 0, 0, 0], begins_attr = [0, 0, 0, 0], ellipsis_mask = [0, 0, 0, 0], end_mask = [0, 0, 0, 0], ends_attr = [1, 8, 80, 1280], new_axis_mask = [0, 0, 0, 0], operandSegmentSizes = array<i32: 1, 0, 0, 0>, shrink_axis_mask = [0, 0, 0, 0], strides_attr = [1, 1, 1, 2]} : tensor<1x8x80x1280xf16> -> tensor<1x8x80x640xf16>
     return %0 : tensor<1x8x80x640xf16>
 
     // CHECK:       [[OUTPUT:%.+]] = VPU.StridedSlice([[INPUT]]) {

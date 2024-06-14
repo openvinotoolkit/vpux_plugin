@@ -1,13 +1,11 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022-2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include <vpu_ov2_layer_test.hpp>
 
-#include <ov_models/builders.hpp>
-#include <ov_models/utils/ov_helpers.hpp>
-#include <shared_test_classes/base/layer_test_utils.hpp>
+#include "common_test_utils/node_builders/fake_quantize.hpp"
 
 namespace ov::test {
 
@@ -47,7 +45,7 @@ class TransposedConvFQTest_NPU3700 :
                 std::make_shared<ov::op::v0::Parameter>(ov::element::f16, inputDynamicShapes.front())};
 
         // Convolution
-        const auto weightsConv = ngraph::builder::makeConstant<float>(ov::element::f16, weightsShape, {2.0f}, false);
+        const auto weightsConv = ov::op::v0::Constant::create(ov::element::f16, weightsShape, std::vector<float>{2.0f});
         const ov::Strides stridesConv = test_params.conv_strides;
         const ov::CoordinateDiff padsBeginConv = test_params.conv_pads_begin;
         const ov::CoordinateDiff padsEndConv = test_params.conv_pads_end;
@@ -59,19 +57,19 @@ class TransposedConvFQTest_NPU3700 :
         const size_t dataLevels = 256;
         const std::vector<float> dataInputLow = {0.0f};
         const std::vector<float> dataInputHigh = {1.0f};
-        const auto convFQ = ngraph::builder::makeFakeQuantize(conv, ov::element::f32, dataLevels, {}, dataInputLow,
-                                                              dataInputHigh, dataInputLow, dataInputHigh);
+        const auto convFQ = ov::test::utils::make_fake_quantize(conv, ov::element::f32, dataLevels, {}, dataInputLow,
+                                                                dataInputHigh, dataInputLow, dataInputHigh);
 
         // Weights for TransposedConv
         const auto weightsTransposedConv =
-                ngraph::builder::makeConstant<float>(ov::element::f16, weightsShape, {-1.0f}, false);
+                ov::op::v0::Constant::create(ov::element::f16, weightsShape, std::vector<float>{-1.0f});
 
         // WeightsFQ
         const std::vector<float> dataWeightsLow = {0.0f};
         const std::vector<float> dataWeightsHigh = {100.0f};
         const auto weightsFQ =
-                ngraph::builder::makeFakeQuantize(weightsTransposedConv, ov::element::f16, dataLevels, {},
-                                                  dataWeightsLow, dataWeightsHigh, dataWeightsLow, dataWeightsHigh);
+                ov::test::utils::make_fake_quantize(weightsTransposedConv, ov::element::f16, dataLevels, {},
+                                                    dataWeightsLow, dataWeightsHigh, dataWeightsLow, dataWeightsHigh);
 
         // TransposedConvolution
         const ov::Strides stridesTransposedConv = test_params.transposed_conv_strides;
@@ -88,11 +86,20 @@ class TransposedConvFQTest_NPU3700 :
         function = std::make_shared<ov::Model>(results, params, "TransposedConvFQTest");
         rel_threshold = 0.5f;
     }
+
+public:
+    static std::string getTestCaseName(const testing::TestParamInfo<TransposedConvFQTestParams>& obj) {
+        const std::string sep = "_";
+        std::ostringstream result;
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
+        result << "TestIdx=" << obj.index << sep;
+        return result.str();
+    };
 };
 
 TEST_P(TransposedConvFQTest_NPU3700, HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3700);
+    run(Platform::NPU3700);
 }
 
 INSTANTIATE_TEST_CASE_P(smoke_TransposedConvFQ, TransposedConvFQTest_NPU3700,
@@ -106,5 +113,6 @@ INSTANTIATE_TEST_CASE_P(smoke_TransposedConvFQ, TransposedConvFQTest_NPU3700,
                                 {2, 2},         // transposed_conv_pads_begin
                                 {2, 2},         // transposed_conv_pads_end
                                 {0, 0}          // transposed_conv_output_padding
-                        }));
+                        }),
+                        TransposedConvFQTest_NPU3700::getTestCaseName);
 }  // namespace ov::test

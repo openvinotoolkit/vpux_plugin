@@ -5,10 +5,10 @@
 
 #include "vpux/IMD/executor.hpp"
 
+#include "intel_npu/al/config/common.hpp"
+#include "intel_npu/al/config/compiler.hpp"
 #include "vpux/IMD/parsed_properties.hpp"
 #include "vpux/IMD/platform_helpers.hpp"
-#include "vpux/al/config/common.hpp"
-#include "vpux/al/config/compiler.hpp"
 #include "vpux/utils/core/checked_cast.hpp"
 #include "vpux/utils/core/format.hpp"
 #include "vpux/utils/core/range.hpp"
@@ -21,7 +21,9 @@
 
 #include <fstream>
 
-using InferenceEngine::VPUXConfigParams::VPUXPlatform;
+namespace Platform = ov::intel_npu::Platform;
+
+using namespace intel_npu;
 
 namespace vpux {
 
@@ -65,6 +67,19 @@ bool IMDExecutor::isValidElfSignature(StringRef filePath) {
 }
 
 //
+// getSimicsPath
+//
+
+std::string IMDExecutor::getSimicsPath(const Config& config) {
+    if (config.has<VPU4_SIMICS_DIR>()) {
+        return config.get<VPU4_SIMICS_DIR>();
+    } else {
+        VPUX_THROW("Can't locate simics directory, please provide VPUX_IMD_VPU4_SIMICS_DIR config option or "
+                   "VPU4_SIMICS_DIR env var");
+    }
+}
+
+//
 // setElfFile
 //
 
@@ -80,19 +95,20 @@ void IMDExecutor::setElfFile(const std::string& bin) {
 // setMoviSimRunArgs
 //
 
-void IMDExecutor::setMoviSimRunArgs(VPUXPlatform platform, const Config& config) {
+void IMDExecutor::setMoviSimRunArgs(const std::string_view platform, const Config& config) {
     const auto appName = getAppName(platform);
     const auto pathToTools = getMoviToolsPath(config);
 
     _app.runProgram = printToString("{0}/moviSim", pathToTools);
-    setElfFile(printToString("{0}/vpux/simulator/{1}", ov::util::get_ov_lib_path(), appName));
 
-    if (platform == VPUXPlatform::VPU3720) {
+    if (platform == Platform::NPU3720) {
         // For some reason, -cv:3720xx doesn't work, while -cv:3700xx works OK for VPU3720
         _app.chipsetArg = "-cv:3700xx";
+        setElfFile(printToString("{0}/vpux/{1}", ov::util::get_ov_lib_path(), appName));
         _app.imdElfArg = printToString("-l:LRT:{0}", _app.elfFile);
     } else {
         _app.chipsetArg = "-cv:ma2490";
+        setElfFile(printToString("{0}/vpux/simulator/{1}", ov::util::get_ov_lib_path(), appName));
         _app.imdElfArg = printToString("-l:LRT0:{0}", _app.elfFile);
     }
 
@@ -103,7 +119,7 @@ void IMDExecutor::setMoviSimRunArgs(VPUXPlatform platform, const Config& config)
 // setMoviDebugRunArgs
 //
 
-void IMDExecutor::setMoviDebugRunArgs(VPUXPlatform platform, const Config& config) {
+void IMDExecutor::setMoviDebugRunArgs(const std::string_view platform, const Config& config) {
     const auto appName = getAppName(platform);
     const auto pathToTools = getMoviToolsPath(config);
 
@@ -121,28 +137,30 @@ void IMDExecutor::setMoviDebugRunArgs(VPUXPlatform platform, const Config& confi
     } else {
         auto vpuElfPlatformStr = std::string(vpuElfPlatform);
         if (vpuElfPlatformStr != "silicon" && vpuElfPlatformStr != "fpga")
-            VPUX_THROW("Unsupported value for NPU_ELF_PLATFORM env var, expected: 'silicon' or 'fpga', got '{0}'",
+            VPUX_THROW("Unsupported value for moviDebug run on NPU_ELF_PLATFORM env var, expected: 'silicon' or "
+                       "'fpga', got '{0}'",
                        vpuElfPlatformStr);
     }
 
     _app.runProgram = printToString("{0}/moviDebug2", pathToTools);
-    setElfFile(printToString("{0}/vpux/{1}/{2}", ov::util::get_ov_lib_path(), vpuElfPlatform, appName));
+    setElfFile(printToString("{0}/vpux/{1}", ov::util::get_ov_lib_path(), appName));
     _app.imdElfArg = printToString("-D:elf={0}", _app.elfFile);
 
     std::string default_targetArg;
 
-    switch (platform) {
-    case VPUXPlatform::VPU3720:
+    if (platform == Platform::NPU4000) {
+        _app.chipsetArg = "-cv:4000";
+        default_targetArg = "-D:default_target=H0";
+    } else if (platform == Platform::NPU3720) {
         _app.chipsetArg = "-cv:3700xx";
         default_targetArg = "-D:default_target=LRT";
-        break;
-    case VPUXPlatform::VPU3700:
+    } else if (platform == Platform::NPU3700) {
         _app.chipsetArg = "-cv:ma2490";
+        // dKMB still has different binary for fpga, overwrite the folder
+        setElfFile(printToString("{0}/vpux/{1}/{2}", ov::util::get_ov_lib_path(), vpuElfPlatform, appName));
         default_targetArg = "-D:default_target=LRT0";
-        break;
-    default:
-        VPUX_THROW("Platform '{0}' is not supported", stringifyEnum(platform));
-        break;
+    } else {
+        VPUX_THROW("Platform '{0}' is not supported", platform);
     }
 
     _app.runArgs = {_app.runProgram, _app.imdElfArg, _app.chipsetArg, default_targetArg, "--no-uart"};
@@ -162,9 +180,12 @@ void IMDExecutor::setMoviDebugRunArgs(VPUXPlatform platform, const Config& confi
     }
 
     // Debug scripts
-    switch (platform) {
-    case VPUXPlatform::VPU3720:
-    case VPUXPlatform::VPU3700: {
+    if (platform == Platform::NPU4000) {
+        auto test_run_templateArg = printToString("{0}/../make/test-run-template.scr", vpuFirmwareDir);
+        auto test_run_reset_script = printToString("-D:lnl_reset={0}/../make/lnl_reset.tcl", vpuFirmwareDir);
+        _app.runArgs.append({"--script", test_run_templateArg});
+        _app.runArgs.append({test_run_reset_script});
+    } else if (platform == Platform::NPU3700 || platform == Platform::NPU3720) {
         auto default_mdbg2Arg = printToString("{0}/build/buildSupport/scripts/debug/default_mdbg2.scr", vpuFirmwareDir);
         auto default_pipe_mdbg2Arg =
                 printToString("{0}/build/buildSupport/scripts/debug/default_pipe_mdbg2.scr", vpuFirmwareDir);
@@ -174,28 +195,69 @@ void IMDExecutor::setMoviDebugRunArgs(VPUXPlatform platform, const Config& confi
         _app.runArgs.append({"--init", default_mdbg2Arg});
         _app.runArgs.append({"--init", default_pipe_mdbg2Arg});
         _app.runArgs.append({"--script", default_run_mdbg2Arg});
-        break;
-    }
-    default:
-        VPUX_THROW("Platform '{0}' is not supported", stringifyEnum(platform));
-        break;
+    } else {
+        VPUX_THROW("Platform '{0}' is not supported", platform);
     }
 
     _app.runArgs.append({"-D:run_opt=runw", "-D:exit_opt=exit"});
 }
 
 //
+// setSimicsRunArgs
+//
+
+void IMDExecutor::setSimicsRunArgs(const std::string_view platform, const Config& config) {
+    const auto appName = getAppName(platform);
+    const auto simicsDir = getSimicsPath(config);
+
+    _app.runProgram = printToString("{0}/simics", simicsDir);
+    setElfFile(printToString("{0}/vpux/{1}", ov::util::get_ov_lib_path(), appName));
+
+    auto binaryFile = "$binary=" + _app.elfFile;
+
+    if (platform == Platform::NPU4000) {
+        _app.runArgs = {_app.runProgram,
+                        "-batch-mode",
+                        "-no-win",
+                        "-e",
+                        binaryFile,
+                        "-e",
+                        "$VPU_GEN=4",
+                        "-e",
+                        "$VPU_GENSKU=4000",
+                        "-e",
+                        "run-command-file \"%simics%/targets/vpu/vpu.simics\""};
+    } else {
+        _app.runArgs = {_app.runProgram,
+                        "-batch-mode",
+                        "-no-win",
+                        "-e",
+                        binaryFile,
+                        "-e",
+                        "$VPU_GEN=5",
+                        "-e",
+                        "$VPU_GENSKU=5010",
+                        "-e",
+                        "run-command-file \"%simics%/targets/vpu/vpu.simics\""};
+    }
+}
+
+//
 // parseAppConfig
 //
 
-void IMDExecutor::parseAppConfig(VPUXPlatform platform, const Config& config) {
-    VPUX_THROW_UNLESS(platformSupported(platform), "Platform '{0}' is not supported", stringifyEnum(platform));
+void IMDExecutor::parseAppConfig(const std::string_view platform, const Config& config) {
+    VPUX_THROW_UNLESS(platformSupported(platform), "Platform '{0}' is not supported", platform);
 
     const auto mode = config.get<LAUNCH_MODE>();
 
     switch (mode) {
     case LaunchMode::Simulator: {
-        setMoviSimRunArgs(platform, config);
+        if (platform == Platform::NPU4000) {
+            setSimicsRunArgs(platform, config);
+        } else {
+            setMoviSimRunArgs(platform, config);
+        }
         break;
     }
     case LaunchMode::MoviDebug: {
@@ -218,9 +280,10 @@ void IMDExecutor::parseAppConfig(VPUXPlatform platform, const Config& config) {
 // Base interface API implementation
 //
 
-IMDExecutor::IMDExecutor(VPUXPlatform platform, const NetworkDescription::CPtr network, const Config& config)
-        : _network(network), _log("InferenceManagerDemo", config.get<LOG_LEVEL>()) {
-    parseAppConfig(platform, config);
+IMDExecutor::IMDExecutor(const std::string_view platform, const std::shared_ptr<const NetworkDescription>& network,
+                         const Config& config)
+        : _network(network), _log("InferenceManagerDemo", getLogLevel(config)) {
+    parseAppConfig(ov::intel_npu::Platform::standardize(platform), config);
 }
 
 }  // namespace vpux

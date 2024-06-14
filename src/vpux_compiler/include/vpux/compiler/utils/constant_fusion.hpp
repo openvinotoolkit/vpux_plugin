@@ -5,8 +5,8 @@
 
 #pragma once
 
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/dialect/const/attributes/content.hpp"
 #include "vpux/compiler/utils/logging.hpp"
 
@@ -16,24 +16,9 @@ namespace vpux {
 namespace ConstantFusing {
 
 using ConstantVector = SmallVector<std::pair<VPUIP::CopyOp, Const::DeclareOp>>;
-using TilingOpVector = SmallVector<std::pair<VPURT::AllocDistributed, VPUIP::NCEClusterTilingOp>>;
 
 constexpr StringLiteral constantsFused = "constantsFused";
 constexpr int8_t numberOfConstantsToFuse = 4;
-
-///
-/// \brief Converts the passed constant to U8 and store in passed vector
-/// \param [in] inValue - T input value
-/// \param [out] outValues - Vector of U8 converted Values
-/// \return void
-///
-
-template <typename T, std::enable_if_t<or_<std::is_same<float16, T>, std::is_same<int32_t, T>>::value, bool> = true>
-void convertToU8(const T& inValue, std::vector<uint8_t>& outValues) {
-    const auto inputU8 = reinterpret_cast<const uint8_t*>(&inValue);
-    for (size_t i = 0; i < sizeof(inValue); ++i)
-        outValues.push_back(*(inputU8 + i));
-}
 
 ///
 /// \brief Get underlying DeclareOp and Op for passed constant
@@ -42,7 +27,7 @@ void convertToU8(const T& inValue, std::vector<uint8_t>& outValues) {
 /// \return Const::DeclareOp when found
 ///
 
-Const::DeclareOp getConstAndDma(VPUIP::NCEClusterTaskOp nceOp, mlir::Value constant, mlir::Operation** constOp);
+Const::DeclareOp getConstAndDma(mlir::Value constant, mlir::Operation** constOp);
 
 ///
 /// \brief Get static offset for the constant
@@ -69,8 +54,7 @@ VPUIP::DistributedBufferType getDistributedBufferType(VPUIP::DistributedBufferTy
 /// @param allocDistributed [out] stores the allocDistributed if found for future use
 /// @param tilingOp [out] stores the top TilingOp if found for future use
 
-void getCopyAndDeclareOpForFusion(VPUIP::NCEClusterTaskOp& nceOp, mlir::Value constant, VPUIP::CopyOp& copyOp,
-                                  Const::DeclareOp& declareOp, VPURT::AllocDistributed& allocDistributed,
-                                  VPUIP::NCEClusterTilingOp& tilingOp);
+void getCopyAndDeclareOpForFusion(mlir::Value constant, VPUIP::CopyOp& copyOp, Const::DeclareOp& declareOp,
+                                  VPURT::AllocDistributed& foundAllocDistributed);
 }  // namespace ConstantFusing
 }  // namespace vpux

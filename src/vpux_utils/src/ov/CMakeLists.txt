@@ -4,7 +4,7 @@
 #
 
 if(ENABLE_LTO)
-    ie_enable_lto()
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
 endif()
 
 find_package(ZLIB)
@@ -13,7 +13,6 @@ set(TARGET_NAME npu_ov_utils)
 
 list(APPEND SOURCES
         config.cpp
-        loop.cpp
         logger_adapter.cpp
 )
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${SOURCES})
@@ -23,7 +22,6 @@ set_target_properties(${TARGET_NAME} PROPERTIES FOLDER "src")
 
 enable_warnings_as_errors(${TARGET_NAME} WIN_STRICT)
 replace_noerror(${TARGET_NAME})
-vpux_enable_clang_format(${TARGET_NAME})
 
 target_include_directories(${TARGET_NAME}
     PUBLIC
@@ -46,12 +44,9 @@ link_system_libraries(${TARGET_NAME}
         openvino::runtime
         openvino::runtime::dev
 )
-
-if (NOT BUILD_SHARED_LIBS)
-    install(TARGETS ${TARGET_NAME} EXPORT OpenVINOTargets
-            RUNTIME DESTINATION ${OV_CPACK_RUNTIMEDIR} COMPONENT ${VPUX_PLUGIN_COMPONENT}
-            ARCHIVE DESTINATION ${OV_CPACK_ARCHIVEDIR} COMPONENT ${VPUX_PLUGIN_COMPONENT}
-            LIBRARY DESTINATION ${OV_CPACK_LIBRARYDIR} COMPONENT ${VPUX_PLUGIN_COMPONENT})
-endif()
+target_link_libraries(${TARGET_NAME}
+    PRIVATE
+        openvino::npu_al
+)
 
 target_link_libraries(${TARGET_NAME} PRIVATE npu_core_utils npu_llvm_utils)

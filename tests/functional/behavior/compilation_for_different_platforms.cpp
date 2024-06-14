@@ -1,17 +1,16 @@
 //
-// Copyright (C) Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include <base/ov_behavior_test_utils.hpp>
-#include <ie_core.hpp>
 #include <string>
 #include <vector>
 #include "common/functions.h"
 #include "common/utils.hpp"
 #include "common/vpu_test_env_cfg.hpp"
-#include "vpux/al/config/common.hpp"
-#include "vpux_private_properties.hpp"
+#include "intel_npu/al/config/common.hpp"
+#include "npu_private_properties.hpp"
 
 namespace {
 
@@ -52,22 +51,46 @@ protected:
 TEST_P(CompileForDifferentPlatformsTests, CompilationForSpecificPlatform) {
     SKIP_IF_CURRENT_TEST_IS_DISABLED() {
         auto cfg = configuration;
+        cfg["NPU_COMPILER_TYPE"] = "MLIR";
         cfg["NPU_CREATE_EXECUTOR"] = "0";
         const auto& ov_model = buildSingleLayerSoftMaxNetwork();
-        ASSERT_NO_THROW(auto compiled_model = core->compile_model(ov_model, target_device, cfg));
+        OV_ASSERT_NO_THROW(auto compiled_model = core->compile_model(ov_model, target_device, cfg));
     }
 }
 
 const std::vector<ov::AnyMap> configs = {
-        {},
-        {{ov::intel_vpux::platform(ov::intel_vpux::VPUXPlatform::VPU3700)}},
-        {{ov::intel_vpux::platform(ov::intel_vpux::VPUXPlatform::VPU3720)}},
-        {{ov::device::id("3700")}},
-        {{ov::device::id("3720")}},
+        {{ov::intel_npu::platform(ov::intel_npu::Platform::NPU3700)},
+         ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::MLIR)},
+        {{ov::intel_npu::platform(ov::intel_npu::Platform::NPU3720)},
+         ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::MLIR)},
+        {{ov::intel_npu::platform(ov::intel_npu::Platform::NPU4000)},
+         ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::MLIR)},
+        {{ov::device::id("3700")}, ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::MLIR)},
+        {{ov::device::id("3720")}, ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::MLIR)},
+        {{ov::device::id("4000")}, ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::MLIR)},
 };
+
+// Driver compiler type config
+const std::vector<ov::AnyMap> driverCompilerConfigs = {
+        {ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::DRIVER)},
+        {{ov::intel_npu::platform(ov::intel_npu::Platform::NPU3700)},
+         ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::DRIVER)},
+        {{ov::intel_npu::platform(ov::intel_npu::Platform::NPU3720)},
+         ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::DRIVER)},
+        {{ov::intel_npu::platform(ov::intel_npu::Platform::NPU4000)},
+         ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::DRIVER)},
+        {{ov::device::id("3700")}, ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::DRIVER)},
+        {{ov::device::id("3720")}, ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::DRIVER)},
+        {{ov::device::id("4000")}, ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::DRIVER)}};
 
 INSTANTIATE_TEST_SUITE_P(smoke_BehaviorTest, CompileForDifferentPlatformsTests,
                          ::testing::Combine(::testing::Values(ov::test::utils::DEVICE_NPU),
                                             ::testing::ValuesIn(configs)),
+                         CompileForDifferentPlatformsTests::getTestCaseName);
+
+// Driver compiler type test suite
+INSTANTIATE_TEST_SUITE_P(smoke_BehaviorTest_Driver, CompileForDifferentPlatformsTests,
+                         ::testing::Combine(::testing::Values(ov::test::utils::DEVICE_NPU),
+                                            ::testing::ValuesIn(driverCompilerConfigs)),
                          CompileForDifferentPlatformsTests::getTestCaseName);
 }  // namespace

@@ -100,7 +100,11 @@ mlir::LogicalResult vpux::VPU::SliceOp::inferReturnTypes(mlir::MLIRContext* ctx,
             possibleDistribution = VPU::getExplicitDistrAttrForActualDataFromSparseType(sparseType);
         }
 
-        const auto sliceDistributedAttr = inferExplicitDistributedAttr(possibleDistribution, origType.getShape().raw());
+        auto newDistribution =
+                VPU::updateSliceLikeOpsAlignment(ctx, origType.getShape(), ShapeRef(sliceShape), possibleDistribution);
+
+        const auto sliceDistributedAttr = inferExplicitDistributedAttr(newDistribution, origType.getShape().raw());
+
         const auto newType = distributedIn.extractDenseTileForExplicitDistribution(
                 ShapeRef(sliceOffsets), ShapeRef(sliceShape), sliceDistributedAttr);
         inferredTypes.emplace_back(newType);

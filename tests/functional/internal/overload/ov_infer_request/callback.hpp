@@ -1,20 +1,19 @@
-// Copyright (C) 2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2023-2024 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #pragma once
 
 #include <future>
 
-#include "overload/overload_test_utils_vpux.hpp"
-#include "shared_test_classes/subgraph/basic_lstm.hpp"
+#include "overload/overload_test_utils_npu.hpp"
 
 namespace ov {
 namespace test {
 namespace behavior {
-using OVInferRequestCallbackTestsVpux = OVInferRequestTestsVpux;
+using OVInferRequestCallbackTestsNPU = OVInferRequestTestsNPU;
 
-TEST_P(OVInferRequestCallbackTestsVpux, canCallAsyncWithCompletionCallback) {
+TEST_P(OVInferRequestCallbackTestsNPU, canCallAsyncWithCompletionCallback) {
     ov::InferRequest req;
     OV_ASSERT_NO_THROW(req = execNet.create_infer_request());
     bool is_called = false;
@@ -28,7 +27,7 @@ TEST_P(OVInferRequestCallbackTestsVpux, canCallAsyncWithCompletionCallback) {
     ASSERT_TRUE(is_called);
 }
 
-TEST_P(OVInferRequestCallbackTestsVpux, syncInferDoesNotCallCompletionCallback) {
+TEST_P(OVInferRequestCallbackTestsNPU, syncInferDoesNotCallCompletionCallback) {
     ov::InferRequest req;
     OV_ASSERT_NO_THROW(req = execNet.create_infer_request());
     bool is_called = false;
@@ -41,7 +40,7 @@ TEST_P(OVInferRequestCallbackTestsVpux, syncInferDoesNotCallCompletionCallback) 
 }
 
 // test that can wait all callbacks on dtor
-TEST_P(OVInferRequestCallbackTestsVpux, canStartSeveralAsyncInsideCompletionCallbackWithSafeDtor) {
+TEST_P(OVInferRequestCallbackTestsNPU, canStartSeveralAsyncInsideCompletionCallbackWithSafeDtor) {
     const int NUM_ITER = 10;
     struct TestUserData {
         std::atomic<int> numIter = {0};
@@ -72,7 +71,7 @@ TEST_P(OVInferRequestCallbackTestsVpux, canStartSeveralAsyncInsideCompletionCall
     ASSERT_EQ(NUM_ITER, dataNumIter);
 }
 
-TEST_P(OVInferRequestCallbackTestsVpux, returnGeneralErrorIfCallbackThrowException) {
+TEST_P(OVInferRequestCallbackTestsNPU, returnGeneralErrorIfCallbackThrowException) {
     ov::InferRequest req;
     OV_ASSERT_NO_THROW(req = execNet.create_infer_request());
     OV_ASSERT_NO_THROW(req.set_callback([](std::exception_ptr) {
@@ -82,11 +81,7 @@ TEST_P(OVInferRequestCallbackTestsVpux, returnGeneralErrorIfCallbackThrowExcepti
     ASSERT_THROW(req.wait(), ov::Exception);
 }
 
-TEST_P(OVInferRequestCallbackTestsVpux, ReturnResultNotReadyFromWaitInAsyncModeForTooSmallTimeout) {
-    // GetNetwork(3000, 380) make inference around 20ms on GNA SW
-    // so increases chances for getting RESULT_NOT_READY
-    OV_ASSERT_NO_THROW(execNet = core->compile_model(SubgraphTestsDefinitions::Basic_LSTM_S::GetNetwork(300, 38),
-                                                     target_device, configuration));
+TEST_P(OVInferRequestCallbackTestsNPU, ReturnResultNotReadyFromWaitInAsyncModeForTooSmallTimeout) {
     ov::InferRequest req;
     OV_ASSERT_NO_THROW(req = execNet.create_infer_request());
     std::promise<std::chrono::system_clock::time_point> callbackTimeStamp;
@@ -112,7 +107,7 @@ TEST_P(OVInferRequestCallbackTestsVpux, ReturnResultNotReadyFromWaitInAsyncModeF
     OV_ASSERT_NO_THROW(req.wait());
 }
 
-TEST_P(OVInferRequestCallbackTestsVpux, ImplDoesNotCopyCallback) {
+TEST_P(OVInferRequestCallbackTestsNPU, ImplDoesNotCopyCallback) {
     ov::InferRequest req;
     OV_ASSERT_NO_THROW(req = execNet.create_infer_request());
     {

@@ -1,10 +1,7 @@
-// Copyright (C) Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
-#include <ov_models/builders.hpp>
-#include <ov_models/utils/ov_helpers.hpp>
-#include <shared_test_classes/base/layer_test_utils.hpp>
 #include <vpu_ov2_layer_test.hpp>
 
 namespace ov::test {
@@ -57,11 +54,22 @@ class Conv2dWithTransposeTest_NPU3720 :
         auto order = ov::op::v0::Constant::create(ov::element::i64, {dimsOrder.size()}, dimsOrder);
         return std::make_shared<ov::op::v1::Transpose>(param, order);
     }
+
+public:
+    static std::string getTestCaseName(
+            const testing::TestParamInfo<std::tuple<std::vector<int64_t>, ov::element::Type, ov::element::Type,
+                                                    ov::Layout, ov::Layout>>& obj) {
+        const std::string sep = "_";
+        std::ostringstream result;
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
+        result << "TestIdx=" << obj.index << sep;
+        return result.str();
+    };
 };
 
 TEST_P(Conv2dWithTransposeTest_NPU3720, HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
 }
 
 const std::vector<std::vector<int64_t>> transposes = {
@@ -77,6 +85,7 @@ const std::vector<ov::Layout> outLayout = {
 INSTANTIATE_TEST_SUITE_P(smoke_transposeConv2d, Conv2dWithTransposeTest_NPU3720,
                          ::testing::Combine(::testing::ValuesIn(transposes), ::testing::Values(ov::element::f16),
                                             ::testing::Values(ov::element::f16), ::testing::Values(ov::Layout("NHWC")),
-                                            ::testing::ValuesIn(outLayout)));
+                                            ::testing::ValuesIn(outLayout)),
+                         Conv2dWithTransposeTest_NPU3720::getTestCaseName);
 
 }  // namespace ov::test

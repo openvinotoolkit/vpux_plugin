@@ -1,13 +1,13 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 #pragma once
 
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPUIP/graph-schema/schema.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
 
 #include <llvm/Support/JSON.h>
 
@@ -30,6 +30,7 @@ enum class CaseType {
     AvgPool,
     DifferentClustersDPU,
     MultiClustersDPU,
+    HaloMultiClustering,
     ActShave,
     ReadAfterWriteDPUDMA,
     ReadAfterWriteDMADPU,
@@ -43,9 +44,11 @@ enum class CaseType {
     RaceConditionDPUDMAACT,
     RaceConditionDPUACT,
     RaceCondition,
+    M2iTask,
     StorageElementTableDPU,
     DualChannelDMA,
     DMAcompressAct,
+    GatherDMA,
     GenerateScaleTable,
     Unknown
 };
@@ -53,12 +56,11 @@ enum class CaseType {
 std::string to_string(CaseType case_);
 CaseType to_case(llvm::StringRef str);
 
-enum class CompilerBackend { Flatbuffer, ELF };
+enum class CompilerBackend { ELF };
 
 std::string to_string(CompilerBackend compilerBackend);
-std::optional<nb::CompilerBackend> to_compiler_backend(llvm::StringRef str);
 
-enum class DType { U1, U4, I4, U8, I8, I32, BF8, HF8, FP16, FP32, BF16, UNK };
+enum class DType { U1, U4, I4, U8, I8, I32, BF8, HF8, FP16, FP32, BF16, I64, U64, UNK };
 
 enum class MemoryLocation { CMX0, CMX1, DDR, Unknown };
 MemoryLocation to_memory_location(llvm::StringRef str);
@@ -106,9 +108,15 @@ struct SM {
     std::array<std::int64_t, 4> shape = {0};
 };
 
+struct GatherIndices {
+    DType dtype = DType::U64;
+    std::array<std::int64_t, 4> shape = {0};
+};
+
 struct DMAparams {
     MemoryLocation srcLocation = MemoryLocation::Unknown;
     MemoryLocation dstLocation = MemoryLocation::Unknown;
+    MemoryLocation indicesLocation = MemoryLocation::Unknown;
     int64_t engine = 0;
     bool actCompressDenseMode = false;
     bool doConvert = false;
@@ -167,6 +175,21 @@ struct MultiClusterDPUParams {
     bool broadcast = false;
 };
 
+struct HaloParams {
+    // clusters on which the DPUTasks will run
+    std::vector<std::size_t> taskClusters;
+    // type of multiclustering tensor segmentation (SOK, SOH, SOW etc.)
+    SegmentationType segmentation = SegmentationType::SOK;
+    // number of clusters assigned per each dim, for segmentation on multiple dims
+    // e.g. SOHK clustersPerDim = {2, 3} -> height is split in 2, output channels are split in 3
+    // e.g. SOHW clustersPerDim = {3, 2} -> height is split in 3, width is split in 2
+    std::vector<std::size_t> clustersPerDim;
+    // halo size over height, to be used for strategies SOH, SOHK
+    int64_t heightHaloSize = 0;
+    // halo size over width, to be used for strategies SOW, SOHW
+    int64_t widthHaloSize = 0;
+};
+
 struct OutputLayer {
     std::array<std::int64_t, 4> shape = {0};
     DType dtype = DType::UNK;
@@ -184,6 +207,7 @@ enum class ActivationType {
     Softmax,
     round_trip_b8h8_to_fp16,
     PopulateWeightTable,
+    Rsqrt,
     Unknown
 };
 
@@ -200,6 +224,34 @@ struct ActivationLayer {
     // TODO: add support for activation functions that take parameters
 };
 
+// M2I i/o color formats
+enum class M2iFmt {
+    PL_YUV420_8,
+    SP_NV12_8,
+    PL_FP16_RGB,
+    PL_RGB24,
+    IL_RGB888,
+    IL_BGR888,
+    Unknown
+    // Note: other less common formats exist
+};
+M2iFmt to_m2i_fmt(llvm::StringRef str);
+
+enum class M2iInterp { NEAREST, BILINEAR, UNKNOWN };
+
+M2iInterp to_m2i_interp(llvm::StringRef str);
+
+struct M2iLayer {
+    bool doCsc = false;     // do color-space-conversion
+    bool doNorm = false;    // do normalization
+    bool doTiling = false;  // do tiling
+    M2iFmt iFmt = M2iFmt::Unknown;
+    M2iFmt oFmt = M2iFmt::Unknown;
+    std::vector<int> outSizes;              // output sizes (optional)
+    std::vector<float> normCoefs;           // normalization coefs (optional)
+    M2iInterp interp = M2iInterp::UNKNOWN;  // interpolation
+};
+
 enum class SETablePattern { SwitchLines, OriginalInput };
 
 struct SETableParams {
@@ -211,10 +263,12 @@ struct ProfilingParams {
     bool dpuProfilingEnabled = false;
     bool dmaProfilingEnabled = false;
     bool swProfilingEnabled = false;
+    bool m2iProfilingEnabled = false;
     bool workpointEnabled = false;
 
     bool profilingEnabled() const {
-        return dpuProfilingEnabled || dmaProfilingEnabled || swProfilingEnabled || workpointEnabled;
+        return dpuProfilingEnabled || dmaProfilingEnabled || swProfilingEnabled || m2iProfilingEnabled ||
+               workpointEnabled;
     }
 };
 
@@ -228,6 +282,9 @@ public:
     }
     llvm::SmallVector<SM> getInputSMList() const {
         return inSMs_;
+    }
+    GatherIndices getInputGatherIndices() const {
+        return gatherIndices_;
     }
     llvm::SmallVector<WeightLayer> getWeightLayers() const {
         return wtLayer_;
@@ -253,6 +310,9 @@ public:
     ActivationLayer getActivationLayer() const {
         return activationLayer_;
     }
+    M2iLayer getM2iLayer() const {
+        return m2iLayer_;
+    }
     RaceConditionParams getRaceConditionParams() const {
         return raceConditionParams_;
     }
@@ -261,6 +321,9 @@ public:
     }
     MultiClusterDPUParams getMultiClusterDPUParams() const {
         return multiClusterDPUParams_;
+    }
+    HaloParams getHaloParams() const {
+        return haloParams_;
     }
     CaseType getCaseType() const {
         return caseType_;
@@ -318,15 +381,18 @@ private:
     llvm::SmallVector<SM> loadWeightSMs(llvm::json::Object* jsonObj);
     llvm::SmallVector<OutputLayer> loadOutputLayer(llvm::json::Object* jsonObj);
     DMAparams loadDMAParams(llvm::json::Object* jsonObj);
+    GatherIndices loadGatherIndices(llvm::json::Object* jsonObj);
     ConvLayer loadConvLayer(llvm::json::Object* jsonObj);
     EltwiseLayer loadEltwiseLayer(llvm::json::Object* jsonObj);
     PoolLayer loadPoolLayer(llvm::json::Object* jsonObj);
     ActivationLayer loadActivationLayer(llvm::json::Object* jsonObj);
+    M2iLayer loadM2iLayer(llvm::json::Object* jsonObj);
     CaseType loadCaseType(llvm::json::Object* jsonObj);
     QuantParams loadQuantizationParams(llvm::json::Object* obj);
     RaceConditionParams loadRaceConditionParams(llvm::json::Object* obj);
     DPUTaskParams loadDPUTaskParams(llvm::json::Object* obj);
     MultiClusterDPUParams loadMultiClusterDPUParams(llvm::json::Object* obj);
+    HaloParams loadHaloTaskParams(llvm::json::Object* jsonObj);
     std::size_t loadIterationCount(llvm::json::Object* obj);
     std::size_t loadClusterNumber(llvm::json::Object* obj);
     std::size_t loadNumClusters(llvm::json::Object* obj);
@@ -345,6 +411,8 @@ private:
     llvm::SmallVector<SM> wtSMs_;
     llvm::SmallVector<OutputLayer> outLayers_;
     ActivationLayer activationLayer_;
+    GatherIndices gatherIndices_;
+    M2iLayer m2iLayer_;
     std::string kernelFilename_;
     std::string caseTypeStr_;
     vpux::VPU::PPEMode ppeLayerType_ = vpux::VPU::PPEMode::ADD;
@@ -358,9 +426,10 @@ private:
     RaceConditionParams raceConditionParams_;
     DPUTaskParams DPUTaskParams_;
     MultiClusterDPUParams multiClusterDPUParams_;
+    HaloParams haloParams_;
     SETableParams seTableParams_;
     vpux::VPU::ArchKind architecture_ = vpux::VPU::ArchKind::UNKNOWN;
-    CompilerBackend compilerBackend_ = CompilerBackend::Flatbuffer;
+    CompilerBackend compilerBackend_ = CompilerBackend::ELF;
     ProfilingParams profilingParams_;
 };
 

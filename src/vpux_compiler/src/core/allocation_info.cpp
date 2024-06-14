@@ -181,8 +181,17 @@ AllocationInfo::AllocationInfo(mlir::func::FuncOp netFunc, mlir::AnalysisManager
 AllocationInfo::AllocationInfo(mlir::func::FuncOp netFunc, const AsyncDepsInfo& depsInfo,
                                MemLiveRangeInfo& liveRangeInfo)
         : _log(Logger::global().nest("allocation-info", 0)), _mainFuncName(netFunc.getName()) {
+    auto module = netFunc->getParentOfType<mlir::ModuleOp>();
+    auto* ctx = module->getContext();
+    auto memSpaceAttr = mlir::SymbolRefAttr::get(ctx, stringifyEnum(VPU::MemoryKind::DDR));
+
+    // Check for reserved memory which memory scheduler should take into account
+    // so that they not overlap with other buffers. Those reserved resource might be related
+    // to handling of additional special features (e.g. DMA HW profiling)
+    _moduleReservedMemVec = IE::getReservedMemOffsetAndSizeVec(module, memSpaceAttr);
+
     std::tie(_linearScanHandler, _scheduledOpOneResource) =
-            vpux::runLinearScan(netFunc, liveRangeInfo, depsInfo, VPU::MemoryKind::DDR, _log);
+            vpux::runLinearScan(netFunc, liveRangeInfo, depsInfo, VPU::MemoryKind::DDR, _log, _moduleReservedMemVec);
 }
 
 bool AllocationInfo::hasResult(VPU::MemoryKind memKind) {
@@ -192,5 +201,5 @@ bool AllocationInfo::hasResult(VPU::MemoryKind memKind) {
 ScanResult AllocationInfo::getScanResult(VPU::MemoryKind memKind) {
     VPUX_THROW_WHEN(!hasResult(memKind), "There is no memory allocation info for {0}", memKind);
 
-    return ScanResult{_linearScanHandler, _scheduledOpOneResource};
+    return ScanResult{_linearScanHandler, _scheduledOpOneResource, _moduleReservedMemVec};
 }

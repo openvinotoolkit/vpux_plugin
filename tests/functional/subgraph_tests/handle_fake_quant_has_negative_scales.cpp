@@ -1,12 +1,10 @@
-// Copyright (C) Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include <vpu_ov2_layer_test.hpp>
 
-#include <ov_models/builders.hpp>
-#include <ov_models/utils/ov_helpers.hpp>
-#include <shared_test_classes/base/layer_test_utils.hpp>
+#include "common_test_utils/node_builders/fake_quantize.hpp"
 
 namespace ov::test {
 
@@ -56,7 +54,7 @@ class HandleFakeQuantHasNegativeScalesSubGraphTestCommon :
         const size_t dataLevels = 256;
         const std::vector<float> defaultFQLow = {0.0f};
         const std::vector<float> defaultFQHigh = {255.0f};
-        const auto inputFq = ngraph::builder::makeFakeQuantize(
+        const auto inputFq = ov::test::utils::make_fake_quantize(
                 params[0], ov::element::f32, dataLevels, {}, defaultFQLow, defaultFQHigh, defaultFQLow, defaultFQHigh);
 
         // Create weights and convert
@@ -83,8 +81,8 @@ class HandleFakeQuantHasNegativeScalesSubGraphTestCommon :
                 std::make_shared<ov::op::v1::Convolution>(inputFq, multiply, strides, pads_begin, pads_end, dilations);
 
         // Create output FQ
-        const auto outputFq = ngraph::builder::makeFakeQuantize(conv, ov::element::f32, dataLevels, {}, defaultFQLow,
-                                                                defaultFQHigh, defaultFQLow, defaultFQHigh);
+        const auto outputFq = ov::test::utils::make_fake_quantize(conv, ov::element::f32, dataLevels, {}, defaultFQLow,
+                                                                  defaultFQHigh, defaultFQLow, defaultFQHigh);
 
         const ov::ResultVector results{std::make_shared<ov::op::v0::Result>(outputFq)};
         function = std::make_shared<ov::Model>(results, params, "HandleFakeQuantHasNegativeScales");
@@ -97,11 +95,13 @@ public:
         std::vector<float> scaleValues;
         std::tie(weightsValues, zeroPointValues, scaleValues) = obj.param;
 
+        const std::string sep = "_";
         std::ostringstream result;
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
         result << "zeroPointValues={" << zeroPointValues.at(0) << ", " << zeroPointValues.at(1) << ", "
-               << zeroPointValues.at(2) << ", " << zeroPointValues.at(3) << "}_";
+               << zeroPointValues.at(2) << ", " << zeroPointValues.at(3) << "}" << sep;
         result << "scaleValues={" << scaleValues.at(0) << ", " << scaleValues.at(1) << ", " << scaleValues.at(2) << ", "
-               << scaleValues.at(3) << "}_";
+               << scaleValues.at(3) << "}" << sep;
         return result.str();
     }
 };
@@ -109,10 +109,19 @@ public:
 class HandleFakeQuantHasNegativeScalesSubGraphTest_NPU3720 :
         public HandleFakeQuantHasNegativeScalesSubGraphTestCommon {};
 
+class HandleFakeQuantHasNegativeScalesSubGraphTest_NPU4000 :
+        public HandleFakeQuantHasNegativeScalesSubGraphTestCommon {};
+
 TEST_P(HandleFakeQuantHasNegativeScalesSubGraphTest_NPU3720, HW) {
     rel_threshold = 0.5;
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
+}
+
+TEST_P(HandleFakeQuantHasNegativeScalesSubGraphTest_NPU4000, HW) {
+    rel_threshold = 0.5;
+    setDefaultHardwareMode();
+    run(Platform::NPU4000);
 }
 
 std::vector<std::vector<int8_t>> weightsValues = {{-56, 96, -32, 8, 4, -54, -88, 68, -74, 54, -26, 34}};
@@ -123,6 +132,10 @@ const auto basicCases = ::testing::Combine(::testing::ValuesIn(weightsValues), :
 
 INSTANTIATE_TEST_SUITE_P(precommit_HandleFakeQuantHasNegativeScales,
                          HandleFakeQuantHasNegativeScalesSubGraphTest_NPU3720, basicCases,
+                         HandleFakeQuantHasNegativeScalesSubGraphTestCommon::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(precommit_HandleFakeQuantHasNegativeScales,
+                         HandleFakeQuantHasNegativeScalesSubGraphTest_NPU4000, basicCases,
                          HandleFakeQuantHasNegativeScalesSubGraphTestCommon::getTestCaseName);
 
 }  // namespace ov::test

@@ -5,18 +5,21 @@
 
 #include "vpux/compiler/compiler.hpp"
 
-#include "vpux/al/config/common.hpp"
-#include "vpux/al/config/compiler.hpp"
+#include "intel_npu/al/config/common.hpp"
+#include "intel_npu/al/config/compiler.hpp"
+#include "intel_npu/al/profiling.hpp"
 
+#include "vpux/compiler/NPU37XX/pipeline_strategy.hpp"
+#include "vpux/compiler/NPU37XX/pipelines.hpp"
+#include "vpux/compiler/NPU40XX/dialect/ELF/export.hpp"
+#include "vpux/compiler/NPU40XX/pipeline_strategy.hpp"
+#include "vpux/compiler/NPU40XX/pipelines.hpp"
 #include "vpux/compiler/VPU30XX/pipeline_strategy.hpp"
 #include "vpux/compiler/VPU30XX/pipelines.hpp"
-#include "vpux/compiler/VPU37XX/pipeline_strategy.hpp"
-#include "vpux/compiler/VPU37XX/pipelines.hpp"
 #include "vpux/compiler/dialect/ELFNPU37XX/export.hpp"
-#include "vpux/compiler/dialect/IE/ops.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPUIP/graph-schema/export.hpp"
-#include "vpux/compiler/dialect/VPUIP/network_description.hpp"
+#include "vpux/compiler/dialect/VPUIP/interfaces/network_description.hpp"
 #include "vpux/compiler/dialect/VPUMI37XX/network_description.hpp"
 #include "vpux/compiler/dialect/const/utils/constant_folding_in_background.hpp"
 #include "vpux/compiler/frontend/IE.hpp"
@@ -24,11 +27,14 @@
 #include "vpux/compiler/interfaces_registry.hpp"
 #include "vpux/compiler/options_mapper.hpp"
 #include "vpux/compiler/utils/dot_printer.hpp"
+#include "vpux/compiler/utils/locations_verifier.hpp"
 #include "vpux/compiler/utils/logging.hpp"
 
 #include "vpux/utils/IE/itt.hpp"
+#include "vpux/utils/IE/private_properties.hpp"
 #include "vpux/utils/core/error.hpp"
 #include "vpux/utils/core/optional.hpp"
+#include "vpux/utils/profiling/reports/api.hpp"
 
 #include <mlir/IR/Dialect.h>
 #include <mlir/IR/MLIRContext.h>
@@ -39,23 +45,45 @@
 #include <llvm/Support/ThreadPool.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include <openvino/core/dimension.hpp>
 #include <openvino/core/preprocess/pre_post_process.hpp>
+#include <openvino/pass/manager.hpp>
+#include <openvino/runtime/intel_npu/properties.hpp>
+#include <openvino/runtime/iplugin.hpp>
 
-#include <description_buffer.hpp>
 #include <device_helpers.hpp>
+#include <transformations/common_optimizations/dimension_tracking.hpp>
+#include <transformations/init_node_info.hpp>
 #include <transformations/utils/utils.hpp>
 
 #include <algorithm>
+#include <regex>
 
 #if defined(VPUX_DEVELOPER_BUILD) || !defined(NDEBUG)
-
 #include "vpux/compiler/core/developer_build_utils.hpp"
-
-#endif  // defined(VPUX_DEVELOPER_BUILD) || !defined(NDEBUG)
+#endif
 
 using namespace vpux;
 
+using intel_npu::ICompiler;
+using intel_npu::NetworkDescription;
+using intel_npu::NetworkMetadata;
+
 namespace {
+
+constexpr std::string_view UNSUPPORTED_PLATFORM_ERROR_MESSAGE =
+        "Unsupported platform: '{0}'\nThe current version of the compiler is unable to compile on the given platform. "
+        "If you're using the compiler inside the plugin, please try using the '{1}' configuration option to set a "
+        "supported platform explicitly.";
+
+void checkPlaformSupportedForCompilation(const std::string_view platform) {
+    const std::unordered_set supportedPlatforms{ov::intel_npu::Platform::NPU3720, ov::intel_npu::Platform::NPU4000};
+
+    if (!supportedPlatforms.count(ov::intel_npu::Platform::standardize(platform))) {
+        VPUX_THROW(UNSUPPORTED_PLATFORM_ERROR_MESSAGE.data(), platform, intel_npu::PLATFORM::key());
+    }
+}
+constexpr uint32_t SUPPORTED_OPSET = 11;
 
 //
 // createPipelineStrategy
@@ -63,10 +91,12 @@ namespace {
 
 std::unique_ptr<IPipelineStrategy> createPipelineStrategy(VPU::ArchKind arch) {
     switch (arch) {
-    case VPU::ArchKind::VPUX30XX:
+    case VPU::ArchKind::NPU30XX:
         return std::make_unique<PipelineStrategy30XX>();
-    case VPU::ArchKind::VPUX37XX:
+    case VPU::ArchKind::NPU37XX:
         return std::make_unique<PipelineStrategy37XX>();
+    case VPU::ArchKind::NPU40XX:
+        return std::make_unique<PipelineStrategy40XX>();
     default:
         VPUX_THROW("Unsupported arch kind: {0}", arch);
     }
@@ -85,6 +115,7 @@ public:
 
     void setup(mlir::DefaultTimingManager& tm) const;
     void setup(mlir::PassManager& pm) const;
+    void dump(mlir::PassManager& pm) const;
 
     // Specifies whether to duplicate IE constants in MLIR when importing a network
     bool useSharedConstants() const {
@@ -108,6 +139,7 @@ private:
     bool _printFullConstant = false;
     bool _allowPrintingHexConstant = true;
     bool _printDebugInfo = false;
+    std::string _printAsTextualPipelineFilePath = "";
     std::string _printDotOptions;
 
     llvm::raw_ostream* _timingStream = nullptr;
@@ -130,6 +162,7 @@ DeveloperConfig::DeveloperConfig(Logger log): _log(log) {
     parseEnv("IE_NPU_PRINT_FULL_CONSTANT", _printFullConstant);
     parseEnv("IE_NPU_PRINT_HEX_CONSTANT", _allowPrintingHexConstant);
     parseEnv("IE_NPU_PRINT_DEBUG_INFO", _printDebugInfo);
+    parseEnv("IE_NPU_PRINT_AS_TEXTUAL_PIPELINE_FILE", _printAsTextualPipelineFilePath);
 
     parseEnv("IE_NPU_PRINT_DOT", _printDotOptions);
 #endif  // defined(VPUX_DEVELOPER_BUILD) || !defined(NDEBUG)
@@ -165,7 +198,7 @@ DeveloperConfig::DeveloperConfig(Logger log): _log(log) {
         }
 
         if (_irPrintingFile.empty()) {
-            _irDumpStream = &vpux::Logger::getBaseStream();
+            _irDumpStream = &Logger::getBaseStream();
         } else {
             std::error_code err;
             _irDumpFile = std::make_unique<llvm::raw_fd_ostream>(_irPrintingFile, err);
@@ -247,16 +280,29 @@ void DeveloperConfig::setup(mlir::PassManager& pm) const {
     if (!_printDotOptions.empty()) {
         addDotPrinter(pm, _printDotOptions);
     }
+    // Locations verifier
+    addLocationsVerifier(pm);
 }
 
+void DeveloperConfig::dump(mlir::PassManager& pm) const {
+    if (!_printAsTextualPipelineFilePath.empty()) {
+        std::error_code err;
+        auto passesDumpFile = std::make_unique<llvm::raw_fd_ostream>(_printAsTextualPipelineFilePath, err);
+        if (err) {
+            VPUX_THROW("Failed to open file '{0}' for write : {1}", _printAsTextualPipelineFilePath, err.message());
+        }
+        pm.printAsTextualPipeline(*passesDumpFile);
+    }
+}
 }  // namespace
 
 //
 // CompilerImpl::query
 //
 
-ov::SupportedOpsMap vpux::CompilerImpl::query(const std::shared_ptr<const ov::Model>& model, const Config& config) {
-    Logger log("vpux-compiler", config.get<LOG_LEVEL>());
+ov::SupportedOpsMap vpux::CompilerImpl::query(const std::shared_ptr<const ov::Model>& model,
+                                              const Config& config) const {
+    Logger log("vpux-compiler", getLogLevel(config));
     log.setName("vpux::CompilerImpl::query");
 
     ov::SupportedOpsMap result;
@@ -295,11 +341,11 @@ ov::SupportedOpsMap vpux::CompilerImpl::query(const std::shared_ptr<const ov::Mo
 namespace {
 
 auto importNetwork(mlir::MLIRContext* ctx, const std::shared_ptr<ov::Model>& model, const DeveloperConfig& devConf,
-                   mlir::TimingScope& rootTiming, bool enableProfiling, bool stubLayers, vpux::VPU::ArchKind arch,
-                   Logger log) {
+                   mlir::TimingScope& rootTiming, bool enableProfiling, bool stubLayers, bool dynamicShapeToStatic,
+                   vpux::VPU::ArchKind arch, Logger log) {
     auto importTiming = rootTiming.nest("Import network");
-    return IE::importNetwork(ctx, model, devConf.useSharedConstants(), importTiming, enableProfiling, stubLayers, arch,
-                             log.nest());
+    return IE::importNetwork(ctx, model, devConf.useSharedConstants(), importTiming, enableProfiling, stubLayers,
+                             dynamicShapeToStatic, arch, log.nest());
 }
 
 void compileNetwork(mlir::ModuleOp module, mlir::PassManager& pm, mlir::TimingScope& rootTiming) {
@@ -312,8 +358,10 @@ auto exportToELF(mlir::ModuleOp module, const std::vector<std::shared_ptr<const 
                  const std::vector<std::shared_ptr<const ov::Node>>& results) {
     const auto arch = VPU::getArch(module);
     switch (arch) {
-    case VPU::ArchKind::VPUX37XX:
+    case VPU::ArchKind::NPU37XX:
         return vpux::ELFNPU37XX::exportToELF(module, parameters, results);
+    case VPU::ArchKind::NPU40XX:
+        return vpux::ELF::exportToELF(module, parameters, results);
     default:
         VPUX_THROW("Unsupported arch kind: {0}", arch);
     }
@@ -329,7 +377,7 @@ bool isIR10(const ov::Model& model) {
     return false;
 }
 
-std::vector<std::shared_ptr<const ov::Node>> buildOVParams(const std::shared_ptr<ov::Model>& model) {
+std::vector<std::shared_ptr<const ov::Node>> buildOVParams(const std::shared_ptr<const ov::Model>& model) {
     std::vector<std::shared_ptr<const ov::Node>> constParams;
     VPUX_THROW_WHEN(model == nullptr, "Null OV model");
 
@@ -351,7 +399,7 @@ std::vector<std::shared_ptr<const ov::Node>> buildOVParams(const std::shared_ptr
     return constParams;
 }
 
-std::vector<std::shared_ptr<const ov::Node>> buildOVResults(const std::shared_ptr<ov::Model>& model) {
+std::vector<std::shared_ptr<const ov::Node>> buildOVResults(const std::shared_ptr<const ov::Model>& model) {
     std::vector<std::shared_ptr<const ov::Node>> constResults;
     VPUX_THROW_WHEN(model == nullptr, "Null OV model");
 
@@ -377,31 +425,30 @@ std::vector<std::shared_ptr<const ov::Node>> buildOVResults(const std::shared_pt
     return constResults;
 }
 
-std::shared_ptr<INetworkDescription> exportNetwork(mlir::ModuleOp module, mlir::TimingScope& rootTiming, Logger log,
-                                                   const std::shared_ptr<ov::Model>& model,
-                                                   const Config& configuration) {
+NetworkDescription exportNetwork(mlir::ModuleOp module, mlir::TimingScope& rootTiming, Logger log,
+                                 const std::shared_ptr<const ov::Model>& model, const Config& configuration) {
     const auto parameters = buildOVParams(model);
     const auto results = buildOVResults(model);
 
     if (isELFEnabled(configuration)) {
-        const auto blob = exportToELF(module, parameters, results);
-        std::vector<char> compiledNetwork(blob.size());
-        std::copy_n(reinterpret_cast<const char*>(blob.data()), blob.size(), compiledNetwork.data());
-        return std::make_shared<VPUMI37XX::NetworkDescription>(std::move(compiledNetwork));
+        auto blob = exportToELF(module, parameters, results);
+        auto meta = VPUMI37XX::getNetworkMetadata(blob);
+
+        return NetworkDescription(std::move(blob), std::move(meta));
     } else {
         auto exportTiming = rootTiming.nest("Export to blob");
-        const auto blob = VPUIP::exportToBlob(module, exportTiming, parameters, results, log);
+        auto blob = VPUIP::exportToBlob(module, exportTiming, parameters, results, log);
         auto finalTiming = rootTiming.nest("Wrap into NetworkDescription");
-        std::vector<char> compiledNetwork(blob.size());
-        std::copy_n(reinterpret_cast<const char*>(blob.data()), blob.size(), compiledNetwork.data());
+        std::vector<uint8_t> compiledNetwork(blob.data(), blob.data() + blob.size());
 
-        return std::make_shared<VPUIP::NetworkDescription>(std::move(compiledNetwork));
+        auto meta = VPUIP::getNetworkMetadata(compiledNetwork);
+        return NetworkDescription(std::move(compiledNetwork), std::move(meta));
     }
 }
 
 template <typename Options>
 bool getDummyOpReplacement(const Config& config) {
-    const auto options = Options::createFromString(config.get<COMPILATION_MODE_PARAMS>());
+    const auto options = Options::createFromString(config.get<intel_npu::COMPILATION_MODE_PARAMS>());
     VPUX_THROW_UNLESS(options != nullptr, "failed to parse COMPILATION_MODE_PARAMS");
     return options->enableDummyOpReplacement;
 }
@@ -422,20 +469,95 @@ bool getDummyOpReplacement(const Config& config) {
 
 bool getDummyOpReplacement(const Config& config) {
     const auto arch = getArchKind(config);
-    if (arch == VPU::ArchKind::VPUX30XX) {
+    if (arch == VPU::ArchKind::NPU30XX) {
         return getDummyOpReplacement<ReferenceSWOptions30XX, ReferenceHWOptions30XX, DefaultHWOptions30XX>(config);
-    } else if (arch == VPU::ArchKind::VPUX37XX) {
+    } else if (arch == VPU::ArchKind::NPU37XX) {
         return getDummyOpReplacement<ReferenceSWOptions37XX, ReferenceHWOptions37XX, DefaultHWOptions37XX>(config);
+    } else if (arch == VPU::ArchKind::NPU40XX) {
+        return getDummyOpReplacement<ReferenceSWOptions40XX, ReferenceHWOptions40XX, DefaultHWOptions40XX>(config);
     } else {
         VPUX_THROW("Unsupported device type: {0}", arch);
     }
+}
+
+std::optional<size_t> getBatchSize(const std::shared_ptr<ov::Model>& model, const Config& config) {
+    std::set<ov::Output<const ov::Node>> batchedInputs;
+    std::set<ov::Output<const ov::Node>> batchedOutputs;
+    std::set<size_t> sBatchSize;
+    const auto arch = getArchKind(config);
+
+    vpux::Logger logger("getBatchSize", getLogLevel(config));
+
+    if (!config.has<intel_npu::BATCH_MODE>()) {
+        return 1;
+    }
+
+    if (arch == VPU::ArchKind::NPU30XX || config.get<intel_npu::BATCH_MODE>() == ov::intel_npu::BatchMode::COMPILER) {
+        return 1;
+    }
+
+    std::shared_ptr<ov::Model> testBatchModel = model->clone();
+    // Find the batch dim
+    ov::pass::Manager passManager;
+    passManager.register_pass<ov::pass::InitNodeInfo>();
+    passManager.register_pass<ov::pass::FindBatch>();
+    passManager.run_passes(testBatchModel);
+    // Do not reshape/re-batch originally batched networks and when there are no inputs with the N* layouts
+    // input(s) should have the batch dim as the first dim (current limitation of the auto-batching impl)
+    const auto& params = testBatchModel->get_parameters();
+    for (size_t input_id = 0; input_id < params.size(); input_id++) {
+        const auto& input = params[input_id];
+        const auto& shape = input->get_partial_shape();
+        if (shape.is_dynamic()) {
+            logger.info("Dynamic networks are not supported when batching is handled by the plugin");
+            return std::nullopt;
+        }
+        // Batching on plugin is working only when batching is found on 0th dimension
+        if (shape.size() && shape[0].has_symbol()) {
+            const auto& static_shape = input->get_shape();
+            batchedInputs.insert(params[input_id]->output(0));
+            sBatchSize.insert(static_shape[0]);
+        } else {
+            logger.info("Only networks with inputs batched by 0th dimension are supported");
+            return std::nullopt;
+        }
+    }
+    for (const auto& output : testBatchModel->get_results()) {
+        const auto& shape = output->get_output_partial_shape(0);
+        if (shape.is_dynamic()) {
+            logger.info("Dynamic networks are not supported when batching is handled by the plugin");
+            return std::nullopt;
+        }
+        // Batching on plugin is working only when batching is found on 0th dimension
+        if (shape.size() && shape[0].has_symbol()) {
+            const auto& node = output->input_value(0);
+            const auto& static_shape = output->get_shape();
+            batchedOutputs.insert(ov::Output<const ov::Node>(node.get_node(), node.get_index()));
+            sBatchSize.insert(static_shape[0]);
+        } else {
+            logger.info("Only networks with outputs batched by 0th dimension are supported");
+            return std::nullopt;
+        }
+    }
+    if (!batchedInputs.size() || !batchedOutputs.size()) {
+        logger.info("Only networks with inputs/outputs featuring batched dim are supported!");
+        return std::nullopt;
+    }
+
+    if (sBatchSize.size() != 1) {
+        logger.info("Batching size shall have same value for all tensors!");
+        return std::nullopt;
+    }
+
+    auto it = sBatchSize.begin();
+    return *it;
 }
 
 #ifdef BACKGROUND_FOLDING_ENABLED
 
 template <typename Options>
 std::tuple<bool, int64_t, bool> getConstantFoldingInBackground(const Config& config) {
-    const auto options = Options::createFromString(config.get<COMPILATION_MODE_PARAMS>());
+    const auto options = Options::createFromString(config.get<intel_npu::COMPILATION_MODE_PARAMS>());
     VPUX_THROW_UNLESS(options != nullptr, "failed to parse COMPILATION_MODE_PARAMS");
     return std::make_tuple<bool, int64_t, bool>(options->constantFoldingInBackground,
                                                 options->constantFoldingInBackgroundNumThreads,
@@ -458,11 +580,14 @@ std::tuple<bool, int64_t, bool> getConstantFoldingInBackground(const Config& con
 
 std::tuple<bool, int64_t, bool> getConstantFoldingInBackground(const Config& config) {
     const auto arch = getArchKind(config);
-    if (arch == VPU::ArchKind::VPUX30XX) {
+    if (arch == VPU::ArchKind::NPU30XX) {
         return getConstantFoldingInBackground<ReferenceSWOptions30XX, ReferenceHWOptions30XX, DefaultHWOptions30XX>(
                 config);
-    } else if (arch == VPU::ArchKind::VPUX37XX) {
+    } else if (arch == VPU::ArchKind::NPU37XX) {
         return getConstantFoldingInBackground<ReferenceSWOptions37XX, ReferenceHWOptions37XX, DefaultHWOptions37XX>(
+                config);
+    } else if (arch == VPU::ArchKind::NPU40XX) {
+        return getConstantFoldingInBackground<ReferenceSWOptions40XX, ReferenceHWOptions40XX, DefaultHWOptions40XX>(
                 config);
     } else {
         VPUX_THROW("Unsupported device type: {0}", arch);
@@ -471,17 +596,99 @@ std::tuple<bool, int64_t, bool> getConstantFoldingInBackground(const Config& con
 
 #endif
 
+void setSafeOptions(Config& config) {
+    auto backendConfig = config.get<intel_npu::BACKEND_COMPILATION_PARAMS>();
+    std::regex reg("enable-partial-workload-management=true");
+    backendConfig = std::regex_replace(backendConfig, reg, "");
+    config.update({{intel_npu::BACKEND_COMPILATION_PARAMS::key().data(), backendConfig}});
+}
+
+mlir::OwningOpRef<mlir::ModuleOp> compileModel(mlir::MLIRContext& ctx, const std::shared_ptr<ov::Model>& model,
+                                               DeveloperConfig& devConf, mlir::TimingScope& rootTiming,
+                                               bool enableDummyOpReplacement, const Config& config, vpux::Logger& log) {
+    OV_ITT_TASK_CHAIN(COMPILER_IMPLEMENTATION, itt::domains::VPUXPlugin, "CompilerImpl::compile", "compileModel");
+    const auto arch = getArchKind(config);
+
+    OV_ITT_TASK_NEXT(COMPILER_IMPLEMENTATION, "importNetwork");
+
+    const auto dynamicShapeToStatic = config.get<intel_npu::DYNAMIC_SHAPE_TO_STATIC>();
+    mlir::OwningOpRef<mlir::ModuleOp> module =
+            importNetwork(&ctx, model, devConf, rootTiming, config.get<intel_npu::PERF_COUNT>(),
+                          enableDummyOpReplacement, dynamicShapeToStatic, arch, log);
+
+    OV_ITT_TASK_NEXT(COMPILER_IMPLEMENTATION, "PassManager");
+
+    mlir::PassManager pm(module.get()->getName(), mlir::OpPassManager::Nesting::Implicit);
+    addLogging(pm, log);
+    devConf.setup(pm);
+
+    auto pipelineFactory = createPipelineStrategy(arch);
+
+    // TODO: somehow protect non-target cases
+    pipelineFactory->buildPipeline(pm, config, rootTiming, log);
+
+#ifdef BACKGROUND_FOLDING_ENABLED
+    const auto [foldingInBackgroundEnabled, maxConcurrentTasks, collectStatistics] =
+            getConstantFoldingInBackground(config);
+
+    std::unique_ptr<vpux::Const::BackgroundConstantFolding> foldingManager;
+    if (foldingInBackgroundEnabled) {
+        foldingManager = std::make_unique<vpux::Const::BackgroundConstantFolding>(&ctx, maxConcurrentTasks,
+                                                                                  collectStatistics, log);
+    }
+#endif
+
+    OV_ITT_TASK_NEXT(COMPILER_IMPLEMENTATION, "compileNetwork");
+
+    compileNetwork(module.get(), pm, rootTiming);  // applies each pass in the pipeline
+
+    if (isELFEnabled(config)) {
+        mlir::PassManager elfPm(module.get()->getName(), mlir::OpPassManager::Nesting::Implicit);
+        addLogging(elfPm, log);
+        devConf.setup(elfPm);
+        pipelineFactory->buildELFPipeline(elfPm, config, rootTiming, log);
+        if (getWlmRollback(config).value_or(false)) {
+            auto backup_module = mlir::OwningOpRef<mlir::ModuleOp>(module.get().clone());
+            try {
+                compileNetwork(module.get(), elfPm, rootTiming);
+            } catch (...) {
+                log.warning("Failed to export to ELF with current config, reverting to simple ELF pipeline");
+                module = std::move(backup_module);
+                auto safeConfig = config;
+                setSafeOptions(safeConfig);
+                mlir::PassManager simpleElfPm(module.get()->getName(), mlir::OpPassManager::Nesting::Implicit);
+                addLogging(simpleElfPm, log);
+                devConf.setup(simpleElfPm);
+                pipelineFactory->buildELFPipeline(simpleElfPm, safeConfig, rootTiming, log);
+                compileNetwork(module.get(), simpleElfPm, rootTiming);
+            }
+        } else {
+            compileNetwork(module.get(), elfPm, rootTiming);
+        }
+    }
+
+    devConf.dump(pm);
+
+    return module;
+}
+
 }  // namespace
 
-std::shared_ptr<INetworkDescription> vpux::CompilerImpl::compile(std::shared_ptr<ov::Model>& model, const std::string&,
-                                                                 const Config& config) {
+uint32_t CompilerImpl::getSupportedOpsetVersion() const {
+    return SUPPORTED_OPSET;
+}
+
+NetworkDescription CompilerImpl::compile(const std::shared_ptr<ov::Model>& model, const Config& config) const {
     OV_ITT_SCOPED_TASK(itt::domains::VPUXPlugin, "CompilerImpl::compile");
-    Logger log("vpux-compiler", config.get<LOG_LEVEL>());
+    Logger log("vpux-compiler", getLogLevel(config));
+    checkPlaformSupportedForCompilation(config.get<intel_npu::PLATFORM>());
 
     DeveloperConfig devConf(log);
 
     mlir::DefaultTimingManager tm;
     devConf.setup(tm);
+
+    OV_ITT_TASK_CHAIN(COMPILER_IMPLEMENTATION, itt::domains::VPUXPlugin, "CompilerImpl::compile", "MLIRContext");
 
     const auto arch = getArchKind(config);
 
@@ -496,83 +703,131 @@ std::shared_ptr<INetworkDescription> vpux::CompilerImpl::compile(std::shared_ptr
     auto interfacesRegistry = createInterfacesRegistry(arch);
     interfacesRegistry->registerInterfaces(registry);
 
-    OV_ITT_TASK_CHAIN(COMPILER_IMPLEMENTATION, itt::domains::VPUXPlugin, "CompilerImpl::compile", "MLIRContext");
+    mlir::MLIRContext ctx(registry, mlir::MLIRContext::Threading::DISABLED);
 
-    mlir::MLIRContext ctx(registry);
+    // If user didn't specify number of threads default to 8 threads. By default MLIR
+    // will attempt to use all of the threads available on the system which might cause
+    // large peak memory usage during constant-related passes such as constant-folding
+    const bool hasThreadLimit = config.has<intel_npu::COMPILATION_NUM_THREADS>();
+    int threadCount = 8;
+    if (hasThreadLimit) {
+        threadCount = config.get<intel_npu::COMPILATION_NUM_THREADS>();
+    }
+    llvm::ThreadPoolStrategy tpStr;
+    std::unique_ptr<llvm::ThreadPool> threadPoolPtr;
+    tpStr.ThreadsRequested = threadCount;
+    tpStr.Limit = true;  // limits number of threads to the number of physical threads
+    threadPoolPtr.reset(new llvm::ThreadPool(tpStr));
+    ctx.setThreadPool(*threadPoolPtr);
+
     addLogging(ctx, log);
     auto rootTiming = tm.getRootScope();
 
-    OV_ITT_TASK_NEXT(COMPILER_IMPLEMENTATION, "importNetwork");
+    mlir::OwningOpRef<mlir::ModuleOp> module;
+    bool useCompilerBatching = true;
+    try {
+        auto batchSize = getBatchSize(model, config);
 
-    const auto module = importNetwork(&ctx, model, devConf, rootTiming, config.get<PERF_COUNT>(),
-                                      enableDummyOpReplacement, arch, log);
+        if (batchSize.has_value()) {
+            if (*batchSize > 1) {
+                // When batching is handled by the plugin we need to modify performance_mode property to Throughput mode
+                Config config_performance_mode = config;
+                if (config_performance_mode.get<intel_npu::PERFORMANCE_HINT>() == ov::hint::PerformanceMode::LATENCY) {
+                    std::stringstream strStream;
+                    strStream << ov::hint::PerformanceMode::THROUGHPUT;
+                    config_performance_mode.update({{ov::hint::performance_mode.name(), strStream.str()}});
+                }
 
-    OV_ITT_TASK_NEXT(COMPILER_IMPLEMENTATION, "PassManager");
+                // If fallback and handle batching on the compiler is needed we will use the original model
+                std::shared_ptr<ov::Model> batch_model = model->clone();
 
-    mlir::PassManager pm(module.get()->getName(), mlir::OpPassManager::Nesting::Implicit);
-    addLogging(pm, log);
-    devConf.setup(pm);
+                ov::set_batch(batch_model, 1);
+                module = compileModel(ctx, batch_model, devConf, rootTiming, enableDummyOpReplacement,
+                                      config_performance_mode, log);
 
-    auto pipelineFactory = createPipelineStrategy(arch);
-
-    // TODO: somehow protect non-target cases
-    pipelineFactory->buildPipeline(pm, config, rootTiming, log);
-
-#ifdef BACKGROUND_FOLDING_ENABLED
-    const auto [foldingInBackgroundEnabled, numFoldingThreads, collectStatistics] =
-            getConstantFoldingInBackground(config);
-    SmallVector<std::shared_future<void>> foldingThreads;
-    if (foldingInBackgroundEnabled) {
-        foldingThreads = Const::initBackgroundConstantFoldingThreads(&ctx, numFoldingThreads, collectStatistics);
+                useCompilerBatching = false;
+            }
+        } else {
+            const auto& batchType = config.get<intel_npu::BATCH_MODE>();
+            if (batchType == ov::intel_npu::BatchMode::AUTO) {
+                log.warning("An error occurred during network compilation so fallback on compiler batch mode");
+            } else if (batchType == ov::intel_npu::BatchMode::PLUGIN) {
+                VPUX_THROW("This model is not supported when handling batching on the plugin.");
+            }
+        }
+    } catch (const std::exception& ex) {
+        const auto& batchType = config.get<intel_npu::BATCH_MODE>();
+        if (batchType == ov::intel_npu::BatchMode::AUTO) {
+            log.info("An error occurred during network compilation so fallback on compiler batch mode {0}", ex.what());
+        } else {
+            VPUX_THROW(ex.what());
+        }
     }
-#endif
 
-    OV_ITT_TASK_NEXT(COMPILER_IMPLEMENTATION, "compileNetwork");
-
-    compileNetwork(module.get(), pm, rootTiming);  // applies each pass in the pipeline
-
-#ifdef BACKGROUND_FOLDING_ENABLED
-    if (foldingInBackgroundEnabled) {
-        Const::stopBackgroundConstantFoldingThreads(&ctx, foldingThreads, collectStatistics, log);
+    if (useCompilerBatching) {
+        module = compileModel(ctx, model, devConf, rootTiming, enableDummyOpReplacement, config, log);
     }
-#endif
 
     OV_ITT_TASK_NEXT(COMPILER_IMPLEMENTATION, "exportNetwork");
-    const std::shared_ptr<INetworkDescription>& networkDescription =
-            exportNetwork(module.get(), rootTiming, log, model, config);
+    auto networkDescription = exportNetwork(module.get(), rootTiming, log, model, config);
     OV_ITT_TASK_SKIP(COMPILER_IMPLEMENTATION);
 
     return networkDescription;
+}
+
+NetworkDescription CompilerImpl::compile(const std::shared_ptr<const ov::Model>& origModel,
+                                         const Config& config) const {
+    OV_ITT_SCOPED_TASK(itt::domains::VPUXPlugin, "CompilerImpl::compile");
+    OV_ITT_TASK_CHAIN(COMPILER_IMPLEMENTATION, itt::domains::VPUXPlugin, "CompilerImpl::compile", "clone_model");
+
+    // NGraph pipeline modifies the model so need to clone here
+    auto model = origModel->clone();
+
+    OV_ITT_TASK_SKIP(COMPILER_IMPLEMENTATION);
+
+    return compile(std::move(model), config);
 }
 
 //
 // CompilerImpl::parse
 //
 
-std::shared_ptr<vpux::INetworkDescription> vpux::CompilerImpl::parse(const std::vector<char>& compiledNetwork,
-                                                                     const Config& config, const std::string&) {
+NetworkMetadata CompilerImpl::parse(const std::vector<uint8_t>& compiledNetwork, const Config& config) const {
     if (isELFEnabled(config)) {
-        return std::make_shared<VPUMI37XX::NetworkDescription>(compiledNetwork);
+        return VPUMI37XX::getNetworkMetadata(compiledNetwork);
     } else {
-        return std::make_shared<VPUIP::NetworkDescription>(compiledNetwork);
+        return VPUIP::getNetworkMetadata(compiledNetwork);
     }
 }
 
 //
-// CreateVPUXCompiler
+// CompilerImpl::process_profiling_output
+//
+
+std::vector<ov::ProfilingInfo> CompilerImpl::process_profiling_output(const std::vector<uint8_t>& profData,
+                                                                      const std::vector<uint8_t>& network,
+                                                                      const Config&) const {
+    auto layerInfo = profiling::getLayerProfilingInfoHook(profData, network);
+    return intel_npu::profiling::convertLayersToIeProfilingInfo(layerInfo);
+}
+
+//
+// CreateNPUCompiler
 //
 
 #ifndef OPENVINO_STATIC_LIBRARY
-OPENVINO_PLUGIN_API void CreateVPUXCompiler(std::shared_ptr<ICompiler>& obj) {
+OPENVINO_PLUGIN_API void CreateNPUCompiler(std::shared_ptr<ICompiler>& obj) {
     obj = std::make_shared<CompilerImpl>();
 }
 #endif
 
 bool vpux::isELFEnabled(const Config& configuration) {
-    const auto isVPUX37XX = getArchKind(configuration) == vpux::VPU::ArchKind::VPUX37XX;
+    const auto isVPUX37XX = getArchKind(configuration) == vpux::VPU::ArchKind::NPU37XX;
+    const auto isVPUX40XX = getArchKind(configuration) == vpux::VPU::ArchKind::NPU40XX;
 
-    const auto optionValue = configuration.get<USE_ELF_COMPILER_BACKEND>();
-    using InferenceEngine::VPUXConfigParams::ElfCompilerBackend;
+    const auto optionValue = configuration.get<intel_npu::USE_ELF_COMPILER_BACKEND>();
+    using ov::intel_npu::ElfCompilerBackend;
 
-    return optionValue == ElfCompilerBackend::YES || (optionValue == ElfCompilerBackend::AUTO && (isVPUX37XX));
+    return optionValue == ElfCompilerBackend::YES ||
+           (optionValue == ElfCompilerBackend::AUTO && (isVPUX37XX || isVPUX40XX));
 }

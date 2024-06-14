@@ -1,8 +1,8 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
-//
+
 // RUN: vpux-translate --vpu-arch=%arch% --export-VPUIP -o %t %data_path_npu%/profiling-30XX.mlir.txt
 // RUN: prof_parser -b %t -m | FileCheck %s
 // REQUIRES: arch-VPUX30XX

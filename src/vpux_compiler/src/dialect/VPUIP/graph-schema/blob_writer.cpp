@@ -4,21 +4,22 @@
 //
 
 #include "vpux/compiler/dialect/VPUIP/graph-schema/blob_writer.hpp"
-#include "vpux/compiler/dialect/VPUIP/convert_to_dma_utils.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/convert_to_dma_utils.hpp"
 
 #include "vpux/compiler/core/attributes/dims_order.hpp"
 #include "vpux/compiler/core/attributes/stride_reqs.hpp"
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
 #include "vpux/compiler/dialect/IERT/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops_interfaces.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops_interfaces.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/sw_utils.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/utils/quantization.hpp"
 #include "vpux/compiler/utils/strings.hpp"
 
 #include "vpux/compiler/act_kernels/invocation_builder.h"
-#include "vpux/utils/IE/float16.hpp"
 #include "vpux/utils/core/checked_cast.hpp"
+#include "vpux/utils/core/custom_float.hpp"
 #include "vpux/utils/core/error.hpp"
 #include "vpux/utils/core/format.hpp"
 #include "vpux/utils/core/helper_macros.hpp"
@@ -31,8 +32,6 @@
 #include <vpux/compiler/act_kernels/compilation.h>
 
 #include <algorithm>
-
-#include <precision_utils.h>
 
 using namespace vpux;
 
@@ -116,14 +115,17 @@ VPUIP::BlobWriter::Task vpux::VPUIP::BlobWriter::createTask(mlir::Operation* op)
 }
 
 ActKernelDesc vpux::VPUIP::BlobWriter::compileKernelData(const CompilationUnitDesc& unitDesc,
-                                                         const vpux::VPU::ArchKind& archKind) {
-    return compileKernelForACTShave(unitDesc, archKind);
+                                                         const vpux::VPU::ArchKind& archKind,
+                                                         std::optional<vpux::VPU::RevisionID> revisionID,
+                                                         bool hasInputsInDDR) {
+    return compileKernelForACTShave(unitDesc, archKind, revisionID, hasInputsInDDR);
 }
 
-ActKernelDesc vpux::VPUIP::BlobWriter::compileManagementKernelData(const vpux::VPU::ArchKind& archKind) {
+ActKernelDesc vpux::VPUIP::BlobWriter::compileManagementKernelData(const vpux::VPU::ArchKind& archKind,
+                                                                   std::optional<vpux::VPU::RevisionID> revisionID) {
     const auto& listDesc = managementKernelCompilationDesc();
 
-    return compileKernelForACTShave(listDesc, archKind);
+    return compileKernelForACTShave(listDesc, archKind, revisionID, false);
 }
 
 const vpux::VPUIP::BlobWriter::ActShavesKernelDataMap& vpux::VPUIP::BlobWriter::getKernelData() const {
@@ -199,9 +201,9 @@ vpux::VPUIP::BlobWriter::ActKernel vpux::VPUIP::BlobWriter::createRuntimeKernelT
     listDesc.name = kernelCode.getValue();
     listDesc.entry = kernelCode.getValue();
 
-    compileKernelForACTShave(listDesc, VPU::getArch(module));
+    compileKernelForACTShave(listDesc, VPU::getArch(module), VPU::getRevisionID(module), false);
 
-    auto runtimeKernelDesc = compileManagementKernelData(VPU::getArch(module));
+    auto runtimeKernelDesc = compileManagementKernelData(VPU::getArch(module), VPU::getRevisionID(module));
     auto runtimeKernelText = createKernelDataRef(runtimeKernelDesc.text);
     auto runtimeKernelData = createKernelDataRef(runtimeKernelDesc.data);
 
@@ -240,8 +242,10 @@ VPUIP::BlobWriter::SpecificTask vpux::VPUIP::BlobWriter::createComputeSWKernelTa
 
     auto module = swKernelTask->getParentOfType<mlir::ModuleOp>();
 
+    bool hasInputsInDDR = VPUIP::hasInputsInDDR(swKernelTask);
     CompilationUnitDesc compilationDesc = {kernelFunc.getName(), kernelEntryPoint.getValue()};
-    auto actKernelDesc = compileKernelData(compilationDesc, VPU::getArch(module));
+    auto actKernelDesc =
+            compileKernelData(compilationDesc, VPU::getArch(module), VPU::getRevisionID(module), hasInputsInDDR);
 
     auto kernelText = createKernelDataRef(actKernelDesc.text);
 
@@ -638,7 +642,7 @@ VPUIP::BlobWriter::TensorReference vpux::VPUIP::BlobWriter::createTensorRef(
         int64_t byteOffset, ArrayRef<int64_t> mult, ArrayRef<int64_t> shift, int64_t postShift,
         ArrayRef<uint8_t> zeroPoints, std::optional<int64_t> sparsityMapOffset,
         std::optional<int64_t> storageElementOffset, std::optional<int64_t> storageElementSize,
-        std::optional<int64_t> swizzlingKey) {
+        std::optional<int64_t> swizzlingKey, std::optional<uint64_t> descriptor) {
     const auto serializedName = createString(name);
 
     const auto serializedDataType = VPUIP::createDType(type.getElementType());
@@ -658,7 +662,7 @@ VPUIP::BlobWriter::TensorReference vpux::VPUIP::BlobWriter::createTensorRef(
 
     const auto basePtrs = createVector(std::vector<uint16_t>{});
 
-    if (_architecture == VPU::ArchKind::VPUX30XX) {
+    if (_architecture == VPU::ArchKind::NPU30XX) {
         const auto strides = createStrides<float>(type);
         MVCNN::TensorReferenceBuilder builder(_impl);
 
@@ -700,13 +704,17 @@ VPUIP::BlobWriter::TensorReference vpux::VPUIP::BlobWriter::createTensorRef(
     if (swizzlingKey.has_value()) {
         builder.add_swizzling_key(checked_cast<uint8_t>(swizzlingKey.value()));
     }
+    if (descriptor.has_value()) {
+        builder.add_descriptor(checked_cast<uint64_t>(descriptor.value()));
+    }
     return builder.Finish();
 }
 
 VPUIP::BlobWriter::TensorReference vpux::VPUIP::BlobWriter::createTensorRef(
         StringRef name, vpux::NDTypeInterface type, VPURT::BufferSection section, ArrayRef<int64_t> sectionIndex,
         int64_t byteOffset, std::optional<int64_t> sparsityMapOffset, std::optional<int64_t> storageElementOffset,
-        std::optional<int64_t> storageElementSize, std::optional<int64_t> swizzlingKey) {
+        std::optional<int64_t> storageElementSize, std::optional<int64_t> swizzlingKey,
+        std::optional<uint64_t> descriptor) {
     SmallVector<uint8_t> zeroPoints;
     SmallVector<int64_t> mults;
     SmallVector<int64_t> shifts;
@@ -739,25 +747,27 @@ VPUIP::BlobWriter::TensorReference vpux::VPUIP::BlobWriter::createTensorRef(
     }
 
     return createTensorRef(name, type, section, sectionIndex, byteOffset, mults, shifts, 0, zeroPoints,
-                           sparsityMapOffset, storageElementOffset, storageElementSize, swizzlingKey);
+                           sparsityMapOffset, storageElementOffset, storageElementSize, swizzlingKey, descriptor);
 }
 
 VPUIP::BlobWriter::TensorReference vpux::VPUIP::BlobWriter::createTensorRef(
         StringRef name, vpux::NDTypeInterface type, VPURT::BufferSection section, int64_t sectionIndex,
         int64_t byteOffset, std::optional<int64_t> sparsityMapOffset, std::optional<int64_t> storageElementOffset,
-        std::optional<int64_t> storageElementSize, std::optional<int64_t> swizzlingKey) {
+        std::optional<int64_t> storageElementSize, std::optional<int64_t> swizzlingKey,
+        std::optional<uint64_t> descriptor) {
     return createTensorRef(name, type, section, ArrayRef({sectionIndex}), byteOffset, sparsityMapOffset,
-                           storageElementOffset, storageElementSize, swizzlingKey);
+                           storageElementOffset, storageElementSize, swizzlingKey, descriptor);
 }
 
 VPUIP::BlobWriter::TensorReference vpux::VPUIP::BlobWriter::createTensorRef(
         mlir::Value val, StringRef name, VPURT::BufferSection section, ArrayRef<int64_t> sectionIndex,
         int64_t byteOffset, std::optional<int64_t> sparsityMapOffset, std::optional<int64_t> storageElementOffset,
-        std::optional<int64_t> storageElementSize, std::optional<int64_t> swizzlingKey) {
+        std::optional<int64_t> storageElementSize, std::optional<int64_t> swizzlingKey,
+        std::optional<uint64_t> descriptor) {
     VPUX_THROW_UNLESS(_tensors.count(val) == 0, "Value '{0}' was already serialized", val.getLoc());
     const auto ref =
             createTensorRef(name, val.getType().cast<vpux::NDTypeInterface>(), section, sectionIndex, byteOffset,
-                            sparsityMapOffset, storageElementOffset, storageElementSize, swizzlingKey);
+                            sparsityMapOffset, storageElementOffset, storageElementSize, swizzlingKey, descriptor);
     _tensors.insert({val, ref});
     return ref;
 }
@@ -765,9 +775,10 @@ VPUIP::BlobWriter::TensorReference vpux::VPUIP::BlobWriter::createTensorRef(
 VPUIP::BlobWriter::TensorReference vpux::VPUIP::BlobWriter::createTensorRef(
         mlir::Value val, StringRef name, VPURT::BufferSection section, int64_t sectionIndex, int64_t byteOffset,
         std::optional<int64_t> sparsityMapOffset, std::optional<int64_t> storageElementOffset,
-        std::optional<int64_t> storageElementSize, std::optional<int64_t> swizzlingKey) {
+        std::optional<int64_t> storageElementSize, std::optional<int64_t> swizzlingKey,
+        std::optional<uint64_t> descriptor) {
     return createTensorRef(val, name, section, ArrayRef({sectionIndex}), byteOffset, sparsityMapOffset,
-                           storageElementOffset, storageElementSize, swizzlingKey);
+                           storageElementOffset, storageElementSize, swizzlingKey, descriptor);
 }
 
 VPUIP::BlobWriter::TensorReference vpux::VPUIP::BlobWriter::getTensorRef(mlir::Value val) const {
@@ -818,13 +829,6 @@ VPUIP::BlobWriter::Barrier vpux::VPUIP::BlobWriter::createBarrier(mlir::Value va
             numProducers += usesCount;
         } else {
             VPUX_THROW("Barrier Value {0} has unsupported Effect in Operation {1}", val, *userOp);
-        }
-    }
-
-    if (auto configureBarrierOp = mlir::dyn_cast<VPURT::ConfigureBarrierOp>(val.getDefiningOp())) {
-        auto isFinalBarrier = configureBarrierOp.getIsFinalBarrier();
-        if (isFinalBarrier) {
-            numConsumers = 1;
         }
     }
 

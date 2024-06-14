@@ -123,6 +123,7 @@ vcl_result_t VCLParallelCompilationTest::parallelCompilation(const std::string& 
             std::cerr << "Failed to vclExecutableCreate with " << std::distance(resCreate.begin(), i) << " thread!"
                       << std::endl;
             std::cerr << "Result:0x" << std::hex << uint64_t(*i) << std::dec << std::endl;
+            vclCompilerDestroy(compiler);
             return *i;
         }
     }
@@ -145,12 +146,13 @@ vcl_result_t VCLParallelCompilationTest::parallelCompilation(const std::string& 
         getBlobSizeThread.join();
     }
 
-    for (auto i = resGetBlobInit.begin(); i != resGetBlobInit.end(); i++) {
-        if (*i != VCL_RESULT_SUCCESS) {
-            std::cerr << "Failed to vclExecutableGetSerializableBlob initially with " << i - resGetBlobInit.begin()
-                      << " thread!" << std::endl;
-            std::cerr << "Result:0x" << std::hex << uint64_t(*i) << std::dec << std::endl;
-            return *i;
+    for (size_t i = 0; i < resGetBlobInit.size(); i++) {
+        const auto result = resGetBlobInit[i];
+        if (result != VCL_RESULT_SUCCESS) {
+            std::cerr << "Failed to vclExecutableGetSerializableBlob initially with " << i << " thread!" << std::endl;
+            std::cerr << "Result:0x" << std::hex << result << std::dec << std::endl;
+            vclCompilerDestroy(compiler);
+            return result;
         }
     }
 
@@ -180,12 +182,13 @@ vcl_result_t VCLParallelCompilationTest::parallelCompilation(const std::string& 
         getBlobThread.join();
     }
 
-    for (auto i = resGetBlob.begin(); i != resGetBlob.end(); i++) {
-        if (*i != VCL_RESULT_SUCCESS) {
-            std::cerr << "Failed to vclExecutableGetSerializableBlob with " << i - resGetBlob.begin() << " thread!"
-                      << std::endl;
-            std::cerr << "Result:0x" << std::hex << uint64_t(*i) << std::dec << std::endl;
-            return *i;
+    for (size_t i = 0; i < resGetBlob.size(); i++) {
+        const auto result = resGetBlob[i];
+        if (result != VCL_RESULT_SUCCESS) {
+            std::cerr << "Failed to vclExecutableGetSerializableBlob with " << i << " thread!" << std::endl;
+            std::cerr << "Result:0x" << std::hex << result << std::dec << std::endl;
+            vclCompilerDestroy(compiler);
+            return result;
         }
     }
 

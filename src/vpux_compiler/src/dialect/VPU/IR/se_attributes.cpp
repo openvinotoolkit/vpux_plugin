@@ -6,11 +6,11 @@
 #include "vpux/compiler/dialect/VPU/IR/se_attributes.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 
-#include "vpux/compiler/dialect/IE/attributes.hpp"
+#include "vpux/compiler/dialect/IE/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_interpolate_utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
+#include "vpux/compiler/utils/loop.hpp"
 
-#include "vpux/utils/IE/loop.hpp"
 #include "vpux/utils/core/error.hpp"
 #include "vpux/utils/core/mem_size.hpp"
 #include "vpux/utils/core/numeric.hpp"
@@ -19,19 +19,6 @@
 #include <mlir/IR/BuiltinTypes.h>
 
 using namespace vpux;
-
-// Get the largest storage element size that is compatible with the given number of channels
-// The storage element size must be a multiple of 16
-// Example: if the number of channels is 48 and the sparsity constraint is for the storage element size to be a power of
-// two, the returned value will be 16
-int64_t VPU::getSESize(int64_t channels, const VPU::SparsityConstraint& sparsityConstraint) {
-    for (int64_t seSize = channels; seSize >= 16; seSize -= 16) {
-        if (channels % seSize == 0 && sparsityConstraint.areChannelsFitForSESize(seSize)) {
-            return seSize;
-        }
-    }
-    VPUX_THROW("Failed to find se_size for '{0}' channels", channels);
-}
 
 //
 // SEInterpolateAttr
@@ -314,8 +301,8 @@ std::function<int64_t(double, double)> getNearestDimFn(VPU::NCEInterpolateModeAt
     return nearestDim;
 }
 
-std::vector<int32_t> computeSpatialSEPtrs(ShapeRef dataShape, ShapeRef outputShape, Byte elemSize, int64_t seSize,
-                                          mlir::ArrayAttr offsetsAttr,
+std::vector<int32_t> computeSpatialSEPtrs(mlir::MLIRContext* ctx, ShapeRef dataShape, ShapeRef outputShape,
+                                          Byte elemSize, int64_t seSize, mlir::ArrayAttr offsetsAttr,
                                           llvm::function_ref<Shape(ShapeRef, ShapeRef)> backInferCoordFn) {
     VPUX_THROW_UNLESS(dataShape.size() == 4, "Expected 4D data shape, got {0} dimensions", dataShape.size());
     VPUX_THROW_UNLESS(elemSize.count() > 0, "Invalid element byte size {0}", elemSize.count());
@@ -346,7 +333,7 @@ std::vector<int32_t> computeSpatialSEPtrs(ShapeRef dataShape, ShapeRef outputSha
     const auto seTableNumElements = sizeH * sizeW * seDepth;
     std::vector<int32_t> sePtrs(seTableNumElements, 0);
 
-    loop_3d(LoopExecPolicy::Parallel, sizeH, sizeW, seDepth, [&](int64_t h, int64_t w, int64_t se) {
+    loop_3d(LoopExecPolicy::Parallel, ctx, sizeH, sizeW, seDepth, [&](int64_t h, int64_t w, int64_t se) {
         const auto outputCoord = Shape({0, se * seSize, startH + h, startW + w});
         const auto interpInputCoord = backInferCoordFn(outputCoord, dataShape);
 
@@ -632,7 +619,7 @@ VPU::SEAttr VPU::SEInterpolateAttr::extractTile(ShapeRef outputTileOffset, Shape
 std::vector<int32_t> VPU::SEInterpolateAttr::computeSEOffsets(ShapeRef dataShape, StridesRef /*dataStrides*/,
                                                               Byte elemSize, int64_t seSize) const {
     const auto outputShape = inferOutputShape(dataShape);
-    return computeSpatialSEPtrs(dataShape, outputShape, elemSize, seSize, getOffsets(),
+    return computeSpatialSEPtrs(getContext(), dataShape, outputShape, elemSize, seSize, getOffsets(),
                                 [&](ShapeRef outputCoord, ShapeRef inputShape) -> Shape {
                                     return backInferInputCoord(outputCoord, inputShape);
                                 });
@@ -915,7 +902,7 @@ VPU::SEAttr VPU::SEUpsamplingAttr::extractTile(ShapeRef outputTileOffset, ShapeR
 std::vector<int32_t> VPU::SEUpsamplingAttr::computeSEOffsets(ShapeRef dataShape, StridesRef /*dataStrides*/,
                                                              Byte elemSize, int64_t seSize) const {
     const auto outputShape = inferOutputShape(dataShape);
-    return computeSpatialSEPtrs(dataShape, outputShape, elemSize, seSize, getOffsets(),
+    return computeSpatialSEPtrs(getContext(), dataShape, outputShape, elemSize, seSize, getOffsets(),
                                 [&](ShapeRef outputCoord, ShapeRef inputShape) -> Shape {
                                     return backInferInputCoord(outputCoord, inputShape);
                                 });
@@ -1284,12 +1271,255 @@ VPU::SEAttr VPU::SEPaddingAttr::extractTile(ShapeRef outputTileOffset, ShapeRef 
 std::vector<int32_t> VPU::SEPaddingAttr::computeSEOffsets(ShapeRef dataShape, StridesRef /*dataStrides*/, Byte elemSize,
                                                           int64_t seSize) const {
     const auto outputShape = inferOutputShape(dataShape);
-    return computeSpatialSEPtrs(dataShape, outputShape, elemSize, seSize, getOffsets(),
+    return computeSpatialSEPtrs(getContext(), dataShape, outputShape, elemSize, seSize, getOffsets(),
                                 [&](ShapeRef outputCoord, ShapeRef inputShape) -> Shape {
                                     return backInferInputCoord(outputCoord, inputShape);
                                 });
 }
 
 std::optional<VPU::SETileInfo> VPU::SEPaddingAttr::getTileInfo() const {
+    return VPU::SETileInfo{getOffsets(), getSizes()};
+}
+
+//
+// SERollAttr
+//
+
+mlir::LogicalResult VPU::SERollAttr::verify(llvm::function_ref<mlir::InFlightDiagnostic()> emitError,
+                                            mlir::ArrayAttr shiftAttr, mlir::ArrayAttr axesAttr,
+                                            mlir::ArrayAttr offsetsAttr, mlir::ArrayAttr sizesAttr) {
+    const auto hasNegativeValues = [](ArrayRef<int64_t> values) {
+        return llvm::any_of(values, [](const int64_t value) {
+            return value < 0;
+        });
+    };
+
+    if (shiftAttr == nullptr) {
+        return printTo(emitError(), "Got NULL shift in 'SERollAttr'");
+    }
+    const auto shifts = parseIntArrayAttr<int64_t>(shiftAttr);
+    if (shifts.size() != 2) {
+        return printTo(emitError(), "Got shifts with {0} dimensions in 'SERollAttr'. Expected 2 dimensions",
+                       shifts.size());
+    }
+
+    if (axesAttr == nullptr) {
+        return printTo(emitError(), "Got NULL axes in 'SERollAttr'");
+    }
+    const auto axes = parseIntArrayAttr<int64_t>(axesAttr);
+    if (axes.size() != 2) {
+        return printTo(emitError(), "Got shifts with {0} dimensions in 'SERollAttr'. Expected 2 dimensions",
+                       axes.size());
+    }
+
+    if (!(axes[SE_ROLL_SPATIAL_H] == Dims4D::Act::H.ind() && axes[SE_ROLL_SPATIAL_W] == Dims4D::Act::W.ind())) {
+        return printTo(emitError(), "Got invalid axes {0}", axes);
+    }
+
+    if (offsetsAttr != nullptr) {
+        const auto offsets = parseIntArrayAttr<int64_t>(offsetsAttr);
+        if (offsets.size() != 4) {
+            return printTo(emitError(), "Got offsets with {0} dimensions in 'SERollAttr'. Expected 4 dimensions",
+                           offsets.size());
+        }
+        if (hasNegativeValues(offsets)) {
+            return printTo(emitError(), "Got negative offsets in 'SERollAttr'");
+        }
+    }
+
+    if (sizesAttr != nullptr) {
+        const auto sizes = parseIntArrayAttr<int64_t>(sizesAttr);
+        if (sizes.size() != 4) {
+            return printTo(emitError(), "Got sizes with {0} dimensions in 'SERollAttr'. Expected 4 dimensions",
+                           sizes.size());
+        }
+        if (hasNegativeValues(sizes)) {
+            return printTo(emitError(), "Got negative sizes in 'SERollAttr'");
+        }
+    }
+
+    return mlir::success();
+}
+
+//
+// SERollAttr (SEAttrInterface)
+//
+
+Shape VPU::SERollAttr::inferOutputShape(ShapeRef inputShape) const {
+    if (getSizes() != nullptr) {
+        return Shape(parseIntArrayAttr<int64_t>(getSizes()));
+    }
+
+    return inputShape.raw();
+}
+
+Shape VPU::SERollAttr::backInferInputShape(ShapeRef outputShape) const {
+    VPUX_THROW_UNLESS(getOffsets() == nullptr && getSizes() == nullptr,
+                      "SERollAttr: Cannot support back infer input shape with offsets and sizes attibution");
+
+    return outputShape.raw();
+}
+
+// Infers the input coordinates that are used to generate the given output coordinate.
+// Reversely roll back to get the input coordinates.
+//
+// For example, let's take the following input data that exemplifies one spatial dimension:
+// -------------------------------------
+// | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+// -------------------------------------
+//
+// If the shift is set to 3 and axis is 0, the following output data is obtained:
+//    0   1   2   3   4   5   6   7   8     <- output index
+//  -------------------------------------
+//  | 6 | 7 | 8 | 0 | 1 | 2 | 3 | 4 | 5 |
+//  -------------------------------------
+//
+// In other words, for this example the function will infer:
+// - output coordinate 0 for input coordinates [6]
+// - output coordinate 1 for input coordinates [7]
+// - output coordinate 8 for input coordinates [5]
+//
+Shape VPU::SERollAttr::backInferInputCoord(ShapeRef outputCoord, ShapeRef inputShape) const {
+    const auto shifts = parseIntArrayAttr<int64_t>(getShift());
+    const auto axes = parseIntArrayAttr<int64_t>(getAxes());
+
+    const auto getInputCoord = [&](int64_t outCoord, int64_t shift, int64_t dimShape) {
+        if (shift == 0) {
+            return outCoord;
+        }
+        auto inputCoord = outCoord + shift;
+        if (inputCoord < 0) {
+            inputCoord = dimShape + inputCoord;
+        } else if (inputCoord >= dimShape) {
+            inputCoord = inputCoord % dimShape;
+        }
+        return inputCoord;
+    };
+
+    const auto inputH = getInputCoord(outputCoord[Dim(axes[SE_ROLL_SPATIAL_H])], -1 * shifts[SE_ROLL_SPATIAL_H],
+                                      inputShape[Dim(axes[SE_ROLL_SPATIAL_H])]);
+    const auto inputW = getInputCoord(outputCoord[Dim(axes[SE_ROLL_SPATIAL_W])], -1 * shifts[SE_ROLL_SPATIAL_W],
+                                      inputShape[Dim(axes[SE_ROLL_SPATIAL_W])]);
+    return Shape({outputCoord[Dims4D::Act::N], outputCoord[Dims4D::Act::C], inputH, inputW});
+}
+
+// Infers the input tile for the given output tile.
+// Receives the offset and shape of the output tile and the input shape of the data. The offset and shape of the
+// inferred input tile is returned via the reference parameters. The return value contains the SERollAttr with
+// updated parameters which, coupled with the inferred input tile, can generate the output tile.
+//
+// For example, let's take the following input data that exemplifies one spatial dimension with shift 3:
+// -------------------------------------
+// | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+// -------------------------------------
+//
+// It produces the following output:
+//    0   1   2   3   4   5   6   7   8     <- output index
+//  -------------------------------------
+//  | 6 | 7 | 8 | 0 | 1 | 2 | 3 | 4 | 5 |
+//  -------------------------------------
+//
+// If the output tile has offset 2 and size 3, the output tile covers range [2-4].
+// The inferred input tile has offset 0 and size 9, covering the range [0-8]. The returned SERollAttr will contain
+// the new shifts 1, so the full output contains:
+// -------------------------------------
+// | 8 | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+// -------------------------------------
+//
+// In order to generate the same output as the output tile received as a parameter, the returned attribute will contain
+// offset 0 and size 3, thus producing the following final output:
+// -------------
+// | 8 | 0 | 1 |
+// -------------
+//
+VPU::SEAttr VPU::SERollAttr::extractTile(ShapeRef outputTileOffset, ShapeRef outputTileShape, ShapeRef inputShape,
+                                         Shape& inputTileOffset, Shape& inputTileShape) const {
+    const auto outputTileShapeH = outputTileShape[Dims4D::Act::H];
+    const auto outputTileShapeW = outputTileShape[Dims4D::Act::W];
+
+    const auto outputTileOffsetH = outputTileOffset[Dims4D::Act::H];
+    const auto outputTileOffsetW = outputTileOffset[Dims4D::Act::W];
+
+    const auto outputTileOffsetEndH = outputTileOffsetH + outputTileShapeH - 1;
+    const auto outputTileOffsetEndW = outputTileOffsetW + outputTileShapeW - 1;
+
+    const auto shifts = parseIntArrayAttr<int64_t>(getShift());
+
+    const auto getMinPoint = [](int64_t shift, int64_t offsetBegin, int64_t offsetEnd) {
+        if (shift == 0) {
+            return offsetBegin;
+        }
+        if (offsetEnd >= shift) {
+            return offsetBegin >= shift ? offsetBegin : shift;
+        } else {
+            return offsetBegin;
+        }
+    };
+
+    const auto getMaxPoint = [](int64_t shift, int64_t offsetBegin, int64_t offsetEnd) {
+        if (shift == 0) {
+            return offsetEnd;
+        }
+        if (offsetEnd >= shift) {
+            return offsetBegin >= shift ? offsetEnd : shift - 1;
+        } else {
+            return offsetEnd;
+        }
+    };
+
+    const auto getInputCoord = [&](int64_t offsetH, int64_t offsetW) {
+        const auto outCoord =
+                Shape({outputTileShape[Dims4D::Act::N], outputTileShape[Dims4D::Act::C], offsetH, offsetW});
+        return backInferInputCoord(outCoord, inputShape);
+    };
+
+    const auto offsetInOutputMinH = getMinPoint(shifts[SE_ROLL_SPATIAL_H], outputTileOffsetH, outputTileOffsetEndH);
+    const auto offsetInOutputMinW = getMinPoint(shifts[SE_ROLL_SPATIAL_W], outputTileOffsetW, outputTileOffsetEndW);
+    const auto minInputCoord = getInputCoord(offsetInOutputMinH, offsetInOutputMinW);
+
+    const auto offsetInOutputMaxH = getMaxPoint(shifts[SE_ROLL_SPATIAL_H], outputTileOffsetH, outputTileOffsetEndH);
+    const auto offsetInOutputMaxW = getMaxPoint(shifts[SE_ROLL_SPATIAL_W], outputTileOffsetW, outputTileOffsetEndW);
+    const auto maxInputCoord = getInputCoord(offsetInOutputMaxH, offsetInOutputMaxW);
+
+    VPUX_THROW_WHEN(maxInputCoord[Dims4D::Act::H] < minInputCoord[Dims4D::Act::H] ||
+                            maxInputCoord[Dims4D::Act::W] < minInputCoord[Dims4D::Act::W],
+                    "illegal min/max values");
+
+    inputTileOffset = Shape({outputTileOffset[Dims4D::Act::N], outputTileOffset[Dims4D::Act::C],
+                             minInputCoord[Dims4D::Act::H], minInputCoord[Dims4D::Act::W]});
+
+    inputTileShape = Shape({outputTileShape[Dims4D::Act::N], outputTileShape[Dims4D::Act::C],
+                            maxInputCoord[Dims4D::Act::H] - minInputCoord[Dims4D::Act::H] + 1,
+                            maxInputCoord[Dims4D::Act::W] - minInputCoord[Dims4D::Act::W] + 1});
+
+    const auto axes = parseIntArrayAttr<int64_t>(getAxes());
+    const auto getNewShift = [&](int64_t dim) -> int64_t {
+        const auto offset = outputTileOffset[Dim(axes[dim])];
+        if (offset >= shifts[dim]) {
+            return 0;
+        } else {
+            return shifts[dim] - offset;
+        }
+    };
+
+    const auto newShifts = Shape{getNewShift(SE_ROLL_SPATIAL_H), getNewShift(SE_ROLL_SPATIAL_W)};
+
+    auto ctx = getContext();
+    return VPU::SERollAttr::get(ctx, getIntArrayAttr(ctx, newShifts), getAxes(),
+                                getIntArrayAttr(ctx, SmallVector<int64_t>(outputTileShape.size(), 0)),
+                                getIntArrayAttr(ctx, outputTileShape.raw()))
+            .cast<VPU::SEAttr>();
+}
+
+std::vector<int32_t> VPU::SERollAttr::computeSEOffsets(ShapeRef dataShape, StridesRef /*dataStrides*/, Byte elemSize,
+                                                       int64_t seSize) const {
+    const auto outputShape = inferOutputShape(dataShape);
+    return computeSpatialSEPtrs(getContext(), dataShape, outputShape, elemSize, seSize, getOffsets(),
+                                [&](ShapeRef outputCoord, ShapeRef inputShape) -> Shape {
+                                    return backInferInputCoord(outputCoord, inputShape);
+                                });
+}
+
+std::optional<VPU::SETileInfo> VPU::SERollAttr::getTileInfo() const {
     return VPU::SETileInfo{getOffsets(), getSizes()};
 }

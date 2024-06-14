@@ -4,7 +4,8 @@
 //
 
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops_interfaces.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/dialect.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops_interfaces.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 #include "vpux/utils/core/array_ref.hpp"
 #include "vpux/utils/core/func_ref.hpp"
@@ -17,23 +18,22 @@
 
 namespace vpux {
 
-//
-// BufferizableOpInterfaceExternalModelBase
-//
-
+// VPU-specific BufferizableOpInterface external model base
 template <typename ConcreteModel, typename ConcreteOp>
 class BufferizableOpInterfaceExternalModelBase :
         public mlir::bufferization::BufferizableOpInterface::ExternalModel<ConcreteModel, ConcreteOp> {
 public:
-    bool bufferizesToMemoryRead(mlir::Operation*, mlir::OpOperand&, const mlir::bufferization::AnalysisState&) const {
-        return true;
+    bool bufferizesToMemoryRead(mlir::Operation* op, mlir::OpOperand& opOperand,
+                                const mlir::bufferization::AnalysisState& state) const {
+        return static_cast<const ConcreteModel*>(this)->bufferizesToMemoryReadImpl(downcast(op), opOperand, state);
     }
-    bool bufferizesToMemoryWrite(mlir::Operation*, mlir::OpOperand&, const mlir::bufferization::AnalysisState&) const {
-        return true;
+    bool bufferizesToMemoryWrite(mlir::Operation* op, mlir::OpOperand& opOperand,
+                                 const mlir::bufferization::AnalysisState& state) const {
+        return static_cast<const ConcreteModel*>(this)->bufferizesToMemoryWriteImpl(downcast(op), opOperand, state);
     }
-    mlir::bufferization::AliasingOpResultList getAliasingOpResults(mlir::Operation*, mlir::OpOperand&,
-                                                                   const mlir::bufferization::AnalysisState&) const {
-        return {};
+    mlir::bufferization::AliasingOpResultList getAliasingOpResults(
+            mlir::Operation* op, mlir::OpOperand& opOperand, const mlir::bufferization::AnalysisState& state) const {
+        return static_cast<const ConcreteModel*>(this)->getAliasingOpResultsImpl(downcast(op), opOperand, state);
     }
 
     // Default BufferizableOpInterface::bufferize() implementation used to set
@@ -41,83 +41,135 @@ public:
     // bufferizeImpl()
     mlir::LogicalResult bufferize(mlir::Operation* op, mlir::RewriterBase& rewriter,
                                   const mlir::bufferization::BufferizationOptions& options) const {
-        auto bufferizedOperands = vpux::bufferizeOperands(rewriter, op->getOperands(), options);
+        auto bufferizedOperands = vpux::bufferizeOperands(rewriter, op->getOperands());
+        auto adaptor = typename ConcreteOp::Adaptor(bufferizedOperands, op->getAttrDictionary(),
+                                                    op->getPropertiesStorage(), op->getRegions());
+        return static_cast<const ConcreteModel*>(this)->bufferizeImpl(downcast(op), rewriter, options, adaptor);
+    }
 
-        using BufferizeImplSignature = mlir::LogicalResult (ConcreteModel::*)(
-                ConcreteOp, mlir::RewriterBase&, const mlir::bufferization::BufferizationOptions&,
-                mlir::ArrayRef<mlir::Value> /* bufferized operands */) const;
-        constexpr bool concreteModelHasValidBufferizeImplSignature =
-                std::is_same<decltype(&ConcreteModel::bufferizeImpl), BufferizeImplSignature>::value;
-        static_assert(concreteModelHasValidBufferizeImplSignature, "ConcreteModel has wrong bufferizeImpl() signature");
+protected:
+    // Default implementations if not overridden by ConcreteModel
+    bool bufferizesToMemoryReadImpl(ConcreteOp, mlir::OpOperand&, const mlir::bufferization::AnalysisState&) const {
+        return true;
+    }
+    bool bufferizesToMemoryWriteImpl(ConcreteOp, mlir::OpOperand&, const mlir::bufferization::AnalysisState&) const {
+        return true;
+    }
+    mlir::bufferization::AliasingOpResultList getAliasingOpResultsImpl(
+            ConcreteOp, mlir::OpOperand&, const mlir::bufferization::AnalysisState&) const {
+        return {};
+    }
 
+private:
+    // Utility method for casting mlir::Operation* to ConcreteOp
+    ConcreteOp downcast(mlir::Operation* op) const {
         VPUX_THROW_UNLESS(mlir::isa<ConcreteOp>(*op), "Operation {0} cannot be converted to ConcreteOp", op->getName());
-        auto concreteOp = mlir::cast<ConcreteOp>(*op);
-        return static_cast<const ConcreteModel*>(this)->bufferizeImpl(concreteOp, rewriter, options,
-                                                                      bufferizedOperands);
+        return mlir::cast<ConcreteOp>(*op);
     }
 };
 
 //
-// registerSoftwareLayerBufferizableOpInterfaces
+// BufferizableOpInterfaces registers
 //
 
 void registerSoftwareLayerBufferizableOpInterfaces(mlir::DialectRegistry& registry);
-
 void registerVpuNceBufferizableOpInterfaces(mlir::DialectRegistry& registry);
-
-//
-// registerFuncAndReturnBufferizableOpInterfaces
-//
-
 void registerFuncAndReturnBufferizableOpInterfaces(mlir::DialectRegistry& registry);
+void registerVPUBufferizableOpInterfaces(mlir::DialectRegistry& registry);
+void registerNCEClusterTilingBufferizableOpInterfaces(mlir::DialectRegistry& registry);
+void registerConstDeclareBufferizableOpInterfaces(mlir::DialectRegistry& registry);
 
 //
-// Note: The following declarations are jointly used by dialect conversion and one shot bufferization which
-// will be removed from this header file after the implementation of one shot bufferization.
-// TODO: E#102424
+// bufferize vpu ops functions
 //
 
-mlir::LogicalResult bufferizeSoftwareLayer(mlir::RewriterBase& rewriter, mlir::ModuleOp module, mlir::Operation* op,
-                                           ArrayRef<mlir::Value> newOperands,
-                                           const std::optional<mlir::bufferization::BufferizationOptions>& options,
-                                           std::optional<std::reference_wrapper<mlir::TypeConverter>> typeConverter,
-                                           Logger log);
-mlir::LogicalResult bufferizeNceClusterTilingSoftwareLayer(
-        mlir::RewriterBase& rewriter, mlir::ModuleOp module, mlir::Operation* op, ArrayRef<mlir::Value> newOperands,
-        const std::optional<mlir::bufferization::BufferizationOptions>& options,
-        std::optional<std::reference_wrapper<mlir::TypeConverter>> typeConverter, Logger log);
+mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::CopyOp origOp, VPU::CopyOp::Adaptor newArgs,
+                                mlir::RewriterBase& rewriter);
+mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::ExpandOp origOp, VPU::ExpandOp::Adaptor newArgs,
+                                mlir::RewriterBase& rewriter);
+mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::ConvertOp origOp, VPU::ConvertOp::Adaptor newArgs,
+                                mlir::RewriterBase& rewriter);
+mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::StridedSliceOp origOp,
+                                VPU::StridedSliceOp::Adaptor newArgs, mlir::RewriterBase& rewriter);
+mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::SliceOp origOp, VPU::SliceOp::Adaptor newArgs,
+                                mlir::RewriterBase& rewriter);
+mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::SplitOp origOp, VPU::SplitOp::Adaptor newArgs,
+                                mlir::RewriterBase& rewriter);
+mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::PermuteCastOp origOp, VPU::PermuteCastOp::Adaptor newArgs,
+                                mlir::RewriterBase& rewriter);
+mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::QuantizeCastOp origOp,
+                                VPU::QuantizeCastOp::Adaptor newArgs, mlir::RewriterBase& rewriter);
+mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::DistributedCastOp origOp,
+                                VPU::DistributedCastOp::Adaptor newArgs, mlir::RewriterBase& rewriter);
+mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::M2ITaskOp origOp, VPU::M2ITaskOp::Adaptor newArgs,
+                                mlir::RewriterBase& rewriter);
+mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::StubOp origOp, VPU::StubOp::Adaptor newArgs,
+                                mlir::RewriterBase& rewriter);
+mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::GroupSparseTensorOp origOp,
+                                VPU::GroupSparseTensorOp::Adaptor newArgs, mlir::RewriterBase& rewriter);
+mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::StorageElementTableOp origOp,
+                                VPU::StorageElementTableOp::Adaptor newArgs, mlir::RewriterBase& rewriter);
+mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::ShapeCastOp origOp, VPU::ShapeCastOp::Adaptor newArgs,
+                                mlir::RewriterBase& rewriter);
+mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::LayoutCastOp origOp, VPU::LayoutCastOp::Adaptor newArgs,
+                                mlir::RewriterBase& rewriter);
+mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::WorkloadCastOp origOp,
+                                VPU::WorkloadCastOp::Adaptor newArgs, mlir::RewriterBase& rewriter);
+mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::UpsamplingOp origOp, VPU::UpsamplingOp::Adaptor newArgs,
+                                mlir::RewriterBase& rewriter);
+mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::ConcatOp origOp, VPU::ConcatOp::Adaptor newArgs,
+                                mlir::RewriterBase& rewriter);
+mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::GatherDMAOp origOp, VPU::GatherDMAOp::Adaptor newArgs,
+                                mlir::RewriterBase& rewriter);
+template <typename ConcreteOp>
+mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, ConcreteOp origOp, typename ConcreteOp::Adaptor newArgs,
+                                mlir::RewriterBase& rewriter);
 
 //
-// shared functionality from convert-vpu-nce-to-vpuip
+// bufferize nce ops functions
 //
 
-using AllocateBuffersFunc = FuncRef<SmallVector<mlir::Value>(const Logger& log, mlir::Location, mlir::OpBuilder&,
-                                                             mlir::ValueRange, bool individualBuffers)>;
-using ReplaceOpFunc = FuncRef<void(mlir::RewriterBase&, mlir::Operation*, mlir::ValueRange)>;
+mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::NCEConvolutionOp origOp,
+                                VPU::NCEConvolutionOp::Adaptor newArgs, mlir::RewriterBase& rewriter);
+mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::NCEMaxPoolOp origOp, VPU::NCEMaxPoolOp::Adaptor newArgs,
+                                mlir::RewriterBase& rewriter);
+mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::NCEAveragePoolOp origOp,
+                                VPU::NCEAveragePoolOp::Adaptor newArgs, mlir::RewriterBase& rewriter);
+mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::NCEDepthConvolutionOp origOp,
+                                VPU::NCEDepthConvolutionOp::Adaptor newArgs, mlir::RewriterBase& rewriter);
+mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::NCEInterpolateOp origOp,
+                                VPU::NCEInterpolateOp::Adaptor newArgs, mlir::RewriterBase& rewriter);
+mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::NCEEltwiseOp origOp, VPU::NCEEltwiseOp::Adaptor newArgs,
+                                mlir::RewriterBase& rewriter);
+mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::NCECompressConvolutionOp origOp,
+                                VPU::NCECompressConvolutionOp::Adaptor newArgs, mlir::RewriterBase& rewriter);
+mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::NCEPermuteOp origOp, VPU::NCEPermuteOp::Adaptor newArgs,
+                                mlir::RewriterBase& rewriter);
 
-mlir::LogicalResult bufferize(const Logger& log, mlir::MLIRContext* ctx, VPU::NCEConvolutionOp origOp,
-                              VPU::NCEConvolutionOp::Adaptor newArgs, mlir::RewriterBase& rewriter,
-                              AllocateBuffersFunc alloc, ReplaceOpFunc replaceOp);
-mlir::LogicalResult bufferize(const Logger& log, mlir::MLIRContext* ctx, VPU::NCEMaxPoolOp origOp,
-                              VPU::NCEMaxPoolOp::Adaptor newArgs, mlir::RewriterBase& rewriter,
-                              AllocateBuffersFunc alloc, ReplaceOpFunc replaceOp);
-mlir::LogicalResult bufferize(const Logger& log, mlir::MLIRContext* ctx, VPU::NCEAveragePoolOp origOp,
-                              VPU::NCEAveragePoolOp::Adaptor newArgs, mlir::RewriterBase& rewriter,
-                              AllocateBuffersFunc alloc, ReplaceOpFunc replaceOp);
-mlir::LogicalResult bufferize(const Logger& log, mlir::MLIRContext* ctx, VPU::NCEDepthConvolutionOp origOp,
-                              VPU::NCEDepthConvolutionOp::Adaptor newArgs, mlir::RewriterBase& rewriter,
-                              AllocateBuffersFunc alloc, ReplaceOpFunc replaceOp);
-mlir::LogicalResult bufferize(const Logger& log, mlir::MLIRContext* ctx, VPU::NCEInterpolateOp origOp,
-                              VPU::NCEInterpolateOp::Adaptor newArgs, mlir::RewriterBase& rewriter,
-                              AllocateBuffersFunc alloc, ReplaceOpFunc replaceOp);
-mlir::LogicalResult bufferize(const Logger& log, mlir::MLIRContext* ctx, VPU::NCEEltwiseOp origOp,
-                              VPU::NCEEltwiseOp::Adaptor newArgs, mlir::RewriterBase& rewriter,
-                              AllocateBuffersFunc alloc, ReplaceOpFunc replaceOp);
-mlir::LogicalResult bufferize(const Logger& log, mlir::MLIRContext* ctx, VPU::NCEPermuteQuantizeOp origOp,
-                              VPU::NCEPermuteQuantizeOp::Adaptor newArgs, mlir::RewriterBase& rewriter,
-                              AllocateBuffersFunc alloc, ReplaceOpFunc replaceOp);
-mlir::LogicalResult bufferize(const Logger& log, mlir::MLIRContext* ctx, VPU::NCECompressConvolutionOp origOp,
-                              VPU::NCECompressConvolutionOp::Adaptor newArgs, mlir::RewriterBase& rewriter,
-                              AllocateBuffersFunc alloc, ReplaceOpFunc replaceOp);
+//
+// bufferize const declare op function
+//
+
+mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, Const::DeclareOp origOp, Const::DeclareOp::Adaptor newArgs,
+                                mlir::RewriterBase& rewriter);
+
+//
+// bufferize nce cluster tiling op function
+//
+
+mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::NCEClusterTilingOp origOp,
+                                VPU::NCEClusterTilingOp::Adaptor newArgs, mlir::RewriterBase& rewriter);
+
+// generic VPU-specific one-shot bufferization model
+template <typename ConcreteOp>
+struct VpuGenericOneShotBufferizeModel :
+        public BufferizableOpInterfaceExternalModelBase<VpuGenericOneShotBufferizeModel<ConcreteOp>, ConcreteOp> {
+    mlir::LogicalResult bufferizeImpl(ConcreteOp op, mlir::RewriterBase& rewriter,
+                                      const mlir::bufferization::BufferizationOptions&,
+                                      typename ConcreteOp::Adaptor opAdaptor) const {
+        // call the actual bufferization function
+        return ::vpux::bufferizeOp(op.getContext(), op, opAdaptor, rewriter);
+    }
+};
 
 }  // namespace vpux

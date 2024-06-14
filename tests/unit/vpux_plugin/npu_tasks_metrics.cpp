@@ -1,12 +1,15 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation
 // SPDX-License-Identifier: Apache 2.0
 //
 
-#include <gtest/gtest.h>
-#include <iostream>
-#include "vpux/utils/IE/profiling.hpp"
 #include "vpux/utils/core/logger.hpp"
+#include "vpux/utils/profiling/reports/stats.hpp"
+#include "vpux/utils/profiling/reports/tasklist.hpp"
+
+#include <gtest/gtest.h>
+
+#include <iostream>
 
 using MetricsUnitTests = ::testing::Test;
 using namespace vpux::profiling;
@@ -27,10 +30,10 @@ TasksDurations testTaskDurations(TaskList testTasks, TaskList refTasks) {
     TaskList reportedTasks(testTasks);
     reportedTasks.append(refTasks);
 
-    TaskTrack track1;
+    details::TaskTrack track1;
     track1.insert(testTasks).coalesce();
 
-    TaskTrack track2;
+    details::TaskTrack track2;
     track2.insert(refTasks).coalesce();
 
     TasksDurations stats;
@@ -218,7 +221,7 @@ TEST_F(MetricsUnitTests, TasksDistributionStats_testEmpty) {
  */
 TEST_F(MetricsUnitTests, TasksDistributionStats_testTaskTrackWorkloads) {
     TaskList testTasks({makeTask(3, 8), makeTask(10, 15)});
-    TaskTrack track;
+    details::TaskTrack track;
     auto totalDuration = track.insert(testTasks).getSumOfDurations();
     EXPECT_EQ(totalDuration, 20);
     totalDuration = track.coalesce().getSumOfDurations();

@@ -146,12 +146,13 @@ bool IE::isSymmetricQuantType(mlir::quant::QuantizedType type) {
 //
 
 bool IE::arch37xx::isMixPrecisionSupported(mlir::Operation* origOp, const bool isPReLUSupported, Logger log) {
-    if (!mlir::isa<IE::ConvolutionOp, IE::GroupConvolutionOp, IE::AddOp, IE::AvgPoolOp>(origOp)) {
+    if (!mlir::isa<IE::ConvolutionOp, IE::GroupConvolutionOp, IE::AddOp, IE::AvgPoolOp, IE::TransposedConvolutionOp>(
+                origOp)) {
         return false;
     }
 
     // Check that the kernel size are not exceding the NCE HW limits
-    if (VPUIP::NCEInvariant::verifyKernel(origOp, log).failed()) {
+    if (VPU::NCEInvariant::verifyKernel(origOp, log).failed()) {
         return false;
     }
 
@@ -226,4 +227,39 @@ Const::DeclareOp vpux::IE::createFQConst(mlir::MLIRContext* ctx, mlir::Location 
 Const::details::ContentRange<float> vpux::IE::getConst(Const::DeclareOp declOp) {
     const auto content = declOp.getContentAttr().fold();
     return content.getValues<float>();
+}
+
+bool vpux::IE::checkRescaledQuantApproximationForConvBasedOp(mlir::Operation* op) {
+    if (!mlir::isa<IE::ConvolutionOp, IE::GroupConvolutionOp, IE::TransposedConvolutionOp>(op)) {
+        return true;
+    }
+
+    auto inElemType = op->getOperand(0).getType().cast<NDTypeInterface>().getElementType();
+    auto outElemType = op->getResult(0).getType().cast<NDTypeInterface>().getElementType();
+    auto weightsType = op->getOperand(1).getType().cast<NDTypeInterface>().getElementType();
+
+    auto inQuantScale = inElemType.isa<mlir::quant::QuantizedType>() ? extractScalesAndZeroPoints(inElemType).first
+                                                                     : SmallVector<double>{1.0};
+    auto outQuantScale = outElemType.isa<mlir::quant::QuantizedType>() ? extractScalesAndZeroPoints(outElemType).first
+                                                                       : SmallVector<double>{1.0};
+    auto weightsQuantScales = exractWeightsScales(weightsType);
+
+    const auto OC = getShape(op->getOperand(1))[Dims4D::Filter::OC];
+    broadcast(inQuantScale, OC);
+    broadcast(outQuantScale, OC);
+    broadcast(weightsQuantScales, OC);
+
+    auto arch = VPU::getArch(op);
+    for (int64_t i = 0; i < OC; i++) {
+        uint16_t mult = 0;
+        uint8_t shift = 0;
+        int8_t postShift = 0;
+        double rescale = (weightsQuantScales[i] * inQuantScale[i]) / outQuantScale[i];
+        std::tie(mult, shift, postShift) = approximate<decltype(mult)>(15, rescale);
+        if (postShift != 0 && arch != VPU::ArchKind::NPU30XX) {
+            return false;
+        }
+    }
+
+    return true;
 }

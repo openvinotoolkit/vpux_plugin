@@ -1,6 +1,6 @@
 //
-// Copyright (C) 2022 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include <signal.h>
@@ -9,9 +9,9 @@
 #include <sstream>
 #include <vpux/utils/core/logger.hpp>
 #include "gtest/gtest.h"
+#include "npu_private_properties.hpp"
 #include "vpu_test_report.hpp"
 #include "vpu_test_tool.hpp"
-#include "vpux/properties.hpp"
 #include "vpux/utils/IE/config.hpp"
 
 namespace testing {
@@ -57,9 +57,9 @@ int main(int argc, char** argv, char** envp) {
         std::string backend{noFetch}, arch{noFetch}, full{noFetch};
         try {
             LayerTestsUtils::VpuTestTool kmbTestTool(LayerTestsUtils::VpuTestEnvConfig::getInstance());
-            backend = kmbTestTool.getDeviceMetric(ov::intel_vpux::backend_name.name());
-            arch = kmbTestTool.getDeviceMetric(METRIC_KEY(DEVICE_ARCHITECTURE));
-            full = kmbTestTool.getDeviceMetric(METRIC_KEY(FULL_DEVICE_NAME));
+            backend = kmbTestTool.getDeviceMetric(ov::intel_npu::backend_name.name());
+            arch = kmbTestTool.getDeviceMetric(ov::device::architecture.name());
+            full = kmbTestTool.getDeviceMetric(ov::device::full_name.name());
         } catch (const std::exception& e) {
             std::cerr << "Exception while trying to determine device characteristics: " << e.what() << std::endl;
         }
@@ -75,8 +75,11 @@ int main(int argc, char** argv, char** envp) {
     }
 
     auto& log = vpux::Logger::global();
-    auto& level = LayerTestsUtils::VpuTestEnvConfig::getInstance().IE_NPU_TESTS_LOG_LEVEL;
-    log.setLevel(level.empty() ? vpux::LogLevel::Info : vpux::OptionParser<vpux::LogLevel>::parse(level.c_str()));
+    auto level = LayerTestsUtils::VpuTestEnvConfig::getInstance().IE_NPU_TESTS_LOG_LEVEL;
+    vpux::LogLevel logLevel = level.empty()
+                                      ? vpux::LogLevel::Info
+                                      : vpux::getLogLevel(vpux::OptionParser<ov::log::Level>::parse(level.c_str()));
+    log.setLevel(logLevel);
 
     return RUN_ALL_TESTS();
 }

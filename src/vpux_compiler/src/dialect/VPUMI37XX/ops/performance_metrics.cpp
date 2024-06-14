@@ -5,7 +5,7 @@
 
 #include "vpux/compiler/dialect/VPU/utils/performance_metrics.hpp"
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
-#include "vpux/compiler/dialect/VPUIP/utils.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
 #include "vpux/compiler/dialect/VPUMI37XX/ops.hpp"
 
 #include <npu_37xx_nnrt.hpp>
@@ -20,8 +20,8 @@ using namespace npu37xx;
 void vpux::VPUMI37XX::PerformanceMetricsOp::serialize(elf::writer::BinaryDataSection<uint8_t>& binDataSection) {
     nn_public::VpuPerformanceMetrics perf{};
 
-    perf.freq_base = VPU::getFreqBase();
-    perf.freq_step = VPU::getFreqStep();
+    perf.freq_base = VPU::getFreqBase(VPU::ArchKind::NPU37XX);
+    perf.freq_step = VPU::getFreqStep(VPU::ArchKind::NPU37XX);
     perf.bw_base = VPU::getBWBase();
     perf.bw_step = VPU::getBWStep();
 

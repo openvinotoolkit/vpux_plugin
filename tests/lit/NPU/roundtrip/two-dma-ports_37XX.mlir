@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -109,34 +109,34 @@ module @mainModule {
 //CHECK-NEXT: ELFNPU37XX.PutOpInSection %[[VAL66]] : !ELFNPU37XX.Symbol
 
 //CHECK: %[[rltDmaNetIn0:.*]] = ELFNPU37XX.CreateRelocationSection secName(".rlt.DMA_NetInput0") sourceSymbolTableSection(%[[symTabSecIn]]) targetSection(%[[VAL7]]) secFlags("SHF_INFO_LINK|VPU_SHF_JIT|VPU_SHF_USERINPUT") -> !ELFNPU37XX.Section {
-//CHECK: ELFNPU37XX.RelocImmOffset offset(16) <R_VPU_64> %[[symIn0]] 0
-//CHECK: ELFNPU37XX.RelocImmOffset offset(144) <R_VPU_64> %[[symIn0]] 0
+//CHECK: ELFNPU37XX.Reloc offset(16) <R_VPU_64> %[[symIn0]] 0
+//CHECK: ELFNPU37XX.Reloc offset(144) <R_VPU_64> %[[symIn0]] 0
 
 //CHECK: %[[rltDmaNetOut0:.*]] = ELFNPU37XX.CreateRelocationSection secName(".rlt.DMA_NetOutput0") sourceSymbolTableSection(%[[symTabSecOut]]) targetSection(%[[VAL7]]) secFlags("SHF_INFO_LINK|VPU_SHF_JIT|VPU_SHF_USEROUTPUT") -> !ELFNPU37XX.Section {
-//CHECK: ELFNPU37XX.RelocImmOffset offset(280) <R_VPU_64> %[[symOut0]] 0
+//CHECK: ELFNPU37XX.Reloc offset(280) <R_VPU_64> %[[symOut0]] 0
 
 //CHECK: %[[rltDmaTasks0:.*]] = ELFNPU37XX.CreateRelocationSection secName(".rlt.text.dmaTasks0") sourceSymbolTableSection(%[[VAL67]]) targetSection(%[[VAL7]]) secFlags(SHF_INFO_LINK) -> !ELFNPU37XX.Section {
-//CHECK: ELFNPU37XX.RelocImmOffset offset(24) <R_VPU_64> %[[VAL60]] 0
-//CHECK: ELFNPU37XX.RelocImmOffset offset(0) <R_VPU_32_RTM> %[[VAL63]] 128
-//CHECK: ELFNPU37XX.RelocImmOffset offset(152) <R_VPU_64> %[[VAL60]] 0
-//CHECK: ELFNPU37XX.RelocImmOffset offset(128) <R_VPU_32_RTM> %[[VAL63]] 128
-//CHECK: ELFNPU37XX.RelocImmOffset offset(272) <R_VPU_64> %[[VAL60]] 0
+//CHECK: ELFNPU37XX.Reloc offset(24) <R_VPU_64> %[[VAL60]] 0
+//CHECK: ELFNPU37XX.Reloc offset(0) <R_VPU_32_RTM> %[[VAL63]] 128
+//CHECK: ELFNPU37XX.Reloc offset(152) <R_VPU_64> %[[VAL60]] 0
+//CHECK: ELFNPU37XX.Reloc offset(128) <R_VPU_32_RTM> %[[VAL63]] 128
+//CHECK: ELFNPU37XX.Reloc offset(272) <R_VPU_64> %[[VAL60]] 0
 
 //CHECK: %[[rltDmaNetIn1:.*]] = ELFNPU37XX.CreateRelocationSection secName(".rlt.DMA_NetInput1") sourceSymbolTableSection(%[[symTabSecIn]]) targetSection(%[[VAL12]]) secFlags("SHF_INFO_LINK|VPU_SHF_JIT|VPU_SHF_USERINPUT") -> !ELFNPU37XX.Section {
-//CHECK: ELFNPU37XX.RelocImmOffset offset(16) <R_VPU_64> %[[symIn0]] 0
-//CHECK: ELFNPU37XX.RelocImmOffset offset(144) <R_VPU_64> %[[symIn0]] 0
+//CHECK: ELFNPU37XX.Reloc offset(16) <R_VPU_64> %[[symIn0]] 0
+//CHECK: ELFNPU37XX.Reloc offset(144) <R_VPU_64> %[[symIn0]] 0
 
 //CHECK: %[[rltDmaNetOut1:.*]] = ELFNPU37XX.CreateRelocationSection secName(".rlt.DMA_NetOutput1") sourceSymbolTableSection(%[[symTabSecOut]]) targetSection(%[[VAL12]]) secFlags("SHF_INFO_LINK|VPU_SHF_JIT|VPU_SHF_USEROUTPUT") -> !ELFNPU37XX.Section {
-//CHECK: ELFNPU37XX.RelocImmOffset offset(280) <R_VPU_64> %[[symOut1]] 0
+//CHECK: ELFNPU37XX.Reloc offset(280) <R_VPU_64> %[[symOut1]] 0
 
 //CHECK: %[[rltDmaTasks1:.*]] = ELFNPU37XX.CreateRelocationSection secName(".rlt.text.dmaTasks1") sourceSymbolTableSection(%[[VAL67]]) targetSection(%[[VAL12]]) secFlags(SHF_INFO_LINK) -> !ELFNPU37XX.Section {
-//CHECK: ELFNPU37XX.RelocImmOffset offset(24) <R_VPU_64> %[[VAL60]] 2097152
-//CHECK: ELFNPU37XX.RelocImmOffset offset(0) <R_VPU_32_RTM> %[[VAL64]] 128
-//CHECK: ELFNPU37XX.RelocImmOffset offset(152) <R_VPU_64> %[[VAL60]] 2097152
-//CHECK: ELFNPU37XX.RelocImmOffset offset(128) <R_VPU_32_RTM> %[[VAL64]] 128
-//CHECK: ELFNPU37XX.RelocImmOffset offset(272) <R_VPU_64> %[[VAL60]] 2097152
+//CHECK: ELFNPU37XX.Reloc offset(24) <R_VPU_64> %[[VAL60]] 2097152
+//CHECK: ELFNPU37XX.Reloc offset(0) <R_VPU_32_RTM> %[[VAL64]] 128
+//CHECK: ELFNPU37XX.Reloc offset(152) <R_VPU_64> %[[VAL60]] 2097152
+//CHECK: ELFNPU37XX.Reloc offset(128) <R_VPU_32_RTM> %[[VAL64]] 128
+//CHECK: ELFNPU37XX.Reloc offset(272) <R_VPU_64> %[[VAL60]] 2097152
 
 //CHECK: %[[rltMi:.*]] = ELFNPU37XX.CreateRelocationSection secName(".rlt.text.MappedInference") sourceSymbolTableSection(%[[symTabTasks]]) targetSection(%[[VAL14]]) secFlags(SHF_INFO_LINK) -> !ELFNPU37XX.Section {
-//CHECK: ELFNPU37XX.RelocImmOffset offset(72) <R_VPU_64> %[[symDmaSec0]] 0
-//CHECK: ELFNPU37XX.RelocImmOffset offset(112) <R_VPU_64> %[[symDmaSec1]] 0
-//CHECK: ELFNPU37XX.RelocImmOffset offset(312) <R_VPU_64> %[[symBarSec]] 0
+//CHECK: ELFNPU37XX.Reloc offset(72) <R_VPU_64> %[[symDmaSec0]] 0
+//CHECK: ELFNPU37XX.Reloc offset(112) <R_VPU_64> %[[symDmaSec1]] 0
+//CHECK: ELFNPU37XX.Reloc offset(312) <R_VPU_64> %[[symBarSec]] 0

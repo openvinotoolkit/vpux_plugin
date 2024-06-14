@@ -5,12 +5,12 @@
 
 #include "vpux/compiler/dialect/VPUIP/graph-schema/utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/performance_metrics.hpp"
-#include "vpux/compiler/dialect/VPUIP/utils.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
 
 #include "vpux/compiler/core/attributes/shape.hpp"
 #include "vpux/compiler/core/layers.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
-#include "vpux/compiler/dialect/VPURT/attributes.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/attributes.hpp"
 
 using namespace vpux;
 
@@ -39,10 +39,12 @@ const EnumMap<ov::element::Type_t, MVCNN::OVNodeType> VPUIP::mapElementType = {
 
 MVCNN::TargetDevice VPUIP::mapTargetDevice(VPU::ArchKind kind) {
     switch (kind) {
-    case VPU::ArchKind::VPUX30XX:
+    case VPU::ArchKind::NPU30XX:
         return MVCNN::TargetDevice::TargetDevice_VPUX30XX;
-    case VPU::ArchKind::VPUX37XX:
+    case VPU::ArchKind::NPU37XX:
         return MVCNN::TargetDevice::TargetDevice_VPUX37XX;
+    case VPU::ArchKind::NPU40XX:
+        return MVCNN::TargetDevice::TargetDevice_VPUX40XX;
     default:
         VPUX_THROW("Unsupported architecture '{0}'", kind);
     }
@@ -50,7 +52,7 @@ MVCNN::TargetDevice VPUIP::mapTargetDevice(VPU::ArchKind kind) {
 
 MVCNN::TargetDeviceRevision VPUIP::mapTargetDeviceRevision(VPU::ArchKind kind) {
     switch (kind) {
-    case VPU::ArchKind::VPUX30XX:
+    case VPU::ArchKind::NPU30XX:
         return MVCNN::TargetDeviceRevision::TargetDeviceRevision_B0;
     default:
         return MVCNN::TargetDeviceRevision::TargetDeviceRevision_NONE;
@@ -59,9 +61,11 @@ MVCNN::TargetDeviceRevision VPUIP::mapTargetDeviceRevision(VPU::ArchKind kind) {
 
 MVCNN::PerfDataMode VPUIP::mapProfilingMode(VPU::ArchKind kind) {
     switch (kind) {
-    case VPU::ArchKind::VPUX30XX:
-    case VPU::ArchKind::VPUX37XX:
+    case VPU::ArchKind::NPU30XX:
+    case VPU::ArchKind::NPU37XX:
         return MVCNN::PerfDataMode_MODE0;
+    case VPU::ArchKind::NPU40XX:
+        return MVCNN::PerfDataMode_MODE3;
     default:
         VPUX_THROW("Unsupported architecture '{0}'", kind);
     }
@@ -245,6 +249,54 @@ MVCNN::PSROIPoolingMode VPUIP::convertVPUXPSROIPoolingModeToMVNCNN(IE::PSROIPool
         return MVCNN::PSROIPoolingMode::PSROIPoolingMode_BILINEAR;
     default:
         VPUX_THROW("Unknown PSROIPoolingMode. Got {0} mode", mode);
+    }
+}
+
+MVCNN::M2IFormat VPUIP::convertM2iColor2MVCNN(VPU::M2iColorFmt fmt) {
+    switch (fmt) {
+    case VPU::M2iColorFmt::PL_YUV444_8:
+        return MVCNN::M2IFormat::M2IFormat_PL_YUV444_8;
+    case VPU::M2iColorFmt::PL_YUV420_8:
+        return MVCNN::M2IFormat::M2IFormat_PL_YUV420_8;
+    case VPU::M2iColorFmt::PL_RGB24:
+        return MVCNN::M2IFormat::M2IFormat_PL_RGB24;
+    case VPU::M2iColorFmt::PL_RGB30:
+        return MVCNN::M2IFormat::M2IFormat_PL_RGB30;
+    case VPU::M2iColorFmt::PL_GRAY8:
+        return MVCNN::M2IFormat::M2IFormat_PL_GRAY8;
+    case VPU::M2iColorFmt::PL_FP16_RGB:
+        return MVCNN::M2IFormat::M2IFormat_PL_FP16_RGB;
+    case VPU::M2iColorFmt::PL_FP16_YUV:
+        return MVCNN::M2IFormat::M2IFormat_PL_FP16_YUV;
+    case VPU::M2iColorFmt::PL_YUV422_8:
+        return MVCNN::M2IFormat::M2IFormat_PL_YUV422_8;
+    case VPU::M2iColorFmt::SP_NV12_8:
+        return MVCNN::M2IFormat::M2IFormat_SP_NV12_8;
+    case VPU::M2iColorFmt::SP_NV12_10:
+        return MVCNN::M2IFormat::M2IFormat_SP_NV12_10;
+    case VPU::M2iColorFmt::SP_P010:
+        return MVCNN::M2IFormat::M2IFormat_SP_P010;
+    case VPU::M2iColorFmt::IL_YUV422_8:
+        return MVCNN::M2IFormat::M2IFormat_IL_YUV422_8;
+    case VPU::M2iColorFmt::IL_RGB8888:
+        return MVCNN::M2IFormat::M2IFormat_IL_RGB8888;
+    case VPU::M2iColorFmt::IL_RGB888:
+        return MVCNN::M2IFormat::M2IFormat_IL_RGB888;
+    case VPU::M2iColorFmt::IL_RGB30:
+        return MVCNN::M2IFormat::M2IFormat_IL_RGB30;
+    default:
+        VPUX_THROW("Unsupported M2I {0} format", fmt);
+    }
+}
+
+MVCNN::M2IInterp VPUIP::convertM2iInterp2MVCNN(VPU::M2iInterp interp) {
+    switch (interp) {
+    case VPU::M2iInterp::NEAREST:
+        return MVCNN::M2IInterp::M2IInterp_NEAREST;
+    case VPU::M2iInterp::BILINEAR:
+        return MVCNN::M2IInterp::M2IInterp_BILINEAR;
+    default:
+        VPUX_THROW("Unsupported M2I {0} interpolation type", interp);
     }
 }
 

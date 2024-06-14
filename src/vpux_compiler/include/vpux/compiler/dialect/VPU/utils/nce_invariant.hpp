@@ -111,6 +111,17 @@ mlir::LogicalResult isSupported(mlir::Operation* op, Logger log = Logger::global
 //
 bool isSmallKernelOptimizationSupported(const VPU::ArchKind arch, mlir::Operation* op);
 
+mlir::LogicalResult verifyKernel(mlir::Location loc, int64_t KY, int64_t KX, int64_t SY, int64_t SX, int64_t padTop,
+                                 int64_t padBottom, int64_t padLeft, int64_t padRight, VPU::ArchKind arch,
+                                 Logger log = Logger::global());
+
+mlir::LogicalResult verifyKernel(mlir::Operation* origOp, Logger log = Logger::global());
+
+mlir::LogicalResult verifyPoolCMX(mlir::Location loc, mlir::ModuleOp module, vpux::NDTypeInterface inputType,
+                                  vpux::NDTypeInterface outputType, mlir::ArrayAttr kernelSize,
+                                  mlir::ArrayAttr kernelStrides, bool hasActivationWindow,
+                                  Logger log = Logger::global());
+
 }  // namespace NCEInvariant
 
 }  // namespace VPU

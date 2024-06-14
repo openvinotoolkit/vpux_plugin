@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022 Intel Corporation
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -14,5 +14,6 @@ constexpr StringLiteral verticalFusion = "verticalFusion";  // only be used for 
 constexpr StringLiteral verticalFusionHash = "verticalFusionHash";
 constexpr StringLiteral layerTypeName = "layerType";
 constexpr StringLiteral updatedVFTiling = "updatedVFTiling";
+constexpr StringLiteral outputPipelining = "outputPipelining";
 
 }  // namespace vpux

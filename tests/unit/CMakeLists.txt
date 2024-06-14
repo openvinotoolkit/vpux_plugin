@@ -1,10 +1,10 @@
 #
 # Copyright (C) 2022 Intel Corporation.
-# SPDX-License-Identifier: Apache 2.0
+# SPDX-License-Identifier: Apache-2.0
 #
 
 if(ENABLE_LTO)
-    ie_enable_lto()
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
 endif()
 
 set(TARGET_NAME "npuUnitTests")
@@ -13,21 +13,25 @@ set(OPTIONAL_UNIT_TESTS_INCLUDES "")
 set(OPTIONAL_UNIT_TESTS_LIBS "")
 set(MANDATORY_UNIT_TESTS_LIBS
     "npu_37xx_firmware_headers"
+    "npu_40xx_firmware_headers"
     "npu_elf"
     "openvino::commonTestUtils"
     "openvino::gmock"
-    "openvino::ov_models"
     "openvino::runtime"
-    "common_tests_helpers"
-    "${VPUX_PLUGIN_STATIC_TARGET}"
     "npu_model_utils"
-    "npu_al"
+    "openvino::npu_al"
     "npu_algo_utils"
     "npu_llvm_utils"
     "npu_ov_utils"
     "npu_profiling_utils"
     "npu_plugin_utils"
+    "openvino::npu_logger_utils"
 )
+
+# Skip tests for plugin targets
+set(ENABLE_DRIVER_COMPILER_ADAPTER OFF)
+set(ENABLE_ZEROAPI_BACKEND OFF)
+list(APPEND EXCLUDED_UNIT_TESTS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vpux_plugin")
 
 if(ENABLE_DRIVER_COMPILER_ADAPTER)
     list(APPEND OPTIONAL_UNIT_TESTS_INCLUDES
@@ -35,12 +39,18 @@ if(ENABLE_DRIVER_COMPILER_ADAPTER)
     )
 
     list(APPEND OPTIONAL_UNIT_TESTS_LIBS
-            npu_driver_compiler_adapter_static
+            npu_driver_compiler_adapter
         )
 else()
     list(APPEND EXCLUDED_UNIT_TESTS_DIR
         "${CMAKE_CURRENT_SOURCE_DIR}/vpux_driver_compiler_adapter"
     )
+endif()
+
+if(ENABLE_ZEROAPI_BACKEND)
+   list(APPEND OPTIONAL_UNIT_TESTS_LIBS
+       ze_loader
+   )
 endif()
 
 if(NOT ENABLE_MLIR_COMPILER)
@@ -55,17 +65,14 @@ else()
     )
 endif()
 
-add_subdirectory(vpux_plugin/test_utils)
 
-addIeTargetTest(
+ov_add_test_target(
     NAME ${TARGET_NAME}
     ROOT ${CMAKE_CURRENT_SOURCE_DIR}
     EXCLUDED_SOURCE_PATHS
         ${EXCLUDED_UNIT_TESTS_DIR}
-        ${CMAKE_CURRENT_SOURCE_DIR}/vpux_plugin/test_utils
     INCLUDES
         ${OPTIONAL_UNIT_TESTS_INCLUDES}
-        "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/include"
         "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/artifacts/vpuip_2"
         "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/src/vpux_translate_utils/include"
         ${CMAKE_CURRENT_SOURCE_DIR}/vpux_compiler
@@ -80,10 +87,8 @@ addIeTargetTest(
 )
 
 set_target_properties(${TARGET_NAME} PROPERTIES FOLDER "tests")
-add_dependencies(${TARGET_NAME} throw_test_backend vpu3700_test_backend no_devices_test_backend)
 
 enable_warnings_as_errors(${TARGET_NAME})
-vpux_enable_clang_format(${TARGET_NAME})
 
 # FIXME: E78489 gtest does not respect this option yet in some parts
 # so we cannot enable it for npuUnitTests

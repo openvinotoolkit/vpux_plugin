@@ -1,4 +1,4 @@
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022 Intel Corporation
 // SPDX-License-Identifier: Apache 2.0
 
 #include <gflags/gflags.h>
@@ -6,7 +6,6 @@
 #include <openvino/opsets/opset3.hpp>
 #include <openvino/pass/manager.hpp>
 #include <openvino/pass/serialize.hpp>
-#include "ie_common.h"
 #include "openvino/core/version.hpp"
 #include "openvino/openvino.hpp"
 
@@ -29,7 +28,7 @@ void parseCommandLine(int argc, char* argv[]) {
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
     if (FLAGS_output.empty() || FLAGS_inputs_size.empty() || FLAGS_outputs_size.empty()) {
-        IE_THROW() << "Not enough parameters. Please check help (--help).";
+        OPENVINO_THROW("Not enough parameters. Please check help (--help).");
     }
 
     std::cout << "Parameters:" << std::endl;
@@ -60,7 +59,7 @@ int main(int argc, char* argv[]) {
         const std::vector<size_t> outputShapes = parseShapes(FLAGS_outputs_size);
 
         if (inputShapes.size() != outputShapes.size()) {
-            IE_THROW() << "Number of inputs must be equal to the number of outputs.";
+            OPENVINO_THROW("Number of inputs must be equal to the number of outputs.");
         }
 
         // Only C layout as input supported
@@ -75,7 +74,7 @@ int main(int argc, char* argv[]) {
 
         for (size_t i = 0; i < outputShapes.size(); ++i) {
             if (outputShapes[i] > inputShapes[i]) {
-                IE_THROW() << "Output size for each pair must be smaller or equal to input.";
+                OPENVINO_THROW("Output size for each pair must be smaller or equal to input.");
             }
 
             auto data = std::make_shared<ov::opset3::Parameter>(elementType, ov::Shape({inputShapes[i]}));

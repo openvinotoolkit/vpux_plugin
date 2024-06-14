@@ -7,6 +7,7 @@
 #define VPUX_COMPILER_DIALECT_VPU_OPS_INTERFACES
 
 include "mlir/IR/OpBase.td"
+include "vpux/compiler/dialect/VPU/attributes.td"
 
 //
 // LayerOpInterface
@@ -53,7 +54,7 @@ def VPU_ClusteredOpInterface : OpInterface<"ClusteredOpInterface"> {
         InterfaceMethod<
                 "Check layer strategy compatibility",
                 "bool", "checkStrategyCompatibility",
-                (ins "VPU::MultiClusterStrategy":$strategy)
+                (ins "VPU::MultiClusterStrategy":$strategy, "size_t":$numTiles)
                 >,
         InterfaceMethod<
                 "Get multi-cluster strategy",
@@ -86,8 +87,7 @@ def VPU_ClusteredOpInterface : OpInterface<"ClusteredOpInterface"> {
                 "vpux::VPU::DistributedTensorAttr", "getExplicitDistributedTensorAttr",
                 (ins "vpux::ShapeRef":$shape, "vpux::VPU::DistributionMode":$distributionMode,
                 "mlir::ArrayAttr":$numTiles, "mlir::IntegerAttr":$numClusters, "mlir::ArrayAttr":$alignment,
-                "mlir::ArrayAttr":$kernel, "vpux::VPU::PaddingAttr":$pad, "mlir::ArrayAttr":$stride,
-                "mlir::UnitAttr":$uniformDistributedSegments)
+                "mlir::UnitAttr":$uniformDistributedSegments, "const vpux::VPU::OverlapDistributionParams&":$overlapParams)
                 >,
 
         InterfaceMethod<
@@ -415,15 +415,6 @@ def VPU_VerticalFusionOpInterface : OpInterface<"VerticalFusionOpInterface"> {
         >,
 
         InterfaceMethod<
-            "Check if operation can be fused as single operation in VF block with next block",
-            "bool", "availableSingleMerge", (ins),
-            [{}],
-            [{
-                return true;
-            }]
-        >,
-
-        InterfaceMethod<
             "Axes which cannot be used when operation is fused",
             "DimArr", "restrictedFusionAxes", (ins),
             [{}],
@@ -477,6 +468,24 @@ def VPU_ViewLikeOpInterface: OpInterface<"ViewLikeOpInterface"> {
 }
 
 //
+// DistributedCastOpInterface
+//
+
+def VPU_DistributedCastOpInterface: OpInterface<"DistributedCastOpInterface"> {
+    let description = "Interface for VPU cast ops which could propagate distributed type";
+
+    let cppNamespace = "vpux::VPU";
+
+    let methods = [
+        InterfaceMethod<
+            "Infer output distributed type from the input type",
+            "mlir::FailureOr<VPU::DistributedTypeInterface>", "inferCastedDistOutput",
+            (ins "VPU::DistributedTensorType":$inDistributedType)
+        >
+    ];
+}
+
+//
 // GroupedViewLikeOpInterface
 //
 
@@ -504,6 +513,15 @@ def VPU_DDRAccessOpInterface: OpInterface<"DDRAccessOpInterface"> {
 }
 
 //
+// DefinedInArch op trait
+//
+
+class DefinedInArch<string arch>
+    : ParamNativeOpTrait<"DefinedInArch", arch>  {
+    let cppNamespace = "vpux::VPU";
+}
+
+//
 // LimitedToArch op trait
 //
 
@@ -527,6 +545,32 @@ def VPU_AlignedWorkloadChannelsOpInterface : OpInterface<"AlignedWorkloadChannel
             "SmallVector<int64_t>", "getSupportedWorkLoadChannels", (ins)
         >
     ];
+}
+
+class VPU_PPETaskOpBase<Dialect dialect, string mnemonic, list<Trait> props = []> : Op<dialect, mnemonic, props> {
+    let summary = "PPE Type";
+
+    let arguments = (ins
+        VPU_PPEModeAttr:$ppe_layer_type,
+
+        OptionalAttr<AnyAttrOf<[IntAttr, F64Attr]>>:$clamp_low,
+        OptionalAttr<AnyAttrOf<[IntAttr, F64Attr]>>:$clamp_high,
+        OptionalAttr<IntAttr>:$lrelu_mult,
+        OptionalAttr<IntAttr>:$lrelu_shift,
+        OptionalAttr<I64ArrayAttr>:$quant_mult,
+        OptionalAttr<I64ArrayAttr>:$quant_shift,
+        OptionalAttr<IntAttr>:$quant_post_shift,
+        OptionalAttr<F64ArrayAttr>:$quant_scale,
+        OptionalAttr<AnyAttrOf<[I64ArrayAttr, F64ArrayAttr]>>:$in1_quant_mult,
+        OptionalAttr<AnyAttrOf<[I64ArrayAttr, F64ArrayAttr]>>:$in2_quant_mult,
+        OptionalAttr<F64Attr>:$fp_prelu_alpha,
+        OptionalAttr<F64Attr>:$ppe_fp_scale,
+        OptionalAttr<F64Attr>:$ppe_fp_bias
+    );
+
+    let assemblyFormat = [{
+        $ppe_layer_type attr-dict
+    }];
 }
 
 #endif

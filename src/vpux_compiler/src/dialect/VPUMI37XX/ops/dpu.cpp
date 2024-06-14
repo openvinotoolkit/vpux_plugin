@@ -6,7 +6,7 @@
 #include <mlir/IR/BuiltinTypes.h>
 
 #include "vpux/compiler/dialect/VPUMI37XX/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 
 #include "vpux/compiler/utils/elf_utils.hpp"
 #include "vpux/utils/core/checked_cast.hpp"
@@ -168,8 +168,8 @@ size_t vpux::VPUMI37XX::DPUInvariantOp::getAlignmentRequirements() {
     return alignof(nn_public::VpuDPUInvariant);
 }
 
-mlir::FailureOr<uint64_t> vpux::VPUMI37XX::DPUInvariantOp::getOffsetOfWithinOperation(mlir::Value /*value*/) {
-    VPUX_THROW("OffsetOf not supported for DPUInvariant");
+size_t vpux::VPUMI37XX::DPUInvariantOp::getOffsetOfWithinOperation(mlir::Value /*value*/) {
+    VPUX_THROW("getOffset is not supported for DPUInvariant");
 }
 
 vpux::ELFNPU37XX::SectionFlagsAttr vpux::VPUMI37XX::DPUInvariantOp::getAccessingProcs() {
@@ -229,12 +229,12 @@ size_t vpux::VPUMI37XX::DPUVariantOp::getAlignmentRequirements() {
     return alignof(nn_public::VpuDPUVariant);
 }
 
-mlir::FailureOr<uint64_t> vpux::VPUMI37XX::DPUVariantOp::getOffsetOfWithinOperation(mlir::Value value) {
+size_t vpux::VPUMI37XX::DPUVariantOp::getOffsetOfWithinOperation(mlir::Value value) {
     if (value == getInvariant()) {
         return offsetof(nn_public::VpuDPUVariant, invariant_);
     }
 
-    return mlir::failure();
+    VPUX_THROW("Provided Value is not linked to the DPUVariant Op or getOffset does not support it");
 }
 
 vpux::ELFNPU37XX::SectionFlagsAttr vpux::VPUMI37XX::DPUVariantOp::getAccessingProcs() {

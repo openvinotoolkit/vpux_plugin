@@ -6,8 +6,8 @@
 #include "vpux/compiler/core/feasible_memory_scheduler.hpp"
 
 #include "vpux/compiler/core/profiling.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/task.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/dma.hpp"
 #include "vpux/compiler/utils/strings.hpp"
@@ -166,12 +166,7 @@ VPUIP::DMATypeOpInterface getDmaTypeOp(mlir::async::ExecuteOp execOp) {
     auto* bodyBlock = execOp.getBody();
 
     for (auto& op : bodyBlock->getOperations()) {
-        auto opToCheck = &op;
-        if (auto nceClustOp = mlir::dyn_cast<VPUIP::NCEClusterTilingOp>(opToCheck)) {
-            opToCheck = nceClustOp.getInnerTaskOp();
-        }
-
-        if (auto dmaOp = mlir::dyn_cast<VPUIP::DMATypeOpInterface>(opToCheck)) {
+        if (auto dmaOp = mlir::dyn_cast<VPUIP::DMATypeOpInterface>(op)) {
             return dmaOp;
         }
     }
@@ -318,7 +313,7 @@ FeasibleMemoryScheduler::QueueAndCycleType FeasibleMemoryScheduler::getCurrentCy
     }
 
     // check if operation cycle begin delayed by dependencies
-    for (const auto& dep : _depsInfo.getOpDeps(opIdx).set_bits()) {
+    for (const auto& dep : _depsInfo.getOpDeps(opIdx)) {
         earliestBeginCycle = std::max(earliestBeginCycle, _opIdxEndCycleMap[dep]);
     }
     return QueueAndCycleType{queueType, std::move(executorInstanceMask), earliestBeginCycle};
@@ -415,7 +410,7 @@ bool FeasibleMemoryScheduler::isDataOp(operationIdxType opIdx) {
     }
 
     // TODO: E93697 extend DataOp scheduling to schedule its dependencies
-    for (const auto& depIdx : _depsInfo.getOpDeps(opIdx).set_bits()) {
+    for (const auto& depIdx : _depsInfo.getOpDeps(opIdx)) {
         if (isDataOp(depIdx)) {
             return false;
         }
@@ -431,16 +426,14 @@ bool FeasibleMemoryScheduler::isDataOp(operationIdxType opIdx) {
     return false;
 }
 
-bool FeasibleMemoryScheduler::isNonComputeChainOp(operationIdxType opIdx) {
-    // Currently only operations in the model which are not related to
-    // processing network inputs are profiling related operations.
-    auto op = _depsInfo.getExecuteOpAtIndex(opIdx);
-    auto curTaskName = stringifyPrimaryLocation(op->getLoc());
-    if (curTaskName.find(PROFILING_CMX_2_DDR_OP_NAME) != std::string::npos) {
-        return true;
+void FeasibleMemoryScheduler::identifyDataOps() {
+    auto opCount = _inDegreeTable.size();
+    _isDataOp.resize(opCount);
+    for (size_t opIdx = 0; opIdx < opCount; ++opIdx) {
+        if (isDataOp(opIdx)) {
+            _isDataOp.set(opIdx);
+        }
     }
-
-    return false;
 }
 
 bool FeasibleMemoryScheduler::freeMemoryResources(const HeapElement& hElement) {
@@ -477,18 +470,13 @@ void FeasibleMemoryScheduler::distributeReadyOps(llvm::ArrayRef<operationIdxType
     _log.trace("Distribute new ready ops");
     _log = _log.nest();
     for (auto& readyOpIdx : readyOps) {
-        if (isDataOp(readyOpIdx)) {
+        if (_isDataOp[readyOpIdx]) {
             VPUX_THROW_UNLESS(_readyDataOps.find(readyOpIdx) == _readyDataOps.end(),
                               "Operation already in the ready data list '{0}'", readyOpIdx);
             _log.nest().trace("Add to ready data ops '{0}'", readyOpIdx);
             _readyDataOps.insert(readyOpIdx);
             const auto newReadyOps = reduceInDegreeOfAdjacentOperations(readyOpIdx);
             distributeReadyOps(newReadyOps);
-        } else if (isNonComputeChainOp(readyOpIdx)) {
-            VPUX_THROW_UNLESS(_nonComputeChainOps.find(readyOpIdx) == _nonComputeChainOps.end(),
-                              "Operation already in non compute chain op list '{0}'", readyOpIdx);
-            _log.nest().trace("Non compute chain op ready '{0}'", readyOpIdx);
-            _nonComputeChainOps.insert(readyOpIdx);
         } else {
             const auto queueType = getQueueType(readyOpIdx);
             if (VPUIP::VPUIPDialect::isComputeExecutorKind(queueType.execKind)) {
@@ -512,7 +500,7 @@ SmallVector<operationIdxType> FeasibleMemoryScheduler::unlockNewReadyOps(const H
         return SmallVector<operationIdxType>{};
     }
     const auto executorType = getExecutorType(hElement.op_);
-    if (!VPUIP::VPUIPDialect::isComputeExecutorKind(executorType) && !isNonComputeChainOp(hElement.op_)) {
+    if (!VPUIP::VPUIPDialect::isComputeExecutorKind(executorType)) {
         // non compute executor kind consumers unlocked during scheduling
         return SmallVector<operationIdxType>{};
     }
@@ -553,7 +541,7 @@ void FeasibleMemoryScheduler::unscheduleAllCompletingOps() {
 SmallVector<operationIdxType> FeasibleMemoryScheduler::reduceInDegreeOfAdjacentOperations(operationIdxType opIdx) {
     SmallVector<operationIdxType> zeroInDegreeOps;
     // reduce in-degree (number of incoming edges) for consumers of ready data ops
-    for (const auto& consumer : _depsInfo.getConsumerOps(opIdx).set_bits()) {
+    for (const auto& consumer : _depsInfo.getConsumerOps(opIdx)) {
         if (_inDegreeTable[consumer] < 2) {
             zeroInDegreeOps.push_back(consumer);
             _inDegreeTable.erase(consumer);
@@ -668,7 +656,7 @@ mlir::DenseSet<mlir::Value> FeasibleMemoryScheduler::getBuffersToAllocateForOp(o
     auto usedBuffers = getNonAliveBuffersUsedByOperation(opIdx);
 
     mlir::DenseSet<mlir::Value> buffersToAllocate(usedBuffers.begin(), usedBuffers.end());
-    for (const auto& dep : _depsInfo.getOpDeps(opIdx).set_bits()) {
+    for (const auto& dep : _depsInfo.getOpDeps(opIdx)) {
         if (_opIdxEndCycleMap.find(dep) != _opIdxEndCycleMap.end()) {
             // op was scheduled
             continue;
@@ -698,7 +686,7 @@ size_t FeasibleMemoryScheduler::scheduleDependencies(operationIdxType opIdx) {
 
     // schedule required dependencies order based on earliest scheduling cycle and IR order
     std::map<size_t, std::set<operationIdxType>> sortedDemandList;
-    for (const auto& depIdx : _depsInfo.getOpDeps(opIdx).set_bits()) {
+    for (const auto& depIdx : _depsInfo.getOpDeps(opIdx)) {
         if (_opIdxEndCycleMap.find(depIdx) != _opIdxEndCycleMap.end()) {
             // op was scheduled
             continue;
@@ -738,16 +726,16 @@ size_t FeasibleMemoryScheduler::scheduleOp(operationIdxType opIdx, EOpType opTyp
 
 size_t FeasibleMemoryScheduler::getOperationLevel(operationIdxType opIdx, bool isSpilled) {
     if (!isSpilled) {
-        return _opLevelMap[opIdx];
+        return _opLevelVec[opIdx];
     }
     // original consumer(s) could have been already scheduled
     auto minRemainingConsumerLevel = std::numeric_limits<size_t>::max();
-    for (const auto& consumerIdx : _depsInfo.getConsumerOps(opIdx).set_bits()) {
+    for (const auto& consumerIdx : _depsInfo.getConsumerOps(opIdx)) {
         if (_opIdxEndCycleMap.find(consumerIdx) != _opIdxEndCycleMap.end()) {
             // consumer scheduled
             continue;
         }
-        minRemainingConsumerLevel = std::min(minRemainingConsumerLevel, _opLevelMap[consumerIdx]);
+        minRemainingConsumerLevel = std::min(minRemainingConsumerLevel, _opLevelVec[consumerIdx]);
     }
     return minRemainingConsumerLevel;
 }
@@ -758,7 +746,7 @@ void FeasibleMemoryScheduler::prefetchOps(ArrayRef<std::pair<operationIdxType, s
     std::set<operationIdxType> aliveOperations;
     for (auto& aliveBuffer : _scan.handler().getAliveValues()) {
         const auto aliveOpIdx = _bufferProducer[aliveBuffer];
-        if (!isDataOp(aliveOpIdx)) {
+        if (!_isDataOp[aliveOpIdx]) {
             continue;
         }
         aliveOperations.insert(aliveOpIdx);
@@ -784,7 +772,7 @@ void FeasibleMemoryScheduler::prefetchOps(ArrayRef<std::pair<operationIdxType, s
             continue;
         }
         lastScheduledOp = std::max(lastScheduledOp, scheduledOp.first);
-        lastScheduledLevel = std::max(lastScheduledLevel, _opLevelMap[lastScheduledOp]);
+        lastScheduledLevel = std::max(lastScheduledLevel, _opLevelVec[lastScheduledOp]);
         if (operationCycleCost(scheduledOp.first) <= 1) {
             // avoid comparing invalid cycles
             continue;
@@ -842,7 +830,7 @@ void FeasibleMemoryScheduler::prefetchOps(ArrayRef<std::pair<operationIdxType, s
             }
 
             // avoid barriers for next compute dependencies using level check
-            if (lastScheduledCycle != 0 && lastScheduledLevel + 1 < _opLevelMap[opIdx] &&
+            if (lastScheduledCycle != 0 && lastScheduledLevel + 1 < _opLevelVec[opIdx] &&
                 scheduleCycle >= lastScheduledCycle) {
                 _log.nest(2).trace("Would be scheduled after compute: '{0}'", opIdx);
                 return;
@@ -1007,7 +995,7 @@ void FeasibleMemoryScheduler::scheduleNonComputeOps() {
         // to standard compute op which as part of its scheduling can force scheduling
         // of needed data ops
         bool areDepsReady = true;
-        for (const auto& dep : _depsInfo.getOpDeps(readyOpIdx).set_bits()) {
+        for (const auto& dep : _depsInfo.getOpDeps(readyOpIdx)) {
             if (_spillBufferMap.find(dep) != _spillBufferMap.end()) {
                 areDepsReady = false;
                 break;
@@ -1089,11 +1077,7 @@ size_t FeasibleMemoryScheduler::evictionPriority(operationIdxType writerOpIdx, m
         }
     }
 
-    if (isNonComputeChainOp(writerOpIdx)) {
-        return 1;
-    }
-
-    if (!isDataOp(writerOpIdx)) {
+    if (!_isDataOp[writerOpIdx]) {
         return 2;
     }
 
@@ -1129,7 +1113,7 @@ FeasibleMemoryScheduler::EvictionCandidate FeasibleMemoryScheduler::chooseCandid
 
     auto getEarliestConsumerIdx = [&](operationIdxType opIdx) {
         auto earliestConsumerIdx = std::numeric_limits<unsigned int>::max();
-        for (const auto& consumerIdx : _depsInfo.getConsumerOps(opIdx).set_bits()) {
+        for (const auto& consumerIdx : _depsInfo.getConsumerOps(opIdx)) {
             if (!VPUIP::VPUIPDialect::isComputeExecutorKind(getExecutorType(consumerIdx))) {
                 continue;
             }
@@ -1137,7 +1121,7 @@ FeasibleMemoryScheduler::EvictionCandidate FeasibleMemoryScheduler::chooseCandid
                 continue;
             }
 
-            earliestConsumerIdx = std::min(earliestConsumerIdx, consumerIdx);
+            earliestConsumerIdx = std::min(earliestConsumerIdx, static_cast<unsigned>(consumerIdx));
         }
         return earliestConsumerIdx;
     };
@@ -1360,7 +1344,7 @@ void FeasibleMemoryScheduler::populateScheduledOps(const HeapElement& scheduledO
     scheduled.inputResourceInfo_ = std::move(inputIntervals);
     scheduled.cycleBegin_ = scheduledOp.cycleBegin_;
     scheduled.cycleEnd_ = scheduledOp.cycleEnd_;
-    scheduled.isDataOp_ = isDataOp(scheduledOp.op_);
+    scheduled.isDataOp_ = _isDataOp[scheduledOp.op_];
     scheduled.freeCmx_ = _scan.totalFreeSize();
     if (scheduledOp.isSpillOp()) {
         scheduled.queueType.execKind = VPU::ExecutorKind::DMA_NN;
@@ -1374,7 +1358,6 @@ void FeasibleMemoryScheduler::populateScheduledOps(const HeapElement& scheduledO
     }
     // scheduled.queueType = scheduledOp.isSpillOp() ? VPU::ExecutorKind::DMA_NN : getExecutorType(scheduledOp.op_);
     scheduled.executorInstanceMask = scheduledOp.executorInstanceMask_;
-    scheduled.isNonComputeChain = isNonComputeChainOp(scheduledOp.op_);
     _scheduledOps.push_back(scheduled);
     insertInOpIdxCycleEndMap(scheduled.op_, scheduled.cycleEnd_);
     _log.trace("Scheduled op: '{0}' during cycles: {1} -> {2}, of type: {3}", scheduled.op_, scheduled.cycleBegin_,
@@ -1402,9 +1385,12 @@ bool FeasibleMemoryScheduler::init() {
         }
     }
 
+    identifyDataOps();
+
     size_t level = 0;
+    _opLevelVec.resize(_inDegreeTable.size(), 0);
     for (size_t computeOpIdx = 0; computeOpIdx < _inDegreeTable.size(); ++computeOpIdx) {
-        if (isDataOp(computeOpIdx) || isNonComputeChainOp(computeOpIdx)) {
+        if (_isDataOp[computeOpIdx]) {
             continue;
         }
 
@@ -1413,12 +1399,12 @@ bool FeasibleMemoryScheduler::init() {
             continue;
         }
 
-        _opLevelMap[computeOpIdx] = level;
-        for (const auto& depInd : _depsInfo.getOpDeps(computeOpIdx).set_bits()) {
-            if (_opLevelMap.find(depInd) != _opLevelMap.end()) {
+        _opLevelVec[computeOpIdx] = level;
+        for (const auto& depInd : _depsInfo.getOpDeps(computeOpIdx)) {
+            if (_opLevelVec[depInd] != 0) {
                 continue;
             }
-            _opLevelMap[depInd] = level;
+            _opLevelVec[depInd] = level;
         }
 
         _computeOpOrder[queueType].push_back(computeOpIdx);

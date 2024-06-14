@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --set-memory-space="memory-space=DDR" %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 // CHECK: func.func @MultipleAllocs([[ARG0:%.+]]: memref<1x1000xf16, @DDR>, [[ARG1:%.+]]: memref<1x1000xf16, @DDR>) -> memref<1x1000xf16, @DDR>
 func.func @MultipleAllocs(%arg0: memref<1x1000xf16>, %arg1: memref<1x1000xf16>) -> memref<1x1000xf16> {
@@ -161,18 +161,18 @@ module @TwoFunctions {
         %5 = VPUIP.Copy inputs(%3 : memref<1x2x60x60xf16>) outputs(%arg2 : memref<1x2x60x60xf16>) -> memref<1x2x60x60xf16>
         return %4, %5 : memref<1x4x60x60xf16>, memref<1x2x60x60xf16>
 
-        // CHECK:       [[SUB_VIEW0:%.+]] = VPUIP.SubView [[ARG0]] [0, 2, 0, 0] [1, 4, 60, 60] : memref<1x8x60x60xf16, @DDR> 
+        // CHECK:       [[SUB_VIEW0:%.+]] = VPUIP.SubView [[ARG0]] [0, 2, 0, 0] [1, 4, 60, 60] : memref<1x8x60x60xf16, @DDR>
         // CHECK-SAME:                          to memref<1x4x60x60xf16, {order = #NCHW, strides = [28800, 3600, 60, 1]}, @DDR>
         // CHECK:       [[ALLOC0:%.+]] = memref.alloc() : memref<1x4x60x60xf16, @DDR>
-        // CHECK:       [[COPY0:%.+]] = VPUIP.Copy inputs([[SUB_VIEW0]] : memref<1x4x60x60xf16, {order = #NCHW, strides = [28800, 3600, 60, 1]}, @DDR>) 
+        // CHECK:       [[COPY0:%.+]] = VPUIP.Copy inputs([[SUB_VIEW0]] : memref<1x4x60x60xf16, {order = #NCHW, strides = [28800, 3600, 60, 1]}, @DDR>)
         // CHECK-SAME:                      outputs([[ALLOC0]] : memref<1x4x60x60xf16, @DDR>) -> memref<1x4x60x60xf16, @DDR>
 
-        // CHECK:       [[SUB_VIEW1:%.+]] = VPUIP.SubView [[ARG0]] [0, 4, 0, 0] [1, 2, 60, 60] : memref<1x8x60x60xf16, @DDR> 
+        // CHECK:       [[SUB_VIEW1:%.+]] = VPUIP.SubView [[ARG0]] [0, 4, 0, 0] [1, 2, 60, 60] : memref<1x8x60x60xf16, @DDR>
         // CHECK-SAME:                          to memref<1x2x60x60xf16, {order = #NCHW, strides = [28800, 3600, 60, 1]}, @DDR>
         // CHECK:       [[ALLOC1:%.+]] = memref.alloc() : memref<1x2x60x60xf16, @DDR>
-        // CHECK:       [[COPY1:%.+]] = VPUIP.Copy inputs([[SUB_VIEW1]] : memref<1x2x60x60xf16, {order = #NCHW, strides = [28800, 3600, 60, 1]}, @DDR>) 
+        // CHECK:       [[COPY1:%.+]] = VPUIP.Copy inputs([[SUB_VIEW1]] : memref<1x2x60x60xf16, {order = #NCHW, strides = [28800, 3600, 60, 1]}, @DDR>)
         // CHECK-SAME:                      outputs([[ALLOC1]] : memref<1x2x60x60xf16, @DDR>) -> memref<1x2x60x60xf16, @DDR>
-        
+
         // CHECK:       [[COPY2:%.+]] = VPUIP.Copy inputs([[COPY0]] : memref<1x4x60x60xf16, @DDR>) outputs([[ARG1]] : memref<1x4x60x60xf16, @DDR>) -> memref<1x4x60x60xf16, @DDR>
         // CHECK:       [[COPY3:%.+]] = VPUIP.Copy inputs([[COPY1]] : memref<1x2x60x60xf16, @DDR>) outputs([[ARG2]] : memref<1x2x60x60xf16, @DDR>) -> memref<1x2x60x60xf16, @DDR>
         // CHECK:       return [[COPY2]], [[COPY3]] : memref<1x4x60x60xf16, @DDR>, memref<1x2x60x60xf16, @DDR>
@@ -187,7 +187,7 @@ module @TwoFunctions {
         // CHECK:   return [[COPY0]] : memref<1x4x60x60xf16, @DDR>
     }
 
-    // CHECK:       func.func @main([[ARG0:%.+]]: memref<1x8x60x60xf16, @DDR>, [[ARG1:%.+]]: memref<1x4x60x60xf16, @DDR>, [[ARG2:%.+]]: memref<1x2x60x60xf16, @DDR>) 
+    // CHECK:       func.func @main([[ARG0:%.+]]: memref<1x8x60x60xf16, @DDR>, [[ARG1:%.+]]: memref<1x4x60x60xf16, @DDR>, [[ARG2:%.+]]: memref<1x2x60x60xf16, @DDR>)
     // CHECK-SAME:      -> (memref<1x4x60x60xf16, @DDR>, memref<1x2x60x60xf16, @DDR>)
     func.func @main(%arg0: memref<1x8x60x60xf16>, %arg1: memref<1x4x60x60xf16>, %arg2: memref<1x2x60x60xf16>) -> (memref<1x4x60x60xf16>, memref<1x2x60x60xf16>) {
         %alloc = memref.alloc() : memref<1x4x60x60xf16>
@@ -201,7 +201,7 @@ module @TwoFunctions {
 
         // CHECK:   [[ALLOC0:%.+]] = memref.alloc() : memref<1x4x60x60xf16, @DDR>
         // CHECK:   [[ALLOC1:%.+]] = memref.alloc() : memref<1x2x60x60xf16, @DDR>
-        // CHECK:   [[FOO1_RES:%.+]]:2 = call @foo1([[ARG0]], [[ALLOC0]], [[ALLOC1]]) : (memref<1x8x60x60xf16, @DDR>, memref<1x4x60x60xf16, @DDR>, memref<1x2x60x60xf16, @DDR>) 
+        // CHECK:   [[FOO1_RES:%.+]]:2 = call @foo1([[ARG0]], [[ALLOC0]], [[ALLOC1]]) : (memref<1x8x60x60xf16, @DDR>, memref<1x4x60x60xf16, @DDR>, memref<1x2x60x60xf16, @DDR>)
         // CHECK-SAME:                      -> (memref<1x4x60x60xf16, @DDR>, memref<1x2x60x60xf16, @DDR>)
 
         // CHECK:   [[ALLOC2:%.+]] = memref.alloc() : memref<1x4x60x60xf16, @DDR>

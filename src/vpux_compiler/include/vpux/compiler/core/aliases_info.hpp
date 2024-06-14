@@ -87,7 +87,10 @@ public:
     // The `val` must be a root value.
     const ValuesSet& getAllAliases(mlir::Value val) const;
     void addAlias(mlir::Value source, mlir::Value alias) override;
-    void removeAlias(mlir::Value val);
+    // Remove information for given alias only
+    void removeAlias(mlir::Value alias);
+    // Remove all information related to given value (aliases, sources, roots)
+    void remove(mlir::Value val);
 
 private:
     void init(mlir::func::FuncOp func);

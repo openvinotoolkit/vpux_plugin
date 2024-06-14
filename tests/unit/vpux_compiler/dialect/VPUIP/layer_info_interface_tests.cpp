@@ -5,8 +5,8 @@
 
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops_interfaces.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops_interfaces.hpp"
 
 #include "common/utils.hpp"
 
@@ -56,8 +56,10 @@ TEST_F(MLIR_VPUIP_LayerInfo, AsyncLayerOpInterface) {
     ASSERT_TRUE(func != nullptr);
 
     mlir::PassManager pm(module.get()->getName(), mlir::OpPassManager::Nesting::Implicit);
-    pm.addPass(vpux::VPU::createInitCompilerPass(vpux::VPU::ArchKind::VPUX30XX, vpux::VPU::CompilationMode::ReferenceSW,
-                                                 std::nullopt, std::nullopt, vpux::Logger::global()));
+    auto initCompilerOptions =
+            vpux::VPU::InitCompilerOptions(vpux::VPU::ArchKind::NPU30XX, vpux::VPU::CompilationMode::ReferenceSW);
+
+    vpux::VPU::buildInitCompilerPipeline(pm, initCompilerOptions, vpux::Logger::global());
 
     ASSERT_TRUE(mlir::succeeded(pm.run(module.get())));
 

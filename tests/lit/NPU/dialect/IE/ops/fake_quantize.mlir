@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --canonicalize %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 func.func @FuseFQ(%arg0: tensor<1x3x16x16xf16>) -> tensor<1x3x16x16xf16> {
     %input_low = const.Declare tensor<f32> = dense<0.0> : tensor<f32>
@@ -17,7 +17,7 @@ func.func @FuseFQ(%arg0: tensor<1x3x16x16xf16>) -> tensor<1x3x16x16xf16> {
     %1 = IE.FakeQuantize(%0, %input_low, %input_high, %input_low, %input_high)
         { auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 } :
         tensor<1x3x16x16xf16>, tensor<f32>, tensor<f32>, tensor<f32>, tensor<f32> -> tensor<1x3x16x16xf16>
-    
+
     return %1 : tensor<1x3x16x16xf16>
     // CHECK-DAG:   %[[ILOW:.*]] = const.Declare tensor<f32> = dense<0.000000e+00> : tensor<f32>
     // CHECK-DAG:   %[[IHIGH:.*]] = const.Declare tensor<f32> = dense<2.550000e+02> : tensor<f32>
@@ -43,7 +43,7 @@ func.func @DoNotFuseFQ(%arg0: tensor<1x3x16x16xf16>) -> tensor<1x3x16x16xf16> {
     %1 = IE.FakeQuantize(%0, %input_low, %input_high_1, %input_low, %input_high_2)
         { auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 } :
         tensor<1x3x16x16xf16>, tensor<f32>, tensor<f32>, tensor<f32>, tensor<f32> -> tensor<1x3x16x16xf16>
-    
+
     return %1 : tensor<1x3x16x16xf16>
     // CHECK-DAG:   %[[ILOW:.*]] = const.Declare tensor<f32> = dense<0.000000e+00> : tensor<f32>
     // CHECK-DAG:   %[[IHIGH1:.*]] = const.Declare tensor<f32> = dense<2.550000e+02> : tensor<f32>

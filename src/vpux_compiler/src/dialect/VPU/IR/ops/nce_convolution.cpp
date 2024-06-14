@@ -7,15 +7,18 @@
 #include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/explicit_distribution_utils.hpp"
+#include "vpux/compiler/utils/IE/transposed_convolution_utils.hpp"
 
 #include "vpux/compiler/core/layers.hpp"
 #include "vpux/compiler/dialect/VPU/utils/conv_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/generate_tiling.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
+#include "vpux/compiler/dialect/VPU/utils/se_roll_utils.hpp"
+#include "vpux/compiler/utils/VPU/tile_utils.hpp"
 #include "vpux/compiler/utils/empty_node.hpp"
 #include "vpux/compiler/utils/error.hpp"
 
-#include <openvino/core/validation_util.hpp>
+#include <openvino/op/convolution.hpp>
 
 using namespace vpux;
 
@@ -221,11 +224,14 @@ mlir::LogicalResult vpux::VPU::NCEConvolutionOp::inferReturnTypes(
     const auto dataPaddingBelow = ov::CoordinateDiff({padTop, padLeft});
     const auto dataPaddingAbove = ov::CoordinateDiff({padBottom, padRight});
 
-    const auto outputShapeNG = ov::infer_convolution_forward(
-            EmptyNode::instance(), ov::Shape(inShape.begin(), inShape.end()),
-            ov::Strides(windowStrides.size(), 1),  // dummy data dilations
-            dataPaddingBelow, dataPaddingAbove, ov::Shape(filterShape.begin(), filterShape.end()),
-            ov::Strides(windowStrides.begin(), windowStrides.end()), windowDilations);
+    const auto conv = ov::op::v1::Convolution(
+            std::make_shared<ov::op::v0::Parameter>(ov::element::i32, ov::Shape(inShape.begin(), inShape.end())),
+            std::make_shared<ov::op::v0::Parameter>(ov::element::i32,
+                                                    ov::Shape(filterShape.begin(), filterShape.end())),
+            ov::Strides(windowStrides.begin(), windowStrides.end()), dataPaddingBelow, dataPaddingAbove,
+            windowDilations);
+
+    const auto& outputShapeNG = conv.get_output_partial_shape(0);
 
     const auto outputShape = to_small_vector(outputShapeNG.get_shape() | transformed([](size_t val) {
                                                  return checked_cast<int64_t>(val);
@@ -310,7 +316,7 @@ SmallVector<int64_t> vpux::VPU::NCEConvolutionOp::getStridesVal() {
 // ClusteredOpInterface
 //
 
-bool vpux::VPU::NCEConvolutionOp::checkStrategyCompatibility(VPU::MultiClusterStrategy strategy) {
+bool vpux::VPU::NCEConvolutionOp::checkStrategyCompatibility(VPU::MultiClusterStrategy strategy, size_t) {
     const auto arch = VPU::getArch(getOperation());
     const bool isCMajor =
             VPU::NCEInvariant::isChannelMajorCompatible(arch, getInput().getType().cast<vpux::NDTypeInterface>());
@@ -318,6 +324,23 @@ bool vpux::VPU::NCEConvolutionOp::checkStrategyCompatibility(VPU::MultiClusterSt
         return strategy == VPU::MultiClusterStrategy::SplitOverHeightOverlapped ||
                strategy == VPU::MultiClusterStrategy::Clustering;
     }
+
+    auto nceOp = mlir::cast<NCEConvolutionOp>(getOperation());
+    const auto isCompatible = VPU::isSEPConvCompatibleWithClusterStrategy(nceOp, strategy);
+    if (isCompatible.has_value()) {
+        return isCompatible.value();
+    }
+
+    const auto outputType = getOutput().getType().cast<vpux::NDTypeInterface>();
+    const auto outputDimsOrder = outputType.getDimsOrder();
+    // Unsupported to broadcast the lowest dimension
+    // Track E#120804
+    if (outputDimsOrder.dimAt(outputDimsOrder.numDims() - 1) == Dims4D::Act::H) {
+        return strategy == VPU::MultiClusterStrategy::Clustering ||
+               strategy == VPU::MultiClusterStrategy::SplitOverHeight ||
+               strategy == VPU::MultiClusterStrategy::SplitOverKernel;
+    }
+
     return strategy == VPU::MultiClusterStrategy::Clustering ||
            strategy == VPU::MultiClusterStrategy::SplitOverHeight ||
            strategy == VPU::MultiClusterStrategy::SplitOverKernel || strategy == VPU::MultiClusterStrategy::HKSwitch;
@@ -325,11 +348,11 @@ bool vpux::VPU::NCEConvolutionOp::checkStrategyCompatibility(VPU::MultiClusterSt
 
 vpux::VPU::DistributedTensorAttr vpux::VPU::NCEConvolutionOp::getExplicitDistributedTensorAttr(
         vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, mlir::ArrayAttr numTiles,
-        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::ArrayAttr kernel, vpux::VPU::PaddingAttr pad,
-        mlir::ArrayAttr stride, mlir::UnitAttr uniformDistributedSegments) {
+        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::UnitAttr uniformDistributedSegments,
+        const vpux::VPU::OverlapDistributionParams& overlapParams) {
     return VPU::getNCEExplicitDistributedTensorAttr(mlir::dyn_cast<VPU::NCEOpInterface>(getOperation()), shape,
-                                                    distributionMode, numTiles, numClusters, alignment, kernel, pad,
-                                                    stride, uniformDistributedSegments);
+                                                    distributionMode, numTiles, numClusters, alignment,
+                                                    uniformDistributedSegments, overlapParams);
 }
 
 // Each cluster should compute at least one output line. Therefore in order for a layer to be SOH
@@ -436,16 +459,133 @@ vpux::VPU::SparsitySupport vpux::VPU::NCEConvolutionOp::sparsitySupport() {
     }
 
     switch (arch) {
-    case VPU::ArchKind::VPUX30XX: {
+    case VPU::ArchKind::NPU30XX: {
         // Weights sparsity is only supported for ZMajor Convolutions
         const auto inputType = getInput().getType().cast<vpux::NDTypeInterface>();
         const auto sparsityMode = inputType.getDimsOrder() == DimsOrder::NHWC ? VPU::SparsitySupport::SPARSE_WEIGHTS
                                                                               : VPU::SparsitySupport::NONE;
         return sparsityMode & excludeMode;
     }
-    case VPU::ArchKind::VPUX37XX:
+    case VPU::ArchKind::NPU37XX:
+    case VPU::ArchKind::NPU40XX:
         return NCESparsity::FULLY_SUPPORTED_SPARSITY_MODE & excludeMode;
     default:
         VPUX_THROW("Unknown sparsity support mode for {0}", arch);
     }
+}
+
+mlir::LogicalResult vpux::VPU::NCEConvolutionOp::verifyKernel(IE::ConvolutionOp origOp, Logger log) {
+    log.setName("NCEInvariant");
+
+    if (origOp.getInput().getType().cast<vpux::NDTypeInterface>().getRank() != 4) {
+        return mlir::failure();
+    }
+
+    const auto dilations = parseIntArrayAttr<int64_t>(origOp.getDilations());
+    if (dilations[0] != 1 || dilations[1] != 1) {
+        log.trace("[{0}] Unsupported kernel dilations '{1}'", origOp->getLoc(), dilations);
+        return mlir::failure();
+    }
+
+    const auto filterShape = getShape(origOp.getFilter());
+    const auto KY = filterShape[Dims4D::Filter::KY];
+    const auto KX = filterShape[Dims4D::Filter::KX];
+
+    const auto kernelStrides = parseIntArrayAttr<int64_t>(origOp.getStrides());
+    const auto SY = kernelStrides[0];
+    const auto SX = kernelStrides[1];
+
+    const auto padsBegin = parseIntArrayAttr<int64_t>(origOp.getPadsBegin());
+    const auto padsEnd = parseIntArrayAttr<int64_t>(origOp.getPadsEnd());
+    const auto padTop = padsBegin[0];
+    const auto padBottom = padsEnd[0];
+    const auto padLeft = padsBegin[1];
+    const auto padRight = padsEnd[1];
+
+    const auto arch = VPU::getArch(origOp->getParentOfType<mlir::ModuleOp>());
+    return NCEInvariant::verifyKernel(origOp->getLoc(), KY, KX, SY, SX, padTop, padBottom, padLeft, padRight, arch,
+                                      log);
+}
+
+mlir::LogicalResult vpux::VPU::NCEConvolutionOp::verifyKernel(IE::TransposedConvolutionOp origOp, Logger log) {
+    log.setName("NCEInvariant");
+
+    if (mlir::failed(IE::canConvertTransposedConvToConv(origOp))) {
+        return mlir::failure();
+    }
+
+    const auto filterShape = getShape(origOp.getFilter());
+    const auto KY = filterShape[Dims4D::Filter::KY];
+    const auto KX = filterShape[Dims4D::Filter::KX];
+
+    const auto SY = 1;
+    const auto SX = 1;
+
+    const auto padTop = 0;
+    const auto padBottom = 0;
+    const auto padLeft = 0;
+    const auto padRight = 0;
+
+    const auto arch = VPU::getArch(origOp->getParentOfType<mlir::ModuleOp>());
+
+    return NCEInvariant::verifyKernel(origOp->getLoc(), KY, KX, SY, SX, padTop, padBottom, padLeft, padRight, arch,
+                                      log);
+}
+
+mlir::LogicalResult vpux::VPU::NCEConvolutionOp::verifyConvCMX(mlir::Location loc, mlir::ModuleOp module,
+                                                               vpux::NDTypeInterface inputType,
+                                                               vpux::NDTypeInterface filterType,
+                                                               vpux::NDTypeInterface outputType,
+                                                               mlir::ArrayAttr kernelStrides, Logger log) {
+    log.setName("NCEInvariant");
+
+    const auto filterShape = filterType.getShape();
+    const auto OC = filterShape[Dims4D::Filter::OC];
+    const auto IC = filterShape[Dims4D::Filter::IC];
+    const auto KY = filterShape[Dims4D::Filter::KY];
+    const auto KX = filterShape[Dims4D::Filter::KX];
+
+    const auto alignment = VPU::NCEInvariant::getAlignment(outputType.getElementType());
+    if (OC % alignment != 0) {
+        log.debug("[{0}] Output channels count of depthwise convolution must be a multiple of {1}, got {2}", loc,
+                  alignment, OC);
+        return mlir::failure();
+    }
+
+    const auto inOrder = inputType.getDimsOrder();
+
+    Byte requiredCMX;
+    if (inOrder == DimsOrder::NHWC) {
+        requiredCMX = VPU::getRequiredCMXSizeForNCEOps({inputType, filterType, outputType}, OC);
+    } else if (inOrder == DimsOrder::NCHW) {
+        const auto remainder = (IC * KY * KX) % alignment;
+        VPUX_THROW_UNLESS(remainder >= 0, "Channel alignment cannot be negative: {0}", remainder);
+
+        const auto padding = (remainder > 0) ? (alignment - remainder) : 0;
+
+        const auto alignedWeightShape = SmallVector<int64_t>{OC, 1, 1, IC * KY * KX + padding};
+        const auto alignedFilterType = mlir::RankedTensorType::get(alignedWeightShape, filterType.getElementType());
+
+        const auto kernelSize = Shape{KY, KX};
+        const auto kernelStridesVals = Shape(parseIntArrayAttr<int64_t>(kernelStrides));
+
+        const auto activationWindowSize = VPU::NCESparsity::getActivationWindowSize(
+                VPU::NCESparsity::Mode::CM_CONV, kernelSize, kernelStridesVals[Dims4D::Strides::X],
+                inputType.getElementType(), IC);
+
+        requiredCMX = VPU::getRequiredCMXSizeForNCEOps({inputType, alignedFilterType, outputType}, OC) +
+                      activationWindowSize * 1_Byte;
+    } else {
+        log.debug("[{0}] Unsupported input layout '{1}'", loc, inOrder);
+        return mlir::failure();
+    }
+
+    const auto cmxSize = vpux::VPU::getTotalCMXSize(module);
+    if (requiredCMX > cmxSize) {
+        log.trace("[{0}] CMX memory is not enough for Convolution, available '{1}', required '{2}'", loc, cmxSize,
+                  requiredCMX);
+        return mlir::failure();
+    }
+
+    return mlir::success();
 }

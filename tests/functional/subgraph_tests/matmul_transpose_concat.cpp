@@ -1,12 +1,10 @@
 //
-// Copyright (C) 2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include "common_test_utils/ov_tensor_utils.hpp"
 #include "openvino/opsets/opset1.hpp"
-#include "shared_test_classes/base/layer_test_utils.hpp"
-#include "vpu_ov1_layer_test.hpp"
 #include "vpu_ov2_layer_test.hpp"
 
 namespace ov::test::subgraph {
@@ -18,8 +16,8 @@ public:
     void generate_inputs(const std::vector<ov::Shape>& inputShapes) override {
         inputs.clear();
         const auto& funcInputs = function->inputs();
-        VPUX_THROW_UNLESS(inputShapes.size() == funcInputs.size(),
-                          "Input shapes number does not match with inputs number");
+        OPENVINO_ASSERT(inputShapes.size() == funcInputs.size(),
+                        "Input shapes number does not match with inputs number");
 
         auto create_and_fill_tensor = [](ov::Shape inputStaticShape) -> ov::Tensor {
             auto inputTensor = ov::Tensor{ov::element::f32, inputStaticShape};
@@ -110,9 +108,9 @@ public:
 
 class MatMulTransposeConcatTest_NPU3720 : public MatMulTransposeConcatTestCommon {};
 
-TEST_F(MatMulTransposeConcatTest_NPU3720, HW) {
+TEST_F(MatMulTransposeConcatTest_NPU3720, HW_TestKindSubgraph) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
 }
 
 }  // namespace ov::test::subgraph

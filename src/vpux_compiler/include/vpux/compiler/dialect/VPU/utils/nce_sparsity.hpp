@@ -6,7 +6,7 @@
 #pragma once
 
 #include "vpux/compiler/core/attributes/shape.hpp"
-#include "vpux/compiler/dialect/IE/attributes.hpp"
+#include "vpux/compiler/dialect/IE/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/const/attributes/content.hpp"
@@ -16,6 +16,7 @@
 #include "vpux/utils/core/func_ref.hpp"
 #include "vpux/utils/core/optional.hpp"
 
+#include <llvm/ADT/bit.h>
 #include <mlir/IR/Value.h>
 
 namespace vpux {
@@ -33,12 +34,6 @@ constexpr int32_t SPARSITY_PTR_WHEN_NO_SPARSITY = 0xFFFFFF;
 
 const unsigned int DEFAULT_SPARSIFIABLE_INPUT_OPERAND_ID = 0;
 const unsigned int ELTWISE_SPARSIFIABLE_SECOND_INPUT_OPERAND_ID = 1;
-
-using BiasConverterCb = int32_t (*)(double);
-using PPEConverterCb = int32_t (*)(uint8_t, uint16_t, double, mlir::Type);
-
-extern const EnumMap<ArchKind, PPEConverterCb> ppeConvertersMap;
-extern const EnumMap<ArchKind, BiasConverterCb> biasConvertersMap;
 
 enum class Mode { CM_CONV, DW_CONV, POOL };
 
@@ -58,11 +53,12 @@ std::vector<int32_t> getWeightsTable(mlir::Type inElemType, mlir::Type outElemTy
                                      std::optional<int32_t> sparsityPtrOffset, int32_t sparsityPtrStep, ArchKind arch,
                                      int64_t OC, mlir::Type weightsElemType = nullptr,
                                      Const::ContentAttr bias = nullptr, VPU::PPETaskAttr ppe = nullptr,
-                                     vpux::IE::PostOpAttr postOpAttr = nullptr);
+                                     vpux::IE::PostOpAttr postOpAttr = nullptr, mlir::FloatAttr constScale = nullptr);
 std::vector<int32_t> getWeightsTable(mlir::Type inElemType, mlir::Type outElemType, ArrayRef<int32_t> weightPtrs,
                                      ArrayRef<int32_t> sparsityPtrs, ArchKind arch, int64_t OC,
                                      mlir::Type weightsElemType = nullptr, Const::ContentAttr bias = nullptr,
-                                     VPU::PPETaskAttr ppe = nullptr, vpux::IE::PostOpAttr postOpAttr = nullptr);
+                                     VPU::PPETaskAttr ppe = nullptr, vpux::IE::PostOpAttr postOpAttr = nullptr,
+                                     mlir::FloatAttr constScale = nullptr);
 
 std::vector<int32_t> patchWeightsTableSparsityPtrs(const std::vector<std::int32_t>& weightsTableVals,
                                                    const int32_t sparsityPtrOffset, const int32_t sparsityPtrStep);
@@ -84,6 +80,18 @@ inline VPU::SparsitySupport bitwiseNot(const VPU::SparsitySupport bits) {
     static_assert(sizeof(bits) == sizeof(uint32_t), "VPU::SparsitySupport has unexpected size");
     return static_cast<VPU::SparsitySupport>(~static_cast<uint32_t>(bits));
 }
+
+//
+// Convert real numbers to fixed point S16.16 format.
+//
+
+int32_t toFixedPoint(const double realVal);
+
+//
+// Convert real numbers to hex format.
+//
+
+int32_t toHex(double realVal);
 
 //
 // RuntimeSparsityStatsProvider

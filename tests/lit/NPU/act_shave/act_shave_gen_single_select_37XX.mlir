@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -44,8 +44,8 @@ module @VPU.SW {
     // `memref` will be translated to `MemRefData`, while raw scalars will be translated as is.
     func.func private @builtin_select(%input0 : memref<*xf16>, %input1 : memref<*xf16>, %input2 : memref<*xf16>, %output : memref<*xf16>)
         attributes {
-            VPU.kernel_code = "eltwise_select_fp16.cpp",
-            VPU.kernel_entry = "eltwise_select_fp16"
+            VPU.kernel_code = "eltwise_select.cpp",
+            VPU.kernel_entry = "eltwise_select"
         }
 
     // management kernel definition
@@ -76,7 +76,7 @@ func.func @main(%1: memref<1x1x1x1000xf16>, %2: memref<1x1x1x1000xf16>, %3: memr
 
     VPURT.Task waits(%b0 : !VPURT.Barrier) updates(%b1 : !VPURT.Barrier) {
         VPUIP.SW.Kernel
-                    {resultSegmentSizes = array<i32: 1, 0>}
+                    {resultSegmentSizes = array<i32: 1, 0, 0>}
                     @VPU.SW::@builtin_select
                     inputs(%in0_tile0_cmx as %arg0: memref<1x1x1x1000xf16, [@CMX_NN, 0]>, %in1_tile0_cmx as %arg1: memref<1x1x1x1000xf16, [@CMX_NN, 0]>, %in2_tile0_cmx as %arg2: memref<1x1x1x1000xf16, [@CMX_NN, 0]>)
                     outputs(%out_tile0_cmx as %arg3: memref<1x1x1x1000xf16, [@CMX_NN, 0]>)

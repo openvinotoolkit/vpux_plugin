@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2022 Intel Corporation.
+# Copyright (C) 2022 Intel Corporation
 # SPDX-License-Identifier: Apache 2.0
 #
 
@@ -10,8 +10,6 @@ find_package(gflags QUIET)
 add_tool_target(
     NAME ${TARGET_NAME}
     ROOT ${CMAKE_CURRENT_SOURCE_DIR}
-    DEPENDENCIES
-        openvino_intel_npu_plugin
     LINK_LIBRARIES
         openvino::runtime
         openvino::runtime::dev

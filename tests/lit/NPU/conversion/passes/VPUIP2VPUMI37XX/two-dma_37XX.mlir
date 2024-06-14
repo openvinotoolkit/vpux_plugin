@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -31,15 +31,15 @@ module @Convert {
     VPURT.Task waits(%0 : !VPURT.Barrier) {
       %3 = VPUIP.NNDMA {port = 0 : i64} inputs(%2 : memref<1x2x3x4xf16, @DDR>) outputs(%arg1 : memref<1x2x3x4xf16, @DDR>) -> memref<1x2x3x4xf16, @DDR>
     }
-    // CHECK:       %[[VAL6:.*]] = VPUMI37XX.NNDMA {port = 0 : i64} inputs(%[[VAL5]] : memref<1x2x3x4xf16, @DDR>) outputs(%[[VAL7:.*]] : memref<1x2x3x4xf16, @DDR>) waits(%[[VAL1]] : !VPURegMapped.Index<0:0:0>) start_after(1) clean_after(1) acceleration_mode(<DISABLE>) -> !VPURegMapped.Index<0:0:1>
+    // CHECK:       %[[VAL6:.*]] = VPUMI37XX.NNDMA {port = 0 : i64} inputs(%[[VAL5]] : memref<1x2x3x4xf16, @DDR>) outputs(%[[VAL7:.*]] : memref<1x2x3x4xf16, @DDR>) waits(%[[VAL1]] : !VPURegMapped.Index<0:0:0>) start_after(1) clean_after(0) acceleration_mode(<DISABLE>) -> !VPURegMapped.Index<0:0:1>
     // CHECK:       %[[VAL3:.*]] = VPUMI37XX.NNDMA {port = 0 : i64} inputs(%[[VAL4:.*]] : memref<1x2x3x4xf16, @DDR>) outputs(%[[VAL2]] : memref<1x2x3x4xf16, @DDR>) nextDMAIdx(%[[VAL6]] : !VPURegMapped.Index<0:0:1>) updates(%[[VAL1]] : !VPURegMapped.Index<0:0:0>) start_after(1) clean_after(0) acceleration_mode(<DISABLE>) -> !VPURegMapped.Index<0:0:0>
 
     // CHECK:       ELFNPU37XX.CreateSection secType(SHT_PROGBITS) secFlags("SHF_ALLOC|SHF_EXECINSTR|VPU_SHF_PROC_DMA") {secAddrAlign = 64 : i64, secInfo = 0 : i64, secName = ".text.dmaTasks0"} -> !ELFNPU37XX.Section
 
     // CHECK:       ELFNPU37XX.CreateRelocationSection secName(".rlt.DMA_NetInput0")
-    // CHECK:           ELFNPU37XX.RelocImmOffset
+    // CHECK:           ELFNPU37XX.Reloc
     // CHECK:       ELFNPU37XX.CreateRelocationSection secName(".rlt.DMA_NetOutput0")
-    // CHECK:           ELFNPU37XX.RelocImmOffset
+    // CHECK:           ELFNPU37XX.Reloc
 
     return %arg1 : memref<1x2x3x4xf16, @DDR>
     // CHECK:       return %arg1 : memref<1x2x3x4xf16, @DDR>

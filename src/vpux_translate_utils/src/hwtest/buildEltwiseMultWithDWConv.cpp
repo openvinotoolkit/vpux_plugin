@@ -10,9 +10,9 @@
 
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/task.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/utils/types.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
@@ -36,11 +36,11 @@ mlir::DenseElementsAttr generateZeroPadForEltwiseMultWeights(ArrayRef<int64_t> w
                                                        static_cast<int64_t>(1), std::multiplies<int64_t>()));
 
     if (dtype.isF16()) {
-        std::vector<float16> wt_vec(vecSize, 0);
-        return mlir::DenseElementsAttr::get(wtData_ddr_valueType, ArrayRef<float16>(wt_vec));
+        std::vector<vpux::type::float16> wt_vec(vecSize, 0);
+        return mlir::DenseElementsAttr::get(wtData_ddr_valueType, ArrayRef<vpux::type::float16>(wt_vec));
     } else if (dtype.isBF16()) {
-        std::vector<bfloat16> wt_vec(vecSize, 0);
-        return mlir::DenseElementsAttr::get(wtData_ddr_valueType, ArrayRef<bfloat16>(wt_vec));
+        std::vector<vpux::type::bfloat16> wt_vec(vecSize, 0);
+        return mlir::DenseElementsAttr::get(wtData_ddr_valueType, ArrayRef<vpux::type::bfloat16>(wt_vec));
     } else {
         if (dtype.dyn_cast<mlir::quant::QuantizedType>().getFlags() & mlir::quant::QuantizationFlags::Signed) {
             std::vector<int8_t> wt_vec(vecSize, 0);
@@ -206,8 +206,10 @@ void buildEltwiseMultWithDwConv(const nb::TestCaseJsonDescriptor& testDesc, mlir
     // Barriers
     auto barrier0 = funcbuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 0);
     auto barrier1 = funcbuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 1);
+    auto finalBarrier = funcbuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 2);
     auto BARRIER_0 = barrier0.getBarrier();
     auto BARRIER_1 = barrier1.getBarrier();
+    auto FINAL_BARRIER = finalBarrier.getBarrier();
 
     auto wt_data_vals = generateZeroPadForEltwiseMultWeights(zero_pad_shape, weightsType, ctx);
     auto wt_data_attr = Const::ContentAttr::get(wt_data_vals);
@@ -315,9 +317,10 @@ void buildEltwiseMultWithDwConv(const nb::TestCaseJsonDescriptor& testDesc, mlir
     auto nceTask = VPURT::wrapIntoTaskOp<VPUIP::NCEClusterTaskOp>(
             funcbuilder, BARRIER_0, BARRIER_1, builder.getUnknownLoc(), output_cmx_memreftype,
             getTensorResult(input_nce_cmx), getTensorResult(weights_nce_cmx), getTensorResult(weightstable_cmx),
-            /*instruction_table_list=*/nullptr, getTensorResult(act_window_cmx), getTensorResult(parent_input_nce_cmx),
-            getTensorResult(parent_output_nce_cmx), getTensorResult(output_nce_cmx), NCETaskType::DWCONV, filtersize,
-            strides, kernel_padding, actChannelLength, /*is_continued*/ nullptr, /*sp_pattern*/ nullptr);
+            /*instruction_table_list=*/nullptr, /*spr_lookup_table=*/nullptr, getTensorResult(act_window_cmx),
+            getTensorResult(parent_input_nce_cmx), getTensorResult(parent_output_nce_cmx),
+            getTensorResult(output_nce_cmx), NCETaskType::DWCONV, filtersize, strides, kernel_padding, actChannelLength,
+            /*is_continued*/ nullptr, /*sp_pattern*/ nullptr);
 
     int64_t clampLow = std::numeric_limits<int32_t>::min();
     int64_t clampHigh = std::numeric_limits<int32_t>::max();
@@ -338,15 +341,20 @@ void buildEltwiseMultWithDwConv(const nb::TestCaseJsonDescriptor& testDesc, mlir
                     VPU::MPEMode::CUBOID_16x16);
 
     // Output DMA
-    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, BARRIER_1, mlir::ValueRange(), builder.getUnknownLoc(),
+    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, BARRIER_1, FINAL_BARRIER, builder.getUnknownLoc(),
                                           getTensorResult(output_cmx), funcoutput, 0);
 
     // Return op
     funcbuilder.create<mlir::func::ReturnOp>(builder.getUnknownLoc(), funcoutput);
 
-    // Runtime resources
+    // set runtime resources
+    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
+
     mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    pm.addPass(VPU::createInitCompilerPass(arch, VPU::CompilationMode::DefaultHW, 1, std::nullopt, log));
+    auto initCompilerOptions = VPU::InitCompilerOptions(arch, VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.numberOfDPUGroups = 1;
+    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
 
     // Compile
     VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");

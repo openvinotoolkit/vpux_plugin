@@ -1,64 +1,60 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022-2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
-#include "single_layer_tests/squeeze_unsqueeze.hpp"
-#include <vector>
-#include "common/functions.h"
-#include "common_test_utils/test_constants.hpp"
-#include "vpu_ov1_layer_test.hpp"
+#include "single_op_tests/squeeze_unsqueeze.hpp"
+#include "vpu_ov2_layer_test.hpp"
 
-namespace LayerTestsDefinitions {
+namespace ov {
 
-class SqueezeUnsqueezeLayerTestCommon :
-        public SqueezeUnsqueezeLayerTest,
-        virtual public LayerTestsUtils::VpuOv1LayerTestsCommon {
+namespace test {
+
+class SqueezeUnsqueezeLayerTestCommon : public SqueezeUnsqueezeLayerTest, virtual public VpuOv2LayerTest {
 protected:
-    void SkipBeforeLoad() override {
+    ov::test::utils::SkipCallback skipCompilationCallback = [this](std::stringstream& str) {
         const auto inRank = function->get_parameters().at(0)->get_output_shape(0).size();
         const auto outRank = function->get_results().at(0)->get_input_shape(0).size();
         if (inRank == 0 || outRank == 0) {
-            throw LayerTestsUtils::VpuSkipTestException("SCALAR case is not supported by run-time");
+            str << "SCALAR case is not supported by run-time";
         }
         if (inRank > 4 || outRank > 4) {
-            throw LayerTestsUtils::VpuSkipTestException(">4D case is not supported by run-time");
+            str << ">4D case is not supported by run-time";
         }
-    }
+        if (getBackendName(*this->core) == "LEVEL0") {
+            str << "Level0: failure on device";
+        }
+    };
 };
 
-class SqueezeUnsqueezeLayerTest_NPU3700 : public SqueezeUnsqueezeLayerTestCommon {
-    void SkipBeforeLoad() override {
-        SqueezeUnsqueezeLayerTestCommon::SkipBeforeLoad();
-        // Tracking number [E#85137]
-        if (getBackendName(*getCore()) == "LEVEL0") {
-            throw LayerTestsUtils::VpuSkipTestException("Level0: failure on device");
-        }
-    }
-};
-
-class SqueezeUnsqueezeLayerTest_NPU3720 : public SqueezeUnsqueezeLayerTestCommon {};
-
-TEST_P(SqueezeUnsqueezeLayerTest_NPU3700, HW) {
-    setPlatformVPU3700();
-    setDefaultHardwareModeMLIR();
-    Run();
+TEST_P(SqueezeUnsqueezeLayerTestCommon, NPU3700) {
+    setSkipCompilationCallback(skipCompilationCallback);
+    setDefaultHardwareMode();
+    run(Platform::NPU3700);
 }
 
-TEST_P(SqueezeUnsqueezeLayerTest_NPU3720, HW) {
-    setPlatformVPU3720();
-    setDefaultHardwareModeMLIR();
-    Run();
+TEST_P(SqueezeUnsqueezeLayerTestCommon, NPU3720) {
+    setSkipCompilationCallback(skipCompilationCallback);
+    setDefaultHardwareMode();
+    run(Platform::NPU3720);
 }
 
-}  // namespace LayerTestsDefinitions
+TEST_P(SqueezeUnsqueezeLayerTestCommon, NPU4000) {
+    setSkipCompilationCallback(skipCompilationCallback);
+    setDefaultHardwareMode();
+    run(Platform::NPU4000);
+}
 
-using namespace LayerTestsDefinitions;
+}  // namespace test
+
+}  // namespace ov
+
+using ov::test::SqueezeUnsqueezeLayerTestCommon;
 
 namespace {
 
-std::map<std::vector<size_t>, std::vector<std::vector<int>>> axesVectors = {
-        {{1, 1, 1, 1},
+std::map<std::vector<ov::Shape>, std::vector<std::vector<int>>> axesVectors = {
+        {{{1, 1, 1, 1}},
          {{-1},
           {0},
           {1},
@@ -73,28 +69,33 @@ std::map<std::vector<size_t>, std::vector<std::vector<int>>> axesVectors = {
           {0, 2, 3},
           {1, 2, 3},
           {0, 1, 2, 3}}},
-        {{1, 2, 3, 4}, {{0}}},
-        {{2, 1, 3, 4}, {{1}}},
-        {{1}, {{-1}, {0}}},
-        {{1, 2}, {{0}}},
-        {{2, 1}, {{1}, {-1}}},
+        {{{1, 2, 3, 4}}, {{0}}},
+        {{{2, 1, 3, 4}}, {{1}}},
+        {{{1}}, {{-1}, {0}}},
+        {{{1, 2}}, {{0}}},
+        {{{2, 1}}, {{1}, {-1}}},
 };
 
-const std::vector<InferenceEngine::Precision> netPrecisions = {InferenceEngine::Precision::FP16};
+auto combined_axes = ov::test::utils::combineParams(axesVectors);
 
-const std::vector<ngraph::helpers::SqueezeOpType> opTypes = {ngraph::helpers::SqueezeOpType::SQUEEZE,
-                                                             ngraph::helpers::SqueezeOpType::UNSQUEEZE};
-const auto paramConfig = testing::Combine(
-        ::testing::ValuesIn(ov::test::utils::combineParams(axesVectors)), ::testing::ValuesIn(opTypes),
-        ::testing::ValuesIn(netPrecisions), ::testing::Values(InferenceEngine::Precision::UNSPECIFIED),
-        ::testing::Values(InferenceEngine::Precision::UNSPECIFIED), ::testing::Values(InferenceEngine::Layout::ANY),
-        ::testing::Values(InferenceEngine::Layout::ANY),
-        ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+auto prepare_cases = [](const std::vector<std::pair<std::vector<ov::Shape>, std::vector<int>>>& raw_axes) {
+    std::vector<std::pair<std::vector<ov::test::InputShape>, std::vector<int>>> cases;
+    for (const auto& raw_case : raw_axes)
+        cases.emplace_back(ov::test::static_shapes_to_test_representation(raw_case.first), raw_case.second);
+    return cases;
+};
 
-INSTANTIATE_TEST_SUITE_P(smoke_Basic, SqueezeUnsqueezeLayerTest_NPU3700, paramConfig,
-                         SqueezeUnsqueezeLayerTest::getTestCaseName);
+auto axes = prepare_cases(combined_axes);
 
-INSTANTIATE_TEST_SUITE_P(smoke_Basic, SqueezeUnsqueezeLayerTest_NPU3720, paramConfig,
-                         SqueezeUnsqueezeLayerTest::getTestCaseName);
+const std::vector<ov::element::Type> modelTypes = {ov::element::f16};
+
+const std::vector<ov::test::utils::SqueezeOpType> opTypes = {ov::test::utils::SqueezeOpType::SQUEEZE,
+                                                             ov::test::utils::SqueezeOpType::UNSQUEEZE};
+const auto paramConfig =
+        testing::Combine(::testing::ValuesIn(axes), ::testing::ValuesIn(opTypes), ::testing::ValuesIn(modelTypes),
+                         ::testing::Values(ov::test::utils::DEVICE_NPU));
+
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_Basic, SqueezeUnsqueezeLayerTestCommon, paramConfig,
+                         SqueezeUnsqueezeLayerTestCommon::getTestCaseName);
 
 }  // namespace

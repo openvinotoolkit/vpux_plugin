@@ -1,0 +1,311 @@
+//
+// Copyright (C) 2022-2023 Intel Corporation.
+// SPDX-License-Identifier: Apache 2.0
+//
+
+#include "vpux/compiler/NPU40XX/dialect/VPU/transforms/passes.hpp"
+#include "vpux/compiler/core/layers.hpp"
+#include "vpux/compiler/core/tiling.hpp"
+#include "vpux/compiler/dialect/VPU/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
+#include "vpux/compiler/utils/logging.hpp"
+#include "vpux/compiler/utils/rewriter.hpp"
+
+#include <llvm/ADT/TypeSwitch.h>
+
+using namespace vpux;
+using namespace VPU;
+
+namespace {
+
+int64_t getInputWorkloadStartCh(NCEOpInterface nceOp, const int64_t outputStartCh) {
+    return llvm::TypeSwitch<mlir::Operation*, int64_t>(nceOp.getOperation())
+            .Case<NCEConvolutionOp, NCECompressConvolutionOp, NCEInterpolateOp>([&](mlir::Operation* /*op*/) {
+                return 0;
+            })
+            .Case<NCEEltwiseOp>([&](mlir::Operation* /*op*/) {
+                VPUX_THROW_WHEN(outputStartCh != 0,
+                                "HW Eltwise does not support workload segmentation over K. Output workload start = {0}",
+                                outputStartCh);
+                return outputStartCh;
+            })
+            .Case<NCEDepthConvolutionOp, NCEMaxPoolOp, NCEAveragePoolOp>([&](mlir::Operation* /*op*/) {
+                return outputStartCh;
+            })
+            .Case<NCEPermuteOp>([&](mlir::Operation* /*op*/) {
+                return outputStartCh;
+            })
+            .Default([&](mlir::Operation * /*op*/) -> int64_t {
+                VPUX_THROW("Unsupported operation type: {0}", nceOp);
+            });
+}
+
+int64_t getInputWorkloadSizeCh(NCEOpInterface nceOp, const int64_t outputSizeCh, const int64_t outputStartCh,
+                               const int64_t fullInputChannels) {
+    return llvm::TypeSwitch<mlir::Operation*, int64_t>(nceOp.getOperation())
+            .Case<NCEConvolutionOp, NCEInterpolateOp>([&](mlir::Operation* /*op*/) {
+                return fullInputChannels;
+            })
+            .Case<NCEEltwiseOp>([&](mlir::Operation* /*op*/) {
+                VPUX_THROW_WHEN(fullInputChannels != outputSizeCh,
+                                "HW Eltwise does not support workload segmentation over K. input channels ({0}) != "
+                                "output channels ({1})",
+                                fullInputChannels, outputSizeCh);
+                return fullInputChannels;
+            })
+            .Case<NCEDepthConvolutionOp, NCEMaxPoolOp, NCEAveragePoolOp>([&](mlir::Operation* /*op*/) {
+                return outputSizeCh;
+            })
+            .Case<NCECompressConvolutionOp>([&](mlir::Operation* /*op*/) {
+                return VPU::NCEInvariant::getAlignment(
+                        nceOp.getWeightsOperand().getType().cast<vpux::NDTypeInterface>().getElementType());
+            })
+            .Case<NCEPermuteOp>([&](mlir::Operation* /*op*/) {
+                if ((outputStartCh + outputSizeCh) > fullInputChannels) {
+                    return fullInputChannels - outputStartCh;
+                }
+                return outputSizeCh;
+            })
+            .Default([&](mlir::Operation * /*op*/) -> int64_t {
+                VPUX_THROW("Unsupported operation type: {0}", nceOp);
+            });
+}
+
+SmallVector<Shape> getInputOffsetsPerCluster(NCEOpInterface nceOp, Logger log) {
+    auto input = nceOp->getOperand(0);
+    auto nceClusterTilingOp = mlir::dyn_cast<VPU::NCEClusterTilingOp>(nceOp->getParentOp());
+
+    if (nceClusterTilingOp == nullptr) {
+        return {};
+    }
+
+    auto inputClusterOperand = VPU::getDistributedOperandFromNCEClusterTiling(nceClusterTilingOp, input);
+    if (inputClusterOperand == nullptr) {
+        return {};
+    }
+
+    auto inputTypes = inputClusterOperand.getType().cast<VPU::DistributedTypeInterface>();
+    if (!inputTypes.containsDistributedTypes()) {
+        return {};
+    }
+
+    auto distributedInType = inputTypes.getDistributedTypes().begin()->cast<VPU::DistributedTensorType>();
+    if (auto inputSparseType = inputTypes.dyn_cast<VPU::SparseTensorType>()) {
+        auto effectiveSparseOutputType = getEffectiveSparseOutputType(inputSparseType);
+        distributedInType = effectiveSparseOutputType.cast<VPU::DistributedTensorType>();
+    }
+    auto inputDistrAttr = distributedInType.getDistribution();
+    auto modeInput = inputDistrAttr.getMode().getValue();
+
+    const auto output = nceClusterTilingOp->getResult(0);
+    const auto outputTypes = output.getType().dyn_cast<VPU::DistributedTypeInterface>();
+    VPUX_THROW_WHEN(outputTypes == nullptr || !outputTypes.containsDistributedTypes(),
+                    "nceClusterTilingOp has distributed type input and non distributed output type.");
+
+    auto distributedOutputType = outputTypes.getDistributedTypes().begin()->cast<VPU::DistributedTensorType>();
+    const auto outputDistrAttr = distributedOutputType.getDistribution();
+    const auto outputPerClusterOffsetInFullTensor = distributedOutputType.getPerClusterMemoryShapeOffsets();
+    const auto modeOutput = outputDistrAttr.getMode().getValue();
+
+    // Offsets in full input tensor for each cluster
+    const auto inputPerClusterOffsetInFullTensor = distributedInType.getPerClusterMemoryShapeOffsets();
+
+    // Get the correction necessary to get offsets relative to the slice of data found in each cluster
+    SmallVector<Shape> perClusterOffsetsAdjustment(inputDistrAttr.getNumClusters().getInt(),
+                                                   Shape(distributedInType.getShape().size(), 0));
+
+    const auto isDWOp =
+            mlir::isa<VPU::NCEDepthConvolutionOp, VPU::NCEMaxPoolOp, VPU::NCEAveragePoolOp>(nceOp.getOperation());
+
+    auto clusterHasFullTensor = [](VPU::DistributionMode mode) {
+        return VPU::bitEnumContainsAny(mode, VPU::DistributionMode::DUPLICATED) ||
+               VPU::bitEnumContainsAny(mode, VPU::DistributionMode::MULTICASTED);
+    };
+
+    const auto hasFullInput = clusterHasFullTensor(modeInput);
+    const auto producesFullOutput = clusterHasFullTensor(modeOutput);
+
+    const auto adjustmentNeededOnH = modeInput == VPU::DistributionMode::OVERLAPPED;
+    const auto adjustmentNeededOnW = modeInput == VPU::DistributionMode::OVERLAPPED;
+    const auto adjustmentNeededOnC = ((isDWOp && hasFullInput && VPU::isSegmentedOverC(outputDistrAttr)) ||
+                                      (isDWOp && producesFullOutput && VPU::isSegmentedOverC(inputDistrAttr)) ||
+                                      (!isDWOp && VPU::isSegmentedOverC(outputDistrAttr)));
+
+    if (!adjustmentNeededOnH && !adjustmentNeededOnW && !adjustmentNeededOnC) {
+        // no adjustment needed
+        return perClusterOffsetsAdjustment;
+    }
+
+    for (size_t clusterIdx = 0; clusterIdx < perClusterOffsetsAdjustment.size(); clusterIdx++) {
+        const auto offsetsInFullTensor = inputPerClusterOffsetInFullTensor[clusterIdx];
+        if (adjustmentNeededOnH) {
+            perClusterOffsetsAdjustment[clusterIdx][Dims4D::Act::H] = -offsetsInFullTensor[Dims4D::Act::H];
+        }
+        if (adjustmentNeededOnW) {
+            perClusterOffsetsAdjustment[clusterIdx][Dims4D::Act::W] = -offsetsInFullTensor[Dims4D::Act::W];
+        }
+        if (adjustmentNeededOnC) {
+            if (isDWOp && hasFullInput && VPU::isSegmentedOverC(outputDistrAttr)) {
+                // DW operations: DUP -> SEG
+                // In this case output workloads start from 0 in each cluster and this offset backinferred to input
+                // offsets. Since input is duplicated then it does not contain any memory offsets, take them from output
+                // distributed tensor.
+                perClusterOffsetsAdjustment[clusterIdx][Dims4D::Act::C] =
+                        outputPerClusterOffsetInFullTensor[clusterIdx][Dims4D::Act::C];
+                continue;
+            }
+
+            perClusterOffsetsAdjustment[clusterIdx][Dims4D::Act::C] = -offsetsInFullTensor[Dims4D::Act::C];
+        }
+    }
+
+    log.trace("Per cluster offsets correction = {0}, distributed type  = {1}", perClusterOffsetsAdjustment,
+              distributedInType);
+
+    return perClusterOffsetsAdjustment;
+}
+
+std::pair<SmallVector<int64_t>, SmallVector<int64_t>> computeInputWorkload(NCEOpInterface nceOp,
+                                                                           DPUWorkloadOp dpuTaskOp, Logger log) {
+    const auto outWlStart = parseIntArrayAttr<int64_t>(dpuTaskOp.getOutOffsets());
+    const auto outWlSize = parseIntArrayAttr<int64_t>(dpuTaskOp.getOutSizes());
+
+    const auto inputType = nceOp->getOperand(0).getType().cast<NDTypeInterface>();
+    auto fullInputShape = inputType.getShape();
+    if (auto inputSparseType = inputType.dyn_cast<VPU::SparseTensorType>()) {
+        auto effectiveSparseOutputType = getEffectiveSparseOutputType(inputSparseType);
+        fullInputShape = effectiveSparseOutputType.getShape();
+    }
+
+    const auto fullInputChannels = fullInputShape[Dims4D::Act::C];
+    const auto fullInputHeight = fullInputShape[Dims4D::Act::H];
+    const auto fullInputWidth = fullInputShape[Dims4D::Act::W];
+
+    const auto kernelSz = nceOp.getKernelSizeVal();
+    const auto strides = nceOp.getStridesVal();
+
+    const auto padding = nceOp.getPad();
+    const auto kernelPadTop = padding.getTop().getInt();
+    const auto kernelPadLeft = padding.getLeft().getInt();
+    const auto kernelPadBottom = padding.getBottom().getInt();
+    const auto kernelPadRight = padding.getRight().getInt();
+
+    DimRange inHeightTile(0, 0);
+    const DimRange outHeightTile(outWlStart[Dims4D::Act::H.ind()],
+                                 outWlStart[Dims4D::Act::H.ind()] + outWlSize[Dims4D::Act::H.ind()]);
+    std::tie(inHeightTile, std::ignore, std::ignore) =
+            vpux::inputForOutputDim(outHeightTile, kernelSz[Dims4D::Kernel::Y.ind()], strides[Dims4D::Kernel::Y.ind()],
+                                    {0, fullInputHeight}, kernelPadTop, kernelPadBottom);
+
+    DimRange inWidthTile(0, 0);
+    const DimRange outWidthTile(outWlStart[Dims4D::Act::W.ind()],
+                                outWlStart[Dims4D::Act::W.ind()] + outWlSize[Dims4D::Act::W.ind()]);
+    std::tie(inWidthTile, std::ignore, std::ignore) =
+            vpux::inputForOutputDim(outWidthTile, kernelSz[Dims4D::Kernel::X.ind()], strides[Dims4D::Kernel::X.ind()],
+                                    {0, fullInputWidth}, kernelPadLeft, kernelPadRight);
+
+    const auto inStartWidth = inWidthTile.begin;
+    const auto inStartHeight = inHeightTile.begin;
+    const auto inStartChannels = getInputWorkloadStartCh(nceOp, outWlStart[Dims4D::Act::C.ind()]);
+
+    const auto start =
+            SmallVector<int64_t>{outWlStart[Dims4D::Act::N.ind()], inStartChannels, inStartHeight, inStartWidth};
+
+    const auto inSizeWidth = inWidthTile.end - inWidthTile.begin;
+    const auto inSizeHeight = inHeightTile.end - inHeightTile.begin;
+    const auto inSizeChannels = getInputWorkloadSizeCh(nceOp, outWlSize[Dims4D::Act::C.ind()],
+                                                       outWlStart[Dims4D::Act::C.ind()], fullInputChannels);
+    VPUX_THROW_WHEN((mlir::isa<VPU::NCEPermuteOp>(nceOp.getOperation())) && (inStartWidth != 0) &&
+                            (inSizeWidth != fullInputWidth),
+                    "HW Permute does not support workload segmentation over W. Input workload start = {0}, Input "
+                    "workload size = {1}",
+                    inStartWidth, inSizeWidth);
+
+    const auto size = SmallVector<int64_t>{outWlSize[Dims4D::Act::N.ind()], inSizeChannels, inSizeHeight, inSizeWidth};
+
+    log.trace("Computed input workload start/end for operation '{0}': start = {1}, size = {2}", dpuTaskOp.getLoc(),
+              start, size);
+
+    return std::make_pair(start, size);
+}
+
+//
+// CorrectNCEWorkloads
+//
+
+class ComputeNCEInputWorkloadsPass final :
+        public VPU::arch40xx::ComputeNCEInputWorkloadsBase<ComputeNCEInputWorkloadsPass> {
+public:
+    explicit ComputeNCEInputWorkloadsPass(Logger log): _log(log) {
+        _log.setName(Base::getArgumentName());
+    }
+
+private:
+    void safeRunOnFunc() final;
+
+private:
+    Logger _log;
+};
+
+void ComputeNCEInputWorkloadsPass::safeRunOnFunc() {
+    auto func = getOperation();
+
+    // TODO: Add support for VPUX37XX input workloads computation
+    // Ticket: E#63055
+
+    func.walk([&](NCEOpInterface nceOp) {
+        const auto perClusterStartOffsets = getInputOffsetsPerCluster(nceOp, _log);
+        auto workloads = nceOp.getWorkloads().getOps<DPUWorkloadOp>();
+        for (auto workload : llvm::make_early_inc_range(workloads)) {
+            if (!workload.getInOffsets().has_value() || !workload.getInSizes().has_value()) {
+                mlir::OpBuilder builder(workload);
+                SmallVector<int64_t> inStart = {};
+                SmallVector<int64_t> inSize = {};
+
+                std::tie(inStart, inSize) = computeInputWorkload(nceOp, workload, _log);
+
+                if (!perClusterStartOffsets.empty()) {
+                    VPUX_THROW_UNLESS(workload.getClusterId().has_value(),
+                                      "DPUWorkload should have cluster_id set: {0}", workload);
+
+                    const auto globalInputOffsets = perClusterStartOffsets[workload.getClusterId().value()];
+                    inStart[Dims4D::Act::C.ind()] += globalInputOffsets[Dims4D::Act::C];
+                    inStart[Dims4D::Act::H.ind()] += globalInputOffsets[Dims4D::Act::H];
+                    inStart[Dims4D::Act::W.ind()] += globalInputOffsets[Dims4D::Act::W];
+
+                    VPUX_THROW_UNLESS(
+                            inStart[Dims4D::Act::H.ind()] >= 0 && inStart[Dims4D::Act::W.ind()] >= 0,
+                            "An NCEClusterTaskOp must not need more overlap lines/columns than provided by the "
+                            "DistributedType of its input, workload = {0}, op = {1}",
+                            workload, nceOp);
+                    VPUX_THROW_UNLESS(inStart[Dims4D::Act::C.ind()] >= 0,
+                                      "An NCEClusterTaskOp has negative input workload channel offset, workload = {0}, "
+                                      "op = {1}, inStart C = {2}, offset was {3}",
+                                      workload, nceOp, inStart[Dims4D::Act::C.ind()],
+                                      globalInputOffsets[Dims4D::Act::C]);
+                }
+
+                const auto inStartAttr = getIntArrayAttr(builder.getContext(), inStart);
+                const auto inSizeAttr = getIntArrayAttr(builder.getContext(), inSize);
+
+                auto workloadWithInputOffsets = builder.create<DPUWorkloadOp>(
+                        workload.getLoc(), workload.getOutOffsets(), workload.getOutSizes(), inStartAttr, inSizeAttr,
+                        workload.getPad(), workload.getMpeMode(), workload.getClusterIdAttr());
+
+                _log.trace("DpuTaskOp '{0}' replaced with {1}", workload, workloadWithInputOffsets);
+
+                workload.erase();
+            }
+        }
+    });
+}
+
+}  // namespace
+
+//
+// createComputeNCEInputWorkloadsPass
+//
+
+std::unique_ptr<mlir::Pass> vpux::VPU::arch40xx::createComputeNCEInputWorkloadsPass(Logger log) {
+    return std::make_unique<ComputeNCEInputWorkloadsPass>(log);
+}

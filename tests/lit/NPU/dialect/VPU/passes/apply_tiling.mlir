@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --apply-tiling --canonicalize %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
@@ -113,9 +113,9 @@ func.func @ApplyTilingMaxPool(%arg0: tensor<1x16x200x200xf16, {order = #NHWC}>) 
 // CHECK-SAME:      [[INPUT:%arg[0-9]]]: tensor<1x16x7x12960xf16, {order = #NHWC}>
 func.func @ApplyTilingAvgPool(%arg0: tensor<1x16x7x12960xf16, {order = #NHWC}>) -> tensor<1x16x1x12960xf16, {order = #NHWC}> {
     %0 = VPU.NCE.AveragePool(%arg0) {
-        kernel_size = [7, 1], 
-        pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, 
-        ppe = #VPU.PPETask<mode = <NOOP>, clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [2.500000e-01]>, 
+        kernel_size = [7, 1],
+        pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
+        ppe = #VPU.PPETask<mode = <NOOP>, clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [2.500000e-01]>,
         strides = [1, 1],
         tilingStrategy = [1, 1, 1, 3]
         } -> tensor<1x16x1x12960xf16, {order = #NHWC}>
@@ -326,7 +326,7 @@ func.func @ApplyTilingSparseQuantNCEConv(%arg0: tensor<1x32x80x80x!qElemType, {o
 // CHECK-LABEL: func.func @ApplyTilingDepthToSpace
 func.func @ApplyTilingDepthToSpace(%arg0: tensor<1x384x10x120xf16, {order = #NHWC}>) -> tensor<1x24x40x480xf16, {order = #NHWC}> {
     %0 = VPU.DepthToSpace(%arg0) {
-        block_size = 4 : i64, 
+        block_size = 4 : i64,
         mode = #IE.depth_to_space_mode<BLOCKS_FIRST>,
         tilingStrategy = [1, 1, 2, 1]
     } : tensor<1x384x10x120xf16, {order = #NHWC}> -> tensor<1x24x40x480xf16, {order = #NHWC}>
@@ -344,7 +344,7 @@ func.func @ApplyTilingDepthToSpace(%arg0: tensor<1x384x10x120xf16, {order = #NHW
     // CHECK-SAME:              mode = #IE.depth_to_space_mode<BLOCKS_FIRST>
     // CHECK-SAME:          : tensor<1x384x5x120xf16, {order = #NHWC}> -> tensor<1x24x20x480xf16, {order = #NHWC}>
 
-    // CHECK:           [[CONCAT:%.+]] = VPU.Concat([[D2S0]], [[D2S1]]) 
+    // CHECK:           [[CONCAT:%.+]] = VPU.Concat([[D2S0]], [[D2S1]])
     // CHECK-SAME{LITERAL}:     static_offsets = [[0, 0, 0, 0], [0, 0, 20, 0]]
     // CHECK-SAME:          : tensor<1x24x20x480xf16, {order = #NHWC}>, tensor<1x24x20x480xf16, {order = #NHWC}> -> tensor<1x24x40x480xf16, {order = #NHWC}>
 
@@ -356,7 +356,7 @@ func.func @ApplyTilingDepthToSpace(%arg0: tensor<1x384x10x120xf16, {order = #NHW
 // CHECK-LABEL:   func.func @ApplyTilingSpaceToDepth
 func.func @ApplyTilingSpaceToDepth(%arg0: tensor<1x48x160x80xf16>) -> tensor<1x768x40x20xf16> {
     %0 = VPU.SpaceToDepthOp(%arg0) {
-        block_size = 4 : i64, 
+        block_size = 4 : i64,
         mode = #IE.space_to_depth_mode<BLOCKS_FIRST>,
         tilingStrategy = [1, 1, 1, 2]
     } : tensor<1x48x160x80xf16> -> tensor<1x768x40x20xf16>
@@ -374,7 +374,7 @@ func.func @ApplyTilingSpaceToDepth(%arg0: tensor<1x48x160x80xf16>) -> tensor<1x7
     // CHECK-SAME:              mode = #IE.space_to_depth_mode<BLOCKS_FIRST>
     // CHECK-SAME:          : tensor<1x48x160x40xf16> -> tensor<1x768x40x10xf16>
 
-    // CHECK:           [[CONCAT:%.+]] = VPU.Concat([[S2D0]], [[S2D1]]) 
+    // CHECK:           [[CONCAT:%.+]] = VPU.Concat([[S2D0]], [[S2D1]])
     // CHECK-SAME{LITERAL}:     static_offsets = [[0, 0, 0, 0], [0, 0, 0, 10]]
     // CHECK-SAME:          : tensor<1x768x40x10xf16>, tensor<1x768x40x10xf16> -> tensor<1x768x40x20xf16>
 
@@ -430,7 +430,7 @@ func.func @ApplyTilingSigmoid(%arg0: tensor<1x8x80x960xf16>) -> tensor<1x8x80x96
     // CHECK:       [[INPUT_TILE0:%.+]] = VPU.Slice [[INPUT]] [0, 0, 0, 0] [1, 8, 80, 480]
     // CHECK-SAME:  : tensor<1x8x80x960xf16> to tensor<1x8x80x480xf16>
 
-    // CHECK:       [[OUTPUT_TILE0:%.+]] = VPU.Sigmoid([[INPUT_TILE0]]) 
+    // CHECK:       [[OUTPUT_TILE0:%.+]] = VPU.Sigmoid([[INPUT_TILE0]])
     // CHECK-SAME:      : tensor<1x8x80x480xf16> -> tensor<1x8x80x480xf16>
 
     // CHECK:       [[INPUT_TILE1:%.+]] = VPU.Slice [[INPUT]] [0, 0, 0, 480] [1, 8, 80, 480]
@@ -539,7 +539,7 @@ func.func @ApplyTilingSqrt(%arg0: tensor<1x8x80x960xf16>) -> tensor<1x8x80x960xf
 // CHECK-SAME:  [[INPUT:%arg[0-9]]]: tensor<1x8x80x960xf16>) -> tensor<1x8x80x960xf16>
 func.func @ApplyTilingClamp(%arg0: tensor<1x8x80x960xf16>) -> tensor<1x8x80x960xf16> {
     %0 = VPU.Clamp(%arg0) {
-        max = 1.000000e+00 : f64, 
+        max = 1.000000e+00 : f64,
         min = -1.000000e+00 : f64,
         tilingStrategy = [1, 1, 1, 2]
     } : tensor<1x8x80x960xf16> -> tensor<1x8x80x960xf16>
@@ -850,13 +850,13 @@ func.func @NestedTilingUnrollChannelFirst(%arg0: tensor<1x512x64x64xf16, {order 
     // When the filter size * TOH * TOW size is bigger than the activation input size * TOC
     // unroll channel first, then H and W, to save the filter DMA
     // CHECK-DAG:       [[WT_0:%.+]] = const.Declare tensor<64x1x1x4xsi32> = dense<1> : tensor<256x1x1x4xsi32>, [#const.SubView<[192, 0, 0, 0], [64, 1, 1, 4]>]
-    // CHECK-DAG:       [[WEIGHTS_0:%.+]] = const.Declare tensor<64x512x5x5xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<256x512x5x5xf16>, [#const.Reorder<#NHWC>, #const.SubView<[192, 0, 0, 0], [64, 512, 5, 5]>]
+    // CHECK-DAG:       [[WEIGHTS_0:%.+]] = const.Declare tensor<64x512x5x5xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<256x512x5x5xf16>, [#const.SubView<[192, 0, 0, 0], [64, 512, 5, 5]>, #const.Reorder<#NHWC>]
     // CHECK-DAG:       [[WT_1:%.+]] = const.Declare tensor<64x1x1x4xsi32> = dense<1> : tensor<256x1x1x4xsi32>, [#const.SubView<[128, 0, 0, 0], [64, 1, 1, 4]>]
-    // CHECK-DAG:       [[WEIGHTS_1:%.+]] = const.Declare tensor<64x512x5x5xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<256x512x5x5xf16>, [#const.Reorder<#NHWC>, #const.SubView<[128, 0, 0, 0], [64, 512, 5, 5]>]
+    // CHECK-DAG:       [[WEIGHTS_1:%.+]] = const.Declare tensor<64x512x5x5xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<256x512x5x5xf16>, [#const.SubView<[128, 0, 0, 0], [64, 512, 5, 5]>, #const.Reorder<#NHWC>]
     // CHECK-DAG:       [[WT_2:%.+]] = const.Declare tensor<64x1x1x4xsi32> = dense<1> : tensor<256x1x1x4xsi32>, [#const.SubView<[64, 0, 0, 0], [64, 1, 1, 4]>]
-    // CHECK-DAG:       [[WEIGHTS_2:%.+]] = const.Declare tensor<64x512x5x5xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<256x512x5x5xf16>, [#const.Reorder<#NHWC>, #const.SubView<[64, 0, 0, 0], [64, 512, 5, 5]>]
+    // CHECK-DAG:       [[WEIGHTS_2:%.+]] = const.Declare tensor<64x512x5x5xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<256x512x5x5xf16>, [#const.SubView<[64, 0, 0, 0], [64, 512, 5, 5]>, #const.Reorder<#NHWC>]
     // CHECK-DAG:       [[WT_3:%.+]] = const.Declare tensor<64x1x1x4xsi32> = dense<1> : tensor<256x1x1x4xsi32>, [#const.SubView<[0, 0, 0, 0], [64, 1, 1, 4]>]
-    // CHECK-DAG:       [[WEIGHTS_3:%.+]] = const.Declare tensor<64x512x5x5xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<256x512x5x5xf16>, [#const.Reorder<#NHWC>, #const.SubView<[0, 0, 0, 0], [64, 512, 5, 5]>]
+    // CHECK-DAG:       [[WEIGHTS_3:%.+]] = const.Declare tensor<64x512x5x5xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<256x512x5x5xf16>, [#const.SubView<[0, 0, 0, 0], [64, 512, 5, 5]>, #const.Reorder<#NHWC>]
     // CHECK:       [[SLICE_0_0:%.+]] = VPU.Slice [[INPUT]] [0, 0, 0, 0] [1, 512, 18, 64] : tensor<1x512x64x64xf16, {order = #NHWC}> to tensor<1x512x18x64xf16, {order = #NHWC}>
     // CHECK:       [[CONV_0_0:%.+]] = VPU.NCE.Convolution([[SLICE_0_0]], [[WEIGHTS_3]], [[WT_3]]) {pad = #VPU.Padding<left = 2 : i64, right = 2 : i64, top = 2 : i64, bottom = 0 : i64>, rawFilterShape = [64, 512, 5, 5], strides = [1, 1]} -> tensor<1x64x16x64xf16, {order = #NHWC}>
     // CHECK:       [[SLICE_0_1:%.+]] = VPU.Slice [[INPUT]] [0, 0, 14, 0] [1, 512, 20, 64] : tensor<1x512x64x64xf16, {order = #NHWC}> to tensor<1x512x20x64xf16, {order = #NHWC}>
@@ -916,13 +916,13 @@ func.func @NestedTilingUnrollSpatialFirst(%arg0: tensor<1x512x32x64xf16, {order 
     // When the filter size * TOH * TOW size is smaller than the activation input size * TOC
     // unroll H and W first, then C, to save the activation input DMA
     // CHECK-DAG:      [[WT_0:%.+]] = const.Declare tensor<64x1x1x4xsi32> = dense<1> : tensor<256x1x1x4xsi32>, [#const.SubView<[192, 0, 0, 0], [64, 1, 1, 4]>]
-    // CHECK-DAG:      [[WEIGHTS_0:%.+]] = const.Declare tensor<64x512x3x3xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<256x512x3x3xf16>, [#const.Reorder<#NHWC>, #const.SubView<[192, 0, 0, 0], [64, 512, 3, 3]>]
+    // CHECK-DAG:      [[WEIGHTS_0:%.+]] = const.Declare tensor<64x512x3x3xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<256x512x3x3xf16>, [#const.SubView<[192, 0, 0, 0], [64, 512, 3, 3]>, #const.Reorder<#NHWC>]
     // CHECK-DAG:      [[WT_1:%.+]] = const.Declare tensor<64x1x1x4xsi32> = dense<1> : tensor<256x1x1x4xsi32>, [#const.SubView<[128, 0, 0, 0], [64, 1, 1, 4]>]
-    // CHECK-DAG:      [[WEIGHTS_1:%.+]] = const.Declare tensor<64x512x3x3xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<256x512x3x3xf16>, [#const.Reorder<#NHWC>, #const.SubView<[128, 0, 0, 0], [64, 512, 3, 3]>]
+    // CHECK-DAG:      [[WEIGHTS_1:%.+]] = const.Declare tensor<64x512x3x3xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<256x512x3x3xf16>, [#const.SubView<[128, 0, 0, 0], [64, 512, 3, 3]>, #const.Reorder<#NHWC>]
     // CHECK-DAG:      [[WT_2:%.+]] = const.Declare tensor<64x1x1x4xsi32> = dense<1> : tensor<256x1x1x4xsi32>, [#const.SubView<[64, 0, 0, 0], [64, 1, 1, 4]>]
-    // CHECK-DAG:      [[WEIGHTS_2:%.+]] = const.Declare tensor<64x512x3x3xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<256x512x3x3xf16>, [#const.Reorder<#NHWC>, #const.SubView<[64, 0, 0, 0], [64, 512, 3, 3]>]
+    // CHECK-DAG:      [[WEIGHTS_2:%.+]] = const.Declare tensor<64x512x3x3xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<256x512x3x3xf16>, [#const.SubView<[64, 0, 0, 0], [64, 512, 3, 3]>, #const.Reorder<#NHWC>]
     // CHECK-DAG:      [[WT_3:%.+]] = const.Declare tensor<64x1x1x4xsi32> = dense<1> : tensor<256x1x1x4xsi32>, [#const.SubView<[0, 0, 0, 0], [64, 1, 1, 4]>]
-    // CHECK-DAG:      [[WEIGHTS_3:%.+]] = const.Declare tensor<64x512x3x3xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<256x512x3x3xf16>, [#const.Reorder<#NHWC>, #const.SubView<[0, 0, 0, 0], [64, 512, 3, 3]>]
+    // CHECK-DAG:      [[WEIGHTS_3:%.+]] = const.Declare tensor<64x512x3x3xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<256x512x3x3xf16>, [#const.SubView<[0, 0, 0, 0], [64, 512, 3, 3]>, #const.Reorder<#NHWC>]
     // CHECK:          [[SLICE_0_0:%.+]] = VPU.Slice [[INPUT]] [0, 0, 0, 0] [1, 512, 17, 64] : tensor<1x512x32x64xf16, {order = #NHWC}> to tensor<1x512x17x64xf16, {order = #NHWC}>
     // CHECK:          [[CONV_0_0:%.+]] = VPU.NCE.Convolution([[SLICE_0_0]], [[WEIGHTS_3]], [[WT_3]]) {pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 0 : i64>, rawFilterShape = [64, 512, 3, 3], strides = [1, 1]} -> tensor<1x64x16x64xf16, {order = #NHWC}>
     // CHECK:          [[SLICE_1_0:%.+]] = VPU.Slice [[INPUT]] [0, 0, 0, 0] [1, 512, 17, 64] : tensor<1x512x32x64xf16, {order = #NHWC}> to tensor<1x512x17x64xf16, {order = #NHWC}>
@@ -942,4 +942,112 @@ func.func @NestedTilingUnrollSpatialFirst(%arg0: tensor<1x512x32x64xf16, {order 
     // CHECK:          [[CONCAT:%.+]] = VPU.Concat([[CONV_0_0]], [[CONV_1_0]], [[CONV_2_0]], [[CONV_3_0]], [[CONV_0_1]], [[CONV_1_1]], [[CONV_2_1]], [[CONV_3_1]])
     // CHECK-SAME:        [0, 0, 0, 0], [0, 64, 0, 0], [0, 128, 0, 0], [0, 192, 0, 0], [0, 0, 16, 0], [0, 64, 16, 0], [0, 128, 16, 0], [0, 192, 16, 0]
     // CHECK:          return [[CONCAT]] : tensor<1x256x32x64xf16, {order = #NHWC}>
+}
+
+// -----
+
+// CHECK-LABEL: func.func @TilePadOverHeightWidth
+// CHECK-SAME:        [[INPUT:%arg[0-9]]]: tensor<1x3x580x580xf16>
+
+func.func @TilePadOverHeightWidth(%arg0: tensor<1x3x580x580xf16>) -> tensor<1x16x600x600xf16> {
+    %pad = VPU.Pad(%arg0)
+          {mode = #IE.pad_mode<CONSTANT>, pad_value_attr = 0.000000e+00 : f64,
+          pads_begin_attr = [0, 0, 10, 10], pads_end_attr = [0, 13, 10, 10],
+          tilingStrategy = [1, 1, 3, 3]}
+          : tensor<1x3x580x580xf16> -> tensor<1x16x600x600xf16>
+
+    return %pad : tensor<1x16x600x600xf16>
+
+    // Tile 0
+
+    // CHECK:        [[SLICE0:%.*]] = VPU.Slice [[INPUT]] [0, 0, 0, 0] [1, 3, 190, 190]
+    // CHECK-SAME:      : tensor<1x3x580x580xf16> to tensor<1x3x190x190xf16>
+    // CHECK:        [[PAD0:%.*]] = VPU.Pad([[SLICE0]])
+    // CHECK-SAME:      {mode = #IE.pad_mode<CONSTANT>, pad_value_attr = 0.000000e+00 : f64,
+    // CHECK-SAME:      pads_begin_attr = [0, 0, 10, 10], pads_end_attr = [0, 13, 0, 0]}
+    // CHECK-SAME:      : tensor<1x3x190x190xf16> -> tensor<1x16x200x200xf16>
+
+    // Tile 1
+
+    // CHECK:        [[SLICE1:%.*]] = VPU.Slice [[INPUT]] [0, 0, 0, 190] [1, 3, 190, 200]
+    // CHECK-SAME:      : tensor<1x3x580x580xf16> to tensor<1x3x190x200xf16>
+    // CHECK:        [[PAD1:%.*]] = VPU.Pad([[SLICE1]])
+    // CHECK-SAME:      {mode = #IE.pad_mode<CONSTANT>, pad_value_attr = 0.000000e+00 : f64,
+    // CHECK-SAME:      pads_begin_attr = [0, 0, 10, 0], pads_end_attr = [0, 13, 0, 0]}
+    // CHECK-SAME:      : tensor<1x3x190x200xf16> -> tensor<1x16x200x200xf16>
+
+    // Tile 2
+
+    // CHECK:        [[SLICE2:%.*]] = VPU.Slice [[INPUT]] [0, 0, 0, 390] [1, 3, 190, 190]
+    // CHECK-SAME:      : tensor<1x3x580x580xf16> to tensor<1x3x190x190xf16>
+    // CHECK:        [[PAD2:%.*]] = VPU.Pad([[SLICE2]])
+    // CHECK-SAME:      {mode = #IE.pad_mode<CONSTANT>, pad_value_attr = 0.000000e+00 : f64,
+    // CHECK-SAME:      pads_begin_attr = [0, 0, 10, 0], pads_end_attr = [0, 13, 0, 10]}
+    // CHECK-SAME:      : tensor<1x3x190x190xf16> -> tensor<1x16x200x200xf16>
+
+    // Tile 3
+
+    // CHECK:        [[SLICE3:%.*]] = VPU.Slice [[INPUT]] [0, 0, 190, 0] [1, 3, 200, 190]
+    // CHECK-SAME:      : tensor<1x3x580x580xf16> to tensor<1x3x200x190xf16>
+    // CHECK:        [[PAD3:%.*]] = VPU.Pad([[SLICE3]])
+    // CHECK-SAME:      {mode = #IE.pad_mode<CONSTANT>, pad_value_attr = 0.000000e+00 : f64,
+    // CHECK-SAME:      pads_begin_attr = [0, 0, 0, 10], pads_end_attr = [0, 13, 0, 0]}
+    // CHECK-SAME:      : tensor<1x3x200x190xf16> -> tensor<1x16x200x200xf16>
+
+
+    // Tile 4
+
+    // CHECK:        [[SLICE4:%.*]] = VPU.Slice [[INPUT]] [0, 0, 190, 190] [1, 3, 200, 200]
+    // CHECK-SAME:      : tensor<1x3x580x580xf16> to tensor<1x3x200x200xf16>
+    // CHECK:        [[PAD4:%.*]] = VPU.Pad([[SLICE4]])
+    // CHECK-SAME:      {mode = #IE.pad_mode<CONSTANT>, pad_value_attr = 0.000000e+00 : f64,
+    // CHECK-SAME:      pads_begin_attr = [0, 0, 0, 0], pads_end_attr = [0, 13, 0, 0]}
+    // CHECK-SAME:      : tensor<1x3x200x200xf16> -> tensor<1x16x200x200xf16>
+
+    // Tile 5
+
+    // CHECK:        [[SLICE5:%.*]] = VPU.Slice [[INPUT]] [0, 0, 190, 390] [1, 3, 200, 190]
+    // CHECK-SAME:      : tensor<1x3x580x580xf16> to tensor<1x3x200x190xf16>
+    // CHECK:        [[PAD5:%.*]] = VPU.Pad([[SLICE5]])
+    // CHECK-SAME:      {mode = #IE.pad_mode<CONSTANT>, pad_value_attr = 0.000000e+00 : f64,
+    // CHECK-SAME:      pads_begin_attr = [0, 0, 0, 0], pads_end_attr = [0, 13, 0, 10]}
+    // CHECK-SAME:      : tensor<1x3x200x190xf16> -> tensor<1x16x200x200xf16>
+
+    // Tile 6
+
+    // CHECK:        [[SLICE6:%.*]] = VPU.Slice [[INPUT]] [0, 0, 390, 0] [1, 3, 190, 190]
+    // CHECK-SAME:      : tensor<1x3x580x580xf16> to tensor<1x3x190x190xf16>
+    // CHECK:        [[PAD6:%.*]] = VPU.Pad([[SLICE6]])
+    // CHECK-SAME:      {mode = #IE.pad_mode<CONSTANT>, pad_value_attr = 0.000000e+00 : f64,
+    // CHECK-SAME:      pads_begin_attr = [0, 0, 0, 10], pads_end_attr = [0, 13, 10, 0]}
+    // CHECK-SAME:      : tensor<1x3x190x190xf16> -> tensor<1x16x200x200xf16>
+
+    // Tile 7
+
+    // CHECK:        [[SLICE7:%.*]] = VPU.Slice [[INPUT]] [0, 0, 390, 190] [1, 3, 190, 200]
+    // CHECK-SAME:      : tensor<1x3x580x580xf16> to tensor<1x3x190x200xf16>
+    // CHECK:        [[PAD7:%.*]] = VPU.Pad([[SLICE7]])
+    // CHECK-SAME:      {mode = #IE.pad_mode<CONSTANT>, pad_value_attr = 0.000000e+00 : f64,
+    // CHECK-SAME:      pads_begin_attr = [0, 0, 0, 0], pads_end_attr = [0, 13, 10, 0]}
+    // CHECK-SAME:      : tensor<1x3x190x200xf16> -> tensor<1x16x200x200xf16>
+
+    // Tile 8
+
+    // CHECK:        [[SLICE8:%.*]] = VPU.Slice [[INPUT]] [0, 0, 390, 390] [1, 3, 190, 190]
+    // CHECK-SAME:      : tensor<1x3x580x580xf16> to tensor<1x3x190x190xf16>
+    // CHECK:        [[PAD8:%.*]] = VPU.Pad([[SLICE8]])
+    // CHECK-SAME:      {mode = #IE.pad_mode<CONSTANT>, pad_value_attr = 0.000000e+00 : f64,
+    // CHECK-SAME:      pads_begin_attr = [0, 0, 0, 0], pads_end_attr = [0, 13, 10, 10]}
+    // CHECK-SAME:      : tensor<1x3x190x190xf16> -> tensor<1x16x200x200xf16>
+
+    // Concat
+
+    // CHECK:        [[CONCAT:%.*]] = VPU.Concat([[PAD0]], [[PAD1]], [[PAD2]], [[PAD3]], [[PAD4]], [[PAD5]], [[PAD6]], [[PAD7]], [[PAD8]]) {static_offsets =
+    // CHECK-SAME:      [0, 0, 0, 0], [0, 0, 0, 200], [0, 0, 0, 400], [0, 0, 200, 0], [0, 0, 200, 200],
+    // CHECK-SAME:      [0, 0, 200, 400], [0, 0, 400, 0], [0, 0, 400, 200], [0, 0, 400, 400]
+    // CHECK-SAME:      : tensor<1x16x200x200xf16>, tensor<1x16x200x200xf16>, tensor<1x16x200x200xf16>, tensor<1x16x200x200xf16>,
+    // CHECK-SAME:      tensor<1x16x200x200xf16>, tensor<1x16x200x200xf16>, tensor<1x16x200x200xf16>, tensor<1x16x200x200xf16>, tensor<1x16x200x200xf16>
+    // CHECK-SAME:      -> tensor<1x16x600x600xf16>
+
+    // CHECK:        return [[CONCAT]] : tensor<1x16x600x600xf16>
 }

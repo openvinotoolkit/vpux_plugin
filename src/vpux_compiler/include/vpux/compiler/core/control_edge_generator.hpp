@@ -37,6 +37,10 @@ struct IntervalTraits<ScheduledOpOneResource> {
     using UnitType = size_t;
     using IntervalType = ScheduledOpOneResource;
 
+    static UnitType intervalOp(const IntervalType& interval) {
+        return interval._op;
+    }
+
     static UnitType intervalBegin(const IntervalType& interval) {
         return interval._addressStart;
     }
@@ -65,7 +69,12 @@ struct IntervalTraits<ScheduledOpOneResource> {
 
 class ControlEdgeSet {
 public:
+    using OperationType = size_t;
     ControlEdgeSet(): _controlEdgeSet() {
+    }
+
+    void operator()(const OperationType& a, const OperationType& b) {
+        _controlEdgeSet.push_back(ControlEdge(a, b));
     }
 
     void operator()(const ScheduledOpOneResource& a, const ScheduledOpOneResource& b) {
@@ -176,6 +185,24 @@ protected:
                 });
 
                 if (canProdCoexist) {
+                    // TODO: E#120027 optimize controlEdge to avoid multiple iterations
+                    // Add control edge from source of currProducers to currInterval
+                    std::set<size_t> currProducers;
+                    std::set<size_t> sourcesOfCurrProducers;
+                    for (auto& prod : qitrProdCons._producers) {
+                        currProducers.insert(Traits::intervalOp(prod));
+                    }
+                    for (auto itr = outputDependency.begin(); itr != outputDependency.end(); ++itr) {
+                        if (llvm::is_contained(currProducers, itr->_sink) && itr->_source != itr->_sink) {
+                            sourcesOfCurrProducers.insert(itr->_source);
+                        }
+                    }
+
+                    for (const auto& source : sourcesOfCurrProducers) {
+                        outputDependency(source, Traits::intervalOp(currInterval));
+                        ++edgeCount;
+                    }
+
                     // Add additional producer for this interval
                     newProdCons.addProducer(currInterval);
                 } else {

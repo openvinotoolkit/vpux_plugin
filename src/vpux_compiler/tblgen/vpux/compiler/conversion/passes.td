@@ -9,6 +9,24 @@
 include "mlir/Pass/PassBase.td"
 
 //=================================================================================
+// LowerIE2VPU
+//=================================================================================
+
+//
+// ConvertIEToVPUM2I
+//
+
+def ConvertIEToVPUM2I : PassBase<"convert-IE-to-VPU-M2I", "vpux::FunctionPass"> {
+    let summary = "Convert supported IE layers to VPU M2I operations";
+
+    let constructor = "vpux::createConvertIEToVPUM2IPass()";
+
+    let dependentDialects = [
+        "vpux::VPU::VPUDialect"
+    ];
+}
+
+//=================================================================================
 // LowerIE2IERT
 //=================================================================================
 
@@ -33,24 +51,9 @@ def BufferizeIE : PassBase<"bufferize-IE", "vpux::FunctionPass"> {
     let dependentDialects = [
         "vpux::VPUIP::VPUIPDialect",
         "mlir::func::FuncDialect",
-        "mlir::memref::MemRefDialect"
+        "mlir::memref::MemRefDialect",
+        "mlir::bufferization::BufferizationDialect"
     ];
-}
-
-//
-// BufferizeFuncAndReturn
-//
-
-def BufferizeFuncAndReturn : PassBase<"bufferize-func-and-return", "vpux::ModulePass"> {
-    let summary = "Bufferize func/return ops";
-
-    let description = [{
-        A bufferize pass that bufferizes std.func ops.
-        In contrast to MLIR standard analogue pass, this pass uses vpux::BufferizeTypeConverter
-        to process encoding attribute in mlir::RankedTensorType
-    }];
-
-    let constructor = "vpux::createBufferizeFuncAndReturnPass()";
 }
 
 //
@@ -80,6 +83,25 @@ def AddBuffersForNetResults : PassBase<"add-buffers-for-net-results", "vpux::Mod
 //=================================================================================
 
 //
+// InPlaceBufferizationAnalyze
+//
+
+def InPlaceBufferizationAnalyze : PassBase<"in-place-bufferization-analyze", "vpux::ModulePass"> {
+    let summary = "One shot in place analyze ops from VPU to VPUIP";
+
+    let description = [{
+        Analyze if operations could be bufferized in-place. This pass must be called before
+        one-shot bufferize action is performed(done by OneShotBufferizeVPU2VPUIP).
+    }];
+
+    let constructor = "vpux::createInPlaceBufferizationAnalyzePass()";
+
+    let dependentDialects = [
+        "vpux::VPU::VPUDialect"
+    ];
+}
+
+//
 // OneShotBufferizeVPU2VPUIP
 //
 
@@ -106,86 +128,6 @@ def OneShotBufferizeVPU2VPUIP : PassBase<"one-shot-bufferize-VPU-to-VPUIP", "vpu
 }
 
 //
-// ConvertVPUNCEToVPUIP
-//
-
-def ConvertVPUNCEToVPUIP : PassBase<"convert-vpu-nce-to-vpuip", "vpux::FunctionPass"> {
-    let summary = "Convert NCE ops from VPU to VPUIP";
-
-    let description = [{
-        Convert ops which can be executed on NCE to VPUIP::NCEClusterTask ops.
-    }];
-
-    let constructor = "vpux::createConvertVPUNCEToVPUIPPass()";
-
-    let dependentDialects = [
-        "vpux::VPU::VPUDialect",
-        "vpux::VPUIP::VPUIPDialect",
-        "vpux::VPURT::VPURTDialect"
-    ];
-}
-
-//
-// ConvertNCEClusterTilingToVPUIP
-//
-
-def ConvertNCEClusterTilingToVPUIP : PassBase<"convert-nce-cluster-tiling-to-vpuip", "vpux::FunctionPass"> {
-    let summary = "Convert VPU NCEClusterTiling ops to VPUIP";
-
-    let description = [{
-        Convert VPU::NCEClusterTiling ops to VPUIP::NCEClusterTiling.
-    }];
-
-    let constructor = "vpux::createConvertNCEClusterTilingToVPUIPPass()";
-
-    let dependentDialects = [
-        "vpux::VPU::VPUDialect",
-        "vpux::VPUIP::VPUIPDialect",
-        "vpux::VPURT::VPURTDialect"
-    ];
-}
-
-//
-// ConvertLayers2VPUIP
-//
-
-def ConvertLayers2VPUIP : PassBase<"convert-layers-to-VPUIP", "vpux::FunctionPass"> {
-    let summary = "Convert VPU Operations to VPUIP Dialect";
-
-    let description = [{
-        Convert operations from VPU to VPUIP dialect,
-        including remaining operations except for NCE and SW operations.
-    }];
-
-    let constructor = "vpux::createConvertLayers2VPUIPPass()";
-
-    let dependentDialects = [
-        "vpux::VPUIP::VPUIPDialect",
-        "vpux::VPURT::VPURTDialect"
-    ];
-}
-
-//
-// ConvertSWLayers2VPUIPSWKernel
-//
-
-def ConvertSWLayers2VPUIPSWKernel : PassBase<"convert-sw-layers-to-VPUIP-sw-kernel", "vpux::ModulePass"> {
-    let summary = "Convert Software Operations to VPUIP SWKernel";
-
-    let description = [{
-        Convert software operations from VPU to VPUIP::SWKernel operations.
-    }];
-
-    let constructor = "vpux::createConvertSWLayers2VPUIPSWKernelPass()";
-
-    let dependentDialects = [
-        "vpux::VPUIP::VPUIPDialect",
-        "mlir::arith::ArithDialect",
-        "vpux::VPURT::VPURTDialect"
-    ];
-}
-
-//
 // ConvertSWLayers2VPUIPUPA
 //
 
@@ -200,7 +142,8 @@ def ConvertSWLayers2VPUIPUPA : PassBase<"convert-sw-layers-to-VPUIP-UPA", "vpux:
 
     let dependentDialects = [
         "vpux::VPUIP::VPUIPDialect",
-        "vpux::VPURT::VPURTDialect"
+        "vpux::VPURT::VPURTDialect",
+        "mlir::bufferization::BufferizationDialect"
     ];
 }
 
@@ -212,7 +155,7 @@ def ConvertSWLayers2Affine : PassBase<"convert-sw-layers-to-Affine", "vpux::Modu
     let summary = "Convert Software Operations to Affine Dialect";
 
     let description = [{
-        Convert software operations from IERT to Affine operations for VPU37XX.
+        Convert software operations from IERT to Affine operations for NPU37XX.
     }];
 
     let constructor = "vpux::createConvertSWLayers2AffinePass()";
@@ -269,6 +212,81 @@ def ConvertVPUIP2VPUMI37XX : PassBase<"convert-VPUIP-to-VPUMI37XX", "vpux::Modul
 }
 
 //
+// ConvertVPUMI37XX2VPUASM
+//
+
+def ConvertVPUMI37XX2VPUASM : PassBase<"convert-VPUMI37XX-to-VPUASM", "vpux::ModulePass"> {
+    let summary = "Convert VPUMI37XX dialect to VPUASM";
+
+    let description = [{
+        VPUMI37XX is the last level of representation where we still employ op-result-operand relationships.
+        After this conversion pass expect only symbolic relationships between the OPS. (with the occasional exception,
+        and helped by *VPUASM_SymbolizeValueOp* we can still permit non-symbolic ops to be present in the IR, having
+        an explicit conversion OP, that can still be present as information containers).
+
+        Concrete example for DistributetBuffers that have no VPUASM counterpart, we can still hook them into VPUASM.Invariant
+        by using SymbolizeValueOp to create a symbol for it.
+    }];
+
+    let constructor = "vpux::createConvertVPUMI37XX2VPUASMPass()";
+    let dependentDialects = [
+        "vpux::VPUIP::VPUIPDialect",
+        "vpux::VPURT::VPURTDialect",
+        "vpux::VPUMI37XX::VPUMI37XXDialect",
+        "vpux::VPURegMapped::VPURegMappedDialect",
+        "vpux::VPUASM::VPUASMDialect",
+        "vpux::ELFNPU37XX::ELFNPU37XXDialect"
+    ];
+}
+
+//
+// ConvertVPUIP2VPUMI40XX
+//
+
+def ConvertVPUIP2VPUMI40XX : PassBase<"convert-VPUIP-to-VPUMI40XX", "vpux::ModulePass"> {
+    let summary = "Convert VPUIP Dialect to VPUMI40XX Dialect";
+
+    let constructor = "vpux::createConvertVPUIP2VPUMI40XXPass()";
+
+    let dependentDialects = [
+        "vpux::VPUIP::VPUIPDialect",
+        "vpux::VPURT::VPURTDialect",
+        "vpux::VPUMI40XX::VPUMI40XXDialect",
+        "vpux::VPURegMapped::VPURegMappedDialect",
+        "vpux::ELFNPU37XX::ELFNPU37XXDialect"
+    ];
+}
+
+//
+// ConvertVPUMI40XX2VPUASM
+//
+
+def ConvertVPUMI40XX2VPUASM : PassBase<"convert-VPUMI40XX-to-VPUASM", "vpux::ModulePass"> {
+    let summary = "Convert VPUMI40XX dialect to VPUASM";
+
+    let description = [{
+        VPUMI40XX is the last level of representation where we still employ op-result-operand relationships.
+        After this conversion pass expect only symbolic relationships between the OPS. (with the occasional exception,
+        and helped by *VPUASM_SymbolizeValueOp* we can still permit non-symbolic ops to be present in the IR, having
+        an explicit conversion OP, that can still be present as information containers).
+
+        Concrete example for DistributetBuffers that have no VPUASM counterpart, we can still hook them into VPUASM.Invariant
+        by using SymbolizeValueOp to create a symbol for it.
+    }];
+
+    let constructor = "vpux::createConvertVPUMI40XX2VPUASMPass()";
+    let dependentDialects = [
+        "vpux::VPUIP::VPUIPDialect",
+        "vpux::VPURT::VPURTDialect",
+        "vpux::VPUMI40XX::VPUMI40XXDialect",
+        "vpux::VPURegMapped::VPURegMappedDialect",
+        "vpux::VPUASM::VPUASMDialect",
+        "vpux::VPUIPDPU::VPUIPDPUDialect",
+        "vpux::ELFNPU37XX::ELFNPU37XXDialect"
+    ];
+}
+
+//
 // ConvertVPUMI37XX2ELF
 //
 
@@ -281,6 +299,130 @@ def ConvertVPUMI37XX2ELF : PassBase<"convert-VPUMI37XX-to-ELF", "vpux::ModulePas
         "vpux::VPURT::VPURTDialect", // E#47129
         "vpux::VPUMI37XX::VPUMI37XXDialect",
         "vpux::ELFNPU37XX::ELFNPU37XXDialect"
+    ];
+}
+
+//=================================================================================
+// Lower VPUASM2ELF
+//=================================================================================
+
+//
+// Move IO Buffers to ELF sections
+//
+
+def MoveIOBuffersToElfSections : PassBase<"move-io-buffers-to-elf-sections", "vpux::ModulePass"> {
+    let summary = "Wrap IO DeclareBuffs into ELF section operations";
+
+    let description = [{
+        IO buffers, more specifically, DeclareBufferOps with location at NetworkInput and NetworkOutput,
+        are handled differently in terms of allocations. Their allocation is not owned or driven by the compilation
+        process, but rather by the execution process. By contract we would recieve only their addresses.
+        In the compiler we still abstract them as allocated buffers.
+        Since ELF dialect materializes the memory allocation process, we would handle these ops differently,
+        with semantics identifiable by the rest of the toolchain.
+    }];
+
+    let constructor = "vpux::createMoveIOBuffersToSectionsPass()";
+
+    let dependentDialects = [
+        "vpux::VPUASM::VPUASMDialect",
+        "vpux::ELF::ELFDialect"
+    ];
+}
+
+//
+// ConvertVPUASM2NPUReg40XX
+//
+
+def ConvertVPUASM2NPUReg40XX : PassBase<"convert-VPUASM-to-NPUReg40XX", "vpux::ModulePass"> {
+    let summary = "Convert VPUASM dialect to NPUReg40XX";
+
+    let description = [{
+        VPUASM level represents ops in their logical form. They have inputs, outputs, associated barriers and so on.
+        NPUReg40XX dialect represents ops in terms of hardware registers.
+    }];
+
+    let constructor = "vpux::createConvertVPUASM2NPUReg40XXPass()";
+    let dependentDialects = [
+        "vpux::VPURegMapped::VPURegMappedDialect",
+        "vpux::VPUASM::VPUASMDialect",
+        "vpux::NPUReg40XX::NPUReg40XXDialect",
+        "vpux::ELF::ELFDialect"
+    ];
+}
+
+//
+// ConvertVPUASM2NPUReg40XXRelocs
+//
+
+def ConvertVPUASM2NPUReg40XXRelocs : PassBase<"convert-VPUASM-to-NPUReg40XX-relocs", "vpux::ModulePass"> {
+    let summary = "Convert VPUASM dialect to NPUReg40XX";
+
+    let description = [{
+        VPUASM -> NPUReg40XX lowering that happens before relocation passes. Intended to be exapanded
+        with more operations gradually over time. Eventually, planned to be replaced with regular
+        VPUASM -> NPUReg40XX lowering.
+    }];
+
+    let constructor = "vpux::createConvertVPUASM2NPUReg40XXRelocsPass()";
+    let dependentDialects = [
+        "vpux::VPURegMapped::VPURegMappedDialect",
+        "vpux::VPUASM::VPUASMDialect",
+        "vpux::NPUReg40XX::NPUReg40XXDialect",
+        "vpux::ELF::ELFDialect"
+    ];
+
+    let options = [
+        Option<
+            "wlmEnabled", "enable-partial-workload-management",
+            "bool", "false",
+            "Flag which identifies enablement of Workload management"
+        >
+    ];
+}
+
+//
+// ConvertVPUASM2NPUReg40XX
+//
+
+def ConvertVPUIPDPU2NPUReg40XX : PassBase<"convert-VPUIPDPU-to-NPUReg40XX", "vpux::ModulePass"> {
+    let summary = "Convert VPUIPDPU dialect to NPUReg40XX";
+
+    let description = [{
+        VPUIPDPU is a logical representation of the DPU config., following the HW functionality specific for each architecture generation.
+        NPUReg40XX dialect represents ops in terms of hardware registers.
+    }];
+
+    let constructor = "vpux::createConvertVPUIPDPU2NPUReg40XXPass()";
+    let dependentDialects = [
+        "vpux::VPURegMapped::VPURegMappedDialect",
+        "vpux::VPUIPDPU::VPUIPDPUDialect",
+        "vpux::NPUReg40XX::NPUReg40XXDialect",
+        "vpux::ELF::ELFDialect"
+    ];
+
+    let options = [
+        Option<
+            "dpuDryRun", "dpu-dry-run",
+            "std::string", "\"none\"",
+            "Flag which identifies whether to dry run DPU operations"
+        >
+    ];
+
+}
+
+//
+// ConvertLayers2VPU
+//
+
+def ConvertLayers2VPU : PassBase<"convert-layers-to-VPU", "vpux::FunctionPass"> {
+    let summary = "Convert Layers Operations to VPU Dialect (SW and View layers)";
+
+    let constructor = "vpux::createConvertLayers2VPUPass()";
+
+    let dependentDialects = [
+        "vpux::VPU::VPUDialect",
+        "vpux::IE::IEDialect"
     ];
 }
 

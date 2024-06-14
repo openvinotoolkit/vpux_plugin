@@ -60,6 +60,27 @@ mlir::Location appendLoc(mlir::Location baseLoc, StringLiteral format, Arg0&& ar
 }
 
 //
+// takeOpLoc
+//
+
+// Equivalent to appendLoc(op->getLoc(), ...)
+template <typename... Args>
+mlir::Location takeOpLoc(mlir::Operation* op, Args&&... args) {
+    return appendLoc(op->getLoc(), std::forward<Args>(args)...);
+}
+
+//
+// extendOpLoc
+//
+
+// Equivalent to op->setLoc(appendLoc(op->getLoc(), ...))
+template <typename... Args>
+void extendOpLoc(mlir::Operation* op, Args&&... args) {
+    const mlir::Location newLoc = takeOpLoc(op, std::forward<Args>(args)...);
+    op->setLoc(newLoc);
+}
+
+//
 // dummyConverter
 //
 
@@ -71,12 +92,30 @@ mlir::Value dummyConverter(mlir::OpBuilder& builder, ConcreteType type, mlir::Va
 }
 
 //
+// BufferizeTypeConverterBase
+//
+
+class BufferizeTypeConverterBase : public mlir::TypeConverter {
+public:
+    BufferizeTypeConverterBase();
+};
+
+//
 // BufferizeTypeConverter
 //
 
-class BufferizeTypeConverter : public mlir::TypeConverter {
+class BufferizeTypeConverter : public BufferizeTypeConverterBase {
 public:
     BufferizeTypeConverter();
+};
+
+//
+// BufferizeOneShotTypeConverter
+//
+
+class BufferizeOneShotTypeConverter : public BufferizeTypeConverterBase {
+public:
+    BufferizeOneShotTypeConverter();
 };
 
 //
@@ -89,25 +128,26 @@ mlir::bufferization::OneShotBufferizationOptions getOneShotBufferizationOptions(
 // getBufferType
 //
 
-vpux::NDTypeInterface getBufferType(mlir::Type type, const mlir::bufferization::BufferizationOptions& options);
+vpux::NDTypeInterface getBufferType(mlir::Type type);
 
 // convenience overload that forwards value.getType()
-vpux::NDTypeInterface getBufferType(mlir::Value value, const mlir::bufferization::BufferizationOptions& options);
+vpux::NDTypeInterface getBufferType(mlir::Value value);
+
+// Converts a buffer type to its "origin" tensor type counterpart.
+mlir::Type reconstructTensorType(mlir::Type memrefType);
 
 //
 // getBuffer
 //
 
-mlir::Value getBuffer(mlir::RewriterBase& rewriter, mlir::Value value,
-                      const mlir::bufferization::BufferizationOptions& options);
+mlir::Value getBuffer(mlir::RewriterBase& rewriter, mlir::Value value);
 
 //
 // bufferizeOperands
 //
 
 // Converts tensor operands to memrefs (One-Shot Bufferization).
-SmallVector<mlir::Value> bufferizeOperands(mlir::RewriterBase& rewriter, mlir::OperandRange operands,
-                                           const mlir::bufferization::BufferizationOptions& options);
+SmallVector<mlir::Value> bufferizeOperands(mlir::RewriterBase& rewriter, mlir::OperandRange operands);
 
 //
 // populateBufferizeMaterializationLegality

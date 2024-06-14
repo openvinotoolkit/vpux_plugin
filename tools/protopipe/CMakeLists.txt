@@ -19,10 +19,10 @@ find_package(Threads QUIET)
 
 find_package(OpenCV QUIET COMPONENTS gapi)
 # FIXME: Since OpenCV might come from OpenVINO developer package
-# find_package(OpenCV 4.8 QUIET COMPONENETS gapi)
+# find_package(OpenCV 4.9 QUIET COMPONENETS gapi)
 # is not enough to disable tool.
-if("${OpenCV_VERSION}" VERSION_LESS 4.8)
-    message(STATUS "OpenCV not found or version is less than 4.8. Protopipe is disabled.")
+if(OpenCV_VERSION VERSION_LESS 4.9)
+    message(STATUS "OpenCV not found or version is less than 4.9. Protopipe is disabled.")
     return()
 endif()
 

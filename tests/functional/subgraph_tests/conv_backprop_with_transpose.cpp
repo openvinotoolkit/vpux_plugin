@@ -1,9 +1,8 @@
 //
-// Copyright (C) 2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
-#include <shared_test_classes/base/layer_test_utils.hpp>
 #include "common_test_utils/ov_tensor_utils.hpp"
 #include "openvino/opsets/opset1.hpp"
 #include "vpu_ov2_layer_test.hpp"
@@ -23,8 +22,10 @@ public:
         std::vector<int64_t> permOrder;
         std::tie(outLayout, permOrder) = obj.param;
 
+        const std::string sep = "_";
         std::ostringstream result;
-        result << "outLayout={" << outLayout.to_string() << "}_";
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
+        result << "outLayout={" << outLayout.to_string() << "}" << sep;
         result << "permOrder={" << permOrder.at(0) << ", " << permOrder.at(1) << ", " << permOrder.at(2) << ", "
                << permOrder.at(3) << "}_";
         return result.str();
@@ -44,7 +45,7 @@ public:
     }
 
     std::shared_ptr<ov::Node> buildConvBackpropData2D(const ov::Output<ov::Node>& param, size_t channelNum) {
-        const InferenceEngine::SizeVector inputShape = param.get_shape();
+        const ov::Shape inputShape = param.get_shape();
 
         const ov::element::Type_t inputs_et = ov::element::f16;
         const auto weightsSize = inputShape.at(1) * channelNum * 2 * 2;
@@ -101,7 +102,7 @@ class ConvBackpropData2dWithTransposeTest_NPU3720 : public ConvBackpropData2dWit
 
 TEST_P(ConvBackpropData2dWithTransposeTest_NPU3720, HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
 }
 
 }  // namespace ov::test::subgraph

@@ -11,10 +11,10 @@
 
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/passes.hpp"
-#include "vpux/compiler/dialect/VPURT/task.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/task.hpp"
+#include "vpux/compiler/dialect/VPURT/transforms/passes.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/utils/types.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
@@ -66,6 +66,9 @@ void buildDMA(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module,
     SmallVector<int64_t> outShape(output.shape.begin(), output.shape.end());
 
     auto testArchitecture = testDesc.getArchitecture();
+    if (testArchitecture == vpux::VPU::ArchKind::NPU40XX) {
+        VPUX_THROW_UNLESS(dmaParams.engine == 0, "buildDMA: DMA on NPU40XX should have 1 engine");
+    }
 
     VPUX_THROW_UNLESS(!inShape.empty(), "buildDMA: Input rank is 0");
     VPUX_THROW_UNLESS(inShape == outShape, "buildDMA: in_shape and out_shape don't match");
@@ -280,10 +283,12 @@ void buildDMA(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module,
         DMAtaskBarrier = funcbuilder.create<VPURT::DeclareVirtualBarrierOp>(builder.getUnknownLoc());
     }
 
+    // finalBarrier passed as production barrier to last DMA task
+    auto finalBarrier = funcbuilder.create<VPURT::DeclareVirtualBarrierOp>(builder.getUnknownLoc());
     if (!dmaParams.doConvert) {
         VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(llvm::ArrayRef<mlir::Value>(waitBarriers)),
                                               dmaParams.dstLocation == nb::MemoryLocation::DDR
-                                                      ? mlir::ValueRange()
+                                                      ? mlir::ValueRange(finalBarrier.getBarrier())
                                                       : mlir::ValueRange(DMAtaskBarrier.getBarrier()),
                                               builder.getUnknownLoc(), DMAinput, DMAoutput, dmaParams.engine);
     } else {
@@ -296,16 +301,25 @@ void buildDMA(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module,
 
     if (dmaParams.dstLocation == nb::MemoryLocation::CMX0 || dmaParams.dstLocation == nb::MemoryLocation::CMX1) {
         VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(DMAtaskBarrier.getBarrier()),
-                                              mlir::ValueRange(), builder.getUnknownLoc(), DMAoutput, funcOutput,
-                                              dmaParams.engine);
+                                              mlir::ValueRange(finalBarrier.getBarrier()), builder.getUnknownLoc(),
+                                              DMAoutput, funcOutput, dmaParams.engine);
     }
 
     funcbuilder.create<mlir::func::ReturnOp>(builder.getUnknownLoc(), funcOutput);
     // set runtime resources
     mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
     std::optional<int> numTiles = std::nullopt;
-    pm.addPass(VPU::createInitCompilerPass(testArchitecture, VPU::CompilationMode::DefaultHW, numTiles, std::nullopt,
-                                           log));
+    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
+
+    if (testArchitecture == vpux::VPU::ArchKind::NPU40XX) {
+        // E#77729
+        numTiles = 2;
+    }
+
+    auto initCompilerOptions = VPU::InitCompilerOptions(testArchitecture, VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.setNumberOfDPUGroups(numTiles);
+    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
 
     // assign physical barriers instead of virtual barriers
     pm.addPass(VPURT::createAssignPhysicalBarriersPass(log));

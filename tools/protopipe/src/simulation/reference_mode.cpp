@@ -1,113 +1,175 @@
 //
-// Copyright (C) 2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2023-2024 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include "reference_mode.hpp"
 
 #include <fstream>
 
-#include "simulation/computation.hpp"
+#include "simulation/computation_builder.hpp"
 #include "simulation/executor.hpp"
 #include "simulation/layers_data.hpp"
 #include "utils/logger.hpp"
 #include "utils/utils.hpp"
 
-BuildStrategy::ConstructInfo ReferenceStrategy::build(const InferDesc& infer) {
+#include <opencv2/gapi/gproto.hpp>  // cv::GCompileArgs
+
+namespace {
+
+struct InputDataVisitor {
+    InputDataVisitor(const InferDesc& _infer, const CalcRefSimulation::Options& _opts)
+            : infer(_infer), opts(_opts), providers(infer.input_layers.size()), metas(infer.input_layers.size()) {
+    }
+
+    void operator()(std::monostate);
+    void operator()(const std::string&);
+    void operator()(const LayerVariantAttr<std::string>&);
+
+    InferDesc infer;
+    const CalcRefSimulation::Options& opts;
     // NB: Relevant when input reference data already exists and need to
     // generate exactly the same amount of output data.
     // Note that this value must be the same for all models within stream.
     cv::util::optional<uint64_t> model_required_iterations;
+    std::vector<IDataProvider::Ptr> providers;
+    std::vector<Meta> metas;
+};
 
-    // NB: Entities below must correspond to layers amount.
-    std::vector<IDataProvider::Ptr> providers(infer.input_layers.size());
-    std::vector<Meta> in_meta_vec(infer.input_layers.size());
-    std::vector<Meta> out_meta_vec(infer.output_layers.size());
+void InputDataVisitor::operator()(std::monostate) {
+    THROW_ERROR("Reference mode requires output data path to be provided"
+                " in form of either directory or single file!");
+};
 
-    switch (infer.input_data.index()) {
-    case LayerVariantAttr<std::string>::index_of<std::string>(): {
-        // NB: Single path provided - either single file or directory.
-        std::filesystem::path path = cv::util::get<std::string>(infer.input_data);
-        if (std::filesystem::exists(path)) {
-            // NB: Provided path exists - upload input data from there.
-            LOG_INFO() << "Input data path: " << path << " for model: " << infer.tag
-                       << " exists - data will be uploaded" << std::endl;
-            auto layers_data = uploadData(path, infer.tag, infer.input_layers, LayersType::INPUT);
-            // NB: The Number of iterations for every layer is ALWAYS the same.
-            model_required_iterations = cv::util::make_optional(layers_data.begin()->second.size());
-            providers = createConstantProviders(std::move(layers_data), extractLayerNames(infer.input_layers));
-        } else {
-            // NB: Provided path doesn't exist - generate data and dump.
-            LOG_INFO() << "Input data path: " << path << " for model: " << infer.tag
-                       << " doesn't exist - input data will be generated and dumped" << std::endl;
-            std::vector<std::filesystem::path> dump_path_vec;
-            if (isDirectory(path)) {
-                // NB: When the directory is provided, the number of input iterations to be generated aren't
-                // bounded so the "random" providers will generate input data on every iteration that will
-                // be dumped on the disk afterwards.
-                dump_path_vec = createDirectoryLayout(path, extractLayerNames(infer.input_layers));
-            } else {
-                // NB: When the single file is provided, the execution must be limited to perform
-                // only 1 iteration.
-                model_required_iterations = cv::util::optional<uint64_t>(1ul);
-                if (infer.input_layers.size() > 1) {
-                    THROW_ERROR("Model: " << infer.tag
-                                          << " must have exactly one input layer in order to dump input data to file: "
-                                          << path);
-                }
-                // NB: In case directories in that path don't exist.
-                std::filesystem::create_directories(path.parent_path());
-                dump_path_vec = {path};
-            }
-            providers = createRandomProviders(infer.input_layers, infer.generators);
-            for (uint32_t i = 0; i < infer.input_layers.size(); ++i) {
-                in_meta_vec[i].set(Dump{dump_path_vec[i]});
-            }
-        }
-        break;
-    }
-    case LayerVariantAttr<std::string>::index_of<cv::util::monostate>(): {
-        THROW_ERROR("Reference mode requires input data path to be provided"
-                    " in form of either directory or single file!");
-    }
-    }  // switch
+void InputDataVisitor::operator()(const LayerVariantAttr<std::string>&) {
+    THROW_ERROR("Reference mode requires output data path to be provided"
+                " in form of either directory or single file!");
+};
 
-    switch (infer.output_data.index()) {
-    case LayerVariantAttr<std::string>::index_of<std::string>(): {
-        // NB: Single path provided - either single file or directory.
-        std::filesystem::path path = cv::util::get<std::string>(infer.output_data);
-        // NB: It doesn't matter if path exist or not - regenerate and dump outputs anyway.
+void InputDataVisitor::operator()(const std::string& path_str) {
+    // NB: Single path provided - either single file or directory.
+    const auto input_names = extractLayerNames(infer.input_layers);
+    const auto& initializers = opts.initializers_map.at(infer.tag);
+
+    std::filesystem::path path{path_str};
+    if (std::filesystem::exists(path)) {
+        // NB: Provided path exists - upload input data from there.
+        LOG_INFO() << "Input data path: " << path << " for model: " << infer.tag << " exists - data will be uploaded"
+                   << std::endl;
+        auto layers_data = uploadData(path, infer.tag, infer.input_layers, LayersType::INPUT);
+        // NB: The Number of iterations for every layer is ALWAYS the same.
+        model_required_iterations = cv::util::make_optional(layers_data.begin()->second.size());
+        providers = createConstantProviders(std::move(layers_data), input_names);
+    } else {
+        // NB: Provided path doesn't exist - generate data and dump.
+        LOG_INFO() << "Input data path: " << path << " for model: " << infer.tag
+                   << " doesn't exist - input data will be generated and dumped" << std::endl;
         std::vector<std::filesystem::path> dump_path_vec;
         if (isDirectory(path)) {
-            dump_path_vec = createDirectoryLayout(path, extractLayerNames(infer.output_layers));
+            // NB: When the directory is provided, the number of input iterations to be generated aren't
+            // bounded so the "random" providers will generate input data on every iteration that will
+            // be dumped on the disk afterwards.
+            dump_path_vec = createDirectoryLayout(path, input_names);
         } else {
-            if (infer.output_layers.size() > 1) {
+            // NB: When the single file is provided, the execution must be limited to perform
+            // only 1 iteration.
+            model_required_iterations = cv::util::optional<uint64_t>(1ul);
+            if (infer.input_layers.size() > 1) {
                 THROW_ERROR("Model: " << infer.tag
-                                      << " must have exactly one output layer in order to dump output data to file: "
+                                      << " must have exactly one input layer in order to dump input data to file: "
                                       << path);
             }
+            // NB: In case directories in that path don't exist.
+            std::filesystem::create_directories(path.parent_path());
             dump_path_vec = {path};
         }
-        for (uint32_t i = 0; i < infer.output_layers.size(); ++i) {
-            const auto& layer = infer.output_layers[i];
-            out_meta_vec[i].set(Dump{dump_path_vec[i]});
+        auto default_initialzer =
+                opts.global_initializer ? opts.global_initializer : std::make_shared<UniformGenerator>(0.0, 255.0);
+        auto layer_initializers = unpackWithDefault(initializers, input_names, default_initialzer);
+        providers = createRandomProviders(infer.input_layers, std::move(layer_initializers));
+        for (uint32_t i = 0; i < infer.input_layers.size(); ++i) {
+            metas[i].set(Dump{dump_path_vec[i]});
         }
-        break;
     }
-    case LayerVariantAttr<std::string>::index_of<cv::util::monostate>(): {
-        THROW_ERROR("Reference mode requires output data path to be provided"
-                    " in form of either directory or single file!");
-    }
-    }  // switch
+}
 
+struct OutputDataVisitor {
+    OutputDataVisitor(const InferDesc& _infer, const CalcRefSimulation::Options& _opts)
+            : infer(_infer), opts(_opts), metas(infer.output_layers.size()) {
+    }
+
+    void operator()(std::monostate);
+    void operator()(const std::string&);
+    void operator()(const LayerVariantAttr<std::string>&);
+
+    InferDesc infer;
+    const CalcRefSimulation::Options& opts;
+    std::vector<Meta> metas;
+};
+
+void OutputDataVisitor::operator()(std::monostate) {
+    THROW_ERROR("Reference mode requires output data path to be provided"
+                " in form of either directory or single file!");
+}
+
+void OutputDataVisitor::operator()(const LayerVariantAttr<std::string>&) {
+    THROW_ERROR("Reference mode requires output data path to be provided"
+                " in form of either directory or single file!");
+}
+
+void OutputDataVisitor::operator()(const std::string& path_str) {
+    std::filesystem::path path{path_str};
+    // NB: It doesn't matter if path exist or not - regenerate and dump outputs anyway.
+    std::vector<std::filesystem::path> dump_path_vec;
+    if (isDirectory(path)) {
+        dump_path_vec = createDirectoryLayout(path, extractLayerNames(infer.output_layers));
+    } else {
+        if (infer.output_layers.size() > 1) {
+            THROW_ERROR("Model: " << infer.tag
+                                  << " must have exactly one output layer in order to dump output data to file: "
+                                  << path);
+        }
+        dump_path_vec = {path};
+    }
+    for (uint32_t i = 0; i < infer.output_layers.size(); ++i) {
+        const auto& layer = infer.output_layers[i];
+        metas[i].set(Dump{dump_path_vec[i]});
+    }
+}
+
+}  // anonymous namespace
+
+class ReferenceStrategy : public IBuildStrategy {
+public:
+    explicit ReferenceStrategy(const CalcRefSimulation::Options& opts);
+
+    IBuildStrategy::InferBuildInfo build(const InferDesc& infer) override;
+
+    // NB: If specified will force execution to perform exactly require_num_iterations
+    // regardless what user specified.
+    // Use case is when N input iterations are provided,
+    // generate exactly the same amount of output iterations.
+    // Another use case is when there is only single file provided
+    // so only one input / output iteration must be generated.
+    cv::optional<uint64_t> required_num_iterations;
+    const CalcRefSimulation::Options& opts;
+};
+
+ReferenceStrategy::ReferenceStrategy(const CalcRefSimulation::Options& _opts): opts(_opts) {
+}
+
+IBuildStrategy::InferBuildInfo ReferenceStrategy::build(const InferDesc& infer) {
+    const auto& input_data = opts.input_data_map.at(infer.tag);
+    InputDataVisitor in_data_visitor{infer, opts};
+    std::visit(in_data_visitor, input_data);
     // NB: Check if there is required number iterations for current model
     // and fail if it's different comparing to other models in stream.
-    if (model_required_iterations.has_value()) {
-        const uint64_t required_iters_value = model_required_iterations.value();
+    if (in_data_visitor.model_required_iterations) {
+        const uint64_t required_iters_value = in_data_visitor.model_required_iterations.value();
         LOG_INFO() << "Model: " << infer.tag << " will perform at most " << required_iters_value << " iteration(s)"
                    << std::endl;
-        if (!required_num_iterations.has_value()) {
-            required_num_iterations = model_required_iterations;
+        if (!required_num_iterations) {
+            required_num_iterations = in_data_visitor.model_required_iterations;
         } else {
             if (required_iters_value != required_num_iterations.value()) {
                 THROW_ERROR("All models in stream are required to have the same number of iterations!");
@@ -115,12 +177,14 @@ BuildStrategy::ConstructInfo ReferenceStrategy::build(const InferDesc& infer) {
         }
     }
 
-    return {std::move(providers), std::move(in_meta_vec), std::move(out_meta_vec)};
+    const auto& output_data = opts.output_data_map.at(infer.tag);
+    OutputDataVisitor out_data_visitor{infer, opts};
+    std::visit(out_data_visitor, output_data);
+
+    return {std::move(in_data_visitor.providers), std::move(in_data_visitor.metas), std::move(out_data_visitor.metas)};
 }
 
-namespace {
-
-void updateCriterion(ITermCriterion::Ptr* criterion, cv::util::optional<uint64_t> required_num_iterations) {
+static void updateCriterion(ITermCriterion::Ptr* criterion, cv::util::optional<uint64_t> required_num_iterations) {
     if (required_num_iterations.has_value()) {
         if (*criterion) {
             // NB: Limit user's termination criterion to perfom at most m_required_num_iterations
@@ -132,7 +196,7 @@ void updateCriterion(ITermCriterion::Ptr* criterion, cv::util::optional<uint64_t
     }
 }
 
-void dumpIterOutput(const cv::Mat& mat, const Dump& dump, const size_t iter) {
+static void dumpIterOutput(const cv::Mat& mat, const Dump& dump, const size_t iter) {
     auto dump_path = dump.path;
     if (isDirectory(dump.path)) {
         std::stringstream ss;
@@ -141,6 +205,8 @@ void dumpIterOutput(const cv::Mat& mat, const Dump& dump, const size_t iter) {
     }
     utils::writeToBinFile(dump_path.string(), mat);
 };
+
+namespace {
 
 class SyncSimulation : public SyncCompiled {
 public:
@@ -272,20 +338,24 @@ bool PipelinedSimulation::process(cv::GStreamingCompiled& pipeline) {
 
 }  // anonymous namespace
 
-CalcRefSimulation::CalcRefSimulation(ScenarioGraph&& graph)
-        : m_strategy(std::make_shared<ReferenceStrategy>()),
-          m_comp(Computation::build(std::move(graph), m_strategy, false /* add perf meta */)) {
+CalcRefSimulation::CalcRefSimulation(Simulation::Config&& cfg, CalcRefSimulation::Options&& opts)
+        : Simulation(std::move(cfg)),
+          m_opts(std::move(opts)),
+          m_strategy(std::make_shared<ReferenceStrategy>(m_opts)),
+          m_comp(ComputationBuilder{m_strategy}.build(m_cfg.graph, m_cfg.params, {false /* add performance meta */})) {
 }
 
-std::shared_ptr<PipelinedCompiled> CalcRefSimulation::compilePipelined(const bool drop_frames,
+std::shared_ptr<PipelinedCompiled> CalcRefSimulation::compilePipelined(DummySources&& sources,
                                                                        cv::GCompileArgs&& compile_args) {
-    auto info = m_comp.compilePipelined(drop_frames, std::move(compile_args));
-    return std::make_shared<PipelinedSimulation>(std::move(info.compiled), std::move(info.sources),
-                                                 std::move(info.out_meta), m_strategy->required_num_iterations);
+    auto compiled = m_comp.compileStreaming(descr_of(sources), std::move(compile_args));
+    auto out_meta = m_comp.getOutMeta();
+    return std::make_shared<PipelinedSimulation>(std::move(compiled), std::move(sources), std::move(out_meta),
+                                                 m_strategy->required_num_iterations);
 }
 
-std::shared_ptr<SyncCompiled> CalcRefSimulation::compileSync(const bool drop_frames, cv::GCompileArgs&& compile_args) {
-    auto info = m_comp.compileSync(drop_frames, std::move(compile_args));
-    return std::make_shared<SyncSimulation>(std::move(info.compiled), std::move(info.sources), std::move(info.out_meta),
+std::shared_ptr<SyncCompiled> CalcRefSimulation::compileSync(DummySources&& sources, cv::GCompileArgs&& compile_args) {
+    auto compiled = m_comp.compile(descr_of(sources), std::move(compile_args));
+    auto out_meta = m_comp.getOutMeta();
+    return std::make_shared<SyncSimulation>(std::move(compiled), std::move(sources), std::move(out_meta),
                                             m_strategy->required_num_iterations);
 }

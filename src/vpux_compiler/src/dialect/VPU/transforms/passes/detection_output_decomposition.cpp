@@ -1,10 +1,12 @@
+//
 // Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
-#include "vpux/compiler/dialect/IE/attributes.hpp"
+#include "vpux/compiler/dialect/IE/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
+#include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/error.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
@@ -90,7 +92,7 @@ mlir::LogicalResult checkSupportedArguments(VPU::DetectionOutputOp origOp) {
     const auto varianceEncodedInTarget = origOp.getAttr().getVarianceEncodedInTarget().getValue();
     if (!normalized && !varianceEncodedInTarget) {
         return errorAt(origOp,
-                       "DetectionOutput: undefined case - normalized == false && varianceEncodedItTarget == false");
+                       "DetectionOutput: undefined case - normalized == false && varianceEncodedInTarget == false");
     }
 
     const auto keepTopKArray = origOp.getAttr().getKeepTopK().getValue();
@@ -136,6 +138,16 @@ mlir::Value transposeBoxes(mlir::PatternRewriter& rewriter, mlir::Value boxes4D)
     const auto permutationMap = DimsOrder::NHCW.toAffineMap(ctx);  // [Batch, Priors, Classes, 4 or 5]
 
     return rewriter.create<VPU::MemPermuteOp>(boxes4D.getLoc(), boxes4D, defaultOrder, permutationMap);
+}
+
+mlir::Value cutOnWidth(mlir::PatternRewriter& rewriter, mlir::Value tensor, int width) {
+    const auto origShape = Shape(getShape(tensor));
+    const auto offsets = Shape(origShape.size());
+    auto slicedShape = Shape(origShape);
+    slicedShape.back() = width;
+
+    auto sliceOp = rewriter.create<VPU::SliceOp>(tensor.getLoc(), tensor, offsets, slicedShape);
+    return sliceOp.getResult();
 }
 
 //
@@ -187,22 +199,22 @@ mlir::LogicalResult DetectionOutputDecomposition::matchAndRewrite(VPU::Detection
     const auto transposedClassPredictions = transposeClassPredictions(rewriter, classPredictions);
     const auto confidenceThreshold = origOp.getAttr().getConfidenceThreshold();
     const auto topK = origOp.getAttr().getTopK();
-    const auto backgroundId = origOp.getAttr().getBackgroundLabelId();
-    auto sortTopK = rewriter.create<VPU::DetectionOutputSortTopKOp>(
-            appendLoc(loc, "sortTopK"), transposedClassPredictions, confidenceThreshold, topK, backgroundId);
+    auto sort = rewriter.create<VPU::DetectionOutputSortOp>(appendLoc(loc, "sort"), transposedClassPredictions,
+                                                            confidenceThreshold, topK);
 
-    auto selectBoxes = rewriter.create<VPU::DetectionOutputSelectBoxesOp>(
-            appendLoc(loc, "selectBoxes"), decodeBoxes, sortTopK.getOutIndices(), sortTopK.getOutSizes(), topK);
+    auto confidenceSlice = cutOnWidth(rewriter, sort.getOutConfidence(), topK.getInt());
+    auto indicesSlice = cutOnWidth(rewriter, sort.getOutIndices(), topK.getInt());
 
-    const auto selectBoxes4DShape = getShape(selectBoxes).toValues();
-    const auto selectBoxes3DShape = SmallVector<int64_t>{selectBoxes4DShape[Dim(0)], selectBoxes4DShape[Dim(1)],
-                                                         selectBoxes4DShape[Dim(2)] * selectBoxes4DShape[Dim(3)]};
-    const auto selectBoxes3D = createReshape(rewriter, selectBoxes, selectBoxes3DShape);
+    const auto sizesShape = getShape(sort.getOutSizes());
+    const auto newSizesShape = SmallVector<int64_t>{sizesShape[Dims4D::Act::N], sizesShape[Dims4D::Act::C],
+                                                    sizesShape[Dims4D::Act::W], sizesShape[Dims4D::Act::H]};
+    const auto reshapedSizes = createReshape(rewriter, sort.getOutSizes(), newSizesShape);
 
     const auto nmsThreshold = origOp.getAttr().getNmsThreshold();
-    auto nmsCaffe =
-            rewriter.create<VPU::DetectionOutputNmsCaffeOp>(appendLoc(loc, "nmsCaffe"), sortTopK.getOutTopKConfidence(),
-                                                            selectBoxes3D, sortTopK.getOutSizes(), nmsThreshold);
+    const auto backgroundId = origOp.getAttr().getBackgroundLabelId();
+    auto nmsCaffe = rewriter.create<VPU::DetectionOutputNmsCaffeOp>(appendLoc(loc, "nmsCaffe"), confidenceSlice,
+                                                                    decodeBoxes.getOutDecodedBoxes(), indicesSlice,
+                                                                    reshapedSizes, topK, nmsThreshold, backgroundId);
 
     const auto keepTopKValue = origOp.getAttr().getKeepTopK()[0].cast<mlir::IntegerAttr>().getInt();
     const auto keepTopK = getIntAttr(rewriter.getContext(), keepTopKValue);
@@ -232,13 +244,14 @@ void DetectionOutputDecompositionPass::safeRunOnFunc() {
     target.addIllegalOp<VPU::DetectionOutputOp>();
     target.addLegalOp<VPU::DetectionOutputNormalizeOp>();
     target.addLegalOp<VPU::DetectionOutputDecodeBoxesOp>();
-    target.addLegalOp<VPU::DetectionOutputSortTopKOp>();
-    target.addLegalOp<VPU::DetectionOutputSelectBoxesOp>();
+    target.addLegalOp<VPU::DetectionOutputSortOp>();
     target.addLegalOp<VPU::DetectionOutputNmsCaffeOp>();
     target.addLegalOp<VPU::DetectionOutputCollectResultsOp>();
 
     target.addLegalOp<VPU::ReshapeOp>();
     target.addLegalOp<VPU::MemPermuteOp>();
+    target.addLegalOp<VPU::SliceOp>();
+    target.addLegalOp<Const::DeclareOp>();  // for auxiliary buffer
 
     mlir::RewritePatternSet patterns(&ctx);
     patterns.add<DetectionOutputDecomposition>(&ctx, _log);

@@ -1,14 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022-2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include <vpu_ov2_layer_test.hpp>
 #include "common/functions.h"
-
-#include <ov_models/builders.hpp>
-#include <ov_models/utils/ov_helpers.hpp>
-#include <shared_test_classes/base/layer_test_utils.hpp>
 
 namespace ov::test {
 
@@ -55,7 +51,7 @@ class ConvHSwishTest_NPU3700 : public VpuOv2LayerTest {
     }
 };
 
-TEST_F(ConvHSwishTest_NPU3700, HW) {
+TEST_F(ConvHSwishTest_NPU3700, HW_TestKindSubgraph) {
     setSkipInferenceCallback([](std::stringstream& skip) {
         if (auto var = std::getenv("IE_NPU_TESTS_RUN_INFER")) {
             skip << "Interpreter backend doesn't implement evaluate"
@@ -63,6 +59,6 @@ TEST_F(ConvHSwishTest_NPU3700, HW) {
         }
     });
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3700);
+    run(Platform::NPU3700);
 }
 }  // namespace ov::test

@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --adapt-shapes-for-scale-shift --canonicalize %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 #NHCW = affine_map<(d0, d1, d2, d3) -> (d0, d2, d1, d3)>
 
@@ -366,6 +366,97 @@ func.func @Convert3dMulWithAdd(%arg0: tensor<1x19x80xf16>) -> tensor<1x19x80xf16
     // CHECK-SAME:  } : tensor<1x19x80x1xf16> -> tensor<1x19x80xf16>
 
     // CHECK:   return [[RESHAPE_OUT]] : tensor<1x19x80xf16>
+}
+
+// -----
+
+// CHECK-LABEL: @Convert4dMul
+func.func @Convert4dMul(%arg0: tensor<1x19x80x80xf16>) -> tensor<1x19x80x80xf16> {
+    %MUL_WEIGHTS = const.Declare tensor<1x1x80x80xf16> = dense<2.000000e+00> : tensor<1x1x80x80xf16>
+
+    %MUL = IE.Multiply(%arg0, %MUL_WEIGHTS) {
+        auto_broadcast = #IE.auto_broadcast_type<NUMPY>
+    } : tensor<1x19x80x80xf16>, tensor<1x1x80x80xf16> -> tensor<1x19x80x80xf16>
+
+    return %MUL : tensor<1x19x80x80xf16>
+
+    // CHECK-DAG:   [[MUL_WEIGHTS:%.*]] = const.Declare tensor<1x6400x1x1xf16> = dense<2.000000e+00>
+    // CHECK-SAME:  : tensor<1x1x80x80xf16>, [#const.Reshape<[1, 6400, 1, 1]>]
+
+    // CHECK:   [[RESHAPE_INPUT:%.*]] = IE.AffineReshape(%arg0) {
+    // CHECK-SAME:      shape_value = [1, 1, 19, 6400]
+    // CHECK-SAME:  } : tensor<1x19x80x80xf16> -> tensor<1x1x19x6400xf16>
+
+    // CHECK:   [[TRANSPOSE_INPUT:%.*]] = IE.Transpose([[RESHAPE_INPUT]]) {
+    // CHECK-SAME:      order_value = #NWCH
+    // CHECK-SAME:  } : tensor<1x1x19x6400xf16> -> tensor<1x6400x1x19xf16>
+
+    // CHECK:   [[MUL:%.*]] = IE.Multiply([[TRANSPOSE_INPUT]], [[MUL_WEIGHTS]]) {
+    // CHECK-SAME:      auto_broadcast = #IE.auto_broadcast_type<NUMPY>
+    // CHECK-SAME:  } : tensor<1x6400x1x19xf16>, tensor<1x6400x1x1xf16> -> tensor<1x6400x1x19xf16>
+
+    // CHECK:   [[TRANSPOSE_OUT:%.*]] = IE.Transpose([[MUL]]) {
+    // CHECK-SAME:      order_value = #NHWC
+    // CHECK-SAME:  } : tensor<1x6400x1x19xf16> -> tensor<1x1x19x6400xf16>
+
+    // CHECK:   [[RESHAPE_OUT:%.*]] = IE.AffineReshape([[TRANSPOSE_OUT]]) {
+    // CHECK-SAME:      shape_value = [1, 19, 80, 80]
+    // CHECK-SAME:  } : tensor<1x1x19x6400xf16> -> tensor<1x19x80x80xf16>
+
+    // CHECK:   return [[RESHAPE_OUT]] : tensor<1x19x80x80xf16>
+}
+
+// -----
+
+// CHECK-LABEL: @Convert4dMulWithTwoActivations
+func.func @Convert4dMulWithTwoActivations(%arg0: tensor<1x19x80x80xf16>, %arg1: tensor<1x1x80x80xf16>) -> tensor<1x19x80x80xf16> {
+    %MUL = IE.Multiply(%arg0, %arg1) {
+        auto_broadcast = #IE.auto_broadcast_type<NUMPY>
+    } : tensor<1x19x80x80xf16>, tensor<1x1x80x80xf16> -> tensor<1x19x80x80xf16>
+
+    return %MUL : tensor<1x19x80x80xf16>
+
+    // CHECK:   [[RESHAPE_INPUT1:%.*]] = IE.AffineReshape(%arg0) {
+    // CHECK-SAME:      shape_value = [1, 1, 19, 6400]
+    // CHECK-SAME:  } : tensor<1x19x80x80xf16> -> tensor<1x1x19x6400xf16>
+
+    // CHECK:   [[TRANSPOSE_INPUT1:%.*]] = IE.Transpose([[RESHAPE_INPUT1]]) {
+    // CHECK-SAME:      order_value = #NWCH
+    // CHECK-SAME:  } : tensor<1x1x19x6400xf16> -> tensor<1x6400x1x19xf16>
+
+    // CHECK:   [[RESHAPE_INPUT2:%.*]] = IE.AffineReshape(%arg1) {
+    // CHECK-SAME:      shape_value = [1, 6400, 1, 1]
+    // CHECK-SAME:  } : tensor<1x1x80x80xf16> -> tensor<1x6400x1x1xf16>
+
+    // CHECK:   [[MUL:%.*]] = IE.Multiply([[TRANSPOSE_INPUT1]], [[RESHAPE_INPUT2]]) {
+    // CHECK-SAME:      auto_broadcast = #IE.auto_broadcast_type<NUMPY>
+    // CHECK-SAME:  } : tensor<1x6400x1x19xf16>, tensor<1x6400x1x1xf16> -> tensor<1x6400x1x19xf16>
+
+    // CHECK:   [[TRANSPOSE_OUT:%.*]] = IE.Transpose([[MUL]]) {
+    // CHECK-SAME:      order_value = #NHWC
+    // CHECK-SAME:  } : tensor<1x6400x1x19xf16> -> tensor<1x1x19x6400xf16>
+
+    // CHECK:   [[RESHAPE_OUT:%.*]] = IE.AffineReshape([[TRANSPOSE_OUT]]) {
+    // CHECK-SAME:      shape_value = [1, 19, 80, 80]
+    // CHECK-SAME:  } : tensor<1x1x19x6400xf16> -> tensor<1x19x80x80xf16>
+
+    // CHECK:   return [[RESHAPE_OUT]] : tensor<1x19x80x80xf16>
+}
+
+// -----
+
+// CHECK-LABEL: @DoNotConvert4dMul
+func.func @DoNotConvert4dMul(%arg0: tensor<1x20x80x80xf16>) -> tensor<2x20x80x80xf16> {
+    %MUL_WEIGHTS = const.Declare tensor<2x1x80x80xf16> = dense<2.000000e+00> : tensor<2x1x80x80xf16>
+    %MUL = IE.Multiply(%arg0, %MUL_WEIGHTS) {
+        auto_broadcast = #IE.auto_broadcast_type<NUMPY>
+    } : tensor<1x20x80x80xf16>, tensor<2x1x80x80xf16> -> tensor<2x20x80x80xf16>
+    return %MUL : tensor<2x20x80x80xf16>
+    // CHECK-DAG:   [[MUL_WEIGHTS:%.*]] = const.Declare tensor<2x1x80x80xf16> = dense<2.000000e+00> : tensor<2x1x80x80xf16>
+    // CHECK:   [[MUL:%.*]] = IE.Multiply(%arg0, [[MUL_WEIGHTS]]) {
+    // CHECK-SAME:      auto_broadcast = #IE.auto_broadcast_type<NUMPY>
+    // CHECK-SAME:  } : tensor<1x20x80x80xf16>, tensor<2x1x80x80xf16> -> tensor<2x20x80x80xf16>
+    // CHECK:   return [[MUL]] : tensor<2x20x80x80xf16>
 }
 
 // -----

@@ -6,10 +6,10 @@
 #include "vpux/compiler/dialect/ELFNPU37XX/utils.hpp"
 #include <vpux_elf/accessor.hpp>
 #include <vpux_elf/reader.hpp>
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 
 std::pair<const uint8_t*, size_t> vpux::ELFNPU37XX::getDataAndSizeOfElfSection(
-        const std::vector<uint8_t>& elfBlob, const std::vector<std::string> possibleSecNames) {
+        llvm::ArrayRef<uint8_t> elfBlob, const std::vector<std::string> possibleSecNames) {
     auto accessor = elf::ElfDDRAccessManager(elfBlob.data(), elfBlob.size());
     auto elf_reader = elf::Reader<elf::ELF_Bitness::Elf32>(&accessor);
 
@@ -95,7 +95,7 @@ size_t vpux::ELFNPU37XX::getOffsetOfOpInSection(mlir::Value& op) {
 }
 
 SmallString vpux::ELFNPU37XX::getSwKernelArchString(VPU::ArchKind archKind) {
-    VPUX_THROW_UNLESS(archKind == VPU::ArchKind::VPUX37XX, "The only supported architecture for sw kernels is 3720xx");
+    VPUX_THROW_UNLESS(archKind == VPU::ArchKind::NPU37XX, "The only supported architecture for sw kernels is 3720xx");
     return SmallString("3720xx");
 }
 
@@ -281,8 +281,9 @@ size_t vpux::ELFNPU37XX::math::lcm(size_t a, size_t b) {
 namespace {
 const std::unordered_map<VPU::ArchKind, elf::platform::ArchKind> vpuToElfArchEnumMap = {
         {VPU::ArchKind::UNKNOWN, elf::platform::ArchKind::UNKNOWN},
-        {VPU::ArchKind::VPUX30XX, elf::platform::ArchKind::VPUX30XX},
-        {VPU::ArchKind::VPUX37XX, elf::platform::ArchKind::VPUX37XX}};
+        {VPU::ArchKind::NPU30XX, elf::platform::ArchKind::VPUX30XX},
+        {VPU::ArchKind::NPU37XX, elf::platform::ArchKind::VPUX37XX},
+        {VPU::ArchKind::NPU40XX, elf::platform::ArchKind::VPUX40XX}};
 }  // namespace
 
 elf::platform::ArchKind vpux::ELFNPU37XX::mapVpuArchKindToElfArchKind(const VPU::ArchKind& archKind) {

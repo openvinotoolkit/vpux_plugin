@@ -47,4 +47,3 @@
                 <edge from-layer="1" from-port="1" to-layer="2" to-port="0"/>
         </edges>
 </net>
-

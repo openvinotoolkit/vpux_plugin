@@ -34,7 +34,7 @@ struct DenseMapInfo<RelocKey> {
         auto h1 = hash_value(val.first.getAsOpaquePointer());
         auto h2 = hash_value(val.second.getAsOpaquePointer());
 
-        return checked_cast<size_t>(h1 * h2);
+        return static_cast<unsigned>(h1 * h2);
     }
 
     static bool isEqual(RelocKey lhs, RelocKey rhs) {
@@ -54,7 +54,7 @@ mlir::MemRefType getLinearMemrefType(mlir::MLIRContext* ctx, int64_t memrefSize,
 
 namespace ELFNPU37XX {
 
-std::pair<const uint8_t*, size_t> getDataAndSizeOfElfSection(const std::vector<uint8_t>& elfBlob,
+std::pair<const uint8_t*, size_t> getDataAndSizeOfElfSection(llvm::ArrayRef<uint8_t> elfBlob,
                                                              const std::vector<std::string> possibleSecNames);
 
 using OffsetCache = mlir::DenseMap<mlir::Value, mlir::DenseMap<mlir::Value, size_t>>;

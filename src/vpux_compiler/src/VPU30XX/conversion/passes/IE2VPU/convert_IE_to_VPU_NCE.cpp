@@ -8,7 +8,7 @@
 
 #include "vpux/compiler/VPU30XX/conversion.hpp"
 #include "vpux/compiler/core/layers.hpp"
-#include "vpux/compiler/dialect/IE/ops.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
 #include "vpux/compiler/utils/VPU/ppe_utils.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
@@ -65,8 +65,10 @@ mlir::LogicalResult arch30xx::ConvToNCE::matchAndRewrite(IE::ConvolutionOp origO
     // Generate weights table
     const auto ppeTaskAttr = VPU::getPPETaskAttrFromPostOpsParams(
             origOp.getInput(), origOp.getOutput(), origOp.getPostOpAttr(), origOp.getLoc(), origOp.getContext(), _arch);
+
+    VPUX_THROW_WHEN(origOp.getStaticScaleAttr() != nullptr, "Static scale is not supported on this architecture");
     const auto weightsTableVec = VPU::createWeightsTableData(origOp.getInput(), origOp.getOutput(), alignedFilter, bias,
-                                                             OC, ppeTaskAttr, _arch, origOp.getPostOpAttr());
+                                                             OC, ppeTaskAttr, _arch, origOp.getPostOpAttr(), nullptr);
     const auto weightsTable = VPU::createWeightsTableTensor(rewriter, origOp->getLoc(), weightsTableVec);
 
     const auto instructionListTableVec =
@@ -135,7 +137,7 @@ mlir::LogicalResult arch30xx::DepthConvToNCE::matchAndRewrite(IE::GroupConvoluti
     auto ppeTaskAttr = VPU::getPPETaskAttrFromPostOpsParams(
             origOp.getInput(), origOp.getOutput(), origOp.getPostOpAttr(), origOp.getLoc(), origOp.getContext(), _arch);
     auto weightsTableVec = VPU::createWeightsTableData(origOp.getInput(), origOp.getOutput(), alignedFilter, bias, OC,
-                                                       ppeTaskAttr, _arch, origOp.getPostOpAttr());
+                                                       ppeTaskAttr, _arch, origOp.getPostOpAttr(), nullptr);
     auto weightsTable = VPU::createWeightsTableTensor(rewriter, origOp->getLoc(), weightsTableVec);
 
     const auto instructionListTableVec =
@@ -186,7 +188,7 @@ mlir::LogicalResult arch30xx::MaxPoolToNCE::matchAndRewrite(IE::MaxPoolOp origOp
     auto ppeTaskAttr = VPU::getPPETaskAttrFromPostOpsParams(
             origOp.getInput(), origOp.getOutput(), origOp.getPostOpAttr(), origOp.getLoc(), origOp.getContext(), _arch);
     auto weightsTableVec = VPU::createWeightsTableData(origOp.getInput(), origOp.getOutput(), nullptr, nullptr, IC,
-                                                       ppeTaskAttr, _arch, origOp.getPostOpAttr());
+                                                       ppeTaskAttr, _arch, origOp.getPostOpAttr(), nullptr);
     auto weightsTable = VPU::createWeightsTableTensor(rewriter, origOp->getLoc(), weightsTableVec);
 
     const auto padAttr = VPU::getPaddingAttr(getContext(), PadInfo(origOp.getPadsBegin(), origOp.getPadsEnd()));

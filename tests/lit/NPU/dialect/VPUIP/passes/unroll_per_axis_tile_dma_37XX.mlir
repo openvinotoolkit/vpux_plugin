@@ -1,9 +1,9 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
-// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --unroll-per-axis-tile-dma --canonicalize %s | FileCheck %s
+// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --unroll-per-axis-tile-dma %s | FileCheck %s
 // REQUIRES: arch-VPUX37XX
 
 #CHW = affine_map<(d0, d1, d2) -> (d0, d1, d2)>
@@ -40,7 +40,7 @@ func.func @UnrollPerAxisTileDMAWrapInClusterDUPLICATED() -> !OutputDistributed {
     //CHECK:      VPUIP.PerAxisTileDMA {dma_descriptor = #VPUIP.DMADescriptorAttr<numPlanes = 1 : i64, len = 1024 : i64, srcWidth = 2 : i64, srcStride = 0 : i64, srcPlaneStride = 2 : i64, dstWidth = 1024 : i64, dstStride = 1024 : i64, dstPlaneStride = 1024 : i64>, port = 0 : i64}
     //CHECK:                inputs([[INPUT]] : memref<1x1x1xf16, @DDR>
     //CHECK:                outputs([[OUTPUT]] : !VPUIP.DistributedBuffer<1x512x1xf16, #CHW, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>
-  
+
     //CHECK:    return [[OUTDISTRIBUTION]] : !VPUIP.DistributedBuffer
 }
 
@@ -102,7 +102,7 @@ func.func @UnrollPerAxisTileDMAWrapInClusterDUPLICATEDExplicitDistribution() -> 
     //CHECK-SAME{LITERAL}:                         compute_offsets = [[0, 0, 0], [0, 0, 0]],
     //CHECK-SAME{LITERAL}:                         memory_shapes = [[1, 512, 1], [1, 512, 1]],
     //CHECK-SAME{LITERAL}:                         memory_offsets = [[0, 0, 0], [0, 0, 0]]}>
-  
+
     //CHECK:    return [[OUTDISTRIBUTION]] : !VPUIP.DistributedBuffer
 }
 
@@ -165,7 +165,7 @@ func.func @UnrollPerAxisTileDMAWrapInClusterSEGMENTED() -> !OutputDistributed {
     //CHECK:      VPUIP.PerAxisTileDMA {dma_descriptor = #VPUIP.DMADescriptorAttr<numPlanes = 16 : i64, len = 32 : i64, srcWidth = 4 : i64, srcStride = 0 : i64, srcPlaneStride = 4 : i64, dstWidth = 32 : i64, dstStride = 32 : i64, dstPlaneStride = 32 : i64>, port = 1 : i64}
     //CHECK:                inputs([[INPUT_2]] : memref<16x2x1xf16, @DDR>
     //CHECK:                outputs([[OUTPUT_2]] : memref<16x16x1xf16, [@CMX_NN, 1]>
-  
+
     //CHECK:    return [[OUTDISTRIBUTION]] : !VPUIP.DistributedBuffer
 }
 
@@ -243,7 +243,7 @@ func.func @UnrollPerAxisTileDMAExplicitSEGMENTED() -> !OutputDistributed {
     //CHECK-SAME:       dstWidth = 32 : i64, dstStride = 32 : i64, dstPlaneStride = 32 : i64>, port = 1 : i64}
     //CHECK:                inputs([[INPUT_2]] : memref<256x2x1xf16, @DDR>
     //CHECK:                outputs([[OUTPUT_2]] : memref<256x16x1xf16, [@CMX_NN, 1]>
-  
+
     //CHECK:    return [[OUTDISTRIBUTION]] : !VPUIP.DistributedBuffer
 }
 
@@ -286,15 +286,23 @@ func.func @UnrollPerAxisTileDMAWrapInClusterOVERLAPPED() -> !OutputDistributed {
     //CHECK:    [[OUTPUT_1:%.*]] = VPURT.DeclareBuffer <CMX_NN> [1] <0> -> memref<120x240x4xf16, [@CMX_NN, 1]>
 
     //CHECK:    VPURT.Task waits([[BAR0]] : !VPURT.Barrier) updates([[BAR1]] : !VPURT.Barrier) {
-    //CHECK:      VPUIP.PerAxisTileDMA {dma_descriptor = #VPUIP.DMADescriptorAttr<numPlanes = 121 : i64, len = 1440 : i64, srcWidth = 720 : i64, srcStride = 0 : i64, srcPlaneStride = 720 : i64, dstWidth = 1440 : i64, dstStride = 1440 : i64, dstPlaneStride = 1440 : i64>, port = 0 : i64}
+    //CHECK:      VPUIP.PerAxisTileDMA {
+    //CHECK-SAME:           dma_descriptor = #VPUIP.DMADescriptorAttr<
+    //CHECK-SAME:               numPlanes = 121 : i64, len = 1920 : i64,
+    //CHECK-SAME:               srcWidth = 960 : i64, srcStride = 0 : i64, srcPlaneStride = 960 : i64,
+    //CHECK-SAME:               dstWidth = 1920 : i64, dstStride = 1920 : i64, dstPlaneStride = 1920 : i64>, port = 0 : i64}
     //CHECK:                inputs([[INPUT_0]] : memref<121x120x4xf16, @DDR>
     //CHECK:                outputs([[OUTPUT_0]] : memref<121x240x4xf16, [@CMX_NN, 0]>
 
     //CHECK:    VPURT.Task waits([[BAR0]] : !VPURT.Barrier) updates([[BAR1]] : !VPURT.Barrier) {
-    //CHECK:      VPUIP.PerAxisTileDMA {dma_descriptor = #VPUIP.DMADescriptorAttr<numPlanes = 120 : i64, len = 1440 : i64, srcWidth = 720 : i64, srcStride = 0 : i64, srcPlaneStride = 720 : i64, dstWidth = 1440 : i64, dstStride = 1440 : i64, dstPlaneStride = 1440 : i64>, port = 1 : i64}
+    //CHECK:      VPUIP.PerAxisTileDMA {
+    //CHECK-SAME:           dma_descriptor = #VPUIP.DMADescriptorAttr<
+    //CHECK-SAME:               numPlanes = 120 : i64, len = 1920 : i64,
+    //CHECK-SAME:               srcWidth = 960 : i64, srcStride = 0 : i64, srcPlaneStride = 960 : i64,
+    //CHECK-SAME:               dstWidth = 1920 : i64, dstStride = 1920 : i64, dstPlaneStride = 1920 : i64>, port = 1 : i64}
     //CHECK:                inputs([[INPUT_1]] : memref<120x120x4xf16, @DDR>
     //CHECK:                outputs([[OUTPUT_1]] : memref<120x240x4xf16, [@CMX_NN, 1]>
-  
+
     //CHECK:    return [[OUTDISTRIBUTION]] : !VPUIP.DistributedBuffer
 }
 
@@ -344,21 +352,21 @@ func.func @UnrollPerAxisTileDMAExplicitOVERLAPPED() -> !OutputDistributed {
 
     //CHECK:    VPURT.Task waits([[BAR0]] : !VPURT.Barrier) updates([[BAR1]] : !VPURT.Barrier) {
     //CHECK:      VPUIP.PerAxisTileDMA {
-    //CHECK-SAME:   dma_descriptor = #VPUIP.DMADescriptorAttr<
-    //CHECK-SAME:       numPlanes = 122 : i64, len = 1440 : i64,
-    //CHECK-SAME:       srcWidth = 720 : i64, srcStride = 0 : i64, srcPlaneStride = 720 : i64,
-    //CHECK-SAME:       dstWidth = 1440 : i64, dstStride = 1440 : i64, dstPlaneStride = 1440 : i64>, port = 0 : i64}
+    //CHECK-SAME:           dma_descriptor = #VPUIP.DMADescriptorAttr<
+    //CHECK-SAME:               numPlanes = 122 : i64, len = 1920 : i64,
+    //CHECK-SAME:               srcWidth = 960 : i64, srcStride = 0 : i64, srcPlaneStride = 960 : i64,
+    //CHECK-SAME:               dstWidth = 1920 : i64, dstStride = 1920 : i64, dstPlaneStride = 1920 : i64>, port = 0 : i64}
     //CHECK:                inputs([[INPUT_0]] : memref<122x120x4xf16, @DDR>
     //CHECK:                outputs([[OUTPUT_0]] : memref<122x240x4xf16, [@CMX_NN, 0]>
 
     //CHECK:    VPURT.Task waits([[BAR0]] : !VPURT.Barrier) updates([[BAR1]] : !VPURT.Barrier) {
     //CHECK:      VPUIP.PerAxisTileDMA {
-    //CHECK-SAME:   dma_descriptor = #VPUIP.DMADescriptorAttr<
-    //CHECK-SAME:       numPlanes = 123 : i64, len = 1440 : i64,
-    //CHECK-SAME:       srcWidth = 720 : i64, srcStride = 0 : i64, srcPlaneStride = 720 : i64,
-    //CHECK-SAME:       dstWidth = 1440 : i64, dstStride = 1440 : i64, dstPlaneStride = 1440 : i64>, port = 1 : i64}
+    //CHECK-SAME:           dma_descriptor = #VPUIP.DMADescriptorAttr<
+    //CHECK-SAME:               numPlanes = 123 : i64, len = 1920 : i64,
+    //CHECK-SAME:               srcWidth = 960 : i64, srcStride = 0 : i64, srcPlaneStride = 960 : i64,
+    //CHECK-SAME:               dstWidth = 1920 : i64, dstStride = 1920 : i64, dstPlaneStride = 1920 : i64>, port = 1 : i64}
     //CHECK:                inputs([[INPUT_1]] : memref<123x120x4xf16, @DDR>
     //CHECK:                outputs([[OUTPUT_1]] : memref<123x240x4xf16, [@CMX_NN, 1]>
-  
+
     //CHECK:    return [[OUTDISTRIBUTION]] : !VPUIP.DistributedBuffer
 }

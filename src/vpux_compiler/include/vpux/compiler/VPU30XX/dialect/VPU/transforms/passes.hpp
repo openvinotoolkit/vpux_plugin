@@ -21,6 +21,9 @@ struct DefaultHWOptions : public VPU::DefaultHWOptionsDialectBase, virtual vpux:
     BoolOption enableVPUNNCost{*this, "vpunn-cost",
                                llvm::cl::desc("Use VPUNN cost model to get the best tiling strategy"),
                                llvm::cl::init(false)};
+
+    BoolOption enableOutputPipelining{*this, "output-pipelining", llvm::cl::desc("Enable output pipelining"),
+                                      llvm::cl::init(false)};
 };
 
 void buildDefaultHWPipeline(mlir::OpPassManager& pm, const DefaultHWOptions& options, Logger log = Logger::global());

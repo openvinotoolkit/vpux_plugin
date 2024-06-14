@@ -5,9 +5,14 @@
 
 #include "vpux/compiler/core/schedule_analysis_utils.hpp"
 
+#include "vpux/utils/profiling/reports/ted.hpp"
+
 #include <iomanip>
 
 using namespace vpux;
+
+static const std::map<std::string, int> executorStrToId = {{"DMA_NN", 0},    {"DPU", 1},       {"NCE", 2},
+                                                           {"SHAVE_UPA", 3}, {"SHAVE_ACT", 4}, {"SHAVE_NN", 5}};
 
 ExecutorStallCycles vpux::getExecutorStallRegions(ScheduledOpInfoVec& scheduledOps) {
     ExecutorStallCycles executorStalls;
@@ -91,7 +96,7 @@ void vpux::verifyDependenciesPreservedInCycles(AsyncDepsInfo& depsInfo, Schedule
     for (auto& schedOp : scheduledOps) {
         auto execOp = depsInfo.getExecuteOpAtIndex(schedOp.op_);
         auto cycleEnd = getAsyncExecuteCycleEnd(execOp);
-        for (auto con : depsInfo.getConsumerOps(schedOp.op_).set_bits()) {
+        for (auto con : depsInfo.getConsumerOps(schedOp.op_)) {
             auto conExecOp = depsInfo.getExecuteOpAtIndex(con);
             auto cycleBegin = getAsyncExecuteCycleBegin(conExecOp);
             // all consumers must execute after the dependency
@@ -181,7 +186,7 @@ void vpux::printScheduleStatistics(mlir::func::FuncOp& netFunc, AsyncDepsInfo& d
                 // check if dependency is causing the stall
                 auto execOpIdx = depsInfo.getIndex(execOp);
                 int64_t eraliestExecutionStartCycle = 0;
-                for (auto depIdx : depsInfo.getOpDeps(execOpIdx).set_bits()) {
+                for (auto depIdx : depsInfo.getOpDeps(execOpIdx)) {
                     auto depExecOp = depsInfo.getExecuteOpAtIndex(depIdx);
                     if (!depExecOp->hasAttr(cycleEnd)) {
                         ++firstAsyncExecOp;
@@ -199,7 +204,7 @@ void vpux::printScheduleStatistics(mlir::func::FuncOp& netFunc, AsyncDepsInfo& d
                     auto consumerExecutorName = executorName;
                     size_t consumerIdx = 0;
                     // find earliest executing consumer
-                    for (auto conIdx : depsInfo.getConsumerOps(execOpIdx).set_bits()) {
+                    for (auto conIdx : depsInfo.getConsumerOps(execOpIdx)) {
                         auto conExecOp = depsInfo.getExecuteOpAtIndex(conIdx);
                         if (!conExecOp->hasAttr(cycleEnd)) {
                             ++firstAsyncExecOp;

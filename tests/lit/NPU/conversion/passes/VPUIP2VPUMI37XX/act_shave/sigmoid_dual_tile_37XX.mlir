@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -35,8 +35,8 @@ module @VPU.SW {
     // `memref` will be translated to `MemRefData`, while raw scalars will be translated as is.
     func.func private @builtin_sigmoid(%input : memref<*xf16>, %output : memref<*xf16>)
         attributes {
-            VPU.kernel_code = "sigmoid_fp16.c",
-            VPU.kernel_entry = "sigmoid_fp16"
+            VPU.kernel_code = "activation_sigmoid.cpp",
+            VPU.kernel_entry = "activation_sigmoid"
         }
 
     // management kernel definition
@@ -57,8 +57,7 @@ func.func @main(%1: memref<1x1x1x1000xf16>, %2: memref<1x1x1x1000xf16>) -> memre
 
     // Genetic Kernel information for the scheduler.
     VPURT.Task {
-        VPUIP.SW.Kernel {
-	            resultSegmentSizes = array<i32: 1, 0>}
+        VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
                     @VPU.SW::@builtin_sigmoid                                                // The reference to the Kernel function.
                     inputs(%in_tile1_cmx as %arg0: memref<1x1x1x1000xf16, [@CMX_NN, 1]>)     // Inputs/outputs buffers for generic operation interface
                     outputs(%out_tile1_cmx as %arg1: memref<1x1x1x1000xf16, [@CMX_NN, 1]>)   // and their mapping to inner region.

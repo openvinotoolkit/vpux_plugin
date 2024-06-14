@@ -70,7 +70,8 @@ bool vpux::VPU::NCEPermuteOp::isSupported(IE::PermuteQuantizeOp op, LogCb logCb,
     // First of all, this operation makes sense only when ODU permutation is supported.
     const auto arch = getArch(op);
     const std::set<VPU::ArchKind> compatibleTargets = {
-            VPU::ArchKind::VPUX37XX,
+            VPU::ArchKind::NPU37XX,
+            VPU::ArchKind::NPU40XX,
     };
     if (compatibleTargets.count(arch) <= 0) {
         logCb(formatv("Target architecture {0} does not support ODU permutations", arch));
@@ -162,7 +163,8 @@ mlir::LogicalResult vpux::VPU::NCEPermuteOp::verify() {
     }
 
     const std::set<VPU::ArchKind> compatibleTargets = {
-            VPU::ArchKind::VPUX37XX,
+            VPU::ArchKind::NPU37XX,
+            VPU::ArchKind::NPU40XX,
     };
     if (compatibleTargets.count(arch) <= 0) {
         return errorAt(op, "Target architecture {0} does not support ODU permutations", arch);
@@ -327,17 +329,21 @@ vpux::VPU::PaddingAttr vpux::VPU::NCEPermuteOp::getPad() {
 // ClusteredOpInterface
 //
 
-bool vpux::VPU::NCEPermuteOp::checkStrategyCompatibility(VPU::MultiClusterStrategy strategy) {
-    return strategy == VPU::MultiClusterStrategy::SplitOverHeightOverlapped;
+bool vpux::VPU::NCEPermuteOp::checkStrategyCompatibility(VPU::MultiClusterStrategy strategy, size_t) {
+    const auto arch = getArch(getOperation());
+    // SOK is only enabled on 40XX+, but 37XX also supports it, need to enable and refactor.
+    // Tracked by: E116491
+    return strategy == VPU::MultiClusterStrategy::SplitOverHeightOverlapped ||
+           (arch == VPU::ArchKind::NPU40XX && strategy == VPU::MultiClusterStrategy::SplitOverKernel);
 }
 
 vpux::VPU::DistributedTensorAttr vpux::VPU::NCEPermuteOp::getExplicitDistributedTensorAttr(
         vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, mlir::ArrayAttr numTiles,
-        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::ArrayAttr kernel, vpux::VPU::PaddingAttr pad,
-        mlir::ArrayAttr stride, mlir::UnitAttr uniformDistributedSegments) {
+        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::UnitAttr uniformDistributedSegments,
+        const vpux::VPU::OverlapDistributionParams& overlapParams) {
     return VPU::getNCEExplicitDistributedTensorAttr(mlir::dyn_cast<VPU::NCEOpInterface>(getOperation()), shape,
-                                                    distributionMode, numTiles, numClusters, alignment, kernel, pad,
-                                                    stride, uniformDistributedSegments);
+                                                    distributionMode, numTiles, numClusters, alignment,
+                                                    uniformDistributedSegments, overlapParams);
 }
 
 bool VPU::NCEPermuteOp::isOperationSplitOverHeightCompatible(const vpux::TileInfo& outputTile) {
@@ -381,9 +387,10 @@ vpux::VPU::SparsitySupport vpux::VPU::NCEPermuteOp::sparsitySupport() {
     }
 
     switch (arch) {
-    case VPU::ArchKind::VPUX30XX:
+    case VPU::ArchKind::NPU30XX:
         VPUX_THROW("NCEPermuteOp is not supported for {0}", arch);
-    case VPU::ArchKind::VPUX37XX:
+    case VPU::ArchKind::NPU37XX:
+    case VPU::ArchKind::NPU40XX:
         return VPU::SparsitySupport::SPARSE_OUTPUTS & excludeMode;
     default:
         VPUX_THROW("Unknown sparsity support mode for {0}", arch);

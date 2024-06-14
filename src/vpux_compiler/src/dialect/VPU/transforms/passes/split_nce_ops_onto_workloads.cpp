@@ -11,7 +11,7 @@
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/cost_model/cost_model.hpp"
-#include "vpux/compiler/dialect/VPUIP/dpu_tiler.hpp"
+#include "vpux/compiler/dialect/VPUIP/interfaces/dpu_tiler.hpp"
 
 #include "vpux/utils/core/enums.hpp"
 
@@ -111,16 +111,18 @@ VPU::MPEMode getMpeModeForVPUX37XX(mlir::Type, mlir::Type, mlir::Operation* oper
 using GetMpeModeCb = VPU::MPEMode (*)(mlir::Type, mlir::Type, mlir::Operation*, ShapeRef);
 
 const EnumMap<VPU::ArchKind, GetMpeModeCb> mpeMap = {
-        {VPU::ArchKind::VPUX30XX, getMpeModeForVPUX30XX},
-        {VPU::ArchKind::VPUX37XX, getMpeModeForVPUX37XX},
+        {VPU::ArchKind::NPU30XX, getMpeModeForVPUX30XX},
+        {VPU::ArchKind::NPU37XX, getMpeModeForVPUX37XX},
+        {VPU::ArchKind::NPU40XX, getMpeModeForVPUX37XX},
 };
 
 using ComputeSplitCostCb = int64_t (*)(const VPUIP::WorkloadSplit&, const VPUIP::WorkloadCostParams&,
                                        const std::shared_ptr<VPUNN::VPUCostModel>&, LogCb);
 
 const EnumMap<VPU::ArchKind, ComputeSplitCostCb> splitCostMap = {
-        {VPU::ArchKind::VPUX30XX, VPUIP::computeSplitCostForVPUX30XX},
-        {VPU::ArchKind::VPUX37XX, VPUIP::computeSplitCostForVPUX37XX},
+        {VPU::ArchKind::NPU30XX, VPUIP::computeSplitCostForVPUX30XX},
+        {VPU::ArchKind::NPU37XX, VPUIP::computeSplitCostForVPUX37XX},
+        {VPU::ArchKind::NPU40XX, VPUIP::computeSplitCostForVPUX37XX},
 };
 
 //
@@ -150,7 +152,7 @@ void generateWorkloads(mlir::OpBuilder& builder, VPU::NCEOpInterface origOp,
     auto inElemType = origOp->getOperand(0).getType().cast<vpux::NDTypeInterface>().getElementType();
     auto outElemType = origOp->getResult(0).getType().cast<vpux::NDTypeInterface>().getElementType();
 
-    if (costParams.arch == VPU::ArchKind::VPUX30XX &&
+    if (costParams.arch == VPU::ArchKind::NPU30XX &&
         isMixedPrecisionSupportedForVPUX30XX(inElemType, outElemType, origOp.getOperation())) {
         dpuTiler.tileOverHWMixedPrecision(splitPoolSet);
     } else {
@@ -159,9 +161,10 @@ void generateWorkloads(mlir::OpBuilder& builder, VPU::NCEOpInterface origOp,
         // Invariants that produce sparse activations must have the same number of channels across the variants
         const auto requiresEqualZ = (origOp->getResult(0).getType().dyn_cast<VPU::SparseTensorType>() != nullptr);
 
-        const auto splitNumPool = (costParams.arch == VPU::ArchKind::VPUX37XX)
-                                          ? dpuTiler.generateSplitNumberPool(costParams.numDPU, 1)
-                                          : dpuTiler.generateSplitNumberPool(costParams.numDPU, MAX_SPLIT_NUMBER);
+        const auto splitNumPool =
+                (costParams.arch == VPU::ArchKind::NPU37XX || costParams.arch == VPU::ArchKind::NPU40XX)
+                        ? dpuTiler.generateSplitNumberPool(costParams.numDPU, 1)
+                        : dpuTiler.generateSplitNumberPool(costParams.numDPU, MAX_SPLIT_NUMBER);
 
         for (const auto& splitNum : splitNumPool) {
             if (isTileOverDimsSupported[Dims4D::Act::W.ind()] == true &&
@@ -264,27 +267,27 @@ void splitOntoWorkloads(mlir::OpBuilder& builder, VPU::NCEOpInterface origOp, VP
         VPUX_THROW_WHEN(distributedInputType == nullptr, "Wrong input type {0} for NCEClusterTilingOp",
                         input.getType());
 
+        // @todo When halos supported in VPUNN, we need use computeShape instead of memory shape
+        // See E#87028
         const auto inputSubTensorShapes = distributedInputType.getPerClusterMemoryShapes();
         VPUX_THROW_WHEN(outputSubTensorShapes.size() != inputSubTensorShapes.size(),
                         "output tensor size:{0} not equal to input tensor size:{1}", outputSubTensorShapes.size(),
                         inputSubTensorShapes.size());
 
-        // ----
-        // In the case of an non broadcasted SOK, outputSubTensorOffsets don't need to be applied
         const auto distributionAttr = distributedOutputType.getDistribution();
-
-        if (distributionAttr.getMode().getValue() == VPU::DistributionMode::SEGMENTED) {
-            const auto numTiles = parseIntArrayAttr<int64_t>(distributionAttr.getNumTiles());
-            const auto totalTiles = std::accumulate(numTiles.begin(), numTiles.end(), static_cast<int64_t>(1),
-                                                    std::multiplies<int64_t>());
-
-            if (numTiles[Dims4D::Act::C.ind()] > 1 && totalTiles == numTiles[Dims4D::Act::C.ind()]) {
+        if (isSegmentedOverC(distributionAttr)) {
+            // Here we keep the output offset for SOC NCEPermute to keep the logic be aligned
+            // with SOH because it will be lowered to SOH NCEEltwise
+            if (mlir::isa<VPU::NCEPermuteOp>(origOp.getOperation())) {
+                // Correct layer strategy to the real strategy after being lowered to Eltwise
+                costParams.layerStrategy = VPU::MultiClusterStrategy::SplitOverHeight;
+            } else {
+                // In the case of an non broadcasted SOK, outputSubTensorOffsets don't need to be applied
                 for (auto& shapeOffset : outputSubTensorOffsets) {
                     std::fill(shapeOffset.begin(), shapeOffset.end(), 0);
                 }
             }
         }
-        // ----
 
         for (size_t clusterId = 0; clusterId < outputSubTensorShapes.size(); clusterId++) {
             auto clusterIdAttr = getIntAttr(origOp->getContext(), clusterId);
@@ -293,7 +296,7 @@ void splitOntoWorkloads(mlir::OpBuilder& builder, VPU::NCEOpInterface origOp, VP
             costParams.outputShape = outputSubTensorShapes[clusterId];
             costParams.numTiles = distributionAttr.getNumClusters().getInt();
 
-            if (costParams.arch == VPU::ArchKind::VPUX37XX &&
+            if (costParams.arch == VPU::ArchKind::NPU37XX &&
                 mlir::isa<VPU::NCEConvolutionOp, VPU::NCECompressConvolutionOp, VPU::NCEInterpolateOp>(origOp)) {
                 mpeMode = getMpeModeForVPUX37XXConv(outputSubTensorShapes[clusterId]);
             }
@@ -350,7 +353,7 @@ mlir::LogicalResult GenericNCERewrite::matchAndRewrite(VPU::NCEOpInterface nceOp
         const auto inOrder = inputType.getDimsOrder();
         const auto isCMajor = inOrder == DimsOrder::NCHW;
         isTileOverDimsSupported[Dims4D::Act::C.ind()] |= !isCMajor;
-    } else if (mlir::isa<VPU::NCEEltwiseOp, VPU::NCEPermuteQuantizeOp>(nceOp.getOperation())) {
+    } else if (mlir::isa<VPU::NCEEltwiseOp>(nceOp.getOperation())) {
         isTileOverDimsSupported[Dims4D::Act::C.ind()] = false;
     } else if (mlir::isa<VPU::NCEPermuteOp>(nceOp.getOperation())) {
         // For NCE Permute operation tileOverHK is needed : See E#91637

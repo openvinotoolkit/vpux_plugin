@@ -42,7 +42,8 @@ struct CompilationUnitDesc {
     mlir::StringRef entry;
 };
 
-ActKernelDesc compileKernelForACTShave(const CompilationUnitDesc& unitDesc, VPU::ArchKind archKind);
+ActKernelDesc compileKernelForACTShave(const CompilationUnitDesc& unitDesc, VPU::ArchKind archKind,
+                                       std::optional<VPU::RevisionID> revisionID, bool hasInputsInDDR);
 
 const CompilationUnitDesc& managementKernelCompilationDesc();
 

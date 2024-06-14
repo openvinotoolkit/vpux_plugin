@@ -79,47 +79,58 @@ public:
 public:
     template <typename... Args>
     void fatal(StringLiteral format, Args&&... args) const {
-        addEntryPacked(LogLevel::Fatal, formatv(format.data(), std::forward<Args>(args)...));
+        addEntryPacked(LogLevel::Fatal, format, std::forward<Args>(args)...);
     }
 
     template <typename... Args>
     void error(StringLiteral format, Args&&... args) const {
-        addEntryPacked(LogLevel::Error, formatv(format.data(), std::forward<Args>(args)...));
+        addEntryPacked(LogLevel::Error, format, std::forward<Args>(args)...);
     }
 
     template <typename... Args>
     void warning(StringLiteral format, Args&&... args) const {
-        addEntryPacked(LogLevel::Warning, formatv(format.data(), std::forward<Args>(args)...));
+        addEntryPacked(LogLevel::Warning, format, std::forward<Args>(args)...);
     }
 
     template <typename... Args>
     void info(StringLiteral format, Args&&... args) const {
-        addEntryPacked(LogLevel::Info, formatv(format.data(), std::forward<Args>(args)...));
+        addEntryPacked(LogLevel::Info, format, std::forward<Args>(args)...);
     }
 
     template <typename... Args>
     void debug(StringLiteral format, Args&&... args) const {
-        addEntryPacked(LogLevel::Debug, formatv(format.data(), std::forward<Args>(args)...));
+        addEntryPacked(LogLevel::Debug, format, std::forward<Args>(args)...);
     }
 
     template <typename... Args>
     void trace(StringLiteral format, Args&&... args) const {
-        addEntryPacked(LogLevel::Trace, formatv(format.data(), std::forward<Args>(args)...));
+        addEntryPacked(LogLevel::Trace, format, std::forward<Args>(args)...);
     }
 
 public:
     template <typename... Args>
     void addEntry(LogLevel msgLevel, StringLiteral format, Args&&... args) const {
-        addEntryPacked(msgLevel, formatv(format.data(), std::forward<Args>(args)...));
+        addEntryPacked(msgLevel, format, std::forward<Args>(args)...);
     }
 
 private:
-    void addEntryPacked(LogLevel msgLevel, const formatv_object_base& msg) const;
+    void addEntryPackedActive(LogLevel msgLevel, const formatv_object_base& msg) const;
+
+    template <typename... Args>
+    void addEntryPacked(LogLevel msgLevel, StringLiteral format, Args&&... args) const {
+        if (!isActive(msgLevel)) {
+            return;
+        }
+        addEntryPackedActive(msgLevel, formatv(format.data(), std::forward<Args>(args)...));
+    }
 
 private:
     StringLiteral _name;
     LogLevel _logLevel = LogLevel::None;
     size_t _indentLevel = 0;
+#if defined(VPUX_DEVELOPER_BUILD) || !defined(NDEBUG)
+    std::string _logFilterStr;
+#endif
 };
 
 }  // namespace vpux

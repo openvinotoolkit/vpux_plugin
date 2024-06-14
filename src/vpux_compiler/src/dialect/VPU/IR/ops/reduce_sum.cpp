@@ -3,8 +3,13 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#include "vpux/compiler/core/tiling.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 
+#include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/explicit_distribution_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/reduce_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/type_infer.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 
@@ -42,104 +47,74 @@ mlir::OpFoldResult vpux::VPU::ReduceSumOp::fold(FoldAdaptor) {
 }
 
 //
+// ClusteredOpInterface
+//
+
+bool vpux::VPU::ReduceSumOp::checkStrategyCompatibility(VPU::MultiClusterStrategy strategy, size_t numTiles) {
+    const auto inputType = getInput().getType().cast<vpux::NDTypeInterface>();
+    const auto inShape = inputType.getShape();
+    const auto axesVec = parseIntArrayAttr<int64_t>(getAxesValueAttr());
+    return checkStrategyCompatibilityReduce(strategy, numTiles, inShape, axesVec);
+}
+
+vpux::VPU::DistributedTensorAttr vpux::VPU::ReduceSumOp::getExplicitDistributedTensorAttr(
+        vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, mlir::ArrayAttr numTiles,
+        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::UnitAttr uniformDistributedSegments,
+        const vpux::VPU::OverlapDistributionParams& /*overlapParams*/) {
+    return vpux::VPU::getSWExplicitDistributedTensorAttr(mlir::dyn_cast<VPU::SWOpInterface>(getOperation()), shape,
+                                                         distributionMode, numTiles, numClusters, alignment,
+                                                         uniformDistributedSegments);
+}
+
+bool vpux::VPU::ReduceSumOp::fitIntoCMX(llvm::ArrayRef<vpux::NDTypeInterface> buffers, Byte reservedMem) {
+    return fitIntoCMXReduce(getOperation(), buffers, reservedMem);
+}
+
+bool vpux::VPU::ReduceSumOp::fitIntoCMX(llvm::ArrayRef<vpux::NDTypeInterface> buffers) {
+    return fitIntoCMXReduce(getOperation(), buffers);
+}
+
+bool vpux::VPU::ReduceSumOp::supportCycleCostCalculation() {
+    return false;
+}
+
+//
 // TilingBuilderOpInterface
 //
 
 vpux::InputTiling vpux::VPU::ReduceSumOp::backInferTileInfo(const vpux::TileInfo& outputTile, vpux::Logger /*log*/) {
-    SmallVector<TileInfo> inputTiles;
+    const auto inShape = getInput().getType().cast<vpux::NDTypeInterface>().getShape();
+    const auto axesValue = getAxesValue();
+    const auto keepDims = getKeepDims();
 
-    auto inShape = getInput().getType().cast<vpux::NDTypeInterface>().getShape().raw();
-    auto axesValue = parseIntArrayAttr<int64_t>(getAxesValue());
-
-    auto tiledOutputAxis = outputTile.axis.raw();
-    auto tiledOutputShape = outputTile.shape.raw();
-    auto tiledOutputOffsets = outputTile.offsets.raw();
-
-    // Adding tiling case when keep dims is false and the axes are reduced from outputShape
-    if (getKeepDims() == false) {
-        Shape newInput, newAxis, newOffset;
-        std::copy(tiledOutputShape.begin(), tiledOutputShape.end(), std::back_inserter(newInput));
-        std::copy(tiledOutputAxis.begin(), tiledOutputAxis.end(), std::back_inserter(newAxis));
-        std::copy(tiledOutputOffsets.begin(), tiledOutputOffsets.end(), std::back_inserter(newOffset));
-
-        for (auto axesInd : axesValue) {
-            // Adjusting the new input based on tiled output
-            newInput.insert(newInput.begin() + axesInd, inShape[axesInd]);
-            newAxis.insert(newAxis.begin() + axesInd, 1);
-            newOffset.insert(newOffset.begin() + axesInd, 0);
-        }
-
-        TileInfo inTile(newInput, newOffset, newAxis);
-
-        return TilingInfo{{std::move(inTile)}};
-    }
-
-    auto inTile = outputTile;
-    for (auto axesInd : axesValue) {
-        inTile.shape[Dim(axesInd)] = inShape[axesInd];
-    }
-
-    return TilingInfo{{std::move(inTile)}};
+    return backInferReduceTile(outputTile, inShape, axesValue, keepDims);
 }
 
 void vpux::VPU::ReduceSumOp::adjustAttrs(const TilingInfo& /*inputTiling*/, const TileInfo& /*outputTile*/) {
 }
 
 mlir::FailureOr<OutputTiling> vpux::VPU::ReduceSumOp::getTilingStrategy(TilingMode tilingMode, Logger log) {
-    auto baseOp = this->getOperation();
-    VPUX_THROW_WHEN(tilingMode != TilingMode::ISOLATED,
-                    "Only supporting isolated tiling for ReduceSum currently, for op {0} at '{1}'", baseOp->getName(),
-                    getLoc());
+    const auto op = getOperation();
+    const auto keepDims = getKeepDims();
+    SmallVector<int64_t> maxNumTiles;
 
-    auto tilingInfo = mlir::dyn_cast<VPU::TilingInfoOpInterface>(baseOp);
-    VPUX_THROW_WHEN(tilingInfo == nullptr, "Operation '{0}' doesn't implement TilingInfoOpInterface",
-                    baseOp->getName());
-    const auto outputType = baseOp->getResult(0).getType().cast<vpux::NDTypeInterface>();
-    const auto outputShape = outputType.getShape();
-    const auto inType = baseOp->getOperand(0).getType().cast<vpux::NDTypeInterface>();
-    const auto inShape = inType.getShape();
-
-    const auto axesValue = getAxesValue();
-    Shape nTilesOnDim(outputShape.size(), 1);
-
-    const auto checkAxes = [axesValue](int64_t tileDim) -> bool {
-        auto axesArray = parseIntArrayAttr<int64_t>(axesValue);
-
-        for (auto axesInd : axesArray) {
-            if (tileDim == axesInd) {
-                return true;
-            }
-        }
-        return false;
-    };
-
-    const auto isSupportedTileSize = [baseOp, &tilingInfo, outputShape, log](ShapeRef nTilesOnDim,
-                                                                             TilingMode tilingMode) -> bool {
-        const auto tiles = fillDividedTiles(baseOp, nTilesOnDim, outputShape);
-        if (mlir::failed(tiles)) {
-            return false;
-        }
-        return tilingInfo.isSupportedTiling(tiles.value(), tilingMode, log);
-    };
-
-    int64_t tileDim = 0;
-
-    while (!isSupportedTileSize(nTilesOnDim, tilingMode)) {
-        VPUX_THROW_WHEN(
-                getAxesValue().size() == inShape.size(),
-                "Tiling for ReduceSum is not supported when all axes are reduced, got axes {0} and input size {1}",
-                getAxesValue().size(), inShape.size());
-        if ((getKeepDims() == true) && checkAxes(tileDim)) {
-            ++tileDim;
-        } else {
-            if (nTilesOnDim[Dim(tileDim)] >= outputShape[Dim(tileDim)]) {
-                ++tileDim;
-            } else {
-                ++nTilesOnDim[Dim(tileDim)];
-            }
-        }
+    if (keepDims) {
+        const auto axes = parseIntArrayAttr<int64_t>(getAxesValueAttr());
+        maxNumTiles = getMaxNumTilesWithAxesExclusion(op, axes);
+    } else {
+        const auto outputType = getOutput().getType().cast<vpux::NDTypeInterface>();
+        const auto outputShape = outputType.getShape();
+        maxNumTiles = to_small_vector(outputShape);
     }
 
-    auto origTiles = fillDividedTiles(baseOp, nTilesOnDim, outputShape);
-    return origTiles;
+    return vpux::getSWLayerTilingStrategy(op, tilingMode, log, maxNumTiles);
+}
+
+//
+// build
+//
+
+void vpux::VPU::ReduceSumOp::build(::mlir::OpBuilder& builder, ::mlir::OperationState& state, ::mlir::Value input,
+                                   ::mlir::ArrayAttr axes_value, ::mlir::UnitAttr keep_dims) {
+    build(builder, state, input, axes_value, keep_dims, {});
 }

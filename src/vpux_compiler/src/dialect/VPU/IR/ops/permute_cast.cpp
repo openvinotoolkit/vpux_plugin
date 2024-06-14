@@ -3,8 +3,12 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#include <mlir/Support/LogicalResult.h>
+#include <cstdint>
+#include "vpux/compiler/core/layers.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 
+#include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/type_infer.hpp"
 #include "vpux/compiler/utils/permute_utils.hpp"
 
@@ -33,4 +37,37 @@ mlir::LogicalResult vpux::VPU::PermuteCastOp::inferReturnTypes(mlir::MLIRContext
                                  inferredReturnTypes);
 
     return mlir::success();
+}
+
+//
+// DistributedCastOpInterface
+//
+
+mlir::FailureOr<VPU::DistributedTypeInterface> vpux::VPU::PermuteCastOp::inferCastedDistOutput(
+        VPU::DistributedTensorType inDistributedType) {
+    if (inDistributedType == nullptr || inDistributedType.getDistribution() == nullptr) {
+        return mlir::failure();
+    }
+    const auto ctx = getContext();
+    const auto origDistribution = inDistributedType.getDistribution();
+    const auto srcType = getInput().getType().cast<NDTypeInterface>();
+    const auto dstType = getOutput().getType().cast<NDTypeInterface>();
+
+    auto castedOutputDistribution =
+            applyPermutationOnDistributedTensorAttr(origDistribution, getMemPerm(), srcType.getDimsOrder(),
+                                                    dstType.getDimsOrder(), srcType.getShape(), dstType.getShape());
+    if (isSegmentedLikeMode(inDistributedType)) {
+        auto legalizeDistribution = legalizeCastedDistribution(castedOutputDistribution, ctx);
+        if (mlir::failed(legalizeDistribution)) {
+            return mlir::failure();
+        }
+
+        castedOutputDistribution = legalizeDistribution.value();
+    }
+
+    const auto dstDimsOrderAttr = mlir::AffineMapAttr::get(dstType.getDimsOrder().toAffineMap(ctx));
+    const auto newDistributionType =
+            DistributedTensorType::get(ctx, dstType.getShape().raw(), dstType.getElementType(), dstDimsOrderAttr,
+                                       inDistributedType.getMemSpace(), castedOutputDistribution);
+    return newDistributionType.cast<VPU::DistributedTypeInterface>();
 }

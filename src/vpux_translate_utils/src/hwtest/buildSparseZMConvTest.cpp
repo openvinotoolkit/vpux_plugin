@@ -1,4 +1,4 @@
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022 Intel Corporation
 // SPDX-License-Identifier: Apache 2.0
 
 #include <numeric>
@@ -7,11 +7,11 @@
 
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/passes.hpp"
-#include "vpux/compiler/dialect/VPUIP/utils.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/task.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/transforms/passes.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/utils/sparsity.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
@@ -103,7 +103,7 @@ void buildSparseZMajorConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mod
     VPUX_THROW_UNLESS(INPUT_CMX_OFFSET % alignment == 0, "INPUT_CMX_OFFSET must be multiple of {0}, got {1}", alignment,
                       INPUT_CMX_OFFSET);
 
-    unsigned long INPUT_SM_CMX_OFFSET;
+    size_t INPUT_SM_CMX_OFFSET = 0;
     if (conv.act_sparsity) {
         INPUT_SM_CMX_OFFSET = INPUT_CMX_OFFSET + inputCMXSize;
         VPUX_THROW_UNLESS(INPUT_SM_CMX_OFFSET % alignment == 0, "INPUT_CMX_OFFSET must be multiple of {0}, got {1}",
@@ -226,8 +226,8 @@ void buildSparseZMajorConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mod
     const auto workloadSize = IC * KY * KX;
     const auto weightsElemByteSize = checked_cast<int32_t>(getElemTypeSize(weightsType).to<Byte>().count());
 
-    int32_t weightsPtrOffset = static_cast<std::int32_t>(WEIGHTS_CMX_OFFSET);
-    int32_t sparsityPtrOffset = static_cast<std::int32_t>(WEIGHTS_SM_CMX_OFFSET);
+    auto weightsPtrOffset = static_cast<std::int32_t>(WEIGHTS_CMX_OFFSET);
+    auto sparsityPtrOffset = static_cast<std::int32_t>(WEIGHTS_SM_CMX_OFFSET);
     const auto sparsityPtrStep = Bit(workloadSize).to<Byte>().count();
 
     SmallVector<int32_t> weightsPtrs(OC, 0);
@@ -235,10 +235,10 @@ void buildSparseZMajorConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mod
     for (auto oc : irange(OC)) {
         weightsPtrs[oc] = weightsPtrOffset;
         const auto weightSetSize = (numNonSparseElements[oc] * weightsElemByteSize);
-        weightsPtrOffset += alignValUp<int32_t>(weightSetSize, alignmentRequirement);
+        weightsPtrOffset += alignValUp<int32_t>(static_cast<int32_t>(weightSetSize), alignmentRequirement);
 
         sparsityPtrs[oc] = sparsityPtrOffset;
-        sparsityPtrOffset += sparsityPtrStep;
+        sparsityPtrOffset += static_cast<int32_t>(sparsityPtrStep);
     }
 
     const auto weightsTable = VPU::NCESparsity::getWeightsTable(
@@ -290,7 +290,7 @@ void buildSparseZMajorConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mod
             functionBuilder, mlir::ValueRange(waitBarrier.getBarrier()), mlir::ValueRange(updateBarrier.getBarrier()),
             loc, inputCMX.getBuffer(), /*input_sparsity_map=*/inputSMCmxBuffer,
             /*input_storage_element_table=*/nullptr, weightsDenseViewCMX.getBuffer(), weightsSMCMX.getBuffer(),
-            weightsTableCMX_0.getBuffer(), nullptr, nullptr, inputCMX.getBuffer(),
+            weightsTableCMX_0.getBuffer(), nullptr, nullptr, nullptr, inputCMX.getBuffer(),
             /*parent_input_sparsity_map=*/inputSMCmxBuffer,
             /*parent_input_storage_element_table=*/nullptr, outputCMX.getBuffer(),
             /*parent_output_sparsity_map=*/nullptr, outputCMX.getBuffer(), /*output_sparsity_map=*/nullptr,
@@ -308,17 +308,26 @@ void buildSparseZMajorConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mod
     nceTask_0.addDPUTask(functionBuilder, start, outEnd, start, inEnd, pad, conv.cube_mode);
     waitBarrier = updateBarrier;
 
+    // finalBarrier passed as production barrier to last DMA task
+    auto barrier2 = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, 2);
+
     VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(waitBarrier.getBarrier()),
-                                          mlir::ValueRange(), loc, outputCMX.getOperation()->getResult(0),
-                                          functionOutput, 0);
+                                          mlir::ValueRange(barrier2.getBarrier()), loc,
+                                          outputCMX.getOperation()->getResult(0), functionOutput, 0);
 
     functionBuilder.create<mlir::func::ReturnOp>(loc, mlir::ValueRange{functionOutput});
 
     module.dump();
 
+    // set runtime resources
+    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
+
     mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    pm.addPass(VPU::createInitCompilerPass(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW, 1, std::nullopt,
-                                           log));
+    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.numberOfDPUGroups = 1;
+    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
+
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
     if (conv.compress) {
         pm.addPass(VPUIP::createCompressWeightsBTCPass(log));
     }

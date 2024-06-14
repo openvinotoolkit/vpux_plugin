@@ -1,0 +1,98 @@
+<net name="torch_jit" version="11">
+	<layers>
+		<layer id="455" name="/_projection/Constant_61_compressed" type="Const" version="opset1">
+			<data element_type="f16" shape="9" offset="0" size="18"/>
+			<output>
+				<port id="0" precision="FP16">
+					<dim>9</dim>
+				</port>
+			</output>
+		</layer>
+		<layer id="456" name="/_projection/Constant_61" type="Convert" version="opset1">
+			<data destination_type="f32"/>
+			<rt_info>
+				<attribute name="decompression" version="0"/>
+			</rt_info>
+			<input>
+				<port id="0" precision="FP16">
+					<dim>9</dim>
+				</port>
+			</input>
+			<output>
+				<port id="1" precision="FP32" names="/_projection/Constant_61_output_0">
+					<dim>9</dim>
+				</port>
+			</output>
+		</layer>
+		<layer id="457" name="/_projection/Constant_63" type="Const" version="opset1">
+			<data element_type="i64" shape="1" offset="18" size="8"/>
+			<output>
+				<port id="0" precision="I64" names="/_projection/Constant_63_output_0">
+					<dim>1</dim>
+				</port>
+			</output>
+		</layer>
+		<layer id="462" name="Broadcast_2104" type="Const" version="opset1">
+			<data element_type="i64" shape="1" offset="26" size="8"/>
+			<output>
+				<port id="0" precision="I64">
+					<dim>1</dim>
+				</port>
+			</output>
+		</layer>
+		<layer id="463" name="/_projection/Slice_9" type="StridedSlice" version="opset1">
+			<data begin_mask="0" end_mask="0" new_axis_mask="" shrink_axis_mask="" ellipsis_mask=""/>
+			<input>
+				<port id="0" precision="FP32">
+					<dim>9</dim>
+				</port>
+				<port id="1" precision="I64">
+					<dim>1</dim>
+				</port>
+				<port id="2" precision="I64">
+					<dim>1</dim>
+				</port>
+				<port id="3" precision="I64">
+					<dim>1</dim>
+				</port>
+			</input>
+			<output>
+				<port id="4" precision="FP32" names="/_projection/Slice_9_output_0">
+					<dim>-1</dim>
+				</port>
+			</output>
+		</layer>
+		<layer id="2" name="EditOpenVinoIRResult_2" type="Result" version="opset1">
+			<input>
+				<port id="2" precision="FP32">
+					<dim>-1</dim>
+				</port>
+			</input>
+		</layer>
+		<layer id="0" name="EditOpenVinoIRParameter_0" type="Parameter" version="opset1">
+			<data element_type="i64" shape="1"/>
+			<output>
+				<port id="3" precision="I64">
+					<dim>1</dim>
+				</port>
+			</output>
+		</layer>
+	</layers>
+	<edges>
+		<edge from-layer="455" from-port="0" to-layer="456" to-port="0"/>
+		<edge from-layer="456" from-port="1" to-layer="463" to-port="0"/>
+		<edge from-layer="457" from-port="0" to-layer="463" to-port="1"/>
+		<edge from-layer="462" from-port="0" to-layer="463" to-port="3"/>
+		<edge from-layer="463" from-port="4" to-layer="2" to-port="2"/>
+		<edge from-layer="0" from-port="3" to-layer="463" to-port="2"/>
+	</edges>
+	<rt_info>
+		<MO_version value="2023.1.0-12185-9e6b00e51cd-releases/2023/1"/>
+		<Runtime_version value="2023.1.0-12185-9e6b00e51cd-releases/2023/1"/>
+		<conversion_parameters>
+			<input_model value="DIR\random_float.onnx"/>
+			<is_python_api_used value="False"/>
+		</conversion_parameters>
+		<legacy_frontend value="False"/>
+	</rt_info>
+</net>

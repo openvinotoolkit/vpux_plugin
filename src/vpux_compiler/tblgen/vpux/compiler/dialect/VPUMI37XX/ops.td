@@ -16,6 +16,7 @@ include "vpux/compiler/dialect/VPUMI37XX/ops_interfaces.td"
 include "vpux/compiler/dialect/VPUMI37XX/types.td"
 include "vpux/compiler/dialect/VPURT/types.td"
 include "vpux/compiler/dialect/VPU/attributes.td"
+include "vpux/compiler/dialect/VPU/ops_interfaces.td"
 include "vpux/compiler/dialect/VPUIP/types.td"
 include "vpux/compiler/dialect/VPUIP/attributes.td"
 include "vpux/compiler/dialect/ELFNPU37XX/ops_interfaces.td"
@@ -345,7 +346,7 @@ def VPUMI37XX_KernelParamsOp :
     let description = [{
         This operation contains description of parameters for software kernel.
         It can be used to cover dynamic and static shapes. Dynamic shapes are represented by
-        input_dims and output_dims arguments. If shape does not require to be dynamic the corresponding argument
+        dynamicInputShapes and dynamicOutputShapes arguments. If shape does not require to be dynamic the corresponding argument
         can be omitted. The shape is resolved via kernel_params for this case.
 
         Currently, dynamic shape is supported only for single input/output.
@@ -354,8 +355,10 @@ def VPUMI37XX_KernelParamsOp :
     let arguments = (ins
         Variadic<AnyMemRef>:$inputs,
         Variadic<AnyMemRef>:$outputs,
-        Optional<AnyMemRef>:$input_dims,  // TODO(E#84956) make variadic
-        Optional<AnyMemRef>:$output_dims, // to handle multiple inputs/outputs
+        VariadicOfVariadic<AnyMemRef, "dynamicInputShapesSize">:$dynamicInputShapes,
+        VariadicOfVariadic<AnyMemRef, "dynamicOutputShapesSize">:$dynamicOutputShapes,
+        DenseI32ArrayAttr:$dynamicInputShapesSize,
+        DenseI32ArrayAttr:$dynamicOutputShapesSize,
         StrAttr:$kernel_type,
         ElementsAttr:$kernel_params
     );
@@ -372,8 +375,8 @@ def VPUMI37XX_KernelParamsOp :
         attr-dict
         (`inputs` `(` $inputs^ `:` type($inputs) `)`)?
         (`outputs` `(` $outputs^ `:` type($outputs) `)`)?
-        (`input_dims` `(` $input_dims^ `:` type($input_dims) `)`)?
-        (`output_dims` `(` $output_dims^ `:` type($output_dims) `)`)?
+        (`dynamicInputShapes` `(` $dynamicInputShapes^ `:` type($dynamicInputShapes) `)`)?
+        (`dynamicOutputShapes` `(` $dynamicOutputShapes^ `:` type($dynamicOutputShapes) `)`)?
         `kernel_type` `(` $kernel_type `)`
         `kernel_params` `(` $kernel_params `)`
         `->` type(results)
@@ -394,7 +397,7 @@ def VPUMI37XX_ActKernelRangeOp : VPUMI37XX_TaskOp<"ActKernelRange",
         Optional<VPURegMapped_IndexType>:$kernel_text_index,
         Optional<VPURegMapped_IndexType>:$kernel_args_index,
         Optional<VPURegMapped_IndexType>:$kernel_entry_index,
-        OptionalAttr<SymbolRefAttr>:$kernelTaskType
+        SymbolRefAttr:$kernelTaskType
     );
 
     let results = (outs
@@ -407,9 +410,11 @@ def VPUMI37XX_ActKernelRangeOp : VPUMI37XX_TaskOp<"ActKernelRange",
         (`kernel_text_index` `(` $kernel_text_index^ `:` type($kernel_text_index) `)`)?
         (`kernel_args_index` `(` $kernel_args_index^ `:` type($kernel_args_index) `)`)?
         (`kernel_entry_index` `(` $kernel_entry_index^ `:` type($kernel_entry_index) `)`)?
-        (`kernelTaskType` `(` $kernelTaskType^ `)`)?
+        `kernelTaskType` `(` $kernelTaskType `)`
         `->` type(results)
     }];
+
+    let hasVerifier = 1;
 }
 
 //
@@ -478,6 +483,12 @@ def VPUMI37XX_DPUVariantOp : VPUMI37XX_TaskOp<"DPUVariant", []> {
         OptionalAttr<IntAttr>:$workload_id
     );
 }
+
+def VPUMI37XX_PPETaskOp : VPU_PPETaskOpBase<
+    VPUMI37XX_Dialect,
+    "PPETask",
+    [ParentOneOf<["vpux::VPUMI37XX::DPUInvariantOp"]>]
+> {}
 
 //
 // DPU Invariant Op
@@ -674,7 +685,7 @@ def MappedInferenceVersionOp :
         attr-dict}];
 
     let builders = [
-        OpBuilder<(ins)>    
+        OpBuilder<(ins)>
         ];
 }
 

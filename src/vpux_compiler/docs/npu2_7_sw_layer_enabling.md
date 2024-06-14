@@ -2,7 +2,7 @@
 
 ## Introduction
 
-This instruction will guide you through steps of adding a new NPU3720 software layer to the NPU compiler.
+This instruction will guide you through steps of adding a new NPU3720 software layer to the NPU compiler. For NPU3700 software layer, please refer [sw_layer_enabling.md](../docs/sw_layer_enabling.md)
 
 > Be aware, that NPU compiler is in a rapid development and code snippets might be out of date.
 
@@ -79,23 +79,6 @@ If not please follow this instruction: [How to create act-shave kernel](../../..
 
 ## Single layer test
 
-In case of the OV1.0 test framework:
-
-```cpp
-class ActivationLayerTest_NPU3720 : public ActivationLayerTestCommon {
-};
-```
-
-Call `setPlatformVPU3720` method to limit the scope of the tests to NPU3720 platform only:
-
-```cpp
-TEST_P(ActivationLayerTest_NPU3720, HW) {
-    setPlatformVPU3720();
-    setReferenceHardwareModeMLIR();
-    Run();
-}
-```
-
 In case of the OV2.0 test framework define a base single layer test:
 
 ```cpp
@@ -107,7 +90,7 @@ Set the environment with helper functions and provide the platform to the `run()
 ```cpp
 TEST_P(SoftMaxLayerTestCommon, NPU3720_SW) {
     setReferenceSoftwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
 }
 ```
 
@@ -115,13 +98,13 @@ To disable a test case on compilation/inference stage, use `setSkipCompilationCa
  `SkipCallback` should return `void` and accept a `std::stringstream& skip` argument. Content of the `skip` stream will be printed to the skip message. If the stream is empty, the test is not skipped.
 
 ```cpp
-TEST_P(EltwiseLayerTestCommon, NPU3720_SW) {
+TEST_P(EltwiseLayerTestCommon, NPU4000_SW) {
     setSkipCompilationCallback([](std::stringstream& skip) {
         skip << "Missing Act shave runtime support";
     });
 
     setReferenceSoftwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU4000);
 }
 ```
 
@@ -173,6 +156,20 @@ void vpux::VPUIP::VPUIPDialect::setupExtraInterfaces(mlir::DialectRegistry& regi
 
 Remove corresponding operation from `setupExtraInterfacesAdditional`.
 [src/vpux_compiler/src/dialect/VPUIP/ops.cpp](../src/dialect/VPUIP/ops.cpp)
+
+Register `mlir::bufferization::BufferizableOpInterface` interface for new operation:
+[src/vpux_compiler/src/conversion/passes/VPU2VPUIP/bufferize_sw_ops_interface.cpp](../src/conversion/passes/VPU2VPUIP/bufferize_sw_ops_interface.cpp)
+
+```cpp
+//
+// registerSoftwareLayerBufferizableOpInterfaces
+//
+
+void vpux::registerSoftwareLayerBufferizableOpInterfaces(mlir::DialectRegistry& registry) {
+    // ...
+    VPU::SoftMaxOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::SoftMaxOp>>(*ctx);
+}
+```
 
 ### Add kernel information
 

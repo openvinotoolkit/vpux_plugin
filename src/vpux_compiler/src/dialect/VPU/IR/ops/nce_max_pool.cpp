@@ -18,7 +18,7 @@
 #include "vpux/compiler/utils/empty_node.hpp"
 #include "vpux/compiler/utils/error.hpp"
 
-#include <ngraph/validation_util.hpp>
+#include "vpux/compiler/utils/infer_output_shape.hpp"
 
 using namespace vpux;
 
@@ -82,7 +82,8 @@ bool vpux::VPU::NCEMaxPoolOp::isSupported(IE::MaxPoolOp op, LogCb logCb, bool ch
     const auto KX = kernelSize[Dims4D::Kernel::X];
 
     const std::set<VPU::ArchKind> compatibleTargets = {
-            VPU::ArchKind::VPUX37XX,
+            VPU::ArchKind::NPU37XX,
+            VPU::ArchKind::NPU40XX,
     };
     if (KY != KX && compatibleTargets.count(arch) <= 0) {
         logCb(formatv("Asymmetric kernel is not supported"));
@@ -101,6 +102,11 @@ bool vpux::VPU::NCEMaxPoolOp::isSupported(IE::MaxPoolOp op, LogCb logCb, bool ch
 
     const auto inputType = op.getInput().getType().cast<vpux::NDTypeInterface>();
     const auto outputType = op.getOutput().getType().cast<vpux::NDTypeInterface>();
+
+    if (inputType.getElementType().isSignedInteger() || outputType.getElementType().isSignedInteger() ||
+        inputType.getElementType().isUnsignedInteger() || outputType.getElementType().isUnsignedInteger()) {
+        return false;
+    }
 
     if (checkChannelAlignment) {
         if (!NCEInvariant::isInputActTypeSupported(arch, inputType, getInputChannelAlignmentImpl(inputType), false) ||
@@ -207,7 +213,7 @@ mlir::LogicalResult vpux::VPU::NCEMaxPoolOp::inferReturnTypes(mlir::MLIRContext*
         return mlir::failure();
     }
 
-    const auto inShape = getShape(op.getInput());
+    const auto inShape = getShape(op.getInput()).raw();
 
     const auto windowShape = parseIntArrayAttr<int64_t>(op.getKernelSize());
     const auto windowStrides = parseIntArrayAttr<int64_t>(op.getStrides());
@@ -217,24 +223,17 @@ mlir::LogicalResult vpux::VPU::NCEMaxPoolOp::inferReturnTypes(mlir::MLIRContext*
     const auto padLeft = op.getPad().getLeft().getValue().getSExtValue();
     const auto padRight = op.getPad().getRight().getValue().getSExtValue();
 
-    const auto dataPaddingBelow = ov::CoordinateDiff({padTop, padLeft});
-    const auto dataPaddingAbove = ov::CoordinateDiff({padBottom, padRight});
+    const auto dataPaddingBelow = SmallVector<int64_t>({padTop, padLeft});
+    const auto dataPaddingAbove = SmallVector<int64_t>({padBottom, padRight});
 
-    const auto outputShapeNG = ngraph::infer_batched_pooling_forward(
-            EmptyNode::instance(), ov::Shape(inShape.begin(), inShape.end()), dataPaddingBelow, dataPaddingAbove,
-            ov::Shape(windowShape.begin(), windowShape.end()), ov::Strides(windowStrides.begin(), windowStrides.end()),
-            /*is_window_all_in_padding_allowed=*/true,
-            /*ceil_mode=*/false);
-
-    const auto outputShape = to_small_vector(outputShapeNG.get_shape() | transformed([](size_t val) {
-                                                 return checked_cast<int64_t>(val);
-                                             }));
+    const auto shapeI64 =
+            inferMaxPoolOutputShape(inShape, windowStrides, dataPaddingBelow, dataPaddingAbove, windowShape);
 
     auto inputType = op.getInput().getType();
     if (auto sparseInputType = inputType.dyn_cast<VPU::SparseTensorType>()) {
         inputType = sparseInputType.getData();
     }
-    const auto outputType = inputType.cast<vpux::NDTypeInterface>().changeShape(Shape(outputShape));
+    const auto outputType = inputType.cast<vpux::NDTypeInterface>().changeShape(Shape(shapeI64));
 
     inferredReturnTypes.push_back(outputType);
     return mlir::success();
@@ -302,18 +301,18 @@ SmallVector<int64_t> vpux::VPU::NCEMaxPoolOp::getStridesVal() {
 // ClusteredOpInterface
 //
 
-bool vpux::VPU::NCEMaxPoolOp::checkStrategyCompatibility(VPU::MultiClusterStrategy strategy) {
+bool vpux::VPU::NCEMaxPoolOp::checkStrategyCompatibility(VPU::MultiClusterStrategy strategy, size_t) {
     return strategy == VPU::MultiClusterStrategy::Clustering ||
            strategy == VPU::MultiClusterStrategy::SplitOverHeight || strategy == VPU::MultiClusterStrategy::HKSwitch;
 }
 
 vpux::VPU::DistributedTensorAttr vpux::VPU::NCEMaxPoolOp::getExplicitDistributedTensorAttr(
         vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, mlir::ArrayAttr numTiles,
-        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::ArrayAttr kernel, vpux::VPU::PaddingAttr pad,
-        mlir::ArrayAttr stride, mlir::UnitAttr uniformDistributedSegments) {
+        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::UnitAttr uniformDistributedSegments,
+        const vpux::VPU::OverlapDistributionParams& overlapParams) {
     return VPU::getNCEExplicitDistributedTensorAttr(mlir::dyn_cast<VPU::NCEOpInterface>(getOperation()), shape,
-                                                    distributionMode, numTiles, numClusters, alignment, kernel, pad,
-                                                    stride, uniformDistributedSegments);
+                                                    distributionMode, numTiles, numClusters, alignment,
+                                                    uniformDistributedSegments, overlapParams);
 }
 
 // Each cluster should compute at least one output line. Therefore in order for a layer to be SOH
@@ -404,11 +403,43 @@ vpux::VPU::SparsitySupport vpux::VPU::NCEMaxPoolOp::sparsitySupport() {
     }
 
     switch (arch) {
-    case VPU::ArchKind::VPUX30XX:
+    case VPU::ArchKind::NPU30XX:
         return VPU::SparsitySupport::NONE;
-    case VPU::ArchKind::VPUX37XX:
+    case VPU::ArchKind::NPU37XX:
+    case VPU::ArchKind::NPU40XX:
         return VPU::SparsitySupport::SPARSE_OUTPUTS & excludeMode;
     default:
         VPUX_THROW("Unknown sparsity support mode for {0}", arch);
     }
+}
+
+mlir::LogicalResult vpux::VPU::NCEMaxPoolOp::verifyKernel(IE::MaxPoolOp origOp, Logger log) {
+    log.setName("NCEInvariant");
+
+    if (origOp.getInput().getType().cast<vpux::NDTypeInterface>().getRank() != 4) {
+        return mlir::failure();
+    }
+
+    const auto arch = VPU::getArch(origOp->getParentOfType<mlir::ModuleOp>());
+    const auto kernelSize = parseIntArrayAttr<int64_t>(origOp.getKernelSize());
+    if (kernelSize[0] != kernelSize[1] && arch != VPU::ArchKind::NPU37XX && arch != VPU::ArchKind::NPU40XX) {
+        log.trace("[{0}] Asymmetric kernel is not supported", origOp->getLoc());
+        return mlir::failure();
+    }
+    const auto KY = kernelSize[0];
+    const auto KX = kernelSize[1];
+
+    const auto kernelStrides = parseIntArrayAttr<int64_t>(origOp.getStrides());
+    const auto SY = kernelStrides[0];
+    const auto SX = kernelStrides[1];
+
+    const auto padsBegin = parseIntArrayAttr<int64_t>(origOp.getPadsBegin());
+    const auto padsEnd = parseIntArrayAttr<int64_t>(origOp.getPadsEnd());
+    const auto padTop = padsBegin[0];
+    const auto padBottom = padsEnd[0];
+    const auto padLeft = padsBegin[1];
+    const auto padRight = padsEnd[1];
+
+    return NCEInvariant::verifyKernel(origOp->getLoc(), KY, KX, SY, SX, padTop, padBottom, padLeft, padRight, arch,
+                                      log);
 }

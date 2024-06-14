@@ -4,6 +4,9 @@
 //
 
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/explicit_distribution_utils.hpp"
 
 using namespace vpux;
 
@@ -41,4 +44,72 @@ DimArr vpux::VPU::MVN6Op::getNonNormDims() {
         }
     }
     return dims;
+}
+
+//
+// ClusteredOpInterface
+//
+
+bool vpux::VPU::MVN6Op::checkStrategyCompatibility(VPU::MultiClusterStrategy strategy, size_t) {
+    const auto nonNormDims = this->getNonNormDims();
+
+    if (strategy == VPU::MultiClusterStrategy::Clustering) {
+        return true;
+    } else if (strategy == VPU::MultiClusterStrategy::SplitOverKernel) {
+        return std::find(nonNormDims.begin(), nonNormDims.end(), Dims4D::Act::C) != nonNormDims.end();
+    } else if (strategy == VPU::MultiClusterStrategy::SplitOverHeight) {
+        return std::find(nonNormDims.begin(), nonNormDims.end(), Dims4D::Act::H) != nonNormDims.end();
+    } else if (strategy == VPU::MultiClusterStrategy::SplitOverWidth) {
+        return std::find(nonNormDims.begin(), nonNormDims.end(), Dims4D::Act::W) != nonNormDims.end();
+    }
+
+    return false;
+}
+
+vpux::VPU::DistributedTensorAttr vpux::VPU::MVN6Op::getExplicitDistributedTensorAttr(
+        vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, mlir::ArrayAttr numTiles,
+        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::UnitAttr uniformDistributedSegments,
+        const vpux::VPU::OverlapDistributionParams& /*overlapParams*/) {
+    return VPU::getSWExplicitDistributedTensorAttr(mlir::dyn_cast<VPU::SWOpInterface>(getOperation()), shape,
+                                                   distributionMode, numTiles, numClusters, alignment,
+                                                   uniformDistributedSegments);
+}
+
+//
+// SWOpInterface
+//
+
+bool vpux::VPU::MVN6Op::fitIntoCMX(llvm::ArrayRef<vpux::NDTypeInterface> buffers, Byte reservedMem) {
+    VPUX_THROW_UNLESS(buffers.size() == 2, "MVN6Op requires 1 input and 1 output, but the number of buffer is {0}",
+                      buffers.size());
+
+    SmallVector<Byte> buffersSize;
+    std::transform(buffers.begin(), buffers.end(), std::back_inserter(buffersSize), [](const auto buffer) {
+        return buffer.getTotalAllocSize();
+    });
+
+    auto totalAvailableCMXSize = reservedMem.count() == 0 ? getTotalCMXSize(getOperation()).count()
+                                                          : getTotalCMXFragmentationAwareSize(getOperation()).count();
+
+    return vpux::VPU::calculateAlignedBuffersMemoryRequirement(getArch(getOperation()), buffersSize).count() +
+                   reservedMem.count() <=
+           totalAvailableCMXSize;
+}
+
+bool vpux::VPU::MVN6Op::fitIntoCMX(llvm::ArrayRef<vpux::NDTypeInterface> buffers) {
+    return fitIntoCMX(buffers, Byte(0));
+}
+
+bool vpux::VPU::MVN6Op::supportCycleCostCalculation() {
+    return false;
+}
+
+//
+// build
+//
+
+void vpux::VPU::MVN6Op::build(::mlir::OpBuilder& builder, ::mlir::OperationState& state, ::mlir::Value input,
+                              ::mlir::ArrayAttr axes, ::mlir::BoolAttr normalize_variance, ::mlir::FloatAttr eps,
+                              vpux::IE::MvnEpsModeAttr eps_mode) {
+    build(builder, state, input.getType(), input, axes, normalize_variance, eps, eps_mode, {});
 }

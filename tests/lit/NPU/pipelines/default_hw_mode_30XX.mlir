@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -12,6 +12,10 @@
 module @Convolution {
     // CHECK-DAG: {{  }}module @UsedMemory
     // CHECK-DAG: {{    }}IE.MemoryResource {{[0-9]+}} bytes of @DDR
+    // CHECK-DAG: {{  }}IE.PipelineOptions @Options
+    // CHECK-DAG: {{    }}IE.Option @VPU.BarrierMaxVariantSum : 512
+    // CHECK-DAG: {{    }}IE.Option @VPU.BarrierMaxVariantCount : 512
+
     // CHECK-DAG: {{  }}IE.ExecutorResource 1 of @DMA_NN
     // CHECK-DAG: {{  }}IE.ExecutorResource 16 of @SHAVE_UPA
     // CHECK-DAG: {{  }}IE.TileResource 4 of @NCE at 7.000000e+02 MHz
@@ -97,23 +101,23 @@ module @Convolution {
         // CHECK-SAME:      [[output_3:%.*]] : memref<1x48x15x60xf16, #NHWC, [@CMX_NN, 3]>)
         // CHECK:               DPUTask
 
-        // CHECK:       VPURT.Task waits([[barrier_1:%.*]] : !VPURT.Barrier) 
+        // CHECK:       VPURT.Task waits([[barrier_1:%.*]] : !VPURT.Barrier)
         // CHECK:       VPUIP.NNDMA {port = 0 : i64} inputs([[IN0_CMX]] : memref<1x48x15x60xf16, #NHWC, [@CMX_NN, 0]>)
         // CHECK-SAME:      outputs([[OUT1_DDR]] : memref<1x48x15x60xf16, #NHWC, @DDR>)
 
-        // CHECK:       VPURT.Task 
+        // CHECK:       VPURT.Task
         // CHECK:       VPUIP.NNDMA {port = 0 : i64} inputs([[IN1_CMX]] : memref<1x48x15x60xf16, #NHWC, [@CMX_NN, 1]>)
         // CHECK-SAME:      outputs([[OUT2_DDR]] : memref<1x48x15x60xf16, #NHWC, @DDR>)
 
-        // CHECK:       VPURT.Task 
+        // CHECK:       VPURT.Task
         // CHECK:       VPUIP.NNDMA {port = 0 : i64} inputs([[IN2_CMX]] : memref<1x48x15x60xf16, #NHWC, [@CMX_NN, 2]>)
         // CHECK-SAME:      outputs([[OUT3_DDR]] : memref<1x48x15x60xf16, #NHWC, @DDR>)
 
-        // CHECK:       VPURT.Task updates([[barrier_2:%.*]] : !VPURT.Barrier) 
+        // CHECK:       VPURT.Task updates([[barrier_2:%.*]] : !VPURT.Barrier)
         // CHECK:       VPUIP.NNDMA {port = 0 : i64} inputs([[IN3_CMX]] : memref<1x48x15x60xf16, #NHWC, [@CMX_NN, 3]>)
         // CHECK-SAME:      outputs([[OUT4_DDR]] : memref<1x48x15x60xf16, #NHWC, @DDR>)
 
-        // CHECK:       VPURT.Task waits([[barrier_2:%.*]] : !VPURT.Barrier) 
+        // CHECK:       VPURT.Task waits([[barrier_2:%.*]] : !VPURT.Barrier)
         // CHECK:       VPUIP.PermuteUPA {order_value = #NWCH} inputs([[IN0_DDR]] : memref<1x48x60x60xf16, #NHWC, @DDR>)
         // CHECK-SAME:      outputs([[OUT0_DDR]] : memref<1x48x60x60xf16, @DDR>)
 
@@ -128,6 +132,9 @@ module @SingleLayer {
 
 // CHECK-DAG: {{  }}module @UsedMemory
 // CHECK-DAG: {{    }}IE.MemoryResource {{[0-9]+}} bytes of @DDR
+// CHECK-DAG: {{  }}IE.PipelineOptions @Options
+// CHECK-DAG: {{    }}IE.Option @VPU.BarrierMaxVariantSum : 512
+// CHECK-DAG: {{    }}IE.Option @VPU.BarrierMaxVariantCount : 512
 // CHECK-DAG: {{  }}IE.ExecutorResource 1 of @DMA_NN
 // CHECK-DAG: {{  }}IE.ExecutorResource 16 of @SHAVE_UPA
 // CHECK-DAG: {{  }}IE.TileResource 4 of @NCE at 7.000000e+02 MHz

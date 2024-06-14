@@ -3,6 +3,6 @@
 # SPDX-License-Identifier: Apache 2.0
 #
 
-#
-
-add_subdirectory(vpux-loader)
+if(ENABLE_NPU_LOADER)
+    add_subdirectory(vpux-loader)
+endif()

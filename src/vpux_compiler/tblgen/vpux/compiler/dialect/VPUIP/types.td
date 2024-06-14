@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -11,6 +11,8 @@ include "vpux/compiler/dialect/VPUIP/attributes.td"
 include "vpux/compiler/dialect/VPU/type_interfaces.td"
 include "vpux/compiler/dialect/VPU/attributes.td"
 include "vpux/compiler/core/type_interfaces.td"
+
+include "mlir/IR/BuiltinTypeInterfaces.td"
 
 // Base class for VPUIP dialect types.
 class VPUIP_Type<string name, list<Trait> traits = []>
@@ -74,7 +76,8 @@ def VPUIP_DistributedBuffer :
             [
                 DeclareTypeInterfaceMethods<NDTypeInterface>,
                 DeclareTypeInterfaceMethods<ClusterTypeInterface>,
-                VPU_DistributedTypeInterface
+                DeclareTypeInterfaceMethods<BaseMemRefTypeInterface>,
+                VPU_DistributedTypeInterface,
             ]
         > {
     let summary = "VPUIP buffer type to describe the buffer tiling";
@@ -88,7 +91,7 @@ def VPUIP_DistributedBuffer :
         "mlir::MemRefLayoutAttrInterface":$layout,
         "vpux::IndexedSymbolAttr":$memSpace,
         "VPU::DistributedTensorAttr":$distribution,
-        "VPUIP::CompressionSchemeAttr":$compressionScheme
+        "VPUIP::SparsityCompressionAttr":$sparsityCompression
     );
 
     let builders = [
@@ -100,9 +103,9 @@ def VPUIP_DistributedBuffer :
                 "mlir::MemRefLayoutAttrInterface":$layout,
                 "vpux::IndexedSymbolAttr":$memSpace,
                 "VPU::DistributedTensorAttr":$distribution,
-                CArg<"VPUIP::CompressionSchemeAttr", "{}">:$compressionScheme
+                CArg<"VPUIP::SparsityCompressionAttr", "{}">:$sparsityCompression
             ), [{
-            return $_get(context, shape, elementType, layout, memSpace, distribution, compressionScheme);
+            return $_get(context, shape, elementType, layout, memSpace, distribution, sparsityCompression);
         }]>
     ];
 
@@ -111,7 +114,10 @@ def VPUIP_DistributedBuffer :
 
         mlir::MemRefLayoutAttrInterface getLayout() const;
         VPU::DistributedTensorAttr getDistribution() const;
-        VPUIP::CompressionSchemeAttr getCompressionScheme() const;
+        VPUIP::SparsityCompressionAttr getSparsityCompression() const;
+        DistributedBufferType cloneWith(std::optional<mlir::ArrayRef<int64_t>> shape,
+                                        mlir::Type elementType) const;
+        Byte getAllocSizeOfCluster(size_t clusterId) const;
     }];
 
     let skipDefaultBuilders = 1;
@@ -128,6 +134,7 @@ def VPUIP_SparseBuffer :
             "SparseBuffer",
             [
                 GroupedTypeInterface,
+                DeclareTypeInterfaceMethods<BaseMemRefTypeInterface>,
                 DeclareTypeInterfaceMethods<NDTypeInterface>,
                 DeclareTypeInterfaceMethods<VPU_DistributedTypeInterface,
                     ["containsDistributedTypes", "getDistributedTypes", "changeShapeForExplicitDistribution",
@@ -151,7 +158,7 @@ def VPUIP_SparseBuffer :
         weights set size of the sparsity map (i.e. ICxKYxKW) needs to be aligned
         to 16 bytes for every output channel.
 
-        The `compressionScheme` attribute is utilized for weights sparsity to
+        The `sparsityCompression` attribute is utilized for weights sparsity to
         identify the number of elements per output channel that are present in
         the data after removing the sparse values.
     }];
@@ -161,7 +168,7 @@ def VPUIP_SparseBuffer :
         "mlir::Type":$sparsityMap,
         "mlir::Type":$storageElementTable,
         "mlir::UnitAttr":$isWeights,
-        "VPUIP::CompressionSchemeAttr":$compressionScheme,
+        "VPUIP::SparsityCompressionAttr":$sparsityCompression,
         VPU_SEAttr:$seAttr
     );
 
@@ -172,12 +179,113 @@ def VPUIP_SparseBuffer :
                 CArg<"mlir::Type", "{}">:$sparsityMap,
                 CArg<"mlir::Type", "{}">:$storageElementTable,
                 CArg<"mlir::UnitAttr", "{}">:$isWeights,
-                CArg<"VPUIP::CompressionSchemeAttr", "{}">:$compressionScheme,
+                CArg<"VPUIP::SparsityCompressionAttr", "{}">:$sparsityCompression,
                 CArg<"VPU::SEAttr", "{}">:$seAttr
             ), [{
-            return $_get(data.getContext(), data, sparsityMap, storageElementTable, isWeights, compressionScheme, seAttr);
+            return $_get(data.getContext(), data, sparsityMap, storageElementTable, isWeights, sparsityCompression, seAttr);
         }]>
     ];
+
+    let extraClassDeclaration = [{
+        SparseBufferType cloneWith(std::optional<mlir::ArrayRef<int64_t>> /*shape*/,
+                                    mlir::Type /*elementType*/) const;
+    }];
+
+    let skipDefaultBuilders = 1;
+    let genVerifyDecl = 1;
+    let hasCustomAssemblyFormat = 1;
+}
+
+//
+// ITIBuffer
+//
+
+def VPUIP_ITIBuffer :
+        VPUIP_Type<
+            "ITIBuffer",
+            [
+                DeclareTypeInterfaceMethods<NDTypeInterface>
+            ]
+        > {
+    let summary = "VPUIP ITI Buffer Type";
+
+    let description = [{
+        This buffer type is used to represent buffers with halo regions.
+        Halo regions are chuncks of the whole buffer that are read from a different
+        cluster (for input ITI buffers) or that are written by another cluster in the
+        current one (for output ITI buffers). This type is used to model buffers in a
+        multiclustering scenario.
+
+        * `iduSegmentation` - attribute used to differentiate between input or output
+        ITI buffers
+        * `inwardHaloRegions` - array of halo regions from other clusters
+        * `outwardHaloRegions` - array of halo regions that the current buffer will
+        share with buffers in a different cluster
+    }];
+
+    let genAccessors = 0;
+
+    let parameters = (ins
+        ArrayRefParameter<"int64_t">:$shape,
+        "mlir::Type":$elementType,
+        "mlir::MemRefLayoutAttrInterface":$layout,
+        "vpux::IndexedSymbolAttr":$memSpace,
+        "mlir::UnitAttr": $iduSegmentation,
+        ArrayRefParameter<"HaloRegionAttr">: $inwardHaloRegions,
+        ArrayRefParameter<"OutwardHaloRegionAttr">: $outwardHaloRegions
+    );
+
+    let extraClassDeclaration = [{
+        mlir::MemRefLayoutAttrInterface getLayout() const;
+        mlir::UnitAttr getIduSegmentation() const;
+        ArrayRef<HaloRegionAttr> getInwardHaloRegions() const;
+        ArrayRef<OutwardHaloRegionAttr> getOutwardHaloRegions() const;
+    }];
+
+    let genVerifyDecl = 1;
+    let hasCustomAssemblyFormat = 1;
+}
+
+//
+// BoundedBuffer
+//
+def VPUIP_BoundedBuffer :
+    VPUIP_Type<
+        "BoundedBuffer",
+        [
+            DeclareTypeInterfaceMethods<NDTypeInterface>,
+            DeclareTypeInterfaceMethods<BaseMemRefTypeInterface>
+        ]
+    > {
+    let summary = "VPUIP Bounded Buffer Type";
+    let description = [{
+        The BoundedBuffer type represents dynamic tensor constrained by predefined upper bounds.
+
+        *  `data` - an upper-bounded memref buffer type to hold the actual data.
+        It defines the maximum capacity and the type of the elements stored within the buffer.
+        * `dynamicShape` - a buffer type that contains the actual size of the data buffer.
+        The size of the buffer equals to the rank of the data buffer. For 4D tensor - the shape is 4.
+    }];
+
+    let parameters = (ins
+        "mlir::Type":$data,
+        "mlir::Type":$dynamicShape
+    );
+
+    let builders = [
+        TypeBuilderWithInferredContext<
+            (ins
+                "mlir::Type":$data,
+                "mlir::Type":$dynamicShape
+            ), [{
+            return $_get(data.getContext(), data, dynamicShape);
+        }]>
+    ];
+
+    let extraClassDeclaration = [{
+        BoundedBufferType cloneWith(std::optional<mlir::ArrayRef<int64_t>> /*shape*/,
+                                    mlir::Type /*elementType*/) const;
+    }];
 
     let skipDefaultBuilders = 1;
     let genVerifyDecl = 1;

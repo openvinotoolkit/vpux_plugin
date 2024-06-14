@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --convert-pad-to-concat %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX
+// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
 
 // CHECK-LABEL: @convertPadToConcatWithN
 func.func @convertPadToConcatWithN(%arg0: tensor<1x8x16x16xf16>) -> tensor<4x8x16x16xf16> {
@@ -104,7 +104,7 @@ func.func @convertPadToConcatWithMultiUser(%arg0: tensor<1x3x297x297xf16>) -> (t
 // CHECK-LABEL: @convertPadToConcatWith3DShape
 func.func @convertPadToConcatWith3DShape(%arg0: tensor<1x96x21499xf16>) -> tensor<1x96x21500xf16> {
     %0 = IE.Pad(%arg0) {mode = #IE.pad_mode<CONSTANT>, pad_value_attr = 0.000000e+00 : f64, pads_begin_attr = [0, 0, 0], pads_end_attr = [0, 0, 1]}
-                        : tensor<1x96x21499xf16> -> tensor<1x96x21500xf16> 
+                        : tensor<1x96x21499xf16> -> tensor<1x96x21500xf16>
 
     return %0 : tensor<1x96x21500xf16>
 
@@ -118,13 +118,13 @@ func.func @convertPadToConcatWith3DShape(%arg0: tensor<1x96x21499xf16>) -> tenso
 // CHECK-LABEL: @convertPadToConcatWith5DShape
 func.func @convertPadToConcatWith5DShape(%arg0: tensor<1x16x32x64x128xf16>) -> tensor<1x17x32x64x129xf16> {
     %0 = IE.Pad(%arg0) {mode = #IE.pad_mode<CONSTANT>, pad_value_attr = 1.000000e+00 : f64, pads_begin_attr = [0, 1, 0, 0, 0], pads_end_attr = [0, 0, 0, 0, 1]}
-                        : tensor<1x16x32x64x128xf16> -> tensor<1x17x32x64x129xf16> 
+                        : tensor<1x16x32x64x128xf16> -> tensor<1x17x32x64x129xf16>
 
     return %0 : tensor<1x17x32x64x129xf16>
 
     // CHECK-DAG:      [[CST0:%.*]] = const.Declare tensor<1x16x32x64x1xf16> = dense<1.000000e+00> : tensor<1x16x32x64x1xf32>, [#const.ConvertElemType<f16>]
     // CHECK-DAG:      [[CST1:%.*]] = const.Declare tensor<1x1x32x64x129xf16> = dense<1.000000e+00> : tensor<1x1x32x64x129xf32>, [#const.ConvertElemType<f16>]
-    
+
     // CHECK-NOT:      IE.Pad
     // CHECK:       [[CONCAT0:%.*]] = IE.Concat(%arg0, [[CST0]]) {per_axis = #IE.Concat<axis = 4 : i64>}
     // CHECK-SAME:       tensor<1x16x32x64x128xf16>, tensor<1x16x32x64x1xf16> -> tensor<1x16x32x64x129xf16>

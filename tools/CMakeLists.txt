@@ -3,25 +3,24 @@
 # SPDX-License-Identifier: Apache 2.0
 #
 
-add_subdirectory(model-comparator)
-
 add_subdirectory(single-image-test)
 add_subdirectory(sol-generator)
 add_subdirectory(query_model)
 
 add_subdirectory(vpux-opt)
 add_subdirectory(vpux-translate)
-add_subdirectory(vpux-lsp-server)
+
+if(ENABLE_NPU_LSP_SERVER)
+    add_subdirectory(vpux-lsp-server)
+endif()
 
 add_subdirectory(profiling_parser)
 
 add_subdirectory(vpux-binutils)
 
-add_subdirectory(protopipe)
-
-add_subdirectory(legacy/single-image-test)
-
-add_subdirectory(legacy/benchmark_app)
+if(ENABLE_NPU_PROTOPIPE)
+    add_subdirectory(protopipe)
+endif()
 
 add_subdirectory(compile_tool)
 

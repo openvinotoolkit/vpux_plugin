@@ -156,14 +156,23 @@ function(vpux_setup_lit_tests TEST_NAME)
     )
 
     set(tests_copy_cmd)
-    foreach(file IN LISTS SOURCES)
+    if(LIT_TESTS_USE_LINKS)
         list(APPEND tests_copy_cmd
             COMMAND
-                ${CMAKE_COMMAND} -E copy
-                    "${LIT_ROOT}/${file}"
-                    "$<TARGET_FILE_DIR:npuUnitTests>/lit-tests/${TEST_NAME}/${file}"
+                ${CMAKE_COMMAND} -E create_symlink
+                    "${LIT_ROOT}/${TEST_NAME}"
+                    "$<TARGET_FILE_DIR:npuUnitTests>/lit-tests/${TEST_NAME}/${TEST_NAME}"
         )
-    endforeach()
+    else()
+        foreach(file IN LISTS SOURCES)
+            list(APPEND tests_copy_cmd
+                COMMAND
+                    ${CMAKE_COMMAND} -E copy
+                        "${LIT_ROOT}/${file}"
+                        "$<TARGET_FILE_DIR:npuUnitTests>/lit-tests/${TEST_NAME}/${file}"
+            )
+        endforeach()
+    endif()
 
     add_custom_target(copy_${TEST_NAME}_tests ALL
         COMMAND

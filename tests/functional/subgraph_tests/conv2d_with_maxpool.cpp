@@ -1,13 +1,11 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022-2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include <vpu_ov2_layer_test.hpp>
 
-#include <ov_models/builders.hpp>
-#include <ov_models/utils/ov_helpers.hpp>
-#include <shared_test_classes/base/layer_test_utils.hpp>
+#include "common_test_utils/node_builders/fake_quantize.hpp"
 
 namespace ov::test {
 
@@ -35,8 +33,8 @@ class ScheduleSubGraphTest_NPU3700 :
         const size_t dataLevels = 256;
         const std::vector<float> dataLow = {0.0f};
         const std::vector<float> dataHigh = {255.0f};
-        const auto dataFq = ngraph::builder::makeFakeQuantize(params[0], ov::element::f32, dataLevels, {}, dataLow,
-                                                              dataHigh, dataLow, dataHigh);
+        const auto dataFq = ov::test::utils::make_fake_quantize(params[0], ov::element::f32, dataLevels, {}, dataLow,
+                                                                dataHigh, dataLow, dataHigh);
 
         std::vector<uint64_t> poolStridesVec = {1, 1};
         std::vector<uint64_t> poolKernelVec = {1, 1};
@@ -55,8 +53,10 @@ class ScheduleSubGraphTest_NPU3700 :
 
         const size_t weightsLevels = 255;
 
-        const auto weightsInLow = ngraph::builder::makeConstant<float>(ov::element::f32, {1}, {0.0f}, false);
-        const auto weightsInHigh = ngraph::builder::makeConstant<float>(ov::element::f32, {1}, {255.0f}, false);
+        const auto weightsInLow =
+                ov::op::v0::Constant::create(ov::element::f32, ov::Shape{1}, std::vector<float>{0.0f});
+        const auto weightsInHigh =
+                ov::op::v0::Constant::create(ov::element::f32, ov::Shape{1}, std::vector<float>{255.0f});
 
         std::vector<float> perChannelLow(weightsShape[0]);
         std::vector<float> perChannelHigh(weightsShape[0]);
@@ -66,10 +66,10 @@ class ScheduleSubGraphTest_NPU3700 :
             perChannelHigh[i] = 255.0f;
         }
 
-        const auto weightsOutLow = ngraph::builder::makeConstant<float>(ov::element::f32, {weightsShape[0], 1, 1, 1},
-                                                                        perChannelLow, false);
-        const auto weightsOutHigh = ngraph::builder::makeConstant<float>(ov::element::f32, {weightsShape[0], 1, 1, 1},
-                                                                         perChannelHigh, false);
+        const auto weightsOutLow =
+                ov::op::v0::Constant::create(ov::element::f32, ov::Shape{weightsShape[0], 1, 1, 1}, perChannelLow);
+        const auto weightsOutHigh =
+                ov::op::v0::Constant::create(ov::element::f32, ov::Shape{weightsShape[0], 1, 1, 1}, perChannelHigh);
 
         const auto weightsFq = std::make_shared<ov::op::v0::FakeQuantize>(weightsFP32, weightsInLow, weightsInHigh,
                                                                           weightsOutLow, weightsOutHigh, weightsLevels);
@@ -83,18 +83,27 @@ class ScheduleSubGraphTest_NPU3700 :
 
         const std::vector<float> outLow = {0.0f};
         const std::vector<float> outHigh = {255.0f};
-        const auto result = ngraph::builder::makeFakeQuantize(conv, ov::element::f32, dataLevels, {}, outLow, outHigh,
-                                                              outLow, outHigh);
+        const auto result = ov::test::utils::make_fake_quantize(conv, ov::element::f32, dataLevels, {}, outLow, outHigh,
+                                                                outLow, outHigh);
 
         const ov::ResultVector results{std::make_shared<ov::op::v0::Result>(result)};
         function = std::make_shared<ov::Model>(results, params, "ScheduleSubGraphTest");
         rel_threshold = 0.1f;
     }
+
+public:
+    static std::string getTestCaseName(const testing::TestParamInfo<ScheduleSubGraphTestParams>& obj) {
+        const std::string sep = "_";
+        std::ostringstream result;
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
+        result << "TestIdx=" << obj.index << sep;
+        return result.str();
+    };
 };
 
 TEST_P(ScheduleSubGraphTest_NPU3700, HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3700);
+    run(Platform::NPU3700);
 }
 
 INSTANTIATE_TEST_CASE_P(smoke, ScheduleSubGraphTest_NPU3700,
@@ -104,6 +113,7 @@ INSTANTIATE_TEST_CASE_P(smoke, ScheduleSubGraphTest_NPU3700,
                                 {1, 1},           // strides
                                 {0, 0},           // pads_begin
                                 {0, 0},           // pads_end
-                        }));
+                        }),
+                        ScheduleSubGraphTest_NPU3700::getTestCaseName);
 
 }  // namespace ov::test

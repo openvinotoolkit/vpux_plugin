@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -63,7 +63,7 @@ public:
         return _data;
     }
 
-    int size() const {
+    size_t size() const {
         return ov::shape_size(_shape);
     }
 
@@ -112,9 +112,10 @@ private:
         auto dimsArray = std::array<int, sizeof...(Dims)>{dims...};
         int index = 0;
 
-        for (int i = dimsArray.size() - 1; i >= 0; i--) {
-            VPUX_THROW_UNLESS((dimsArray[i] >= 0 && dimsArray[i] < static_cast<int>(_shape[i])),
-                              "Index {0} with value {1} is out of bounds=[{2}..{3})", i, dimsArray[i], 0, _shape[i]);
+        for (auto i = static_cast<int>(dimsArray.size() - 1); i >= 0; i--) {
+            VPUX_THROW_UNLESS((dimsArray[i] >= 0 && dimsArray[i] < _shape[i]),
+                              "Index {0} with value {1} is out of bounds=[{2}..{3})", i, dimsArray[i], 0,
+                              static_cast<int>(_shape[i]));
             index += dimsArray[i] * _strides[i];
         }
 
@@ -124,5 +125,5 @@ private:
 private:
     ElementType* _data;
     ov::Shape _shape;
-    std::array<size_t, DimSize> _strides;
+    std::array<int, DimSize> _strides;
 };

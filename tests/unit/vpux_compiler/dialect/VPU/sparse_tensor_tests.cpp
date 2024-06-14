@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022 Intel Corporation
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -43,9 +43,10 @@ TEST_F(MLIR_NDTypeInterface, SparseTensorType_Weights) {
     const auto numElemsAttr = mlir::DenseElementsAttr::get(numElemsType, ArrayRef(numElems));
     const int64_t compressionAxis = 0;
     const int64_t alignment = 16;
-    const auto compressionScheme = VPU::CompressionSchemeAttr::get(&ctx, getIntAttr(&ctx, compressionAxis),
-                                                                   numElemsAttr, getIntAttr(&ctx, alignment));
-    const auto sparseTensorType = VPU::SparseTensorType::get(data, sparsityMap, nullptr, isWeights, compressionScheme);
+    const auto sparsityCompression = VPU::SparsityCompressionAttr::get(&ctx, getIntAttr(&ctx, compressionAxis),
+                                                                       numElemsAttr, getIntAttr(&ctx, alignment));
+    const auto sparseTensorType =
+            VPU::SparseTensorType::get(data, sparsityMap, nullptr, isWeights, sparsityCompression);
 
     const auto ndType = sparseTensorType.dyn_cast<vpux::NDTypeInterface>();
     ASSERT_TRUE(ndType != nullptr) << "Type cannot be cast to vpux::NDTypeInterface";
@@ -72,7 +73,7 @@ TEST_F(MLIR_NDTypeInterface, SparseTensorType_Weights) {
 
     int64_t dataByteSize = 0;
     for (auto elems : numElems) {
-        dataByteSize += alignValUp<int64_t>(elems * sizeof(float16), alignment);
+        dataByteSize += alignValUp<int64_t>(elems * sizeof(vpux::type::float16), alignment);
     }
     EXPECT_EQ(ndType.getTotalAllocSize().count(), dataByteSize + 64 * 256 / CHAR_BIT);
     EXPECT_EQ(ndType.getCompactAllocSize().count(), dataByteSize + 64 * 256 / CHAR_BIT);
@@ -146,7 +147,7 @@ TEST_F(MLIR_NDTypeInterface, SparseTensorType_Weights) {
     ASSERT_TRUE(sparseTiledType != nullptr);
     EXPECT_EQ(sparseTiledType.getData().cast<NDTypeInterface>().getShape(), ShapeRef(tileShape));
     EXPECT_EQ(sparseTiledType.getSparsityMap().cast<NDTypeInterface>().getShape(), ShapeRef(smTileShape));
-    auto tiledNumElems = sparseTiledType.getCompressionScheme().getNumElems().getValues<int64_t>();
+    auto tiledNumElems = sparseTiledType.getSparsityCompression().getNumElems().getValues<int64_t>();
     EXPECT_EQ(tiledNumElems.size(), tileShape[compressionAxis]);
 
     const SmallVector<int64_t> tileElemStrides({1, 1, 1, 1});

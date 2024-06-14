@@ -13,6 +13,7 @@ namespace vpux {
 
 // Get sparsify value and update element type to storage type
 int64_t getSparsifyValue(mlir::Type& inputElementType);
+int64_t getValuesPerSparsityBit(mlir::Type& elementType);
 SmallVector<int64_t> countNonSparseElementsPerOC(const Const::Content& content, mlir::Type elementType);
 
 }  // namespace vpux

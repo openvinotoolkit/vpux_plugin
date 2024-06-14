@@ -1,20 +1,18 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022-2023 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
-#include <shared_test_classes/base/layer_test_utils.hpp>
 #include <vpu_ov2_layer_test.hpp>
 #include "common/functions.h"
 
 namespace ov::test::subgraph {
 
-typedef std::tuple<ov::element::Type, ov::element::Type, std::vector<ov::test::InputShape>,
-                   LayerTestsUtils::TargetDevice>
-        SwishTestParams;
-class SwishSingleInputTest_NPU3700 :
+typedef std::tuple<ov::element::Type, ov::element::Type, std::vector<ov::test::InputShape>, ov::test::TargetDevice>
+        SwishLayerTestParams;
+class SwishSingleInputLayerTest_NPU3700 :
         virtual public VpuOv2LayerTest,
-        public testing::WithParamInterface<SwishTestParams> {
+        public testing::WithParamInterface<SwishLayerTestParams> {
     void SetUp() override {
         std::vector<ov::test::InputShape> inputShape;
 
@@ -52,7 +50,7 @@ class SwishSingleInputTest_NPU3700 :
     }
 
 public:
-    static std::string getTestCaseName(::testing::TestParamInfo<SwishTestParams> obj) {
+    static std::string getTestCaseName(::testing::TestParamInfo<SwishLayerTestParams> obj) {
         auto params = obj.param;
 
         ov::element::Type ip, op;
@@ -71,19 +69,19 @@ public:
     }
 };
 
-TEST_P(SwishSingleInputTest_NPU3700, HW) {
+TEST_P(SwishSingleInputLayerTest_NPU3700, HW) {
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3700);
+    run(Platform::NPU3700);
 }
 const std::vector<ov::element::Type> netPrecision = {ov::element::undefined};
 
 const std::vector<std::vector<ov::Shape>> inputShapes{{{1, 3, 32, 32}}, {{1, 3, 200, 200}}};
 
 INSTANTIATE_TEST_CASE_P(
-        smoke_SwishSingleInputTest, SwishSingleInputTest_NPU3700,
+        smoke_SwishSingleInputTest, SwishSingleInputLayerTest_NPU3700,
         ::testing::Combine(::testing::ValuesIn(netPrecision), ::testing::ValuesIn(netPrecision),
                            ::testing::ValuesIn(ov::test::static_shapes_to_test_representation(inputShapes)),
                            ::testing::Values(ov::test::utils::DEVICE_NPU)),
-        SwishSingleInputTest_NPU3700::getTestCaseName);
+        SwishSingleInputLayerTest_NPU3700::getTestCaseName);
 
 }  // namespace ov::test::subgraph

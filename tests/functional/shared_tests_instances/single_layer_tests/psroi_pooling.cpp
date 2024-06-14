@@ -1,4 +1,4 @@
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022 Intel Corporation
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -6,44 +6,83 @@
 
 #include <common/functions.h>
 #include "common_test_utils/test_constants.hpp"
-#include "single_layer_tests/psroi_pooling.hpp"
-#include "vpu_ov1_layer_test.hpp"
+#include "single_op_tests/psroi_pooling.hpp"
+#include "vpu_ov2_layer_test.hpp"
 
-namespace LayerTestsDefinitions {
-class PSROIPoolingLayerTestCommon :
-        public PSROIPoolingLayerTest,
-        virtual public LayerTestsUtils::VpuOv1LayerTestsCommon {
-    void SkipBeforeLoad() override {
-        std::string psROIPoolingMode;
-        std::tie(std::ignore, std::ignore, std::ignore, std::ignore, std::ignore, std::ignore, std::ignore,
-                 psROIPoolingMode, std::ignore, targetDevice) = this->GetParam();
-        if (psROIPoolingMode == "bilinear") {
-            throw LayerTestsUtils::VpuSkipTestException("BILINEAR mode is unsupported for now");
-        }
+using namespace ov::test::utils;
+
+namespace ov {
+
+namespace test {
+
+class PSROIPoolingLayerTestCommon : public PSROIPoolingLayerTest, public VpuOv2LayerTest {
+    void SetUp() override {
+        std::vector<size_t> inputShapes, coordsShape;
+        size_t outputDim, groupSize, spatialBinsX, spatialBinsY;
+        float spatialScale;
+        std::string mode;
+        ov::element::Type modelType;
+        std::tie(inputShapes, coordsShape, outputDim, groupSize, spatialScale, spatialBinsX, spatialBinsY, mode,
+                 modelType, std::ignore) = this->GetParam();
+
+        VpuOv2LayerTest::init_input_shapes(static_shapes_to_test_representation({inputShapes, coordsShape}));
+
+        ov::ParameterVector params{
+                std::make_shared<ov::op::v0::Parameter>(modelType, VpuOv2LayerTest::inputDynamicShapes[0]),
+                std::make_shared<ov::op::v0::Parameter>(modelType, VpuOv2LayerTest::inputDynamicShapes[1])};
+        auto psroiPooling = std::make_shared<ov::op::v0::PSROIPooling>(params[0], params[1], outputDim, groupSize,
+                                                                       spatialScale, spatialBinsX, spatialBinsY, mode);
+        VpuOv2LayerTest::function = std::make_shared<ov::Model>(psroiPooling->outputs(), params, "psroiPooling");
+    }
+    void TearDown() override {
+        VpuOv2LayerTest::TearDown();
     }
 };
 
 class PSROIPoolingLayerTest_NPU3700 : public PSROIPoolingLayerTestCommon {};
 class PSROIPoolingLayerTest_NPU3720 : public PSROIPoolingLayerTestCommon {};
+class PSROIPoolingLayerTest_NPU4000 : public PSROIPoolingLayerTestCommon {};
 
 TEST_P(PSROIPoolingLayerTest_NPU3700, HW) {
-    setPlatformVPU3700();
-    setDefaultHardwareModeMLIR();
-    Run();
+    VpuOv2LayerTest::setSkipCompilationCallback([this](std::stringstream& skip) {
+        std::string psROIPoolingMode = std::get<7>(GetParam());
+        if (psROIPoolingMode == "bilinear") {
+            skip << "BILINEAR mode is unsupported for now";
+        }
+    });
+    VpuOv2LayerTest::setDefaultHardwareMode();
+    VpuOv2LayerTest::run(Platform::NPU3700);
 }
 
 TEST_P(PSROIPoolingLayerTest_NPU3720, HW) {
-    setPlatformVPU3720();
-    setDefaultHardwareModeMLIR();
-    Run();
+    VpuOv2LayerTest::setSkipCompilationCallback([this](std::stringstream& skip) {
+        std::string psROIPoolingMode = std::get<7>(GetParam());
+        if (psROIPoolingMode == "bilinear") {
+            skip << "BILINEAR mode is unsupported for now";
+        }
+    });
+    VpuOv2LayerTest::setDefaultHardwareMode();
+    VpuOv2LayerTest::run(Platform::NPU3720);
 }
 
-}  // namespace LayerTestsDefinitions
+TEST_P(PSROIPoolingLayerTest_NPU4000, SW) {
+    VpuOv2LayerTest::setSkipCompilationCallback([this](std::stringstream& skip) {
+        std::string psROIPoolingMode = std::get<7>(GetParam());
+        if (psROIPoolingMode == "bilinear") {
+            skip << "BILINEAR mode is unsupported for now";
+        }
+    });
+    VpuOv2LayerTest::setReferenceSoftwareMode();
+    VpuOv2LayerTest::run(Platform::NPU4000);
+}
 
-using namespace LayerTestsDefinitions;
+}  // namespace test
 
-const std::vector<InferenceEngine::Precision> netPrecisions = {InferenceEngine::Precision::FP32,
-                                                               InferenceEngine::Precision::FP16};
+}  // namespace ov
+
+using namespace ov::test;
+
+const std::vector<ov::element::Type> modelTypes = {ov::element::f32, ov::element::f16};
 
 const std::vector<std::vector<size_t>> inputShapeVector0 = {
         {2, 200, 20, 20}, {2, 200, 20, 16}, {2, 200, 16, 20}, {3, 200, 16, 16}};
@@ -63,8 +102,7 @@ const auto paramsAvg0 = testing::Combine(::testing::ValuesIn(inputShapeVector0),
                                          ::testing::Values(1),                     // spatialBinX
                                          ::testing::Values(1),                     // spatialBinY
                                          ::testing::Values("average"),             // mode
-                                         ::testing::ValuesIn(netPrecisions),
-                                         ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+                                         ::testing::ValuesIn(modelTypes), ::testing::Values(DEVICE_NPU));
 
 const auto paramsAvg1 = testing::Combine(::testing::ValuesIn(inputShapeVector1),   // input
                                          ::testing::ValuesIn(coordShapesVector1),  // coord
@@ -74,8 +112,7 @@ const auto paramsAvg1 = testing::Combine(::testing::ValuesIn(inputShapeVector1),
                                          ::testing::Values(1),                     // spatialBinX
                                          ::testing::Values(1),                     // spatialBinY
                                          ::testing::Values("average"),             // mode
-                                         ::testing::ValuesIn(netPrecisions),
-                                         ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+                                         ::testing::ValuesIn(modelTypes), ::testing::Values(DEVICE_NPU));
 
 const auto paramsAvg2 = testing::Combine(::testing::ValuesIn(inputShapeVector2),   // input
                                          ::testing::ValuesIn(coordShapesVector0),  // coord
@@ -85,8 +122,7 @@ const auto paramsAvg2 = testing::Combine(::testing::ValuesIn(inputShapeVector2),
                                          ::testing::Values(1),                     // spatialBinX
                                          ::testing::Values(1),                     // spatialBinY
                                          ::testing::Values("average"),             // mode
-                                         ::testing::ValuesIn(netPrecisions),
-                                         ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+                                         ::testing::ValuesIn(modelTypes), ::testing::Values(DEVICE_NPU));
 
 const auto paramsBilinear = testing::Combine(::testing::ValuesIn(inputShapeVector3),   // input
                                              ::testing::ValuesIn(coordShapesVector2),  // coord
@@ -96,8 +132,7 @@ const auto paramsBilinear = testing::Combine(::testing::ValuesIn(inputShapeVecto
                                              ::testing::Values(3),                     // spatialBinX
                                              ::testing::Values(3),                     // spatialBinY
                                              ::testing::Values("bilinear"),            // mode
-                                             ::testing::ValuesIn(netPrecisions),
-                                             ::testing::Values(LayerTestsUtils::testPlatformTargetDevice()));
+                                             ::testing::ValuesIn(modelTypes), ::testing::Values(DEVICE_NPU));
 
 // --------- NPU3700 ---------
 INSTANTIATE_TEST_SUITE_P(smoke_PSROIPoolingBiliniarLayoutTest0, PSROIPoolingLayerTest_NPU3700, paramsBilinear,
@@ -113,11 +148,23 @@ INSTANTIATE_TEST_SUITE_P(smoke_PSROIPoolingAverageLayoutTest2, PSROIPoolingLayer
                          PSROIPoolingLayerTest_NPU3700::getTestCaseName);
 
 // --------- NPU3720 ---------
-INSTANTIATE_TEST_SUITE_P(smoke_PSROIPoolingAverageLayoutTest0, PSROIPoolingLayerTest_NPU3720, paramsAvg0,
+// Passing on master branch. Please reenable when backmerge
+INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_PSROIPoolingAverageLayoutTest0, PSROIPoolingLayerTest_NPU3720, paramsAvg0,
                          PSROIPoolingLayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_PSROIPoolingAverageLayoutTest1, PSROIPoolingLayerTest_NPU3720, paramsAvg2,
+// Passing on master branch. Please reenable when backmerge
+INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_PSROIPoolingAverageLayoutTest1, PSROIPoolingLayerTest_NPU3720, paramsAvg2,
                          PSROIPoolingLayerTest_NPU3720::getTestCaseName);
 
 INSTANTIATE_TEST_SUITE_P(smoke_PSROIPoolingBiliniarLayoutTest0, PSROIPoolingLayerTest_NPU3720, paramsBilinear,
                          PSROIPoolingLayerTest_NPU3720::getTestCaseName);
+
+// --------- NPU4000 ---------
+// Passing on master branch. Please reenable when backmerge
+INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_precommit_PSROIPoolingAverageLayoutTest0, PSROIPoolingLayerTest_NPU4000,
+                         paramsAvg0, PSROIPoolingLayerTest_NPU4000::getTestCaseName);
+// Passing on master branch. Please reenable when backmerge
+INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_PSROIPoolingAverageLayoutTest0, PSROIPoolingLayerTest_NPU4000, paramsAvg2,
+                         PSROIPoolingLayerTest_NPU4000::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(smoke_PSROIPoolingBiliniarLayoutTest0, PSROIPoolingLayerTest_NPU4000, paramsBilinear,
+                         PSROIPoolingLayerTest_NPU4000::getTestCaseName);

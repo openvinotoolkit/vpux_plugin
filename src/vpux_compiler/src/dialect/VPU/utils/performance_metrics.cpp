@@ -4,29 +4,30 @@
 //
 
 #include "vpux/compiler/dialect/VPU/utils/performance_metrics.hpp"
+#include "vpux/utils/profiling/parser/parser.hpp"
 
 namespace vpux {
 namespace VPU {
 
-// Base of frequency values used in tables (in MHz).
-static constexpr uint32_t FREQ_BASE = 700;
-// Step of frequency for each entry in tables (in MHz).
-static constexpr uint32_t FREQ_STEP = 150;
+// Base of frequency values used in tables (in MHz)
+static constexpr uint32_t FREQ_BASE_37XX_VALUE_MHZ = 700;
+static constexpr uint32_t FREQ_BASE_40XX_VALUE_MHZ = 900;
+// Step of frequency for each entry in tables (in MHz)
+static constexpr uint32_t FREQ_STEP_37XX_VALUE_MHZ = 150;
+static constexpr uint32_t FREQ_STEP_40XX_VALUE_MHZ = 200;
+
 // Base of bandwidth values used in tables (in MB/s).
 static constexpr uint32_t BW_BASE = 2000;
 // Step of bandwidth values used in tables (in MB/s).
 static constexpr uint32_t BW_STEP = 100;
 // Num entries in table, each entry contains set of values for particular frequency
 static constexpr uint32_t NUM_ENTRIES = 5;
-// Profiling timer block fixed frequency by MHz
-// TODO: it should be provided by vpunn API per arch
-static constexpr double PROF_CLK = 38.4;
 
-uint32_t getFreqBase() {
-    return FREQ_BASE;
+uint32_t getFreqBase(VPU::ArchKind arch) {
+    return arch == VPU::ArchKind::NPU40XX ? FREQ_BASE_40XX_VALUE_MHZ : FREQ_BASE_37XX_VALUE_MHZ;
 }
-uint32_t getFreqStep() {
-    return FREQ_STEP;
+uint32_t getFreqStep(VPU::ArchKind arch) {
+    return arch == VPU::ArchKind::NPU40XX ? FREQ_STEP_40XX_VALUE_MHZ : FREQ_STEP_37XX_VALUE_MHZ;
 }
 
 uint32_t getBWBase() {
@@ -37,10 +38,6 @@ uint32_t getBWStep() {
 }
 uint32_t getNumEntries() {
     return NUM_ENTRIES;
-}
-
-double getProfClk() {
-    return PROF_CLK;
 }
 
 const SmallVector<float>& getBWScales() {
@@ -69,13 +66,17 @@ SmallVector<SmallVector<uint64_t>> getBWTicks(mlir::ModuleOp module) {
     }
 
     // Get corresponding dpu freq (MHz) from vpunn to parse inferenceTimebyDPUCycle
-    size_t dpuBaseFreq = VPU::getDpuFrequency(VPU::getArch(module));
+    const auto arch = VPU::getArch(module);
+    size_t dpuBaseFreq = VPU::getDpuFrequency(arch);
     // Convert inference ticks by getProfClk
-    size_t baseTicks =
-            static_cast<double>(inferenceTimebyDPUCycle) / static_cast<double>(dpuBaseFreq) * VPU::getProfClk();
+    auto profClk = arch == VPU::ArchKind::NPU40XX ? vpux::profiling::ProfClk40XX::PROF_CLK_DEFAULT_VALUE_MHZ
+                                                  : vpux::profiling::ProfClk37XX::PROF_CLK_DEFAULT_VALUE_MHZ;
+    auto freqBase = VPU::getFreqBase(arch);
+    auto freqStep = VPU::getFreqStep(arch);
+    size_t baseTicks = static_cast<double>(inferenceTimebyDPUCycle) / static_cast<double>(dpuBaseFreq) * profClk;
     for (uint32_t i = 0; i < VPU::getNumEntries(); ++i) {
         // Scale baseTicks by different dpu freq
-        auto dpuFreq = VPU::getFreqBase() + i * VPU::getFreqStep();
+        auto dpuFreq = freqBase + i * freqStep;
         auto ticksByDPUFreq = baseTicks * dpuBaseFreq / dpuFreq;
         // Scale ticks by dma bandwidth
         // Currently ignore bandwidth scaling, put same ticks for all bw steps
@@ -94,7 +95,8 @@ double getActivityFactor(VPU::ExecutorKind execKind, mlir::ModuleOp module, IERT
     if (execKind == VPU::ExecutorKind::NCE || execKind == VPU::ExecutorKind::SHAVE_UPA ||
         execKind == VPU::ExecutorKind::SHAVE_NN) {
         switch (arch) {
-        case VPU::ArchKind::VPUX37XX:
+        case VPU::ArchKind::NPU37XX:
+        case VPU::ArchKind::NPU40XX:
             // Here we must get AF from NCE res (a TileResourceOp) as the AF attribute is attached to tile op
             if (execKind == VPU::ExecutorKind::NCE) {
                 auto NCERes = mlir::cast<IE::TileResourceOp>(res.getOperation());
@@ -121,7 +123,7 @@ double getActivityFactor(VPU::ExecutorKind execKind, mlir::ModuleOp module, IERT
                                                activityFactor);
             }
             return activityFactor;
-        case VPU::ArchKind::VPUX30XX:
+        case VPU::ArchKind::NPU30XX:
         default:
             return activityFactor;
         }

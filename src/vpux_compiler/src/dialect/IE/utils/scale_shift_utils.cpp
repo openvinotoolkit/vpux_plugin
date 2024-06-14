@@ -24,7 +24,7 @@ mlir::LogicalResult isBeneficialConvertScaleShiftToDW(IE::ScaleShiftOp scaleShif
     auto onlySupportNHWCLayout = [&](mlir::Operation* op) -> bool {
         if (auto iface = mlir::dyn_cast_or_null<IE::LayoutInfoOpInterface>(op)) {
             auto orderInfo = iface.getLayoutInfo();
-            iface.inferLayoutInfo(orderInfo, /*seOpsEnabled=*/false, /*seTransposedConvEnabled=*/false);
+            iface.inferLayoutInfo(orderInfo, /*seOpsEnabled=*/false, /*seExperimentalOpsEnabled=*/false);
             return orderInfo.hasChanges();
         }
         return false;

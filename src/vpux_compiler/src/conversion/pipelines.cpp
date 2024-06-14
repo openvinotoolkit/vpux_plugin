@@ -21,7 +21,7 @@ void vpux::buildLowerIE2IERTPipeline(mlir::OpPassManager& pm, Logger log) {
     const auto grc = getDefaultGreedyRewriteConfig();
 
     pm.addPass(createBufferizeIEPass(log));
-    pm.addPass(createBufferizeFuncAndReturnPass(log));
+    pm.addPass(createOneShotBufferizeVPU2VPUIPPass());
     pm.addPass(createAddBuffersForNetResults(log));
     pm.addPass(mlir::createCanonicalizerPass(grc));
 }

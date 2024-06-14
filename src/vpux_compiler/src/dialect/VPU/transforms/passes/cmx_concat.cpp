@@ -1,6 +1,6 @@
 //
-// Copyright (C) 2022 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
@@ -853,6 +853,15 @@ mlir::FailureOr<InputConcatPattern> CMXConcatPass::getInputPattern(VPU::ConcatOp
             if (parentNCEClusterTilingOp) {
                 if (auto innerOp = parentNCEClusterTilingOp.getInnerTaskOpOfType<VPU::NCEOpInterface>()) {
                     parentNCEOp = innerOp;
+                    // ViewOp is inserted between NCEPermuteOp and ClusterTiling copy(CMX2CMX) when bufferizing for
+                    // NCEPermuteOp.
+                    // The ViewOp would block removing this CMX2CMX ClusterTiling copy and lead to unrolling error
+                    // because the input and ouput are both distributed.
+                    // So skip CMXConcat for NCEPermuteOp, see E#118060 for details.
+                    if (mlir::isa<VPU::NCEPermuteOp>(parentNCEOp)) {
+                        logNest.trace("Skip CMXConcat for NCEPermuteOp");
+                        return mlir::failure();
+                    }
                 }
             }
         }

@@ -35,6 +35,7 @@ void ReservedMemInfo::init(mlir::func::FuncOp netFunc, AllocationInfo& allocatio
 
     auto scanResult = allocationInfo.getScanResult(VPU::MemoryKind::DDR);
     auto& allReservedMemInfo = scanResult.linearScanHandler;
+    auto& moduleReservedMemVec = scanResult.moduleReservedMemVec;
 
     auto updateReservedMemInfo = [&](StringRef calleeName, const ValueOrderedSet& buffers) {
         for (const auto& buffer : buffers) {
@@ -50,6 +51,12 @@ void ReservedMemInfo::init(mlir::func::FuncOp netFunc, AllocationInfo& allocatio
         VPUX_THROW_UNLESS(parentExecOp != nullptr, "func::CallOp must have async::ExecuteOp parent");
 
         auto calleeName = callOp.getCallee();
+
+        // Add also reserved ranges on module level. Those reserved resource might be related
+        // to handling of additional special features (e.g. DMA HW profiling)
+        _allReservedMemInfo[calleeName][VPU::MemoryKind::DDR].insert(
+                _allReservedMemInfo[calleeName][VPU::MemoryKind::DDR].end(), moduleReservedMemVec.begin(),
+                moduleReservedMemVec.end());
 
         updateReservedMemInfo(calleeName, liveRangeInfo.getInputBuffers(parentExecOp));
         updateReservedMemInfo(calleeName, liveRangeInfo.getOutputBuffers(parentExecOp));

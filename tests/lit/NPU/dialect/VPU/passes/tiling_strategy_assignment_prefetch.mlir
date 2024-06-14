@@ -1,10 +1,11 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% allow-custom-values=true"  --tiling-strategy-assignment %s | FileCheck %s
 // REQUIRES: arch-VPUX30XX
+// TODO: #-81889 restore arch-VPUX37XX and arch-VPUX40XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
@@ -40,9 +41,9 @@ func.func @MultiAxesAndPerAxisQuant(
 
     // CHECK:       [[MAXPOOL:%.+]] = VPU.NCE.MaxPool(%arg0, [[WEIGHTS_TABLE]] , [[ACTIVATION_WINDOW]] ) {
     // CHECK-SAME:           activation_window_channel_length = 54 : i64,
-    // CHECK-SAME:           kernel_size = [3, 3], 
-    // CHECK-SAME:           pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>, 
-    // CHECK-SAME:           strides = [1, 1], 
+    // CHECK-SAME:           kernel_size = [3, 3],
+    // CHECK-SAME:           pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
+    // CHECK-SAME:           strides = [1, 1],
     // CHECK-SAME:           tilingStrategy = [1, 1, 8, 1]}
     // CHECK-SAME:      -> tensor<1x32x8x8x!qElemType, {order = #NHWC}>
 

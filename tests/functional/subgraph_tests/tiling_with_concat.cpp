@@ -1,12 +1,8 @@
-// Copyright (C) Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
 //
 
 #include "vpu_ov2_layer_test.hpp"
-
-#include <ov_models/builders.hpp>
-#include <ov_models/utils/ov_helpers.hpp>
-#include <shared_test_classes/base/layer_test_utils.hpp>
 
 using namespace ov::test;
 using namespace ov::test::utils;
@@ -32,21 +28,6 @@ std::shared_ptr<ov::Node> buildConvolution(const ov::Output<ov::Node>& param, co
 }
 
 class TilingWithConcatTest_NPU3720 : public VpuOv2LayerTest, public testing::WithParamInterface<ov::Shape> {
-    ov::Shape transposeShape(const ov::Shape& inputShape, const ov::Layout& order) const {
-        ov::Shape transposedShape = inputShape;
-        std::string neutralDims = "NCHW";
-        std::vector<int64_t> indices;
-        const auto dimToIdx = [&order](const char dim) -> int64_t {
-            const std::string dimStr(1, dim);
-            return order.get_index_by_name(dimStr);
-        };
-        std::transform(neutralDims.cbegin(), neutralDims.cend(), std::back_inserter(indices), dimToIdx);
-        for (size_t srcIdx = 0; srcIdx < inputShape.size(); srcIdx++) {
-            const auto dstIdx = indices.at(srcIdx);
-            transposedShape.at(dstIdx) = inputShape.at(srcIdx);
-        }
-        return transposedShape;
-    }
     void SetUp() override {
         const ov::Shape origInputShape = GetParam();
         inType = outType = ov::element::f16;
@@ -87,19 +68,29 @@ class TilingWithConcatTest_NPU3720 : public VpuOv2LayerTest, public testing::Wit
 
         rel_threshold = 0.5f;
     }
+
+public:
+    static std::string getTestCaseName(const testing::TestParamInfo<ov::Shape>& obj) {
+        const std::string sep = "_";
+        std::ostringstream result;
+        result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
+        result << "TestIdx=" << obj.index << sep;
+        return result.str();
+    };
 };
 
 TEST_P(TilingWithConcatTest_NPU3720, HW) {
+    abs_threshold = 0.02;
     setDefaultHardwareMode();
-    run(VPUXPlatform::VPU3720);
+    run(Platform::NPU3720);
 }
 
 const std::vector<ov::Shape> inputShapes = {
         {1, 16, 175, 175},
-        // This case is working in OV1 but in OV2 has threshold error
-        // {1, 3, 250, 250},
+        {1, 3, 250, 250},
 };
 
-INSTANTIATE_TEST_SUITE_P(smoke_tiling_with_concat, TilingWithConcatTest_NPU3720, ::testing::ValuesIn(inputShapes));
+INSTANTIATE_TEST_SUITE_P(smoke_tiling_with_concat, TilingWithConcatTest_NPU3720, ::testing::ValuesIn(inputShapes),
+                         TilingWithConcatTest_NPU3720::getTestCaseName);
 
 }  // namespace

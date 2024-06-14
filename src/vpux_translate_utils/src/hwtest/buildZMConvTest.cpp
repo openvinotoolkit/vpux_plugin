@@ -10,11 +10,11 @@
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
-#include "vpux/compiler/dialect/VPUIP/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/passes.hpp"
-#include "vpux/compiler/dialect/VPUIP/utils.hpp"
-#include "vpux/compiler/dialect/VPURT/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/task.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/transforms/passes.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/dialect/const/passes.hpp"
 #include "vpux/compiler/utils/quantization.hpp"
@@ -37,6 +37,9 @@ vpux::VPU::PPEMode getPPEMode(nb::ActivationType activationType) {
         break;
     case nb::ActivationType::ReLUX:
         return vpux::VPU::PPEMode::LRELUX;
+        break;
+    case nb::ActivationType::Rsqrt:
+        return vpux::VPU::PPEMode::RSQRT;
         break;
     default:
         VPUX_THROW("Encountered unsupported activation type '{0}'", nb::to_string(activationType));
@@ -65,6 +68,7 @@ void buildSimpleZMajorConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mod
 
     const auto weightsSwizzlingKey = testDesc.getWeightsSwizzlingKey();
     const auto architecture = testDesc.getArchitecture();
+    const auto ppeConfiguration = testDesc.getActivationLayer();
 
     const llvm::SmallVector<std::int64_t> inputShape(input.shape.begin(), input.shape.end());
     const llvm::SmallVector<std::int64_t> outputShape(output.shape.begin(), output.shape.end());
@@ -146,9 +150,14 @@ void buildSimpleZMajorConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mod
 
     mlir::IntegerAttr swizzlingKeyAttr;
     vpux::VPUIP::SwizzlingSchemeAttr swizzlingSchemeAttr;
+    if (isWeightsSwizzlingRequired) {
+        swizzlingKeyAttr = getIntAttr(ctx, nb::to_underlying(weightsSwizzlingKey));
+        swizzlingSchemeAttr = createSwizzlingSchemeAttr(ctx, architecture, swizzlingKeyAttr.getInt());
+    }
     const auto swizzlingAligment =
-            (isWeightsSwizzlingRequired) ? vpux::getAddressAlignmentForSwizzling(nb::to_underlying(weightsSwizzlingKey))
-                                         : 16;
+            (isWeightsSwizzlingRequired)
+                    ? vpux::getAddressAlignmentForSwizzling(nb::to_underlying(weightsSwizzlingKey), architecture)
+                    : 16;
 
     const auto weightsCMXSize =
             vpux::alignValUp(vpux::hwtest::totalTensorSize(paddedWeightsCMXShape, weightsType),
@@ -157,6 +166,8 @@ void buildSimpleZMajorConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mod
     const auto inputCMXSize =
             vpux::alignValUp(vpux::hwtest::totalTensorSize(inputCMXShape, inputType),
                              static_cast<std::uint64_t>(vpux::getSizeAlignmentForSwizzling(architecture)));
+    const auto wtableCMXSize = vpux::hwtest::totalTensorSize(weightsTableShape, int32);
+
     const auto alignment =
             (alignmentRequirement * static_cast<vpux::Bit>(getElemTypeSize(inputType)).count()) / CHAR_BIT;
     const auto WEIGHTS_CMX_OFFSET = 0;
@@ -237,9 +248,6 @@ void buildSimpleZMajorConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mod
 
     vpux::VPURT::DeclareBufferOp weightsCMX;
     if (isWeightsSwizzlingRequired) {
-        swizzlingKeyAttr = getIntAttr(ctx, nb::to_underlying(weightsSwizzlingKey));
-        swizzlingSchemeAttr = createSwizzlingSchemeAttr(ctx, architecture, swizzlingKeyAttr.getInt());
-
         weightsAttribute = weightsAttribute.swizzleConstant(nb::to_underlying(weightsSwizzlingKey),
                                                             static_cast<uint64_t>(architecture));
         weightsCMX = createDeclareTensorOp(functionBuilder, VPURT::BufferSection::CMX_NN, weightsCMXShape, weightsType,
@@ -326,6 +334,46 @@ void buildSimpleZMajorConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mod
 
     auto barrier0 = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 0);
     auto barrier1 = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 1);
+    // finalBarrier passed as production barrier to last DMA task
+    auto barrier2 = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 2);
+
+    mlir::Value rsqrtLUTBuffer = nullptr;
+    if (ppeConfiguration.activationType == nb::ActivationType::Rsqrt) {
+        const auto RSQRT_LUT_TABLE_CMX_OFFSET =
+                vpux::alignValUp(WEIGHTSTABLE_CMX_OFFSET + wtableCMXSize, static_cast<std::uint64_t>(alignment));
+        VPUX_THROW_UNLESS(RSQRT_LUT_TABLE_CMX_OFFSET % alignment == 0,
+                          "RSQRT_LUT_TABLE_CMX_OFFSET must be multiple of {0}, got {1}", alignment,
+                          RSQRT_LUT_TABLE_CMX_OFFSET);
+
+        const llvm::SmallVector<std::int64_t> rsqrtLUTShape{1, 1, 10, 16};
+        const auto rsqrtLUTElementType = mlir::IntegerType::get(ctx, 16, mlir::IntegerType::Unsigned);
+
+        auto rsqrtLUTContent = computeRsqrtLookupTable();
+
+        auto rsqrtLUTValues =
+                mlir::DenseElementsAttr::get(mlir::RankedTensorType::get(rsqrtLUTShape, rsqrtLUTElementType),
+                                             llvm::ArrayRef<uint16_t>(rsqrtLUTContent));
+
+        auto rsqrtLUTDDRType =
+                getMemRefType(VPURT::BufferSection::Constant, rsqrtLUTShape, rsqrtLUTElementType, DimsOrder::NCHW);
+        auto rsqrtLUTStrides = rsqrtLUTDDRType.cast<vpux::NDTypeInterface>().getStrides();
+
+        auto rsqrtLUTConstAttr = vpux::Const::ContentAttr::get(rsqrtLUTValues);
+        rsqrtLUTConstAttr = rsqrtLUTConstAttr.reorder(vpux::DimsOrder::NCHW);
+
+        auto rsqrtLUTDDR = functionBuilder.create<vpux::Const::DeclareOp>(builder.getUnknownLoc(), rsqrtLUTDDRType,
+                                                                          rsqrtLUTConstAttr);
+
+        auto rsqrtLUTCMX =
+                createDeclareTensorOp(functionBuilder, VPURT::BufferSection::CMX_NN, rsqrtLUTShape, rsqrtLUTElementType,
+                                      DimsOrder::NCHW, rsqrtLUTStrides, 0, RSQRT_LUT_TABLE_CMX_OFFSET);
+
+        VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(
+                functionBuilder, mlir::ValueRange(), mlir::ValueRange(barrier0.getBarrier()), builder.getUnknownLoc(),
+                rsqrtLUTDDR.getOperation()->getResult(0), rsqrtLUTCMX.getOperation()->getResult(0), 0);
+
+        rsqrtLUTBuffer = rsqrtLUTCMX.getBuffer();
+    }
 
     VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(), mlir::ValueRange(barrier0.getBarrier()),
                                           builder.getUnknownLoc(), functionInput, inputCMX.getOperation()->getResult(0),
@@ -336,9 +384,9 @@ void buildSimpleZMajorConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mod
     VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(), mlir::ValueRange(barrier0.getBarrier()),
                                           builder.getUnknownLoc(), weightsTableDDR.getOperation()->getResult(0),
                                           weightsTableCMX.getOperation()->getResult(0), 0);
-    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(barrier1.getBarrier()), mlir::ValueRange(),
-                                          builder.getUnknownLoc(), outputCMX.getOperation()->getResult(0),
-                                          functionOutput, 0);
+    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(barrier1.getBarrier()),
+                                          mlir::ValueRange(barrier2.getBarrier()), builder.getUnknownLoc(),
+                                          outputCMX.getOperation()->getResult(0), functionOutput, 0);
 
     const auto strides = getIntArrayAttr(ctx, conv.stride);
     std::vector<std::int64_t> paddings = convertNBPadtoNCETaskPad(conv.pad);
@@ -352,7 +400,7 @@ void buildSimpleZMajorConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mod
     auto nceTask = VPURT::wrapIntoTaskOp<VPUIP::NCEClusterTaskOp>(
             functionBuilder, barrier0.getBarrier(), barrier1.getBarrier(), builder.getUnknownLoc(),
             paddedInputCMX.getBuffer(), paddedWeightsCMX.getBuffer(), weightsTableCMX.getBuffer(),
-            /*instruction_table_list*/ nullptr,
+            /*instruction_table_list*/ nullptr, /*spr_lookup_table=*/rsqrtLUTBuffer,
             /*activation_window=*/nullptr, paddedInputCMX.getBuffer(), outputCMX.getBuffer(), outputCMX.getBuffer(),
             vpux::VPUIP::NCETaskType::CONV, kernelSize, strides, kernelPaddings, nullptr, nullptr,
             vpux::getIntAttr(builder.getContext(), sparsityPattern), nullptr, nullptr, inputChannelsCompression);
@@ -370,24 +418,22 @@ void buildSimpleZMajorConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mod
 
     nceTask.addDPUTask(functionBuilder, start, outEnd, start, inEnd, pad, conv.cube_mode);
 
-    const auto ppeConfiguration = testDesc.getActivationLayer();
-
     int64_t clampLow = std::numeric_limits<int32_t>::min();
     int64_t clampHigh = std::numeric_limits<int32_t>::max();
     const int64_t lreluMult = 1;
     const int64_t lreluShift = 0;
+    auto outputScale = 1.0 / output.qp.scale.front();
+    const auto scaleApproximation = QuantizationApproximation(testDesc.getArchitecture(), outputScale);
     if (const auto outElemQType = outputType.template dyn_cast<mlir::quant::QuantizedType>()) {
         clampLow = outElemQType.getStorageTypeMin();
         clampHigh = outElemQType.getStorageTypeMax();
     }
 
-    auto outputScale = 1.0 / output.qp.scale.front();
     if (ppeConfiguration.activationType != nb::ActivationType::None) {
         if (ppeConfiguration.maximum != 0) {
-            clampHigh = ppeConfiguration.maximum;
+            clampHigh = static_cast<int64_t>(ppeConfiguration.maximum);
         }
 
-        const auto scaleApproximation = QuantizationApproximation(testDesc.getArchitecture(), outputScale);
         const auto preluScale = ppeConfiguration.alpha;
         const auto alphaApproximation = PReLUApproximation(testDesc.getArchitecture(), preluScale);
         nceTask.addPPETask(functionBuilder, getPPEMode(ppeConfiguration.activationType), clampLow, clampHigh,
@@ -395,24 +441,57 @@ void buildSimpleZMajorConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mod
                            scaleApproximation.shift(), /*quant_post_shift=*/0, /*quant_scale=*/1,
                            /*in1_quant_mult=*/0, /*in2_quant_mult=*/0, ppeConfiguration.alpha);
     } else {
-        const auto scaleApproximation = QuantizationApproximation(testDesc.getArchitecture(), outputScale);
-        nceTask.addPPETask(functionBuilder, VPU::PPEMode::NOOP, clampLow, clampHigh, lreluMult, lreluShift,
-                           scaleApproximation.mult(), scaleApproximation.shift(), scaleApproximation.postShift(),
-                           outputScale);
+        if (const auto outElemQType = outputType.template dyn_cast<mlir::quant::QuantizedType>()) {
+            SmallVector<double> quantMults;
+            SmallVector<double> quantShifts;
+            const auto scalesAndZps = extractScalesAndZeroPoints(outElemQType);
+            const auto scales = scalesAndZps.first;
+            const auto zps = scalesAndZps.second;
+
+            quantMults.resize(scales.size());
+            quantShifts.resize(scales.size());
+            for (std::size_t i = 0; i < scales.size(); ++i) {
+                const auto quantScaleApproximation = QuantizationApproximation(testDesc.getArchitecture(), scales[i]);
+                quantMults[i] = quantScaleApproximation.mult();
+                quantShifts[i] = quantScaleApproximation.shift();
+            }
+
+            nceTask.addPPETask(functionBuilder, VPU::PPEModeAttr::get(ctx, VPU::PPEMode::NOOP),
+                               getIntAttr(ctx, clampLow), getIntAttr(ctx, clampHigh), getIntAttr(ctx, lreluMult),
+                               getIntAttr(ctx, lreluShift), getIntArrayAttr(ctx, quantMults),
+                               getIntArrayAttr(ctx, quantShifts), getIntAttr(ctx, scaleApproximation.postShift()),
+                               getFPArrayAttr(ctx, ArrayRef<double>{outputScale}), /*in1_quant_mult=*/nullptr,
+                               /*in2_quant_mult=*/nullptr, /*fp_prelu_alpha*/ nullptr, /*ppe_fp_scale*/ nullptr,
+                               /*ppe_fp_bias*/ nullptr);
+        } else {
+            nceTask.addPPETask(functionBuilder, VPU::PPEMode::NOOP, clampLow, clampHigh, lreluMult, lreluShift,
+                               scaleApproximation.mult(), scaleApproximation.shift(), scaleApproximation.postShift(),
+                               outputScale);
+        }
     }
 
     functionBuilder.create<mlir::func::ReturnOp>(builder.getUnknownLoc(), functionOutput);
 
     module.dump();
 
+    // set runtime resources
+    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
+
     mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    pm.addPass(VPU::createInitCompilerPass(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW, 1, std::nullopt,
-                                           log));
+    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.numberOfDPUGroups = 1;
+    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
+
+    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
     if (conv.compress) {
         pm.addPass(VPUIP::createCompressWeightsBTCPass(log));
     }
     if (isWeightsSwizzlingRequired) {
-        pm.addPass(Const::createConstantFoldingPass());
+        mlir::OpPassManager::Nesting nesting = pm.getNesting();
+        pm.setNesting(mlir::OpPassManager::Nesting::Explicit);
+        mlir::OpPassManager& constPm = pm.nest<mlir::func::FuncOp>().nest<Const::DeclareOp>();
+        constPm.addPass(Const::createConstantFoldingPass());
+        pm.setNesting(nesting);
     }
 
     VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");

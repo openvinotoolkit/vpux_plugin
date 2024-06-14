@@ -5,12 +5,12 @@
 
 #pragma once
 
-#include "vpux/compiler/dialect/IE/ops.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 
 namespace vpux {
 namespace IE {
 
-mlir::LogicalResult canConvertGroupConvToConv(IE::GroupConvolutionOp groupconv);
+mlir::LogicalResult canConvertGroupConvToConv(IE::GroupConvolutionOp groupconv, bool isAttrCheckEnabled = true);
 bool groupConvIsEltwise(IE::GroupConvolutionOp convOp);
 
 //

@@ -1,6 +1,6 @@
 //
-// Copyright (C) 2022 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2022 Intel Corporation
+// SPDX-License-Identifier: Apache 2.0.
 //
 
 #include "vpux/utils/plugin/device_info.hpp"
@@ -28,6 +28,7 @@ constexpr StringLiteral EMPTY_SOC_REV = "XX";
 const DeviceInfo vpux::DeviceInfo::VPUX30XX("30XX", 0);
 const DeviceInfo vpux::DeviceInfo::VPUX31XX("31XX", 0);
 const DeviceInfo vpux::DeviceInfo::VPUX37XX("37XX", 0);
+const DeviceInfo vpux::DeviceInfo::VPUX40XX("40XX", 0);
 
 vpux::DeviceInfo::DeviceInfo(StringRef codeStr, int) {
     std::fill_n(_code.data(), _code.size(), ANY_SYM);

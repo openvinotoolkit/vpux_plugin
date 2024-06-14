@@ -32,8 +32,8 @@ void VPU::SparseTensorType::print(mlir::AsmPrinter& printer) const {
     if (getIsWeights() != nullptr) {
         printer << ", is_weights";
     }
-    if (getCompressionScheme() != nullptr) {
-        printer << ", " << getCompressionScheme();
+    if (getSparsityCompression() != nullptr) {
+        printer << ", " << getSparsityCompression();
     }
     if (getSeAttr() != nullptr) {
         printer << ", " << getSeAttr();
@@ -48,7 +48,7 @@ mlir::Type VPU::SparseTensorType::parse(mlir::AsmParser& parser) {
     mlir::Type sparsityMap;
     mlir::Type storageElementTable;
     mlir::UnitAttr isWeights;
-    VPU::CompressionSchemeAttr compressionScheme;
+    VPU::SparsityCompressionAttr sparsityCompression;
     VPU::SEAttr seAttr;
 
     if (parser.parseKeyword("data")) {
@@ -68,13 +68,14 @@ mlir::Type VPU::SparseTensorType::parse(mlir::AsmParser& parser) {
         return Type();
     }
     if (mlir::succeeded(parser.parseOptionalKeyword("is_weights"))) {
-        if (mlir::succeeded(parser.parseOptionalComma()) && parser.parseAttribute(compressionScheme)) {
+        if (mlir::succeeded(parser.parseOptionalComma()) && parser.parseAttribute(sparsityCompression)) {
             return Type();
         }
         if (parser.parseGreater()) {
             return Type();
         }
-        return get(data, sparsityMap, storageElementTable, mlir::UnitAttr::get(parser.getContext()), compressionScheme);
+        return get(data, sparsityMap, storageElementTable, mlir::UnitAttr::get(parser.getContext()),
+                   sparsityCompression);
     }
     if (parser.parseKeyword("sparsity_map")) {
         return Type();
@@ -93,14 +94,14 @@ mlir::Type VPU::SparseTensorType::parse(mlir::AsmParser& parser) {
         return Type();
     }
     if (mlir::succeeded(parser.parseOptionalKeyword("is_weights"))) {
-        if (mlir::succeeded(parser.parseOptionalComma()) && parser.parseAttribute(compressionScheme)) {
+        if (mlir::succeeded(parser.parseOptionalComma()) && parser.parseAttribute(sparsityCompression)) {
             return Type();
         }
         if (parser.parseGreater()) {
             return Type();
         }
         isWeights = mlir::UnitAttr::get(parser.getContext());
-        return get(data, sparsityMap, storageElementTable, isWeights, compressionScheme);
+        return get(data, sparsityMap, storageElementTable, isWeights, sparsityCompression);
     }
     if (parser.parseKeyword("storage_element_table")) {
         return Type();
@@ -114,14 +115,14 @@ mlir::Type VPU::SparseTensorType::parse(mlir::AsmParser& parser) {
 
     if (mlir::succeeded(parser.parseOptionalComma())) {
         if (mlir::succeeded(parser.parseOptionalKeyword("is_weights"))) {
-            if (mlir::succeeded(parser.parseOptionalComma()) && parser.parseAttribute(compressionScheme)) {
+            if (mlir::succeeded(parser.parseOptionalComma()) && parser.parseAttribute(sparsityCompression)) {
                 return Type();
             }
             if (parser.parseGreater()) {
                 return Type();
             }
             isWeights = mlir::UnitAttr::get(parser.getContext());
-            return get(data, sparsityMap, storageElementTable, isWeights, compressionScheme);
+            return get(data, sparsityMap, storageElementTable, isWeights, sparsityCompression);
         }
 
         if (parser.parseAttribute(seAttr)) {
@@ -130,7 +131,7 @@ mlir::Type VPU::SparseTensorType::parse(mlir::AsmParser& parser) {
         if (parser.parseGreater()) {
             return Type();
         }
-        return get(data, sparsityMap, storageElementTable, isWeights, compressionScheme, seAttr);
+        return get(data, sparsityMap, storageElementTable, isWeights, sparsityCompression, seAttr);
     }
 
     if (parser.parseGreater()) {
@@ -147,7 +148,7 @@ mlir::Type VPU::SparseTensorType::parse(mlir::AsmParser& parser) {
 mlir::LogicalResult VPU::SparseTensorType::verify(llvm::function_ref<::mlir::InFlightDiagnostic()> emitError,
                                                   mlir::Type data, mlir::Type sparsityMap, mlir::Type seTable,
                                                   mlir::UnitAttr isWeights,
-                                                  VPU::CompressionSchemeAttr compressionScheme,
+                                                  VPU::SparsityCompressionAttr sparsityCompression,
                                                   VPU::SEAttr seAttribute) {
     if (!data.isa<mlir::RankedTensorType, VPU::DistributedTensorType>()) {
         return printTo(emitError(), "Data type is not a ranked or distributed tensor. Got {0}", data);
@@ -159,9 +160,9 @@ mlir::LogicalResult VPU::SparseTensorType::verify(llvm::function_ref<::mlir::InF
         return printTo(emitError(), "Storage element table type is not a ranked or distributed tensor. Got {0}",
                        seTable);
     }
-    if ((seAttribute != nullptr) && ((isWeights != nullptr) || (compressionScheme != nullptr))) {
+    if ((seAttribute != nullptr) && ((isWeights != nullptr) || (sparsityCompression != nullptr))) {
         return printTo(emitError(),
-                       "SEAttr and (isWeights or CompressionSchemeAttr) cannot be present at the same time.");
+                       "SEAttr and (isWeights or SparsityCompressionAttr) cannot be present at the same time.");
     }
 
     if (data.isa<VPU::DistributedTensorType>()) {
@@ -203,8 +204,8 @@ int64_t VPU::SparseTensorType::getRank() const {
 }
 
 int64_t VPU::SparseTensorType::getNumElements() const {
-    if (getCompressionScheme() != nullptr) {
-        return getCompressionScheme().getTotalNumElems();
+    if (getSparsityCompression() != nullptr) {
+        return getSparsityCompression().getTotalNumElems();
     }
     auto data = VPU::getEffectiveSparseOutputType<VPU::SparseTensorType>(*this);
     return data.getNumElements();
@@ -247,8 +248,8 @@ Bit VPU::SparseTensorType::getElemTypeSize() const {
 
 Byte VPU::SparseTensorType::getTotalAllocSize() const {
     Byte totalSize(0);
-    if (getCompressionScheme() != nullptr) {
-        totalSize = getCompressionScheme().getAllocSize(getElementType());
+    if (getSparsityCompression() != nullptr) {
+        totalSize = getSparsityCompression().getAllocSize(getElementType());
     } else {
         const auto data = getData().cast<NDTypeInterface>();
         totalSize = data.getTotalAllocSize();
@@ -266,8 +267,8 @@ Byte VPU::SparseTensorType::getTotalAllocSize() const {
 
 Byte VPU::SparseTensorType::getCompactAllocSize() const {
     Byte compactSize(0);
-    if (getCompressionScheme() != nullptr) {
-        compactSize = getCompressionScheme().getAllocSize(getElementType());
+    if (getSparsityCompression() != nullptr) {
+        compactSize = getSparsityCompression().getAllocSize(getElementType());
     } else {
         const auto data = getData().cast<NDTypeInterface>();
         compactSize = data.getTotalAllocSize();
@@ -291,7 +292,7 @@ NDTypeInterface VPU::SparseTensorType::changeElemType(mlir::Type elemType) const
     const auto ndData = getData().cast<NDTypeInterface>();
     const auto data = ndData.changeElemType(elemType);
     return VPU::SparseTensorType::get(data, getSparsityMap(), getStorageElementTable(), getIsWeights(),
-                                      getCompressionScheme(), getSeAttr());
+                                      getSparsityCompression(), getSeAttr());
 }
 
 NDTypeInterface VPU::SparseTensorType::changeShapeElemType(ShapeRef shape, mlir::Type elemType) const {
@@ -322,7 +323,7 @@ NDTypeInterface VPU::SparseTensorType::changeShapeElemType(ShapeRef shape, mlir:
         storageElementTable = ndStorageElementTable.changeShape(seTableShape);
     }
 
-    return VPU::SparseTensorType::get(data, sparsityMap, storageElementTable, getIsWeights(), getCompressionScheme(),
+    return VPU::SparseTensorType::get(data, sparsityMap, storageElementTable, getIsWeights(), getSparsityCompression(),
                                       getSeAttr());
 }
 
@@ -339,7 +340,7 @@ NDTypeInterface VPU::SparseTensorType::changeDimsOrder(DimsOrder order) const {
     }
 
     return VPU::SparseTensorType::get(data, sparsityMap, getStorageElementTable(), getIsWeights(),
-                                      getCompressionScheme(), getSeAttr());
+                                      getSparsityCompression(), getSeAttr());
 }
 
 NDTypeInterface VPU::SparseTensorType::changeMemSpace(IndexedSymbolAttr memSpace) const {
@@ -358,7 +359,7 @@ NDTypeInterface VPU::SparseTensorType::changeMemSpace(IndexedSymbolAttr memSpace
         storageElementTable = ndStorageElementTable.changeMemSpace(memSpace);
     }
 
-    return VPU::SparseTensorType::get(data, sparsityMap, storageElementTable, getIsWeights(), getCompressionScheme(),
+    return VPU::SparseTensorType::get(data, sparsityMap, storageElementTable, getIsWeights(), getSparsityCompression(),
                                       getSeAttr());
 }
 
@@ -405,8 +406,8 @@ NDTypeInterface VPU::SparseTensorType::changeTypeComponents(const TypeComponents
         storageElementTable = ndStorageElementTable.changeTypeComponents(SETComponents);
     }
 
-    return VPU::SparseTensorType::get(newData, sparsityMap, storageElementTable, getIsWeights(), getCompressionScheme(),
-                                      getSeAttr());
+    return VPU::SparseTensorType::get(newData, sparsityMap, storageElementTable, getIsWeights(),
+                                      getSparsityCompression(), getSeAttr());
 }
 
 NDTypeInterface VPU::SparseTensorType::extractDenseTile(ShapeRef tileOffsets, ShapeRef tileShape) const {
@@ -443,9 +444,9 @@ NDTypeInterface VPU::SparseTensorType::extractDenseTile(ShapeRef tileOffsets, Sh
         storageElementTable = ndStorageElementTable.extractDenseTile(seTableTileOffsets, seTableTileShape);
     }
 
-    const auto compressionScheme = VPU::tileCompressionScheme(getCompressionScheme(), tileOffsets, tileShape);
+    const auto sparsityCompression = VPU::tileSparsityCompression(getSparsityCompression(), tileOffsets, tileShape);
 
-    return VPU::SparseTensorType::get(data, sparsityMap, storageElementTable, getIsWeights(), compressionScheme,
+    return VPU::SparseTensorType::get(data, sparsityMap, storageElementTable, getIsWeights(), sparsityCompression,
                                       seAttr);
 }
 
@@ -470,7 +471,7 @@ NDTypeInterface VPU::SparseTensorType::eraseTiledInfo() const {
         storageElementTable = ndStorageElementTable.eraseTiledInfo();
     }
 
-    return VPU::SparseTensorType::get(data, sparsityMap, storageElementTable, getIsWeights(), getCompressionScheme(),
+    return VPU::SparseTensorType::get(data, sparsityMap, storageElementTable, getIsWeights(), getSparsityCompression(),
                                       getSeAttr());
 }
 
@@ -504,7 +505,7 @@ NDTypeInterface VPU::SparseTensorType::pad(ShapeRef padBefore, ShapeRef padAfter
         storageElementTable = ndStorageElementTable.changeShape(seTableShape);
     }
 
-    return VPU::SparseTensorType::get(data, sparsityMap, storageElementTable, getIsWeights(), getCompressionScheme(),
+    return VPU::SparseTensorType::get(data, sparsityMap, storageElementTable, getIsWeights(), getSparsityCompression(),
                                       getSeAttr());
 }
 
@@ -618,8 +619,8 @@ NDTypeInterface VPU::SparseTensorType::changeTypeComponentsForExplicitDistributi
                 clusterSETable.changeTypeComponentsForExplicitDistribution(SETComponents, seTableDistributedAttr);
     }
 
-    return VPU::SparseTensorType::get(newData, sparsityMap, storageElementTable, getIsWeights(), getCompressionScheme(),
-                                      getSeAttr());
+    return VPU::SparseTensorType::get(newData, sparsityMap, storageElementTable, getIsWeights(),
+                                      getSparsityCompression(), getSeAttr());
 }
 
 // @brief Extract a dense tile from a DistributedType with an explicit DistributedTensorAttr.
@@ -689,9 +690,9 @@ NDTypeInterface VPU::SparseTensorType::extractDenseTileForExplicitDistribution(
                         seTableTileOffsets, seTableTileShape, seTableDistributedAttr);
     }
 
-    const auto compressionScheme = VPU::tileCompressionScheme(getCompressionScheme(), tileOffsets, tileShape);
+    const auto sparsityCompression = VPU::tileSparsityCompression(getSparsityCompression(), tileOffsets, tileShape);
 
-    return VPU::SparseTensorType::get(data, sparsityMap, storageElementTable, getIsWeights(), compressionScheme,
+    return VPU::SparseTensorType::get(data, sparsityMap, storageElementTable, getIsWeights(), sparsityCompression,
                                       seAttr);
 }
 

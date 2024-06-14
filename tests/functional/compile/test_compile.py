@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# Copyright (C) 2022 Intel Corporation.
-# SPDX-License-Identifier: Apache 2.0
+# Copyright (C) 2022 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
 
 """ Test for IR compilation.
 Refer to conftest.py on the test usage.

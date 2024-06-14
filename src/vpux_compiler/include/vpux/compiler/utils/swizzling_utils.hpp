@@ -8,7 +8,7 @@
 #include <mlir/IR/BuiltinAttributes.h>
 #include <mlir/IR/Types.h>
 #include "vpux/compiler/dialect/VPU/IR/types.hpp"
-#include "vpux/compiler/dialect/VPUIP/types.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/types.hpp"
 #include "vpux/compiler/utils/hw_settings.hpp"
 #include "vpux/utils/core/mem_size.hpp"
 
@@ -23,6 +23,7 @@ constexpr uint64_t SWIZZLING_KEY_5 = 5;
 
 // Swizzled buffers need to have space in CMX of size aligned to 512/1024 based on arch, because this
 // it the smallest unit of CMX RAM cut
+constexpr int64_t SWIZZLING_SIZE_ALIGNMENT_VPUX40XX = 1024;
 constexpr int64_t SWIZZLING_SIZE_ALIGNMENT_VPUX37XX = 512;
 
 int64_t getSizeAlignmentForSwizzling(VPU::ArchKind arch);
@@ -31,7 +32,7 @@ int64_t getSizeAlignmentForSwizzling(VPU::ArchKind arch);
 /// @param swizzlingKey
 /// @param archKind
 /// @return alignment [bytes]
-int64_t getAddressAlignmentForSwizzling(int64_t swizzlingKey);
+int64_t getAddressAlignmentForSwizzling(int64_t swizzlingKey, VPU::ArchKind archKind);
 
 VPUIP::SwizzlingSchemeAttr createSwizzlingSchemeAttr(mlir::MLIRContext* ctx, VPU::ArchKind archKind,
                                                      int64_t swizzlingKey);
@@ -46,7 +47,8 @@ int64_t alignSizeForSwizzling(int64_t size, int64_t sizeAlignment);
 /// vpux::SWIZZLING_KEY_5. Must be > 0. The start address ADDR of any allocated buffer yields ADDR % offsetAlignment ==
 /// 0.
 /// @param sizeAlignment - memory allocation increment. The memory is allocated  in units of sizeAlignment so that
-/// bufferSize[i] % sizeAlignment == 0. The default value corresponds to SWIZZLING_SIZE_ALIGNMENT_VPUX37XX.
+/// bufferSize[i] % sizeAlignment == 0. The default value corresponds to SWIZZLING_SIZE_ALIGNMENT_VPUX37XX or
+/// SWIZZLING_SIZE_ALIGNMENT_VPUX40XX.
 /// @return required memory taking into account the allocation requirements for swizzled buffers [bytes].
 Byte calculateAlignedBuffersMemoryRequirement(mlir::SmallVector<Byte>& bufferSizes,
                                               const Byte offsetAlignment = Byte(vpux::DEFAULT_CMX_ALIGNMENT),

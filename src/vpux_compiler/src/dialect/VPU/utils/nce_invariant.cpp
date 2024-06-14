@@ -4,11 +4,14 @@
 //
 
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
+#include "vpux/compiler/dialect/VPU/utils/se_padding_utils.hpp"
 
 #include "vpux/compiler/core/attributes/dims_order.hpp"
-#include "vpux/compiler/dialect/IE/ops.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/utils/conv_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/se_roll_utils.hpp"
+#include "vpux/compiler/utils/VPU/tile_utils.hpp"
 
 #include <llvm/ADT/TypeSwitch.h>
 
@@ -22,8 +25,8 @@ bool vpux::VPU::NCEInvariant::isPrecisionSupported(ArchKind arch, mlir::ValueRan
     for (const auto& val : vals) {
         const auto elemType = val.getType().cast<vpux::NDTypeInterface>().getElementType();
 
-        if (elemType.isBF16() && arch != ArchKind::VPUX37XX) {
-            logCb(formatv("BF16 is only supported by VPUX37XX"));
+        if (elemType.isBF16() && arch != VPU::ArchKind::NPU37XX && arch != VPU::ArchKind::NPU40XX) {
+            logCb(formatv("BF16 is only supported by VPUX37XX and VPUX40XX"));
             return false;
         }
     }
@@ -91,7 +94,7 @@ bool vpux::VPU::NCEInvariant::isAttrsSupported(ArchKind arch, int64_t KY, int64_
         return false;
     }
 
-    if (SX != SY && arch != VPU::ArchKind::VPUX37XX) {
+    if (SX != SY && arch != VPU::ArchKind::NPU37XX && arch != VPU::ArchKind::NPU40XX) {
         logCb(formatv("Asymmetric strides are not supported"));
         return false;
     }
@@ -161,7 +164,12 @@ bool vpux::VPU::NCEInvariant::isInputActTypeSupported(ArchKind arch, vpux::NDTyp
 
     if (supportsInputActCompression) {
         const auto IC = type.getShape()[Dims4D::Act::C];
-        return IC == VPU_COMPRESSED_INPUT_CHANNEL_NUM;
+        const bool inputChannelsMatch = (IC == VPU_COMPRESSED_INPUT_CHANNEL_NUM);
+        if (!inputChannelsMatch) {
+            logCb(formatv("Input channels do not match VPU_COMPRESSED_INPUT_CHANNEL_NUM: got {0} expected {1}", IC,
+                          VPU_COMPRESSED_INPUT_CHANNEL_NUM));
+        }
+        return inputChannelsMatch;
     }
 
     return isAligned(type, alignment, arch, logCb);
@@ -180,7 +188,7 @@ Byte vpux::VPU::NCEInvariant::getWeightsTableSize(int64_t OC) {
 //
 
 bool vpux::VPU::NCEInvariant::isChannelMajorCompatible(ArchKind arch, vpux::NDTypeInterface inputType) {
-    if (arch != ArchKind::VPUX30XX) {
+    if (arch != VPU::ArchKind::NPU30XX) {
         return false;
     }
 
@@ -213,7 +221,7 @@ bool vpux::VPU::NCEInvariant::checkLayouts(mlir::TypeRange operandTypes, mlir::T
     for (auto resultType : resultTypes) {
         const auto actualOutLayout = resultType.cast<vpux::NDTypeInterface>().getDimsOrder();
         const auto& expectedOutLayout = DimsOrder::NHWC;
-        if (arch != VPU::ArchKind::VPUX37XX && actualOutLayout != expectedOutLayout) {
+        if (arch != VPU::ArchKind::NPU37XX && arch != VPU::ArchKind::NPU40XX && actualOutLayout != expectedOutLayout) {
             logCb(formatv("Unsupported output layout. Expected: {0}, got: {1}", expectedOutLayout, actualOutLayout));
             return false;
         }
@@ -224,7 +232,8 @@ bool vpux::VPU::NCEInvariant::checkLayouts(mlir::TypeRange operandTypes, mlir::T
 
 bool vpux::VPU::NCEInvariant::isSuperdenseSupported(const VPU::ArchKind arch) {
     const llvm::DenseSet<VPU::ArchKind> compatibleTargets = {
-            VPU::ArchKind::VPUX37XX,
+            VPU::ArchKind::NPU37XX,
+            VPU::ArchKind::NPU40XX,
     };
     return compatibleTargets.contains(arch);
 }
@@ -253,7 +262,7 @@ mlir::LogicalResult vpux::VPU::NCEInvariant::isSupported(mlir::Operation* op, Lo
                                                               emptyLogCb, checkLayout, checkChannelAlignment);
                     })
                     .Case<IE::MultiplyOp>([&](IE::MultiplyOp origOp) {
-                        if (getArch(origOp) != VPU::ArchKind::VPUX30XX) {
+                        if (getArch(origOp) != VPU::ArchKind::NPU30XX) {
                             return false;
                         }
                         return VPU::NCEEltwiseOp::isSupported(origOp, allowDifferentScales, allowDifferentZp,
@@ -278,6 +287,12 @@ mlir::LogicalResult vpux::VPU::NCEInvariant::isSupported(mlir::Operation* op, Lo
                     .Case<IE::TransposedConvolutionOp>([&](IE::TransposedConvolutionOp origOp) {
                         return isSupportedSEPTransposedConv(origOp, emptyLogCb, checkLayout, checkChannelAlignment);
                     })
+                    .Case<IE::PadOp>([&](IE::PadOp origOp) {
+                        return isSupportedSEPPadOp(origOp, emptyLogCb, checkLayout, checkChannelAlignment);
+                    })
+                    .Case<IE::RollOp>([&](IE::RollOp origOp) {
+                        return VPU::isSupportedSEPRoll(origOp, emptyLogCb, checkLayout, checkChannelAlignment);
+                    })
                     .Default([](mlir::Operation*) -> bool {
                         return false;
                     }));
@@ -285,14 +300,13 @@ mlir::LogicalResult vpux::VPU::NCEInvariant::isSupported(mlir::Operation* op, Lo
 
 bool vpux::VPU::NCEInvariant::isSmallKernelOptimizationSupported(const VPU::ArchKind arch, mlir::Operation* op) {
     // TODO: E#96201, attach concrete implementation of NCEOpInterface depending on the type of device
-    if (arch == VPU::ArchKind::VPUX37XX || arch == VPU::ArchKind::VPUX30XX) {
+    if (arch != VPU::ArchKind::NPU40XX) {
         return false;
     }
     if (!mlir::isa<VPU::NCEDepthConvolutionOp, VPU::NCEAveragePoolOp>(op)) {
         return false;
     }
     auto nceOp = mlir::dyn_cast<VPU::NCEOpInterface>(op);
-
     // Skip Sparse Ops
     if (nceOp->getResult(0).getType().dyn_cast<VPU::SparseTensorType>() != nullptr) {
         return false;
@@ -301,22 +315,149 @@ bool vpux::VPU::NCEInvariant::isSmallKernelOptimizationSupported(const VPU::Arch
     // L1Opt can be enabled when kernelX = 3 and strideX = 1
     const auto kernelSize = nceOp.getKernelSizeVal();
     const auto KX = kernelSize[Dims4D::Kernel::X.ind()];
+
     const auto kernelStride = nceOp.getStridesVal();
     const auto SX = kernelStride[Dims4D::Strides::X.ind()];
 
     // Get a set containing all the channels from the workloads of the given NCE operations
     mlir::DenseSet<int64_t> workloadsChannels;
-    auto workloads = nceOp.getWorkloads().getOps<VPU::DPUWorkloadOp>();
-    auto channels =
-            to_container<mlir::DenseSet<int64_t>>(workloads | transformed([](VPU::DPUWorkloadOp workload) -> int64_t {
-                                                      const auto wlSizes =
-                                                              parseIntArrayAttr<int64_t>(workload.getOutSizes());
-                                                      return wlSizes[Dims4D::Act::C.ind()];
-                                                  }));
+    const auto workloads = nceOp.getWorkloads().getOps<VPU::DPUWorkloadOp>();
 
-    auto workloadChannelsMeetRequirement = llvm::all_of(channels, [&](const auto& channel) {
-        return channel == VPU_CHANNEL_SIZE_FOR_L1OPT;
+    const auto workloadChannelsMeetRequirement = llvm::all_of(workloads, [](auto workload) {
+        const auto wlSizes = parseIntArrayAttr<int64_t>(workload.getOutSizes());
+        return wlSizes[Dims4D::Act::C.ind()] == VPU_CHANNEL_SIZE_FOR_L1OPT;
     });
 
     return KX == 3 && SX == 1 && workloadChannelsMeetRequirement;
+}
+
+//
+// verifyKernel
+//
+
+mlir::LogicalResult vpux::VPU::NCEInvariant::verifyKernel(mlir::Location loc, int64_t KY, int64_t KX, int64_t SY,
+                                                          int64_t SX, int64_t padTop, int64_t padBottom,
+                                                          int64_t padLeft, int64_t padRight, VPU::ArchKind arch,
+                                                          Logger log) {
+    log.setName("NCEInvariant");
+
+    static const int32_t NCE_MAX_STRIDE_SIZE = 8;
+
+    if (KY > VPU::NCEInvariant::MAX_KERNEL_SIZE || KY <= 0) {
+        log.trace("[{0}] Unsupported kernel height dimension '{1}', must be in range [1, {2}]", loc, KY,
+                  VPU::NCEInvariant::MAX_KERNEL_SIZE);
+        return mlir::failure();
+    }
+    if (KX > VPU::NCEInvariant::MAX_KERNEL_SIZE || KX <= 0) {
+        log.trace("[{0}] Unsupported kernel width dimension '{1}', must be in range [1, {2}]", loc, KX,
+                  VPU::NCEInvariant::MAX_KERNEL_SIZE);
+        return mlir::failure();
+    }
+
+    if (SX != SY && arch != VPU::ArchKind::NPU37XX && arch != VPU::ArchKind::NPU40XX) {
+        log.trace("[{0}] Asymmetric strides are not supported", loc);
+        return mlir::failure();
+    }
+    if (SY > NCE_MAX_STRIDE_SIZE || SY <= 0) {
+        log.trace("[{0}] Unsupported stride height dimension '{1}', must be in range [1, {2}]", loc, SY,
+                  NCE_MAX_STRIDE_SIZE);
+        return mlir::failure();
+    }
+    if (SX > NCE_MAX_STRIDE_SIZE || SX <= 0) {
+        log.trace("[{0}] Unsupported stride width dimension '{1}', must be in range [1, {2}]", loc, SX,
+                  NCE_MAX_STRIDE_SIZE);
+        return mlir::failure();
+    }
+
+    if (padTop < 0 || (padTop > 1 && padTop > KY / 2)) {
+        log.trace("[{0}] Unsupported padding '{1}', must be in range [0, {2}]", loc, padTop, KY / 2);
+        return mlir::failure();
+    }
+    if (padBottom < 0 || (padBottom > 1 && padBottom > KY / 2)) {
+        log.trace("[{0}] Unsupported padding '{1}', must be in range [0, {2}]", loc, padBottom, KY / 2);
+        return mlir::failure();
+    }
+    if (padLeft < 0 || (padLeft > 1 && padLeft > KX / 2)) {
+        log.trace("[{0}] Unsupported padding '{1}', must be in range [0, {2}]", loc, padLeft, KX / 2);
+        return mlir::failure();
+    }
+    if (padRight < 0 || (padRight > 1 && padRight > KX / 2)) {
+        log.trace("[{0}] Unsupported padding '{1}', must be in range [0, {2}]", loc, padRight, KX / 2);
+        return mlir::failure();
+    }
+
+    return mlir::success();
+}
+
+mlir::LogicalResult vpux::VPU::NCEInvariant::verifyKernel(mlir::Operation* op, Logger) {
+    return llvm::TypeSwitch<mlir::Operation*, mlir::LogicalResult>(op)
+            .Case<IE::ConvolutionOp>([&](IE::ConvolutionOp origOp) {
+                return VPU::NCEConvolutionOp::verifyKernel(origOp);
+            })
+            .Case<IE::MaxPoolOp>([&](IE::MaxPoolOp origOp) {
+                return VPU::NCEMaxPoolOp::verifyKernel(origOp);
+            })
+            .Case<IE::AvgPoolOp>([&](IE::AvgPoolOp origOp) {
+                return VPU::NCEAveragePoolOp::verifyKernel(origOp);
+            })
+            .Case<IE::AddOp>([&](IE::AddOp origOp) {
+                return VPU::NCEEltwiseOp::verifyKernel(origOp);
+            })
+            .Case<IE::MultiplyOp>([&](IE::MultiplyOp origOp) {
+                return VPU::NCEEltwiseOp::verifyKernel(origOp);
+            })
+            .Case<IE::SubtractOp>([&](IE::SubtractOp origOp) {
+                return VPU::NCEEltwiseOp::verifyKernel(origOp);
+            })
+            .Case<IE::AndOp>([&](IE::AndOp origOp) {
+                return VPU::NCEEltwiseOp::verifyKernel(origOp);
+            })
+            .Case<IE::GroupConvolutionOp>([&](IE::GroupConvolutionOp origOp) {
+                return VPU::NCEDepthConvolutionOp::verifyKernel(origOp);
+            })
+            .Case<IE::TransposedConvolutionOp>([&](IE::TransposedConvolutionOp origOp) {
+                return VPU::NCEConvolutionOp::verifyKernel(origOp);
+            })
+            .Default([](mlir::Operation*) -> mlir::LogicalResult {
+                return mlir::failure();
+            });
+}
+
+//
+// verifyPoolCMX
+//
+
+mlir::LogicalResult vpux::VPU::NCEInvariant::verifyPoolCMX(mlir::Location loc, mlir::ModuleOp module,
+                                                           vpux::NDTypeInterface inputType,
+                                                           vpux::NDTypeInterface outputType, mlir::ArrayAttr kernelSize,
+                                                           mlir::ArrayAttr kernelStrides, bool hasActivationWindow,
+                                                           Logger log) {
+    log.setName("NCEInvariant");
+
+    VPUX_THROW_UNLESS(kernelSize.size() == 2, "Unsupported kernel size: {0}", kernelSize.size());
+    VPUX_THROW_UNLESS(kernelStrides.size() == 2, "Unsupported strides size: {0}", kernelSize.size());
+
+    const auto outputShape = outputType.getShape();
+    const auto OC = outputShape[Dims4D::Act::C];
+
+    int64_t activationWindowSize = 0;
+    if (hasActivationWindow) {
+        const auto kernelSizeVals = Shape(parseIntArrayAttr<int64_t>(kernelSize));
+        const auto kernelStridesVals = Shape(parseIntArrayAttr<int64_t>(kernelStrides));
+        activationWindowSize = VPU::NCESparsity::getActivationWindowSize(VPU::NCESparsity::Mode::POOL, kernelSizeVals,
+                                                                         kernelStridesVals[Dims4D::Strides::X],
+                                                                         inputType.getElementType(), 1);
+    }
+
+    const auto requiredCMX =
+            VPU::getRequiredCMXSizeForNCEOps({inputType, outputType}, OC) + activationWindowSize * 1_Byte;
+
+    const auto cmxSize = vpux::VPU::getTotalCMXSize(module);
+    if (requiredCMX > cmxSize) {
+        log.trace("[{0}] CMX memory is not enough for Pooling, available '{1}', required '{2}'", loc, cmxSize,
+                  requiredCMX);
+        return mlir::failure();
+    }
+
+    return mlir::success();
 }

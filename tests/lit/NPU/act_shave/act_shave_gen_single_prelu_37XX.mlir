@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -65,7 +65,7 @@ func.func @main(%1: memref<1x1000x1x1xf16>, %2: memref<1x1000x1x1xf16>) -> memre
     // Genetic Kernel information for the scheduler.
     VPURT.Task waits(%b1 : !VPURT.Barrier) updates(%b2 : !VPURT.Barrier) {
         VPUIP.SW.Kernel
-                    {resultSegmentSizes = array<i32: 1, 0>}
+                    {resultSegmentSizes = array<i32: 1, 0, 0>}
                     @VPU.SW::@builtin_prelu           // The reference to the Kernel function.
                     inputs(%in0_tile0_cmx as %arg0: memref<1x1000x1x1xf16, [@CMX_NN, 0]>, %in1_tile0_cmx as %arg1: memref<1000xf16, [@CMX_NN, 0]>)     // Inputs/outputs buffers for generic operation interface
                     outputs(%out_tile0_cmx as %arg2: memref<1x1000x1x1xf16, [@CMX_NN, 0]>)   //
