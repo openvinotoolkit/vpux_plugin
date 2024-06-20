@@ -23,7 +23,10 @@ void Const::ConstantFoldingCache::enqueueRequest(const Const::FoldingRequest& fo
 
 Const::FoldingRequest Const::ConstantFoldingCache::getRequest() {
     Const::FoldingRequest result;
-    _requestQueue.pop(result);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstringop-overflow"
+     _requestQueue.pop(result);
+#pragma GCC diagnostic pop
     return result;
 }
 
