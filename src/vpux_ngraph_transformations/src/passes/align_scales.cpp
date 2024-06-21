@@ -400,7 +400,7 @@ bool AlignScales::run_on_model(const std::shared_ptr<ov::Model>& m) {
             continue;
         }
 
-        update_concat_out_fq(std::move(node), fqs_to_align);
+        update_concat_out_fq(node, fqs_to_align);
 
         if (fqs_to_align.size() > 2) {
             adjust_fqs_to_align(fqs_to_align);

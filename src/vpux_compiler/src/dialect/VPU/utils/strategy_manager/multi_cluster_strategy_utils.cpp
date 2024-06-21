@@ -1219,7 +1219,8 @@ SmallVector<uint32_t> vpux::VPU::getDPUCostForNCEOp(VPU::NCEOpInterface nceOp, V
             }
             return vpunnLayers;
         };
-        vpunnLayers = tilingVPUNNLayer(vpunnLayers[0], outTiles);
+        auto layers = tilingVPUNNLayer(vpunnLayers[0], outTiles);
+        vpunnLayers = layers; 
     }
 
     // E#113592 For not supported SEP layer costs - optimize activation spills
