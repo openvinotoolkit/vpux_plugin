@@ -746,8 +746,10 @@ private:
         return std::pair<mlir::Value, mlir::Value>(kernelRangeOp.getResult(), kernelInvocationOp.getResult());
     }
 
+#if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
     void replaceVPURTTaskOpWithKernelOps(mlir::MLIRContext* ctx, mlir::ModuleOp& moduleOp, mlir::func::FuncOp& funcOp,
                                          Logger& _log) {
         _log.info("VPUIP_VPUMI40XX pass: replaceVPURTTaskOpWithKernelOps()");
@@ -1037,7 +1039,9 @@ private:
             }
         }
     }
+#if defined(__GNUC__)
 #pragma GCC diagnostic pop
+#endif
 
     void setBarrierIndexValues(mlir::MLIRContext* ctx, mlir::func::FuncOp& funcOp, Logger _log) {
         auto barrierCount = 0;
