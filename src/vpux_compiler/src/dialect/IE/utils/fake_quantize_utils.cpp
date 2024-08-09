@@ -71,6 +71,7 @@ mlir::FailureOr<std::tuple<Const::ContentAttr, Const::ContentAttr, mlir::RankedT
     const auto broadcastedInHighValues = to_small_vector(broadcastedInHighContent.getValues<float>());
     const auto broadcastedTransformValues = to_small_vector(broadcastedTransformContent.getValues<float>());
 
+    // Apply transformation
     auto outLowValues = SmallVector<float>(broadcastedTransformValues.size(), 0);
     auto outHighValues = SmallVector<float>(broadcastedTransformValues.size(), 0);
     loop_1d(LoopExecPolicy::Parallel, transformContentAttr.getType().getElementType().getContext(),
@@ -81,8 +82,8 @@ mlir::FailureOr<std::tuple<Const::ContentAttr, Const::ContentAttr, mlir::RankedT
 
     auto outConstShape = inLowContentAttr.getType().dyn_cast<vpux::NDTypeInterface>().getShape();
     auto outStorageType = mlir::RankedTensorType::get(outConstShape.raw(), broadcastedTransformBaseElemType);
-    const auto outLowDenseElementVal = wrapArrayRef(outStorageType, outLowValues);
-    const auto outHighDenseElementVal = wrapArrayRef(outStorageType, outHighValues);
+    const auto outLowDenseElementVal = wrapData(outStorageType, outLowValues);
+    const auto outHighDenseElementVal = wrapData(outStorageType, outHighValues);
     auto outLowContentAttr = Const::ContentAttr::get(outLowDenseElementVal);
     auto outHighContentAttr = Const::ContentAttr::get(outHighDenseElementVal);
     return std::make_tuple(outLowContentAttr, outHighContentAttr, outStorageType);
@@ -140,156 +141,358 @@ mlir::LogicalResult revertScaleShift(const Const::ContentAttr& scale, const Cons
     return mlir::success();
 }
 
-mlir::FailureOr<std::tuple<int64_t, bool>> getLevels(Const::ContentAttr weightsContentAttr, float weightsMinimum) {
-    // Storing i4 values as constants is not possible in MLIR; so even when we import the model we should import
-    // the model in our frontend we should create a Constant that has higher level storage such as SI8 and a
-    // transformation which converts the expressed type to I4/U4
-    // Example: const.ConvertElemType<si4>, const.ConvertElemType<ui4>
-    for (const auto& attr : weightsContentAttr.getTransformations()) {
+template <typename NewT>
+Const::ContentAttr castStorageType(const Const::Content& content) {
+    const auto contentType = content.getType();
+    const auto tensorType = contentType.cast<mlir::RankedTensorType>();
+    const auto size = checked_cast<size_t>(contentType.getNumElements());
+    const auto byteSize = checked_cast<size_t>(contentType.getTotalAllocSize().count());
+
+    std::vector<NewT> tempBuffer(size);
+    content.copyTo(MutableArrayRef(reinterpret_cast<char*>(tempBuffer.data()), byteSize));
+
+    auto denseAttr = mlir::DenseElementsAttr::getFromRawBuffer(
+            tensorType, ArrayRef(reinterpret_cast<char*>(tempBuffer.data()), byteSize));
+
+    return Const::ContentAttr::get(denseAttr);
+}
+
+mlir::LogicalResult WeightsDequantizeStructureInfo::initializeStructure(IE::MultiplyOp& multiplyOp) {
+    lastOp = multiplyOp.getOperation();
+
+    // Retrieve scale
+    auto scaleCst = multiplyOp.getInput2().getDefiningOp<Const::DeclareOp>();
+    if (scaleCst == nullptr) {
+        log.trace("Match failed: Got non-const scale");
+        return mlir::failure();
+    }
+    scale = scaleCst.getContentAttr();
+
+    return mlir::success();
+}
+
+mlir::LogicalResult WeightsDequantizeStructureInfo::initializeStructure(IE::SubtractOp& subtractOp) {
+    lastOp = subtractOp.getOperation();
+
+    // Retrieve shift
+    auto shiftCst = subtractOp.getInput2().getDefiningOp<Const::DeclareOp>();
+    if (shiftCst == nullptr) {
+        log.trace("Match failed: Got non-const shift");
+        return mlir::failure();
+    }
+    shift = shiftCst.getContentAttr();
+
+    // Check following ops
+    const auto opUser = subtractOp->user_begin();
+    if (opUser == subtractOp->user_end()) {
+        return mlir::failure();
+    }
+
+    if (auto multiplyOp = mlir::dyn_cast<IE::MultiplyOp>(*opUser)) {
+        return this->initializeStructure(multiplyOp);
+    }
+
+    return mlir::success();
+}
+
+mlir::LogicalResult WeightsDequantizeStructureInfo::initializeStructure(IE::ConvertOp& convertOp) {
+    lastOp = convertOp.getOperation();
+
+    // Retrieve non-const input properties
+    inputBlock = mlir::dyn_cast_or_null<mlir::BlockArgument>(convertOp.getInput());
+    if (inputBlock != nullptr) {
+        inputElemBaseType = llvm::dyn_cast<mlir::ShapedType>(inputBlock.getType()).getElementType();
+        if (inputElemBaseType.isInteger(4)) {
+            inputVirtualI4ElemType = inputElemBaseType;
+        }
+        log.trace("Got block argument input: {0}", inputElemBaseType);
+
+    } else {
+        log.trace("Match failed: Got ConvertOp without Const or BlockArgument input");
+        return mlir::failure();
+    }
+
+    inputElemConvertType = convertOp.getDstElemType();
+    inputValue = convertOp.getOutput();
+
+    // Check following ops
+    if (!convertOp->hasOneUse()) {
+        // We decided to only treat the single-use case for now
+        log.trace("Match failed: Got ConvertOp with 0 or multiple users");
+        return mlir::failure();
+    }
+    auto opUser = convertOp->user_begin();
+
+    // Prevent rematching already processed ConvertOps (they aren't deleted by the WDtoFQ pass)
+    if (auto fakeQuantOp = mlir::dyn_cast<IE::FakeQuantizeOp>(*opUser)) {
+        log.trace("Match failed: FakeQuantizeOp already present at end of structure");
+        return mlir::failure();
+    }
+
+    if (auto subtractOp = mlir::dyn_cast<IE::SubtractOp>(*opUser)) {
+        return this->initializeStructure(subtractOp);
+    }
+    if (auto multiplyOp = mlir::dyn_cast<IE::MultiplyOp>(*opUser)) {
+        return this->initializeStructure(multiplyOp);
+    }
+
+    // in block arg case, ConvertOps are kept, so a ConvertOp with no following SubtractOp or MultiplyOp would
+    // result in a useless FakeQuantizeOp being inserted
+    log.trace("Match failed: ConvertOp with no following SubractOp or MultiplyOp, match failed");
+    return mlir::failure();
+}
+
+mlir::LogicalResult WeightsDequantizeStructureInfo::initializeStructure(Const::DeclareOp& declareOp) {
+    lastOp = declareOp.getOperation();
+
+    inputAttr = declareOp.getContentAttr();
+    inputContent = declareOp.getContent();
+
+    inputElemBaseType = initialInputElemStorageType = inputElemConvertType =
+            inputAttr.getBaseContent().getShapedType().getElementType();
+
+    // since U4 and I4 aren't aren't fully supported, they are represented through ConvertElemType transforms
+    for (const auto& attr : inputAttr.getTransformations()) {
         if (auto convert = attr.dyn_cast_or_null<Const::ConvertElemTypeAttr>()) {
-            if (convert.getElemType().isSignedInteger(4)) {
-                return std::tuple<int64_t, bool>((isFloatEqual(weightsMinimum, -8.0f)) ? 16 : 15, true);
-            }
-            if (convert.getElemType().isUnsignedInteger(4)) {
-                return std::tuple<int64_t, bool>(16, false);
+            if (convert.getElemType().isInteger(4)) {
+                inputVirtualI4ElemType = convert.getElemType();
+            } else {
+                inputElemConvertType = convert.getElemType();
             }
         }
     }
 
-    auto weightsBaseElemType = weightsContentAttr.getBaseContent().getShapedType().getElementType();
-    if (weightsBaseElemType.isSignedInteger(8)) {
-        return std::tuple<int64_t, bool>((isFloatEqual(weightsMinimum, -128.0f)) ? 256 : 255, true);
-    }
-    if (weightsBaseElemType.isUnsignedInteger(8)) {
-        return std::tuple<int64_t, bool>(256, false);
+    // Check following ops
+    const auto opUser = declareOp->user_begin();
+    if (opUser == declareOp->user_end()) {
+        return mlir::failure();
     }
 
-    return mlir::failure();
+    // Prevent matching DeclareOps which were already quantized in pre-compilation (by OV)
+    if (auto fakeQuantOp = mlir::dyn_cast<IE::FakeQuantizeOp>(*opUser)) {
+        log.trace("Match failed: FakeQuantizeOp already present at end of structure");
+        return mlir::failure();
+    }
+    if (auto subtractOp = mlir::dyn_cast<IE::SubtractOp>(*opUser)) {
+        return this->initializeStructure(subtractOp);
+    }
+    if (auto multiplyOp = mlir::dyn_cast<IE::MultiplyOp>(*opUser)) {
+        return this->initializeStructure(multiplyOp);
+    }
+
+    if (inputElemBaseType == inputElemConvertType) {
+        // A DeclareOp is still considered a WD if it has at least one ConvertElemType transformation
+        // The WDtoFQ pass must remove ConvertElemType from processed constants, otherwise this case results in an
+        // infinite loop
+        log.trace("Match failed: DeclareOp without conversions, shifting or scaling");
+        return mlir::failure();
+    }
+
+    return mlir::success();
 }
 
-mlir::FailureOr<std::tuple<mlir::Operation*, Const::ContentAttr, Const::ContentAttr>> getWeightsDequantizeStructure(
-        Const::DeclareOp origOp, const Logger& _log) {
-    // finds the lowest op in the weights dequantize structure: Multiply / Substract / Declare
-    // and retrieves the shift and scale arguments if present
-
-    mlir::Operation* lastOp = origOp.getOperation();
-    Const::ContentAttr shiftContentAttr = nullptr;
-    Const::ContentAttr scaleContentAttr = nullptr;
-
-    if (lastOp->getResult(0).getUsers().empty()) {
-        _log.trace("Const is not in use");
-        return mlir::failure();
-    }
-
-    auto maybeFakeQuantize = mlir::dyn_cast_or_null<IE::FakeQuantizeOp>(*lastOp->getResult(0).getUsers().begin());
-    if (maybeFakeQuantize != nullptr) {
-        _log.trace("FakeQuantize already present.");
-        return mlir::failure();
-    }
-
-    auto maybeSubtract = mlir::dyn_cast_or_null<IE::SubtractOp>(*lastOp->getResult(0).getUsers().begin());
-    if (maybeSubtract != nullptr) {
-        lastOp = maybeSubtract.getOperation();
-
-        auto shiftCst = maybeSubtract.getInput2().getDefiningOp<Const::DeclareOp>();
-        if (shiftCst == nullptr) {
-            return mlir::failure();
-        }
-        shiftContentAttr = shiftCst.getContentAttr();
-    }
-
-    if (lastOp->getResult(0).getUsers().empty()) {
-        _log.trace("Const is not in use");
-        return mlir::failure();
-    }
-
-    auto maybeMultiply = mlir::dyn_cast_or_null<IE::MultiplyOp>(*lastOp->getResult(0).getUsers().begin());
-    if (maybeMultiply != nullptr) {
-        lastOp = maybeMultiply.getOperation();
-
-        auto scaleCst = maybeMultiply.getInput2().getDefiningOp<Const::DeclareOp>();
-        if (scaleCst == nullptr) {
-            return mlir::failure();
-        }
-        scaleContentAttr = scaleCst.getContentAttr();
-    }
-
-    return std::make_tuple(lastOp, shiftContentAttr, scaleContentAttr);
+WeightsDequantizeStructureInfo::WeightsDequantizeStructureInfo(Const::DeclareOp& origOp, const Logger& log) noexcept
+        : firstOp(origOp.getOperation()), log(log) {
+    isValid = mlir::succeeded(this->initializeStructure(origOp));
 }
 
-mlir::FailureOr<Const::ContentAttr> castWeightStorageToHighPrecision(const Const::Content& weightsContent,
-                                                                     const Logger& _log) {
+WeightsDequantizeStructureInfo::WeightsDequantizeStructureInfo(IE::ConvertOp& origOp, const Logger& log) noexcept
+        : firstOp(origOp.getOperation()), log(log) {
+    isValid = mlir::succeeded(this->initializeStructure(origOp));
+}
+
+mlir::MLIRContext* WeightsDequantizeStructureInfo::getContext() const {
+    return firstOp->getContext();
+}
+
+const mlir::Location WeightsDequantizeStructureInfo::getLocation() const {
+    return firstOp->getLoc();
+}
+
+mlir::Operation* WeightsDequantizeStructureInfo::getFirstOp() const {
+    return firstOp;
+}
+
+mlir::Operation* WeightsDequantizeStructureInfo::getLastOp() const {
+    return lastOp;
+}
+
+bool WeightsDequantizeStructureInfo::isSuccessfulMatch() const {
+    return isValid;
+}
+
+bool WeightsDequantizeStructureInfo::hasConstInput() const {
+    return inputAttr != nullptr;
+}
+
+bool WeightsDequantizeStructureInfo::has8BitIntegerInput() const {
+    return inputVirtualI4ElemType == nullptr && inputElemBaseType.isInteger(8);
+}
+
+bool WeightsDequantizeStructureInfo::has4BitIntegerInput() const {
+    return inputVirtualI4ElemType != nullptr;
+}
+
+bool WeightsDequantizeStructureInfo::has8BitFloatInput() const {
+    return inputElemBaseType.isFloat8E4M3FN() || inputElemBaseType.isFloat8E5M2();
+}
+
+bool WeightsDequantizeStructureInfo::hasSignedInput() const {
+    return inputVirtualI4ElemType != nullptr ? inputVirtualI4ElemType.isSignedInteger()
+                                             : inputElemBaseType.isSignedInteger();
+}
+
+mlir::ShapedType WeightsDequantizeStructureInfo::getInputShapedType() const {
+    if (this->hasConstInput()) {
+        return llvm::dyn_cast<mlir::ShapedType>(inputAttr.getType());
+    }
+
+    return llvm::dyn_cast<mlir::ShapedType>(inputBlock.getType());
+}
+
+mlir::Type WeightsDequantizeStructureInfo::getInputElemBaseType() const {
+    return inputElemBaseType;
+}
+
+mlir::Type WeightsDequantizeStructureInfo::getInputElemConvertType() const {
+    return inputVirtualI4ElemType != nullptr ? inputVirtualI4ElemType : inputElemConvertType;
+}
+
+mlir::Type WeightsDequantizeStructureInfo::getInputFinalElemConvertType() const {
+    // Return the final convert type (likely f16 or f32), even if an i4 conversion is present
+    return inputElemConvertType;
+}
+
+mlir::Type WeightsDequantizeStructureInfo::getInputElemStorageType() const {
+    if (this->hasConstInput()) {
+        // Base type is not used because high precision casting might have occurred
+        return inputContent->getStorageElemType();
+    }
+
+    // For block arg. input, ConvertOps determine the type of the tensor
+    return inputElemConvertType;
+}
+
+int64_t WeightsDequantizeStructureInfo::getInputShapeRank() const {
+    return this->getInputShapedType().getRank();
+}
+
+int64_t WeightsDequantizeStructureInfo::getQuantizationLevels() const {
+    // Note: universally use fixed quantization levels. For activations, we
+    // cannot know real values, so it's impossible to adjust this anyhow. For
+    // weights, we do not need to know real values, because it does not affect
+    // accuracy (or, should not, at least).
+    if (this->has4BitIntegerInput()) {
+        return 16;
+    }
+    if (this->has8BitIntegerInput()) {
+        return 256;
+    }
+
+    VPUX_THROW("Got unsupported type when trying to compute levels: {0}", inputElemBaseType);
+}
+
+Const::DeclareOp WeightsDequantizeStructureInfo::getInputDeclareOp() const {
+    VPUX_THROW_UNLESS(this->hasConstInput(), "WeightsDequantizeStructureInfo: Illegal method call for non-const input");
+    return llvm::dyn_cast<Const::DeclareOp>(*firstOp);
+}
+
+const Const::Content& WeightsDequantizeStructureInfo::getInputContent() const {
+    VPUX_THROW_UNLESS(this->hasConstInput(),
+                      "WeightsDequantizeStructureInfo: Tried to retrieve content from non-const input");
+    return *inputContent;
+}
+
+const Const::ContentAttr& WeightsDequantizeStructureInfo::getInputContentAttr() const {
+    VPUX_THROW_UNLESS(this->hasConstInput(),
+                      "WeightsDequantizeStructureInfo: Tried to retrieve content from non-const input");
+    return inputAttr;
+}
+
+const mlir::Value WeightsDequantizeStructureInfo::getInputValue() const {
+    VPUX_THROW_WHEN(this->hasConstInput(),
+                    "WeightsDequantizeStructureInfo: Tried to retrieve block argument from const input");
+    return inputValue;
+}
+
+mlir::LogicalResult WeightsDequantizeStructureInfo::ensureHighPrecisionStorage() {
     // Converts weights values from lower precision to float
-    // This should ensure good precision for possible further operation done on weights along the compilation flow
+    // Ensures good precision for later passes (some expecting f16/f32)
+    // This results in a considerable performance loss (see E#115057) and efforts are made to remove it TODO: E#107322
 
-    const auto weightsContentType = weightsContent.getType();
-    const auto weightsBufferSize = checked_cast<size_t>(weightsContentType.getNumElements());
-    if (weightsBufferSize == 0) {
-        _log.trace("Weights constant is empty");
+    if (!hasConstInput()) {
         return mlir::failure();
     }
 
-    const auto weightsElementType = weightsContentType.getElementType();
-    const auto weightsBufferByteSize = checked_cast<size_t>(weightsContentType.getTotalAllocSize().count());
-    const auto weightsRankedTensorType = weightsContentType.cast<mlir::RankedTensorType>();
+    const auto convertType = this->getInputFinalElemConvertType();
+    const auto storageType = this->getInputElemStorageType();
 
-    if (weightsElementType.isF16()) {
-        std::vector<vpux::type::float16> fp16TempWeightsBuffer(weightsBufferSize);
-        weightsContent.copyTo(
-                MutableArrayRef(reinterpret_cast<char*>(fp16TempWeightsBuffer.data()), weightsBufferByteSize));
-        const auto weightsDenseAttr = mlir::DenseElementsAttr::getFromRawBuffer(
-                weightsRankedTensorType,
-                ArrayRef(reinterpret_cast<char*>(fp16TempWeightsBuffer.data()), weightsBufferByteSize));
-        return Const::ContentAttr::get(weightsDenseAttr);
+    // Skip casting if weights storage type is already F16 or F32
+    if (convertType == storageType && (storageType.isF16() || storageType.isF32())) {
+        return mlir::success();
     }
 
-    if (weightsElementType.isF32()) {
-        std::vector<float> fp32TempWeightsBuffer(weightsBufferSize);
-        weightsContent.copyTo(
-                MutableArrayRef(reinterpret_cast<char*>(fp32TempWeightsBuffer.data()), weightsBufferByteSize));
-        const auto weightsDenseAttr = mlir::DenseElementsAttr::getFromRawBuffer(
-                weightsRankedTensorType,
-                ArrayRef(reinterpret_cast<char*>(fp32TempWeightsBuffer.data()), weightsBufferByteSize));
-        return Const::ContentAttr::get(weightsDenseAttr);
+    const auto castAttr = convertType.isF16() ? castStorageType<vpux::type::float16>(*inputContent)
+                                              : convertType.isF32() ? castStorageType<float>(*inputContent) : nullptr;
+    if (castAttr == nullptr) {
+        log.trace("Weights element type must be f16 or f32 but got {0}", convertType);
+        return mlir::failure();
     }
 
-    _log.trace("Weights element type must be FP16 or FP32 but got {0}", weightsElementType);
-    return mlir::failure();
+    inputAttr = castAttr;
+    inputContent = castAttr.fold();
+
+    log.trace("Weights were casted to high precision {0}", convertType);
+    return mlir::success();
 }
 
-// option A
-// float getMinWeightsValue(const Const::Content& weightsContent) {
-//     std::vector<float> values;
-//     const auto weightsBufferByteSize = checked_cast<size_t>(weightsContent.getType().getTotalAllocSize().count());
-//     values.resize(weightsBufferByteSize);
-//     weightsContent.copyTo(
-//                 MutableArrayRef(reinterpret_cast<char*>(values.data()), weightsBufferByteSize));
+std::pair<Const::ContentAttr, Const::ContentAttr> WeightsDequantizeStructureInfo::getInputQuantizationInterval(
+        const float low, const float high) {
+    const auto inputRank = this->getInputShapeRank();
+    const auto inElementType = this->getInputElemConvertType();
+    const auto inStorageType =
+            mlir::RankedTensorType::get(SmallVector<int64_t>(inputRank, 1),
+                                        inElementType.isInteger(4) ? this->getInputElemStorageType() : inElementType);
 
-//     const auto min = std::min_element(values.begin(), values.end());
+    const auto inLowDenseElementVal = wrapData(inStorageType, low);
+    const auto inHighDenseElementVal = wrapData(inStorageType, high);
 
-//     VPUX_THROW_WHEN(min == values.end(), "Got empty weights content");
-//     return *min;
-// }
+    return std::make_pair(Const::ContentAttr::get(inLowDenseElementVal),
+                          Const::ContentAttr::get(inHighDenseElementVal));
+}
 
-// // option B
-// float getMinWeightsValue(const Const::Content& weightsContent) {
-//     const auto& values = weightsContent.getValues<float>();
-//     const auto min = std::min_element(values.begin(), values.end());
+std::pair<Const::ContentAttr, Const::ContentAttr> WeightsDequantizeStructureInfo::getOutputQuantizationInterval(
+        std::pair<Const::ContentAttr, Const::ContentAttr> inputInterval) {
+    auto outType = inputInterval.first.getType();
+    if (mlir::failed(IE::revertScaleShift(scale, shift, inputInterval.first, inputInterval.second, outType, log))) {
+        VPUX_THROW("Failed to revert scale-shift");
+    }
 
-//     VPUX_THROW_WHEN(min == values.end(), "Got empty weights content");
-//     return *min;
-// }
+    return inputInterval;
+}
 
-// option C
-// float getMinWeightsValue(const Const::Content& weightsContent) {
-//     const auto& values = weightsContent.vec<float>();
-//     const auto min = std::min_element(values.begin(), values.end());
-
-//     VPUX_THROW_WHEN(min == values.end(), "Got empty weights content");
-//     return *min;
-// }
-
-// option D
+// findAxes returns the positions of quantization axes
+// For FQ in_low = in_high = out_low = out_high = 1x1x1x1 the set is empty
+// For FQ in_low = in_high = out_low = out_high = 1x3x1x1 the set contains only one value = 1
+// For FQ in_low = in_high = 1x1x1x1, out_low = out_high = 1x3x1x1 the set contains only one value = 1
+// For FQ in_low = in_high = out_low = out_high = 1x3x1x16 the set contains positions 1 and 3
+std::set<int64_t> findAxes(IE::FakeQuantizeOp origOp) {
+    const auto operandShapes = SmallVector<ShapeRef>{
+            getShape(origOp.getInputLow()),
+            getShape(origOp.getInputHigh()),
+            getShape(origOp.getOutputLow()),
+            getShape(origOp.getOutputHigh()),
+    };
+    std::set<int64_t> axes;
+    for (const auto& shape : operandShapes) {
+        for (const auto& axis : irange(shape.size())) {
+            if (shape[Dim(axis)] != 1) {
+                axes.insert(axis);
+            }
+        }
+    }
+    return axes;
+}
 
 }  // namespace IE
 }  // namespace vpux

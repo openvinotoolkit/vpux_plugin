@@ -5,7 +5,7 @@
 
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
-
+#include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
 using namespace vpux;
@@ -88,21 +88,17 @@ void insertExplicitPad(Logger& log, VPU::NCEPermuteOp origOp) {
 
     mlir::OpBuilder builder(origOp);
     auto permuteInShape = inputType.getShape();
-    auto padOutType = inputType.changeShape(Shape({permuteInShape[Dims4D::Act::N], expandedChannels,
-                                                   permuteInShape[Dims4D::Act::H], permuteInShape[Dims4D::Act::W]}));
-    SmallVector<int64_t> padsBegin(permuteInShape.size(), 0);
-    SmallVector<int64_t> padsEnd(permuteInShape.size(), 0);
-    padsEnd[Dims4D::Act::C.ind()] = expandedChannels - permuteInShape[Dims4D::Act::C];
-    // Padding will be done with 0.0f value.
-    auto zeroFpAttr = getFPAttr(builder, 0.0f);
-
-    auto padOp = builder.create<VPU::PadOp>(origOp.getLoc(), padOutType, origOp.getInput(), nullptr, nullptr, nullptr,
-                                            getIntArrayAttr(origOp.getContext(), ArrayRef(padsBegin)),
-                                            getIntArrayAttr(origOp.getContext(), ArrayRef(padsEnd)), zeroFpAttr,
-                                            IE::PadMode::CONSTANT);
-
+    const SmallVector<int64_t> padShape = {permuteInShape[Dims4D::Act::N],
+                                           expandedChannels - permuteInShape[Dims4D::Act::C],
+                                           permuteInShape[Dims4D::Act::H], permuteInShape[Dims4D::Act::W]};
+    const auto elemType = inputType.getElementType();
+    const auto padType = mlir::RankedTensorType::get(padShape, elemType);
+    // create zero const for padding
+    auto padData = Const::createZerosConst(builder, origOp.getLoc(), padType);
+    auto concat = builder.create<VPU::ConcatOp>(origOp.getLoc(), mlir::ValueRange{origOp.getInput(), padData},
+                                                Dims4D::Act::C);
     auto newPermuteOp = builder.create<VPU::NCEPermuteOp>(origOp->getLoc(), origOp.getOutput().getType(),
-                                                          padOp.getOutput(), origOp.getExpandedChannelsAttr(),
+                                                          concat.getOutput(), origOp.getExpandedChannelsAttr(),
                                                           origOp.getDstElemTypeAttr(), origOp.getDstOrderAttr(),
                                                           origOp.getPpeAttr(), origOp.getMultiClusterStrategyAttr());
 

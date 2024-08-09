@@ -79,6 +79,9 @@ vpux::Shape getVolumeInCurrentCluster(ShapeRef itiShape, bool isIduSegmented,
 
 void VPUIP::ITIBufferType::print(mlir::AsmPrinter& printer) const {
     printer << "<";
+    printer.increaseIndent();
+    printer.increaseIndent();
+    printer.printNewline();
     for (auto& dim : getShape()) {
         printer << dim << "x";
     }
@@ -100,16 +103,54 @@ void VPUIP::ITIBufferType::print(mlir::AsmPrinter& printer) const {
     }
 
     if (!getInwardHaloRegions().empty()) {
-        printer << ", inwardHaloRegions = [" << getInwardHaloRegions() << "]";
+        printer << ",";
+        printer.printNewline();
+        printer << "inwardHaloRegions = [";
+        printer.increaseIndent();
+        printer.increaseIndent();
+        printer.printNewline();
+
+        const auto inwardHaloRegions = getInwardHaloRegions();
+        for (const auto haloRegion : inwardHaloRegions) {
+            printer << haloRegion;
+            if (haloRegion != inwardHaloRegions.back()) {
+                printer << ",";
+                printer.printNewline();
+            }
+        }
+        printer.decreaseIndent();
+        printer.decreaseIndent();
+        printer.printNewline();
+        printer << "]";
     }
 
     if (!getOutwardHaloRegions().empty()) {
-        printer << ", outwardHaloRegions = [" << getOutwardHaloRegions() << "]";
+        printer << ",";
+        printer.printNewline();
+        printer << "outwardHaloRegions = [";
+        printer.increaseIndent();
+        printer.increaseIndent();
+        printer.printNewline();
+
+        const auto outwardHaloRegions = getOutwardHaloRegions();
+        for (const auto haloRegion : outwardHaloRegions) {
+            printer << haloRegion;
+            if (haloRegion != outwardHaloRegions.back()) {
+                printer << ",";
+                printer.printNewline();
+            }
+        }
+
+        for (size_t i = 0; i < 4; ++i) {
+            printer.decreaseIndent();
+        }
+
+        printer.printNewline();
+        printer << "]";
     }
 
     printer << ">";
 }
-
 mlir::Type VPUIP::ITIBufferType::parse(mlir::AsmParser& parser) {
     if (parser.parseLess()) {
         return Type();

@@ -23,11 +23,11 @@ mlir::FailureOr<int64_t> getConstValue(mlir::Value input) {
         return mlir::failure();
     }
 
-    const auto content = op.getContent();
-    if (!content.isSplat()) {
+    if (const auto attr = op.getContentAttr(); !attr.isSplat()) {
         return mlir::failure();
     }
 
+    const auto content = op.getContent();
     return content.getSplatValue<int64_t>();
 }
 

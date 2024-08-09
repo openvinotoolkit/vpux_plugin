@@ -31,7 +31,7 @@ namespace {
 //
 
 SmallVector<mlir::Value> allocateResults(mlir::Location loc, mlir::OpBuilder& builder,
-                                         mlir::TypeConverter& typeConverter, mlir::ValueRange origResults) {
+                                         const mlir::TypeConverter& typeConverter, mlir::ValueRange origResults) {
     return to_small_vector(origResults | transformed([&](mlir::Value origVal) -> mlir::Value {
                                auto origType = origVal.getType();
                                auto memRefType = typeConverter.convertType(origType);
@@ -75,7 +75,7 @@ mlir::LogicalResult ReshapeRewrite<ConcreteOp>::matchAndRewrite(ConcreteOp origO
                            IERT::GenericReshapeOp::getOperationName());
     }
 
-    auto* typeConverter = this->getTypeConverter();
+    const auto* typeConverter = this->getTypeConverter();
     VPUX_THROW_UNLESS(typeConverter != nullptr, "TypeConverter is not set");
 
     const auto newOutType = typeConverter->convertType(outType);
@@ -107,7 +107,7 @@ mlir::LogicalResult PermuteCastRewrite::matchAndRewrite(IE::PermuteCastOp origOp
                                                         mlir::ConversionPatternRewriter& rewriter) const {
     _log.trace("Found PermuteCast Operation '{0}' at '{1}'", origOp->getName(), origOp->getLoc());
 
-    auto* typeConverter = getTypeConverter();
+    const auto* typeConverter = getTypeConverter();
     VPUX_THROW_UNLESS(typeConverter != nullptr, "TypeConverter is not set");
 
     const auto newOutType = typeConverter->convertType(origOp.getType());
@@ -149,7 +149,7 @@ mlir::LogicalResult SplitRewrite::matchAndRewrite(IE::SplitOp origOp, OpAdaptor 
 
     const auto axis = Dim(origOp.getAxisValue().value());
 
-    auto* typeConverter = getTypeConverter();
+    const auto* typeConverter = getTypeConverter();
     VPUX_THROW_UNLESS(typeConverter != nullptr, "TypeConverter is not set");
 
     auto allocatedBufs = allocateResults(origOp->getLoc(), rewriter, *typeConverter, origOp.getResults());
@@ -278,7 +278,7 @@ mlir::LogicalResult ConcatRewrite::matchAndRewrite(IE::ConcatOp origOp, OpAdapto
                                                    mlir::ConversionPatternRewriter& rewriter) const {
     _log.trace("Found Concat Operation '{0}'", origOp->getLoc());
 
-    auto* typeConverter = getTypeConverter();
+    const auto* typeConverter = getTypeConverter();
     VPUX_THROW_UNLESS(typeConverter != nullptr, "TypeConverter is not set");
 
     _log.trace("Add Alloc Operations for results");
@@ -348,7 +348,7 @@ mlir::LogicalResult ExpandRewrite::matchAndRewrite(IE::ExpandOp origOp, OpAdapto
                                                    mlir::ConversionPatternRewriter& rewriter) const {
     _log.trace("Found Expand Operation '{0}'", origOp->getLoc());
 
-    auto* typeConverter = getTypeConverter();
+    const auto* typeConverter = getTypeConverter();
     VPUX_THROW_UNLESS(typeConverter != nullptr, "ExpandRewrite: failed to get type converter");
 
     auto expandedBuffer = allocateResults(origOp->getLoc(), rewriter, *typeConverter, origOp.getOutput());
@@ -428,7 +428,7 @@ mlir::LogicalResult LSTMCellRewrite::matchAndRewrite(IE::LSTMCellOp origOp, OpAd
                                                      mlir::ConversionPatternRewriter& rewriter) const {
     _log.trace("Found LSTMCell Operation '{0}'", origOp->getLoc());
 
-    auto* typeConverter = getTypeConverter();
+    const auto* typeConverter = getTypeConverter();
     VPUX_THROW_UNLESS(typeConverter != nullptr, "TypeConverter is not set");
 
     // Concatenate 'weights' and 'recurrenceWeights' into single buffer
@@ -477,7 +477,7 @@ mlir::LogicalResult LSTMSequenceRewrite::matchAndRewrite(IE::LSTMSequenceOp orig
                                                          mlir::ConversionPatternRewriter& rewriter) const {
     _log.trace("Found LSTMSequence Operation '{0}'", origOp->getLoc());
 
-    auto* typeConverter = getTypeConverter();
+    const auto* typeConverter = getTypeConverter();
     VPUX_THROW_UNLESS(typeConverter != nullptr, "TypeConverter is not set");
 
     // Concatenate 'weights' and 'recurrenceWeights' into single buffer
@@ -527,7 +527,7 @@ mlir::LogicalResult ReverseSequenceRewrite::matchAndRewrite(IE::ReverseSequenceO
                                                             mlir::ConversionPatternRewriter& rewriter) const {
     _log.trace("Found ReverseSequence Operation '{0}'", origOp->getLoc());
 
-    auto* typeConverter = getTypeConverter();
+    const auto* typeConverter = getTypeConverter();
     VPUX_THROW_UNLESS(typeConverter != nullptr, "TypeConverter is not set");
 
     auto origSeqLengthShapeType = origOp.getSeqLength().getType().cast<mlir::ShapedType>();
@@ -574,7 +574,7 @@ mlir::LogicalResult QuantizeCastRewriter::matchAndRewrite(IE::QuantizeCastOp ori
 
     const auto outType = origOp.getType();
 
-    auto* typeConverter = getTypeConverter();
+    const auto* typeConverter = getTypeConverter();
     VPUX_THROW_UNLESS(typeConverter != nullptr, "TypeConverter is not set");
 
     const auto newOutType = typeConverter->convertType(outType);
@@ -606,7 +606,7 @@ mlir::LogicalResult NonMaxSuppressionRewrite::matchAndRewrite(IE::NonMaxSuppress
                                                               mlir::ConversionPatternRewriter& rewriter) const {
     _log.trace("Found NonMaxSuppressionOp Operation '{0}'", origOp->getLoc());
 
-    auto* typeConverter = getTypeConverter();
+    const auto* typeConverter = getTypeConverter();
     VPUX_THROW_UNLESS(typeConverter != nullptr, "TypeConverter is not set");
 
     auto resultBufs = allocateResults(origOp->getLoc(), rewriter, *typeConverter, origOp->getOpResults());
@@ -1566,7 +1566,7 @@ mlir::LogicalResult LayerRewrite::matchAndRewrite(mlir::Operation* origOp, Array
     VPUX_THROW_UNLESS(newOperands.size() == origOp->getNumOperands(), "Got wrong newOperands size : '{0}'",
                       newOperands.size());
 
-    auto* typeConverter = getTypeConverter();
+    const auto* typeConverter = getTypeConverter();
     VPUX_THROW_UNLESS(typeConverter != nullptr, "TypeConverter is not set");
 
     const auto resultBufs = allocateResults(origOp->getLoc(), rewriter, *typeConverter, origOp->getOpResults());

@@ -3,10 +3,13 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+//
+
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 #include "vpux/compiler/dialect/IE/utils/quantization.hpp"
-#include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/eltwise_utils.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
 #include <mlir/IR/PatternMatch.h>
@@ -32,20 +35,13 @@ private:
     Logger _log;
 };
 
-bool isLhsActivation(IE::MultiplyOp multiplyOp) {
-    const auto lhsType = multiplyOp.getInput1().getType().cast<mlir::ShapedType>();
-    const auto outShapeRes = multiplyOp.getOutput().getType().cast<mlir::ShapedType>();
-
-    return (lhsType == outShapeRes);
-}
-
 // This pass comes from the front-end ngrap pass. Openvion's mo will convert some FakeQuantizeOps on Weight in the
 // original model into FQ + ADD + MUL. This pass is used to merge these MULs into FQ, so only the case of const weight
 // FQ is handled. And currently, only per channel FQ is handled, because the FQ of per element is not yet supported
 // #E73317
 
 bool isLegalToFuse(IE::MultiplyOp multiplyOp) {
-    bool lhsIsActivation = isLhsActivation(multiplyOp);
+    bool lhsIsActivation = vpux::VPU::isEltwiseLhsActivation<IE::MultiplyOp>(multiplyOp);
 
     auto fakeQuantOp = lhsIsActivation ? multiplyOp.getInput1().getDefiningOp<IE::FakeQuantizeOp>()
                                        : multiplyOp.getInput2().getDefiningOp<IE::FakeQuantizeOp>();
@@ -99,7 +95,7 @@ mlir::LogicalResult FuseFQAndMul::matchAndRewrite(IE::MultiplyOp multiplyOp, mli
     if (!isLegalToFuse(multiplyOp)) {
         return mlir::failure();
     }
-    bool lhsIsActivation = isLhsActivation(multiplyOp);
+    bool lhsIsActivation = vpux::VPU::isEltwiseLhsActivation<IE::MultiplyOp>(multiplyOp);
 
     auto fakeQuantOp = lhsIsActivation ? multiplyOp.getInput1().getDefiningOp<IE::FakeQuantizeOp>()
                                        : multiplyOp.getInput2().getDefiningOp<IE::FakeQuantizeOp>();
@@ -132,10 +128,11 @@ mlir::LogicalResult FuseFQAndMul::matchAndRewrite(IE::MultiplyOp multiplyOp, mli
         outLowVals[idx] *= mulConstShape[Dims4D::Filter::OC] == 1 ? mulConstVal[0] : mulConstVal[idx];
     }
 
-    auto newOutHighConst = VPU::createFloatConst(outHighConst.getType().cast<mlir::RankedTensorType>(),
-                                                 ArrayRef(outHighVals), fakeQuantOp.getLoc(), rewriter);
-    auto newOutLowConst = VPU::createFloatConst(outLowConst.getType().cast<mlir::RankedTensorType>(),
-                                                ArrayRef(outLowVals), fakeQuantOp.getLoc(), rewriter);
+    auto newOutHighConst =
+            Const::createFloatConst(rewriter, fakeQuantOp.getLoc(),
+                                    outHighConst.getType().cast<mlir::RankedTensorType>(), ArrayRef(outHighVals));
+    auto newOutLowConst = Const::createFloatConst(
+            rewriter, fakeQuantOp.getLoc(), outLowConst.getType().cast<mlir::RankedTensorType>(), ArrayRef(outLowVals));
 
     rewriter.replaceOpWithNewOp<IE::FakeQuantizeOp>(multiplyOp, fakeQuantOp.getInput(), fakeQuantOp.getInputLow(),
                                                     fakeQuantOp.getInputHigh(), newOutLowConst, newOutHighConst,

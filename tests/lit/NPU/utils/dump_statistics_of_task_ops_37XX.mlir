@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: env IE_NPU_LOG_FILTER=dump-statistics-of-task-ops vpux-opt --init-compiler="vpu-arch=%arch% allow-custom-values=true" --compress-weights-btc --dump-statistics-of-task-ops -o /dev/null %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX
+// REQUIRES: arch-NPU37XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 

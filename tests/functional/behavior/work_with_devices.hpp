@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 #include "common/functions.h"
-#include "common/vpu_test_env_cfg.hpp"
+#include "common/npu_test_env_cfg.hpp"
 #include "intel_npu/al/config/common.hpp"
 #include "npu_private_properties.hpp"
 
@@ -52,7 +52,7 @@ protected:
 
 TEST_P(TestCompiledModelNPU, samePlatformProduceTheSameBlob) {
     SKIP_IF_CURRENT_TEST_IS_DISABLED() {
-        std::string platform = LayerTestsUtils::getTestsPlatformFromEnvironmentOr("3700");
+        std::string platform = LayerTestsUtils::getTestsPlatformFromEnvironmentOr("3720");
 
         configuration[ov::intel_npu::create_executor.name()] = "0";
         auto configuration1 = configuration;
@@ -98,7 +98,7 @@ TEST_P(TestCompileModelWithoutDeviceNPU, ThrowIfNoDeviceAndNoPlatform) {
 TEST_P(TestCompileModelWithoutDeviceNPU, NoThrowIfNoDeviceAndButPlatformPassed) {
     SKIP_IF_CURRENT_TEST_IS_DISABLED() {
         auto netConfiguration = configuration;
-        netConfiguration[ov::intel_npu::platform.name()] = LayerTestsUtils::getTestsPlatformFromEnvironmentOr("3700");
+        netConfiguration[ov::intel_npu::platform.name()] = LayerTestsUtils::getTestsPlatformFromEnvironmentOr("3720");
         const auto& ov_model = buildSingleLayerSoftMaxNetwork();
         OV_ASSERT_NO_THROW(auto compiled_model = core->compile_model(ov_model, target_device, netConfiguration));
     }
@@ -106,7 +106,6 @@ TEST_P(TestCompileModelWithoutDeviceNPU, NoThrowIfNoDeviceAndButPlatformPassed) 
 
 const std::map<std::string_view, std::array<std::string_view, 2>> wrongDevice = {
         // {orig, {wrong for MLIR}}
-        {"VPU3700", {"VPU0000"}},
         {"VPU3720", {"VPU0000"}},
         {"VPU4000", {"VPU0000"}},
 };
@@ -123,7 +122,6 @@ std::string getWrongDevice(const std::string_view platform, const CompilerType&)
 
 const std::map<std::string_view, std::array<std::string_view, 2>> validDevice = {
         // {orig, {valid for MLIR}}
-        {"VPU3700", {"VPU3700"}},
         {"VPU3720", {"VPU3720"}},
         {"VPU4000", {"VPU4000"}},
 };

@@ -4,7 +4,7 @@
 //
 
 // RUN: vpux-opt --init-compiler="vpu-arch=%arch% compilation-mode=ReferenceSW enable-partial-workload-management=true" %s | FileCheck %s --strict-whitespace
-// REQUIRES: arch-VPUX40XX
+// REQUIRES: arch-NPU40XX
 
 // CHECK: module @test attributes {VPU.arch = #VPU.arch_kind<NPU40XX>, VPU.compilationMode = #VPU.compilation_mode<ReferenceSW>, VPU.revisionID = #VPU.revision_id<REVISION_NONE>}
 module @test {
@@ -12,11 +12,12 @@ module @test {
 // CHECK-DAG:    {{  }}IE.PipelineOptions @Options {
 // CHECK-DAG:    {{    }}IE.Option @VPU.BarrierMaxVariantSum : 256
 // CHECK-DAG:    {{    }}IE.Option @VPU.BarrierMaxVariantCount : 256
+// CHECK-DAG:    {{    }}IE.Option @VPU.AutoPaddingODU : false
 // CHECK-DAG:    {{  }}}
 
 // CHECK-DAG:    {{  }}IE.ExecutorResource 2 of @DMA_NN
 // CHECK-DAG:    {{  }}IE.ExecutorResource 1 of @M2I
-// CHECK-DAG:    {{  }}IE.TileResource 6 of @NCE at 1.700000e+03 MHz {
+// CHECK-DAG:    {{  }}IE.TileResource 6 of @NCE at 1.850000e+03 MHz {
 // CHECK-DAG:    {{    }}IE.ExecutorResource 2 of @SHAVE_ACT
 // CHECK-DAG:    {{    }}IE.ExecutorResource 1 of @DPU
 // CHECK-DAG:    {{    }}IE.MemoryResource 1327104 bytes of @CMX_NN_FragmentationAware

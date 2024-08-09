@@ -11,7 +11,7 @@
 #include "vpux/compiler/dialect/IE/IR/dialect.hpp"
 #include "vpux/compiler/dialect/IERT/ops.hpp"  // E#106904: IERT doesn't have a dialect header
 #include "vpux/compiler/dialect/VPU/utils/dry_run_utils.hpp"
-#include "vpux/compiler/dialect/VPUASM/ops.hpp"  // E#106904: VPUASM doesn't have a dialect header
+#include "vpux/compiler/dialect/VPUASM/dialect.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPUIPDPU/dialect.hpp"
 #include "vpux/compiler/dialect/VPUMI37XX/dialect.hpp"
@@ -27,6 +27,7 @@
 #include <mlir/Dialect/ControlFlow/IR/ControlFlow.h>
 #include <mlir/Dialect/LLVMIR/LLVMDialect.h>
 #include <mlir/Dialect/Math/IR/Math.h>
+#include <mlir/Dialect/SCF/IR/SCF.h>
 #include <mlir/IR/BuiltinOps.h>
 
 #include <memory>
@@ -88,8 +89,6 @@ std::unique_ptr<mlir::Pass> createConvertVPUIPDPU2NPUReg40XXPass(
 std::unique_ptr<mlir::Pass> createConvertVPUASM2NPUReg40XXPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createConvertVPUASM2NPUReg40XXRelocsPass(Logger log = Logger::global(),
                                                                      bool enableWLM = false);
-
-std::unique_ptr<mlir::Pass> createMoveIOBuffersToSectionsPass(Logger log = Logger::global());
 
 //
 // registerConversionPipelines

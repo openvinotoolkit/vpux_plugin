@@ -22,7 +22,7 @@ bool VPUIP::FuncInlinerInterface::isLegalToInline(mlir::Region*, mlir::Region*, 
     return true;
 }
 
-void VPUIP::FuncInlinerInterface::handleTerminator(mlir::Operation*, ArrayRef<mlir::Value>) const {
+void VPUIP::FuncInlinerInterface::handleTerminator(mlir::Operation*, mlir::ValueRange) const {
 }
 
 void VPUIP::FuncInlinerInterface::processInlinedCallBlocks(

@@ -107,7 +107,9 @@ mlir::LogicalResult RewriteEnqueueToDma::matchAndRewrite(VPURegMapped::FetchTask
             true, true, false,                           // is_out_of_rder  and is_critical, enable_msc
             0,                                           // port has no meaning
             VPUIP::DMAAccMode::DISABLE,
+            nullptr,  // dma_transaction
             nullptr,  // no descriptor attr required
+            nullptr,  // no act_compression_sparsity_map required
             nullptr,  // no descriptor attr required
             nullptr,  // dma_hwp_id 0 s nullptr
             nullptr,  //  profilingMetadata
@@ -123,7 +125,9 @@ mlir::LogicalResult RewriteEnqueueToDma::matchAndRewrite(VPURegMapped::FetchTask
             true, true, false,  // is_out_of_rder  and is_critical, enable_msc
             0,                  // port has no meaning
             VPUIP::DMAAccMode::DISABLE,
+            nullptr,  // dma_transaction
             nullptr,  // no descriptor attr required
+            nullptr,  // no act_compression_sparsity_map required
             nullptr,  // no descriptor attr required
             nullptr,  // dma_hwp_id 0 s nullptr
             nullptr,  // profilingMetadata

@@ -12,6 +12,7 @@
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/cost_model/cost_model.hpp"
 #include "vpux/compiler/dialect/VPUIP/interfaces/dpu_tiler.hpp"
+#include "vpux/compiler/dialect/VPUIP/transforms/factories/split_cost_getter.hpp"
 
 #include "vpux/utils/core/enums.hpp"
 
@@ -25,105 +26,6 @@ namespace {
 //
 
 constexpr int64_t MAX_SPLIT_NUMBER = 50;
-
-//
-// MPE mode utilities
-//
-
-bool isMixedPrecisionSupportedForVPUX30XX(mlir::Type inElemType, mlir::Type outElemType, mlir::Operation* operation) {
-    return inElemType.isa<mlir::quant::QuantizedType>() && !outElemType.isa<mlir::quant::QuantizedType>() &&
-           mlir::isa<VPU::NCEConvolutionOp, VPU::NCEDepthConvolutionOp, VPU::NCEMaxPoolOp, VPU::NCEInterpolateOp>(
-                   operation);
-}
-
-VPU::MPEMode getMpeModeForVPUX30XX(mlir::Type inElemType, mlir::Type outElemType, mlir::Operation* operation,
-                                   ShapeRef shape) {
-    if (isMixedPrecisionSupportedForVPUX30XX(inElemType, outElemType, operation)) {
-        return VPU::MPEMode::VECTOR_FP16;
-    }
-
-    if (inElemType.isa<mlir::quant::QuantizedType>() || outElemType.isa<mlir::quant::QuantizedType>()) {
-        const double W = static_cast<double>(shape[Dims4D::Act::W]);
-        const double H = static_cast<double>(shape[Dims4D::Act::H]);
-        // VPU::MPEMode::MATRIX process tensor using W=4 H=4 parts, calculate grid cells count for it
-        const double matrixPartsCount = std::ceil(W / 4.0) * std::ceil(H / 4.0);
-        // VPU::MPEMode::VECTOR process tensor using W=16 H=1 parts, calculate grid cells count for it
-        const double vectorPartsCount = std::ceil(W / 16.0) * H;
-        // Cells count is in direct ratio with work size, so choose smaller one
-        return (vectorPartsCount <= matrixPartsCount) ? VPU::MPEMode::VECTOR : VPU::MPEMode::MATRIX;
-    }
-
-    if (inElemType.isF16() || inElemType.isBF16() || outElemType.isF16() || outElemType.isBF16()) {
-        return VPU::MPEMode::VECTOR_FP16;
-    }
-
-    // Let's fall back to vector (might be a bad idea though).
-    return VPU::MPEMode::VECTOR;
-}
-
-inline std::vector<unsigned int> getNTHWNTKGrid(VPU::MPEMode mode) {
-    switch (mode) {
-    case VPU::MPEMode::CUBOID_4x16:
-        return {8, 8, 256};
-    case VPU::MPEMode::CUBOID_8x16:
-        return {16, 8, 128};
-    default:
-        return {16, 16, 64};
-    }
-}
-
-VPU::MPEMode getMpeModeForVPUX37XXConv(ShapeRef shape) {
-    std::vector<std::pair<double, VPU::MPEMode>> MPECost = {{0.0, VPU::MPEMode::CUBOID_4x16},
-                                                            {0.0, VPU::MPEMode::CUBOID_8x16},
-                                                            {0.0, VPU::MPEMode::CUBOID_16x16}};
-
-    for (unsigned int idx = 0; idx < MPECost.size(); idx++) {
-        auto grid = getNTHWNTKGrid(MPECost[idx].second);
-
-        // Get the number of weights and activation grid reads
-        double numWtGrids = std::ceil((double)shape[Dims4D::Act::C] / (double)grid[2]);
-        double numActGrids = std::ceil((double)shape[Dims4D::Act::H] / (double)grid[1]) *
-                             std::ceil((double)shape[Dims4D::Act::W] / (double)grid[0]);
-
-        // Compute the simplfied number of reads
-        double actReads = numWtGrids * shape[Dims4D::Act::H] * shape[Dims4D::Act::W];
-        double wtReads = numActGrids * shape[Dims4D::Act::C];
-
-        MPECost[idx].first = actReads + wtReads;
-    }
-
-    // Select the one that has min number of reads
-    return (*std::min_element(MPECost.begin(), MPECost.end())).second;
-}
-
-VPU::MPEMode getMpeModeForVPUX37XX(mlir::Type, mlir::Type, mlir::Operation* operation, ShapeRef shape) {
-    if (mlir::isa<VPU::NCEConvolutionOp, VPU::NCECompressConvolutionOp, VPU::NCEInterpolateOp>(operation)) {
-        return getMpeModeForVPUX37XXConv(shape);
-    } else if (mlir::isa<VPU::NCEDepthConvolutionOp, VPU::NCEMaxPoolOp, VPU::NCEAveragePoolOp>(operation)) {
-        return VPU::MPEMode::CUBOID_16x16;
-    } else if (mlir::isa<VPU::NCEEltwiseOp>(operation)) {
-        return VPU::MPEMode::CUBOID_8x16;
-    }
-
-    return VPU::MPEMode::CUBOID_16x16;
-}
-
-using GetMpeModeCb = VPU::MPEMode (*)(mlir::Type, mlir::Type, mlir::Operation*, ShapeRef);
-
-const EnumMap<VPU::ArchKind, GetMpeModeCb> mpeMap = {
-        {VPU::ArchKind::NPU30XX, getMpeModeForVPUX30XX},
-        {VPU::ArchKind::NPU37XX, getMpeModeForVPUX37XX},
-        {VPU::ArchKind::NPU40XX, getMpeModeForVPUX37XX},
-};
-
-using ComputeSplitCostCb = int64_t (*)(const VPUIP::WorkloadSplit&, const VPUIP::WorkloadCostParams&,
-                                       const std::shared_ptr<VPUNN::VPUCostModel>&, LogCb);
-
-const EnumMap<VPU::ArchKind, ComputeSplitCostCb> splitCostMap = {
-        {VPU::ArchKind::NPU30XX, VPUIP::computeSplitCostForVPUX30XX},
-        {VPU::ArchKind::NPU37XX, VPUIP::computeSplitCostForVPUX37XX},
-        {VPU::ArchKind::NPU40XX, VPUIP::computeSplitCostForVPUX37XX},
-};
 
 //
 // generateWorkloads
@@ -143,21 +45,30 @@ void addSubTensorOffset(TileInfo& tileInfo, ShapeRef tensorOffset) {
 
 void generateWorkloads(mlir::OpBuilder& builder, VPU::NCEOpInterface origOp,
                        const VPUIP::WorkloadCostParams& costParams, VPU::MPEMode mpeMode,
-                       ArrayRef<bool> isTileOverDimsSupported, const std::shared_ptr<VPUNN::VPUCostModel>& costModel,
-                       Logger log, mlir::IntegerAttr clusterId = nullptr, ShapeRef subTensorOffset = {}) {
+                       ArrayRef<bool> isTileOverDimsSupported, VPUNN::VPUCostModel& costModel, Logger log,
+                       mlir::IntegerAttr clusterId = nullptr, ShapeRef subTensorOffset = {}) {
     VPUIP::DpuTiler dpuTiler(costParams.outputShape, mpeMode);
 
     VPUIP::WorkloadSplitPool splitPoolSet;
 
-    auto inElemType = origOp->getOperand(0).getType().cast<vpux::NDTypeInterface>().getElementType();
-    auto outElemType = origOp->getResult(0).getType().cast<vpux::NDTypeInterface>().getElementType();
+    dpuTiler.tileOverH(costParams.numDPU, splitPoolSet);
 
-    if (costParams.arch == VPU::ArchKind::NPU30XX &&
-        isMixedPrecisionSupportedForVPUX30XX(inElemType, outElemType, origOp.getOperation())) {
-        dpuTiler.tileOverHWMixedPrecision(splitPoolSet);
+    if (costParams.outputShape.size() == 5) {
+        int64_t cluster = 0;
+        if (clusterId != nullptr) {
+            cluster = clusterId.getValue().getSExtValue();
+        }
+        // This logic assumes that each chunk starts right after the previous.
+        // cluster 0: outOffsets [0, 0, 0, 0, 0]  outSizes [32, 1, 16, 16, 1]
+        // cluster 1: outOffsets [32, 0, 0, 0, 0] outSizes [32, 1, 16, 16, 1]
+        // cluster 2: outOffsets [64, 0, 0, 0, 0] outSizes [32, 1, 16, 16, 1]
+        const Shape offsets = {cluster * costParams.outputShape.front(), 0, 0, 0, 0};
+        auto tilePad = VPU::getPaddingAttr(builder.getContext(), 0, 0, 0, 0);
+        origOp.addWorkload(builder, origOp.getLoc(), offsets, costParams.outputShape, tilePad,
+                           VPU::MPEMode::CUBOID_16x16, getIntAttr(origOp->getContext(), cluster));
+        return;
     } else {
         dpuTiler.tileOverH(costParams.numDPU, splitPoolSet);
-
         // Invariants that produce sparse activations must have the same number of channels across the variants
         const auto requiresEqualZ = (origOp->getResult(0).getType().dyn_cast<VPU::SparseTensorType>() != nullptr);
 
@@ -198,7 +109,7 @@ void generateWorkloads(mlir::OpBuilder& builder, VPU::NCEOpInterface origOp,
         const auto logCb = [&](const formatv_object_base& msg) {
             log.trace("{0}", msg.str());
         };
-        auto computeSplitCostByArch = splitCostMap.at(costParams.arch);
+        auto computeSplitCostByArch = VPUIP::getSplitCostCb(costParams.arch);
         splitPoolCosts[ind] = computeSplitCostByArch(curSplit, costParams, costModel, logCb);
     }
 
@@ -234,8 +145,8 @@ void generateWorkloads(mlir::OpBuilder& builder, VPU::NCEOpInterface origOp,
 //
 
 void splitOntoWorkloads(mlir::OpBuilder& builder, VPU::NCEOpInterface origOp, VPUIP::WorkloadCostParams& costParams,
-                        VPU::MPEMode mpeMode, ArrayRef<bool> isTileOverDimsSupported,
-                        const std::shared_ptr<VPUNN::VPUCostModel>& costModel, Logger log) {
+                        VPU::MPEMode mpeMode, ArrayRef<bool> isTileOverDimsSupported, VPUNN::VPUCostModel& costModel,
+                        Logger log) {
     if (auto clusterOp = mlir::dyn_cast<VPU::NCEClusterTilingOp>(origOp->getParentOp())) {
         const auto outputs = clusterOp->getResults();
         VPUX_THROW_UNLESS(outputs.size() == 1, "Wrong outputs size: {0}", outputs.size());
@@ -298,7 +209,7 @@ void splitOntoWorkloads(mlir::OpBuilder& builder, VPU::NCEOpInterface origOp, VP
 
             if (costParams.arch == VPU::ArchKind::NPU37XX &&
                 mlir::isa<VPU::NCEConvolutionOp, VPU::NCECompressConvolutionOp, VPU::NCEInterpolateOp>(origOp)) {
-                mpeMode = getMpeModeForVPUX37XXConv(outputSubTensorShapes[clusterId]);
+                mpeMode = origOp.getMpeMode(nullptr, nullptr, outputSubTensorShapes[clusterId]);
             }
             generateWorkloads(builder, origOp, costParams, mpeMode, isTileOverDimsSupported, costModel, log,
                               clusterIdAttr, outputSubTensorOffsets[clusterId]);
@@ -343,8 +254,7 @@ mlir::LogicalResult GenericNCERewrite::matchAndRewrite(VPU::NCEOpInterface nceOp
 
     const auto outputShape = outputType.getShape();
 
-    const auto mpeByType = mpeMap.at(_arch);
-    const auto mpeMode = mpeByType(inElemType, outElemType, nceOp, outputShape);
+    const auto mpeMode = nceOp.getMpeMode(inElemType, outElemType, outputShape);
 
     auto params = VPU::getWorkloadCostParam(nceOp, _arch, _numDPU);
 
@@ -360,8 +270,8 @@ mlir::LogicalResult GenericNCERewrite::matchAndRewrite(VPU::NCEOpInterface nceOp
         isTileOverDimsSupported[Dims4D::Act::W.ind()] = false;
     }
 
-    rewriter.updateRootInPlace(nceOp, [&]() {
-        splitOntoWorkloads(rewriter, nceOp, params, mpeMode, ArrayRef(isTileOverDimsSupported), _costModel, _log);
+    rewriter.modifyOpInPlace(nceOp, [&]() {
+        splitOntoWorkloads(rewriter, nceOp, params, mpeMode, ArrayRef(isTileOverDimsSupported), *_costModel, _log);
     });
 
     return mlir::success();
@@ -391,7 +301,6 @@ void SplitNCEOpsOntoWorkloadsPass::safeRunOnFunc() {
     auto module = func->getParentOfType<mlir::ModuleOp>();
 
     const auto arch = VPU::getArch(module);
-    VPUX_THROW_UNLESS(mpeMap.find(arch) != mpeMap.end(), "Failed to map MPE mode to target arch");
 
     auto nceCluster = IE::getTileExecutor(module);
     VPUX_THROW_UNLESS(nceCluster != nullptr, "Failed to get NCE_Cluster information");

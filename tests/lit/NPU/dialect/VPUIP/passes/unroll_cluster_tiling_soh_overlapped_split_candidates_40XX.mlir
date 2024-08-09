@@ -4,7 +4,7 @@
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --unroll-cluster-tiling --canonicalize  %s | FileCheck %s
-// REQUIRES: arch-VPUX40XX
+// REQUIRES: arch-NPU40XX
 
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
@@ -89,6 +89,8 @@
 !WeightsStub_CMX = memref<16x16x3x3xf16, #NHWC, @CMX_NN>
 !WeightsTableStub_CMX = memref<16x1x1x4xsi32, @CMX_NN>
 
+// Duplicate of UnrollNceSoHOutputOverlapped from unroll_cluster_tiling_soh_overlapped_40XX+.mlir,
+// but verifies selection of candidates for split.
 //CHECK-LABEL: @UnrollNceSoHOutputOverlappedSplitCandidates
 func.func @UnrollNceSoHOutputOverlappedSplitCandidates(%input: !Input_DDR, %output: !Output_DDR) -> !Output_DDR {
     // Barriers
@@ -118,7 +120,7 @@ func.func @UnrollNceSoHOutputOverlappedSplitCandidates(%input: !Input_DDR, %outp
         VPUIP.NNDMA {port = 0 : i64} inputs(%parent_in: !Input_DDR) outputs(%parent_input_cmx: !InputDistributed) -> !InputDistributed
     }
     // Select cluster 2 as candidate for split
-    // CHECK:   VPUIP.NNDMA {port = 0 : i64, split_candidate} 
+    // CHECK:   VPUIP.NNDMA {port = 0 : i64, split_candidate}
     // CHECK-SAME:      memref<1x16x12x33xf16, #NHWC, @DDR>
     // CHECK-SAME:      memref<1x16x12x33xf16, #NHWC, [@CMX_NN, 2]>
 
@@ -180,7 +182,7 @@ func.func @UnrollNceSoHOutputOverlappedSplitCandidates(%input: !Input_DDR, %outp
         VPUIP.NNDMA {port = 0 : i64} inputs(%parent_out_cmx: !OutputDistributed) outputs(%parent_out: !Output_DDR) -> !Output_DDR
     }
     // Select cluster 2 as candidate for split
-    // CHECK:   VPUIP.NNDMA {port = 0 : i64, split_candidate} 
+    // CHECK:   VPUIP.NNDMA {port = 0 : i64, split_candidate}
     // CHECK-SAME:      memref<1x16x11x33xf16, #NHWC, [@CMX_NN, 2]>
     // CHECK-SAME:      memref<1x16x11x33xf16, #NHWC, @DDR>
 

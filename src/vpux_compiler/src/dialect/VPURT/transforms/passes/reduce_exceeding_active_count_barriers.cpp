@@ -16,15 +16,16 @@ namespace {
 class ReduceExceedingActiveCountBarriersPass final :
         public VPURT::ReduceExceedingActiveCountBarriersBase<ReduceExceedingActiveCountBarriersPass> {
 public:
-    explicit ReduceExceedingActiveCountBarriersPass(Logger log) {
+    explicit ReduceExceedingActiveCountBarriersPass(const bool wlmFlag, const bool unevenVariantSplit, Logger log)
+            : _wlmFlag(wlmFlag), _unevenVariantSplitFlag(unevenVariantSplit) {
         Base::initLogger(log, Base::getArgumentName());
     }
 
 private:
     void safeRunOnFunc() final;
-    bool linearizeTasks(std::set<size_t>& linearizationTasks, BarrierInfo& barrierInfo, mlir::func::FuncOp func);
-    void linearizeBarriers(mlir::DenseSet<VPURT::DeclareVirtualBarrierOp>& barrierOps, BarrierInfo& barrierInfo,
-                           mlir::func::FuncOp func);
+    bool linearizeTasks(std::set<size_t>& linearizationTasks, BarrierInfo& barrierInfo);
+    void linearizeBarriers(mlir::DenseSet<VPURT::DeclareVirtualBarrierOp>& barrierOps, BarrierInfo& barrierInfo);
+
     // When linearizing tasks barriers are being inserted to represent new control flow. During
     // this process already existing dependency might be checked to prevent from barrier insertion.
     // This is optional feature as nevertheless unnecessary dependencies are being removed in optimizeBarriers step
@@ -32,9 +33,18 @@ private:
     bool _checkDependencyWhenLinearizing = true;
     bool _rebuildControlMap = true;
     const bool _considerTaskFifoDependency = false;
+    const bool _mergeWaitBarriersIteratively = false;
+    bool _wlmFlag = false;
+    bool _unevenVariantSplitFlag = false;
     SmallVector<llvm::BitVector> _taskControlMap;
     size_t _controlMapOffset = 0;
     size_t _controlMapBlockIdx = 0;
+    size_t _availableSlots = 0;
+
+    // Remove checks of slot count limits in barrier optimizations during linearization in order to merge more
+    // barriers from parallel branches that wouldn't be merged otherwise. Subsequent analysis verifies the slot
+    // count and if necessary, enforce barrier split.
+    const bool _checkSlotCountWhenOptimizing = false;
 };
 
 // check if taskA and taskB use the same barriers
@@ -59,7 +69,7 @@ bool useSameBarriers(size_t taskA, size_t taskB, BarrierInfo& barrierInfo) {
                                    TaskOpM
 */
 bool ReduceExceedingActiveCountBarriersPass::linearizeTasks(std::set<size_t>& linearizationTasks,
-                                                            BarrierInfo& barrierInfo, mlir::func::FuncOp func) {
+                                                            BarrierInfo& barrierInfo) {
     _log.trace("Linearizing tasks");
 
     if (linearizationTasks.size() < 2) {
@@ -74,7 +84,7 @@ bool ReduceExceedingActiveCountBarriersPass::linearizeTasks(std::set<size_t>& li
         ++endItr;
         while (endItr != linearizationTasks.end() && useSameBarriers(*currItr, *endItr, barrierInfo)) {
             slotCount += barrierInfo.getNumOfSlotsUsed(barrierInfo.getTaskOpAtIndex(*endItr));
-            if (slotCount > (VPUIP::getBarrierMaxVariantSum(func) / 2)) {
+            if (slotCount > _availableSlots) {
                 return endItr;
             }
             ++endItr;
@@ -177,7 +187,7 @@ bool ReduceExceedingActiveCountBarriersPass::linearizeTasks(std::set<size_t>& li
     TaskOp1...TaskOpM       TaskOp1 - Bar - ... - Bar - TaskOpm
 */
 void ReduceExceedingActiveCountBarriersPass::linearizeBarriers(
-        mlir::DenseSet<VPURT::DeclareVirtualBarrierOp>& barrierOps, BarrierInfo& barrierInfo, mlir::func::FuncOp func) {
+        mlir::DenseSet<VPURT::DeclareVirtualBarrierOp>& barrierOps, BarrierInfo& barrierInfo) {
     _log.trace("Linearizing barriers");
 
     // store barrier producers and consumers to linearize
@@ -196,7 +206,7 @@ void ReduceExceedingActiveCountBarriersPass::linearizeBarriers(
     // Note: might increase compilation time
 
     // linearize producers and consumers
-    auto linearized = linearizeTasks(tasksToLinearize, barrierInfo, func);
+    auto linearized = linearizeTasks(tasksToLinearize, barrierInfo);
     _log.trace("Linearized = '{0}' producers and consumers", linearized);
 }
 
@@ -207,11 +217,17 @@ void ReduceExceedingActiveCountBarriersPass::safeRunOnFunc() {
                                                          : checked_cast<size_t>(VPUIP::getNumAvailableBarriers(func));
     const auto maxAvailableSlots = maxVariantCount.hasValue() ? checked_cast<size_t>(maxVariantCount.getValue())
                                                               : VPUIP::getBarrierMaxVariantCount(func);
-
+    const auto maxSlotsSum = VPUIP::getBarrierMaxVariantSum(func);
     _log.trace("There are {0} physical barriers and {1} slots for each barrier", numBarriersToUse, maxAvailableSlots);
+    _log.trace("Run-time limit for sum of producers and consumers per barrier: {0}", maxSlotsSum);
+
+    // divide slots equally between producers and consumers and split barriers if needed
+    _availableSlots = VPUIP::getAvailableSlots(maxSlotsSum, maxAvailableSlots);
 
     VPUX_THROW_UNLESS(numBarriersToUse > 1, "Not possible to satisfy barrier requirement numBarriersToUse '{0}'",
                       numBarriersToUse);
+
+    const auto wlmFlag = wlmEnableOpt.hasValue() ? static_cast<bool>(wlmEnableOpt.getValue()) : _wlmFlag;
 
     auto& barrierInfo = getAnalysis<BarrierInfo>();
     if (barrierInfo.getNumOfVirtualBarriers() <= numBarriersToUse) {
@@ -220,7 +236,11 @@ void ReduceExceedingActiveCountBarriersPass::safeRunOnFunc() {
         return;
     }
 
-    VPURT::BarrierSimulator barrierSim(func);
+    if (_unevenVariantSplitFlag) {
+        barrierInfo.enableUnevenVariantSplit();
+    }
+
+    VPURT::BarrierSimulator barrierSim(func, wlmFlag);
     VPUX_THROW_UNLESS(barrierSim.isDynamicBarriers(), "Barrier generated by barrier scheduler must be dynamic");
     VPUX_THROW_UNLESS(barrierInfo.verifyControlGraphSplit(), "Encountered split of control graph is incorrect");
 
@@ -240,10 +260,24 @@ void ReduceExceedingActiveCountBarriersPass::safeRunOnFunc() {
     SmallVector<mlir::DenseSet<VPURT::DeclareVirtualBarrierOp>> barrierBatchesToLegalize;
 
     const auto updateAnalysis = [&]() {
-        barrierInfo.optimizeBarriers();
+        barrierInfo.optimizeBarriers(_checkSlotCountWhenOptimizing);
         VPURT::orderExecutionTasksAndBarriers(func, barrierInfo);
 
-        barrierSim = VPURT::BarrierSimulator{func};
+        barrierSim = VPURT::BarrierSimulator{func, wlmFlag};
+        if (!mlir::succeeded(barrierSim.checkProducerAndConsumerCount(_log))) {
+            _log.trace("Active barrier slot count is not valid, will split barriers");
+            // split barriers that violate the slot count limits
+            barrierInfo.splitBarriersWithExceedingVariantCount(_availableSlots, maxSlotsSum, maxAvailableSlots);
+            VPURT::orderExecutionTasksAndBarriers(func, barrierInfo);
+        }
+
+        // merge parallel wait barriers respecting limits of slot count per barrier
+        if (barrierInfo.ensureTasksDrivenBySingleBarrier(_availableSlots, _mergeWaitBarriersIteratively)) {
+            // IR was modified
+            VPURT::orderExecutionTasksAndBarriers(func, barrierInfo);
+        }
+
+        barrierSim = VPURT::BarrierSimulator{func, wlmFlag};
         if (mlir::succeeded(barrierSim.simulateBarriers(barSimLog, numBarriersToUse, true))) {
             _log.trace("Barrier simulation passed with '{0}', no isses with exceeding barriers", numBarriersToUse);
             VPUX_THROW_UNLESS(barrierSim.getBarrierBatchesToLegalize().empty(),
@@ -255,6 +289,7 @@ void ReduceExceedingActiveCountBarriersPass::safeRunOnFunc() {
 
     // optimize current barrier state and perform simulation
     updateAnalysis();
+    auto barrierBatchesFromPrevIteration = barrierBatchesToLegalize;
 
     // iterate through barrier batches to legalize and reduce active barrier count in each batch
     for (size_t it = 0; it < barrierInfo.getNumOfVirtualBarriers() && !barrierBatchesToLegalize.empty(); ++it) {
@@ -273,12 +308,14 @@ void ReduceExceedingActiveCountBarriersPass::safeRunOnFunc() {
             // Note: currently not merging barriers due to worse performance
 
             // linearize execution
-            linearizeBarriers(activeBarriers, barrierInfo, func);
+            linearizeBarriers(activeBarriers, barrierInfo);
         }
 
-        // TODO: merge more barriers and split exceeding active count barriers ?
-
         updateAnalysis();
+        VPUX_THROW_UNLESS(
+                barrierBatchesToLegalize != barrierBatchesFromPrevIteration,
+                "Encountered identical barrier batches as in previous iteration. Cannot reduce active barriers count.");
+        barrierBatchesFromPrevIteration = barrierBatchesToLegalize;
     }
 
     VPUX_THROW_UNLESS(barrierInfo.verifyControlGraphSplit(), "Encountered split of control graph is incorrect");
@@ -292,7 +329,11 @@ void ReduceExceedingActiveCountBarriersPass::safeRunOnFunc() {
 
     VPURT::postProcessBarrierOps(func);
 
-    VPURT::verifyBarrierSlots(func, _log);
+    VPUX_THROW_UNLESS(VPURT::verifyBarrierSlots(func, _log), "Barrier slot count check failed");
+    auto hasOneWaitBarrierPerTask = VPURT::verifyOneWaitBarrierPerTask(func, _log);
+    if (_mergeWaitBarriersIteratively) {
+        VPUX_THROW_UNLESS(hasOneWaitBarrierPerTask, "Encountered task with more then one wait barrier");
+    }
 }
 
 }  // namespace
@@ -301,6 +342,8 @@ void ReduceExceedingActiveCountBarriersPass::safeRunOnFunc() {
 // createReduceExceedingActiveCountBarriersPass
 //
 
-std::unique_ptr<mlir::Pass> vpux::VPURT::createReduceExceedingActiveCountBarriersPass(Logger log) {
-    return std::make_unique<ReduceExceedingActiveCountBarriersPass>(log);
+std::unique_ptr<mlir::Pass> vpux::VPURT::createReduceExceedingActiveCountBarriersPass(const bool wlmFlag,
+                                                                                      const bool unevenVariantSplitFlag,
+                                                                                      Logger log) {
+    return std::make_unique<ReduceExceedingActiveCountBarriersPass>(wlmFlag, unevenVariantSplitFlag, log);
 }

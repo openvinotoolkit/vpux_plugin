@@ -21,7 +21,8 @@ namespace vpux {
 // even tough opOperand relationships dissapear, we would need to register types that would need intermediate
 // materialization. The SymbolizationPattern overrides the default matchAndRewrite conversion hook and provides two
 // additional hooks:
-//  - getSymbolicName: called out for each Op (at initialization stage) each OP should provide a unique symbolic name
+//  - getSymbolicNames: called out for each Op (at initialization stage) each OP should provide a unique symbolic name
+//  for each of its results
 //  - symbolize: the actual conversion method, where instead of the Operand adaptor, we provide a symbolic map
 //                  that can be used to lookup an ops symbolic name
 template <typename SourceOp>
@@ -38,15 +39,18 @@ public:
     virtual mlir::LogicalResult symbolize(SourceOp op, SymbolMapper& mapper,
                                           mlir::ConversionPatternRewriter& rewriter) const = 0;
 
-    virtual mlir::FlatSymbolRefAttr getSymbolicName(SourceOp op, size_t counter) = 0;
+    virtual llvm::SmallVector<mlir::FlatSymbolRefAttr> getSymbolicNames(SourceOp op, size_t counter) = 0;
 
     void initialize() {
-        size_t counter = 0;
-        for (auto op : _parentFunc.getOps<SourceOp>()) {
-            if (auto symbolicName = getSymbolicName(op, counter)) {
-                _mapper->insert(std::make_pair(op.getResult(), symbolicName));
+        for (auto [counter, op] : _parentFunc.getOps<SourceOp>() | indexed) {
+            auto symbolicNames = getSymbolicNames(op, counter);
+            VPUX_THROW_WHEN(symbolicNames.size() != op->getNumResults(),
+                            "Op must define as many symbolic names as it has results");
+            for (auto [symNameIdx, symName] : symbolicNames | indexed) {
+                if (symName) {
+                    _mapper->try_emplace(op->getResult(symNameIdx), symName);
+                }
             }
-            counter++;
         }
     }
 

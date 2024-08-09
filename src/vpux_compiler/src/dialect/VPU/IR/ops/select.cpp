@@ -13,11 +13,11 @@ using namespace vpux;
 
 mlir::LogicalResult vpux::VPU::SelectOp::inferReturnTypes(mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc,
                                                           mlir::ValueRange operands, mlir::DictionaryAttr attrs,
-                                                          mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+                                                          mlir::OpaqueProperties prop, mlir::RegionRange /*regions*/,
                                                           mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::SelectOpAdaptor select(operands, attrs);
+    VPU::SelectOpAdaptor select(operands, attrs, prop);
     if (mlir::failed(select.verify(loc))) {
         return mlir::failure();
     }
@@ -30,10 +30,14 @@ mlir::LogicalResult vpux::VPU::SelectOp::inferReturnTypes(mlir::MLIRContext* ctx
             IE::broadcastEltwiseShape({in1Type.getShape().raw(), in2Type.getShape().raw(), in3Type.getShape().raw()},
                                       select.getAutoBroadcast(), loc);
 
-    if (mlir::succeeded(outShapeRes)) {
-        const auto outType = in2Type.changeShape(Shape(outShapeRes.value()));
-        inferredReturnTypes.push_back(outType);
+    if (mlir::failed(outShapeRes)) {
+        return mlir::failure();
     }
+
+    auto outputType = mlir::RankedTensorType::get(outShapeRes.value(), in2Type.getElementType(),
+                                                  createTensorAttrFromType(in2Type));
+
+    inferredReturnTypes.push_back(outputType);
 
     return mlir::success();
 }
@@ -49,29 +53,36 @@ bool vpux::VPU::SelectOp::checkStrategyCompatibility(VPU::MultiClusterStrategy s
            strategy == VPU::MultiClusterStrategy::SplitOverWidth;
 }
 
-vpux::VPU::DistributedTensorAttr vpux::VPU::SelectOp::getExplicitDistributedTensorAttr(
-        vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, mlir::ArrayAttr numTiles,
-        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::UnitAttr uniformDistributedSegments,
-        const vpux::VPU::OverlapDistributionParams& /*overlapParams*/) {
-    return VPU::getSWExplicitDistributedTensorAttr(mlir::dyn_cast<VPU::SWOpInterface>(getOperation()), shape,
-                                                   distributionMode, numTiles, numClusters, alignment,
-                                                   uniformDistributedSegments);
+vpux::VPU::DistributedTensorNative vpux::VPU::SelectOp::getExplicitDistributedTensorAttr(
+        vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, ArrayRef<int64_t> numTiles,
+        const int64_t numClusters, ArrayRef<int64_t> alignment, const bool uniformDistributedSegments,
+        const vpux::VPU::OverlapDistributionParams& overlapParams) {
+    return VPU::getSWExplicitDistributedTensorNative(mlir::cast<VPU::SWOpInterface>(getOperation()), shape,
+                                                     distributionMode, numTiles, numClusters, alignment,
+                                                     uniformDistributedSegments, overlapParams);
 }
 
 bool VPU::SelectOp::doesLayerFitIntoCMX(VPU::MultiClusterStrategy strategy, Byte reservedMem) {
     auto selectOp = mlir::cast<VPU::SelectOp>(getOperation());
     const auto outputShape = getShape(selectOp.getOutput());
-    auto numClusters = VPU::getOptimalNumClusters(selectOp, outputShape[Dims4D::Act::C], strategy);
+    auto numClusters = VPU::getOptimalNumClusters(selectOp, outputShape, strategy);
 
-    SmallVector<vpux::NDTypeInterface> ioBuffers;
-    ioBuffers.push_back(
-            getDistributedOutputTypeFromOp(selectOp, selectOp.getOutput().getType(), numClusters, strategy));
+    SmallVector<Byte> buffersSize{VPU::getTotalAllocSizeWithDistribution(
+            getOutput().getType(),
+            getOutputDistributionAttrFromOp(selectOp, getOutput().getType(), numClusters.getInt(), strategy))};
 
     for (const auto input : selectOp->getOperands()) {
-        ioBuffers.push_back(getDistributedActivationTypeFromOp(selectOp, input.getType(), numClusters, strategy));
+        buffersSize.push_back(VPU::getTotalAllocSizeWithDistribution(
+                input.getType(),
+                getActivationDistributionAttrFromOp(selectOp, input.getType(), numClusters.getInt(), strategy)));
     }
 
-    return fitIntoCMX(std::move(ioBuffers), reservedMem);
+    auto totalAvailableCMXSize = reservedMem.count() == 0 ? getTotalCMXSize(getOperation()).count()
+                                                          : getTotalCMXFragmentationAwareSize(getOperation()).count();
+
+    return vpux::VPU::calculateAlignedBuffersMemoryRequirement(getArch(getOperation()), buffersSize).count() +
+                   reservedMem.count() <=
+           totalAvailableCMXSize;
 }
 
 //

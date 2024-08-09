@@ -4,6 +4,7 @@
 //
 
 #include <vpux_elf/writer.hpp>
+#include "vpux/compiler/NPU40XX/dialect/VPU/utils/performance_metrics.hpp"
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
 #include "vpux/compiler/dialect/VPU/utils/performance_metrics.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
@@ -17,8 +18,9 @@ using namespace npu40xx;
 void vpux::ELF::PerformanceMetricsOp::serialize(elf::writer::BinaryDataSection<uint8_t>& binDataSection) {
     nn_public::VpuPerformanceMetrics perf{};
 
-    perf.freq_base = VPU::getFreqBase(VPU::ArchKind::NPU40XX);
-    perf.freq_step = VPU::getFreqStep(VPU::ArchKind::NPU40XX);
+    auto freqTable = VPU::arch40xx::getFrequencyTable();
+    perf.freq_base = freqTable.base;
+    perf.freq_step = freqTable.step;
     perf.bw_base = VPU::getBWBase();
     perf.bw_step = VPU::getBWStep();
 

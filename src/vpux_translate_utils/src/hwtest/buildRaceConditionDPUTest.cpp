@@ -10,6 +10,7 @@
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPUIP/transforms/passes.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
@@ -118,7 +119,7 @@ void buildRaceConditionDPUTest(const nb::TestCaseJsonDescriptor& testDesc, mlir:
         functionOutputs.push_back(function.getArgument(idx));
     }
 
-    const auto weightsValues = generateWeights(weightsShape, weightsType, ctx, weightsFileName);
+    const auto weightsValues = generateWeights(builder, weightsShape, weightsType, ctx, weightsFileName);
     const auto weightsAttribute = generateDefaultWeightsAttr(weightsValues, weightsType);
 
     const auto weightsDDRType =
@@ -169,11 +170,13 @@ void buildRaceConditionDPUTest(const nb::TestCaseJsonDescriptor& testDesc, mlir:
             loc, weightsTableDDRMemRef,
             vpux::Const::ContentAttr::get(weightsTableValues).reorder(vpux::DimsOrder::NHWC));
 
-    auto updateBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, 0);
+    auto [waitWLMBarrier, freeBarrierId] =
+            insertWLMStartSequence(functionBuilder, testDesc.getWLMParams().isWLMPartialEnabled);
+    auto updateBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, freeBarrierId++);
     VPURT::ConfigureBarrierOp waitBarrier;
 
     for (std::size_t idx = 0; idx < numClusters; ++idx) {
-        VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(),
+        VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, waitWLMBarrier,
                                               mlir::ValueRange(updateBarrier.getBarrier()), loc, functionInput,
                                               inputsCMX[idx].getOperation()->getResult(0), 0);
         VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(
@@ -199,7 +202,20 @@ void buildRaceConditionDPUTest(const nb::TestCaseJsonDescriptor& testDesc, mlir:
     const auto pad = VPU::getPaddingAttr(ctx, paddings[PAD_NCETASK_LEFT], paddings[PAD_NCETASK_RIGHT],
                                          paddings[PAD_NCETASK_TOP], paddings[PAD_NCETASK_BOTTOM]);
 
-    for (std::size_t i = 1; i < iterationCount - 1; ++i) {
+    uint32_t wlmInsertDMAfreq = INT_MAX;
+    mlir::Value wlmDummyInputBuff;
+    mlir::Value wlmDummyOutputBuff;
+
+    if (testDesc.getWLMParams().isWLMPartialEnabled == true) {
+        // 0x DPU->DPU->...->DPU x31 -> (insert) DMA
+        auto wlmInvExecGroupSz = 32;
+        wlmInsertDMAfreq = wlmInvExecGroupSz / numClusters;
+        wlmDummyInputBuff = VPUIP::createDummyBuffer(functionBuilder);
+        wlmDummyOutputBuff = VPUIP::createDummyBuffer(functionBuilder);
+    }
+
+    auto startIter = freeBarrierId++;
+    for (std::size_t i = startIter, iter = 1; i < iterationCount - 1; iter++) {
         updateBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, i);
 
         for (std::size_t idx = 0; idx < numClusters; ++idx) {
@@ -211,11 +227,26 @@ void buildRaceConditionDPUTest(const nb::TestCaseJsonDescriptor& testDesc, mlir:
                     vpux::VPUIP::NCETaskType::CONV, kernelSize, strides, pad, nullptr, nullptr);
             nceTask.addDPUTask(functionBuilder, start, outEnd, start, inEnd, pad, conv.cube_mode);
         }
+
+        if ((testDesc.getWLMParams().isWLMPartialEnabled == true) && (iter % wlmInsertDMAfreq == 0)) {
+            waitBarrier = updateBarrier;
+
+            updateBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, ++i);
+            VPURT::wrapIntoTaskOp<VPUIP::SyncDMAOp>(
+                    functionBuilder, mlir::ValueRange(waitBarrier.getBarrier()),
+                    mlir::ValueRange(updateBarrier.getBarrier()), loc, wlmDummyInputBuff, wlmDummyOutputBuff,
+                    /*port*/ vpux::getIntAttr(ctx, 0),
+                    /*isOutOfOrder*/ nullptr, /*isCritical*/ nullptr, /*dmaHwpId*/ nullptr,
+                    /*dmaProfilingMetaData*/ nullptr);
+        }
+
         waitBarrier = updateBarrier;
+        i++;
     }
 
     // finalBarrier passed as production barrier to last DMA task
-    auto finalBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, iterationCount - 1);
+    auto finalBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(
+            loc, iterationCount - 1, testDesc.getWLMParams().isWLMPartialEnabled);
     for (std::size_t idx = 0; idx < numClusters; ++idx) {
         VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(waitBarrier.getBarrier()),
                                               mlir::ValueRange(finalBarrier.getBarrier()), loc,

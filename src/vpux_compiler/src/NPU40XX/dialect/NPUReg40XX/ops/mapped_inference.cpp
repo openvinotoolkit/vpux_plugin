@@ -8,7 +8,6 @@
 #include "vpux/compiler/NPU40XX/dialect/NPUReg40XX/types.hpp"
 #include "vpux/compiler/act_kernels/shave_binary_resources.h"
 #include "vpux/compiler/core/profiling.hpp"
-#include "vpux/compiler/dialect/ELFNPU37XX/utils.hpp"
 #include "vpux/compiler/dialect/VPUASM/ops.hpp"
 #include "vpux/compiler/dialect/VPUMI40XX/utils.hpp"
 #include "vpux/utils/core/mem_size.hpp"

@@ -86,8 +86,11 @@ void buildRaceConditionTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mo
     const auto inputCMXOffset = 0;
     const auto outputCMXOffset = inputCMXOffset + totalTensorSize(inShape, inputType);
 
+    auto [waitWLMBarrier, freeBarrierId] =
+            insertWLMStartSequence(funcBuilder, testDesc.getWLMParams().isWLMPartialEnabled);
+
     VPURT::ConfigureBarrierOp waitBarrier;
-    size_t barrierNumber = 0;
+    size_t barrierNumber = freeBarrierId++;
     SmallVector<mlir::Value> waitBarriers;
     SmallVector<vpux::VPURT::DeclareBufferOp> outputs;
     SmallVector<mlir::Type> cnnOpOutputs;
@@ -103,7 +106,7 @@ void buildRaceConditionTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mo
                                                     static_cast<int>(cluster), inputCMXOffset));
 
         vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(
-                funcBuilder, mlir::ValueRange(), mlir::ValueRange(inputDataDMA.getBarrier()), builder.getUnknownLoc(),
+                funcBuilder, waitWLMBarrier, mlir::ValueRange(inputDataDMA.getBarrier()), builder.getUnknownLoc(),
                 funcInput, getTensorResult(inputCMXVec[0]), 0,
                 testDesc.getArchitecture() == vpux::VPU::ArchKind::NPU40XX ? 0 : cluster);
 
@@ -130,7 +133,8 @@ void buildRaceConditionTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mo
 
     SmallVector<mlir::BlockArgument> returnOps;
     // finalBarrier passed as production barrier to last DMA task
-    auto finalBarrier = funcBuilder.create<VPURT::ConfigureBarrierOp>(funcBuilder.getUnknownLoc(), barrierNumber++);
+    auto finalBarrier = funcBuilder.create<VPURT::ConfigureBarrierOp>(funcBuilder.getUnknownLoc(), barrierNumber++,
+                                                                      testDesc.getWLMParams().isWLMPartialEnabled);
     for (size_t i = 0; i < outputs.size(); ++i) {
         vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcBuilder, mlir::ValueRange(llvm::ArrayRef(waitBarriers)),
                                                     mlir::ValueRange(finalBarrier.getBarrier()),

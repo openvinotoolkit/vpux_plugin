@@ -8,14 +8,11 @@
 using namespace vpux;
 using namespace VPU;
 
-// the length of VF pipelining pattern
-// should match the pattern DPU-SW-DPU for now
-constexpr int64_t VF_PIPELINE_LENGTH = 3;
 constexpr int64_t VF_POTENTIAL_PIPELINE_LENGTH = 2;
 
 VFConfig::VFConfig(VPU::VerticalFusionOp vfOp, bool enableVFPipelining /*true*/)
         : _subgraph(vfOp), _isPipelineEnabled(enableVFPipelining) {
-    _isVFPipelineCandidate = _isPipelineEnabled && isVFPipelinePattern();
+    restoreVFPipeline();
 }
 
 bool VFConfig::isVFPipelinePattern() {

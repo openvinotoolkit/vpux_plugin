@@ -1,11 +1,11 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --mlir-print-debuginfo --init-compiler="vpu-arch=%arch% allow-custom-values=true" --lower-VPUIP-to-ELF %data_path_npu%/profiling-40XX.mlir.txt | vpux-translate --vpu-arch=%arch% --export-ELF -o %t
 // RUN: prof_parser -b %t -p %data_path_npu%/profiling-0-40XX.bin -f debug | FileCheck %s
-// REQUIRES: arch-VPUX40XX
+// REQUIRES: arch-NPU40XX
 
 //CHECK:    Index  Offset        Engine  Buffer ID         Cluster ID      Buffer offset    IDU dur         IDU tstamp  IDU WL ID  IDU DPU ID    ODU dur         ODU tstamp  ODU WL ID  ODU DPU ID  Task
 //CHECK:        0       0           dpu          0                  0                  0         bb           239b9eab         10           0        172   239b9ead                 10          0  conv1/WithoutBiases?t_Convolution/cluster_0/variant_0

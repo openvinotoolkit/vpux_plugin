@@ -15,12 +15,12 @@
 
 #include <openvino/runtime/profiling_info.hpp>
 
-namespace vpux {
+namespace intel_npu {
 
-class IMDInferRequest final : public intel_npu::SyncInferRequest {
+class IMDInferRequest final : public SyncInferRequest {
 public:
-    explicit IMDInferRequest(const std::shared_ptr<const intel_npu::ICompiledModel>& compiledModel,
-                             const std::shared_ptr<intel_npu::IExecutor>& executor, const intel_npu::Config& config);
+    explicit IMDInferRequest(const std::shared_ptr<const ICompiledModel>& compiledModel,
+                             const std::shared_ptr<IExecutor>& executor, const Config& config);
 
     void infer() override;
     void infer_async() override;
@@ -33,7 +33,7 @@ private:
     std::vector<ov::ProfilingInfo> get_profiling_info() const override;
     std::vector<uint8_t> get_raw_profiling_data() const;
 
-    SmallString create_temporary_work_directory();
+    vpux::SmallString create_temporary_work_directory();
     void store_compiled_model();
     void store_network_inputs();
     void run_app();
@@ -41,10 +41,10 @@ private:
                         const bool isDynamic = false);
     void load_network_outputs();
 
-    SmallString _workDirectory;
-    const std::shared_ptr<intel_npu::IExecutor> _executorPtr;
-    const intel_npu::Config _config;
-    Logger _logger;
+    vpux::SmallString _workDirectory;
+    const std::shared_ptr<IExecutor> _executorPtr;
+    const Config _config;
+    vpux::Logger _logger;
 
     std::unordered_map<std::string, size_t> _inputOrder;
     std::unordered_map<std::string, size_t> _outputOrder;
@@ -52,11 +52,7 @@ private:
     std::shared_ptr<ov::ITensor> _rawProfilingData;
 };
 
-namespace profiling {
-
 using LayerStatistics = std::vector<ov::ProfilingInfo>;
 LayerStatistics getLayerStatistics(const uint8_t* rawData, size_t dataSize, const std::vector<char>& blob);
 
-}  //  namespace profiling
-
-}  //  namespace vpux
+}  //  namespace intel_npu

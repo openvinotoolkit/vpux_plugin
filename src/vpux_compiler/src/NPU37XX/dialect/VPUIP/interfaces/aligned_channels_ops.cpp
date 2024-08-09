@@ -24,6 +24,10 @@ public:
             return mlir::success();
         }
 
+        if (mlir::isa<IE::MatMulOp>(op) && VPU::MatMulOp::isSupported(mlir::dyn_cast<IE::MatMulOp>(op))) {
+            return mlir::success();
+        }
+
         return VPUIP::NCEInvariant::verifyChannels(mlir::cast<MainOpType>(op));
     }
 
@@ -101,5 +105,6 @@ void vpux::VPUIP::arch37xx::registerAlignedChannelsOpInterfaces(mlir::DialectReg
         IE::InterpolateOp::attachInterface<AlignedChannelsOpModel<IE::InterpolateOp>>(*ctx);
         IE::TransposedConvolutionOp::attachInterface<AlignedChannelsOpModel<IE::TransposedConvolutionOp>>(*ctx);
         IE::PadOp::attachInterface<AlignedChannelsOpModel<IE::PadOp>>(*ctx);
+        IE::MatMulOp::attachInterface<AlignedChannelsOpModel<IE::MatMulOp>>(*ctx);
     });
 }

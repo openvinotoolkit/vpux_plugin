@@ -4,10 +4,18 @@
 //
 
 #include "vpux/compiler/dialect/VPU/utils/clustered_op_interface_utils.hpp"
+#include "vpux/compiler/core/layers.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops_interfaces.hpp"
 #include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/multi_cluster_strategy_utils.hpp"
 
 using namespace vpux;
+
+int64_t getNumTiles(mlir::Operation* op) {
+    auto moduleOp = op->getParentOfType<mlir::ModuleOp>();
+    auto tileOp = IE::getTileExecutor(moduleOp);
+    return tileOp.getCount();
+}
 
 bool VPU::isOperationSplitOverHeightCompatible(mlir::Operation* op, const vpux::TileInfo& outputTile) {
     auto clusteredOp = mlir::dyn_cast_or_null<VPU::ClusteredOpInterface>(op);
@@ -15,12 +23,9 @@ bool VPU::isOperationSplitOverHeightCompatible(mlir::Operation* op, const vpux::
         return false;
     }
 
-    auto moduleOp = op->getParentOfType<mlir::ModuleOp>();
-    auto tileOp = IE::getTileExecutor(moduleOp);
-    const auto numTiles = tileOp.getCount();
+    const auto numTiles = getNumTiles(op);
     const auto minimumOutputHeightForSOH = numTiles;
 
-    const auto arch = VPU::getArch(clusteredOp);
     auto isUniformDistributedSegments = VPU::isUniformDistributedSegmentsSupported(clusteredOp);
 
     auto outputShape = ShapeRef(outputTile.shape);
@@ -45,17 +50,17 @@ bool VPU::isOperationSplitOverHeightCompatible(mlir::Operation* op, const vpux::
 
     auto offset = ShapeRef(outputTile.offsets);
     if (!offset.empty()) {
-        const auto numClusters = vpux::VPU::getOptimalNumClusters(clusteredOp, outputShape[Dims4D::Act::C],
+        const auto numClusters = vpux::VPU::getOptimalNumClusters(clusteredOp, outputShape,
                                                                   clusteredOp.getMultiClusterStrategy().value());
-        const auto outputType = clusteredOp->getResult(0).getType().cast<vpux::NDTypeInterface>();
-        const auto outputTileType = outputType.extractDenseTile(offset, outputShape);
-        auto outDistributedType = VPU::getDistributedOutputTypeFromOp(clusteredOp, outputTileType, numClusters);
-        if (outDistributedType != nullptr && outDistributedType.containsDistributedTypes()) {
-            auto distribution = outDistributedType.getDistributedTypes()
-                                        .front()
-                                        .cast<VPU::DistributedTensorType>()
-                                        .getDistribution();
-            if (distribution.getMemoryShapes() == nullptr) {
+        {
+            const auto outputType = clusteredOp->getResult(0).getType().cast<vpux::NDTypeInterface>();
+            const auto outputTileType = outputType.extractDenseTile(offset, outputShape);
+            auto distributions =
+                    VPU::getOutputDistributionAttrFromOp(clusteredOp, outputTileType, numClusters.getInt());
+            auto distribution = mlir::isa<VPU::SparseTensorType>(outputTileType)
+                                        ? distributions.at(outputTileType.cast<VPU::SparseTensorType>().getData())
+                                        : distributions.at(outputTileType);
+            if (distribution.getMemoryShapes().empty()) {
                 auto optionalPerClusterMemoryShapes = VPU::getPerClusterMemoryShapes(outputShape, distribution);
                 if (!optionalPerClusterMemoryShapes.has_value()) {
                     return false;
@@ -76,35 +81,18 @@ bool VPU::isOperationSplitOverHeightCompatible(mlir::Operation* op, const vpux::
 
             const auto inputType = clusteredOp->getOperand(0).getType().cast<vpux::NDTypeInterface>();
             const auto inputTileType = inputType.extractDenseTile(inputTile.offsets, inputTile.shape);
-            auto inDistributedType = VPU::getDistributedActivationTypeFromOp(clusteredOp, inputTileType, numClusters);
-            if (inDistributedType != nullptr && inDistributedType.containsDistributedTypes()) {
-                auto distribution = inDistributedType.getDistributedTypes()
-                                            .front()
-                                            .cast<VPU::DistributedTensorType>()
-                                            .getDistribution();
-                if (distribution.getMemoryShapes() == nullptr) {
-                    auto optionalPerClusterMemoryShapes =
-                            VPU::getPerClusterMemoryShapes(inputTileType.getShape(), distribution);
-                    if (!optionalPerClusterMemoryShapes.has_value()) {
-                        return false;
-                    }
-                }
-            }
-        }
-    }
 
-    const std::set<VPU::ArchKind> compatibleTargets = {
-            VPU::ArchKind::NPU40XX,
-    };
-    if (compatibleTargets.count(arch) > 0) {
-        // For VPUX40XX, H/W segmented output needs to have explicit halo regions defined.
-        // Thus the applicability of SOH on the current operation is tightly dependent
-        // if the consumer operations can be SOH themselves.
-        // If that's not the case and not all consumers are SOH compatible, we can't represent
-        // the output OVERLAP DistributedTensor in an correct manner.
-        for (auto consumer : clusteredOp->getResult(0).getUsers()) {
-            if (auto clusteredConsumer = mlir::dyn_cast<VPU::ClusteredOpInterface>(consumer)) {
-                isSOHCompatible &= heightCompatibleCheck(getShape(clusteredConsumer->getResult(0)));
+            auto distributions =
+                    VPU::getActivationDistributionAttrFromOp(clusteredOp, inputTileType, numClusters.getInt());
+            auto distribution = mlir::isa<VPU::SparseTensorType>(inputTileType)
+                                        ? distributions.at(inputTileType.cast<VPU::SparseTensorType>().getData())
+                                        : distributions.at(inputTileType);
+            if (distribution.getMemoryShapes().empty()) {
+                auto optionalPerClusterMemoryShapes =
+                        VPU::getPerClusterMemoryShapes(inputTileType.getShape(), distribution);
+                if (!optionalPerClusterMemoryShapes.has_value()) {
+                    return false;
+                }
             }
         }
     }
@@ -119,9 +107,7 @@ bool VPU::isOperationSplitOverWidthCompatible(mlir::Operation* op, ShapeRef outp
         return false;
     }
 
-    auto moduleOp = op->getParentOfType<mlir::ModuleOp>();
-    auto tileOp = IE::getTileExecutor(moduleOp);
-    const auto numTiles = tileOp.getCount();
+    const auto numTiles = getNumTiles(op);
     const auto minimumOutputWidthForSOW = numTiles;
 
     const auto arch = VPU::getArch(clusteredOp);
@@ -166,9 +152,7 @@ bool VPU::isOperationSplitOverKernelCompatible(mlir::Operation* op, ShapeRef out
         return false;
     }
 
-    auto moduleOp = op->getParentOfType<mlir::ModuleOp>();
-    auto tileOp = IE::getTileExecutor(moduleOp);
-    const auto numTiles = tileOp.getCount();
+    const auto numTiles = getNumTiles(op);
 
     if (outputShape == ShapeRef()) {
         outputShape = getShape(clusteredOp->getResult(0));
@@ -244,6 +228,51 @@ bool VPU::isOperationSplitOverKernelCompatible(mlir::Operation* op, ShapeRef out
     return true;
 }
 
+bool VPU::isOperationSplitOverBatchCompatible(mlir::Operation* op, ShapeRef outputShape) {
+    auto clusteredOp = mlir::dyn_cast_or_null<VPU::ClusteredOpInterface>(op);
+    if (clusteredOp == nullptr) {
+        return false;
+    }
+
+    if (outputShape == ShapeRef()) {
+        outputShape = getShape(clusteredOp->getResult(0));
+    }
+
+    // Currently, SOB supported with condition batch being less or equal to number tiles used
+    const auto B = outputShape[Dims4D::Act::N];
+    const auto numTiles = getNumTiles(op);
+
+    return (B > 1) && (B <= numTiles);
+}
+
+bool VPU::isOperationSplitOverGroupCompatible(mlir::Operation* op, const vpux::TileInfo& outputTile) {
+    auto clusteredOp = mlir::dyn_cast_or_null<VPU::ClusteredOpInterface>(op);
+    if (clusteredOp == nullptr) {
+        return false;
+    }
+
+    auto moduleOp = op->getParentOfType<mlir::ModuleOp>();
+    auto tileOp = IE::getTileExecutor(moduleOp);
+    const auto numTiles = tileOp.getCount();
+    const auto minimumOutputGroupsForSOG = numTiles;
+
+    auto outputShape = ShapeRef(outputTile.shape);
+    if (outputShape == ShapeRef()) {
+        outputShape = getShape(clusteredOp->getResult(0));
+    }
+
+    auto groupCompatibleCheck = [&](ShapeRef outputShape) {
+        // #E125517 Layer still can be SOG compatible if rank is less than 5, but it is not supported yet
+        if (outputShape.size() != DimsGroups5D::Act::numDims) {
+            return false;
+        }
+        const auto groups = outputShape[DimsGroups5D::Act::G];
+        return groups >= minimumOutputGroupsForSOG;
+    };
+
+    return groupCompatibleCheck(outputShape);
+}
+
 bool VPU::checkMCRestrictions(mlir::Operation* op) {
     auto module = op->getParentOfType<mlir::ModuleOp>();
     if (IE::getAvailableExecutor(module, VPU::ExecutorKind::SHAVE_ACT) == nullptr) {
@@ -252,8 +281,8 @@ bool VPU::checkMCRestrictions(mlir::Operation* op) {
 
     auto inputShape = getShape(op->getOperand(0));
     auto outputShape = getShape(op->getResult(0));
-    return !(inputShape.front() > VPU::SINGLE_BATCH || inputShape.size() != VPU::RANK_REQUIRED_FOR_TILING ||
-             outputShape.size() != VPU::RANK_REQUIRED_FOR_TILING);
+    return !((inputShape.front() > VPU::SINGLE_BATCH && isSingleBatchRequired(op)) ||
+             inputShape.size() != VPU::RANK_REQUIRED_FOR_TILING || outputShape.size() != VPU::RANK_REQUIRED_FOR_TILING);
 }
 
 bool VPU::doesLayerFitIntoCMX(mlir::Operation* op, VPU::MultiClusterStrategy strategy, Byte reservedMem) {
@@ -265,7 +294,7 @@ bool VPU::doesLayerFitIntoCMX(mlir::Operation* op, VPU::MultiClusterStrategy str
     VPUX_THROW_WHEN(swOp == nullptr, "Expected software operation, got {0} at {1}", op->getName(), op->getLoc());
 
     const auto outputType = op->getResult(0).getType().cast<vpux::NDTypeInterface>();
-    auto numClusters = getOptimalNumClusters(op, outputType.getShape()[Dims4D::Act::C], strategy);
+    auto numClusters = getOptimalNumClusters(op, outputType.getShape(), strategy);
     auto clusteredOp = mlir::cast<VPU::ClusteredOpInterface>(op);
     SmallVector<vpux::NDTypeInterface> distributedTensorNDTypes = {
             getDistributedActivationTypeFromOp(clusteredOp, op->getOperand(0).getType(), numClusters, strategy),

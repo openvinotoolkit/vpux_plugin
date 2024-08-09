@@ -10,7 +10,7 @@
 #include <openvino/runtime/core.hpp>
 #include <string>
 #include <string_view>
-#include "common/vpu_test_env_cfg.hpp"
+#include "common/npu_test_env_cfg.hpp"
 #include "vpux/utils/core/logger.hpp"
 
 namespace ov::test::utils {

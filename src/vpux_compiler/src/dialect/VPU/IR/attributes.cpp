@@ -4,15 +4,18 @@
 //
 
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
+#include "vpux/utils/IE/private_properties.hpp"
 
 #include "vpux/compiler/core/attributes/stride_reqs.hpp"
 #include "vpux/compiler/core/tiling.hpp"
 #include "vpux/compiler/dialect/IE/IR/attributes.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
+#include "vpux/compiler/dialect/VPU/IR/native_attributes/distributed_tensor_native.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
 #include "vpux/compiler/utils/analysis.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
+#include "vpux/compiler/utils/platform_resources.hpp"
 
 #include "vpux/utils/core/error.hpp"
 #include "vpux/utils/core/mem_size.hpp"
@@ -60,22 +63,8 @@ StringLiteral vpux::VPU::getMemoryBandwidthAttrName() {
     return bandwidthAttrName;
 }
 
-namespace {
-
-constexpr int VPUX30XX_MAX_DPU_GROUPS = 4;
-constexpr int VPUX37XX_MAX_DPU_GROUPS = 2;
-constexpr int VPUX40XX_MAX_DPU_GROUPS = 6;
-
-constexpr int VPUX30XX_MAX_DMA_PORTS = 1;
-constexpr int VPUX37XX_MAX_DMA_PORTS = 2;
-constexpr int VPUX40XX_MAX_DMA_PORTS = 2;
-
-}  // namespace
-
 uint32_t vpux::VPU::getMaxArchDPUClusterNum(ArchKind arch) {
     switch (arch) {
-    case VPU::ArchKind::NPU30XX:
-        return VPUX30XX_MAX_DPU_GROUPS;
     case VPU::ArchKind::NPU37XX:
         return VPUX37XX_MAX_DPU_GROUPS;
     case VPU::ArchKind::NPU40XX:
@@ -91,8 +80,6 @@ uint32_t vpux::VPU::getMaxArchDPUClusterNum(mlir::Operation* op) {
 
 uint32_t vpux::VPU::getMaxDMAPorts(ArchKind arch) {
     switch (arch) {
-    case VPU::ArchKind::NPU30XX:
-        return VPUX30XX_MAX_DMA_PORTS;
     case VPU::ArchKind::NPU37XX:
         return VPUX37XX_MAX_DMA_PORTS;
     case VPU::ArchKind::NPU40XX:
@@ -102,14 +89,12 @@ uint32_t vpux::VPU::getMaxDMAPorts(ArchKind arch) {
     }
 }
 
-double vpux::VPU::getDMABandwidth(ArchKind arch) {
+double vpux::VPU::getDMABandwidth(ArchKind arch, VPU::RevisionID rev) {
     switch (arch) {
-    case VPU::ArchKind::NPU30XX:
-        return 20000.0 / 700;
     case VPU::ArchKind::NPU37XX:
-        return 31200.0f / 1300;
+        return VPUNN::get_dram_bandwidth_MBps(VPUNN::VPUDevice::VPU_2_7) / VPU::getDpuFrequency(arch, rev);
     case VPU::ArchKind::NPU40XX:
-        return 45000.0f / 1700;
+        return VPUNN::get_dram_bandwidth_MBps(VPUNN::VPUDevice::VPU_4_0) / VPU::getDpuFrequency(arch, rev);
     default:
         VPUX_THROW("Unsupported architecture '{0}'", arch);
     }
@@ -117,10 +102,7 @@ double vpux::VPU::getDMABandwidth(ArchKind arch) {
 
 double vpux::VPU::getNCEThroughput(ArchKind arch) {
     switch (arch) {
-    case VPU::ArchKind::NPU30XX:
-        return 7168000.0;
     case VPU::ArchKind::NPU37XX:
-        return 8000000.0;
     case VPU::ArchKind::NPU40XX:
         return 8000000.0;
     default:
@@ -128,18 +110,17 @@ double vpux::VPU::getNCEThroughput(ArchKind arch) {
     }
 }
 
-unsigned int vpux::VPU::getDpuFrequency(vpux::VPU::ArchKind arch) {
+unsigned int vpux::VPU::getDpuFrequency(vpux::VPU::ArchKind arch, vpux::VPU::RevisionID rev) {
     switch (arch) {
-    case VPU::ArchKind::NPU30XX:
-        return VPUNN::get_dpu_fclk(VPUNN::VPUDevice::VPU_2_0);
     case VPU::ArchKind::NPU37XX:
         return VPUNN::get_dpu_fclk(VPUNN::VPUDevice::VPU_2_7); /*!< The value 1300 corresponds to Highvcc of dpuclk.
                 (See VPUX37XX HAS #voltage-and-frequency-targets section).
                  */
     case VPU::ArchKind::NPU40XX:
-        return VPUNN::get_dpu_fclk(VPUNN::VPUDevice::VPU_4_0); /*!< TODO: verify the correct value for VPUX40XX.
-                Value set to the maximal dpu_clk value from VPUX40XX HAS (See NPU40XX #clocks section)
-                */
+        if (rev >= VPU::RevisionID::REVISION_B) {
+            return 1850;  // MHz; TODO: switch to the value from vpunn, once this frequency is implemented. E#127567
+        }
+        return VPUNN::get_dpu_fclk(VPUNN::VPUDevice::VPU_4_0);
     default:
         VPUX_THROW("Unsupported architecture '{0}'", arch);
     }
@@ -153,9 +134,6 @@ double vpux::VPU::getDmaBandwidthGBps(mlir::ModuleOp module) {
 double vpux::VPU::getDmaBandwidthGBps(vpux::VPU::ArchKind arch) {
     double BW = 0;
     switch (arch) {
-    case VPU::ArchKind::NPU30XX:
-        BW = VPUNN::get_dram_bandwidth_MBps(VPUNN::VPUDevice::VPU_2_0);  // 20000 MB/s
-        break;
     case VPU::ArchKind::NPU37XX:
         BW = VPUNN::get_dram_bandwidth_MBps(VPUNN::VPUDevice::VPU_2_7);  // 27000 MB/s
         break;
@@ -172,16 +150,15 @@ double vpux::VPU::getDmaBandwidthGBps(vpux::VPU::ArchKind arch) {
 
 Byte vpux::VPU::getTotalCMXSize(mlir::ModuleOp module) {
     auto cmxRes = IE::getAvailableMemory(module, VPU::MemoryKind::CMX_NN);
-    const ArchKind arch = getArch(module);
 
     // This function is used to determine the best tile size. It tries to put maximum data in CMX.
     // Available CMX memory is decreased by two profilingBufferSize even if profiling is disabled
     // because we want to get exactly same compiled networks with profiling enabled and disabled.
     // Two buffer sizes are required in case when profiling allocates new buffer and old buffer
     // is still not disposed. Second buffer can be treated as an optimisation that prevents spilling.
-    const int64_t profilingBufferSize =
-            vpux::VPUIP::HW_DMA_PROFILING_MAX_BUFFER_SIZE + vpux::VPUIP::HW_DPU_PROFILING_MAX_BUFFER_SIZE +
-            ((arch != VPU::ArchKind::NPU30XX) ? vpux::VPUIP::HW_ACT_SHAVE_PROFILING_MAX_BUFFER_SIZE : 0);
+    const int64_t profilingBufferSize = vpux::VPUIP::HW_DMA_PROFILING_MAX_BUFFER_SIZE +
+                                        vpux::VPUIP::HW_DPU_PROFILING_MAX_BUFFER_SIZE +
+                                        vpux::VPUIP::HW_ACT_SHAVE_PROFILING_MAX_BUFFER_SIZE;
 
     return cmxRes.size() - Byte(2 * profilingBufferSize);
 }
@@ -227,26 +204,12 @@ constexpr StringLiteral archAttrName = "VPU.arch";
 
 constexpr Byte DDR_HEAP_SIZE = 4000_MB;
 
-constexpr Byte KMB_CMX_WORKSPACE_SIZE = Byte(896_KB);
-constexpr Byte KMB_CMX_WORKSPACE_FRAGMENTATION_AWARE_SIZE =
-        Byte(static_cast<double>(KMB_CMX_WORKSPACE_SIZE.count()) * FRAGMENTATION_AVOID_RATIO);
-
-constexpr Byte VPUX37XX_CMX_WORKSPACE_SIZE = Byte(1936_KB);
-constexpr Byte VPUX37XX_CMX_WORKSPACE_FRAGMENTATION_AWARE_SIZE =
-        Byte(static_cast<double>(VPUX37XX_CMX_WORKSPACE_SIZE.count()) * FRAGMENTATION_AVOID_RATIO);
-
-constexpr Byte VPUX40XX_CMX_WORKSPACE_SIZE =
-        Byte(1440_KB);  // Error from feasibleAllication if 1449_KB; See E62792 and E60873
-constexpr Byte VPUX40XX_CMX_WORKSPACE_FRAGMENTATION_AWARE_SIZE =
-        Byte(static_cast<double>(VPUX40XX_CMX_WORKSPACE_SIZE.count()) * FRAGMENTATION_AVOID_RATIO);
-
 struct Resources {
-    std::optional<int> numOfDPUGroups = std::nullopt;
+    int numOfDPUGroups = 1;
     std::optional<int> numOfDMAPorts = std::nullopt;
     std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
 
-    Resources(std::optional<int> numOfDPUGroups, std::optional<int> numOfDMAPorts,
-              std::optional<vpux::Byte> availableCMXMemory)
+    Resources(int numOfDPUGroups, std::optional<int> numOfDMAPorts, std::optional<vpux::Byte> availableCMXMemory)
             : numOfDPUGroups(numOfDPUGroups), numOfDMAPorts(numOfDMAPorts), availableCMXMemory(availableCMXMemory) {
     }
 };
@@ -296,13 +259,6 @@ void setArch(mlir::ModuleOp module, VPU::ArchKind kind, const Resources& res, co
     auto numOfDMAPorts = res.numOfDMAPorts;
     auto availableCMXMemory = res.availableCMXMemory;
 
-    const auto getNumOfDPUGroupsVal = [&](int maxDpuGroups) {
-        int numOfDPUGroupsVal = numOfDPUGroups.has_value() ? numOfDPUGroups.value() : maxDpuGroups;
-        VPUX_THROW_UNLESS(1 <= numOfDPUGroupsVal && numOfDPUGroupsVal <= maxDpuGroups,
-                          "Invalid number of DPU groups: '{0}'", numOfDPUGroupsVal);
-        return numOfDPUGroupsVal;
-    };
-
     const auto getNumOfDMAPortsVal = [&](int maxDmaPorts) {
         int numOfDMAPortsVal = numOfDMAPorts.has_value() ? numOfDMAPorts.value() : maxDmaPorts;
         VPUX_THROW_UNLESS(1 <= numOfDMAPortsVal && numOfDMAPortsVal <= maxDmaPorts,
@@ -317,26 +273,6 @@ void setArch(mlir::ModuleOp module, VPU::ArchKind kind, const Resources& res, co
     const auto cmxFragAwareSymbolAttr = mlir::SymbolRefAttr::get(module.getContext(), VPU::CMX_NN_FragmentationAware);
 
     switch (kind) {
-    case VPU::ArchKind::NPU30XX: {
-        const auto workspaceCMXSize =
-                availableCMXMemory.has_value() ? availableCMXMemory.value() : KMB_CMX_WORKSPACE_SIZE;
-        const auto workspaceFragmentationAwareSize =
-                availableCMXMemory.has_value()
-                        ? Byte(static_cast<double>(availableCMXMemory.value().count()) * FRAGMENTATION_AVOID_RATIO)
-                        : KMB_CMX_WORKSPACE_FRAGMENTATION_AWARE_SIZE;
-
-        funcs.addMemoryWithAttrs(ddrSymbolAttr, DDR_HEAP_SIZE, 0.6, 8);
-
-        funcs.addExecutor(VPU::ExecutorKind::DMA_NN, getNumOfDMAPortsVal(VPUX30XX_MAX_DMA_PORTS));
-        funcs.addExecutor(VPU::ExecutorKind::SHAVE_UPA, 16);
-        nceCluster = funcs.addTileExecutor(getNumOfDPUGroupsVal(VPUX30XX_MAX_DPU_GROUPS));
-        funcs.addSubExecutor(nceCluster, VPU::ExecutorKind::DPU, 5);
-        funcs.addSubExecutor(nceCluster, VPU::ExecutorKind::SHAVE_NN, 5);
-        funcs.addInnerMemoryWithAttrs(nceCluster, cmxSymbolAttr, workspaceCMXSize, 1.0, 32);
-        funcs.addInnerMemory(nceCluster, cmxFragAwareSymbolAttr, workspaceFragmentationAwareSize);
-
-        break;
-    }
     case VPU::ArchKind::NPU37XX: {
         const auto workspaceCMXSize =
                 availableCMXMemory.has_value() ? availableCMXMemory.value() : VPUX37XX_CMX_WORKSPACE_SIZE;
@@ -349,7 +285,7 @@ void setArch(mlir::ModuleOp module, VPU::ArchKind kind, const Resources& res, co
 
         // Have NN_DMA as shared resource across clusters
         funcs.addExecutor(VPU::ExecutorKind::DMA_NN, getNumOfDMAPortsVal(VPUX37XX_MAX_DMA_PORTS));
-        nceCluster = funcs.addTileExecutor(getNumOfDPUGroupsVal(VPUX37XX_MAX_DPU_GROUPS));
+        nceCluster = funcs.addTileExecutor(numOfDPUGroups);
         funcs.addSubExecutor(nceCluster, VPU::ExecutorKind::DPU, 1);
         funcs.addSubExecutor(nceCluster, VPU::ExecutorKind::SHAVE_NN, 1);
         funcs.addSubExecutor(nceCluster, VPU::ExecutorKind::SHAVE_ACT, 2);
@@ -369,7 +305,7 @@ void setArch(mlir::ModuleOp module, VPU::ArchKind kind, const Resources& res, co
         funcs.addMemoryWithAttrs(ddrSymbolAttr, DDR_HEAP_SIZE, 0.6, 64);
 
         // Have NN_DMA as shared resource across clusters
-        auto numClusters = getNumOfDPUGroupsVal(VPUX40XX_MAX_DPU_GROUPS);
+        auto numClusters = numOfDPUGroups;
         funcs.addExecutor(VPU::ExecutorKind::DMA_NN,
                           getNumOfDMAPortsVal(std::min(numClusters, VPUX40XX_MAX_DMA_PORTS)));
         funcs.addExecutor(VPU::ExecutorKind::M2I, 1);
@@ -387,17 +323,12 @@ void setArch(mlir::ModuleOp module, VPU::ArchKind kind, const Resources& res, co
 
     VPUX_THROW_WHEN(!allowCustom && nceCluster.hasProcessorFrequency(),
                     "Processor frequencyis already defined, probably you run '--init-compiler' twice");
-
-    if (!nceCluster.hasProcessorFrequency()) {
-        nceCluster.setProcessorFrequency(getFPAttr(module.getContext(), getDpuFrequency(kind)));
-    }
 }
 
 }  // namespace
 
-void vpux::VPU::setArch(mlir::ModuleOp module, ArchKind kind, std::optional<int> numOfDPUGroups,
-                        std::optional<int> numOfDMAPorts, std::optional<vpux::Byte> availableCMXMemory,
-                        bool allowCustomValues) {
+void vpux::VPU::setArch(mlir::ModuleOp module, ArchKind kind, int numOfDPUGroups, std::optional<int> numOfDMAPorts,
+                        std::optional<vpux::Byte> availableCMXMemory, bool allowCustomValues) {
     const auto addExecutor = [&](VPU::ExecutorKind kind, size_t count) {
         VPUX_THROW_WHEN(!allowCustomValues && IE::hasExecutor(module, kind),
                         "Available executor kind '{0}' was already added", kind);
@@ -491,7 +422,7 @@ VPU::ArchKind vpux::VPU::getArch(mlir::Operation* op) {
 
 // To discern between VPUX3XXX and later on architectures
 bool vpux::VPU::isArchVPUX3XXX(VPU::ArchKind arch) {
-    return (arch == VPU::ArchKind::NPU37XX) || (arch == VPU::ArchKind::NPU30XX);
+    return (arch == VPU::ArchKind::NPU37XX);
 }
 
 //
@@ -544,7 +475,7 @@ bool vpux::VPU::hasRevisionID(mlir::ModuleOp module) {
     return module->hasAttr(revisionIDAttrName);
 }
 
-std::optional<VPU::RevisionID> vpux::VPU::getRevisionID(mlir::Operation* op) {
+VPU::RevisionID vpux::VPU::getRevisionID(mlir::Operation* op) {
     auto module = getModuleOp(op);
 
     if (module->hasAttr(revisionIDAttrName)) {
@@ -556,7 +487,7 @@ std::optional<VPU::RevisionID> vpux::VPU::getRevisionID(mlir::Operation* op) {
         }
     }
 
-    return std::nullopt;
+    return VPU::RevisionID::REVISION_NONE;
 }
 
 //
@@ -1005,8 +936,8 @@ std::optional<SmallVector<Shape>> VPU::splitSegmentedShape(ArrayRef<int64_t> sha
 }
 
 std::optional<SmallVector<DimRange>> getOverlappedInputTileDimRanges(
-        ArrayRef<int64_t> shape, ArrayRef<int64_t> tilingScheme, mlir::ArrayAttr kernelAttr,
-        mlir::ArrayAttr stridesAttr, VPU::PaddingAttr padAttr, const int64_t axis, const int64_t numClusters,
+        ArrayRef<int64_t> shape, ArrayRef<int64_t> tilingScheme, ArrayRef<int64_t> kernel, ArrayRef<int64_t> strides,
+        const std::optional<VPU::Padding>& pad, const int64_t axis, const int64_t numClusters,
         const bool uniformDistributedSegments) {
     const auto axisDim = Dim(axis);
     VPUX_THROW_UNLESS(axisDim == Dims4D::Act::W || axisDim == Dims4D::Act::H,
@@ -1017,8 +948,11 @@ std::optional<SmallVector<DimRange>> getOverlappedInputTileDimRanges(
     const auto Y = shape[Dims4D::Act::H.ind()];
     const auto X = shape[Dims4D::Act::W.ind()];
 
-    VPUX_THROW_WHEN(padAttr == nullptr, "Pads shouldn't be nullptr");
-    const auto getOutputHW = vpux::spatialOutputForInputWindowSize({Y, X}, kernelAttr, stridesAttr, toPadInfo(padAttr));
+    VPUX_THROW_UNLESS(pad.has_value(), "Pads value is required");
+    auto padInfo = vpux::PadInfo(pad.value().getLeftPad(), pad.value().getRightPad(), pad.value().getTopPad(),
+                                 pad.value().getBottomPad());
+
+    const auto getOutputHW = vpux::spatialOutputForInputWindowSize({Y, X}, kernel, strides, padInfo);
     if (!getOutputHW.has_value()) {
         return std::nullopt;
     }
@@ -1039,20 +973,18 @@ std::optional<SmallVector<DimRange>> getOverlappedInputTileDimRanges(
     const auto outputTiles = segmentedShape.value();
 
     int64_t offset = 0;
-    VPUX_THROW_WHEN(kernelAttr == nullptr, "Kernel shouldn't be nullptr");
-    const auto kernel = parseIntArrayAttr<int64_t>(kernelAttr);
+    VPUX_THROW_WHEN(kernel.empty(), "Kernel shouldn't be empty");
     const auto KY = kernel[Dims4D::Kernel::Y.ind()];
     const auto KX = kernel[Dims4D::Kernel::X.ind()];
 
-    VPUX_THROW_WHEN(stridesAttr == nullptr, "Strides shouldn't be nullptr");
-    const auto strides = parseIntArrayAttr<int64_t>(stridesAttr);
+    VPUX_THROW_WHEN(strides.empty(), "Strides shouldn't be empty");
     const auto SY = strides[Dims4D::Strides::Y.ind()];
     const auto SX = strides[Dims4D::Strides::X.ind()];
 
-    const auto padTop = padAttr.getTop().getInt();
-    const auto padBottom = padAttr.getBottom().getInt();
-    const auto padLeft = padAttr.getLeft().getInt();
-    const auto padRight = padAttr.getRight().getInt();
+    const auto padTop = pad.value().getTopPad();
+    const auto padBottom = pad.value().getBottomPad();
+    const auto padLeft = pad.value().getLeftPad();
+    const auto padRight = pad.value().getRightPad();
     SmallVector<DimRange> inputTileDimRanges;
     for (const auto& outputTile : outputTiles) {
         const auto dimSize = outputTile[Dim(axis)];
@@ -1075,27 +1007,30 @@ std::optional<SmallVector<DimRange>> getOverlappedInputTileDimRanges(
 }
 
 SmallVector<Shape> vpux::VPU::getPerClusterComputeShapes(ShapeRef shapeRef, DistributedTensorAttr distributionAttr) {
-    auto shape = to_small_vector(shapeRef.raw());
-    const auto distributionMode = distributionAttr.getMode().getValue();
+    return getPerClusterComputeShapes(shapeRef, VPU::DistributedTensorNative::getClassFromAttr(distributionAttr));
+}
 
-    const auto numClusters = distributionAttr.getNumClusters().getInt();
+SmallVector<Shape> vpux::VPU::getPerClusterComputeShapes(ShapeRef shapeRef,
+                                                         const VPU::DistributedTensorNative& distribution) {
+    auto shape = to_small_vector(shapeRef.raw());
+    const auto distributionMode = distribution.getDistributionMode();
+
+    const auto numClusters = distribution.getNumClusters();
     auto tiledComputeShapes = SmallVector<Shape>(numClusters);
 
     std::optional<ArrayRef<int64_t>> optionalAlignment = std::nullopt;
-    auto alignment = SmallVector<int64_t>(numClusters);
-    if (distributionAttr.getAlignment() != nullptr) {
-        alignment = parseIntArrayAttr<int64_t>(distributionAttr.getAlignment());
+    auto alignment = SmallVector<int64_t>(distribution.getAlignment());
+    if (!alignment.empty()) {
         optionalAlignment = std::optional<ArrayRef<int64_t>>(alignment);
     }
 
     auto getComputeSplitIntoSegments = [&]() -> SmallVector<Shape> {
-        const auto tilingScheme = parseIntArrayAttr<int64_t>(distributionAttr.getNumTiles());
+        const auto tilingScheme = distribution.getNumTiles();
         const auto axis = vpux::VPU::getDistributedTilingAxis(tilingScheme);
         VPUX_THROW_UNLESS(axis < int64_t(tilingScheme.size()), "Segmented tiling scheme requires at least 1 dimension "
                                                                "to be segmented but the tiling schema is [1, 1, 1, 1]");
-        const auto segmentedShape =
-                VPU::splitSegmentedShape(shape, tilingScheme, numClusters, axis, optionalAlignment,
-                                         distributionAttr.getUniformDistributedSegments() != nullptr);
+        const auto segmentedShape = VPU::splitSegmentedShape(shape, tilingScheme, numClusters, axis, optionalAlignment,
+                                                             distribution.hasUniformDistributedSegments());
         VPUX_THROW_UNLESS(segmentedShape.has_value(), "Improper split, '{0}' over '{1}' tiles", shape[axis],
                           tilingScheme[axis]);
         return segmentedShape.value();
@@ -1106,10 +1041,11 @@ SmallVector<Shape> vpux::VPU::getPerClusterComputeShapes(ShapeRef shapeRef, Dist
     }
 
     if (VPU::bitEnumContainsAny(distributionMode, VPU::DistributionMode::OVERLAPPED)) {
-        if (distributionAttr.getEqualMemoryAndComputeView() != nullptr) {
-            const auto optionalPerClusterMemoryShapes = getPerClusterMemoryShapes(shapeRef, distributionAttr);
+        if (distribution.hasEqualMemoryAndComputeView()) {
+            const auto optionalPerClusterMemoryShapes = getPerClusterMemoryShapes(shapeRef, distribution);
+
             VPUX_THROW_UNLESS(optionalPerClusterMemoryShapes.has_value(),
-                              "Cannot get per cluster memory shapes. Unsupported distribution: {0}", distributionAttr);
+                              "Cannot get per cluster memory shapes. Unsupported distribution: {0}", distribution);
             return optionalPerClusterMemoryShapes.value();
         }
 
@@ -1123,20 +1059,25 @@ SmallVector<Shape> vpux::VPU::getPerClusterComputeShapes(ShapeRef shapeRef, Dist
         return tiledComputeShapes;
     }
 
-    VPUX_THROW("Cannot get per cluster memory shapes. Unsupported distribution: {0}", distributionAttr);
+    VPUX_THROW("Cannot get per cluster memory shapes. Unsupported distribution: {0}", distribution);
 }
 
 SmallVector<Shape> vpux::VPU::getPerClusterComputeShapeOffsets(ShapeRef shapeRef,
                                                                DistributedTensorAttr distributionAttr) {
-    const auto shape = to_small_vector(shapeRef.raw());
-    const auto distributionMode = distributionAttr.getMode().getValue();
+    return getPerClusterComputeShapeOffsets(shapeRef, VPU::DistributedTensorNative::getClassFromAttr(distributionAttr));
+}
 
-    const auto numClusters = distributionAttr.getNumClusters().getInt();
+SmallVector<Shape> vpux::VPU::getPerClusterComputeShapeOffsets(ShapeRef shapeRef,
+                                                               const VPU::DistributedTensorNative& distribution) {
+    const auto shape = to_small_vector(shapeRef.raw());
+    const auto distributionMode = distribution.getDistributionMode();
+
+    const auto numClusters = distribution.getNumClusters();
     auto tiledComputeShapeOffsets = SmallVector<Shape>(numClusters, Shape(shapeRef.size(), 0));
 
     auto getOffsetsForSegments = [&](SmallVector<Shape>& perClusterOffsets) -> SmallVector<Shape> {
-        const auto tiledComputeShapes = getPerClusterComputeShapes(shapeRef, distributionAttr);
-        const auto tilingScheme = parseIntArrayAttr<int64_t>(distributionAttr.getNumTiles());
+        const auto tiledComputeShapes = getPerClusterComputeShapes(shapeRef, distribution);
+        const auto tilingScheme = distribution.getNumTiles();
         const auto axis = vpux::VPU::getDistributedTilingAxis(tilingScheme);
 
         int64_t offset = 0;
@@ -1153,8 +1094,8 @@ SmallVector<Shape> vpux::VPU::getPerClusterComputeShapeOffsets(ShapeRef shapeRef
     }
 
     if (VPU::bitEnumContainsAny(distributionMode, VPU::DistributionMode::OVERLAPPED)) {
-        if (distributionAttr.getEqualMemoryAndComputeView() != nullptr) {
-            return getPerClusterMemoryShapeOffsets(shapeRef, distributionAttr);
+        if (distribution.hasEqualMemoryAndComputeView()) {
+            return getPerClusterMemoryShapeOffsets(shapeRef, distribution);
         }
 
         return getOffsetsForSegments(tiledComputeShapeOffsets);
@@ -1165,21 +1106,27 @@ SmallVector<Shape> vpux::VPU::getPerClusterComputeShapeOffsets(ShapeRef shapeRef
         return tiledComputeShapeOffsets;
     }
 
-    VPUX_THROW("Cannot get per cluster memory shapes. Unsupported distribution: {0}", distributionAttr);
+    VPUX_THROW("Cannot get per cluster memory shapes. Unsupported distribution: {0}", distribution);
 }
 
 std::optional<SmallVector<Shape>> vpux::VPU::getPerClusterMemoryShapes(ShapeRef shapeRef,
-                                                                       DistributedTensorAttr distributionAttr) {
-    auto shape = to_small_vector(shapeRef.raw());
-    const auto distributionMode = distributionAttr.getMode().getValue();
+                                                                       DistributedTensorAttr distributionAttr)
 
-    const auto numClusters = distributionAttr.getNumClusters().getInt();
+{
+    return getPerClusterMemoryShapes(shapeRef, VPU::DistributedTensorNative::getClassFromAttr(distributionAttr));
+}
+
+std::optional<SmallVector<Shape>> vpux::VPU::getPerClusterMemoryShapes(
+        ShapeRef shapeRef, const VPU::DistributedTensorNative& distribution) {
+    auto shape = to_small_vector(shapeRef.raw());
+    const auto distributionMode = distribution.getDistributionMode();
+
+    const auto numClusters = distribution.getNumClusters();
     auto tiledMemoryShapes = SmallVector<Shape>(numClusters);
 
     std::optional<ArrayRef<int64_t>> optionalAlignment = std::nullopt;
-    auto alignment = SmallVector<int64_t>(numClusters);
-    if (distributionAttr.getAlignment() != nullptr) {
-        alignment = parseIntArrayAttr<int64_t>(distributionAttr.getAlignment());
+    auto alignment = SmallVector<int64_t>(distribution.getAlignment());
+    if (!alignment.empty()) {
         optionalAlignment = std::optional<ArrayRef<int64_t>>(alignment);
     }
 
@@ -1192,21 +1139,21 @@ std::optional<SmallVector<Shape>> vpux::VPU::getPerClusterMemoryShapes(ShapeRef 
     }
 
     if (distributionMode == VPU::DistributionMode::SEGMENTED) {
-        const auto tilingScheme = parseIntArrayAttr<int64_t>(distributionAttr.getNumTiles());
+        const auto tilingScheme = distribution.getNumTiles();
         const auto axis = vpux::VPU::getDistributedTilingAxis(tilingScheme);
         VPUX_THROW_UNLESS(axis < int64_t(tilingScheme.size()), "Segmented tiling scheme requires at least 1 dimension "
                                                                "to be segmented but the tiling schema is [1, 1, 1, 1]");
-        return splitSegmentedShape(shape, tilingScheme, numClusters, axis, optionalAlignment,
-                                   distributionAttr.getUniformDistributedSegments() != nullptr);
+        return vpux::VPU::splitSegmentedShape(shape, tilingScheme, numClusters, axis, optionalAlignment,
+                                              distribution.hasUniformDistributedSegments());
     }
 
     if (distributionMode == VPU::DistributionMode::OVERLAPPED) {
-        const auto tilingScheme = parseIntArrayAttr<int64_t>(distributionAttr.getNumTiles());
+        const auto tilingScheme = distribution.getNumTiles();
         const auto axis = vpux::VPU::getDistributedTilingAxis(tilingScheme);
+
         const auto optionalInputTileDimRanges = getOverlappedInputTileDimRanges(
-                shape, tilingScheme, distributionAttr.getKernel(), distributionAttr.getStrides(),
-                distributionAttr.getPads(), axis, numClusters,
-                distributionAttr.getUniformDistributedSegments() != nullptr);
+                shape, tilingScheme, distribution.getKernel(), distribution.getStrides(), distribution.getPadding(),
+                axis, numClusters, distribution.hasUniformDistributedSegments());
 
         if (!optionalInputTileDimRanges.has_value()) {
             return std::nullopt;
@@ -1224,15 +1171,20 @@ std::optional<SmallVector<Shape>> vpux::VPU::getPerClusterMemoryShapes(ShapeRef 
         return tiledMemoryShapes;
     }
 
-    VPUX_THROW("Cannot get per cluster memory shapes. Unsupported distribution: {0}", distributionAttr);
+    VPUX_THROW("Cannot get per cluster memory shapes. Unsupported distribution: {0}", distribution);
 }
 
 SmallVector<Shape> vpux::VPU::getPerClusterMemoryShapeOffsets(ShapeRef shapeRef,
                                                               DistributedTensorAttr distributionAttr) {
-    const auto shape = to_small_vector(shapeRef.raw());
-    const auto distributionMode = distributionAttr.getMode().getValue();
+    return getPerClusterMemoryShapeOffsets(shapeRef, VPU::DistributedTensorNative::getClassFromAttr(distributionAttr));
+}
 
-    const auto numClusters = distributionAttr.getNumClusters().getInt();
+SmallVector<Shape> vpux::VPU::getPerClusterMemoryShapeOffsets(ShapeRef shapeRef,
+                                                              const VPU::DistributedTensorNative& distribution) {
+    const auto shape = to_small_vector(shapeRef.raw());
+    const auto distributionMode = distribution.getDistributionMode();
+
+    const auto numClusters = distribution.getNumClusters();
 
     auto tiledMemoryOffsets = SmallVector<Shape>(numClusters, Shape(shapeRef.size(), 0));
 
@@ -1244,12 +1196,13 @@ SmallVector<Shape> vpux::VPU::getPerClusterMemoryShapeOffsets(ShapeRef shapeRef,
     }
 
     if (distributionMode == VPU::DistributionMode::SEGMENTED) {
-        const auto optionalPerClusterMemoryShapes = getPerClusterMemoryShapes(shapeRef, distributionAttr);
+        const auto optionalPerClusterMemoryShapes = getPerClusterMemoryShapes(shapeRef, distribution);
+
         VPUX_THROW_UNLESS(optionalPerClusterMemoryShapes.has_value(),
-                          "Cannot get per cluster memory shape offsets. Unsupported distribution: {0}",
-                          distributionAttr);
+                          "Cannot get per cluster memory shape offsets. Unsupported distribution: {0}", distribution);
+
         const auto tiledComputeShapes = optionalPerClusterMemoryShapes.value();
-        const auto tilingScheme = parseIntArrayAttr<int64_t>(distributionAttr.getNumTiles());
+        const auto tilingScheme = distribution.getNumTiles();
         const auto axis = vpux::VPU::getDistributedTilingAxis(tilingScheme);
 
         int64_t offset = 0;
@@ -1262,17 +1215,15 @@ SmallVector<Shape> vpux::VPU::getPerClusterMemoryShapeOffsets(ShapeRef shapeRef,
     }
 
     if (distributionMode == VPU::DistributionMode::OVERLAPPED) {
-        const auto tilingScheme = parseIntArrayAttr<int64_t>(distributionAttr.getNumTiles());
+        const auto tilingScheme = distribution.getNumTiles();
         const auto axis = vpux::VPU::getDistributedTilingAxis(tilingScheme);
 
         const auto optionalInputTileDimRanges = getOverlappedInputTileDimRanges(
-                shape, tilingScheme, distributionAttr.getKernel(), distributionAttr.getStrides(),
-                distributionAttr.getPads(), axis, numClusters,
-                distributionAttr.getUniformDistributedSegments() != nullptr);
+                shape, tilingScheme, distribution.getKernel(), distribution.getStrides(), distribution.getPadding(),
+                axis, numClusters, distribution.hasUniformDistributedSegments());
 
         VPUX_THROW_UNLESS(optionalInputTileDimRanges.has_value(),
-                          "Cannot get per cluster memory shape offsets. Unsupported distribution: {0}",
-                          distributionAttr);
+                          "Cannot get per cluster memory shape offsets. Unsupported distribution: {0}", distribution);
 
         const auto inputTileDimRanges = optionalInputTileDimRanges.value();
         for (auto p : inputTileDimRanges | indexed) {
@@ -1284,7 +1235,7 @@ SmallVector<Shape> vpux::VPU::getPerClusterMemoryShapeOffsets(ShapeRef shapeRef,
         return tiledMemoryOffsets;
     }
 
-    VPUX_THROW("Cannot get per cluster memory shapes. Unsupported distribution: {0}", distributionAttr);
+    VPUX_THROW("Cannot get per cluster memory shapes. Unsupported distribution: {0}", distribution);
 }
 
 SmallVector<Shape> vpux::VPU::getOverlappedPerClusterNewMemoryShapes(ShapeRef newShape, ShapeRef origShape,
@@ -1471,6 +1422,25 @@ bool vpux::VPU::isOverlappedOverH(VPU::DistributedTensorAttr distAttr) {
     return true;
 }
 
+bool vpux::VPU::isOverlappedOverW(VPU::DistributedTensorAttr distAttr) {
+    if (distAttr.getMode().getValue() != VPU::DistributionMode::OVERLAPPED) {
+        return false;
+    }
+    const auto numTiles = parseIntArrayAttr<int64_t>(distAttr.getNumTiles());
+    if (numTiles.size() != 4 || numTiles[Dims4D::Act::N.ind()] > 1 || numTiles[Dims4D::Act::C.ind()] > 1 ||
+        numTiles[Dims4D::Act::H.ind()] > 1) {
+        return false;
+    }
+    return true;
+}
+
+bool vpux::VPU::isDuplicated(VPU::DistributedTensorAttr distAttr) {
+    const auto mode = distAttr.getMode().getValue();
+
+    return VPU::bitEnumContainsAny(mode, VPU::DistributionMode::DUPLICATED) ||
+           VPU::bitEnumContainsAny(mode, VPU::DistributionMode::MULTICASTED);
+}
+
 //
 // SparsityCompressionAttr
 //
@@ -1545,46 +1515,12 @@ VPU::SparsityCompressionAttr VPU::tileSparsityCompression(VPU::SparsityCompressi
                                              sparsityCompression.getAlignment());
 }
 
-// DeprecatedArchKind
-
-namespace {
-StringRef stringifyDeprecatedArchKind(VPU::DeprecatedArchKind val) {
-    switch (val) {
-    case VPU::DeprecatedArchKind::UNKNOWN:
-        return "UNKNOWN";
-    case VPU::DeprecatedArchKind::VPUX30XX:
-        return "VPUX30XX";
-    case VPU::DeprecatedArchKind::VPUX37XX:
-        return "VPUX37XX";
-    case VPU::DeprecatedArchKind::VPUX40XX:
-        return "VPUX40XX";
+SmallVector<SmallVector<int64_t>> VPU::arrayOfArrayFromShape(ArrayRef<Shape> shape) {
+    SmallVector<SmallVector<int64_t>> ret;
+    for (const auto& a : shape) {
+        ret.push_back(a.raw());
     }
-    return "";
-}
-}  // namespace
-
-std::optional<VPU::DeprecatedArchKind> vpux::VPU::symbolizeDeprecatedArchKind(StringRef str) {
-    return ::llvm::StringSwitch<::std::optional<VPU::DeprecatedArchKind>>(str)
-            .Case("UNKNOWN", VPU::DeprecatedArchKind::UNKNOWN)
-            .Case("VPUX30XX", VPU::DeprecatedArchKind::VPUX30XX)
-            .Case("VPUX37XX", VPU::DeprecatedArchKind::VPUX37XX)
-            .Case("VPUX40XX", VPU::DeprecatedArchKind::VPUX40XX)
-            .Default(::std::nullopt);
-}
-
-VPU::ArchKind vpux::VPU::mapDeprecatedArchKind(VPU::DeprecatedArchKind val) {
-    switch (val) {
-    case VPU::DeprecatedArchKind::UNKNOWN:
-        return VPU::ArchKind::UNKNOWN;
-    case VPU::DeprecatedArchKind::VPUX30XX:
-        return VPU::ArchKind::NPU30XX;
-    case VPU::DeprecatedArchKind::VPUX37XX:
-        return VPU::ArchKind::NPU37XX;
-    case VPU::DeprecatedArchKind::VPUX40XX:
-        return VPU::ArchKind::NPU40XX;
-    default:
-        VPUX_THROW("Unsupported deprecated arch kind {0}", stringifyDeprecatedArchKind(val));
-    }
+    return ret;
 }
 
 //

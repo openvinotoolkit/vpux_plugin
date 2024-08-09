@@ -20,13 +20,16 @@ list(APPEND SOURCES
                 ../core/mask.cpp
                 ../core/mem_size.cpp
                 ../core/simple_math.cpp
-                ../core/string_utils.cpp
 )
 
 if(WIN32)
-  list (APPEND SOURCES ../core/win32/env.cpp)
+  list (APPEND SOURCES
+                    ../core/win32/env.cpp
+                    ../core/win32/memory_usage.cpp)
 else()
-  list (APPEND SOURCES ../core/unix/env.cpp)
+  list (APPEND SOURCES
+                    ../core/unix/env.cpp 
+                    ../core/unix/memory_usage.cpp)
 endif()
 
 add_library(${TARGET_NAME} STATIC ${SOURCES})
@@ -39,7 +42,6 @@ target_include_directories(${TARGET_NAME}
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         ${VPUX_UTILS_CURRENT_SOURCE_DIR}/include
-        ${VPUX_UTILS_CURRENT_SOURCE_DIR}/include/vpux/utils/LLVM/
 )
 
 target_include_directories(${TARGET_NAME}

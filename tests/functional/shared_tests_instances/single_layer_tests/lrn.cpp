@@ -14,7 +14,6 @@ namespace ov {
 namespace test {
 
 class LrnLayerTestCommon : public LrnLayerTest, virtual public VpuOv2LayerTest {};
-class LrnLayerTest_NPU3700 : public LrnLayerTestCommon {};
 class LrnLayerTest_FP16_NPU3720 : public LrnLayerTestCommon {};
 class LrnLayerTest_FP16_NPU4000 : public LrnLayerTestCommon {};
 class LrnLayerTest_SW_FP32 : public LrnLayerTestCommon {
@@ -24,11 +23,6 @@ class LrnLayerTest_SW_FP32 : public LrnLayerTestCommon {
 };
 class LrnLayerTest_FP32_NPU3720 : public LrnLayerTest_SW_FP32 {};
 class LrnLayerTest_FP32_NPU4000 : public LrnLayerTest_SW_FP32 {};
-
-TEST_P(LrnLayerTest_NPU3700, HW) {
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
 
 // FP16
 TEST_P(LrnLayerTest_FP16_NPU3720, HW) {
@@ -64,20 +58,6 @@ const double alpha = 9.9e-05;
 const double beta = 2;
 const double bias = 1.0;
 const size_t size = 5;
-
-//
-// NPU3700
-//
-const std::vector<std::vector<int64_t>> axes_3700 = {{1}, {2, 3}};
-
-INSTANTIATE_TEST_SUITE_P(smoke_LrnCheck, LrnLayerTest_NPU3700,
-                         ::testing::Combine(::testing::Values(alpha), ::testing::Values(beta), ::testing::Values(bias),
-                                            ::testing::Values(size), ::testing::ValuesIn(axes_3700),
-                                            ::testing::ValuesIn(modelTypes),
-                                            ::testing::ValuesIn(static_shapes_to_test_representation(
-                                                    std::vector<std::vector<ov::Shape>>({{{1, 10, 3, 2}}}))),
-                                            ::testing::Values(DEVICE_NPU)),
-                         LrnLayerTest_NPU3700::getTestCaseName);
 
 //
 // NPU3720/4000

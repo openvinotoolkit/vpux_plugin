@@ -6,28 +6,12 @@
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
-#include "vpux/compiler/dialect/IE/utils/broadcast_utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
 using namespace vpux;
 
 namespace {
-
-// experimental value
-constexpr int64_t THRESHOLD_FOR_CONVERT_SUBSTRACT = 8192;
-
-bool isGreaterShape(ShapeRef shape1, ShapeRef shape2) {
-    if (shape1.size() < shape2.size()) {
-        return false;
-    }
-    for (auto p : zip(shape1, shape2)) {
-        if (std::get<0>(p) < std::get<1>(p)) {
-            return false;
-        }
-    }
-    return true;
-}
 
 static inline Const::DeclareOp createConstOpFromValue(mlir::PatternRewriter& rewriter, mlir::Location loc, float val,
                                                       mlir::RankedTensorType argType) {
@@ -39,13 +23,16 @@ static inline Const::DeclareOp createConstOpFromValue(mlir::PatternRewriter& rew
     return rewriter.create<Const::DeclareOp>(loc, argType, Const::ContentAttr::get(denseElementVal));
 }
 
-Const::DeclareOp getConstInput(IE::SubtractOp subtractOp) {
-    if (auto input2Fq = subtractOp.getInput2().getDefiningOp<IE::FakeQuantizeOp>()) {
-        if (auto fqConstInput = input2Fq.getInput().getDefiningOp<Const::DeclareOp>()) {
+Const::DeclareOp getInputConstantOp(mlir::Value input) {
+    if (input == nullptr) {
+        return nullptr;
+    }
+    if (auto inputFq = input.getDefiningOp<IE::FakeQuantizeOp>()) {
+        if (auto fqConstInput = inputFq.getInput().getDefiningOp<Const::DeclareOp>()) {
             return fqConstInput;
         }
-    } else if (auto input2Const = subtractOp.getInput2().getDefiningOp<Const::DeclareOp>()) {
-        return input2Const;
+    } else if (auto inputConst = input.getDefiningOp<Const::DeclareOp>()) {
+        return inputConst;
     }
     return nullptr;
 }
@@ -53,9 +40,8 @@ Const::DeclareOp getConstInput(IE::SubtractOp subtractOp) {
 mlir::Value createNegativeFqVal(mlir::PatternRewriter& rewriter, mlir::Location loc, mlir::Value fqVal,
                                 mlir::RankedTensorType storageType) {
     auto valConst = fqVal.getDefiningOp<Const::DeclareOp>();
+    VPUX_THROW_UNLESS(valConst.getContentAttr().isSplat(), "Second input's FQ constant is not splat");
     auto valConstContent = valConst.getContent();
-
-    VPUX_THROW_UNLESS(valConstContent.isSplat(), "Second input's FQ constant is not splat");
     auto inValue = valConstContent.getSplatValue<float>();
     auto negativeValue = (inValue == 0) ? 0 : -1 * inValue;
     return createConstOpFromValue(rewriter, loc, negativeValue, storageType);
@@ -107,20 +93,36 @@ mlir::LogicalResult ConvertSubtractToDWConvAdd::matchAndRewrite(IE::SubtractOp s
         return mlir::failure();
     }
 
-    const auto elemType = subOp.getOutput().getType().cast<vpux::NDTypeInterface>().getElementType();
+    mlir::Value firstInput = input1;
+    const auto outputType = subOp.getOutput().getType().cast<vpux::NDTypeInterface>();
+    if (auto constInput1Op = getInputConstantOp(input1)) {
+        auto constInput1Type = constInput1Op.getType().cast<NDTypeInterface>();
+        auto broadcastContent = constInput1Op.getContentAttr();
+        auto newInput1Shape = to_small_vector(input1Shape);
 
-    mlir::Value negativeInput = nullptr;
+        for (const auto& [index, inOutSizes] : enumerate(zip(constInput1Type.getShape(), outputType.getShape()))) {
+            auto [inSize, outSize] = inOutSizes;
+            if (inSize != outSize) {
+                broadcastContent = broadcastContent.broadcast(Dim(index), outSize);
+                newInput1Shape[index] = outSize;
+            }
+        }
 
-    auto constInput2 = getConstInput(subOp);
+        auto newInput1Type = constInput1Type.changeShape(Shape(newInput1Shape));
+        firstInput = rewriter.create<Const::DeclareOp>(subOpLoc, newInput1Type, broadcastContent);
+    }
+
     auto fqInput2 = input2.getDefiningOp<IE::FakeQuantizeOp>();
-    if (constInput2 != nullptr) {
+
+    mlir::Value negativeInput = input2;
+    if (auto constInput2 = getInputConstantOp(input2)) {
         auto constInput2Content = constInput2.getContentAttr();
         auto negativeContent = constInput2Content.rescale(-1.0);
         negativeInput = rewriter.create<Const::DeclareOp>(subOpLoc, constInput2.getType(), negativeContent);
     } else {
+        const auto elemType = outputType.getElementType();
         const auto inputC = input2Shape[Dims4D::Act::C];
-        const Shape filterShape = {inputC, 1, 1, 1};
-        const auto filterStorageType = mlir::RankedTensorType::get(to_small_vector(filterShape), elemType);
+        const auto filterStorageType = mlir::RankedTensorType::get(SmallVector<int64_t>{inputC, 1, 1, 1}, elemType);
         auto dwConvFilter = createConstOpFromValue(rewriter, subOpLoc, -1.0f, filterStorageType);
         auto filter = dwConvFilter.getOutput();
 
@@ -149,30 +151,7 @@ mlir::LogicalResult ConvertSubtractToDWConvAdd::matchAndRewrite(IE::SubtractOp s
         negativeInput = createNewFq(rewriter, subOpLoc, negativeInput, fqInput2).getOutput();
     }
 
-    if (constInput2 == nullptr) {
-        auto negativeInputShape = getShape(negativeInput);
-        if (input1Shape != negativeInputShape) {
-            auto ctx = rewriter.getContext();
-
-            IE::BroadcastOp inputBroadcast;
-            const auto broadcastType = IE::BroadcastTypeAttr::get(ctx, IE::BroadcastType::NUMPY);
-            if (isGreaterShape(input1Shape, negativeInputShape)) {
-                inputBroadcast = rewriter.create<IE::BroadcastOp>(
-                        subOpLoc, negativeInput,
-                        vpux::IE::createShapeConstForBroadCast(rewriter, ctx, subOpLoc, input1Shape), nullptr,
-                        broadcastType);
-                negativeInput = inputBroadcast.getOutput();
-            } else {
-                inputBroadcast = rewriter.create<IE::BroadcastOp>(
-                        subOpLoc, input1,
-                        vpux::IE::createShapeConstForBroadCast(rewriter, ctx, subOpLoc, negativeInputShape), nullptr,
-                        broadcastType);
-                input1 = inputBroadcast.getOutput();
-            }
-        }
-    }
-
-    rewriter.replaceOpWithNewOp<IE::AddOp>(subOp, input1, negativeInput, subOp.getAutoBroadcastAttr(),
+    rewriter.replaceOpWithNewOp<IE::AddOp>(subOp, firstInput, negativeInput, subOp.getAutoBroadcastAttr(),
                                            /*post_op=*/nullptr, /*clamp=*/nullptr);
     return mlir::success();
 }
@@ -230,70 +209,41 @@ void ConvertSubtractToAddPass::safeRunOnFunc() {
     auto& ctx = getContext();
     auto func = getOperation();
 
-    const auto notEqualOne = [](auto dim) {
-        return dim != 1;
-    };
-
     const auto isLegalSubtractOp = [&](IE::SubtractOp op) {
-        const auto input1ElemType = op.getInput1().getType().cast<vpux::NDTypeInterface>().getElementType();
-        const auto input2ElemType = op.getInput2().getType().cast<vpux::NDTypeInterface>().getElementType();
+        const auto input1Type = op.getInput1().getType().cast<vpux::NDTypeInterface>();
+        const auto input2Type = op.getInput2().getType().cast<vpux::NDTypeInterface>();
+        const auto outputType = op.getResult().getType().cast<vpux::NDTypeInterface>();
 
         // SubTract with INTEGER input/ouput can not be executed as NCE op, and should be kept like Subtract and be
         // executed on shave.
-        const auto hasIntInput = input1ElemType.isa<mlir::IntegerType>() || input2ElemType.isa<mlir::IntegerType>();
+        const auto hasIntInput = input1Type.getElementType().isa<mlir::IntegerType>() ||
+                                 input2Type.getElementType().isa<mlir::IntegerType>();
 
-        if (hasIntInput) {
-            return true;
-        }
+        // Check if a broadcast operation is needed. If the input and output types do not match, and it cannot be
+        // optimized through constant folding, then broadcasting is required
+        const auto needsBroadcast = (input1Type != input2Type) &&
+                                    ((input1Type != outputType && getInputConstantOp(op.getInput1()) == nullptr) ||
+                                     (input2Type != outputType && getInputConstantOp(op.getInput2()) == nullptr));
 
-        auto constInput2 = getConstInput(op);
-        const auto input1Shape = getShape(op.getInput1());
-        const auto input2Shape = getShape(op.getInput2());
+        // Check if an expansion operation is needed. If the size of the output shape is not a multiple of the channel
+        // alignment, then expansion is required
+        auto iface = mlir::cast<IE::AlignedChannelsOpInterface>(op.getOperation());
+        const auto alignment = iface.getOutputChannelAlignment();
+        const auto needsExpansion = (outputType.getShape().totalSize() % alignment) != 0;
 
-        // find the legal pattern that should not be changed by pass
-        //    SubTract:<1x1x1xW>, <1x1x1x1>
-        // Or
-        //    SubTract:<1x1x1x1>, <1x1x1x1>
-
-        const auto numOfNotOneDimForInput1 = llvm::count_if(input1Shape, notEqualOne);
-        const auto isInput2Scalar = llvm::count_if(input2Shape, notEqualOne) == 0;
-        const auto isBeneficialPattern = [&]() {
-            if (constInput2) {
-                return false;
-            }
-            if (!isInput2Scalar) {
-                return false;
-            }
-            if (numOfNotOneDimForInput1 == 0) {
-                return true;
-            }
-            if (numOfNotOneDimForInput1 == 1 && input1Shape[Dims4D::Act::W] >= THRESHOLD_FOR_CONVERT_SUBSTRACT) {
-                return true;
-            }
-            return false;
-        };
-        if (isBeneficialPattern()) {
-            return true;
-        }
-        return false;
+        return hasIntInput || needsBroadcast || needsExpansion;
     };
 
     mlir::ConversionTarget target(ctx);
     target.addLegalOp<IE::GroupConvolutionOp>();
     target.addLegalOp<IE::AddOp>();
-    target.addLegalOp<IE::BroadcastOp>();
     target.addLegalOp<Const::DeclareOp>();
     target.addLegalOp<IE::FakeQuantizeOp>();
     target.addLegalOp<IE::NegativeOp>();
     target.addDynamicallyLegalOp<IE::SubtractOp>(isLegalSubtractOp);
 
-    const auto arch = VPU::getArch(func);
     mlir::RewritePatternSet patterns(&ctx);
-    if (arch == VPU::ArchKind::NPU30XX) {
-        patterns.add<ConvertSubtractToNegativeAdd>(&ctx, _log);
-    } else {
-        patterns.add<ConvertSubtractToDWConvAdd>(&ctx, _log);
-    }
+    patterns.add<ConvertSubtractToDWConvAdd>(&ctx, _log);
 
     if (mlir::failed(mlir::applyPartialConversion(func, target, std::move(patterns)))) {
         signalPassFailure();

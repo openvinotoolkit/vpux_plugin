@@ -3,8 +3,8 @@
 //
 
 #include "behavior/ov_infer_request/properties_tests.hpp"
+#include "common/npu_test_env_cfg.hpp"
 #include "common/utils.hpp"
-#include "common/vpu_test_env_cfg.hpp"
 #include "npu_private_properties.hpp"
 
 using namespace ov::test::behavior;

@@ -72,3 +72,35 @@ mlir::LogicalResult OpRanges::verify() {
 
     return mlir::success();
 }
+
+namespace {
+
+template <class Range>
+Range findRange(mlir::ArrayAttr types, mlir::Operation::operand_range values, VPURegMapped::TaskType type,
+                VPURegMapped::IndexType index) {
+    const auto taskTypes = types | transformed([](auto attr) {
+                               return mlir::cast<VPURegMapped::TaskTypeAttr>(attr).getValue();
+                           });
+    const auto zipped = zip(taskTypes, values);
+
+    const auto areFromTheSameRange = [](auto lhs, auto rhs) {
+        return lhs.getTileIdx() == rhs.getTileIdx() && lhs.getListIdx() == rhs.getListIdx();
+    };
+    const auto isInRange = [&](auto entry) {
+        const auto& [entryType, entryBegin] = entry;
+        const auto beginIndex = mlir::cast<VPURegMapped::IndexType>(entryBegin.getType());
+        return type == entryType && areFromTheSameRange(index, beginIndex);
+    };
+    const auto range = llvm::find_if(zipped, isInRange);
+    return range == std::end(zipped) ? Range{} : Range{std::get<1>(*range)};
+}
+
+}  // namespace
+
+TaskForwardRange OpRanges::getForwardRange(VPURegMapped::TaskType type, VPURegMapped::IndexType index) {
+    return findRange<TaskForwardRange>(getTypes(), getBegins(), type, index);
+}
+
+TaskBackwardRange OpRanges::getBackwardRange(VPURegMapped::TaskType type, VPURegMapped::IndexType index) {
+    return findRange<TaskBackwardRange>(getTypes(), getEnds(), type, index);
+}

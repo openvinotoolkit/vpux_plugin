@@ -10,11 +10,11 @@ using namespace vpux;
 
 mlir::LogicalResult vpux::IE::AccumulateOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::AccumulateOpAdaptor accumulate(operands, attrs);
+    IE::AccumulateOpAdaptor accumulate(operands, attrs, prop);
     if (mlir::failed(accumulate.verify(loc))) {
         return mlir::failure();
     }

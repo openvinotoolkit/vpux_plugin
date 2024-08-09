@@ -44,7 +44,8 @@ std::pair<mlir::SmallVector<std::string>, mlir::DictionaryAttr> getPrimaryLocati
         }
     } else if (auto nameLoc = location.dyn_cast<mlir::NameLoc>()) {
         locParts.push_back(nameLoc.getName().str());
-    } else if (location.dyn_cast<mlir::UnknownLoc>() || location.dyn_cast<mlir::FileLineColLoc>()) {
+    } else if (location.dyn_cast<mlir::UnknownLoc>() || location.dyn_cast<mlir::FileLineColLoc>() ||
+               location.dyn_cast<mlir::CallSiteLoc>()) {
         // NOTE: This behavior is here to prevent breaking 100+ lit tests which assume that
         // stringifyPrimaryLocation() for FileLineColLoc and UnknownLoc returns an empty string.
         // TODO: E#93652

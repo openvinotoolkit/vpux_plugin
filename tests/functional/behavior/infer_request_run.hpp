@@ -10,8 +10,8 @@
 #include "npu_private_properties.hpp"
 
 #include "base/ov_behavior_test_utils.hpp"
+#include "common/npu_test_env_cfg.hpp"
 #include "common/utils.hpp"
-#include "common/vpu_test_env_cfg.hpp"
 #include "functional_test_utils/ov_plugin_cache.hpp"
 #include "overload/overload_test_utils_npu.hpp"
 

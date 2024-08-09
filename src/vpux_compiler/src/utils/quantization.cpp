@@ -258,7 +258,7 @@ vpux::QuantizationApproximation::QuantizationApproximation(VPU::ArchKind archite
         : _mult(0), _shift(0), _postShift(0) {
     std::tie(_mult, _shift, _postShift) = approximate<decltype(_mult)>(15, target);
 
-    VPUX_THROW_WHEN(_postShift != 0 && architecture != VPU::ArchKind::NPU30XX,
+    VPUX_THROW_WHEN(_postShift != 0,
                     "Encountered an attempt to approximate {0} as mult = {1}, shift = {2}, postShift = {3} on {4}, "
                     "but postShift is not supported",
                     target, mult(), shift(), postShift(), architecture);
@@ -344,7 +344,7 @@ QuantizationApproximation vpux::EltwiseQuantizationApproximation::output() const
 
 vpux::PReLUApproximation::PReLUApproximation(VPU::ArchKind architecture, double target): _mult(0), _shift(0) {
     // TODO return logic for 11 bits for quantized case VPUX37XX back as soon as it works.
-    const auto bits = architecture == VPU::ArchKind::NPU30XX ? 7 : 11;
+    const auto bits = 11;
     int8_t postShift = 0;
     std::tie(_mult, _shift, postShift) = approximate<decltype(_mult)>(bits, target);
 
@@ -511,7 +511,8 @@ mlir::FailureOr<std::tuple<float, float>> vpux::getFp8Range(mlir::Type lowFpType
 mlir::quant::QuantizedType vpux::getQuantizedType(mlir::Attribute lowConstAttr, mlir::Attribute highConstAttr,
                                                   std::optional<int64_t> levels, std::optional<mlir::Type> lowFpType,
                                                   mlir::FloatType realType, bool isSigned, mlir::Location loc,
-                                                  IE::AutoBroadcastType broadcast, const Logger& log) {
+                                                  IE::AutoBroadcastType broadcast, bool ignoreZPCheck,
+                                                  const Logger& log) {
     const auto innerLog = log.nest("getQuantizedType");
 
     const auto lowConst = lowConstAttr.dyn_cast_or_null<Const::ContentAttr>();
@@ -614,7 +615,7 @@ mlir::quant::QuantizedType vpux::getQuantizedType(mlir::Attribute lowConstAttr, 
         }
     }
 
-    if (!std::equal(zeroPoints.begin() + 1, zeroPoints.end(), zeroPoints.begin())) {
+    if (!ignoreZPCheck && !std::equal(zeroPoints.begin() + 1, zeroPoints.end(), zeroPoints.begin())) {
         return nullptr;
     }
 
@@ -682,6 +683,16 @@ void vpux::getFakeQuantParams(vpux::NDTypeInterface qType, int64_t& levels, mlir
         rMaxAttr = mlir::DenseElementsAttr::get(attrType, ArrayRef(rMaxVals));
     } else {
         VPUX_THROW("Unsupported Quantized Type '{0}'", qElemType);
+    }
+}
+
+float vpux::fakeQuantize(float inVal, float inLow, float inHigh, float qLow, float qHigh, float fLevels) {
+    if (inVal <= inLow) {
+        return qLow;
+    } else if (inVal > inHigh) {
+        return qHigh;
+    } else {
+        return std::round((inVal - inLow) / (inHigh - inLow) * (fLevels - 1)) / (fLevels - 1) * (qHigh - qLow) + qLow;
     }
 }
 

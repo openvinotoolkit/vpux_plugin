@@ -59,11 +59,11 @@ mlir::Value vpux::IERT::SubViewOp::getViewSource() {
 mlir::LogicalResult vpux::IERT::SubViewOp::inferReturnTypes(mlir::MLIRContext* ctx,
                                                             std::optional<mlir::Location> optLoc,
                                                             mlir::ValueRange operands, mlir::DictionaryAttr attrs,
-                                                            mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+                                                            mlir::OpaqueProperties prop, mlir::RegionRange /*regions*/,
                                                             mlir::SmallVectorImpl<mlir::Type>& inferredTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IERT::SubViewOpAdaptor subViewOp(operands, attrs);
+    IERT::SubViewOpAdaptor subViewOp(operands, attrs, prop);
     if (mlir::failed(subViewOp.verify(loc))) {
         return mlir::failure();
     }

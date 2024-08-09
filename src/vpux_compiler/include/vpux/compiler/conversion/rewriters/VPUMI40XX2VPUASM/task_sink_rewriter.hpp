@@ -16,7 +16,7 @@ public:
     using Base::Base;
     mlir::LogicalResult symbolize(VPURegMapped::TaskSinkOp op, SymbolMapper& mapper,
                                   mlir::ConversionPatternRewriter& rewriter) const override;
-    mlir::FlatSymbolRefAttr getSymbolicName(VPURegMapped::TaskSinkOp op, size_t counter) override;
+    llvm::SmallVector<mlir::FlatSymbolRefAttr> getSymbolicNames(VPURegMapped::TaskSinkOp op, size_t counter) override;
 };
 
 }  // namespace vpumi40xx2vpuasm

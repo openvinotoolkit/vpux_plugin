@@ -3,11 +3,10 @@
 //
 
 #include "single_op_tests/pooling.hpp"
-#include "npu_private_properties.hpp"
-
-#include <vector>
-
 #include <common/functions.h>
+#include <common_test_utils/ov_tensor_utils.hpp>
+#include <vector>
+#include "npu_private_properties.hpp"
 #include "vpu_ov2_layer_test.hpp"
 
 using namespace ov::test::utils;
@@ -27,21 +26,6 @@ namespace test {
 #define INSTANTIATE_TEST_SUITE_P_WITH_DISABLE_OPTION(A, B, C, D) INSTANTIATE_TEST_SUITE_P(DISABLED_##A, B, C, D)
 #endif
 
-class PoolingLayerTest_NPU3700 : public PoolingLayerTest, virtual public VpuOv2LayerTest {};
-
-void skipCompilationCallbackImplNPU3700(std::stringstream& skip, ov::AnyMap configuration, PoolingTypes poolType,
-                                        std::vector<size_t> strides, double rel_threshold) {
-    if (poolType == PoolingTypes::AVG && configuration[ov::intel_npu::compilation_mode.name()] == "DefaultHW") {
-        rel_threshold = 0.25;
-    }
-
-    // MLIR uses software layer, which seem to be flawed
-    if (poolType == PoolingTypes::AVG) {
-        if (strides[0] != 1 || strides[1] != 1) {
-            skip << "AVG pool strides != 1 produces inaccurate results";
-        }
-    }
-}
 void skipCompilationCallbackImplNPU3720(std::stringstream& skip, ov::AnyMap configuration, PoolingTypes poolType,
                                         std::vector<size_t> kernel, std::vector<size_t> strides,
                                         std::vector<size_t> padBegin, std::vector<size_t> padEnd,
@@ -101,31 +85,22 @@ void skipCompilationCallbackImplNPU3720(std::stringstream& skip, ov::AnyMap conf
     }
 }
 
-TEST_P(PoolingLayerTest_NPU3700, SW) {
-    setSkipCompilationCallback([this](std::stringstream& skip) {
-        const auto& poolParams = std::get<0>(GetParam());
-        PoolingTypes poolType = std::get<0>(poolParams);
-        std::vector<size_t> strides = std::get<2>(poolParams);
-        ov::op::RoundingType roundingMode = std::get<5>(poolParams);
-        skipCompilationCallbackImplNPU3700(skip, configuration, poolType, strides, rel_threshold);
-    });
-    setReferenceSoftwareMode();
-    run(Platform::NPU3700);
-}
+class PoolingLayerTestWithBatching : public PoolingLayerTest, virtual public VpuOv2LayerTest {
+    void configure_model() override {
+        configuration[ov::intel_npu::compilation_mode_params.name()] = "skip-unroll-batch=true";
+    }
+};
 
-TEST_P(PoolingLayerTest_NPU3700, HW) {
-    setSkipCompilationCallback([this](std::stringstream& skip) {
-        const auto& poolParams = std::get<0>(GetParam());
-        PoolingTypes poolType = std::get<0>(poolParams);
-        std::vector<size_t> strides = std::get<2>(poolParams);
-        ov::op::RoundingType roundingMode = std::get<5>(poolParams);
-        skipCompilationCallbackImplNPU3700(skip, configuration, poolType, strides, rel_threshold);
-    });
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
-
-class PoolingLayerTest_NPU3720 : public PoolingLayerTest, virtual public VpuOv2LayerTest {};
+class PoolingLayerTest_NPU3720 : public PoolingLayerTest, virtual public VpuOv2LayerTest {
+    void generate_inputs(const std::vector<ov::Shape>& targetInputStaticShapes) override {
+        VpuOv2LayerTest::inputs.clear();
+        const auto& funcInputs = VpuOv2LayerTest::function->inputs();
+        ov::Tensor tensorData =
+                create_and_fill_tensor(funcInputs[0].get_element_type(), targetInputStaticShapes[0], 8, 0, 32);
+        VpuOv2LayerTest::inputs.insert({funcInputs[0].get_node_shared_ptr(), tensorData});
+    }
+};
+class PoolingLayerTest_NPU3720_SOB : public PoolingLayerTestWithBatching {};
 
 TEST_P(PoolingLayerTest_NPU3720, SW) {
     setSkipCompilationCallback([this](std::stringstream& skip) {
@@ -198,7 +173,21 @@ TEST_P(PoolingLayerTest_NPU3720_SingleCluster, HW) {
     run(Platform::NPU3720);
 }
 
-class PoolingLayerTest_NPU4000 : public PoolingLayerTest, virtual public VpuOv2LayerTest {};
+TEST_P(PoolingLayerTest_NPU3720_SOB, HW) {
+    setDefaultHardwareMode();
+    run(Platform::NPU3720);
+}
+
+class PoolingLayerTest_NPU4000 : public PoolingLayerTest, virtual public VpuOv2LayerTest {
+    void generate_inputs(const std::vector<ov::Shape>& targetInputStaticShapes) override {
+        VpuOv2LayerTest::inputs.clear();
+        const auto& funcInputs = VpuOv2LayerTest::function->inputs();
+        ov::Tensor tensorData =
+                create_and_fill_tensor(funcInputs[0].get_element_type(), targetInputStaticShapes[0], 8, 0, 32);
+        VpuOv2LayerTest::inputs.insert({funcInputs[0].get_node_shared_ptr(), tensorData});
+    }
+};
+class PoolingLayerTest_NPU4000_SOB : public PoolingLayerTestWithBatching {};
 
 class PoolingLayerTest_NPU4000_F32 : public PoolingLayerTest_NPU4000 {
     void configure_model() override {
@@ -226,6 +215,11 @@ TEST_P(PoolingLayerTest_NPU4000_F32, SW) {
     run(Platform::NPU4000);
 }
 
+TEST_P(PoolingLayerTest_NPU4000_SOB, HW) {
+    setDefaultHardwareMode();
+    run(Platform::NPU4000);
+}
+
 }  // namespace test
 }  // namespace ov
 
@@ -250,9 +244,6 @@ const auto pool_AutoPadValid = ::testing::Combine(
         ::testing::ValuesIn(static_shapes_to_test_representation(inputShapesAutoPadValid)),  // inputShapes
         ::testing::Values(DEVICE_NPU));
 
-INSTANTIATE_TEST_SUITE_P(smoke_Pooling_AutoPadValid, PoolingLayerTest_NPU3700, pool_AutoPadValid,
-                         PoolingLayerTest::getTestCaseName);
-
 /* ============= ExplicitPadding ============= */
 
 std::vector<std::vector<ov::Shape>> inputShapesExplicitPadding = {{{1, 16, 30, 30}}};
@@ -270,9 +261,6 @@ const auto pool_ExplicitPadding = ::testing::Combine(
         ::testing::ValuesIn(static_shapes_to_test_representation(inputShapesExplicitPadding)),  // inputShapes
         ::testing::Values(DEVICE_NPU));
 
-INSTANTIATE_TEST_SUITE_P(smoke_Pooling_ExplicitPadding, PoolingLayerTest_NPU3700, pool_ExplicitPadding,
-                         PoolingLayerTest::getTestCaseName);
-
 /* ============= AsymmetricKernel ============= */
 
 const auto pool_AsymmetricKernel = ::testing::Combine(
@@ -288,9 +276,6 @@ const auto pool_AsymmetricKernel = ::testing::Combine(
         ::testing::ValuesIn(static_shapes_to_test_representation(inputShapesExplicitPadding)),  // inputShapes
         ::testing::Values(DEVICE_NPU));
 
-INSTANTIATE_TEST_SUITE_P(smoke_Pooling_AsymmetricKernel, PoolingLayerTest_NPU3700, pool_AsymmetricKernel,
-                         PoolingLayerTest::getTestCaseName);
-
 /* ============= AsymmetricStrides ============= */
 
 const auto pool_AsymmetricStrides = ::testing::Combine(
@@ -305,9 +290,6 @@ const auto pool_AsymmetricStrides = ::testing::Combine(
         ::testing::Values(ov::element::f16),                                                    // netPrc
         ::testing::ValuesIn(static_shapes_to_test_representation(inputShapesExplicitPadding)),  // inputShapes
         ::testing::Values(DEVICE_NPU));
-
-INSTANTIATE_TEST_SUITE_P(smoke_Pooling_AsymmetricStrides, PoolingLayerTest_NPU3700, pool_AsymmetricStrides,
-                         PoolingLayerTest::getTestCaseName);
 
 /* ============= LargeSize ============= */
 
@@ -325,9 +307,6 @@ const auto pool_LargeSize1 = ::testing::Combine(
                 static_shapes_to_test_representation(std::vector<ov::Shape>{{1, 64, 128, 128}})),  // inputShapes
         ::testing::Values(DEVICE_NPU));
 
-INSTANTIATE_TEST_SUITE_P(smoke_Pooling_LargeSize1, PoolingLayerTest_NPU3700, pool_LargeSize1,
-                         PoolingLayerTest::getTestCaseName);
-
 const auto pool_LargeSize2 = ::testing::Combine(
         ::testing::Combine(::testing::Values(PoolingTypes::MAX),                //
                            ::testing::ValuesIn<std::vector<size_t>>({{3, 3}}),  // kernels
@@ -341,9 +320,6 @@ const auto pool_LargeSize2 = ::testing::Combine(
         ::testing::Values(
                 static_shapes_to_test_representation(std::vector<ov::Shape>{{1, 16, 256, 256}})),  // inputShapes
         ::testing::Values(DEVICE_NPU));
-
-INSTANTIATE_TEST_SUITE_P(smoke_Pooling_LargeSize2, PoolingLayerTest_NPU3700, pool_LargeSize2,
-                         PoolingLayerTest::getTestCaseName);
 
 /* ============= LargeStrides ============= */
 
@@ -362,29 +338,6 @@ const auto pool_LargeStrides = ::testing::Combine(
                 static_shapes_to_test_representation(std::vector<ov::Shape>{{1, 16, 64, 64}})),  // inputShapes
         ::testing::Values(DEVICE_NPU));
 
-INSTANTIATE_TEST_SUITE_P(smoke_Pooling_LargeStrides, PoolingLayerTest_NPU3700, pool_LargeStrides,
-                         PoolingLayerTest::getTestCaseName);
-
-/* ============= BatchN to batch1 ============= */
-
-const auto pool_batchN = ::testing::Combine(::testing::Values(PoolingTypes::MAX),                //
-                                            ::testing::ValuesIn<std::vector<size_t>>({{1, 1}}),  // kernels
-                                            ::testing::ValuesIn<std::vector<size_t>>({{1, 1}}),  // strides
-                                            ::testing::ValuesIn<std::vector<size_t>>({{0, 0}}),  // padBegins
-                                            ::testing::ValuesIn<std::vector<size_t>>({{0, 0}}),  // padEnds
-                                            ::testing::Values(ov::op::RoundingType::FLOOR),      //
-                                            ::testing::Values(ov::op::PadType::VALID),           //
-                                            ::testing::Values(false)                             // excludePad
-);
-
-INSTANTIATE_TEST_CASE_P(smoke_Pooling_BatchN, PoolingLayerTest_NPU3700,
-                        ::testing::Combine(pool_batchN,                          //
-                                           ::testing::Values(ov::element::f16),  // netPrc
-                                           ::testing::Values(static_shapes_to_test_representation(
-                                                   std::vector<ov::Shape>{{16, 16, 1, 64}})),  // inputShapes
-                                           ::testing::Values(DEVICE_NPU)),
-                        PoolingLayerTest::getTestCaseName);
-
 /* ============= Padding valitation ( > K_SZ/2) ============= */
 
 const auto pool_LargePadding2 = ::testing::Combine(
@@ -401,9 +354,6 @@ const auto pool_LargePadding2 = ::testing::Combine(
                 static_shapes_to_test_representation(std::vector<ov::Shape>{{1, 16, 64, 64}})),  // inputShapes
         ::testing::Values(DEVICE_NPU));
 
-INSTANTIATE_TEST_SUITE_P(smoke_Pooling_LargePadding2, PoolingLayerTest_NPU3700, pool_LargePadding2,
-                         PoolingLayerTest::getTestCaseName);
-
 const auto pool_LargePadding3 = ::testing::Combine(
         ::testing::Combine(::testing::Values(PoolingTypes::MAX),                                //
                            ::testing::ValuesIn<std::vector<size_t>>({{3, 3}, {4, 4}, {5, 5}}),  // kernels
@@ -418,9 +368,6 @@ const auto pool_LargePadding3 = ::testing::Combine(
                 static_shapes_to_test_representation(std::vector<ov::Shape>{{1, 16, 64, 64}})),  // inputShapes
         ::testing::Values(DEVICE_NPU));
 
-INSTANTIATE_TEST_SUITE_P(smoke_Pooling_LargePadding3, PoolingLayerTest_NPU3700, pool_LargePadding3,
-                         PoolingLayerTest::getTestCaseName);
-
 const auto pool_LargePadding4 = ::testing::Combine(
         ::testing::Combine(::testing::Values(PoolingTypes::MAX),                                        //
                            ::testing::ValuesIn<std::vector<size_t>>({{4, 4}, {5, 5}, {6, 6}, {7, 7}}),  // kernels
@@ -434,9 +381,6 @@ const auto pool_LargePadding4 = ::testing::Combine(
         ::testing::Values(
                 static_shapes_to_test_representation(std::vector<ov::Shape>{{1, 16, 64, 64}})),  // inputShapes
         ::testing::Values(DEVICE_NPU));
-
-INSTANTIATE_TEST_SUITE_P(smoke_Pooling_LargePadding4, PoolingLayerTest_NPU3700, pool_LargePadding4,
-                         PoolingLayerTest::getTestCaseName);
 
 const auto pool_LargePadding5 = ::testing::Combine(
         ::testing::Combine(
@@ -453,9 +397,6 @@ const auto pool_LargePadding5 = ::testing::Combine(
                 static_shapes_to_test_representation(std::vector<ov::Shape>{{1, 16, 64, 64}})),  // inputShapes
         ::testing::Values(DEVICE_NPU));
 
-INSTANTIATE_TEST_SUITE_P(smoke_Pooling_LargePadding5, PoolingLayerTest_NPU3700, pool_LargePadding5,
-                         PoolingLayerTest::getTestCaseName);
-
 const auto pool_LargePadding6 = ::testing::Combine(
         ::testing::Combine(::testing::Values(PoolingTypes::MAX),  //
                            ::testing::ValuesIn<std::vector<size_t>>(
@@ -470,9 +411,6 @@ const auto pool_LargePadding6 = ::testing::Combine(
         ::testing::Values(
                 static_shapes_to_test_representation(std::vector<ov::Shape>{{1, 16, 64, 64}})),  // inputShapes
         ::testing::Values(DEVICE_NPU));
-
-INSTANTIATE_TEST_SUITE_P(smoke_Pooling_LargePadding6, PoolingLayerTest_NPU3700, pool_LargePadding6,
-                         PoolingLayerTest::getTestCaseName);
 
 const auto pool_LargePadding7 = ::testing::Combine(
         ::testing::Combine(
@@ -489,9 +427,6 @@ const auto pool_LargePadding7 = ::testing::Combine(
                 static_shapes_to_test_representation(std::vector<ov::Shape>{{1, 16, 64, 64}})),  // inputShapes
         ::testing::Values(DEVICE_NPU));
 
-INSTANTIATE_TEST_SUITE_P(smoke_Pooling_LargePadding7, PoolingLayerTest_NPU3700, pool_LargePadding7,
-                         PoolingLayerTest::getTestCaseName);
-
 const auto pool_LargePadding8 = ::testing::Combine(
         ::testing::Combine(::testing::Values(PoolingTypes::MAX),                                            //
                            ::testing::ValuesIn<std::vector<size_t>>({{8, 8}, {9, 9}, {10, 10}, {11, 11}}),  // kernels
@@ -505,9 +440,6 @@ const auto pool_LargePadding8 = ::testing::Combine(
         ::testing::Values(
                 static_shapes_to_test_representation(std::vector<ov::Shape>{{1, 16, 64, 64}})),  // inputShapes
         ::testing::Values(DEVICE_NPU));
-
-INSTANTIATE_TEST_SUITE_P(smoke_Pooling_LargePadding8, PoolingLayerTest_NPU3700, pool_LargePadding8,
-                         PoolingLayerTest::getTestCaseName);
 
 /* ============= AVGPooling / Large Kernels ============= */
 
@@ -525,9 +457,6 @@ const auto avgPool_largeKernels = ::testing::Combine(
                 static_shapes_to_test_representation(std::vector<ov::Shape>{{1, 2048, 23, 30}})),  // inputShapes
         ::testing::Values(DEVICE_NPU));
 
-INSTANTIATE_TEST_SUITE_P(smoke_AvgPooling_LargeKernels, PoolingLayerTest_NPU3700, avgPool_largeKernels,
-                         PoolingLayerTest::getTestCaseName);
-
 /* ============= AVGPooling / Large KernelsX ============= */
 
 const auto avgPool_largeKernelsX = ::testing::Combine(
@@ -543,9 +472,6 @@ const auto avgPool_largeKernelsX = ::testing::Combine(
         ::testing::Values(static_shapes_to_test_representation(std::vector<ov::Shape>{{1, 16, 1, 14}})),  // inputShapes
         ::testing::Values(DEVICE_NPU));
 
-INSTANTIATE_TEST_SUITE_P(smoke_AvgPooling_LargeKernelsX, PoolingLayerTest_NPU3700, avgPool_largeKernelsX,
-                         PoolingLayerTest::getTestCaseName);
-
 /* ============= AVGPooling / Large KernelsY ============= */
 
 const auto avgPool_largeKernelsY = ::testing::Combine(
@@ -560,9 +486,6 @@ const auto avgPool_largeKernelsY = ::testing::Combine(
         ::testing::Values(ov::element::f16),                                                              // netPrc
         ::testing::Values(static_shapes_to_test_representation(std::vector<ov::Shape>{{1, 16, 14, 1}})),  // inputShapes
         ::testing::Values(DEVICE_NPU));
-
-INSTANTIATE_TEST_SUITE_P(smoke_AvgPooling_LargeKernelsY, PoolingLayerTest_NPU3700, avgPool_largeKernelsY,
-                         PoolingLayerTest::getTestCaseName);
 
 /* ============= AVGPooling / Large Prime Kernels ============= */
 
@@ -580,9 +503,6 @@ const auto avgPool_largePrimeKernels = ::testing::Combine(
                 static_shapes_to_test_representation(std::vector<ov::Shape>{{1, 147, 17, 17}})),  // inputShapes
         ::testing::Values(DEVICE_NPU));
 
-INSTANTIATE_TEST_SUITE_P(smoke_AvgPooling_LargePrimeKernels, PoolingLayerTest_NPU3700, avgPool_largePrimeKernels,
-                         PoolingLayerTest::getTestCaseName);
-
 /* ============= MAXPooling / Large Kernels ============= */
 
 const auto maxPool_largeKernels = ::testing::Combine(
@@ -599,9 +519,6 @@ const auto maxPool_largeKernels = ::testing::Combine(
                 static_shapes_to_test_representation(std::vector<ov::Shape>{{1, 2048, 23, 30}})),  // inputShapes
         ::testing::Values(DEVICE_NPU));
 
-INSTANTIATE_TEST_SUITE_P(smoke_MaxPooling_LargeKernels, PoolingLayerTest_NPU3700, maxPool_largeKernels,
-                         PoolingLayerTest::getTestCaseName);
-
 /* ============= MAXPooling / Large KernelsX ============= */
 
 const auto maxPool_largeKernelsX = ::testing::Combine(
@@ -616,9 +533,6 @@ const auto maxPool_largeKernelsX = ::testing::Combine(
         ::testing::Values(ov::element::f16),                                                              // netPrc
         ::testing::Values(static_shapes_to_test_representation(std::vector<ov::Shape>{{1, 16, 1, 14}})),  // inputShapes
         ::testing::Values(DEVICE_NPU));
-
-INSTANTIATE_TEST_SUITE_P(smoke_MaxPooling_LargeKernelsX, PoolingLayerTest_NPU3700, maxPool_largeKernelsX,
-                         PoolingLayerTest::getTestCaseName);
 
 /* ============= MAXPooling / Large KernelsY ============= */
 
@@ -635,9 +549,6 @@ const auto maxPool_largeKernelsY = ::testing::Combine(
         ::testing::Values(static_shapes_to_test_representation(std::vector<ov::Shape>{{1, 16, 14, 1}})),  // inputShapes
         ::testing::Values(DEVICE_NPU));
 
-INSTANTIATE_TEST_SUITE_P(smoke_MaxPooling_LargeKernelsY, PoolingLayerTest_NPU3700, maxPool_largeKernelsY,
-                         PoolingLayerTest::getTestCaseName);
-
 /* ============= AvgPooling / Exclude_Pad Handling ============= */
 
 const auto avgPool_excludePad = ::testing::Combine(
@@ -653,9 +564,6 @@ const auto avgPool_excludePad = ::testing::Combine(
         ::testing::Values(
                 static_shapes_to_test_representation(std::vector<ov::Shape>{{1, 16, 28, 28}})),  // inputShapes
         ::testing::Values(DEVICE_NPU));
-
-INSTANTIATE_TEST_SUITE_P(smoke_avgPool_excludePad, PoolingLayerTest_NPU3700, avgPool_excludePad,
-                         PoolingLayerTest::getTestCaseName);
 
 /* ======================================== NPU 3720 ============================================================= */
 
@@ -801,9 +709,23 @@ const auto pool_inputOutputInteger = ::testing::Combine(
         ::testing::Values(static_shapes_to_test_representation(std::vector<ov::Shape>{{1, 1, 16, 8}})),  // inputShapes
         ::testing::Values(DEVICE_NPU));
 
+// SOB multi-clustering
+auto generateSOBParamsFromInputShape = [](const std::vector<ov::Shape>& inputShapes) {
+    return ::testing::Combine(::testing::Combine(::testing::Values(PoolingTypes::AVG, PoolingTypes::MAX),
+                                                 ::testing::Values<std::vector<size_t>>({3, 3}),  // kernels
+                                                 ::testing::Values<std::vector<size_t>>({2, 2}),  // strides
+                                                 ::testing::Values<std::vector<size_t>>({1, 1}),  // padBegins
+                                                 ::testing::Values<std::vector<size_t>>({1, 1}),  // padEnds
+                                                 ::testing::Values(ov::op::RoundingType::FLOOR),
+                                                 ::testing::Values(ov::op::PadType::EXPLICIT),
+                                                 ::testing::Values(false)),                          // excludePad
+                              ::testing::Values(ov::element::f16),                                   // netPrc
+                              ::testing::Values(static_shapes_to_test_representation(inputShapes)),  // inputShapes
+                              ::testing::Values(DEVICE_NPU));
+};
+
 INSTANTIATE_TEST_SUITE_P(smoke_Pooling_NCHW_NoPadding, PoolingLayerTest_NPU3720, pool_ExplicitNoPadding_Params,
                          PoolingLayerTest_NPU3720::getTestCaseName);
-
 INSTANTIATE_TEST_SUITE_P(smoke_Pooling_NCHW_NoPadding_ELF, PoolingLayerTest_NPU3720_SingleCluster,
                          pool_ExplicitNoPadding_Params, PoolingLayerTest_NPU3720::getTestCaseName);
 // U-net usecase
@@ -831,11 +753,13 @@ INSTANTIATE_TEST_SUITE_P(smoke_Pooling_5D, PoolingLayerTest_NPU3720, pool5DParam
 // pad outside of kernel size/2. Pad is valid until at kerneSize-1.
 INSTANTIATE_TEST_SUITE_P(smoke_Pooling_BigPadEndParams, PoolingLayerTest_NPU3720, pooligBigPadEndParams,
                          PoolingLayerTest_NPU3720::getTestCaseName);
-
 // Integer Input/Output
 INSTANTIATE_TEST_SUITE_P(smoke_Pooling_InputOutputInteger, PoolingLayerTest_NPU3720, pool_inputOutputInteger,
                          PoolingLayerTest_NPU3720::getTestCaseName);
-
+// SOB multi-clustering
+INSTANTIATE_TEST_SUITE_P(smoke_Pooling_SOB, PoolingLayerTest_NPU3720_SOB,
+                         generateSOBParamsFromInputShape({{2, 64, 28, 28}}),
+                         PoolingLayerTest_NPU3720_SOB::getTestCaseName);
 // previous cip reused tests
 /* ============= AutoPadValid ============= */
 INSTANTIATE_TEST_SUITE_P_WITH_DISABLE_OPTION(smoke_Pooling_AutoPadValid, PoolingLayerTest_NPU3720, pool_AutoPadValid,
@@ -867,7 +791,7 @@ INSTANTIATE_TEST_SUITE_P_WITH_DISABLE_OPTION(smoke_AvgPooling_LargePrimeKernels,
 INSTANTIATE_TEST_SUITE_P_WITH_DISABLE_OPTION(smoke_avgPool_excludePad, PoolingLayerTest_NPU3720, avgPool_excludePad,
                                              PoolingLayerTest::getTestCaseName);
 
-// Max pool ported tests from VPU3700
+// Max pool ported tests from NPU3720
 INSTANTIATE_TEST_SUITE_P_WITH_DISABLE_OPTION(smoke_Pooling_LargeSize1, PoolingLayerTest_NPU3720, pool_LargeSize1,
                                              PoolingLayerTest::getTestCaseName);
 INSTANTIATE_TEST_SUITE_P_WITH_DISABLE_OPTION(smoke_Pooling_LargeSize2, PoolingLayerTest_NPU3720, pool_LargeSize2,
@@ -924,6 +848,10 @@ INSTANTIATE_TEST_SUITE_P(smoke_Pooling_F32, PoolingLayerTest_NPU4000_F32, pool_b
 // Integer Input/Output
 INSTANTIATE_TEST_SUITE_P(smoke_Pooling_InputOutputInteger, PoolingLayerTest_NPU4000, pool_inputOutputInteger,
                          PoolingLayerTest_NPU3720::getTestCaseName);
+// SOB multi-clustering
+INSTANTIATE_TEST_SUITE_P(smoke_Pooling_SOB, PoolingLayerTest_NPU4000_SOB,
+                         generateSOBParamsFromInputShape({{4, 64, 28, 28}}),
+                         PoolingLayerTest_NPU4000_SOB::getTestCaseName);
 // previous cip reused tests
 /* ============= AutoPadValid ============= */
 INSTANTIATE_TEST_SUITE_P_WITH_DISABLE_OPTION(smoke_Pooling_AutoPadValid, PoolingLayerTest_NPU4000, pool_AutoPadValid,
@@ -954,7 +882,7 @@ INSTANTIATE_TEST_SUITE_P_WITH_DISABLE_OPTION(smoke_AvgPooling_LargePrimeKernels,
 INSTANTIATE_TEST_SUITE_P_WITH_DISABLE_OPTION(smoke_avgPool_excludePad, PoolingLayerTest_NPU4000, avgPool_excludePad,
                                              PoolingLayerTest::getTestCaseName);
 
-// Max pool ported tests from NPU3700
+// Max pool ported tests from NPU4000
 INSTANTIATE_TEST_SUITE_P_WITH_DISABLE_OPTION(smoke_Pooling_LargeSize1, PoolingLayerTest_NPU4000, pool_LargeSize1,
                                              PoolingLayerTest::getTestCaseName);
 INSTANTIATE_TEST_SUITE_P_WITH_DISABLE_OPTION(smoke_Pooling_LargeSize2, PoolingLayerTest_NPU4000, pool_LargeSize2,

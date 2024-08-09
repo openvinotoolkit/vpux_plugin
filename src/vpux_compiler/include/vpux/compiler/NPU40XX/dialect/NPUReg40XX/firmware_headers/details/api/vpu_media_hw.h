@@ -25,22 +25,6 @@ extern "C" {
 
 #pragma pack(push, 1)
 
-typedef struct ALIGN_MEDIA(16) {
-    uint64_t reserved1 : 64;
-    uint64_t reserved2 : 64;
-    uint64_t reserved3 : 64;
-    uint64_t reserved4 : 64;
-    uint64_t reserved5 : 64;
-    uint64_t reserved6 : 64;
-    uint64_t reserved7 : 8;
-    uint64_t reserved8 : 8;
-    uint64_t reserved9 : 16;
-    uint64_t reserved10 : 16;
-    uint64_t reserved11 : 16;
-    uint64_t reserved12 : 32;
-    uint64_t reserved13 : 32;
-} Media_HWPDescriptor_t;
-
 typedef struct {
     uint64_t Coeff11 : 16;
     uint64_t Coeff12 : 16;

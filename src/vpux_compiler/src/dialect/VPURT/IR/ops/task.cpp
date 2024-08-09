@@ -38,7 +38,7 @@ VPU::ExecutorKind vpux::VPURT::TaskOp::getExecutorKind() {
         innerTaskOp = clusterTilingOp.getInnerTaskOp();
     }
     auto task = mlir::dyn_cast<VPUIP::TaskOpInterface>(innerTaskOp);
-    VPUX_THROW_UNLESS(task != nullptr, "Inner task  does not implement TaskOpInterface");
+    VPUX_THROW_UNLESS(task != nullptr, "Inner task at {0} does not implement TaskOpInterface", innerTaskOp->getLoc());
 
     return task.getExecutorKind();
 }

@@ -16,7 +16,5 @@ using namespace vpux;
 // Generated
 //
 
-#include <vpux/compiler/NPU40XX/dialect/ELF/ops_interfaces.cpp.inc>
-
 #define GET_OP_CLASSES
 #include <vpux/compiler/NPU40XX/dialect/ELF/ops.cpp.inc>

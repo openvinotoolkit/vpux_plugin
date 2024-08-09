@@ -4,7 +4,7 @@
 //
 
 // RUN: vpux-opt --vpu-arch=%arch% --split-input-file -inline --move-declarations-to-top %s | FileCheck %s --strict-whitespace
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 // foo1 -> foo2
 

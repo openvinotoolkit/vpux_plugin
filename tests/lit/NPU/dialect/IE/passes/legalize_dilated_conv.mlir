@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --legalize-dilated-conv %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 // CHECK-LABEL: @LegalizeDilatedConvolution
 func.func @LegalizeDilatedConvolution(%arg0: tensor<1x2x16x16xf32>) -> tensor<1x8x16x16xf32> {
@@ -63,6 +63,29 @@ func.func @LegalizeDilatedGroupConvolution(%arg0: tensor<1x3x30x30xf16>) -> tens
     // CHECK-DAG: [[FILTERS:%.*]] = const.Declare tensor<3x1x3x3xf16>
     // CHECK: [[EXPAND_DILATED:%.*]] = IE.ExpandDilated([[FILTERS]]) {dilations = [2, 2]} : tensor<3x1x3x3xf16> -> tensor<3x1x5x5xf16>
     // CHECK: [[CONV:%.*]] = IE.GroupConvolution(%arg0, [[EXPAND_DILATED]]) {dilations = [1, 1], groups = 3 : i64, pads_begin = [2, 2], pads_end = [2, 2], strides = [1, 1]} : tensor<1x3x30x30xf16>, tensor<3x1x5x5xf16> -> tensor<1x3x30x30xf16>
+
+    // CHECK: return [[CONV]]
+}
+
+// CHECK-LABEL: @LegalizeDilatedGroupConvolutionWithConstantWeights
+// CHECK-SAME:     ([[INPUT:%.+]]: tensor<1x3x30x30xf16>)
+func.func @LegalizeDilatedGroupConvolutionWithConstantWeights(%arg0: tensor<1x3x30x30xf16>) -> tensor<1x3x30x30xf16> {
+    %filter = const.Declare tensor<1x3x3x3xf16> = dense<1.0> : tensor<1x3x3x3xf16>
+    %0 = IE.AffineReshape(%filter) {dim_mapping = [[0], [0], [1, 2], [3]], shape_value = [3, 1, 3, 3]} : tensor<1x3x3x3xf16> -> tensor<3x1x3x3xf16>
+    %1 = IE.GroupConvolution(%arg0, %0)
+        {
+            dilations = [2, 2],
+            groups = 3,
+            pads_begin = [2, 2],
+            pads_end = [2, 2],
+            strides = [1, 1]
+        } :
+        tensor<1x3x30x30xf16>, tensor<3x1x3x3xf16> -> tensor<1x3x30x30xf16>
+    return %1 : tensor<1x3x30x30xf16>
+
+    // CHECK-DAG: [[FILTERS:%.*]] = const.Declare tensor<3x1x3x3xf16> = dense<1.000000e+00> : tensor<1x3x3x3xf16>, [#const.Reshape<[3, 1, 3, 3]>]
+    // CHECK: [[EXPAND_DILATED:%.*]] = IE.ExpandDilated([[FILTERS]]) {dilations = [2, 2]} : tensor<3x1x3x3xf16> -> tensor<3x1x5x5xf16>
+    // CHECK: [[CONV:%.*]] = IE.GroupConvolution([[INPUT]], [[EXPAND_DILATED]]) {dilations = [1, 1], groups = 3 : i64, pads_begin = [2, 2], pads_end = [2, 2], strides = [1, 1]} : tensor<1x3x30x30xf16>, tensor<3x1x5x5xf16> -> tensor<1x3x30x30xf16>
 
     // CHECK: return [[CONV]]
 }
@@ -293,3 +316,113 @@ func.func @LegalizeDilatedConvolution1(%arg0: tensor<1x3x64x64xf16>) -> tensor<1
     // CHECK: [[ADD7:%.*]] = IE.Add([[ADD6]], [[CONV8]]) {auto_broadcast = #IE.auto_broadcast_type<NONE_OR_EXPLICIT>} : tensor<1x8x50x50xf16>, tensor<1x8x50x50xf16> -> tensor<1x8x50x50xf16>
     // CHECK: return [[ADD7]]
   }
+
+// -----
+
+// CHECK-LABEL: @LegalizeDilatedConvolutionWeightsAsInputs
+// CHECK-SAME:  ([[INPUT:%.+]]: tensor<1x3x30x30xf16>, [[WEIGHTS:%.+]]: tensor<3x3x3x3xf16>)
+func.func @LegalizeDilatedConvolutionWeightsAsInputs(%input: tensor<1x3x30x30xf16>, %weights: tensor<3x3x3x3xf16>) -> tensor<1x3x30x30xf16> {
+    %conv = IE.Convolution(%input, %weights) {
+            dilations = [2, 2],
+            pads_begin = [2, 2],
+            pads_end = [2, 2],
+            strides = [1, 1]
+        } : tensor<1x3x30x30xf16>, tensor<3x3x3x3xf16> -> tensor<1x3x30x30xf16>
+    return %conv : tensor<1x3x30x30xf16>
+
+    // CHECK:  [[WEIGHTS_SLICE0:%.+]] = IE.Slice [[WEIGHTS]] [0, 0, 0, 0] [3, 3, 1, 1]
+    // CHECK:  [[WEIGHTS_SLICE1:%.+]] = IE.Slice [[WEIGHTS]] [0, 0, 1, 0] [3, 3, 1, 1]
+    // CHECK:  [[WEIGHTS_SLICE2:%.+]] = IE.Slice [[WEIGHTS]] [0, 0, 2, 0] [3, 3, 1, 1]
+    // CHECK:  [[WEIGHTS_SLICE3:%.+]] = IE.Slice [[WEIGHTS]] [0, 0, 0, 1] [3, 3, 1, 1]
+    // CHECK:  [[WEIGHTS_SLICE4:%.+]] = IE.Slice [[WEIGHTS]] [0, 0, 1, 1] [3, 3, 1, 1]
+    // CHECK:  [[WEIGHTS_SLICE5:%.+]] = IE.Slice [[WEIGHTS]] [0, 0, 2, 1] [3, 3, 1, 1]
+    // CHECK:  [[WEIGHTS_SLICE6:%.+]] = IE.Slice [[WEIGHTS]] [0, 0, 0, 2] [3, 3, 1, 1]
+    // CHECK:  [[WEIGHTS_SLICE7:%.+]] = IE.Slice [[WEIGHTS]] [0, 0, 1, 2] [3, 3, 1, 1]
+    // CHECK:  [[WEIGHTS_SLICE8:%.+]] = IE.Slice [[WEIGHTS]] [0, 0, 2, 2] [3, 3, 1, 1]
+
+    // CHECK:  [[INPUT_SLICE0:%.+]] = IE.Slice [[INPUT]] [0, 0, 0, 0] [1, 3, 28, 28]
+    // CHECK:  [[CONV0:%.+]] = IE.Convolution([[INPUT_SLICE0]], [[WEIGHTS_SLICE0]]) {dilations = [1, 1], pads_begin = [2, 2], pads_end = [0, 0], strides = [1, 1]}
+    // CHECK:  [[INPUT_SLICE1:%.+]] = IE.Slice [[INPUT]] [0, 0, 0, 0] [1, 3, 30, 28]
+    // CHECK:  [[CONV1:%.+]] = IE.Convolution([[INPUT_SLICE1]], [[WEIGHTS_SLICE1]]) {dilations = [1, 1], pads_begin = [0, 2], pads_end = [0, 0], strides = [1, 1]}
+    // CHECK:  [[INPUT_SLICE2:%.+]] = IE.Slice [[INPUT]] [0, 0, 2, 0] [1, 3, 28, 28]
+    // CHECK:  [[CONV2:%.+]] = IE.Convolution([[INPUT_SLICE2]], [[WEIGHTS_SLICE2]]) {dilations = [1, 1], pads_begin = [0, 2], pads_end = [2, 0], strides = [1, 1]}
+    // CHECK:  [[INPUT_SLICE3:%.+]] = IE.Slice [[INPUT]] [0, 0, 0, 0] [1, 3, 28, 30]
+    // CHECK:  [[CONV3:%.+]] = IE.Convolution([[INPUT_SLICE3]], [[WEIGHTS_SLICE3]]) {dilations = [1, 1], pads_begin = [2, 0], pads_end = [0, 0], strides = [1, 1]}
+    // CHECK:  [[INPUT_SLICE4:%.+]] = IE.Slice [[INPUT]] [0, 0, 0, 0] [1, 3, 30, 30]
+    // CHECK:  [[CONV4:%.+]] = IE.Convolution([[INPUT_SLICE4]], [[WEIGHTS_SLICE4]]) {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]}
+    // CHECK:  [[INPUT_SLICE5:%.+]] = IE.Slice [[INPUT]] [0, 0, 2, 0] [1, 3, 28, 30]
+    // CHECK:  [[CONV5:%.+]] = IE.Convolution([[INPUT_SLICE5]], [[WEIGHTS_SLICE5]]) {dilations = [1, 1], pads_begin = [0, 0], pads_end = [2, 0], strides = [1, 1]}
+    // CHECK:  [[INPUT_SLICE6:%.+]] = IE.Slice [[INPUT]] [0, 0, 0, 2] [1, 3, 28, 28]
+    // CHECK:  [[CONV6:%.+]] = IE.Convolution([[INPUT_SLICE6]], [[WEIGHTS_SLICE6]]) {dilations = [1, 1], pads_begin = [2, 0], pads_end = [0, 2], strides = [1, 1]}
+    // CHECK:  [[INPUT_SLICE7:%.+]] = IE.Slice [[INPUT]] [0, 0, 0, 2] [1, 3, 30, 28]
+    // CHECK:  [[CONV7:%.+]] = IE.Convolution([[INPUT_SLICE7]], [[WEIGHTS_SLICE7]]) {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 2], strides = [1, 1]}
+    // CHECK:  [[INPUT_SLICE8:%.+]] = IE.Slice [[INPUT]] [0, 0, 2, 2] [1, 3, 28, 28]
+    // CHECK:  [[CONV8:%.+]] = IE.Convolution([[INPUT_SLICE8]], [[WEIGHTS_SLICE8]]) {dilations = [1, 1], pads_begin = [0, 0], pads_end = [2, 2], strides = [1, 1]}
+
+    // CHECK:  [[ADD0:%.+]] = IE.Add([[CONV0]], [[CONV1]])
+    // CHECK:  [[ADD1:%.+]] = IE.Add([[ADD0]], [[CONV2]])
+    // CHECK:  [[ADD2:%.+]] = IE.Add([[ADD1]], [[CONV3]])
+    // CHECK:  [[ADD3:%.+]] = IE.Add([[ADD2]], [[CONV4]])
+    // CHECK:  [[ADD4:%.+]] = IE.Add([[ADD3]], [[CONV5]])
+    // CHECK:  [[ADD5:%.+]] = IE.Add([[ADD4]], [[CONV6]])
+    // CHECK:  [[ADD6:%.+]] = IE.Add([[ADD5]], [[CONV7]])
+    // CHECK:  [[ADD7:%.+]] = IE.Add([[ADD6]], [[CONV8]])
+
+    // CHECK:  return [[ADD7]]
+}
+
+// -----
+
+// CHECK-LABEL: @LegalizeDilatedGroupConvolutionWeightsAsInputs
+// CHECK-SAME:  ([[INPUT:%.+]]: tensor<1x3x30x30xf16>, [[WEIGHTS:%.+]]: tensor<3x1x3x3xf16>)
+func.func @LegalizeDilatedGroupConvolutionWeightsAsInputs(%input: tensor<1x3x30x30xf16>, %weights: tensor<3x1x3x3xf16>) -> tensor<1x3x30x30xf16> {
+    %conv = IE.GroupConvolution(%input, %weights) {
+            dilations = [2, 2],
+            groups = 3,
+            pads_begin = [2, 2],
+            pads_end = [2, 2],
+            strides = [1, 1]
+        } : tensor<1x3x30x30xf16>, tensor<3x1x3x3xf16> -> tensor<1x3x30x30xf16>
+    return %conv : tensor<1x3x30x30xf16>
+
+
+    // CHECK:  [[WEIGHTS_SLICE0:%.+]] = IE.Slice [[WEIGHTS]] [0, 0, 0, 0] [3, 1, 1, 1]
+    // CHECK:  [[WEIGHTS_SLICE1:%.+]] = IE.Slice [[WEIGHTS]] [0, 0, 1, 0] [3, 1, 1, 1]
+    // CHECK:  [[WEIGHTS_SLICE2:%.+]] = IE.Slice [[WEIGHTS]] [0, 0, 2, 0] [3, 1, 1, 1]
+    // CHECK:  [[WEIGHTS_SLICE3:%.+]] = IE.Slice [[WEIGHTS]] [0, 0, 0, 1] [3, 1, 1, 1]
+    // CHECK:  [[WEIGHTS_SLICE4:%.+]] = IE.Slice [[WEIGHTS]] [0, 0, 1, 1] [3, 1, 1, 1]
+    // CHECK:  [[WEIGHTS_SLICE5:%.+]] = IE.Slice [[WEIGHTS]] [0, 0, 2, 1] [3, 1, 1, 1]
+    // CHECK:  [[WEIGHTS_SLICE6:%.+]] = IE.Slice [[WEIGHTS]] [0, 0, 0, 2] [3, 1, 1, 1]
+    // CHECK:  [[WEIGHTS_SLICE7:%.+]] = IE.Slice [[WEIGHTS]] [0, 0, 1, 2] [3, 1, 1, 1]
+    // CHECK:  [[WEIGHTS_SLICE8:%.+]] = IE.Slice [[WEIGHTS]] [0, 0, 2, 2] [3, 1, 1, 1]
+
+    // CHECK:  [[INPUT_SLICE0:%.+]] = IE.Slice [[INPUT]] [0, 0, 0, 0] [1, 3, 28, 28]
+    // CHECK:  [[CONV0:%.+]] = IE.GroupConvolution([[INPUT_SLICE0]], [[WEIGHTS_SLICE0]]) {dilations = [1, 1], groups = 3 : i64, pads_begin = [2, 2], pads_end = [0, 0], strides = [1, 1]}
+    // CHECK:  [[INPUT_SLICE1:%.+]] = IE.Slice [[INPUT]] [0, 0, 0, 0] [1, 3, 30, 28]
+    // CHECK:  [[CONV1:%.+]] = IE.GroupConvolution([[INPUT_SLICE1]], [[WEIGHTS_SLICE1]]) {dilations = [1, 1], groups = 3 : i64, pads_begin = [0, 2], pads_end = [0, 0], strides = [1, 1]}
+    // CHECK:  [[INPUT_SLICE2:%.+]] = IE.Slice [[INPUT]] [0, 0, 2, 0] [1, 3, 28, 28]
+    // CHECK:  [[CONV2:%.+]] = IE.GroupConvolution([[INPUT_SLICE2]], [[WEIGHTS_SLICE2]]) {dilations = [1, 1], groups = 3 : i64, pads_begin = [0, 2], pads_end = [2, 0], strides = [1, 1]}
+    // CHECK:  [[INPUT_SLICE3:%.+]] = IE.Slice [[INPUT]] [0, 0, 0, 0] [1, 3, 28, 30]
+    // CHECK:  [[CONV3:%.+]] = IE.GroupConvolution([[INPUT_SLICE3]], [[WEIGHTS_SLICE3]]) {dilations = [1, 1], groups = 3 : i64, pads_begin = [2, 0], pads_end = [0, 0], strides = [1, 1]}
+    // CHECK:  [[INPUT_SLICE4:%.+]] = IE.Slice [[INPUT]] [0, 0, 0, 0] [1, 3, 30, 30]
+    // CHECK:  [[CONV4:%.+]] = IE.GroupConvolution([[INPUT_SLICE4]], [[WEIGHTS_SLICE4]]) {dilations = [1, 1], groups = 3 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]}
+    // CHECK:  [[INPUT_SLICE5:%.+]] = IE.Slice [[INPUT]] [0, 0, 2, 0] [1, 3, 28, 30]
+    // CHECK:  [[CONV5:%.+]] = IE.GroupConvolution([[INPUT_SLICE5]], [[WEIGHTS_SLICE5]]) {dilations = [1, 1], groups = 3 : i64, pads_begin = [0, 0], pads_end = [2, 0], strides = [1, 1]}
+    // CHECK:  [[INPUT_SLICE6:%.+]] = IE.Slice [[INPUT]] [0, 0, 0, 2] [1, 3, 28, 28]
+    // CHECK:  [[CONV6:%.+]] = IE.GroupConvolution([[INPUT_SLICE6]], [[WEIGHTS_SLICE6]]) {dilations = [1, 1], groups = 3 : i64, pads_begin = [2, 0], pads_end = [0, 2], strides = [1, 1]}
+    // CHECK:  [[INPUT_SLICE7:%.+]] = IE.Slice [[INPUT]] [0, 0, 0, 2] [1, 3, 30, 28]
+    // CHECK:  [[CONV7:%.+]] = IE.GroupConvolution([[INPUT_SLICE7]], [[WEIGHTS_SLICE7]]) {dilations = [1, 1], groups = 3 : i64, pads_begin = [0, 0], pads_end = [0, 2], strides = [1, 1]}
+    // CHECK:  [[INPUT_SLICE8:%.+]] = IE.Slice [[INPUT]] [0, 0, 2, 2] [1, 3, 28, 28]
+    // CHECK:  [[CONV8:%.+]] = IE.GroupConvolution([[INPUT_SLICE8]], [[WEIGHTS_SLICE8]]) {dilations = [1, 1], groups = 3 : i64, pads_begin = [0, 0], pads_end = [2, 2], strides = [1, 1]}
+
+    // CHECK:  [[ADD0:%.+]] = IE.Add([[CONV0]], [[CONV1]])
+    // CHECK:  [[ADD1:%.+]] = IE.Add([[ADD0]], [[CONV2]])
+    // CHECK:  [[ADD2:%.+]] = IE.Add([[ADD1]], [[CONV3]])
+    // CHECK:  [[ADD3:%.+]] = IE.Add([[ADD2]], [[CONV4]])
+    // CHECK:  [[ADD4:%.+]] = IE.Add([[ADD3]], [[CONV5]])
+    // CHECK:  [[ADD5:%.+]] = IE.Add([[ADD4]], [[CONV6]])
+    // CHECK:  [[ADD6:%.+]] = IE.Add([[ADD5]], [[CONV7]])
+    // CHECK:  [[ADD7:%.+]] = IE.Add([[ADD6]], [[CONV8]])
+
+    // CHECK:  return [[ADD7]]
+}

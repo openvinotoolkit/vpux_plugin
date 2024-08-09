@@ -17,6 +17,9 @@ namespace arch40xx {
 // Passes
 //
 
+std::unique_ptr<mlir::Pass> createMapBilinearInterpolateOnDPUPass(const bool interpolateAsSEOp = false,
+                                                                  Logger log = Logger::global());
+
 //
 // DefaultHWOptions
 //
@@ -45,6 +48,18 @@ void buildDefaultHWPipeline(mlir::OpPassManager& pm, const IE::arch40xx::Default
 //
 
 void registerIEPipelines();
+
+//
+// Generated
+//
+
+#define GEN_PASS_CLASSES
+#include <vpux/compiler/NPU40XX/dialect/IE/passes.hpp.inc>
+#undef GEN_PASS_CLASSES
+
+#define GEN_PASS_REGISTRATION
+#include <vpux/compiler/NPU40XX/dialect/IE/passes.hpp.inc>
+#undef GEN_PASS_REGISTRATION
 
 }  // namespace arch40xx
 }  // namespace IE

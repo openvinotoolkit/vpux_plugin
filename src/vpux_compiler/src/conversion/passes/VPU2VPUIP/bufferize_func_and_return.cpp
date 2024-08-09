@@ -91,8 +91,8 @@ public:
                                     const mlir::bufferization::AnalysisState& state) const;
     bool bufferizesToMemoryWriteImpl(mlir::func::CallOp op, mlir::OpOperand& opOperand,
                                      const mlir::bufferization::AnalysisState& state) const;
-    mlir::bufferization::AliasingOpResultList getAliasingOpResultsImpl(
-            mlir::func::CallOp op, mlir::OpOperand& opOperand, const mlir::bufferization::AnalysisState& state) const;
+    mlir::bufferization::AliasingValueList getAliasingValuesImpl(mlir::func::CallOp op, mlir::OpOperand& opOperand,
+                                                                 const mlir::bufferization::AnalysisState& state) const;
     mlir::LogicalResult bufferizeImpl(mlir::func::CallOp op, mlir::RewriterBase& rewriter,
                                       const mlir::bufferization::BufferizationOptions& options,
                                       mlir::func::CallOp::Adaptor adaptor) const;
@@ -125,14 +125,14 @@ bool CallOpBufferizeModel::bufferizesToMemoryWriteImpl(mlir::func::CallOp op, ml
     return funcState.writtenBbArgs.lookup(funcOp).contains(opOperand.getOperandNumber());
 }
 
-mlir::bufferization::AliasingOpResultList CallOpBufferizeModel::getAliasingOpResultsImpl(
+mlir::bufferization::AliasingValueList CallOpBufferizeModel::getAliasingValuesImpl(
         mlir::func::CallOp op, mlir::OpOperand& opOperand, const mlir::bufferization::AnalysisState& state) const {
     auto callOp = mlir::cast<mlir::func::CallOp>(op);
     auto funcOp = getCalledFunction(callOp);
 
     if (getFuncOpAnalysisState(state, funcOp) != mlir::bufferization::func_ext::FuncOpAnalysisState::Analyzed) {
         // FuncOp not analyzed yet. Any OpResult may be aliasing.
-        return mlir::bufferization::detail::unknownGetAliasingOpResults(opOperand);  // Note: using 'detail' namespace!
+        return mlir::bufferization::detail::unknownGetAliasingValues(opOperand);  // Note: using 'detail' namespace!
     }
 
     // Get aliasing results from state.
@@ -147,7 +147,7 @@ mlir::bufferization::AliasingOpResultList CallOpBufferizeModel::getAliasingOpRes
                         "inconsistent analysis state");
     }
 
-    mlir::bufferization::AliasingOpResultList result;
+    mlir::bufferization::AliasingValueList result;
     for (auto resultIdx : aliasingReturnVals) {
         result.addAlias({callOp->getOpResult(resultIdx),
                          equivalent.has_value() ? mlir::bufferization::BufferRelation::Equivalent
@@ -245,6 +245,23 @@ public:
     mlir::LogicalResult bufferizeImpl(mlir::func::FuncOp op, mlir::RewriterBase& rewriter,
                                       const mlir::bufferization::BufferizationOptions& options,
                                       mlir::func::FuncOp::Adaptor) const;
+
+    bool hasTensorSemantics(mlir::Operation* op) const {
+        // defaultHasTensorSemantics() does not return true for FuncOps who return tensors but have
+        // zero arguments. We need to implement this behaviour ourselves.
+
+        auto isaTensor = [](mlir::Type t) {
+            return llvm::isa<mlir::TensorType>(t);
+        };
+
+        auto funcOp = llvm::dyn_cast<mlir::FunctionOpInterface>(op);
+        VPUX_THROW_UNLESS(funcOp != nullptr, "op does not implement mlir::FunctionOpInterface");
+
+        bool hasTensorArg = llvm::any_of(funcOp.getArgumentTypes(), isaTensor);
+        bool hasTensorResult = llvm::any_of(funcOp.getResultTypes(), isaTensor);
+
+        return hasTensorArg || hasTensorResult;
+    }
 };
 
 mlir::LogicalResult FuncOpBufferizeModel::bufferizeImpl(mlir::func::FuncOp funcOp, mlir::RewriterBase& rewriter,

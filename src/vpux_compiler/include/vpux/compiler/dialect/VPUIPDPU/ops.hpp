@@ -5,8 +5,8 @@
 
 #pragma once
 
-#include "vpux/compiler/dialect/VPU/IR/ops_interfaces.hpp"
-#include "vpux/compiler/dialect/VPUASM/ops_interfaces.hpp"
+#include "vpux/compiler/dialect/VPUASM/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPUIPDPU/attributes.hpp"
 #include "vpux/compiler/dialect/VPURegMapped/types.hpp"
 

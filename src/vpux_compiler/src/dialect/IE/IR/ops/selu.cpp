@@ -12,11 +12,11 @@ using namespace vpux;
 
 mlir::LogicalResult vpux::IE::SeluOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::SeluOpAdaptor selu(operands, attrs);
+    IE::SeluOpAdaptor selu(operands, attrs, prop);
     if (mlir::failed(selu.verify(loc))) {
         return mlir::failure();
     }
@@ -47,15 +47,11 @@ mlir::LogicalResult getAttrValue(mlir::Value attr, float& attrValue) {
         return mlir::failure();
     }
     auto attrOp = attr.getDefiningOp<Const::DeclareOp>();
-    if (attrOp == nullptr) {
+    if (attrOp == nullptr || !attrOp.getContentAttr().isSplat()) {
         return mlir::failure();
     }
 
     const auto attrContent = attrOp.getContent();
-    if (!attrContent.isSplat()) {
-        return mlir::failure();
-    }
-
     attrValue = attrContent.getSplatValue<float>();
 
     return mlir::success();

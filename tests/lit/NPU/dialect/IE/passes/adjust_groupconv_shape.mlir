@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --adjust-groupconv-shape %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 // CHECK-LABEL: @adjustGroupConvInput
@@ -50,10 +50,8 @@ func.func @adjustGroupConvInputForDimCFromDimHW(%arg0: tensor<1x3x64x52xf16, {or
   %0 = IE.GroupConvolution(%arg0, %cst, %bias) {dilations = [1, 1], groups = 3 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x3x64x52xf16, {order = #NHWC}>, tensor<3x1x1x1xf16, {order = #NHWC}>, tensor<1x3x1x1xf16, {order = #NHWC}> -> tensor<1x3x64x52xf16, {order = #NHWC}>
   return %0 : tensor<1x3x64x52xf16, {order = #NHWC}>
 
-  // CHECK-DAG:   [[CST_WEIGHTS:%.+]] = const.Declare tensor<48x1x1x1xf16, {order = #NHWC}>
-  // CHECK-SAME:        #const.Reorder<#NHWC>, #const.Broadcast<0 : i64, 48 : i64>
-  // CHECK-DAG:   [[CST_BIAS:%.+]] = const.Declare tensor<1x48x1x1xf16, {order = #NHWC}>
-  // CHECK-SAME:        #const.Reorder<#NHWC>, #const.Broadcast<1 : i64, 48 : i64>
+  // CHECK-DAG:   [[CST_WEIGHTS:%.+]] = const.Declare tensor<48x1x1x1xf16, {order = #NHWC}> = dense<{{\[\[\[\[}}1.000000e+00]]], {{\[\[\[}}2.000000e+00]]], {{\[\[\[}}3.000000e+00]]]]> : tensor<3x1x1x1xf16>, [#const.Reorder<#NHWC>, #const.Broadcast<0 : i64, 48 : i64>, #const.Reshape<[48, 1, 1, 1]>]
+  // CHECK-DAG:   [[CST_BIAS:%.+]] = const.Declare tensor<1x48x1x1xf16, {order = #NHWC}> = dense<[4.000000e+00, 5.000000e+00, 6.000000e+00]> : tensor<3xf16>, [#const.Reshape<[1, 3, 1, 1]>, #const.Reorder<#NHWC>, #const.Broadcast<1 : i64, 48 : i64>, #const.Reshape<[1, 48, 1, 1]>]
   // CHECK:   [[INPUT:%.+]] = IE.ShapeCast {shape = [1, 48, 16, 13]}
   // CHECK-SAME:    inputs(%arg0 : tensor<1x3x64x52xf16, {order = #NHWC}>) -> tensor<1x48x16x13xf16, {order = #NHWC}>
   // CHECK:   [[CONV_RET:%.+]] = IE.GroupConvolution([[INPUT]], [[CST_WEIGHTS]], [[CST_BIAS]]) {dilations = [1, 1], groups = 48 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]}
@@ -66,19 +64,20 @@ func.func @adjustGroupConvInputForDimCFromDimHW(%arg0: tensor<1x3x64x52xf16, {or
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 // CHECK-LABEL: @adjustGroupConvInputForElem
+// CHECK-SAME:    [[ARG0:%.+]]: tensor<1x3x64x52xf16, {order = #NHWC}>
 func.func @adjustGroupConvInputForElem(%arg0: tensor<1x3x64x52xf16, {order = #NHWC}>) -> tensor<1x3x64x52xf16, {order = #NHWC}> {
   %cst = const.Declare tensor<3x1x1x1xf16, {order = #NHWC}> = dense<1.250000e-01> : tensor<3x1x1x1xf16>, [#const.Reorder<#NHWC>]
   %bias = const.Declare tensor<1x3x1x1xf16, {order = #NHWC}> = dense<1.0> : tensor<3xf16>, [#const.Reshape<[1, 3, 1, 1]>, #const.Reorder<#NHWC>]
   %0 = IE.GroupConvolution(%arg0, %cst, %bias) {dilations = [1, 1], groups = 3 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x3x64x52xf16, {order = #NHWC}>, tensor<3x1x1x1xf16, {order = #NHWC}>, tensor<1x3x1x1xf16, {order = #NHWC}> -> tensor<1x3x64x52xf16, {order = #NHWC}>
   return %0 : tensor<1x3x64x52xf16, {order = #NHWC}>
 
-  // CHECK-DAG:   [[CST_WEIGHTS:%.+]] = const.Declare tensor<16x1x1x1xf16, {order = #NHWC}>
-  // CHECK-DAG:   [[CST_BIAS:%.+]] = const.Declare tensor<1x16x1x1xf16, {order = #NHWC}>
-  // CHECK:   [[INPUT:%.+]] = IE.ShapeCast {shape = [1, 16, 26, 24]}
-  // CHECK-SAME:    inputs(%arg0 : tensor<1x3x64x52xf16, {order = #NHWC}>) -> tensor<1x16x26x24xf16, {order = #NHWC}>
-  // CHECK:   [[CONV_RET:%.+]] = IE.GroupConvolution([[INPUT]], [[CST_WEIGHTS]], [[CST_BIAS]]) {dilations = [1, 1], groups = 16 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]}
+  // CHECK-DAG:   [[CST_WEIGHTS:%.+]] = const.Declare tensor<48x1x1x1xf16, {order = #NHWC}>
+  // CHECK-DAG:   [[CST_BIAS:%.+]] = const.Declare tensor<1x48x1x1xf16, {order = #NHWC}>
+  // CHECK:   [[INPUT:%.+]] = IE.ShapeCast {shape = [1, 48, 16, 13]}
+  // CHECK-SAME:    inputs([[ARG0]] : tensor<1x3x64x52xf16, {order = #NHWC}>) -> tensor<1x48x16x13xf16, {order = #NHWC}>
+  // CHECK:   [[CONV_RET:%.+]] = IE.GroupConvolution([[INPUT]], [[CST_WEIGHTS]], [[CST_BIAS]]) {dilations = [1, 1], groups = 48 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]}
   // CHECK:   [[RESULT:%.+]] = IE.ShapeCast {shape = [1, 3, 64, 52]}
-  // CHECK-SAME:    inputs(%1 : tensor<1x16x26x24xf16, {order = #NHWC}>) -> tensor<1x3x64x52xf16, {order = #NHWC}>
+  // CHECK-SAME:    inputs(%1 : tensor<1x48x16x13xf16, {order = #NHWC}>) -> tensor<1x3x64x52xf16, {order = #NHWC}>
   // CHECK:   return [[RESULT]]
 }
 
@@ -86,21 +85,20 @@ func.func @adjustGroupConvInputForElem(%arg0: tensor<1x3x64x52xf16, {order = #NH
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 // CHECK-LABEL: @adjustGroupConvInputForElemAndReshapeCst
+// CHECK-SAME: [[ARG0:%.+]]: tensor<1x17x64x52xf16, {order = #NHWC}>
 func.func @adjustGroupConvInputForElemAndReshapeCst(%arg0: tensor<1x17x64x52xf16, {order = #NHWC}>) -> tensor<1x17x64x52xf16, {order = #NHWC}> {
   %cst = const.Declare tensor<17x1x1x1xf16, {order = #NHWC}> = dense<1.250000e-01> : tensor<17x1x1x1xf16>, [#const.Reorder<#NHWC>]
   %bias = const.Declare tensor<1x17x1x1xf16, {order = #NHWC}> = dense<1.0> : tensor<17xf16>, [#const.Reshape<[1, 17, 1, 1]>, #const.Reorder<#NHWC>]
   %0 = IE.GroupConvolution(%arg0, %cst, %bias) {dilations = [1, 1], groups = 17 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x17x64x52xf16, {order = #NHWC}>, tensor<17x1x1x1xf16, {order = #NHWC}>, tensor<1x17x1x1xf16, {order = #NHWC}> -> tensor<1x17x64x52xf16, {order = #NHWC}>
   return %0 : tensor<1x17x64x52xf16, {order = #NHWC}>
 
-  // CHECK-DAG:   [[CST_WEIGHTS:%.+]] = const.Declare tensor<16x1x1x1xf16, {order = #NHWC}> = dense<1.250000e-01>
-  // CHECK-SAME:    tensor<17x1x1x1xf16>, [#const.Reshape<[1, 1, 1, 1]>, #const.Reorder<#NHWC>, #const.Broadcast<0 : i64, 16 : i64>]
-  // CHECK-DAG:   [[CST_BIAS:%.+]] = const.Declare tensor<1x16x1x1xf16, {order = #NHWC}> = dense<1.000000e+00>
-  // CHECK-SAME:    tensor<17xf16>, [#const.Reshape<[1, 1, 1, 1]>, #const.Reorder<#NHWC>, #const.Broadcast<1 : i64, 16 : i64>]
-  // CHECK:   [[INPUT:%.+]] = IE.ShapeCast {shape = [1, 16, 68, 52]}
-  // CHECK-SAME:    inputs(%arg0 : tensor<1x17x64x52xf16, {order = #NHWC}>) -> tensor<1x16x68x52xf16, {order = #NHWC}>
-  // CHECK:   [[CONV_RET:%.+]] = IE.GroupConvolution([[INPUT]], [[CST_WEIGHTS]], [[CST_BIAS]]) {dilations = [1, 1], groups = 16 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]}
+  // CHECK-DAG:   [[CST_WEIGHTS:%.+]] = const.Declare tensor<272x1x1x1xf16, {order = #NHWC}> = dense<1.250000e-01> : tensor<17x1x1x1xf16>, [#const.Reshape<[1, 1, 1, 1]>, #const.Reorder<#NHWC>, #const.Broadcast<0 : i64, 272 : i64>]
+  // CHECK-DAG:   [[CST_BIAS:%.+]] = const.Declare tensor<1x272x1x1xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<17xf16>, [#const.Reshape<[1, 1, 1, 1]>, #const.Reorder<#NHWC>, #const.Broadcast<1 : i64, 272 : i64>]
+  // CHECK:   [[INPUT:%.+]] = IE.ShapeCast {shape = [1, 272, 16, 13]}
+  // CHECK-SAME:    inputs([[ARG0]] : tensor<1x17x64x52xf16, {order = #NHWC}>) -> tensor<1x272x16x13xf16, {order = #NHWC}>
+  // CHECK:   [[CONV_RET:%.+]] = IE.GroupConvolution([[INPUT]], [[CST_WEIGHTS]], [[CST_BIAS]]) {dilations = [1, 1], groups = 272 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]}
   // CHECK:   [[RESULT:%.+]] = IE.ShapeCast {shape = [1, 17, 64, 52]}
-  // CHECK-SAME:    inputs(%1 : tensor<1x16x68x52xf16, {order = #NHWC}>) -> tensor<1x17x64x52xf16, {order = #NHWC}>
+  // CHECK-SAME:    inputs(%1 : tensor<1x272x16x13xf16, {order = #NHWC}>) -> tensor<1x17x64x52xf16, {order = #NHWC}>
   // CHECK:   return [[RESULT]]
 }
 
@@ -109,19 +107,19 @@ func.func @adjustGroupConvInputForElemAndReshapeCst(%arg0: tensor<1x17x64x52xf16
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
 // CHECK-LABEL: @adjustGroupConvInputForElemAndConvertReshapeCst
-// CHECK-SAME: [[INPUT:%.+]]: tensor<1x49x120x192xf16, {order = #NHWC}>
+// CHECK-SAME: [[ARG0:%.+]]: tensor<1x49x120x192xf16, {order = #NHWC}>
 func.func @adjustGroupConvInputForElemAndConvertReshapeCst(%arg0: tensor<1x49x120x192xf16, {order = #NHWC}>) -> tensor<1x49x120x192xf16, {order = #NHWC}> {
   %cst = const.Declare tensor<49x1x1x1xf16, {order = #NHWC}> = dense<0.010416667> : tensor<1x1x1x1x1xf32>, [#const.ConvertElemType<f16>, #const.Reshape<[1, 1, 1, 1]>, #const.Broadcast<1 : i64, 49 : i64>, #const.Reshape<[49, 1, 1, 1]>, #const.Reorder<#NHWC>]
 
   %0 = IE.GroupConvolution(%arg0, %cst) {dilations = [1, 1], groups = 49 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x49x120x192xf16, {order = #NHWC}>, tensor<49x1x1x1xf16, {order = #NHWC}> -> tensor<1x49x120x192xf16, {order = #NHWC}>
   return %0 : tensor<1x49x120x192xf16, {order = #NHWC}>
 
-  // CHECK-DAG:   [[CST_WEIGHTS:%.+]] = const.Declare tensor<16x1x1x1xf16, {order = #NHWC}>
-  // CHECK:   [[ACTIVATION:%.+]] = IE.ShapeCast {shape = [1, 16, 280, 252]}
-  // CHECK-SAME:    inputs([[INPUT]] : tensor<1x49x120x192xf16, {order = #NHWC}>) -> tensor<1x16x280x252xf16, {order = #NHWC}>
-  // CHECK:   [[GROUPCONV_RET:%.+]] = IE.GroupConvolution([[ACTIVATION]], [[CST_WEIGHTS]]) {dilations = [1, 1], groups = 16 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]}
+  // CHECK-DAG:   [[CST_WEIGHTS:%.+]] = const.Declare tensor<784x1x1x1xf16, {order = #NHWC}>
+  // CHECK:   [[ACTIVATION:%.+]] = IE.ShapeCast {shape = [1, 784, 120, 12]}
+  // CHECK-SAME:    inputs([[ARG0]] : tensor<1x49x120x192xf16, {order = #NHWC}>) -> tensor<1x784x120x12xf16, {order = #NHWC}>
+  // CHECK:   [[GROUPCONV_RET:%.+]] = IE.GroupConvolution([[ACTIVATION]], [[CST_WEIGHTS]]) {dilations = [1, 1], groups = 784 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]}
   // CHECK:   [[RESULT:%.+]] = IE.ShapeCast {shape = [1, 49, 120, 192]}
-  // CHECK-SAME:    inputs([[GROUPCONV_RET]] : tensor<1x16x280x252xf16, {order = #NHWC}>) -> tensor<1x49x120x192xf16, {order = #NHWC}>
+  // CHECK-SAME:    inputs([[GROUPCONV_RET]] : tensor<1x784x120x12xf16, {order = #NHWC}>) -> tensor<1x49x120x192xf16, {order = #NHWC}>
   // CHECK:   return [[RESULT]]
 }
 
@@ -204,16 +202,14 @@ func.func @adjustGroupConvWithPostOp(%arg0: tensor<1x8x240x320xf16, {order = #NH
     return %GROUP_CONV : tensor<1x8x240x320xf16, {order = #NHWC}>
 
   // CHECK-DAG:   [[CST_FILTER:%.+]] = const.Declare tensor<16x1x1x1xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<1x1x1x1xf16>, [#const.Reshape<[1, 1, 1, 1]>, #const.Reorder<#NHWC>, #const.Broadcast<0 : i64, 16 : i64>]
-  // CHECK-DAG:   [[CST_BIAS:%.+]] = const.Declare tensor<1x16x1x1xf16> = dense<
-  // CHECK-SAME(LITERAL):        [[[[0.788085938]], [[1.11230469]], [[2.08007813]], [[0.470214844]], [[0.528808594]], [[0.282714844]], [[0.441162109]], [[0.197021484]]]]>
-  // CHECK-SAME:                 : tensor<1x8x1x1xf32>, [#const.ConvertElemType<f16>, #const.Broadcast<1 : i64, 16 : i64>, #const.Reshape<[1, 16, 1, 1]>]
-  // CHECK:       [[INPUT:%.+]] = IE.ShapeCast {shape = [1, 16, 200, 192]}
-  // CHECK-SAME:        inputs([[INPUT_DATA]] : tensor<1x8x240x320xf16, {order = #NHWC}>) -> tensor<1x16x200x192xf16, {order = #NHWC}>
+  // CHECK-DAG:   [[CST_BIAS:%.+]] = const.Declare tensor<1x16x1x1xf16> = dense<{{\[\[\[\[}}0.788085938]], {{\[\[}}1.11230469]], {{\[\[}}2.08007813]], {{\[\[}}0.470214844]], {{\[\[}}0.528808594]], {{\[\[}}0.282714844]], {{\[\[}}0.441162109]], {{\[\[}}0.197021484]]]]> : tensor<1x8x1x1xf32>, [#const.ConvertElemType<f16>, #const.Broadcast<1 : i64, 16 : i64>, #const.Reshape<[1, 16, 1, 1]>]
+  // CHECK:       [[INPUT:%.+]] = IE.ShapeCast {shape = [1, 16, 240, 160]}
+  // CHECK-SAME:        inputs([[INPUT_DATA]] : tensor<1x8x240x320xf16, {order = #NHWC}>) -> tensor<1x16x240x160xf16, {order = #NHWC}>
   // CHECK:       [[GROUP_CONV:%.+]] = IE.GroupConvolution([[INPUT]], [[CST_FILTER]], [[CST_BIAS]]) {
   // CHECK-SAME:        dilations = [1, 1], groups = 16 : i64, pads_begin = [0, 0], pads_end = [0, 0],
   // CHECK-SAME:        post_op = #IE.PostOp<name = "IE.ReLU", attrs = {}>, strides = [1, 1]}
   // CHECK:       [[RESULT:%.+]] = IE.ShapeCast {shape = [1, 8, 240, 320]}
-  // CHECK-SAME:        inputs([[GROUP_CONV]] : tensor<1x16x200x192xf16, {order = #NHWC}>) -> tensor<1x8x240x320xf16, {order = #NHWC}>
+  // CHECK-SAME:        inputs([[GROUP_CONV]] : tensor<1x16x240x160xf16, {order = #NHWC}>) -> tensor<1x8x240x320xf16, {order = #NHWC}>
   // CHECK:       return [[RESULT]]
 }
 
@@ -238,18 +234,12 @@ func.func @sliceGroupConvWithReorderOp(%arg0: tensor<1x3x144x478xf16, {order = #
     %2 = IE.Reorder(%1) {dstOrder = #NCHW} :  tensor<1x3x144x478xf16, {order = #NHWC}> -> tensor<1x3x144x478xf16>
     return %2 : tensor<1x3x144x478xf16>
 
-    // CHECK-DAG:    [[CST:%.+]] = const.Declare
-    // CHECK-SAME(LITERAL):    tensor<16x1x1x1xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<1x3x1x1x1xf16>, [#const.Reshape<[1, 1, 1, 1]>, #const.Reorder<#NHWC>, #const.SubView<[0, 0, 0, 0], [1, 1, 1, 1]>, #const.Broadcast<0 : i64, 16 : i64>]
-    // CHECK-DAG:    [[CST_0:%.+]] = const.Declare
-    // CHECK-SAME(LITERAL):    tensor<1x16x1x1xf16> = dense<[[[[0.788085938]], [[1.11230469]], [[2.08007813]]]]> : tensor<1x3x1x1xf32>, [#const.ConvertElemType<f16>, #const.SubView<[0, 0, 0, 0], [1, 1, 1, 1]>, #const.Broadcast<1 : i64, 16 : i64>, #const.Reshape<[1, 16, 1, 1]>]
-    // CHECK-DAG:    [[CST_1:%.+]] = const.Declare
-    // CHECK-SAME(LITERAL):    tensor<16x1x1x1xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<1x3x1x1x1xf16>, [#const.Reshape<[1, 1, 1, 1]>, #const.Reorder<#NHWC>, #const.SubView<[1, 0, 0, 0], [1, 1, 1, 1]>, #const.Broadcast<0 : i64, 16 : i64>]
-    // CHECK-DAG:    [[CST_2:%.+]] = const.Declare
-    // CHECK-SAME(LITERAL):    tensor<1x16x1x1xf16> = dense<[[[[0.788085938]], [[1.11230469]], [[2.08007813]]]]> : tensor<1x3x1x1xf32>, [#const.ConvertElemType<f16>, #const.SubView<[0, 1, 0, 0], [1, 1, 1, 1]>, #const.Broadcast<1 : i64, 16 : i64>, #const.Reshape<[1, 16, 1, 1]>]
-    // CHECK-DAG:    [[CST_3:%.+]] = const.Declare
-    // CHECK-SAME(LITERAL):    tensor<16x1x1x1xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<1x3x1x1x1xf16>, [#const.Reshape<[1, 1, 1, 1]>, #const.Reorder<#NHWC>, #const.SubView<[2, 0, 0, 0], [1, 1, 1, 1]>, #const.Broadcast<0 : i64, 16 : i64>]
-    // CHECK-DAG:    [[CST_4:%.+]] = const.Declare
-    // CHECK-SAME(LITERAL):    tensor<1x16x1x1xf16> = dense<[[[[0.788085938]], [[1.11230469]], [[2.08007813]]]]> : tensor<1x3x1x1xf32>, [#const.ConvertElemType<f16>, #const.SubView<[0, 2, 0, 0], [1, 1, 1, 1]>, #const.Broadcast<1 : i64, 16 : i64>, #const.Reshape<[1, 16, 1, 1]>]
+    // CHECK-DAG:    [[CST:%.+]] = const.Declare tensor<16x1x1x1xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<1x3x1x1x1xf16>, [#const.Reshape<[1, 1, 1, 1]>, #const.Reorder<#NHWC>, #const.SubView<[0, 0, 0, 0], [1, 1, 1, 1]>, #const.Broadcast<0 : i64, 16 : i64>]
+    // CHECK-DAG:    [[CST_0:%.+]] = const.Declare tensor<1x16x1x1xf16> = dense<{{\[\[\[\[}}0.788085938]], {{\[\[}}1.11230469]], {{\[\[}}2.08007813]]]]> : tensor<1x3x1x1xf32>, [#const.ConvertElemType<f16>, #const.SubView<[0, 0, 0, 0], [1, 1, 1, 1]>, #const.Broadcast<1 : i64, 16 : i64>, #const.Reshape<[1, 16, 1, 1]>]
+    // CHECK-DAG:    [[CST_1:%.+]] = const.Declare tensor<16x1x1x1xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<1x3x1x1x1xf16>, [#const.Reshape<[1, 1, 1, 1]>, #const.Reorder<#NHWC>, #const.SubView<[1, 0, 0, 0], [1, 1, 1, 1]>, #const.Broadcast<0 : i64, 16 : i64>]
+    // CHECK-DAG:    [[CST_2:%.+]] = const.Declare tensor<1x16x1x1xf16> = dense<{{\[\[\[\[}}0.788085938]], {{\[\[}}1.11230469]], {{\[\[}}2.08007813]]]]> : tensor<1x3x1x1xf32>, [#const.ConvertElemType<f16>, #const.SubView<[0, 1, 0, 0], [1, 1, 1, 1]>, #const.Broadcast<1 : i64, 16 : i64>, #const.Reshape<[1, 16, 1, 1]>]
+    // CHECK-DAG:    [[CST_3:%.+]] = const.Declare tensor<16x1x1x1xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<1x3x1x1x1xf16>, [#const.Reshape<[1, 1, 1, 1]>, #const.Reorder<#NHWC>, #const.SubView<[2, 0, 0, 0], [1, 1, 1, 1]>, #const.Broadcast<0 : i64, 16 : i64>]
+    // CHECK-DAG:    [[CST_4:%.+]] = const.Declare tensor<1x16x1x1xf16> = dense<{{\[\[\[\[}}0.788085938]], {{\[\[}}1.11230469]], {{\[\[}}2.08007813]]]]> : tensor<1x3x1x1xf32>, [#const.ConvertElemType<f16>, #const.SubView<[0, 2, 0, 0], [1, 1, 1, 1]>, #const.Broadcast<1 : i64, 16 : i64>, #const.Reshape<[1, 16, 1, 1]>]
     // CHECK:        [[SLICE_0:%.+]] = IE.Slice [[INPUT_DATA]]
     // CHECK-SAME:       [0, 0, 0, 0] [1, 1, 144, 478] : tensor<1x3x144x478xf16, {order = #NHCW}> to tensor<1x1x144x478xf16, {order = #NHCW}>
     // CHECK:        [[PERMUTE_CAST_0:%.+]] = IE.PermuteCast([[SLICE_0]])
@@ -288,4 +278,32 @@ func.func @sliceGroupConvWithReorderOp(%arg0: tensor<1x3x144x478xf16, {order = #
     // CHECK:        [[RESULT:%.+]] = IE.Reorder([[CONCAT]]) {dstOrder = #NCHW} : tensor<1x3x144x478xf16, {order = #NHWC}> -> tensor<1x3x144x478xf16>
 
     // CHECK:        return [[RESULT]] : tensor<1x3x144x478xf16>
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @adjustNonEltwiseGroupConvWithChannelBiggerThanAlignment
+// CHECK-SAME:    [[ARG0:%.+]]: tensor<1x56x224x224xf16, {order = #NHWC}>
+func.func @adjustNonEltwiseGroupConvWithChannelBiggerThanAlignment(%arg0 : tensor<1x56x224x224xf16, {order = #NHWC}>) -> (tensor<1x56x224x224xf16, {order = #NHWC}>) {
+    %filter = const.Declare tensor<56x1x1x1xf16, {order = #NHWC}> = dense<[[[[0.7]]], [[[1.1]]], [[[2.0]]], [[[3.0]]]]> : tensor<4x1x1x1xf16>, [#const.Broadcast<0 : i64, 56 : i64>, #const.Reorder<#NHWC>]
+    %group_conv = IE.GroupConvolution(%arg0, %filter) {
+        dilations = [1, 1],
+        groups = 56 : i64,
+        pads_begin = [0, 0],
+        pads_end = [0, 0],
+        strides = [1, 1]
+        } : tensor<1x56x224x224xf16, {order = #NHWC}>, tensor<56x1x1x1xf16, {order = #NHWC}> -> tensor<1x56x224x224xf16, {order = #NHWC}>
+
+    return %group_conv : tensor<1x56x224x224xf16, {order = #NHWC}>
+    // CHECK:       const.Declare
+    // CHECK-SAME{{LITERAL}}:  tensor<112x1x1x1xf16, {order = #NHWC}> = dense<[[[[7.001950e-01]]], [[[1.099610e+00]]], [[[2.000000e+00]]], [[[3.000000e+00]]]]> : tensor<4x1x1x1xf16>, [#const.Broadcast<0 : i64, 56 : i64>, #const.Reorder<#NHWC>, #const.Broadcast<0 : i64, 112 : i64>, #const.Reshape<[112, 1, 1, 1]>]
+    // CHECK:       IE.ShapeCast
+    // CHECK-SAME{{LITERAL}}:  {shape = [1, 112, 224, 112]} inputs([[ARG0]] : tensor<1x56x224x224xf16, {order = #NHWC}>) -> tensor<1x112x224x112xf16, {order = #NHWC}>
+    // CHECK:       IE.GroupConvolution
+    // CHECK-SAME{{LITERAL}}:  {dilations = [1, 1], groups = 112 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]}
+    // CHECK-SAME   tensor<1x112x224x112xf16, {order = #NHWC}>, tensor<112x1x1x1xf16, {order = #NHWC}> -> tensor<1x112x224x112xf16, {order = #NHWC}>
+    // CHECK:       IE.ShapeCast
+    // CHECK-SAME{{LITERAL}}:  {shape = [1, 56, 224, 224]} inputs(%1 : tensor<1x112x224x112xf16, {order = #NHWC}>) -> tensor<1x56x224x224xf16, {order = #NHWC}>
 }

@@ -57,7 +57,7 @@ TEST_F(MLIR_VPUIP_LayerInfo, AsyncLayerOpInterface) {
 
     mlir::PassManager pm(module.get()->getName(), mlir::OpPassManager::Nesting::Implicit);
     auto initCompilerOptions =
-            vpux::VPU::InitCompilerOptions(vpux::VPU::ArchKind::NPU30XX, vpux::VPU::CompilationMode::ReferenceSW);
+            vpux::VPU::InitCompilerOptions(vpux::VPU::ArchKind::NPU37XX, vpux::VPU::CompilationMode::ReferenceSW);
 
     vpux::VPU::buildInitCompilerPipeline(pm, initCompilerOptions, vpux::Logger::global());
 

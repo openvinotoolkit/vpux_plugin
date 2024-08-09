@@ -4,14 +4,14 @@
 //
 
 #include "vpux/compiler/dialect/VPUIPDPU/rewriters/utils.hpp"
+#include "vpux/compiler/dialect/VPUASM/ops.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
-#include "vpux/compiler/dialect/VPUIPDPU/rewriters/dpu_invariant_block_rewriters.hpp"
 
 namespace vpux {
 namespace VPUIPDPU {
 
 IOType getIOType(mlir::Type type) {
-    auto baseType = DPUInvariantBlockRewriter::getBaseType(type);
+    auto baseType = getBaseType(type);
     if (baseType.isa<mlir::IntegerType>()) {
         return IOType::INT;
     } else if (baseType.isa<mlir::FloatType>()) {
@@ -19,77 +19,6 @@ IOType getIOType(mlir::Type type) {
     }
 
     return IOType::IOTypeNum;
-}
-
-std::pair<mlir::LogicalResult, PPETask> evalPPETasks(const Logger& log, mlir::Region& ppeRegion) {
-    PPETask ppeTask{};
-
-    for (auto ppeTaskOp : ppeRegion.getOps<VPUASM::PPETaskOp>()) {
-        const auto ppeMode = ppeTaskOp.getPpeLayerType();
-        if (ppeMode != VPU::PPEMode::NOOP) {
-            if (ppeTask.fixedFunction.ppeMode != VPU::PPEMode::NOOP) {
-                log.error("Cannot set more than one PPE task");
-                return {mlir::failure(), ppeTask};
-            }
-            ppeTask.fixedFunction.ppeMode = ppeMode;
-        }
-        if (ppeTaskOp.getClampLow().has_value()) {
-            if (auto intClampLowAttr = ppeTaskOp.getClampLowAttr().dyn_cast<mlir::IntegerAttr>()) {
-                ppeTask.fixedFunction.intClampLow = checked_cast<int32_t>(intClampLowAttr.getInt());
-            } else if (auto fpClampLowAttr = ppeTaskOp.getClampLowAttr().dyn_cast<mlir::FloatAttr>()) {
-                ppeTask.fixedFunction.fpClampLow = static_cast<float>(fpClampLowAttr.getValue().convertToDouble());
-            }
-        }
-        if (ppeTaskOp.getClampHigh().has_value()) {
-            if (auto intClampHighAttr = ppeTaskOp.getClampHighAttr().dyn_cast<mlir::IntegerAttr>()) {
-                ppeTask.fixedFunction.intClampHigh = checked_cast<int32_t>(intClampHighAttr.getInt());
-            } else if (auto fpClampHighAttr = ppeTaskOp.getClampHighAttr().dyn_cast<mlir::FloatAttr>()) {
-                ppeTask.fixedFunction.fpClampHigh = static_cast<float>(fpClampHighAttr.getValue().convertToDouble());
-            }
-        }
-        if (ppeTaskOp.getLreluMult().has_value()) {
-            ppeTask.fixedFunction.lReluMult = checked_cast<int32_t>(ppeTaskOp.getLreluMult().value());
-        }
-        if (ppeTaskOp.getLreluShift().has_value()) {
-            ppeTask.fixedFunction.lReluShift = checked_cast<uint32_t>(ppeTaskOp.getLreluShift().value());
-        }
-        if (ppeTaskOp.getQuantScale().has_value()) {
-            auto floatScaleAttr = ppeTaskOp.getQuantScaleAttr().getValue()[0];
-            // for float values checked cast will fail due to floating point precision representation differences
-            // between float and int. Intentionally using static_cast
-            ppeTask.fpScaleData =
-                    static_cast<float>(floatScaleAttr.cast<mlir::FloatAttr>().getValue().convertToDouble());
-        }
-        if (ppeTaskOp.getFpPreluAlpha().has_value()) {
-            ppeTask.fpPreluAlpha = static_cast<float>(ppeTaskOp.getFpPreluAlpha().value().convertToDouble());
-        }
-        if (ppeTaskOp.getQuantMult().has_value()) {
-            ppeTask.ppeQuantMult =
-                    parseIntArrayAttr<int64_t>(ppeTaskOp.getQuantMult().value().dyn_cast<mlir::ArrayAttr>());
-        }
-        if (ppeTaskOp.getQuantShift().has_value()) {
-            ppeTask.ppeQuantShift = parseIntArrayAttr<int64_t>(ppeTaskOp.getQuantShift().value());
-        }
-        if (ppeTaskOp.getQuantPostShift().has_value()) {
-            ppeTask.ppeQuantPostShift = checked_cast<int64_t>(ppeTaskOp.getQuantPostShift().value());
-        }
-        if (ppeTaskOp.getPpeFpScale().has_value()) {
-            const auto fpScale = static_cast<float>(ppeTaskOp.getPpeFpScale().value().convertToDouble());
-            ppeTask.ppeFpScale = fpScale;
-        }
-        if (ppeTaskOp.getPpeFpBias().has_value()) {
-            const auto fpBias = static_cast<float>(ppeTaskOp.getPpeFpBias().value().convertToDouble());
-            ppeTask.ppeFpBias = fpBias;
-        }
-    }
-
-    if ((ppeTask.fixedFunction.ppeMode == VPU::PPEMode::LRELU) ||
-        (ppeTask.fixedFunction.ppeMode == VPU::PPEMode::LRELUX)) {
-        ppeTask.fpPreluAlpha = -0.0f;  // note: -0.0, to ensure zero-gained data uses positive zero in FP32
-                                       // (0x00000000), not negative zero (0x80000000)
-    }
-
-    return {mlir::success(), ppeTask};
 }
 
 mlir::FloatAttr getF32FloatAttrOrNull(mlir::OpBuilder& builder, const std::optional<float>& attr) {
@@ -130,6 +59,77 @@ uint64_t getSwizzlingKey(mlir::Operation* bufferRef) {
     }
 
     return swizzlingKey;
+}
+
+mlir::BlockArgument getInvBlockArg(BlockArg invBlockArg, mlir::Block* invBlock,
+                                   const std::unordered_map<BlockArg, size_t>& invBlockArgsPos) {
+    auto arg = invBlockArgsPos.find(invBlockArg);
+    if (arg == invBlockArgsPos.end()) {
+        return nullptr;
+    }
+
+    return invBlock->getArgument(arg->second);
+}
+
+mlir::Type getBaseType(mlir::Type type) {
+    if (!type.isa<mlir::quant::QuantizedType>()) {
+        return type;
+    }
+
+    auto quantType = type.cast<mlir::quant::QuantizedType>();
+    auto quantStorageType = quantType.getStorageType();
+    if (quantStorageType.isFloat8E5M2()) {
+        return mlir::Float8E5M2Type::get(type.getContext());
+    }
+
+    if (quantStorageType.isFloat8E4M3FN()) {
+        return mlir::Float8E4M3FNType::get(type.getContext());
+    }
+
+    auto signedness = quantType.isSigned() ? mlir::IntegerType::Signed : mlir::IntegerType::Unsigned;
+    auto bitWidth = quantType.getStorageTypeIntegralWidth();
+    return mlir::IntegerType::get(type.getContext(), bitWidth, signedness);
+}
+
+mlir::LogicalResult getQuantConfig(const Logger&, mlir::Type type, SmallVector<int64_t>& quantMult,
+                                   SmallVector<int64_t>& quantShift, SmallVector<uint8_t>& quantZero,
+                                   VPU::ArchKind arch) {
+    if (const auto qType = type.dyn_cast<mlir::quant::UniformQuantizedType>()) {
+        quantZero.push_back(checked_cast<uint8_t>(qType.getZeroPoint()));
+        const auto scaleApproximation = QuantizationApproximation(arch, qType.getScale());
+        quantMult.push_back(scaleApproximation.mult());
+        quantShift.push_back(scaleApproximation.shift());
+    } else if (const auto qPerAxisType = type.dyn_cast<mlir::quant::UniformQuantizedPerAxisType>()) {
+        auto qtypeQuantZp = qPerAxisType.getZeroPoints();
+        auto qtypeQuantScale = qPerAxisType.getScales();
+
+        quantZero.resize(qtypeQuantZp.size());
+        std::transform(qtypeQuantZp.begin(), qtypeQuantZp.end(), quantZero.begin(), [](int64_t val) {
+            return checked_cast<uint8_t>(val);
+        });
+
+        quantMult.resize(qtypeQuantScale.size());
+        quantShift.resize(qtypeQuantScale.size());
+        for (std::size_t i = 0; i < qtypeQuantScale.size(); ++i) {
+            const auto scaleApproximation = QuantizationApproximation(arch, qtypeQuantScale[i]);
+            quantMult[i] = scaleApproximation.mult();
+            quantShift[i] = scaleApproximation.shift();
+        }
+    } else {
+        quantMult.push_back(1);
+        quantShift.push_back(0);
+        quantZero.push_back(0);
+    }
+
+    return mlir::success();
+}
+
+mlir::IntegerAttr getI64IntegerAttrOrNull(mlir::OpBuilder& builder, const std::optional<int64_t>& attr) {
+    if (attr.has_value()) {
+        return builder.getI64IntegerAttr(attr.value());
+    }
+
+    return nullptr;
 }
 
 }  // namespace VPUIPDPU

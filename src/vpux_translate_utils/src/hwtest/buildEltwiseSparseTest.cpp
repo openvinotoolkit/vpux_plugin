@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+//
+
 #include <numeric>
 
 #include <mlir/Dialect/Quant/QuantTypes.h>
@@ -13,6 +15,7 @@
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/utils/VPU/ppe_utils.hpp"
+#include "vpux/compiler/utils/platform_resources.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
 #include "vpux/utils/core/error.hpp"
 
@@ -114,14 +117,18 @@ void buildEltwiseSparse(const nb::TestCaseJsonDescriptor& testDesc, mlir::Module
     auto parentOutputCmx =
             createDeclareTensorOp(funcBuilder, outputCmxType, VPURT::BufferSection::CMX_NN, 0, OUTPUT_CMX_OFFSET);
 
+    auto [waitWLMBarrier, freeBarrierId] =
+            insertWLMStartSequence(funcBuilder, testDesc.getWLMParams().isWLMPartialEnabled);
+
     // barrier config
-    auto barrier0 = funcBuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 0);
-    auto barrier1 = funcBuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 1);
+    auto barrier0 = funcBuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), freeBarrierId++);
+    auto barrier1 = funcBuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), freeBarrierId++);
     // finalBarrier passed as production barrier to last DMA task
-    auto finalBarrier = funcBuilder.create<vpux::VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 2);
+    auto finalBarrier = funcBuilder.create<vpux::VPURT::ConfigureBarrierOp>(
+            builder.getUnknownLoc(), freeBarrierId++, testDesc.getWLMParams().isWLMPartialEnabled);
 
     // DMAs
-    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcBuilder, mlir::ValueRange(), mlir::ValueRange(barrier0.getBarrier()),
+    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcBuilder, waitWLMBarrier, mlir::ValueRange(barrier0.getBarrier()),
                                           builder.getUnknownLoc(), funcInputSM, inputSMCmx.getOperation()->getResult(0),
                                           0);
     VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcBuilder, mlir::ValueRange(), mlir::ValueRange(barrier0.getBarrier()),
@@ -171,14 +178,11 @@ void buildEltwiseSparse(const nb::TestCaseJsonDescriptor& testDesc, mlir::Module
     int64_t clampHigh = std::numeric_limits<int32_t>::max();
     int64_t bypassMult = 1;
     int64_t bypassShift = 0;
-
     if (auto outElemQType = outputType.template dyn_cast<mlir::quant::QuantizedType>()) {
         const auto zps = extractScalesAndZeroPoints(outputType).second;
-
         clampLow = outElemQType.getStorageTypeMin() - zps.front();
         clampHigh = outElemQType.getStorageTypeMax() - zps.front();
     }
-
     // Since Eltwise operation doesn't have weights table it requires final quantization scaling
     // to be part of output tensor description. Scale vector will be placed in PPE block and
     // later used during NCE task serialization

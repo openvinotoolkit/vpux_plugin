@@ -28,32 +28,30 @@ void vpux::VPUIP::NCEClusterTaskOp::build(mlir::OpBuilder& builder, mlir::Operat
     assert(operands.size() >= 4u && "mismatched number of parameters");
     state.addOperands(operands);
 
-    // Compute value for resultSegmentSizes attribute and add it to the attributes dictionary
-    auto resultSegmentSizesAttr =
-            builder.getDenseI32ArrayAttr({1, (output_sparsity_map ? 1 : 0), (profiling_output ? 1 : 0)});
+    auto& props = state.getOrAddProperties<vpux::VPUIP::NCEClusterTaskOp::Properties>();
 
-    bool foundAttr = false;
-    auto newAttributes = SmallVector<mlir::NamedAttribute>(attributes.begin(), attributes.end());
-    for (auto& attribute : newAttributes) {
-        if (attribute.getName() != getResultSegmentSizesAttrName(state.name)) {
-            continue;
-        }
-        attribute.setValue(resultSegmentSizesAttr);
-        foundAttr = true;
-        break;
-    }
-    if (!foundAttr) {
-        newAttributes.emplace_back(getResultSegmentSizesAttrName(state.name), resultSegmentSizesAttr);
-    }
+    auto dict = mlir::DictionaryAttr::get(builder.getContext(), attributes);
+    VPUX_THROW_UNLESS(vpux::VPUIP::NCEClusterTaskOp::setPropertiesFromAttr(props, dict, nullptr).succeeded(),
+                      "Cannot initialize NCEClusterTaskOp::Properties from attribute '{0}'!", dict);
 
-    state.addAttributes(newAttributes);
-    for (unsigned i = 0; i != 2; ++i)
+    // Compute value for resultSegmentSizes attribute and add it to the properties
+    int32_t output_sparsity_map_val = (output_sparsity_map != nullptr) ? 1 : 0;
+    int32_t profiling_output_val = (profiling_output != nullptr) ? 1 : 0;
+    props.setResultSegmentSizes({1, output_sparsity_map_val, profiling_output_val});
+
+    for (unsigned i = 0; i != 2; ++i) {
         (void)state.addRegion();
+    }
+
     state.addTypes(output);
-    if (output_sparsity_map)
+
+    if (output_sparsity_map != nullptr) {
         state.addTypes(output_sparsity_map);
-    if (profiling_output)
+    }
+
+    if (profiling_output != nullptr) {
         state.addTypes(profiling_output);
+    }
 }
 
 void vpux::VPUIP::NCEClusterTaskOp::build(
@@ -146,13 +144,14 @@ void vpux::VPUIP::NCEClusterTaskOp::build(
         mlir::UnitAttr isSmallKernelOptimized) {
     build(builder, state, output_buff.getType(),
           output_sparsity_map_buff ? output_sparsity_map_buff.getType() : nullptr,
-          profiling_data ? profiling_data.getType() : nullptr, input, input_sparsity_map, input_storage_element_table,
-          weights, weights_sparsity_map, weight_table, instruction_list_table, spr_lookup_table, activation_window,
-          parent_input, parent_input_sparsity_map, parent_input_storage_element_table, parent_output,
-          parent_output_sparsity_map, mlir::ValueRange(), output_buff, output_sparsity_map_buff, profiling_data,
-          task_type, kernel_size, kernel_strides, kernel_padding, activation_window_channel_length, is_continued,
-          cm_sp_pattern, is_segmented, out_channel_offset, input_channels_compression, is_superdense, is_inplace,
-          input_se_size, output_se_size, isPermuteQuantize, isSmallKernelOptimized);
+          (profiling_data != nullptr) ? profiling_data.getType() : nullptr, input, input_sparsity_map,
+          input_storage_element_table, weights, weights_sparsity_map, weight_table, instruction_list_table,
+          spr_lookup_table, activation_window, parent_input, parent_input_sparsity_map,
+          parent_input_storage_element_table, parent_output, parent_output_sparsity_map, mlir::ValueRange(),
+          output_buff, output_sparsity_map_buff, profiling_data, task_type, kernel_size, kernel_strides, kernel_padding,
+          activation_window_channel_length, is_continued, cm_sp_pattern, is_segmented, out_channel_offset,
+          input_channels_compression, is_superdense, is_inplace, input_se_size, output_se_size, isPermuteQuantize,
+          isSmallKernelOptimized);
 }
 
 void vpux::VPUIP::NCEClusterTaskOp::build(
@@ -195,104 +194,18 @@ void vpux::VPUIP::NCEClusterTaskOp::build(
         mlir::UnitAttr input_channels_compression, mlir::UnitAttr is_superdense, mlir::BoolAttr is_inplace,
         mlir::IntegerAttr input_se_size, mlir::IntegerAttr output_se_size, mlir::UnitAttr isPermuteQuantize,
         mlir::UnitAttr isSmallKernelOptimized) {
-    state.addOperands(input);
-    if (input_sparsity_map)
-        state.addOperands(input_sparsity_map);
-    if (input_storage_element_table)
-        state.addOperands(input_storage_element_table);
-    if (weights)
-        state.addOperands(weights);
-    if (weights_sparsity_map)
-        state.addOperands(weights_sparsity_map);
-    if (weight_table)
-        state.addOperands(weight_table);
-    if (instruction_list_table)
-        state.addOperands(instruction_list_table);
-    if (spr_lookup_table)
-        state.addOperands(spr_lookup_table);
-    if (activation_window)
-        state.addOperands(activation_window);
-    state.addOperands(parent_input);
-    if (parent_input_sparsity_map)
-        state.addOperands(parent_input_sparsity_map);
-    if (parent_input_storage_element_table)
-        state.addOperands(parent_input_storage_element_table);
-    state.addOperands(parent_output);
-    if (parent_output_sparsity_map)
-        state.addOperands(parent_output_sparsity_map);
-    if (!output_ITI_buff.empty())
-        state.addOperands(output_ITI_buff);
-    state.addOperands(output_buff);
-    if (output_sparsity_map_buff)
-        state.addOperands(output_sparsity_map_buff);
-    if (profiling_data)
-        state.addOperands(profiling_data);
-    state.addAttribute(
-            getOperandSegmentSizesAttrName(state.name),
-            builder.getDenseI32ArrayAttr(
-                    {1, (input_sparsity_map ? 1 : 0), (input_storage_element_table ? 1 : 0), (weights ? 1 : 0),
-                     (weights_sparsity_map ? 1 : 0), (weight_table ? 1 : 0), (instruction_list_table ? 1 : 0),
-                     (spr_lookup_table ? 1 : 0), (activation_window ? 1 : 0), 1, (parent_input_sparsity_map ? 1 : 0),
-                     (parent_input_storage_element_table ? 1 : 0), 1, (parent_output_sparsity_map ? 1 : 0),
-                     (!output_ITI_buff.empty() ? static_cast<int32_t>(output_ITI_buff.size()) : 0), 1,
-                     (output_sparsity_map_buff ? 1 : 0), (profiling_data ? 1 : 0)}));
-    state.addAttribute(getResultSegmentSizesAttrName(state.name),
-                       builder.getDenseI32ArrayAttr({1, (output_sparsity_map ? 1 : 0), (profiling_output ? 1 : 0)}));
-    state.addAttribute(getTaskTypeAttrName(state.name),
-                       vpux::VPUIP::NCETaskTypeAttr::get(builder.getContext(), task_type));
-    if (kernel_size) {
-        state.addAttribute(getKernelSizeAttrName(state.name), kernel_size);
-    }
-    if (kernel_strides) {
-        state.addAttribute(getKernelStridesAttrName(state.name), kernel_strides);
-    }
-    if (kernel_padding) {
-        state.addAttribute(getKernelPaddingAttrName(state.name), kernel_padding);
-    }
-    if (activation_window_channel_length) {
-        state.addAttribute(getActivationWindowChannelLengthAttrName(state.name), activation_window_channel_length);
-    }
-    if (is_continued) {
-        state.addAttribute(getIsContinuedAttrName(state.name), is_continued);
-    }
-    if (cm_sp_pattern) {
-        state.addAttribute(getCmSpPatternAttrName(state.name), cm_sp_pattern);
-    }
-    if (is_segmented) {
-        state.addAttribute(getIsSegmentedAttrName(state.name), is_segmented);
-    }
-    if (out_channel_offset) {
-        state.addAttribute(getOutChannelOffsetAttrName(state.name), out_channel_offset);
-    }
-    if (input_channels_compression) {
-        state.addAttribute(getInputChannelsCompressionAttrName(state.name), input_channels_compression);
-    }
-    if (is_superdense) {
-        state.addAttribute(getIsSuperdenseAttrName(state.name), is_superdense);
-    }
-    if (is_inplace) {
-        state.addAttribute(getIsInplaceAttrName(state.name), is_inplace);
-    }
-    if (input_se_size) {
-        state.addAttribute(getInputSeSizeAttrName(state.name), input_se_size);
-    }
-    if (output_se_size) {
-        state.addAttribute(getOutputSeSizeAttrName(state.name), output_se_size);
-    }
-    if (isPermuteQuantize) {
-        state.addAttribute(getIsPermuteQuantizeAttrName(state.name), isPermuteQuantize);
-    }
-    if (isSmallKernelOptimized) {
-        state.addAttribute(getIsSmallKernelOptimizedAttrName(state.name), isSmallKernelOptimized);
-    }
-    (void)state.addRegion();
-    (void)state.addRegion();
-    state.addTypes(output);
-    if (output_sparsity_map)
-        state.addTypes(output_sparsity_map);
-    if (profiling_output)
-        state.addTypes(profiling_output);
+    auto taskTypeAttr = vpux::VPUIP::NCETaskTypeAttr::get(builder.getContext(), task_type);
 
+    build(builder, state, output, output_sparsity_map, profiling_output, input, input_sparsity_map,
+          input_storage_element_table, weights, weights_sparsity_map, weight_table, instruction_list_table,
+          spr_lookup_table, activation_window, parent_input, parent_input_sparsity_map,
+          parent_input_storage_element_table, parent_output, parent_output_sparsity_map, output_ITI_buff, output_buff,
+          output_sparsity_map_buff, profiling_data, taskTypeAttr, kernel_size, kernel_strides, kernel_padding,
+          activation_window_channel_length, is_continued, cm_sp_pattern, is_segmented, out_channel_offset,
+          input_channels_compression, is_superdense, is_inplace, input_se_size, output_se_size, isPermuteQuantize,
+          isSmallKernelOptimized, /*profilingMetadata=*/nullptr);
+
+    // The auto-generated builders don't populate the regions even if SizedRegion<1> is specified.
     for (auto& region : state.regions) {
         region->emplaceBlock();
     }
@@ -433,7 +346,6 @@ mlir::LogicalResult verifyNCEConv(VPUIP::NCEClusterTaskOp op, VPU::ArchKind arch
     if (op.getKernelPaddingAttr() == nullptr) {
         return errorAt(op, "kernel_padding is required for NCETaskType : '{0}'", op.getTaskType());
     }
-
     const auto kernelSize = parseIntArrayAttr<int64_t>(op.getKernelSizeAttr());
     const auto KY = kernelSize[0];
     const auto KX = kernelSize[1];
@@ -447,7 +359,6 @@ mlir::LogicalResult verifyNCEConv(VPUIP::NCEClusterTaskOp op, VPU::ArchKind arch
     const auto padRight = kernelPadding.getRight().getInt();
     const auto padTop = kernelPadding.getTop().getInt();
     const auto padBottom = kernelPadding.getBottom().getInt();
-
     if (mlir::failed(VPU::NCEInvariant::verifyKernel(op->getLoc(), KY, KX, SY, SX, padTop, padBottom, padLeft, padRight,
                                                      arch))) {
         return errorAt(op, "Kernel verification failed");
@@ -468,17 +379,37 @@ mlir::LogicalResult verifyNCEConv(VPUIP::NCEClusterTaskOp op, VPU::ArchKind arch
     const auto weightsOrder = DimsOrder::fromValue(op.getWeights());
     const auto outOrder = DimsOrder::fromValue(op.getOutputBuff());
 
-    if (op.getTaskType() == VPUIP::NCETaskType::CONV && inOrder != DimsOrder::NHWC) {
-        return errorAt(op, "For NCE z-major convolution input must have NHWC layout, got '{0}'", inOrder);
+    if (op.getTaskType() == VPUIP::NCETaskType::CONV && (inOrder != DimsOrder::NHWC && inOrder != DimsOrder::GNHWC)) {
+        return errorAt(op, "For NCE z-major convolution input must have NHWC or GNHWC layout, got '{0}'", inOrder);
     }
     if (op.getTaskType() == VPUIP::NCETaskType::CMCONV && inOrder != DimsOrder::NCHW) {
         return errorAt(op, "For NCE c-major convolution input must have NCHW layout, got '{0}'", inOrder);
     }
-    if (weightsOrder != DimsOrder::OYXI) {
+    if (weightsOrder != DimsOrder::OYXI && weightsOrder != DimsOrder::GOYXI) {
         return errorAt(op, "For NCE convolution weights must have OYXI layout, got '{0}'", weightsOrder);
     }
     if (arch != VPU::ArchKind::NPU37XX && arch != VPU::ArchKind::NPU40XX && outOrder != DimsOrder::NHWC) {
         return errorAt(op, "For NCE convolution output must have NHWC layout, got '{0}'", outOrder);
+    }
+
+    const auto outputShape = getShape(op.getOutput());
+
+    const auto isOutput5d = outputShape.size() == 5;
+
+    if (isOutput5d) {  // if 5D, then that is grouped matmul and checks below are not applicable
+        return mlir::success();
+    }
+
+    const auto batch = outputShape[Dims4D::Act::N];
+    if (batch != vpux::VPU::NCEInvariant::SUPPORTED_BATCH_SIZE) {
+        if (arch < VPU::ArchKind::NPU37XX) {
+            return errorAt(op, "Got unsupported input batch '{0}' expected '{1}'", batch,
+                           vpux::VPU::NCEInvariant::SUPPORTED_BATCH_SIZE);
+        }
+        if (batch > vpux::VPU::getMaxArchDPUClusterNum(arch)) {
+            return errorAt(op, "Got unsupported input batch '{0}' expected to be less than or equal to '{1}'", batch,
+                           vpux::VPU::getMaxArchDPUClusterNum(arch));
+        }
     }
 
     return mlir::success();
@@ -489,20 +420,6 @@ mlir::LogicalResult verifyNCEPool(VPUIP::NCEClusterTaskOp op, VPU::ArchKind arch
             op.getTaskType() == VPUIP::NCETaskType::AVEPOOL || op.getTaskType() == VPUIP::NCETaskType::MAXPOOL,
             "Expected task type '{0}' or '{1}', but got '{2}'", VPUIP::NCETaskType::AVEPOOL,
             VPUIP::NCETaskType::MAXPOOL, op.getTaskType());
-
-    // Only VPUX30XX requires weights table and activation window for max/average pool ops
-    if (arch == VPU::ArchKind::NPU30XX) {
-        if (op.getWeightTable() == nullptr) {
-            return errorAt(op, "weight_table is required for NCETaskType : '{0}'", op.getTaskType());
-        }
-        if (op.getActivationWindow() == nullptr) {
-            return errorAt(op, "activation_window is required for NCETaskType : '{0}'", op.getTaskType());
-        }
-        if (op.getActivationWindowChannelLengthAttr() == nullptr) {
-            return errorAt(op, "activation_window_channel_length is required for NCETaskType : '{0}'",
-                           op.getTaskType());
-        }
-    }
 
     if (op.getKernelSizeAttr() == nullptr) {
         return errorAt(op, "kernel_size is required for NCETaskType : '{0}'", op.getTaskType());
@@ -578,12 +495,6 @@ mlir::LogicalResult verifyNCEDWConv(VPUIP::NCEClusterTaskOp op, VPU::ArchKind ar
     if (op.getWeightTable() == nullptr) {
         return errorAt(op, "weight_table is required for NCETaskType : '{0}'", op.getTaskType());
     }
-    if (arch == VPU::ArchKind::NPU30XX) {
-        if (op.getActivationWindow() == nullptr) {
-            return errorAt(op, "activation_window is required for NCETaskType : '{0}'", op.getTaskType());
-        }
-    }
-
     if (op.getKernelSizeAttr() == nullptr) {
         return errorAt(op, "kernel_size is required for NCETaskType : '{0}'", op.getTaskType());
     }
@@ -658,14 +569,15 @@ mlir::LogicalResult vpux::VPUIP::DPUTaskOp::verify() {
 
 mlir::LogicalResult vpux::VPUIP::NCEClusterTaskOp::verify() {
     const auto op = getOperation();
-    const auto arch = VPU::getArch(getOperation()->getParentOfType<mlir::ModuleOp>());
+    auto module = op->getParentOfType<mlir::ModuleOp>();
+    const auto arch = VPU::getArch(module);
 
     for (const auto& operand : getOpOperands()) {
         const auto val = operand.get();
         const auto type = val.getType().cast<vpux::NDTypeInterface>().getElementType();
 
         if (arch != VPU::ArchKind::NPU37XX && arch != VPU::ArchKind::NPU40XX && type.isBF16()) {
-            return errorAt(op, "BF16 is only supported by VPUX37XX and VPUX40XX");
+            return errorAt(op, "BF16 is only supported by VPUX37XX, VPUX40XX");
         }
     }
 
@@ -718,11 +630,36 @@ mlir::LogicalResult vpux::VPUIP::NCEClusterTaskOp::verify() {
     auto nnCMXOperands = SmallVector<mlir::Value>();
 
     const auto inputShape = getShape(getInput());
-    const auto inputBatch = inputShape[Dims4D::Act::N];
-    if (inputBatch != vpux::VPU::NCEInvariant::SUPPORTED_BATCH_SIZE) {
-        return errorAt(op, "Got unsupported input batch '{0}' expected '{1}'", inputBatch,
-                       vpux::VPU::NCEInvariant::SUPPORTED_BATCH_SIZE);
-    }
+
+    const auto isInput4d = inputShape.size() == 4;
+    if (isInput4d) {
+        const auto inputBatch = inputShape[Dims4D::Act::N];
+        if (inputBatch != vpux::VPU::NCEInvariant::SUPPORTED_BATCH_SIZE) {
+            if (arch < VPU::ArchKind::NPU37XX) {
+                return errorAt(op, "Got unsupported input batch '{0}' expected '{1}'", inputBatch,
+                               vpux::VPU::NCEInvariant::SUPPORTED_BATCH_SIZE);
+            }
+
+            // Verify NPU37XX, NPU40XX and future version with batch tiling feature
+            if (inputBatch > vpux::VPUIP::getNumTilesUsed(module)) {
+                return errorAt(op, "Got unsupported input batch '{0}' expected to be less than or equal to '{1}'",
+                               inputBatch, getNumTilesUsed(module));
+            }
+            if (auto nceTilingParent = op->getParentOfType<VPUIP::NCEClusterTilingOp>()) {
+                auto outputType = nceTilingParent->getResult(0).getType().cast<VPUIP::DistributedBufferType>();
+                const auto numClusters = outputType.getDistribution().getNumClusters().getInt();
+                if (inputBatch != numClusters) {
+                    return errorAt(op, "Got unsupported input batch '{0}' expected '{1}'", inputBatch, numClusters);
+                }
+            } else if (auto outputType = getOutput().getType().dyn_cast_or_null<VPUIP::DistributedBufferType>()) {
+                const auto numClusters = outputType.getDistribution().getNumClusters().getInt();
+                if (inputBatch != numClusters) {
+                    return errorAt(op, "Got unsupported input batch '{0}' expected '{1}'", inputBatch, numClusters);
+                }
+            }
+        }
+    }  // else if (is5D) no limitation
+
     appendToVector(nnCMXOperands, getInput());
     appendToVector(nnCMXOperands, getWeights());
     appendToVector(nnCMXOperands, getWeightTable());
@@ -844,6 +781,8 @@ MVCNN::Permutation getODUPermutationType(DimsOrder outputDimsOrder) {
         return MVCNN::Permutation_XZY;
     } else if (outputDimsOrder == vpux::DimsOrder::NCHW) {
         return MVCNN::Permutation_XYZ;
+    } else if (outputDimsOrder == vpux::DimsOrder::GNHWC) {
+        return MVCNN::Permutation_ZXY;
     } else {
         VPUX_THROW("Can't get ODU permutation by output dimsOrder: '{0}'", outputDimsOrder);
     }
@@ -957,7 +896,6 @@ vpux::VPUIP::BlobWriter::TensorReference getTensorReferenceWithUpdatedQuantParam
 
     std::optional<int64_t> sparsityMapOffset = std::nullopt;
     std::optional<int64_t> seTableOffset = std::nullopt;
-    std::optional<uint64_t> descriptor = std::nullopt;
     if (operandSparsityMap != nullptr) {
         auto sparsityMapBufferOp = operandSparsityMap.getDefiningOp<VPURT::DeclareBufferOp>();
         VPUX_THROW_UNLESS(sparsityMapBufferOp != nullptr, "Unable to find DeclareBufferOp for sparsity map");
@@ -968,14 +906,11 @@ vpux::VPUIP::BlobWriter::TensorReference getTensorReferenceWithUpdatedQuantParam
         VPUX_THROW_UNLESS(seTableBufferOp != nullptr, "Unable to find DeclareBufferOp for storage element table");
         seTableOffset = seTableBufferOp.getByteOffset();
     }
-    if (auto value = bufferOp->getAttr("DescriptorHandle").dyn_cast_or_null<mlir::IntegerAttr>()) {
-        descriptor = value.getUInt();
-    }
 
     return writer.createTensorRef("tensor_scale_updated", type, bufferOp.getSection(), sectionIndex,
                                   bufferOp.getByteOffset(), ppeQuantMult, ppeQuantShift, ppeQuantPostShift,
                                   quantZeroPoints, sparsityMapOffset, seTableOffset, storageElementSize,
-                                  bufferOp.getSwizzlingKey(), descriptor);
+                                  bufferOp.getSwizzlingKey());
 }
 
 // This is a helper routine to build new TensorReference of individual variant with profiling data
@@ -1021,7 +956,7 @@ VPUIP::BlobWriter::SpecificTask vpux::VPUIP::NCEClusterTaskOp::serialize(VPUIP::
         auto inSize = SmallVector<int64_t>{0, 0, 0};
 
         // Currently, input start/size attributes are computed only for VPUX40XX.
-        // For VPUX37XX and VPUX30XX, input workload start/size are back-inferred by runtime from
+        // For VPUX37XX, input workload start/size are back-inferred by runtime from
         // output workload start/end.
         // TODO: Add input workload computation for VPUX37XX - E#63055
         if (arch == VPU::ArchKind::NPU40XX) {
@@ -1244,8 +1179,6 @@ VPUIP::BlobWriter::SpecificTask vpux::VPUIP::NCEClusterTaskOp::serialize(VPUIP::
     auto inputData = writer.getTensorRef(getInput());
     auto weightsData = getWeights() != nullptr ? writer.getTensorRef(getWeights()) : 0;
     const auto weightsTable = getWeightTable() != nullptr ? writer.getTensorRef(getWeightTable()) : 0;
-    const auto activationWindow = getActivationWindow() != nullptr ? writer.getTensorRef(getActivationWindow()) : 0;
-    const auto activationWindowChannelLength = checked_cast<int32_t>(getActivationWindowChannelLength().value_or(0));
 
     auto outputData = writer.getTensorRef(getOutput());
 
@@ -1283,42 +1216,39 @@ VPUIP::BlobWriter::SpecificTask vpux::VPUIP::NCEClusterTaskOp::serialize(VPUIP::
 
     const auto invariantMPEMode = getMPEFrequentModeFromDPUTasks(getVariants());
 
-    const auto invariant =
-            MVCNN::CreateNCEInvariantFields(writer,
-                                            getDPULayerType(getTaskType()),  // dpu_task_type
-                                            ppeTask,                         // ppe_task
-                                            getMPEMode(invariantMPEMode),    // mpe_frequent_mode
-                                            kernelSizeH,                     // kernelH
-                                            kernelSizeW,                     // kernelW
-                                            kernelStridesH,                  // kernel_strideH
-                                            kernelStridesW,                  // kernel_strideW
-                                            kernelPadL,                      // kernel_padLeft
-                                            kernelPadR,                      // kernel_padRight
-                                            kernelPadT,                      // kernel_padTop
-                                            kernelPadB,                      // kernel_padBottom
-                                            parentInputTensor,               // parent_input_tensor
-                                            parentOutputTensor,              // parent_output_tensor
-                                            0,                               // parent_weights_tensor
-                                            inputData,                       // input_data
-                                            outputData,                      // output_data
-                                            weightsData,                     // weights_data
-                                            weightsTable,                    // weights_table
-                                            activationWindow,                // activation_window
-                                            activationWindowChannelLength,   // activation_window_channel_length
-                                            enabled_optimizations,           // enabled_optimizations
-                                            odu_offset,                      // odu_offset
-                                            out_channel_offset,              // out_channel_offset
-                                            is_segmented,                    // is_segmented
-                                            is_continued,                    // is_continued
-                                            isSuperdense,                    // is_superdense
-                                            0,                               // segment_height
-                                            oduPermutation,                  // odu_permutation
-                                            cm_sp_pattern,                   // cm_sp_pattern
-                                            profBufferBaseAddress,           // cmx_local_slice_base
-                                            input_channels_compression,      // input_channels_compression
-                                            false,                           // explicit_input_workloads
-                                            isL1OptOn                        // depthwise_conv_3x3s1_optimization
-            );
+    const auto invariant = MVCNN::CreateNCEInvariantFields(writer,
+                                                           getDPULayerType(getTaskType()),  // dpu_task_type
+                                                           ppeTask,                         // ppe_task
+                                                           getMPEMode(invariantMPEMode),    // mpe_frequent_mode
+                                                           kernelSizeH,                     // kernelH
+                                                           kernelSizeW,                     // kernelW
+                                                           kernelStridesH,                  // kernel_strideH
+                                                           kernelStridesW,                  // kernel_strideW
+                                                           kernelPadL,                      // kernel_padLeft
+                                                           kernelPadR,                      // kernel_padRight
+                                                           kernelPadT,                      // kernel_padTop
+                                                           kernelPadB,                      // kernel_padBottom
+                                                           parentInputTensor,               // parent_input_tensor
+                                                           parentOutputTensor,              // parent_output_tensor
+                                                           0,                               // parent_weights_tensor
+                                                           inputData,                       // input_data
+                                                           outputData,                      // output_data
+                                                           weightsData,                     // weights_data
+                                                           weightsTable,                    // weights_table
+                                                           enabled_optimizations,           // enabled_optimizations
+                                                           odu_offset,                      // odu_offset
+                                                           out_channel_offset,              // out_channel_offset
+                                                           is_segmented,                    // is_segmented
+                                                           is_continued,                    // is_continued
+                                                           isSuperdense,                    // is_superdense
+                                                           0,                               // segment_height
+                                                           oduPermutation,                  // odu_permutation
+                                                           cm_sp_pattern,                   // cm_sp_pattern
+                                                           profBufferBaseAddress,           // cmx_local_slice_base
+                                                           input_channels_compression,  // input_channels_compression
+                                                           false,                       // explicit_input_workloads
+                                                           isL1OptOn  // depthwise_conv_3x3s1_optimization
+    );
 
     MVCNN::NCE2TaskBuilder builder(writer);
     builder.add_variant(variant);

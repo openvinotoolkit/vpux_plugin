@@ -3,8 +3,9 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-// RUN: vpux-translate --vpu-arch=VPUX37XX --import-IE --set-upper-bounds="1 3 192 192" ./dynamic_transpose.xml -o %t
+// RUN: vpux-translate --vpu-arch=%arch% --import-IE --set-upper-bounds="1 3 192 192" ./dynamic_transpose.xml -o %t
 // RUN: FileCheck %s --input-file %t
+// REQUIRES: arch-NPU37XX
 
 // CHECK: module @dynamic_transpose {
 // CHECK:   IE.CNNNetwork entryPoint : @main inputsInfo : {

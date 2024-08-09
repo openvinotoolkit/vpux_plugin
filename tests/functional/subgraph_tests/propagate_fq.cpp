@@ -4,13 +4,23 @@
 
 #include <vpu_ov2_layer_test.hpp>
 
+#include <common_test_utils/ov_tensor_utils.hpp>
 #include "common_test_utils/node_builders/fake_quantize.hpp"
+
+using namespace ov::test::utils;
 
 namespace ov::test {
 
 class PropagateFQSubGraphTest_NPU3720 :
         public VpuOv2LayerTest,
         public testing::WithParamInterface<std::tuple<std::vector<int64_t>>> {
+    void generate_inputs(const std::vector<ov::Shape>& targetInputStaticShapes) override {
+        VpuOv2LayerTest::inputs.clear();
+        const auto& funcInputs = VpuOv2LayerTest::function->inputs();
+        ov::Tensor tensorData =
+                create_and_fill_tensor(funcInputs[0].get_element_type(), targetInputStaticShapes[0], 8, 0, 32);
+        VpuOv2LayerTest::inputs.insert({funcInputs[0].get_node_shared_ptr(), tensorData});
+    }
     void SetUp() override {
         const ov::Shape inputShape{1, 16, 32, 32};
         const auto transposeOrder = std::get<0>(GetParam());
@@ -70,7 +80,7 @@ public:
         result << "TestIdx=" << obj.index << sep;
         return result.str();
     };
-};
+};  // namespace ov::test
 
 using PropagateFQUpwardTestParams = std::tuple<std::vector<float>,  // fqRanges1
                                                std::vector<float>   // fqRanges2

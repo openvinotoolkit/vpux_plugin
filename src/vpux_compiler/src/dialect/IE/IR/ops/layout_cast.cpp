@@ -10,11 +10,11 @@ using namespace vpux;
 
 mlir::LogicalResult vpux::IE::LayoutCastOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::LayoutCastOpAdaptor overrideLayout(operands, attrs);
+    IE::LayoutCastOpAdaptor overrideLayout(operands, attrs, prop);
     if (mlir::failed(overrideLayout.verify(loc))) {
         return mlir::failure();
     }

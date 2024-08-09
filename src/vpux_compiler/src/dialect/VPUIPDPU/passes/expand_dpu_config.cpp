@@ -60,8 +60,6 @@ void ExpandDPUConfigPass::safeRunOnFunc() {
     if (mlir::failed(mlir::applyPartialConversion(netFunc, target, std::move(patternsInv)))) {
         signalPassFailure();
     }
-
-    return;
 }
 
 }  // namespace

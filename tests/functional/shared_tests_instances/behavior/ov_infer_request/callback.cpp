@@ -6,8 +6,8 @@
 #include <vector>
 
 #include "behavior/ov_infer_request/callback.hpp"
+#include "common/npu_test_env_cfg.hpp"
 #include "common/utils.hpp"
-#include "common/vpu_test_env_cfg.hpp"
 #include "intel_npu/al/config/common.hpp"
 #include "overload/ov_infer_request/callback.hpp"
 #include "vpu_test_tool.hpp"

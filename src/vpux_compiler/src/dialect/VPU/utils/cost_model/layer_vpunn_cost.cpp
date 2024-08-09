@@ -40,7 +40,7 @@ void MultiClusterStrategySetter::setTemporaryStrategy(VPU::MultiClusterStrategy 
 
 StrategyCost LayerVPUNNCost::getStrategyCost(mlir::Operation* operation, const VPUNNCostParameters& parameters) const {
     if (mlir::isa<VPU::NCEPermuteOp>(operation)) {
-        return getSimpleLayerCost(operation, parameters);
+        return getSimpleLayerCost(operation->getResult(0).getType().cast<vpux::NDTypeInterface>(), parameters);
     } else if (auto nceOp = mlir::dyn_cast<VPU::NCEOpInterface>(operation)) {
         return getNCELayerCost(nceOp, parameters);
     } else if (auto swOp = mlir::dyn_cast<VPU::SWOpInterface>(operation)) {
@@ -49,7 +49,7 @@ StrategyCost LayerVPUNNCost::getStrategyCost(mlir::Operation* operation, const V
         return 0.0;
     } else {
         _log.trace("Unsupported op type {0} at {1}", operation->getName(), operation->getLoc());
-        return getSimpleLayerCost(operation, parameters);
+        return getSimpleLayerCost(operation->getResult(0).getType().cast<vpux::NDTypeInterface>(), parameters);
     }
 }
 
@@ -146,10 +146,8 @@ size_t LayerVPUNNCost::getNumClusterCorrectionSize(VPU::MultiClusterStrategy str
     return strategy != MultiClusterStrategy::Clustering ? _numTiles : 1;
 }
 
-StrategyCost LayerVPUNNCost::getSimpleLayerCost(mlir::Operation* operation,
+StrategyCost LayerVPUNNCost::getSimpleLayerCost(vpux::NDTypeInterface outputType,
                                                 const VPUNNCostParameters& parameters) const {
-    auto outputType = operation->getResult(0).getType().cast<vpux::NDTypeInterface>();
-
     return outputType.getTotalAllocSize().count() / getNumClusterCorrectionSize(parameters._strategy);
 }
 
@@ -186,7 +184,7 @@ StrategyCost LayerVPUNNCost::getNCELayerCost(VPU::NCEOpInterface nceOp, const VP
     };
     auto vpunnLayerWeightsCosts = getPerTileWeightsDMACosts(nceOp, tilesTypes, getSpillingReadCost);
     _log.trace("VPUNN weights DMA costs {0}", vpunnLayerWeightsCosts);
-    vpunnCost += getWeightsDMACostForNCEOp(nceOp, parameters._tiling, vpunnLayerDPUCosts, vpunnLayerWeightsCosts,
+    vpunnCost += getWeightsDMACostForNCEOp(nceOp, parameters._tiling, vpunnLayerDPUCosts, vpunnLayerWeightsCosts, 0,
                                            isPrefetchTilingEnabled, _log);
     _log.trace("VPUNN total layer cost {0}", vpunnCost);
     return vpunnCost;
@@ -217,11 +215,12 @@ StrategyCost LayerVPUNNCost::getSWLayerCost(VPU::SWOpInterface swOp, const VPUNN
             inputNDTypes.push_back(swOp->getOperand(typeIndex).getType().cast<vpux::NDTypeInterface>().extractDenseTile(
                     inputTiles[typeIndex].offsets, inputTiles[typeIndex].shape));
         }
-        const auto vpunnLayer = getVPUNNSWKernelOp(
-                swOp, outputType.extractDenseTile(outputTiling[index].offsets, outputTiling[index].shape),
-                inputNDTypes);
+
+        auto outputTiledType = outputType.extractDenseTile(outputTiling[index].offsets, outputTiling[index].shape);
+        const auto vpunnLayer = getVPUNNSWKernelOp(swOp, outputTiledType, inputNDTypes);
+
         if (!vpunnLayer) {
-            fullCost += getSimpleLayerCost(swOp, parameters);
+            fullCost += getSimpleLayerCost(outputTiledType, parameters);
         } else {
             auto vpunnStrategy =
                     VPU::getVPULayerStrategy(parameters._strategy, _numDPUs, _numTiles, _numShaveActs, false);

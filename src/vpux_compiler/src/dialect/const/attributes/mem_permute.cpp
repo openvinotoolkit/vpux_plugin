@@ -106,6 +106,10 @@ vpux::NDTypeInterface vpux::Const::MemPermuteAttr::inferOutputType(vpux::NDTypeI
     return input.changeDimsOrder(dstOrder).changeShapeElemType(outShape, elemType);
 }
 
+bool vpux::Const::MemPermuteAttr::inferOutputSplat(bool inputIsSplat, vpux::NDTypeInterface) {
+    return inputIsSplat;
+}
+
 //
 // MemPermuteAttr::transform
 //

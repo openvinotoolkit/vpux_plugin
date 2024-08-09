@@ -9,11 +9,11 @@ using namespace vpux;
 
 mlir::LogicalResult vpux::VPU::OneHotOp::inferReturnTypes(mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc,
                                                           mlir::ValueRange operands, mlir::DictionaryAttr attrs,
-                                                          mlir::OpaqueProperties, mlir::RegionRange,
+                                                          mlir::OpaqueProperties prop, mlir::RegionRange,
                                                           mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::OneHotOpAdaptor oneHot(operands, attrs);
+    VPU::OneHotOpAdaptor oneHot(operands, attrs, prop);
     if (mlir::failed(oneHot.verify(loc))) {
         return mlir::failure();
     }

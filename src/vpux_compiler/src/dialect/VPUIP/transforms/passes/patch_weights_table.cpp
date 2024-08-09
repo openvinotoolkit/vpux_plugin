@@ -95,10 +95,11 @@ void PatchWeightsTablePass::safeRunOnFunc() {
         }
 
         auto weightTableSize = getWeightTableSize(nceOp, weightsPtrPerCluster, sparsityPtr, baseOffset);
+        const auto channelOffset = 0;
 
-        auto newConstAttr = cstOp.getContentAttr().relocateWeightsTablePointers(weightsPtrPerCluster, sparsityPtr,
-                                                                                ShapeRef(offsets), weightTableSize,
-                                                                                weightsElemBitSize, weightsCompression);
+        auto newConstAttr = cstOp.getContentAttr().relocateWeightsTablePointers(
+                weightsPtrPerCluster, sparsityPtr, ShapeRef(offsets), weightTableSize, weightsElemBitSize,
+                weightsCompression, channelOffset);
         mlir::OpBuilder builder(cstOp);
         auto newConstOp = builder.create<Const::DeclareOp>(cstOp.getLoc(), cstOp.getOutput().getType(), newConstAttr);
         cstLoadOp->setOperand(0, newConstOp.getOutput());

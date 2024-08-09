@@ -107,7 +107,7 @@ mlir::LogicalResult LayerRewriter::matchAndRewrite(IE::LayerOpInterface origOp, 
         return mlir::failure();
     }
 
-    auto* typeConverter = this->getTypeConverter();
+    const auto* typeConverter = this->getTypeConverter();
     VPUX_THROW_UNLESS(typeConverter != nullptr, "TypeConverter was not set");
 
     const auto origOperands = origOp->getOperands();
@@ -129,6 +129,7 @@ inline bool isFloatInputQuantWeightsMixedPrecisionOperation(mlir::Operation* op)
     // If a TransposeOp or an op with ViewLikeOpInterface can match the pattern
     // ViewLikeOp/TransposeOp -> ViewLikeOp/TransposeOp -> ... -> Conv
     // The op should also be checked here.
+
     //
     // [E#124175] Also a temporary solution is to match the pattern for:
     // Const -> Split -> AffineReshape -> Concat -> AffineReshape -> Conv
@@ -183,7 +184,7 @@ mlir::LogicalResult ConstRewriter::matchAndRewrite(Const::DeclareOp origOp, OpAd
                                                    mlir::ConversionPatternRewriter& rewriter) const {
     _log.trace("Process Operation '{0}' at '{1}", origOp->getName(), origOp->getLoc());
 
-    auto* typeConverter = this->getTypeConverter();
+    const auto* typeConverter = this->getTypeConverter();
     VPUX_THROW_UNLESS(typeConverter != nullptr, "TypeConverter was not set");
 
     const auto origQuantType =

@@ -38,7 +38,6 @@ class RdftLayerTestCommon : public RDFTLayerTest, virtual public VpuOv2LayerTest
         VpuOv2LayerTest::function = std::make_shared<ov::Model>(rdft->outputs(), ov::ParameterVector{param}, "RDFT");
 
         if (modelType == ov::element::f16) {
-            VpuOv2LayerTest::abs_threshold = 0.15f * axes.size();
             VpuOv2LayerTest::rel_threshold = 0.15f * axes.size();
         }
     }

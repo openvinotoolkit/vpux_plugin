@@ -45,8 +45,7 @@ def VPU_ArchKind :
             "ArchKind",
             "Represents VPU architecture generation",
             [
-                I64EnumAttrCase<"UNKNOWN",  0>,
-                I64EnumAttrCase<"NPU30XX", 1>,
+                I64EnumAttrCase<"UNKNOWN", 0>,
                 I64EnumAttrCase<"NPU37XX", 3>,
                 I64EnumAttrCase<"NPU40XX", 4>
             ]
@@ -369,6 +368,8 @@ def VPU_MultiClusterStrategy :
                 I64EnumAttrCase<"HKSwitch",                  5>,
                 I64EnumAttrCase<"SplitOverHeightKernel",     6>,
                 I64EnumAttrCase<"SplitOverHeightWidth",      7>,
+                I64EnumAttrCase<"SplitOverBatch",            8>,
+                I64EnumAttrCase<"SplitOverGroup",            9>,
             ]
         > {
 }

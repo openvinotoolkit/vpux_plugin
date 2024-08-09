@@ -4,11 +4,11 @@
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW" --merge-vertical-fusion-subgraphs="enable-vertical-fusion-pipelining=true" %s | FileCheck %s
-// REQUIRES: arch-VPUX40XX
+// REQUIRES: arch-NPU40XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
-func.func @VerticalFuseConvSoftmaxConv(
+func.func @MergeVFWithoutVFPipelining(
     %arg0: tensor<1x48x1024x4xf16, {order = #NHWC}>,
     %arg1: tensor<4096x48x1x1xf16, {order = #NHWC}>,
     %arg2: tensor<48x4096x1x1xf16, {order = #NHWC}>) -> tensor<1x48x1024x4xf16, {order = #NHWC}> {
@@ -62,4 +62,46 @@ func.func @VerticalFuseConvSoftmaxConv(
     //CHECK:    [[CONV_1:%.+]] = VPU.NCE.Convolution
 
     //CHECK: return [[VF]]
+}
+
+// -----
+
+!qElemType0 = !quant.uniform<u8:f16, 0.17455944734461168:132>
+!qElemType1 = !quant.uniform<u8:f16, 0.00174561528598561:128>
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+func.func @BuildPipeliningWithWTiling(%arg0: tensor<1x32x101x480x!qElemType0, {order = #NHWC}>, %arg1: tensor<1x32x101x480xf16, {order = #NHWC}>) -> tensor<1x32x101x480xf16, {order = #NHWC}> {
+
+    %0 = VPU.VerticalFusion (%arg0 as %arg2: tensor<1x32x101x480x!qElemType0, {order = #NHWC}>) attributes {tilingStrategy = [1, 1, 1, 1]} -> tensor<1x32x101x480xf16, {order = #NHWC}> {
+      %4 = VPU.NCE.AveragePool(%arg2) {kernel_size = [1, 1], multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_mult = [22879], quant_shift = [17], quant_post_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>, strides = [1, 1]} -> tensor<1x32x101x480xf16, {order = #NHWC}>
+      VPU.Yield %4
+    }
+    %1 = VPU.VerticalFusion (%0 as %arg2: tensor<1x1x101x1xf16, {order = #NHWC}>, %arg1 as %arg3: tensor<1x32x101x480xf16, {order = #NHWC}>) attributes {tilingStrategy = [1, 1, 1, 2]} -> tensor<1x32x101x480xf16, {order = #NHWC}> {
+      %4 = VPU.Multiply(%arg2, %arg3) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>} : tensor<1x1x101x1xf16, {order = #NHWC}>, tensor<1x32x101x480xf16, {order = #NHWC}> -> tensor<1x32x101x480xf16, {order = #NHWC}>
+      VPU.Yield %4
+    }
+    %2 = VPU.VerticalFusion (%1 as %arg2: tensor<1x32x101x480xf16, {order = #NHWC}>) attributes {tilingStrategy = [1, 1, 1, 1]} -> tensor<1x32x101x480x!qElemType1, {order = #NHWC}> {
+      %4 = VPU.NCE.AveragePool(%arg2) {kernel_size = [1, 1], multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = 0 : i64, clamp_high = 255 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [572.86391109675674], fp_prelu_alpha = 572.8638916015625 : f64>, strides = [1, 1]} -> tensor<1x32x101x480x!qElemType1, {order = #NHWC}>
+      VPU.Yield %4
+    }
+    %3 = VPU.VerticalFusion (%2 as %arg24: tensor<1x32x101x480x!qElemType1, {order = #NHWC}>) attributes {tilingStrategy = [1, 1, 1, 1]} -> tensor<1x32x101x480xf16, {order = #NHWC}> {
+      %4 = VPU.NCE.AveragePool(%arg24) {kernel_size = [1, 1], multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_mult = [29286], quant_shift = [24], quant_post_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>, strides = [1, 1]} -> tensor<1x32x101x480xf16, {order = #NHWC}>
+      VPU.Yield %4
+    }
+
+    return %3  : tensor<1x32x101x480xf16, {order = #NHWC}>
+
+    //CHECK:  [[VF_0:%.+]] = VPU.VerticalFusion
+    // CHECK-SAME:  as [[INPUT0:%.+]]: tensor<1x32x101x480x!qElemType, {order = #NHWC}>
+    // CHECK-SAME:  as [[INPUT1:%.+]]: tensor<1x32x101x480xf16, {order = #NHWC}>
+    //CHECK-SAME: tilingStrategy = [1, 1, 1, 4]
+
+    //CHECK: [[POOL0:%.+]] = VPU.NCE.AveragePool([[INPUT0]])
+    //CHECK: [[MULT:%.+]] = VPU.Multiply([[POOL0]], [[INPUT1]])
+    //CHECK: [[POOL1:%.+]] = VPU.NCE.AveragePool([[MULT]])
+    //CHECK: [[POOL2:%.+]] = VPU.NCE.AveragePool([[POOL1]])
+    //CHECK: VPU.Yield [[POOL2]]
+
+    //CHECK: return [[VF_0]]  : tensor<1x32x101x480xf16, {order = #NHWC}>
+
 }

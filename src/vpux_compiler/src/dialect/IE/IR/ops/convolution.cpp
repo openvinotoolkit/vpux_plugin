@@ -116,11 +116,11 @@ mlir::LogicalResult FuseConvAndSlice::matchAndRewrite(IE::ConvolutionOp convOp, 
 
 mlir::LogicalResult vpux::IE::ConvolutionOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::ConvolutionOpAdaptor conv(operands, attrs);
+    IE::ConvolutionOpAdaptor conv(operands, attrs, prop);
     if (mlir::failed(conv.verify(loc))) {
         return mlir::failure();
     }
@@ -170,11 +170,11 @@ void vpux::IE::ConvolutionOp::getCanonicalizationPatterns(mlir::RewritePatternSe
 
 mlir::LogicalResult vpux::IE::GroupConvolutionOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::GroupConvolutionOpAdaptor conv(operands, attrs);
+    IE::GroupConvolutionOpAdaptor conv(operands, attrs, prop);
     if (mlir::failed(conv.verify(loc))) {
         return mlir::failure();
     }
@@ -224,7 +224,11 @@ mlir::LogicalResult vpux::IE::GroupConvolutionOp::inferReturnTypeComponents(
     const auto shapeI64 = to_small_vector(outputShape.get_shape() | transformed([](size_t val) {
                                               return checked_cast<int64_t>(val);
                                           }));
-    inferredReturnShapes.emplace_back(shapeI64, inType);
+
+    const auto inputType = conv.getInput().getType().cast<vpux::NDTypeInterface>();
+    const auto outDesc = vpux::getTensorAttr(ctx, inputType.getDimsOrder(), inputType.getMemSpace());
+
+    inferredReturnShapes.emplace_back(shapeI64, inType, outDesc);
 
     return mlir::success();
 }

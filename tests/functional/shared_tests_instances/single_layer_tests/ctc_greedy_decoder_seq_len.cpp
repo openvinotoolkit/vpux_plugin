@@ -121,17 +121,8 @@ class CTCGreedyDecoderSeqLenLayerTestCommon :
         public NPUCTCGreedyDecoderSeqLenLayerTest,
         virtual public VpuOv2LayerTest {};
 
-class CTCGreedyDecoderSeqLenLayerTest_NPU3700 : public CTCGreedyDecoderSeqLenLayerTestCommon {};
 class CTCGreedyDecoderSeqLenLayerTest_NPU3720 : public CTCGreedyDecoderSeqLenLayerTestCommon {};
 class CTCGreedyDecoderSeqLenLayerTest_NPU4000 : public CTCGreedyDecoderSeqLenLayerTestCommon {};
-
-TEST_P(CTCGreedyDecoderSeqLenLayerTest_NPU3700, HW) {
-    setSkipInferenceCallback([this](std::stringstream& skip) {
-        skip << "differs from the reference";
-    });
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
 
 TEST_P(CTCGreedyDecoderSeqLenLayerTest_NPU3720, HW) {
     setDefaultHardwareMode();
@@ -163,10 +154,6 @@ const auto params = testing::Combine(::testing::ValuesIn(inputShape), ::testing:
                                      ::testing::ValuesIn(probPrecisions), ::testing::ValuesIn(idxPrecisions),
                                      ::testing::ValuesIn(blankIndexes), ::testing::ValuesIn(mergeRepeated),
                                      ::testing::Values(DEVICE_NPU));
-
-// NPU3700
-INSTANTIATE_TEST_SUITE_P(smoke_CTCGreedyDecoderSeqLenTests, CTCGreedyDecoderSeqLenLayerTest_NPU3700, params,
-                         NPUCTCGreedyDecoderSeqLenLayerTest::getTestCaseName);
 
 // NPU3720
 INSTANTIATE_TEST_SUITE_P(smoke_CTCGreedyDecoderSeqLenTests, CTCGreedyDecoderSeqLenLayerTest_NPU3720, params,

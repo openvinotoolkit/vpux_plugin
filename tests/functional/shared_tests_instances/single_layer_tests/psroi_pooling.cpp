@@ -39,20 +39,8 @@ class PSROIPoolingLayerTestCommon : public PSROIPoolingLayerTest, public VpuOv2L
     }
 };
 
-class PSROIPoolingLayerTest_NPU3700 : public PSROIPoolingLayerTestCommon {};
 class PSROIPoolingLayerTest_NPU3720 : public PSROIPoolingLayerTestCommon {};
 class PSROIPoolingLayerTest_NPU4000 : public PSROIPoolingLayerTestCommon {};
-
-TEST_P(PSROIPoolingLayerTest_NPU3700, HW) {
-    VpuOv2LayerTest::setSkipCompilationCallback([this](std::stringstream& skip) {
-        std::string psROIPoolingMode = std::get<7>(GetParam());
-        if (psROIPoolingMode == "bilinear") {
-            skip << "BILINEAR mode is unsupported for now";
-        }
-    });
-    VpuOv2LayerTest::setDefaultHardwareMode();
-    VpuOv2LayerTest::run(Platform::NPU3700);
-}
 
 TEST_P(PSROIPoolingLayerTest_NPU3720, HW) {
     VpuOv2LayerTest::setSkipCompilationCallback([this](std::stringstream& skip) {
@@ -133,19 +121,6 @@ const auto paramsBilinear = testing::Combine(::testing::ValuesIn(inputShapeVecto
                                              ::testing::Values(3),                     // spatialBinY
                                              ::testing::Values("bilinear"),            // mode
                                              ::testing::ValuesIn(modelTypes), ::testing::Values(DEVICE_NPU));
-
-// --------- NPU3700 ---------
-INSTANTIATE_TEST_SUITE_P(smoke_PSROIPoolingBiliniarLayoutTest0, PSROIPoolingLayerTest_NPU3700, paramsBilinear,
-                         PSROIPoolingLayerTest_NPU3700::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_PSROIPoolingAverageLayoutTest0, PSROIPoolingLayerTest_NPU3700, paramsAvg0,
-                         PSROIPoolingLayerTest_NPU3700::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_PSROIPoolingAverageLayoutTest1, PSROIPoolingLayerTest_NPU3700, paramsAvg1,
-                         PSROIPoolingLayerTest_NPU3700::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_PSROIPoolingAverageLayoutTest2, PSROIPoolingLayerTest_NPU3700, paramsAvg2,
-                         PSROIPoolingLayerTest_NPU3700::getTestCaseName);
 
 // --------- NPU3720 ---------
 // Passing on master branch. Please reenable when backmerge

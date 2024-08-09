@@ -8,6 +8,7 @@
 
 include "vpux/compiler/core/attributes.td"
 include "vpux/compiler/dialect/VPUMI40XX/dialect.td"
+include "vpux/compiler/dialect/VPUMI40XX/attr_interfaces.td"
 
 //
 // Base classes
@@ -27,6 +28,7 @@ class VPUMI40XX_EnumAttr <EnumAttrInfo enumInfo, string name = "", list <Trait> 
 class VPUMI40XX_Attr<string name, list<Trait> traits = []> :
         AttrDef<VPUMI40XX_Dialect, name, traits> {
     let mnemonic = name;
+    let assemblyFormat = "`<` struct(params) `>`";
 }
 
 //
@@ -97,5 +99,33 @@ def VPUMI40XX_MPEMode :
 }
 
 def VPUMI40XX_MPEModeAttr : VPUMI40XX_EnumAttr<VPUMI40XX_MPEMode, "mpe_mode">;
+
+//
+// DMATransactionAttr
+//
+
+class VPUMI40XX_DMATransactionAttrBase<Pred condition, string summary> : Attr<condition, summary> {
+    let storageType = [{ vpux::VPUMI40XX::DMATransactionAttr }];
+    let returnType = [{ vpux::VPUMI40XX::DMATransactionAttr }];
+    let convertFromStorage = "$_self";
+}
+
+def VPUMI40XX_DMATransactionAttr : VPUMI40XX_DMATransactionAttrBase<CPred<"$_self.isa<vpux::VPUMI40XX::DMATransactionAttr>()">,
+                                      "DMA transaction attribute"> {
+    string cppType = "vpux::VPU::DMATransactionAttr";
+}
+
+//
+// NNDMATransactionAttr
+//
+
+def VPUMI40XX_NNDMATransactionAttr : VPUMI40XX_Attr<"NNDMATransaction",
+    [DeclareAttrInterfaceMethods<VPUMI40XX_DMATransactionAttrInterface>]> {
+
+    let parameters = (ins
+        "mlir::Type":$inputType,
+        "mlir::Type":$outputType
+    );
+}
 
 #endif

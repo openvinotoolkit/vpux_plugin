@@ -93,6 +93,20 @@ def OptimizeParallelCopies : PassBase<"optimize-parallel-copies", "vpux::Functio
 }
 
 //
+// FuseLastCopy
+//
+
+def FuseLastCopy : PassBase<"fuse-last-copy", "vpux::FunctionPass"> {
+    let summary = "Remove last Copy operations that output to DDR";
+
+    let description = [{
+        This pass checks if the Copy ops output to DDR can be optimized out to reduce the amount of unnecessary DMAs and intermediate buffers.
+    }];
+
+    let constructor = "vpux::VPUIP::createFuseLastCopyPass()";
+}
+
+//
 // CopyOpTiling
 //
 
@@ -270,6 +284,14 @@ def DMATaskProfilingReserveMem : PassBase<"dma-task-profiling-reserve-mem", "vpu
         This pass adds in ModuleOp information about reserved memory for DMA profiling.
     }];
 
+    let options = [
+        Option<
+            "enableDMAProfiling", "dma-profiling",
+            "std::string", [{"false"}],
+            "Enable DMA task profiling (true|static|false)"
+        >
+    ];
+
     let constructor = "vpux::VPUIP::createDMATaskProfilingReserveMemPass()";
 }
 
@@ -283,6 +305,14 @@ def DMATaskProfilingAfterBarrierSched : PassBase<"dma-task-profiling-after-barri
     let description = [{
         This pass adds DMA profiling tasks after barrier scheduler.
     }];
+
+    let options = [
+        Option<
+            "enableDMAProfiling", "dma-profiling",
+            "std::string", [{"false"}],
+            "Enable DMA task profiling (true|static|false)"
+        >
+    ];
 
     let constructor = "vpux::VPUIP::createDMATaskProfilingAfterBarrierSchedPass()";
 }
@@ -322,6 +352,22 @@ def DPUProfiling : PassBase<"dpu-profiling", "vpux::ModulePass"> {
         })
     }];
 
+}
+
+def LegalizeRepeatingFuncCalls : PassBase<"legalize-repeating-func-calls", "vpux::FunctionPass"> {
+    let summary = "Ensure repeating func calls adhere to VPUIP constaints";
+
+    let description = [{
+        This pass adjusts repeating func.call invocations (call the same
+        function multiple times) in a way that satisfies constraints of later
+        passes (c.f. ConvertFuncArgsToDeclarations).
+    }];
+
+    let constructor = "vpux::VPUIP::createLegalizeRepeatingFuncCallsPass()";
+
+    let dependentDialects = [
+        "vpux::VPUIP::VPUIPDialect",
+    ];
 }
 
 //=================================================================================
@@ -504,6 +550,24 @@ def WrapWithPermuteAsNNDMA: PassBase<"wrap-with-permute-as-nndma", "vpux::Functi
     }];
 
     let constructor = "vpux::VPUIP::createWrapWithPermuteAsNNDMAPass()";
+
+    let dependentDialects = [
+        "vpux::VPUIP::VPUIPDialect"
+    ];
+}
+
+//
+// OptimizeTileOpAsNNDMA
+//
+
+def OptimizeTileOpAsNNDMA: PassBase<"optimize-tile-op-as-nndma", "vpux::FunctionPass"> {
+    let summary = "Optimize tile op with concat op user by convert it as dma and fuse unnecessary copy ops";
+
+    let description = [{
+        This pass will replace specific tile op as DMA and fuse the unnecessary following copy ops.
+    }];
+
+    let constructor = "vpux::VPUIP::createOptimizeTileOpAsNNDMAPass()";
 
     let dependentDialects = [
         "vpux::VPUIP::VPUIPDialect"
@@ -1391,6 +1455,66 @@ def CollectUsedMemory : PassBase<"collect-used-memory", "vpux::ModulePass"> {
     }];
 
     let constructor = "vpux::VPUIP::createCollectUsedMemoryPass()";
+}
+
+//
+// ReduceBarrierDependencies
+//
+
+def ReduceBarrierDependencies : PassBase<"reduce-barrier-dependencies", "vpux::FunctionPass"> {
+    let summary = "The pass tries to reduce barrier dependencies which can be deduced by the FIFO order";
+
+    let description = [{
+        Long term solution to make optimizeBarriers FIFO aware would be done with E#126891
+        This pass will remove some barrier dependencies by :
+            1. Adding explicit barrier dependencies between tasks in same FIFO
+            2. Calls Optimize Barriers
+            3. Removes the explicitly added dependencies
+    }];
+
+    let constructor = "vpux::VPUIP::createReduceBarrierDependenciesPass()";
+}
+
+//
+// IntroduceInitFunction
+//
+
+def IntroduceInitFunction : PassBase<"introduce-init-function", "vpux::ModulePass"> {
+    let summary = "Intooduce the `init` function into the IR";
+
+    let description = [{
+        Extract the constant operations that read data from the @ov_bin section into a
+        dedicated `init` function. This function will contain explicit operations that
+        perform the same changes to the data as the existing list of transformations does.
+        The `init` function will store the results into a dedicated section, from which
+        `main` will read them.
+
+        This pass is intended to be used as part of the weights separation feature.
+    }];
+
+    let constructor = "vpux::VPUIP::createIntroduceInitFunctionPass()";
+}
+
+def BatchMatMulToMatMul : PassBase<"batch-matmul-to-matmul", "vpux::FunctionPass"> {
+    let summary = "Converts NCE MatMul tasks with batch > 1 to NCE MatMul tasks with batch = 1";
+
+    let description = [{
+        Transform 5-d workloads of an NCEClusterTask:
+        ```
+        %IN = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<2x1x16x4x1xf16, #GNHWC, [@CMX_NN, 0]>
+        %MATMUL = VPUIP.NCEClusterTask input(%5 : memref<2x1x16x4x1xf16, #GNHWC, [@CMX_NN, 0]>)
+        ```
+        into serveral 4-d memref values:
+        ```
+        %IN_0 = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x16x4x1xf16, #NHWC, [@CMX_NN, 0]>
+        %MATMUL_0 = VPUIP.NCEClusterTask input(%IN_0 : memref<1x16x4x1xf16, #NHWC, [@CMX_NN, 0]>)
+
+        %IN_1 = VPURT.DeclareBuffer <CMX_NN> [0] <128> -> memref<1x16x4x1xf16, #NHWC, [@CMX_NN, 0]>
+        %MATMUL_1 = VPUIP.NCEClusterTask input(%IN_1 : memref<1x16x4x1xf16, #NHWC, [@CMX_NN, 0]>)
+        ```
+    }];
+
+    let constructor = "vpux::VPUIP::createBatchMatMulToMatMulPass()";
 }
 
 #endif

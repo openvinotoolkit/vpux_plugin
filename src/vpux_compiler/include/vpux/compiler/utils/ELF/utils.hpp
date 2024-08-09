@@ -135,5 +135,11 @@ std::string generateSignature(LHS&& lhs, RHS&& rhs, Rest&&... rest) {
                              std::forward<Rest>(rest)...);
 }
 
+std::pair<uint8_t, uint8_t> reduceWaitMaskTo8bit(uint64_t waitMask);
+
+// creates a linear (1D) MemrefType of dimension (memrefSize x dataType)
+mlir::MemRefType getLinearMemrefType(mlir::MLIRContext* ctx, int64_t memrefSize, mlir::Type dataType,
+                                     VPU::MemoryKind memKind);
+
 }  // namespace ELF
 }  // namespace vpux

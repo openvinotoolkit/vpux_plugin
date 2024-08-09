@@ -32,11 +32,11 @@ mlir::LogicalResult vpux::IE::RandomUniformOp::verify() {
 
 mlir::LogicalResult vpux::IE::RandomUniformOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::RandomUniformOpAdaptor rand(operands, attrs);
+    IE::RandomUniformOpAdaptor rand(operands, attrs, prop);
     if (mlir::failed(rand.verify(loc))) {
         return mlir::failure();
     }

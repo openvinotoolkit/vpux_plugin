@@ -38,15 +38,7 @@ VPU::ReshapeOp reshapeIndices(const mlir::Value& input, const mlir::Value& indic
     const auto indicesType = indices.getType().cast<vpux::NDTypeInterface>();
     const auto indicesShape = indicesType.getShape();
 
-    size_t indicesCount{0};
-    for (size_t idx{0}; idx < indicesShape.size(); ++idx) {
-        if (indicesShape[vpux::Dim(idx)] != 1) {
-            indicesCount = indicesShape[vpux::Dim(idx)];
-        }
-    }
-    if (indicesCount == 0) {
-        indicesCount = 1;
-    }
+    const auto indicesCount = vpux::details::calcTotalShapeSize(indicesShape.raw());
     auto newShape = SmallVector<int64_t>(inputShape.size(), 1);
     newShape[axis.getInt()] = indicesCount;
 
@@ -73,16 +65,27 @@ mlir::LogicalResult MovetoDMAGather::matchAndRewrite(VPU::GatherOp origOp, mlir:
     auto gatherDMAOp =
             rewriter.create<VPU::GatherDMAOp>(origOp->getLoc(), origOp->getOperand(0), indicesCMX, origOp.getAxis(),
                                               origOp.getAxisValueAttr(), origOp.getBatchDims());
+
+    auto copyOp = rewriter.create<VPU::CopyOp>(origOp->getLoc(), gatherDMAOp->getResult(0), ddrMemSpace);
+
+    const auto copyOutputType = copyOp->getResult(0).getType().cast<NDTypeInterface>();
+
+    auto copyResultType = mlir::RankedTensorType::get(copyOutputType.getShape().raw(), copyOutputType.getElementType());
+
+    copyOp->getResult(0).setType(copyResultType);
+
     auto resultType = origOp->getResult(0).getType().cast<NDTypeInterface>();
     const auto newOutputShapeAttr = getIntArrayAttr(origOp.getContext(), resultType.getShape().toValues());
 
-    auto reshapeOp2 = rewriter.create<VPU::ReshapeOp>(origOp->getLoc(), gatherDMAOp->getResult(0), nullptr, false,
-                                                      newOutputShapeAttr);
-    auto copyOp = rewriter.replaceOpWithNewOp<VPU::CopyOp>(origOp, reshapeOp2->getResult(0), ddrMemSpace);
-    auto copyResultType =
-            mlir::RankedTensorType::get(copyOp->getResult(0).getType().cast<NDTypeInterface>().getShape().raw(),
-                                        copyOp->getResult(0).getType().cast<NDTypeInterface>().getElementType());
-    copyOp->getResult(0).setType(copyResultType);
+    auto reshapeOp2 = rewriter.replaceOpWithNewOp<VPU::ReshapeOp>(origOp, copyOp->getResult(0), nullptr, false,
+                                                                  newOutputShapeAttr);
+
+    const auto reshapeOutputType = reshapeOp2->getResult(0).getType().cast<NDTypeInterface>();
+
+    auto reshapeResultType =
+            mlir::RankedTensorType::get(reshapeOutputType.getShape().raw(), reshapeOutputType.getElementType());
+    reshapeOp2->getResult(0).setType(reshapeResultType);
+
     return mlir::success();
 }
 }  // namespace
@@ -97,51 +100,10 @@ void VPU::arch40xx::ConvertOpToDMAForPerformantExecutionStrategy::addPatterns(ml
     patterns.insert<MovetoDMAGather>(ctx, log);
 }
 
-bool isLegalConvertToGatherDMA(VPU::GatherOp op, vpux::Logger log) {
-    log.trace("Got Gather Op at {0}.", op->getLoc());
-
-    const auto outputType = op.getOutput().getType().cast<vpux::NDTypeInterface>();
-    const auto indicesType = op.getIndices().getType().cast<vpux::NDTypeInterface>();
-    const auto inputType = op.getInput().getType().cast<vpux::NDTypeInterface>();
-
-    const auto outputSize = outputType.getTotalAllocSize();
-    const auto indicesSize = indicesType.getTotalAllocSize();
-    const auto cmxMemSize = VPU::getTotalCMXSize(op.getOperation());
-    // Only DDR->CMX DMA gather has been implemented so far, not convert to GatherDMA when output can't fit on CMX
-    // TODO: Support large output Gather layer with GatherDMA, see E*120478
-    if (outputSize + indicesSize > cmxMemSize) {
-        return false;
-    }
-
-    // For GatherDMA all dimensions before axis dimension must be 1
-    size_t axis = op.getAxisValue().value();
-    const auto inputShape = inputType.getShape();
-
-    for (size_t idx = 0; idx < axis; ++idx) {
-        if (inputShape[vpux::Dim(idx)] != 1) {
-            return false;
-        }
-    }
-
-    const size_t numberOfIndices = indicesType.getNumElements();
-    if (numberOfIndices > VPUIP::arch40xx::DMA_MAX_INDICES_LIST_LENGTH) {
-        return false;
-    }
-    const Bit elemOutSize = vpux::getElemTypeSize(outputType);
-    const size_t dma_element_size =
-            (outputType.getNumElements() / indicesType.getNumElements()) * elemOutSize.to<Byte>().count();
-    if (dma_element_size > VPUIP::arch40xx::GATHER_DMA_MAX_ELEMENT_SIZE) {
-        return false;
-    }
-
-    log.trace("GatherOp at {0} can be converted to GatherDMAOp.", op->getLoc());
-    return true;
-}
-
 void VPU::arch40xx::ConvertOpToDMAForPerformantExecutionStrategy::markOpLegality(mlir::ConversionTarget& target,
                                                                                  Logger& log) const {
     target.addDynamicallyLegalOp<VPU::GatherOp>([&](VPU::GatherOp op) {
-        if (!isLegalConvertToGatherDMA(op, log)) {
+        if (!VPU::isLegalConvertToGatherDMA(op, /*isElementTile*/ false, /*isIndicesTile*/ false, log)) {
             return true;
         }
         return false;

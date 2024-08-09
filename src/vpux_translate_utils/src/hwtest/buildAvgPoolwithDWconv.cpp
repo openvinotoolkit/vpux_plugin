@@ -16,6 +16,7 @@
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
+#include "vpux/compiler/utils/platform_resources.hpp"
 #include "vpux/compiler/utils/types.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
 #include "vpux/hwtest/test_case_json_parser.hpp"
@@ -159,14 +160,18 @@ void buildAvgpoolWithDwConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mo
     auto parent_outputcmx =
             createDeclareTensorOp(funcbuilder, outputcmx_type, VPURT::BufferSection::CMX_NN, 0, OUTPUT_CMX_OFFSET);
 
+    auto [waitWLMBarrier, freeBarrierId] =
+            insertWLMStartSequence(funcbuilder, testDesc.getWLMParams().isWLMPartialEnabled);
+
     // barrier config
-    auto barrier0 = funcbuilder.create<VPURT::ConfigureBarrierOp>(loc, 0);
-    auto barrier1 = funcbuilder.create<VPURT::ConfigureBarrierOp>(loc, 1);
+    auto barrier0 = funcbuilder.create<VPURT::ConfigureBarrierOp>(loc, freeBarrierId++);
+    auto barrier1 = funcbuilder.create<VPURT::ConfigureBarrierOp>(loc, freeBarrierId++);
     // finalBarrier passed as production barrier to last DMA task
-    auto barrier2 = funcbuilder.create<VPURT::ConfigureBarrierOp>(loc, 2);
+    auto finalBarrier = funcbuilder.create<VPURT::ConfigureBarrierOp>(loc, freeBarrierId++,
+                                                                      testDesc.getWLMParams().isWLMPartialEnabled);
 
     // DMAs
-    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(), mlir::ValueRange(barrier0.getBarrier()), loc,
+    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, waitWLMBarrier, mlir::ValueRange(barrier0.getBarrier()), loc,
                                           funcinput, inputcmx.getOperation()->getResult(0), 0);
     VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(), mlir::ValueRange(barrier0.getBarrier()), loc,
                                           weight_data_ddr, wtData_cmx.getOperation()->getResult(0), 0);
@@ -276,7 +281,7 @@ void buildAvgpoolWithDwConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mo
     createDPUTaskOp(funcbuilder, variantbuilder, out_shape, in_shape, padding_vec, VPU::MPEMode::CUBOID_16x16);
 
     VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(barrier1.getBarrier()),
-                                          mlir::ValueRange(barrier2.getBarrier()), loc,
+                                          mlir::ValueRange(finalBarrier.getBarrier()), loc,
                                           outputcmx.getOperation()->getResult(0), funcoutput, 0);
 
     funcbuilder.create<mlir::func::ReturnOp>(loc, funcoutput);

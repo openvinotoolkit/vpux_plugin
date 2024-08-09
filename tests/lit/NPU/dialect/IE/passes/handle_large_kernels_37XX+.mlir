@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --handle-large-kernels %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 // CHECK-LABEL: @HandleLargeKernelsXAvgPool
 func.func @HandleLargeKernelsXAvgPool(%arg0 : tensor<1x64x10x13xf16>) -> (tensor<1x64x10x1xf16>) {
@@ -84,16 +84,11 @@ func.func @HandleLargerKernelsAvgPoolPaddingNeededOneDim(%arg0 : tensor<1x128x1x
 
     return %ave_pool : tensor<1x128x1x1xf16>
 
-    // CHECK:       const.Declare
-    // CHECK-SAME:      tensor<128x1x1x5xf16> = dense<1.999510e-01> : tensor<128x1x1x5xf16>
-    // CHECK:       const.Declare
-    // CHECK-SAME:      tensor<128x1x1x6xf16> = dense<1.667480e-01> : tensor<128x1x1x6xf16>
-    // CHECK:       const.Declare
-    // CHECK-SAME:      tensor<128x1x1x2xf16> = dense<5.014650e-01> : tensor<128x1x1x2xf16>
-    // CHECK:       const.Declare
-    // CHECK-SAME:      tensor<128x1x1x2xf16> = dense<5.034180e-01> : tensor<128x1x1x2xf16>
-    // CHECK:       const.Declare
-    // CHECK-SAME:      tensor<128x1x1x8xf16> = dense<1.265870e-01> : tensor<128x1x1x8xf16>
+    // CHECK-DAG:   const.Declare tensor<128x1x1x5xf16> = dense<1.999510e-01> : tensor<128x1x1x5xf16>
+    // CHECK-DAG:   const.Declare tensor<128x1x1x6xf16> = dense<1.667480e-01> : tensor<128x1x1x6xf16>
+    // CHECK-DAG:   const.Declare tensor<128x1x1x2xf16> = dense<5.014650e-01> : tensor<128x1x1x2xf16>
+    // CHECK-DAG:   const.Declare tensor<128x1x1x2xf16> = dense<5.034180e-01> : tensor<128x1x1x2xf16>
+    // CHECK-DAG:   const.Declare tensor<128x1x1x8xf16> = dense<1.265870e-01> : tensor<128x1x1x8xf16>
     // CHECK:       IE.AvgPool
     // CHECK-SAME:      kernel_size = [1, 4]
     // CHECK-SAME:      pads_begin = [0, 0]

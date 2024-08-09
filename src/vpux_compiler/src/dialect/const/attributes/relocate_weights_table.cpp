@@ -41,6 +41,11 @@ void vpux::Const::RelocateWeightsTableAttr::print(mlir::AsmPrinter& printer) con
         printer << "weightsCompression=";
         printer.printAttribute(getWeightsCompression());
     }
+    if (getChannelOffset() != nullptr) {
+        printer << ", ";
+        printer << "channelOffset=";
+        printer.printAttribute(getChannelOffset());
+    }
     printer << ">";
 }
 
@@ -59,12 +64,13 @@ mlir::Attribute vpux::Const::RelocateWeightsTableAttr::parse(mlir::AsmParser& pa
     mlir::IntegerAttr weightsElemBitSize;
     VPUIP::SparsityCompressionAttr weightsCompression;
     mlir::IntegerAttr weightsTableSize;
+    mlir::IntegerAttr channelOffset;
 
-    if (parser.parseKeyword("weightsPtr")) {
+    if (mlir::failed(parser.parseKeyword("weightsPtr"))) {
         return nullptr;
     }
 
-    if (parser.parseEqual()) {
+    if (mlir::failed(parser.parseEqual())) {
         return nullptr;
     }
 
@@ -76,11 +82,11 @@ mlir::Attribute vpux::Const::RelocateWeightsTableAttr::parse(mlir::AsmParser& pa
         return nullptr;
     }
 
-    if (parser.parseKeyword("sparsityPtr")) {
+    if (mlir::failed(parser.parseKeyword("sparsityPtr"))) {
         return nullptr;
     }
 
-    if (parser.parseEqual()) {
+    if (mlir::failed(parser.parseEqual())) {
         return nullptr;
     }
 
@@ -92,11 +98,11 @@ mlir::Attribute vpux::Const::RelocateWeightsTableAttr::parse(mlir::AsmParser& pa
         return nullptr;
     }
 
-    if (parser.parseKeyword("offsets")) {
+    if (mlir::failed(parser.parseKeyword("offsets"))) {
         return nullptr;
     }
 
-    if (parser.parseEqual()) {
+    if (mlir::failed(parser.parseEqual())) {
         return nullptr;
     }
 
@@ -108,11 +114,11 @@ mlir::Attribute vpux::Const::RelocateWeightsTableAttr::parse(mlir::AsmParser& pa
         return nullptr;
     }
 
-    if (parser.parseKeyword("weightsTableSize")) {
+    if (mlir::failed(parser.parseKeyword("weightsTableSize"))) {
         return nullptr;
     }
 
-    if (parser.parseEqual()) {
+    if (mlir::failed(parser.parseEqual())) {
         return nullptr;
     }
 
@@ -122,44 +128,52 @@ mlir::Attribute vpux::Const::RelocateWeightsTableAttr::parse(mlir::AsmParser& pa
 
     if (mlir::succeeded(parser.parseOptionalGreater())) {
         return Const::RelocateWeightsTableAttr::get(weightsPtr, sparsityPtr, offsets, weightsTableSize,
-                                                    weightsElemBitSize, weightsCompression);
+                                                    weightsElemBitSize, weightsCompression, channelOffset);
     }
 
     if (mlir::failed(parser.parseComma())) {
         return nullptr;
     }
 
-    if (parser.parseKeyword("weightsElemBitSize")) {
-        return nullptr;
+    if (mlir::succeeded(parser.parseOptionalKeyword("weightsElemBitSize"))) {
+        if (mlir::failed(parser.parseEqual())) {
+            return nullptr;
+        }
+        if (mlir::failed(parser.parseAttribute(weightsElemBitSize))) {
+            return nullptr;
+        }
+        if (mlir::succeeded(parser.parseOptionalGreater())) {
+            return Const::RelocateWeightsTableAttr::get(weightsPtr, sparsityPtr, offsets, weightsTableSize,
+                                                        weightsElemBitSize, weightsCompression, channelOffset);
+        }
+        if (mlir::failed(parser.parseComma())) {
+            return nullptr;
+        }
     }
 
-    if (parser.parseEqual()) {
-        return nullptr;
+    if (mlir::succeeded(parser.parseOptionalKeyword("weightsCompression"))) {
+        if (mlir::failed(parser.parseEqual())) {
+            return nullptr;
+        }
+        if (mlir::failed(parser.parseAttribute(weightsCompression))) {
+            return nullptr;
+        }
+        if (mlir::succeeded(parser.parseOptionalGreater())) {
+            return Const::RelocateWeightsTableAttr::get(weightsPtr, sparsityPtr, offsets, weightsTableSize,
+                                                        weightsElemBitSize, weightsCompression, channelOffset);
+        }
+        if (mlir::failed(parser.parseComma())) {
+            return nullptr;
+        }
     }
 
-    if (mlir::failed(parser.parseAttribute(weightsElemBitSize))) {
-        return nullptr;
-    }
-
-    if (mlir::succeeded(parser.parseOptionalGreater())) {
-        return Const::RelocateWeightsTableAttr::get(weightsPtr, sparsityPtr, offsets, weightsTableSize,
-                                                    weightsElemBitSize, weightsCompression);
-    }
-
-    if (mlir::failed(parser.parseComma())) {
-        return nullptr;
-    }
-
-    if (parser.parseKeyword("weightsCompression")) {
-        return nullptr;
-    }
-
-    if (parser.parseEqual()) {
-        return nullptr;
-    }
-
-    if (mlir::failed(parser.parseAttribute(weightsCompression))) {
-        return nullptr;
+    if (mlir::succeeded(parser.parseOptionalKeyword("channelOffset"))) {
+        if (mlir::failed(parser.parseEqual())) {
+            return nullptr;
+        }
+        if (mlir::failed(parser.parseAttribute(channelOffset))) {
+            return nullptr;
+        }
     }
 
     if (mlir::failed(parser.parseGreater())) {
@@ -167,7 +181,7 @@ mlir::Attribute vpux::Const::RelocateWeightsTableAttr::parse(mlir::AsmParser& pa
     }
 
     return Const::RelocateWeightsTableAttr::get(weightsPtr, sparsityPtr, offsets, weightsTableSize, weightsElemBitSize,
-                                                weightsCompression);
+                                                weightsCompression, channelOffset);
 }
 
 //
@@ -178,26 +192,23 @@ vpux::NDTypeInterface vpux::Const::RelocateWeightsTableAttr::inferOutputType(vpu
     return input;
 }
 
+bool vpux::Const::RelocateWeightsTableAttr::inferOutputSplat(bool inputIsSplat, vpux::NDTypeInterface) {
+    return inputIsSplat;
+}
+
 //
 // RelocateWeightsTableAttr::transform
 //
 
 Const::Content vpux::Const::RelocateWeightsTableAttr::transform(vpux::Const::Content& input) const {
     constexpr auto numElemPerOC = static_cast<size_t>(VPU::NCEInvariant::WEIGHT_TABLE_NUM_ELEMENTS_PER_OC);
+    auto output = Const::Content::moveBuffer(inferOutputType(input.getType()), input.copyUnownedBuffer());
 
-    auto output =
-            Const::Content::allocTempBuffer(inferOutputType(input.getType()), input.getType().getElementType(), false);
-    input.copyTo(output.getTempBuf<char>());
-
-    const auto rawBuffer = input.getRawStorageBuf();
-    const auto values =
-            ArrayRef(reinterpret_cast<const int32_t*>(rawBuffer.data()), (rawBuffer.size() / sizeof(int32_t)));
-    auto patchedValues = output.getTempBuf<int32_t>();
+    auto values = output.getTempBuf<int32_t>();
 
     const auto weightsPtr = parseIntArrayAttr<int32_t>(getWeightsPtr());
     const auto sparsityPtr = static_cast<int32_t>(*getSparsityPtr().getValue().getRawData());
     const auto offsets = parseIntArrayAttr<int64_t>(getOffsets());
-
     int32_t weightPtrStep = 0;
     int32_t sparsityPtrStep = 0;
     auto numWTEntries = getWeightsTableSize().getInt() / sizeof(int32_t);
@@ -207,17 +218,18 @@ Const::Content vpux::Const::RelocateWeightsTableAttr::transform(vpux::Const::Con
         sparsityPtrStep = values[1 * numElemPerOC + 1] - values[0 * numElemPerOC + 1];
     }
 
+    const auto channelOffset = getChannelOffset() != nullptr ? checked_cast<int32_t>(getChannelOffset().getInt()) : 0;
+    const auto weightsPtrOffset = channelOffset * weightPtrStep;
+    const auto sparsityPtrOffset = channelOffset * sparsityPtrStep;
+
     const auto OC = checked_cast<int64_t>(numWTEntries / numElemPerOC);
     const auto numClusters = checked_cast<int64_t>(offsets.size());
-
     // In case all clusters have the same channel offsets, the weights are not segmented
     const auto areWeightsSegmented =
             std::adjacent_find(offsets.begin(), offsets.end(), std::not_equal_to<>()) != offsets.end();
-
     const auto isNewCluster = [&](const int64_t oc, const int64_t currentClusterIdx) -> bool {
         return areWeightsSegmented && (currentClusterIdx + 1) < numClusters && oc >= offsets[currentClusterIdx + 1];
     };
-
     SmallVector<int64_t> weightsPtrSteps(OC);
     if (getWeightsCompression() != nullptr) {
         const auto numElems = to_small_vector(getWeightsCompression().getNumElems().getValues<int64_t>());
@@ -228,17 +240,16 @@ Const::Content vpux::Const::RelocateWeightsTableAttr::transform(vpux::Const::Con
         const auto alignment = (getWeightsCompression().getAlignment() != nullptr)
                                        ? getWeightsCompression().getAlignment().getInt()
                                        : VPU::NCEInvariant::VPU_WEIGHT_SET_BYTE_ALIGNMENT;
-
-        int64_t weightsPtrOffset = 0;
+        int64_t ptrOffset = 0;
         for (int64_t oc = 0, clusterIdx = 0; oc < OC; ++oc) {
             if (isNewCluster(oc, clusterIdx)) {
                 clusterIdx++;
-                weightsPtrOffset = 0;
+                ptrOffset = 0;
             }
-            weightsPtrSteps[oc] = weightsPtrOffset;
+            weightsPtrSteps[oc] = ptrOffset;
             const auto weightSetByteSize =
                     alignMemSize(Bit(numElems[oc] * weightsElemBitSize), Byte(1)).to<Byte>().count();
-            weightsPtrOffset += alignValUp<int64_t>(weightSetByteSize, alignment);
+            ptrOffset += alignValUp<int64_t>(weightSetByteSize, alignment);
         }
     } else {
         for (int64_t oc = 0, clusterIdx = 0; oc < OC; ++oc) {
@@ -248,19 +259,16 @@ Const::Content vpux::Const::RelocateWeightsTableAttr::transform(vpux::Const::Con
             weightsPtrSteps[oc] = weightPtrStep * (oc - offsets[clusterIdx]);
         }
     }
-
     for (int64_t oc = 0, clusterIdx = 0; oc < OC; ++oc) {
         if (isNewCluster(oc, clusterIdx)) {
             clusterIdx++;
         }
 
         const auto wtInd = oc * numElemPerOC;
-        patchedValues[wtInd + 0] = checked_cast<int32_t>(weightsPtr[clusterIdx] + weightsPtrSteps[oc]);
-
-        patchedValues[wtInd + 1] = values[wtInd + 1];
+        values[wtInd + 0] = checked_cast<int32_t>(weightsPtr[clusterIdx] + weightsPtrSteps[oc]) + weightsPtrOffset;
         if (values[wtInd + 1] != VPU::NCESparsity::SPARSITY_PTR_WHEN_NO_SPARSITY) {
-            patchedValues[wtInd + 1] =
-                    checked_cast<int32_t>(sparsityPtr + (oc - offsets[clusterIdx]) * sparsityPtrStep);
+            values[wtInd + 1] = checked_cast<int32_t>(sparsityPtr + (oc - offsets[clusterIdx]) * sparsityPtrStep) +
+                                sparsityPtrOffset;
         }
     }
     return output;
@@ -268,11 +276,12 @@ Const::Content vpux::Const::RelocateWeightsTableAttr::transform(vpux::Const::Con
 
 Const::ContentAttr vpux::Const::ContentAttr::relocateWeightsTablePointers(
         ArrayRef<uint32_t> weightsPtr, uint64_t sparsityPtr, ShapeRef offsets, uint64_t weightsTableSize,
-        uint64_t weightsElemBitSize, VPUIP::SparsityCompressionAttr weightsCompression) const {
+        uint64_t weightsElemBitSize, VPUIP::SparsityCompressionAttr weightsCompression, uint64_t channelOffset) const {
     return ContentAttr::addTransformation(
             *this, Const::RelocateWeightsTableAttr::get(
                            getIntArrayAttr(getContext(), weightsPtr), getIntAttr(getContext(), sparsityPtr),
                            getIntArrayAttr(getContext(), offsets), getIntAttr(getContext(), weightsTableSize),
-                           getIntAttr(getContext(), weightsElemBitSize), weightsCompression)
+                           getIntAttr(getContext(), weightsElemBitSize), weightsCompression,
+                           getIntAttr(getContext(), channelOffset))
                            .cast<Const::TransformAttrInterface>());
 }

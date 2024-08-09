@@ -21,7 +21,7 @@ namespace Const {
 class BackgroundConstantFolding {
 public:
     BackgroundConstantFolding(mlir::MLIRContext* ctx, size_t maxConcurrentTasks, bool collectStatistics,
-                              Logger log = Logger::global());
+                              size_t memoryUsageLimit, double cacheCleanThreshold, Logger log = Logger::global());
     ~BackgroundConstantFolding();
 
     BackgroundConstantFolding(const BackgroundConstantFolding&) = delete;

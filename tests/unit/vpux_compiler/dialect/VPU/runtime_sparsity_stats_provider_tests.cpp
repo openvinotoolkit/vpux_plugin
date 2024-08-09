@@ -19,10 +19,9 @@
 using vpux::VPU::ArchKind;
 using namespace vpux;
 
-using MLIR_VPU_RT_SPARSITY_STATS_PROVIDER = MLIR_UnitBase;
+using MLIR_VPU_RT_SPARSITY_STATS_PROVIDER = vpux::VPU::arch37xx::UnitTest;
 
 TEST_F(MLIR_VPU_RT_SPARSITY_STATS_PROVIDER, MissedStats) {
-    mlir::MLIRContext ctx(registry);
     constexpr llvm::StringLiteral inputIR = R"(
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
@@ -61,7 +60,6 @@ TEST_F(MLIR_VPU_RT_SPARSITY_STATS_PROVIDER, MissedStats) {
 }
 
 TEST_F(MLIR_VPU_RT_SPARSITY_STATS_PROVIDER, WithStats) {
-    mlir::MLIRContext ctx(registry);
     constexpr llvm::StringLiteral inputIR = R"(
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 

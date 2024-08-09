@@ -19,10 +19,9 @@
 using vpux::VPU::ArchKind;
 using namespace vpux;
 
-using MLIR_VPU_OpStrategies = MLIR_UnitBase;
+using MLIR_VPU_OpStrategies = vpux::VPU::arch37xx::UnitTest;
 
 TEST_F(MLIR_VPU_OpStrategies, OS_Storage_Insert) {
-    mlir::MLIRContext ctx(registry);
     constexpr llvm::StringLiteral inputIR = R"(
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
@@ -87,7 +86,6 @@ TEST_F(MLIR_VPU_OpStrategies, OS_Storage_Insert) {
 }
 
 TEST_F(MLIR_VPU_OpStrategies, OS_Storage_TransitionCost) {
-    mlir::MLIRContext ctx(registry);
     constexpr llvm::StringLiteral inputIR = R"(
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 

@@ -67,7 +67,7 @@ void addDPUTasks(const Logger& log, VPUIP::NCEClusterTaskOp nceOp, mlir::OpBuild
 
         mlir::ArrayAttr inStartAttr = nullptr;
         mlir::ArrayAttr inEndAttr = nullptr;
-
+        const auto isGroupedMatMul = offsets.size() == DimsGroups5D::Act::numDims;
         // Update workloads padding, offsets and sizes
         // after reshape and layout changes.
         if (isNCEPermute) {
@@ -91,6 +91,31 @@ void addDPUTasks(const Logger& log, VPUIP::NCEClusterTaskOp nceOp, mlir::OpBuild
             }
             nceOp.addDPUTask(rewriter, getIntArrayAttr(rewriter, outDpuStart), getIntArrayAttr(rewriter, outDpuEnds),
                              inStartAttr, inEndAttr, dpuTaskOp.getPadAttr(), dpuTaskOp.getMpeMode(),
+                             dpuTaskOp.getClusterIdAttr());
+        } else if (isGroupedMatMul) {
+            // This part is for grouped Matmul which has 5D input/output
+            // Logic is same only dimensions are adjusted for 5D
+            const auto dimC = DimsGroups5D::Act::C;
+            const auto dimH = DimsGroups5D::Act::H;
+            const auto dimW = DimsGroups5D::Act::W;
+            const SmallVector<int64_t> outDpuStart{offsets[dimW.ind()], offsets[dimH.ind()], offsets[dimC.ind()]};
+            const SmallVector<int64_t> outDpuEnds{ends[dimW.ind()], ends[dimH.ind()], ends[dimC.ind()]};
+
+            if (dpuTaskOp.getInOffsetsAttr() != nullptr && dpuTaskOp.getInSizesAttr() != nullptr) {
+                const auto inOffset = parseIntArrayAttr<int64_t>(dpuTaskOp.getInOffsetsAttr());
+                const auto inSizes = parseIntArrayAttr<int64_t>(dpuTaskOp.getInSizesAttr());
+
+                const SmallVector<int64_t> inDpuStart{inOffset[dimW.ind()], inOffset[dimH.ind()], inOffset[dimC.ind()]};
+                const SmallVector<int64_t> inDpuEnds{inOffset[dimW.ind()] + inSizes[dimW.ind()] - 1,
+                                                     inOffset[dimH.ind()] + inSizes[dimH.ind()] - 1,
+                                                     inOffset[dimC.ind()] + inSizes[dimC.ind()] - 1};
+
+                inStartAttr = getIntArrayAttr(rewriter, inDpuStart);
+                inEndAttr = getIntArrayAttr(rewriter, inDpuEnds);
+            }
+
+            nceOp.addDPUTask(rewriter, getIntArrayAttr(rewriter, outDpuStart), getIntArrayAttr(rewriter, outDpuEnds),
+                             inStartAttr, inEndAttr, dpuTaskOp.getPad(), dpuTaskOp.getMpeMode(),
                              dpuTaskOp.getClusterIdAttr());
         } else {
             // as soon as we need workload_x, workload_y, workload_z coords
@@ -340,7 +365,7 @@ mlir::LogicalResult vpux::bufferizeOp(mlir::MLIRContext* ctx, VPU::NCEMaxPoolOp 
             origOp.getActivationWindowChannelLengthAttr(), origOp.getWorkloads(), isSuperdenseAttr, ppeAttr,
             dpuCostAttr, /*isInplace=*/nullptr,
             /*isPermuteQuantize=*/nullptr, /*cmSpPattern=*/nullptr,
-            /*inputChannelsCompression=*/nullptr, /*isNCEPermute*/ false, /*smallKernelOptimization=*/nullptr, log);
+            /*inputChannelsCompression=*/nullptr, /*isNCEPermute=*/false, /*smallKernelOptimization=*/nullptr, log);
 
     mlir::bufferization::replaceOpWithBufferizedValues(rewriter, origOp, nceOp);
 
@@ -388,7 +413,7 @@ mlir::LogicalResult vpux::bufferizeOp(mlir::MLIRContext* ctx, VPU::NCEAveragePoo
                                       /*activation_window_channel_length=*/nullptr, origOp.getWorkloads(),
                                       isSuperdenseAttr, ppeAttr, dpuCostAttr, /*isInplace=*/nullptr,
                                       /*isPermuteQuantize=*/nullptr, /*cmSpPattern=*/nullptr,
-                                      /*inputChannelsCompression=*/nullptr, /*isNCEPermute*/ false,
+                                      /*inputChannelsCompression=*/nullptr, /*isNCEPermute=*/false,
                                       /*smallKernelOptimization=*/isSmallKernelOptimizationAttr, log);
 
     mlir::bufferization::replaceOpWithBufferizedValues(rewriter, origOp, nceOp);
@@ -447,7 +472,7 @@ mlir::LogicalResult vpux::bufferizeOp(mlir::MLIRContext* ctx, VPU::NCEDepthConvo
             kernelSizeAttr, origOp.getStrides(), origOp.getPad(), origOp.getActivationWindowChannelLengthAttr(),
             origOp.getWorkloads(), isSuperdenseAttr, ppeAttr, dpuCostAttr, /*isInplace=*/nullptr,
             /*isPermuteQuantize=*/nullptr, /*cmSpPattern=*/nullptr,
-            /*inputChannelsCompression=*/nullptr, /*isNCEPermute*/ false,
+            /*inputChannelsCompression=*/nullptr, /*isNCEPermute=*/false,
             /*smallKernelOptimization=*/isSmallKernelOptimizationAttr, log);
 
     mlir::bufferization::replaceOpWithBufferizedValues(rewriter, origOp, nceOp);
@@ -489,19 +514,20 @@ mlir::LogicalResult vpux::bufferizeOp(mlir::MLIRContext* ctx, VPU::NCEInterpolat
         isSuperdenseAttr = mlir::UnitAttr::get(ctx);
     }
 
+    auto nceOpInterface = mlir::dyn_cast<VPU::NCEOpInterface>(origOp.getOperation());
     auto nceOp = createNCEClusterTask(
             /*rewriter=*/rewriter, /*loc=*/newLoc, /*input=*/newArgs.getInput(),
             /*weights=*/newArgs.getWeights(), /*weightsTable=*/newArgs.getWeightsTable(),
             /*instructionListTable=*/nullptr,
             /*activationWindow=*/nullptr, /*outputBuffs=*/outputBuffers, /*taskType=*/VPUIP::NCETaskType::CONV,
             /*kernelSizeAttr=*/kernelSizeAttr,
-            /*kernelStridesAttr=*/getIntArrayAttr(ctx, origOp.getStridesVal()),
-            /*kernelPaddingAttr=*/origOp.getPad(),
+            /*kernelStridesAttr=*/getIntArrayAttr(ctx, nceOpInterface.getStridesVal()),
+            /*kernelPaddingAttr=*/nceOpInterface.getPad(),
             /*activationWindowChannelLengthAttr=*/nullptr,
             /*workloads=*/origOp.getWorkloads(), /*isSuperdenseAttr=*/isSuperdenseAttr, /*ppeAttr=*/ppeTaskAttr,
             /*dpuCostAttr=*/dpuCostAttr,
             /*isInplace=*/nullptr, /*isPermuteQuantize=*/nullptr, /*cmSpPattern=*/nullptr,
-            /*inputChannelsCompression=*/nullptr, /*isNCEPermute*/ false, /*smallKernelOptimization=*/nullptr,
+            /*inputChannelsCompression=*/nullptr, /*isNCEPermute=*/false, /*smallKernelOptimization=*/nullptr,
             /*log=*/log);
 
     mlir::bufferization::replaceOpWithBufferizedValues(rewriter, origOp, nceOp);
@@ -552,7 +578,7 @@ mlir::LogicalResult vpux::bufferizeOp(mlir::MLIRContext* ctx, VPU::NCEEltwiseOp 
             /*kernel_padding=*/nullptr, activation_window_channel_length, origOp.getWorkloads(), isSuperdenseAttr,
             ppeAttr, dpuCostAttr, origOp.getIsInplaceAttr(),
             /*isPermuteQuantize=*/nullptr, /*cmSpPattern=*/nullptr,
-            /*inputChannelsCompression=*/nullptr, /*isNCEPermute*/ false, /*smallKernelOptimization=*/nullptr, log);
+            /*inputChannelsCompression=*/nullptr, /*isNCEPermute=*/false, /*smallKernelOptimization=*/nullptr, log);
 
     mlir::bufferization::replaceOpWithBufferizedValues(rewriter, origOp, nceOp);
 
@@ -621,7 +647,7 @@ mlir::LogicalResult vpux::bufferizeOp(mlir::MLIRContext* ctx, VPU::NCECompressCo
             kernelSizeAttr, origOp.getStrides(), origOp.getPadAttr(), /*activation_window_channel_lengthAttr=*/nullptr,
             origOp.getWorkloads(), isSuperdenseAttr, ppeAttr, dpuCostAttr,
             /*isInplace=*/nullptr, /*isPermuteQuantize=*/nullptr, origOp.getCmSpPatternAttr(), inputChannelsCompression,
-            /*isNCEPermute*/ false, /*smallKernelOptimization=*/nullptr, log);
+            /*isNCEPermute=*/false, /*smallKernelOptimization=*/nullptr, log);
 
     mlir::bufferization::replaceOpWithBufferizedValues(rewriter, origOp, nceOp);
 
@@ -668,7 +694,7 @@ mlir::LogicalResult vpux::bufferizeOp(mlir::MLIRContext* ctx, VPU::NCEPermuteOp 
 
     log.nest().trace("Allocating result buffer of type '{0}' for value type '{1}'", bufferType, outType);
     const auto outputBuffers =
-            allocateBuffersOfType(log.nest(), origOp.getLoc(), rewriter, bufferType, /*individualBuffers*/ true);
+            allocateBuffersOfType(log.nest(), origOp.getLoc(), rewriter, bufferType, /*individualBuffers=*/true);
 
     // Add PPE task to rescale output.
     const auto ppeTaskAttr = composePPETask(outType);
@@ -695,7 +721,7 @@ mlir::LogicalResult vpux::bufferizeOp(mlir::MLIRContext* ctx, VPU::NCEPermuteOp 
                                       /*kernel_padding=*/nullptr, activationWindowChannelLength, origOp.getWorkloads(),
                                       isSuperdenseAttr, ppeTaskAttr, dpuCostAttr,
                                       /*isInplace=*/nullptr, isPermuteQuantizeAttr, /*cmSpPattern=*/nullptr,
-                                      /*inputChannelsCompression=*/nullptr, /*isNCEPermute*/ true,
+                                      /*inputChannelsCompression=*/nullptr, /*isNCEPermute=*/true,
                                       /*smallKernelOptimization=*/nullptr, log);
 
     // ViewOp Output
@@ -705,6 +731,54 @@ mlir::LogicalResult vpux::bufferizeOp(mlir::MLIRContext* ctx, VPU::NCEPermuteOp 
     viewOpOutType = viewOpOutType.changeShape(getShape(origOp.getOutput()));
     auto viewOpOut = rewriter.create<VPUIP::ViewOp>(origOp.getLoc(), viewOpOutType, nceOp);
     mlir::bufferization::replaceOpWithBufferizedValues(rewriter, origOp, viewOpOut.getResult());
+
+    return mlir::success();
+}
+
+mlir::LogicalResult vpux::bufferizeOp(mlir::MLIRContext* ctx, VPU::NCEMatMulOp origOp,
+                                      VPU::NCEMatMulOp::Adaptor newArgs, mlir::RewriterBase& rewriter) {
+    auto log = Logger::global().nest("one-shot-bufferize-NCEMatMulOp", 0);
+    log.trace("Got '{0}' at '{1}'", origOp->getName(), origOp->getLoc());
+    //
+    // Get dimensions
+    //
+    const auto filterShape = Shape(parseIntArrayAttr<int64_t>(origOp.getRawFilterShape()));
+
+    const auto KY = filterShape[DimsGroups5D::Filter::KY];
+    const auto KX = filterShape[DimsGroups5D::Filter::KX];
+
+    //
+    // Prepare output buffer for DPU
+    //
+
+    const auto outputBuffers =
+            allocateBuffers(log, origOp.getLoc(), rewriter, {origOp.getOutput()}, /*individualBuffers=*/true);
+
+    //
+    // Create NCE per-cluster Operation
+    //
+
+    const auto kernelSizeAttr = getIntArrayAttr(ctx, ArrayRef({KY, KX}));
+    const auto taskType = VPUIP::NCETaskType::CONV;
+    auto ppeAttr = origOp.getPpe().value_or(nullptr);
+    auto dpuCostAttr = origOp->hasAttr(DPUCost) ? origOp->getAttr(DPUCost) : nullptr;
+
+    log.nest().trace("Creating VPUIP::NCEClusterTaskOp");
+    mlir::UnitAttr isSuperdenseAttr = nullptr;
+    if (isSuperdenseOp(origOp)) {
+        VPUX_THROW_WHEN(origOp->getResult(0).getType().isa<VPU::SparseTensorType>(),
+                        "Output cannot be sparse and super-dense at the same time");
+        isSuperdenseAttr = mlir::UnitAttr::get(ctx);
+    }
+
+    auto nceOp = createNCEClusterTask(
+            rewriter, origOp->getLoc(), newArgs.getInput(), newArgs.getWeights(), newArgs.getWeightsTable(), nullptr,
+            nullptr, outputBuffers, taskType, kernelSizeAttr, origOp.getStrides(), origOp.getPadAttr(), nullptr,
+            origOp.getWorkloads(), isSuperdenseAttr, ppeAttr, dpuCostAttr,
+            /*isInplace=*/nullptr, /*isPermuteQuantize=*/nullptr, /*cmSpPattern=*/nullptr,
+            /*inputChannelsCompression=*/nullptr, /*isNCEPermute*/ false, /*smallKernelOptimization=*/nullptr, log);
+
+    mlir::bufferization::replaceOpWithBufferizedValues(rewriter, origOp, nceOp);
 
     return mlir::success();
 }
@@ -812,7 +886,7 @@ mlir::LogicalResult NCEPermuteMultiTileRewriter::matchAndRewrite(VPU::NCECluster
     _log.trace("Got '{0}' Multi Tile at '{1}'", origOp->getName(), origOp->getLoc());
 
     auto ctx = this->getContext();
-    auto* typeConverter = getTypeConverter();
+    const auto* typeConverter = getTypeConverter();
     VPUX_THROW_UNLESS(typeConverter != nullptr, "TypeConverter is not set");
 
     auto clusteredOp = mlir::dyn_cast<VPU::ClusteredOpInterface>(permuteOp.getOperation());
@@ -840,8 +914,9 @@ mlir::LogicalResult NCEPermuteMultiTileRewriter::matchAndRewrite(VPU::NCECluster
     // Layout change to NHWC
     auto inputViewOp = rewriter.create<VPUIP::ViewOp>(castLoc, outBufferTypeInViewOp, newArgs.getOperands());
 
-    auto outValueCastInput = rewriter.create<mlir::bufferization::ToTensorOp>(
-            loc, mlir::TypeRange{castToDistType}, mlir::ValueRange{inputViewOp.getResult()});
+    auto outValueCastInput =
+            rewriter.create<mlir::bufferization::ToTensorOp>(loc, castToDistType, inputViewOp.getResult(),
+                                                             /*restrict=*/nullptr, /*writable=*/nullptr);
 
     // Manual update output type
     auto outType = permuteOp.getOutput().getType().cast<NDTypeInterface>();
@@ -883,7 +958,7 @@ mlir::LogicalResult NCEPermuteMultiTileRewriter::matchAndRewrite(VPU::NCECluster
                 mlir::ValueRange{newOperands.front()});
         _log.nest().trace("Allocating result buffer of type '{0}' for value type '{1}'", bufferType, outType);
         const auto outputBuffers =
-                allocateBuffersOfType(_log.nest(), loc, builder, bufferType, /*individualBuffers*/ true);
+                allocateBuffersOfType(_log.nest(), loc, builder, bufferType, /*individualBuffers=*/true);
 
         auto nceOp = createNCEClusterTask(builder, loc, valueCastInput.getResult(0), valueCastInput.getResult(0),
                                           /*weightsTable=*/nullptr,
@@ -894,7 +969,7 @@ mlir::LogicalResult NCEPermuteMultiTileRewriter::matchAndRewrite(VPU::NCECluster
                                           /*kernel_padding=*/nullptr, activationWindowChannelLength,
                                           permuteOp.getWorkloads(), isSuperdenseAttr, ppeTaskAttr, dpuCostAttr,
                                           /*isInplace=*/nullptr, isPermuteQuantizeAttr, /*cmSpPattern=*/nullptr,
-                                          /*inputChannelsCompression=*/nullptr, /*isNCEPermute*/ true,
+                                          /*inputChannelsCompression=*/nullptr, /*isNCEPermute=*/true,
                                           /*smallKernelOptimization=*/nullptr, _log);
         const auto nceOpOutType = nceOp.getType().cast<NDTypeInterface>();
 
@@ -913,8 +988,8 @@ mlir::LogicalResult NCEPermuteMultiTileRewriter::matchAndRewrite(VPU::NCECluster
     // Reshape to NxCxHxW
     // Layout change to NHWC
     auto inValueCastOutput = rewriter.create<mlir::bufferization::ToMemrefOp>(
-            loc, mlir::TypeRange{typeConverter->convertType(newClusterTilingDistType)},
-            mlir::ValueRange{newClusterTilingOp.getResult(0)});
+            loc, typeConverter->convertType(newClusterTilingDistType), newClusterTilingOp.getResult(0),
+            /*read_only=*/nullptr);
 
     auto outputViewOp = rewriter.create<VPUIP::ViewOp>(newClusterTilingOp.getLoc(),
                                                        typeConverter->convertType(origOp.getResult(0).getType()),
@@ -966,5 +1041,6 @@ void vpux::registerVpuNceBufferizableOpInterfaces(mlir::DialectRegistry& registr
         VPU::NCECompressConvolutionOp::attachInterface<VpuGenericOneShotBufferizeModel<VPU::NCECompressConvolutionOp>>(
                 *ctx);
         VPU::NCEPermuteOp::attachInterface<VpuGenericOneShotBufferizeModel<VPU::NCEPermuteOp>>(*ctx);
+        VPU::NCEMatMulOp::attachInterface<VpuGenericOneShotBufferizeModel<VPU::NCEMatMulOp>>(*ctx);
     });
 }

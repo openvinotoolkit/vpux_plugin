@@ -17,7 +17,6 @@
 #include "intel_npu/al/config/runtime.hpp"
 
 #include <device_helpers.hpp>
-#include "vpux/utils/IE/itt.hpp"
 #include "vpux/utils/IE/prefix.hpp"
 #include "vpux/utils/core/checked_cast.hpp"
 #include "vpux/utils/core/format.hpp"
@@ -27,16 +26,16 @@
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/Program.h>
 
-using namespace intel_npu;
+using vpux::printToString;
 
-namespace vpux {
+namespace intel_npu {
 
 IMDInferRequest::IMDInferRequest(const std::shared_ptr<const ICompiledModel>& compiledModel,
                                  const std::shared_ptr<IExecutor>& executor, const Config& config)
         : SyncInferRequest(compiledModel),
           _executorPtr(executor),
           _config(config),
-          _logger("IMDInferRequest", getLogLevel(config)) {
+          _logger("IMDInferRequest", vpux::getLogLevel(config)) {
     const auto& meta = compiledModel->get_network_metadata();
     _inputOrder = meta.inputOrder;
     _outputOrder = meta.outputOrder;
@@ -71,8 +70,6 @@ void IMDInferRequest::infer() {
 
 void IMDInferRequest::infer_async() {
     _logger.debug("InferRequest::infer_async started");
-    OV_ITT_SCOPED_TASK(itt::domains::VPUXPlugin, "infer_async");
-
     _logger.info("Run inference using InferenceManagerDemo application");
 
     _workDirectory = create_temporary_work_directory();
@@ -85,7 +82,6 @@ void IMDInferRequest::infer_async() {
 
 void IMDInferRequest::get_result() {
     _logger.debug("InferRequest::get_result started");
-    OV_ITT_SCOPED_TASK(itt::domains::VPUXPlugin, "get_result");
 
     load_network_outputs();
 
@@ -99,10 +95,10 @@ void IMDInferRequest::get_result() {
     _logger.debug("InferRequest::get_result finished");
 }
 
-SmallString IMDInferRequest::create_temporary_work_directory() {
+vpux::SmallString IMDInferRequest::create_temporary_work_directory() {
     _logger.trace("Create unique temporary working directory");
 
-    SmallString _workDirectory;
+    vpux::SmallString _workDirectory;
     const auto errc = llvm::sys::fs::createUniqueDirectory("vpux-IMD", _workDirectory);
     VPUX_THROW_WHEN(errc, "Failed to create temporary working directory : {0}", errc.message());
 
@@ -117,7 +113,7 @@ void IMDInferRequest::store_compiled_model() {
     IMDExecutor* executor = static_cast<IMDExecutor*>(_executorPtr.get());
     const auto& compiledModel = executor->getNetworkDesc()->compiledNetwork;
 
-    const std::string fileName = "test.blob";
+    const std::string fileName = "vpuip.blob";
     const auto modelFilePath = printToString("{0}/{1}", _workDirectory.str(), fileName);
     std::ofstream file(modelFilePath, std::ios::binary);
 
@@ -136,17 +132,17 @@ void IMDInferRequest::store_network_inputs() {
     for (const auto& name : _inputAndStateInputNames) {
         std::shared_ptr<ov::ITensor>& inputTensor = _allTensors.at(name);
 
-        if (isShapeTensorName(name)) {
+        if (vpux::isShapeTensorName(name)) {
             const auto actualTensorName = name.substr(SHAPE_TENSOR_PREFIX.size());
             const auto& inputDims = _allTensors.at(actualTensorName)->get_shape();
 
             for (size_t i = 0; i < inputTensor->get_size(); ++i) {
                 const auto reverseIdx = inputDims.size() - 1 - i;
-                inputTensor->data<uint32_t>()[i] = checked_cast<uint32_t>(inputDims[reverseIdx]);
+                inputTensor->data<uint32_t>()[i] = vpux::checked_cast<uint32_t>(inputDims[reverseIdx]);
             }
             inputIndex = _inputOrder.at(name);
-        } else if (isStateOutputName(name)) {
-            inputIndex = _inputOrder.at(stateOutputToStateInputName(name));
+        } else if (vpux::isStateOutputName(name)) {
+            inputIndex = _inputOrder.at(vpux::stateOutputToStateInputName(name));
         } else {
             inputIndex = _inputOrder.at(name);
         }
@@ -165,7 +161,7 @@ void IMDInferRequest::store_network_inputs() {
 void IMDInferRequest::run_app() {
     _logger.trace("Run the application");
 
-    SmallString curPath;
+    vpux::SmallString curPath;
     auto errc = llvm::sys::fs::current_path(curPath);
     VPUX_THROW_WHEN(errc, "Failed to get current path : {0}", errc.message());
 
@@ -183,31 +179,31 @@ void IMDInferRequest::run_app() {
     VPUX_THROW_WHEN(errc, "Failed to change current path : {0}", errc.message());
 
     const std::string emptyString;
-    SmallVector<std::optional<StringRef>> redirects = {
+    llvm::SmallVector<std::optional<llvm::StringRef>> redirects = {
             std::nullopt,  // stdin(0)
             std::nullopt,  // stdout(1)
             std::nullopt   // stderr(2)
     };
 
-    if (_logger.level() < LogLevel::Error) {
+    if (_logger.level() < vpux::LogLevel::Error) {
         // diconnect stderr file descriptor
-        redirects[2] = StringRef(emptyString);
+        redirects[2] = llvm::StringRef(emptyString);
     }
 
-    if (_logger.level() < LogLevel::Info) {
+    if (_logger.level() < vpux::LogLevel::Info) {
         // diconnect stdout file descriptor
-        redirects[1] = StringRef(emptyString);
+        redirects[1] = llvm::StringRef(emptyString);
     }
 
     std::string errMsg;
     auto app = static_cast<IMDExecutor*>(_executorPtr.get())->getApp();
-    SmallVector<StringRef> args(app.runArgs.begin(), app.runArgs.end());
+    llvm::SmallVector<llvm::StringRef> args(app.runArgs.begin(), app.runArgs.end());
     _logger.trace("exec: {0}", app.runProgram);
     _logger.trace("args: {0}", args);
 
     const auto procErr = llvm::sys::ExecuteAndWait(app.runProgram, args,
                                                    /*Env=*/std::nullopt, llvm::ArrayRef(redirects),
-                                                   checked_cast<uint32_t>(app.timeoutSec),
+                                                   vpux::checked_cast<uint32_t>(app.timeoutSec),
                                                    /*MemoryLimit=*/0, &errMsg);
     VPUX_THROW_WHEN(procErr != 0, "Failed to run InferenceManagerDemo ({0}) : {1}", procErr, errMsg);
 }
@@ -246,7 +242,7 @@ void IMDInferRequest::load_network_outputs() {
                                        : false;
         read_from_file(outputFilePath, outputTensor, isDynamic);
 
-        if (isShapeTensorName(name)) {
+        if (vpux::isShapeTensorName(name)) {
             ov::Shape actualDims;
             for (size_t i = 0; i < outputTensor->get_size(); ++i) {
                 const auto reverseIdx = outputTensor->get_size() - 1 - i;
@@ -286,6 +282,10 @@ void IMDInferRequest::check_network_precision(const ov::element::Type_t precisio
         break;
     case ov::element::Type_t::f16:
         break;
+    case ov::element::Type_t::u4:
+        break;
+    case ov::element::Type_t::i4:
+        break;
     case ov::element::Type_t::u8:
         break;
     case ov::element::Type_t::i8:
@@ -302,11 +302,14 @@ void IMDInferRequest::check_network_precision(const ov::element::Type_t precisio
         break;
     case ov::element::Type_t::i64:
         break;
+    case ov::element::Type_t::f64:
+        break;
     case ov::element::Type_t::boolean:
         break;
     default:
-        OPENVINO_THROW("Unsupported tensor precision: " + ov::element::Type(precision).get_type_name() +
-                       "! Supported precisions: FP32, FP16, U8, I8, U16, I16, U32, I32, U64, I64, BOOLEAN");
+        OPENVINO_THROW(
+                "Unsupported tensor precision: " + ov::element::Type(precision).get_type_name() +
+                "! Supported precisions: FP32, FP16, U4, I4, U8, I8, U16, I16, U32, I32, U64, I64, FP64, BOOLEAN");
     }
 }
 
@@ -334,4 +337,4 @@ std::vector<uint8_t> IMDInferRequest::get_raw_profiling_data() const {
     return {begin, end};
 }
 
-}  // namespace vpux
+}  // namespace intel_npu

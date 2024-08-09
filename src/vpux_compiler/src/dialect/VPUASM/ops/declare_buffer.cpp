@@ -60,23 +60,45 @@ std::optional<ELF::SectionSignature> vpux::VPUASM::DeclareBufferOp::getSectionSi
     const auto location = buffType.getLocation();
     const auto section = location.getSection();
 
-    auto type = (section == VPURT::BufferSection::CMX_NN) ? ELF::SectionTypeAttr::VPU_SHT_CMX_WORKSPACE
-                                                          : ELF::SectionTypeAttr::SHT_NOBITS;
-    bool isInputOrOutputBuffer =
-            section == VPURT::BufferSection::NetworkInput || section == VPURT::BufferSection::NetworkOutput;
-    const auto name = vpux::ELF::generateSignature("buffer", buffType);
+    ELF::SectionTypeAttr type;
+    ELF::SectionFlagsAttr flags;
 
-    if (isInputOrOutputBuffer) {
+    bool isInputOrOutputBuffer = false;
+
+    switch (section) {
+    case VPURT::BufferSection::CMX_NN:
+        type = ELF::SectionTypeAttr::VPU_SHT_CMX_WORKSPACE;
+        flags = ELF::SectionFlagsAttr::SHF_NONE;
+        break;
+    case VPURT::BufferSection::DDR:
+        type = ELF::SectionTypeAttr::SHT_NOBITS;
+        flags = ELF::SectionFlagsAttr::SHF_WRITE | ELF::SectionFlagsAttr::SHF_ALLOC;
+        break;
+    case VPURT::BufferSection::NetworkInput:
+        type = ELF::SectionTypeAttr::SHT_NOBITS;
+        flags = ELF::SectionFlagsAttr::VPU_SHF_USERINPUT;
+        isInputOrOutputBuffer = true;
+        break;
+    case VPURT::BufferSection::NetworkOutput:
+        type = ELF::SectionTypeAttr::SHT_NOBITS;
+        flags = ELF::SectionFlagsAttr::VPU_SHF_USEROUTPUT;
+        isInputOrOutputBuffer = true;
+        break;
+    case VPURT::BufferSection::ProfilingOutput:
+        type = ELF::SectionTypeAttr::SHT_NOBITS;
+        flags = ELF::SectionFlagsAttr::VPU_SHF_PROFOUTPUT;
+        break;
+    default:
         return std::nullopt;
     }
 
-    if (section == VPURT::BufferSection::CMX_NN || section == VPURT::BufferSection::DDR) {
-        ELF::SectionFlagsAttr flags = (section == VPURT::BufferSection::CMX_NN)
-                                              ? ELF::SectionFlagsAttr::SHF_NONE
-                                              : ELF::SectionFlagsAttr::SHF_WRITE | ELF::SectionFlagsAttr::SHF_ALLOC;
-        return ELF::SectionSignature(name, flags, type);
+    auto name = vpux::ELF::generateSignature("buffer", buffType);
+
+    if (isInputOrOutputBuffer || section == VPURT::BufferSection::ProfilingOutput) {
+        name = ELF::generateSignature("io", buffType);
     }
-    return std::nullopt;
+
+    return ELF::SectionSignature(name, flags, type);
 }
 
 bool vpux::VPUASM::DeclareBufferOp::hasMemoryFootprint() {

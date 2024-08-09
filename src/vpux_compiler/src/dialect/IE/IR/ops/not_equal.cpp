@@ -10,11 +10,11 @@ using namespace vpux;
 
 mlir::LogicalResult vpux::IE::NotEqualOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::NotEqualOpAdaptor notEqual(operands, attrs);
+    IE::NotEqualOpAdaptor notEqual(operands, attrs, prop);
     if (mlir::failed(notEqual.verify(loc))) {
         return mlir::failure();
     }
@@ -25,7 +25,7 @@ mlir::LogicalResult vpux::IE::NotEqualOp::inferReturnTypeComponents(
     const auto outShapeRes =
             IE::broadcastEltwiseShape(in1Type.getShape(), in2Type.getShape(), notEqual.getAutoBroadcast(), loc);
     if (mlir::succeeded(outShapeRes)) {
-        inferredReturnShapes.emplace_back(outShapeRes.value(), in1Type.getElementType());
+        inferredReturnShapes.emplace_back(outShapeRes.value(), getBool8Type(ctx));
     }
 
     return outShapeRes;

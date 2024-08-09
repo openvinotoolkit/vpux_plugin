@@ -42,7 +42,16 @@ private:
     bool _allowCustomValues = false;
 };
 
-void addConstraint(mlir::OpBuilder optionsBuilder, mlir::StringRef constraintName, size_t constraintValue) {
+void addConstraint(mlir::OpBuilder optionsBuilder, IE::PipelineOptionsOp pipelineOptionsOp,
+                   mlir::StringRef constraintName, size_t constraintValue, bool allowCustomValues) {
+    auto hasPipelineOption = pipelineOptionsOp.lookupSymbol<IE::OptionOp>(constraintName) != nullptr;
+    VPUX_THROW_WHEN(!allowCustomValues && hasPipelineOption,
+                    "Barrier constraint is already defined, probably you run '--init-compiler' twice");
+
+    if (hasPipelineOption) {
+        return;
+    }
+
     auto* ctx = optionsBuilder.getContext();
     mlir::IntegerType sizeType = mlir::IntegerType::get(ctx, sizeof(void*) * 8, mlir::IntegerType::Unsigned);
     const auto constraintAttr = mlir::StringAttr::get(ctx, constraintName);
@@ -81,21 +90,9 @@ void SetupPerBarrierVariantConstraintPass::initializeFromOptions() {
 }
 
 void SetupPerBarrierVariantConstraintPass::safeRunOnModule() {
-    auto& ctx = getContext();
     auto moduleOp = getModuleOp(getOperation());
-
-    const auto hasPipelineOptions = moduleOp.lookupSymbol<IE::PipelineOptionsOp>(VPU::PIPELINE_OPTIONS) != nullptr;
-    VPUX_THROW_WHEN(!_allowCustomValues && hasPipelineOptions,
-                    "PipelineOptions operation is already defined, probably you run '--init-compiler' twice");
-
-    if (hasPipelineOptions) {
-        return;
-    }
-
     auto optionsBuilder = mlir::OpBuilder::atBlockBegin(moduleOp.getBody());
-    auto pipelineOptionsOp =
-            optionsBuilder.create<IE::PipelineOptionsOp>(mlir::UnknownLoc::get(&ctx), VPU::PIPELINE_OPTIONS);
-    pipelineOptionsOp.getOptions().emplaceBlock();
+    auto pipelineOptionsOp = VPU::getPipelineOptionsOp(getContext(), moduleOp);
     optionsBuilder =
             mlir::OpBuilder::atBlockBegin(&pipelineOptionsOp.getOptions().front(), optionsBuilder.getListener());
 
@@ -104,8 +101,8 @@ void SetupPerBarrierVariantConstraintPass::safeRunOnModule() {
     auto barrVariantSum = perBarrierVariantConstraint.getPerBarrierMaxVariantSum();
     auto barrVariantCount = perBarrierVariantConstraint.getPerBarrierMaxVariantCount();
 
-    addConstraint(optionsBuilder, VPU::BARR_MAX_VARIANT_SUM, barrVariantSum);
-    addConstraint(optionsBuilder, VPU::BARR_MAX_VARIANT_COUNT, barrVariantCount);
+    addConstraint(optionsBuilder, pipelineOptionsOp, VPU::BARR_MAX_VARIANT_SUM, barrVariantSum, _allowCustomValues);
+    addConstraint(optionsBuilder, pipelineOptionsOp, VPU::BARR_MAX_VARIANT_COUNT, barrVariantCount, _allowCustomValues);
 }
 
 }  // namespace

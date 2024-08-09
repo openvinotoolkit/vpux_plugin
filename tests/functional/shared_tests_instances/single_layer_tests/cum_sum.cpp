@@ -45,6 +45,7 @@ const std::vector<std::vector<ov::Shape>> shapes = {{{5, 14, 5, 7}},
                                                     {{8, 384}}};
 
 const std::vector<ov::element::Type> inputPrecision = {ov::element::f16, ov::element::f32};
+const std::vector<ov::element::Type> inputLowPrecision = {ov::element::f16, ov::element::i32};
 
 const std::vector<int64_t> axes = {0, 1};
 const std::vector<int64_t> negativeAxes = {-2, -1};
@@ -73,8 +74,8 @@ const auto testCasesRealNet =
 
 const auto testCasePrecommit =
         testing::Combine(testing::ValuesIn({static_shapes_to_test_representation({shapes[4]})}),
-                         testing::Values(inputPrecision[0]), testing::Values(negativeAxes[0]),
-                         testing::Values(exclusive[0]), testing::Values(reverse[0]), testing::Values(DEVICE_NPU));
+                         testing::ValuesIn(inputLowPrecision), testing::ValuesIn(negativeAxes),
+                         testing::ValuesIn(exclusive), testing::ValuesIn(reverse), testing::Values(DEVICE_NPU));
 
 // ------ NPU3720 ------
 INSTANTIATE_TEST_SUITE_P(smoke_CumSum_axis_0, CumSumLayerTest_NPU3720, testCaseAxis_0,

@@ -11,6 +11,56 @@ namespace VPUMI40XX {
 
 enum class DmaNnSrcType { DDR, CMX_NN, Count };
 
+//
+// TaskMetadata Utils
+//
+
+// Sizes are completely governed by compiler
+// E#121935: If the following configs vary between arches, then all this info should be moved to arch-specific
+// dialects
+template <VPURegMapped::TaskType type>
+struct MetadataBufferSize {};
+
+template <>
+struct MetadataBufferSize<VPURegMapped::TaskType::DPUInvariant> {
+    static constexpr size_t listCount = 1;
+    static constexpr std::array<size_t, listCount> defaultTaskCount = {64};
+};
+
+template <>
+struct MetadataBufferSize<VPURegMapped::TaskType::DPUVariant> {
+    static constexpr size_t listCount = 1;
+    static constexpr std::array<size_t, listCount> defaultTaskCount = {128};
+};
+
+template <>
+struct MetadataBufferSize<VPURegMapped::TaskType::ActKernelRange> {
+    static constexpr size_t listCount = 1;
+    static constexpr std::array<size_t, listCount> defaultTaskCount = {64};
+};
+
+template <>
+struct MetadataBufferSize<VPURegMapped::TaskType::ActKernelInvocation> {
+    static constexpr size_t listCount = 1;
+    static constexpr std::array<size_t, listCount> defaultTaskCount = {64};
+};
+
+template <>
+struct MetadataBufferSize<VPURegMapped::TaskType::DMA> {
+    static constexpr size_t listCount = 2;
+    // DMA does not have default task counts, just a collection of value pairs, out of which one is chosen by logic
+    // present in compute_dma_split() max size_t value used as placeholders in order to aid the computation and to
+    // preserve uniformity of logic between task types
+    static constexpr std::array<size_t, listCount> defaultTaskCount = {std::numeric_limits<size_t>::max(),
+                                                                       std::numeric_limits<size_t>::max()};
+};
+
+template <>
+struct MetadataBufferSize<VPURegMapped::TaskType::M2I> {
+    static constexpr size_t listCount = 1;
+    static constexpr std::array<size_t, listCount> defaultTaskCount = {4};
+};
+
 uint64_t computeMaskHi(mlir::ArrayAttr barriers);
 uint64_t computeMaskLo(mlir::ArrayAttr barriers);
 bool isConfigureBarrierOpType(const mlir::Operation::operand_range& barriers);
@@ -55,6 +105,9 @@ T getNextOp(T op) {
 
     return llvm::cast_if_present<T>(nextOpIt == users.end() ? nullptr : *nextOpIt);
 }
+
+size_t reindexEnqueueList(VPURegMapped::EnqueueOp head);
+constexpr StringLiteral lastSecondaryTaskInExecutionGroup = "lastSecondaryTaskInExecutionGroup";
 
 }  // namespace VPUMI40XX
 }  // namespace vpux

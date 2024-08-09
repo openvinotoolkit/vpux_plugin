@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --vpu-arch=%arch% %s
-// REQUIRES: arch-VPUX40XX
+// REQUIRES: arch-NPU40XX
 // this test can only be (correctly) run manually until E#48620 is solved
 
 module @Test attributes {VPU.arch = #VPU.arch_kind<NPU40XX>} {

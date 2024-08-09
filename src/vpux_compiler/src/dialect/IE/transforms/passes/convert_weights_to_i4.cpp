@@ -39,11 +39,15 @@ mlir::LogicalResult LayerRewriter::matchAndRewrite(IE::LayerOpInterface origOp, 
                                                    mlir::ConversionPatternRewriter& rewriter) const {
     _log.trace("Process Operation '{0}' at '{1}", origOp->getName(), origOp->getLoc());
 
-    auto* typeConverter = this->getTypeConverter();
+    const auto* typeConverter = this->getTypeConverter();
     VPUX_THROW_UNLESS(typeConverter != nullptr, "TypeConverter was not set");
 
     const auto origOperands = origOp->getOperands();
     VPUX_THROW_UNLESS(origOperands.size() == newOperands.size(), "Wrong operands size : {0}", newOperands.size());
+
+    if (mlir::isa<IE::QuantizeOp, IE::QuantizeCastOp>(origOp.getOperation())) {
+        return mlir::failure();
+    }
 
     mlir::IRMapping mapper;
     mapper.map(origOperands, newOperands);
@@ -54,6 +58,42 @@ mlir::LogicalResult LayerRewriter::matchAndRewrite(IE::LayerOpInterface origOp, 
     }
 
     rewriter.replaceOp(origOp, newOp->getResults());
+    return mlir::success();
+}
+
+//
+// QuantizeLikeOpRewriter
+//
+
+template <class QuantizeLikeOp>
+class QuantizeLikeOpRewriter final : public mlir::OpConversionPattern<QuantizeLikeOp> {
+    using OpAdaptor = typename mlir::OpConversionPattern<QuantizeLikeOp>::OpAdaptor;
+
+public:
+    QuantizeLikeOpRewriter(mlir::TypeConverter& typeConverter, mlir::MLIRContext* ctx, Logger log)
+            : mlir::OpConversionPattern<QuantizeLikeOp>(typeConverter, ctx), _log(log) {
+    }
+
+public:
+    mlir::LogicalResult matchAndRewrite(QuantizeLikeOp origOp, OpAdaptor newArgs,
+                                        mlir::ConversionPatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+template <class QuantizeLikeOp>
+mlir::LogicalResult QuantizeLikeOpRewriter<QuantizeLikeOp>::matchAndRewrite(
+        QuantizeLikeOp origOp, OpAdaptor newArgs, mlir::ConversionPatternRewriter& rewriter) const {
+    _log.trace("Process Operation '{0}' at '{1}", origOp->getName(), origOp->getLoc());
+
+    auto* typeConverter = this->getTypeConverter();
+    VPUX_THROW_UNLESS(typeConverter != nullptr, "TypeConverter was not set");
+
+    auto resultType = origOp->getResult(0).getType();
+    const auto dstElemType =
+            typeConverter->convertType(resultType).template cast<vpux::NDTypeInterface>().getElementType();
+    rewriter.replaceOpWithNewOp<QuantizeLikeOp>(origOp, newArgs.getInput(), dstElemType);
     return mlir::success();
 }
 
@@ -79,7 +119,7 @@ mlir::LogicalResult ConstRewriter::matchAndRewrite(Const::DeclareOp origOp, OpAd
                                                    mlir::ConversionPatternRewriter& rewriter) const {
     _log.trace("Process Operation '{0}' at '{1}", origOp->getName(), origOp->getLoc());
 
-    auto* typeConverter = this->getTypeConverter();
+    const auto* typeConverter = this->getTypeConverter();
     VPUX_THROW_UNLESS(typeConverter != nullptr, "TypeConverter was not set");
 
     const auto outputType = origOp.getType();
@@ -217,8 +257,10 @@ void ConvertWeightsToI4Pass::safeRunOnFunc() {
     });
 
     mlir::RewritePatternSet patterns(&ctx);
-    patterns.add<LayerRewriter>(typeConverter, &ctx, _log);
     patterns.add<ConstRewriter>(typeConverter, &ctx, _log);
+    patterns.add<QuantizeLikeOpRewriter<IE::QuantizeOp>>(typeConverter, &ctx, _log);
+    patterns.add<QuantizeLikeOpRewriter<IE::QuantizeCastOp>>(typeConverter, &ctx, _log);
+    patterns.add<LayerRewriter>(typeConverter, &ctx, _log);
 
     if (mlir::failed(applyPartialConversion(func, target, std::move(patterns)))) {
         signalPassFailure();

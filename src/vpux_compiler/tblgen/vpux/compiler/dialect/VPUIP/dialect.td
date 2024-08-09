@@ -45,6 +45,8 @@ It handles such VPU-specifics as:
     let useDefaultTypePrinterParser = 1;
     let useDefaultAttributePrinterParser = 1;
 
+    let usePropertiesForAttributes = 1;
+
     let extraClassDeclaration = [{
         void registerAttributes();
         void registerTypes();

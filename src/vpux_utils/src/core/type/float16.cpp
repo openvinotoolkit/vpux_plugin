@@ -148,6 +148,11 @@ bool std::isnan(vpux::type::float16 x) {
     return (x.to_bits() & 0x7FFF) > 0x7c00;
 }
 
+bool std::isinf(vpux::type::float16 x) {
+    // Sign doesn't matter, frac not zero (infinity)
+    return (x.to_bits() & 0x7FFF) == 0x7c00;
+}
+
 uint16_t vpux::type::float16::to_bits() const {
     return m_value;
 }

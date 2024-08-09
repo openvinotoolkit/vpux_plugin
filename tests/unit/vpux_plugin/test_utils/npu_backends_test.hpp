@@ -13,7 +13,6 @@
 #include "vpux/utils/IE/private_properties.hpp"
 
 #include "no_devices_test_backend.hpp"
-#include "npu3700_test_backend.hpp"
 #include "npu3720_test_backend.hpp"
 #include "throw_test_backend.hpp"
 
@@ -46,10 +45,6 @@ public:
             try {
                 if (name == "npu3720_test_backend") {
                     const auto backend = ov::SoPtr<IEngineBackend>(std::make_shared<NPU3720TestBackend>());
-                    registerBackend(backend, name);
-                }
-                if (name == "npu3700_test_backend") {
-                    const auto backend = ov::SoPtr<IEngineBackend>(std::make_shared<NPU3700TestBackend>());
                     registerBackend(backend, name);
                 }
                 if (name == "no_device_test_backend") {

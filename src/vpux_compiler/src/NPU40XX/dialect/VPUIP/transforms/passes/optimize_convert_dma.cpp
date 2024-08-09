@@ -66,7 +66,6 @@ void replaceOpWithNewClusterConvertDMAOp(mlir::PatternRewriter& rewriter, mlir::
     const auto convertOpBodyBuilder = [&](mlir::OpBuilder& builder, mlir::Location loc, mlir::ValueRange newOperands) {
         builder.create<VPUIP::ConvertDMAOp>(loc, newOperands[0], newOperands[1]);
     };
-
     SmallVector<mlir::Value> inputsOutputOperands = {input, outputBuff};
     rewriter.replaceOpWithNewOp<VPUIP::NCEClusterTilingOp>(opToReplace, outputBuff.getType(), inputsOutputOperands,
                                                            convertOpBodyBuilder);
@@ -152,6 +151,81 @@ mlir::LogicalResult ConvertDMACopyRewriterBase::matchAndRewrite(VPUIP::CopyOp co
     return mlir::success();
 }
 
+class CopyConvertDMARewriterBase : public mlir::OpRewritePattern<VPUIP::CopyOp> {
+public:
+    CopyConvertDMARewriterBase(mlir::MLIRContext* ctx,
+                               CreateAndReplaceWithConvertDMAFunctType createAndReplaceWithNewConvertDMAOp,
+                               GetCopyFunctType getCopyOp, GetConvertDMAFunctType getConvertDMAOp, Logger log)
+            : mlir::OpRewritePattern<VPUIP::CopyOp>(ctx),
+              _createAndReplaceWithNewConvertDMAOp(createAndReplaceWithNewConvertDMAOp),
+              _getCopyOp(getCopyOp),
+              _getConvertDMAOp(getConvertDMAOp),
+              _log(log) {
+        setDebugName("CopyConvertDMARewriter");
+    }
+
+    mlir::LogicalResult matchAndRewrite(VPUIP::CopyOp copyOp, mlir::PatternRewriter& rewriter) const final;
+
+private:
+    CreateAndReplaceWithConvertDMAFunctType _createAndReplaceWithNewConvertDMAOp;
+    GetCopyFunctType _getCopyOp;
+    GetConvertDMAFunctType _getConvertDMAOp;
+    Logger _log;
+};
+
+mlir::LogicalResult CopyConvertDMARewriterBase::matchAndRewrite(VPUIP::CopyOp copy,
+                                                                mlir::PatternRewriter& rewriter) const {
+    _log.trace("[{0}] Copy at {0}", getDebugName(), copy->getLoc());
+    auto nestedLogger = _log.nest();
+
+    auto copyOp = _getCopyOp(copy);
+    if (copyOp == nullptr) {
+        nestedLogger.trace("Couldn't find the copyOp");
+        return mlir::failure();
+    }
+
+    // Copy op should have only one result
+    if (copyOp->getResults().size() != 1) {
+        nestedLogger.trace("Copy op should have only one result {0}", copyOp.getLoc());
+        return mlir::failure();
+    }
+
+    if (!copyOp->hasOneUse()) {
+        nestedLogger.trace("Copy op has multiple use {0}", copyOp.getLoc());
+        return mlir::failure();
+    }
+
+    auto copyOutput = *copyOp->getResult(0).getUsers().begin();
+    auto convertDMAOp = _getConvertDMAOp(copyOutput);
+    if (convertDMAOp == nullptr) {
+        nestedLogger.trace("Result ConvertDMAOp not found {0}", copyOutput->getLoc());
+        return mlir::failure();
+    }
+
+    auto newConvertDMAInput = copyOp->getOperand(0);
+    auto outputBuff = convertDMAOp.getOutputs()[0];
+
+    auto newConvertDMAInputDistType = newConvertDMAInput.getType().dyn_cast<VPUIP::DistributedBufferType>();
+    auto newConvertDMAOutputDistType = outputBuff.getType().dyn_cast<VPUIP::DistributedBufferType>();
+    if (newConvertDMAInputDistType != nullptr && newConvertDMAOutputDistType != nullptr &&
+        mlir::failed(VPU::areDistributionAttrsCompatible(newConvertDMAInputDistType, newConvertDMAOutputDistType,
+                                                         /*allowDifferentPerClusterMemoryView = */ false))) {
+        nestedLogger.trace("ConvertDMA will have incompatible input and output distributions after fused with copy",
+                           copyOp.getLoc());
+        return mlir::failure();
+    }
+
+    rewriter.setInsertionPointAfter(convertDMAOp.getOperation());
+
+    _createAndReplaceWithNewConvertDMAOp(rewriter, newConvertDMAInput, outputBuff, convertDMAOp);
+
+    if (copyOp->use_empty()) {
+        rewriter.eraseOp(copyOp);
+    }
+    nestedLogger.trace("Successfully optimized Copy->ClusterConvertDMA pattern");
+    return mlir::success();
+}
+
 //
 // ConvertDMAOp                  |
 //     |             =>      ConvertDMAOp
@@ -194,6 +268,60 @@ public:
 };
 
 //
+// ClusterCopyOp                          |
+//     |                =>      ClusterConvertDMAOp
+// ClusterConvertDMAOp                    |
+//
+
+class ClusterCopyClusterConvertDMA final : public CopyConvertDMARewriterBase {
+public:
+    ClusterCopyClusterConvertDMA(mlir::MLIRContext* ctx, Logger log)
+            : CopyConvertDMARewriterBase(ctx, replaceOpWithNewClusterConvertDMAOp, getClusterCopyOp,
+                                         getClusterConvertDMAOp, log) {
+    }
+};
+
+//
+// ClusterCopyOp                          |
+//     |                =>      ClusterConvertDMAOp
+// ConvertDMAOp                           |
+//
+
+class ClusterCopyConvertDMA final : public CopyConvertDMARewriterBase {
+public:
+    ClusterCopyConvertDMA(mlir::MLIRContext* ctx, Logger log)
+            : CopyConvertDMARewriterBase(ctx, replaceOpWithNewConvertDMAOp, getClusterCopyOp, getConvertDMAOp, log) {
+    }
+};
+
+//
+//  CopyOp                           |
+//     |                =>      ConvertDMAOp
+// ConvertDMAOp                      |
+//
+
+class CopyConvertDMA final : public CopyConvertDMARewriterBase {
+public:
+    CopyConvertDMA(mlir::MLIRContext* ctx, Logger log)
+            : CopyConvertDMARewriterBase(ctx, replaceOpWithNewConvertDMAOp, getCopyOp, getConvertDMAOp, log) {
+    }
+};
+
+//
+//   CopyOp                               |
+//     |                =>      ClusterConvertDMAOp
+// ClusterConvertDMAOp                    |
+//
+
+class CopyClusterConvertDMA final : public CopyConvertDMARewriterBase {
+public:
+    CopyClusterConvertDMA(mlir::MLIRContext* ctx, Logger log)
+            : CopyConvertDMARewriterBase(ctx, replaceOpWithNewClusterConvertDMAOp, getCopyOp, getClusterConvertDMAOp,
+                                         log) {
+    }
+};
+
+//
 // OptimizeConvertDMAPass
 //
 
@@ -215,7 +343,10 @@ void OptimizeConvertDMAPass::safeRunOnFunc() {
     patterns.add<ConvertDMACopy>(&ctx, _log);
     patterns.add<ConvertDMAClusterCopy>(&ctx, _log);
     patterns.add<ClusterConvertDMACopy>(&ctx, _log);
-    // Patterns like Copy->ConvertDMA will be optimized with E#90373
+    patterns.add<CopyConvertDMA>(&ctx, _log);
+    patterns.add<CopyClusterConvertDMA>(&ctx, _log);
+    patterns.add<ClusterCopyClusterConvertDMA>(&ctx, _log);
+    patterns.add<ClusterCopyConvertDMA>(&ctx, _log);
 
     if (mlir::failed(mlir::applyPatternsAndFoldGreedily(func, std::move(patterns), getDefaultGreedyRewriteConfig()))) {
         signalPassFailure();

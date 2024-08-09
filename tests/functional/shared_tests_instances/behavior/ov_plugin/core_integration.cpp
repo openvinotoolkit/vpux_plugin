@@ -8,14 +8,13 @@
 #include "behavior/ov_plugin/core_integration_sw.hpp"
 #include "behavior/ov_plugin/properties_tests.hpp"
 #include "common/functions.h"
+#include "common/npu_test_env_cfg.hpp"
 #include "common/utils.hpp"
-#include "common/vpu_test_env_cfg.hpp"
 #include "common_test_utils/subgraph_builders/conv_pool_relu.hpp"
 #include "common_test_utils/test_assertions.hpp"
 #include "functional_test_utils/ov_plugin_cache.hpp"
 #include "intel_npu/al/config/common.hpp"
 #include "openvino/runtime/intel_npu/properties.hpp"
-#include "vpux/utils/plugin/plugin_name.hpp"
 
 using namespace ov::test::behavior;
 using namespace LayerTestsUtils;
@@ -34,7 +33,7 @@ std::vector<std::string> devices = {
 };
 
 std::pair<std::string, std::string> plugins[] = {
-        std::make_pair(std::string(vpux::VPUX_PLUGIN_LIB_NAME), std::string(ov::test::utils::DEVICE_NPU)),
+        std::make_pair("openvino_intel_npu_plugin", ov::test::utils::DEVICE_NPU),
 };
 
 namespace OVClassBasicTestName {
@@ -300,15 +299,15 @@ TEST_P(OVClassGetMetricAndPrintNoThrow, DeviceAllocMemSizeLesserAfterModelIsLoad
     SKIP_IF_CURRENT_TEST_IS_DISABLED()
     ov::Core ie;
     ov::Any p;
+    ov::CompiledModel compiledModel;
 
     OV_ASSERT_NO_THROW(p = ie.get_property(target_device, ov::intel_npu::device_alloc_mem_size.name()));
     uint64_t a1 = p.as<uint64_t>();
 
-    SKIP_IF_CURRENT_TEST_IS_DISABLED() {
-        auto model = ov::test::utils::make_conv_pool_relu();
-        OV_ASSERT_NO_THROW(ie.compile_model(
-                model, target_device, {ov::intel_npu::platform(ov::test::utils::getTestsPlatformCompilerInPlugin())}));
-    }
+    auto model = ov::test::utils::make_conv_pool_relu();
+    OV_ASSERT_NO_THROW(compiledModel = ie.compile_model(
+                               model, target_device,
+                               {ov::intel_npu::platform(ov::test::utils::getTestsPlatformCompilerInPlugin())}));
 
     OV_ASSERT_NO_THROW(p = ie.get_property(target_device, ov::intel_npu::device_alloc_mem_size.name()));
     uint64_t a2 = p.as<uint64_t>();
@@ -317,24 +316,23 @@ TEST_P(OVClassGetMetricAndPrintNoThrow, DeviceAllocMemSizeLesserAfterModelIsLoad
               << "}" << std::endl;
 
     // after the network is loaded onto device, allocated memory value should increase
-    ASSERT_LE(a1, a2);
+    ASSERT_LT(a1, a2);
 }
 
 TEST_P(OVClassGetMetricAndPrintNoThrow, VpuDeviceAllocMemSizeLesserAfterModelIsLoaded_Driver) {
     SKIP_IF_CURRENT_TEST_IS_DISABLED()
     ov::Core ie;
     ov::Any p;
+    ov::CompiledModel compiledModel;
 
     OV_ASSERT_NO_THROW(p = ie.get_property(target_device, ov::intel_npu::device_alloc_mem_size.name()));
     uint64_t a1 = p.as<uint64_t>();
 
-    SKIP_IF_CURRENT_TEST_IS_DISABLED() {
-        auto model = ov::test::utils::make_conv_pool_relu();
-        OV_ASSERT_NO_THROW(
-                ie.compile_model(model, target_device,
-                                 ov::AnyMap{ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::DRIVER),
-                                            ov::log::level(ov::log::Level::DEBUG)}));
-    }
+    auto model = ov::test::utils::make_conv_pool_relu();
+    OV_ASSERT_NO_THROW(compiledModel = ie.compile_model(
+                               model, target_device,
+                               ov::AnyMap{ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::DRIVER),
+                                          ov::log::level(ov::log::Level::DEBUG)}));
 
     OV_ASSERT_NO_THROW(p = ie.get_property(target_device, ov::intel_npu::device_alloc_mem_size.name()));
     uint64_t a2 = p.as<uint64_t>();
@@ -343,23 +341,23 @@ TEST_P(OVClassGetMetricAndPrintNoThrow, VpuDeviceAllocMemSizeLesserAfterModelIsL
               << "}" << std::endl;
 
     // after the network is loaded onto device, allocated memory value should increase
-    ASSERT_LE(a1, a2);
+    ASSERT_LT(a1, a2);
 }
 
 TEST_P(OVClassGetMetricAndPrintNoThrow, DeviceAllocMemSizeLesserAfterModelIsLoadedNPU_Driver) {
     SKIP_IF_CURRENT_TEST_IS_DISABLED()
     ov::Core ie;
     ov::Any p;
+    ov::CompiledModel compiledModel;
 
     ASSERT_NO_THROW(p = ie.get_property(target_device, ov::intel_npu::device_alloc_mem_size.name()));
     uint64_t a1 = p.as<uint64_t>();
 
-    SKIP_IF_CURRENT_TEST_IS_DISABLED() {
-        auto model = ov::test::utils::make_conv_pool_relu();
-        ASSERT_NO_THROW(ie.compile_model(model, target_device,
-                                         ov::AnyMap{ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::DRIVER),
-                                                    ov::log::level(ov::log::Level::DEBUG)}));
-    }
+    auto model = ov::test::utils::make_conv_pool_relu();
+    ASSERT_NO_THROW(compiledModel = ie.compile_model(
+                            model, target_device,
+                            ov::AnyMap{ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::DRIVER),
+                                       ov::log::level(ov::log::Level::DEBUG)}));
 
     ASSERT_NO_THROW(p = ie.get_property(target_device, ov::intel_npu::device_alloc_mem_size.name()));
     uint64_t a2 = p.as<uint64_t>();
@@ -368,7 +366,7 @@ TEST_P(OVClassGetMetricAndPrintNoThrow, DeviceAllocMemSizeLesserAfterModelIsLoad
               << "}" << std::endl;
 
     // after the network is loaded onto device, allocated memory value should increase
-    ASSERT_LE(a1, a2);
+    ASSERT_LT(a1, a2);
 }
 
 TEST_P(OVClassGetMetricAndPrintNoThrow, DriverVersionNPU) {
@@ -410,7 +408,7 @@ INSTANTIATE_TEST_SUITE_P(nightly_BehaviorTests_OVClassGetMetricTest, OVClassGetM
 INSTANTIATE_TEST_SUITE_P(nightly_BehaviorTests_OVClassSeveralDevicesTest, OVClassSeveralDevicesTestCompileModel,
                          ::testing::Values(std::vector<std::string>(
                                  {std::string(ov::test::utils::DEVICE_NPU) + "." +
-                                  removeDeviceNameOnlyID(ov::test::utils::getTestsPlatformFromEnvironmentOr("3700"))})),
+                                  removeDeviceNameOnlyID(ov::test::utils::getTestsPlatformFromEnvironmentOr("3720"))})),
                          (ov::test::utils::appendPlatformTypeTestName<OVClassSeveralDevicesTestCompileModel>));
 
 INSTANTIATE_TEST_SUITE_P(nightly_BehaviorTests_OVClassModelOptionalTestP, OVClassModelOptionalTestP,
@@ -421,9 +419,9 @@ INSTANTIATE_TEST_SUITE_P(
         nightly_BehaviorTests_OVClassSeveralDevicesTest, OVClassSeveralDevicesTestQueryModel,
         ::testing::Values(std::vector<std::string>(
                 {std::string(ov::test::utils::DEVICE_NPU) + "." +
-                         removeDeviceNameOnlyID(ov::test::utils::getTestsPlatformFromEnvironmentOr("3700")),
+                         removeDeviceNameOnlyID(ov::test::utils::getTestsPlatformFromEnvironmentOr("3720")),
                  std::string(ov::test::utils::DEVICE_NPU) + "." +
-                         removeDeviceNameOnlyID(ov::test::utils::getTestsPlatformFromEnvironmentOr("3700"))})),
+                         removeDeviceNameOnlyID(ov::test::utils::getTestsPlatformFromEnvironmentOr("3720"))})),
         (ov::test::utils::appendPlatformTypeTestName<OVClassSeveralDevicesTestQueryModel>));
 
 }  // namespace

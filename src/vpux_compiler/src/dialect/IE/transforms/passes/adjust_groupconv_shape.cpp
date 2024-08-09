@@ -68,9 +68,8 @@ Const::DeclareOp ReshapeGroupConvInput::broadcastConst(mlir::Value activation, i
 
     auto cst = activation.getDefiningOp<Const::DeclareOp>();
 
-    auto content = cst.getContent();
     Const::ContentAttr newContentAttr;
-    if (content.isSplat()) {
+    if (cst.getContentAttr().isSplat()) {
         auto contentAttr = cst.getContentAttr();
         newContentAttr = Const::ContentAttr::get(contentAttr.getBaseContent());  // content-only copy
         auto newConstantShape = Shape(origInShape.size(), int64_t(1));
@@ -116,8 +115,7 @@ mlir::LogicalResult ReshapeGroupConvInput::matchAndRewrite(IE::GroupConvolutionO
 
     auto isSplat = [](mlir::Value val) {
         auto cst = val.getDefiningOp<Const::DeclareOp>();
-        auto content = cst.getContent();
-        return content.isSplat();
+        return cst.getContentAttr().isSplat();
     };
 
     auto isElementWised = [isSplat](IE::GroupConvolutionOp op) {
@@ -167,8 +165,17 @@ mlir::LogicalResult ReshapeGroupConvInput::matchAndRewrite(IE::GroupConvolutionO
             }
         }
 
-        if (isElementWised(layerOp)) {
-            auto newExpandedShapeResult =
+        // Input can be reshaped
+        auto newExpandedShapeResult =
+                getShapeCastExpandedShapeKeepDimC(layerOp, getShape(layerOp.getInput()), _log.nest());
+        // Borrowing from weight or height is better than adjust channel to alignment value when it's bigger for all
+        // cases, since the other nce ops using the same method when adjust input shape. So it would not insert
+        // ShapeCast between these ops which would benefit the other optimizations such as VF.
+        if (!mlir::failed(newExpandedShapeResult)) {
+            newInputShape = newExpandedShapeResult.value().raw();
+            return true;
+        } else if (isElementWised(layerOp)) {
+            newExpandedShapeResult =
                     getShapeCastExpandedShapeInDimC(layerOp, getShape(layerOp.getInput()), _log.nest());
             if (mlir::failed(newExpandedShapeResult)) {
                 newExpandedShapeResult =
@@ -180,14 +187,8 @@ mlir::LogicalResult ReshapeGroupConvInput::matchAndRewrite(IE::GroupConvolutionO
             newInputShape = newExpandedShapeResult.value().raw();
             return true;
         }
-        // Input can be reshaped
-        auto newExpandedShapeResult =
-                getShapeCastExpandedShapeKeepDimC(layerOp, getShape(layerOp.getInput()), _log.nest());
-        if (mlir::failed(newExpandedShapeResult)) {
-            return false;
-        }
-        newInputShape = newExpandedShapeResult.value().raw();
-        return true;
+
+        return false;
     };
     if (!supportedGroupConv(convOp)) {
         return mlir::failure();

@@ -411,6 +411,30 @@ def FuseReordersPass : PassBase<"fuse-reorders", "vpux::FunctionPass"> {
     ];
 }
 
+def FuseMultiplyToConv : PassBase<"fuse-multiply-to-conv", "vpux::FunctionPass"> {
+    let summary = "Fuses suitable `IE.Multiply` with const operand to `IE.Convolution`";
+
+    let description = [{
+        This transformation takes the following subgraph:
+        ```
+                                        Const.Declare
+                                            |
+            IE.Convolution -> ... -> IE.Multiply
+        ```
+        and fuses the `IE.Multiply` into `IE.Convolution` (see `static_scale`
+        attribute and weights table generation for details).
+
+        Fusing multiplication by a constant to a convolution makes the
+        multiplication itself effectively no-op on several HW architectures.
+    }];
+
+    let constructor = "vpux::IE::arch37xx::createFuseMultiplyToConvPass()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+}
+
 //
 // ConvertWeightsToI8Pass
 //
@@ -436,6 +460,62 @@ def ConvertWeightsToI8 : PassBase<"convert-weights-to-i8", "vpux::FunctionPass">
     }];
 
     let constructor = "vpux::IE::arch37xx::createConvertWeightsToI8Pass()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+}
+
+def ProcessAsymmetricZeroPointsForConvolution : PassBase<"process-asymmetric-zero-points-for-convolution", "vpux::FunctionPass"> {
+    let summary = "Changes zero point of convolution weights to 128 via decomposition";
+
+    let description = [{
+        Changes zero point of convolution weights to 128 via decomposition.
+        This is done to support mixed precision convolution which must have f16 input and i8 weights with zero
+        point of 0, only u8 weights with zero point of 128 are converted to i8 ( by ConvertWeightsToI8Pass) so
+        this pass fixes zero points of u8 weights to 128.
+        Pass first look for this pattern for convolution filter:
+        FakeQuantize -> Optional(Transpose) -> Optional(AffineReshape)  -> Convolution
+        Full pattern with Transpose and AffineReshape captures matmuls which are converted to Convolutions.
+        FakeQuantize -> Convolution pattern captures ops which were originally convolution in the input graph.
+        Additional conditions are checked for the pattern to be valid.
+        Quantized type must be unsigned 8 bit number with zero point different than 128.
+        Converts : input -> Convolution <- FakeQuantize <- constDeclare
+        To :
+        P1 =  input -> Convolution <- (ModifiedFakeQuantize ZeroPoint = 128 ) <- constDeclare
+        P2 =  input -> Convolution <- constDeclare ( same size as original filter, values are (128-ZeroPoint) * scale)
+            P1 -> Add <- P2
+        Current implementation causes a regression as it increases #DPU task 2x, and DMA size is not any
+        less than original flow. There are plans to reduce DMA size E#126278.
+    }];
+
+    let constructor = "vpux::IE::arch37xx::createProcessAsymmetricZeroPointsForConvolutionPass()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+}
+
+//
+// FuseOutstandingDequant
+//
+
+def FuseOutstandingDequant: PassBase<"fuse-outstanding-dequant", "vpux::FunctionPass"> {
+    let summary = "Fuse outstanding dequantize after NCE task";
+
+    let description = [{
+        The pass is a part of `LowPrecision` pipeline.
+
+        Pass walks through quant-agnostic ops and removes dequantize after
+        NCE task with quantized output.
+
+        Converts :
+        `u8_Convolution_u8 -> u8_ElemTypeInfoOp_u8 -> ... -> u8_Dequantize_f16 -> f16_SWKernel_f16`
+        To :
+        `u8_Convolution_f16 -> f16_ElemTypeInfoOp_f16 -> ... -> f16_SWKernel_f16`
+    }];
+
+    let constructor = "vpux::IE::arch37xx::createFuseOutstandingDequant()";
 
     let dependentDialects = [
         "vpux::IE::IEDialect"

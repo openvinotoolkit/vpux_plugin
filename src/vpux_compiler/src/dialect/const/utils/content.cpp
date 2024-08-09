@@ -7,6 +7,7 @@
 
 #include "vpux/compiler/core/layers.hpp"
 #include "vpux/compiler/utils/loop.hpp"
+#include "vpux/compiler/utils/quantization.hpp"
 #include "vpux/utils/core/numeric.hpp"
 
 using namespace vpux;
@@ -179,6 +180,10 @@ void vpux::Const::Content::copySubByteContent(MutableArrayRef<char> targetData, 
         return;
     }
     std::memcpy(targetData.data(), _data.data(), _data.size());
+}
+
+mlir::Type vpux::Const::Content::getNormalizedQuantStorageType(mlir::quant::QuantizedType qType) {
+    return vpux::normalizeQuantStorageType(qType);
 }
 
 void vpux::Const::Content::copyTo(MutableArrayRef<char> targetData) const {

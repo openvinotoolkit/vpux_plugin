@@ -8,6 +8,7 @@
 #include "vpux/compiler/dialect/IE/utils/interpolate_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/permute_utils.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
@@ -46,9 +47,11 @@ mlir::Value createAverageConv(mlir::Value input, ShapeRef kernelShape, mlir::Loc
         }
     }
 
-    const DimsOrder weighOrder = DimsOrder::OYXI;
-
-    auto weight = VPU::buildWeightsConst(ShapeRef(weightShape), weighOrder, ArrayRef(weights), input, rewriter);
+    const DimsOrder weightOrder = DimsOrder::OYXI;
+    const auto weightType = mlir::RankedTensorType::get(
+            weightShape.raw(), mlir::cast<NDTypeInterface>(input.getType()).getElementType(),
+            getTensorAttr(rewriter.getContext(), weightOrder, nullptr, nullptr));
+    auto weight = Const::buildWeightsConst(rewriter, input.getLoc(), weightType, ArrayRef(weights));
 
     auto newLoc = appendLoc(loc, "_interpolate_Conv");
 
@@ -83,28 +86,21 @@ auto createAverageDWConv(mlir::Value input, ShapeRef kernelShape, mlir::Location
     auto groupAttr = getIntAttr(rewriter, inShape[Dims4D::Act::C]);
 
     const auto elemType = input.getType().cast<vpux::NDTypeInterface>().getElementType();
-    auto createConstOp = [&](ShapeRef shape, vpux::type::float16 value) -> Const::DeclareOp {
-        const auto dataStorageType = mlir::RankedTensorType::get(to_small_vector(shape), elemType);
-
-        const auto denseElementVal = mlir::DenseElementsAttr::get(dataStorageType, value);
-        return rewriter.create<Const::DeclareOp>(loc, dataStorageType, Const::ContentAttr::get(denseElementVal));
-    };
 
     // OC is equal with IC
     const auto weightShape = Shape{inShape[Dims4D::Act::C], 1, kernelShape[Dim(0)], kernelShape[Dim(1)]};
     const float weightsScaleFactor = 1.0f / static_cast<float>(kernelShape[Dim(0)] * kernelShape[Dim(1)]);
     const float weightRealVal = (inputFQ != nullptr) ? 1.0f : weightsScaleFactor;
-    auto dwConvFilter = createConstOp(weightShape, weightRealVal);
-    auto weights = dwConvFilter.getOutput();
     const auto dataStorageType = mlir::RankedTensorType::get(to_small_vector(weightShape), elemType);
+    auto weights = Const::createFloatConst(rewriter, loc, dataStorageType, weightRealVal);
     // Add fakeQuan after kernel if needed
     if (inputFQ != nullptr) {
         const auto fqArgType = mlir::RankedTensorType::get({}, elemType);
 
         auto fqLevelsVal = getIntAttr(rewriter, 255);
-        auto fqLowVal = VPU::declareFloatConst(rewriter, loc, 0.0f, fqArgType);
-        auto fqInHighVal = VPU::declareFloatConst(rewriter, loc, 254.0f, fqArgType);
-        auto fqOutHighVal = VPU::declareFloatConst(rewriter, loc, 254.0f * weightsScaleFactor, fqArgType);
+        auto fqLowVal = Const::createFloatConst(rewriter, loc, fqArgType, 0.0f);
+        auto fqInHighVal = Const::createFloatConst(rewriter, loc, fqArgType, 254.0f);
+        auto fqOutHighVal = Const::createFloatConst(rewriter, loc, fqArgType, 254.0f * weightsScaleFactor);
 
         // lowFpType is ignored (nullptr), only levels are given
         auto quantizationForWeights =
@@ -634,7 +630,6 @@ void ConvertBilinearToStridedConcatAndConvPass::safeRunOnFunc() {
         const auto coordMode = attrs.getCoordMode().getValue();
         const auto inputShape = getShape(op.getInput());
         const auto outShape = getShape(op.getOutput());
-        const auto arch = VPU::getArch(op);
         int64_t scaleW = 1;
         int64_t scaleH = 1;
 
@@ -679,7 +674,7 @@ void ConvertBilinearToStridedConcatAndConvPass::safeRunOnFunc() {
                     (outShape[Dims4D::Act::H] - 1) % (inputShape[Dims4D::Act::H] - 1) == 0) {
                     scaleW = (outShape[Dims4D::Act::W] - 1) / (inputShape[Dims4D::Act::W] - 1);
                     scaleH = (outShape[Dims4D::Act::H] - 1) / (inputShape[Dims4D::Act::H] - 1);
-                    return (arch == VPU::ArchKind::NPU30XX && scaleW == 4 && scaleH == 4) || (scaleW > 4 && scaleH > 4);
+                    return (scaleW > 4 && scaleH > 4);
                 } else {
                     return true;
                 }
@@ -704,7 +699,7 @@ void ConvertBilinearToStridedConcatAndConvPass::safeRunOnFunc() {
                     // cause some performance loss especially for big interpolates. In future, SEP may help to solve
                     // this issue. Details see ticket: E43217 The scaleW 4 and scaleH 4 is more efficient on VPUX37XX.
                     // Details see ticket: E56905
-                    return (arch == VPU::ArchKind::NPU30XX && scaleW == 4 && scaleH == 4) || (scaleW > 4 && scaleH > 4);
+                    return (scaleW > 4 && scaleH > 4);
                 } else if ((coordMode == IE::InterpolateCoordMode::PYTORCH_HALF_PIXEL) ||
                            (coordMode == IE::InterpolateCoordMode::HALF_PIXEL)) {
                     scaleW = outShape[Dims4D::Act::W] / inputShape[Dims4D::Act::W];
@@ -761,12 +756,6 @@ void ConvertBilinearToStridedConcatAndConvPass::safeRunOnFunc() {
         const auto inputShape = getShape(op.getInput());
         const auto outputShape = getShape(op.getOutput());
         const auto inputType = op.getInput().getType().cast<vpux::NDTypeInterface>();
-        const auto arch = VPU::getArch(op);
-
-        // This convert will build asymmetric stride convolution, VPUX30XX didn't support asymmetric stride.
-        if (arch == VPU::ArchKind::NPU30XX) {
-            return true;
-        }
 
         if ((interpMode != IE::InterpolateMode::LINEAR_ONNX && interpMode != IE::InterpolateMode::LINEAR) ||
             antiAlias) {

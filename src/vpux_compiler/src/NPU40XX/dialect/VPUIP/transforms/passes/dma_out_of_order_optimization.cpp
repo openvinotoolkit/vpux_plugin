@@ -92,16 +92,23 @@ void DMAOutOfOrderOptimizationPass::safeRunOnFunc() {
         const auto port = dmaOp.getPortVal();
         VPUX_THROW_UNLESS(port.has_value(), "DMA port has not been set");
         const auto portValue = port.value();
-
         auto channelType = dmaOp.getChannelType();
-
         auto dmaQueueTaskId = getDMAQueueIdEncoding(portValue, channelType);
-
         _log.trace("Identified DMA operation on port - {0} and channel - {1}:'{2}', ", portValue, channelType,
                    dmaOp->getLoc());
 
         auto taskOp = dmaOp->getParentOfType<VPURT::TaskOp>();
         VPUX_THROW_WHEN(taskOp == nullptr, "Parent must be VPURT::TaskOp");
+
+        // Skip DMAs which are used for profiling buffer management because
+        // applying OOO optimization to them can lead to concurrency issues,
+        // specifically in DMA HWP
+        if (auto nndmaOp = mlir::dyn_cast<VPUIP::NNDMAOp>(dmaOp.getOperation())) {
+            if (nndmaOp.getProfilingBufferMgmt()) {
+                return;
+            }
+        }
+
         const auto waitBarriers = taskOp.getWaitBarriers();
         if (dmaPreviousTasksQueueMap.find(dmaQueueTaskId) == dmaPreviousTasksQueueMap.end()) {
             // First task on this queue. Just store information about it

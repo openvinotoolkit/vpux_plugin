@@ -138,20 +138,14 @@ void writeProfilingOutput(const OutputFormat format, const uint8_t* blobData, si
         writeDebugProfilingInfo(output, blobData, blobSize, profData, profSize);
         return;
     }
-    std::vector<TaskInfo> taskProfiling =
-            getTaskInfo(blobData, blobSize, profData, profSize, verbosity, fpga, highFreqPerfClk);
-    std::vector<LayerInfo> layerProfiling = getLayerInfo(taskProfiling);
-
-    // Order tasks and layers by start time
-    std::sort(taskProfiling.begin(), taskProfiling.end(), profilingTaskStartTimeComparator<TaskInfo>);
-    std::sort(layerProfiling.begin(), layerProfiling.end(), profilingTaskStartTimeComparator<LayerInfo>);
+    ProfInfo profInfo = getProfInfo(blobData, blobSize, profData, profSize, verbosity, fpga, highFreqPerfClk);
 
     switch (format) {
     case OutputFormat::TEXT:
-        printProfilingAsText(taskProfiling, layerProfiling, output);
+        printProfilingAsText(profInfo.tasks, profInfo.layers, output);
         break;
     case OutputFormat::JSON:
-        printProfilingAsTraceEvent(taskProfiling, layerProfiling, output);
+        printProfilingAsTraceEvent(profInfo.tasks, profInfo.layers, profInfo.dpuFreq, output);
         break;
     default:
         VPUX_THROW("Unsupported profiling output type.");

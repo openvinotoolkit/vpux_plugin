@@ -262,8 +262,9 @@ def VPUIPDPU_IDUEltWiseCfgOp :
     let summary = "IDU eltwise configuration";
 
     let arguments =(ins
-        OptionalAttr<AnyAttrOf<[IntAttr, F32Attr]>>:$elop_scale_a,
-        OptionalAttr<AnyAttrOf<[IntAttr, F32Attr]>>:$elop_scale_b
+        UnitAttr:$bf16_flow_on,
+        AnyAttrOf<[IntAttr, F32Attr]>:$elop_scale_a,
+        AnyAttrOf<[IntAttr, F32Attr]>:$elop_scale_b
         );
 
     let hasVerifier = 1;
@@ -1191,8 +1192,8 @@ def VPUIPDPU_ODUOutActivationsOp :
 Data type specification:
 | attr name  | value range                                | vpu arch |
 |:-----------|:-------------------------------------------|:---------|
-| data_type  | fp16, u8f, g8, i8, i32, i4, i2, log, bin   | NPU37XX  |
-| data_width | 1-bit, 2-bit, 4-bit, 8-bit, 16-bit, 32-bit | NPU40XX  |
+| data_type  | fp16, u8f, g8, i8, i32, i4, i2, log, bin   | NPU37XX   |
+| data_width | 1-bit, 2-bit, 4-bit, 8-bit, 16-bit, 32-bit | NPU40XX     |
 If data_type/data_width is not specified then ODU output data type should be inferred from %out_activations.
         }];
 

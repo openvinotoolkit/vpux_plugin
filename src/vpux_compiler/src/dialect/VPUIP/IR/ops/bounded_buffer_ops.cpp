@@ -15,11 +15,12 @@ using namespace vpux;
 mlir::LogicalResult VPUIP::GroupBoundedBufferOp::inferReturnTypes(mlir::MLIRContext* ctx,
                                                                   std::optional<mlir::Location> optLoc,
                                                                   mlir::ValueRange operands, mlir::DictionaryAttr attrs,
-                                                                  mlir::OpaqueProperties, mlir::RegionRange /*ranges*/,
+                                                                  mlir::OpaqueProperties props,
+                                                                  mlir::RegionRange /*ranges*/,
                                                                   SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPUIP::GroupBoundedBufferOpAdaptor op(operands, attrs);
+    VPUIP::GroupBoundedBufferOpAdaptor op(operands, attrs, props);
     if (mlir::failed(op.verify(loc))) {
         return mlir::failure();
     }
@@ -36,15 +37,13 @@ mlir::ValueRange VPUIP::GroupBoundedBufferOp::getViewSources() {
     return getOperands();
 }
 
-mlir::LogicalResult VPUIP::UngroupBoundedBufferOp::inferReturnTypes(mlir::MLIRContext* ctx,
-                                                                    std::optional<mlir::Location> optLoc,
-                                                                    mlir::ValueRange operands,
-                                                                    mlir::DictionaryAttr attrs, mlir::OpaqueProperties,
-                                                                    mlir::RegionRange /*ranges*/,
-                                                                    SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
+mlir::LogicalResult VPUIP::UngroupBoundedBufferOp::inferReturnTypes(
+        mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueRange operands,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties props, mlir::RegionRange /*ranges*/,
+        SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPUIP::UngroupBoundedBufferOpAdaptor op(operands, attrs);
+    VPUIP::UngroupBoundedBufferOpAdaptor op(operands, attrs, props);
     if (mlir::failed(op.verify(loc))) {
         return mlir::failure();
     }

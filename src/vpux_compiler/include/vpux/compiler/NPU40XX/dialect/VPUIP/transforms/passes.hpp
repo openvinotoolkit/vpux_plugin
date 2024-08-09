@@ -25,7 +25,8 @@ std::unique_ptr<mlir::Pass> createComputeTaskStrippingPass(
         bool shaveDryRun = false);
 
 std::unique_ptr<mlir::Pass> createComputeHaloRegionForDPUTaskOpPass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createDMATaskProfilingHwDdrPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createDMATaskProfilingHwDdrPass(
+        DMAProfilingMode dmaProfilingMode = DMAProfilingMode::DISABLED, Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createConstantDpuProfHwpBasePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createCompressSpillDmaPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createDMAOutOfOrderOptimizationPass(Logger log = Logger::global());
@@ -33,6 +34,7 @@ std::unique_ptr<mlir::Pass> createDMAOutOfOrderOptimizationPass(Logger log = Log
 std::unique_ptr<mlir::Pass> createUnrollClusterTilingPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createOptimizeConvertDMAOpPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createAddStartBarrierPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createDetectDMASplitCandidatePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createSplitDMAToBalanceLoadPass(Logger log = Logger::global());
 
 //
@@ -63,8 +65,9 @@ struct DefaultHWOptions :
         public VPUIP::DefaultHWOptionsDialectBase,
         virtual vpux::arch40xx::DefaultHWOptionsDeviceBase {
     // Enable for 40XX once RT will be ready, follow up #E95864
-    BoolOption enableDMAProfiling{*this, "dma-profiling", llvm::cl::desc("Enable DMA task profiling"),
-                                  llvm::cl::init(false)};
+    StrOption enableDMAProfiling{*this, "dma-profiling",
+                                 llvm::cl::desc("Enable DMA task profiling (true, false, static)"),
+                                 ::llvm::cl::init("false")};
 
     BoolOption enableCompressWeightsBTC{*this, "compress-weights-btc", ::llvm::cl::desc("Enable compress-weights pass"),
                                         ::llvm::cl::init(false)};

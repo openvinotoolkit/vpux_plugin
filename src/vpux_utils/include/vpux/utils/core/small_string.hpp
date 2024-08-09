@@ -4,6 +4,8 @@
 //
 
 //
+
+//
 // A SmallString is just a SmallVector with methods and accessors
 // that make it work better as a string
 //

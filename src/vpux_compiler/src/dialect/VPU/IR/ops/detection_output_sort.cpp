@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2023-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -10,6 +10,7 @@
 #include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/explicit_distribution_utils.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
 using namespace vpux;
@@ -20,11 +21,11 @@ using namespace vpux;
 
 mlir::LogicalResult VPU::DetectionOutputSortOp::inferReturnTypes(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange /*regions*/,
         mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::DetectionOutputSortOpAdaptor sort(operands, attrs);
+    VPU::DetectionOutputSortOpAdaptor sort(operands, attrs, prop);
     if (mlir::failed(sort.verify(loc))) {
         return mlir::failure();
     }
@@ -39,8 +40,8 @@ mlir::LogicalResult VPU::DetectionOutputSortOp::inferReturnTypes(
     const auto outIndicesShape = SmallVector<int64_t>{1, 1, numClasses, numPriors};
     const auto outSizesShape = SmallVector<int64_t>{1, 1, numClasses, 1};
 
-    const auto outConfidenceType = inputType.changeShape(Shape(outConfidenceShape));
-
+    const auto outConfidenceType = mlir::RankedTensorType::get(outConfidenceShape, inputType.getElementType(),
+                                                               createTensorAttrFromType(inputType));
     const auto outIndicesElemType = mlir::IntegerType::get(ctx, 32, mlir::IntegerType::Signed);
     const auto outIndicesType = mlir::RankedTensorType::get(outIndicesShape, outIndicesElemType);
     const auto outSizesType = mlir::RankedTensorType::get(outSizesShape, outIndicesElemType);
@@ -64,22 +65,14 @@ mlir::Value createIndicesAuxiliaryBuffer(mlir::OpBuilder& rewriter, ShapeRef sha
     }
 
     const auto auxIndicesType = mlir::RankedTensorType::get(shape.raw(), getSInt32Type(rewriter.getContext()));
-    const auto auxIndicesAttr = mlir::DenseElementsAttr::get(auxIndicesType, ArrayRef(auxIndicesContent));
-    auto auxIndicesContentAttr = Const::ContentAttr::get(auxIndicesAttr);
-
-    return rewriter.create<Const::DeclareOp>(
-            appendLoc(mlir::UnknownLoc::get(rewriter.getContext()), "sort_IndicesBuffer"),
-            auxIndicesContentAttr.getType(), auxIndicesContentAttr);
+    return Const::createConst(rewriter, appendLoc(mlir::UnknownLoc::get(rewriter.getContext()), "sort_IndicesBuffer"),
+                              auxIndicesType, ArrayRef(auxIndicesContent));
 }
 
 mlir::Value createSortingAuxiliaryBuffer(mlir::OpBuilder& rewriter, ShapeRef shape) {
     const auto auxIndicesType = mlir::RankedTensorType::get(shape.raw(), getSInt32Type(rewriter.getContext()));
-    const auto auxIndicesAttr = mlir::DenseElementsAttr::get(auxIndicesType, 0);
-    auto auxIndicesContentAttr = Const::ContentAttr::get(auxIndicesAttr);
-
-    return rewriter.create<Const::DeclareOp>(
-            appendLoc(mlir::UnknownLoc::get(rewriter.getContext()), "sort_SortingBuffer"),
-            auxIndicesContentAttr.getType(), auxIndicesContentAttr);
+    return Const::createConst(rewriter, appendLoc(mlir::UnknownLoc::get(rewriter.getContext()), "sort_SortingBuffer"),
+                              auxIndicesType, ArrayRef<int32_t>(0));
 }
 
 static mlir::ModuleOp getModule(::mlir::OpBuilder& odsBuilder) {
@@ -139,19 +132,25 @@ bool vpux::VPU::DetectionOutputSortOp::checkStrategyCompatibility(VPU::MultiClus
     return strategy == VPU::MultiClusterStrategy::SplitOverHeight;
 }
 
-vpux::VPU::DistributedTensorAttr vpux::VPU::DetectionOutputSortOp::getExplicitDistributedTensorAttr(
-        vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, mlir::ArrayAttr numTiles,
-        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::UnitAttr uniformDistributedSegments,
-        const vpux::VPU::OverlapDistributionParams& /*overlapParams*/) {
-    return VPU::getSWExplicitDistributedTensorAttr(mlir::dyn_cast<VPU::SWOpInterface>(getOperation()), shape,
-                                                   distributionMode, numTiles, numClusters, alignment,
-                                                   uniformDistributedSegments);
+vpux::VPU::DistributedTensorNative vpux::VPU::DetectionOutputSortOp::getExplicitDistributedTensorAttr(
+        vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, ArrayRef<int64_t> numTiles,
+        const int64_t numClusters, ArrayRef<int64_t> alignment, const bool uniformDistributedSegments,
+        const vpux::VPU::OverlapDistributionParams& overlapParams) {
+    return VPU::getSWExplicitDistributedTensorNative(mlir::cast<VPU::SWOpInterface>(getOperation()), shape,
+                                                     distributionMode, numTiles, numClusters, alignment,
+                                                     uniformDistributedSegments, overlapParams);
 }
 
 bool VPU::DetectionOutputSortOp::isOperationSplitOverHeightCompatible(const vpux::TileInfo& outputTile) {
     auto moduleOp = getOperation()->getParentOfType<mlir::ModuleOp>();
     auto tileOp = IE::getTileExecutor(moduleOp);
-    auto height = outputTile.shape[Dims4D::Act::H];
+
+    auto outputShape = ShapeRef(outputTile.shape);
+    if (outputShape == ShapeRef()) {
+        outputShape = getShape(getOutConfidence());
+    }
+    auto height = outputShape[Dims4D::Act::H];
+
     return height >= tileOp.getCount();
 }
 
@@ -166,20 +165,28 @@ bool VPU::DetectionOutputSortOp::isOperationSplitOverKernelCompatible(ShapeRef, 
 bool VPU::DetectionOutputSortOp::doesLayerFitIntoCMX(VPU::MultiClusterStrategy strategy, Byte reservedMem) {
     auto op = mlir::cast<VPU::DetectionOutputSortOp>(getOperation());
     const auto outputType = op->getResult(0).getType().cast<vpux::NDTypeInterface>();
-    auto numClusters = VPU::getOptimalNumClusters(op, outputType.getShape()[Dims4D::Act::H], strategy);
+    auto numClusters = VPU::getOptimalNumClusters(op, outputType.getShape(), strategy);
 
-    auto distributedTensorTypes = SmallVector<vpux::NDTypeInterface>();
+    SmallVector<Byte> buffersSize;
+
     for (const auto& operand : op.getOperands()) {
-        const auto distributedType = getDistributedActivationTypeFromOp(op, operand.getType(), numClusters, strategy);
-        distributedTensorTypes.push_back(distributedType);
+        buffersSize.push_back(VPU::getTotalAllocSizeWithDistribution(
+                operand.getType(),
+                getActivationDistributionAttrFromOp(op, operand.getType(), numClusters.getInt(), strategy)));
     }
 
     for (const auto& result : op.getResults()) {
-        const auto distributedType = getDistributedOutputTypeFromOp(op, result.getType(), numClusters, strategy);
-        distributedTensorTypes.push_back(distributedType);
+        buffersSize.push_back(VPU::getTotalAllocSizeWithDistribution(
+                result.getType(),
+                getOutputDistributionAttrFromOp(op, result.getType(), numClusters.getInt(), strategy)));
     }
 
-    return fitIntoCMX(distributedTensorTypes, reservedMem);
+    auto totalAvailableCMXSize = reservedMem.count() == 0 ? getTotalCMXSize(getOperation()).count()
+                                                          : getTotalCMXFragmentationAwareSize(getOperation()).count();
+
+    return vpux::VPU::calculateAlignedBuffersMemoryRequirement(getArch(getOperation()), buffersSize).count() +
+                   reservedMem.count() <=
+           totalAvailableCMXSize;
 }
 
 //

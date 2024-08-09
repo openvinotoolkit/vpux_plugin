@@ -14,11 +14,11 @@ using namespace vpux;
 
 mlir::LogicalResult vpux::VPU::GRUSequenceOp::inferReturnTypes(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         mlir::SmallVectorImpl<mlir::Type>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::GRUSequenceOpAdaptor gru(operands, attrs);
+    VPU::GRUSequenceOpAdaptor gru(operands, attrs, prop);
     if (mlir::failed(gru.verify(loc))) {
         return mlir::failure();
     }
@@ -134,7 +134,10 @@ mlir::FailureOr<OutputTiling> vpux::VPU::GRUSequenceOp::getTilingStrategy(Tiling
     int64_t tileDim = 0;
     while (!isSupportedTileSize(nTilesOnDimForOutputY, tilingMode)) {
         // Dimension of hidden_size can't be tiled.
-        VPUX_THROW_UNLESS(tileDim < 3, "can't get feasible tiling strategy for GRUSequence.");
+        if (tileDim >= 3) {
+            log.trace("can't get feasible tiling strategy for GRUSequence.");
+            return mlir::failure();
+        }
         if (nTilesOnDimForOutputY[Dim(tileDim)] >= outputYShape[Dim(tileDim)]) {
             ++tileDim;
         } else {

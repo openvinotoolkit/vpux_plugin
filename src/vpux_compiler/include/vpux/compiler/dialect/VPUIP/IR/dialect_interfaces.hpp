@@ -51,7 +51,7 @@ struct FuncInlinerInterface : public mlir::DialectInlinerInterface {
 
     bool isLegalToInline(mlir::Region*, mlir::Region*, bool, mlir::IRMapping&) const final;
 
-    void handleTerminator(mlir::Operation*, ArrayRef<mlir::Value>) const final;
+    void handleTerminator(mlir::Operation*, mlir::ValueRange) const final;
 
     void processInlinedCallBlocks(mlir::Operation* call,
                                   mlir::iterator_range<mlir::Region::iterator> inlinedBlocks) const final;

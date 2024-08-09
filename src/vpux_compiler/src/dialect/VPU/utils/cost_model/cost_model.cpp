@@ -15,8 +15,6 @@ namespace {
 
 ArrayRef<char> getCostModelData(VPU::ArchKind archKind, bool isFastModel) {
     switch (archKind) {
-    case VPU::ArchKind::NPU30XX:
-        return ArrayRef(VPU::COST_MODEL_2_0, VPU::COST_MODEL_2_0_SIZE);
     case VPU::ArchKind::NPU37XX:
     case VPU::ArchKind::NPU40XX:
         if (isFastModel) {
@@ -122,8 +120,6 @@ float vpux::VPU::getWeightsSparsityRatio(mlir::Value weights) {
 
 VPUNN::VPUDevice vpux::VPU::getVPUDeviceType(VPU::ArchKind archKind) {
     switch (archKind) {
-    case VPU::ArchKind::NPU30XX:
-        return VPUNN::VPUDevice::VPU_2_0;
     case VPU::ArchKind::NPU37XX:
         return VPUNN::VPUDevice::VPU_2_7;
     case VPU::ArchKind::NPU40XX:
@@ -131,6 +127,26 @@ VPUNN::VPUDevice vpux::VPU::getVPUDeviceType(VPU::ArchKind archKind) {
     default:
         VPUX_THROW("Unsupported VPU arch type: '{0}'", archKind);
     }
+}
+
+bool vpux::VPU::isVPUNNSupportedElementType(mlir::Type type) {
+    if (type.isBF16()) {
+        return true;
+    } else if (type.isF16()) {
+        return true;
+    } else if (type.isInteger(CHAR_BIT * sizeof(int8_t))) {
+        return true;
+    } else if (type.isUnsignedInteger(CHAR_BIT * sizeof(int8_t))) {
+        return true;
+    } else if (auto qType = type.dyn_cast<mlir::quant::QuantizedType>()) {
+        if (qType.getStorageTypeIntegralWidth() == 8) {
+            return true;
+        } else if (qType.getStorageTypeIntegralWidth() == 4) {
+            // Temporary enablement; follow up E#103211
+            return true;
+        }
+    }
+    return false;
 }
 
 VPUNN::DataType vpux::VPU::getVPUNNElementType(mlir::Type type) {
@@ -241,6 +257,9 @@ VPUNN::VPULayerStrategy vpux::VPU::getVPULayerStrategy(VPU::MultiClusterStrategy
     case VPU::MultiClusterStrategy::SplitOverHeight:
     case VPU::MultiClusterStrategy::SplitOverHeightOverlapped:
     case VPU::MultiClusterStrategy::HKSwitch:
+    // TODO:[E-122321] Investigate if VPUNN Cost Model supports multiple batch query.
+    // As a workaround, we set SOB MC to SOH tiling strategy for now.
+    case VPU::MultiClusterStrategy::SplitOverBatch:
         VPUNNStrategy.tiling_strategy = VPUNN::VPUTilingStrategy::SOH;
         return VPUNNStrategy;
     case VPU::MultiClusterStrategy::SplitOverKernel:
@@ -365,11 +384,6 @@ VPUNN::DPUWorkload vpux::VPU::getDPUWorkload(const VPUIP::WorkloadCostParams& ti
             {static_cast<unsigned int>(padsTileConf.top), static_cast<unsigned int>(padsTileConf.bottom),
              static_cast<unsigned int>(padsTileConf.left), static_cast<unsigned int>(padsTileConf.right)},
             getExecutionMode(mpeMode)};
-
-    // VPUNN model on KMB device is not maintained, keep original construction way
-    if (tileParams.arch == VPU::ArchKind::NPU30XX) {
-        return vpunnDPUWorkload;
-    }
 
     vpunnDPUWorkload.weight_sparsity_enabled = tileParams.isWeightsSparsityEnabled;
     vpunnDPUWorkload.weight_sparsity = tileParams.weightsSparsityRatio;
@@ -527,6 +541,9 @@ VPUIP::WorkloadCostParams vpux::VPU::getWorkloadCostParam(VPU::NCEOpInterface nc
                 params.nceTaskType = VPUIP::NCETaskType::ELTWISE;
             })
             .Case<VPU::NCEInterpolateOp>([&](VPU::NCEInterpolateOp) {
+                params.nceTaskType = VPUIP::NCETaskType::CONV;
+            })
+            .Case<VPU::NCEMatMulOp>([&](auto) {
                 params.nceTaskType = VPUIP::NCETaskType::CONV;
             })
             // Only for VPUNN L1 DPU API

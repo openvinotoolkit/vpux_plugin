@@ -1,10 +1,11 @@
 //
-// Copyright (C) 2023 Intel Corporation
+// Copyright (C) 2023-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
+#include "vpux/compiler/dialect/IE/utils/fake_quantize_utils.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
 using namespace vpux;
@@ -21,7 +22,6 @@ public:
     mlir::LogicalResult matchAndRewrite(IE::FakeQuantizeOp origOp, mlir::PatternRewriter& rewriter) const final;
 
 private:
-    std::set<int64_t> findAxes(IE::FakeQuantizeOp origOp) const;
     mlir::Value getValue(const mlir::ValueRange values, const int64_t idx) const;
     SmallVector<mlir::Value> splitValue(const mlir::Value val, const int64_t axis,
                                         mlir::PatternRewriter& rewriter) const;
@@ -31,29 +31,6 @@ private:
 private:
     Logger _log;
 };
-
-// Returns the positions of axes
-// For FQ in_low = in_high = out_low = out_high = 1x1x1x1 the set is empty
-// For FQ in_low = in_high = out_low = out_high = 1x3x1x1 the set contains only one value = 1
-// For FQ in_low = in_high = 1x1x1x1, out_low = out_high = 1x3x1x1 the set contains only one value = 1
-// For FQ in_low = in_high = out_low = out_high = 1x3x1x16 the set contains positions 1 and 3
-std::set<int64_t> UnrollFakeQuantize::findAxes(IE::FakeQuantizeOp origOp) const {
-    const auto operandShapes = SmallVector<ShapeRef>{
-            getShape(origOp.getInputLow()),
-            getShape(origOp.getInputHigh()),
-            getShape(origOp.getOutputLow()),
-            getShape(origOp.getOutputHigh()),
-    };
-    std::set<int64_t> axes;
-    for (const auto& shape : operandShapes) {
-        for (const auto& axis : irange(shape.size())) {
-            if (shape[Dim(axis)] != 1) {
-                axes.insert(axis);
-            }
-        }
-    }
-    return axes;
-}
 
 // Dispatch the case when the shapes of quantization parameters don't match.
 // For example fqLow = 1x1x1, fqHigh = 16x1x64.
@@ -127,7 +104,7 @@ mlir::LogicalResult UnrollFakeQuantize::matchAndRewrite(IE::FakeQuantizeOp origO
         return mlir::failure();
     }
 
-    const auto axes = findAxes(origOp);
+    const auto axes = IE::findAxes(origOp);
     // Cases when there's only one axis or there are no axes at all are fine. Nothing to do.
     if (axes.size() <= 1) {
         return mlir::failure();

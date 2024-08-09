@@ -9,6 +9,7 @@
 #include "vpux/compiler/dialect/VPUMI40XX/dialect.hpp"
 #include "vpux/compiler/dialect/VPURegMapped/passes.hpp"
 
+#include "vpux/compiler/core/profiling.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/dialect.hpp"
 #include "vpux/compiler/utils/passes.hpp"
 
@@ -26,7 +27,8 @@ namespace VPUMI40XX {
 // Passes
 //
 
-std::unique_ptr<mlir::Pass> createSetupProfilingVPUMI40XXPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createSetupProfilingVPUMI40XXPass(
+        DMAProfilingMode dmaProfilingMode = DMAProfilingMode::DISABLED, Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createBarrierComputationPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> reorderMappedInferenceOpsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createResolveTaskLocationPass(Logger log = Logger::global());
@@ -42,6 +44,7 @@ std::unique_ptr<mlir::Pass> createUnrollFetchTaskOpsPass(Logger log = Logger::gl
 std::unique_ptr<mlir::Pass> createLinkEnqueueTargetsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createLinkAllOpsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createUnrollEnqueueOpsPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createSplitEnqueueOpsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createAddBootstrapOpsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createNextSameIdAssignmentPass(Logger log = Logger::global());
 

@@ -190,5 +190,40 @@ IE::ShapeCastOp buildShapeCast(mlir::Location loc, mlir::Value input, ArrayRef<i
     return rewriter.create<IE::ShapeCastOp>(loc, dstType, input, targetShapeAttr);
 }
 
+bool isEligibleToFoldStrideKernel(vpux::NDTypeInterface inputType, vpux::NDTypeInterface outputType, int64_t kernelX,
+                                  int64_t strideX, int64_t inAlignment, int64_t outAlignment, const Logger& log) {
+    auto inDimOrder = inputType.getDimsOrder();
+    if (DimsOrder::NHWC != inDimOrder) {
+        return false;
+    }
+
+    if ((1 == strideX) || (kernelX > strideX)) {
+        return false;
+    }
+
+    auto inputShape = inputType.getShape();
+    if (inputShape[Dims4D::Act::W] % strideX) {
+        return false;
+    }
+
+    auto outputShape = outputType.getShape();
+    const auto IC = inputShape[Dims4D::Act::C];
+    const auto OC = outputShape[Dims4D::Act::C];
+    if ((IC % inAlignment) == 0 && (OC % outAlignment) == 0) {
+        log.trace("The input/output channels are already aligned");
+        return false;
+    }
+
+    return true;
+}
+
+Shape getNewShapeAfterStrideFolding(ShapeRef origShape, int64_t SX) {
+    Shape newShape(origShape.raw());
+    newShape[Dims4D::Act::W] /= SX;
+    newShape[Dims4D::Act::C] *= SX;
+
+    return newShape;
+}
+
 }  // namespace IE
 }  // namespace vpux

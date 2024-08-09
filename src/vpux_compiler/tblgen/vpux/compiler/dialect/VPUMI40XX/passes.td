@@ -19,6 +19,14 @@ def SetupProfilingVPUMI40XX : PassBase<"setup-profiling-VPUMI40XX", "vpux::Modul
 
     let constructor = "vpux::VPUMI40XX::createSetupProfilingVPUMI40XXPass()";
 
+    let options = [
+        Option<
+            "enableDMAProfiling", "dma-profiling",
+            "std::string", [{"false"}],
+            "Enable DMA task profiling (true|static|false)"
+        >
+    ];
+
     let dependentDialects = [
         "vpux::VPUIP::VPUIPDialect",
         "vpux::VPURT::VPURTDialect",
@@ -151,6 +159,19 @@ def UnrollFetchTaskOps : PassBase<"unroll-fetch-ops", "vpux::FunctionPass"> {
     let summary = [{ Unroll FetchTask Ops}];
 
     let constructor = "vpux::VPUMI40XX::createUnrollFetchTaskOpsPass()";
+}
+
+def SplitEnqueueOps : PassBase<"split-enqueue-ops", "vpux::FunctionPass"> {
+    let summary = [{ Split enqueue Ops fot avoid bug when we have last op in task buffer in LL}];
+
+    let description = [{
+        There is a situation in which we are preempting at a boundary level and, in specific case of operations which linked,
+        we might end up reading incorrect information from CMX during save state stage.
+        Every enqueue op has [start, end] range inside. This pass split existing enqueue in two if find the task which contains special attribute
+        As a result enqueue[start,end] will be transformed to two enqueues: enqueue[start, task_with_attr] , enqueue[task_with_attr+1, end]
+    }];
+
+    let constructor = "vpux::VPUMI40XX::createSplitEnqueueOpsPass()";
 }
 
 def UnrollEnqueueOps : PassBase<"unroll-enqueue-ops", "vpux::FunctionPass"> {

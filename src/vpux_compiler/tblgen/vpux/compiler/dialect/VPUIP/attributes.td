@@ -89,7 +89,7 @@ def VPUIP_NCETaskType :
             I64EnumAttrCase<"FCL",              4>,
             I64EnumAttrCase<"ELTWISE",          5>,
             I64EnumAttrCase<"IDENTITY",         6>,
-            I64EnumAttrCase<"CMCONV",           7>,
+            I64EnumAttrCase<"CMCONV",           7>
         ]
     > {
 }
@@ -229,13 +229,18 @@ def HaloRegionArrayAttr : TypedArrayAttrBase<VPUIP_HaloRegionAttr, "Array of Hal
 // OutwardHaloRegionAttr
 //
 
-def VPUIP_OutwardHaloRegionAttr : VPUIP_Attr<"OutwardHaloRegion"> {
+def VPUIP_OutwardHaloRegionAttr : AttrDef<VPUIP_Dialect,"OutwardHaloRegion",[]> {
+
+    let mnemonic = "OutwardHaloRegionAttr";
+
     let parameters = (ins
         "mlir::ArrayAttr":$shape,
         "mlir::ArrayAttr":$offset,
         "mlir::IntegerAttr":$cluster_id,
         "mlir::ArrayAttr":$inwardHaloRegions
     );
+
+    let hasCustomAssemblyFormat = 1;
 }
 
 //

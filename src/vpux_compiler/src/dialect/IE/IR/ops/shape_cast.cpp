@@ -10,11 +10,11 @@ using namespace IE;
 
 mlir::LogicalResult vpux::IE::ShapeCastOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::ShapeCastOpAdaptor shapeCast(operands, attrs);
+    IE::ShapeCastOpAdaptor shapeCast(operands, attrs, prop);
     if (mlir::failed(shapeCast.verify(loc))) {
         return mlir::failure();
     }

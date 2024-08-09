@@ -14,14 +14,8 @@ namespace test {
 
 class MixedPrecisionConvSubGraphTestCommon : public MixedPrecisionConvSubGraphTest {};
 
-using MixedPrecisionConvSubGraphTest_NPU3700 = MixedPrecisionConvSubGraphTestCommon;
 using MixedPrecisionConvSubGraphTest_NPU3720 = MixedPrecisionConvSubGraphTestCommon;
 using MixedPrecisionConvSubGraphTest_NPU4000 = MixedPrecisionConvSubGraphTestCommon;
-
-TEST_P(MixedPrecisionConvSubGraphTest_NPU3700, HW) {
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
 
 TEST_P(MixedPrecisionConvSubGraphTest_NPU3720, HW) {
     setDefaultHardwareMode();
@@ -62,13 +56,6 @@ const auto conv2DParamsI4 =
                            ::testing::Values(16),                                    // quantLevels
                            ::testing::Values(QuantizationGranularity::Pertensor)     // quantGranularity
         );
-
-INSTANTIATE_TEST_CASE_P(smoke_precommit_mixed_precision_Convolution2D_I8, MixedPrecisionConvSubGraphTest_NPU3700,
-                        ::testing::Combine(conv2DParamsI8,
-                                           ::testing::Values(ov::element::f16),              // netPrc
-                                           ::testing::ValuesIn({ov::Shape{1, 16, 16, 16}}),  // inputShapes
-                                           ::testing::Values(DEVICE_NPU)),                   // targetDevice
-                        MixedPrecisionConvSubGraphTest_NPU3700::getTestCaseName);
 
 INSTANTIATE_TEST_CASE_P(smoke_precommit_mixed_precision_Convolution2D_I8, MixedPrecisionConvSubGraphTest_NPU3720,
                         ::testing::Combine(conv2DParamsI8,

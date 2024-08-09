@@ -17,10 +17,11 @@ using namespace vpux;
 // BarrierLegalization
 //
 
-void vpux::VPURT::buildBarrierLegalizationPipeline(mlir::OpPassManager& pm, Logger log) {
+void vpux::VPURT::buildBarrierLegalizationPipeline(mlir::OpPassManager& pm, const bool wlmFlag,
+                                                   const bool unevenVariantSplitFlag, Logger log) {
     pm.addPass(VPURT::createSplitExceedingVariantCountBarriersPass(log));
-    pm.addPass(VPURT::createSatisfyOneWaitBarrierPerTaskPass(log));
-    pm.addPass(VPURT::createReduceExceedingActiveCountBarriersPass(log));
+    pm.addPass(VPURT::createSatisfyOneWaitBarrierPerTaskPass(unevenVariantSplitFlag, log));
+    pm.addPass(VPURT::createReduceExceedingActiveCountBarriersPass(wlmFlag, unevenVariantSplitFlag, log));
 }
 
 //

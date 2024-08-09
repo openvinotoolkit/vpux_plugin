@@ -77,13 +77,17 @@ vpux::NDTypeInterface vpux::Const::BroadcastAttr::inferOutputType(vpux::NDTypeIn
     return input.pad(padBefore, padAfter);
 }
 
+bool vpux::Const::BroadcastAttr::inferOutputSplat(bool inputIsSplat, vpux::NDTypeInterface) {
+    return inputIsSplat;
+}
+
 //
 // BroadcastAttr::transform
 //
 
 Const::Content vpux::Const::BroadcastAttr::transform(vpux::Const::Content& input) const {
     auto output = Const::Content::allocTempBuffer(inferOutputType(input.getType()), input.getStorageElemType(),
-                                                  input.isSplat());
+                                                  inferOutputSplat(input.isSplat(), input.getType()));
 
     const auto inBuf = input.getRawStorageBuf();
     auto outBuf = output.getRawTempBuf();

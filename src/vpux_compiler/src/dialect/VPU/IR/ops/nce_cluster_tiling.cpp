@@ -12,15 +12,24 @@ using namespace vpux;
 // RegionBranchOpInterface
 //
 
-mlir::OperandRange vpux::VPU::NCEClusterTilingOp::getSuccessorEntryOperands(std::optional<unsigned> index) {
-    VPUX_THROW_UNLESS(index.has_value() && *index == 0, "Invalid region index: {0}", index);
+mlir::OperandRange vpux::VPU::NCEClusterTilingOp::getEntrySuccessorOperands(mlir::RegionBranchPoint point) {
+    mlir::Region* pRegion = point.getRegionOrNull();
+
+    if (pRegion != nullptr) {
+        unsigned int index = pRegion->getRegionNumber();
+        VPUX_THROW_UNLESS(index == 0, "Invalid region index: {0}", index);
+    }
+
     return getOperands();
 }
 
-void vpux::VPU::NCEClusterTilingOp::getSuccessorRegions(std::optional<unsigned> index, ArrayRef<mlir::Attribute>,
+void vpux::VPU::NCEClusterTilingOp::getSuccessorRegions(mlir::RegionBranchPoint point,
                                                         SmallVectorImpl<mlir::RegionSuccessor>& regions) {
-    if (index.has_value()) {
-        VPUX_THROW_UNLESS(*index == 0, "Invalid region index: {0}", *index);
+    mlir::Region* pRegion = point.getRegionOrNull();
+
+    if (pRegion != nullptr) {
+        unsigned int index = pRegion->getRegionNumber();
+        VPUX_THROW_UNLESS(index == 0, "Invalid region index: {0}", index);
         regions.push_back(mlir::RegionSuccessor(getResults()));
         return;
     }
@@ -192,8 +201,9 @@ mlir::LogicalResult vpux::VPU::NCEClusterTilingOp::verify() {
         for (auto operand : operands) {
             if (auto distributedTensor = operand.getType().dyn_cast<vpux::VPU::DistributedTensorType>()) {
                 auto rank = distributedTensor.getShape().size();
-                if (rank != 4) {
-                    return errorAt(op->getLoc(), "Only 4D tensors are supported. Got {0}", rank);
+                if (rank != 4 && rank != DimsGroups5D::Act::numDims) {
+                    return errorAt(op->getLoc(), "Only 4D or {0}D tensors are supported. Got {1}",
+                                   DimsGroups5D::Act::numDims, rank);
                 }
             }
         }

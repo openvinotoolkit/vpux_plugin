@@ -5,13 +5,13 @@
 
 #pragma once
 
-#include "vpux/compiler/utils/quantization.hpp"
 #include "vpux/compiler/utils/types.hpp"
 
 #include "vpux/utils/core/checked_cast.hpp"
 #include "vpux/utils/core/custom_float.hpp"
 #include "vpux/utils/core/error.hpp"
 #include "vpux/utils/core/mem_size.hpp"
+#include "vpux/utils/core/type/float16.hpp"
 
 #include <mlir/Dialect/Quant/QuantTypes.h>
 
@@ -43,7 +43,15 @@ template <>
 struct CvtHelper<vpux::type::float16> final {
     template <typename InT>
     static vpux::type::float16 cvt(InT val) {
-        return vpux::type::float16(checked_cast<float>(val));
+        auto castedVal = vpux::type::float16(checked_cast<float>(val));
+        if (std::isinf(castedVal)) {
+            const auto clampedVal = std::numeric_limits<vpux::type::float16>::clamp(castedVal);
+            auto logger = Logger::global();
+            logger.warning("Value is out of range for FP16 = {0}; clamping to = {1}.", checked_cast<float>(val),
+                           checked_cast<float>(clampedVal));
+            return clampedVal;
+        }
+        return castedVal;
     }
 };
 
@@ -307,7 +315,7 @@ private:
         } else if (elemType.isFloat8E5M2()) {
             return caller(vpux::type::float8_e5m2(0.0f));
         } else if (const auto qType = elemType.dyn_cast<mlir::quant::QuantizedType>()) {
-            const auto quantStorageType = vpux::normalizeQuantStorageType(qType);
+            const auto quantStorageType = getNormalizedQuantStorageType(qType);
             if (quantStorageType.isSignedInteger(8)) {
                 return caller(int8_t(0));
             } else if (quantStorageType.isUnsignedInteger(8)) {
@@ -330,6 +338,9 @@ private:
 
 private:
     void copySubByteContent(MutableArrayRef<char> targetData, mlir::Type elemType) const;
+
+    // helper function to hide quantization.hpp header
+    static mlir::Type getNormalizedQuantStorageType(mlir::quant::QuantizedType qType);
 
 private:
     vpux::NDTypeInterface _type;

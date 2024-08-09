@@ -13,14 +13,8 @@ namespace test {
 
 class ScatterUpdateLayerTestCommon : public ScatterUpdateLayerTest, virtual public VpuOv2LayerTest {};
 
-class ScatterUpdateLayerTest_NPU3700 : public ScatterUpdateLayerTestCommon {};
 class ScatterUpdateLayerTest_NPU3720 : public ScatterUpdateLayerTestCommon {};
 class ScatterUpdateLayerTest_NPU4000 : public ScatterUpdateLayerTestCommon {};
-
-TEST_P(ScatterUpdateLayerTest_NPU3700, HW) {
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
 
 TEST_P(ScatterUpdateLayerTest_NPU3720, SW) {
     setReferenceSoftwareMode();
@@ -41,7 +35,6 @@ TEST_P(ScatterUpdateLayerTest_NPU4000, SW) {
 
 }  // namespace ov
 
-using ov::test::ScatterUpdateLayerTest_NPU3700;
 using ov::test::ScatterUpdateLayerTest_NPU3720;
 using ov::test::ScatterUpdateLayerTest_NPU4000;
 
@@ -84,9 +77,6 @@ const std::vector<std::vector<int64_t>> scatterIndices = {{0, 2, 4, 6, 1, 3, 5, 
 const auto params = testing::Combine(testing::ValuesIn(combineShapes(axesShapeInShape)),
                                      testing::ValuesIn(scatterIndices), testing::Values(ov::element::f16),
                                      testing::Values(ov::element::i32), testing::Values(ov::test::utils::DEVICE_NPU));
-
-INSTANTIATE_TEST_SUITE_P(smoke_ScatterUpdate, ScatterUpdateLayerTest_NPU3700, params,
-                         ScatterUpdateLayerTest_NPU3700::getTestCaseName);
 
 INSTANTIATE_TEST_SUITE_P(smoke_ScatterUpdate, ScatterUpdateLayerTest_NPU3720, params,
                          ScatterUpdateLayerTest_NPU3720::getTestCaseName);

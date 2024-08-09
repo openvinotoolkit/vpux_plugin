@@ -17,11 +17,11 @@ mlir::LogicalResult vpux::VPU::QuantizeCastOp::verify() {
 
 mlir::LogicalResult vpux::VPU::QuantizeCastOp::inferReturnTypes(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange /*regions*/,
         mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::QuantizeCastOpAdaptor quantizeCast(operands, attrs);
+    VPU::QuantizeCastOpAdaptor quantizeCast(operands, attrs, prop);
     if (mlir::failed(quantizeCast.verify(loc))) {
         return mlir::failure();
     }
@@ -91,6 +91,6 @@ mlir::FailureOr<VPU::DistributedTypeInterface> vpux::VPU::QuantizeCastOp::inferC
     const auto dstDimsOrderAttr = mlir::AffineMapAttr::get(dstType.getDimsOrder().toAffineMap(ctx));
     const auto newDistributionType =
             DistributedTensorType::get(ctx, dstType.getShape().raw(), dstType.getElementType(), dstDimsOrderAttr,
-                                       dstType.getMemSpace(), origDistribution);
+                                       inDistributedType.cast<NDTypeInterface>().getMemSpace(), origDistribution);
     return newDistributionType.cast<VPU::DistributedTypeInterface>();
 }

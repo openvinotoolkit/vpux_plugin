@@ -6,7 +6,8 @@
 #pragma once
 
 #include <mlir/IR/Types.h>
-#include "vpux/compiler/dialect/VPUIP/IR/attributes.hpp"
+#include "vpux/compiler/core/layers.hpp"
+#include "vpux/compiler/utils/infer_output_shape.hpp"
 
 namespace vpux {
 
@@ -17,9 +18,13 @@ namespace vpux {
 constexpr uint32_t ACT_COMPRESSION_RESERVED_MEM_SIZE = 64;
 constexpr uint32_t ACT_COMPRESSION_SIZE_ENTRY_SIZE = 32;
 constexpr uint32_t ACT_COMPRESSION_BUF_SIZE_ALIGNMENT = 32;
+constexpr uint32_t ACT_COMPRESSION_MIN_BUF_SIZE = 256;
 
 // For compression reserved size of buffer needs to be updated for worst case compression
-int64_t updateSizeForCompression(int64_t size);
+int64_t updateSizeForCompression(int64_t origTensorSize, llvm::ArrayRef<int64_t> origShape = llvm::ArrayRef<int64_t>(),
+                                 int64_t sparsityMapSize = 0);
+
+bool isSupportedBufferSizeForCompression(vpux::NDTypeInterface ndType);
 
 mlir::Type setCompressionState(mlir::Type type, VPUIP::CompressionState compression);
 

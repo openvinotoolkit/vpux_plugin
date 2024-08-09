@@ -128,6 +128,39 @@ SmallVector<mlir::Value> reifyTileTopK(VPU::TilingBuilderOpInterface origOp, con
     return ret;
 }
 
+mlir::LogicalResult applyTileStrategyGatherDMA(VPU::TilingBuilderOpInterface origOp, const OutputTiling& tiles,
+                                               mlir::PatternRewriter& rewriter, Logger log) {
+    auto copyOp = mlir::dyn_cast<VPU::CopyOp>(*(origOp->getResults()[0].user_begin()));
+    if (!copyOp) {
+        log.trace("No copyOp after GatherDMA, cannot apply tiling");
+        return mlir::failure();
+    }
+
+    SmallVector<mlir::Value> resultTileVals;
+    SmallVector<ShapeRef> resultTileOffsets;
+
+    resultTileVals.reserve(tiles.size());
+    resultTileOffsets.reserve(tiles.size());
+    for (const auto& outputTile : tiles) {
+        const auto tiledRes = reifyTile(origOp, outputTile, rewriter, log);
+        const auto tiledShape = getShape(tiledRes);
+        VPUX_THROW_UNLESS(tiledShape == outputTile.shape,
+                          "Inferred tiled output shape '{0}' doesn't match with generated '{1}'", tiledShape,
+                          outputTile.shape);
+        const auto ddrMemSpace = IndexedSymbolAttr::get(origOp.getContext(), stringifyEnum(VPU::MemoryKind::DDR));
+        auto copyOp = rewriter.create<VPU::CopyOp>(origOp->getLoc(), tiledRes, ddrMemSpace);
+        resultTileVals.push_back(copyOp.getOutput());
+        resultTileOffsets.push_back(outputTile.offsets);
+    }
+
+    rewriter.replaceOpWithNewOp<VPU::ConcatOp>(copyOp, copyOp->getResult(0).getType(), mlir::ValueRange(resultTileVals),
+                                               ArrayRef(resultTileOffsets));
+
+    rewriter.eraseOp(origOp);
+
+    return mlir::success();
+}
+
 // Temporari solution until E#59988 will be implemented.
 // Function can be deleted when E#59993 related interface will be added.
 mlir::LogicalResult applyTileStrategyTopK(VPU::TilingBuilderOpInterface origOp, const OutputTiling& tiles,
@@ -285,6 +318,9 @@ mlir::LogicalResult applyTileStrategy(VPU::TilingBuilderOpInterface origOp, cons
     if (mlir::isa<VPU::TopKOp>(origOp)) {
         return applyTileStrategyTopK(origOp, tiles, rewriter, log);
     }
+    if (mlir::isa<VPU::GatherDMAOp>(origOp)) {
+        return applyTileStrategyGatherDMA(origOp, tiles, rewriter, log);
+    }
     if (mlir::isa<VPU::DetectionOutputSortOp>(origOp) || mlir::isa<VPU::DetectionOutputNmsCaffeOp>(origOp) ||
         mlir::isa<VPU::GRUSequenceOp>(origOp) || mlir::isa<VPU::GRUSequenceLastPartOp>(origOp)) {
         return applyTileStrategyMultiOutput(origOp, tiles, rewriter, log);
@@ -318,7 +354,7 @@ mlir::LogicalResult applyTileStrategy(VPU::TilingBuilderOpInterface origOp, cons
         if (!mlir::isa<VPU::ConcatOp>(concatOp)) {
             continue;
         }
-        origOp->replaceAllUsesWith(concatOp);
+
         for (auto concatConsumer : concatOp->getResult(0).getUsers()) {
             if (concatOp->isBeforeInBlock(concatConsumer)) {
                 continue;
@@ -407,12 +443,6 @@ bool prefetchTilingConditionSatisfied(mlir::Operation* op, Logger log) {
     if (parentOp == nullptr) {
         return false;
     }
-    const auto arch = VPU::getArch(op);
-    if (arch == VPU::ArchKind::NPU30XX) {
-        if (!mlir::isa<VPU::NCEOpInterface>(parentOp)) {
-            return false;
-        }
-    }
     auto opTilingInter = mlir::dyn_cast<VPU::TilingInfoOpInterface>(op);
     auto parentTilingInter = mlir::dyn_cast<VPU::TilingInfoOpInterface>(parentOp);
     if (!opTilingInter || !parentTilingInter) {
@@ -469,8 +499,9 @@ bool isLargeConstOp(mlir::Operation* op, Logger log) {
     if (op->hasAttr(multiClusterStrategy)) {
         auto nceOp = mlir::cast<VPU::NCEOpInterface>(op);
         auto clusterOp = mlir::cast<VPU::ClusteredOpInterface>(op);
+        auto outputType = clusterOp->getResult(0).getType().cast<NDTypeInterface>();
         auto numClusters = VPU::getOptimalNumClusters(
-                clusterOp, filterType.getShape()[Dims4D::Filter::OC],
+                clusterOp, outputType.getShape(),
                 clusterOp->getAttr(VPU::multiClusterStrategy).cast<VPU::MultiClusterStrategyAttr>().getValue());
         auto filterDistributedType = VPU::getDistributedFilterTypeFromOp(nceOp, filterType, numClusters);
         for (auto filterType : filterDistributedType.getDistributedTypes()) {
@@ -544,7 +575,10 @@ bool opNeedsTiling(mlir::Operation* op, bool enablePrefetchTiling, Logger log) {
             const auto bounds = parseIntArrayAttr<int64_t>(boundedTensor.getBounds());
             resShape = Shape(bounds.begin(), bounds.end());
         }
-        if (!iface.isSupportedTiling({TileInfo(resShape)}, TilingMode::ISOLATED, log.nest())) {
+        TileInfo outputTile(resShape);
+        // Mark the output tile as completed so that the inferred input shape contains the whole input
+        outputTile.isCompletedTile = true;
+        if (!iface.isSupportedTiling({std::move(outputTile)}, TilingMode::ISOLATED, log.nest())) {
             log.nest().trace("ISOLATED tiling or PIPELINING tiling required");
             return true;
         }
@@ -656,7 +690,7 @@ bool doesNCEOpChannelSatisfyWorkload(mlir::Operation* nceOp, const TileInfo& out
         }
         // SOK case
         auto numClusters =
-                VPU::getOptimalNumClusters(clusterOp, tileChannel, VPU::MultiClusterStrategy::SplitOverKernel);
+                VPU::getOptimalNumClusters(clusterOp, outputTile.shape, VPU::MultiClusterStrategy::SplitOverKernel);
         // check wl channel on each cluster to satisfy supportedChannels
         if (numClusters.getInt() > maxNumClusters) {
             numClusters = mlir::IntegerAttr::get(getInt64Type(nceOp->getContext()), maxNumClusters);
@@ -778,7 +812,8 @@ SmallVector<OutputTiling> getOneDimIsolatedTilingStrategies(mlir::Operation* op,
 SmallVector<OutputTiling> getOneDimTilingStrategies(mlir::Operation* op, TilingMode tilingMode, Logger log) {
     const auto alignRequirement = getAlignDimAndSize(op);
     auto supportedTilingStrategies = getOneDimIsolatedTilingStrategies(op, alignRequirement, log.nest());
-    if (supportedTilingStrategies.empty() || tilingMode == TilingMode::ISOLATED) {
+    // NCEPermuteOp does not support prefetching/pipelining tiling
+    if (supportedTilingStrategies.empty() || tilingMode == TilingMode::ISOLATED || mlir::isa<VPU::NCEPermuteOp>(op)) {
         return supportedTilingStrategies;
     }
     const auto dimToAlign = alignRequirement.first;

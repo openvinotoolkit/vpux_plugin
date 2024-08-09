@@ -10,6 +10,25 @@
 namespace vpux {
 namespace VPUIP {
 
+struct OptimizeCopiesOptionsBase : mlir::PassPipelineOptions<OptimizeCopiesOptionsBase> {
+    OptimizeCopiesOptionsBase() = default;
+
+    BoolOption enableOptimizeCopies{*this, "optimize-copies", llvm::cl::desc("Enable optimize-copies pass"),
+                                    llvm::cl::init(true)};
+    BoolOption enableOptimizeConstCopies{*this, "optimize-const-copies", llvm::cl::desc("Enable optimize-const-copies"),
+                                         llvm::cl::init(true)};
+    BoolOption enableOpsAsDMA{*this, "enable-ops-as-dma",
+                              llvm::cl::desc("Force using DMA transformations instead of SW ops"),
+                              llvm::cl::init(true)};
+
+    template <class OtherOptions>
+    explicit OptimizeCopiesOptionsBase(const OtherOptions& options) {
+        enableOptimizeCopies = options.enableOptimizeCopies;
+        enableOptimizeConstCopies = options.enableOptimizeConstCopies;
+        enableOpsAsDMA = options.enableOpsAsDMA;
+    }
+};
+
 struct MemoryAllocationOptionsBase : mlir::PassPipelineOptions<MemoryAllocationOptionsBase> {
     BoolOption linearizeSchedule{*this, "linearize-schedule", llvm::cl::desc("Linearize tasks on all engines"),
                                  llvm::cl::init(false)};

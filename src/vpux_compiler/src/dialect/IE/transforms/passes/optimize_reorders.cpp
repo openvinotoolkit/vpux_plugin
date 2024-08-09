@@ -6,6 +6,7 @@
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 #include "vpux/compiler/dialect/IE/transforms/rewriters/expand_with_layer_rewriter.hpp"
 
+#include "vpux/compiler/dialect/IE/utils/reshape_utils.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/utils/adjust_layout_utils.hpp"
 #include "vpux/compiler/utils/error.hpp"
@@ -121,8 +122,8 @@ private:
 SmallVector<SmallVector<Dim>> getReshapedAxes(ShapeRef inShape, ShapeRef outShape, DimsOrder order) {
     SmallVector<SmallVector<Dim>> reshapedAxes;
     SmallVector<Dim> reshapedGroup;
-    int64_t inProduct;
-    int64_t outProduct;
+    int64_t inProduct = 1;
+    int64_t outProduct = 1;
     bool startMatch = false;
     for (const auto& dim : order.toPermutation()) {
         auto inDimSize = inShape[dim];
@@ -191,7 +192,7 @@ bool isReshapeInImmutableGroup(const SmallVector<SmallVector<Dim>>& reshapedAxes
 //   MemShape if propagateReorder:  (1,1,64,64) ->ShapeCast-> (64,64,1,1) ->Reorder-> (64,64,1,1)
 //   NormMemShape if propagateReorder: (0,0,1,2) ->ShapeCast-> (1,2,0,0) ->ReorderOp-> (1,2,0,0)
 //   return false as (64,64) == (64,64) && (2,1) != (1,2)
-bool isCompatibleMemReshape(vpux::NDTypeInterface inType, vpux::NDTypeInterface outType) {
+bool isIdenticalMemShapeAndPermutation(vpux::NDTypeInterface inType, vpux::NDTypeInterface outType) {
     auto inMemShape = inType.getMemShape();
     const auto inOrder = inType.getDimsOrder();
     const auto newOutType = outType.changeDimsOrder(inOrder);
@@ -213,9 +214,9 @@ bool isCompatibleMemReshape(vpux::NDTypeInterface inType, vpux::NDTypeInterface 
         return MemShape(normalizedVec);
     };
 
+    auto originalReorderPermutation = getPermutationFromOrders(inOrder, outType.getDimsOrder(), inType.getContext());
     // cal original normalized mem shape
     auto inNormMemShape = getNormalizedMemShape(inMemShape);
-    auto originalReorderPermutation = getPermutationFromOrders(inOrder, outType.getDimsOrder(), inType.getContext());
     auto origReorderNormMemShape = applyPerm(inNormMemShape, originalReorderPermutation);
 
     // get new reshape's normalized mem permutation
@@ -235,6 +236,42 @@ bool isCompatibleMemReshape(vpux::NDTypeInterface inType, vpux::NDTypeInterface 
     return inMemShape == newOutMemShape && origReorderNormMemShape == newOutNormMemShape;
 }
 
+// if not has immutable reshape axes and identical memshape, Reorder could still
+// propagate through reshape when the memshape is continuous
+// Example:
+//   8000x256x1x1xf16#HNWC   -reorder1-> 8000x256x1x1xf16#NCHW -reshape-> 1x8000x16x16xf16#NCHW
+//   Memshape (1,8000,1,256) -reorder1-> (8000,256,1,1)        -reshape-> (1,8000,16,16)
+// The memshape keeps continuous, reorder could be transformed to permute and propagated as follow:
+//   8000x256x1x1xf16#HNWC   -shapecast-> 8000x16x1x16xf16#HNWC -permute-> 1x8000x16x16xf16#NCHW
+//   Memshape (1,8000,1,256) -shapecast-> (1,8000,16,16)        -permute-> (1,8000,16,16)
+bool isContinuousMemShape(vpux::NDTypeInterface inType, vpux::NDTypeInterface outType) {
+    const auto inMemShape = inType.getMemShape();
+    const auto outMemShape = outType.getMemShape();
+
+    // convert Memshape into Vector
+    auto getMemShapeArray = [](MemShapeRef memShape) -> SmallVector<int64_t> {
+        SmallVector<int64_t> memShapeVec(memShape.size(), 1);
+        for (const auto ind : irange(memShape.size())) {
+            memShapeVec[ind] = memShape[MemDim(ind)];
+        }
+        return memShapeVec;
+    };
+
+    // get the permutation of reorder
+    const auto inOrder = inType.getDimsOrder();
+    const auto outOrder = outType.getDimsOrder();
+    const auto origReorderPermutation = getPermutationFromOrders(inOrder, outOrder, inType.getContext());
+
+    // get the reassociationMap of in/out memshape
+    auto inMemShapeVec = getMemShapeArray(inMemShape);
+    auto outMemShapeVec = getMemShapeArray(outMemShape);
+    auto reassociationMap = IE::getReassociationMap(inMemShapeVec, outMemShapeVec);
+
+    // check if the perm is trivial and the in/out memshape could be reassociated
+    // successfully (could be legally affined)
+    return isTrivialPermute(inMemShape, origReorderPermutation) && mlir::succeeded(reassociationMap);
+}
+
 // Maintain the Reorder -> PermuteCast -> Reorder chain as it can later be reduced to a single operation
 bool isMaintainPattern(mlir::Operation* op) {
     if (auto prevPermuteCastOp = op->getOperand(0).getDefiningOp<IE::PermuteCastOp>()) {
@@ -249,6 +286,7 @@ bool isMaintainPattern(mlir::Operation* op) {
 template <class ConcreteOp>
 mlir::LogicalResult ReorderWithShapeChange<ConcreteOp>::matchAndRewrite(ConcreteOp origReshapeOp,
                                                                         mlir::PatternRewriter& rewriter) const {
+    const auto ctx = origReshapeOp.getContext();
     const auto origReshapeInput = origReshapeOp->getOperand(0);
 
     // Propagate Reorder through Reshape only with pattern: Reorder -> Reshape -> Reorder
@@ -279,28 +317,57 @@ mlir::LogicalResult ReorderWithShapeChange<ConcreteOp>::matchAndRewrite(Concrete
                            reshapeOutOrder);
     }
 
+    auto getMemShapeArray = [](mlir::Value val) -> SmallVector<int64_t> {
+        const auto memShape = val.getType().template dyn_cast<vpux::NDTypeInterface>().getMemShape();
+        SmallVector<int64_t> memShapeVec(memShape.size(), 1);
+        for (const auto ind : irange(memShape.size())) {
+            memShapeVec[ind] = memShape[MemDim(ind)];
+        }
+        return memShapeVec;
+    };
+
+    const auto reshapeOutMemShape = getMemShapeArray(origReshapeOutput);
     const auto reshapeInShape = getShape(origReshapeInput);
     const auto reshapeOutShape = getShape(origReshapeOutput);
     const auto reshapedAxes = getReshapedAxes(reshapeInShape, reshapeOutShape, outOrder);
-
-    if (!isReshapeInImmutableGroup(reshapedAxes, inOrder) &&
-        !isCompatibleMemReshape(origReorderOp.getInput().getType(), origReshapeOutput.getType())) {
-        return matchFailed(_log.nest(), rewriter, origReshapeOp,
-                           "The orders of reshaped axes {0} are different in input order {2} and output order {3}, ",
-                           "and the shape change op is not a trivial mem reshape ", reshapedAxes, inOrder, outOrder);
-    }
-
-    auto shapeAttr = getIntArrayAttr(origReshapeOp.getContext(), reshapeOutShape);
-    auto shapeCastOp = rewriter.create<IE::ShapeCastOp>(origReshapeOp->getLoc(), origReorderOp.getInput(), shapeAttr);
-    if (outputQuantizeCastOp != nullptr) {
-        auto newQuantizeCastOp = rewriter.create<IE::QuantizeCastOp>(
-                outputQuantizeCastOp->getLoc(), shapeCastOp.getResult(), outputQuantizeCastOp.getDstElemTypeAttr());
-        rewriter.replaceOpWithNewOp<IE::ReorderOp>(outputQuantizeCastOp, newQuantizeCastOp.getOutput(),
+    const auto origReorderInType = origReorderOp.getInput().getType();
+    const auto origReshapeOutType = origReshapeOutput.getType();
+    if (isReshapeInImmutableGroup(reshapedAxes, inOrder) ||
+        isIdenticalMemShapeAndPermutation(origReorderInType, origReshapeOutType)) {
+        auto shapeAttr = getIntArrayAttr(ctx, reshapeOutShape);
+        auto shapeCastOp =
+                rewriter.create<IE::ShapeCastOp>(origReshapeOp->getLoc(), origReorderOp.getInput(), shapeAttr);
+        if (outputQuantizeCastOp != nullptr) {
+            auto newQuantizeCastOp = rewriter.create<IE::QuantizeCastOp>(
+                    outputQuantizeCastOp->getLoc(), shapeCastOp.getResult(), outputQuantizeCastOp.getDstElemTypeAttr());
+            rewriter.replaceOpWithNewOp<IE::ReorderOp>(outputQuantizeCastOp, newQuantizeCastOp.getOutput(),
+                                                       origReorderOp.getDstOrderAttr());
+        }
+        rewriter.replaceOpWithNewOp<IE::ReorderOp>(origReshapeOp, shapeCastOp.getResult(),
                                                    origReorderOp.getDstOrderAttr());
-    }
-    rewriter.replaceOpWithNewOp<IE::ReorderOp>(origReshapeOp, shapeCastOp.getResult(), origReorderOp.getDstOrderAttr());
+        return mlir::success();
+    } else if (isContinuousMemShape(origReorderInType, origReshapeOutType)) {
+        const auto inputOrder =
+                origReorderOp.getInput().getType().template dyn_cast<vpux::NDTypeInterface>().getDimsOrder();
+        const auto outputShape = inputOrder.toLogicalOrder(MemShape(reshapeOutMemShape));
+        const auto shapeAttr = getIntArrayAttr(ctx, outputShape);
+        auto shapeCastOp =
+                rewriter.create<IE::ShapeCastOp>(origReshapeOp->getLoc(), origReorderOp.getInput(), shapeAttr);
 
-    return mlir::success();
+        const auto outputOrder = origReshapeOutput.getType().template dyn_cast<vpux::NDTypeInterface>().getDimsOrder();
+        const auto outputOrderAttr = mlir::AffineMapAttr::get(outputOrder.toAffineMap(ctx));
+        const auto memPermAttr =
+                mlir::AffineMapAttr::get(DimsOrder::fromNumDims(outputOrder.numDims()).toAffineMap(ctx));
+        auto permuteOp = rewriter.create<IE::PermuteCastOp>(origReshapeOp->getLoc(), shapeCastOp.getResult(),
+                                                            outputOrderAttr, memPermAttr);
+
+        rewriter.replaceOp(origReshapeOp, permuteOp.getOutput());
+        return mlir::success();
+    }
+
+    return matchFailed(_log.nest(), rewriter, origReshapeOp,
+                       "The orders of reshaped axes {0} are different in input order {2} and output order {3}, ",
+                       "and the shape change op is not a trivial mem reshape ", reshapedAxes, inOrder, outOrder);
 }
 
 //
@@ -1324,7 +1391,7 @@ mlir::LogicalResult ReorderWithLayer::matchAndRewrite(IE::LayoutInfoOpInterface 
         }
     }
 
-    rewriter.startRootUpdate(layerOp);
+    rewriter.startOpModification(layerOp);
 
     _log.nest(1).trace("Remove Reorder before the first input");
     layerOp->getOpOperand(0).set(argReorderOp.getInput());
@@ -1360,7 +1427,7 @@ mlir::LogicalResult ReorderWithLayer::matchAndRewrite(IE::LayoutInfoOpInterface 
         }
     }
 
-    rewriter.finalizeRootUpdate(layerOp);
+    rewriter.finalizeOpModification(layerOp);
 
     return mlir::success();
 }
@@ -1463,24 +1530,28 @@ mlir::LogicalResult ReorderWithReadValue::matchAndRewrite(IE::ReadValueOp origRe
 //
 //  The beneficial pattern:
 //
-//    Reorder    Const          Reorder
-//        \     /                  |
-//         Add             =>   Reorder
-//          |                      |
-//        Reorder               LayoutCast   Const(changed dims order)
-//                                     \     /
-//                                       Add
-//                                        |
+// Reorder    Reorder or Const  Reorder     Reorder
+//        \     /                  |           |
+//         Add             =>   Reorder     Reorder
+//          |                      |           |
+//        Reorder             LayoutCast   LayoutCast  or Const(changed dims order)
+//          |                         \     /
+//        SWOp                          Add
+//                                       |
 //                                    LayoutCast
+//                                       |
+//                                      SWOp
 // The Dimorder has no impact on the element-wise NCE.Eltwise ADD operation
 // In the IE dialect, propagating ReorderOp before AddOp allows the fusion of two ReorderOp.
-// This reduces the consumption of DMA resources by the VPU.MempermuteOp converted by ReorderOp.
+// This reduces the consumption of DMA resources by the VPU.MempermuteOp converted by ReorderOp and also keep the SWOp
+// in optimal layout.
 //
 
+template <class ConcreteOp>
 class ReorderWithHWAdd final : public mlir::OpRewritePattern<IE::ReorderOp> {
 public:
     ReorderWithHWAdd(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<IE::ReorderOp>(ctx), _log(log) {
-        setDebugName("ReorderWithHWAdd");
+        this->setDebugName("ReorderWithHWAdd");
     }
 
     mlir::LogicalResult matchAndRewrite(IE::ReorderOp origOp, mlir::PatternRewriter& rewriter) const final;
@@ -1489,20 +1560,33 @@ private:
     Logger _log;
 };
 
-mlir::LogicalResult ReorderWithHWAdd::matchAndRewrite(IE::ReorderOp origOp, mlir::PatternRewriter& rewriter) const {
-    _log.trace("[{0}] Got IE::ReorderOp at {1}", getDebugName(), origOp->getLoc());
+template <class ConcreteOp>
+mlir::LogicalResult ReorderWithHWAdd<ConcreteOp>::matchAndRewrite(IE::ReorderOp origOp,
+                                                                  mlir::PatternRewriter& rewriter) const {
+    _log.trace("[{0}] Got IE::ReorderOp at {1}", this->getDebugName(), origOp->getLoc());
+
     auto parentAdd = origOp.getInput().getDefiningOp<IE::AddOp>();
     if (parentAdd == nullptr || !parentAdd.getResult().hasOneUse()) {
         return mlir::failure();
     }
 
-    auto parentReorder = parentAdd.getInput1().getDefiningOp<IE::ReorderOp>();
-    if (parentReorder == nullptr || !parentReorder.getResult().hasOneUse()) {
+    auto parentInput1Reorder = parentAdd.getInput1().getDefiningOp<IE::ReorderOp>();
+    if (parentInput1Reorder == nullptr || !parentInput1Reorder.getResult().hasOneUse()) {
+        return mlir::failure();
+    }
+
+    // Second input must be Reorder or Constant
+    auto parentInput2Reorder = parentAdd.getInput2().getDefiningOp<IE::ReorderOp>();
+    if (parentInput2Reorder != nullptr && !parentInput2Reorder.getResult().hasOneUse()) {
         return mlir::failure();
     }
 
     auto constInput = parentAdd.getInput2().getDefiningOp<Const::DeclareOp>();
-    if (constInput == nullptr || !constInput.getResult().hasOneUse()) {
+    if (constInput != nullptr && !constInput.getResult().hasOneUse()) {
+        return mlir::failure();
+    }
+
+    if (parentInput2Reorder == nullptr && constInput == nullptr) {
         return mlir::failure();
     }
 
@@ -1514,16 +1598,28 @@ mlir::LogicalResult ReorderWithHWAdd::matchAndRewrite(IE::ReorderOp origOp, mlir
         return mlir::failure();
     }
 
+    mlir::Value reorderInput2 = nullptr;
+    if (parentInput2Reorder != nullptr) {
+        auto consumerOp = *(origOp.getOutput().getUsers().begin());
+        if (!mlir::isa<ConcreteOp>(consumerOp) || !consumerOp->hasOneUse()) {
+            return mlir::failure();
+        }
+        reorderInput2 =
+                rewriter.create<IE::ReorderOp>(origOp->getLoc(), parentAdd.getInput2(), origOp.getDstOrderAttr());
+    } else if (constInput != nullptr) {
+        reorderInput2 = rewriter.createOrFold<IE::ReorderOp>(origOp->getLoc(), constInput.getResult(),
+                                                             origOp.getDstOrderAttr());
+    } else {
+        VPUX_THROW("Unsupported usecase.");
+    }
+
     const auto nhwcOrderAttr = mlir::AffineMapAttr::get(targetInOutOrder.toAffineMap(origOp.getContext()));
-    auto constReroder =
-            rewriter.createOrFold<IE::ReorderOp>(origOp->getLoc(), constInput.getResult(), origOp.getDstOrderAttr());
-    auto newConstIn = rewriter.create<IE::LayoutCastOp>(parentAdd.getLoc(), constReroder, nhwcOrderAttr);
 
     auto reorderInput1 =
             rewriter.create<IE::ReorderOp>(origOp->getLoc(), parentAdd.getInput1(), origOp.getDstOrderAttr());
     auto newIn1 = rewriter.create<IE::LayoutCastOp>(parentAdd.getLoc(), reorderInput1, nhwcOrderAttr);
-
-    auto newAdd = rewriter.create<IE::AddOp>(parentAdd.getLoc(), parentAdd.getType(), newIn1, newConstIn,
+    auto newIn2 = rewriter.create<IE::LayoutCastOp>(parentAdd.getLoc(), reorderInput2, nhwcOrderAttr);
+    auto newAdd = rewriter.create<IE::AddOp>(parentAdd.getLoc(), parentAdd.getType(), newIn1, newIn2,
                                              parentAdd.getAutoBroadcastAttr(), parentAdd.getPostOpAttr(),
                                              parentAdd.getClampAttr());
 
@@ -1610,7 +1706,7 @@ void OptimizeReordersPass::safeRunOnFunc() {
     patterns.add<ReorderWithTile>(&ctx, _log);
     patterns.add<ReorderWithLayer>(&ctx, _log, _seOpsEnabled, _seExperimentalOpsEnabled);
     patterns.add<ReorderWithPermuteCast>(&ctx, _log);
-    patterns.add<ReorderWithHWAdd>(&ctx, _log);
+    patterns.add<ReorderWithHWAdd<IE::MVNOp>>(&ctx, _log);
     IE::ReorderOp::getCanonicalizationPatterns(patterns, &ctx);
 
     auto func = getOperation();

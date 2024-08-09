@@ -37,7 +37,7 @@ private:
 //
 
 mlir::LogicalResult convertGeneric(mlir::Operation* origOp, mlir::ValueRange operands,
-                                   mlir::ConversionPatternRewriter& rewriter, mlir::TypeConverter& typeConverter,
+                                   mlir::ConversionPatternRewriter& rewriter, const mlir::TypeConverter& typeConverter,
                                    Logger log) {
     log.trace("Process Operation '{0}' at '{1}", origOp->getName(), origOp->getLoc());
     const auto origOperands = origOp->getOperands();
@@ -64,7 +64,7 @@ public:
 public:
     mlir::LogicalResult matchAndRewrite(IE::LayerOpInterface origOp, ArrayRef<mlir::Value> newArgs,
                                         mlir::ConversionPatternRewriter& rewriter) const final {
-        auto* typeConverter = this->getTypeConverter();
+        const auto* typeConverter = this->getTypeConverter();
         VPUX_THROW_UNLESS(typeConverter != nullptr, "TypeConverter was not set");
 
         return convertGeneric(origOp, newArgs, rewriter, *typeConverter, _log);

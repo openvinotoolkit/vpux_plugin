@@ -12,13 +12,16 @@
 
 namespace vpux {
 
-VPU::InitCompilerOptions getInitCompilerOptions(const Config& config);
+VPU::InitCompilerOptions getInitCompilerOptions(const intel_npu::Config& config);
 
-VPU::ArchKind getArchKind(const Config& config);
-VPU::CompilationMode getCompilationMode(const Config& config);
-std::optional<int> getRevisionID(const Config& config);
-std::optional<int> getNumberOfDPUGroups(const Config& config);
-std::optional<int> getNumberOfDMAEngines(const Config& config);
-std::optional<bool> getWlmRollback(const Config& config);
+VPU::ArchKind getArchKind(const intel_npu::Config& config);
+VPU::CompilationMode getCompilationMode(const intel_npu::Config& config);
+std::optional<int> getRevisionID(const intel_npu::Config& config);
+std::optional<int> getNumberOfDPUGroups(const intel_npu::Config& config);
+std::optional<int> getNumberOfDMAEngines(const intel_npu::Config& config);
+std::optional<bool> getWlmRollback(const intel_npu::Config& config);
+Byte getAvailableCmx(const intel_npu::Config& config);
+
+std::optional<std::string> getPerformanceHintOverride(const intel_npu::Config& config);
 
 }  // namespace vpux

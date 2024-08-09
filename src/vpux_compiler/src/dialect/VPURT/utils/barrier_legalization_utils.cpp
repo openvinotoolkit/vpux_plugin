@@ -67,12 +67,27 @@ void VPURT::postProcessBarrierOps(mlir::func::FuncOp func) {
 }
 
 // It should be called at ending of each pass which may change barriers after SplitExceedingVariantCountBarriersPass
-void VPURT::verifyBarrierSlots(mlir::func::FuncOp func, Logger log) {
+bool VPURT::verifyBarrierSlots(mlir::func::FuncOp func, Logger log) {
     auto barrierSim = VPURT::BarrierSimulator{func};
     if (mlir::failed(barrierSim.checkProducerAndConsumerCount(log))) {
         log.error("verifyBarrierSlots failed");
+        return false;
     }
-    return;
+    return true;
+}
+
+bool VPURT::verifyOneWaitBarrierPerTask(mlir::func::FuncOp funcOp, Logger log) {
+    bool hasOneWaitBarrierPerTask = true;
+    funcOp->walk([&](VPURT::TaskOp taskOp) {
+        if (taskOp.getWaitBarriers().size() > 1) {
+            log.error("Task '{0}' has more then one wait barrier", taskOp);
+            hasOneWaitBarrierPerTask = false;
+            return mlir::WalkResult::interrupt();
+        }
+        return mlir::WalkResult::advance();
+    });
+
+    return hasOneWaitBarrierPerTask;
 }
 
 // simulate execution of tasks an barriers to generate an order for tasks an barriers which will represent execution

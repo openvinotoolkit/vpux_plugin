@@ -72,7 +72,7 @@ double getActivityFactor(double totalEnergy, size_t totalCycles, size_t numTiles
 }
 
 double convertCyclesToNanoSeconds(size_t cycles, double freqInMHz) {
-    return static_cast<double>(cycles * 1000) / freqInMHz;
+    return (cycles * 1000.0) / freqInMHz;
 }
 
 void createScheduleTraceEventFile(const SmallVector<VPURT::TaskConfig, 1>& tasksCycleConfig, double freqInMHz,
@@ -108,7 +108,8 @@ void createScheduleTraceEventFile(const SmallVector<VPURT::TaskConfig, 1>& tasks
         }
     }
 
-    printProfilingAsTraceEvent(tasks, {}, out_stream, log);
+    printProfilingAsTraceEvent(tasks, /*layers=*/{}, /*dpuFreq=*/{freqInMHz, profiling::FreqStatus::SIM}, out_stream,
+                               log);
 }
 
 class InferenceExecutionAnalysisPass final :

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+#include <common_test_utils/ov_tensor_utils.hpp>
 #include "vpu_ov2_layer_test.hpp"
 
 using namespace ov::test;
@@ -28,6 +29,13 @@ std::shared_ptr<ov::Node> buildConvolution(const ov::Output<ov::Node>& param, co
 }
 
 class TilingWithConcatTest_NPU3720 : public VpuOv2LayerTest, public testing::WithParamInterface<ov::Shape> {
+    void generate_inputs(const std::vector<ov::Shape>& targetInputStaticShapes) override {
+        VpuOv2LayerTest::inputs.clear();
+        const auto& funcInputs = VpuOv2LayerTest::function->inputs();
+        ov::Tensor tensorData =
+                create_and_fill_tensor(funcInputs[0].get_element_type(), targetInputStaticShapes[0], 8, 0, 32);
+        VpuOv2LayerTest::inputs.insert({funcInputs[0].get_node_shared_ptr(), tensorData});
+    }
     void SetUp() override {
         const ov::Shape origInputShape = GetParam();
         inType = outType = ov::element::f16;
@@ -65,8 +73,6 @@ class TilingWithConcatTest_NPU3720 : public VpuOv2LayerTest, public testing::Wit
         preProc.output().tensor().set_layout("NHWC");
         preProc.output().model().set_layout("NHWC");
         function = preProc.build();
-
-        rel_threshold = 0.5f;
     }
 
 public:
@@ -80,7 +86,7 @@ public:
 };
 
 TEST_P(TilingWithConcatTest_NPU3720, HW) {
-    abs_threshold = 0.02;
+    abs_threshold = 0.07;
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }

@@ -14,15 +14,9 @@ namespace test {
 
 class TileLayerTestCommon : public TileLayerTest, virtual public VpuOv2LayerTest {};
 
-class TileLayerTest_NPU3700 : public TileLayerTestCommon {};
 class TileLayerTest_NPU3720 : public TileLayerTestCommon {};
 class TileLayerTest_NPU3720_tiling : public TileLayerTestCommon {};
 class TileLayerTest_NPU4000 : public TileLayerTestCommon {};
-
-TEST_P(TileLayerTest_NPU3700, HW) {
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
 
 TEST_P(TileLayerTest_NPU3720, SW) {
     setReferenceSoftwareMode();
@@ -43,7 +37,6 @@ TEST_P(TileLayerTest_NPU4000, SW) {
 
 }  // namespace ov
 
-using ov::test::TileLayerTest_NPU3700;
 using ov::test::TileLayerTest_NPU3720;
 using ov::test::TileLayerTest_NPU3720_tiling;
 using ov::test::TileLayerTest_NPU4000;
@@ -84,13 +77,6 @@ const std::vector<std::vector<ov::Shape>> inputShapes = {
         // input shapes with more than 4D is not supported by runtime yet
         // {{1, 4, 3, 1, 3, 1}}
 };
-
-INSTANTIATE_TEST_SUITE_P(
-        smoke_Tile, TileLayerTest_NPU3700,
-        ::testing::Combine(::testing::ValuesIn(repeats), ::testing::ValuesIn(modelTypes),
-                           ::testing::ValuesIn(ov::test::static_shapes_to_test_representation(inputShapes)),
-                           ::testing::Values(ov::test::utils::DEVICE_NPU)),
-        TileLayerTest_NPU3700::getTestCaseName);
 
 const auto tileParams = ::testing::Combine(
         ::testing::ValuesIn(std::vector<ov::test::TileSpecificParams>({{1, 3, 2}, {3, 2, 1, 5}, {1, 3, 2, 1}})),

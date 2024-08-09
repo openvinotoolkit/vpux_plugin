@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --convert-VPUIPDPU-to-NPUReg40XX %s | FileCheck %s
-// REQUIRES: arch-VPUX40XX
+// REQUIRES: arch-NPU40XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 module @Test {
@@ -72,8 +72,8 @@ module @Test {
                     // CHECK-DAG:  UINT conv_cond at 3 size 1 = 1,
                     // CHECK-DAG:  UINT dense_se at 4 size 1 = 1,
                     // CHECK-DAG:  UINT swizzle_key_offset at 6 size 3 = 1,
-                    // CHECK-DAG:  UINT wt_swizzle_key at 24 size 3 = 2,
-                    // CHECK-DAG:  UINT wt_swizzle_sel at 27 size 1 = 0
+                    // CHECK-DAG:  UINT wt_swizzle_key at 27 size 3 = 2,
+                    // CHECK-DAG:  UINT wt_swizzle_sel at 30 size 1 = 1
 
                     VPUIPDPU.BarrierCfg waits([1 : ui8, 2 : ui8]) updates([3 : ui8, 4 : ui8, 5 : ui8]) start_after(0) clean_after(0)
                     // CHECK-DAG:  cbarrier_lo offset 32 size 64 = UINT 6,
@@ -169,7 +169,7 @@ module @Test {
                     // CHECK-DAG:  UINT te_end_z at 13 size 13 = 0xF
                     // CHECK-DAG:  UINT te_end_x at 0 size 13 = 0x3F
                     VPUIPDPU.DPUGroup invariantIdx(!VPURegMapped.Index<0:0:0>) variantCount(4) {isFirstVariant}
-                    // CHECK-DAG:  UINT invar_lptr_force at 13 size 1 = 1,
+                    // CHECK-DAG:  UINT invar_lptr_force at 14 size 1 = 1,
                     // CHECK-DAG:  UINT workload_odu_auto_upd at 8 size 1 = 0,
                     // CHECK-DAG:  invariant_index_ offset 200 size 32 = UINT 0,
                 }
@@ -196,8 +196,8 @@ module @Test {
                     // CHECK-DAG:  UINT conv_cond at 3 size 1 = 0,
                     // CHECK-DAG:  UINT dense_se at 4 size 1 = 0,
                     // CHECK-DAG:  UINT swizzle_key_offset at 6 size 3 = 3,
-                    // CHECK-DAG:  UINT wt_swizzle_key at 24 size 3 = 0,
-                    // CHECK-DAG:  UINT wt_swizzle_sel at 27 size 1 = 0
+                    // CHECK-DAG:  UINT wt_swizzle_key at 27 size 3 = 0,
+                    // CHECK-DAG:  UINT wt_swizzle_sel at 30 size 1 = 1
 
                     VPUIPDPU.ODUOutSubtensor begin_coord_x(0) begin_coord_y(0) begin_coord_z(0) end_coord_x(63) end_coord_y(63) end_coord_z(15)
                     // CHECK-DAG:  UINT te_beg_y at 0 size 13 = 0,
@@ -207,7 +207,7 @@ module @Test {
                     // CHECK-DAG:  UINT te_end_z at 13 size 13 = 0xF
                     // CHECK-DAG:  UINT te_end_x at 0 size 13 = 0x3F
                     VPUIPDPU.DPUGroup invariantIdx(!VPURegMapped.Index<0:0:0>) variantCount(4)
-                    // CHECK-DAG:  UINT invar_lptr_force at 13 size 1 = 0,
+                    // CHECK-DAG:  UINT invar_lptr_force at 14 size 1 = 0,
                     // CHECK-DAG:  UINT workload_odu_auto_upd at 8 size 1 = 0,
                     // CHECK-DAG:  invariant_index_ offset 200 size 32 = UINT 0,
                 }
@@ -236,7 +236,7 @@ module @Test {
                     // CHECK-DAG:  weight_num offset 184 size 32 = UINT 0x20,
                     // CHECK-DAG:  weight_start offset 188 size 32 = UINT 0,
                     VPUIPDPU.DPUGroup invariantIdx(!VPURegMapped.Index<0:0:0>) variantCount(4)
-                    // CHECK-DAG:  UINT invar_lptr_force at 13 size 1 = 0,
+                    // CHECK-DAG:  UINT invar_lptr_force at 14 size 1 = 0,
                     // CHECK-DAG:  UINT workload_odu_auto_upd at 8 size 1 = 0,
                     // CHECK-DAG:  invariant_index_ offset 200 size 32 = UINT 0,
                 }
@@ -247,7 +247,7 @@ module @Test {
                 // CHECK-NOT:   VPUIPDPU.DPUVariant
                 // CHECK:       NPUReg40XX.DPUVariant
                     ^bb0(%weights_tensor: memref<32x16x3x3xf16, #NHWC, [@CMX_NN, 0]>):
-                    // CHECK-DAG:  UINT shave_l2_cache_en at 18 size 1 = 0,
+                    // CHECK-DAG:  UINT shave_l2_cache_en at 19 size 1 = 0,
                     // CHECK-DAG:  UINT workload_prm_sel at 2 size 1 = 0,
                     VPUIPDPU.ODUOutSubtensor begin_coord_x(0) begin_coord_y(0) begin_coord_z(0) end_coord_x(63) end_coord_y(63) end_coord_z(15)
                     // CHECK-DAG:  UINT te_beg_y at 0 size 13 = 0,
@@ -257,7 +257,7 @@ module @Test {
                     // CHECK-DAG:  UINT te_end_z at 13 size 13 = 0xF
                     // CHECK-DAG:  UINT te_end_x at 0 size 13 = 0x3F
                     VPUIPDPU.DPUGroup invariantIdx(!VPURegMapped.Index<0:0:0>) variantCount(4) {isLastVariant}
-                    // CHECK-DAG:  UINT invar_lptr_force at 13 size 1 = 0,
+                    // CHECK-DAG:  UINT invar_lptr_force at 14 size 1 = 0,
                     // CHECK-DAG:  UINT workload_odu_auto_upd at 8 size 1 = 1,
                     // CHECK-DAG:  invariant_index_ offset 200 size 32 = UINT 0,
                 }
@@ -344,7 +344,7 @@ module @ProfilingTest {
                     VPUIPDPU.ODUOutSubtensor begin_coord_x(1) begin_coord_y(32) begin_coord_z(64) end_coord_x(63) end_coord_y(63) end_coord_z(15)
 
                     VPUIPDPU.DPUGroup invariantIdx(!VPURegMapped.Index<0:0:0>) variantCount(1) {isFirstVariant}
-                    // CHECK-DAG:  UINT invar_lptr_force at 13 size 1 = 1,
+                    // CHECK-DAG:  UINT invar_lptr_force at 14 size 1 = 1,
                     // CHECK-DAG:  UINT workload_odu_auto_upd at 8 size 1 = 0,
                     // CHECK-DAG:  invariant_index_ offset 200 size 32 = UINT 0,
                 }

@@ -12,11 +12,11 @@ using namespace vpux;
 
 mlir::LogicalResult vpux::IE::SwishOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::SwishOpAdaptor swish(operands, attrs);
+    IE::SwishOpAdaptor swish(operands, attrs, prop);
     if (mlir::failed(swish.verify(loc))) {
         return mlir::failure();
     }
@@ -51,15 +51,11 @@ mlir::LogicalResult ConvertConstToAttr::matchAndRewrite(IE::SwishOp swishOp, mli
 
     if (auto beta = swishOp.getBeta()) {
         auto betaOp = beta.getDefiningOp<Const::DeclareOp>();
-        if (betaOp == nullptr) {
+        if (betaOp == nullptr || !betaOp.getContentAttr().isSplat()) {
             return mlir::failure();
         }
 
         const auto betaContent = betaOp.getContent();
-        if (!betaContent.isSplat()) {
-            return mlir::failure();
-        }
-
         betaValue = betaContent.getSplatValue<float>();
     }
 

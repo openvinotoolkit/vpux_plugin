@@ -59,6 +59,7 @@ table ProfilingSection {
     type: uint;
     offset: uint;
     size: uint;
+    typeLabel: string;
 }
 
 table ProfilingBuffer {

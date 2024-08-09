@@ -170,10 +170,7 @@ SmallVector<mlir::Operation*> getPermutesToMove(ArrayRef<mlir::Operation*> permu
 }
 
 bool isSplatConstant(Const::DeclareOp constOp) {
-    if (constOp == nullptr) {
-        return false;
-    }
-    return constOp.getContent().isSplat();
+    return (constOp != nullptr) && constOp.getContentAttr().isSplat();
 }
 
 /* Rewrite the pattern from:
@@ -411,6 +408,29 @@ mlir::LogicalResult PermuteEltwiseRewriter<EltwiseOp>::matchAndRewrite(EltwiseOp
             }
 
             return shapeCastOp.getResult();
+        }
+        // In case IE.mempermute -> IE.GroupConvolution0() ... IE.GroupConvolutionN() return last Eltwise
+        // GroupConvolution()
+        if (auto groupConvolutionOp = mlir::dyn_cast<IE::GroupConvolutionOp>(*output.getUsers().begin())) {
+            if (isEltwiseGroupConvolution(groupConvolutionOp)) {
+                while (true) {
+                    // If GroupConvolution is not eligible, skip those GroupConvolution ops.
+                    const auto hasEltwiseTrait = groupConvolutionOp->template hasTrait<IE::EltwiseOp>();
+                    if (!(hasEltwiseTrait || (_verifyFunc && _verifyFunc(groupConvolutionOp.getOperation())))) {
+                        return output;
+                    }
+                    if (auto nextOp = mlir::dyn_cast<IE::GroupConvolutionOp>(
+                                *groupConvolutionOp.getOutput().getUsers().begin())) {
+                        if (!isEltwiseGroupConvolution(nextOp)) {
+                            break;
+                        }
+                        groupConvolutionOp = nextOp;
+                    } else {
+                        break;
+                    }
+                }
+                return groupConvolutionOp.getOutput();
+            }
         }
         return output;
     };

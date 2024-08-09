@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --init-compiler="vpu-arch=%arch%" --resolve-strided-slice %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 // CHECK-LABEL: @ResolveStridedSliceWithStride
 func.func @ResolveStridedSliceWithStride(%arg0: tensor<1x10x20x30xf16>) -> tensor<1x5x5x5xf16> {
@@ -178,4 +178,29 @@ func.func @StridedSliceWith0dOutput(%arg0: tensor<4xsi32>) -> tensor<1xsi32> {
     // CHECK:       [[VAL0:%.*]] = IE.Slice %arg0 [3] [1] : tensor<4xsi32> to tensor<1xsi32>
     // CHECK:       [[VAL1:%.*]] = IE.Reshape([[VAL0]]) {shape_value = [1]} : tensor<1xsi32> -> tensor<1xsi32>
     // CHECK:       return [[VAL1]]  : tensor<1xsi32>
+}
+
+// CHECK-LABEL: @StridedSliceWithEllipsisAttr
+func.func @StridedSliceWithEllipsisAttr(%arg0: tensor<1x1x10x2xf16>) -> tensor<1x1x10x2xf16> {
+    %0 = IE.StridedSlice(%arg0) {
+        begin_mask = [0, 1],
+        begins_attr = [0, 0],
+        ellipsis_mask = [1, 0],
+        end_mask = [0, 1],
+        ends_attr = [0, 0],
+        new_axis_mask = [0, 0],
+        operandSegmentSizes = array<i32: 1, 0, 0, 0>,
+        shrink_axis_mask = [0, 0],
+        strides_attr = [1, -1]
+        } : tensor<1x1x10x2xf16> -> tensor<1x1x10x2xf16>
+
+    return %0 : tensor<1x1x10x2xf16>
+
+    // CHECK:       [[SLICE0:%.+]] = IE.Slice {{[^:]+}} [0, 0, 0, 0] [1, 1, 10, 1] : tensor<1x1x10x2xf16> to tensor<1x1x10x1xf16>
+    // CHECK:       [[SLICE1:%.+]] = IE.Slice {{[^:]+}} [0, 0, 0, 1] [1, 1, 10, 1] : tensor<1x1x10x2xf16> to tensor<1x1x10x1xf16>
+    // CHECK:       [[CONCAT0:%.+]] = IE.Concat([[SLICE1]], [[SLICE0]]) {per_axis = #IE.Concat<axis = 3 : i64>} : tensor<1x1x10x1xf16>, tensor<1x1x10x1xf16> -> tensor<1x1x10x2xf16>
+    // CHECK:       [[SLICE2:%.+]] = IE.Slice [[CONCAT0]] [0, 0, 0, 0] [1, 1, 10, 2] : tensor<1x1x10x2xf16> to tensor<1x1x10x2xf16>
+    // CHECK:       [[RESHAPE:%.+]] = IE.Reshape([[SLICE2]]) {shape_value = [1, 1, 10, 2]} : tensor<1x1x10x2xf16> -> tensor<1x1x10x2xf16>
+
+    // CHECK:       return [[RESHAPE]]  : tensor<1x1x10x2xf16>
 }

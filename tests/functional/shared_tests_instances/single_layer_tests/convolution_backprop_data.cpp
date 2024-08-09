@@ -16,18 +16,12 @@ namespace test {
 class ConvolutionBackpropDataLayerTestCommon :
         public ConvolutionBackpropDataLayerTest,
         virtual public VpuOv2LayerTest {};
-class ConvolutionBackpropDataLayerTest_NPU3700 : public ConvolutionBackpropDataLayerTestCommon {};
 class ConvolutionBackpropDataLayerTest_NPU3720 : public ConvolutionBackpropDataLayerTestCommon {};
 
 TEST_P(ConvolutionBackpropDataLayerTest_NPU3720, HW) {
-    abs_threshold = 0.5;
+    rel_threshold = 0.002;
     setDefaultHardwareMode();
     run(Platform::NPU3720);
-}
-
-TEST_P(ConvolutionBackpropDataLayerTest_NPU3700, HW) {
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
 }
 
 }  // namespace test
@@ -112,27 +106,6 @@ INSTANTIATE_TEST_SUITE_P(smoke_precommit_ConvolutionBackpropData2D_OutputPadding
                                             ::testing::ValuesIn(emptyOutputShape), ::testing::Values(DEVICE_NPU)),
                          ConvolutionBackpropDataLayerTest_NPU3720::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(
-        smoke_ConvolutionBackpropData2D_ExplicitPadding, ConvolutionBackpropDataLayerTest_NPU3700,
-        ::testing::Combine(conv2DParams_ExplicitPadding, ::testing::ValuesIn(netPrecisions),
-                           ::testing::ValuesIn(static_shapes_to_test_representation(inputShapes2D_MLIR)),
-                           ::testing::ValuesIn(emptyOutputShape), ::testing::Values(DEVICE_NPU)),
-        ConvolutionBackpropDataLayerTest_NPU3700::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(
-        smoke_ConvolutionBackpropData2D_OutputShape, ConvolutionBackpropDataLayerTest_NPU3700,
-        ::testing::Combine(conv2DParams_AutoPadSameLower, ::testing::ValuesIn(netPrecisions),
-                           ::testing::ValuesIn(static_shapes_to_test_representation(specificInputShapes2D_MLIR)),
-                           ::testing::ValuesIn(outputShape), ::testing::Values(DEVICE_NPU)),
-        ConvolutionBackpropDataLayerTest_NPU3700::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(
-        smoke_ConvolutionBackpropData2D_AutoPadValid, ConvolutionBackpropDataLayerTest_NPU3700,
-        ::testing::Combine(conv2DParams_AutoPadValid, ::testing::ValuesIn(netPrecisions),
-                           ::testing::ValuesIn(static_shapes_to_test_representation(inputShapes2D_MLIR)),
-                           ::testing::ValuesIn(emptyOutputShape), ::testing::Values(DEVICE_NPU)),
-        ConvolutionBackpropDataLayerTest_NPU3700::getTestCaseName);
-
 /* ============= 3D ConvolutionBackpropData ============= */
 const std::vector<std::vector<ov::Shape>> inputShapes3D = {
         {{1, 3, 10, 10, 10}}, {{1, 16, 5, 5, 5}}, {{1, 32, 5, 5, 5}}};
@@ -151,21 +124,5 @@ const auto conv3DParams_AutoPadValid = ::testing::Combine(
         ::testing::Values(std::vector<ptrdiff_t>({0, 0, 0})), ::testing::Values(std::vector<ptrdiff_t>({0, 0, 0})),
         ::testing::ValuesIn(dilations3D), ::testing::ValuesIn(numOutChannels),
         ::testing::Values(ov::op::PadType::VALID), ::testing::ValuesIn(emptyOutputPadding));
-
-// Tracking number [E#85137]
-INSTANTIATE_TEST_SUITE_P(DISABLED_smoke_ConvolutionBackpropData3D_ExplicitPadding,
-                         ConvolutionBackpropDataLayerTest_NPU3700,
-                         ::testing::Combine(conv3DParams_ExplicitPadding, ::testing::ValuesIn(netPrecisions),
-                                            ::testing::ValuesIn(static_shapes_to_test_representation(inputShapes3D)),
-                                            ::testing::ValuesIn(emptyOutputShape), ::testing::Values(DEVICE_NPU)),
-                         ConvolutionBackpropDataLayerTest_NPU3700::getTestCaseName);
-
-// Tracking number [E#85137]
-INSTANTIATE_TEST_SUITE_P(DISABLED_smoke_ConvolutionBackpropData3D_AutoPadValid,
-                         ConvolutionBackpropDataLayerTest_NPU3700,
-                         ::testing::Combine(conv3DParams_AutoPadValid, ::testing::ValuesIn(netPrecisions),
-                                            ::testing::ValuesIn(static_shapes_to_test_representation(inputShapes3D)),
-                                            ::testing::ValuesIn(emptyOutputShape), ::testing::Values(DEVICE_NPU)),
-                         ConvolutionBackpropDataLayerTest_NPU3700::getTestCaseName);
 
 }  // namespace

@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
-// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --constant-folding-pipe --mlir-print-elementsattrs-with-hex-if-larger=-1 %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --constant-folding-pipeline --mlir-print-elementsattrs-with-hex-if-larger=-1 %s | FileCheck %s
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 !qElemType = !quant.uniform<u8:f16, 0.0039215686274509803>
 #YXOI = affine_map<(d0, d1, d2, d3) -> (d2, d3, d0, d1)>
@@ -323,21 +323,27 @@ func.func @ConstFoldDequantizeAxis4() -> memref<2x2x2x2x2xf16> {
 
 // -----
 
-func.func @RelocateFoldUnfusedConstantSingleCluster() -> memref<5x1x1x4xsi32> {
-
+func.func @RelocateFoldUnfusedConstantSingleCluster() -> (memref<5x1x1x4xsi32>, memref<2x1x1x4xsi32>) {
     // weightPtrStep = 1, sparsityPtrStep = 2
-    %0 = const.Declare memref<5x1x1x4xsi32> = dense<[[[[1, 2, 3, 3]]], [[[2, 4, 4, 4]]], [[[3, 6, 5, 5]]], [[[4, 8, 6, 6]]], [[[5, 10, 7, 7]]]]> : tensor<5x1x1x4xsi32>, [#const.RelocateWeightsTable<weightsPtr=[10], sparsityPtr=15 : i64, offsets=[0], weightsTableSize=80 : i64, weightsElemBitSize=16 : i64>]
-    return %0 : memref<5x1x1x4xsi32>
+    %relocate = const.Declare memref<5x1x1x4xsi32> = dense<[[[[1, 2, 3, 3]]], [[[2, 4, 4, 4]]], [[[3, 6, 5, 5]]], [[[4, 8, 6, 6]]], [[[5, 10, 7, 7]]]]> : tensor<5x1x1x4xsi32>,
+        [#const.RelocateWeightsTable<weightsPtr=[10], sparsityPtr=15 : i64, offsets=[0], weightsTableSize=80 : i64, weightsElemBitSize=16 : i64>]
+    %subview_relocate = const.Declare memref<2x1x1x4xsi32> = dense<[[[[1, 2, 3, 3]]], [[[2, 4, 4, 4]]], [[[3, 6, 5, 5]]], [[[4, 8, 6, 6]]], [[[5, 10, 7, 7]]]]> : tensor<5x1x1x4xsi32>,
+        [#const.SubView<[2, 0, 0, 0], [2, 1, 1, 4]>,
+         #const.RelocateWeightsTable<weightsPtr=[10], sparsityPtr=15 : i64, offsets=[0], weightsTableSize=32 : i64, weightsElemBitSize=16 : i64, channelOffset=2 : i64>]
+    return %relocate, %subview_relocate : memref<5x1x1x4xsi32>, memref<2x1x1x4xsi32>
 
-    // CHECK: [[CST:%*]] = const.Declare memref<5x1x1x4xsi32>
-    // CHECK-SAME{LITERAL}: dense<[[[[10, 15, 3, 3]]], [[[11, 17, 4, 4]]], [[[12, 19, 5, 5]]], [[[13, 21, 6, 6]]], [[[14, 23, 7, 7]]]]>
+    // CHECK:               [[RELOCATE:%*]] = const.Declare memref<5x1x1x4xsi32>
+    // CHECK-SAME{LITERAL}:     dense<[[[[10, 15, 3, 3]]], [[[11, 17, 4, 4]]], [[[12, 19, 5, 5]]], [[[13, 21, 6, 6]]], [[[14, 23, 7, 7]]]]>
+    // CHECK:               [[SUBVIEW_RELOCATE:%*]] = const.Declare memref<2x1x1x4xsi32>
+    // CHECK-SAME{LITERAL}:     dense<[[[[12, 19, 5, 5]]], [[[13, 21, 6, 6]]]]>
 }
 
 // -----
 
 func.func @RelocateFoldFusedConstantSingleCluster() -> memref<1x1x1x16xsi32> {
     // weightPtrStep = 1, sparsityPtrStep = 2
-    %0 = const.Declare memref<1x1x1x16xsi32> = dense<[[[[1, 2, 1, 2, 2, 4, 2, 3, 3, 6, 4, 5, 0, 0, 0, 0]]]]> : tensor<1x1x1x16xsi32>, [#const.RelocateWeightsTable<weightsPtr=[10], sparsityPtr=15 : i64, offsets=[0], weightsTableSize=48 : i64, weightsElemBitSize=16 : i64>]
+    %0 = const.Declare memref<1x1x1x16xsi32> = dense<[[[[1, 2, 1, 2, 2, 4, 2, 3, 3, 6, 4, 5, 0, 0, 0, 0]]]]> : tensor<1x1x1x16xsi32>,
+        [#const.RelocateWeightsTable<weightsPtr=[10], sparsityPtr=15 : i64, offsets=[0], weightsTableSize=48 : i64, weightsElemBitSize=16 : i64>]
     return %0 : memref<1x1x1x16xsi32>
 
     // CHECK: [[CST:%*]] = const.Declare memref<1x1x1x16xsi32>
@@ -346,12 +352,18 @@ func.func @RelocateFoldFusedConstantSingleCluster() -> memref<1x1x1x16xsi32> {
 
 // -----
 
-func.func @RelocateFoldUnfusedMultiCluster() -> memref<4x1x1x4xsi32> {
-    %0 = const.Declare memref<4x1x1x4xsi32> = dense<[[[[1, 2, 3, 3]]], [[[2, 4, 4, 4]]], [[[3, 6, 5, 5]]], [[[4, 8, 6, 6]]]]> : tensor<4x1x1x4xsi32>, [#const.RelocateWeightsTable<weightsPtr=[10, 20], sparsityPtr=5 : i64, offsets=[0, 2], weightsTableSize=64 : i64, weightsElemBitSize=16 : i64>]
-    return %0 : memref<4x1x1x4xsi32>
+func.func @RelocateFoldUnfusedMultiCluster() -> (memref<4x1x1x4xsi32>, memref<2x1x1x4xsi32>) {
+    %relocate = const.Declare memref<4x1x1x4xsi32> = dense<[[[[1, 2, 3, 3]]], [[[2, 4, 4, 4]]], [[[3, 6, 5, 5]]], [[[4, 8, 6, 6]]]]> : tensor<4x1x1x4xsi32>,
+        [#const.RelocateWeightsTable<weightsPtr=[10, 20], sparsityPtr=5 : i64, offsets=[0, 2], weightsTableSize=64 : i64, weightsElemBitSize=16 : i64>]
+    %subview_relocate = const.Declare memref<2x1x1x4xsi32> = dense<[[[[1, 2, 3, 3]]], [[[2, 4, 4, 4]]], [[[3, 6, 5, 5]]], [[[4, 8, 6, 6]]]]> : tensor<4x1x1x4xsi32>,
+        [#const.SubView<[2, 0, 0, 0], [2, 1, 1, 4]>,
+         #const.RelocateWeightsTable<weightsPtr=[20], sparsityPtr=5 : i64, offsets=[0], weightsTableSize=32 : i64, weightsElemBitSize=16 : i64, channelOffset=0 : i64>]
+    return %relocate, %subview_relocate : memref<4x1x1x4xsi32>, memref<2x1x1x4xsi32>
 
-    // CHECK: [[CST:%*]] = const.Declare memref<4x1x1x4xsi32>
-    // CHECK-SAME{LITERAL}: dense<[[[[10, 5, 3, 3]]], [[[11, 7, 4, 4]]], [[[20, 5, 5, 5]]], [[[21, 7, 6, 6]]]]>
+    // CHECK:               [[RELOCATE:%*]] = const.Declare memref<4x1x1x4xsi32>
+    // CHECK-SAME{LITERAL}:    dense<[[[[10, 5, 3, 3]]], [[[11, 7, 4, 4]]], [[[20, 5, 5, 5]]], [[[21, 7, 6, 6]]]]>
+    // CHECK:               [[SUBVIEW_RELOCATE:%*]] = const.Declare memref<2x1x1x4xsi32>
+    // CHECK-SAME{LITERAL}:     dense<[[[[20, 5, 5, 5]]], [[[21, 7, 6, 6]]]]>
 }
 
 // -----
@@ -403,4 +415,24 @@ func.func @FoldFusedWeightWithMajorityOfF16Type() -> memref<1x1x1x384xf16> {
 
     //CHECK: [[FUSED_CONSTANT:%.+]] = const.Declare memref<1x1x1x384xf16> =
     // CHECK-SAME{LITERAL} dense<[[[[0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00, 3.075600e-05, 1.000980e+00, 0.000000e+00, 0.000000e+00, 9.536740e-07, 0.000000e+00, 0.000000e+00, 0.000000e+00, 3.075600e-05, 1.000980e+00, 0.000000e+00, 0.000000e+00, 1.907350e-06, 0.000000e+00, 0.000000e+00, 0.000000e+00, 3.075600e-05, 1.000980e+00, 0.000000e+00, 0.000000e+00, 2.861020e-06, 0.000000e+00, 0.000000e+00, 0.000000e+00, 3.075600e-05, 1.000980e+00, 0.000000e+00, 0.000000e+00, 3.814700e-06, 0.000000e+00, 0.000000e+00, 0.000000e+00, 3.075600e-05, 1.000980e+00, 0.000000e+00, 0.000000e+00, 4.768370e-06, 0.000000e+00, 0.000000e+00, 0.000000e+00, 3.075600e-05, 1.000980e+00, 0.000000e+00, 0.000000e+00, 5.722050e-06, 0.000000e+00, 0.000000e+00, 0.000000e+00, 3.075600e-05, 1.000980e+00, 0.000000e+00, 0.000000e+00, 6.675720e-06, 0.000000e+00, 0.000000e+00, 0.000000e+00, 3.075600e-05, 1.000980e+00, 0.000000e+00, 0.000000e+00, 7.629390e-06, 0.000000e+00, 0.000000e+00, 0.000000e+00, 3.075600e-05, 1.000980e+00, 0.000000e+00, 0.000000e+00, 8.583060e-06, 0.000000e+00, 0.000000e+00, 0.000000e+00, 3.075600e-05, 1.000980e+00, 0.000000e+00, 0.000000e+00, 9.536740e-06, 0.000000e+00, 0.000000e+00, 0.000000e+00, 3.075600e-05, 1.000980e+00, 0.000000e+00, 0.000000e+00, 1.049040e-05, 0.000000e+00, 0.000000e+00, 0.000000e+00, 3.075600e-05, 1.000980e+00, 0.000000e+00, 0.000000e+00, 1.144410e-05, 0.000000e+00, 0.000000e+00, 0.000000e+00, 3.075600e-05, 1.000980e+00, 0.000000e+00, 0.000000e+00, 1.239780e-05, 0.000000e+00, 0.000000e+00, 0.000000e+00, 3.075600e-05, 1.000980e+00, 0.000000e+00, 0.000000e+00, 1.335140e-05, 0.000000e+00, 0.000000e+00, 0.000000e+00, 3.075600e-05, 1.000980e+00, 0.000000e+00, 0.000000e+00, 1.430510e-05, 0.000000e+00, 0.000000e+00, 0.000000e+00, 3.075600e-05, 1.000980e+00, 0.000000e+00, 0.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00]]]]> : tensor<1x1x1x384xf16>
+}
+
+// -----
+
+func.func @FP16OverflowNegative() -> tensor<1x2x2x2xf16> {
+    %0 = const.Declare tensor<1x2x2x2xf16> = dense<-100000.0> : tensor<1x2x2x2xf16>
+    return %0 : tensor<1x2x2x2xf16>
+
+    // CHECK: [[CST:%*]] = const.Declare tensor<1x2x2x2xf16>
+    // CHECK-SAME{LITERAL}: dense<-6.550400e+04> : tensor<1x2x2x2xf16>
+}
+
+// -----
+
+func.func @FP16OverflowPositive() -> tensor<1x2x2x2xf16> {
+    %0 = const.Declare tensor<1x2x2x2xf16> = dense<100000.0> : tensor<1x2x2x2xf16>
+    return %0 : tensor<1x2x2x2xf16>
+
+    // CHECK: [[CST:%*]] = const.Declare tensor<1x2x2x2xf16>
+    // CHECK-SAME{LITERAL}: dense<6.550400e+04> : tensor<1x2x2x2xf16>
 }

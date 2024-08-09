@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -22,7 +22,7 @@ public:
     static sw_params::DataType getDataTypeFromMlirType(mlir::Type type);
 
 private:
-    static void addTensorArgToVector(SmallVector<uint8_t>& vec, mlir::Value value);
+    static void addTensorArgToVector(SmallVector<uint8_t>& vec, mlir::Value value, bool isDynamic);
     static void addAttrsToVector(SmallVector<uint8_t>& vec, mlir::Attribute attr);
     static void addBasicAttrToVector(SmallVector<uint8_t>& vec, mlir::Attribute attr);
 

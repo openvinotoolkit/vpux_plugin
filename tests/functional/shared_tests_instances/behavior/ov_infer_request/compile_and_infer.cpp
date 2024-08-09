@@ -5,8 +5,8 @@
 
 #include "overload/compile_and_infer.hpp"
 #include <npu_private_properties.hpp>
+#include "common/npu_test_env_cfg.hpp"
 #include "common/utils.hpp"
-#include "common/vpu_test_env_cfg.hpp"
 
 namespace {
 

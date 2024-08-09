@@ -38,7 +38,7 @@ std::vector<uint8_t> vpux::ELFNPU37XX::exportToELF(mlir::ModuleOp module,
     log.trace("Serializing '{0}' ops", ELFNPU37XX::CreateMetadataSectionOp::getOperationName());
     auto createMetadataSectionOps = netFunc.getOps<ELFNPU37XX::CreateMetadataSectionOp>();
     for (auto createMetadataSectionOp : createMetadataSectionOps) {
-        auto metadataPtr = vpux::ELFNPU37XX::constructMetadata(module, netOp, netFunc, parameters, results);
+        auto metadataPtr = vpux::ELFNPU37XX::constructMetadata(module, netOp, netFunc, parameters, results, log.nest());
         auto& metadata = *metadataPtr.get();
         createMetadataSectionOp.serialize(elfWriter, sectionMap, symbolMap, metadata);
     }

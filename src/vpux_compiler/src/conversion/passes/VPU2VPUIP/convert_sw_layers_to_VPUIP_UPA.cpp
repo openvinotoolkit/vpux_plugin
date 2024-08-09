@@ -46,7 +46,7 @@ mlir::LogicalResult ReverseSequenceRewrite::matchAndRewrite(VPU::ReverseSequence
                                                             mlir::ConversionPatternRewriter& rewriter) const {
     _log.trace("Found ReverseSequence Operation '{0}'", origOp->getLoc());
 
-    auto* typeConverter = getTypeConverter();
+    const auto* typeConverter = getTypeConverter();
     VPUX_THROW_UNLESS(typeConverter != nullptr, "TypeConverter is not set");
 
     auto origSeqLengthShapeType = origOp.getSeqLength().getType().cast<mlir::ShapedType>();
@@ -89,7 +89,7 @@ mlir::LogicalResult LSTMCellRewrite::matchAndRewrite(VPU::LSTMCellOp origOp, OpA
                                                      mlir::ConversionPatternRewriter& rewriter) const {
     _log.trace("Found LSTMCell Operation '{0}'", origOp->getLoc());
 
-    auto* typeConverter = getTypeConverter();
+    const auto* typeConverter = getTypeConverter();
     VPUX_THROW_UNLESS(typeConverter != nullptr, "TypeConverter is not set");
 
     // Concatenate 'weights' and 'recurrenceWeights' into single buffer
@@ -137,7 +137,7 @@ mlir::LogicalResult LSTMSequenceRewrite::matchAndRewrite(VPU::LSTMSequenceOp ori
                                                          mlir::ConversionPatternRewriter& rewriter) const {
     _log.trace("Found LSTMSequence Operation '{0}'", origOp->getLoc());
 
-    auto* typeConverter = getTypeConverter();
+    const auto* typeConverter = getTypeConverter();
     VPUX_THROW_UNLESS(typeConverter != nullptr, "TypeConverter is not set");
 
     // Concatenate 'weights' and 'recurrenceWeights' into single buffer

@@ -301,8 +301,23 @@ NDTypeInterface VPU::SparseTensorType::changeShapeElemType(ShapeRef shape, mlir:
     if (auto seAttr = getSeAttr()) {
         inputDataShape = seAttr.backInferInputShape(shape);
     }
-    const auto data = ndData.changeShapeElemType(inputDataShape, elemType);
-
+    VPU::DistributedTensorAttr possibleDistribution =
+            containsDistributedTypes()
+                    ? getDistributedTypes().front().cast<VPU::DistributedTensorType>().getDistribution()
+                    : nullptr;
+    auto newShape = [&](vpux::VPU::DistributedTensorAttr dist) {
+        if (dist != nullptr) {
+            if (VPU::isDistributedAttrWithExplicitShapesAndOffsets(dist)) {
+                auto newDistribution = VPU::getNonOverlappedDistributedAttr(
+                        shape, dist.getMode(), nullptr, dist.getNumClusters(), nullptr,
+                        dist.getUniformDistributedSegments(), ndData.getContext());
+                return ndData.cast<VPU::SparseTensorType>().changeShapeElemTypeForExplicitDistribution(shape, elemType,
+                                                                                                       newDistribution);
+            }
+        }
+        return ndData.changeShapeElemType(inputDataShape, elemType);
+    };
+    const auto data = newShape(possibleDistribution);
     auto sparsityMap = getSparsityMap();
     if (sparsityMap != nullptr) {
         const auto ndSparsityMap = sparsityMap.cast<NDTypeInterface>();

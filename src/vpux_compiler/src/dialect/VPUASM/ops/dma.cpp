@@ -57,8 +57,9 @@ mlir::LogicalResult vpux::VPUASM::NNDMAOp::verify() {
     // act_compression_size_entryAttr not required for compressed weight case but it's necessary for activation
     // spilling. We need to distinguish these two cases and require act_compression_size_entryAttr be set if
     // acceleration_mode is decompression for activation spilling but current API doesn't allow us to do that.
+    // Same for act_compression_sparsity_map
     bool isConfigurationSupported = false;
-    if (getActCompressionSizeEntryAttr()) {
+    if (getActCompressionSizeEntryAttr() || getActCompressionSparsityMapAttr()) {
         isConfigurationSupported = getAccelerationMode() == VPUIP::DMAAccMode::COMPRESSION ||
                                    getAccelerationMode() == VPUIP::DMAAccMode::DECOMPRESSION;
     } else {
@@ -68,9 +69,11 @@ mlir::LogicalResult vpux::VPUASM::NNDMAOp::verify() {
 
     if (!isConfigurationSupported) {
         return errorAt(getLoc(),
-                       "Operation {0}: unsupported configuration: act_compression_size_entryAttr={1} and "
-                       "acceleration_mode={2}",
-                       getOperationName(), getActCompressionSizeEntryAttr(), getAccelerationMode());
+                       "Operation {0}: unsupported configuration: "
+                       "act_compression_size_entryAttr={1}/act_compression_sparsity_mapAttr={2} and "
+                       "acceleration_mode={3}",
+                       getOperationName(), getActCompressionSizeEntryAttr(), getActCompressionSparsityMapAttr(),
+                       getAccelerationMode());
     }
 
     const auto symName = getSymName();

@@ -14,7 +14,7 @@
 
 void createCaseGeneratorHeaderJson(llvm::json::OStream& j) {
     j.attribute("architecture", "NPU37XX");
-    j.attribute("compiler_backend", "ELF");
+    j.attribute("backend_flow", "Default");
     j.attribute("case_type", "ZMajorConvolution");
     j.attribute("network", "");
     j.attribute("layer_name", "conv2d_u8_to_u8_unit_test");

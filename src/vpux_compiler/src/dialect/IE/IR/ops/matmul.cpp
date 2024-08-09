@@ -49,11 +49,11 @@ using namespace vpux;
 
 mlir::LogicalResult vpux::IE::MatMulOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::MatMulOpAdaptor matMul(operands, attrs);
+    IE::MatMulOpAdaptor matMul(operands, attrs, prop);
     if (mlir::failed(matMul.verify(loc))) {
         return mlir::failure();
     }
@@ -216,7 +216,13 @@ mlir::LogicalResult TransposeInputs::matchAndRewrite(IE::MatMulOp matmulOp, mlir
     };
 
     auto input1 = getInput(!matmulOp.getTransposeA(), matmulOp.getInput1(), "input_1");
+    if (input1 == nullptr) {
+        return mlir::failure();
+    }
     auto input2 = getInput(matmulOp.getTransposeB(), matmulOp.getInput2(), "input_2");
+    if (input2 == nullptr) {
+        return mlir::failure();
+    }
 
     rewriter.replaceOpWithNewOp<IE::MatMulOp>(matmulOp, input1, input2, /*transpose_a=*/false,
                                               /*transpose_b=*/true);
@@ -226,159 +232,7 @@ mlir::LogicalResult TransposeInputs::matchAndRewrite(IE::MatMulOp matmulOp, mlir
 
 }  // namespace
 
-//
-// ConvertPrecisionToFP16
-//
-
-namespace {
-
-class ConvertPrecisionToFP16 final : public mlir::OpRewritePattern<IE::MatMulOp> {
-public:
-    using mlir::OpRewritePattern<IE::MatMulOp>::OpRewritePattern;
-
-public:
-    mlir::LogicalResult matchAndRewrite(IE::MatMulOp matmulOp, mlir::PatternRewriter& rewriter) const final;
-};
-
-mlir::LogicalResult ConvertPrecisionToFP16::matchAndRewrite(IE::MatMulOp origOp,
-                                                            mlir::PatternRewriter& rewriter) const {
-    auto outputElemType = origOp.getOutput().getType().cast<NDTypeInterface>().getElementType();
-    if (outputElemType.isF16() || outputElemType.isF32()) {
-        return mlir::failure();
-    }
-
-    mlir::IRMapping mapper;
-    for (auto inputIter : origOp->getOperands() | indexed) {
-        auto input = inputIter.value();
-        auto index = inputIter.index();
-        const auto inputElemType = input.getType().cast<vpux::NDTypeInterface>().getElementType();
-        const auto elemTypeFP16 = mlir::Float16Type::get(inputElemType.getContext());
-        auto inputLoc = appendLoc(origOp->getLoc(), "_Input_Convert_{0}", index);
-        const auto inputCvtToFP16 =
-                rewriter.createOrFold<IE::ConvertOp>(inputLoc, input, mlir::TypeAttr::get(elemTypeFP16));
-        mapper.map(origOp->getOperand(index), inputCvtToFP16);
-    }
-
-    auto newOp = rewriter.clone(*origOp, mapper);
-    vpux::inferReturnTypes(newOp, vpux::InferShapedTypeMode::ELEM_TYPE);
-    auto outputLoc = appendLoc(origOp->getLoc(), "_Output_Convert_0");
-    const auto outputCvtToOrig =
-            rewriter.createOrFold<IE::ConvertOp>(outputLoc, newOp->getResult(0), mlir::TypeAttr::get(outputElemType));
-    rewriter.replaceOp(origOp, outputCvtToOrig);
-
-    return mlir::success();
-}
-
-class PropagateTransposeToConst final : public mlir::OpRewritePattern<IE::MatMulOp> {
-public:
-    using mlir::OpRewritePattern<IE::MatMulOp>::OpRewritePattern;
-
-public:
-    mlir::LogicalResult matchAndRewrite(IE::MatMulOp matmulOp, mlir::PatternRewriter& rewriter) const final;
-};
-
-mlir::LogicalResult PropagateTransposeToConst::matchAndRewrite(IE::MatMulOp matmulOp,
-                                                               mlir::PatternRewriter& rewriter) const {
-    auto ctx = matmulOp.getContext();
-    auto transposeB = matmulOp.getTransposeB();
-    if (!transposeB) {
-        return matchFailed(rewriter, matmulOp, "Input doesn't have transpose");
-    }
-
-    const auto inType1 = matmulOp.getInput1().getType().dyn_cast<vpux::NDTypeInterface>();
-    const auto inType2 = matmulOp.getInput2().getType().dyn_cast<vpux::NDTypeInterface>();
-    if (inType1.getRank() != 2 || inType2.getRank() != 2) {
-        return matchFailed(rewriter, matmulOp, "Input rank doesn't meet requirement");
-    }
-
-    auto affineReshapeOp = matmulOp.getInput2().getDefiningOp<IE::AffineReshapeOp>();
-    if (affineReshapeOp == nullptr) {
-        return matchFailed(rewriter, matmulOp, "Doesn't have affineReshape layer");
-    }
-
-    auto dimMapping = parseIntArrayOfArrayAttr<int64_t>(affineReshapeOp.getDimMapping());
-    for (size_t idx = 0; idx < dimMapping.size(); idx++) {
-        if (dimMapping[idx].size() != 1) {
-            return matchFailed(rewriter, matmulOp, "Incorrect dim mapping for affineReshape");
-        }
-    }
-
-    const auto affineReshapInOrder = DimsOrder::fromValue(affineReshapeOp.getInput());
-    const auto affineReshapOutOrder = DimsOrder::fromValue(affineReshapeOp.getOutput());
-
-    if (affineReshapInOrder != DimsOrder::CHW || affineReshapOutOrder != DimsOrder::NC) {
-        return matchFailed(rewriter, matmulOp, "Incorrect affineReshape input output order");
-    }
-
-    auto fqOp = affineReshapeOp.getInput().getDefiningOp<IE::FakeQuantizeOp>();
-    if (fqOp == nullptr) {
-        return matchFailed(rewriter, matmulOp, "Doesn't have FakeQuantize layer");
-    }
-
-    for (auto operand : fqOp->getOperands() | indexed) {
-        auto constOp = operand.value().getDefiningOp<Const::DeclareOp>();
-        if (constOp == nullptr) {
-            return matchFailed(rewriter, matmulOp, "FakeQuantize input is not const");
-        }
-        const auto outType = constOp->getResult(0).getType().dyn_cast<vpux::NDTypeInterface>();
-        if (outType.getRank() != 3) {
-            return matchFailed(rewriter, matmulOp, "FakeQuantize input rank doesn't meet requirement");
-        }
-
-        // check if it is benefical to propagate.
-        if (operand.index() != 0) {
-            auto outShape = outType.getShape();
-            if (outShape[Dims4D::Act::N] < outShape[Dims4D::Act::C]) {
-                return matchFailed(rewriter, matmulOp, "Not benefical to propagate to const");
-            }
-        }
-    }
-
-    // Since matmul rank size is 2, so the dim mapping of affineReshape only contains [0] and [1], the transpose in
-    // matmul attribute is to swap [0] and [1]. for dim mapping [0] [0] [1], we acutally transpose it to [1] [0] [0],
-    // the original positon for [1] is 2, so the permutationMap is [2, 0, 1]
-    SmallVector<uint32_t> permutationMap;
-    permutationMap.reserve(dimMapping.size());
-    for (auto dim = inType2.getRank() - 1; dim >= 0; dim--) {
-        for (size_t idx = 0; idx < dimMapping.size(); idx++) {
-            if (dimMapping[idx].front() == dim) {
-                permutationMap.push_back(idx);
-            }
-        }
-    }
-    VPUX_THROW_WHEN(permutationMap.size() != dimMapping.size(), "PermutationMap size should be the same as dimMapping");
-
-    auto orderAttr = mlir::AffineMapAttr::get(mlir::AffineMap::getPermutationMap(permutationMap, ctx));
-    auto addTranspose = [&](mlir::Value input) {
-        return rewriter.createOrFold<IE::TransposeOp>(input.getLoc(), input, nullptr, orderAttr);
-    };
-    auto input = addTranspose(fqOp.getInput());
-    auto inLow = addTranspose(fqOp.getInputLow());
-    auto inHigh = addTranspose(fqOp.getInputHigh());
-    auto outLow = addTranspose(fqOp.getOutputLow());
-    auto outHigh = addTranspose(fqOp.getOutputHigh());
-    auto newFqOp = rewriter.create<IE::FakeQuantizeOp>(fqOp->getLoc(), input, inLow, inHigh, outLow, outHigh,
-                                                       fqOp.getLevelsAttr(), fqOp.getLowFpTypeAttr(),
-                                                       fqOp.getAutoBroadcastAttr());
-
-    auto affineReshapeOut = getShape(affineReshapeOp.getOutput()).raw();
-    SmallVector<int64_t> newShapeOut(affineReshapeOut.begin(), affineReshapeOut.end());
-    // reverse the shape for we propagate the transpose
-    std::reverse(newShapeOut.begin(), newShapeOut.end());
-    auto reshape = rewriter.create<IE::ReshapeOp>(affineReshapeOp->getLoc(), newFqOp.getOutput(), nullptr, false,
-                                                  getIntArrayAttr(ctx, newShapeOut));
-    auto matMul = rewriter.create<IE::MatMulOp>(matmulOp->getLoc(), matmulOp.getInput1(), reshape.getOutput(),
-                                                matmulOp.getTransposeA(), false);
-    rewriter.replaceOp(matmulOp, matMul.getOutput());
-
-    return mlir::success();
-}
-
-}  // namespace
-
 void vpux::IE::MatMulOp::getCanonicalizationPatterns(mlir::RewritePatternSet& patterns, mlir::MLIRContext* context) {
-    patterns.add<ConvertPrecisionToFP16>(context);
     patterns.add<TransposeInputs>(context);
-    patterns.add<PropagateTransposeToConst>(context);
     patterns.add<UseFullyConnected>(context);
 }

@@ -48,7 +48,11 @@ mlir::LogicalResult canConvertGroupConvToConv(IE::GroupConvolutionOp groupconv, 
     const auto group = groupconv.getGroups().value();
     const auto filterShape = getShape(groupconv.getFilter());
     const auto inputShape = getShape(groupconv.getInput());
-    if (filterShape[Dims4D::Filter::OC] == group && inputShape[Dims4D::Act::C] == group) {
+    // If DWConv cannot be converted to NCEDepthConvolution, convert it to Convolution. Here is not need to check layout
+    // due to this pass is ahead of adjust layout and channel alignment pipeline.
+    if (filterShape[Dims4D::Filter::OC] == group && inputShape[Dims4D::Act::C] == group &&
+        (VPU::NCEDepthConvolutionOp::isSupported(groupconv, logCb, /*checkLayout=*/false,
+                                                 /*checkChannelAlignment=*/false))) {
         logCb(formatv("Conversion is not needed for dw conv"));
         return mlir::failure();
     }

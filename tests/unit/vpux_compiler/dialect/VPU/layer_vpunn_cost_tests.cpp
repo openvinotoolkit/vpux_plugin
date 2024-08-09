@@ -21,7 +21,7 @@ using vpux::VPU::ArchKind;
 using vpux::VPU::MultiClusterStrategy;
 using namespace vpux;
 
-using MLIR_VPU_LayerVPUNNCost = MLIR_UnitBase;
+using MLIR_VPU_LayerVPUNNCost = vpux::VPU::arch37xx::UnitTest;
 
 VPU::StrategyCost getSWVPUNNCost(std::shared_ptr<VPUNN::SWOperation> vpunnLayer, mlir::ModuleOp module,
                                  VPU::MultiClusterStrategy mcStrategy) {
@@ -78,7 +78,6 @@ VPUNN::CyclesInterfaceType getWeightsDMACost(VPU::NCEOpInterface nceOp, mlir::Mo
 }
 
 TEST_F(MLIR_VPU_LayerVPUNNCost, DPU_LayerCost) {
-    mlir::MLIRContext ctx(registry);
     constexpr llvm::StringLiteral inputIR = R"(
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
@@ -116,7 +115,8 @@ TEST_F(MLIR_VPU_LayerVPUNNCost, DPU_LayerCost) {
     auto dpuExec = tileOp.getSubExecutor(VPU::ExecutorKind::DPU);
 
     func->walk([&](VPU::NCEConvolutionOp convOp) {
-        const auto costParam = VPU::getWorkloadCostParam(convOp, archKind, dpuExec.getCount());
+        auto nceOp = mlir::cast<VPU::NCEOpInterface>(convOp.getOperation());
+        const auto costParam = VPU::getWorkloadCostParam(nceOp, archKind, dpuExec.getCount());
         auto dpuLayer = VPU::getDPULayer(costParam);
 
         auto clusteredOp = mlir::dyn_cast<VPU::ClusteredOpInterface>(convOp.getOperation());
@@ -131,7 +131,7 @@ TEST_F(MLIR_VPU_LayerVPUNNCost, DPU_LayerCost) {
             return cost;
         };
 
-        auto weightsDMACost = getWeightsDMACost(convOp, module.get());
+        auto weightsDMACost = getWeightsDMACost(nceOp, module.get());
 
         EXPECT_EQ(getStrategyCost(VPU::MultiClusterStrategy::Clustering),
                   getHWVPUNNCost(dpuLayer, module.get(), VPU::MultiClusterStrategy::Clustering) + weightsDMACost);
@@ -143,7 +143,6 @@ TEST_F(MLIR_VPU_LayerVPUNNCost, DPU_LayerCost) {
 }
 
 TEST_F(MLIR_VPU_LayerVPUNNCost, SWKernel_LayerCost) {
-    mlir::MLIRContext ctx(registry);
     constexpr llvm::StringLiteral inputIR = R"(
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
@@ -194,7 +193,6 @@ TEST_F(MLIR_VPU_LayerVPUNNCost, SWKernel_LayerCost) {
 }
 
 TEST_F(MLIR_VPU_LayerVPUNNCost, SWKernel_SimpleCost) {
-    mlir::MLIRContext ctx(registry);
     constexpr llvm::StringLiteral inputIR = R"(
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
@@ -230,7 +228,6 @@ TEST_F(MLIR_VPU_LayerVPUNNCost, SWKernel_SimpleCost) {
 }
 
 TEST_F(MLIR_VPU_LayerVPUNNCost, DMA_Cost) {
-    mlir::MLIRContext ctx(registry);
     constexpr llvm::StringLiteral inputIR = R"(
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 

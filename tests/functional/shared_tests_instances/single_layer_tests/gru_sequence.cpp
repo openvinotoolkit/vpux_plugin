@@ -18,19 +18,13 @@ namespace test {
 
 class GRUSequenceLayerTestCommon : public GRUSequenceTest, virtual public VpuOv2LayerTest {
     void generate_inputs(const std::vector<ov::Shape>& targetInputStaticShapes) override {
-        SubgraphBaseTest::generate_inputs(targetInputStaticShapes);
-        ov::Tensor blob;
-        const int64_t maxSeqLen = targetInputStaticShapes[0][1];
-        const auto& funcInputs = function->inputs();
-        if (funcInputs.size() > 2) {
-            const auto& seqLenInput = inputs.find(funcInputs[2].get_node_shared_ptr());
-            if (seqLenInput == inputs.end())
-                blob = create_and_fill_tensor_normal_distribution(funcInputs[0].get_element_type(),
-                                                                  targetInputStaticShapes[0], 0, 1, 1);
-
-            blob = create_and_fill_tensor(funcInputs[0].get_element_type(), targetInputStaticShapes[0], maxSeqLen, 0,
-                                          1);
-            inputs.insert({funcInputs[0].get_node_shared_ptr(), blob});
+        VpuOv2LayerTest::inputs.clear();
+        ov::Tensor inputData;
+        const auto& funcInputs = VpuOv2LayerTest::function->inputs();
+        for (size_t ind = 0; ind < 2; ind++) {
+            inputData =
+                    create_and_fill_tensor(funcInputs[ind].get_element_type(), targetInputStaticShapes[ind], 8, 0, 32);
+            VpuOv2LayerTest::inputs.insert({funcInputs[ind].get_node_shared_ptr(), inputData});
         }
     }
 };
@@ -45,6 +39,8 @@ TEST_P(GRUSequenceLayerTest_NPU3720, HW) {
 
 TEST_P(GRUSequenceLayerTest_NPU4000, HW) {
     setDefaultHardwareMode();
+    // TODO: E129229
+    configuration["NPU_BACKEND_COMPILATION_PARAMS"] = "enable-partial-workload-management=false";
     run(Platform::NPU4000);
 }
 
@@ -169,6 +165,7 @@ INSTANTIATE_TEST_SUITE_P(smoke_precommit_GRUSequence_Split_BI, GRUSequenceLayerT
                          GRUSequenceTest::getTestCaseName);
 
 //    NPU4000
+
 INSTANTIATE_TEST_SUITE_P(smoke_precommit_GRUSequence, GRUSequenceLayerTest_NPU4000, gruSequenceParam0,
                          GRUSequenceTest::getTestCaseName);
 

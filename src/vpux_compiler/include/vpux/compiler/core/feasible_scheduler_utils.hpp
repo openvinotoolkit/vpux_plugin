@@ -11,6 +11,7 @@
 #include <unordered_set>
 
 #include <llvm/ADT/SmallVector.h>
+#include <mlir/IR/Value.h>
 
 namespace vpux {
 
@@ -18,12 +19,14 @@ struct ScheduledOpOneResource {
     enum class EResRelation { PRODUCER = 0, CONSUMER = 1 };
 
     struct ResourceView {
+        mlir::Value buffer;
         llvm::SmallVector<int64_t> offset;
         llvm::SmallVector<int64_t> shape;
         llvm::SmallVector<int64_t> staticStrides;
 
         bool operator==(const ResourceView& o) const {
-            return (offset == o.offset) && (shape == o.shape) && (staticStrides == o.staticStrides);
+            return (buffer == o.buffer) && (offset == o.offset) && (shape == o.shape) &&
+                   (staticStrides == o.staticStrides);
         }
     };
 
@@ -52,22 +55,35 @@ struct ScheduledOpOneResource {
     }
     ~ScheduledOpOneResource() = default;
 
+    // Check if operation resource can overlap in execution with other operation
+    // Example:
+    // Root buffer range [0 100]
+    //  DMA1 produces first half [0 50]
+    //  DMA2 produces second half [51 100]
+    // Above tasks can execute in parralel even though they write to single root buffer
     bool canOverlap(const ScheduledOpOneResource& o) const {
         // no overlap
         if (_addressEnd < o._addressStart || _addressStart > o._addressEnd) {
             return true;
         }
 
+        // Limit overlap to cases where whole root buffer have same start and end
+        // as this is what can be seen in our compilation pipeline where subviews of buffer
+        // refer to same root buffer (same range).
         if (_addressStart == o._addressStart && _addressEnd == o._addressEnd) {
             if (!_resourceView.has_value() || !o._resourceView.has_value()) {
                 return false;
             }
 
-            // Same range. Check if range access details specify non-overlapping views of buffers
-            // For now require same staticStrides but different offset. Shape can be ignored
+            // If same range and buffer, check if range access details specify non-overlapping views of same buffer
+            // Require same staticStrides but different offset. Shape can be ignored
+            // It is possible to have different strides but such case would require more detailed check which
+            // would include all sub view properties (offset, shape, stride) and is not something that would be
+            // spotted in real compilation besides some artificial test case scenarios
             auto resVal1 = _resourceView.value();
             auto resVal2 = o._resourceView.value();
-            if (resVal1.staticStrides == resVal2.staticStrides && resVal1.offset != resVal2.offset) {
+            if (resVal1.buffer == resVal2.buffer && resVal1.staticStrides == resVal2.staticStrides &&
+                resVal1.offset != resVal2.offset) {
                 return true;
             }
         }

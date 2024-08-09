@@ -4,10 +4,9 @@
 //
 
 #include "single_op_tests/ctc_greedy_decoder.hpp"
-
-#include <vector>
-
 #include <common/functions.h>
+#include <common_test_utils/ov_tensor_utils.hpp>
+#include <vector>
 #include "vpu_ov2_layer_test.hpp"
 
 using namespace ov::test::utils;
@@ -15,9 +14,16 @@ using namespace ov::test::utils;
 namespace ov {
 namespace test {
 
-class CTCGreedyDecoderLayerTestCommon : public CTCGreedyDecoderLayerTest, virtual public VpuOv2LayerTest {};
+class CTCGreedyDecoderLayerTestCommon : public CTCGreedyDecoderLayerTest, virtual public VpuOv2LayerTest {
+    void generate_inputs(const std::vector<ov::Shape>& targetInputStaticShapes) override {
+        VpuOv2LayerTest::inputs.clear();
+        const auto& funcInputs = VpuOv2LayerTest::function->inputs();
+        ov::Tensor tensorData =
+                create_and_fill_tensor(funcInputs[0].get_element_type(), targetInputStaticShapes[0], 8, 0, 32);
+        VpuOv2LayerTest::inputs.insert({funcInputs[0].get_node_shared_ptr(), tensorData});
+    }
+};
 
-class CTCGreedyDecoderLayerTest_NPU3700 : public CTCGreedyDecoderLayerTestCommon {};
 class CTCGreedyDecoderLayerTest_NPU3720 : public CTCGreedyDecoderLayerTestCommon {};
 class CTCGreedyDecoderLayerTest_NPU4000 : public CTCGreedyDecoderLayerTestCommon {};
 
@@ -30,14 +36,6 @@ void skipInferCallbackImpl(std::stringstream& skip, std::vector<InputShape> inSh
             skip << "Comparison fails";
         }
     }
-}
-
-TEST_P(CTCGreedyDecoderLayerTest_NPU3700, HW) {
-    setSkipInferenceCallback([](std::stringstream& skip) {
-        skipInferCallbackImpl(skip, std::get<std::vector<InputShape>>(GetParam()));
-    });
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
 }
 
 TEST_P(CTCGreedyDecoderLayerTest_NPU3720, HW) {
@@ -73,10 +71,6 @@ const auto params_MLIR =
                          testing::ValuesIn(static_shapes_to_test_representation(inputShapes_MLIR)),  // Input shapes
                          testing::ValuesIn(mergeRepeated),                                           // Merge repeated
                          testing::Values(DEVICE_NPU));                                               // Device name
-
-// NPU3700
-INSTANTIATE_TEST_SUITE_P(smoke_CTCGreedyDecoder, CTCGreedyDecoderLayerTest_NPU3700, params_MLIR,
-                         CTCGreedyDecoderLayerTest::getTestCaseName);
 
 // NPU3720
 INSTANTIATE_TEST_SUITE_P(smoke_CTCGreedyDecoder, CTCGreedyDecoderLayerTest_NPU3720, params_MLIR,

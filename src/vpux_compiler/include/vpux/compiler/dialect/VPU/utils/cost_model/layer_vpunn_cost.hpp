@@ -107,7 +107,7 @@ private:
      *  Get simple cycle cost for operation which is not supported by VPUNN yet
      *  Approximate cost is size of output tensor in bytes per cluster
      */
-    StrategyCost getSimpleLayerCost(mlir::Operation* operation, const VPUNNCostParameters& parameters) const;
+    StrategyCost getSimpleLayerCost(vpux::NDTypeInterface outputType, const VPUNNCostParameters& parameters) const;
 
     /*
      *  Get divisor to get size for output tensor per cluster

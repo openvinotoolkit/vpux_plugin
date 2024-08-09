@@ -369,7 +369,7 @@ void buildMultiClustersDPUTest(const nb::TestCaseJsonDescriptor& testDesc, mlir:
     auto functionBuilder = mlir::OpBuilder::atBlockBegin(function.addEntryBlock(), builder.getListener());
     auto functionInput = function.getArgument(0);
 
-    const auto weightsValues = generateWeights(weightsShape, weightsType, ctx, weightsFileName);
+    const auto weightsValues = generateWeights(builder, weightsShape, weightsType, ctx, weightsFileName);
     auto weightsAttribute = Const::ContentAttr::get(weightsValues);
     weightsAttribute = weightsAttribute.reorder(DimsOrder::OYXI);
 
@@ -586,8 +586,11 @@ void buildMultiClustersDPUTest(const nb::TestCaseJsonDescriptor& testDesc, mlir:
 
     // Create CMX2DDR DMAs to move outputs from each cluster to DDR
     auto functionOutputs = SmallVector<mlir::Value>(numClusters);
+
     // finalBarrier passed as production barrier to last DMA task
-    auto finalBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, 2);
+    auto finalBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(
+            loc, 2, testDesc.getWLMParams().isWLMPartialEnabled);
+
     for (unsigned int idx = 0; idx < static_cast<unsigned int>(numClusters); idx++) {
         auto functionOutput = function.getArgument(1 + idx);
         functionOutputs[idx] = functionOutput;

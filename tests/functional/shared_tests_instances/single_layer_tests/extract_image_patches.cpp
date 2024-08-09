@@ -15,14 +15,9 @@ namespace test {
 
 class ExtractImagePatchesLayerTestCommon : public ExtractImagePatchesTest, virtual public VpuOv2LayerTest {};
 
-class ExtractImagePatchesLayerTest_NPU3700 : public ExtractImagePatchesLayerTestCommon {};
 class ExtractImagePatchesLayerTest_NPU3720 : public ExtractImagePatchesLayerTestCommon {};
 class ExtractImagePatchesLayerTest_NPU4000 : public ExtractImagePatchesLayerTestCommon {};
 
-TEST_P(ExtractImagePatchesLayerTest_NPU3700, HW) {
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
 TEST_P(ExtractImagePatchesLayerTest_NPU3720, SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU3720);
@@ -32,7 +27,6 @@ TEST_P(ExtractImagePatchesLayerTest_NPU4000, SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
-
 }  // namespace test
 }  // namespace ov
 
@@ -41,26 +35,9 @@ using namespace ov::test;
 
 namespace {
 
-const std::vector<ov::element::Type> modelTypes = {
-        ov::element::f16,
-        ov::element::i32,
-        ov::element::f32,
-        ov::element::u8,
-};
-
 const std::vector<PadType> paddingType = {PadType::VALID, PadType::SAME_UPPER, PadType::SAME_LOWER};
-const std::vector<std::vector<ov::Shape>> inputShape = {{{1, 3, 10, 10}}};
-const std::vector<std::vector<size_t>> sizes = {{3, 3}};
 const std::vector<std::vector<size_t>> strides = {{5, 5}};
 const std::vector<std::vector<size_t>> rates = {{2, 2}};
-
-const auto testExtractImagePatchesParams = ::testing::Combine(
-        ::testing::ValuesIn(static_shapes_to_test_representation(inputShape)), ::testing::ValuesIn(sizes),
-        ::testing::ValuesIn(strides), ::testing::ValuesIn(rates), ::testing::ValuesIn(paddingType),
-        ::testing::ValuesIn(modelTypes), ::testing::Values(DEVICE_NPU));
-
-INSTANTIATE_TEST_CASE_P(smoke_ExtractImagePatches, ExtractImagePatchesLayerTest_NPU3700, testExtractImagePatchesParams,
-                        ExtractImagePatchesTest::getTestCaseName);
 
 // FP16
 const auto test1ExtractImagePatchesParams = ::testing::Combine(

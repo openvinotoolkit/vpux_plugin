@@ -1,12 +1,11 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
-// RUN: vpux-opt --mlir-print-debuginfo --init-compiler="vpu-arch=%arch% allow-custom-values=true" --lower-VPUIP-to-ELF %data_path_npu%/profiling-40XX.mlir.txt -o %t.mlir
-// RUN: vpux-translate --vpu-arch=%arch% --export-ELF -o %t.elf %t.mlir
-// RUN: prof_parser -b %t.elf -m | FileCheck %s
-// REQUIRES: arch-VPUX40XX
+// RUN: vpux-opt --mlir-print-debuginfo --init-compiler="vpu-arch=%arch% allow-custom-values=true" --lower-VPUIP-to-ELF %data_path_npu%/profiling-40XX.mlir.txt | vpux-translate --vpu-arch=%arch% --export-ELF -o %t
+// RUN: prof_parser -b %t -m | FileCheck %s
+// REQUIRES: arch-NPU40XX
 
 //CHECK: {
 //CHECK: majorVersion: 2,

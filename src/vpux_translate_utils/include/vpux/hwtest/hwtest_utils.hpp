@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+//
+
 #pragma once
 
 #include <llvm/ADT/SmallVector.h>
@@ -50,6 +52,7 @@ static constexpr size_t HWP_DMA_BYTES_PER_ENTRY = 64;
 static constexpr size_t HWP_ACTSHAVE_BYTES_PER_ENTRY = 32;
 static constexpr size_t HWP_PLL_WORKPOINT_BYTES_PER_ENTRY = 64;
 static constexpr size_t HWP_M2I_BYTES_PER_ENTRY = 64;
+static constexpr size_t HWP_DMA_ID_LIMIT = 64;
 
 struct ProfilingDataSection {
     int64_t execType;
@@ -57,19 +60,14 @@ struct ProfilingDataSection {
     int64_t size;
 };
 
-static constexpr auto NUM_LUT_CFG_REGS = 64;
-static constexpr auto NUM_LUT_DATA_REGS = 256;
-static constexpr auto NUM_LUT_SAT_REGS = 8;
-static constexpr auto NUM_LUT_RESERVED_REGS = 7;
-static constexpr auto NUM_LUT_RANGES = 32;
+std::vector<uint16_t> computeSprLookupTable(nb::ActivationType activation_type);
 
-std::vector<uint16_t> computeRsqrtLookupTable();
-
-mlir::DenseElementsAttr generateWeights(llvm::ArrayRef<int64_t> wt_shape, mlir::Type dtype, mlir::MLIRContext* ctx,
-                                        const char* weight_file_name);
+mlir::DenseElementsAttr generateWeights(mlir::OpBuilder builder, llvm::ArrayRef<int64_t> wt_shape, mlir::Type dtype,
+                                        mlir::MLIRContext* ctx, const char* weight_file_name);
 vpux::Const::ContentAttr generateDefaultWeightsAttr(mlir::DenseElementsAttr weights, mlir::Type type);
 
 std::size_t totalTensorSize(llvm::ArrayRef<int64_t> shape, mlir::Type elementtype);
+std::size_t totalWeightsSize(llvm::ArrayRef<int64_t> shape, mlir::Type elementtype);
 
 std::vector<int64_t> convertNBPadtoNCETaskPad(const std::array<int64_t, 4>& nb_pad);
 
@@ -84,10 +82,14 @@ void buildCNNOp(mlir::OpBuilder& builder, llvm::StringRef mainFuncName, llvm::Ar
 
 void buildDMA(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module, mlir::OpBuilder builder, Logger& log,
               mlir::Type inputType, mlir::Type outputType);
-void buildDMACompressAct(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module, mlir::OpBuilder builder,
-                         Logger& log, mlir::Type inputType, mlir::Type outputType);
+void buildDMACompressActDense(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module,
+                              mlir::OpBuilder builder, Logger& log, mlir::Type inputType, mlir::Type outputType);
+void buildDMACompressActSparse(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module,
+                               mlir::OpBuilder builder, Logger& log, mlir::Type inputType, mlir::Type outputType);
 void buildGatherDMA(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module, mlir::OpBuilder builder,
                     Logger& log, mlir::Type inputType, mlir::Type outputType);
+void buildDMABroadcast(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module, mlir::OpBuilder builder,
+                       Logger& log, mlir::Type inputType, mlir::Type outputType);
 void buildSimpleZMajorConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module, mlir::OpBuilder builder,
                            Logger& log, mlir::Type inputType, mlir::Type weightsType, mlir::Type outputType);
 void buildContinuedConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module, mlir::OpBuilder builder,
@@ -227,6 +229,9 @@ vpux::Dim getInnermostDim(const vpux::DimsOrder& order);
 VPU::PaddingAttr getMulticlusteringPaddings(mlir::MLIRContext* ctx, const int64_t cluster, const int64_t numClusters,
                                             nb::SegmentationType segmentationType, VPU::PaddingAttr globalPadding,
                                             SmallVector<std::int64_t> clustersPerDim = {});
+
+std::pair<mlir::SmallVector<mlir::Value>, size_t> insertWLMStartSequence(mlir::OpBuilder& builder, bool isWLMEnabled,
+                                                                         bool useVirtualBarriers = false);
 
 }  // namespace hwtest
 }  // namespace vpux

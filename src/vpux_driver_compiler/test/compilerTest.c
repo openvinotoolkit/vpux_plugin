@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "vpux_driver_compiler.h"
+#include "npu_driver_compiler.h"
 
 void getLastError(vcl_log_handle_t logHandle) {
     /// Get latest error info
@@ -231,8 +231,7 @@ vcl_result_t testCompiler(int argc, char** argv) {
         char options[] =
                 "--inputs_precisions=\"input:U8\" --inputs_layouts=\"input:NCHW\" "
                 "--outputs_precisions=\"InceptionV1/Logits/Predictions/Softmax:FP32\" "
-                "--outputs_layouts=\"InceptionV1/Logits/Predictions/Softmax:NC\" --config LOG_LEVEL=\"LOG_INFO\" "
-                "NPU_COMPILATION_MODE_PARAMS=\"use-user-precision=false propagate-quant-dequant=0\"";
+                "--outputs_layouts=\"InceptionV1/Logits/Predictions/Softmax:NC\" --config LOG_LEVEL=\"LOG_INFO\" ";
         vcl_executable_desc_t exeDesc = {modelIR, modelIRSize, options, sizeof(options)};
         ret = vclExecutableCreate(compiler, exeDesc, &executable);
     } else {

@@ -51,16 +51,17 @@ void ConvertDivideToMultiplyPass::safeRunOnFunc() {
             return;
         }
 
-        const bool constDivisor = mlir::isa_and_nonnull<Const::DeclareOp>(divideOp.getInput2().getDefiningOp());
+        const auto constOp = divideOp.getInput2().getDefiningOp();
+        const bool constDivisor = mlir::isa_and_nonnull<Const::DeclareOp>(constOp);
         if (!constDivisor) {
             _log.trace("Ignore: IE.Divide has no constant divisor");
             return;
         }
 
         _log.trace("Transforming IE.Divide to IE.Multiply");
-        mlir::OpBuilder builder(divideOp);
+        mlir::OpBuilder builder(constOp);
+        const auto newInput2 = applyScalarMultInverse(builder, constOp->getLoc(), divideOp.getInput2());
         builder.setInsertionPoint(divideOp);
-        const auto newInput2 = applyScalarMultInverse(builder, divideOp->getLoc(), divideOp.getInput2());
         const auto multiplyOp = builder.create<IE::MultiplyOp>(appendLoc(divideOp->getLoc(), "convert_to_multiply"),
                                                                divideOp.getInput1(), newInput2,
                                                                divideOp.getAutoBroadcastAttr(), nullptr, nullptr);

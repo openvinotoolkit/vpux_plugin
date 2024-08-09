@@ -87,8 +87,8 @@ def VPUIP_NNDMAOp :
     let summary = "NN DMA task";
 
     let arguments = (ins
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_ITIBuffer]>:$input,
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer]>:$output_buff,
+        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_ITIBuffer, VPUIP_BoundedBuffer]>:$input,
+        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_BoundedBuffer]>:$output_buff,
 
         OptionalAttr<IntAttr>:$port,
         UnitAttr:$is_out_of_order,
@@ -97,11 +97,12 @@ def VPUIP_NNDMAOp :
         OptionalAttr<UnitAttr>:$compress_candidate,
         OptionalAttr<IntAttr>:$dma_hwp_id,
         OptionalAttr<VPUIP_DmaProfilingMetadataAttr>:$profilingMetadata,
-        UnitAttr:$split_candidate
+        UnitAttr:$split_candidate,
+        UnitAttr:$profiling_buffer_mgmt
     );
 
     let results = (outs
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer]>:$output
+        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_BoundedBuffer]>:$output
     );
 
     let builders = [
@@ -307,8 +308,8 @@ def VPUIP_ConvertDMAOp :
     let summary = "NN DMA task which enables data conversion";
 
     let arguments = (ins
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_ITIBuffer]>:$input,
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer]>:$output_buff,
+        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_ITIBuffer, VPUIP_BoundedBuffer]>:$input,
+        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_BoundedBuffer]>:$output_buff,
 
         OptionalAttr<IntAttr>:$port,
         UnitAttr:$is_out_of_order,
@@ -318,7 +319,7 @@ def VPUIP_ConvertDMAOp :
     );
 
     let results = (outs
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer]>:$output
+        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_BoundedBuffer]>:$output
     );
 
     let builders = [
@@ -360,7 +361,8 @@ def VPUIP_DecompressDMAOp :
             [
                 ViewLikeOpInterface,
                 DotInterface,
-                VPUIP_DMATypeOpInterface
+                VPUIP_DMATypeOpInterface,
+                AttrSizedOperandSegments
             ]
         > {
     let summary = [{
@@ -372,6 +374,7 @@ def VPUIP_DecompressDMAOp :
     let arguments = (ins
         AnyMemRef:$input,
         Optional<AnyMemRef>:$act_compression_size_entry,
+        Optional<AnyMemRef>:$act_compression_sparsity_map,
         AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer]>:$output_buff,
 
         OptionalAttr<IntAttr>:$port,
@@ -402,6 +405,9 @@ def VPUIP_DecompressDMAOp :
             (ins "mlir::Value":$input, "mlir::Value":$actCompressionSizeEntryBuff, "mlir::Value":$output_buff, "int64_t":$port)
         >,
         OpBuilder<
+            (ins "mlir::Value":$input, "mlir::Value":$actCompressionSizeEntryBuff, "mlir::Value":$act_compression_sparsity_map, "mlir::Value":$output_buff, "int64_t":$port)
+        >,
+        OpBuilder<
             (ins "mlir::Value":$input, "mlir::Value":$actCompressionSizeEntryBuff, "mlir::Value":$output_buff, "int64_t":$port, "bool":$is_out_of_order, "bool":$is_critical)
         >,
         OpBuilder<
@@ -425,6 +431,7 @@ def VPUIP_DecompressDMAOp :
         `inputs` `(` $input `:` type($input) `)`
         `outputs` `(` $output_buff `:` type($output_buff) `)`
         (`act_compression_size_entry` `(` $act_compression_size_entry^  `:` type($act_compression_size_entry) `)`)?
+        (`act_compression_sparsity_map` `(` $act_compression_sparsity_map^  `:` type($act_compression_sparsity_map) `)`)?
         `->` type(results)
     }];
 
@@ -451,6 +458,7 @@ def VPUIP_CompressDMAOp :
     let arguments = (ins
         AnyMemRef:$input,
         AnyMemRef:$act_compression_size_entry,
+        Optional<AnyMemRef>:$act_compression_sparsity_map,
         AnyMemRef:$output_buff,
 
         OptionalAttr<IntAttr>:$port,
@@ -467,6 +475,9 @@ def VPUIP_CompressDMAOp :
     let builders = [
         OpBuilder<
             (ins "mlir::Value":$input, "mlir::Value":$actCompressionSizeEntryBuff, "mlir::Value":$output_buff, "int64_t":$port)
+        >,
+        OpBuilder<
+            (ins "mlir::Value":$input, "mlir::Value":$actCompressionSizeEntryBuff, "mlir::Value":$act_compression_sparsity_map, "mlir::Value":$output_buff, "int64_t":$port)
         >,
         OpBuilder<
             (ins "mlir::Value":$input, "mlir::Value":$actCompressionSizeEntryBuff, "mlir::Value":$output_buff, "int64_t":$port, "bool":$is_out_of_order, "bool":$is_critical)
@@ -492,6 +503,7 @@ def VPUIP_CompressDMAOp :
         `inputs` `(` $input `:` type($input) `)`
         `outputs` `(` $output_buff `:` type($output_buff) `)`
         `act_compression_size_entry` `(` $act_compression_size_entry  `:` type($act_compression_size_entry) `)`
+        (`act_compression_sparsity_map` `(` $act_compression_sparsity_map^  `:` type($act_compression_sparsity_map) `)`)?
         `->` type(results)
     }];
 
@@ -2917,7 +2929,7 @@ def VPUIP_NCEClusterTaskOp :
         SizedRegion<1>:$ppe
     );
 
-    let skipDefaultBuilders = 1;
+    let skipDefaultBuilders = 0;
 
     let builders = [
         OpBuilder<(ins
@@ -4996,8 +5008,9 @@ def VPUIP_ShapeCastOp :
 
     let arguments = (ins
         AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer, VPUIP_SparseBuffer]>:$source,
-
-        I64ArrayAttr:$shape
+        I64ArrayAttr:$shape,
+        OptionalAttr<I64ArrayOfArraysAttr>:$explicit_output_shapes,
+        OptionalAttr<I64ArrayOfArraysAttr>:$explicit_output_offsets
     );
 
     let results = (outs
@@ -5011,6 +5024,18 @@ def VPUIP_ShapeCastOp :
         `inputs` `(` $source `:` type($source) `)`
         `->` type(results)
     }];
+
+    let builders = [
+        OpBuilder<
+            (ins "mlir::Value":$source, "vpux::ShapeRef":$shape)
+        >,
+        OpBuilder<
+            (ins "mlir::Value":$source, "vpux::ArrayRef<int64_t>":$shape)
+        >,
+        OpBuilder<
+            (ins "mlir::Value":$source, "mlir::ArrayAttr":$shape)
+        >,
+    ];
 }
 
 //
@@ -5487,6 +5512,52 @@ def VPUIP_UpsamplingDMAOp :
         `outputs` `(` $output_buff `:` type($output_buff) `)`
         `->` type(results)
     }];
+}
+
+//
+// ExtractFlatSlice
+//
+
+def VPUIP_ExtractFlatSliceOp :
+        VPUIP_Op<
+            "ExtractFlatSlice",
+            [
+                Pure,
+                DeclareOpInterfaceMethods<ViewLikeOpInterface>,
+                DeclareOpInterfaceMethods<InferTypeOpInterface>
+            ]
+        > {
+    let summary = "Operation that extracts flat slice from DistributedBuffer";
+
+    let description = [{
+        This operation provides view to single slice from DistributedBuffer on the tiling dim.
+        In contrast to SubView, this operation can take buffer slice from single cluster.
+        For example, !VPUIP.DistributedBuffer<1x32x16x128xf16, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 4, 1, 1]>
+        And offset is 20, which effectively means, that view will be memref<1x1x16x128xf16, [@CMX_NN, 2]>, because
+        dims are distributed as 8+8+8+8 and 20 is 8+8+4, which means slice is located in 2 cluster
+    }];
+
+    let arguments = (ins
+        AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer]>:$source,
+        IntAttr:$offset
+    );
+
+    let results = (outs
+        AnyMemRef:$result
+    );
+
+    let hasVerifier = 1;
+
+    let assemblyFormat = [{
+        attr-dict
+        `inputs` `(` $source `:` type($source) `)`
+        `->` type(results)
+    }];
+
+    let extraClassDeclaration = [{
+        Byte getByteOffset();
+    }];
+
 }
 
 //

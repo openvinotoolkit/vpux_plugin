@@ -188,7 +188,7 @@ mlir::LogicalResult AdjustForEltwise::matchAndRewrite(IE::LayerOpInterface origO
         return matchFailed(rewriter, origOp, "Already the best solution");
     }
 
-    rewriter.startRootUpdate(origOp);
+    rewriter.startOpModification(origOp);
     rewriter.setInsertionPoint(origOp);
 
     // add permutes to inputs
@@ -222,7 +222,7 @@ mlir::LogicalResult AdjustForEltwise::matchAndRewrite(IE::LayerOpInterface origO
                                                              mlir::inversePermutation(bestMemPerm));
     output.replaceAllUsesExcept(outMemPermuteOp.getOutput(), outMemPermuteOp);
 
-    rewriter.finalizeRootUpdate(origOp);
+    rewriter.finalizeOpModification(origOp);
 
     return mlir::success();
 }
@@ -292,6 +292,67 @@ mlir::LogicalResult AdjustForTile::matchAndRewrite(IE::TileOp origOp, mlir::Patt
 }
 
 //
+// AdjustForConvert
+//
+// This pattern tries to move the permuteCast after convertOp if the convertOp is the last Operation before return.
+// It will give the chance to enable vertical fusion between convertOp and the previous layer.
+// Note that this pattern can be removed after we can support permuteCast for vertical fusion E#106960
+class AdjustForConvert final : public mlir::OpRewritePattern<IE::ConvertOp> {
+public:
+    AdjustForConvert(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<IE::ConvertOp>(ctx), _log(log) {
+        setDebugName("AdjustForConvert");
+    }
+
+public:
+    mlir::LogicalResult matchAndRewrite(IE::ConvertOp origOp, mlir::PatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+/*
+Convert subgraph:
+       |                  |
+   PermuteCast       ConvertOp
+       |                  |
+    ConvertOp    =>  PermuteCast
+       |                  |
+    ReturnOp           ReturnOp
+*/
+mlir::LogicalResult AdjustForConvert::matchAndRewrite(IE::ConvertOp origOp, mlir::PatternRewriter& rewriter) const {
+    _log.trace("[{0}] Got '{1}' at '{2}'", getDebugName(), origOp->getName(), origOp->getLoc());
+
+    const auto usedByReturnOp = llvm::all_of(origOp->getUsers(), [](const auto& user) {
+        return mlir::isa<mlir::func::ReturnOp>(user);
+    });
+    if (!usedByReturnOp) {
+        return matchFailed(rewriter, origOp, "Used by non-return ops");
+    }
+
+    auto inputPermuteCastOp = mlir::dyn_cast_or_null<IE::PermuteCastOp>(origOp.getInput().getDefiningOp());
+    if (inputPermuteCastOp == nullptr) {
+        return matchFailed(rewriter, origOp, "No PermuteCastOp found");
+    }
+    if (!inputPermuteCastOp->hasOneUse()) {
+        return matchFailed(rewriter, origOp, "PermuteCastOp has other uses");
+    }
+    _log.trace("Move PermuteCast after convert op at '{0}'", origOp->getLoc());
+
+    auto newConvertOp =
+            rewriter.create<IE::ConvertOp>(origOp->getLoc(), inputPermuteCastOp.getInput(), origOp.getDstElemType());
+
+    auto origPermuteCastOutType = inputPermuteCastOp.getOutput().getType().cast<NDTypeInterface>();
+    auto newPermuteCastOutType = origPermuteCastOutType.changeElemType(origOp.getDstElemType());
+    auto newPermuteCastOp =
+            rewriter.create<IE::PermuteCastOp>(origOp->getLoc(), newPermuteCastOutType, newConvertOp.getOutput(),
+                                               inputPermuteCastOp.getDstOrder(), inputPermuteCastOp.getMemPerm());
+
+    rewriter.replaceOp(origOp, newPermuteCastOp);
+    rewriter.eraseOp(inputPermuteCastOp);
+    return mlir::success();
+}
+
+//
 // AdjustMemPermuteAroundOpPass
 //
 
@@ -311,6 +372,7 @@ void AdjustMemPermuteAroundOpPass::safeRunOnFunc() {
     mlir::RewritePatternSet patterns(&ctx);
     patterns.add<AdjustForEltwise>(&ctx, _log);
     patterns.add<AdjustForTile>(&ctx, _log);
+    patterns.add<AdjustForConvert>(&ctx, _log);
     IE::MemPermuteOp::getCanonicalizationPatterns(patterns, &ctx);
 
     auto func = getOperation();

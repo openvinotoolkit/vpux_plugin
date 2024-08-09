@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "vpux_driver_compiler.h"
+#include "npu_driver_compiler.h"
 
 int readFile(const char* fileName, char** buffer, size_t* size) {
     FILE* file = fopen(fileName, "rb");

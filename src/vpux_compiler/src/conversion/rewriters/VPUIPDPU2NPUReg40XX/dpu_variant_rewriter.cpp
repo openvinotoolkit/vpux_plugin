@@ -9,6 +9,7 @@
 #include "vpux/compiler/NPU40XX/dialect/NPUReg40XX/utils.hpp"
 #include "vpux/compiler/dialect/VPUMI40XX/utils.hpp"
 #include "vpux/compiler/dialect/VPURegMapped/utils.hpp"
+#include "vpux/compiler/utils/traits_utils.hpp"
 
 using namespace vpux;
 using namespace vpux::VPURegMapped;
@@ -51,8 +52,9 @@ mlir::LogicalResult DPUVariantRewriter::matchAndRewrite(VPUIPDPU::DPUVariantOp o
     // index incremented by one by runtime logic. Something to do with preemption
     // This value can be change if needed in the future. For now we use the index+1 just because it is
     // convinient for when we want to preempt when running on Simics (E71635)
+    const uint64_t maxTaskId = (1ull << NPUReg40XX::RegField_var_tagType::getRegFieldWidth()) - 1;
     auto taskIdx = checked_cast_reg<NPUReg40XX::RegField_var_tagType>(
-            static_cast<uint64_t>(origOp.getTaskIndex().getValue() + 1));
+            static_cast<uint64_t>(origOp.getTaskIndex().getValue() % maxTaskId + 1));
 
     VPURegMapped::updateRegMappedInitializationValues(initValues, {
                                                                           {"invar_ptr", {{"var_tag", taskIdx}}},
@@ -167,7 +169,8 @@ void DPUVariantRewriter::fillIDUCfg(mlir::Region& DPURegion,
                                                                           });
         } else if (auto op = mlir::dyn_cast_or_null<VPUIPDPU::IDUWeightSetOp>(&DPUOp)) {
             auto weightsStart = checked_cast_reg<NPUReg40XX::RegField_weight_startType>(op.getWeightStart());
-            auto weightsNum = checked_cast_reg<NPUReg40XX::RegField_weight_numType>(op.getWeightNum());
+            auto weightsNum = vpux::alignValUp(checked_cast_reg<NPUReg40XX::RegField_weight_numType>(op.getWeightNum()),
+                                               static_cast<std::uint64_t>(VPU::NCEInvariant::VPU_CHANNEL_ALIGNMENT));
             auto weightsSize = checked_cast_reg<NPUReg40XX::RegField_weight_sizeType>(op.getWeightSize());
 
             // weight_start register will be modified by relocation mechanism based on provided offset info
@@ -279,7 +282,7 @@ void DPUVariantRewriter::fillStubCfg(std::map<std::string, std::map<std::string,
                                   {"pad_count_left", 0x0},
                                   {"pad_count_down", 0x0},
                                   {"pad_count_right", 0x0}}},
-                                {"workload_start0", {{"workload_start_x", 0x1}, {"workload_start_y", 0x1}}},
+                                {"workload_start0", {{"workload_start_x", 0x0}, {"workload_start_y", 0x0}}},
                                 {"workload_start1", {{"workload_start_z", 0x0}}},
                                 {"weight_size", {{"weight_size", 0x10}}},
                                 {"weight_num", {{"weight_num", 0x10}}},

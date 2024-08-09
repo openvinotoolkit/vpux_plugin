@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --unroll-tensor-iterator %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX
+// REQUIRES: arch-NPU37XX
 
 // -----
 
@@ -140,7 +140,7 @@ func.func @main(%arg0: tensor<2x3x4x5xf32>) -> (tensor<2x15x4x5xf32>) {
     // CHECK:       [[ADD3:%.*]] = IE.Add([[ADD2]], [[CST0]])
     // CHECK-SAME:      {auto_broadcast = #IE.auto_broadcast_type<NUMPY>}
     // CHECK-SAME:      : tensor<2x3x4x5xf32>, tensor<2x3x4x5xf32> -> tensor<2x3x4x5xf32>
-    
+
     // CHECK:       [[ADD4:%.*]] = IE.Add([[ADD3]], [[CST0]])
     // CHECK-SAME:      {auto_broadcast = #IE.auto_broadcast_type<NUMPY>}
     // CHECK-SAME:      : tensor<2x3x4x5xf32>, tensor<2x3x4x5xf32> -> tensor<2x3x4x5xf32>
@@ -169,12 +169,12 @@ func.func @main(%arg0: tensor<3x4x6x10xf32>, %arg1: tensor<3x4x6x10xf32>, %arg2:
       %1 = IE.Add(%arg3, %arg4) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x4x6x10xf32>, tensor<1x4x6x10xf32> -> tensor<1x4x6x10xf32>
       %2 = IE.Add(%arg5, %1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x4x6x10xf32>, tensor<1x4x6x10xf32> -> tensor<1x4x6x10xf32>
       "IE.LoopTerminator"(%2) : (tensor<1x4x6x10xf32>) -> ()
-    } 
-    num_iterations : 3 
-    slice_input_descs : [#IE.SliceInputPortMap<external_port_id = 0 : i64, internal_layer_id = 0 : i64, axis = 0 : i64, start = 0 : i64, stride = 1 : i64, part_size = 1 : i64, end = 2 : i64>, #IE.SliceInputPortMap<external_port_id = 1 : i64, internal_layer_id = 1 : i64, axis = 0 : i64, start = 2 : i64, stride = -1 : i64, part_size = 1 : i64, end = 0 : i64>] 
-    invariant_input_descs : [] 
-    feedback_input_descs : [#IE.MergedInputPortMap<external_port_id = 2 : i64, internal_layer_id = 2 : i64, body_input_index = 0 : i64>] 
-    concat_output_descs : [] 
+    }
+    num_iterations : 3
+    slice_input_descs : [#IE.SliceInputPortMap<external_port_id = 0 : i64, internal_layer_id = 0 : i64, axis = 0 : i64, start = 0 : i64, stride = 1 : i64, part_size = 1 : i64, end = 2 : i64>, #IE.SliceInputPortMap<external_port_id = 1 : i64, internal_layer_id = 1 : i64, axis = 0 : i64, start = 2 : i64, stride = -1 : i64, part_size = 1 : i64, end = 0 : i64>]
+    invariant_input_descs : []
+    feedback_input_descs : [#IE.MergedInputPortMap<external_port_id = 2 : i64, internal_layer_id = 2 : i64, body_input_index = 0 : i64>]
+    concat_output_descs : []
     invariant_output_descs : [#IE.InvariantOutputPortMap<external_port_id = 0 : i64, internal_layer_id = 0 : i64>]
     (%arg0, %arg1, %arg2) : tensor<3x4x6x10xf32>, tensor<3x4x6x10xf32>, tensor<1x4x6x10xf32> -> tensor<1x4x6x10xf32>
     return %0 : tensor<1x4x6x10xf32>

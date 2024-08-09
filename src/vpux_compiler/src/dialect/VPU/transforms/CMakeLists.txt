@@ -20,7 +20,6 @@ add_mlir_dialect_library(${TARGET_NAME}
         npu_compiler_dialect_vpu
         npu_compiler_dialect_vpu_interfaces
         npu_compiler_dialect_vpu_utils
-        npu_compiler_vpu30xx
         npu_compiler_npu37xx
         npu_compiler_npu40xx
         inferenceStatic)

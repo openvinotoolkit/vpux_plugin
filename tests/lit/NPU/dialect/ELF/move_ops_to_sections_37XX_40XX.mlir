@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --vpu-arch=%arch% --move-ops-into-sections %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 module @mainModule attributes {VPU.arch = #VPU.arch_kind<NPU40XX>} {
   IE.ExecutorResource 1 of @DMA_NN
@@ -26,13 +26,19 @@ module @mainModule attributes {VPU.arch = #VPU.arch_kind<NPU40XX>} {
 
 //CHECK: ELF.Main @ELFMain
 
-//CHECK: ELF.CreateLogicalSection [[MetadataTaskSec:@.*]] aligned(32) secType(VPU_SHT_CMX_METADATA) secFlags("SHF_NONE")
+//CHECK-DAG: ELF.CreateLogicalSection [[MetadataTaskSec:@.*]] aligned(1) secType(VPU_SHT_CMX_METADATA) secFlags("SHF_NONE")
 //CHECK-NEXT: VPUASM.DeclareTaskBuffer {{.*}} idx(!VPURegMapped.Index<0:0:0>) <DMA>
 
-//CHECK: ELF.CreateSection [[DMA0SEC:@.*]] aligned(64) secType(SHT_PROGBITS) secFlags(SHF_ALLOC) {
-//CHECK-NEXT VPUASM.NNDMA @NNDMA_0_0_0 idx(!VPURegMapped.Index<0:0:0>)
+//CHECK-DAG: ELF.CreateLogicalSection [[NetworkInput:@.*]] aligned(1) secType(SHT_NOBITS) secFlags(VPU_SHF_USERINPUT)
+//CHECK-NEXT: VPUASM.DeclareBuffer {{.*}} !VPUASM.Buffer< "NetworkInput"[0]
 
-//CHECK: ELF.CreateSection [[MappedInferenceSection:@.*]] aligned(64) secType(SHT_PROGBITS) secFlags(SHF_ALLOC)
+//CHECK-DAG: ELF.CreateLogicalSection [[NetworkOutput:@.*]] aligned(1) secType(SHT_NOBITS) secFlags(VPU_SHF_USEROUTPUT)
+//CHECK-NEXT: VPUASM.DeclareBuffer {{.*}} !VPUASM.Buffer< "NetworkOutput"[0]
+
+//CHECK-DAG: ELF.CreateSection [[DMA0SEC:@.*]] aligned(64) secType(SHT_PROGBITS) secFlags(SHF_ALLOC) {
+//CHECK-NEXT: VPUASM.NNDMA @NNDMA_0_0_0 idx(!VPURegMapped.Index<0:0:0>)
+
+//CHECK-DAG: ELF.CreateSection [[MappedInferenceSection:@.*]] aligned(64) secType(SHT_PROGBITS) secFlags(SHF_ALLOC)
 //CHECK-NEXT: VPUASM.MappedInference
 
 // -----
@@ -74,7 +80,7 @@ module @mainModule attributes {VPU.arch = #VPU.arch_kind<NPU40XX>} {
 
 //CHECK: ELF.Main @ELFMain {
 
-//CHECK: ELF.CreateLogicalSection [[MetadataSec:@.*]] aligned(32) secType(VPU_SHT_CMX_METADATA) secFlags("SHF_NONE")
+//CHECK-DAG: ELF.CreateLogicalSection [[MetadataSec:@.*]] aligned(1) secType(VPU_SHT_CMX_METADATA) secFlags("SHF_NONE")
 //CHECK-NEXT: VPUASM.DeclareTaskBuffer [[DMATASKBUFF10:@.*]] idx(!VPURegMapped.Index<0:1:0>) <DMA>
 //CHECK-NEXT: VPUASM.DeclareTaskBuffer [[DMATASKBUFF11:@.*]] idx(!VPURegMapped.Index<0:1:1>) <DMA>
 //CHECK-NEXT: VPUASM.DeclareTaskBuffer [[DMATASKBUFF12:@.*]] idx(!VPURegMapped.Index<0:1:2>) <DMA>
@@ -82,17 +88,26 @@ module @mainModule attributes {VPU.arch = #VPU.arch_kind<NPU40XX>} {
 //CHECK-NEXT: VPUASM.DeclareTaskBuffer [[DMATASKBUFF01:@.*]] idx(!VPURegMapped.Index<0:0:1>) <DMA>
 //CHECK-NEXT: VPUASM.DeclareTaskBuffer [[DMATASKBUFF02:@.*]] idx(!VPURegMapped.Index<0:0:2>) <DMA>
 
-//CHECK: ELF.CreateLogicalSection [[NNCMX0:@.*]] aligned(1) secType(VPU_SHT_CMX_WORKSPACE) secFlags("SHF_NONE") {
+//CHECK-DAG: ELF.CreateLogicalSection [[NetworkInput:@.*]] aligned(1) secType(SHT_NOBITS) secFlags(VPU_SHF_USERINPUT)
+//CHECK-NEXT: VPUASM.DeclareBuffer {{.*}} !VPUASM.Buffer< "NetworkInput"[0]
+
+//CHECK-DAG: ELF.CreateLogicalSection [[NetworkOutput0:@.*]] aligned(1) secType(SHT_NOBITS) secFlags(VPU_SHF_USEROUTPUT)
+//CHECK-NEXT: VPUASM.DeclareBuffer {{.*}} !VPUASM.Buffer< "NetworkOutput"[0]
+
+//CHECK-DAG: ELF.CreateLogicalSection [[NetworkOutput1:@.*]] aligned(1) secType(SHT_NOBITS) secFlags(VPU_SHF_USEROUTPUT)
+//CHECK-NEXT: VPUASM.DeclareBuffer {{.*}} !VPUASM.Buffer< "NetworkOutput"[1]
+
+//CHECK-DAG: ELF.CreateLogicalSection [[NNCMX0:@.*]] aligned(1) secType(VPU_SHT_CMX_WORKSPACE) secFlags("SHF_NONE") {
 //CHECK-NEXT: VPUASM.DeclareBuffer [[BUFF0:@.*]] !VPUASM.Buffer< "CMX_NN"[0]
 
-//CHECK: ELF.CreateLogicalSection [[NNCMX1:@.*]] aligned(1) secType(VPU_SHT_CMX_WORKSPACE) secFlags("SHF_NONE") {
+//CHECK-DAG: ELF.CreateLogicalSection [[NNCMX1:@.*]] aligned(1) secType(VPU_SHT_CMX_WORKSPACE) secFlags("SHF_NONE") {
 //CHECK-NEXT: VPUASM.DeclareBuffer [[BUFF1:@.*]] !VPUASM.Buffer< "CMX_NN"[1]
 
-//CHECK: ELF.CreateSection [[BARRSEC:@.*]] aligned(64) secType(SHT_PROGBITS) secFlags(SHF_ALLOC) {
+//CHECK-DAG: ELF.CreateSection [[BARRSEC:@.*]] aligned(64) secType(SHT_PROGBITS) secFlags(SHF_ALLOC) {
 //CHECK-NEXT: VPUASM.ConfigureBarrier [[BARR0:@.*]] idx(!VPURegMapped.Index<0:0:0>)
 //CHECK-NEXT: VPUASM.ConfigureBarrier [[BARR1:@.*]] idx(!VPURegMapped.Index<0:0:1>)
 
-//CHECK: ELF.CreateSection [[DMA0SEC:@.*]] aligned(64) secType(SHT_PROGBITS) secFlags(SHF_ALLOC)
+//CHECK-DAG: ELF.CreateSection [[DMA0SEC:@.*]] aligned(64) secType(SHT_PROGBITS) secFlags(SHF_ALLOC)
 //CHECK-NEXT: VPUASM.NNDMA [[DMA00:@.*]] idx(!VPURegMapped.Index<0:0:0>) taskLocation([[MetadataSec]]::[[DMATASKBUFF00]])
     //CHECK-SAME: outputs([
     //CHECK-SAME: [[NNCMX0]]::[[BUFF0]]])
@@ -104,7 +119,7 @@ module @mainModule attributes {VPU.arch = #VPU.arch_kind<NPU40XX>} {
 //CHECK-NEXT: VPUASM.NNDMA [[DMA02:@.*]] idx(!VPURegMapped.Index<0:0:2>) taskLocation([[MetadataSec]]::[[DMATASKBUFF02]])
     //CHECK-SAME: input([[NNCMX0]]::[[BUFF0]])
 
-//CHECK: ELF.CreateSection [[DMA1SEC:@.*]] aligned(64) secType(SHT_PROGBITS) secFlags(SHF_ALLOC)
+//CHECK-DAG: ELF.CreateSection [[DMA1SEC:@.*]] aligned(64) secType(SHT_PROGBITS) secFlags(SHF_ALLOC)
 //CHECK-NEXT: VPUASM.NNDMA [[DMA10:@.*]] idx(!VPURegMapped.Index<0:1:0>) taskLocation([[MetadataSec]]::[[DMATASKBUFF10]])
     //CHECK-SAME: outputs([
     //CHECK-SAME: [[NNCMX1]]::[[BUFF1]]])
@@ -116,7 +131,7 @@ module @mainModule attributes {VPU.arch = #VPU.arch_kind<NPU40XX>} {
 //CHECK-NEXT: VPUASM.NNDMA [[DMA12:@.*]] idx(!VPURegMapped.Index<0:1:2>) taskLocation([[MetadataSec]]::[[DMATASKBUFF12]])
     //CHECK-SAME: input([[NNCMX1]]::[[BUFF1]])
 
-//CHECK: ELF.CreateSection [[MappedInferenceSection:@.*]] aligned(64) secType(SHT_PROGBITS) secFlags(SHF_ALLOC) {
+//CHECK-DAG: ELF.CreateSection [[MappedInferenceSection:@.*]] aligned(64) secType(SHT_PROGBITS) secFlags(SHF_ALLOC) {
 //CHECK-NEXT: VPUASM.MappedInference @MappedInference
     //CHECK-SAME: dmas([
     //CHECK-SAME: [

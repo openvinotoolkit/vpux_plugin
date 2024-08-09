@@ -15,29 +15,29 @@
 using namespace vpux;
 
 namespace llvm {
-using RelocKey = std::pair<mlir::Value, ELFNPU37XX::CreateSymbolTableSectionOp>;
+using RelocKey37XX = std::pair<mlir::Value, ELFNPU37XX::CreateSymbolTableSectionOp>;
 template <>
-struct DenseMapInfo<RelocKey> {
-    static RelocKey getEmptyKey() {
+struct DenseMapInfo<RelocKey37XX> {
+    static RelocKey37XX getEmptyKey() {
         void* pointer = llvm::DenseMapInfo<void*>::getEmptyKey();
-        return RelocKey(RelocKey::first_type::getFromOpaquePointer(pointer),
-                        RelocKey::second_type::getFromOpaquePointer(pointer));
+        return RelocKey37XX(RelocKey37XX::first_type::getFromOpaquePointer(pointer),
+                            RelocKey37XX::second_type::getFromOpaquePointer(pointer));
     }
 
-    static RelocKey getTombstoneKey() {
+    static RelocKey37XX getTombstoneKey() {
         void* pointer = llvm::DenseMapInfo<void*>::getTombstoneKey();
-        return RelocKey(RelocKey::first_type::getFromOpaquePointer(pointer),
-                        RelocKey::second_type::getFromOpaquePointer(pointer));
+        return RelocKey37XX(RelocKey37XX::first_type::getFromOpaquePointer(pointer),
+                            RelocKey37XX::second_type::getFromOpaquePointer(pointer));
     }
 
-    static unsigned getHashValue(RelocKey val) {
+    static unsigned getHashValue(RelocKey37XX val) {
         auto h1 = hash_value(val.first.getAsOpaquePointer());
         auto h2 = hash_value(val.second.getAsOpaquePointer());
 
         return static_cast<unsigned>(h1 * h2);
     }
 
-    static bool isEqual(RelocKey lhs, RelocKey rhs) {
+    static bool isEqual(RelocKey37XX lhs, RelocKey37XX rhs) {
         auto l1 = DenseMapInfo<mlir::Value>::isEqual(lhs.first, rhs.first);
         auto l2 = DenseMapInfo<mlir::Operation*>::isEqual(lhs.second.getOperation(), rhs.second.getOperation());
 
@@ -47,11 +47,6 @@ struct DenseMapInfo<RelocKey> {
 }  // namespace llvm
 
 namespace vpux {
-
-// creates a linear (1D) MemrefType of dimension (memrefSize x dataType)
-mlir::MemRefType getLinearMemrefType(mlir::MLIRContext* ctx, int64_t memrefSize, mlir::Type dataType,
-                                     VPU::MemoryKind memKind);
-
 namespace ELFNPU37XX {
 
 std::pair<const uint8_t*, size_t> getDataAndSizeOfElfSection(llvm::ArrayRef<uint8_t> elfBlob,

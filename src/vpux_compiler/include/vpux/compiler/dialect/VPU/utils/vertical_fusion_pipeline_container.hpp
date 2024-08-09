@@ -22,9 +22,6 @@ public:
     // add the first operation
     VFPipelineContainer(mlir::Operation* operation, const VPUNNCostParameters& tilingInfo);
 
-    // check if there are operations with same characteristics are already there
-    bool hasOperType(mlir::Operation* operation) const;
-
     // add new operation to the container to be pipelined with current ones
     void addOperation(mlir::Operation* operation, const VPUNNCostParameters& tilingInfo);
 

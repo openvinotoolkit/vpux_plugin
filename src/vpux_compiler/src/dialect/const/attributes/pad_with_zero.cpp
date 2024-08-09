@@ -100,12 +100,17 @@ vpux::NDTypeInterface vpux::Const::PadWithZeroAttr::inferOutputType(vpux::NDType
     return input.pad(ShapeRef(padBefore), ShapeRef(padAfter));
 }
 
+bool vpux::Const::PadWithZeroAttr::inferOutputSplat(bool, vpux::NDTypeInterface) {
+    return false;
+}
+
 //
 // PadWithZeroAttr::transform
 //
 
 Const::Content vpux::Const::PadWithZeroAttr::transform(vpux::Const::Content& input) const {
-    auto output = Const::Content::allocTempBuffer(inferOutputType(input.getType()), input.getStorageElemType(), false);
+    auto output = Const::Content::allocTempBuffer(inferOutputType(input.getType()), input.getStorageElemType(),
+                                                  inferOutputSplat(input.isSplat(), input.getType()));
 
     output.fillWithZero();
 

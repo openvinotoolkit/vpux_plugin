@@ -18,13 +18,11 @@ set(MANDATORY_UNIT_TESTS_LIBS
     "openvino::commonTestUtils"
     "openvino::gmock"
     "openvino::runtime"
-    "npu_model_utils"
     "openvino::npu_al"
     "npu_algo_utils"
     "npu_llvm_utils"
     "npu_ov_utils"
     "npu_profiling_utils"
-    "npu_plugin_utils"
     "openvino::npu_logger_utils"
 )
 

@@ -47,6 +47,33 @@ mlir::LogicalResult UngroupCopyOp::matchAndRewrite(VPUIP::CopyOp origOp, mlir::P
     return mlir::success();
 }
 
+class UngroupConvertDMAOp final : public mlir::OpRewritePattern<VPUIP::ConvertDMAOp> {
+public:
+    UngroupConvertDMAOp(mlir::MLIRContext* ctx, Logger log)
+            : mlir::OpRewritePattern<VPUIP::ConvertDMAOp>(ctx), _log(log) {
+    }
+
+public:
+    mlir::LogicalResult matchAndRewrite(VPUIP::ConvertDMAOp origOp, mlir::PatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+mlir::LogicalResult UngroupConvertDMAOp::matchAndRewrite(VPUIP::ConvertDMAOp origOp,
+                                                         mlir::PatternRewriter& rewriter) const {
+    auto ungroupInput = rewriter.create<VPUIP::UngroupBoundedBufferOp>(origOp->getLoc(), origOp.getInput());
+    auto ungroupOutput = rewriter.create<VPUIP::UngroupBoundedBufferOp>(origOp->getLoc(), origOp.getOutputBuff());
+
+    auto copyData =
+            rewriter.create<VPUIP::ConvertDMAOp>(origOp->getLoc(), ungroupInput.getData(), ungroupOutput.getData());
+    auto copyShape = rewriter.create<VPUIP::CopyOp>(origOp->getLoc(), ungroupInput.getDynamicShape(),
+                                                    ungroupOutput.getDynamicShape());
+    rewriter.replaceOpWithNewOp<VPUIP::GroupBoundedBufferOp>(origOp, copyData.getOutput(), copyShape.getOutput());
+
+    return mlir::success();
+}
+
 class UngroupSwKernelOp final : public mlir::OpRewritePattern<VPUIP::SwKernelOp> {
 public:
     UngroupSwKernelOp(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<VPUIP::SwKernelOp>(ctx), _log(log) {
@@ -144,6 +171,12 @@ void UngroupBoundedBuffers::safeRunOnFunc() {
 
         return !areBothOperandsBoundedBuffers;
     };
+    auto isLegalConvertDMAOp = [](VPUIP::ConvertDMAOp ConvertDMAOp) {
+        bool areBothOperandsBoundedBuffers = mlir::isa<VPUIP::BoundedBufferType>(ConvertDMAOp.getInput().getType()) &&
+                                             mlir::isa<VPUIP::BoundedBufferType>(ConvertDMAOp.getOutput().getType());
+
+        return !areBothOperandsBoundedBuffers;
+    };
     auto isLegalSwKernelOp = [](VPUIP::SwKernelOp op) {
         const auto isBoundedBuffer = [](mlir::Value value) {
             return value.getType().isa<VPUIP::BoundedBufferType>();
@@ -156,6 +189,7 @@ void UngroupBoundedBuffers::safeRunOnFunc() {
 
     mlir::ConversionTarget target(ctx);
     target.addDynamicallyLegalOp<VPUIP::CopyOp>(isLegalCopyOp);
+    target.addDynamicallyLegalOp<VPUIP::ConvertDMAOp>(isLegalConvertDMAOp);
     target.addDynamicallyLegalOp<VPUIP::SwKernelOp>(isLegalSwKernelOp);
     target.addLegalOp<VPUIP::GroupBoundedBufferOp>();
     target.addLegalOp<VPUIP::UngroupBoundedBufferOp>();
@@ -163,6 +197,7 @@ void UngroupBoundedBuffers::safeRunOnFunc() {
     mlir::RewritePatternSet patterns(&ctx);
     patterns.add<UngroupCopyOp>(&ctx, _log);
     patterns.add<UngroupSwKernelOp>(&ctx, _log);
+    patterns.add<UngroupConvertDMAOp>(&ctx, _log);
 
     if (mlir::failed(mlir::applyPartialConversion(getOperation(), target, std::move(patterns)))) {
         signalPassFailure();

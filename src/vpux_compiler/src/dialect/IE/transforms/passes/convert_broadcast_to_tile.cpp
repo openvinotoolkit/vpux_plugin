@@ -8,6 +8,7 @@
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/utils/broadcast_utils.hpp"
 #include "vpux/compiler/dialect/IE/utils/shape_infer.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/types.hpp"
 
@@ -68,9 +69,7 @@ mlir::LogicalResult ConvertBroadcastToTile::matchAndRewrite(IE::BroadcastOp orig
 
     const auto dataType =
             mlir::RankedTensorType::get({static_cast<int64_t>(repeats.size())}, getSInt32Type(getContext()));
-    const auto dataAttr = mlir::DenseElementsAttr::get(dataType, ArrayRef(repeats));
-    auto repeatsConstOp =
-            rewriter.create<Const::DeclareOp>(origOp->getLoc(), dataType, Const::ContentAttr::get(dataAttr));
+    const auto repeatsConstOp = Const::createConst(rewriter, origOp->getLoc(), dataType, ArrayRef(repeats));
 
     const auto adjustedInputShapeAttr = getIntArrayAttr(getContext(), adjustedInputShape);
     auto reshapeInputOp =

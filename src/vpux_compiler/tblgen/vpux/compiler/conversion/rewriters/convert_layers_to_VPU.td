@@ -115,8 +115,8 @@ def createLRNOp :
 
 def RewriteLRN :
         Pat<
-            (IE_LRNOp $input, $axis, $alpha, $beta, $bias, $size),
-            (createLRNOp $input, $axis, $alpha, $beta, $bias, $size)
+            (IE_LRNOp $input, $axes, $axes_value, $alpha, $beta, $bias, $size),
+            (createLRNOp $input, $axes_value, $alpha, $beta, $bias, $size)
         >;
 
 //
@@ -1493,13 +1493,13 @@ def RewriteReorgYolo :
 def createMVNOp :
         NativeCodeCall<[{
             $_builder.create<vpux::VPU::MVNOp>(
-                $_loc, $0, $1, $2, $3)
+                $_loc, $0, $1, $2, $3, $4)
         }]>;
 
 def RewriteMVN :
         Pat<
-            (IE_MVNOp $input, $across_channels, $normalize_variance, $eps),
-            (createMVNOp $input, $across_channels, $normalize_variance, $eps)
+            (IE_MVNOp $input, $across_channels, $normalize_variance, $eps, $internal_reshape),
+            (createMVNOp $input, $across_channels, $normalize_variance, $eps, $internal_reshape)
         >;
 
 //
@@ -1886,16 +1886,6 @@ def RewriteLSTMSequence :
         Pat<
             (IE_LSTMSequenceOp $inputData, $initialHiddenState, $initialCellState, $weights, $recurrenceWeights, $biases, $sequenceLength, $direction),
             (VPU_LSTMSequenceOp $inputData, $initialHiddenState, $initialCellState, $weights, $recurrenceWeights, $biases, $sequenceLength, $direction)
-        >;
-
-//
-// IE.LSTMGates -> VPU.LSTMGates
-//
-
-def RewriteLSTMGates :
-        Pat<
-            (IE_LSTMGatesOp $inputData, $initialCellState),
-            (VPU_LSTMGatesOp $inputData, $initialCellState)
         >;
 
 //

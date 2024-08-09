@@ -14,20 +14,9 @@ namespace test {
 
 class LogicalLayerTestCommon : public LogicalLayerTest, virtual public VpuOv2LayerTest {};
 
-class LogicalLayerTest_NPU3700 : public LogicalLayerTestCommon {};
 class LogicalLayerTest_SW_NPU3720 : public LogicalLayerTestCommon {};
 class LogicalLayerTest_HW_NPU3720 : public LogicalLayerTestCommon {};
 class LogicalLayerTest_SW_NPU4000 : public LogicalLayerTestCommon {};
-
-TEST_P(LogicalLayerTest_NPU3700, HW) {
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
-
-TEST_P(LogicalLayerTest_NPU3700, SW) {
-    setReferenceSoftwareMode();
-    run(Platform::NPU3700);
-}
 
 TEST_P(LogicalLayerTest_SW_NPU3720, SW) {
     setReferenceSoftwareMode();
@@ -97,25 +86,6 @@ std::vector<ov::element::Type> modelTypes = {
 };
 
 std::map<std::string, std::string> additional_config = {};
-
-const auto LogicalTestParams = ::testing::Combine(
-        ::testing::ValuesIn(static_shapes_to_test_representation(combineShapes(inputShapes))),  // Input shapes
-        ::testing::ValuesIn(logicalOpTypes),                                                    // Logical op type
-        ::testing::ValuesIn(secondInputTypes),                                                  // Second input type
-        ::testing::ValuesIn(modelTypes),                                                        // Model type
-        ::testing::Values(DEVICE_NPU),                                                          // Device name
-        ::testing::Values(additional_config));  // Additional model configuration
-
-const auto LogicalTestParamsNot = ::testing::Combine(
-        ::testing::ValuesIn(static_shapes_to_test_representation(combineShapes(inputShapesNot))),
-        ::testing::Values(LogicalTypes::LOGICAL_NOT), ::testing::Values(InputLayerType::CONSTANT),
-        ::testing::ValuesIn(modelTypes), ::testing::Values(DEVICE_NPU), ::testing::Values(additional_config));
-
-INSTANTIATE_TEST_CASE_P(smoke_CompareWithRefs, LogicalLayerTest_NPU3700, LogicalTestParams,
-                        LogicalLayerTest::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_CompareWithRefsNot, LogicalLayerTest_NPU3700, LogicalTestParamsNot,
-                         LogicalLayerTest::getTestCaseName);
 
 //
 // NPU3720/4000

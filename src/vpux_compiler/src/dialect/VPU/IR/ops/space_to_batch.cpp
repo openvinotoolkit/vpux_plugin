@@ -20,11 +20,12 @@ using namespace vpux;
 mlir::LogicalResult vpux::VPU::SpaceToBatch::inferReturnTypes(mlir::MLIRContext* ctx,
                                                               std::optional<mlir::Location> optLoc,
                                                               mlir::ValueRange operands, mlir::DictionaryAttr attrs,
-                                                              mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+                                                              mlir::OpaqueProperties prop,
+                                                              mlir::RegionRange /*regions*/,
                                                               mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::SpaceToBatchAdaptor spb(operands, attrs);
+    VPU::SpaceToBatchAdaptor spb(operands, attrs, prop);
     if (mlir::failed(spb.verify(loc))) {
         return mlir::failure();
     }

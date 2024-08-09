@@ -48,7 +48,12 @@ mlir::LogicalResult BroadcastEltwiseRewriter<EltwiseOp>::matchAndTranspose(Eltwi
     // Reshape NxM input to 1xNxMx1
     const auto lhsType = origOp.getInput1().getType().template cast<vpux::NDTypeInterface>();
     const auto lhsShape = lhsType.getShape();
-    const std::array<int64_t, 4> lhs4D = {1, lhsShape[Dim(broadcastAxis - 1)], lhsShape[Dim(broadcastAxis)], 1};
+    auto newChannelSize = lhsShape[Dim(broadcastAxis - 1)];
+    if (broadcastAxis == 2) {
+        // Handles two scenarios for 3D shape: 1xNxM or Nx1xM
+        newChannelSize = lhsShape[Dim(0)] > 1 ? lhsShape[Dim(0)] : lhsShape[Dim(1)];
+    }
+    const std::array<int64_t, 4> lhs4D = {1, newChannelSize, lhsShape[Dim(broadcastAxis)], 1};
     const auto reshapedLhsType = lhsType.changeShape(ShapeRef(lhs4D));
     const auto reshapedLhsLoc = appendLoc(origOpLoc, "reshape_lhs");
     auto reshapedLhs = rewriter.create<IE::ReshapeOp>(reshapedLhsLoc, reshapedLhsType, origOp.getInput1(), nullptr,
@@ -129,10 +134,9 @@ private:
 };
 
 // Examples of illegal operations:
-// IE.Add : tensor<NxMxf16>, tensor<1xMxf16> -> tensor<NxMxf16>
-// IE.Multiply : tensor<NxMxf16>, tensor<1xMxf16> -> tensor<NxMxf16>
-// IE.Add : tensor<1xNxMxf16>, tensor<1x1xMxf16> -> tensor<1xNxMxf16>
-// IE.Multiply : tensor<1xNxMxf16>, tensor<1x1xMxf16> -> tensor<1xNxMxf16>
+// Add / Multiply : tensor<NxMxf16>, tensor<1xMxf16> -> tensor<NxMxf16>
+// Add / Multiply : tensor<1xNxMxf16>, tensor<1x1xMxf16> -> tensor<1xNxMxf16>
+// Add / Multiply : tensor<Nx1xMxf16>, tensor<1x1xMxf16> -> tensor<Nx1xMxf16>
 bool isLegalEltwise(mlir::Operation* op) {
     if (op->getNumOperands() != 2) {
         return true;
@@ -163,8 +167,8 @@ bool isLegalEltwise(mlir::Operation* op) {
         return true;
     }
 
-    // For 3d case, batch must be equal to 1
-    if (is3DCase && (lhsInputShape[Dim(0)] != 1 || rhsInputShape[Dim(0)] != 1)) {
+    // In the 3D case, one of the sizes for the first two dimensions must be 1
+    if (is3DCase && lhsInputShape[Dim(0)] != 1 && lhsInputShape[Dim(1)] != 1) {
         return true;
     }
     const auto lhsInputWidth = lhsInputShape.raw().back();
@@ -311,9 +315,17 @@ mlir::LogicalResult MultiNonTrivialDimEltwiseRewriter<EltwiseOp>::matchAndRewrit
     _log.trace("[{0}] Got '{1}' at '{2}'", this->getDebugName(), origOp->getName(), origOp->getLoc());
     const auto origOpLoc = origOp.getLoc();
 
-    // LHS: NxCxHxW -> 1xNxCx(HxW) -> 1x(HxW)xNxC
     const auto lhsType = origOp.getInput1().getType().template cast<vpux::NDTypeInterface>();
     const auto lhsShape = lhsType.getShape();
+    const auto rhsType = origOp.getInput2().getType().template cast<vpux::NDTypeInterface>();
+    const auto rhsShape = rhsType.getShape();
+    // Check if the new IC exceeds the dimension limit 8192
+    if (lhsShape[Dim(2)] * lhsShape[Dim(3)] > VPU::NCEInvariant::VPU_DIMENSION_LIMIT ||
+        rhsShape[Dim(2)] * rhsShape[Dim(3)] > VPU::NCEInvariant::VPU_DIMENSION_LIMIT) {
+        return mlir::failure();
+    }
+
+    // LHS: NxCxHxW -> 1xNxCx(HxW) -> 1x(HxW)xNxC
     const std::array<int64_t, 4> lhs4D = {1, lhsShape[Dim(0)], lhsShape[Dim(1)], lhsShape[Dim(2)] * lhsShape[Dim(3)]};
     const auto reshapedLhsType = lhsType.changeShape(ShapeRef(lhs4D));
     const auto reshapedLhsLoc = appendLoc(origOpLoc, "reshape_lhs");
@@ -326,8 +338,6 @@ mlir::LogicalResult MultiNonTrivialDimEltwiseRewriter<EltwiseOp>::matchAndRewrit
     auto transposedLhs = rewriter.create<IE::TransposeOp>(transposeLhsLoc, reshapedLhs, nullptr, transposeLhsOrder);
 
     // RHS: 1x1xHxW -> 1x(HxW)x1x1
-    const auto rhsType = origOp.getInput2().getType().template cast<vpux::NDTypeInterface>();
-    const auto rhsShape = rhsType.getShape();
     const std::array<int64_t, 4> rhs4D = {1, rhsShape[Dim(2)] * rhsShape[Dim(3)], 1, 1};
     const auto reshapedRhsType = rhsType.changeShape(ShapeRef(rhs4D));
     const auto reshapedRhsLoc = appendLoc(origOpLoc, "reshape_rhs");

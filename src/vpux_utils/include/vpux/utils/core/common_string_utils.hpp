@@ -19,39 +19,6 @@
 
 namespace vpux {
 
-//
-// splitStringList
-//
-
-// Splits the `str` string onto separate elements using `delim` as delimiter and
-// call `callback` for each element.
-void splitStringList(const std::string& str, char delim, std::function<void(std::string_view)> callback);
-
-// Splits the string into container.
-template <class Container>
-Container splitStringList(const std::string& str, char delim) {
-    Container out;
-
-    splitStringList(str, delim, [&out](std::string_view val) {
-        addToContainer(out, val);
-    });
-
-    return out;
-}
-
-//
-// removeCharFromString
-//
-
-// Remove all `ch` character occurrences in `str` string.
-std::string removeCharFromString(std::string&& str, char ch);
-
-//
-// eraseSubString
-//
-
-std::string eraseSubString(std::string&& str, const std::string& strToRemove, bool removeAllAfterSubstr = false);
-
 std::string printFormattedCStr(const char* fmt, ...)
 #if defined(__clang__)
         ;
@@ -60,4 +27,5 @@ std::string printFormattedCStr(const char* fmt, ...)
 #else
         ;
 #endif
+
 }  // namespace vpux

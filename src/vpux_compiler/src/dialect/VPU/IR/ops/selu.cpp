@@ -9,11 +9,11 @@ using namespace vpux;
 
 mlir::LogicalResult vpux::VPU::SeluOp::inferReturnTypes(mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc,
                                                         mlir::ValueRange operands, mlir::DictionaryAttr attrs,
-                                                        mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+                                                        mlir::OpaqueProperties prop, mlir::RegionRange /*regions*/,
                                                         mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::SeluOpAdaptor selu(operands, attrs);
+    VPU::SeluOpAdaptor selu(operands, attrs, prop);
     if (mlir::failed(selu.verify(loc))) {
         return mlir::failure();
     }

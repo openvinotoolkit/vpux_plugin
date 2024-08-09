@@ -14,6 +14,7 @@
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
+#include "vpux/compiler/utils/platform_resources.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
 #include "vpux/hwtest/test_case_json_parser.hpp"
 #include "vpux/utils/core/error.hpp"
@@ -154,7 +155,7 @@ void buildSETableTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp
     auto fcnBuilder = mlir::OpBuilder::atBlockBegin(function.addEntryBlock(), builder.getListener());
     auto functionInput = function.getArgument(0);
 
-    const auto weightsValues = generateWeights(weightsShape, weightsType, ctx, weightsFileName);
+    const auto weightsValues = generateWeights(builder, weightsShape, weightsType, ctx, weightsFileName);
     auto weightsAttribute = vpux::Const::ContentAttr::get(weightsValues);
     weightsAttribute = weightsAttribute.reorder(vpux::DimsOrder::OYXI);
 
@@ -250,11 +251,14 @@ void buildSETableTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp
             fcnBuilder, VPURT::BufferSection::CMX_NN, outputCMXShape, outputTypeIf.getElementType(),
             outputTypeIf.getDimsOrder(), CLUSTER_NUM, OUTPUT_CMX_OFFSET);
 
-    auto updateBarrier = fcnBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, 0);
+    auto [waitWLMBarrier, freeBarrierId] =
+            insertWLMStartSequence(fcnBuilder, testDesc.getWLMParams().isWLMPartialEnabled);
+
+    auto updateBarrier = fcnBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, freeBarrierId++);
 
     // Create DMAs for input act, weights, weights table, sparsity map and SE table
-    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(fcnBuilder, mlir::ValueRange(), mlir::ValueRange(updateBarrier.getBarrier()),
-                                          loc, functionInput, inputCMX, 0);
+    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(fcnBuilder, waitWLMBarrier, mlir::ValueRange(updateBarrier.getBarrier()), loc,
+                                          functionInput, inputCMX, 0);
     VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(fcnBuilder, mlir::ValueRange(), mlir::ValueRange(updateBarrier.getBarrier()),
                                           loc, weightsDDR, weightsCMX, 0);
     VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(fcnBuilder, mlir::ValueRange(), mlir::ValueRange(updateBarrier.getBarrier()),
@@ -274,7 +278,7 @@ void buildSETableTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp
     const auto kernelSize = getIntArrayAttr(ctx, kernel);
     auto sparsityMap = !seTableParams.seOnlyEn ? sparsityMapCMX.getBuffer() : nullptr;
     // Create NCEClusterTaskOp
-    updateBarrier = fcnBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, 1);
+    updateBarrier = fcnBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, freeBarrierId++);
     auto nceTask = VPURT::wrapIntoTaskOp<VPUIP::NCEClusterTaskOp>(
             fcnBuilder, mlir::ValueRange(waitBarrier.getBarrier()), mlir::ValueRange(updateBarrier.getBarrier()), loc,
             inputCMX.getBuffer(), sparsityMap, seTableCMX.getBuffer(), weightsCMX,
@@ -306,7 +310,8 @@ void buildSETableTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp
 
     waitBarrier = updateBarrier;
     // finalBarrier passed as production barrier to last DMA task
-    auto finalBarrier = fcnBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, 2);
+    auto finalBarrier = fcnBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, freeBarrierId++,
+                                                                           testDesc.getWLMParams().isWLMPartialEnabled);
 
     // Create CMX2DDR DMAs from each cluster the output was broadcasted to
 

@@ -145,13 +145,10 @@ void checkSEPPad(IE::PadOp op, const Logger& log) {
     if (op.getMode() == IE::PadMode::CONSTANT) {
         if (op.getPadValue() != nullptr) {
             auto padValueConst = op.getPadValue().getDefiningOp<Const::DeclareOp>();
-            if (padValueConst == nullptr) {
+            if (padValueConst == nullptr || !padValueConst.getContentAttr().isSplat()) {
                 return;
             }
             const auto padValueContent = padValueConst.getContent();
-            if (!padValueContent.isSplat()) {
-                return;
-            }
             constantPadValue = padValueContent.getSplatValue<double>();
         } else if (op.getPadValueAttrAttr() != nullptr) {
             const auto padValueAttr = op.getPadValueAttr();

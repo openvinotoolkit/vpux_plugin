@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+//
+
 #include "vpux/compiler/utils/VPU/tile_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
 
@@ -57,7 +59,7 @@ SmallVector<vpux::NDTypeInterface> getTileTypes(VPU::NCEConvolutionOp origOp, co
         VPUX_THROW_WHEN(nceOp == nullptr, "Op {0} has multiClusterStrategy but is not an NCEOp", origOp->getLoc());
 
         auto numClusters = VPU::getOptimalNumClusters(
-                clusteredOp, outputTileType.getShape()[Dims4D::Act::C],
+                clusteredOp, outputTileType.getShape(),
                 clusteredOp->getAttr(VPU::multiClusterStrategy).cast<VPU::MultiClusterStrategyAttr>().getValue());
         return {VPU::getDistributedActivationTypeFromOp(clusteredOp, inputTileType, numClusters, nullptr, tiles[0]),
                 VPU::getDistributedFilterTypeFromOp(nceOp, filterTileType, numClusters),
@@ -104,7 +106,7 @@ SmallVector<vpux::NDTypeInterface> getTileTypes(VPU::NCEMaxPoolOp origOp, const 
         VPUX_THROW_WHEN(clusteredOp == nullptr, "Op {0} has multiClusterStrategy but is not an ClusteredOp",
                         origOp->getLoc());
 
-        auto numClusters = VPU::getOptimalNumClusters(clusteredOp, outputTileType.getShape()[Dims4D::Act::C],
+        auto numClusters = VPU::getOptimalNumClusters(clusteredOp, outputTileType.getShape(),
                                                       clusteredOp.getMultiClusterStrategy().value());
         return {VPU::getDistributedActivationTypeFromOp(clusteredOp, inputTileType, numClusters, nullptr, tiles[0]),
                 VPU::getDistributedOutputTypeFromOp(clusteredOp, outputTileType, numClusters, nullptr, outTile)};
@@ -133,7 +135,7 @@ SmallVector<vpux::NDTypeInterface> getTileTypes(VPU::NCEAveragePoolOp origOp, co
         VPUX_THROW_WHEN(clusteredOp == nullptr, "Op {0} has multiClusterStrategy but is not an ClusteredOp",
                         origOp->getLoc());
 
-        auto numClusters = VPU::getOptimalNumClusters(clusteredOp, outputTileType.getShape()[Dims4D::Act::C],
+        auto numClusters = VPU::getOptimalNumClusters(clusteredOp, outputTileType.getShape(),
                                                       clusteredOp.getMultiClusterStrategy().value());
         return {VPU::getDistributedActivationTypeFromOp(clusteredOp, inputTileType, numClusters, nullptr, tiles[0]),
                 VPU::getDistributedOutputTypeFromOp(clusteredOp, outputTileType, numClusters, nullptr, outTile)};
@@ -190,7 +192,7 @@ SmallVector<vpux::NDTypeInterface> getTileTypes(VPU::NCEDepthConvolutionOp origO
         VPUX_THROW_WHEN(clusteredOp == nullptr, "Op {0} has multiClusterStrategy but is not an ClusteredOp",
                         origOp->getLoc());
 
-        auto numClusters = VPU::getOptimalNumClusters(clusteredOp, outputTileType.getShape()[Dims4D::Act::C],
+        auto numClusters = VPU::getOptimalNumClusters(clusteredOp, outputTileType.getShape(),
                                                       clusteredOp.getMultiClusterStrategy().value());
         return {VPU::getDistributedActivationTypeFromOp(clusteredOp, inputTileType, numClusters, nullptr, tiles[0]),
                 VPU::getDistributedFilterTypeFromOp(nceOp, filterTileType, numClusters),
@@ -219,7 +221,7 @@ SmallVector<vpux::NDTypeInterface> getTileTypes(VPU::NCECompressConvolutionOp or
         VPUX_THROW_WHEN(nceOp == nullptr, "Op {0} has multiClusterStrategy but is not an NCEOp", origOp->getLoc());
 
         auto numClusters = VPU::getOptimalNumClusters(
-                clusteredOp, outputTileType.getShape()[Dims4D::Act::C],
+                clusteredOp, outputTileType.getShape(),
                 clusteredOp->getAttr(VPU::multiClusterStrategy).cast<VPU::MultiClusterStrategyAttr>().getValue());
         return {VPU::getDistributedActivationTypeFromOp(clusteredOp, inputTileType, numClusters, nullptr, tiles[0]),
                 VPU::getDistributedFilterTypeFromOp(nceOp, filterTileType, numClusters),
@@ -248,7 +250,7 @@ SmallVector<vpux::NDTypeInterface> getTileTypes(VPU::NCEPermuteOp origOp, const 
         VPUX_THROW_WHEN(nceOp == nullptr, "Op {0} has multiClusterStrategy but is not an NCEOp", origOp->getLoc());
 
         auto numClusters = VPU::getOptimalNumClusters(
-                clusteredOp, outputTileType.getShape()[Dims4D::Act::C],
+                clusteredOp, outputTileType.getShape(),
                 clusteredOp->getAttr(VPU::multiClusterStrategy).cast<VPU::MultiClusterStrategyAttr>().getValue());
         return {VPU::getDistributedActivationTypeFromOp(clusteredOp, inputTileType, numClusters, nullptr, tiles[0]),
                 VPU::getDistributedOutputTypeFromOp(clusteredOp, outputTileType, numClusters, nullptr, outTile)};
@@ -278,7 +280,7 @@ SmallVector<vpux::NDTypeInterface> getTileTypes(VPU::DepthToSpaceOp origOp, cons
                         origOp->getLoc());
 
         auto numClusters = VPU::getOptimalNumClusters(
-                clusteredOp, outputTileType.getShape()[Dims4D::Act::C],
+                clusteredOp, outputTileType.getShape(),
                 clusteredOp->getAttr(VPU::multiClusterStrategy).cast<VPU::MultiClusterStrategyAttr>().getValue());
         return {VPU::getDistributedActivationTypeFromOp(clusteredOp, inputTileType, numClusters, nullptr, tiles[0]),
                 VPU::getDistributedOutputTypeFromOp(clusteredOp, outputTileType, numClusters, nullptr, outTile)};
@@ -320,7 +322,7 @@ SmallVector<vpux::NDTypeInterface> getTileTypesCommon(mlir::Operation* origOp, c
     auto clusteredOp = mlir::dyn_cast<VPU::ClusteredOpInterface>(origOp);
     VPUX_THROW_WHEN(clusteredOp == nullptr, "Op {0} has multiClusterStrategy but is not an ClusteredOp",
                     origOp->getLoc());
-    auto numClusters = VPU::getOptimalNumClusters(clusteredOp, outputTileType.getShape()[Dims4D::Act::C],
+    auto numClusters = VPU::getOptimalNumClusters(clusteredOp, outputTileType.getShape(),
                                                   clusteredOp.getMultiClusterStrategy().value());
 
     SmallVector<vpux::NDTypeInterface> distributedTensorTypes;
@@ -360,7 +362,7 @@ SmallVector<vpux::NDTypeInterface> getTileTypes(VPU::NCEInterpolateOp origOp, co
         VPUX_THROW_WHEN(nceOp == nullptr, "Op {0} has multiClusterStrategy but is not an NCEOp", origOp->getLoc());
 
         auto numClusters = VPU::getOptimalNumClusters(
-                clusteredOp, outputTileType.getShape()[Dims4D::Act::C],
+                clusteredOp, outputTileType.getShape(),
                 clusteredOp->getAttr(VPU::multiClusterStrategy).cast<VPU::MultiClusterStrategyAttr>().getValue());
         return {VPU::getDistributedActivationTypeFromOp(clusteredOp, inputTileType, numClusters, nullptr, tiles[0]),
                 VPU::getDistributedFilterTypeFromOp(nceOp, filterTileType, numClusters),

@@ -14,10 +14,9 @@ namespace VPU {
 // Looks over the ops in opSubgraph and selects those that implement NCEOpInterface and are SOH-compatible. From that
 // subset, picks the Overlapped params with the largest kernel. Overlapped params are described by combinations of
 // kernel, pads, strides.
-OverlapDistributionParams getOverlappedDistributionParameters(mlir::MLIRContext* ctx,
-                                                              ArrayRef<VPU::ClusteredOpInterface> opSubgraph,
+OverlapDistributionParams getOverlappedDistributionParameters(ArrayRef<VPU::ClusteredOpInterface> opSubgraph,
                                                               int64_t kernelDistributionAxis,
-                                                              mlir::UnitAttr equalComputeAndMemoryView = nullptr);
+                                                              bool equalComputeAndMemoryView = false);
 
 // For each cluster, computes the union of the memory views of the consumerSubgraph ops' inputs and the compute view of
 // the producer op's output. The ops considered from consumerSubgraph must implement NCEOpInterface and be
@@ -37,8 +36,8 @@ OverlapDistributionParams getOverlappedDistributionParameters(mlir::MLIRContext*
 // Resulting OverlappedParams: cluster 0 = [0, 0, 0, 0] -> [1, 15, 17, 17], cluster 1 = [0, 0, 14, 0] -> [1, 15, 27, 17]
 // OverlappedParams are described by explicit per cluster memory shapes and offsets.
 OverlapDistributionParams getOverlappedDistributionParameters(
-        mlir::MLIRContext* ctx, NDTypeInterface tensorType, ArrayRef<VPU::ClusteredOpInterface> consumerSubgraph,
-        const int64_t numClusters, ArrayRef<int64_t> numTiles, mlir::UnitAttr uniformDistributedSegments,
+        NDTypeInterface tensorType, ArrayRef<VPU::ClusteredOpInterface> consumerSubgraph, const int64_t numClusters,
+        ArrayRef<int64_t> numTiles, bool uniformDistributedSegments,
         const vpux::TileInfo& tileInfo = vpux::TileInfo(ShapeRef()));
 
 // In case of input being presented with explicit overlap lines with DPU,
@@ -66,11 +65,13 @@ OverlapDistributionParams getActivationOverlappedParams(VPU::ClusteredOpInterfac
 // of tensor needed in each cluster to satisfy all the input requirements of the sibling ops.
 OverlapDistributionParams getActivationOverlappedParams(VPU::ClusteredOpInterface clusteredOp,
                                                         ArrayRef<int64_t> activationTensorNumTiles,
-                                                        mlir::UnitAttr uniformDistributedSegments,
+                                                        const bool uniformDistributedSegments,
                                                         vpux::NDTypeInterface inputType = nullptr,
                                                         const vpux::TileInfo& tileInfo = vpux::TileInfo(ShapeRef()));
 
 std::set<VPU::ClusteredOpInterface> getSiblingOps(mlir::Operation* op);
+
+bool isPassthroughOp(mlir::Operation* op);
 
 // In case of output producing overlap lines with DPU
 // for VPUX4000 and beyond, we need to take into account all the consumer requirements
@@ -99,9 +100,19 @@ OverlapDistributionParams getOutputOverlappedParams(VPU::ClusteredOpInterface cl
 
 OverlapDistributionParams getOutputOverlappedParams(VPU::ClusteredOpInterface clusteredOp,
                                                     ArrayRef<int64_t> outputTensorNumTiles,
-                                                    mlir::UnitAttr uniformDistributedSegments,
-                                                    vpux::NDTypeInterface outputType,
+                                                    bool uniformDistributedSegments, vpux::NDTypeInterface outputType,
                                                     const vpux::TileInfo& tileInfo = vpux::TileInfo(ShapeRef()));
+
+OverlapDistributionParams getOutputOverlappedParams(VPU::ClusteredOpInterface clusteredOp,
+                                                    ArrayRef<int64_t> outputTensorNumTiles,
+                                                    const bool uniformDistributedSegments,
+                                                    vpux::NDTypeInterface outputType, const vpux::TileInfo& tileInfo,
+                                                    std::set<VPU::ClusteredOpInterface>& siblings);
+
+OverlapDistributionParams getOutputOverlappedParamsNoHalo(VPU::ClusteredOpInterface clusteredOp,
+                                                          ArrayRef<int64_t> outputTensorNumTiles);
+
+bool outputOverlappedParamsIsHaloSupported(VPU::ClusteredOpInterface clusteredOp);
 
 }  // namespace VPU
 }  // namespace vpux

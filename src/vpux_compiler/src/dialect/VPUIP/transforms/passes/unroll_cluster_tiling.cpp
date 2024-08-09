@@ -371,8 +371,7 @@ void VPUIP::ClusterNCEBaseRewriter::matchAndRewrite(VPUIP::NCEClusterTaskOp nceT
         _log.trace("Insert new NCE task: '{0}'", newTask);
     }
 
-    vpurtTask->dropAllReferences();
-    vpurtTask->remove();
+    vpurtTask->erase();
 }
 
 SmallVector<mlir::Value> VPUIP::ClusterNCEBaseRewriter::getWeightsBuffers(mlir::Location loc,
@@ -485,8 +484,7 @@ void VPUIP::ClusterPerElementDMABaseRewriter::matchAndRewrite(VPUIP::DMATypeOpIn
         VPUX_THROW("Unsupported unrolling mode");
     }
 
-    vpurtTask->dropAllReferences();
-    vpurtTask->remove();
+    vpurtTask->erase();
 }
 
 bool isStorageElementTableConstantOp(Const::DeclareOp constOp) {
@@ -529,7 +527,7 @@ bool isStorageElementTableConstantOp(Const::DeclareOp constOp) {
 // There is an example: Bilinear Interpolate H size from 5 to 10
 // Input Date:               0         1       2       3       4
 // Effective Data:           0 0 0 0 0 1 1 1 1 2 2 2 2 3 3 3 3 4 4 4 4 4
-// - For 30XX and 37XX:
+// - For 37XX:
 // BASE_PTR at Cluster 0:    0 0 0 0 0 0 0 0 0 0 0 0 0
 // BASE_PTR at Cluster 1:                              1 1 1 1 1 1 1 1 1
 // - For 40XX+:
@@ -841,7 +839,6 @@ void VPUIP::ClusterPerElementDMABaseRewriter::unrollSegmentedOrOverlapped(mlir::
     VPUX_THROW_WHEN(origDMAOp == nullptr, "Inner task is not DMA op");
     auto inputInsertionPoint = input.getDefiningOp();
     auto outputInsertionPoint = output.getDefiningOp();
-
     for (size_t clusterId = 0; clusterId < numClusters; ++clusterId) {
         const auto newInputType = newInTypes[clusterId];
         const auto newOutType = newOutTypes[clusterId];
@@ -857,6 +854,13 @@ void VPUIP::ClusterPerElementDMABaseRewriter::unrollSegmentedOrOverlapped(mlir::
         const auto newLoc = appendLoc(loc, "_cluster_{0}", clusterId);
         auto newDMAOp = wrapIntoTaskOp(origDMAOp, vpurtTask, newLoc, inputBuffer, outBuffer, clusterId % _dmaPortCount,
                                        builder);
+
+        if (maybeNNDMAOp != nullptr && maybeNNDMAOp.getProfilingBufferMgmt()) {
+            if (auto newNNDMAOp = mlir::dyn_cast<VPUIP::NNDMAOp>(newDMAOp.getOperation())) {
+                newNNDMAOp.setProfilingBufferMgmt(true);
+            }
+        }
+
         // Consider 3 DMA on ports, first 2 are largest, last DMA is a remainder
         // Port 0: |---------- CMX 0 ----------| |---- CMX 2 ----|
         // Port 1: |---------- CMX 1 ----------|

@@ -3,17 +3,11 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#include <cstdint>
 #include <cstring>
 #include <vpux_elf/writer.hpp>
 #include "vpux/compiler/NPU40XX/dialect/ELF/ops.hpp"
 #include "vpux/compiler/utils/ELF/utils.hpp"
-
-namespace {
-// Loader ABI version (HPI4000 specific) - To be updated on Loader ABI changes
-static constexpr uint32_t VERSION_MAJOR = 1;
-static constexpr uint32_t VERSION_MINOR = 0;
-static constexpr uint32_t VERSION_PATCH = 1;
-}  // namespace
 
 using LoaderAbiVersionNote = elf::elf_note::VersionNote;
 
@@ -29,7 +23,7 @@ void vpux::ELF::ABIVersionOp::serialize(elf::writer::BinaryDataSection<uint8_t>&
     static_assert(sizeof(name) == nameSize);
     std::memcpy(abiVersionStruct.n_name, name, nameSize);
 
-    const uint32_t desc[4] = {elf::elf_note::ELF_NOTE_OS_LINUX, VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH};
+    const uint32_t desc[4] = {elf::elf_note::ELF_NOTE_OS_LINUX, getMajor(), getMinor(), getPatch()};
     static_assert(sizeof(desc) == descSize);
     std::memcpy(abiVersionStruct.n_desc, desc, descSize);
 
@@ -62,6 +56,7 @@ bool vpux::ELF::ABIVersionOp::hasMemoryFootprint() {
     return true;
 }
 
-void vpux::ELF::ABIVersionOp::build(mlir::OpBuilder& builder, mlir::OperationState& state) {
-    build(builder, state, "LoaderABIVersion", VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH);
+void vpux::ELF::ABIVersionOp::build(mlir::OpBuilder& builder, mlir::OperationState& state, uint32_t verMajor,
+                                    uint32_t verMinor, uint32_t verPatch) {
+    build(builder, state, "LoaderABIVersion", verMajor, verMinor, verPatch);
 }

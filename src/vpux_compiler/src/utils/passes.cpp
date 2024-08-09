@@ -5,6 +5,7 @@
 
 #include "vpux/compiler/utils/passes.hpp"
 #include "vpux/compiler/utils/error.hpp"
+#include "vpux/utils/core/error.hpp"
 #include "vpux/utils/core/range.hpp"
 
 using namespace vpux;
@@ -70,6 +71,11 @@ void vpux::FunctionPass::runOnOperation() {
         _log = _log.nest();
         safeRunOnFunc();
         _log = _log.unnest();
+    } catch (const vpux::WlmRollbackException& WlmException) {
+        _log.warning("WLM exception occured during {0} pass: {1}", passName, WlmException.what());
+        signalPassFailure();
+        // Rethrow exception to trigger rollback
+        throw WlmException;
     } catch (const std::exception& e) {
         (void)errorAt(currentOp, "{0} Pass failed : {1}", passName, e.what());
         signalPassFailure();

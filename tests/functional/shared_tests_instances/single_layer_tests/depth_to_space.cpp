@@ -15,14 +15,8 @@ namespace test {
 
 class DepthToSpaceLayerTestCommon : public DepthToSpaceLayerTest, virtual public VpuOv2LayerTest {};
 
-class DepthToSpaceLayerTest_NPU3700 : public DepthToSpaceLayerTestCommon {};
 class DepthToSpaceLayerTest_NPU3720 : public DepthToSpaceLayerTestCommon {};
 class DepthToSpaceLayerTest_NPU4000 : public DepthToSpaceLayerTestCommon {};
-
-TEST_P(DepthToSpaceLayerTest_NPU3700, HW) {
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
 
 TEST_P(DepthToSpaceLayerTest_NPU3720, HW) {
     setDefaultHardwareMode();
@@ -47,44 +41,14 @@ using ov::op::v0::DepthToSpace;
 
 namespace {
 const std::vector<ov::element::Type> inputPrecisions = {
-        ov::element::f32, ov::element::u8,
-        ov::element::f16,  // CPU-plugin has parameter I16, but NPU3700 does not
-};                         // support it. So I16 is changed to FP16.
+        ov::element::f32,
+        ov::element::u8,
+        ov::element::f16,
+};
 
 const std::vector<ov::op::v0::DepthToSpace::DepthToSpaceMode> modes = {
         ov::op::v0::DepthToSpace::DepthToSpaceMode::BLOCKS_FIRST,
         ov::op::v0::DepthToSpace::DepthToSpaceMode::DEPTH_FIRST};
-
-// ------ NPU3700 ------
-const std::vector<std::vector<ov::Shape>> inputShapesBS2 = {
-        {{1, 4, 1, 1}}, {{1, 4, 2, 2}}, {{1, 4, 3, 3}}, {{2, 32, 3, 3}}, {{2, 16, 5, 4}}};
-// {1, 8, 1, 1, 1}, {1, 8, 2, 2, 2}, {1, 8, 3, 3, 3}, {2, 32, 3, 3, 3}, {2, 16, 5, 4, 6}};
-// These 5-dimensional values from CPU-test, but NPU-plugin does not support dims.size() > 4.
-// Therefore they are commented.
-// For details please see: NPU-plugin/src/utils/dims_parser.cpp
-
-const std::vector<std::vector<ov::Shape>> inputShapesBS3 = {
-        {{1, 9, 1, 1}}, {{1, 9, 2, 2}}, {{1, 9, 3, 3}}, {{2, 36, 3, 3}}, {{2, 27, 5, 4}}};
-// {1, 27, 1, 1, 1}, {1, 27, 2, 2, 2}, {1, 27, 3, 3, 3}, {2, 108, 3, 3, 3}, {2, 54, 5, 4, 6}};
-// These 5-dimensional values from CPU-test, but NPU-plugin does not support dims.size() > 4.
-// Therefore they are commented.
-// For details please see: NPU-plugin/src/utils/dims_parser.cpp
-
-const auto DepthToSpaceBS2 =
-        ::testing::Combine(::testing::ValuesIn(static_shapes_to_test_representation(inputShapesBS2)),  // Input shape
-                           ::testing::ValuesIn(inputPrecisions),                                       // Model type
-                           ::testing::ValuesIn(modes),                                                 // Mode
-                           ::testing::Values(2),                                                       // Block size
-                           ::testing::Values(DEVICE_NPU));                                             // Device name
-
-const auto DepthToSpaceBS3 = ::testing::Combine(
-        ::testing::ValuesIn(static_shapes_to_test_representation(inputShapesBS3)), ::testing::ValuesIn(inputPrecisions),
-        ::testing::ValuesIn(modes), ::testing::Values(3), ::testing::Values(DEVICE_NPU));
-
-INSTANTIATE_TEST_SUITE_P(smoke_DepthToSpaceBS2, DepthToSpaceLayerTest_NPU3700, DepthToSpaceBS2,
-                         DepthToSpaceLayerTest_NPU3700::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(smoke_DepthToSpaceBS3, DepthToSpaceLayerTest_NPU3700, DepthToSpaceBS3,
-                         DepthToSpaceLayerTest_NPU3700::getTestCaseName);
 
 // ------ NPU3720/4000 ------
 const auto DepthToSpaceBS2_PRECOMMIT =

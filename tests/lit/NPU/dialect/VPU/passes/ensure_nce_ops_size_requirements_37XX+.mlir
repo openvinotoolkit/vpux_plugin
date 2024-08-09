@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --ensure-nce-ops-size-requirements --canonicalize %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
@@ -219,9 +219,9 @@ func.func @SplitNCEConvOverIC3ConvsMixedPrecision(%arg0: tensor<1x16640x1x1xf16,
 
   return %0 : tensor<1x16x1x1xf16, {order = #NHWC}>
 
-  // CHECK-DAG:  [[FILTER0:%.+]] = const.Declare tensor<16x5536x1x1x!qElemType, {order = #NHWC}> = dense<6.400000e+01> : tensor<16x16640x1x1xf32, {order = #NHWC}>, [#const.ConvertElemType<f16>, #const.ConvertElemType<si8>, #const.QuantCast<!qElemType>, #const.SubView<[0, 11104, 0, 0], [16, 5536, 1, 1]>]
-  // CHECK-DAG:  [[FILTER1:%.+]] = const.Declare tensor<16x5552x1x1x!qElemType, {order = #NHWC}> = dense<6.400000e+01> : tensor<16x16640x1x1xf32, {order = #NHWC}>, [#const.ConvertElemType<f16>, #const.ConvertElemType<si8>, #const.QuantCast<!qElemType>, #const.SubView<[0, 5552, 0, 0], [16, 5552, 1, 1]>]
-  // CHECK-DAG:  [[FILTER2:%.+]] = const.Declare tensor<16x5552x1x1x!qElemType, {order = #NHWC}> = dense<6.400000e+01> : tensor<16x16640x1x1xf32, {order = #NHWC}>, [#const.ConvertElemType<f16>, #const.ConvertElemType<si8>, #const.QuantCast<!qElemType>, #const.SubView<[0, 0, 0, 0], [16, 5552, 1, 1]>]
+  // CHECK-DAG:  [[FILTER0:%.+]] = const.Declare tensor<16x5536x1x1x!qElemType, {order = #NHWC}> = dense<6.400000e+01> : tensor<16x16640x1x1xf32, {order = #NHWC}>, [#const.SubView<[0, 11104, 0, 0], [16, 5536, 1, 1]>, #const.ConvertElemType<f16>, #const.ConvertElemType<si8>, #const.QuantCast<!qElemType>]
+  // CHECK-DAG:  [[FILTER1:%.+]] = const.Declare tensor<16x5552x1x1x!qElemType, {order = #NHWC}> = dense<6.400000e+01> : tensor<16x16640x1x1xf32, {order = #NHWC}>, [#const.SubView<[0, 5552, 0, 0], [16, 5552, 1, 1]>, #const.ConvertElemType<f16>, #const.ConvertElemType<si8>, #const.QuantCast<!qElemType>]
+  // CHECK-DAG:  [[FILTER2:%.+]] = const.Declare tensor<16x5552x1x1x!qElemType, {order = #NHWC}> = dense<6.400000e+01> : tensor<16x16640x1x1xf32, {order = #NHWC}>, [#const.SubView<[0, 0, 0, 0], [16, 5552, 1, 1]>, #const.ConvertElemType<f16>, #const.ConvertElemType<si8>, #const.QuantCast<!qElemType>]
 
   // CHECK-DAG:  [[WEIGHTS_TABLE0:%.+]] = const.Declare tensor<16x1x1x4xsi32>
   // CHECK-SAME{LITERAL}:       dense<[[[[0, 0, 10, 0]]], [[[5536, 704, 10, 0]]], [[[11072, 1408, 10, 0]]], [[[16608, 2112, 10, 0]]], [[[22144, 2816, 10, 0]]], [[[27680, 3520, 10, 0]]], [[[33216, 4224, 10, 0]]], [[[38752, 4928, 10, 0]]], [[[44288, 5632, 10, 0]]], [[[49824, 6336, 10, 0]]], [[[55360, 7040, 10, 0]]], [[[60896, 7744, 10, 0]]], [[[66432, 8448, 10, 0]]], [[[71968, 9152, 10, 0]]], [[[77504, 9856, 10, 0]]], [[[83040, 10560, 10, 0]]]]> : tensor<16x1x1x4xsi32>
@@ -262,9 +262,9 @@ func.func @SplitNCEConvOverIC3ConvsMixedPrecisionI4(%arg0: tensor<1x16416x1x1xf1
   } -> tensor<1x16x1x1xf16, {order = #NHWC}>
 
   return %0 : tensor<1x16x1x1xf16, {order = #NHWC}>
-// CHECK-DAG:  [[FILTER0:%.+]] = const.Declare tensor<16x5472x1x1x!qElemType, {order = #NHWC}> = dense<6.400000e+01> : tensor<16x16416x1x1xf32, {order = #NHWC}>, [#const.ConvertElemType<f16>, #const.ConvertElemType<si4>, #const.QuantCast<!qElemType>, #const.SubView<[0, 10944, 0, 0], [16, 5472, 1, 1]>]
-// CHECK-DAG:  [[FILTER1:%.+]] = const.Declare tensor<16x5472x1x1x!qElemType, {order = #NHWC}> = dense<6.400000e+01> : tensor<16x16416x1x1xf32, {order = #NHWC}>, [#const.ConvertElemType<f16>, #const.ConvertElemType<si4>, #const.QuantCast<!qElemType>, #const.SubView<[0, 5472, 0, 0], [16, 5472, 1, 1]>]
-// CHECK-DAG:  [[FILTER2:%.+]] = const.Declare tensor<16x5472x1x1x!qElemType, {order = #NHWC}> = dense<6.400000e+01> : tensor<16x16416x1x1xf32, {order = #NHWC}>, [#const.ConvertElemType<f16>, #const.ConvertElemType<si4>, #const.QuantCast<!qElemType>, #const.SubView<[0, 0, 0, 0], [16, 5472, 1, 1]>]
+// CHECK-DAG:  [[FILTER0:%.+]] = const.Declare tensor<16x5472x1x1x!qElemType, {order = #NHWC}> = dense<6.400000e+01> : tensor<16x16416x1x1xf32, {order = #NHWC}>, [#const.SubView<[0, 10944, 0, 0], [16, 5472, 1, 1]>, #const.ConvertElemType<f16>, #const.ConvertElemType<si4>, #const.QuantCast<!qElemType>]
+// CHECK-DAG:  [[FILTER1:%.+]] = const.Declare tensor<16x5472x1x1x!qElemType, {order = #NHWC}> = dense<6.400000e+01> : tensor<16x16416x1x1xf32, {order = #NHWC}>, [#const.SubView<[0, 5472, 0, 0], [16, 5472, 1, 1]>, #const.ConvertElemType<f16>, #const.ConvertElemType<si4>, #const.QuantCast<!qElemType>]
+// CHECK-DAG:  [[FILTER2:%.+]] = const.Declare tensor<16x5472x1x1x!qElemType, {order = #NHWC}> = dense<6.400000e+01> : tensor<16x16416x1x1xf32, {order = #NHWC}>, [#const.SubView<[0, 0, 0, 0], [16, 5472, 1, 1]>, #const.ConvertElemType<f16>, #const.ConvertElemType<si4>, #const.QuantCast<!qElemType>]
 // CHECK-DAG:  [[WEIGHTS_TABLE0:%.+]] = const.Declare tensor<16x1x1x4xsi32>
 // CHECK-SAME{LITERAL}:  dense<[[[[0, 0, 10, 0]]], [[[2736, 352, 10, 0]]], [[[5472, 704, 10, 0]]], [[[8208, 1056, 10, 0]]], [[[10944, 1408, 10, 0]]], [[[13680, 1760, 10, 0]]], [[[16416, 2112, 10, 0]]], [[[19152, 2464, 10, 0]]], [[[21888, 2816, 10, 0]]], [[[24624, 3168, 10, 0]]], [[[27360, 3520, 10, 0]]], [[[30096, 3872, 10, 0]]], [[[32832, 4224, 10, 0]]], [[[35568, 4576, 10, 0]]], [[[38304, 4928, 10, 0]]], [[[41040, 5280, 10, 0]]]]> : tensor<16x1x1x4xsi32>
 // CHECK-DAG:  [[WEIGHTS_TABLE1:%.+]] = const.Declare tensor<16x1x1x4xsi32>

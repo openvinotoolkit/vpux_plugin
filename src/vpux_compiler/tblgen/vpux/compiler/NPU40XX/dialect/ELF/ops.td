@@ -39,7 +39,8 @@ def DataSectionOp :
                 Symbol,
                 SymbolContainer,
                 NoRegionArguments,
-                DeclareOpInterfaceMethods<ELF_SectionInterface>
+                DeclareOpInterfaceMethods<ELF_SectionInterface>,
+                DeclareOpInterfaceMethods<ELF_SymbolicallyRepresentedOpInterface>
             ]
             # GraphRegionNoTerminator.traits
         > {
@@ -76,7 +77,8 @@ def LogicalSectionOp :
                 Symbol,
                 SymbolContainer,
                 NoRegionArguments,
-                DeclareOpInterfaceMethods<ELF_SectionInterface>
+                DeclareOpInterfaceMethods<ELF_SectionInterface>,
+                DeclareOpInterfaceMethods<ELF_SymbolicallyRepresentedOpInterface>
             ]
             # GraphRegionNoTerminator.traits
         > {
@@ -101,6 +103,10 @@ def LogicalSectionOp :
         `secType` `(` $secType `)`
         `secFlags` `(` $secFlags `)`
         $content
+    }];
+
+    let extraClassDeclaration = [{
+        size_t getTotalSize();
     }];
 }
 
@@ -317,6 +323,10 @@ def SymbolOp :
         `value` `(` $value `)`
         attr-dict
     }];
+
+    let builders = [
+        OpBuilder<(ins "vpux::ELF::SymbolSignature&":$signature)>
+    ];
 }
 
 //
@@ -414,7 +424,7 @@ def ABIVersionOp :
         attr-dict}];
 
     let builders = [
-        OpBuilder<(ins)>
+        OpBuilder<(ins "uint32_t":$major, "uint32_t":$minor, "uint32_t":$patch)>
         ];
 }
 

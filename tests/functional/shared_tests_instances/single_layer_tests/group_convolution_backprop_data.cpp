@@ -15,14 +15,8 @@ namespace test {
 
 class GroupConvBackpropLayerTestCommon : public GroupConvBackpropLayerTest, virtual public VpuOv2LayerTest {};
 
-class GroupConvBackpropLayerTest_NPU3700 : public GroupConvBackpropLayerTestCommon {};
 class GroupConvBackpropLayerTest_NPU3720 : public GroupConvBackpropLayerTestCommon {};
 class GroupConvBackpropLayerTest_NPU4000 : public GroupConvBackpropLayerTestCommon {};
-
-TEST_P(GroupConvBackpropLayerTest_NPU3700, HW) {
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
 
 TEST_P(GroupConvBackpropLayerTest_NPU3720, HW) {
     abs_threshold = 0.1;
@@ -70,21 +64,6 @@ const auto groupConvBackpropData2DParams_OutputPadding = ::testing::Combine(
         ::testing::ValuesIn(padEnds2D), ::testing::ValuesIn(dilations2D), ::testing::ValuesIn(numOutChannels),
         ::testing::ValuesIn(numGroups), ::testing::Values(ov::op::PadType::EXPLICIT),
         ::testing::ValuesIn(outputPadding2D));
-
-// ------ NPU3700 ------
-INSTANTIATE_TEST_SUITE_P(smoke_GroupConvBackpropData2D_ExplicitPadding, GroupConvBackpropLayerTest_NPU3700,
-                         ::testing::Combine(groupConvBackpropData2DParams_ExplicitPadding,
-                                            ::testing::ValuesIn(modelTypes),
-                                            ::testing::ValuesIn(static_shapes_to_test_representation(inputShapes2D)),
-                                            ::testing::ValuesIn(emptyOutputShape), ::testing::Values(DEVICE_NPU)),
-                         GroupConvBackpropLayerTest_NPU3700::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_GroupConvBackpropData2D_OutputPadding, GroupConvBackpropLayerTest_NPU3700,
-                         ::testing::Combine(groupConvBackpropData2DParams_OutputPadding,
-                                            ::testing::ValuesIn(modelTypes),
-                                            ::testing::ValuesIn(static_shapes_to_test_representation(inputShapes2D)),
-                                            ::testing::ValuesIn(emptyOutputShape), ::testing::Values(DEVICE_NPU)),
-                         GroupConvBackpropLayerTest_NPU3700::getTestCaseName);
 
 // ------ NPU3720 ------
 INSTANTIATE_TEST_SUITE_P(smoke_GroupConvBackpropData2D_ExplicitPadding, GroupConvBackpropLayerTest_NPU3720,

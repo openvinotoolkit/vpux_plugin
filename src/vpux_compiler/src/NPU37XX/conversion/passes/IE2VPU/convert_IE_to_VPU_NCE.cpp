@@ -49,8 +49,8 @@ mlir::LogicalResult arch37xx::ConvToNCE::matchAndRewrite(IE::ConvolutionOp origO
                 weightsContentAttr.getBaseContent().getType().cast<NDTypeInterface>().getShape()[Dims4D::Filter::IC];
         for (auto attr : weightsContentAttr.getTransformations()) {
             if (auto padWithZeroAttr = attr.dyn_cast_or_null<Const::PadWithZeroAttr>()) {
-                const auto padZeroAttrPadsBegin = ShapeRef(parseIntArrayAttr<int64_t>(padWithZeroAttr.getPadBefore()));
-                origChannelVal += padZeroAttrPadsBegin[Dims4D::Filter::IC];
+                const auto padZeroAttrPadsBegin = parseIntArrayAttr<int64_t>(padWithZeroAttr.getPadBefore());
+                origChannelVal += padZeroAttrPadsBegin[Dims4D::Filter::IC.ind()];
             }
         }
 
@@ -102,6 +102,115 @@ mlir::LogicalResult arch37xx::ConvToNCE::matchAndRewrite(IE::ConvolutionOp origO
                 /*activation_window_channel_length=*/nullptr, /*multi_cluster_strategyAttr=*/nullptr);
     };
 
+    return mlir::success();
+}
+
+//
+// MatMulToNCE
+//
+
+// Convert inputs to 5D.
+mlir::Value transposeInput(mlir::Value input, mlir::PatternRewriter& rewriter, DimsOrder memPermOrder) {
+    const auto dstOrder = DimsOrder::GNHWC.toAffineMap(rewriter.getContext());
+    const auto memPerm = memPermOrder.toAffineMap(rewriter.getContext());
+
+    const auto inputShape = getShape(input);
+
+    SmallVector<SmallVector<int64_t>> dimMapping = {
+            {DimsGroups5D::Act::G.ind()},
+            {DimsGroups5D::Act::G.ind()},
+            {DimsGroups5D::Act::N.ind()},
+            {DimsGroups5D::Act::C.ind(), DimsGroups5D::Act::H.ind(), DimsGroups5D::Act::W.ind()}};
+
+    SmallVector<int64_t> reshape = {
+            inputShape[Dims4D::Act::C], inputShape[Dims4D::Act::H], inputShape[Dims4D::Act::W], 1, 1,
+    };
+
+    auto reshapeOp = rewriter.create<IE::AffineReshapeOp>(input.getLoc(), input,
+                                                          getIntArrayOfArray(rewriter.getContext(), dimMapping),
+                                                          getIntArrayAttr(rewriter.getContext(), reshape));
+
+    auto memPermuteOp = rewriter.create<IE::PermuteCastOp>(input.getLoc(), reshapeOp.getOutput(), dstOrder, memPerm);
+
+    return memPermuteOp.getOutput();
+}
+
+// Convert output back to 4D.
+mlir::Value transposeOutput(mlir::Value output, mlir::PatternRewriter& rewriter) {
+    const auto dstOrder = DimsOrder::GNCHW.toAffineMap(rewriter.getContext());
+    const auto memPerm = DimsOrder::fromCode(0x13524).toAffineMap(
+            rewriter.getContext());  // TODO: E#129621 Define new alias (GCWNH) and use it here in follow-up PR.
+
+    const auto inputShape = getShape(output);
+
+    SmallVector<SmallVector<int64_t>> dimMapping = {{Dims4D::Act::N.ind(), Dims4D::Act::C.ind()},
+                                                    {Dims4D::Act::H.ind()},
+                                                    {Dims4D::Act::W.ind()},
+                                                    {Dims4D::Act::W.ind()},
+                                                    {Dims4D::Act::W.ind()}};
+
+    SmallVector<int64_t> reshape = {
+            inputShape[Dims4D::Act::C],
+            inputShape[Dims4D::Act::N],
+            inputShape[Dims4D::Act::W],
+            inputShape[Dims4D::Act::H],
+    };
+
+    auto memPermuteOp = rewriter.create<IE::MemPermuteOp>(output.getLoc(), output, dstOrder, memPerm);
+
+    auto reshapeOp = rewriter.create<IE::AffineReshapeOp>(output.getLoc(), memPermuteOp.getOutput(),
+                                                          getIntArrayOfArray(rewriter.getContext(), dimMapping),
+                                                          getIntArrayAttr(rewriter.getContext(), reshape));
+
+    return reshapeOp.getOutput();
+}
+
+mlir::LogicalResult arch37xx::MatMulToNCE::matchAndRewrite(IE::MatMulOp origOp, mlir::PatternRewriter& rewriter) const {
+    _log.trace("[{0}] Got '{1}' at '{2}'", getDebugName(), origOp->getName(), origOp->getLoc());
+
+    // Convert from 4D inputs to 5D.
+    auto input1 = transposeInput(origOp.getInput1(), rewriter,
+                                 /* memPermOrder = */ DimsOrder::GHNWC);  // TODO: E#129621 Define new alias (GHNWC) and
+                                                                          // use it here in follow-up PR.
+    auto input2 = transposeInput(origOp.getInput2(), rewriter, /* memPermOrder = */ DimsOrder::GNHWC);
+
+    // Generate weights table
+    Const::ContentAttr bias;
+
+    const auto ppeTaskAttr =
+            VPU::getPPETaskAttrFromPostOpsParams(origOp.getInput1(), origOp.getOutput(),
+                                                 /* postOp = */ nullptr, origOp.getLoc(), origOp.getContext(), _arch);
+
+    auto filterShape = getShape(input2).toValues();
+
+    auto weightsTableSize = filterShape[DimsGroups5D::Act::G] * filterShape[DimsGroups5D::Act::N];
+    const auto weightsTableVec = VPU::NCESparsity::create5DWeightsTableData(
+            origOp.getInput1(), origOp.getOutput(), input2, bias, weightsTableSize, ppeTaskAttr, _arch,
+            /* postOp = */ nullptr);
+
+    const auto weightsTable =
+            VPU::NCESparsity::create5DWeightsTableTensor(rewriter, origOp->getLoc(), weightsTableVec,
+                                                         /* OC = */ filterShape[DimsGroups5D::Act::N],
+                                                         /* groups = */ filterShape[DimsGroups5D::Act::G]);
+
+    // We have a trivial 1x1 convolution. We don't need padding or strides other than (1, 1).
+    const SmallVector<int64_t> pads = {0, 0, 0, 0};
+
+    const auto padsBegin = getIntArrayAttr(getContext(), pads);
+    const auto padsEnd = getIntArrayAttr(getContext(), pads);
+    const auto padAttr = VPU::getPaddingAttr(getContext(), PadInfo(padsBegin, padsEnd));
+
+    const SmallVector<int64_t> strides = {1, 1};
+    const auto stridesAttr = getIntArrayAttr(getContext(), strides);
+
+    auto nceOp = rewriter.create<VPU::NCEMatMulOp>(origOp.getLoc(), input1, input2, weightsTable, stridesAttr, padAttr,
+                                                   ppeTaskAttr, getIntArrayAttr(rewriter, filterShape),
+                                                   /* multiClusterStrategyAttr = */ nullptr);
+
+    // Convert from 5D inputs to 4D.
+    auto reshapedOut = transposeOutput(nceOp.getOutput(), rewriter);
+
+    rewriter.replaceOp(origOp, reshapedOut);
     return mlir::success();
 }
 
@@ -259,6 +368,13 @@ void ConvertIEToVPUNCEPass::safeRunOnFunc() {
     target.addLegalDialect<Const::ConstDialect>();
     target.addLegalDialect<vpux::IE::IEDialect>();
     target.addLegalDialect<vpux::VPU::VPUDialect>();
+
+    target.addDynamicallyLegalOp<IE::MatMulOp>([&](IE::MatMulOp op) {
+        return !VPU::NCEMatMulOp::isSupported(op, logCb, /* checkLayout = */ true,
+                                              /* checkChannelAlignment = */ true) &&
+               VPU::MatMulOp::isSupported(op);
+    });
+
     target.addDynamicallyLegalOp<IE::ConvolutionOp>([&](IE::ConvolutionOp op) {
         return !VPU::NCEConvolutionOp::isSupported(op, logCb, /*checkLayout=*/true, /*checkChannelAlignment=*/true) &&
                !VPU::NCECompressConvolutionOp::isSupported(op, logCb, /*checkLayout=*/true,
@@ -296,6 +412,7 @@ void ConvertIEToVPUNCEPass::safeRunOnFunc() {
     patterns.add<arch37xx::MaxPoolToNCE>(&ctx, arch, _log);
     patterns.add<arch37xx::AveragePoolToNCE>(&ctx, arch, _log);
     patterns.add<arch37xx::PermuteQuantizeToNCEPermute>(&ctx, _log);
+    patterns.add<arch37xx::MatMulToNCE>(&ctx, arch, _log);
 
     patterns.add<EltwiseToNCE<IE::AddOp>>(&ctx, VPU::EltwiseType::ADD, arch, _log);
 

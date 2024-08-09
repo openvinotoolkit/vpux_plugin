@@ -1,5 +1,5 @@
 // RUN: vpux-translate --vpu-arch=%arch% --export-ELF %s | FileCheck %s
-// REQUIRES: arch-VPUX40XX
+// REQUIRES: arch-NPU40XX
 
 module @Test attributes {VPU.arch = #VPU.arch_kind<NPU40XX>, VPU.compilationMode = #VPU.compilation_mode<DefaultHW>} {
   IE.TileResource 6 of @NCE at 1.700000e+03 MHz {

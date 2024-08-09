@@ -82,33 +82,32 @@ public:
         return out;
     }
 
-#define cu32(x) (F32(x).i)
-
     static uint16_t round_to_nearest_even(float x) {
-        return static_cast<uint16_t>((cu32(x) + ((cu32(x) & 0x00010000) >> 1)) >> 16);
+        return static_cast<uint16_t>((tou32(x) + ((tou32(x) & 0x00010000) >> 1)) >> 16);
     }
 
     static uint16_t round_to_nearest(float x) {
-        return static_cast<uint16_t>((cu32(x) + 0x8000) >> 16);
+        return static_cast<uint16_t>((tou32(x) + 0x8000) >> 16);
     }
 
     static uint16_t truncate(float x) {
-        return static_cast<uint16_t>((cu32(x)) >> 16);
+        return static_cast<uint16_t>((tou32(x)) >> 16);
     }
 
 private:
     constexpr bfloat16(uint16_t x, bool): m_value{x} {
     }
-    union F32 {
-        F32(float val): f{val} {
-        }
-        F32(uint32_t val): i{val} {
-        }
-        float f;
-        uint32_t i;
-    };
 
-    uint16_t m_value;
+    static uint32_t tou32(float x) {
+        union {
+            float f;
+            uint32_t i;
+        };
+        f = x;
+        return i;
+    }
+
+    uint16_t m_value = 0;
 };
 
 #if defined(_MSC_VER)

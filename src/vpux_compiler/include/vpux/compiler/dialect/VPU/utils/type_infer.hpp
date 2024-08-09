@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#include "vpux/compiler/core/attributes/tensor_attr.hpp"
+#include "vpux/compiler/core/type_interfaces.hpp"
 #include "vpux/utils/core/small_vector.hpp"
 
 #include <mlir/IR/BuiltinTypes.h>
@@ -16,6 +18,8 @@ mlir::LogicalResult inferReduceReturnTypes(mlir::Location loc, mlir::Value input
                                            mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes);
 void inferPermuteReturnTypes(mlir::Value input, mlir::AffineMap mem_perm, mlir::AffineMap dst_order,
                              SmallVectorImpl<mlir::Type>& inferredReturnTypes);
+
+vpux::TensorAttr createTensorAttrFromType(vpux::NDTypeInterface inType);
 
 }  // namespace VPU
 }  // namespace vpux

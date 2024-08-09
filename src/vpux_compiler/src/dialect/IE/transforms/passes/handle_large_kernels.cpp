@@ -10,6 +10,7 @@
 #include "vpux/compiler/dialect/IE/utils/handle_kernels_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/factors.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
@@ -22,8 +23,179 @@ namespace {
 
 // To explicitly control the patterns exec order to assure dependency
 // benefitLevels[0] is highest benefit level and represent the relative pattern is the first one to run
-const uint32_t levelCount = 2;
+const uint32_t levelCount = 3;
 SmallVector<mlir::PatternBenefit> benefitLevels = getBenefitLevels(levelCount);
+
+SmallVector<mlir::Value> sliceFilter(const mlir::Value filterToSplit, const int64_t numXSlices,
+                                     const int64_t numYSlices, const int64_t targetKernelSize,
+                                     const mlir::Location location, mlir::PatternRewriter& rewriter) {
+    auto ctx = rewriter.getContext();
+
+    SmallVector<mlir::Value> slicedFilters;
+
+    const auto filterShape = getShape(filterToSplit);
+    const auto KX = filterShape[Dims4D::Filter::KX];
+    const auto KY = filterShape[Dims4D::Filter::KY];
+
+    for (int64_t j = 0; j < numYSlices; j++) {
+        for (int64_t i = 0; i < numXSlices; i++) {
+            int64_t slicedKX = std::min(KX, targetKernelSize);
+            if (i == (numXSlices - 1)) {
+                slicedKX = KX - (numXSlices - 1) * targetKernelSize;
+            }
+
+            int64_t slicedKY = std::min(KY, targetKernelSize);
+            if (j == (numYSlices - 1)) {
+                slicedKY = KY - (numYSlices - 1) * targetKernelSize;
+            }
+
+            const auto IC = filterShape[Dims4D::Filter::IC];
+            const auto OC = filterShape[Dims4D::Filter::OC];
+            SmallVector<int64_t> sliceShape{OC, IC, slicedKY, slicedKX};
+
+            Shape offsets(filterShape.size());
+            offsets[Dims4D::Filter::KX] = i * targetKernelSize;
+            offsets[Dims4D::Filter::KY] = j * targetKernelSize;
+            auto slice = rewriter.create<IE::SliceOp>(location, filterToSplit, getIntArrayAttr(ctx, offsets.raw()),
+                                                      getIntArrayAttr(ctx, sliceShape));
+            slicedFilters.push_back(slice);
+        }
+    }
+    return slicedFilters;
+}
+
+mlir::Value getExtendedActivation(IE::ConvolutionOp origOp, mlir::PatternRewriter& rewriter) {
+    SmallVector<mlir::Value> extendedActivation;
+
+    auto activation = origOp->getOperand(0);
+    const auto inputShape = getShape(activation);
+    int64_t newWidth = inputShape[Dims4D::Act::W];
+
+    const auto padStart = Shape(parseIntArrayAttr<int64_t>(origOp.getPadsBegin()));
+    const auto padEnd = Shape(parseIntArrayAttr<int64_t>(origOp.getPadsEnd()));
+
+    auto const extendActivationOnWidth = [&](int64_t dim) {
+        Shape zeroConstShape(to_small_vector(inputShape));
+        zeroConstShape[Dims4D::Act::W] = dim;
+        const auto zeroType = mlir::RankedTensorType::get(
+                zeroConstShape.raw(), mlir::cast<NDTypeInterface>(origOp.getInput().getType()).getElementType());
+        auto constZeros = Const::createZerosConst(rewriter, origOp->getLoc(), zeroType);
+        extendedActivation.push_back(constZeros);
+        newWidth += dim;
+    };
+
+    if (padStart[Dims4D::PadsBegin::Left] > 0) {
+        extendActivationOnWidth(padStart[Dims4D::PadsBegin::Left]);
+    }
+
+    extendedActivation.push_back(activation);
+
+    if (padEnd[Dims4D::PadsEnd::Right] > 0) {
+        extendActivationOnWidth(padStart[Dims4D::PadsEnd::Right]);
+    }
+
+    auto tempActivation =
+            rewriter.createOrFold<IE::ConcatOp>(origOp.getLoc(), mlir::ValueRange(extendedActivation), Dims4D::Act::W);
+
+    extendedActivation.clear();
+
+    auto const extendActivationOnHeight = [&](int64_t dim) {
+        Shape zeroConstShape(to_small_vector(inputShape));
+        zeroConstShape[Dims4D::Act::H] = dim;
+        zeroConstShape[Dims4D::Act::W] = newWidth;
+        const auto zeroType = mlir::RankedTensorType::get(
+                zeroConstShape.raw(), mlir::cast<NDTypeInterface>(origOp.getInput().getType()).getElementType());
+        auto constZeros = Const::createZerosConst(rewriter, origOp->getLoc(), zeroType);
+        extendedActivation.push_back(constZeros);
+    };
+    if (padStart[Dims4D::PadsBegin::Top] > 0) {
+        extendActivationOnHeight(padStart[Dims4D::PadsBegin::Top]);
+    }
+
+    extendedActivation.push_back(tempActivation);
+
+    if (padEnd[Dims4D::PadsEnd::Bottom] > 0) {
+        extendActivationOnHeight(padStart[Dims4D::PadsEnd::Bottom]);
+    }
+
+    return rewriter.createOrFold<IE::ConcatOp>(origOp.getLoc(), mlir::ValueRange(extendedActivation), Dims4D::Act::H);
+}
+
+void rewriteSubGraph(IE::ConvolutionOp origOp, ArrayRef<mlir::Value> slicedFilters, mlir::Value extendedActivation,
+                     int64_t numXSlices, const int64_t numYSlices, const int64_t targetKernelSize,
+                     mlir::PatternRewriter& rewriter, Logger log) {
+    auto ctx = rewriter.getContext();
+
+    const auto inputShape = getShape(origOp->getOperand(0));
+    const auto filterShape = getShape(origOp.getFilter());
+    const auto origKX = filterShape[Dims4D::Filter::KX];
+    const auto origKY = filterShape[Dims4D::Filter::KY];
+    const auto strides = Shape(parseIntArrayAttr<int64_t>(origOp.getStrides()));
+    const auto broadcastType = vpux::IE::AutoBroadcastTypeAttr::get(ctx, IE::AutoBroadcastType::NONE_OR_EXPLICIT);
+    const auto extendedActivationShape = getShape(extendedActivation);
+
+    SmallVector<mlir::Value> accumulativeOutputTensors;
+    for (int64_t j = 0; j < numYSlices; j++) {
+        for (int64_t i = 0; i < numXSlices; i++) {
+            int64_t startW = i * targetKernelSize;
+            VPUX_THROW_WHEN(startW >= extendedActivationShape[Dims4D::Act::W], "dimension W out of range");
+            int64_t startH = j * targetKernelSize;
+            VPUX_THROW_WHEN(startH >= extendedActivationShape[Dims4D::Act::H], "dimension H out of range");
+
+            auto slicedFilterShape = getShape(slicedFilters[j * numXSlices + i]);
+            // Calculate activation slice shape
+            int64_t newActivationWidth =
+                    ((extendedActivationShape[Dims4D::Act::W] - origKX) / strides[Dims4D::Strides::X]) *
+                            strides[Dims4D::Strides::X] +
+                    slicedFilterShape[Dims4D::Act::W];
+            int64_t newActivationHeight =
+                    ((extendedActivationShape[Dims4D::Act::H] - origKY) / strides[Dims4D::Strides::Y]) *
+                            strides[Dims4D::Strides::Y] +
+                    slicedFilterShape[Dims4D::Act::H];
+            if (newActivationWidth > extendedActivationShape[Dims4D::Act::W]) {
+                newActivationWidth = extendedActivationShape[Dims4D::Act::W];
+            }
+            if (newActivationHeight > extendedActivationShape[Dims4D::Act::H]) {
+                newActivationHeight = extendedActivationShape[Dims4D::Act::H];
+            }
+
+            mlir::Value convInput;
+            SmallVector<int64_t> sliceShape{extendedActivationShape[Dims4D::Act::N],
+                                            extendedActivationShape[Dims4D::Act::C], newActivationHeight,
+                                            newActivationWidth};
+            Shape offsets(inputShape.size());
+            offsets[Dims4D::Act::W] = startW;
+            offsets[Dims4D::Act::H] = startH;
+            log.trace("Activation slice shape {1}, slice offsets {2}", sliceShape, offsets);
+
+            convInput =
+                    rewriter.create<IE::SliceOp>(origOp->getLoc(), extendedActivation,
+                                                 getIntArrayAttr(ctx, offsets.raw()), getIntArrayAttr(ctx, sliceShape));
+
+            // Add bias and post process for the last convolution and eltwise.
+            auto isLastSlice = i == (numXSlices - 1) && j == (numYSlices - 1);
+            auto conv = rewriter.create<IE::ConvolutionOp>(
+                    origOp->getLoc(), convInput, slicedFilters[j * numXSlices + i],
+                    isLastSlice ? origOp.getBias() : mlir::TypedValue<mlir::RankedTensorType>{nullptr},
+                    origOp.getStrides(), getIntArrayAttr(origOp->getContext(), ArrayRef({0, 0})),
+                    getIntArrayAttr(origOp->getContext(), ArrayRef({0, 0})), origOp.getDilationsAttr(), nullptr,
+                    nullptr, origOp.getStaticScaleAttr());
+
+            if (!accumulativeOutputTensors.empty()) {
+                auto add = rewriter.create<IE::AddOp>(origOp->getLoc(), accumulativeOutputTensors.back(), conv,
+                                                      broadcastType, isLastSlice ? origOp.getClampAttr(),
+                                                      origOp.getPostOpAttr() : nullptr, nullptr);
+                accumulativeOutputTensors.push_back(add);
+            } else {
+                accumulativeOutputTensors.push_back(conv);
+            }
+        }
+    }
+
+    log.trace("Successufuly replace large convolution at {1}", origOp->getLoc());
+
+    rewriter.replaceOp(origOp, accumulativeOutputTensors.back());
+}
 
 //
 // GeneralPoolingBaseRewriter
@@ -75,15 +247,6 @@ bool GeneralPoolingBaseRewriter<ConcreteOp>::isLegalGeneralPoolingOp(ConcreteOp 
     const auto strides = parseIntArrayAttr<int64_t>(origOp.getStrides());
     if (vpux::IE::hasSupportedKernels(Shape(kernelSize))) {
         _log.trace("Kernel size of general Pooling Op is legal");
-        return true;
-    }
-
-    // VPUX3700 does not support HW AvgPool
-    // Experiments show kernel with one axis equal to 1 will get more performance
-    const auto arch = VPU::getArch(origOp);
-    if (mlir::isa<IE::AvgPoolOp>(origOp) && arch == VPU::ArchKind::NPU30XX &&
-        (kernelSize[Dims4D::Kernel::X.ind()] == 1 || kernelSize[Dims4D::Kernel::Y.ind()] == 1)) {
-        _log.trace("AvgPool operation ignored by HandleLargeKernel pass for performance");
         return true;
     }
 
@@ -296,10 +459,7 @@ mlir::Value GeneralAvgPoolRewriter::handlePoolWithPadding(IE::AvgPoolOp origOp, 
     const auto weightShape = SmallVector<int64_t>{inShape[Dims4D::Act::C], 1, kernel[Dims4D::Kernel::Y.ind()],
                                                   kernel[Dims4D::Kernel::X.ind()]};
     const auto dataStorageType = mlir::RankedTensorType::get(weightShape, inShapeType.getElementType());
-    const auto denseElementVal =
-            mlir::DenseElementsAttr::get(dataStorageType, static_cast<vpux::type::float16>(weightsScaleVal));
-    auto weights = rewriter.create<Const::DeclareOp>(origOp->getLoc(), dataStorageType,
-                                                     Const::ContentAttr::get(denseElementVal));
+    const auto weights = Const::createFloatConst(rewriter, origOp->getLoc(), dataStorageType, weightsScaleVal);
 
     const auto dilationsAttr = getIntArrayAttr(ctx, SmallVector<int64_t>{1, 1});
     const auto groupAttr = getIntAttr(ctx, inShape[Dims4D::Act::C]);
@@ -495,204 +655,11 @@ public:
 
     mlir::LogicalResult matchAndRewrite(IE::ConvolutionOp origOp, mlir::PatternRewriter& rewriter) const final;
 
-    SmallVector<mlir::Value> sliceFilter(const mlir::Value filterToSplit, const int64_t numXSlices,
-                                         const int64_t numYSlices, const int64_t targetKernelSize,
-                                         const mlir::Location location, mlir::PatternRewriter& rewriter) const;
-
-    mlir::Value getExtendedActivation(IE::ConvolutionOp origOp, mlir::PatternRewriter& rewriter) const;
-
-    void rewriteSubGraph(IE::ConvolutionOp origOp, ArrayRef<mlir::Value> slicedFilters, mlir::Value newActivation,
-                         int64_t numXSlices, const int64_t numYSlices, const int64_t targetKernelSize,
-                         mlir::PatternRewriter& rewriter) const;
-
     bool isLegalOpToConvert(IE::ConvolutionOp origOp) const;
 
 private:
     Logger _log;
 };
-
-mlir::Value getZerosConst(mlir::PatternRewriter& rewriter, ShapeRef constShape, IE::ConvolutionOp origOp) {
-    const auto elemType = origOp.getInput().getType().cast<vpux::NDTypeInterface>().getElementType();
-    const auto dataStorageType = mlir::RankedTensorType::get(to_small_vector(constShape), elemType);
-
-    mlir::DenseElementsAttr denseElementVal = wrapData(dataStorageType, 0.0f);
-    VPUX_THROW_UNLESS(denseElementVal != nullptr,
-                      "ConvolutionOp has incompatible data type {0}, only float16 or float32 are supported", elemType);
-
-    return rewriter.create<Const::DeclareOp>(origOp.getLoc(), dataStorageType, Const::ContentAttr::get(denseElementVal))
-            .getOutput();
-}
-
-SmallVector<mlir::Value> SliceLargeConvRewriter::sliceFilter(const mlir::Value filterToSplit, const int64_t numXSlices,
-                                                             const int64_t numYSlices, const int64_t targetKernelSize,
-                                                             const mlir::Location location,
-                                                             mlir::PatternRewriter& rewriter) const {
-    auto ctx = rewriter.getContext();
-
-    SmallVector<mlir::Value> slicedFilters;
-
-    const auto filterShape = getShape(filterToSplit);
-    const auto KX = filterShape[Dims4D::Filter::KX];
-    const auto KY = filterShape[Dims4D::Filter::KY];
-
-    for (int64_t j = 0; j < numYSlices; j++) {
-        for (int64_t i = 0; i < numXSlices; i++) {
-            int64_t slicedKX = std::min(KX, targetKernelSize);
-            if (i == (numXSlices - 1)) {
-                slicedKX = KX - (numXSlices - 1) * targetKernelSize;
-            }
-
-            int64_t slicedKY = std::min(KY, targetKernelSize);
-            if (j == (numYSlices - 1)) {
-                slicedKY = KY - (numYSlices - 1) * targetKernelSize;
-            }
-
-            const auto IC = filterShape[Dims4D::Filter::IC];
-            const auto OC = filterShape[Dims4D::Filter::OC];
-            SmallVector<int64_t> sliceShape{OC, IC, slicedKY, slicedKX};
-
-            Shape offsets(filterShape.size());
-            offsets[Dims4D::Filter::KX] = i * targetKernelSize;
-            offsets[Dims4D::Filter::KY] = j * targetKernelSize;
-            auto slice = rewriter.create<IE::SliceOp>(location, filterToSplit, getIntArrayAttr(ctx, offsets.raw()),
-                                                      getIntArrayAttr(ctx, sliceShape));
-            slicedFilters.push_back(slice);
-        }
-    }
-    return slicedFilters;
-}
-
-mlir::Value SliceLargeConvRewriter::getExtendedActivation(IE::ConvolutionOp origOp,
-                                                          mlir::PatternRewriter& rewriter) const {
-    SmallVector<mlir::Value> extendedActivation;
-
-    auto activation = origOp->getOperand(0);
-    const auto inputShape = getShape(activation);
-    int64_t newWidth = inputShape[Dims4D::Act::W];
-
-    const auto padStart = Shape(parseIntArrayAttr<int64_t>(origOp.getPadsBegin()));
-    const auto padEnd = Shape(parseIntArrayAttr<int64_t>(origOp.getPadsEnd()));
-
-    auto const extendActivationOnWidth = [&](int64_t dim) {
-        Shape zeroConstShape(to_small_vector(inputShape));
-        zeroConstShape[Dims4D::Act::W] = dim;
-        auto constZeros = getZerosConst(rewriter, zeroConstShape, origOp);
-        extendedActivation.push_back(constZeros);
-        newWidth += dim;
-    };
-
-    if (padStart[Dims4D::PadsBegin::Left] > 0) {
-        extendActivationOnWidth(padStart[Dims4D::PadsBegin::Left]);
-    }
-
-    extendedActivation.push_back(activation);
-
-    if (padEnd[Dims4D::PadsEnd::Right] > 0) {
-        extendActivationOnWidth(padStart[Dims4D::PadsEnd::Right]);
-    }
-
-    auto tempActivation =
-            rewriter.createOrFold<IE::ConcatOp>(origOp.getLoc(), mlir::ValueRange(extendedActivation), Dims4D::Act::W);
-
-    extendedActivation.clear();
-
-    auto const extendActivationOnHeight = [&](int64_t dim) {
-        Shape zeroConstShape(to_small_vector(inputShape));
-        zeroConstShape[Dims4D::Act::H] = dim;
-        zeroConstShape[Dims4D::Act::W] = newWidth;
-        auto constZeros = getZerosConst(rewriter, zeroConstShape, origOp);
-        extendedActivation.push_back(constZeros);
-    };
-    if (padStart[Dims4D::PadsBegin::Top] > 0) {
-        extendActivationOnHeight(padStart[Dims4D::PadsBegin::Top]);
-    }
-
-    extendedActivation.push_back(tempActivation);
-
-    if (padEnd[Dims4D::PadsEnd::Bottom] > 0) {
-        extendActivationOnHeight(padStart[Dims4D::PadsEnd::Bottom]);
-    }
-
-    return rewriter.createOrFold<IE::ConcatOp>(origOp.getLoc(), mlir::ValueRange(extendedActivation), Dims4D::Act::H);
-}
-
-void SliceLargeConvRewriter::rewriteSubGraph(IE::ConvolutionOp origOp, ArrayRef<mlir::Value> slicedFilters,
-                                             mlir::Value extendedActivation, int64_t numXSlices,
-                                             const int64_t numYSlices, const int64_t targetKernelSize,
-                                             mlir::PatternRewriter& rewriter) const {
-    auto ctx = rewriter.getContext();
-
-    const auto inputShape = getShape(origOp->getOperand(0));
-    const auto filterShape = getShape(origOp.getFilter());
-    const auto origKX = filterShape[Dims4D::Filter::KX];
-    const auto origKY = filterShape[Dims4D::Filter::KY];
-    const auto strides = Shape(parseIntArrayAttr<int64_t>(origOp.getStrides()));
-    const auto broadcastType =
-            vpux::IE::AutoBroadcastTypeAttr::get(getContext(), IE::AutoBroadcastType::NONE_OR_EXPLICIT);
-    const auto extendedActivationShape = getShape(extendedActivation);
-
-    SmallVector<mlir::Value> accumulativeOutputTensors;
-    for (int64_t j = 0; j < numYSlices; j++) {
-        for (int64_t i = 0; i < numXSlices; i++) {
-            int64_t startW = i * targetKernelSize;
-            VPUX_THROW_WHEN(startW >= extendedActivationShape[Dims4D::Act::W], "dimension W out of range");
-            int64_t startH = j * targetKernelSize;
-            VPUX_THROW_WHEN(startH >= extendedActivationShape[Dims4D::Act::H], "dimension H out of range");
-
-            auto slicedFilterShape = getShape(slicedFilters[j * numXSlices + i]);
-            // Calculate activation slice shape
-            int64_t newActivationWidth =
-                    ((extendedActivationShape[Dims4D::Act::W] - origKX) / strides[Dims4D::Strides::X]) *
-                            strides[Dims4D::Strides::X] +
-                    slicedFilterShape[Dims4D::Act::W];
-            int64_t newActivationHeight =
-                    ((extendedActivationShape[Dims4D::Act::H] - origKY) / strides[Dims4D::Strides::Y]) *
-                            strides[Dims4D::Strides::Y] +
-                    slicedFilterShape[Dims4D::Act::H];
-            if (newActivationWidth > extendedActivationShape[Dims4D::Act::W]) {
-                newActivationWidth = extendedActivationShape[Dims4D::Act::W];
-            }
-            if (newActivationHeight > extendedActivationShape[Dims4D::Act::H]) {
-                newActivationHeight = extendedActivationShape[Dims4D::Act::H];
-            }
-
-            mlir::Value convInput;
-            SmallVector<int64_t> sliceShape{extendedActivationShape[Dims4D::Act::N],
-                                            extendedActivationShape[Dims4D::Act::C], newActivationHeight,
-                                            newActivationWidth};
-            Shape offsets(inputShape.size());
-            offsets[Dims4D::Act::W] = startW;
-            offsets[Dims4D::Act::H] = startH;
-            _log.trace("[{0}] Activation slice shape {1}, slice offsets {2}", getDebugName(), sliceShape, offsets);
-
-            convInput =
-                    rewriter.create<IE::SliceOp>(origOp->getLoc(), extendedActivation,
-                                                 getIntArrayAttr(ctx, offsets.raw()), getIntArrayAttr(ctx, sliceShape));
-
-            // Add bias and post process for the last convolution and eltwise.
-            auto isLastSlice = i == (numXSlices - 1) && j == (numYSlices - 1);
-            auto conv = rewriter.create<IE::ConvolutionOp>(
-                    origOp->getLoc(), convInput, slicedFilters[j * numXSlices + i],
-                    isLastSlice ? origOp.getBias() : mlir::TypedValue<mlir::RankedTensorType>{nullptr},
-                    origOp.getStrides(), getIntArrayAttr(origOp->getContext(), ArrayRef({0, 0})),
-                    getIntArrayAttr(origOp->getContext(), ArrayRef({0, 0})), origOp.getDilationsAttr(), nullptr,
-                    nullptr, origOp.getStaticScaleAttr());
-
-            if (!accumulativeOutputTensors.empty()) {
-                auto add = rewriter.create<IE::AddOp>(origOp->getLoc(), accumulativeOutputTensors.back(), conv,
-                                                      broadcastType, isLastSlice ? origOp.getClampAttr(),
-                                                      origOp.getPostOpAttr() : nullptr, nullptr);
-                accumulativeOutputTensors.push_back(add);
-            } else {
-                accumulativeOutputTensors.push_back(conv);
-            }
-        }
-    }
-
-    _log.trace("[{0}] Successufuly replace large convolution at {1}", getDebugName(), origOp->getLoc());
-
-    rewriter.replaceOp(origOp, accumulativeOutputTensors.back());
-}
 
 bool SliceLargeConvRewriter::isLegalOpToConvert(IE::ConvolutionOp origOp) const {
     auto activationRank = origOp.getInput().getType().cast<vpux::NDTypeInterface>().getRank();
@@ -741,7 +708,8 @@ mlir::LogicalResult SliceLargeConvRewriter::matchAndRewrite(IE::ConvolutionOp or
                getShape(extendedActivation), extendedActivation, origOp->getLoc());
 
     // Create new sub graph and replace origOp
-    rewriteSubGraph(origOp, slicedFilters, extendedActivation, numXSlices, numYSlices, targetKernelSize, rewriter);
+    rewriteSubGraph(origOp, slicedFilters, extendedActivation, numXSlices, numYSlices, targetKernelSize, rewriter,
+                    _log);
     return mlir::success();
 }
 
@@ -872,7 +840,20 @@ mlir::LogicalResult ReshapeLargeConvRewriter::matchAndRewrite(IE::ConvolutionOp 
                                                                  : IE::getFactorsWithLimitation(KY, limit);
 
     if (!isLegalOpToConvert(origOp, factorsResult)) {
-        return mlir::failure();
+        const auto stridesData = Shape(parseIntArrayAttr<int64_t>(origOp.getStrides()));
+        if ((stridesData[Dims4D::Strides::X] <= 1 && stridesData[Dims4D::Strides::Y] <= 1) ||
+            inputShape[Dims4D::Act::C.ind()] != 1) {
+            return mlir::failure();
+        }
+
+        const auto newLimit = KX > VPU::NCEInvariant::MAX_KERNEL_SIZE ? KX / stridesData[Dims4D::Strides::X]
+                                                                      : KY / stridesData[Dims4D::Strides::Y];
+        factorsResult = KX > VPU::NCEInvariant::MAX_KERNEL_SIZE ? IE::getFactorsWithLimitation(KX, newLimit)
+                                                                : IE::getFactorsWithLimitation(KY, newLimit);
+
+        if (!isLegalOpToConvert(origOp, factorsResult)) {
+            return mlir::failure();
+        }
     }
 
     auto factors = factorsResult.value();
@@ -936,6 +917,111 @@ mlir::LogicalResult ReshapeLargeConvRewriter::matchAndRewrite(IE::ConvolutionOp 
 }
 
 //
+// SliceLargePrimeKernelRewriter
+//
+
+class SliceLargePrimeKernelRewriter final : public mlir::OpRewritePattern<IE::ConvolutionOp> {
+public:
+    SliceLargePrimeKernelRewriter(mlir::MLIRContext* ctx, mlir::PatternBenefit benefit, Logger log)
+            : mlir::OpRewritePattern<IE::ConvolutionOp>(ctx, benefit), _log(log) {
+        setDebugName("SliceLargePrimeKernelRewriter");
+    }
+
+    mlir::LogicalResult matchAndRewrite(IE::ConvolutionOp origOp, mlir::PatternRewriter& rewriter) const final;
+
+    bool isLegalOpToSlice(IE::ConvolutionOp origOp) const;
+
+private:
+    Logger _log;
+};
+
+bool SliceLargePrimeKernelRewriter::isLegalOpToSlice(IE::ConvolutionOp origOp) const {
+    auto activationRank = origOp.getInput().getType().cast<vpux::NDTypeInterface>().getRank();
+    auto filterRank = origOp.getFilter().getType().cast<vpux::NDTypeInterface>().getRank();
+    if (activationRank != 4 || filterRank != 4) {
+        return false;
+    }
+
+    const auto dilations = Shape(parseIntArrayAttr<int64_t>(origOp.getDilations()));
+    if (dilations[Dims4D::Dilation::X] > 1 || dilations[Dims4D::Dilation::Y] > 1) {
+        return false;
+    }
+
+    const auto filterShape = getShape(origOp.getFilter());
+    const auto KY = filterShape[Dims4D::Filter::KY];
+    const auto KX = filterShape[Dims4D::Filter::KX];
+    const auto inputShape = getShape(origOp.getInput());
+    const auto inputHeight = inputShape[Dims4D::Act::H];
+    const auto inputWidth = inputShape[Dims4D::Act::W];
+    const auto inputChannel = inputShape[Dims4D::Act::C];
+    const auto stridesData = Shape(parseIntArrayAttr<int64_t>(origOp.getStrides()));
+
+    if ((KX > VPU::NCEInvariant::MAX_KERNEL_SIZE && KY == 1 && inputHeight == 1 &&
+         stridesData[Dims4D::Strides::X] > 1 && inputChannel == 1) ||
+        (KY > VPU::NCEInvariant::MAX_KERNEL_SIZE && KX == 1 && inputWidth == 1 && stridesData[Dims4D::Strides::Y] > 1 &&
+         inputChannel == 1)) {
+        return true;
+    }
+
+    return false;
+}
+
+mlir::LogicalResult SliceLargePrimeKernelRewriter::matchAndRewrite(IE::ConvolutionOp origOp,
+                                                                   mlir::PatternRewriter& rewriter) const {
+    _log.trace("[{0}] Got Convolution layer at '{1}'", getDebugName(), origOp->getLoc());
+    auto inputShape = getShape(origOp.getInput()).raw();
+    auto filterShape = getShape(origOp.getFilter()).raw();
+
+    if (inputShape.size() != 4 || filterShape.size() != 4) {
+        return mlir::failure();
+    }
+
+    auto KX = filterShape[Dims4D::Filter::KX.ind()];
+    auto KY = filterShape[Dims4D::Filter::KY.ind()];
+
+    const auto limit = std::min(VPU::NCEInvariant::MAX_KERNEL_SIZE, VPU::NCEInvariant::MAX_STRIDE);
+    auto factorsResult = KX > VPU::NCEInvariant::MAX_KERNEL_SIZE ? IE::getFactorsWithLimitation(KX, limit)
+                                                                 : IE::getFactorsWithLimitation(KY, limit);
+    if (factorsResult.has_value()) {
+        return mlir::failure();
+    }
+
+    if (!isLegalOpToSlice(origOp)) {
+        return mlir::failure();
+    }
+
+    const auto strides = Shape(parseIntArrayAttr<int64_t>(origOp.getStrides()));
+    auto targetKernelSize = 1;
+    auto numXSlices = 1;
+    auto numYSlices = 1;
+
+    if (KX > VPU::NCEInvariant::MAX_KERNEL_SIZE) {
+        targetKernelSize = KX / strides[Dims4D::Strides::X] * strides[Dims4D::Strides::X];
+        numXSlices = checked_cast<int64_t>(llvm::alignTo(KX, targetKernelSize) / targetKernelSize);
+    } else {
+        targetKernelSize = KY / strides[Dims4D::Strides::Y] * strides[Dims4D::Strides::Y];
+        numYSlices = checked_cast<int64_t>(llvm::alignTo(KY, targetKernelSize) / targetKernelSize);
+    }
+
+    // Slice filter
+    SmallVector<mlir::Value> slicedFilters =
+            sliceFilter(origOp.getFilter(), numXSlices, numYSlices, targetKernelSize, origOp->getLoc(), rewriter);
+    _log.trace("[{0}] Split kernel into {1} small kernels {2} at {3}", getDebugName(), slicedFilters.size(),
+               slicedFilters, origOp->getLoc());
+
+    // Pad activation
+    auto extendedActivation = getExtendedActivation(origOp, rewriter);
+    _log.trace("[{0}] Pad on activation, new shape {1}, new activation {2} at {3}", getDebugName(),
+               getShape(extendedActivation), extendedActivation, origOp->getLoc());
+
+    // Create new sub graph and replace origOp
+    rewriteSubGraph(origOp, slicedFilters, extendedActivation, numXSlices, numYSlices, targetKernelSize, rewriter,
+                    _log);
+
+    return mlir::success();
+}
+
+//
 // HandleLargeKernelsPass
 //
 
@@ -953,8 +1039,9 @@ void HandleLargeKernelsPass::safeRunOnFunc() {
     auto& ctx = getContext();
     auto func = getOperation();
     mlir::RewritePatternSet convPatterns(&ctx);
-    convPatterns.add<ReshapeLargeConvRewriter>(&ctx, benefitLevels[0], _log);
-    convPatterns.add<SliceLargeConvRewriter>(&ctx, benefitLevels[1], _log);
+    convPatterns.add<SliceLargePrimeKernelRewriter>(&ctx, benefitLevels[0], _log);
+    convPatterns.add<ReshapeLargeConvRewriter>(&ctx, benefitLevels[1], _log);
+    convPatterns.add<SliceLargeConvRewriter>(&ctx, benefitLevels[2], _log);
 
     if (mlir::failed(
                 mlir::applyPatternsAndFoldGreedily(func, std::move(convPatterns), getDefaultGreedyRewriteConfig()))) {

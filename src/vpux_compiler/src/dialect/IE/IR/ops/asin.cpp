@@ -9,11 +9,11 @@ using namespace vpux;
 
 mlir::LogicalResult vpux::IE::AsinOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::AsinOpAdaptor asin(operands, attrs);
+    IE::AsinOpAdaptor asin(operands, attrs, prop);
     if (mlir::failed(asin.verify(loc))) {
         return mlir::failure();
     }

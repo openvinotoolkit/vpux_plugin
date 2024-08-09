@@ -19,6 +19,7 @@ struct IRSlice {
     SmallVector<mlir::Value> inputs;
     SmallVector<mlir::Value> outputs;
     std::vector<mlir::Operation*> operations;
+    SmallVector<std::pair<mlir::Operation*, size_t>> inputUserMapping;
 };
 
 // A vector of IR slices which should be outlined with the same function. This means all of these instances should be
@@ -41,7 +42,7 @@ public:
 // FunctionOutlinerNaive
 //
 
-class FunctionOutlinerNaive final : IFunctionOutliner {
+class FunctionOutlinerNaive final : public IFunctionOutliner {
 public:
     FunctionOutlinerNaive(size_t numSplits, Logger log);
 
@@ -59,7 +60,7 @@ private:
 // FunctionOutlinerRepeatingBlocks
 //
 
-class FunctionOutlinerRepeatingBlocks final : IFunctionOutliner {
+class FunctionOutlinerRepeatingBlocks final : public IFunctionOutliner {
 public:
     FunctionOutlinerRepeatingBlocks(size_t minOpsInBlock, size_t maxNumIterations, Logger log);
 
@@ -71,4 +72,12 @@ private:
     Logger _log;
 };
 
+class FunctionOutlinerBatching final : IFunctionOutliner {
+public:
+    FunctionOutlinerBatching(Logger log);
+    SmallVector<OutliningInstance> getOutliningTargets(mlir::func::FuncOp mainFunction) override;
+
+private:
+    Logger _log;
+};
 }  // namespace vpux

@@ -3,15 +3,9 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-#include "vpux/compiler/dialect/VPUASM/ops.hpp"
-#include "vpux/compiler/NPU40XX/dialect/ELF/attributes.hpp"
-#include "vpux/compiler/NPU40XX/dialect/ELF/ops_interfaces.hpp"
-#include "vpux/compiler/NPU40XX/dialect/VPUIPDPU/ops.hpp"
-#include "vpux/compiler/dialect/VPUIPDPU/dialect.hpp"
 #include "vpux/compiler/dialect/VPUIPDPU/ops.hpp"
-
-#include "vpux/compiler/core/attributes/indexed_symbol_attr.hpp"
-#include "vpux/compiler/utils/error.hpp"
+#include "vpux/compiler/dialect/VPUIPDPU/dialect.hpp"
+#include "vpux/compiler/dialect/VPUIPDPU/ops_interfaces.hpp"
 #include "vpux/compiler/utils/traits_utils.hpp"
 
 #include <mlir/Dialect/Quant/QuantTypes.h>
@@ -20,7 +14,6 @@
 
 #include <functional>
 
-using namespace vpux;
 using namespace vpux::VPUIPDPU;
 using namespace mlir;
 
@@ -35,10 +28,7 @@ using namespace mlir;
 // Custom
 //
 
-namespace vpux {
-namespace VPUIPDPU {
-
-mlir::LogicalResult DPUInvariantOp::verify() {
+mlir::LogicalResult vpux::VPUIPDPU::DPUInvariantOp::verify() {
     if (!hasMandatorySingleInstanceChildren<DPUInvariantOp, IDUCfgOp, PPECfgOp, ODUCfgOp>(*this)) {
         return errorAt(getLoc(), "Operation {0}: missing mandatory child ops", getOperationName());
     }
@@ -49,45 +39,32 @@ mlir::LogicalResult DPUInvariantOp::verify() {
     return ::mlir::success();
 }
 
-mlir::LogicalResult DPUVariantOp::verify() {
-    if (!hasMandatorySingleInstanceChildren<DPUVariantOp, ODUOutSubtensorOp>(*this)) {
-        return errorAt(getLoc(), "Operation {0}: missing mandatory child ops", getOperationName());
+mlir::LogicalResult vpux::VPUIPDPU::MPECfgOp::verify() {
+    auto op = this->getOperation();
+    if (!mlir::isa<VPUIPDPU::MPECfgOpInterface>(op)) {
+        return errorAt(op, "Operation '{0}' is not MPECfg", op->getName());
     }
 
-    // NPU40XX supports up to 5 halo regions
-    if (getEntryBlockSize<ODUHaloRegionOp>(getOperation()) > 5) {
-        return errorAt(getLoc(), "Operation {0}: too many halo regions defined", getOperationName());
-    }
-
-    return ::mlir::success();
+    auto iface = mlir::cast<VPUIPDPU::MPECfgOpInterface>(op);
+    return iface.verifyInnerOps();
 }
 
-mlir::LogicalResult ODUCfgOp::verify() {
-    if (!hasMandatorySingleInstanceChildren<ODUCfgOp, ODUOutTensorSizeOp, ODUOutActivationsOp>(*this)) {
-        return errorAt(getLoc(), "Operation {0}: missing mandatory child ops", getOperationName());
+mlir::LogicalResult vpux::VPUIPDPU::ODUCfgOp::verify() {
+    auto op = this->getOperation();
+    if (!mlir::isa<VPUIPDPU::ODUCfgOpInterface>(op)) {
+        return errorAt(op, "Operation '{0}' is not ODUCfg", op->getName());
     }
 
-    if (!hasOptionalSingleInstanceChildren<ODUCfgOp, ODUDataReuseOp, ODUPermuteDataOp, ODUSparsityOp, ODUSwizzleDataOp,
-                                           ODUMemoryModeOp, ODUCmxPortsOp, ODUWriteCombineBufferOp>(*this)) {
-        return errorAt(getLoc(), "Operation {0}: too many optional child ops", getOperationName());
-    }
-
-    // NPU37XX  supports up to 3 cast instances
-    if (getEntryBlockSize<ODUCastOp>(getOperation()) > 3) {
-        return errorAt(getLoc(), "Operation {0}: too many cast instances defined", getOperationName());
-    }
-
-    return ::mlir::success();
+    auto iface = mlir::cast<VPUIPDPU::ODUCfgOpInterface>(op);
+    return iface.verifyInnerOps();
 }
 
-mlir::LogicalResult MPECfgOp::verify() {
-    if (!hasOptionalSingleInstanceChildren<MPECfgOp, MPEDenormalOperandsFTZOp, MPEActivationBiasOp, MPEWeightsBiasOp>(
-                *this)) {
-        return errorAt(getLoc(), "Operation {0}: too many optional child ops", getOperationName());
+mlir::LogicalResult vpux::VPUIPDPU::DPUVariantOp::verify() {
+    auto op = this->getOperation();
+    if (!mlir::isa<VPUIPDPU::DPUVariantOpInterface>(op)) {
+        return errorAt(op, "Operation '{0}' is not DPUVariant", op->getName());
     }
 
-    return ::mlir::success();
+    auto iface = mlir::cast<VPUIPDPU::DPUVariantOpInterface>(op);
+    return iface.verifyInnerOps();
 }
-
-}  // namespace VPUIPDPU
-}  // namespace vpux

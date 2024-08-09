@@ -52,6 +52,7 @@ std::unique_ptr<mlir::Pass> createConvertPrecisionToFP16Pass(Logger log = Logger
 std::unique_ptr<mlir::Pass> createConvertPrecisionToI32Pass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createUseUserPrecisionPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createAdjustSoftwareOpsPrecisionPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createAdjustNCEOpsWithI32InputsPass(Logger log = Logger::global());
 
 //
 // AdjustLayout
@@ -86,6 +87,7 @@ struct AdjustLayoutOptions : mlir::PassPipelineOptions<AdjustLayoutOptions> {
 std::unique_ptr<mlir::Pass> createAdjustLayoutsPass(const bool seOpsEnabled = false,
                                                     const bool seExperimentalOpsEnabled = false,
                                                     Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createFuseReshapeMvnPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createOptimizeReordersPass(const bool seOpsEnabled = false,
                                                        const bool seExperimentalOpsEnabled = false,
                                                        Logger log = Logger::global());
@@ -100,7 +102,10 @@ std::unique_ptr<mlir::Pass> createLegalizeNDMemPermutePass(Logger log = Logger::
 std::unique_ptr<mlir::Pass> createTransposeToPermuteCastPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createAdaptShapesForScaleShiftPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createConvertSplitConcatToTransposePass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createOutlinerPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createOutlinerPass(const std::string& mode = "naive", Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createDebatcherPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createAndInitDebatcherPass(StringRef extraArgs, Logger log);
+std::unique_ptr<mlir::Pass> createDeDebatcherPass(Logger log = Logger::global());
 
 //
 // AdjustForVPU
@@ -133,6 +138,7 @@ void buildAdjustForVPUPipeline(mlir::OpPassManager& pm, const AdjustForVPUOption
 
 std::unique_ptr<mlir::Pass> createConvertAssignReadValueToReturnsAndInputs(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createConvertScalarToTensorPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createConvertMinMaxToClampPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createConvertShapeTo4DPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createSwapOperationsPass(const bool seOpsEnabled = false, Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createSwapViewOpAndClampPass(Logger log = Logger::global());
@@ -161,10 +167,12 @@ std::unique_ptr<mlir::Pass> createConvertGroupTransposedConvToTransposedConvPass
         const bool enableSEPTransposedConv = false, Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createConvertUpsamplingToStridedConcatPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createConvertDepth2SpaceToTransposedConvPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createSwapD2SAndScaleShiftPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createConvertDepth2SpaceLayerPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createConvertSpace2DepthLayerPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createInsertReorderBetweenLayerAndConcatPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createPropagateAffineReshapePass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createPropagateShapeCastPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createPropagateTransposePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createSwapTransposeWithFQPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createPropagateFqThroughConcatPass(Logger log = Logger::global());
@@ -181,6 +189,7 @@ std::unique_ptr<mlir::Pass> createConvertGRNToNormalizeL2Pass(Logger log = Logge
 std::unique_ptr<mlir::Pass> createUniquifyBranchesPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createSwapMVNWithTransposePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createAdjustMemPermuteAroundOpPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createExpandMatMulSoftMaxMatMulPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createPropagateMemPermuteThroughAddPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createPropagateMemPermuteBeforeOpPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createPropagateMemPermuteThroughSoftMaxPass(Logger log = Logger::global());
@@ -223,6 +232,10 @@ struct LowPrecisionOptions : mlir::PassPipelineOptions<LowPrecisionOptions> {
                                          llvm::cl::desc("Enable quantize->dequantize sequence removal"),
                                          llvm::cl::init(false)};
 
+    BoolOption enableFuseOutstandingDequant{*this, "fuse-outstanding-dequant",
+                                            llvm::cl::desc("Fuse outstanding dequantize after NCE task"),
+                                            llvm::cl::init(false)};
+
     BoolOption enableSwapTransposeWithFQ{*this, "swap-transpose-with-fq",
                                          ::llvm::cl::desc("Enable SwapTransposeWithFQ pass"), ::llvm::cl::init(true)};
 
@@ -254,11 +267,21 @@ struct LowPrecisionOptions : mlir::PassPipelineOptions<LowPrecisionOptions> {
     BoolOption enableAdjustNonZeroFakeQuant{*this, "adjust-non-zero-fake-quant",
                                             llvm::cl::desc("Enable adjust non zero fake quant"), llvm::cl::init(true)};
 
+    BoolOption enableConvolutionMixedPrecisionDecomposition{
+            *this, "enable-convolution-mixed-precision-decomposition",
+            llvm::cl::desc("Enable mixed precision decomposition for convolution"), llvm::cl::init(false)};
+
+    BoolOption enableWDBlockArgumentInput{
+            *this, "enable-wd-blockarg-input",
+            llvm::cl::desc("Enable WeightsDequantizeToFakeQuantizePass on structures with BlockArgument input"),
+            llvm::cl::init(false)};
+
     LowPrecisionOptions() = default;
 
     template <class OtherOptions>
     explicit LowPrecisionOptions(const OtherOptions& options) {
         enableQuantDequantRemoval = options.enableQuantDequantRemoval;
+        enableFuseOutstandingDequant = options.enableFuseOutstandingDequant;
         enableSwapTransposeWithFQ = options.enableSwapTransposeWithFQ;
         enablePropagateQuantDequant = options.enablePropagateQuantDequant;
         enableFP16ToU8MixedMode = options.enableFP16ToU8MixedMode;
@@ -267,6 +290,8 @@ struct LowPrecisionOptions : mlir::PassPipelineOptions<LowPrecisionOptions> {
         enableSEPtrsOperations = options.enableSEPtrsOperations;
         enableExperimentalSEPtrsOperations = options.enableExperimentalSEPtrsOperations;
         enableAdjustNonZeroFakeQuant = options.enableAdjustNonZeroFakeQuant;
+        enableConvolutionMixedPrecisionDecomposition = options.enableConvolutionMixedPrecisionDecomposition;
+        enableWDBlockArgumentInput = options.enableWDBlockArgumentInput;
     }
 };
 
@@ -276,11 +301,36 @@ struct TransformOptions : mlir::PassPipelineOptions<TransformOptions> {
     BoolOption enableConvertFCToConv{*this, "convert-fc-to-conv", llvm::cl::desc("Enable convert-fc-to-conv pass"),
                                      llvm::cl::init(true)};
 
+    BoolOption enableWDBlockArgumentInput{
+            *this, "enable-wd-blockarg-input",
+            llvm::cl::desc("Enable WeightsDequantizeToFakeQuantizePass on structures with BlockArgument input"),
+            llvm::cl::init(false)};
+
+    BoolOption enableGroupedMatMul{*this, "enable-grouped-matmul",
+                                   llvm::cl::desc("Enable execution of grouped MatMul as a single operation."),
+                                   llvm::cl::init(false)};
+
     template <
             class OtherOptions,
             typename = std::enable_if_t<std::is_base_of<mlir::PassPipelineOptions<OtherOptions>, OtherOptions>::value>>
     explicit TransformOptions(const OtherOptions& options) {
         enableConvertFCToConv = options.enableConvertFCToConv;
+        enableWDBlockArgumentInput = options.enableWDBlockArgumentInput;
+        enableGroupedMatMul = options.enableGroupedMatMul;
+    }
+};
+
+struct LowPrecisionTransformOptions : mlir::PassPipelineOptions<LowPrecisionTransformOptions> {
+    LowPrecisionTransformOptions() = default;
+
+    BoolOption enableWDBlockArgumentInput{
+            *this, "enable-wd-blockarg-input",
+            llvm::cl::desc("Enable WeightsDequantizeToFakeQuantizePass on structures with BlockArgument input"),
+            llvm::cl::init(false)};
+
+    template <class OtherOptions>
+    explicit LowPrecisionTransformOptions(const OtherOptions& options) {
+        enableWDBlockArgumentInput = options.enableWDBlockArgumentInput;
     }
 };
 
@@ -321,9 +371,13 @@ struct ExpandActivationChannelsOptions : mlir::PassPipelineOptions<ExpandActivat
 void buildScaleShiftProcessingPipeline(mlir::OpPassManager& pm, Logger log = Logger::global());
 void buildOperationConversionPipeline(mlir::OpPassManager& pm, Logger log = Logger::global());
 
+std::unique_ptr<mlir::Pass> createConvertMVN6ToMVN1Pass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createHandleU16FakeQuantizePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createFuseFQAndMulPass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createWeightsDequantizeToFakeQuantizePass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createEltwiseFakeQuantizeFusionPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createWeightsDequantizeToFakeQuantizePass();
+std::unique_ptr<mlir::Pass> createWeightsDequantizeToFakeQuantizePass(const IE::LowPrecisionTransformOptions& options,
+                                                                      Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createFoldReLUBeforeFQPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createSwapFakeQuantWithReshapeAndStridedSlicePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createResolveScatterUpdateByTransposePass(Logger log = Logger::global());
@@ -343,11 +397,15 @@ std::unique_ptr<mlir::Pass> createConvertWeightsToU8Pass(Logger log = Logger::gl
 std::unique_ptr<mlir::Pass> createConvertWeightsToI4Pass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createFuseConvertWithQuantizePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createConvertToDequantizePass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createConvertToDequantizePass(const IE::LowPrecisionOptions& options,
+                                                          Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createConvertQuantizeOpsToNceOpsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createUnrollFakeQuantizePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createUnrollFullyConnectedPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createFuseScalesToAccumulatePass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createFuseMultiplyToConvPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createSwapMultiplyWithMatmulPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createReshapeMatMulInputsPass(const bool enableGroupedMatMul = false,
+                                                          Logger log = Logger::global());
 
 //
 // Legalization for NCE
@@ -359,7 +417,9 @@ std::unique_ptr<mlir::Pass> createAdjustConvolutionWeightsPass(Logger log = Logg
 std::unique_ptr<mlir::Pass> createConvertBatchedLayerTo1NPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createAdjustConvolutionInputShapePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createAdjustMaxPoolInputShapePass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createMatMulInputsTo2dPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createOptimizeAvgPoolWithUnalignedChannelsPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createMatMulInputsTo2dPass(const bool enableGroupedMatMul = false,
+                                                       Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createConvertDivideToMultiplyPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createConvertMatMulToConvPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createConvertConvBackpropDataToTransposedConvPass(Logger log = Logger::global());
@@ -385,6 +445,7 @@ std::unique_ptr<mlir::Pass> createExpandActivationChannelsPass(const bool seOpsE
 std::unique_ptr<mlir::Pass> createHandleLargeKernelsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createConvertReduceSumToConvPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createConvertReduceToPoolingPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createUnrollReduceMinAllAxesPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createHandleExcludePadForAvgPoolPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createConvertSquaredDiffToSubAndPowerPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createConvertPowerToMultPass(Logger log = Logger::global());
@@ -405,6 +466,7 @@ std::unique_ptr<mlir::Pass> createLogOpOptimizationsPass();
 std::unique_ptr<mlir::Pass> createAdjustNonZeroFakeQuantPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createFuseConvWithSlicePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createMVNFusionPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createOptimizeGroupConvConcatPass(Logger log = Logger::global());
 
 //
 // Generic Optimizations
@@ -453,6 +515,9 @@ struct DefaultHWOptionsDialectBase : public virtual vpux::DefaultHWOptionsBase {
                                            llvm::cl::desc("Enable split-bilinear-into-H-and-W pass"),
                                            llvm::cl::init(false)};
 
+    BoolOption skipUnrollBatch{*this, "skip-unroll-batch", llvm::cl::desc("Skip unroll on batch dimension"),
+                               llvm::cl::init(false)};
+
     BoolOption enableUpstreamSlice{*this, "upstream-slice", llvm::cl::desc("Enable upstream-slice pipeline building"),
                                    llvm::cl::init(true)};
 
@@ -487,6 +552,11 @@ struct DefaultHWOptionsDialectBase : public virtual vpux::DefaultHWOptionsBase {
     BoolOption enableConvertFCToConv{*this, "convert-fc-to-conv", llvm::cl::desc("Enable convert-fc-to-conv pass"),
                                      llvm::cl::init(true)};
 
+    BoolOption enableWDBlockArgumentInput{
+            *this, "enable-wd-blockarg-input",
+            llvm::cl::desc("Enable WeightsDequantizeToFakeQuantizePass on structures with BlockArgument input"),
+            llvm::cl::init(false)};
+
     // AdjustLayoutOptions
 
     BoolOption enableOptimizeReorders{*this, "optimize-reorders", llvm::cl::desc("Enable optimize-reorders pass"),
@@ -502,6 +572,10 @@ struct DefaultHWOptionsDialectBase : public virtual vpux::DefaultHWOptionsBase {
     BoolOption enableQuantDequantRemoval{*this, "quant-dequant-removal",
                                          llvm::cl::desc("Enable quantize->dequantize sequence removal"),
                                          llvm::cl::init(false)};
+
+    BoolOption enableFuseOutstandingDequant{*this, "fuse-outstanding-dequant",
+                                            llvm::cl::desc("Fuse outstanding dequantize after NCE task"),
+                                            llvm::cl::init(false)};
 
     BoolOption enableSwapTransposeWithFQ{*this, "swap-transpose-with-fq",
                                          ::llvm::cl::desc("Enable SwapTransposeWithFQ pass"), ::llvm::cl::init(true)};
@@ -527,9 +601,18 @@ struct DefaultHWOptionsDialectBase : public virtual vpux::DefaultHWOptionsBase {
             llvm::cl::desc("Enable mixed mode for NCE tasks with float input and quantized weights"),
             llvm::cl::init(true)};
 
+    // LowPrecisionOptions(37XX+)
+    BoolOption enableConvolutionMixedPrecisionDecomposition{
+            *this, "enable-convolution-mixed-precision-decomposition",
+            llvm::cl::desc("Enable mixed precision decomposition for convolution"), llvm::cl::init(false)};
+
     // Common
     BoolOption enableFuseClampOperations{*this, "enable-fuse-clamp-op", llvm::cl::desc("Enable fuse clamp operations"),
                                          llvm::cl::init(false)};
+
+    BoolOption enableGroupedMatMul{*this, "enable-grouped-matmul",
+                                   llvm::cl::desc("Enable execution of grouped MatMul as a single operation."),
+                                   llvm::cl::init(false)};
 };
 
 //

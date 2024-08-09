@@ -10,8 +10,8 @@
 
 #pragma once
 
+#include "npu_driver_compiler.h"
 #include "vpux/utils/core/logger.hpp"
-#include "vpux_driver_compiler.h"
 
 #include <mutex>
 

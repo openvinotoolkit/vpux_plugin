@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache 2.0
 #
 
-set(TARGET_NAME vpux_driver_compiler)
+set(TARGET_NAME npu_driver_compiler)
 
 add_library(${TARGET_NAME}
     SHARED
@@ -59,7 +59,6 @@ target_link_libraries(${TARGET_NAME}
         openvino::npu_al
         npu_llvm_utils
         npu_ov_utils
-        npu_plugin_utils
         npu_mlir_compiler_static
         npu_profiling_utils
 )
@@ -73,7 +72,7 @@ if(WIN32)
             RUNTIME DESTINATION cid/lib
             COMPONENT ${CID_COMPONENT})
 
-    install(FILES $<TARGET_PDB_FILE:vpux_driver_compiler>
+    install(FILES $<TARGET_PDB_FILE:npu_driver_compiler>
             DESTINATION cid/pdb
             COMPONENT ${CID_COMPONENT})
 else()
@@ -84,6 +83,6 @@ endif()
 
 install(
         FILES
-            "${InferenceEngineVPUXPlugin_SOURCE_DIR}/src/vpux_driver_compiler/include/vpux_driver_compiler.h"
+            "${InferenceEngineVPUXPlugin_SOURCE_DIR}/src/vpux_driver_compiler/include/npu_driver_compiler.h"
         DESTINATION cid
         COMPONENT ${CID_COMPONENT})

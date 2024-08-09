@@ -8,7 +8,7 @@
 #include "vpux/compiler/dialect/VPUMI37XX/ops.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 
-#include "vpux/compiler/utils/elf_utils.hpp"
+#include "vpux/compiler/utils/ELF/utils.hpp"
 #include "vpux/utils/core/checked_cast.hpp"
 
 #include "vpux/compiler/dialect/VPUIP/graph-schema/blob_writer.hpp"
@@ -141,7 +141,7 @@ void vpux::VPUMI37XX::DPUInvariantOp::serialize(elf::writer::BinaryDataSection<u
     taskWrapper.barriers_.mask_ = 0;
 
     std::tie(taskWrapper.barriers_.group_, taskWrapper.barriers_.mask_) =
-            reduceWaitMaskTo8bit(taskWrapper.barriers_.wait_mask_);
+            ELF::reduceWaitMaskTo8bit(taskWrapper.barriers_.wait_mask_);
 
     taskWrapper.barriers_sched_.start_after_ = getStartAfter();
     taskWrapper.barriers_sched_.clean_after_ = getCleanAfter();

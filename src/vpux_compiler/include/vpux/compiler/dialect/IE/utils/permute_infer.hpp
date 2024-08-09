@@ -55,3 +55,5 @@ mlir::LogicalResult fusePermutations(PermOp permuteOp, mlir::PatternRewriter& re
 
 mlir::ArrayAttr permuteBounds(mlir::MLIRContext* ctx, vpux::BoundedTypeInterface boundedTensor, DimsOrder srcOrder,
                               DimsOrder dstOrder, mlir::AffineMap memPerm);
+
+Dim getHighestDim(ShapeRef shape, const DimsOrder& dimOrder);

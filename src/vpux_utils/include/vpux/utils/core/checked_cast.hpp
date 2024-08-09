@@ -4,6 +4,8 @@
 //
 
 //
+
+//
 // Safe version of `static_cast` with run-time checks.
 //
 

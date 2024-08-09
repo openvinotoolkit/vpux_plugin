@@ -32,7 +32,7 @@ std::tuple<LinearScanHandler, std::list<ScheduledOpOneResource>> vpux::runLinear
 
     LinearScanImpl scan(maxMemSize.count(), vec, memDefaultAlignment);
 
-    const auto allocNewBuffers = [&](const ValueOrderedSet& usedBufs) {
+    const auto getBuffersToAllocate = [&](const ValueOrderedSet& usedBufs) {
         log.trace("Locate new buffers");
         log = log.nest();
 
@@ -51,13 +51,17 @@ std::tuple<LinearScanHandler, std::list<ScheduledOpOneResource>> vpux::runLinear
             newBufs.push_back(val);
         }
 
-        if (!newBufs.empty()) {
-            log.trace("Allocate memory for the new buffers");
-            VPUX_THROW_UNLESS(scan.alloc(newBufs, /*allowSpills*/ false), "Failed to statically allocate '{0}' memory",
-                              memKind);
-        }
-
         log = log.unnest();
+        return newBufs;
+    };
+
+    const auto allocNewBuffers = [&](const SmallVector<mlir::Value>& buffers) {
+        if (buffers.empty()) {
+            return;
+        }
+        log.trace("Allocate memory for the new buffers");
+        VPUX_THROW_UNLESS(scan.alloc(buffers, /*allowSpills*/ false), "Failed to statically allocate '{0}' memory",
+                          memKind);
     };
 
     const auto freeDeadBuffers = [&](const ValueOrderedSet& usedBufs) {
@@ -125,23 +129,23 @@ std::tuple<LinearScanHandler, std::list<ScheduledOpOneResource>> vpux::runLinear
         log.trace("Process next task at '{0}' during cycles '{1}' to '{2}'", curExecOp->getLoc(), cycleBegin, cycleEnd);
         log = log.nest();
 
-        // Free buffers if the current async.execute operation is executing
-        // after the end cycle for the buffers
-        for (auto freeBuffsIt = freeBuffersCycleEnd.begin(); freeBuffsIt != freeBuffersCycleEnd.end();) {
-            // check if current async.execute starts before buffer end cycle
-            if (cycleBegin < freeBuffsIt->first) {
-                // no need to continue the loop as freeBuffersCycleEnd is ordered map
-                // and subsequent elements will satisfy this condition
+        // Free buffers if the operation is executing after the end cycle for the buffer or
+        // if the current async.execute can not be allocated
+        auto usedBufs = liveRangeInfo.getUsedBuffers(curExecOp);
+        auto toAlloc = getBuffersToAllocate(usedBufs);
+        auto freeBuffsIt = freeBuffersCycleEnd.begin();
+        while (freeBuffsIt != freeBuffersCycleEnd.end()) {
+            bool freeBuffersForCycle = cycleBegin >= freeBuffsIt->first || !scan.canAlloc(toAlloc);
+            if (!freeBuffersForCycle) {
                 break;
             }
+
             log.nest().trace("Current cycle '{0}', freeing buffers end at cycle '{1}'", cycleBegin, freeBuffsIt->first);
             freeDeadBuffers(freeBuffsIt->second);
             freeBuffsIt = freeBuffersCycleEnd.erase(freeBuffsIt);
         }
 
-        const auto usedBufs = liveRangeInfo.getUsedBuffers(curExecOp);
-
-        allocNewBuffers(usedBufs);
+        allocNewBuffers(toAlloc);
 
         auto opIndex = depsInfo.getIndex(curExecOp);
 
@@ -152,7 +156,12 @@ std::tuple<LinearScanHandler, std::list<ScheduledOpOneResource>> vpux::runLinear
                                                        outputBuffers, log);
 
         // Store free buffers with cycle end
-        freeBuffersCycleEnd[cycleEnd] = getFreeBuffers(usedBufs, curExecOp);
+        auto consumedBuffers = getFreeBuffers(usedBufs, curExecOp);
+        auto consumedAtCycleItr = freeBuffersCycleEnd.find(cycleEnd);
+        if (consumedAtCycleItr != freeBuffersCycleEnd.end()) {
+            consumedBuffers.insert(consumedAtCycleItr->second.begin(), consumedAtCycleItr->second.end());
+        }
+        freeBuffersCycleEnd[cycleEnd] = std::move(consumedBuffers);
 
         log = log.unnest();
     }
@@ -189,6 +198,18 @@ AllocationInfo::AllocationInfo(mlir::func::FuncOp netFunc, const AsyncDepsInfo& 
     // so that they not overlap with other buffers. Those reserved resource might be related
     // to handling of additional special features (e.g. DMA HW profiling)
     _moduleReservedMemVec = IE::getReservedMemOffsetAndSizeVec(module, memSpaceAttr);
+
+    // Check that cycles assigned to 'async.execute' ops are legal
+    size_t prevCycleBegin = 0;
+    for (auto curExecOp : netFunc.getOps<mlir::async::ExecuteOp>()) {
+        // ensure current operation does not start before any previous op
+        auto cycleBegin = getAsyncExecuteCycleBegin(curExecOp);
+        VPUX_THROW_WHEN(cycleBegin < prevCycleBegin,
+                        "Allocation assumes ordered operations, but operation '{0}' executes out of place at cycle "
+                        "'{1}', previous cycle '{2}' exists",
+                        curExecOp.getLoc(), cycleBegin, prevCycleBegin);
+        prevCycleBegin = cycleBegin;
+    }
 
     std::tie(_linearScanHandler, _scheduledOpOneResource) =
             vpux::runLinearScan(netFunc, liveRangeInfo, depsInfo, VPU::MemoryKind::DDR, _log, _moduleReservedMemVec);

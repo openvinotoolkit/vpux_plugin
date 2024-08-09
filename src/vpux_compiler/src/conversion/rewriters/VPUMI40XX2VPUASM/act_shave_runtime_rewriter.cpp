@@ -9,8 +9,8 @@
 namespace vpux {
 namespace vpumi40xx2vpuasm {
 
-mlir::FlatSymbolRefAttr ActShaveRtRewriter::getSymbolicName(VPUMI40XX::ActShaveRtOp, size_t) {
-    return mlir::FlatSymbolRefAttr::get(getContext(), "ActShaveRt");
+llvm::SmallVector<mlir::FlatSymbolRefAttr> ActShaveRtRewriter::getSymbolicNames(VPUMI40XX::ActShaveRtOp, size_t) {
+    return {mlir::FlatSymbolRefAttr::get(getContext(), "ActShaveRt")};
 }
 
 mlir::LogicalResult ActShaveRtRewriter::symbolize(VPUMI40XX::ActShaveRtOp op, SymbolMapper&,

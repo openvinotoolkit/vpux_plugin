@@ -32,11 +32,11 @@ void vpux::VPU::SliceOp::build(mlir::OpBuilder& builder, mlir::OperationState& s
 
 mlir::LogicalResult vpux::VPU::SliceOp::inferReturnTypes(mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc,
                                                          mlir::ValueRange operands, mlir::DictionaryAttr attrs,
-                                                         mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+                                                         mlir::OpaqueProperties prop, mlir::RegionRange /*regions*/,
                                                          mlir::SmallVectorImpl<mlir::Type>& inferredTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::SliceOpAdaptor sliceOp(operands, attrs);
+    VPU::SliceOpAdaptor sliceOp(operands, attrs, prop);
     if (mlir::failed(sliceOp.verify(loc))) {
         return mlir::failure();
     }

@@ -14,14 +14,8 @@ namespace ov {
 namespace test {
 
 class MaxMinLayerTestCommon : public MaxMinLayerTest, virtual public VpuOv2LayerTest {};
-class MaxMinLayerTest_NPU3700 : public MaxMinLayerTestCommon {};
 class MaxMinLayerTest_NPU3720 : public MaxMinLayerTestCommon {};
 class MaxMinLayerTest_NPU4000 : public MaxMinLayerTestCommon {};
-
-TEST_P(MaxMinLayerTest_NPU3700, HW) {
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
 
 TEST_P(MaxMinLayerTest_NPU3720, SW) {
     setReferenceSoftwareMode();
@@ -70,12 +64,6 @@ const auto params3 = testing::Combine(::testing::ValuesIn(static_shapes_to_test_
                                               std::vector<std::vector<ov::Shape>>({{{1, 1, 1, 3}, {1}}}))),
                                       ::testing::ValuesIn(opType), ::testing::ValuesIn(modelTypes),
                                       ::testing::ValuesIn(inputType), ::testing::Values(DEVICE_NPU));
-
-//
-// NPU3700 Instantiation
-//
-INSTANTIATE_TEST_SUITE_P(smoke_maximum_4D, MaxMinLayerTest_NPU3700, params0, MaxMinLayerTest_NPU3700::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(smoke_maximum_3D, MaxMinLayerTest_NPU3700, params1, MaxMinLayerTest_NPU3700::getTestCaseName);
 
 //
 // NPU3720 Instantiation

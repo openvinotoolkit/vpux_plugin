@@ -77,12 +77,6 @@ bool isOutputActTypeSupported(vpux::NDTypeInterface type, int64_t alignment, Log
 Byte getWeightsTableSize(int64_t OC);
 
 //
-// Channel major Convolution
-//
-
-bool isChannelMajorCompatible(ArchKind arch, vpux::NDTypeInterface inputType);
-
-//
 // Fuse PadOp check
 //
 

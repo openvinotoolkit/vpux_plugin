@@ -10,6 +10,7 @@
 #include "vpux/compiler/dialect/VPU/IR/types.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/init.hpp"
+#include "vpux/compiler/interfaces_registry.hpp"
 
 #include <mlir/IR/MLIRContext.h>
 #include <mlir/Parser/Parser.h>
@@ -24,6 +25,8 @@ void testSparsitySupport(llvm::StringLiteral inputIR, ArchKind arch, bool suppor
     mlir::DialectRegistry registry;
     vpux::registerDialects(registry);
     vpux::registerCommonInterfaces(registry);
+    auto interfacesRegistry = vpux::createInterfacesRegistry(arch);
+    interfacesRegistry->registerInterfaces(registry);
 
     mlir::MLIRContext ctx(registry);
     auto module = mlir::parseSourceString<mlir::ModuleOp>(inputIR, &ctx);
@@ -65,30 +68,7 @@ TEST(MLIR_VPU_Sparsity, NCEZMajorConvSparsitySupport) {
             }
         }
     )";
-    testSparsitySupport(inputIR, ArchKind::NPU30XX, /*input=*/false, /*output=*/false, /*weights=*/true);
     testSparsitySupport(inputIR, ArchKind::NPU37XX, /*input=*/true, /*output=*/true, /*weights=*/true);
-}
-
-TEST(MLIR_VPU_Sparsity, NCECMajorConvSparsitySupport) {
-    constexpr llvm::StringLiteral inputIR = R"(
-        #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
-        #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
-
-        module @test {
-            func.func @main(%arg0: tensor<1x3x224x224xf16, {order = #NCHW}>) -> tensor<1x32x112x112xf16, {order = #NHWC}> {
-                %cst = const.Declare tensor<1x1x1x32xui8> = dense<10> : tensor<1x1x1x32xui8>
-                %cst_0 = const.Declare tensor<32x1x1x4xsi32> = dense<10> : tensor<32x1x1x4xsi32>
-                %cst_1 = const.Declare tensor<32x1x1x32xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<32x1x1x32xf16>, [#const.Reorder<#NHWC>]
-                %0 = VPU.NCE.Convolution(%arg0, %cst_1, %cst_0, %cst) {
-                    activation_window_channel_length = 81 : i64,
-                    pad = #VPU.Padding<left = 0 : i64, right = 1 : i64, top = 0 : i64, bottom = 1 : i64>,
-                    rawFilterShape = [32, 3, 3, 3],
-                    strides = [2, 2]} -> tensor<1x32x112x112xf16, {order = #NHWC}>
-                return %0 : tensor<1x32x112x112xf16, {order = #NHWC}>
-            }
-        }
-    )";
-    testSparsitySupport(inputIR, ArchKind::NPU30XX, /*input=*/false, /*output=*/false, /*weights=*/false);
 }
 
 TEST(MLIR_VPU_Sparsity, NCEEltwiseSparsitySupport) {
@@ -102,7 +82,6 @@ TEST(MLIR_VPU_Sparsity, NCEEltwiseSparsitySupport) {
             }
         }
     )";
-    testSparsitySupport(inputIR, ArchKind::NPU30XX, /*input=*/false, /*output=*/false, /*weights=*/false);
     testSparsitySupport(inputIR, ArchKind::NPU37XX, /*input=*/false, /*output=*/true, /*weights=*/false);
 }
 
@@ -129,7 +108,6 @@ TEST(MLIR_VPU_Sparsity, NCEDepthconvSparsitySupport) {
             }
         }
     )";
-    testSparsitySupport(inputIR, ArchKind::NPU30XX, /*input=*/false, /*output=*/false, /*weights=*/false);
     testSparsitySupport(inputIR, ArchKind::NPU37XX, /*input=*/false, /*output=*/true, /*weights=*/false);
 }
 
@@ -150,7 +128,6 @@ TEST(MLIR_VPU_Sparsity, NCEMaxpoolSparsitySupport) {
             }
         }
     )";
-    testSparsitySupport(inputIR, ArchKind::NPU30XX, /*input=*/false, /*output=*/false, /*weights=*/false);
     testSparsitySupport(inputIR, ArchKind::NPU37XX, /*input=*/false, /*output=*/true, /*weights=*/false);
 }
 
@@ -171,7 +148,5 @@ TEST(MLIR_VPU_Sparsity, NCEAvgpoolSparsitySupport) {
             }
         }
     )";
-    EXPECT_ANY_THROW(
-            testSparsitySupport(inputIR, ArchKind::NPU30XX, /*input=*/false, /*output=*/false, /*weights=*/false));
     testSparsitySupport(inputIR, ArchKind::NPU37XX, /*input=*/false, /*output=*/true, /*weights=*/false);
 }

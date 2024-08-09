@@ -71,6 +71,11 @@ void ConvertPrecisionToFP16Pass::safeRunOnModule() {
     target.addLegalOp<IE::IfOp>();
     target.addLegalOp<IE::YieldOp>();
     target.addLegalOp<IE::EqualOp>();
+    target.addLegalOp<IE::LessOp>();
+    target.addLegalOp<IE::LessEqualOp>();
+    target.addLegalOp<IE::GreaterOp>();
+    target.addLegalOp<IE::GreaterEqualOp>();
+    target.addLegalOp<IE::NotEqualOp>();
     // AssignOp & ReadValueOp represent inputs/outputs. Cannot convert their type internally.
     target.addLegalOp<IE::AssignOp>();
     target.addLegalOp<IE::ReadValueOp>();
@@ -87,12 +92,32 @@ void ConvertPrecisionToFP16Pass::safeRunOnModule() {
         std::string dialectNamespace = IE::IEDialect::getDialectNamespace().str() + ".";
         std::string option;
         while (std::getline(optionsStream, option, ',')) {
+            bool isAddRMSNorm = option == std::string("Add_RMSNorm");
+            if (isAddRMSNorm) {
+                option = std::string("Add");
+            }
             std::string fullOption = dialectNamespace + option;
             StringRef opnameRef(fullOption);
             auto opname = mlir::OperationName(opnameRef, &ctx);
             VPUX_THROW_UNLESS(opname.isRegistered(), "Invalid input layer '{0}'", opname);
             // Keep the original precision for all instances of specified layer name(s) during the conversion to FP16
-            target.addLegalOp(opname);
+
+            // If AddOp is listed into computeLayersWithHigherPrecision list,
+            // keep precision only in RMSNorm pattern
+            if (isAddRMSNorm) {
+                target.addDynamicallyLegalOp<IE::AddOp>([&](IE::AddOp op) {
+                    // Try to find RMSNorm pattern
+                    // ReaduceMeanOp -> AddOp -> SqrtOp
+                    if ((op.getInput1().getDefiningOp<IE::ReduceMeanOp>() != nullptr ||
+                         op.getInput2().getDefiningOp<IE::ReduceMeanOp>() != nullptr) &&
+                        mlir::isa_and_nonnull<IE::SqrtOp>(*op.getOutput().getUsers().begin())) {
+                        return true;
+                    }
+                    return isLegalOp(op);
+                });
+            } else {
+                target.addLegalOp(opname);
+            }
         }
     }
 

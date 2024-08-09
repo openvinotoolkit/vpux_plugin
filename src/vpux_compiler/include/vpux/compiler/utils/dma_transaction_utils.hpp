@@ -5,21 +5,34 @@
 
 #pragma once
 
-#include "vpux/compiler/core/attributes/strides.hpp"
-#include "vpux/compiler/utils/types.hpp"
+#include <llvm/ADT/SmallVector.h>
+#include <cstddef>
+#include <utility>
 
 namespace vpux {
+class NDTypeInterface;
+
+struct DMAPattern {
+    DMAPattern(llvm::SmallVector<size_t> dims, llvm::SmallVector<size_t> strides)
+            : dims(std::move(dims)), strides(std::move(strides)) {
+    }
+    DMAPattern() = default;
+
+    llvm::SmallVector<size_t> dims;
+    llvm::SmallVector<size_t> strides;
+};
 
 struct DMATransaction {
-    DMATransaction(ArrayRef<uint64_t> dims, ArrayRef<uint64_t> strides): dims(dims), strides(strides) {
+    DMATransaction(llvm::SmallVector<DMAPattern> inputs, llvm::SmallVector<DMAPattern> outputs)
+            : inputs(std::move(inputs)), outputs(std::move(outputs)) {
     }
     DMATransaction() = default;
 
-    llvm::SmallVector<uint64_t> dims;
-    llvm::SmallVector<uint64_t> strides;
+    llvm::SmallVector<DMAPattern> inputs;
+    llvm::SmallVector<DMAPattern> outputs;
 };
 
-DMATransaction reduceDimsForDma(vpux::NDTypeInterface ndType);
-void patchDimsForNPU37XX(DMATransaction& dmaTransactionDetails);
+DMAPattern reduceDimsForDma(vpux::NDTypeInterface ndType);
+void patchDimsForNPU37XX(DMAPattern& dmaPattern);
 
 }  // namespace vpux

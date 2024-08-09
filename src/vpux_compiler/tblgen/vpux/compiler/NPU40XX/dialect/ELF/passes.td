@@ -37,8 +37,7 @@ def AddELFSymbolTable : PassBase<"create-elf-symbol-table", "vpux::FunctionPass"
 
     let description = [{
         Each ELF section that holds program data needs to have an associated symbol op.
-        This pass will create one ELF.SymbolTableSection op, and for each DataSection and LogicalSection operation it
-        will also insert an associated ELF symbol op, in the SymbolTableSection
+        For each DataSection and LogicalSection operation, an associated ELF symbol op will be added to the SymbolTableSection.
     }];
 
     let constructor = "vpux::ELF::createAddELFSymbolTablePass()";
@@ -86,6 +85,14 @@ def SetOpOffsets : PassBase<"set-elf-op-offsets", "vpux::FunctionPass"> {
 
     let dependentDialects = [
         "vpux::ELF::ELFDialect"
+    ];
+
+    let options = [
+        Option<
+            "computeTaskBufferOffsets", "compute-task-buffer-offsets",
+            "bool", "false",
+            "Flag which enables/disables the computation of offsets for TaskBufferOps"
+        >
     ];
 }
 
@@ -186,6 +193,20 @@ def AddInnerSectionPadding : PassBase<"add-inner-section-padding", "vpux::Functi
 
     let dependentDialects = [
         "vpux::ELF::ELFDialect"
+    ];
+}
+
+def AddABIVersion : PassBase<"add-abi-version", "vpux::FunctionPass"> {
+    let summary = "Add ABI version op to ELF";
+
+    let description = [{
+        The pass adds ELF.ABIVersionOp to IR. Major, minor and patch version numbers are passed as arguments.
+    }];
+
+    let constructor = "vpux::ELF::createAddABIVersionPass()";
+
+    let dependentDialects = [
+        "vpux::ELF::ELFDialect",
     ];
 }
 

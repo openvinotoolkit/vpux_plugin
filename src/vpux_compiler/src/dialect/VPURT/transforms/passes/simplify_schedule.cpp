@@ -405,8 +405,6 @@ public:
 
 private:
     void safeRunOnFunc() final;
-
-private:
     bool _shareWaitAndUpdateBarriers{true};
     bool _reduceParallelControlFlows{true};
 };

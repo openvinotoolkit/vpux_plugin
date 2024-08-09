@@ -117,26 +117,45 @@ mlir::LogicalResult ConvertAvgPoolToDWConvPass::AvgPoolOpConverter::matchAndRewr
 
     const bool isAvgPoolQuantizedVal = isAvgPoolQuantized(origOp);
     const float weightRealVal = (isAvgPoolQuantizedVal) ? 1.0f : weightsScaleFactor;
-    auto dwConvFilter = VPU::declareFloatConst(rewriter, location, weightRealVal, dataStorageType);
-    auto weights = dwConvFilter.getOutput();
+    auto weights = Const::createFloatConst(rewriter, location, dataStorageType, weightRealVal);
 
     if (isAvgPoolQuantizedVal) {
         _log.trace("AvgPool is quantized, replacing it by DW convolution with quantized weights.");
 
         const auto fqArgType = mlir::RankedTensorType::get({}, elemType);
 
-        auto fqLevelsVal = getIntAttr(ctx, 255);  // the created FQ is artificial, levels are set to 255 in correlation
-                                                  // with FQ range from 0.0f to 254.0f (255 integer values)
-        auto fqLowVal = VPU::declareFloatConst(rewriter, location, 0.0f, fqArgType);
-        auto fqInHighVal = VPU::declareFloatConst(rewriter, location, 254.0f, fqArgType);
-        auto fqOutHighVal = VPU::declareFloatConst(rewriter, location, 254.0f * weightsScaleFactor, fqArgType);
+        auto inputLayerFQ = origOp.getInput().getDefiningOp<IE::FakeQuantizeOp>();
+        if (inputLayerFQ.getLevels().has_value()) {
+            // Integer case
+            // The created FQ is artificial, levels are set to 255 in correlation
+            auto fqLevelsVal = getIntAttr(ctx, 255);
+            // With FQ range from 0.0f to 254.0f (255 integer values)
+            auto fqLowVal = Const::createFloatConst(rewriter, location, fqArgType, 0.0f);
+            auto fqInHighVal = Const::createFloatConst(rewriter, location, fqArgType, 254.0f);
+            auto fqOutHighVal = Const::createFloatConst(rewriter, location, fqArgType, 254.0f * weightsScaleFactor);
 
-        IE::FakeQuantizeOp inputLayerFQ = origOp.getInput().getDefiningOp<IE::FakeQuantizeOp>();
+            auto quantizationForWeights = rewriter.create<IE::FakeQuantizeOp>(
+                    location, dataStorageType, weights, fqLowVal, fqInHighVal, fqLowVal, fqOutHighVal, fqLevelsVal,
+                    /*lowFpType=*/nullptr, inputLayerFQ.getAutoBroadcastAttr());
+            weights = quantizationForWeights.getOutput();
 
-        IE::FakeQuantizeOp quantizationForWeights = rewriter.create<IE::FakeQuantizeOp>(
-                origOp.getLoc(), dataStorageType, dwConvFilter.getOutput(), fqLowVal, fqInHighVal, fqLowVal,
-                fqOutHighVal, fqLevelsVal, inputLayerFQ.getLowFpTypeAttr(), inputLayerFQ.getAutoBroadcastAttr());
-        weights = quantizationForWeights.getOutput();
+        } else {
+            // Low precision floating-point case
+            const auto lowFpType = *inputLayerFQ.getLowFpType();
+            const auto rangeOrFail = vpux::getFp8Range(lowFpType);
+            VPUX_THROW_WHEN(mlir::failed(rangeOrFail), "Unsupported FQ lowFpType: {0}", lowFpType);
+            const auto lowVal = std::get<0>(*rangeOrFail), highVal = std::get<1>(*rangeOrFail);
+
+            auto fqInLowVal = Const::createFloatConst(rewriter, location, fqArgType, lowVal);
+            auto fqInHighVal = Const::createFloatConst(rewriter, location, fqArgType, highVal);
+            auto fqOutLowVal = Const::createFloatConst(rewriter, location, fqArgType, lowVal * weightsScaleFactor);
+            auto fqOutHighVal = Const::createFloatConst(rewriter, location, fqArgType, highVal * weightsScaleFactor);
+
+            auto quantizationForWeights = rewriter.create<IE::FakeQuantizeOp>(
+                    location, dataStorageType, weights, fqInLowVal, fqInHighVal, fqOutLowVal, fqOutHighVal,
+                    /*levels=*/nullptr, mlir::TypeAttr::get(lowFpType), inputLayerFQ.getAutoBroadcastAttr());
+            weights = quantizationForWeights.getOutput();
+        }
     }
 
     const SmallVector<int32_t> dilations = {1, 1};

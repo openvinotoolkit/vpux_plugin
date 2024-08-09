@@ -5,6 +5,7 @@
 
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 #include "vpux/utils/core/numeric.hpp"
 
@@ -177,13 +178,8 @@ std::optional<SmallVector<float>> FuseScalesToAccumulate::fetchScales(IE::FakeQu
 
     const auto scaleShape =
             mlir::RankedTensorType::get(getShape(fqOp.getOutputLow()), mlir::Float32Type::get(rewriter.getContext()));
-    const auto newLowAttr = mlir::DenseElementsAttr::get(scaleShape, ArrayRef(lowVals));
-    const auto newHighAttr = mlir::DenseElementsAttr::get(scaleShape, ArrayRef(highVals));
-
-    auto newLowVal =
-            rewriter.create<Const::DeclareOp>(outLowConst.getLoc(), scaleShape, Const::ContentAttr::get(newLowAttr));
-    auto newHighVal =
-            rewriter.create<Const::DeclareOp>(outHighConst.getLoc(), scaleShape, Const::ContentAttr::get(newHighAttr));
+    auto newLowVal = Const::createConst(rewriter, outLowConst.getLoc(), scaleShape, ArrayRef(lowVals));
+    auto newHighVal = Const::createConst(rewriter, outHighConst.getLoc(), scaleShape, ArrayRef(highVals));
 
     outLowConst.getOutput().replaceAllUsesWith(newLowVal);
     outHighConst.getOutput().replaceAllUsesWith(newHighVal);
@@ -211,14 +207,10 @@ mlir::LogicalResult FuseScalesToAccumulate::matchAndRewrite(IE::AccumulateOp ori
         return matchFailed(rewriter, origOp, "Failed to fetch scales for the second input.", origOp->getLoc());
     }
     const auto scaleShape = mlir::RankedTensorType::get({shape.back()}, mlir::Float32Type::get(rewriter.getContext()));
-    const auto lhsAttr = mlir::DenseElementsAttr::get(scaleShape, ArrayRef(lhsScales.value()));
-    const auto rhsAttr = mlir::DenseElementsAttr::get(scaleShape, ArrayRef(rhsScales.value()));
+    const auto lhsScaleVal = Const::createConst(rewriter, origOp.getLoc(), scaleShape, ArrayRef(lhsScales.value()));
+    const auto rhsScaleVal = Const::createConst(rewriter, origOp.getLoc(), scaleShape, ArrayRef(rhsScales.value()));
 
-    auto lhsScaleVal = rewriter.create<Const::DeclareOp>(origOp.getLoc(), scaleShape, Const::ContentAttr::get(lhsAttr));
-    auto rhsScaleVal = rewriter.create<Const::DeclareOp>(origOp.getLoc(), scaleShape, Const::ContentAttr::get(rhsAttr));
-
-    rewriter.replaceOpWithNewOp<IE::AccumulateOp>(origOp, origOp.getLhs(), origOp.getRhs(), lhsScaleVal.getOutput(),
-                                                  rhsScaleVal.getOutput());
+    rewriter.replaceOpWithNewOp<IE::AccumulateOp>(origOp, origOp.getLhs(), origOp.getRhs(), lhsScaleVal, rhsScaleVal);
 
     return mlir::success();
 }

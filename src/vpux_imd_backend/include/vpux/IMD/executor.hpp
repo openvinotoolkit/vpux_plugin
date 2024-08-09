@@ -14,16 +14,15 @@
 
 #include <string>
 
-namespace vpux {
+namespace intel_npu {
 
-class IMDExecutor final : public intel_npu::IExecutor {
+class IMDExecutor final : public IExecutor {
 public:
     struct InferenceManagerDemo;
 
-    IMDExecutor(const std::string_view, const std::shared_ptr<const intel_npu::NetworkDescription>& network,
-                const intel_npu::Config& config);
+    IMDExecutor(const std::string_view, const std::shared_ptr<const NetworkDescription>& network, const Config& config);
 
-    std::shared_ptr<const intel_npu::NetworkDescription>& getNetworkDesc() {
+    std::shared_ptr<const NetworkDescription>& getNetworkDesc() {
         return _network;
     }
 
@@ -34,27 +33,29 @@ public:
     struct InferenceManagerDemo final {
         std::string elfFile;
         std::string runProgram;
-        SmallVector<std::string> runArgs;
+        llvm::SmallVector<std::string> runArgs;
         int64_t timeoutSec;
         std::string chipsetArg;
         std::string imdElfArg;
     };
 
+    void setWorkloadType(const ov::WorkloadType workloadType) const override;
+
 private:
-    std::string getMoviToolsPath(const intel_npu::Config& config);
-    std::string getSimicsPath(const intel_npu::Config& config);
+    std::string getMoviToolsPath(const Config& config);
+    std::string getSimicsPath(const Config& config);
     void setElfFile(const std::string& bin);
-    void setMoviSimRunArgs(const std::string_view platform, const intel_npu::Config& config);
-    void setMoviDebugRunArgs(const std::string_view platform, const intel_npu::Config& config);
-    void setSimicsRunArgs(const std::string_view platform, const intel_npu::Config& config);
+    void setMoviSimRunArgs(const std::string_view platform, const Config& config);
+    void setMoviDebugRunArgs(const std::string_view platform, const Config& config);
+    void setSimicsRunArgs(const std::string_view platform, const Config& config);
 
-    static bool isValidElfSignature(StringRef filePath);
-    void parseAppConfig(const std::string_view platform, const intel_npu::Config& config);
+    static bool isValidElfSignature(llvm::StringRef filePath);
+    void parseAppConfig(const std::string_view platform, const Config& config);
 
-    std::shared_ptr<const intel_npu::NetworkDescription> _network;
-    Logger _log;
+    std::shared_ptr<const NetworkDescription> _network;
+    vpux::Logger _log;
 
     InferenceManagerDemo _app;
 };
 
-}  // namespace vpux
+}  // namespace intel_npu

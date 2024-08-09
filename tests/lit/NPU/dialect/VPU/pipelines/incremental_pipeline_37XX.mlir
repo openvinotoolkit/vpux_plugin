@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --incremental-pipeline %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX
+// REQUIRES: arch-NPU37XX
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 func.func @MaxpoolIncrementalPipelineCheck(%arg0: tensor<1x16x1x4xf16, {order = #NHWC}>) -> tensor<1x16x1x4xf16, {order = #NHWC}> {
@@ -287,63 +287,80 @@ func.func @EltwiseAssignedSOHWithOddWidthAndSmallHeight(%arg0: tensor<1x16x4x331
 // CHECK-LABEL:   func.func @InterpolateIncrementalPipeline(
 // CHECK-SAME:                    %[[VAL_0:.*]]: tensor<1x2x540x1920xf16>) -> tensor<1x2x256x512xf16> {
 func.func @InterpolateIncrementalPipeline(%arg0: tensor<1x2x540x1920xf16>) -> tensor<1x2x256x512xf16> {
-    %0 = VPU.Interpolate(%arg0) {attr = #IE.Interpolate<mode = <LINEAR>, shape_calc_mode = <SIZES>, coord_mode = <ALIGN_CORNERS>, nearest_mode = <ROUND_PREFER_FLOOR>, antialias = false, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], cube_coeff = -7.500000e-01 : f64>, axes_attr = [2, 3], operandSegmentSizes = array<i32: 1, 0, 0, 0>, scales_attr = [1.3333300352096558, 1.3333300352096558], sizes_attr = [256, 512]} : tensor<1x2x540x1920xf16> -> tensor<1x2x256x512xf16>
+    %0 = VPU.Interpolate(%arg0) {attr = #IE.Interpolate<mode = <LINEAR>, shape_calc_mode = <SIZES>, coord_mode = <ALIGN_CORNERS>, nearest_mode = <ROUND_PREFER_FLOOR>, antialias = false, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], cube_coeff = -7.500000e-01 : f64>, axes_attr = [2, 3], operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0>, scales_attr = [1.3333300352096558, 1.3333300352096558], sizes_attr = [256, 512]} : tensor<1x2x540x1920xf16> -> tensor<1x2x256x512xf16>
     return %0 : tensor<1x2x256x512xf16>
 
-    // CHECK:           %[[VAL_1:.*]] = VPU.Slice %[[VAL_0]] [0, 0, 0, 0] [1, 1, 270, 1920] : tensor<1x2x540x1920xf16> to tensor<1x1x270x1920xf16>
-    // CHECK:           %[[VAL_2:.*]] = VPU.NCE.ClusterTiling (%[[VAL_1]] as %[[VAL_3:.*]]: tensor<1x1x270x1920xf16>) -> !VPU.DistributedTensor<1x1x270x1920xf16, #NCHW, @CMX_NN, {mode = "OVERLAPPED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64, compute_shapes = {{\[\[}}1, 1, 135, 1920], [1, 1, 135, 1920]], compute_offsets = {{\[\[}}0, 0, 0, 0], [0, 0, 135, 0]], memory_shapes = {{\[\[}}1, 1, 135, 1920], [1, 1, 135, 1920]], memory_offsets = {{\[\[}}0, 0, 0, 0], [0, 0, 135, 0]]}> {
-    // CHECK:             %[[VAL_4:.*]] = VPU.Copy(%[[VAL_3]]) {out_mem_space = @CMX_NN} : tensor<1x1x270x1920xf16> -> tensor<1x1x270x1920xf16, {mem_space = @CMX_NN, order = #NCHW}>
-    // CHECK:             VPU.Yield %[[VAL_4]]
-    // CHECK:           }
-    // CHECK:           %[[VAL_5:.*]] = VPU.NCE.ClusterTiling (%[[VAL_2]] as %[[VAL_6:.*]]: tensor<1x1x270x1920xf16, {mem_space = @CMX_NN, order = #NCHW}>) -> !VPU.DistributedTensor<1x1x128x512xf16, #NCHW, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
-    // CHECK:            %[[VAL_7:.*]] = VPU.Interpolate(%[[VAL_6]]) {attr = #IE.Interpolate<mode = <LINEAR>, shape_calc_mode = <SCALES>, coord_mode = <ALIGN_CORNERS>, nearest_mode = <ROUND_PREFER_FLOOR>, antialias = false, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], cube_coeff = -7.500000e-01 : f64>, axes_attr = [2, 3], initial_input_dims_attr = [1, 2, 540, 1920], initial_input_offset_attr = [0, 0, 0, 0], initial_output_dims_attr = [1, 2, 256, 512], initial_output_offset_attr = [0, 0, 0, 0], operandSegmentSizes = array<i32: 1, 0, 0, 0>, scales_attr = [0.47407407407407409, 0.26666666666666666], sizes_attr = [256, 512], tile_offset_attr = [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00]} : tensor<1x1x270x1920xf16, {mem_space = @CMX_NN, order = #NCHW}> -> tensor<1x1x128x512xf16, {mem_space = @CMX_NN, order = #NCHW}>
-    // CHECK:             VPU.Yield %[[VAL_7]]
-    // CHECK:           }
-    // CHECK:           %[[VAL_8:.*]] = VPU.NCE.ClusterTiling (%[[VAL_5]] as %[[VAL_9:.*]]: tensor<1x1x128x512xf16, {mem_space = @CMX_NN, order = #NCHW}>) -> tensor<1x1x128x512xf16> {
-    // CHECK:             %[[VAL_10:.*]] = VPU.Copy(%[[VAL_9]]) : tensor<1x1x128x512xf16, {mem_space = @CMX_NN, order = #NCHW}> -> tensor<1x1x128x512xf16>
-    // CHECK:             VPU.Yield %[[VAL_10]]
-    // CHECK:           }
-    // CHECK:           %[[VAL_11:.*]] = VPU.Slice %[[VAL_0]] [0, 0, 270, 0] [1, 1, 270, 1920] : tensor<1x2x540x1920xf16> to tensor<1x1x270x1920xf16>
-    // CHECK:           %[[VAL_12:.*]] = VPU.NCE.ClusterTiling (%[[VAL_11]] as %[[VAL_13:.*]]: tensor<1x1x270x1920xf16>) -> !VPU.DistributedTensor<1x1x270x1920xf16, #NCHW, @CMX_NN, {mode = "OVERLAPPED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64, compute_shapes = {{\[\[}}1, 1, 135, 1920], [1, 1, 135, 1920]], compute_offsets = {{\[\[}}0, 0, 0, 0], [0, 0, 135, 0]], memory_shapes = {{\[\[}}1, 1, 135, 1920], [1, 1, 135, 1920]], memory_offsets = {{\[\[}}0, 0, 0, 0], [0, 0, 135, 0]]}> {
-    // CHECK:             %[[VAL_14:.*]] = VPU.Copy(%[[VAL_13]]) {out_mem_space = @CMX_NN} : tensor<1x1x270x1920xf16> -> tensor<1x1x270x1920xf16, {mem_space = @CMX_NN, order = #NCHW}>
-    // CHECK:             VPU.Yield %[[VAL_14]]
-    // CHECK:           }
-    // CHECK:           %[[VAL_15:.*]] = VPU.NCE.ClusterTiling (%[[VAL_12]] as %[[VAL_16:.*]]: tensor<1x1x270x1920xf16, {mem_space = @CMX_NN, order = #NCHW}>) -> !VPU.DistributedTensor<1x1x128x512xf16, #NCHW, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
-    // CHECK:             %[[VAL_17:.*]] = VPU.Interpolate(%[[VAL_16]]) {attr = #IE.Interpolate<mode = <LINEAR>, shape_calc_mode = <SCALES>, coord_mode = <ALIGN_CORNERS>, nearest_mode = <ROUND_PREFER_FLOOR>, antialias = false, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], cube_coeff = -7.500000e-01 : f64>, axes_attr = [2, 3], initial_input_dims_attr = [1, 2, 540, 1920], initial_input_offset_attr = [0, 0, 270, 0], initial_output_dims_attr = [1, 2, 256, 512], initial_output_offset_attr = [0, 0, 128, 0], operandSegmentSizes = array<i32: 1, 0, 0, 0>, scales_attr = [0.47407407407407409, 0.26666666666666666], sizes_attr = [256, 512], tile_offset_attr = [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00]} : tensor<1x1x270x1920xf16, {mem_space = @CMX_NN, order = #NCHW}> -> tensor<1x1x128x512xf16, {mem_space = @CMX_NN, order = #NCHW}>
-    // CHECK:             VPU.Yield %[[VAL_17]]
-    // CHECK:           }
-    // CHECK:           %[[VAL_18:.*]] = VPU.NCE.ClusterTiling (%[[VAL_15]] as %[[VAL_19:.*]]: tensor<1x1x128x512xf16, {mem_space = @CMX_NN, order = #NCHW}>) -> tensor<1x1x128x512xf16> {
-    // CHECK:             %[[VAL_20:.*]] = VPU.Copy(%[[VAL_19]]) : tensor<1x1x128x512xf16, {mem_space = @CMX_NN, order = #NCHW}> -> tensor<1x1x128x512xf16>
-    // CHECK:             VPU.Yield %[[VAL_20]]
-    // CHECK:           }
-    // CHECK:           %[[VAL_21:.*]] = VPU.Slice %[[VAL_0]] [0, 1, 0, 0] [1, 1, 270, 1920] : tensor<1x2x540x1920xf16> to tensor<1x1x270x1920xf16>
-    // CHECK:           %[[VAL_22:.*]] = VPU.NCE.ClusterTiling (%[[VAL_21]] as %[[VAL_23:.*]]: tensor<1x1x270x1920xf16>) -> !VPU.DistributedTensor<1x1x270x1920xf16, #NCHW, @CMX_NN, {mode = "OVERLAPPED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64, compute_shapes = {{\[\[}}1, 1, 135, 1920], [1, 1, 135, 1920]], compute_offsets = {{\[\[}}0, 0, 0, 0], [0, 0, 135, 0]], memory_shapes = {{\[\[}}1, 1, 135, 1920], [1, 1, 135, 1920]], memory_offsets = {{\[\[}}0, 0, 0, 0], [0, 0, 135, 0]]}> {
-    // CHECK:             %[[VAL_24:.*]] = VPU.Copy(%[[VAL_23]]) {out_mem_space = @CMX_NN} : tensor<1x1x270x1920xf16> -> tensor<1x1x270x1920xf16, {mem_space = @CMX_NN, order = #NCHW}>
-    // CHECK:             VPU.Yield %[[VAL_24]]
-    // CHECK:           }
-    // CHECK:           %[[VAL_25:.*]] = VPU.NCE.ClusterTiling (%[[VAL_22]] as %[[VAL_26:.*]]: tensor<1x1x270x1920xf16, {mem_space = @CMX_NN, order = #NCHW}>) -> !VPU.DistributedTensor<1x1x128x512xf16, #NCHW, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
-    // CHECK:             %[[VAL_27:.*]] = VPU.Interpolate(%[[VAL_26]]) {attr = #IE.Interpolate<mode = <LINEAR>, shape_calc_mode = <SCALES>, coord_mode = <ALIGN_CORNERS>, nearest_mode = <ROUND_PREFER_FLOOR>, antialias = false, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], cube_coeff = -7.500000e-01 : f64>, axes_attr = [2, 3], initial_input_dims_attr = [1, 2, 540, 1920], initial_input_offset_attr = [0, 1, 0, 0], initial_output_dims_attr = [1, 2, 256, 512], initial_output_offset_attr = [0, 1, 0, 0], operandSegmentSizes = array<i32: 1, 0, 0, 0>, scales_attr = [0.47407407407407409, 0.26666666666666666], sizes_attr = [256, 512], tile_offset_attr = [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00]} : tensor<1x1x270x1920xf16, {mem_space = @CMX_NN, order = #NCHW}> -> tensor<1x1x128x512xf16, {mem_space = @CMX_NN, order = #NCHW}>
-    // CHECK:             VPU.Yield %[[VAL_27]]
-    // CHECK:           }
-    // CHECK:           %[[VAL_28:.*]] = VPU.NCE.ClusterTiling (%[[VAL_25]] as %[[VAL_29:.*]]: tensor<1x1x128x512xf16, {mem_space = @CMX_NN, order = #NCHW}>) -> tensor<1x1x128x512xf16> {
-    // CHECK:             %[[VAL_30:.*]] = VPU.Copy(%[[VAL_29]]) : tensor<1x1x128x512xf16, {mem_space = @CMX_NN, order = #NCHW}> -> tensor<1x1x128x512xf16>
-    // CHECK:             VPU.Yield %[[VAL_30]]
-    // CHECK:           }
-    // CHECK:           %[[VAL_31:.*]] = VPU.Slice %[[VAL_0]] [0, 1, 270, 0] [1, 1, 270, 1920] : tensor<1x2x540x1920xf16> to tensor<1x1x270x1920xf16>
-    // CHECK:           %[[VAL_32:.*]] = VPU.NCE.ClusterTiling (%[[VAL_31]] as %[[VAL_33:.*]]: tensor<1x1x270x1920xf16>) -> !VPU.DistributedTensor<1x1x270x1920xf16, #NCHW, @CMX_NN, {mode = "OVERLAPPED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64, compute_shapes = {{\[\[}}1, 1, 135, 1920], [1, 1, 135, 1920]], compute_offsets = {{\[\[}}0, 0, 0, 0], [0, 0, 135, 0]], memory_shapes = {{\[\[}}1, 1, 135, 1920], [1, 1, 135, 1920]], memory_offsets = {{\[\[}}0, 0, 0, 0], [0, 0, 135, 0]]}> {
-    // CHECK:             %[[VAL_34:.*]] = VPU.Copy(%[[VAL_33]]) {out_mem_space = @CMX_NN} : tensor<1x1x270x1920xf16> -> tensor<1x1x270x1920xf16, {mem_space = @CMX_NN, order = #NCHW}>
-    // CHECK:             VPU.Yield %[[VAL_34]]
-    // CHECK:           }
-    // CHECK:           %[[VAL_35:.*]] = VPU.NCE.ClusterTiling (%[[VAL_32]] as %[[VAL_36:.*]]: tensor<1x1x270x1920xf16, {mem_space = @CMX_NN, order = #NCHW}>) -> !VPU.DistributedTensor<1x1x128x512xf16, #NCHW, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
-    // CHECK:             %[[VAL_37:.*]] = VPU.Interpolate(%[[VAL_36]]) {attr = #IE.Interpolate<mode = <LINEAR>, shape_calc_mode = <SCALES>, coord_mode = <ALIGN_CORNERS>, nearest_mode = <ROUND_PREFER_FLOOR>, antialias = false, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], cube_coeff = -7.500000e-01 : f64>, axes_attr = [2, 3], initial_input_dims_attr = [1, 2, 540, 1920], initial_input_offset_attr = [0, 1, 270, 0], initial_output_dims_attr = [1, 2, 256, 512], initial_output_offset_attr = [0, 1, 128, 0], operandSegmentSizes = array<i32: 1, 0, 0, 0>, scales_attr = [0.47407407407407409, 0.26666666666666666], sizes_attr = [256, 512], tile_offset_attr = [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00]} : tensor<1x1x270x1920xf16, {mem_space = @CMX_NN, order = #NCHW}> -> tensor<1x1x128x512xf16, {mem_space = @CMX_NN, order = #NCHW}>
-    // CHECK:             VPU.Yield %[[VAL_37]]
-    // CHECK:           }
-    // CHECK:           %[[VAL_38:.*]] = VPU.NCE.ClusterTiling (%[[VAL_35]] as %[[VAL_39:.*]]: tensor<1x1x128x512xf16, {mem_space = @CMX_NN, order = #NCHW}>) -> tensor<1x1x128x512xf16> {
-    // CHECK:             %[[VAL_40:.*]] = VPU.Copy(%[[VAL_39]]) : tensor<1x1x128x512xf16, {mem_space = @CMX_NN, order = #NCHW}> -> tensor<1x1x128x512xf16>
-    // CHECK:             VPU.Yield %[[VAL_40]]
-    // CHECK:           }
-    // CHECK:           %[[VAL_41:.*]] = VPU.Concat(%[[VAL_8]], %[[VAL_18]], %[[VAL_28]], %[[VAL_38]]) {static_offsets = {{\[\[}}0, 0, 0, 0], [0, 0, 128, 0], [0, 1, 0, 0], [0, 1, 128, 0]]} : tensor<1x1x128x512xf16>, tensor<1x1x128x512xf16>, tensor<1x1x128x512xf16>, tensor<1x1x128x512xf16> -> tensor<1x2x256x512xf16>
-    // CHECK:           return %[[VAL_41]] : tensor<1x2x256x512xf16>
+// CHECK:   %[[VAL_1:.*]] = const.Declare tensor<1x1x1x340xf16> = dense<
+// CHECK:   %[[VAL_2:.*]] = const.Declare tensor<1x1x1x170xsi32> = dense<
+// CHECK:   %[[VAL_3:.*]] = const.Declare tensor<1x1x1x342xf16> = dense<
+// CHECK:   %[[VAL_4:.*]] = const.Declare tensor<1x1x1x171xsi32> = dense<
+// CHECK:   %[[VAL_5:.*]] = const.Declare tensor<1x1x1x342xf16> = dense<
+// CHECK:   %[[VAL_6:.*]] = const.Declare tensor<1x1x1x171xsi32> = dense<
+// CHECK:   %[[VAL_7:.*]] = VPU.Slice %[[VAL_0]] [0, 0, 0, 0] [1, 2, 540, 640] : tensor<1x2x540x1920xf16> to tensor<1x2x540x640xf16>
+// CHECK:   %[[VAL_8:.*]] = VPU.NCE.ClusterTiling (%[[VAL_7]] as %[[VAL_9:.*]]: tensor<1x2x540x640xf16>) -> !VPU.DistributedTensor<1x2x540x640xf16, #NCHW, @CMX_NN, {mode = "OVERLAPPED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64, compute_shapes = {{\[\[}}1, 2, 270, 640], [1, 2, 270, 640]], compute_offsets = {{\[\[}}0, 0, 0, 0], [0, 0, 270, 0]], memory_shapes = {{\[\[}}1, 2, 270, 640], [1, 2, 270, 640]], memory_offsets = {{\[\[}}0, 0, 0, 0], [0, 0, 270, 0]]}> {
+// CHECK:     %[[VAL_10:.*]] = VPU.Copy(%[[VAL_9]]) {out_mem_space = @CMX_NN} : tensor<1x2x540x640xf16> -> tensor<1x2x540x640xf16, {mem_space = @CMX_NN, order = #NCHW}>
+// CHECK:     VPU.Yield %[[VAL_10]]
+// CHECK:   }
+// CHECK:   %[[VAL_11:.*]] = VPU.NCE.ClusterTiling (%[[VAL_6]] as %[[VAL_12:.*]]: tensor<1x1x1x171xsi32>) -> !VPU.DistributedTensor<1x1x1x171xsi32, #NCHW, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}> {
+// CHECK:     %[[VAL_13:.*]] = VPU.Copy(%[[VAL_12]]) {out_mem_space = @CMX_NN} : tensor<1x1x1x171xsi32> -> tensor<1x1x1x171xsi32, {mem_space = @CMX_NN, order = #NCHW}>
+// CHECK:     VPU.Yield %[[VAL_13]]
+// CHECK:   }
+// CHECK:   %[[VAL_14:.*]] = VPU.NCE.ClusterTiling (%[[VAL_5]] as %[[VAL_15:.*]]: tensor<1x1x1x342xf16>) -> !VPU.DistributedTensor<1x1x1x342xf16, #NCHW, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}> {
+// CHECK:     %[[VAL_16:.*]] = VPU.Copy(%[[VAL_15]]) {out_mem_space = @CMX_NN} : tensor<1x1x1x342xf16> -> tensor<1x1x1x342xf16, {mem_space = @CMX_NN, order = #NCHW}>
+// CHECK:     VPU.Yield %[[VAL_16]]
+// CHECK:   }
+// CHECK:   %[[VAL_17:.*]] = VPU.NCE.ClusterTiling (%[[VAL_8]] as %[[VAL_18:.*]]: tensor<1x2x540x640xf16, {mem_space = @CMX_NN, order = #NCHW}>, %[[VAL_11]] as %[[VAL_19:.*]]: tensor<1x1x1x171xsi32, {mem_space = @CMX_NN, order = #NCHW}>, %[[VAL_14]] as %[[VAL_20:.*]]: tensor<1x1x1x342xf16, {mem_space = @CMX_NN, order = #NCHW}>) -> !VPU.DistributedTensor<1x2x256x171xf16, #NCHW, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
+// CHECK:     %[[VAL_21:.*]] = VPU.Interpolate(%[[VAL_18]], %[[VAL_19]], %[[VAL_20]]) {attr = #IE.Interpolate<mode = <LINEAR>, shape_calc_mode = <SCALES>, coord_mode = <ALIGN_CORNERS>, nearest_mode = <ROUND_PREFER_FLOOR>, antialias = false, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], cube_coeff = -7.500000e-01 : f64>, axes_attr = [2, 3], initial_input_dims_attr = [1, 2, 540, 1920], initial_input_offset_attr = [0, 0, 0, 0], initial_output_dims_attr = [1, 2, 256, 512], initial_output_offset_attr = [0, 0, 0, 0], operandSegmentSizes = array<i32: 1, 0, 0, 0, 1, 1>, scales_attr = [0.47407407407407409, 0.26718750000000002], sizes_attr = [256, 512], tile_offset_attr = [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00]} : tensor<1x2x540x640xf16, {mem_space = @CMX_NN, order = #NCHW}>, tensor<1x1x1x171xsi32, {mem_space = @CMX_NN, order = #NCHW}>, tensor<1x1x1x342xf16, {mem_space = @CMX_NN, order = #NCHW}> -> tensor<1x2x256x171xf16, {mem_space = @CMX_NN, order = #NCHW}>
+// CHECK:     VPU.Yield %[[VAL_21]]
+// CHECK:   }
+// CHECK:   %[[VAL_22:.*]] = VPU.NCE.ClusterTiling (%[[VAL_17]] as %[[VAL_23:.*]]: tensor<1x2x256x171xf16, {mem_space = @CMX_NN, order = #NCHW}>) -> tensor<1x2x256x171xf16> {
+// CHECK:     %[[VAL_24:.*]] = VPU.Copy(%[[VAL_23]]) : tensor<1x2x256x171xf16, {mem_space = @CMX_NN, order = #NCHW}> -> tensor<1x2x256x171xf16>
+// CHECK:     VPU.Yield %[[VAL_24]]
+// CHECK:   }
+// CHECK:   %[[VAL_25:.*]] = VPU.Slice %[[VAL_0]] [0, 0, 0, 642] [1, 2, 540, 640] : tensor<1x2x540x1920xf16> to tensor<1x2x540x640xf16>
+// CHECK:   %[[VAL_26:.*]] = VPU.NCE.ClusterTiling (%[[VAL_25]] as %[[VAL_27:.*]]: tensor<1x2x540x640xf16>) -> !VPU.DistributedTensor<1x2x540x640xf16, #NCHW, @CMX_NN, {mode = "OVERLAPPED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64, compute_shapes = {{\[\[}}1, 2, 270, 640], [1, 2, 270, 640]], compute_offsets = {{\[\[}}0, 0, 0, 0], [0, 0, 270, 0]], memory_shapes = {{\[\[}}1, 2, 270, 640], [1, 2, 270, 640]], memory_offsets = {{\[\[}}0, 0, 0, 0], [0, 0, 270, 0]]}> {
+// CHECK:     %[[VAL_28:.*]] = VPU.Copy(%[[VAL_27]]) {out_mem_space = @CMX_NN} : tensor<1x2x540x640xf16> -> tensor<1x2x540x640xf16, {mem_space = @CMX_NN, order = #NCHW}>
+// CHECK:     VPU.Yield %[[VAL_28]]
+// CHECK:   }
+// CHECK:   %[[VAL_29:.*]] = VPU.NCE.ClusterTiling (%[[VAL_4]] as %[[VAL_30:.*]]: tensor<1x1x1x171xsi32>) -> !VPU.DistributedTensor<1x1x1x171xsi32, #NCHW, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}> {
+// CHECK:     %[[VAL_31:.*]] = VPU.Copy(%[[VAL_30]]) {out_mem_space = @CMX_NN} : tensor<1x1x1x171xsi32> -> tensor<1x1x1x171xsi32, {mem_space = @CMX_NN, order = #NCHW}>
+// CHECK:     VPU.Yield %[[VAL_31]]
+// CHECK:   }
+// CHECK:   %[[VAL_32:.*]] = VPU.NCE.ClusterTiling (%[[VAL_3]] as %[[VAL_33:.*]]: tensor<1x1x1x342xf16>) -> !VPU.DistributedTensor<1x1x1x342xf16, #NCHW, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}> {
+// CHECK:     %[[VAL_34:.*]] = VPU.Copy(%[[VAL_33]]) {out_mem_space = @CMX_NN} : tensor<1x1x1x342xf16> -> tensor<1x1x1x342xf16, {mem_space = @CMX_NN, order = #NCHW}>
+// CHECK:     VPU.Yield %[[VAL_34]]
+// CHECK:   }
+// CHECK:   %[[VAL_35:.*]] = VPU.NCE.ClusterTiling (%[[VAL_26]] as %[[VAL_36:.*]]: tensor<1x2x540x640xf16, {mem_space = @CMX_NN, order = #NCHW}>, %[[VAL_29]] as %[[VAL_37:.*]]: tensor<1x1x1x171xsi32, {mem_space = @CMX_NN, order = #NCHW}>, %[[VAL_32]] as %[[VAL_38:.*]]: tensor<1x1x1x342xf16, {mem_space = @CMX_NN, order = #NCHW}>) -> !VPU.DistributedTensor<1x2x256x171xf16, #NCHW, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
+// CHECK:     %[[VAL_39:.*]] = VPU.Interpolate(%[[VAL_36]], %[[VAL_37]], %[[VAL_38]]) {attr = #IE.Interpolate<mode = <LINEAR>, shape_calc_mode = <SCALES>, coord_mode = <ALIGN_CORNERS>, nearest_mode = <ROUND_PREFER_FLOOR>, antialias = false, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], cube_coeff = -7.500000e-01 : f64>, axes_attr = [2, 3], initial_input_dims_attr = [1, 2, 540, 1920], initial_input_offset_attr = [0, 0, 0, 642], initial_output_dims_attr = [1, 2, 256, 512], initial_output_offset_attr = [0, 0, 0, 171], operandSegmentSizes = array<i32: 1, 0, 0, 0, 1, 1>, scales_attr = [0.47407407407407409, 0.26718750000000002], sizes_attr = [256, 512], tile_offset_attr = [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00]} : tensor<1x2x540x640xf16, {mem_space = @CMX_NN, order = #NCHW}>, tensor<1x1x1x171xsi32, {mem_space = @CMX_NN, order = #NCHW}>, tensor<1x1x1x342xf16, {mem_space = @CMX_NN, order = #NCHW}> -> tensor<1x2x256x171xf16, {mem_space = @CMX_NN, order = #NCHW}>
+// CHECK:     VPU.Yield %[[VAL_39]]
+// CHECK:   }
+// CHECK:   %[[VAL_40:.*]] = VPU.NCE.ClusterTiling (%[[VAL_35]] as %[[VAL_41:.*]]: tensor<1x2x256x171xf16, {mem_space = @CMX_NN, order = #NCHW}>) -> tensor<1x2x256x171xf16> {
+// CHECK:     %[[VAL_42:.*]] = VPU.Copy(%[[VAL_41]]) : tensor<1x2x256x171xf16, {mem_space = @CMX_NN, order = #NCHW}> -> tensor<1x2x256x171xf16>
+// CHECK:     VPU.Yield %[[VAL_42]]
+// CHECK:   }
+// CHECK:   %[[VAL_43:.*]] = VPU.Slice %[[VAL_0]] [0, 0, 0, 1284] [1, 2, 540, 636] : tensor<1x2x540x1920xf16> to tensor<1x2x540x636xf16>
+// CHECK:   %[[VAL_44:.*]] = VPU.NCE.ClusterTiling (%[[VAL_43]] as %[[VAL_45:.*]]: tensor<1x2x540x636xf16>) -> !VPU.DistributedTensor<1x2x540x636xf16, #NCHW, @CMX_NN, {mode = "OVERLAPPED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64, compute_shapes = {{\[\[}}1, 2, 270, 636], [1, 2, 270, 636]], compute_offsets = {{\[\[}}0, 0, 0, 0], [0, 0, 270, 0]], memory_shapes = {{\[\[}}1, 2, 270, 636], [1, 2, 270, 636]], memory_offsets = {{\[\[}}0, 0, 0, 0], [0, 0, 270, 0]]}> {
+// CHECK:     %[[VAL_46:.*]] = VPU.Copy(%[[VAL_45]]) {out_mem_space = @CMX_NN} : tensor<1x2x540x636xf16> -> tensor<1x2x540x636xf16, {mem_space = @CMX_NN, order = #NCHW}>
+// CHECK:     VPU.Yield %[[VAL_46]]
+// CHECK:   }
+// CHECK:   %[[VAL_47:.*]] = VPU.NCE.ClusterTiling (%[[VAL_2]] as %[[VAL_48:.*]]: tensor<1x1x1x170xsi32>) -> !VPU.DistributedTensor<1x1x1x170xsi32, #NCHW, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}> {
+// CHECK:     %[[VAL_49:.*]] = VPU.Copy(%[[VAL_48]]) {out_mem_space = @CMX_NN} : tensor<1x1x1x170xsi32> -> tensor<1x1x1x170xsi32, {mem_space = @CMX_NN, order = #NCHW}>
+// CHECK:     VPU.Yield %[[VAL_49]]
+// CHECK:   }
+// CHECK:   %[[VAL_50:.*]] = VPU.NCE.ClusterTiling (%[[VAL_1]] as %[[VAL_51:.*]]: tensor<1x1x1x340xf16>) -> !VPU.DistributedTensor<1x1x1x340xf16, #NCHW, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}> {
+// CHECK:     %[[VAL_52:.*]] = VPU.Copy(%[[VAL_51]]) {out_mem_space = @CMX_NN} : tensor<1x1x1x340xf16> -> tensor<1x1x1x340xf16, {mem_space = @CMX_NN, order = #NCHW}>
+// CHECK:     VPU.Yield %[[VAL_52]]
+// CHECK:   }
+// CHECK:   %[[VAL_53:.*]] = VPU.NCE.ClusterTiling (%[[VAL_44]] as %[[VAL_54:.*]]: tensor<1x2x540x636xf16, {mem_space = @CMX_NN, order = #NCHW}>, %[[VAL_47]] as %[[VAL_55:.*]]: tensor<1x1x1x170xsi32, {mem_space = @CMX_NN, order = #NCHW}>, %[[VAL_50]] as %[[VAL_56:.*]]: tensor<1x1x1x340xf16, {mem_space = @CMX_NN, order = #NCHW}>) -> !VPU.DistributedTensor<1x2x256x170xf16, #NCHW, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
+// CHECK:     %[[VAL_57:.*]] = VPU.Interpolate(%[[VAL_54]], %[[VAL_55]], %[[VAL_56]]) {attr = #IE.Interpolate<mode = <LINEAR>, shape_calc_mode = <SCALES>, coord_mode = <ALIGN_CORNERS>, nearest_mode = <ROUND_PREFER_FLOOR>, antialias = false, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], cube_coeff = -7.500000e-01 : f64>, axes_attr = [2, 3], initial_input_dims_attr = [1, 2, 540, 1920], initial_input_offset_attr = [0, 0, 0, 1284], initial_output_dims_attr = [1, 2, 256, 512], initial_output_offset_attr = [0, 0, 0, 342], operandSegmentSizes = array<i32: 1, 0, 0, 0, 1, 1>, scales_attr = [0.47407407407407409, 0.26729559748427673], sizes_attr = [256, 512], tile_offset_attr = [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00]} : tensor<1x2x540x636xf16, {mem_space = @CMX_NN, order = #NCHW}>, tensor<1x1x1x170xsi32, {mem_space = @CMX_NN, order = #NCHW}>, tensor<1x1x1x340xf16, {mem_space = @CMX_NN, order = #NCHW}> -> tensor<1x2x256x170xf16, {mem_space = @CMX_NN, order = #NCHW}>
+// CHECK:     VPU.Yield %[[VAL_57]]
+// CHECK:   }
+// CHECK:   %[[VAL_58:.*]] = VPU.NCE.ClusterTiling (%[[VAL_53]] as %[[VAL_59:.*]]: tensor<1x2x256x170xf16, {mem_space = @CMX_NN, order = #NCHW}>) -> tensor<1x2x256x170xf16> {
+// CHECK:     %[[VAL_60:.*]] = VPU.Copy(%[[VAL_59]]) : tensor<1x2x256x170xf16, {mem_space = @CMX_NN, order = #NCHW}> -> tensor<1x2x256x170xf16>
+// CHECK:     VPU.Yield %[[VAL_60]]
+// CHECK:   }
+// CHECK:   %[[VAL_61:.*]] = VPU.Concat(%[[VAL_22]], %[[VAL_40]], %[[VAL_58]]) {static_offsets = {{\[\[}}0, 0, 0, 0], [0, 0, 0, 171], [0, 0, 0, 342]]} : tensor<1x2x256x171xf16>, tensor<1x2x256x171xf16>, tensor<1x2x256x170xf16> -> tensor<1x2x256x512xf16>
+// CHECK:   return %[[VAL_61]] : tensor<1x2x256x512xf16>
 }
 
 // -----

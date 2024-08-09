@@ -129,7 +129,7 @@ def VPUASM_DeclareTaskBufferOp :
         VPUASM_Memory<"DeclareTaskBuffer",
             [
                 DeclareOpInterfaceMethods<ELF_BinaryOpInterface, ["serialize", "getBinarySize"]>,
-                DeclareOpInterfaceMethods<ELF_WrappableOpInterface>,
+                DeclareOpInterfaceMethods<ELF_WrappableOpInterface, ["getMemoryOffset", "setMemoryOffset"]>,
                 VPUASM_IndexedTaskInterface
             ]
         > {
@@ -139,7 +139,8 @@ def VPUASM_DeclareTaskBufferOp :
     let arguments = (ins
         SymbolNameAttr:$sym_name,
         VPUASM_IndexTypeAttr:$task_index,
-        VPURegMapped_TaskTypeAttr:$task_type
+        VPURegMapped_TaskTypeAttr:$task_type,
+        OptionalAttr<UI64Attr>:$offset
     );
 
     let assemblyFormat = [{
@@ -580,6 +581,7 @@ def VPUASM_NNDMAOp :
         UnitAttr:$is_critical,
         UnitAttr:$enable_msc,
         OptionalAttr<SymbolRefAttr>:$act_compression_size_entry,
+        OptionalAttr<SymbolRefAttr>:$act_compression_sparsity_map,
         VPUIP_DMADescriptorAttr:$dma_descriptor,
         OptionalAttr<IntAttr>:$dma_hwp_id,
         OptionalAttr<I64ArrayAttr>:$tile_indexes,
@@ -612,6 +614,7 @@ def VPUASM_NNDMAOp :
         `descriptor` `(` $dma_descriptor `)`
         `acceleration_mode` `(` $acceleration_mode `)`
         (`act_compression_size_entry` `(` $act_compression_size_entry^ `)`)?
+        (`act_compression_sparsity_map` `(` $act_compression_sparsity_map^ `)`)?
         (`is_out_of_order` `(` $is_out_of_order^ `)`)?
         (`is_critical` `(` $is_critical^ `)`)?
         (`tile_indexes` `(` $tile_indexes^ `)`)?

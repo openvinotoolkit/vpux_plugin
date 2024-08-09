@@ -8,7 +8,9 @@
 
 #include <mlir/IR/SymbolTable.h>
 
-void vpux::ELF::SymbolOp::serialize(elf::writer::Symbol* symbol, vpux::ELF::SectionMapType& sectionMap) {
+using namespace vpux;
+
+void ELF::SymbolOp::serialize(elf::writer::Symbol* symbol, ELF::SectionMapType& sectionMap) {
     auto symName = getSymName();
     auto symType = getType();
     auto symSize = getSize();
@@ -40,4 +42,9 @@ void vpux::ELF::SymbolOp::serialize(elf::writer::Symbol* symbol, vpux::ELF::Sect
     auto sectionEntry = sectionMapEntry->second;
 
     symbol->setRelatedSection(sectionEntry);
+}
+
+void ELF::SymbolOp::build(mlir::OpBuilder& odsBuilder, ::mlir::OperationState& odsState,
+                          ELF::SymbolSignature& signature) {
+    build(odsBuilder, odsState, signature.name, signature.reference, signature.type, signature.size, signature.value);
 }

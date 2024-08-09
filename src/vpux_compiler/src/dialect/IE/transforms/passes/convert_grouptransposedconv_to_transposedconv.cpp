@@ -8,6 +8,7 @@
 #include "vpux/compiler/core/layers.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/utils/conv_utils.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/IE/transposed_convolution_utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
@@ -203,9 +204,7 @@ mlir::Value DepthwiseGroupTransposedConvConverter::createNewWeightsConst(mlir::P
 
     const auto baseType =
             mlir::RankedTensorType::get(newWeightsShape.raw(), mlir::Float16Type::get(weightsOp.getContext()));
-    const auto baseAttr = mlir::DenseElementsAttr::get(baseType, ArrayRef(newValues));
-    const auto contentAttr = Const::ContentAttr::get(baseAttr);
-    return rewriter.create<Const::DeclareOp>(weightsOp.getLoc(), baseType, contentAttr);
+    return Const::createConst(rewriter, weightsOp.getLoc(), baseType, ArrayRef(newValues));
 }
 
 // Converts IE.GroupTransposedConvolution to IE.TransposedConvolution for depthwise cases.

@@ -23,6 +23,8 @@ namespace {
 
 // TODO: needs find suitable implict reshape value. Ticket: E#78751
 constexpr int64_t CONVOLUTION_INPUT_SHAPE_ALIGNMENT = 4;
+// TODO: needs find suitable input shape size threshold value. Ticket: E#124225
+constexpr int64_t THRESHOLD_FOR_BENEFICIAL_CONVERSION = 2048;
 
 //
 // ReshapeSingleConstDWConvInput
@@ -200,6 +202,18 @@ mlir::LogicalResult ReshapeConvInput<ConcreteOp>::matchAndRewrite(ConcreteOp con
                                                                |
                                                           AffineReshape
                                                           [1, OC, H, 1]
+
+            input          filter                    input               filter
+        [1, C, 1, W]     [OC, C, 1, 1]            [1, C, 1, W]        [OC, C, 1, 1]
+              \             /                =>        |                   |
+                   Conv                            AffineReshape           |
+               [1, OC, 1, W]                     [1, C, 4, W/4]            |
+                                                       \                  /
+                                                              Conv
+                                                        [1, OC, 4, W/4]
+                                                               |
+                                                          AffineReshape
+                                                          [1, OC, 1, W]
     */
     auto ctx = convOp->getContext();
     const auto inputShape = getShape(convOp.getInput());
@@ -210,8 +224,8 @@ mlir::LogicalResult ReshapeConvInput<ConcreteOp>::matchAndRewrite(ConcreteOp con
         return mlir::failure();
     }
 
-    // check suitable 1x1 convolution with input width = 1, strides = [1, 1]
-    if (inputShape[Dims4D::Act::W] != 1 || filterShape[Dims4D::Filter::KX] != 1 ||
+    // check suitable 1x1 convolution with input width/height = 1 , strides = [1, 1]
+    if ((inputShape[Dims4D::Act::W] != 1 && inputShape[Dims4D::Act::H] != 1) || filterShape[Dims4D::Filter::KX] != 1 ||
         filterShape[Dims4D::Filter::KY] != 1) {
         return mlir::failure();
     }
@@ -224,10 +238,20 @@ mlir::LogicalResult ReshapeConvInput<ConcreteOp>::matchAndRewrite(ConcreteOp con
         return mlir::failure();
     }
 
+    auto alignOnH = inputShape[Dims4D::Act::H] == 1 &&
+                    inputShape[Dims4D::Act::W] != CONVOLUTION_INPUT_SHAPE_ALIGNMENT &&
+                    inputShape.totalSize() > THRESHOLD_FOR_BENEFICIAL_CONVERSION;
     int64_t convolutionInputShapeAlignment = CONVOLUTION_INPUT_SHAPE_ALIGNMENT;
+    auto inputShapeToAlign = alignOnH ? inputShape[Dims4D::Act::W] : inputShape[Dims4D::Act::H];
+
+    // if the input height/width is small, reshape input is not beneficial. e.g. shape [1, 320, 4, 1]
+    if (inputShapeToAlign <= CONVOLUTION_INPUT_SHAPE_ALIGNMENT ||
+        inputShapeToAlign / CONVOLUTION_INPUT_SHAPE_ALIGNMENT < 2) {
+        return mlir::failure();
+    }
     // Find another factor if input height is not divisible by 4
-    if (inputShape[Dims4D::Act::H] % CONVOLUTION_INPUT_SHAPE_ALIGNMENT != 0) {
-        int64_t val = inputShape[Dims4D::Act::H];
+    if (inputShapeToAlign % CONVOLUTION_INPUT_SHAPE_ALIGNMENT != 0) {
+        int64_t val = inputShapeToAlign;
         int64_t factor = sqrt(val);
         for (; factor > 1; factor--) {
             if (val % factor == 0) {
@@ -240,17 +264,23 @@ mlir::LogicalResult ReshapeConvInput<ConcreteOp>::matchAndRewrite(ConcreteOp con
             return mlir::failure();
         }
     }
-
     _log.trace("Adjust input shape for convolution at '{0}'", convOp->getLoc());
-    const SmallVector<int64_t> newInShape = {inputShape[Dims4D::Act::N], inputShape[Dims4D::Act::C],
-                                             inputShape[Dims4D::Act::H] / convolutionInputShapeAlignment,
-                                             convolutionInputShapeAlignment};
+    const SmallVector<int64_t> newInShape = {
+            inputShape[Dims4D::Act::N], inputShape[Dims4D::Act::C],
+            alignOnH ? convolutionInputShapeAlignment : inputShape[Dims4D::Act::H] / convolutionInputShapeAlignment,
+            alignOnH ? inputShape[Dims4D::Act::W] / convolutionInputShapeAlignment : convolutionInputShapeAlignment};
 
     const auto inputShapeAttr = getIntArrayAttr(convOp->getContext(), newInShape);
-    SmallVector<SmallVector<int64_t>> inDimMapping{{Dims4D::Act::N.ind()},
-                                                   {Dims4D::Act::C.ind()},
-                                                   {Dims4D::Act::H.ind(), Dims4D::Act::W.ind()},
-                                                   {Dims4D::Act::W.ind()}};
+
+    SmallVector<SmallVector<int64_t>> inDimMappingOnW{{Dims4D::Act::N.ind()},
+                                                      {Dims4D::Act::C.ind()},
+                                                      {Dims4D::Act::H.ind(), Dims4D ::Act::W.ind()},
+                                                      {Dims4D::Act::W.ind()}};
+    SmallVector<SmallVector<int64_t>> inDimMappingOnH{{Dims4D::Act::N.ind()},
+                                                      {Dims4D::Act::C.ind()},
+                                                      {Dims4D::Act::H.ind()},
+                                                      {Dims4D::Act::H.ind(), Dims4D::Act::W.ind()}};
+    auto inDimMapping = alignOnH ? inDimMappingOnH : inDimMappingOnW;
     auto newInput = rewriter.create<IE::AffineReshapeOp>(convOp->getLoc(), convOp.getInput(),
                                                          getIntArrayOfArray(ctx, inDimMapping), inputShapeAttr);
     mlir::IRMapping mapper;
@@ -258,9 +288,12 @@ mlir::LogicalResult ReshapeConvInput<ConcreteOp>::matchAndRewrite(ConcreteOp con
     auto newConvOp = mlir::dyn_cast<ConcreteOp>(rewriter.clone(*convOp, mapper));
 
     auto outputShape = getShape(convOp.getOutput());
-    auto newOutputShape = Shape(SmallVector<int64_t>{outputShape[Dims4D::Act::N], outputShape[Dims4D::Act::C],
-                                                     outputShape[Dims4D::Act::H] / convolutionInputShapeAlignment,
-                                                     outputShape[Dims4D::Act::W] * convolutionInputShapeAlignment});
+    auto newOutputShape =
+            Shape(SmallVector<int64_t>{outputShape[Dims4D::Act::N], outputShape[Dims4D::Act::C],
+                                       alignOnH ? outputShape[Dims4D::Act::H] * convolutionInputShapeAlignment
+                                                : outputShape[Dims4D::Act::H] / convolutionInputShapeAlignment,
+                                       alignOnH ? outputShape[Dims4D::Act::W] / convolutionInputShapeAlignment
+                                                : outputShape[Dims4D::Act::W] * convolutionInputShapeAlignment});
 
     auto newOutputType = newConvOp.getOutput().getType().template cast<vpux::NDTypeInterface>();
     newOutputType = newOutputType.changeShape(newOutputShape);
@@ -268,10 +301,15 @@ mlir::LogicalResult ReshapeConvInput<ConcreteOp>::matchAndRewrite(ConcreteOp con
     const auto outShape = getShape(convOp.getOutput()).raw();
     const auto outShapeAttr = getIntArrayAttr(ctx, outShape);
 
-    SmallVector<SmallVector<int64_t>> outDimMapping{{Dims4D::Act::N.ind()},
-                                                    {Dims4D::Act::C.ind()},
-                                                    {Dims4D::Act::H.ind()},
-                                                    {Dims4D::Act::H.ind(), Dims4D::Act::W.ind()}};
+    SmallVector<SmallVector<int64_t>> outDimMappingOnW{{Dims4D::Act::N.ind()},
+                                                       {Dims4D::Act::C.ind()},
+                                                       {Dims4D::Act::H.ind()},
+                                                       {Dims4D::Act::H.ind(), Dims4D::Act::W.ind()}};
+    SmallVector<SmallVector<int64_t>> outDimMappingOnH{{Dims4D::Act::N.ind()},
+                                                       {Dims4D::Act::C.ind()},
+                                                       {Dims4D::Act::H.ind(), Dims4D::Act::W.ind()},
+                                                       {Dims4D::Act::W.ind()}};
+    auto outDimMapping = alignOnH ? outDimMappingOnH : outDimMappingOnW;
     rewriter.replaceOpWithNewOp<IE::AffineReshapeOp>(convOp, newConvOp.getOutput(),
                                                      getIntArrayOfArray(ctx, outDimMapping), outShapeAttr);
 

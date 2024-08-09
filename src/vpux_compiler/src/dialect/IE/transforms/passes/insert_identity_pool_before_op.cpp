@@ -11,12 +11,24 @@ using namespace vpux;
 
 bool vpux::IE::isEligiblePostOp(mlir::Operation* op, Logger log) {
     auto postOpInterface = op->getOperand(0).getDefiningOp<IE::LayerWithPostOpInterface>();
-    if (postOpInterface != nullptr && !postOpInterface.getPostOp().has_value() &&
-        postOpInterface->getResult(0).hasOneUse()) {
-        log.trace("A PostOp at {0} has already got a suitable producer", op->getLoc());
-        return false;
+    if (postOpInterface == nullptr || postOpInterface.getPostOp().has_value() ||
+        !postOpInterface->getResult(0).hasOneUse()) {
+        return true;
     }
-    return true;
+
+    const auto inElemType = postOpInterface->getOperand(0).getType().cast<vpux::NDTypeInterface>().getElementType();
+    const auto outElemType = postOpInterface->getResult(0).getType().cast<vpux::NDTypeInterface>().getElementType();
+    // Because of the convert to float, the prelu shift will be bypassed. Check PPE diagram
+    if (inElemType.isa<mlir::quant::QuantizedType>() && !outElemType.isa<mlir::quant::QuantizedType>() &&
+        mlir::isa<IE::PReluOp, IE::LeakyReluOp>(op)) {
+        log.trace("A PRelu or LeakyRely at {0} has mixed precision producer, and because of this the prelu shift will "
+                  "be skiped",
+                  op->getLoc());
+        return true;
+    }
+
+    log.trace("A PostOp at {0} has already got a suitable producer", op->getLoc());
+    return false;
 }
 
 mlir::LogicalResult vpux::IE::genericIdInserter(mlir::Operation* concreteOp, const InsertIdFunctor& insertId,

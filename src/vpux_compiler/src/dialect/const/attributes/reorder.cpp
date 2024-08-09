@@ -72,6 +72,10 @@ vpux::NDTypeInterface vpux::Const::ReorderAttr::inferOutputType(vpux::NDTypeInte
     return input.changeDimsOrder(order);
 }
 
+bool vpux::Const::ReorderAttr::inferOutputSplat(bool inputIsSplat, vpux::NDTypeInterface) {
+    return inputIsSplat;
+}
+
 static SmallVector<uint32_t> computeOrder(const DimsOrder inOrder, const DimsOrder outOrder) {
     auto inPerm = inOrder.toPermutation();
     auto outPerm = outOrder.toPermutation();

@@ -17,11 +17,11 @@ mlir::LogicalResult vpux::IE::QuantizeCastOp::verify() {
 
 mlir::LogicalResult vpux::IE::QuantizeCastOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::QuantizeCastOpAdaptor quantizeCast(operands, attrs);
+    IE::QuantizeCastOpAdaptor quantizeCast(operands, attrs, prop);
     if (mlir::failed(quantizeCast.verify(loc))) {
         return mlir::failure();
     }

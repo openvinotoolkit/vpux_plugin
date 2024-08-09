@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include "vpux_driver_compiler.h"
+#include "npu_driver_compiler.h"
 
 #include <gtest/gtest.h>
 #include <fstream>

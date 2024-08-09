@@ -6,6 +6,7 @@
 #include "vpux/compiler/dialect/IE/transforms/passes/map_bilinear_interpolate_on_DPU.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/utils/core/numeric.hpp"
 
@@ -31,9 +32,9 @@ mlir::Value alignInputChannels(mlir::PatternRewriter& rewriter, mlir::Location l
 
 // Generates the weights for GroupConvolution tasks by
 // duplicating the fraction coefficients to the number of input/output channels
-Const::DeclareOp createGroupConvWeightsForBilinearInterp(mlir::PatternRewriter& rewriter, mlir::Location loc,
-                                                         mlir::Value input, std::vector<double>& bilinearCoeffs,
-                                                         size_t index, ShapeRef weightShape, int64_t outputSize) {
+mlir::Value createGroupConvWeightsForBilinearInterp(mlir::PatternRewriter& rewriter, mlir::Location loc,
+                                                    mlir::Value input, std::vector<double>& bilinearCoeffs,
+                                                    size_t index, ShapeRef weightShape, int64_t outputSize) {
     // OC is equal with IC
     auto inputC = weightShape[Dims4D::Filter::OC];
     std::vector<vpux::type::float16> duplicatedWeights(inputC * 2);
@@ -42,10 +43,8 @@ Const::DeclareOp createGroupConvWeightsForBilinearInterp(mlir::PatternRewriter& 
         duplicatedWeights[2 * i + 1] = static_cast<vpux::type::float16>(bilinearCoeffs[outputSize + index]);
     }
     const auto elemType = input.getType().cast<vpux::NDTypeInterface>().getElementType();
-    const auto weightsStorageType = mlir::RankedTensorType::get(to_small_vector(weightShape), elemType);
-    const auto weightsAttr = mlir::DenseElementsAttr::get(weightsStorageType, ArrayRef(duplicatedWeights));
-    const auto weightsContentAttr = Const::ContentAttr::get(weightsAttr);
-    return rewriter.create<Const::DeclareOp>(loc, weightsStorageType, weightsContentAttr);
+    const auto weightsStorageType = mlir::RankedTensorType::get(weightShape.raw(), elemType);
+    return Const::createConst(rewriter, loc, weightsStorageType, ArrayRef(duplicatedWeights));
 }
 
 // Create the GroupConvolution operations that does the vertical and horizontal scaling
@@ -59,9 +58,8 @@ mlir::Value createGenericGroupConv(mlir::PatternRewriter& rewriter, mlir::Locati
     auto padEndAttr = getIntArrayAttr(rewriter, SmallVector<int32_t>{0, 0});
     auto groupAttr = getIntAttr(rewriter, inShape[Dims4D::Act::C]);
 
-    auto groupConvFilter = createGroupConvWeightsForBilinearInterp(rewriter, loc, input, bilinearCoeffs, index,
-                                                                   weightShape, outputSize);
-    auto weights = groupConvFilter.getOutput();
+    auto weights = createGroupConvWeightsForBilinearInterp(rewriter, loc, input, bilinearCoeffs, index, weightShape,
+                                                           outputSize);
     auto groupConvOp = rewriter.create<IE::GroupConvolutionOp>(loc, input, weights, /*bias=*/nullptr, stridesAttr,
                                                                padBeginAttr, padEndAttr, dilationsAttr, groupAttr,
                                                                /*post_opAttr=*/nullptr, /*clampAttr*/ nullptr);
@@ -90,7 +88,7 @@ void computeCoefficientsAndIndexes(std::vector<double>& allFractionCoefficients,
 
 }  // namespace
 
-// Creates identity pooling operations which to ensure that all the inputs of the Concat operations that
+// Creates identify pooling operations which to ensure that all the inputs of the Concat operations that
 // compose the scaled results on each axis has only NCE inputs
 // This ensures that the compiler will map more optimal the generated operations on the available HW resources
 mlir::Value IE::MapBilinearInterpolateOnDPUBaseRewriter::createIdentityPooling(mlir::PatternRewriter& rewriter,
@@ -235,6 +233,7 @@ mlir::Value IE::MapBilinearInterpolateOnDPUBaseRewriter::scaleOnAxis(mlir::Patte
         }
     }
 
+    //
     // Final Concat of all operations that do the scale
     //
     auto outputConcatOp = rewriter.create<IE::ConcatOp>(loc, gatheredConcatInputs, axis);
@@ -243,7 +242,7 @@ mlir::Value IE::MapBilinearInterpolateOnDPUBaseRewriter::scaleOnAxis(mlir::Patte
 
 mlir::LogicalResult IE::MapBilinearInterpolateOnDPUBaseRewriter::matchAndRewrite(
         IE::InterpolateOp origOp, mlir::PatternRewriter& rewriter) const {
-    _log.trace("Got '{0}' at '{1}'", origOp->getName(), origOp->getLoc());
+    _log.trace("Got '{1}' at '{2}'", origOp->getName(), origOp->getLoc());
 
     const auto attrs = origOp.getAttr();
     const auto axesValue = parseIntArrayAttr<int64_t>(origOp.getAxesAttrAttr());

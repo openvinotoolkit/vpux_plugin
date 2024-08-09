@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --resolve-task-location %s | FileCheck %s
-// REQUIRES: arch-VPUX40XX
+// REQUIRES: arch-NPU40XX
 
 VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096]
 module @VPU.SW {
@@ -154,140 +154,144 @@ func.func @manyActShaveTasks() {
   %i64 = VPUMI40XX.ActKernelInvocation range_index(%r64 : <0:0:64>) kernel_params(%7 : <0:0:0>) tile(0) start_after(0) clean_after(0) -> !VPURegMapped.Index<0:0:64>
   %i65 = VPUMI40XX.ActKernelInvocation range_index(%r65 : <0:0:65>) kernel_params(%7 : <0:0:0>) tile(0) start_after(0) clean_after(0) -> !VPURegMapped.Index<0:0:65>
 
+  %mi = VPUMI40XX.MappedInference actKernelRanges(%r0 : !VPURegMapped.Index<0:0:0>) actKernelInvocations(%i0 : !VPURegMapped.Index<0:0:0>) dmaCount([[0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0]]) invariantCount([0, 0, 0, 0, 0, 0]) variantCount([0, 0, 0, 0, 0, 0]) actKernelRangesCount([66, 0, 0, 0, 0, 0]) actKernelInvocationsCount([66, 0, 0, 0, 0, 0]) mediaCount(0) barrierCount(0) -> !VPURegMapped.Index<0:0:0>
+
   return
 }
 
 //CHECK: func.func @manyActShaveTasks
 
-//CHECK-DAG: [[TBR0:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:0>
-//CHECK-DAG: [[TBR1:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:1>
-//CHECK-DAG: [[TBR2:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:2>
-//CHECK-DAG: [[TBR3:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:3>
-//CHECK-DAG: [[TBR4:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:4>
-//CHECK-DAG: [[TBR5:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:5>
-//CHECK-DAG: [[TBR6:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:6>
-//CHECK-DAG: [[TBR7:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:7>
-//CHECK-DAG: [[TBR8:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:8>
-//CHECK-DAG: [[TBR9:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:9>
-//CHECK-DAG: [[TBR10:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:10>
-//CHECK-DAG: [[TBR11:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:11>
-//CHECK-DAG: [[TBR12:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:12>
-//CHECK-DAG: [[TBR13:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:13>
-//CHECK-DAG: [[TBR14:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:14>
-//CHECK-DAG: [[TBR15:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:15>
-//CHECK-DAG: [[TBR16:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:16>
-//CHECK-DAG: [[TBR17:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:17>
-//CHECK-DAG: [[TBR18:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:18>
-//CHECK-DAG: [[TBR19:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:19>
-//CHECK-DAG: [[TBR20:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:20>
-//CHECK-DAG: [[TBR21:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:21>
-//CHECK-DAG: [[TBR22:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:22>
-//CHECK-DAG: [[TBR23:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:23>
-//CHECK-DAG: [[TBR24:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:24>
-//CHECK-DAG: [[TBR25:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:25>
-//CHECK-DAG: [[TBR26:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:26>
-//CHECK-DAG: [[TBR27:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:27>
-//CHECK-DAG: [[TBR28:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:28>
-//CHECK-DAG: [[TBR29:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:29>
-//CHECK-DAG: [[TBR30:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:30>
-//CHECK-DAG: [[TBR31:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:31>
-//CHECK-DAG: [[TBR32:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:32>
-//CHECK-DAG: [[TBR33:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:33>
-//CHECK-DAG: [[TBR34:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:34>
-//CHECK-DAG: [[TBR35:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:35>
-//CHECK-DAG: [[TBR36:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:36>
-//CHECK-DAG: [[TBR37:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:37>
-//CHECK-DAG: [[TBR38:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:38>
-//CHECK-DAG: [[TBR39:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:39>
-//CHECK-DAG: [[TBR40:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:40>
-//CHECK-DAG: [[TBR41:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:41>
-//CHECK-DAG: [[TBR42:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:42>
-//CHECK-DAG: [[TBR43:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:43>
-//CHECK-DAG: [[TBR44:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:44>
-//CHECK-DAG: [[TBR45:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:45>
-//CHECK-DAG: [[TBR46:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:46>
-//CHECK-DAG: [[TBR47:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:47>
-//CHECK-DAG: [[TBR48:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:48>
-//CHECK-DAG: [[TBR49:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:49>
-//CHECK-DAG: [[TBR50:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:50>
-//CHECK-DAG: [[TBR51:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:51>
-//CHECK-DAG: [[TBR52:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:52>
-//CHECK-DAG: [[TBR53:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:53>
-//CHECK-DAG: [[TBR54:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:54>
-//CHECK-DAG: [[TBR55:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:55>
-//CHECK-DAG: [[TBR56:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:56>
-//CHECK-DAG: [[TBR57:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:57>
-//CHECK-DAG: [[TBR58:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:58>
-//CHECK-DAG: [[TBR59:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:59>
-//CHECK-DAG: [[TBR60:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:60>
-//CHECK-DAG: [[TBR61:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:61>
-//CHECK-DAG: [[TBR62:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:62>
-//CHECK-DAG: [[TBR63:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelRange> -> !VPURegMapped.Index<0:0:63>
+//CHECK-DAG: [[TBR0:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:0>
+//CHECK-DAG: [[TBR1:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:1>
+//CHECK-DAG: [[TBR2:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:2>
+//CHECK-DAG: [[TBR3:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:3>
+//CHECK-DAG: [[TBR4:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:4>
+//CHECK-DAG: [[TBR5:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:5>
+//CHECK-DAG: [[TBR6:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:6>
+//CHECK-DAG: [[TBR7:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:7>
+//CHECK-DAG: [[TBR8:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:8>
+//CHECK-DAG: [[TBR9:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:9>
+//CHECK-DAG: [[TBR10:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:10>
+//CHECK-DAG: [[TBR11:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:11>
+//CHECK-DAG: [[TBR12:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:12>
+//CHECK-DAG: [[TBR13:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:13>
+//CHECK-DAG: [[TBR14:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:14>
+//CHECK-DAG: [[TBR15:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:15>
+//CHECK-DAG: [[TBR16:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:16>
+//CHECK-DAG: [[TBR17:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:17>
+//CHECK-DAG: [[TBR18:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:18>
+//CHECK-DAG: [[TBR19:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:19>
+//CHECK-DAG: [[TBR20:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:20>
+//CHECK-DAG: [[TBR21:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:21>
+//CHECK-DAG: [[TBR22:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:22>
+//CHECK-DAG: [[TBR23:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:23>
+//CHECK-DAG: [[TBR24:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:24>
+//CHECK-DAG: [[TBR25:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:25>
+//CHECK-DAG: [[TBR26:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:26>
+//CHECK-DAG: [[TBR27:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:27>
+//CHECK-DAG: [[TBR28:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:28>
+//CHECK-DAG: [[TBR29:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:29>
+//CHECK-DAG: [[TBR30:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:30>
+//CHECK-DAG: [[TBR31:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:31>
+//CHECK-DAG: [[TBR32:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:32>
+//CHECK-DAG: [[TBR33:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:33>
+//CHECK-DAG: [[TBR34:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:34>
+//CHECK-DAG: [[TBR35:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:35>
+//CHECK-DAG: [[TBR36:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:36>
+//CHECK-DAG: [[TBR37:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:37>
+//CHECK-DAG: [[TBR38:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:38>
+//CHECK-DAG: [[TBR39:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:39>
+//CHECK-DAG: [[TBR40:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:40>
+//CHECK-DAG: [[TBR41:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:41>
+//CHECK-DAG: [[TBR42:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:42>
+//CHECK-DAG: [[TBR43:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:43>
+//CHECK-DAG: [[TBR44:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:44>
+//CHECK-DAG: [[TBR45:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:45>
+//CHECK-DAG: [[TBR46:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:46>
+//CHECK-DAG: [[TBR47:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:47>
+//CHECK-DAG: [[TBR48:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:48>
+//CHECK-DAG: [[TBR49:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:49>
+//CHECK-DAG: [[TBR50:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:50>
+//CHECK-DAG: [[TBR51:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:51>
+//CHECK-DAG: [[TBR52:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:52>
+//CHECK-DAG: [[TBR53:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:53>
+//CHECK-DAG: [[TBR54:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:54>
+//CHECK-DAG: [[TBR55:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:55>
+//CHECK-DAG: [[TBR56:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:56>
+//CHECK-DAG: [[TBR57:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:57>
+//CHECK-DAG: [[TBR58:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:58>
+//CHECK-DAG: [[TBR59:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:59>
+//CHECK-DAG: [[TBR60:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:60>
+//CHECK-DAG: [[TBR61:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:61>
+//CHECK-DAG: [[TBR62:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:62>
+//CHECK-DAG: [[TBR63:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelRange> -> !VPURegMapped.Index<0:0:63>
 
-//CHECK-DAG: [[TBI0:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:0>
-//CHECK-DAG: [[TBI1:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:1>
-//CHECK-DAG: [[TBI2:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:2>
-//CHECK-DAG: [[TBI3:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:3>
-//CHECK-DAG: [[TBI4:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:4>
-//CHECK-DAG: [[TBI5:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:5>
-//CHECK-DAG: [[TBI6:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:6>
-//CHECK-DAG: [[TBI7:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:7>
-//CHECK-DAG: [[TBI8:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:8>
-//CHECK-DAG: [[TBI9:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:9>
-//CHECK-DAG: [[TBI10:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:10>
-//CHECK-DAG: [[TBI11:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:11>
-//CHECK-DAG: [[TBI12:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:12>
-//CHECK-DAG: [[TBI13:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:13>
-//CHECK-DAG: [[TBI14:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:14>
-//CHECK-DAG: [[TBI15:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:15>
-//CHECK-DAG: [[TBI16:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:16>
-//CHECK-DAG: [[TBI17:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:17>
-//CHECK-DAG: [[TBI18:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:18>
-//CHECK-DAG: [[TBI19:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:19>
-//CHECK-DAG: [[TBI20:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:20>
-//CHECK-DAG: [[TBI21:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:21>
-//CHECK-DAG: [[TBI22:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:22>
-//CHECK-DAG: [[TBI23:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:23>
-//CHECK-DAG: [[TBI24:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:24>
-//CHECK-DAG: [[TBI25:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:25>
-//CHECK-DAG: [[TBI26:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:26>
-//CHECK-DAG: [[TBI27:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:27>
-//CHECK-DAG: [[TBI28:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:28>
-//CHECK-DAG: [[TBI29:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:29>
-//CHECK-DAG: [[TBI30:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:30>
-//CHECK-DAG: [[TBI31:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:31>
-//CHECK-DAG: [[TBI32:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:32>
-//CHECK-DAG: [[TBI33:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:33>
-//CHECK-DAG: [[TBI34:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:34>
-//CHECK-DAG: [[TBI35:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:35>
-//CHECK-DAG: [[TBI36:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:36>
-//CHECK-DAG: [[TBI37:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:37>
-//CHECK-DAG: [[TBI38:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:38>
-//CHECK-DAG: [[TBI39:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:39>
-//CHECK-DAG: [[TBI40:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:40>
-//CHECK-DAG: [[TBI41:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:41>
-//CHECK-DAG: [[TBI42:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:42>
-//CHECK-DAG: [[TBI43:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:43>
-//CHECK-DAG: [[TBI44:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:44>
-//CHECK-DAG: [[TBI45:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:45>
-//CHECK-DAG: [[TBI46:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:46>
-//CHECK-DAG: [[TBI47:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:47>
-//CHECK-DAG: [[TBI48:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:48>
-//CHECK-DAG: [[TBI49:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:49>
-//CHECK-DAG: [[TBI50:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:50>
-//CHECK-DAG: [[TBI51:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:51>
-//CHECK-DAG: [[TBI52:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:52>
-//CHECK-DAG: [[TBI53:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:53>
-//CHECK-DAG: [[TBI54:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:54>
-//CHECK-DAG: [[TBI55:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:55>
-//CHECK-DAG: [[TBI56:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:56>
-//CHECK-DAG: [[TBI57:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:57>
-//CHECK-DAG: [[TBI58:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:58>
-//CHECK-DAG: [[TBI59:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:59>
-//CHECK-DAG: [[TBI60:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:60>
-//CHECK-DAG: [[TBI61:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:61>
-//CHECK-DAG: [[TBI62:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:62>
-//CHECK-DAG: [[TBI63:%.*]] = VPURegMapped.DeclareTaskBuffer <ActKernelInvocation> -> !VPURegMapped.Index<0:0:63>
+//CHECK-DAG: [[TBI0:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:0>
+//CHECK-DAG: [[TBI1:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:1>
+//CHECK-DAG: [[TBI2:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:2>
+//CHECK-DAG: [[TBI3:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:3>
+//CHECK-DAG: [[TBI4:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:4>
+//CHECK-DAG: [[TBI5:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:5>
+//CHECK-DAG: [[TBI6:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:6>
+//CHECK-DAG: [[TBI7:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:7>
+//CHECK-DAG: [[TBI8:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:8>
+//CHECK-DAG: [[TBI9:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:9>
+//CHECK-DAG: [[TBI10:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:10>
+//CHECK-DAG: [[TBI11:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:11>
+//CHECK-DAG: [[TBI12:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:12>
+//CHECK-DAG: [[TBI13:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:13>
+//CHECK-DAG: [[TBI14:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:14>
+//CHECK-DAG: [[TBI15:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:15>
+//CHECK-DAG: [[TBI16:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:16>
+//CHECK-DAG: [[TBI17:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:17>
+//CHECK-DAG: [[TBI18:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:18>
+//CHECK-DAG: [[TBI19:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:19>
+//CHECK-DAG: [[TBI20:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:20>
+//CHECK-DAG: [[TBI21:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:21>
+//CHECK-DAG: [[TBI22:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:22>
+//CHECK-DAG: [[TBI23:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:23>
+//CHECK-DAG: [[TBI24:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:24>
+//CHECK-DAG: [[TBI25:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:25>
+//CHECK-DAG: [[TBI26:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:26>
+//CHECK-DAG: [[TBI27:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:27>
+//CHECK-DAG: [[TBI28:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:28>
+//CHECK-DAG: [[TBI29:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:29>
+//CHECK-DAG: [[TBI30:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:30>
+//CHECK-DAG: [[TBI31:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:31>
+//CHECK-DAG: [[TBI32:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:32>
+//CHECK-DAG: [[TBI33:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:33>
+//CHECK-DAG: [[TBI34:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:34>
+//CHECK-DAG: [[TBI35:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:35>
+//CHECK-DAG: [[TBI36:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:36>
+//CHECK-DAG: [[TBI37:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:37>
+//CHECK-DAG: [[TBI38:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:38>
+//CHECK-DAG: [[TBI39:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:39>
+//CHECK-DAG: [[TBI40:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:40>
+//CHECK-DAG: [[TBI41:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:41>
+//CHECK-DAG: [[TBI42:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:42>
+//CHECK-DAG: [[TBI43:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:43>
+//CHECK-DAG: [[TBI44:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:44>
+//CHECK-DAG: [[TBI45:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:45>
+//CHECK-DAG: [[TBI46:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:46>
+//CHECK-DAG: [[TBI47:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:47>
+//CHECK-DAG: [[TBI48:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:48>
+//CHECK-DAG: [[TBI49:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:49>
+//CHECK-DAG: [[TBI50:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:50>
+//CHECK-DAG: [[TBI51:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:51>
+//CHECK-DAG: [[TBI52:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:52>
+//CHECK-DAG: [[TBI53:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:53>
+//CHECK-DAG: [[TBI54:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:54>
+//CHECK-DAG: [[TBI55:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:55>
+//CHECK-DAG: [[TBI56:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:56>
+//CHECK-DAG: [[TBI57:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:57>
+//CHECK-DAG: [[TBI58:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:58>
+//CHECK-DAG: [[TBI59:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:59>
+//CHECK-DAG: [[TBI60:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:60>
+//CHECK-DAG: [[TBI61:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:61>
+//CHECK-DAG: [[TBI62:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:62>
+//CHECK-DAG: [[TBI63:%.*]] = VPURegMapped.DeclareTaskBuffer {offset = {{.*}}}  <ActKernelInvocation> -> !VPURegMapped.Index<0:0:63>
+
+//CHECK-DAG: VPURegMapped.TaskBufferLayout
 
 //CHECK: [[R0:%.*]] = VPUMI40XX.ActKernelRange
     //CHECK-SAME: taskLocation([[TBR0]]

@@ -62,11 +62,11 @@ mlir::FailureOr<SmallVector<int64_t>> getAxes(IE::SqueezeOpAdaptor squeeze, mlir
 
 mlir::LogicalResult vpux::IE::SqueezeOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::SqueezeOpAdaptor squeeze(operands, attrs);
+    IE::SqueezeOpAdaptor squeeze(operands, attrs, prop);
     if (mlir::failed(squeeze.verify(loc))) {
         return mlir::failure();
     }

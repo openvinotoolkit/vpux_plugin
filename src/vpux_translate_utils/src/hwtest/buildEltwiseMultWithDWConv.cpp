@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+//
+
 #include <climits>
 #include <numeric>
 
@@ -14,6 +16,7 @@
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
+#include "vpux/compiler/utils/platform_resources.hpp"
 #include "vpux/compiler/utils/types.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
 #include "vpux/hwtest/test_case_json_parser.hpp"
@@ -203,13 +206,14 @@ void buildEltwiseMultWithDwConv(const nb::TestCaseJsonDescriptor& testDesc, mlir
     auto output_cmx = createDeclareTensorOp(funcbuilder, VPURT::BufferSection::CMX_NN, out_shape, outputType,
                                             DimsOrder::NHWC, 0, OUTPUT_CMX_OFFSET);
 
+    auto [waitWLMBarrier, freeBarrierId] =
+            insertWLMStartSequence(funcbuilder, testDesc.getWLMParams().isWLMPartialEnabled);
+
     // Barriers
-    auto barrier0 = funcbuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 0);
-    auto barrier1 = funcbuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 1);
-    auto finalBarrier = funcbuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 2);
-    auto BARRIER_0 = barrier0.getBarrier();
-    auto BARRIER_1 = barrier1.getBarrier();
-    auto FINAL_BARRIER = finalBarrier.getBarrier();
+    auto barrier0 = funcbuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), freeBarrierId++);
+    auto barrier1 = funcbuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), freeBarrierId++);
+    auto finalBarrier = funcbuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), freeBarrierId++,
+                                                                      testDesc.getWLMParams().isWLMPartialEnabled);
 
     auto wt_data_vals = generateZeroPadForEltwiseMultWeights(zero_pad_shape, weightsType, ctx);
     auto wt_data_attr = Const::ContentAttr::get(wt_data_vals);
@@ -221,12 +225,12 @@ void buildEltwiseMultWithDwConv(const nb::TestCaseJsonDescriptor& testDesc, mlir
                                                               wt_data_attr.reorder(DimsOrder::NHWC));
 
     // Input DMAs
-    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(), BARRIER_0, builder.getUnknownLoc(),
+    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, waitWLMBarrier, barrier0.getBarrier(), builder.getUnknownLoc(),
                                           funcinput, getTensorResult(input_cmx), 0);
-    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(), BARRIER_0, builder.getUnknownLoc(),
-                                          zero_pad_data, getTensorResult(zero_pad_cmx), 0);
-    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(), BARRIER_0, builder.getUnknownLoc(),
-                                          funcweights, getTensorResult(weights_cmx), 0);
+    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(), barrier0.getBarrier(),
+                                          builder.getUnknownLoc(), zero_pad_data, getTensorResult(zero_pad_cmx), 0);
+    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(), barrier0.getBarrier(),
+                                          builder.getUnknownLoc(), funcweights, getTensorResult(weights_cmx), 0);
 
     // Activation Window
     const auto bitPatternSize = VPU::NCESparsity::getBitPatternSize(
@@ -260,8 +264,9 @@ void buildEltwiseMultWithDwConv(const nb::TestCaseJsonDescriptor& testDesc, mlir
     auto act_window_cmx = createDeclareTensorOp(funcbuilder, VPURT::BufferSection::CMX_NN, sparsity_shape,
                                                 sparsity_type, DimsOrder::NHWC, 0, ACTIVATIONWINDOW_CMX_OFFSET);
 
-    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(), BARRIER_0, builder.getUnknownLoc(),
-                                          getConstResult(act_window_ddr), getTensorResult(act_window_cmx), 0);
+    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(), barrier0.getBarrier(),
+                                          builder.getUnknownLoc(), getConstResult(act_window_ddr),
+                                          getTensorResult(act_window_cmx), 0);
 
     // weights table ddr
     SmallVector<int64_t> weightstable_data_shape{output_nce_shape[1], 1, 1, 4};
@@ -305,8 +310,9 @@ void buildEltwiseMultWithDwConv(const nb::TestCaseJsonDescriptor& testDesc, mlir
                                                   WEIGHTSTABLE_CMX_OFFSET);
 
     // weights table dma ddr->cmx
-    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(), BARRIER_0, builder.getUnknownLoc(),
-                                          getConstResult(weightstable_data_ddr), getTensorResult(weightstable_cmx), 0);
+    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(), barrier0.getBarrier(),
+                                          builder.getUnknownLoc(), getConstResult(weightstable_data_ddr),
+                                          getTensorResult(weightstable_cmx), 0);
 
     // NCE Task
     auto filtersize = getIntArrayAttr(builder, filter_size);
@@ -315,7 +321,7 @@ void buildEltwiseMultWithDwConv(const nb::TestCaseJsonDescriptor& testDesc, mlir
                                               padding_vec[PAD_NCETASK_TOP], padding_vec[PAD_NCETASK_BOTTOM]);
 
     auto nceTask = VPURT::wrapIntoTaskOp<VPUIP::NCEClusterTaskOp>(
-            funcbuilder, BARRIER_0, BARRIER_1, builder.getUnknownLoc(), output_cmx_memreftype,
+            funcbuilder, barrier0.getBarrier(), barrier1.getBarrier(), builder.getUnknownLoc(), output_cmx_memreftype,
             getTensorResult(input_nce_cmx), getTensorResult(weights_nce_cmx), getTensorResult(weightstable_cmx),
             /*instruction_table_list=*/nullptr, /*spr_lookup_table=*/nullptr, getTensorResult(act_window_cmx),
             getTensorResult(parent_input_nce_cmx), getTensorResult(parent_output_nce_cmx),
@@ -341,8 +347,8 @@ void buildEltwiseMultWithDwConv(const nb::TestCaseJsonDescriptor& testDesc, mlir
                     VPU::MPEMode::CUBOID_16x16);
 
     // Output DMA
-    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, BARRIER_1, FINAL_BARRIER, builder.getUnknownLoc(),
-                                          getTensorResult(output_cmx), funcoutput, 0);
+    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, barrier1.getBarrier(), finalBarrier.getBarrier(),
+                                          builder.getUnknownLoc(), getTensorResult(output_cmx), funcoutput, 0);
 
     // Return op
     funcbuilder.create<mlir::func::ReturnOp>(builder.getUnknownLoc(), funcoutput);

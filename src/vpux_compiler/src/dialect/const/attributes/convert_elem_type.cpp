@@ -72,6 +72,10 @@ vpux::NDTypeInterface vpux::Const::ConvertElemTypeAttr::inferOutputType(vpux::ND
     return input.changeElemType(getElemType());
 }
 
+bool vpux::Const::ConvertElemTypeAttr::inferOutputSplat(bool inputIsSplat, vpux::NDTypeInterface) {
+    return inputIsSplat;
+}
+
 //
 // ConvertElemTypeAttr::transform
 //

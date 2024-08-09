@@ -4,7 +4,7 @@
 //
 
 #include "functions.h"
-#include "common/vpu_test_env_cfg.hpp"
+#include "common/npu_test_env_cfg.hpp"
 #include "openvino/op/softmax.hpp"
 #include "openvino/runtime/intel_npu/properties.hpp"
 

@@ -13,16 +13,10 @@ namespace test {
 
 class StridedSliceLayerTestCommon : public StridedSliceLayerTest, virtual public VpuOv2LayerTest {};
 
-class StridedSliceLayerTest_NPU3700 : public StridedSliceLayerTestCommon {};
 class StridedSliceLayerTest_NPU3720 : public StridedSliceLayerTestCommon {};
 class StridedSliceNCELayerTest_NPU3720 : public StridedSliceLayerTestCommon {};
 class StridedSliceTilingLayerTest_NPU3720 : public StridedSliceLayerTestCommon {};
 class StridedSliceLayerTest_NPU4000 : public StridedSliceLayerTestCommon {};
-
-TEST_P(StridedSliceLayerTest_NPU3700, HW) {
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
 
 TEST_P(StridedSliceLayerTest_NPU3720, SW) {
     setReferenceSoftwareMode();
@@ -48,7 +42,6 @@ TEST_P(StridedSliceLayerTest_NPU4000, SW) {
 
 }  // namespace ov
 
-using ov::test::StridedSliceLayerTest_NPU3700;
 using ov::test::StridedSliceLayerTest_NPU3720;
 using ov::test::StridedSliceLayerTest_NPU4000;
 using ov::test::StridedSliceNCELayerTest_NPU3720;
@@ -706,13 +699,6 @@ std::vector<ov::test::StridedSliceSpecificParams> testsConfig = {
 };
 
 const std::vector<ov::element::Type> modelTypes = {ov::element::f16};
-
-// --------- NPU3700 ---------
-
-INSTANTIATE_TEST_SUITE_P(smoke_StridedSlice, StridedSliceLayerTest_NPU3700,
-                         ::testing::Combine(::testing::ValuesIn(tests), ::testing::ValuesIn(modelTypes),
-                                            ::testing::Values(ov::test::utils::DEVICE_NPU)),
-                         StridedSliceLayerTest_NPU3700::getTestCaseName);
 
 // --------- NPU3720 ---------
 

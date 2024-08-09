@@ -6,9 +6,10 @@
 #include <vpux_elf/writer.hpp>
 #include "vpux/compiler/NPU40XX/dialect/ELF/ops.hpp"
 
-void vpux::ELF::CreateSymbolTableSectionOp::serialize(elf::Writer& writer, vpux::ELF::SectionMapType& sectionMap,
-                                                      vpux::ELF::SymbolMapType& symbolMap,
-                                                      vpux::ELF::SymbolReferenceMap& symRefMap) {
+using namespace vpux;
+
+void ELF::CreateSymbolTableSectionOp::serialize(elf::Writer& writer, ELF::SectionMapType& sectionMap,
+                                                ELF::SymbolMapType& symbolMap, ELF::SymbolReferenceMap& symRefMap) {
     VPUX_UNUSED(symRefMap);
     const auto name = getSymName().str();
     auto section = writer.addSymbolSection(name);
@@ -18,7 +19,7 @@ void vpux::ELF::CreateSymbolTableSectionOp::serialize(elf::Writer& writer, vpux:
     auto& operations = getBody()->getOperations();
     for (auto& op : operations) {
         auto symbol = section->addSymbolEntry();
-        auto symOp = llvm::dyn_cast<vpux::ELF::SymbolOp>(op);
+        auto symOp = llvm::dyn_cast<ELF::SymbolOp>(op);
 
         VPUX_THROW_UNLESS(symOp, "Symbol table section op is expected to contain only SymbolOps. Got {0}", op);
         symOp.serialize(symbol, sectionMap);

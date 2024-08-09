@@ -4,6 +4,7 @@
 //
 
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
+#include "vpux/compiler/core/layers.hpp"
 #include "vpux/compiler/dialect/VPU/utils/se_padding_utils.hpp"
 
 #include "vpux/compiler/core/attributes/dims_order.hpp"
@@ -26,7 +27,7 @@ bool vpux::VPU::NCEInvariant::isPrecisionSupported(ArchKind arch, mlir::ValueRan
         const auto elemType = val.getType().cast<vpux::NDTypeInterface>().getElementType();
 
         if (elemType.isBF16() && arch != VPU::ArchKind::NPU37XX && arch != VPU::ArchKind::NPU40XX) {
-            logCb(formatv("BF16 is only supported by VPUX37XX and VPUX40XX"));
+            logCb(formatv("BF16 is only supported by VPUX37XX, VPUX40XX"));
             return false;
         }
     }
@@ -121,7 +122,28 @@ bool vpux::VPU::NCEInvariant::isAligned(vpux::NDTypeInterface type, int64_t alig
 
     const bool supportsSuperDense = VPU::NCEInvariant::isSuperdenseSupported(arch);
     // In super-dense mode only channels must be aligned.
-    const auto channels = shape[Dims4D::Act::C];
+    const auto channels = type.getRank() == 4 ? shape[Dims4D::Act::C] : shape[DimsGroups5D::Act::C];
+    if (supportsSuperDense && channels % alignment == 0) {
+        return true;
+    }
+
+    const auto innerDim = memShape.back();
+    if (innerDim % alignment != 0) {
+        logCb(formatv("Activation inner dimension '{0}' is not aligned to '{1}'", innerDim, alignment));
+        return false;
+    }
+
+    return true;
+}
+
+bool is5DAligned(vpux::NDTypeInterface type, int64_t alignment, vpux::VPU::ArchKind arch, LogCb logCb) {
+    const auto shape = type.getShape();
+    const auto order = type.getDimsOrder();
+    const auto memShape = order.toMemoryOrder(shape);
+
+    const bool supportsSuperDense = VPU::NCEInvariant::isSuperdenseSupported(arch);
+    // In super-dense mode only channels must be aligned.
+    const auto channels = shape[DimsGroups5D::Act::C];
     if (supportsSuperDense && channels % alignment == 0) {
         return true;
     }
@@ -141,6 +163,11 @@ int64_t vpux::VPU::NCEInvariant::getAlignment(mlir::Type elemType) {
 }
 
 bool vpux::VPU::NCEInvariant::isOutputActTypeSupported(vpux::NDTypeInterface type, int64_t alignment, LogCb logCb) {
+    if (type.getRank() == DimsGroups5D::Act::numDims) {
+        const auto channels = type.getShape()[DimsGroups5D::Act::C];
+        return channels % alignment == 0;
+    }
+
     if (type.getRank() != 4) {
         logCb(formatv("Ouput activation has unsupported rank: {0}", type.getRank()));
         return false;
@@ -157,6 +184,10 @@ bool vpux::VPU::NCEInvariant::isOutputActTypeSupported(vpux::NDTypeInterface typ
 
 bool vpux::VPU::NCEInvariant::isInputActTypeSupported(ArchKind arch, vpux::NDTypeInterface type, int64_t alignment,
                                                       bool supportsInputActCompression, LogCb logCb) {
+    if (type.getRank() == DimsGroups5D::Act::numDims) {
+        return isAligned(type, alignment, arch, logCb);
+    }
+
     if (type.getRank() != 4) {
         logCb(formatv("Input activation has unsupported rank: {0}", type.getRank()));
         return false;
@@ -181,26 +212,6 @@ bool vpux::VPU::NCEInvariant::isInputActTypeSupported(ArchKind arch, vpux::NDTyp
 
 Byte vpux::VPU::NCEInvariant::getWeightsTableSize(int64_t OC) {
     return OC * WEIGHT_TABLE_NUM_ELEMENTS_PER_OC * 4_Byte;
-}
-
-//
-// Channel major Convolution
-//
-
-bool vpux::VPU::NCEInvariant::isChannelMajorCompatible(ArchKind arch, vpux::NDTypeInterface inputType) {
-    if (arch != VPU::ArchKind::NPU30XX) {
-        return false;
-    }
-
-    const auto inputShape = inputType.getShape();
-    if (inputShape.size() < 4) {
-        return false;
-    }
-
-    const auto IC = inputShape[Dims4D::Act::C];
-    const auto IW = inputShape[Dims4D::Act::W];
-
-    return (IC < NCEInvariant::KMB_CMCONV_CHANNELS_LIMIT) && (IW % NCEInvariant::KMB_CMCONV_WIDTH_ALIGNMENT == 0);
 }
 
 //
@@ -261,12 +272,8 @@ mlir::LogicalResult vpux::VPU::NCEInvariant::isSupported(mlir::Operation* op, Lo
                         return VPU::NCEEltwiseOp::isSupported(origOp, allowDifferentScales, allowDifferentZp,
                                                               emptyLogCb, checkLayout, checkChannelAlignment);
                     })
-                    .Case<IE::MultiplyOp>([&](IE::MultiplyOp origOp) {
-                        if (getArch(origOp) != VPU::ArchKind::NPU30XX) {
-                            return false;
-                        }
-                        return VPU::NCEEltwiseOp::isSupported(origOp, allowDifferentScales, allowDifferentZp,
-                                                              emptyLogCb, checkLayout, checkChannelAlignment);
+                    .Case<IE::MultiplyOp>([&](IE::MultiplyOp) {
+                        return false;
                     })
                     .Case<IE::SubtractOp>([&](IE::SubtractOp origOp) {
                         return VPU::NCEEltwiseOp::isSupported(origOp, allowDifferentScales, allowDifferentZp,
@@ -292,6 +299,9 @@ mlir::LogicalResult vpux::VPU::NCEInvariant::isSupported(mlir::Operation* op, Lo
                     })
                     .Case<IE::RollOp>([&](IE::RollOp origOp) {
                         return VPU::isSupportedSEPRoll(origOp, emptyLogCb, checkLayout, checkChannelAlignment);
+                    })
+                    .Case<IE::MatMulOp>([&](IE::MatMulOp origOp) {
+                        return VPU::NCEMatMulOp::isSupported(origOp, emptyLogCb, checkLayout, checkChannelAlignment);
                     })
                     .Default([](mlir::Operation*) -> bool {
                         return false;
@@ -320,7 +330,6 @@ bool vpux::VPU::NCEInvariant::isSmallKernelOptimizationSupported(const VPU::Arch
     const auto SX = kernelStride[Dims4D::Strides::X.ind()];
 
     // Get a set containing all the channels from the workloads of the given NCE operations
-    mlir::DenseSet<int64_t> workloadsChannels;
     const auto workloads = nceOp.getWorkloads().getOps<VPU::DPUWorkloadOp>();
 
     const auto workloadChannelsMeetRequirement = llvm::all_of(workloads, [](auto workload) {

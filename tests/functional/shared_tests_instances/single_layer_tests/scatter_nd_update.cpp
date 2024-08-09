@@ -12,14 +12,8 @@ namespace test {
 
 class ScatterNDUpdateLayerTestCommon : public ScatterNDUpdateLayerTest, virtual public VpuOv2LayerTest {};
 
-class ScatterNDUpdateLayerTest_NPU3700 : public ScatterNDUpdateLayerTestCommon {};
 class ScatterNDUpdateLayerTest_NPU3720 : public ScatterNDUpdateLayerTestCommon {};
 class ScatterNDUpdateLayerTest_NPU4000 : public ScatterNDUpdateLayerTestCommon {};
-
-TEST_P(ScatterNDUpdateLayerTest_NPU3700, HW) {
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
 
 TEST_P(ScatterNDUpdateLayerTest_NPU3720, HW) {
     setDefaultHardwareMode();
@@ -35,7 +29,6 @@ TEST_P(ScatterNDUpdateLayerTest_NPU4000, SW) {
 
 }  // namespace ov
 
-using ov::test::ScatterNDUpdateLayerTest_NPU3700;
 using ov::test::ScatterNDUpdateLayerTest_NPU3720;
 using ov::test::ScatterNDUpdateLayerTest_NPU4000;
 
@@ -43,7 +36,7 @@ namespace {
 
 // map<inputShape vector<pair<indicesShape, indicesValue>>>
 // updateShape is gotten from inputShape and indicesShape
-using InputMap = std::map<std::vector<size_t>, std::vector<std::pair<std::vector<size_t>, std::vector<size_t>>>>;
+using InputMap = std::map<std::vector<size_t>, std::vector<std::pair<std::vector<size_t>, std::vector<int>>>>;
 
 InputMap sliceSelectInShape{
         {{1}, {{{1, 1}, {0}}}},
@@ -100,11 +93,6 @@ const auto precommit_params = testing::Combine(testing::ValuesIn(combineShapes(p
                                                testing::Values(ov::element::f16),  // model
                                                testing::Values(ov::element::i32),  // indices
                                                testing::Values(ov::test::utils::DEVICE_NPU));
-
-// --------- NPU3700 ---------
-
-INSTANTIATE_TEST_SUITE_P(smoke_ScatterNDUpdate, ScatterNDUpdateLayerTest_NPU3700, params,
-                         ScatterNDUpdateLayerTest_NPU3700::getTestCaseName);
 
 // --------- NPU3720 ---------
 

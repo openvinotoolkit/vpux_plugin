@@ -27,11 +27,11 @@ mlir::LogicalResult vpux::IE::ClampOp::verify() {
 
 mlir::LogicalResult vpux::IE::ClampOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::ClampOpAdaptor clamp(operands, attrs);
+    IE::ClampOpAdaptor clamp(operands, attrs, prop);
     if (mlir::failed(clamp.verify(loc))) {
         return mlir::failure();
     }

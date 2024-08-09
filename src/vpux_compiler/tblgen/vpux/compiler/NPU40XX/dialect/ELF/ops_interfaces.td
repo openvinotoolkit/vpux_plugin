@@ -9,6 +9,26 @@
 include "mlir/IR/OpBase.td"
 
 //
+// SymbolicallyRepresentedOpInterface
+//
+
+// For the moment, this interface will only be inherited by the SectionInterface
+// If non-section symbols will be enabled, other entities could make use of this
+
+def ELF_SymbolicallyRepresentedOpInterface : OpInterface<"SymbolicallyRepresentedOpInterface"> {
+    let description = "ELF Interface for the operations that need to be represented by a symbol in a SymbolTable";
+    let cppNamespace = "vpux::ELF";
+
+    let methods = [
+        InterfaceMethod<
+            "Get the signature of the symbol, containing all the info necessary to construct it",
+            "ELF::SymbolSignature",
+            "getSymbolSignature", (ins)
+        >
+    ];
+}
+
+//
 // ELFSectionInterface
 //
 
@@ -51,6 +71,26 @@ def ELF_SectionInterface : OpInterface<"ElfSectionInterface"> {
                 } else {
                     return std::nullopt;
                 }
+            }]
+        >,
+        InterfaceMethod<
+            "Get the symbol table where the symbol for the given section should be inserted",
+            "ELF::SectionSignature",
+            "getSymbolTableSectionSignature", (ins), [{}], [{
+                auto op = this->getOperation();
+                auto sectionFlagsAttr = op->template getAttrOfType<ELF::SectionFlagsAttrAttr>("secFlags");
+                auto sectionFlags = sectionFlagsAttr ? sectionFlagsAttr.getValue() : ELF::SectionFlagsAttr::SHF_NONE;
+                auto name = "symtab";
+                if (static_cast<bool>(sectionFlags & ELF::SectionFlagsAttr::VPU_SHF_USERINPUT)) {
+                    name = "symtab.io.NetworkInput";
+                } else if (static_cast<bool>(sectionFlags & ELF::SectionFlagsAttr::VPU_SHF_USEROUTPUT)) {
+                    name = "symtab.io.NetworkOutput";
+                } else if (static_cast<bool>(sectionFlags & ELF::SectionFlagsAttr::VPU_SHF_PROFOUTPUT)) {
+                    name = "symtab.io.ProfilingOutput";
+                } else {
+                    sectionFlags = ELF::SectionFlagsAttr::SHF_NONE;
+                }
+                return ELF::SectionSignature(name, sectionFlags);
             }]
         >
     ];

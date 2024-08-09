@@ -44,7 +44,7 @@ mlir::LogicalResult LayerRewriter::matchAndRewrite(IE::LayoutInfoOpInterface ori
     auto orderInfo = origOp.getLayoutInfo();
     origOp.inferLayoutInfo(orderInfo, _seOpsEnabled, _seExperimentalOpsEnabled);
 
-    rewriter.startRootUpdate(origOp);
+    rewriter.startOpModification(origOp);
 
     const auto inputs = origOp->getOpOperands();
     for (auto i : irange(inputs.size())) {
@@ -73,7 +73,7 @@ mlir::LogicalResult LayerRewriter::matchAndRewrite(IE::LayoutInfoOpInterface ori
         }
     }
 
-    rewriter.finalizeRootUpdate(origOp);
+    rewriter.finalizeOpModification(origOp);
 
     return mlir::success();
 }

@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --init-compiler="vpu-arch=%arch%" --canonicalize %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 // CHECK-LABEL: @ConvertConstToAttr
 func.func @ConvertConstToAttr(%arg0: tensor<1x10x20x30xf16>) -> tensor<1x10x10x30xf16> {
@@ -164,7 +164,7 @@ func.func @ConvertNegStrideStridedSlice2Reverse(%arg0: tensor<1x50x128xf16>) -> 
     %slice = IE.StridedSlice(%arg0, %cst, %cst_0, %cst_1) {begin_mask = [1, 0], ellipsis_mask = [], end_mask = [1, 0], new_axis_mask = [], operandSegmentSizes = array<i32: 1, 1, 1, 1>, shrink_axis_mask = []} : tensor<1x50x128xf16>, tensor<2xsi64>, tensor<2xsi64>, tensor<2xsi64> -> tensor<1x50x128xf16>
     return %slice : tensor<1x50x128xf16>
 
-    // CHECK-DAG: [[CST:%.+]] = const.Declare tensor<1xsi64> = dense<50> : tensor<1xsi64>, [#const.ConvertElemType<si32>]
-    // CHECK:     [[REVERSE_SEQ:%.+]] = IE.ReverseSequence(%arg0, [[CST]]) {batch_axis = 0 : i64, seq_axis = 1 : i64} : tensor<1x50x128xf16>, tensor<1xsi64> -> tensor<1x50x128xf16>
+    // CHECK-DAG: [[CST:%.+]] = const.Declare tensor<1xsi32> = dense<50> : tensor<1xsi64>, [#const.ConvertElemType<si32>]
+    // CHECK:     [[REVERSE_SEQ:%.+]] = IE.ReverseSequence(%arg0, [[CST]]) {batch_axis = 0 : i64, seq_axis = 1 : i64} : tensor<1x50x128xf16>, tensor<1xsi32> -> tensor<1x50x128xf16>
     // CHECK:     return [[REVERSE_SEQ]] : tensor<1x50x128xf16>
 }

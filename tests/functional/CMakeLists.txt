@@ -34,12 +34,9 @@ ov_add_test_target(
         openvino::func_test_utils
         openvino::funcSharedTests
         openvino::format_reader
-        openvino::reference
         openvino::runtime
-        npu_model_utils
         npu_llvm_utils
         npu_ov_utils
-        npu_plugin_utils
         openvino::npu_al
         npu_mlir_compiler_schema # used by subgraph_tests/compress_weights_btc.cpp
     DEFINES
@@ -63,6 +60,26 @@ if(MSVC)
         PRIVATE
             /Zc:preprocessor
     )
+endif()
+
+set(SKIP_TESTS_CONFIG_SRC "skip_tests_config.cpp")
+set(PRIVATE_NPU_SKIP_TESTS_CONFIG "${CMAKE_CURRENT_SOURCE_DIR}/shared_tests_instances/${SKIP_TESTS_CONFIG_SRC}")
+set(OV_NPU_SKIP_TESTS_CONFIG_DIR "${OpenVINO_SOURCE_DIR}/src/plugins/intel_npu/tests/functional/shared_tests_instances")
+set(OV_BUILD_DIR "${OpenVINODeveloperPackage_DIR}")
+
+message(STATUS "Copying ${PRIVATE_NPU_SKIP_TESTS_CONFIG} to ${OV_NPU_SKIP_TESTS_CONFIG_DIR}")
+
+# Replace `skip_tests_config.cpp` from private tests to openvino tests
+file(COPY "${PRIVATE_NPU_SKIP_TESTS_CONFIG}" DESTINATION "${OV_NPU_SKIP_TESTS_CONFIG_DIR}")
+
+# Force touch the new copied file to update its last access, so it won't be ignored in forced rebuild
+file(TOUCH "${OV_NPU_SKIP_TESTS_CONFIG_DIR}/${SKIP_TESTS_CONFIG_SRC}")
+
+# Force rebuild `ov_npu_func_tests` target, if this isn't a static build
+if (NOT(${OV_BUILD_DIR} MATCHES "build-modules"))
+    execute_process(COMMAND "${CMAKE_COMMAND}" "--build" "${OpenVINODeveloperPackage_DIR}" "--config" "${CMAKE_BUILD_TYPE}" "--target" "ov_npu_func_tests"
+                    COMMAND_ECHO STDOUT
+                    COMMAND_ERROR_IS_FATAL ANY)
 endif()
 
 install(TARGETS ${TARGET_NAME}

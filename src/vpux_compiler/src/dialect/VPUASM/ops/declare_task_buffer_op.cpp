@@ -40,23 +40,7 @@ size_t VPUASM::DeclareTaskBufferOp::getBinarySize() {
 }
 
 size_t VPUASM::DeclareTaskBufferOp::getAlignmentRequirements() {
-    switch (getTaskType()) {
-    case VPURegMapped::TaskType::DMA:
-        return alignof(nn_public::VpuDMATask);
-    case VPURegMapped::TaskType::ActKernelInvocation:
-        return alignof(nn_public::VpuActKernelInvocation);
-    case VPURegMapped::TaskType::ActKernelRange:
-        return alignof(nn_public::VpuActKernelRange);
-    case VPURegMapped::TaskType::DPUInvariant:
-        return alignof(nn_public::VpuDPUInvariant);
-    case VPURegMapped::TaskType::DPUVariant:
-        return alignof(nn_public::VpuDPUVariant);
-    case VPURegMapped::TaskType::M2I:
-        return sizeof(nn_public::VpuMediaTask);
-    default:
-        VPUX_THROW("Invalid task type for DeclareTaskBufferOp {0}", *this);
-        return 0;
-    }
+    return ELF::VPUX_NO_ALIGNMENT;
 }
 
 ELF::SectionFlagsAttr VPUASM::DeclareTaskBufferOp::getAccessingProcs(mlir::SymbolUserMap&) {
@@ -76,4 +60,12 @@ std::optional<ELF::SectionSignature> vpux::VPUASM::DeclareTaskBufferOp::getSecti
 
 bool vpux::VPUASM::DeclareTaskBufferOp::hasMemoryFootprint() {
     return false;
+}
+
+void VPUASM::DeclareTaskBufferOp::setMemoryOffset(mlir::IntegerAttr offset) {
+    setOffsetAttr(offset);
+}
+
+uint64_t VPUASM::DeclareTaskBufferOp::getMemoryOffset() {
+    return getOffset().value_or(0);
 }

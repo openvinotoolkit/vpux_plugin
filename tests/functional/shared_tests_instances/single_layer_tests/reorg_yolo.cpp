@@ -30,22 +30,8 @@ class ReorgYoloLayerTestCommon : public ReorgYoloLayerTest, virtual public VpuOv
     }
 };
 
-class ReorgYoloLayerTest_NPU3700 : public ReorgYoloLayerTestCommon {};
-
 class ReorgYoloLayerTest_NPU3720 : public ReorgYoloLayerTestCommon {};
 class ReorgYoloLayerTest_NPU4000 : public ReorgYoloLayerTestCommon {};
-
-TEST_P(ReorgYoloLayerTest_NPU3700, HW) {
-    VpuOv2LayerTest::setSkipCompilationCallback([this](std::stringstream& skip) {
-        std::vector<size_t> inputShape = std::get<0>(GetParam());
-        auto inN = inputShape[0];
-        if (inN != 1) {
-            skip << "Runtime only supports N=1 shape, got " + std::to_string(inN);
-        }
-    });
-    VpuOv2LayerTest::setDefaultHardwareMode();
-    VpuOv2LayerTest::run(Platform::NPU3700);
-}
 
 TEST_P(ReorgYoloLayerTest_NPU3720, HW) {
     VpuOv2LayerTest::setDefaultHardwareMode();
@@ -87,12 +73,6 @@ const auto paramsA = testing::Combine(testing::ValuesIn(inputShapesA), testing::
 
 const auto paramsB = testing::Combine(testing::ValuesIn(inputShapesB), testing::ValuesIn(stridesB),
                                       testing::ValuesIn(modelTypes), testing::Values(DEVICE_NPU));
-
-INSTANTIATE_TEST_CASE_P(smoke_ReorgYolo_a, ReorgYoloLayerTest_NPU3700, paramsA,
-                        ReorgYoloLayerTest_NPU3700::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_ReorgYolo_b, ReorgYoloLayerTest_NPU3700, paramsB,
-                        ReorgYoloLayerTest_NPU3700::getTestCaseName);
 
 INSTANTIATE_TEST_CASE_P(smoke_ReorgYolo_a, ReorgYoloLayerTest_NPU3720, paramsA,
                         ReorgYoloLayerTest_NPU3720::getTestCaseName);

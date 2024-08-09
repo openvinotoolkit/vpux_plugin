@@ -48,14 +48,23 @@ mlir::LogicalResult MergeQuantDequant::matchAndRewrite(IE::DequantizeOp dequanti
     mlir::DenseElementsAttr rMinAttr, rMaxAttr;
     getFakeQuantParams(quantizeType, levels, attrType, rMinAttr, rMaxAttr);
 
+    mlir::IntegerAttr levelsAttr = nullptr;
+    mlir::TypeAttr lowFpTypeAttr = nullptr;
+
+    if (const auto quantizeStorageType =
+                quantizeType.getElementType().dyn_cast<mlir::quant::QuantizedType>().getStorageType();
+        quantizeStorageType.isa<mlir::Float8E4M3FNType>() || quantizeStorageType.isa<mlir::Float8E5M2Type>()) {
+        lowFpTypeAttr = mlir::TypeAttr::get(quantizeStorageType);
+    } else {
+        levelsAttr = getIntAttr(dequantizeOp.getContext(), levels);
+    }
+
     auto rMinOp = rewriter.create<Const::DeclareOp>(dequantizeOp.getLoc(), attrType, Const::ContentAttr::get(rMinAttr));
     auto rMaxOp = rewriter.create<Const::DeclareOp>(dequantizeOp.getLoc(), attrType, Const::ContentAttr::get(rMaxAttr));
 
-    // lowFpType in not needed (nullptr), only levels are given
     rewriter.replaceOpWithNewOp<IE::FakeQuantizeOp>(dequantizeOp, quantizeOp.getInput(), rMinOp.getOutput(),
                                                     rMaxOp.getOutput(), rMinOp.getOutput(), rMaxOp.getOutput(),
-                                                    getIntAttr(dequantizeOp.getContext(), levels),
-                                                    /*lowFpType=*/nullptr, IE::AutoBroadcastType::NUMPY);
+                                                    levelsAttr, lowFpTypeAttr, IE::AutoBroadcastType::NUMPY);
 
     return mlir::success();
 }
@@ -101,8 +110,19 @@ mlir::LogicalResult MergeQuantCastDequant::matchAndRewrite(IE::DequantizeOp dequ
     getFakeQuantParams(inputQuantizeType, inLevels, inAttrType, inMinAttr, inMaxAttr);
     getFakeQuantParams(outputQuantizeCastType, outLevels, outAttrType, outMinAttr, outMaxAttr);
 
-    if (inLevels != outLevels) {
-        return mlir::failure();
+    mlir::IntegerAttr levelsAttr = nullptr;
+    mlir::TypeAttr lowFpTypeAttr = nullptr;
+
+    if (const auto quantizeStorageType =
+                outputQuantizeCastType.getElementType().dyn_cast<mlir::quant::QuantizedType>().getStorageType();
+        quantizeStorageType.isa<mlir::Float8E4M3FNType>() || quantizeStorageType.isa<mlir::Float8E5M2Type>()) {
+        lowFpTypeAttr = mlir::TypeAttr::get(quantizeStorageType);
+    } else {
+        if (inLevels != outLevels) {
+            return mlir::failure();
+        }
+
+        levelsAttr = getIntAttr(dequantizeOp.getContext(), inLevels);
     }
 
     auto inMinOp =
@@ -117,8 +137,7 @@ mlir::LogicalResult MergeQuantCastDequant::matchAndRewrite(IE::DequantizeOp dequ
     // lowFpType in not needed (nullptr), only levels are given
     rewriter.replaceOpWithNewOp<IE::FakeQuantizeOp>(dequantizeOp, quantizeOp.getInput(), inMinOp.getOutput(),
                                                     inMaxOp.getOutput(), outMinOp.getOutput(), outMaxOp.getOutput(),
-                                                    getIntAttr(dequantizeOp.getContext(), inLevels),
-                                                    /*lowFpType=*/nullptr, IE::AutoBroadcastType::NUMPY);
+                                                    levelsAttr, lowFpTypeAttr, IE::AutoBroadcastType::NUMPY);
 
     return mlir::success();
 }

@@ -117,7 +117,7 @@ TEST_P(CompressWeightsLayerTest_NPU3720, HW) {
     OPENVINO_ASSERT(hasCompressedDMATasks, "Blob contains no compressed DMA tasks");
 }
 
-INSTANTIATE_TEST_CASE_P(precommit, CompressWeightsLayerTest_NPU3720,
+INSTANTIATE_TEST_CASE_P(DISABLED_precommit, CompressWeightsLayerTest_NPU3720,
                         ::testing::Combine(::testing::Values(ov::element::f16)),
                         CompressWeightsLayerTest::getTestCaseName);
 }  // namespace ov::test

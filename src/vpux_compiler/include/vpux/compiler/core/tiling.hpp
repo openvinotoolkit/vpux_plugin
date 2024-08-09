@@ -42,7 +42,7 @@ static constexpr int MAX_EXCESSIVE_TILING_TIME = 3;
 
 // Track [E#87286]
 // Experimental number to avoid spilling in vertical fusion
-static constexpr double VF_WEIGHTS_RATIO = 0.58;
+static constexpr double VF_CONST_RATIO = 0.58;
 
 // Experimental number to avoid spilling in vertical fusion
 static constexpr double VF_LARGEST_OP_MEM_RATIO = 0.6;
@@ -62,8 +62,9 @@ static constexpr double NCEDWCONV_DPU_COST_RATIO = 2;
 // Track [E#117195]
 static constexpr double ACTSPARSE_DPU_COST_RATIO = 2;
 
-// Experimental number to use DDR access for GatherOp with large input but small output
-static constexpr double DDR_ACCESS_GATHER_IO_RATIO = 500;
+// Experimental number for reducemin to get better DPU performance than SHAVE
+// Track [E#126141]
+static constexpr double REDUCEMIN_DPU_THRESHOLD = 96 * 1024;
 
 //
 // Tiling Mode
@@ -240,6 +241,8 @@ InputTiling backInferReduceTile(const vpux::TileInfo& outputTile, ShapeRef inSha
 InputTiling backInferInterpolateTile(const vpux::TileInfo& outputTile, ArrayRef<int64_t> initialInputDims,
                                      ArrayRef<int64_t> initialOutputDims, ArrayRef<int64_t> initialInputOffsets,
                                      ArrayRef<int64_t> initialOutputOffsets, ArrayRef<int64_t> currentInputDims,
+                                     std::optional<ArrayRef<int64_t>> coordinatesDims,
+                                     std::optional<ArrayRef<int64_t>> lambdasDims,
                                      vpux::IE::InterpolateMode interpolateMode,
                                      vpux::IE::InterpolateCoordMode coordMode,
                                      vpux::IE::InterpolateNearestMode nearestMode, vpux::Logger log);
@@ -251,6 +254,13 @@ InputTiling backInferInterpolateTile(const vpux::TileInfo& outputTile, ArrayRef<
 InputTiling backInferGatherTile(const vpux::TileInfo& outputTile, const ShapeRef& origInputShape,
                                 const ShapeRef& origIndicesShape, int64_t axisValue, int64_t batchDims,
                                 bool hasAxisTensor, vpux::Logger log);
+
+//
+// GatherDMA tiling
+//
+
+InputTiling backInferGatherDMATile(const vpux::TileInfo& outputTile, ShapeRef origInputShape, ShapeRef origIndicesShape,
+                                   int64_t axisValue, bool hasAxisTensor, vpux::Logger log);
 
 //
 // Pad tiling
@@ -314,8 +324,8 @@ struct DimRange final {
 };
 
 std::optional<std::pair<int64_t, int64_t>> spatialOutputForInputWindowSize(const std::pair<int64_t, int64_t>& inputHW,
-                                                                           const mlir::ArrayAttr& kernel,
-                                                                           const mlir::ArrayAttr& strides,
+                                                                           ArrayRef<int64_t> kernel,
+                                                                           ArrayRef<int64_t> strides,
                                                                            const PadInfo& pads);
 
 //
@@ -400,6 +410,11 @@ bool isSupportedAlignedDivision(int64_t dimSize, int64_t tiles, int64_t alignmen
  * Get the dimensions greater than 1
  */
 SmallVector<Dim> getNonOneDim(ShapeRef inputShape);
+
+/*
+ * Get the dimension with the maximum size in all non-one dimensions
+ */
+std::optional<Dim> getMaxNonOneDim(ShapeRef inputShape);
 
 /*
  * Get the next supported tiling number

@@ -5,6 +5,7 @@
 
 #include "vpux/compiler/dialect/IE/utils/shape_infer.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPU/IR/types.hpp"
 #include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/explicit_distribution_utils.hpp"
@@ -13,11 +14,11 @@ using namespace vpux;
 
 mlir::LogicalResult vpux::VPU::AddOp::inferReturnTypes(mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc,
                                                        mlir::ValueRange operands, mlir::DictionaryAttr attrs,
-                                                       mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+                                                       mlir::OpaqueProperties prop, mlir::RegionRange /*regions*/,
                                                        mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::AddOpAdaptor add(operands, attrs);
+    VPU::AddOpAdaptor add(operands, attrs, prop);
     if (mlir::failed(add.verify(loc))) {
         return mlir::failure();
     }
@@ -28,10 +29,14 @@ mlir::LogicalResult vpux::VPU::AddOp::inferReturnTypes(mlir::MLIRContext* ctx, s
     const auto outShapeRes =
             IE::broadcastEltwiseShape(in1Type.getShape().raw(), in2Type.getShape().raw(), add.getAutoBroadcast(), loc);
 
-    if (mlir::succeeded(outShapeRes)) {
-        const auto outType = in1Type.changeShape(Shape(outShapeRes.value()));
-        inferredReturnTypes.push_back(outType);
+    if (mlir::failed(outShapeRes)) {
+        return mlir::failure();
     }
+
+    auto outputType = mlir::RankedTensorType::get(outShapeRes.value(), in1Type.getElementType(),
+                                                  createTensorAttrFromType(in1Type));
+
+    inferredReturnTypes.push_back(outputType);
 
     return mlir::success();
 }
@@ -47,23 +52,37 @@ bool vpux::VPU::AddOp::checkStrategyCompatibility(VPU::MultiClusterStrategy stra
            strategy == VPU::MultiClusterStrategy::SplitOverWidth;
 }
 
-vpux::VPU::DistributedTensorAttr vpux::VPU::AddOp::getExplicitDistributedTensorAttr(
-        vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, mlir::ArrayAttr numTiles,
-        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::UnitAttr uniformDistributedSegments,
-        const vpux::VPU::OverlapDistributionParams& /*overlapParams*/) {
-    return VPU::getSWExplicitDistributedTensorAttr(mlir::dyn_cast<VPU::SWOpInterface>(getOperation()), shape,
-                                                   distributionMode, numTiles, numClusters, alignment,
-                                                   uniformDistributedSegments);
+vpux::VPU::DistributedTensorNative vpux::VPU::AddOp::getExplicitDistributedTensorAttr(
+        vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, ArrayRef<int64_t> numTiles,
+        const int64_t numClusters, ArrayRef<int64_t> alignment, const bool uniformDistributedSegments,
+        const vpux::VPU::OverlapDistributionParams& overlapParams) {
+    return VPU::getSWExplicitDistributedTensorNative(mlir::cast<VPU::SWOpInterface>(getOperation()), shape,
+                                                     distributionMode, numTiles, numClusters, alignment,
+                                                     uniformDistributedSegments, overlapParams);
 }
 
 bool VPU::AddOp::doesLayerFitIntoCMX(VPU::MultiClusterStrategy strategy, Byte reservedMem) {
     auto addOp = mlir::cast<VPU::AddOp>(getOperation());
     const auto outputType = addOp->getResult(0).getType().cast<vpux::NDTypeInterface>();
-    auto numClusters = VPU::getOptimalNumClusters(addOp, outputType.getShape()[Dims4D::Act::C], strategy);
-    auto distInput1Type = getDistributedActivationTypeFromOp(addOp, addOp.getInput1().getType(), numClusters, strategy);
-    auto distInput2Type = getDistributedActivationTypeFromOp(addOp, addOp.getInput2().getType(), numClusters, strategy);
-    auto distOutputType = getDistributedOutputTypeFromOp(addOp, addOp.getOutput().getType(), numClusters, strategy);
-    return fitIntoCMX({distInput1Type, distInput2Type, distOutputType}, reservedMem);
+    auto numClusters = VPU::getOptimalNumClusters(addOp, outputType.getShape(), strategy);
+
+    SmallVector<Byte> buffersSize{
+            VPU::getTotalAllocSizeWithDistribution(
+                    getInput1().getType(),
+                    getActivationDistributionAttrFromOp(addOp, getInput1().getType(), numClusters.getInt(), strategy)),
+            VPU::getTotalAllocSizeWithDistribution(
+                    getInput2().getType(),
+                    getActivationDistributionAttrFromOp(addOp, getInput2().getType(), numClusters.getInt(), strategy)),
+            VPU::getTotalAllocSizeWithDistribution(
+                    getOutput().getType(),
+                    getOutputDistributionAttrFromOp(addOp, getOutput().getType(), numClusters.getInt(), strategy))};
+
+    auto totalAvailableCMXSize = reservedMem.count() == 0 ? getTotalCMXSize(getOperation()).count()
+                                                          : getTotalCMXFragmentationAwareSize(getOperation()).count();
+
+    return vpux::VPU::calculateAlignedBuffersMemoryRequirement(getArch(getOperation()), buffersSize).count() +
+                   reservedMem.count() <=
+           totalAvailableCMXSize;
 }
 
 //
@@ -77,11 +96,11 @@ void vpux::VPU::AddOp::build(::mlir::OpBuilder& odsBuilder, ::mlir::OperationSta
 }
 
 bool vpux::VPU::AddOp::fitIntoCMX(llvm::ArrayRef<vpux::NDTypeInterface> buffers, Byte reservedMem) {
-    VPUX_THROW_UNLESS(buffers.size() == 3, "AddOp requires 2 input and 1 output, but the number of buffer is {0}",
-                      buffers.size());
+    VPUX_THROW_UNLESS(buffers.size() == 5,
+                      "AccumulateOp requires 4 inputs and 1 output, but the number of buffers is {0}", buffers.size());
 
     SmallVector<Byte> buffersSize;
-    std::transform(buffers.begin(), buffers.end(), std::back_inserter(buffersSize), [](const auto buffer) {
+    llvm::transform(buffers, std::back_inserter(buffersSize), [](const auto buffer) {
         return buffer.getTotalAllocSize();
     });
 

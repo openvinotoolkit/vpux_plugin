@@ -4,7 +4,7 @@
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --initial-low-precision-transformations %s | FileCheck %s --strict-whitespace
-// REQUIRES: arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 // CHECK-LABEL: @ScalarArgumentsWeightsDequantizeToFakeQuantize
 func.func @ScalarArgumentsWeightsDequantizeToFakeQuantize(%arg0: tensor<1x16x32x32xf32>) -> tensor<1x16x32x32xf32> {
@@ -19,17 +19,18 @@ func.func @ScalarArgumentsWeightsDequantizeToFakeQuantize(%arg0: tensor<1x16x32x
   %3 = IE.GroupConvolution(%0, %2) {dilations = [1, 1], groups = 16 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x16x32x32xf32>, tensor<16x1x1x1xf32> -> tensor<1x16x32x32xf32>
   return %3 : tensor<1x16x32x32xf32>
 
-  // CHECK-DAG:   [[CST:%.*]] = const.Declare tensor<1x1x1x1xf32> = dense<-1.270000e+02> : tensor<1x1x1x1xf32>
-  // CHECK-DAG:   [[CST_0:%.*]] = const.Declare tensor<1x1x1x1xf32> = dense<1.270000e+02> : tensor<1x1x1x1xf32>
-  // CHECK-DAG:   [[CST_1:%.*]] = const.Declare tensor<1x1x1x1xf32> = dense<-8.60620307> : tensor<1x1x1x1xf32>
-  // CHECK-DAG:   [[CST_2:%.*]] = const.Declare tensor<1x1x1x1xf32> = dense<5.77521514> : tensor<1x1x1x1xf32>
-  // CHECK-DAG:   [[CST_3:%.*]] = const.Declare tensor<16x1x1x1xf32>
-  // CHECK-SAME{LITERAL}  = dense<[[[[2.700000e+01]]], [[[2.500000e+01]]], [[[3.900000e+01]]], [[[2.200000e+01]]], [[[2.700000e+01]]], [[[2.500000e+01]]], [[[2.100000e+01]]], [[[2.700000e+01]]], [[[3.100000e+01]]], [[[2.900000e+01]]], [[[4.200000e+01]]], [[[2.700000e+01]]], [[[2.700000e+01]]], [[[2.800000e+01]]], [[[3.300000e+01]]], [[[3.300000e+01]]]]> : tensor<16x1x1x1xf32>
-  // CHECK-DAG:   [[CST_4:%.*]] = const.Declare tensor<1x1x1x1xf32> = dense<5.99976158> : tensor<1x1x1x1xf32>
-  // CHECK-DAG:   [[CST_5:%.*]] = const.Declare tensor<1x1x1x1xf32> = dense<0.000000e+00> : tensor<1x1x1x1xf32>
+  // CHECK: [[ACT_HIGH:%.*]] = const.Declare tensor<1x1x1x1xf32> = dense<5.99976158> : tensor<1x1x1x1xf32>
+  // CHECK: [[ACT_LOW:%.*]] = const.Declare tensor<1x1x1x1xf32> = dense<0.000000e+00> : tensor<1x1x1x1xf32>
 
-  // CHECK-DAG:   [[WT_FQ:%.*]] = IE.FakeQuantize([[CST_3]], [[CST]], [[CST_0]], [[CST_1]], [[CST_2]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 255 : i64} : tensor<16x1x1x1xf32>, tensor<1x1x1x1xf32>, tensor<1x1x1x1xf32>, tensor<1x1x1x1xf32>, tensor<1x1x1x1xf32> -> tensor<16x1x1x1xf32>
-  // CHECK-DAG:   [[ACT_FQ:%.*]] = IE.FakeQuantize(%arg0, [[CST_5]], [[CST_4]], [[CST_5]], [[CST_4]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64} : tensor<1x16x32x32xf32>, tensor<1x1x1x1xf32>, tensor<1x1x1x1xf32>, tensor<1x1x1x1xf32>, tensor<1x1x1x1xf32> -> tensor<1x16x32x32xf32>
+  // CHECK: [[WT_IN_LOW:%.*]] = const.Declare tensor<1x1x1x1xf32> = dense<-1.280000e+02> : tensor<1x1x1x1xf32>
+  // CHECK: [[WT_IN_HIGH:%.*]] = const.Declare tensor<1x1x1x1xf32> = dense<1.270000e+02> : tensor<1x1x1x1xf32>
+  // CHECK: [[WT_OUT_LOW:%.*]] = const.Declare tensor<1x1x1x1xf32> = dense<-8.66282272> : tensor<1x1x1x1xf32>
+  // CHECK: [[WT_OUT_HIGH:%.*]] = const.Declare tensor<1x1x1x1xf32> = dense<5.77521514> : tensor<1x1x1x1xf32>
+  // CHECK: [[WT_DATA:%.*]] = const.Declare tensor<16x1x1x1xf32>
+  // CHECK-SAME{LITERAL}: dense<[[[[2.700000e+01]]], [[[2.500000e+01]]], [[[3.900000e+01]]], [[[2.200000e+01]]], [[[2.700000e+01]]], [[[2.500000e+01]]], [[[2.100000e+01]]], [[[2.700000e+01]]], [[[3.100000e+01]]], [[[2.900000e+01]]], [[[4.200000e+01]]], [[[2.700000e+01]]], [[[2.700000e+01]]], [[[2.800000e+01]]], [[[3.300000e+01]]], [[[3.300000e+01]]]]> : tensor<16x1x1x1xf32>
+
+  // CHECK-DAG: [[WT_FQ:%.*]] = IE.FakeQuantize([[WT_DATA]], [[WT_IN_LOW]], [[WT_IN_HIGH]], [[WT_OUT_LOW]], [[WT_OUT_HIGH]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64} : tensor<16x1x1x1xf32>, tensor<1x1x1x1xf32>, tensor<1x1x1x1xf32>, tensor<1x1x1x1xf32>, tensor<1x1x1x1xf32> -> tensor<16x1x1x1xf32>
+  // CHECK-DAG: [[ACT_FQ:%.*]] = IE.FakeQuantize(%arg0, [[ACT_LOW]], [[ACT_HIGH]], [[ACT_LOW]], [[ACT_HIGH]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64} : tensor<1x16x32x32xf32>, tensor<1x1x1x1xf32>, tensor<1x1x1x1xf32>, tensor<1x1x1x1xf32>, tensor<1x1x1x1xf32> -> tensor<1x16x32x32xf32>
   // CHECK:   [[GRUP_CONV:%.*]] = IE.GroupConvolution([[ACT_FQ]], [[WT_FQ]]) {dilations = [1, 1], groups = 16 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x16x32x32xf32>, tensor<16x1x1x1xf32> -> tensor<1x16x32x32xf32>
 
   // CHECK:   return [[GRUP_CONV]] : tensor<1x16x32x32xf32>

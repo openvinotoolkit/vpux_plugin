@@ -10,9 +10,9 @@
 
 #include "vpux/utils/core/string_ref.hpp"
 
-namespace vpux {
+namespace intel_npu {
 
 bool platformSupported(const std::string_view platform);
-StringRef getAppName(const std::string_view platform);
+llvm::StringRef getAppName(const std::string_view platform);
 
-}  // namespace vpux
+}  // namespace intel_npu

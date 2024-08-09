@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --vpu-arch=%arch% --add-inner-section-padding %s | FileCheck %s
-// REQUIRES: arch-VPUX40XX
+// REQUIRES: arch-NPU40XX
 
 module @mainModule attributes {VPU.arch = #VPU.arch_kind<NPU40XX>} {
   IE.ExecutorResource 1 of @DMA_NN
@@ -71,15 +71,15 @@ module @mainModule attributes {VPU.arch = #VPU.arch_kind<NPU40XX>} {
       }
       ELF.CreateSection @text.shave aligned(1024) secType(SHT_PROGBITS) secFlags(SHF_ALLOC) {
         VPUASM.DeclareKernelText @DeclareKernelText0 : "activation_sigmoid"
-        //CHECK:  ELF.Pad size(336)
+        //CHECK:  ELF.Pad size(480)
         VPUASM.DeclareKernelText @DeclareKernelText1 : "activation_sigmoid"
-        //CHECK:  ELF.Pad size(336)
+        //CHECK:  ELF.Pad size(480)
         VPUASM.DeclareKernelText @DeclareKernelText2 : "activation_sigmoid"
-        //CHECK:  ELF.Pad size(336)
+        //CHECK:  ELF.Pad size(480)
         VPUASM.DeclareKernelText @DeclareKernelText3 : "activation_sigmoid"
-        //CHECK:  ELF.Pad size(336)
+        //CHECK:  ELF.Pad size(480)
         VPUASM.DeclareKernelText @DeclareKernelText4 : "activation_sigmoid"
-        //CHECK:  ELF.Pad size(336)
+        //CHECK:  ELF.Pad size(480)
         VPUASM.DeclareKernelText @DeclareKernelText5 : "activation_sigmoid"
       }
       ELF.CreateSection @program.shave.data aligned(1024) secType(SHT_PROGBITS) secFlags(SHF_ALLOC) {

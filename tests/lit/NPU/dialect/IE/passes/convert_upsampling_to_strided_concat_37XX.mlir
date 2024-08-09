@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --convert-upsampling-to-strided-concat %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX
+// REQUIRES: arch-NPU37XX
 
 // CHECK-LABEL: @ConvertUpsamplingToStridedConcatW
 func.func @ConvertUpsamplingToStridedConcatW(%arg0: tensor<1x1x2x2xf16>) -> tensor<1x1x2x3xf16> {

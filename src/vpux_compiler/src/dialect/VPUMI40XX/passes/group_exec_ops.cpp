@@ -174,6 +174,8 @@ void groupExecOps(VPUMI40XX::MappedInferenceOp mpi, int64_t tilesCount, const VP
 
             auto waitBarrs = getBarrieredOp(minPrimary, minSecondary).waitBarriers();
             auto updateBarrs = getBarrieredOp(maxPrimary, maxSecondary).updateBarriers();
+            maxSecondary->setAttr(VPUMI40XX::lastSecondaryTaskInExecutionGroup,
+                                  mlir::UnitAttr::get(maxSecondary->getContext()));
 
             // Here we have implicit insert and create logic because
             // GroupOp inherits the SSA values of the first and last variant and invariant,
@@ -205,8 +207,6 @@ void groupExecOps(VPUMI40XX::MappedInferenceOp mpi, int64_t tilesCount, const VP
                 bool isOwnerSecodanry = ownerTaskOp ? (ownerTaskOp.getTaskType() == secondary) : false;
 
                 return isOwnerGroup && !isOwnerSecodanry;
-                // return (link.getOwner()->getParentOp() != group.getOperation()) &&
-                //    !mlir::isa<VPUMI40XX::DPUVariantOp>(link.getOwner());
             });
 
             moveOpsIntoBlock(1, minSecondary, maxSecondary, group, [&group](mlir::OpOperand& link) {

@@ -7,6 +7,7 @@
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
+#include "vpux/compiler/utils/platform_resources.hpp"
 #include "vpux/compiler/utils/types.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
 #include "vpux/hwtest/ops/act_shave_op.hpp"
@@ -83,11 +84,15 @@ void buildActShave(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mo
                               ? func.getArgument(static_cast<unsigned int>(inputList.size()) + 1)
                               : nullptr;
 
+    auto [waitWLMBarrier, freeBarrierId] =
+            insertWLMStartSequence(funcbuilder, testDesc.getWLMParams().isWLMPartialEnabled);
+
     //  Build main function: barriers
-    auto barrier0 = funcbuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 0);
-    auto barrier1 = funcbuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 1);
+    auto barrier0 = funcbuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), freeBarrierId++);
+    auto barrier1 = funcbuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), freeBarrierId++);
     // finalBarrier passed as production barrier to last DMA task
-    auto barrier2 = funcbuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 2);
+    auto finalBarrier = funcbuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), freeBarrierId++,
+                                                                      testDesc.getWLMParams().isWLMPartialEnabled);
 
     //  Build main function: input/output cmx
     SmallVector<vpux::VPURT::DeclareBufferOp> inputCmxVec;
@@ -122,7 +127,7 @@ void buildActShave(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mo
 
     for (std::size_t idx = 0; idx < inputList.size(); idx++) {
         //  Build main function: DMA func input -> CMX input
-        vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(),
+        vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, waitWLMBarrier,
                                                     mlir::ValueRange(barrier0.getBarrier()), builder.getUnknownLoc(),
                                                     funcinputs[idx], getTensorResult(inputCmxVec[idx]), 0);
     }
@@ -133,13 +138,13 @@ void buildActShave(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mo
 
     //  Build main function: DMA CMX output -> func output
     vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(barrier1.getBarrier()),
-                                                mlir::ValueRange(barrier2.getBarrier()), builder.getUnknownLoc(),
+                                                mlir::ValueRange(finalBarrier.getBarrier()), builder.getUnknownLoc(),
                                                 getTensorResult(outputCmx), funcoutput, 0);
 
     if (profilingParams.swProfilingEnabled) {
         // copy profiling data into DDR
         VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(barrier1.getBarrier()),
-                                              mlir::ValueRange(barrier2.getBarrier()), builder.getUnknownLoc(),
+                                              mlir::ValueRange(finalBarrier.getBarrier()), builder.getUnknownLoc(),
                                               getTensorResult(profOutputCmx), getTensorResult(profOutputDdr), 0);
     }
 

@@ -104,7 +104,8 @@ void buildDualChannelDMATest(const nb::TestCaseJsonDescriptor& testDesc, mlir::M
     auto barrier_0 = funcBuilder.create<VPURT::ConfigureBarrierOp>(loc, 0);
     auto barrier_1 = funcBuilder.create<VPURT::ConfigureBarrierOp>(loc, 1);
     // finalBarrier passed as production barrier to last DMA task
-    auto barrier_2 = funcBuilder.create<VPURT::ConfigureBarrierOp>(loc, 2);
+    auto finalBarrier =
+            funcBuilder.create<VPURT::ConfigureBarrierOp>(loc, 2, testDesc.getWLMParams().isWLMPartialEnabled);
 
     // transactions from ProgrammableInput to CMX
     vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcBuilder, mlir::ValueRange(),
@@ -134,11 +135,11 @@ void buildDualChannelDMATest(const nb::TestCaseJsonDescriptor& testDesc, mlir::M
 
     // transactions from CMX to ProgrammableOutput
     vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcBuilder, mlir::ValueRange(barrier_1.getBarrier()),
-                                                mlir::ValueRange(barrier_2.getBarrier()), loc,
+                                                mlir::ValueRange(finalBarrier.getBarrier()), loc,
                                                 outputCMX_0.getOperation()->getResult(0), funcOutput_0, 0);
 
     vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcBuilder, mlir::ValueRange(barrier_1.getBarrier()),
-                                                mlir::ValueRange(barrier_2.getBarrier()), loc,
+                                                mlir::ValueRange(finalBarrier.getBarrier()), loc,
                                                 outputCMX_1.getOperation()->getResult(0), funcOutput_1, 1);
 
     funcBuilder.create<mlir::func::ReturnOp>(loc,

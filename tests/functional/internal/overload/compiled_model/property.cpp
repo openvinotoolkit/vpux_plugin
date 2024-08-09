@@ -4,8 +4,8 @@
 //
 
 #include "behavior/compiled_model/properties.hpp"
+#include "common/npu_test_env_cfg.hpp"
 #include "common/utils.hpp"
-#include "common/vpu_test_env_cfg.hpp"
 #include "common_test_utils/subgraph_builders/conv_pool_relu.hpp"
 #include "intel_npu/al/config/common.hpp"
 

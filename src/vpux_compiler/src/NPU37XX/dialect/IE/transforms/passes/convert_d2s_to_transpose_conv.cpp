@@ -4,6 +4,7 @@
 //
 
 #include "vpux/compiler/dialect/VPUIP/interfaces/nce_invariant.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/interfaces/d2s_to_transposed_conv_verifier.hpp"
@@ -78,28 +79,16 @@ SmallVector<uint8_t> createDepthFirstWeights(ShapeRef filterShape) {
     return weights;
 }
 
-//
-// createDepthFirstWeightsConst
-//
-
-Const::DeclareOp createDepthFirstWeightsConst(mlir::MLIRContext* ctx, IE::DepthToSpaceOp d2sOp, ShapeRef filterShape,
-                                              mlir::PatternRewriter& rewriter, [[maybe_unused]] Logger log) {
+mlir::Value createDepthFirstWeightsConst(mlir::MLIRContext* ctx, IE::DepthToSpaceOp d2sOp, ShapeRef filterShape,
+                                         mlir::PatternRewriter& rewriter, [[maybe_unused]] Logger log) {
     auto weights = createDepthFirstWeights(filterShape);
-
-    auto filterTensorAttr = vpux::getTensorAttr(ctx, DimsOrder::OIYX, nullptr);
-    auto filterType = mlir::RankedTensorType::get(filterShape.raw(), mlir::Float16Type::get(ctx), filterTensorAttr)
-                              .cast<vpux::NDTypeInterface>();
 
     auto dataStorageTensorAttr = vpux::getTensorAttr(ctx, DimsOrder::OYXI, nullptr);
     auto dataStorageType = mlir::RankedTensorType::get(filterShape.raw(), getUInt8Type(ctx), dataStorageTensorAttr);
-
-    auto dataAttr = mlir::DenseElementsAttr::get(dataStorageType, ArrayRef(weights));
-
-    auto contentAttr = Const::ContentAttr::get(dataAttr)
-                               .convertElemType(mlir::Float16Type::get(ctx))
-                               .reorder(filterType.getDimsOrder());
-
-    return rewriter.create<Const::DeclareOp>(d2sOp.getLoc(), filterType, contentAttr);
+    return Const::createConst(rewriter, d2sOp.getLoc(), dataStorageType, ArrayRef(weights),
+                              [&](Const::ContentAttr attr) {
+                                  return attr.convertElemType(mlir::Float16Type::get(ctx)).reorder(DimsOrder::OIYX);
+                              });
 }
 
 //
@@ -112,8 +101,8 @@ IE::FakeQuantizeOp createBinaryFakeQuantize(mlir::MLIRContext* ctx, IE::DepthToS
 
     const auto fqArgType = mlir::RankedTensorType::get({1, 1, 1, 1}, elemType);
 
-    auto fqLow = VPU::declareFloatConst(rewriter, d2sOp.getLoc(), 0.0f, fqArgType);
-    auto fqHigh = VPU::declareFloatConst(rewriter, d2sOp.getLoc(), 1.0f, fqArgType);
+    auto fqLow = Const::createFloatConst(rewriter, d2sOp.getLoc(), fqArgType, 0.0f);
+    auto fqHigh = Const::createFloatConst(rewriter, d2sOp.getLoc(), fqArgType, 1.0f);
 
     auto levels = getIntAttr(ctx, 2);
     auto broadcast = vpux::IE::AutoBroadcastTypeAttr::get(ctx, IE::AutoBroadcastType::NUMPY);
@@ -170,7 +159,7 @@ mlir::LogicalResult convertDepthFirstOp(mlir::MLIRContext* ctx, IE::DepthToSpace
 
     // Generate weights and FakeQuantize
     auto weightsConst = createDepthFirstWeightsConst(ctx, d2sOp, filterShape, rewriter, log);
-    auto fq = createBinaryFakeQuantize(ctx, d2sOp, weightsConst.getOutput(), rewriter, log);
+    auto fq = createBinaryFakeQuantize(ctx, d2sOp, weightsConst, rewriter, log);
 
     // Replace D2S with TransposedConvolution
     auto strides = getIntArrayAttr(ctx, ov::Strides{strideX, strideY});

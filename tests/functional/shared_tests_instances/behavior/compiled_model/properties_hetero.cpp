@@ -1,11 +1,12 @@
-// Copyright (C) 2018-2024 Intel Corporation
+//
+// Copyright (C) 2022 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
 #include "behavior/compiled_model/properties_hetero.hpp"
 #include "common/functions.h"
+#include "common/npu_test_env_cfg.hpp"
 #include "common/utils.hpp"
-#include "common/vpu_test_env_cfg.hpp"
 #include "functional_test_utils/ov_plugin_cache.hpp"
 
 using namespace ov::test::behavior;

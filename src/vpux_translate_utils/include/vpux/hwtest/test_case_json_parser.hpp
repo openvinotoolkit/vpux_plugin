@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+//
+
 #pragma once
 
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
@@ -47,22 +49,25 @@ enum class CaseType {
     M2iTask,
     StorageElementTableDPU,
     DualChannelDMA,
-    DMAcompressAct,
+    DMACompressActDense,
+    DMACompressActSparse,
     GatherDMA,
     GenerateScaleTable,
+    ReduceMean,
+    ReduceSumSquare,
     Unknown
 };
 
 std::string to_string(CaseType case_);
 CaseType to_case(llvm::StringRef str);
 
-enum class CompilerBackend { ELF };
-
-std::string to_string(CompilerBackend compilerBackend);
+enum class BackendFlow { Default, WLMPartial };
+std::string to_string(BackendFlow backendFlow);
 
 enum class DType { U1, U4, I4, U8, I8, I32, BF8, HF8, FP16, FP32, BF16, I64, U64, UNK };
 
-enum class MemoryLocation { CMX0, CMX1, DDR, Unknown };
+// For CMX the enum constant values correspond to the tile indexes
+enum class MemoryLocation { CMX0 = 0, CMX1 = 1, CMX2 = 2, CMX3 = 3, CMX4 = 4, CMX5 = 5, DDR, Unknown };
 MemoryLocation to_memory_location(llvm::StringRef str);
 std::string to_string(MemoryLocation memoryLocation);
 
@@ -115,10 +120,10 @@ struct GatherIndices {
 
 struct DMAparams {
     MemoryLocation srcLocation = MemoryLocation::Unknown;
-    MemoryLocation dstLocation = MemoryLocation::Unknown;
+    // multiple destination locations for DMA broadcast (otherwise one location)
+    std::vector<MemoryLocation> dstLocations;
     MemoryLocation indicesLocation = MemoryLocation::Unknown;
     int64_t engine = 0;
-    bool actCompressDenseMode = false;
     bool doConvert = false;
     bool testMemSideCache = false;
     bool cacheTrashing = false;
@@ -208,6 +213,8 @@ enum class ActivationType {
     round_trip_b8h8_to_fp16,
     PopulateWeightTable,
     Rsqrt,
+    Sin,
+    Tanh,
     Unknown
 };
 
@@ -270,6 +277,10 @@ struct ProfilingParams {
         return dpuProfilingEnabled || dmaProfilingEnabled || swProfilingEnabled || m2iProfilingEnabled ||
                workpointEnabled;
     }
+};
+
+struct WLMParams {
+    bool isWLMPartialEnabled = false;
 };
 
 class TestCaseJsonDescriptor {
@@ -366,12 +377,12 @@ public:
         return architecture_;
     }
 
-    CompilerBackend getCompilerBackend() const {
-        return compilerBackend_;
-    }
-
     ProfilingParams getProfilingParams() const {
         return profilingParams_;
+    }
+
+    WLMParams getWLMParams() const {
+        return WLMParams_;
     }
 
 private:
@@ -399,6 +410,7 @@ private:
     SETableParams loadSETableParams(llvm::json::Object* obj);
     SwizzlingKey loadSwizzlingKey(llvm::json::Object* obj, std::string keyType);
     ProfilingParams loadProfilingParams(llvm::json::Object* obj);
+    WLMParams loadWLMParams(llvm::json::Object* obj);
 
     CaseType caseType_ = CaseType::Unknown;
     DMAparams DMAparams_;
@@ -429,8 +441,8 @@ private:
     HaloParams haloParams_;
     SETableParams seTableParams_;
     vpux::VPU::ArchKind architecture_ = vpux::VPU::ArchKind::UNKNOWN;
-    CompilerBackend compilerBackend_ = CompilerBackend::ELF;
     ProfilingParams profilingParams_;
+    WLMParams WLMParams_;
 };
 
 }  // namespace nb

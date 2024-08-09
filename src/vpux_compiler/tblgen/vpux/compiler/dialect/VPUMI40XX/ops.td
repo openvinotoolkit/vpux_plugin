@@ -9,6 +9,7 @@
 include "vpux/compiler/core/attributes.td"
 include "vpux/compiler/core/ops_interfaces.td"
 include "vpux/compiler/dialect/VPUMI40XX/dialect.td"
+include "vpux/compiler/dialect/VPUMI40XX/attributes.td"
 include "vpux/compiler/dialect/VPUMI40XX/ops_interfaces.td"
 include "vpux/compiler/dialect/VPU/attributes.td"
 include "vpux/compiler/dialect/VPU/ops_interfaces.td"
@@ -153,6 +154,10 @@ def VPUMI40XX_MappedInferenceOp :
     let extraClassDeclaration = [{
         mlir::Value getListHead(VPURegMapped::TaskType, int64_t tileIdx, int64_t listIdx = 0);
         mlir::MutableOperandRange getListHeadMutable(VPURegMapped::TaskType, int64_t tileIdx, int64_t listIdx = 0);
+
+        // TODO: E#122694 - Retrieve info needed about task counts & max tile used from OpRanges
+        size_t getTaskCount(vpux::VPURegMapped::TaskType taskType, size_t tileIdx, size_t listIdx);
+        size_t getMaxTaskTile(vpux::VPURegMapped::TaskType taskType);
     }];
 
     let assemblyFormat = [{
@@ -214,6 +219,8 @@ def VPUMI40XX_NNDMAOp :
         IntAttr:$port,
         VPUIP_DMAAccModeAttr:$acceleration_mode,
         Optional<AnyMemRef>:$act_compression_size_entry,
+        Optional<AnyMemRef>:$act_compression_sparsity_map,
+        OptionalAttr<VPUMI40XX_DMATransactionAttr>:$dma_transaction,
         OptionalAttr<VPUIP_DMADescriptorAttr>:$dma_descriptor,
         OptionalAttr<IntAttr>:$dma_hwp_id,
         OptionalAttr<VPUIP_DmaProfilingMetadataAttr>:$profilingMetadata,
@@ -237,6 +244,7 @@ def VPUMI40XX_NNDMAOp :
                     "mlir::Value":$prevousDma,
                     "mlir::ValueRange":$waitBarriers,
                     "mlir::ValueRange":$updateBarriers,
+                    "VPUMI40XX::DMATransactionAttr":$dma_transaction,
                     "VPUIP::DMADescriptorAttr":$dma_descriptor)
         >
     ];
@@ -260,7 +268,9 @@ def VPUMI40XX_NNDMAOp :
         `start_after` `(` $start_after `)`
         `clean_after` `(` $clean_after `)`
         `acceleration_mode` `(` $acceleration_mode `)`
+        (`dma_transaction` `(` $dma_transaction^ `)`)?
         (`act_compression_size_entry` `(` $act_compression_size_entry^  `:` type($act_compression_size_entry) `)`)?
+        (`act_compression_sparsity_map` `(` $act_compression_sparsity_map^  `:` type($act_compression_sparsity_map) `)`)?
         (`dma_hwp_id` `(` $dma_hwp_id^ `)`)?
         (`indices` `(` $indices^ `:` type($indices) `)`)?
         `->` type(results)
@@ -394,9 +404,37 @@ def VPUMI40XX_KernelParamsOp :
         > {
     let summary = "Kernel Params";
 
+    let description = [{
+        This operation contains description of parameters for software kernel, accommodating both dynamic and static shapes. 
+        For dynamic shapes, the parameters `dynamicInputShapes` and `dynamicOutputShapes` are utilized. 
+        If a shape does not need to be dynamic, the corresponding parameter can be omitted. The shape is resolved via kernel_params for this case.
+
+        Currently, support for dynamic shapes is limited to scenarios with a single input or output.
+        The rank of these shapes is inferred from the bounds and layout; dynamic rank is not supported.
+
+        For instance, consider a ReLu operation with the following specifications:
+        - Input: `tensor<1x?x?xf32>, {bounds = [1, 18, 15], order = #CHW}`
+        - Output: `tensor<1x?x?xf32>, {bounds = [1, 18, 15], order = #CHW}`
+        In this example, the dimensions are defined by the layout and bounds. Consequently, the input will allocate a buffer with memref<1x18x15xf32>, order = #CHW. 
+        
+        In the VPUMI40XX dialect, the arguments are defined as follows:
+        | Arguments              | Type                | Description                                                                                                                                                                                                 |
+        |------------------------|-------------------  |-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+        | inputs                 | memref<1x18x15xf16> | Collection of static shapes (or upper bounds) of inputs/outputs.                                                                                                                                              |
+        | outputs                | memref<1x18x15xf16> |                                                                                                                                                                                                             |
+        | dynamicInputShapes     | memref<3xsi32>      | Collection of dynamic shapes of inputs/outputs. The dimension value in the dynamic shape represents the size available at runtime and cannot be larger than the corresponding upper bound. The dynamic shape contains the whole shape, including both static and dynamic dimensions (its rank is equal to the rank of the corresponding input/output static shape).                                                      | 
+        | dynamicOutputShapes    | memref<3xsi32>      |                                                                                                                                                                                                             |
+        | dynamicInputShapesSize | array<i32: 1>       | Amount of inputs/outputs processed by the kernel. In this case, it is an array that contains a single integer and the value is 1. Adding the sizes is a requirement of MLIR framework. For more details, please refer to [MLIR documentation on defining dialects and operations](https://mlir.llvm.org/docs/DefiningDialects/Operations/#variadicofvariadic-operands).               |
+        | dynamicOutputShapesSize| array<i32: 1>       |                                                                                                                                                                                                             |
+    }];
+
     let arguments = (ins
         Variadic<AnyMemRef>:$inputs,
         Variadic<AnyMemRef>:$outputs,
+        VariadicOfVariadic<AnyMemRef, "dynamicInputShapesSize">:$dynamicInputShapes,
+        VariadicOfVariadic<AnyMemRef, "dynamicOutputShapesSize">:$dynamicOutputShapes,
+        DenseI32ArrayAttr:$dynamicInputShapesSize,
+        DenseI32ArrayAttr:$dynamicOutputShapesSize,
         StrAttr:$kernel_type,
         ElementsAttr:$kernel_params
     );
@@ -409,6 +447,8 @@ def VPUMI40XX_KernelParamsOp :
         attr-dict
         `inputs` `(` $inputs `:` type($inputs) `)`
         `outputs` `(` $outputs `:` type($outputs) `)`
+        (`dynamicInputShapes` `(` $dynamicInputShapes^ `:` type($dynamicInputShapes) `)`)?
+        (`dynamicOutputShapes` `(` $dynamicOutputShapes^ `:` type($dynamicOutputShapes) `)`)?
         `kernel_type` `(` $kernel_type `)`
         `kernel_params` `(` $kernel_params `)`
         `->` type(results)
@@ -850,6 +890,11 @@ def OpRanges : VPUMI40XX_Op<"OpRanges", [
         (`begins` `(` $begins^ `:` type($begins) `)`)?
         (`ends` `(` $ends^ `:` type($ends) `)`)?
         attr-dict
+    }];
+
+    let extraClassDeclaration = [{
+        ::vpux::VPUMI40XX::TaskForwardRange getForwardRange(::vpux::VPURegMapped::TaskType, ::vpux::VPURegMapped::IndexType);
+        ::vpux::VPUMI40XX::TaskBackwardRange getBackwardRange(::vpux::VPURegMapped::TaskType, ::vpux::VPURegMapped::IndexType);
     }];
 
     let hasVerifier = 1;

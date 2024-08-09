@@ -83,8 +83,7 @@ bool VPU::shouldRemoveOutputSparsity(VPU::NCEOpInterface nceOp) {
     VPUX_THROW_UNLESS(sparseOutputType.getStorageElementTable() == nullptr,
                       "Dynamically populated storage element table is not supported");
 
-    const auto numClusters =
-            VPU::getOptimalNumClusters(clusteredOp, outputTensorType.getShape()[Dims4D::Act::C], strategy);
+    const auto numClusters = VPU::getOptimalNumClusters(clusteredOp, outputTensorType.getShape(), strategy);
     const auto distributedDataType = getDistributedOutputTypeFromOp(
             clusteredOp, sparseOutputType.getData(), numClusters,
             /*inputType*/ nullptr, /*tileInfo*/ vpux::TileInfo(ShapeRef()), /*hasExplicitDistributedAttr*/ false);

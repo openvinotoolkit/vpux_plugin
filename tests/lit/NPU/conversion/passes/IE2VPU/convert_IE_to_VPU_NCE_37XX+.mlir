@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW" --convert-IE-to-VPU-NCE %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
@@ -134,28 +134,6 @@ func.func @EltwiseAddWithDifferentScales(%arg0: tensor<1x64x28x28x!qElemType, {o
     // CHECK-SAME:      -> tensor<1x64x28x28x!qElemType2, {order = #NHWC}>
 
     // CHECK:       return [[OUT]] : tensor<1x64x28x28x!qElemType2, {order = #NHWC}>
-}
-
-// -----
-
-#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
-
-// CHECK-LABEL: @SkipEltwiseMulToNCE
-func.func @SkipEltwiseMulToNCE(%arg0: tensor<1x64x28x28xf16, {order = #NHWC}>, %arg1: tensor<1x64x28x28xf16, {order = #NHWC}>)
-        -> tensor<1x64x28x28xf16, {order = #NHWC}> {
-    %0 = IE.Multiply(%arg0, %arg1) { auto_broadcast = #IE.auto_broadcast_type<NUMPY> } :
-        tensor<1x64x28x28xf16, {order = #NHWC}>, tensor<1x64x28x28xf16, {order = #NHWC}>
-        -> tensor<1x64x28x28xf16, {order = #NHWC}>
-
-    return %0 : tensor<1x64x28x28xf16, {order = #NHWC}>
-
-    // CHECK-NOT:   VPU.NCE.Eltwise
-
-    // CHECK:       [[OUT:%.+]] = IE.Multiply(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} :
-    // CHECK-SAME:      tensor<1x64x28x28xf16, {order = #NHWC}>, tensor<1x64x28x28xf16, {order = #NHWC}>
-    // CHECK-SAME:      -> tensor<1x64x28x28xf16, {order = #NHWC}>
-
-    // CHECK:       return [[OUT]] : tensor<1x64x28x28xf16, {order = #NHWC}>
 }
 
 // -----

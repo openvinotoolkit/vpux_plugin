@@ -13,7 +13,6 @@
 #include "vpux/compiler/dialect/VPURegMapped/utils.hpp"
 #include "vpux/compiler/utils/ELF/utils.hpp"
 #include "vpux/compiler/utils/compression_utils.hpp"
-#include "vpux/compiler/utils/elf_utils.hpp"
 #include "vpux/utils/core/mem_size.hpp"
 
 #include <npu_40xx_nnrt.hpp>
@@ -59,7 +58,7 @@ uint64_t getTensorMode(mlir::Type type) {
                std::is_same<REG_TYPE, NPUReg40XX::RegField_dma_acc_info_decompress_dtypeType>::value) {
         if (type.isSignedInteger() || type.isUnsignedInteger() || type.isSignlessInteger()) {
             return DMA_ACC_DTYPE_INT8_UINT8;
-        } else if (type.isBF16() || type.isF16()) {
+        } else {
             return DMA_ACC_DTYPE_FP16_BF16;
         }
     }
@@ -122,6 +121,11 @@ void setDMAAccelerationCompress(RegisterMap& initValues, VPUASM::NNDMAOp origOp,
     const auto dmaDescriptor = origOp.getDmaDescriptor();
     const auto srcWidth = dmaDescriptor.getSrcWidth().getInt();
     const auto dstWidth = outputType.cast<vpux::NDTypeInterface>().getTotalAllocSize().count();
+
+    const auto uncompressedBufSize = inputType.cast<vpux::NDTypeInterface>().getTotalAllocSize().count();
+    VPUX_THROW_UNLESS(uncompressedBufSize > ACT_COMPRESSION_MIN_BUF_SIZE,
+                      "Uncompressed buffer size '{0}' needs to be larger then '{1}'", uncompressedBufSize,
+                      ACT_COMPRESSION_MIN_BUF_SIZE);
 
     VPURegMapped::updateRegMappedInitializationValues(
             initValues,
@@ -236,10 +240,16 @@ NPUReg40XX_3D_DmaConfig configure3DDma(VPUIP::DMADescriptorAttr vpu27Config) {
 
     auto srcDimSize1 = srcWidth ? static_cast<int64_t>((length / srcWidth) - 1) : 0;
     auto dstDimSize1 = (dstWidth && (length > dstWidth)) ? static_cast<int64_t>((length / dstWidth) - 1) : 0;
-    int64_t numDims = numPlanes <= 1 ? DMA_2D : DMA_3D;
+
+    int64_t numDims = 0;
+    if (numPlanes > 1) {
+        numDims = DMA_3D;
+    } else if (srcWidth == srcStride && dstWidth == dstStride) {
+        numDims = DMA_1D;
+    } else {
+        numDims = DMA_2D;
+    }
     vpu4config.numDims = checked_cast_reg<NPUReg40XX::RegField_dma_cfg_fields_num_dimType>(numDims);
-    vpu4config.srcWidth = checked_cast_reg<NPUReg40XX::RegField_dma_width_srcType>(srcWidth);
-    vpu4config.dstWidth = checked_cast_reg<NPUReg40XX::RegField_dma_width_dstType>(dstWidth);
 
     switch (numDims) {
     case DMA_3D:
@@ -257,6 +267,11 @@ NPUReg40XX_3D_DmaConfig configure3DDma(VPUIP::DMADescriptorAttr vpu27Config) {
 
         vpu4config.srcStride1 = checked_cast_reg<NPUReg40XX::RegField_dma_stride_src_1Type>(srcStride);
         vpu4config.dstStride1 = checked_cast_reg<NPUReg40XX::RegField_dma_stride_dst_1Type>(dstStride);
+
+        [[fallthrough]];
+    case DMA_1D:
+        vpu4config.srcWidth = checked_cast_reg<NPUReg40XX::RegField_dma_width_srcType>(srcWidth);
+        vpu4config.dstWidth = checked_cast_reg<NPUReg40XX::RegField_dma_width_dstType>(dstWidth);
         break;
     default:
         VPUX_THROW("Error at configure3DDma. Unsupported numDims={0}", numDims);
@@ -1042,7 +1057,7 @@ mlir::LogicalResult ActKernelInvocationRewriter::matchAndRewrite(VPUASM::ActKern
     uint8_t barrier_group = 0;
     uint8_t barrier_mask = 0;
 
-    std::tie(barrier_group, barrier_mask) = reduceWaitMaskTo8bit(waitMaskLo);
+    std::tie(barrier_group, barrier_mask) = ELF::reduceWaitMaskTo8bit(waitMaskLo);
 
     auto regActKernelInvoDescriptorAttr =
             vpux::VPURegMapped::getRegMappedAttributeWithValues<vpux::NPUReg40XX::RegMapped_VpuActKernelInvocationType>(

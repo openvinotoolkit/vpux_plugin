@@ -4,7 +4,7 @@
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --hardware-adaptation %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 module @TwoDMAs {
     IE.CNNNetwork entryPoint : @main
@@ -52,7 +52,6 @@ module @TwoDMAs {
         // CHECK:       return [[ARG1]] : memref<5xf16, @DDR>
     }
 }
-
 
 // -----
 
@@ -115,7 +114,6 @@ module @ConcatView {
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 
 module @ThreeFunctions {
-    // We can run test-case for 30XX, because act-shave does not affect the pipeline result
     VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
     module @VPU.SW {
         func.func private @builtin_SoftMax(memref<*xf16>, memref<*xf16>, i64, i64) attributes {VPU.kernel_code = "softmax.cpp", VPU.kernel_entry = "softmax", VPU.task_type = @COMPUTE}
@@ -344,5 +342,117 @@ module @ThreeFunctions {
         // CHECK:   VPUIP.NNDMA {port = 0 : i64} inputs([[TMP_DDR3]] : memref<1x1x20x60xf16, @DDR>) outputs([[OUT3]] : memref<1x1x20x60xf16, @DDR>)
 
         // CHECK: return [[ARG1:%.*]], [[ARG2:%.*]], [[ARG3:%.*]] : memref<1x4x60x60xf16, @DDR>, memref<1x2x60x60xf16, @DDR>, memref<1x1x20x60xf16, @DDR>
+    }
+}
+
+// -----
+
+module @RepeatingBlocks {
+    VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
+    module @VPU.SW {
+        func.func private @builtin_SoftMax(memref<*xf16>, memref<*xf16>, i64, i64) attributes {VPU.kernel_code = "softmax.cpp", VPU.kernel_entry = "softmax", VPU.task_type = @COMPUTE}
+        func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
+    }
+
+    IE.CNNNetwork entryPoint : @main inputsInfo : {
+        DataInfo "input" : tensor<1x4x5x5xf16>
+    } outputsInfo : {
+        DataInfo "output" : tensor<1x4x5x5xf16>
+    }
+
+    // CHECK: func.func @foo([[ARG0:%.+]]: memref<1x4x5x5xf16, @DDR>, [[ARG1:%.+]]: memref<1x4x5x5xf16, @DDR>)
+    func.func @foo(%arg0: memref<1x4x5x5xf16, @DDR>, %arg1: memref<1x4x5x5xf16, @DDR>) -> memref<1x4x5x5xf16, @DDR> {
+        %token_2, %bodyResults_0 = async.execute
+                                        -> !async.value<memref<1x4x5x5xf16, @DDR>> attributes {VPUIP.executor = @SHAVE_ACT, "async-deps-index" = 2 : i64, cycleBegin = 3872 : i64, cycleCost = 27268 : i64, cycleEnd = 31140 : i64} {
+            %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_SoftMax inputs(%arg0 as %arg2: memref<1x4x5x5xf16, @DDR>) outputs(%arg1 as %arg3: memref<1x4x5x5xf16, @DDR>) on tile 0 -> memref<1x4x5x5xf16, @DDR>{
+                VPUIP.SW.Kernel.run {attrs = [0, 0]}(%arg2, %arg3) : memref<1x4x5x5xf16, @DDR>, memref<1x4x5x5xf16, @DDR>
+            }
+            async.yield %arg1 : memref<1x4x5x5xf16, @DDR>
+        }
+
+        %0 = async.await %bodyResults_0 : !async.value<memref<1x4x5x5xf16, @DDR>>
+        return %0 : memref<1x4x5x5xf16, @DDR>
+
+        // CHECK: [[IN:%.+]] = VPURT.DeclareBuffer <DDR> <0> -> memref<1x4x5x5xf16, @DDR>
+        // CHECK: [[OUT:%.+]] = VPURT.DeclareBuffer <DDR> <100> -> memref<1x4x5x5xf16, @DDR>
+
+        // CHECK:   VPURT.Task
+        // CHECK:       VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_SoftMax
+        // CHECK-SAME:           inputs([[IN]] as {{[^:]+}}: memref<1x4x5x5xf16, @DDR>)
+        // CHECK-SAME:           outputs([[OUT]] as {{[^:]+}}: memref<1x4x5x5xf16, @DDR>) on tile 0
+
+        // CHECK: return [[ARG1]] : memref<1x4x5x5xf16, @DDR>
+    }
+
+    // CHECK: func.func @main([[ARG0:%.+]]: memref<1x4x5x5xf16, @DDR>, [[ARG1:%.+]]: memref<1x4x5x5xf16, @DDR>)
+    func.func @main(%arg0: memref<1x4x5x5xf16, @DDR>, %arg1: memref<1x4x5x5xf16, @DDR>) -> memref<1x4x5x5xf16, @DDR> {
+        %tmp_in = VPUIP.StaticAlloc<0> -> memref<1x4x5x5xf16, @DDR>
+        %tmp_out = VPUIP.StaticAlloc<100> -> memref<1x4x5x5xf16, @DDR>
+
+        // copy network input to temporary (tmp_in)buffer to comply with fixed offest for offset
+        // TODO: #-XXXXX recalculate the offset at the inlining stage to get rid of this copy
+        %copy_token0, %copy_res0 = async.execute -> !async.value<memref<1x4x5x5xf16, @DDR>>
+                attributes { VPUIP.executor = @DMA_NN, VPUIP.num_units = 1 } {
+            %0 = VPUIP.Copy inputs(%arg0 : memref<1x4x5x5xf16, @DDR>) outputs(%tmp_in : memref<1x4x5x5xf16, @DDR>) -> memref<1x4x5x5xf16, @DDR>
+            async.yield %0: memref<1x4x5x5xf16, @DDR>
+        }
+
+        %foo_token0, %foo_results0 = async.execute[%copy_token0] (%copy_res0 as %arg2: !async.value<memref<1x4x5x5xf16, @DDR>>) -> !async.value<memref<1x4x5x5xf16, @DDR>>
+                                    attributes {VPUIP.executor = @NCE, "async-deps-index" = 0 : i64, cycleBegin = 0 : i64, cycleCost = 1 : i64, cycleEnd = 1 : i64} {
+            %0 = func.call @foo(%arg2, %tmp_out) : (memref<1x4x5x5xf16, @DDR>, memref<1x4x5x5xf16, @DDR>) -> memref<1x4x5x5xf16, @DDR>
+            async.yield %0 : memref<1x4x5x5xf16, @DDR>
+        }
+
+        // copy output from first call of repeating block
+        // to temporary (tmp_in)buffer to comply with fixed offest for in/out buffers offset
+        // TODO: #-XXXXX recalculate the offset at the inlining stage to get rid of this copy
+        %copy_token1, %copy_res1 = async.execute[%foo_token0] (%foo_results0 as %arg2: !async.value<memref<1x4x5x5xf16, @DDR>>) -> !async.value<memref<1x4x5x5xf16, @DDR>>
+                attributes { VPUIP.executor = @DMA_NN, VPUIP.num_units = 1 } {
+            %0 = VPUIP.Copy inputs(%arg2 : memref<1x4x5x5xf16, @DDR>) outputs(%tmp_in : memref<1x4x5x5xf16, @DDR>) -> memref<1x4x5x5xf16, @DDR>
+            async.yield %0: memref<1x4x5x5xf16, @DDR>
+        }
+
+        %foo_token1, %foo_results1 = async.execute[%copy_token1] (%copy_res1 as %arg2: !async.value<memref<1x4x5x5xf16, @DDR>>)
+                                        -> !async.value<memref<1x4x5x5xf16, @DDR>>
+                                            attributes {VPUIP.executor = @NCE, "async-deps-index" = 1 : i64, cycleBegin = 1 : i64, cycleCost = 1 : i64, cycleEnd = 2 : i64} {
+            %0 = func.call @foo(%arg2, %tmp_out) : (memref<1x4x5x5xf16, @DDR>, memref<1x4x5x5xf16, @DDR>) -> memref<1x4x5x5xf16, @DDR>
+            async.yield %0 : memref<1x4x5x5xf16, @DDR>
+        }
+
+        %copy_token2, %copy_res2 = async.execute[%foo_token1] (%foo_results1 as %arg2: !async.value<memref<1x4x5x5xf16, @DDR>>) -> !async.value<memref<1x4x5x5xf16, @DDR>>
+                attributes { VPUIP.executor = @DMA_NN, VPUIP.num_units = 1 } {
+            %0 = VPUIP.Copy inputs(%arg2 : memref<1x4x5x5xf16, @DDR>) outputs(%arg1 : memref<1x4x5x5xf16, @DDR>) -> memref<1x4x5x5xf16, @DDR>
+            async.yield %0: memref<1x4x5x5xf16, @DDR>
+        }
+
+        %0 = async.await %copy_res2 : !async.value<memref<1x4x5x5xf16, @DDR>>
+        return %0 : memref<1x4x5x5xf16, @DDR>
+
+        //CHECK-DAG: [[IN:%.+]] = VPURT.DeclareBuffer <NetworkInput> [0] <0> -> memref<1x4x5x5xf16, @DDR>
+        //CHECK-DAG: [[OUT:%.+]] = VPURT.DeclareBuffer <NetworkOutput> [0] <0> -> memref<1x4x5x5xf16, @DDR>
+        //CHECK-DAG: [[TMP_IN:%.+]] = VPURT.DeclareBuffer <DDR> <0> -> memref<1x4x5x5xf16, @DDR>
+        //CHECK-DAG: [[TMP_OUT:%.+]] = VPURT.DeclareBuffer <DDR> <100> -> memref<1x4x5x5xf16, @DDR>
+
+        //CHECK-DAG: [[BARR1:%.+]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+        //CHECK-DAG: [[BARR2:%.+]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+        //CHECK-DAG: [[BARR3:%.+]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+        //CHECK-DAG: [[BARR4:%.+]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+
+        //CHECK:    VPURT.Task updates([[BARR1]] : !VPURT.Barrier) {
+        //CHECK:        VPUIP.Copy inputs([[IN]] : memref<1x4x5x5xf16, @DDR>) outputs([[TMP_IN]] : memref<1x4x5x5xf16, @DDR>) -> memref<1x4x5x5xf16, @DDR>
+
+        //CHECK:    VPURT.Task waits([[BARR1]] : !VPURT.Barrier) updates([[BARR2]] : !VPURT.Barrier) {
+        //CHECK:        func.call @foo([[TMP_IN]], [[TMP_OUT]]) : (memref<1x4x5x5xf16, @DDR>, memref<1x4x5x5xf16, @DDR>) -> memref<1x4x5x5xf16, @DDR>
+
+        //CHECK:    VPURT.Task waits([[BARR2]] : !VPURT.Barrier) updates([[BARR3]] : !VPURT.Barrier) {
+        //CHECK:        VPUIP.Copy inputs([[TMP_OUT]] : memref<1x4x5x5xf16, @DDR>) outputs([[TMP_IN]] : memref<1x4x5x5xf16, @DDR>) -> memref<1x4x5x5xf16, @DDR>
+
+        //CHECK:    VPURT.Task waits([[BARR3]] : !VPURT.Barrier) updates([[BARR4]] : !VPURT.Barrier) {
+        //CHECK:        func.call @foo([[TMP_IN]], [[TMP_OUT]]) : (memref<1x4x5x5xf16, @DDR>, memref<1x4x5x5xf16, @DDR>) -> memref<1x4x5x5xf16, @DDR>
+
+        //CHECK:    VPURT.Task waits([[BARR4]] : !VPURT.Barrier) {
+        //CHECK:        VPUIP.Copy inputs([[TMP_OUT]] : memref<1x4x5x5xf16, @DDR>) outputs([[OUT]] : memref<1x4x5x5xf16, @DDR>) -> memref<1x4x5x5xf16, @DDR>
+
+        //CHECK: return [[ARG1]] : memref<1x4x5x5xf16, @DDR>
     }
 }

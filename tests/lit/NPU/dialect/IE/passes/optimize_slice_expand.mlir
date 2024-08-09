@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW" --optimize-slice-expand %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 // CHECK-LABEL: @OptimizeSliceExpand
 module @OptimizeSliceExpand {
@@ -180,11 +180,13 @@ func.func @main(%arg0: tensor<1x16x128x200xf16, {order = #NHWC}>) -> tensor<1x16
    %3 = IE.Expand(%2) {pads_begin = [0, 0, 0, 0], pads_end = [0, 15, 0, 0]} : tensor<1x1x130x202xf16, {order = #NHWC}> -> tensor<1x16x130x202xf16, {order = #NHWC}>
    return %3 : tensor<1x16x130x202xf16, {order = #NHWC}>
 
-   // CHECK-DAG:   [[CST_0:%.+]] = const.Declare tensor<1x16x128x1xf16, {order = #NHWC}> = dense<0.000000e+00> : tensor<1x1x128x1xf16>, [#const.Reorder<#NHWC>, #const.Broadcast<1 : i64, 16 : i64>]
-   // CHECK-DAG:   [[CST_1:%.+]] = const.Declare tensor<1x16x1x202xf16, {order = #NHWC}> = dense<0.000000e+00> : tensor<1x1x1x202xf16>, [#const.Reorder<#NHWC>, #const.Broadcast<1 : i64, 16 : i64>]
-   // CHECK:       [[CONCAT_0:%.+]] = IE.Concat([[CST_0]], %arg0, [[CST_0]]) {per_axis = #IE.Concat<axis = 3 : i64>}
+   // CHECK-DAG:   [[CST_0:%.+]] = const.Declare tensor<1x16x128x1xf16, {order = #NHWC}> = dense<0.000000e+00> : tensor<1x1x128x1xf16>, [#const.Reorder<#NHWC>, #const.PadWithZero<[0, 0, 0, 0], [0, 15, 0, 0]>]
+   // CHECK-DAG:   [[CST_1:%.+]] = const.Declare tensor<1x16x1x202xf16, {order = #NHWC}> = dense<0.000000e+00> : tensor<1x1x1x202xf16>, [#const.Reorder<#NHWC>, #const.PadWithZero<[0, 0, 0, 0], [0, 15, 0, 0]>]
+   // CHECK:       [[CONCAT_0:%.+]] = IE.Concat([[CST_0]], %arg0, [[CST_0]])
+   // CHECK-SAME{LITERAL}:    {static_offsets = [[0, 0, 0, 0], [0, 0, 0, 1], [0, 0, 0, 201]]}
    // CHECK-SAME:      : tensor<1x16x128x1xf16, {order = #NHWC}>, tensor<1x16x128x200xf16, {order = #NHWC}>, tensor<1x16x128x1xf16, {order = #NHWC}> -> tensor<1x16x128x202xf16, {order = #NHWC}>
-   // CHECK:       [[CONCAT_1:%.+]] = IE.Concat([[CST_1]], [[CONCAT_0]], [[CST_1]]) {per_axis = #IE.Concat<axis = 2 : i64>}
+   // CHECK:       [[CONCAT_1:%.+]] = IE.Concat([[CST_1]], [[CONCAT_0]], [[CST_1]])
+   // CHECK-SAME{LITERAL}:    {static_offsets = [[0, 0, 0, 0], [0, 0, 1, 0], [0, 0, 129, 0]]}
    // CHECK-SAME:      : tensor<1x16x1x202xf16, {order = #NHWC}>, tensor<1x16x128x202xf16, {order = #NHWC}>, tensor<1x16x1x202xf16, {order = #NHWC}> -> tensor<1x16x130x202xf16, {order = #NHWC}>
    // CHECK:       return [[CONCAT_1]] : tensor<1x16x130x202xf16, {order = #NHWC}>
 
@@ -193,9 +195,10 @@ func.func @main(%arg0: tensor<1x16x128x200xf16, {order = #NHWC}>) -> tensor<1x16
 
 // -----
 
-// CHECK-LABEL: @NotOptimizeSliceTwoConcatsExpandForSliceAxisNotInLastMemDim
-module @NotOptimizeSliceTwoConcatsExpandForSliceAxisNotInLastMemDim {
-
+// CHECK-LABEL: @OptimizeSliceTwoConcatsExpandForSliceAxisNotInLastMemDim
+module @OptimizeSliceTwoConcatsExpandForSliceAxisNotInLastMemDim {
+// CHECK-LABEL: @main
+// CHECK-SAME: [[INPUT:%.+]]: tensor<1x16x128x200xf16>
 func.func @main(%arg0: tensor<1x16x128x200xf16>) -> tensor<1x16x130x202xf16> {
    %cst_0 = const.Declare tensor<1x1x1x202xf16> = dense<0.000000e+00> : tensor<1x1x1x202xf16>
    %cst_1 = const.Declare tensor<1x1x128x1xf16> = dense<0.000000e+00> : tensor<1x1x128x1xf16>
@@ -208,16 +211,13 @@ func.func @main(%arg0: tensor<1x16x128x200xf16>) -> tensor<1x16x130x202xf16> {
    %3 = IE.Expand(%2) {pads_begin = [0, 0, 0, 0], pads_end = [0, 15, 0, 0]} : tensor<1x1x130x202xf16> -> tensor<1x16x130x202xf16>
    return %3 : tensor<1x16x130x202xf16>
 
-   // CHECK-DAG:   [[CST_0:%.+]] = const.Declare tensor<1x1x1x202xf16> = dense<0.000000e+00> : tensor<1x1x1x202xf16>
-   // CHECK-DAG:   [[CST_1:%.+]] = const.Declare tensor<1x1x128x1xf16> = dense<0.000000e+00> : tensor<1x1x128x1xf16>
-   // CHECK:       [[SLICE_0:%.+]] = IE.Slice %arg0 [0, 0, 0, 0] [1, 1, 128, 200]
-   // CHECK-SAME:      : tensor<1x16x128x200xf16> to tensor<1x1x128x200xf16>
-   // CHECK:       [[CONCAT_0:%.+]] = IE.Concat([[CST_1]], [[SLICE_0]], [[CST_1]]) {static_offsets = {{\[\[}}0, 0, 0, 0], [0, 0, 0, 1], [0, 0, 0, 201]]}
-   // CHECK-SAME:      : tensor<1x1x128x1xf16>, tensor<1x1x128x200xf16>, tensor<1x1x128x1xf16> -> tensor<1x1x128x202xf16>
-   // CHECK:       [[CONCAT_1:%.+]] = IE.Concat([[CST_0]], [[CONCAT_0]], [[CST_0]]) {static_offsets = {{\[\[}}0, 0, 0, 0], [0, 0, 1, 0], [0, 0, 129, 0]]}
-   // CHECK-SAME:      : tensor<1x1x1x202xf16>, tensor<1x1x128x202xf16>, tensor<1x1x1x202xf16> -> tensor<1x1x130x202xf16>
-   // CHECK:       [[EXPAND:%.+]] = IE.Expand([[CONCAT_1]]) {pads_begin = [0, 0, 0, 0], pads_end = [0, 15, 0, 0]} : tensor<1x1x130x202xf16> -> tensor<1x16x130x202xf16>
-   // CHECK:       return [[EXPAND]] : tensor<1x16x130x202xf16>
+   // CHECK-DAG:   [[CST_0:%.+]] = const.Declare tensor<1x16x128x1xf16> = dense<0.000000e+00> : tensor<1x1x128x1xf16>, [#const.PadWithZero<[0, 0, 0, 0], [0, 15, 0, 0]>]
+   // CHECK-DAG:   [[CST_1:%.+]] = const.Declare tensor<1x16x1x202xf16> = dense<0.000000e+00> : tensor<1x1x1x202xf16>, [#const.PadWithZero<[0, 0, 0, 0], [0, 15, 0, 0]>]
+   // CHECK:       [[CONCAT_0:%.+]] = IE.Concat([[CST_0]], [[INPUT]], [[CST_0]]) {static_offsets = {{\[\[}}0, 0, 0, 0], [0, 0, 0, 1], [0, 0, 0, 201]]}
+   // CHECK-SAME:      : tensor<1x16x128x1xf16>, tensor<1x16x128x200xf16>, tensor<1x16x128x1xf16> -> tensor<1x16x128x202xf16>
+   // CHECK:       [[CONCAT_1:%.+]] = IE.Concat([[CST_1]], [[CONCAT_0]], [[CST_1]]) {static_offsets = {{\[\[}}0, 0, 0, 0], [0, 0, 1, 0], [0, 0, 129, 0]]}
+   // CHECK-SAME:      : tensor<1x16x1x202xf16>, tensor<1x16x128x202xf16>, tensor<1x16x1x202xf16> -> tensor<1x16x130x202xf16>
+   // CHECK:       return [[CONCAT_1]] : tensor<1x16x130x202xf16>
 
 }
 }
@@ -241,11 +241,13 @@ func.func @main(%arg0: tensor<1x16x128x200xf16, {order = #NHWC}>) -> tensor<1x16
    %3 = IE.Expand(%2) {pads_begin = [0, 0, 0, 0], pads_end = [0, 15, 0, 0]} : tensor<1x1x130x202xf16, {order = #NHWC}> -> tensor<1x16x130x202xf16, {order = #NHWC}>
    return %3 : tensor<1x16x130x202xf16, {order = #NHWC}>
 
-   // CHECK-DAG:   [[CST_0:%.+]] = const.Declare tensor<1x16x128x1xf16, {order = #NHWC}> = dense<0.000000e+00> : tensor<1x1x1x1xf16>, [#const.Broadcast<2 : i64, 128 : i64>, #const.Reorder<#NHWC>, #const.Broadcast<1 : i64, 16 : i64>]
-   // CHECK-DAG:   [[CST_1:%.+]] = const.Declare tensor<1x16x1x202xf16, {order = #NHWC}> = dense<0.000000e+00> : tensor<1x1x1x1xf16>, [#const.Broadcast<3 : i64, 202 : i64>, #const.Reorder<#NHWC>, #const.Broadcast<1 : i64, 16 : i64>]
-   // CHECK:       [[CONCAT_0:%.+]] = IE.Concat([[CST_0]], %arg0, [[CST_0]]) {per_axis = #IE.Concat<axis = 3 : i64>}
+   // CHECK-DAG:   [[CST_0:%.+]] = const.Declare tensor<1x16x128x1xf16, {order = #NHWC}> = dense<0.000000e+00> : tensor<1x1x1x1xf16>, [#const.Broadcast<2 : i64, 128 : i64>, #const.Reorder<#NHWC>, #const.PadWithZero<[0, 0, 0, 0], [0, 15, 0, 0]>]
+   // CHECK-DAG:   [[CST_1:%.+]] = const.Declare tensor<1x16x1x202xf16, {order = #NHWC}> = dense<0.000000e+00> : tensor<1x1x1x1xf16>, [#const.Broadcast<3 : i64, 202 : i64>, #const.Reorder<#NHWC>, #const.PadWithZero<[0, 0, 0, 0], [0, 15, 0, 0]>]
+   // CHECK:       [[CONCAT_0:%.+]] = IE.Concat([[CST_0]], %arg0, [[CST_0]])
+   // CHECK-SAME{LITERAL}:    {static_offsets = [[0, 0, 0, 0], [0, 0, 0, 1], [0, 0, 0, 201]]}
    // CHECK-SAME:      : tensor<1x16x128x1xf16, {order = #NHWC}>, tensor<1x16x128x200xf16, {order = #NHWC}>, tensor<1x16x128x1xf16, {order = #NHWC}> -> tensor<1x16x128x202xf16, {order = #NHWC}>
-   // CHECK:       [[CONCAT_1:%.+]] = IE.Concat([[CST_1]], [[CONCAT_0]], [[CST_1]]) {per_axis = #IE.Concat<axis = 2 : i64>}
+   // CHECK:       [[CONCAT_1:%.+]] = IE.Concat([[CST_1]], [[CONCAT_0]], [[CST_1]])
+   // CHECK-SAME{LITERAL}:    {static_offsets = [[0, 0, 0, 0], [0, 0, 1, 0], [0, 0, 129, 0]]}
    // CHECK-SAME:      : tensor<1x16x1x202xf16, {order = #NHWC}>, tensor<1x16x128x202xf16, {order = #NHWC}>, tensor<1x16x1x202xf16, {order = #NHWC}> -> tensor<1x16x130x202xf16, {order = #NHWC}>
    // CHECK:       return [[CONCAT_1]] : tensor<1x16x130x202xf16, {order = #NHWC}>
 
@@ -924,9 +926,118 @@ func.func @main(%arg0: tensor<1x25x56x56x!qElemType, {order = #NHWC}>) -> tensor
    // CHECK:       [[SLICE23:%.+]]  = IE.Slice %arg0 [0, 0, 0, 0] [1, 4, 56, 56] : tensor<1x25x56x56x!qElemType, {order = #NHWC}> to tensor<1x4x56x56x!qElemType, {order = #NHWC}>
    // CHECK:       [[SLICE24:%.+]]  = IE.Slice %arg0 [0, 0, 0, 0] [1, 4, 56, 56] : tensor<1x25x56x56x!qElemType, {order = #NHWC}> to tensor<1x4x56x56x!qElemType, {order = #NHWC}>
 
-   // CHECK:       [[CONCAT:%.+]] = IE.Concat([[SLICE24]], [[SLICE23]], [[SLICE22]], [[SLICE21]], [[SLICE20]], [[SLICE19]], [[SLICE18]], [[SLICE17]], [[SLICE16]], [[SLICE15]], [[SLICE14]], [[SLICE13]], [[SLICE12]], [[SLICE11]], [[SLICE10]], [[SLICE9]], [[SLICE8]], [[SLICE7]], [[SLICE6]], [[SLICE5]], [[SLICE4]], [[SLICE3]], [[SLICE2]], [[SLICE1]], [[SLICE0]]) {per_axis = #IE.Concat<axis = 1 : i64>}
+   // CHECK:       [[CONCAT:%.+]] = IE.Concat([[SLICE24]], [[SLICE23]], [[SLICE22]], [[SLICE21]], [[SLICE20]], [[SLICE19]], [[SLICE18]], [[SLICE17]], [[SLICE16]], [[SLICE15]], [[SLICE14]], [[SLICE13]], [[SLICE12]], [[SLICE11]], [[SLICE10]], [[SLICE9]], [[SLICE8]], [[SLICE7]], [[SLICE6]], [[SLICE5]], [[SLICE4]], [[SLICE3]], [[SLICE2]], [[SLICE1]], [[SLICE0]])
    // CHECK-SAME:      : tensor<1x4x56x56x!qElemType, {order = #NHWC}>, tensor<1x4x56x56x!qElemType, {order = #NHWC}>, tensor<1x4x56x56x!qElemType, {order = #NHWC}>, tensor<1x4x56x56x!qElemType, {order = #NHWC}>, tensor<1x4x56x56x!qElemType, {order = #NHWC}>, tensor<1x4x56x56x!qElemType, {order = #NHWC}>, tensor<1x4x56x56x!qElemType, {order = #NHWC}>, tensor<1x4x56x56x!qElemType, {order = #NHWC}>, tensor<1x4x56x56x!qElemType, {order = #NHWC}>, tensor<1x4x56x56x!qElemType, {order = #NHWC}>, tensor<1x4x56x56x!qElemType, {order = #NHWC}>, tensor<1x4x56x56x!qElemType, {order = #NHWC}>, tensor<1x4x56x56x!qElemType, {order = #NHWC}>, tensor<1x4x56x56x!qElemType, {order = #NHWC}>, tensor<1x4x56x56x!qElemType, {order = #NHWC}>, tensor<1x4x56x56x!qElemType, {order = #NHWC}>, tensor<1x4x56x56x!qElemType, {order = #NHWC}>, tensor<1x4x56x56x!qElemType, {order = #NHWC}>, tensor<1x4x56x56x!qElemType, {order = #NHWC}>, tensor<1x4x56x56x!qElemType, {order = #NHWC}>, tensor<1x4x56x56x!qElemType, {order = #NHWC}>, tensor<1x4x56x56x!qElemType, {order = #NHWC}>, tensor<1x4x56x56x!qElemType, {order = #NHWC}>, tensor<1x4x56x56x!qElemType, {order = #NHWC}>, tensor<1x4x56x56x!qElemType, {order = #NHWC}> -> tensor<1x100x56x56x!qElemType, {order = #NHWC}>
 
    // CHECK:       return [[CONCAT]] : tensor<1x100x56x56x!qElemType, {order = #NHWC}>
+}
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @OptimizeSlicePReluExpandWithConstInput
+module @OptimizeSlicePReluExpandWithConstInput {
+// CHECK-LABEL: @main
+// CHECK-SAME: [[INPUT:%.+]]: tensor<1x16x482x642xf16, {order = #NHWC}>
+func.func @main(%arg0: tensor<1x16x482x642xf16, {order = #NHWC}>) -> tensor<1x16x482x642xf16, {order = #NHWC}> {
+   %cst = const.Declare tensor<1x5x1x1xf16, {order = #NHWC}> = dense<[1.0, 2.0, 3.0, 4.0, 5.0]> : tensor<5xf16>, [#const.Reshape<[1, 5, 1, 1]>, #const.Reorder<#NHWC>]
+   %0 = IE.Slice %arg0 [0, 0, 0, 0] [1, 5, 482, 642] : tensor<1x16x482x642xf16, {order = #NHWC}> to tensor<1x5x482x642xf16, {order = #NHWC}>
+   %1 = IE.PRelu(%0, %cst) : tensor<1x5x482x642xf16, {order = #NHWC}>, tensor<1x5x1x1xf16, {order = #NHWC}> -> tensor<1x5x482x642xf16, {order = #NHWC}>
+   %2 = IE.Expand(%1) {pads_begin = [0, 0, 0, 0], pads_end = [0, 11, 0, 0]} : tensor<1x5x482x642xf16, {order = #NHWC}> -> tensor<1x16x482x642xf16, {order = #NHWC}>
+
+   return %2 : tensor<1x16x482x642xf16, {order = #NHWC}>
+
+   // CHECK-DAG:   [[CST:%.+]] = const.Declare
+   // CHECK-SAME:      tensor<1x16x1x1xf16, {order = #NHWC}> = dense<[1.000000e+00, 2.000000e+00, 3.000000e+00, 4.000000e+00, 5.000000e+00]> : tensor<5xf16>, [#const.Reshape<[1, 5, 1, 1]>, #const.Reorder<#NHWC>, #const.PadWithZero<[0, 0, 0, 0], [0, 11, 0, 0]>]
+   // CHECK:       [[PRELU:%.+]] = IE.PRelu([[INPUT]], [[CST]])
+   // CHECK-SAME:      tensor<1x16x482x642xf16, {order = #NHWC}>, tensor<1x16x1x1xf16, {order = #NHWC}> -> tensor<1x16x482x642xf16, {order = #NHWC}>
+   // CHECK:       return [[PRELU]] : tensor<1x16x482x642xf16, {order = #NHWC}>
+}
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @OptimizeSlicePReluExpand
+module @OptimizeSlicePReluExpand {
+// CHECK-LABEL: @main
+// CHECK-SAME: ([[INPUT_0:%.+]]: tensor<1x16x482x642xf16, {order = #NHWC}>, [[INPUT_1:%.+]]: tensor<1x16x1x1xf16, {order = #NHWC}>)
+func.func @main(%arg0: tensor<1x16x482x642xf16, {order = #NHWC}>, %arg1: tensor<1x16x1x1xf16, {order = #NHWC}>) -> tensor<1x16x482x642xf16, {order = #NHWC}> {
+   %0 = IE.Slice %arg0 [0, 0, 0, 0] [1, 5, 482, 642] : tensor<1x16x482x642xf16, {order = #NHWC}> to tensor<1x5x482x642xf16, {order = #NHWC}>
+   %1 = IE.Slice %arg1 [0, 0, 0, 0] [1, 5, 1, 1] : tensor<1x16x1x1xf16, {order = #NHWC}> to tensor<1x5x1x1xf16, {order = #NHWC}>
+   %2 = IE.PRelu(%0, %1) : tensor<1x5x482x642xf16, {order = #NHWC}>, tensor<1x5x1x1xf16, {order = #NHWC}> -> tensor<1x5x482x642xf16, {order = #NHWC}>
+   %3 = IE.Expand(%2) {pads_begin = [0, 0, 0, 0], pads_end = [0, 11, 0, 0]} : tensor<1x5x482x642xf16, {order = #NHWC}> -> tensor<1x16x482x642xf16, {order = #NHWC}>
+
+   return %3 : tensor<1x16x482x642xf16, {order = #NHWC}>
+
+   // CHECK:       [[PRELU:%.+]] = IE.PRelu([[INPUT_0]], [[INPUT_1]])
+   // CHECK-SAME:      tensor<1x16x482x642xf16, {order = #NHWC}>, tensor<1x16x1x1xf16, {order = #NHWC}> -> tensor<1x16x482x642xf16, {order = #NHWC}>
+   // CHECK:       return [[PRELU]] : tensor<1x16x482x642xf16, {order = #NHWC}>
+}
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @NotOptimizeSlicePReluExpand
+module @NotOptimizeSlicePReluExpand {
+// CHECK-LABEL: @main
+// CHECK-SAME: ([[INPUT_0:%.+]]: tensor<1x16x482x642xf16, {order = #NHWC}>, [[INPUT_1:%.+]]: tensor<1x5x482x642xf16, {order = #NHWC}>)
+func.func @main(%arg0: tensor<1x16x482x642xf16, {order = #NHWC}>, %arg1: tensor<1x5x482x642xf16, {order = #NHWC}>) -> tensor<1x16x482x642xf16, {order = #NHWC}> {
+   %0 = IE.Slice %arg0 [0, 0, 0, 0] [1, 5, 482, 642] : tensor<1x16x482x642xf16, {order = #NHWC}> to tensor<1x5x482x642xf16, {order = #NHWC}>
+   %2 = IE.PRelu(%0, %arg1) : tensor<1x5x482x642xf16, {order = #NHWC}>, tensor<1x5x482x642xf16, {order = #NHWC}> -> tensor<1x5x482x642xf16, {order = #NHWC}>
+   %3 = IE.Expand(%2) {pads_begin = [0, 0, 0, 0], pads_end = [0, 11, 0, 0]} : tensor<1x5x482x642xf16, {order = #NHWC}> -> tensor<1x16x482x642xf16, {order = #NHWC}>
+
+   return %3 : tensor<1x16x482x642xf16, {order = #NHWC}>
+
+   // CHECK:       [[SLICE:%.+]] = IE.Slice [[INPUT_0]]
+   // CHECK-SAME:      tensor<1x16x482x642xf16, {order = #NHWC}> to tensor<1x5x482x642xf16, {order = #NHWC}>
+   // CHECK:       [[PRELU:%.+]] = IE.PRelu([[SLICE]], [[INPUT_1]])
+   // CHECK-SAME:      tensor<1x5x482x642xf16, {order = #NHWC}>, tensor<1x5x482x642xf16, {order = #NHWC}> -> tensor<1x5x482x642xf16, {order = #NHWC}>
+   // CHECK:       [[EXPAND:%.+]] = IE.Expand([[PRELU]]) {pads_begin = [0, 0, 0, 0], pads_end = [0, 11, 0, 0]} : tensor<1x5x482x642xf16, {order = #NHWC}> -> tensor<1x16x482x642xf16, {order = #NHWC}>
+   // CHECK:       return [[EXPAND]] : tensor<1x16x482x642xf16, {order = #NHWC}>
+}
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @OptimizeSlicePReluTwoConcatsExpand
+module @OptimizeSlicePReluTwoConcatsExpand {
+// CHECK-LABEL: @main
+// CHECK-SAME: [[INPUT:%.+]]: tensor<1x16x482x642xf16, {order = #NHWC}>
+func.func @main(%arg0: tensor<1x16x482x642xf16, {order = #NHWC}>) -> tensor<1x16x484x644xf16, {order = #NHWC}> {
+   %cst = const.Declare tensor<1x5x1x1xf16, {order = #NHWC}> = dense<[1.0, 2.0, 3.0, 4.0, 5.0]> : tensor<5xf16>, [#const.Reshape<[1, 5, 1, 1]>, #const.Reorder<#NHWC>]
+   %cst_0 = const.Declare tensor<1x5x482x1xf16, {order = #NHWC}> = dense<0.000000e+00> : tensor<1x5x482x1xf16>, [#const.Reorder<#NHWC>]
+   %cst_1 = const.Declare tensor<1x5x1x644xf16, {order = #NHWC}> = dense<0.000000e+00> : tensor<1x5x1x644xf16>, [#const.Reorder<#NHWC>]
+
+   %0 = IE.Slice %arg0 [0, 0, 0, 0] [1, 5, 482, 642] : tensor<1x16x482x642xf16, {order = #NHWC}> to tensor<1x5x482x642xf16, {order = #NHWC}>
+   %1 = IE.PRelu(%0, %cst) : tensor<1x5x482x642xf16, {order = #NHWC}>, tensor<1x5x1x1xf16, {order = #NHWC}> -> tensor<1x5x482x642xf16, {order = #NHWC}>
+   %2 = IE.Concat(%cst_0, %1, %cst_0) {static_offsets = [[0, 0, 0, 0], [0, 0, 0, 1], [0, 0, 0, 643]]} : tensor<1x5x482x1xf16, {order = #NHWC}>, tensor<1x5x482x642xf16, {order = #NHWC}>, tensor<1x5x482x1xf16, {order = #NHWC}> -> tensor<1x5x482x644xf16, {order = #NHWC}>
+   %3 = IE.Concat(%cst_1, %2, %cst_1) {static_offsets = [[0, 0, 0, 0], [0, 0, 1, 0], [0, 0, 483, 0]]} : tensor<1x5x1x644xf16, {order = #NHWC}>, tensor<1x5x482x644xf16, {order = #NHWC}>, tensor<1x5x1x644xf16, {order = #NHWC}> -> tensor<1x5x484x644xf16, {order = #NHWC}>
+   %4 = IE.Expand(%3) {pads_begin = [0, 0, 0, 0], pads_end = [0, 11, 0, 0]} : tensor<1x5x484x644xf16, {order = #NHWC}> -> tensor<1x16x484x644xf16, {order = #NHWC}>
+
+   return %4 : tensor<1x16x484x644xf16, {order = #NHWC}>
+
+   // CHECK-DAG:   [[CST:%.+]] = const.Declare
+   // CHECK-SAME:      tensor<1x16x1x644xf16, {order = #NHWC}> = dense<0.000000e+00> : tensor<1x5x1x644xf16>, [#const.Reorder<#NHWC>, #const.PadWithZero<[0, 0, 0, 0], [0, 11, 0, 0]>]
+   // CHECK-DAG:   [[CST_0:%.+]] = const.Declare
+   // CHECK-SAME:      tensor<1x16x482x1xf16, {order = #NHWC}> = dense<0.000000e+00> : tensor<1x5x482x1xf16>, [#const.Reorder<#NHWC>, #const.PadWithZero<[0, 0, 0, 0], [0, 11, 0, 0]>]
+   // CHECK-DAG:   [[CST_1:%.+]] = const.Declare
+   // CHECK-SAME:      tensor<1x16x1x1xf16, {order = #NHWC}> = dense<[1.000000e+00, 2.000000e+00, 3.000000e+00, 4.000000e+00, 5.000000e+00]> : tensor<5xf16>, [#const.Reshape<[1, 5, 1, 1]>, #const.Reorder<#NHWC>, #const.PadWithZero<[0, 0, 0, 0], [0, 11, 0, 0]>]
+   // CHECK:       [[PRELU:%.+]] = IE.PRelu([[INPUT]], [[CST_1]])
+   // CHECK-SAME:      tensor<1x16x482x642xf16, {order = #NHWC}>, tensor<1x16x1x1xf16, {order = #NHWC}> -> tensor<1x16x482x642xf16, {order = #NHWC}>
+   // CHECK:       [[CONCAT_0:%.+]] = IE.Concat([[CST_0]], [[PRELU]], [[CST_0]])
+   // CHECK-SAME{LITERAL}:    {static_offsets = [[0, 0, 0, 0], [0, 0, 0, 1], [0, 0, 0, 643]]}
+   // CHECK-SAME:      : tensor<1x16x482x1xf16, {order = #NHWC}>, tensor<1x16x482x642xf16, {order = #NHWC}>, tensor<1x16x482x1xf16, {order = #NHWC}> -> tensor<1x16x482x644xf16, {order = #NHWC}>
+   // CHECK:       [[CONCAT_1:%.+]] = IE.Concat([[CST]], [[CONCAT_0]], [[CST]])
+   // CHECK-SAME{LITERAL}:    {static_offsets = [[0, 0, 0, 0], [0, 0, 1, 0], [0, 0, 483, 0]]}
+   // CHECK-SAME:      : tensor<1x16x1x644xf16, {order = #NHWC}>, tensor<1x16x482x644xf16, {order = #NHWC}>, tensor<1x16x1x644xf16, {order = #NHWC}> -> tensor<1x16x484x644xf16, {order = #NHWC}>
+   // CHECK:       return [[CONCAT_1]] : tensor<1x16x484x644xf16, {order = #NHWC}>
 }
 }

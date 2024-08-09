@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --vpu-arch=%arch% --init-resources="vpu-arch=%arch% compilation-mode=DefaultHW allow-custom-values=true" %s | FileCheck %s --strict-whitespace
-// REQUIRES: arch-VPUX37XX
+// REQUIRES: arch-NPU37XX
 
 // CHECK: module @mode attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilationMode = #VPU.compilation_mode<ReferenceSW>, VPU.revisionID = #VPU.revision_id<REVISION_NONE>}
 module @mode attributes {VPU.compilationMode = #VPU.compilation_mode<ReferenceSW>} {
@@ -12,8 +12,8 @@ module @mode attributes {VPU.compilationMode = #VPU.compilation_mode<ReferenceSW
 
 // -----
 
-// CHECK: module @arch attributes {VPU.arch = #VPU.arch_kind<NPU30XX>, VPU.compilationMode = #VPU.compilation_mode<DefaultHW>, VPU.revisionID = #VPU.revision_id<REVISION_NONE>}
-module @arch attributes {VPU.arch = #VPU.arch_kind<NPU30XX>} {
+// CHECK: module @arch attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilationMode = #VPU.compilation_mode<DefaultHW>, VPU.revisionID = #VPU.revision_id<REVISION_NONE>}
+module @arch attributes {VPU.arch = #VPU.arch_kind<NPU37XX>} {
 }
 
 // -----

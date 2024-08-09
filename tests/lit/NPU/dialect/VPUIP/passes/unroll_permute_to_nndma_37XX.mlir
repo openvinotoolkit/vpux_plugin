@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --unroll-permute-to-nndma  %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX
+// REQUIRES: arch-NPU37XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
@@ -1251,4 +1251,114 @@ func.func @PermuteToDMAWithNCHWToNHWC2D() -> !OutputDistributed {
 
 
     // CHECK:    return [[OUTPUT]] : !VPUIP.DistributedBuffer<1x72x2x1xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @UniformPermuteDMAPlaneSizeRequiredTwoDMAs
+func.func @UniformPermuteDMAPlaneSizeRequiredTwoDMAs() -> memref<1x16x1x261xf16, [@CMX_NN, 0]> {
+    %bar0 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+
+    %input = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x16x1x261xf16, #NHWC, [@CMX_NN, 0]>
+    %output = VPURT.DeclareBuffer <CMX_NN> [0] <4096> -> memref<1x16x1x261xf16, [@CMX_NN, 0]>
+
+    VPURT.Task updates(%bar0: !VPURT.Barrier)  {
+        VPUIP.PermuteDMA {dst_stride = 0 : i64, mem_perm = affine_map<(d0, d1, d2, d3) -> (d0, d3, d1, d2)>, port = 0 : i64, src_plane_stride = 0 : i64}
+                inputs(%input : memref<1x16x1x261xf16, #NHWC, [@CMX_NN, 0]>)
+                outputs(%output : memref<1x16x1x261xf16, [@CMX_NN, 0]>) -> memref<1x16x1x261xf16, [@CMX_NN, 0]>
+    }
+
+    return %output: memref<1x16x1x261xf16, [@CMX_NN, 0]>
+
+    // CHECK:    [[BARRIER:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+    // CHECK:    [[INPUT_BUFFER_0:%.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <4160> -> memref<131x16xf16, [@CMX_NN, 0]>
+    // CHECK:    [[INPUT_BUFFER_1:%.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<130x16xf16, [@CMX_NN, 0]>
+    // CHECK:    [[RETURN_BUFFER:%.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <4096> -> memref<1x16x1x261xf16, [@CMX_NN, 0]>
+    // CHECK:    [[OUTPUT_BUFFER_0:%.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <4356> -> memref<16x131xf16, [@CMX_NN, 0]>
+    // CHECK:    [[OUTPUT_BUFFER_1:%.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <4096> -> memref<16x130xf16, [@CMX_NN, 0]>
+
+    // CHECK:    VPURT.Task updates([[BARRIER]] : !VPURT.Barrier) {
+    // CHECK:        VPUIP.PermuteDMA {
+    // CHECK-SAME:         dma_descriptor = #VPUIP.DMADescriptorAttr<numPlanes = 130 : i64, len = 32 : i64, srcWidth = 32 : i64, srcStride = 2 : i64, srcPlaneStride = 32 : i64, dstWidth = 2 : i64, dstStride = 522 : i64, dstPlaneStride = 2 : i64>
+    // CHECK-SAME:         port = 0 : i64
+    // CHECK:            inputs([[INPUT_BUFFER_1]] : memref<130x16xf16, [@CMX_NN, 0]>)
+    // CHECK:            outputs([[OUTPUT_BUFFER_1]] : memref<16x130xf16, [@CMX_NN, 0]>) -> memref<16x130xf16, [@CMX_NN, 0]>
+    // CHECK:    }
+
+    // CHECK:    VPURT.Task updates([[BARRIER]] : !VPURT.Barrier) {
+    // CHECK:        VPUIP.PermuteDMA {
+    // CHECK-SAME:         dma_descriptor = #VPUIP.DMADescriptorAttr<numPlanes = 131 : i64, len = 32 : i64, srcWidth = 32 : i64, srcStride = 2 : i64, srcPlaneStride = 32 : i64, dstWidth = 2 : i64, dstStride = 522 : i64, dstPlaneStride = 2 : i64>
+    // CHECK-SAME:         port = 1 : i64
+    // CHECK:            inputs([[INPUT_BUFFER_0]] : memref<131x16xf16, [@CMX_NN, 0]>)
+    // CHECK:            outputs([[OUTPUT_BUFFER_0]] : memref<16x131xf16, [@CMX_NN, 0]>) -> memref<16x131xf16, [@CMX_NN, 0]>
+    // CHECK:    }
+
+    // CHECK:    return [[RETURN_BUFFER]] : memref<1x16x1x261xf16, [@CMX_NN, 0]>
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @UniformPermuteDMAPlaneSizeRequiredFourDMAs
+func.func @UniformPermuteDMAPlaneSizeRequiredFourDMAs() -> memref<1x16x1x520xf16, [@CMX_NN, 0]> {
+    %bar0 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+
+    %input = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x16x1x520xf16, #NHWC, [@CMX_NN, 0]>
+    %output = VPURT.DeclareBuffer <CMX_NN> [0] <4096> -> memref<1x16x1x520xf16, [@CMX_NN, 0]>
+
+    VPURT.Task updates(%bar0: !VPURT.Barrier)  {
+        VPUIP.PermuteDMA {dst_stride = 0 : i64, mem_perm = affine_map<(d0, d1, d2, d3) -> (d0, d3, d1, d2)>, port = 0 : i64, src_plane_stride = 0 : i64}
+                inputs(%input : memref<1x16x1x520xf16, #NHWC, [@CMX_NN, 0]>)
+                outputs(%output : memref<1x16x1x520xf16, [@CMX_NN, 0]>) -> memref<1x16x1x520xf16, [@CMX_NN, 0]>
+    }
+
+    return %output: memref<1x16x1x520xf16, [@CMX_NN, 0]>
+
+    // CHECK:    [[BARRIER:%.+]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+    // CHECK:    [[INPUT_BUFFER_0:%.+]] = VPURT.DeclareBuffer <CMX_NN> [0] <12480> -> memref<130x16xf16, [@CMX_NN, 0]>
+    // CHECK:    [[INPUT_BUFFER_1:%.+]] = VPURT.DeclareBuffer <CMX_NN> [0] <8320> -> memref<130x16xf16, [@CMX_NN, 0]>
+    // CHECK:    [[INPUT_BUFFER_2:%.+]] = VPURT.DeclareBuffer <CMX_NN> [0] <4160> -> memref<130x16xf16, [@CMX_NN, 0]>
+    // CHECK:    [[INPUT_BUFFER_3:%.+]] = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<130x16xf16, [@CMX_NN, 0]>
+    // CHECK:    [[RETURN_BUFFER:%.+]] = VPURT.DeclareBuffer <CMX_NN> [0] <4096> -> memref<1x16x1x520xf16, [@CMX_NN, 0]>
+    // CHECK:    [[OUTPUT_BUFFER_0:%.+]] = VPURT.DeclareBuffer <CMX_NN> [0] <4876> -> memref<16x130xf16, [@CMX_NN, 0]>
+    // CHECK:    [[OUTPUT_BUFFER_1:%.+]] = VPURT.DeclareBuffer <CMX_NN> [0] <4616> -> memref<16x130xf16, [@CMX_NN, 0]>
+    // CHECK:    [[OUTPUT_BUFFER_2:%.+]] = VPURT.DeclareBuffer <CMX_NN> [0] <4356> -> memref<16x130xf16, [@CMX_NN, 0]>
+    // CHECK:    [[OUTPUT_BUFFER_3:%.+]] = VPURT.DeclareBuffer <CMX_NN> [0] <4096> -> memref<16x130xf16, [@CMX_NN, 0]>
+
+    // CHECK:    VPURT.Task {
+    // CHECK:        VPUIP.PermuteDMA {
+    // CHECK-SAME:         dma_descriptor = #VPUIP.DMADescriptorAttr<numPlanes = 130 : i64, len = 32 : i64, srcWidth = 32 : i64, srcStride = 2 : i64, srcPlaneStride = 32 : i64, dstWidth = 2 : i64, dstStride = 1040 : i64, dstPlaneStride = 2 : i64>
+    // CHECK-SAME:         port = 0 : i64
+    // CHECK:            inputs([[INPUT_BUFFER_3]] : memref<130x16xf16, [@CMX_NN, 0]>)
+    // CHECK:            outputs([[OUTPUT_BUFFER_3]] : memref<16x130xf16, [@CMX_NN, 0]>) -> memref<16x130xf16, [@CMX_NN, 0]>
+    // CHECK:    }
+
+    // CHECK:    VPURT.Task {
+    // CHECK:        VPUIP.PermuteDMA {
+    // CHECK-SAME:         dma_descriptor = #VPUIP.DMADescriptorAttr<numPlanes = 130 : i64, len = 32 : i64, srcWidth = 32 : i64, srcStride = 2 : i64, srcPlaneStride = 32 : i64, dstWidth = 2 : i64, dstStride = 1040 : i64, dstPlaneStride = 2 : i64>
+    // CHECK-SAME:         port = 1 : i64
+    // CHECK:            inputs([[INPUT_BUFFER_2]] : memref<130x16xf16, [@CMX_NN, 0]>)
+    // CHECK:            outputs([[OUTPUT_BUFFER_2]] : memref<16x130xf16, [@CMX_NN, 0]>) -> memref<16x130xf16, [@CMX_NN, 0]>
+    // CHECK:    }
+
+    // CHECK:    VPURT.Task updates([[BARRIER]] : !VPURT.Barrier) {
+    // CHECK:        VPUIP.PermuteDMA {
+    // CHECK-SAME:         dma_descriptor = #VPUIP.DMADescriptorAttr<numPlanes = 130 : i64, len = 32 : i64, srcWidth = 32 : i64, srcStride = 2 : i64, srcPlaneStride = 32 : i64, dstWidth = 2 : i64, dstStride = 1040 : i64, dstPlaneStride = 2 : i64>
+    // CHECK-SAME:         port = 0 : i64
+    // CHECK:            inputs([[INPUT_BUFFER_1]] : memref<130x16xf16, [@CMX_NN, 0]>)
+    // CHECK:            outputs([[OUTPUT_BUFFER_1]] : memref<16x130xf16, [@CMX_NN, 0]>) -> memref<16x130xf16, [@CMX_NN, 0]>
+    // CHECK:    }
+
+    // CHECK:    VPURT.Task updates([[BARRIER]] : !VPURT.Barrier) {
+    // CHECK:        VPUIP.PermuteDMA {
+    // CHECK-SAME:         dma_descriptor = #VPUIP.DMADescriptorAttr<numPlanes = 130 : i64, len = 32 : i64, srcWidth = 32 : i64, srcStride = 2 : i64, srcPlaneStride = 32 : i64, dstWidth = 2 : i64, dstStride = 1040 : i64, dstPlaneStride = 2 : i64>
+    // CHECK-SAME:         port = 1 : i64
+    // CHECK:            inputs([[INPUT_BUFFER_0]] : memref<130x16xf16, [@CMX_NN, 0]>)
+    // CHECK:            outputs([[OUTPUT_BUFFER_0]] : memref<16x130xf16, [@CMX_NN, 0]>) -> memref<16x130xf16, [@CMX_NN, 0]>
+    // CHECK:    }
+
+    // CHECK:    return [[RETURN_BUFFER]] : memref<1x16x1x520xf16, [@CMX_NN, 0]>
 }

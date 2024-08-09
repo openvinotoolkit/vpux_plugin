@@ -23,27 +23,11 @@ public:
                                       VPU::ConvertOp::Adaptor adaptor) const;
 };
 
-bool isLegalConvertOp(VPU::ConvertOp convertOp) {
-    const auto isLegalElementType = [](mlir::Type elemType) {
-        return elemType.isF16() || elemType.isF32() || elemType.isSignedInteger() || elemType.isSignlessInteger() ||
-               elemType.isUnsignedInteger();
-    };
-
-    auto inputElemType = convertOp.getInput().getType().cast<vpux::NDTypeInterface>().getElementType();
-    auto outputElemType = convertOp.getOutput().getType().cast<vpux::NDTypeInterface>().getElementType();
-    // If conversion can be done on DMA, mark it as legal to bufferize it to DMA operation.
-    if (isConvertSupportedOnDMA<VPU::ConvertOp>(convertOp)) {
-        return true;
-    }
-
-    return !isLegalElementType(inputElemType) || !isLegalElementType(outputElemType);
-}
-
 mlir::LogicalResult ConvertOpBufferizeModel::bufferizeImpl(VPU::ConvertOp origOp, mlir::RewriterBase& rewriter,
                                                            const mlir::bufferization::BufferizationOptions& options,
                                                            VPU::ConvertOp::Adaptor adaptor) const {
-    if (isLegalConvertOp(origOp)) {
-        // Convert ConvertOp to DMA operation
+    // If conversion can be done on DMA, bufferize it to DMA operation.
+    if (isConvertSupportedOnDMA<VPU::ConvertOp>(origOp)) {
         return vpux::bufferizeOp(origOp->getContext(), origOp, adaptor, rewriter);
     }
 

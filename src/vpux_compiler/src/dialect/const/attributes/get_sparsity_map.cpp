@@ -24,7 +24,9 @@ Const::Content generateSparsityMap(const Const::Content& content, int64_t sparsi
     const auto inputBuffer = content.getValues<StorageType>();
 
     const auto sparsityMapElementType = mlir::IntegerType::get(context, 1, mlir::IntegerType::Unsigned);
-    auto output = Const::Content::allocTempBuffer(outputType, sparsityMapElementType, false);
+    auto output =
+            Const::Content::allocTempBuffer(outputType, sparsityMapElementType,
+                                            Const::GetSparsityMapAttr::inferOutputSplat(content.isSplat(), inputType));
     output.fillWithZero();
     auto outputBuffer = output.getRawTempBuf();
 
@@ -69,6 +71,10 @@ vpux::NDTypeInterface vpux::Const::GetSparsityMapAttr::inferOutputType(vpux::NDT
     return outputType.changeElemType(mlir::IntegerType::get(getContext(), 1, mlir::IntegerType::Signless));
 }
 
+bool vpux::Const::GetSparsityMapAttr::inferOutputSplat(bool, vpux::NDTypeInterface) {
+    return false;
+}
+
 //
 // GetSparsityMapAttr::transform
 //
@@ -102,6 +108,12 @@ Const::Content vpux::Const::GetSparsityMapAttr::transform(vpux::Const::Content& 
                                                          getContext());
     } else if (inputElementType.isF32()) {
         return generateSparsityMap<float>(input, sparsifyValue, input.getType(), outputType, getContext());
+    } else if (inputElementType.isFloat8E5M2()) {
+        return generateSparsityMap<vpux::type::float8_e5m2>(input, sparsifyValue, input.getType(), outputType,
+                                                            getContext());
+    } else if (inputElementType.isFloat8E4M3FN()) {
+        return generateSparsityMap<vpux::type::float8_e4m3>(input, sparsifyValue, input.getType(), outputType,
+                                                            getContext());
     }
     VPUX_THROW("Unexpected weights data type: {0}", inputElementType);
 }

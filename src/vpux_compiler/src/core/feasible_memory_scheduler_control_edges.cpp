@@ -266,7 +266,7 @@ void vpux::updateScheduledOpsResourcesForControlEdge(std::list<ScheduledOpOneRes
                                               subViewOp.getSource().getType().cast<vpux::NDTypeInterface>().getRank(),
                                               1);
 
-                    resView = ScheduledOpOneResource::ResourceView({subViewOffsets, subViewShape, subViewStrides});
+                    resView = ScheduledOpOneResource::ResourceView({buf, subViewOffsets, subViewShape, subViewStrides});
                 }
             }
 

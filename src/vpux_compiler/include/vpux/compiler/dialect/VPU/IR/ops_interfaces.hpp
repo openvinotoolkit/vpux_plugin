@@ -8,6 +8,7 @@
 #include "vpux/compiler/core/attributes/shape.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops_interfaces.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
+#include "vpux/compiler/dialect/VPU/IR/native_attributes/distributed_tensor_native.hpp"
 #include "vpux/compiler/dialect/VPU/IR/types.hpp"
 #include "vpux/compiler/dialect/VPU/utils/clustered_op_interface_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
@@ -22,6 +23,8 @@
 
 namespace vpux {
 namespace VPU {
+
+void registerAlignedChannelsOpInterfacesVPU(mlir::DialectRegistry& registry);
 
 //
 // SparseOpInterface
@@ -42,7 +45,8 @@ void setLayerMultiClusterStrategy(ConcreteOp mainOp, VPU::MultiClusterStrategy s
     mainOp.setMultiClusterStrategyAttr(multiClusterStrategyAttr);
 }
 
-mlir::IntegerAttr getOptimalNumClusters(mlir::Operation* operation, int64_t OC, VPU::MultiClusterStrategy strategy);
+mlir::IntegerAttr getOptimalNumClusters(mlir::Operation* operation, ShapeRef outputShape,
+                                        VPU::MultiClusterStrategy strategy);
 
 namespace details {
 
@@ -51,6 +55,8 @@ mlir::LogicalResult validateWorkloadsRegion(mlir::Location loc, mlir::Region& wo
 
 mlir::Operation* addWorkload(mlir::Region& workloads, mlir::OpBuilder& builder, mlir::Location loc, ShapeRef offsets,
                              ShapeRef sizes, PaddingAttr pad, MPEMode mpeMode, mlir::IntegerAttr clusterId);
+
+mlir::LogicalResult verifyInputTypeOp(mlir::Operation* op, vpux::NDTypeInterface inputType);
 
 }  // namespace details
 

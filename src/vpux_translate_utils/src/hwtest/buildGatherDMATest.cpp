@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+//
+
 #include <climits>
 #include <numeric>
 
@@ -16,6 +18,7 @@
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
+#include "vpux/compiler/utils/platform_resources.hpp"
 #include "vpux/compiler/utils/types.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
 #include "vpux/utils/core/error.hpp"
@@ -66,15 +69,21 @@ void buildGatherDMA(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp m
 
     const auto funcType = builder.getFunctionType(ArrayRef(inputTypes), outType);
 
+    VPUX_THROW_UNLESS(!dmaParams.dstLocations.empty(), "buildGatherDMA: no destination memory location");
+
     auto func = builder.create<mlir::func::FuncOp>(
             builder.getUnknownLoc(),
             printToString("dma_from_{0}_{1}_to_{2}_{3}_gather", nb::to_string(dmaParams.srcLocation), inputType,
-                          nb::to_string(dmaParams.dstLocation), outputType),
+                          nb::to_string(dmaParams.dstLocations.front()), outputType),
             funcType, builder.getStringAttr("private"), /*arg_attrs=*/nullptr, /*res_attrs=*/nullptr);
     auto funcbuilder = mlir::OpBuilder::atBlockBegin(func.addEntryBlock(), builder.getListener());
-    int barrierNumber = 0;
+
+    auto [waitWLMBarrier, freeBarrierId] =
+            insertWLMStartSequence(funcbuilder, testDesc.getWLMParams().isWLMPartialEnabled);
+
+    int barrierNumber = freeBarrierId++;
+    auto barrier0 = funcbuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), barrierNumber++);
     auto barrier1 = funcbuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), barrierNumber++);
-    auto barrier2 = funcbuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), barrierNumber++);
 
     auto indicesArg = func.getArgument(1);
     auto inputCmxOffset = 0;
@@ -83,9 +92,9 @@ void buildGatherDMA(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp m
     auto indicesCmxTensorOp =
             createDeclareTensorOp(funcbuilder, indicesCmxType, VPURT::BufferSection::CMX_NN, 0, inputCmxOffset);
     inputCmxOffset += totalTensorSize(indicesShape, elemType);
-    vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(),
-                                                mlir::ValueRange(barrier1.getBarrier()), funcbuilder.getUnknownLoc(),
-                                                indicesArg, getTensorResult(indicesCmxTensorOp), 0);
+    vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, waitWLMBarrier, mlir::ValueRange(barrier0.getBarrier()),
+                                                funcbuilder.getUnknownLoc(), indicesArg,
+                                                getTensorResult(indicesCmxTensorOp), 0);
 
     auto outputCmxType =
             getMemRefType(VPURT::BufferSection::CMX_NN, sectionIdx, ShapeRef(outShape), outputType, DimsOrder::NHWC);
@@ -93,17 +102,18 @@ void buildGatherDMA(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp m
             createDeclareTensorOp(funcbuilder, outputCmxType, VPURT::BufferSection::CMX_NN, 0, inputCmxOffset);
     inputCmxOffset += totalTensorSize(outShape, outputType);
 
-    VPURT::wrapIntoTaskOp<VPUIP::GatherDMAOp>(funcbuilder, mlir::ValueRange(barrier1.getBarrier()),
-                                              mlir::ValueRange(barrier2.getBarrier()), builder.getUnknownLoc(),
+    VPURT::wrapIntoTaskOp<VPUIP::GatherDMAOp>(funcbuilder, mlir::ValueRange(barrier0.getBarrier()),
+                                              mlir::ValueRange(barrier1.getBarrier()), builder.getUnknownLoc(),
                                               func.getArgument(0), getTensorResult(indicesCmxTensorOp),
                                               getTensorResult(outputCmxTensorOp), 0, 0, 0);
 
     auto funcOutput = func.getArgument(2);
     // finalBarrier passed as production barrier to last DMA task
-    auto barrier3 = funcbuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), barrierNumber++);
-    vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(barrier2.getBarrier()),
-                                                mlir::ValueRange(barrier3.getBarrier()), funcbuilder.getUnknownLoc(),
-                                                getTensorResult(outputCmxTensorOp), funcOutput, 0);
+    auto finalBarrier = funcbuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), barrierNumber++,
+                                                                      testDesc.getWLMParams().isWLMPartialEnabled);
+    vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(
+            funcbuilder, mlir::ValueRange(barrier1.getBarrier()), mlir::ValueRange(finalBarrier.getBarrier()),
+            funcbuilder.getUnknownLoc(), getTensorResult(outputCmxTensorOp), funcOutput, 0);
 
     funcbuilder.create<mlir::func::ReturnOp>(builder.getUnknownLoc(), funcOutput);
 

@@ -35,14 +35,8 @@ private:
         VpuOv2LayerTest::TearDown();
     }
 };
-class ReshapeLayerTest_NPU3700 : public ReshapeLayerTestCommon {};
 class ReshapeLayerTest_NPU3720 : public ReshapeLayerTestCommon {};
 class ReshapeLayerTest_NPU4000 : public ReshapeLayerTestCommon {};
-
-TEST_P(ReshapeLayerTest_NPU3700, HW) {
-    VpuOv2LayerTest::setDefaultHardwareMode();
-    VpuOv2LayerTest::run(Platform::NPU3700);
-}
 
 TEST_P(ReshapeLayerTest_NPU3720, SW) {
     VpuOv2LayerTest::setReferenceSoftwareMode();
@@ -95,28 +89,6 @@ const auto paramGeneric1 =
 const auto paramGeneric2 = ::testing::Combine(
         ::testing::Values(true), ::testing::ValuesIn(modelTypes), ::testing::Values(std::vector<size_t>{1, 4, 2, 2}),
         ::testing::Values(std::vector<int64_t>{1, 2, 4, 2}), ::testing::Values(DEVICE_NPU));
-
-// NPU3700
-INSTANTIATE_TEST_SUITE_P(smoke_ReshapeCollapse1, ReshapeLayerTest_NPU3700, paramCollapse1,
-                         ReshapeLayerTest_NPU3700::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_ReshapeCollapse2, ReshapeLayerTest_NPU3700, paramCollapse2,
-                         ReshapeLayerTest_NPU3700::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_ReshapeExpand1, ReshapeLayerTest_NPU3700, paramExpand1,
-                         ReshapeLayerTest_NPU3700::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_ReshapeExpand2, ReshapeLayerTest_NPU3700, paramExpand2,
-                         ReshapeLayerTest_NPU3700::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_ReshapeExpand3, ReshapeLayerTest_NPU3700, paramExpand3,
-                         ReshapeLayerTest_NPU3700::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_ReshapeGeneric1, ReshapeLayerTest_NPU3700, paramGeneric1,
-                         ReshapeLayerTest_NPU3700::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_ReshapeGeneric2, ReshapeLayerTest_NPU3700, paramGeneric2,
-                         ReshapeLayerTest_NPU3700::getTestCaseName);
 
 // NPU3720
 INSTANTIATE_TEST_SUITE_P(smoke_ReshapeCollapse1, ReshapeLayerTest_NPU3720, paramCollapse1,

@@ -5,6 +5,8 @@
 
 #include "vpux/compiler/dialect/IE/transforms/passes/expand_activation_channels.hpp"
 #include "vpux/compiler/NPU37XX/dialect/IE/transforms/passes.hpp"
+#include "vpux/compiler/NPU37XX/dialect/IE/transforms/passes/expand_activation_channels.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
 #include <mlir/Transforms/GreedyPatternRewriteDriver.h>
@@ -14,19 +16,9 @@ using namespace vpux;
 //
 // AveragePoolRewriter
 //
-class AveragePoolRewriter final : public mlir::OpRewritePattern<IE::AvgPoolOp> {
-public:
-    AveragePoolRewriter(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<IE::AvgPoolOp>(ctx), _log(log) {
-        setDebugName("AveragePoolRewriter");
-    }
 
-    mlir::LogicalResult matchAndRewrite(IE::AvgPoolOp origOp, mlir::PatternRewriter& rewriter) const final;
-
-private:
-    Logger _log;
-};
-
-mlir::LogicalResult AveragePoolRewriter::matchAndRewrite(IE::AvgPoolOp origOp, mlir::PatternRewriter& rewriter) const {
+mlir::LogicalResult arch37xx::AveragePoolRewriter::matchAndRewrite(IE::AvgPoolOp origOp,
+                                                                   mlir::PatternRewriter& rewriter) const {
     _log.trace("[{0}] Got AveragePool layer at '{1}'", getDebugName(), origOp->getLoc());
 
     const auto opCreator = [&](mlir::Value expandedInput, int64_t outChanPadsEnd) -> mlir::Operation* {
@@ -116,10 +108,11 @@ void ExpandActivationChannelsPass::safeRunOnFunc() {
 
     mlir::RewritePatternSet patterns(&ctx);
     patterns.add<IE::MaxPoolRewriter>(&ctx, _log);
-    patterns.add<AveragePoolRewriter>(&ctx, _log);
+    patterns.add<arch37xx::AveragePoolRewriter>(&ctx, _log);
     patterns.add<IE::EltwiseRewriter<IE::AddOp>>(&ctx, _log);
     patterns.add<IE::ConvolutionRewriter>(&ctx, _log);
     patterns.add<IE::GroupConvolutionRewriter>(&ctx, _log);
+    patterns.add<IE::MatMulRewriter>(&ctx, _log);
 
     if (_seOpsEnabled) {
         patterns.add<IE::InterpolateRewriter>(&ctx, _log);

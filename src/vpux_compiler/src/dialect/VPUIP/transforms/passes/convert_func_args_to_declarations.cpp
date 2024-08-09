@@ -13,11 +13,46 @@
 #include "vpux/compiler/utils/analysis.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/func_dialect.hpp"
+#include "vpux/compiler/utils/hash.hpp"
 #include "vpux/compiler/utils/logging.hpp"
 
 using namespace vpux;
 
 namespace {
+
+//
+// BufferDeclarationChain
+//  Represents a chain of view-like operations that lead to a buffer declaration for CallOp argument
+//  For instance, main function:
+//      %0 = VPURT.DeclareBuffer <NetworkInput> [0] <0> -> !type1
+//      %1 = VPUIP.GenericReshape inputs(%0 : !type1) -> !type2
+//      %2 = VPUIP.SubView %1 [0, 0, 0, 0] [i, j, k, f] : !type2 to !type3
+//
+//      %3 = func.call @foo1(%2, %n, %m)
+//    For %2 argument of CallOp the structure will be:
+//      viewOps = [VPUIP.SubView, VPUIP.GenericReshape]
+//      declOp = VPURT.DeclareBuffer // (%0)
+
+struct BufferDeclarationChain {
+    SmallVector<mlir::Operation*> viewOps;
+    VPURT::DeclareBufferOp declBuffOp;
+};
+
+using ArgToBufferDeclarationMap = DenseMap<int64_t, BufferDeclarationChain>;
+
+bool operator==(const BufferDeclarationChain& lhs, const BufferDeclarationChain& rhs) {
+    if (lhs.viewOps.size() != rhs.viewOps.size()) {
+        return false;
+    }
+
+    for (auto p : llvm::zip(lhs.viewOps, rhs.viewOps)) {
+        if (hashOperation(std::get<0>(p)) != hashOperation(std::get<1>(p))) {
+            return false;
+        }
+    }
+
+    return hashOperation(lhs.declBuffOp) == hashOperation(rhs.declBuffOp);
+}
 
 //
 // ConvertFuncArgsToDeclarationsPass
@@ -37,13 +72,13 @@ private:
 void ConvertFuncArgsToDeclarationsPass::safeRunOnModule() {
     auto moduleOp = getOperation();
 
-    const auto getNewDecl = [](mlir::OpBuilder& argBuilder, mlir::Value val, VPURT::BufferSection section,
-                               int64_t sectionIndex) {
+    const auto buildNewDecl = [](mlir::OpBuilder& argBuilder, mlir::Value val, VPURT::BufferSection section,
+                                 int64_t sectionIndex) {
         return argBuilder.create<VPURT::DeclareBufferOp>(val.getLoc(), val.getType(), section, sectionIndex, 0)
                 .getResult();
     };
 
-    const auto replaceArgs = [&](mlir::func::FuncOp funcOp, auto getDecl) {
+    const auto replaceArgs = [&](mlir::func::FuncOp funcOp, auto buildDecl) {
         VPUX_THROW_WHEN(funcOp.isExternal(), "It is assumed that the method is run only for functions with body");
         VPUX_THROW_UNLESS(funcOp.getNumArguments() >= funcOp.getNumResults(), "Function '{0}' is not bufferized",
                           funcOp);
@@ -64,7 +99,7 @@ void ConvertFuncArgsToDeclarationsPass::safeRunOnModule() {
                 }
 
                 argBuilder.setInsertionPoint(&firstOp);
-                auto newArg = getDecl(argBuilder, val, section, p.index());
+                auto newArg = buildDecl(argBuilder, val, section, p.index());
 
                 _log.trace("Replace all uses of '{0}' with '{1}'",
                            newArg.template getDefiningOp<VPURT::DeclareBufferOp>());
@@ -80,23 +115,15 @@ void ConvertFuncArgsToDeclarationsPass::safeRunOnModule() {
     vpux::IE::CNNNetworkOp cnnOp;
     vpux::IE::CNNNetworkOp::getFromModule(moduleOp, cnnOp, netFunc);
 
-    replaceArgs(netFunc, getNewDecl);
+    replaceArgs(netFunc, buildNewDecl);
+
+    mlir::DenseMap<mlir::func::FuncOp, ArgToBufferDeclarationMap> funcToDeclChains;
     netFunc.walk([&](mlir::func::CallOp callOp) {
-        auto func = getCalledFunction(callOp);
-
-        // TODO:#108930 -- sanity check
-        auto maybeUses = func.getSymbolUses(func->getParentOfType<mlir::ModuleOp>());
-        VPUX_THROW_WHEN(!maybeUses.has_value() || maybeUses.value().empty(),
-                        "An unused function {0}. It must either be an entry point or be called by the main",
-                        func.getSymName());
-        auto uses = maybeUses.value();
-        VPUX_THROW_WHEN(std::distance(uses.begin(), uses.end()) != 1, "At the moment, several calls are not supported");
-
         const auto isPureViewLike = [](mlir::Operation* op) {
             return mlir::isa<mlir::ViewLikeOpInterface>(op) && !mlir::isa<VPUIP::LayerOpInterface>(op);
         };
 
-        const auto getDeclaration = [&](mlir::OpBuilder& argBuilder, mlir::Value val, VPURT::BufferSection, int64_t) {
+        const auto getDeclaration = [&](mlir::Value val) {
             auto funcBlockArg = mlir::cast<mlir::BlockArgument>(val);
 
             auto callOperand = callOp.getOperand(funcBlockArg.getArgNumber());
@@ -111,10 +138,37 @@ void ConvertFuncArgsToDeclarationsPass::safeRunOnModule() {
             VPUX_THROW_WHEN(originDeclOp == nullptr, "Could not find declare buffer op for CallOp '{0}' operand '{1}'",
                             callOp, callOperand);
 
+            return BufferDeclarationChain{std::move(viewOps), originDeclOp};
+        };
+
+        auto func = getCalledFunction(callOp);
+        if (funcToDeclChains.contains(func)) {
+            for (const auto& arg : func.getArguments()) {
+                if (!funcToDeclChains[func].contains(arg.getArgNumber())) {
+                    continue;
+                }
+
+                auto declChain = getDeclaration(arg);
+                VPUX_THROW_UNLESS(
+                        funcToDeclChains[func][arg.getArgNumber()] == declChain,
+                        "Declaration chain for argument at idx '{0}' of CallOp with callee '{1}' is not equal "
+                        "to the chain of the first call of the same function.",
+                        arg.getArgNumber(), func.getName());
+            }
+            return;
+        }
+
+        ArgToBufferDeclarationMap declChainsMap;
+        const auto buildDeclaration = [&](mlir::OpBuilder& argBuilder, mlir::Value val, VPURT::BufferSection, int64_t) {
+            auto originDeclChain = getDeclaration(val);
+            auto funcBlockArg = mlir::cast<mlir::BlockArgument>(val);
+            declChainsMap[funcBlockArg.getArgNumber()] = originDeclChain;
+
             // clang-format off
             // Clone full chain of pure view like ops to get correct offset in the "child" function after ConvertViewOpsToDeclarations
             // For example:
-            // main: %0 = VPURT.DeclareBuffer <NetworkInput> [0] <0> -> memref<1x10x10x12xf16, @DDR>
+            // main:
+            // %0 = VPURT.DeclareBuffer <NetworkInput> [0] <0> -> memref<1x10x10x12xf16, @DDR>
             // %1 = VPUIP.SubView %0 [0, 1] [1, 8] : memref<1x10f16, @DDR> to memref<1x8xf16, {order = #NC, strides = [10, 1]}, @DDR>
             //
             // foo1:
@@ -126,8 +180,8 @@ void ConvertFuncArgsToDeclarationsPass::safeRunOnModule() {
             // After ConvertViewOpsToDeclarations offset is 2, but shoud be 3 = 1("main" offset) + 2("foo1" offset)
             // clang-format on
 
-            auto resValue = argBuilder.clone(*originDeclOp.getOperation())->getResult(0);
-            for (auto& currViewOp : viewOps | reversed) {
+            auto resValue = argBuilder.clone(*originDeclChain.declBuffOp.getOperation())->getResult(0);
+            for (auto& currViewOp : originDeclChain.viewOps | reversed) {
                 mlir::IRMapping mapper;
                 mapper.map(mlir::cast<mlir::ViewLikeOpInterface>(currViewOp).getViewSource(), resValue);
                 resValue = argBuilder.clone(*currViewOp, mapper)->getResult(0);
@@ -136,7 +190,8 @@ void ConvertFuncArgsToDeclarationsPass::safeRunOnModule() {
             return resValue;
         };
 
-        replaceArgs(func, getDeclaration);
+        replaceArgs(func, buildDeclaration);
+        funcToDeclChains[func] = std::move(declChainsMap);
     });
 }
 

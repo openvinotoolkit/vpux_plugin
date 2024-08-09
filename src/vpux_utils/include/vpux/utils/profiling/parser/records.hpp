@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+//
+
 #pragma once
 
 #include "parser.hpp"
@@ -73,7 +75,7 @@ public:
 
     template <typename T, typename std::enable_if_t<std::is_integral<T>::value, bool> = true>
     static TimeType convertTicksToNs(T cycles, double frequency) {
-        VPUX_THROW_WHEN(frequency == FrequenciesSetup::UNITIALIZED_FREQUENCY_VALUE, "Invalid frequency {0}", frequency);
+        VPUX_THROW_WHEN(frequency == UNINITIALIZED_FREQUENCY_VALUE, "Invalid frequency {0}", frequency);
         return static_cast<TimeType>(cycles * 1000. / frequency);
     }
 
@@ -263,16 +265,13 @@ protected:
 public:
     void sanitize(vpux::Logger& log, FrequenciesSetup frequenciesSetup) const override {
         const auto dmaDurationNs = getDuration(frequenciesSetup);
-        const auto bandwidth = frequenciesSetup.dmaBandwidth;
-        VPUX_THROW_WHEN(bandwidth == FrequenciesSetup::UNITIALIZED_FREQUENCY_VALUE, "DMA bandwidth is uninitialized");
         // Maximum 4MB  transfer
         const uint64_t maxTransferSize = 1024LL * 1024LL * 4LL;
-        // guard band (DMA transfers seem to have significant variance in duration probably due to
+        // guard band (DMA transfers seem to have significant variance in duration due to
         // variable DDR latency)
         const uint64_t guardBand = 10;
-        // Calculation of DMA ticks taken from vpu cost model (including dpuCyclesCoeff provided
-        // per platform taken as input parameter)
-        const uint64_t maxTicks = static_cast<ExtendedTimestampType>(guardBand * maxTransferSize * bandwidth);
+        // clock cycles upper limit (for 32 bytes/cycle) extended by guardBand margin
+        const uint64_t maxTicks = static_cast<ExtendedTimestampType>(guardBand * maxTransferSize / 32);
         if (dmaDurationNs > convertTicksToNs(maxTicks, FrequenciesSetup::MIN_FREQ_MHZ)) {
             log.warning("Too long execution time of DMA task");
         }
@@ -308,45 +307,6 @@ protected:
         outStream << std::setw(cols[0].second) << this->_record.startCycle << std::setw(cols[1].second)
                   << this->_record.endCycle;
     }
-};
-
-class RawProfilingDMA20Record : public RawProfilingSwDmaRecord<DMA20Data_t> {
-public:
-    using ExtendedTimestampType = RawProfilingDMARecord::ExtendedTimestampType;
-
-public:
-    explicit RawProfilingDMA20Record(const DMA20Data_t& record, const ProfilingFB::DMATask* metadata,
-                                     const BarriersSet& wBarriers, const BarriersSet& uBarriers,
-                                     ExtendedTimestampType overflowCorrectionShift, size_t inMemoryOffset)
-            : RawProfilingSwDmaRecord<DMA20Data_t>(record, metadata, wBarriers, uBarriers, inMemoryOffset),
-              _overflowCorrectionShift(overflowCorrectionShift) {
-    }
-
-    ExecutorType getExecutorType() const override {
-        return ExecutorType::DMA_SW;
-    }
-
-    TimeType getStartTime(FrequenciesSetup frequenciesSetup) const override {
-        return convertTicksToNs(this->getStartCycle(), frequenciesSetup.profClk);
-    }
-
-    TimeType getFinishTime(FrequenciesSetup frequenciesSetup) const override {
-        return convertTicksToNs(this->getEndCycle(), frequenciesSetup.profClk);
-    }
-
-protected:
-    ExtendedTimestampType getStartCycle() const {
-        return static_cast<ExtendedTimestampType>(_record.startCycle) + _overflowCorrectionShift;
-    }
-
-    ExtendedTimestampType getEndCycle() const {
-        // Use unsigned 32-bit arithmetic to automatically avoid overflow
-        const uint32_t durationInCycles = _record.endCycle - _record.startCycle;
-        return getStartCycle() + static_cast<uint64_t>(durationInCycles);
-    }
-
-private:
-    ExtendedTimestampType _overflowCorrectionShift;
 };
 
 class RawProfilingDMA27Record : public RawProfilingSwDmaRecord<DMA27Data_t> {
@@ -472,59 +432,6 @@ protected:
     uint32_t _inClusterIndex;
     uint32_t _clusterId;
     uint32_t _variantId;
-};
-
-class RawProfilingDPUSWRecord : public RawProfilingDPURecord {
-public:
-    explicit RawProfilingDPUSWRecord(SwDpuData_t timestamps, const ProfilingFB::DPUTask* metadata, uint32_t variantId,
-                                     size_t inMemoryOffset, uint32_t inClusterOffset)
-            : RawProfilingDPURecord(metadata, variantId, inMemoryOffset, inClusterOffset), _timestamps(timestamps) {
-    }
-
-    void checkDataOrDie() const override {
-        VPUX_THROW_WHEN(_timestamps.begin == 0 && _timestamps.end == 0, "Invalid DPU task timestamp");
-    }
-
-    ExecutorType getExecutorType() const override {
-        return ExecutorType::DPU;
-    }
-
-    TimeType getStartTime(FrequenciesSetup frequenciesSetup) const override {
-        return convertTicksToNs(_timestamps.begin, frequenciesSetup.profClk);
-    }
-
-    TimeType getFinishTime(FrequenciesSetup frequenciesSetup) const override {
-        return convertTicksToNs(_timestamps.end, frequenciesSetup.profClk);
-    }
-
-    size_t getDebugDataSize() const override {
-        return sizeof(SwDpuData_t);
-    }
-
-protected:
-    double getTaskDurationClock(FrequenciesSetup frequenciesSetup) const override {
-        return frequenciesSetup.profClk;
-    }
-
-    ColDesc getColDesc() const override {
-        return {{"Buffer ID", COL_WIDTH_32},
-                {"Cluster ID", COL_WIDTH_64},
-                {"Buffer offset", COL_WIDTH_64},
-                {"Begin tstamp", COL_WIDTH_64},
-                {"End tstamp", COL_WIDTH_64}};
-    }
-
-    void printDebugInfo(std::ostream& outStream) const override {
-        const auto swDpuCol = getColDesc();
-        const auto bufferOffsetBytes = _inClusterIndex * getDebugDataSize();
-
-        outStream << std::setw(swDpuCol[0].second) << _bufferId << std::setw(swDpuCol[1].second) << _clusterId
-                  << std::setw(swDpuCol[2].second) << bufferOffsetBytes << std::setw(swDpuCol[3].second)
-                  << _timestamps.begin << std::setw(swDpuCol[4].second) << _timestamps.end;
-    }
-
-private:
-    SwDpuData_t _timestamps;
 };
 
 class RawProfilingDPUHW27Record : public RawProfilingDPURecord {
@@ -746,6 +653,7 @@ public:
 
     TaskInfo getTaskInfo(FrequenciesSetup frequenciesSetup) const override {
         auto profInfoItem = RawProfilingRecord::getTaskInfo(frequenciesSetup);
+        profInfoItem.active_cycles = _data.clockCycles;
         profInfoItem.stall_cycles = _data.stallCycles;
         return profInfoItem;
     }

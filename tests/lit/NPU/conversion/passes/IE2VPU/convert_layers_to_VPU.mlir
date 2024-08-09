@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --verify-diagnostics --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW" --convert-layers-to-VPU %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 // CHECK-LABEL: @SingleLayer
 func.func @SingleLayer(%arg0: tensor<1x1000xf16>) -> tensor<1x1000xf16> {
@@ -555,7 +555,7 @@ func.func @InterpolateQuantized(%arg0: tensor<1x16x3x3x!qElemType>) -> tensor<1x
     // CHECK-SAME:                           pads_end = [0, 0, 0, 0],
     // CHECK-SAME:                           cube_coeff = -7.500000e-01 : f64>,
     // CHECK-SAME:    axes_attr = [2, 3],
-    // CHECK-SAME:    operandSegmentSizes = array<i32: 1, 0, 0, 0>,
+    // CHECK-SAME:    operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0>,
     // CHECK-SAME:    scales_attr = [2.000000e+00, 2.000000e+00],
     // CHECK-SAME:    sizes_attr = [6, 6]}
     // CHECK-SAME:  : tensor<1x16x3x3x!qElemType> -> tensor<1x16x6x6x!qElemType1>
@@ -762,4 +762,20 @@ func.func @DoNotConvertConvWithStaticScale(%arg: tensor<1x3x62x62xf32>) -> tenso
         static_scale = 1.0 : f32
     } : tensor<1x3x62x62xf32>, tensor<48x3x3x3xf32> -> tensor<1x48x60x60xf32>
     return %0 : tensor<1x48x60x60xf32>
+}
+
+// -----
+
+// CHECK-LABEL: @SelectTest
+// CHECK-SAME:  [[INPUT0:%arg[0-9]]]: tensor<1x1x1x1024xf16>
+// CHECK-SAME:  [[INPUT1:%arg[0-9]]]: tensor<1x1x1x1xsi32>
+// CHECK-SAME:  [[INPUT2:%arg[0-9]]]: tensor<1x1x1x1024xsi32>
+func.func @SelectTest(%arg0: tensor<1x1x1x1024xf16>, %arg1: tensor<1x1x1x1xsi32>, %arg2: tensor<1x1x1x1024xsi32>) -> tensor<1x1x1x1024xsi32> {
+    %0 = IE.Select(%arg0, %arg1, %arg2) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} :
+                tensor<1x1x1x1024xf16>, tensor<1x1x1x1xsi32>, tensor<1x1x1x1024xsi32> -> tensor<1x1x1x1024xsi32>
+    return %0 : tensor<1x1x1x1024xsi32>
+
+    // CHECK:       [[SELECT:%.+]] = VPU.Select([[INPUT0]], [[INPUT1]], [[INPUT2]]) {
+    // CHECK-SAME:          auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x1x1x1024xf16>, tensor<1x1x1x1xsi32>, tensor<1x1x1x1024xsi32> -> tensor<1x1x1x1024xsi32>
+    // CHECK:       return [[SELECT]] : tensor<1x1x1x1024xsi32>
 }

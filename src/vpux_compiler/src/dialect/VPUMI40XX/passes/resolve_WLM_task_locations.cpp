@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+//
+
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
 #include "vpux/compiler/dialect/VPUMI40XX/passes.hpp"
 #include "vpux/compiler/dialect/VPUMI40XX/utils.hpp"
@@ -45,7 +47,8 @@ void ResolveWLMTaskLocationPass::safeRunOnFunc() {
         for (size_t i = 0; i < count; ++i) {
             auto index = VPURegMapped::IndexType::get(builder.getContext(), static_cast<uint32_t>(tileIdx), 0,
                                                       static_cast<uint32_t>(i));
-            auto taskBuffer = builder.create<VPURegMapped::DeclareTaskBufferOp>(netFunc.getLoc(), index, taskType);
+            auto taskBuffer = builder.create<VPURegMapped::DeclareTaskBufferOp>(netFunc.getLoc(), index, taskType,
+                                                                                /* offset */ nullptr);
             taskBuffers.push_back(taskBuffer.getResult());
         }
         return taskBuffers;
@@ -69,14 +72,18 @@ void ResolveWLMTaskLocationPass::safeRunOnFunc() {
         size_t groupCtr = 0;
 
         while (groupOp) {
+            auto taskOps = groupOp.getOps<VPURegMapped::TaskOpInterface>();
+            auto numberOfOpsInGroup = std::count_if(std::begin(taskOps), std::end(taskOps), [taskType](auto op) {
+                return op.getTaskType() == taskType;
+            });
+            int offsetFromStart = groupSize - numberOfOpsInGroup;
             size_t taskCtr = 0;
-            for (auto execTaskOp : groupOp.getOps<VPURegMapped::TaskOpInterface>()) {
+            for (auto execTaskOp : taskOps) {
                 if (execTaskOp.getTaskType() != taskType)
                     continue;
-                execTaskOp.setTaskLocation(taskBuffers[groupCtr + taskCtr]);
+                execTaskOp.setTaskLocation(taskBuffers[groupCtr + taskCtr + offsetFromStart]);
                 taskCtr++;
             }
-
             groupCtr = (groupCtr + groupSize) % (groupSize * 2);
             groupOp = VPUMI40XX::getNextGroup(groupOp);
         }

@@ -71,3 +71,14 @@ bool IE::isQuantizedAvgPoolPermutation(IE::AvgPoolOp avgPool) {
     // do not check order, cause the pool might be used for permutation as well
     return inputType.getElementType().isF16() && outputType.getElementType().isa<mlir::quant::UniformQuantizedType>();
 }
+
+//
+// isAddOutputQuantized
+//
+bool IE::isAddOutputQuantized(IE::AddOp add) {
+    auto inputType = add.getInput1().getType().cast<vpux::NDTypeInterface>();
+    auto outputType = add.getOutput().getType().cast<vpux::NDTypeInterface>();
+
+    // do not check order, cause the pool might be used for permutation as well
+    return inputType.getElementType().isF16() && outputType.getElementType().isa<mlir::quant::UniformQuantizedType>();
+}

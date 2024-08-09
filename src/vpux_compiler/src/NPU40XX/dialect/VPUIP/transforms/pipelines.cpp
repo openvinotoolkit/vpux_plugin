@@ -16,6 +16,8 @@
 
 #include "vpux/compiler/utils/rewriter.hpp"
 
+#include "vpux/utils/profiling/common.hpp"
+
 #include <mlir/Pass/PassManager.h>
 #include <mlir/Transforms/Passes.h>
 
@@ -38,6 +40,7 @@ void vpux::VPUIP::arch40xx::buildMemoryAllocationPipeline(mlir::OpPassManager& p
     }
 
     pm.addPass(VPUIP::createQueryArgsAllocationAnalysisPass());
+    pm.addPass(VPUIP::createUngroupBoundedBuffersPass(log));
     pm.addPass(VPUIP::createStaticAllocationPass(VPU::getMemKind<VPU::MemoryKind::DDR>, log));
     pm.addPass(VPUIP::createCollectUsedMemoryPass());
 }
@@ -48,6 +51,11 @@ void vpux::VPUIP::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
 
     pm.addPass(VPUIP::createTileActShaveKernelTaskPass(log));
     pm.addPass(mlir::createCanonicalizerPass(grc));
+    if (options.enableOptimizeCopies || options.enableOpsAsDMA) {
+        // This pass is a part of "copy optimization pipeline", but need to be done before because
+        // WrapWithPermuteAsNNDMA depends on it.
+        pm.addPass(VPUIP::createMovePureViewOpBeforeCopyPass(log));
+    }
     if (options.enableOpsAsDMA) {
         pm.addPass(VPUIP::createWrapWithPermuteAsNNDMAPass(log));
     }
@@ -75,17 +83,10 @@ void vpux::VPUIP::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
         pm.addPass(mlir::createCanonicalizerPass(grc));
     }
 
-    if (options.enableOptimizeCopies) {
-        pm.addPass(VPUIP::createMovePureViewOpBeforeCopyPass(log));
-        pm.addPass(VPUIP::createOptimizeCopiesPass(log));
-        pm.addPass(VPUIP::createOptimizeConcatViewCopiesPass(log));
-        pm.addPass(VPUIP::createFuseDDRCopiesIntoConcats(log));
-        pm.addPass(VPUIP::createOptimizeParallelCopiesPass(options.enableOptimizeConstCopies, log));
-        if (options.enableOpsAsDMA) {
-            pm.addPass(VPUIP::createMovePureViewOpBeforeCopyPass(log));
-            pm.addPass(VPUIP::createWrapWithPermuteAsNNDMAPass(log));
-        }
-    }
+    pm.addPass(VPUIP::createUngroupBoundedBuffersPass(log));
+    pm.addPass(mlir::createCanonicalizerPass(grc));
+
+    VPUIP::arch37xx::buildOptimizeCopiesPipeline(pm, VPUIP::arch37xx::OptimizeCopiesOptions(options), log);
 
     pm.addPass(VPUIP::createInsertCopyForEltwiseInPlaceInputPass(log));
     pm.addPass(VPUIP::arch40xx::createOptimizeConvertDMAOpPass(log));
@@ -96,7 +97,6 @@ void vpux::VPUIP::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
     pm.addPass(VPUIP::createCopyOpTilingPass(log));
 
     pm.addPass(mlir::createCanonicalizerPass(grc));
-    pm.addPass(VPUIP::createUnwrapClusterTilingPass(log));
     pm.addPass(VPUIP::createConvWeightsCompressionPass(log));
 
     if (VPU::isActSparsityEnabled(options.enableActivationSparsity)) {
@@ -108,6 +108,12 @@ void vpux::VPUIP::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
     }
 
     pm.addPass(VPUIP::createSwizzlingPass(options.enableWeightsSwizzling, options.enableActivationSwizzling, log));
+
+    // Note: this pass introduces necessary VPUIP.Copy operations, thus, it must
+    // be called *after* all copy optimizations are run (to ensure the
+    // introduced copies are not optimized out).
+    pm.addPass(VPUIP::createLegalizeRepeatingFuncCallsPass(log));
+    pm.addPass(mlir::createCanonicalizerPass(grc));
 
     pm.addPass(VPUIP::createConvertTransferOpsToDMAsPass(log));
 
@@ -125,7 +131,8 @@ void vpux::VPUIP::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
         pm.addPass(VPUIP::createCompressDmaReserveMemPass(log));
     }
 
-    pm.addPass(VPUIP::createDMATaskProfilingReserveMemPass(log));
+    auto profilingMode = getDMAProfilingMode(VPU::ArchKind::NPU40XX, options.enableDMAProfiling.getValue());
+    pm.addPass(VPUIP::createDMATaskProfilingReserveMemPass(profilingMode, log));
 
     if (options.enableSWKernelPrefetchingReserveMem) {
         pm.addPass(VPUIP::createSWKernelPrefetchingReserveMemPass(log));
@@ -148,6 +155,8 @@ void vpux::VPUIP::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
     pm.addPass(VPUIP::createUnrollSwKernelPass(log));
 
     pm.addPass(VPUIP::arch40xx::createUnrollClusterTilingPass(log));
+    pm.addPass(VPUIP::createBatchMatMulToMatMulPass(log));
+    pm.addPass(VPUIP::arch40xx::createDetectDMASplitCandidatePass(log));
     pm.addPass(VPUIP::createNNDMATilingPass(log));
     pm.addPass(VPUIP::createSegmentHalosPass(log));
     pm.addPass(VPUIP::arch40xx::createComputeHaloRegionForDPUTaskOpPass(log));
@@ -192,9 +201,15 @@ void vpux::VPUIP::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
         }
     }
 
+    if (options.enableProfiling) {
+        auto dmaProfilingMode = getDMAProfilingMode(VPU::ArchKind::NPU40XX, options.enableDMAProfiling.getValue());
+        pm.addPass(VPUIP::arch40xx::createDMATaskProfilingHwDdrPass(dmaProfilingMode, log));
+    }
+
     if (options.enableControlGraphSplit) {
         pm.addPass(VPURT::createSplitControlGraphPass(options.controlGraphSplitBlockSize, log));
     }
+    pm.addPass(VPUIP::createReduceBarrierDependenciesPass(log));
 
     if (!options.linearizeSchedule) {
         pm.addPass(VPUIP::createDMABarrierOptimizationPass(log));
@@ -210,7 +225,7 @@ void vpux::VPUIP::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
         pm.addPass(VPUIP::arch40xx::createComputeTaskStrippingPass(log, dpuDryRunMode, options.shaveDryRun));
     }
 
-    VPURT::buildBarrierLegalizationPipeline(pm, log);
+    VPURT::buildBarrierLegalizationPipeline(pm, options.enablePartialWorkloadManagement, true, log);
 
     if (options.enableFunctionOutlining && options.enableBarrierSchedWithFunctionOutlining) {
         pm.addPass(mlir::createInlinerPass());
@@ -226,12 +241,11 @@ void vpux::VPUIP::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
 
     pm.addPass(VPURT::arch37xx::createAddUpdateBarrierForSwKernelsPass(log));
 
-    pm.addPass(VPUIP::arch40xx::createDMAOutOfOrderOptimizationPass(log));
+    if (options.enableDmaOutOfOrder) {
+        pm.addPass(VPUIP::arch40xx::createDMAOutOfOrderOptimizationPass(log));
+    }
 
     if (options.enableProfiling) {
-        if (options.enableDMAProfiling) {
-            pm.addPass(VPUIP::arch40xx::createDMATaskProfilingHwDdrPass(log));
-        }
         if (options.enableDPUProfiling) {
             pm.addPass(VPUIP::arch40xx::createConstantDpuProfHwpBasePass(log));
         }
@@ -240,13 +254,10 @@ void vpux::VPUIP::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
         pm.addPass(createMoveDeclarationsToTopPass(log));
     }
 
-    pm.addPass(VPURT::createAssignPhysicalBarriersPass(log));
+    pm.addPass(VPURT::createAssignPhysicalBarriersPass(options.enablePartialWorkloadManagement, log));
     pm.addPass(VPURT::createBarrierSimulationPass(log));
-    mlir::OpPassManager::Nesting nesting = pm.getNesting();
-    pm.setNesting(mlir::OpPassManager::Nesting::Explicit);
-    mlir::OpPassManager& constPm = pm.nest<mlir::func::FuncOp>().nest<Const::DeclareOp>();
-    constPm.addPass(Const::createConstantFoldingPass());
-    pm.setNesting(nesting);
+    pm.addPass(mlir::createCanonicalizerPass(grc));
+    pm.nest<mlir::func::FuncOp>().addNestedPass<Const::DeclareOp>(Const::createConstantFoldingPass());
 
     if (options.enableActivityFactor || options.enableScheduleTrace) {
         pm.addPass(VPURT::createInferenceExecutionAnalysisPass(options.scheduleTraceFile, options.enableScheduleTrace,
@@ -260,6 +271,12 @@ void vpux::VPUIP::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
 }
 
 void vpux::VPUIP::arch40xx::registerVPUIPPipelines() {
+    mlir::PassPipelineRegistration<VPUIP::arch37xx::OptimizeCopiesOptions>(
+            "optimize-copies-pipeline", "Optimize Copies Pipeline",
+            [](mlir::OpPassManager& pm, const VPUIP::arch37xx::OptimizeCopiesOptions& options) {
+                VPUIP::arch37xx::buildOptimizeCopiesPipeline(pm, options);
+            });
+
     mlir::PassPipelineRegistration<VPUIP::arch40xx::MemoryAllocationOptions>(
             "memory-allocation", "Memory Allocation",
             [](mlir::OpPassManager& pm, const VPUIP::arch40xx::MemoryAllocationOptions& options) {

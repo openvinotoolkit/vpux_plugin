@@ -171,6 +171,22 @@ private:
 };
 
 //
+// LSTMGatesRewrite
+//
+
+class LSTMGatesRewrite final : public mlir::OpRewritePattern<IE::LSTMGatesOp> {
+public:
+    LSTMGatesRewrite(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<IE::LSTMGatesOp>(ctx), _log(log) {
+    }
+
+public:
+    mlir::LogicalResult matchAndRewrite(IE::LSTMGatesOp origOp, mlir::PatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+//
 // RewriteEmbeddingBagPackedSum
 //
 

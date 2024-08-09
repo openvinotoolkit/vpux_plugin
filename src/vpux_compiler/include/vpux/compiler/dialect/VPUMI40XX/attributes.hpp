@@ -6,6 +6,7 @@
 #pragma once
 
 #include <mlir/IR/BuiltinTypes.h>
+#include <vpux/compiler/dialect/VPUMI40XX/attr_interfaces.hpp>
 
 //
 // Generated

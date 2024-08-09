@@ -29,13 +29,14 @@ public:
     explicit LayerCostModel(mlir::func::FuncOp func, bool enablePrefetchTiling, Logger log);
     ~LayerCostModel() = default;
 
-    double getLayerCost(VPU::ClusteredOpInterface clusteredOp, VPU::MultiClusterStrategy strategy,
-                        bool useTimeBasedCost = true);
+    double getLayerCost(mlir::Operation* clusteredOp, VPU::MultiClusterStrategy strategy, bool useTimeBasedCost = true,
+                        bool onlyLastComputeCost = false);
+    double getTheLastTileComputeCost(VPU::NCEOpInterface nceOp, VPU::MultiClusterStrategy opStrategy);
     double getNCELayerCost(VPU::NCEOpInterface nceOp, VPU::MultiClusterStrategy strategy, bool useTimeBasedCost = true);
     double getSWLayerCost(VPU::SWOpInterface swOp, VPU::MultiClusterStrategy strategy) const;
-    double getDPUandDMATimeCost(VPU::NCEOpInterface nceOp, VPU::MultiClusterStrategy strategy) const;
+    double getDPUandDMATimeCost(VPU::NCEOpInterface nceOp, VPU::MultiClusterStrategy strategy);
     double getDPUandDMATimeCostWithCustomTiling(VPU::NCEOpInterface nceOp, VPU::MultiClusterStrategy strategy,
-                                                const OutputTiling& outTiles) const;
+                                                const OutputTiling& outTiles);
     double getEfficiencyCost(VPU::NCEOpInterface nceOp, VPU::MultiClusterStrategy strategy) const;
 
     bool hasMultiClusterStrategy(mlir::Operation* op) const;
@@ -54,6 +55,7 @@ public:
                      VPU::ClusteredOpInterface userOp, VPU::MultiClusterStrategy userOpStrategy) const;
 
     bool doesLayerRequireTiling(VPU::ClusteredOpInterface clusteredOp, VPU::MultiClusterStrategy strategy) const;
+    bool doesLayerHaveVPUNNSupportedTypes(VPU::ClusteredOpInterface clusteredOp) const;
     double getSpillingReadCost(vpux::NDTypeInterface srcTensorType) const;
     double getSpillingWriteCost(vpux::NDTypeInterface srcTensorType) const;
     SpillingCost getSpillingCost(vpux::NDTypeInterface srcTensorType, vpux::NDTypeInterface dstTensorType,
@@ -140,7 +142,7 @@ SmallVector<uint32_t> getPerTileOutputDMACosts(VPU::NCEOpInterface nceOp,
 
 uint32_t getWeightsDMACostForNCEOp(VPU::NCEOpInterface nceOp, const OutputTiling& outTiles,
                                    SmallVector<uint32_t>& layerDPUCosts, ArrayRef<uint32_t> layerDMACosts,
-                                   bool enablePrefetchTiling, vpux::Logger log);
+                                   uint32_t parentLastDPUCostToOverlap, bool enablePrefetchTiling, vpux::Logger log);
 
 uint32_t getActivationDMACostForNCEOp(VPU::NCEOpInterface nceOp, const OutputTiling& outTiles,
                                       SmallVector<uint32_t>& layerDPUCosts, ArrayRef<uint32_t> layerDMACosts,
@@ -153,6 +155,8 @@ uint32_t getOutputDMACostForNCEOp(VPU::NCEOpInterface nceOp, const OutputTiling&
 size_t getNumNonConstantOperands(mlir::Operation* op);
 
 bool hasLayerWithMultipleInputs(mlir::Operation* op);
+
+bool isSingleBatchRequired(mlir::Operation* op);
 
 }  // namespace VPU
 }  // namespace vpux

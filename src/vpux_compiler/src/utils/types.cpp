@@ -294,14 +294,22 @@ bool vpux::areTypesCompatible(mlir::TypeRange lhs, mlir::TypeRange rhs, IE::Type
         auto rhsOrigType = std::get<1>(p);
 
         if (lhsOrigType.getTypeID() != rhsOrigType.getTypeID()) {
-            if (IE::bitEnumContainsAny(elemComparisonModes, IE::TypeComparisonMode::ALLOW_GROUPED_OUTPUT)) {
+            if (IE::bitEnumContainsAny(elemComparisonModes, (IE::TypeComparisonMode::ALLOW_GROUPED_OUTPUT |
+                                                             IE::TypeComparisonMode::ALLOW_DISTRIBUTED_OUTPUT))) {
                 const auto oneIsGrouped = (lhsOrigType.isa<vpux::GroupedTypeInterface>() &&
                                            !rhsOrigType.isa<vpux::GroupedTypeInterface>()) ||
                                           (!lhsOrigType.isa<vpux::GroupedTypeInterface>() &&
                                            rhsOrigType.isa<vpux::GroupedTypeInterface>());
-                if (!oneIsGrouped) {
+                const auto oneIsDistributed = (lhsOrigType.isa<vpux::VPU::DistributedTensorType>() &&
+                                               !rhsOrigType.isa<vpux::VPU::DistributedTensorType>()) ||
+                                              (!lhsOrigType.isa<vpux::VPU::DistributedTensorType>() &&
+                                               rhsOrigType.isa<vpux::VPU::DistributedTensorType>());
+
+                if (!oneIsGrouped && !oneIsDistributed) {
                     return false;
                 }
+            } else {
+                return false;
             }
         }
 

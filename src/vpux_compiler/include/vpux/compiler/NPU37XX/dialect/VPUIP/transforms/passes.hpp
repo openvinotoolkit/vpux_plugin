@@ -22,6 +22,21 @@ std::unique_ptr<mlir::Pass> createAddSwKernelCacheHandlingOpsPass(Logger log = L
 std::unique_ptr<mlir::Pass> createUnrollClusterTilingPass(Logger log = Logger::global());
 
 //
+// Optimize copies pipeline
+//
+
+struct OptimizeCopiesOptions final : public VPUIP::OptimizeCopiesOptionsBase {
+    OptimizeCopiesOptions() = default;
+
+    template <class OtherOptions>
+    explicit OptimizeCopiesOptions(const OtherOptions& options): OptimizeCopiesOptionsBase(options) {
+    }
+};
+
+void buildOptimizeCopiesPipeline(mlir::OpPassManager& pm, const OptimizeCopiesOptions& options,
+                                 Logger log = Logger::global());
+
+//
 // Memory allocation pipeline
 //
 
@@ -43,8 +58,8 @@ void buildMemoryAllocationPipeline(mlir::OpPassManager& pm, const MemoryAllocati
 struct DefaultHWOptions :
         public VPUIP::DefaultHWOptionsDialectBase,
         virtual vpux::arch37xx::DefaultHWOptionsDeviceBase {
-    BoolOption enableDMAProfiling{*this, "dma-profiling", llvm::cl::desc("Enable DMA task profiling"),
-                                  llvm::cl::init(true)};
+    StrOption enableDMAProfiling{*this, "dma-profiling", llvm::cl::desc("Enable DMA task profiling"),
+                                 llvm::cl::init("true")};
 
     BoolOption enableCompressWeightsBTC{*this, "compress-weights-btc", ::llvm::cl::desc("Enable compress-weights pass"),
                                         ::llvm::cl::init(false)};

@@ -15,36 +15,6 @@
 using namespace vpux;
 
 namespace {
-size_t reindexList(VPURegMapped::EnqueueOp head) {
-    if (!head)
-        return 0;
-
-    auto ctx = head.getOperation()->getContext();
-    const uint32_t listIdx = head.getType().getListIdx();
-    const uint32_t tileIdx = head.getType().getTileIdx();
-    uint32_t taskIdx = 0;
-
-    do {
-        head.getOperation()->getResult(0).setType(VPURegMapped::IndexType::get(ctx, tileIdx, listIdx, taskIdx));
-        taskIdx++;
-
-        auto headId = llvm::find_if(head.getOperation()->getResult(0).getUsers(), [&head](mlir::Operation* op) {
-            if (auto next = mlir::dyn_cast<VPURegMapped::EnqueueOp>(op)) {
-                if (next.getPreviousTaskIdx() == head)
-                    return true;
-            }
-            return false;
-        });
-
-        head = headId != head.getOperation()->getResult(0).getUsers().end()
-                       ? mlir::cast<VPURegMapped::EnqueueOp>((*headId))
-                       : nullptr;
-
-    } while (head);
-
-    return taskIdx;
-}
-
 class UnrollEnqueuePattern final : public mlir::OpRewritePattern<VPURegMapped::EnqueueOp> {
 public:
     UnrollEnqueuePattern(mlir::MLIRContext* ctx, Logger log)
@@ -127,7 +97,7 @@ void UnrollEnqueueOpsPass::safeRunOnFunc() {
 
     // pattern rewriter may have changed the firstEnqu
     firstEnqu = mpi.getWorkItemTasks();
-    auto newCount = reindexList(mlir::cast<VPURegMapped::EnqueueOp>(firstEnqu.getDefiningOp()));
+    auto newCount = VPUMI40XX::reindexEnqueueList(mlir::cast<VPURegMapped::EnqueueOp>(firstEnqu.getDefiningOp()));
     mpi.setWorkItemCount(newCount);
 }
 

@@ -183,6 +183,21 @@ std::string getTraceEventThreadName(const TaskInfo& task) {
     }
 }
 
+std::string formatDuration(uint64_t timeNs) {
+    uint64_t ms = timeNs / 1000000;
+    uint64_t us = (timeNs / 1000) % 1000;
+    uint64_t ns = timeNs % 1000;
+    std::string timeString;
+    if (ms != 0) {
+        timeString += printToString("{0}ms ", ms);
+    }
+    if (us != 0) {
+        timeString += printToString("{0}us ", us);
+    }
+    timeString += printToString("{0}ns", ns);
+    return timeString;
+}
+
 void TraceEventExporter::processTasks(const std::vector<TaskInfo>& tasks) {
     for (auto& task : tasks) {
         validateTaskNameAndDuration(task);
@@ -242,6 +257,17 @@ void TraceEventExporter::processLayers(const std::vector<LayerInfo>& layers) {
         ted.timestamp = layer.start_time_ns / 1000.;
         ted.duration = layer.duration_ns / 1000.;
         ted.customArgs.push_back({"Layer type", layer.layer_type});
+
+        if (layer.dpu_ns != 0) {
+            ted.customArgs.push_back({"DPU time:", formatDuration(layer.dpu_ns)});
+        }
+        if (layer.sw_ns != 0) {
+            ted.customArgs.push_back({"Shave time:", formatDuration(layer.sw_ns)});
+        }
+        if (layer.dma_ns != 0) {
+            ted.customArgs.push_back({"DMA time:", formatDuration(layer.dma_ns)});
+        }
+
         _events.push_back(ted);
     }
 
@@ -299,6 +325,14 @@ void TraceEventExporter::processTraceEvents(const TaskList& tasks, const std::st
         // use ns-resolution integers to avoid round-off errors during fixed precision output to JSON
         ted.timestamp = task.start_time_ns / 1000.;
         ted.duration = task.duration_ns / 1000.;
+
+        if (task.active_cycles != 0) {
+            ted.customArgs.push_back({"Active cycles:", std::to_string(task.active_cycles)});
+        }
+        if (task.stall_cycles != 0) {
+            ted.customArgs.push_back({"Stall cycles:", std::to_string(task.stall_cycles)});
+        }
+
         _events.push_back(ted);
     }
 
@@ -353,10 +387,32 @@ void TraceEventExporter::setTraceEventProcessSortIndex(int processId, unsigned s
                << R"(, "args": {"sort_index" : ")" << sortIndex << R"("}})" << suffixStr << std::endl;
 }
 
+const char* to_string(const FreqStatus& freqStatus) {
+    switch (freqStatus) {
+    case FreqStatus::UNKNOWN:
+        return "UNKNOWN";
+    case FreqStatus::VALID:
+        return "OK";
+    case FreqStatus::INVALID:
+        return "INVALID";
+    case FreqStatus::SIM:
+        return "SIM";
+    }
+    return NULL;
+}
+
+std::ostream& operator<<(std::ostream& os, const FreqInfo& freqInfo) {
+    if (freqInfo.freqMHz != UNINITIALIZED_FREQUENCY_VALUE) {
+        return printTo(os, "\"workpoint\": { \"freq\": {0:1}, \"status\": \"{1}\" },\n", freqInfo.freqMHz,
+                       to_string(freqInfo.freqStatus));
+    }
+    return os;
+}
+
 }  // namespace
 
 void printProfilingAsTraceEvent(const std::vector<TaskInfo>& tasks, const std::vector<LayerInfo>& layers,
-                                std::ostream& output, Logger& log) {
+                                FreqInfo dpuFreq, std::ostream& output, Logger& log) {
     TaskStatistics stats(tasks);
 
     {
@@ -365,6 +421,7 @@ void printProfilingAsTraceEvent(const std::vector<TaskInfo>& tasks, const std::v
         events.processLayers(layers);
         events.flushAsTraceEvents();
         stats.printAsJson(output);
+        output << dpuFreq;
     }
 
     stats.log(log);

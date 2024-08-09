@@ -52,8 +52,8 @@ class QuantizedConvSubGraphTestCommon :
         const auto dataFq = ov::test::utils::make_fake_quantize(params[0], ov::element::f32, dataLevels, {}, dataInLow,
                                                                 dataInHigh, dataOutLow, dataOutHigh);
 
-        const auto weightsU8 =
-                ov::test::utils::deprecated::make_constant<uint8_t>(ov::element::u8, weightsShape, {}, true, 254, 0);
+        const auto weightsU8 = ov::test::utils::make_constant(ov::element::u8, weightsShape,
+                                                              ov::test::utils::InputGenerateData(0, 255));
 
         const auto weightsFP32 = std::make_shared<ov::op::v0::Convert>(weightsU8, ov::element::f32);
 
@@ -72,10 +72,10 @@ class QuantizedConvSubGraphTestCommon :
             perChannelHigh[i] = 1.0f;
         }
 
-        const auto weightsOutLow = ov::test::utils::deprecated::make_constant<float>(
-                ov::element::f32, {weightsShape[0], 1, 1, 1}, perChannelLow, false);
-        const auto weightsOutHigh = ov::test::utils::deprecated::make_constant<float>(
-                ov::element::f32, {weightsShape[0], 1, 1, 1}, perChannelHigh, false);
+        const auto weightsOutLow =
+                ov::op::v0::Constant::create(ov::element::f32, ov::Shape{weightsShape[0], 1, 1, 1}, perChannelLow);
+        const auto weightsOutHigh =
+                ov::op::v0::Constant::create(ov::element::f32, ov::Shape{weightsShape[0], 1, 1, 1}, perChannelHigh);
 
         const auto weightsFq = std::make_shared<ov::op::v0::FakeQuantize>(weightsFP32, weightsInLow, weightsInHigh,
                                                                           weightsOutLow, weightsOutHigh, weightsLevels);
@@ -113,19 +113,8 @@ public:
     }
 };
 
-class QuantizedConvSubGraphTest_NPU3700 : public QuantizedConvSubGraphTestCommon {};
 class QuantizedConvSubGraphTest_NPU3720 : public QuantizedConvSubGraphTestCommon {};
 class QuantizedConvSubGraphTest_NPU4000 : public QuantizedConvSubGraphTestCommon {};
-
-TEST_P(QuantizedConvSubGraphTest_NPU3700, SW) {
-    setReferenceSoftwareMode();
-    run(Platform::NPU3700);
-}
-
-TEST_P(QuantizedConvSubGraphTest_NPU3700, HW) {
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
 
 TEST_P(QuantizedConvSubGraphTest_NPU3720, SW) {
     setReferenceSoftwareMode();
@@ -136,23 +125,6 @@ TEST_P(QuantizedConvSubGraphTest_NPU4000, HW) {
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
-
-std::vector<std::vector<float>> fqRanges = {
-        {0.0f, 255.0f, 0.0f, 255.0f},
-        {0.0f, 244.0f, 0.0f, 244.0f},
-        {0.0f, 255.0f, -1.0f, 1.0f},
-        {0.0f, 244.0f, -1.0f, 1.0f},
-};
-
-const std::vector<ov::element::Type> netPrecisions = {ov::element::u8, ov::element::f16};
-
-const std::vector<ov::element::Type> netOutputPrecisions = {ov::element::u8, ov::element::f32};
-
-const auto basicCases = ::testing::Combine(::testing::ValuesIn(netPrecisions), ::testing::ValuesIn(netOutputPrecisions),
-                                           ::testing::ValuesIn(fqRanges));
-
-INSTANTIATE_TEST_SUITE_P(smoke_QuantizedConv, QuantizedConvSubGraphTest_NPU3700, basicCases,
-                         QuantizedConvSubGraphTestCommon::getTestCaseName);
 
 std::vector<std::vector<float>> fqRangesM = {{0.0f, 255.0f, 0.0f, 255.0f}};
 

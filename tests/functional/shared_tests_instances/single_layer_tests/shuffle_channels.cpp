@@ -12,14 +12,8 @@ namespace ov {
 namespace test {
 class ShuffleChannelsLayerTestCommon : public ShuffleChannelsLayerTest, virtual public VpuOv2LayerTest {};
 
-class ShuffleChannelsLayerTest_NPU3700 : public ShuffleChannelsLayerTestCommon {};
 class ShuffleChannelsLayerTest_NPU3720 : public ShuffleChannelsLayerTestCommon {};
 class ShuffleChannelsLayerTest_NPU4000 : public ShuffleChannelsLayerTestCommon {};
-
-TEST_P(ShuffleChannelsLayerTest_NPU3700, HW) {
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
 
 TEST_P(ShuffleChannelsLayerTest_NPU3720, SW) {
     setReferenceSoftwareMode();
@@ -35,7 +29,6 @@ TEST_P(ShuffleChannelsLayerTest_NPU4000, SW) {
 
 }  // namespace ov
 
-using ov::test::ShuffleChannelsLayerTest_NPU3700;
 using ov::test::ShuffleChannelsLayerTest_NPU3720;
 using ov::test::ShuffleChannelsLayerTest_NPU4000;
 
@@ -52,9 +45,6 @@ const std::vector<ov::test::shuffleChannelsSpecificParams> shuffleParameters = {
 const auto params0 = testing::Combine(testing::ValuesIn(shuffleParameters), testing::ValuesIn(modelTypes),
                                       testing::ValuesIn(ov::test::static_shapes_to_test_representation(inputShapes)),
                                       testing::Values(ov::test::utils::DEVICE_NPU));
-
-INSTANTIATE_TEST_CASE_P(smoke_ShuffleChannels, ShuffleChannelsLayerTest_NPU3700, params0,
-                        ShuffleChannelsLayerTest_NPU3700::getTestCaseName);
 
 INSTANTIATE_TEST_CASE_P(smoke_ShuffleChannels, ShuffleChannelsLayerTest_NPU3720, params0,
                         ShuffleChannelsLayerTest_NPU3720::getTestCaseName);
@@ -83,11 +73,6 @@ const auto precommit_params = testing::Combine(testing::ValuesIn(shParams), test
                                                testing::ValuesIn(ov::test::static_shapes_to_test_representation(
                                                        std::vector<std::vector<ov::Shape>>({{{1, 4, 3, 2}}}))),
                                                testing::Values(ov::test::utils::DEVICE_NPU));
-
-// --------- NPU3700 ---------
-
-INSTANTIATE_TEST_CASE_P(conform_ShuffleChannels, ShuffleChannelsLayerTest_NPU3700, params1,
-                        ShuffleChannelsLayerTest_NPU3700::getTestCaseName);
 
 // --------- NPU3720 ---------
 

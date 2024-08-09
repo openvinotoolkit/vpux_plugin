@@ -34,15 +34,6 @@ mlir::LogicalResult isBeneficialConvertScaleShiftToDW(IE::ScaleShiftOp scaleShif
     if (onlySupportNHWCLayout(prevOp)) {
         return mlir::success();
     }
-    for (auto user : scaleShiftOp.getResult().getUsers()) {
-        auto convOp = mlir::dyn_cast<IE::ConvolutionOp>(user);
-        if (convOp != nullptr &&
-            VPU::NCEInvariant::isChannelMajorCompatible(VPU::getArch(convOp),
-                                                        convOp.getInput().getType().cast<vpux::NDTypeInterface>())) {
-            log.nest().trace("Cannot convert ScaleShift to DW, since there is no benefit.");
-            return mlir::failure();
-        }
-    }
 
     return mlir::success();
 }

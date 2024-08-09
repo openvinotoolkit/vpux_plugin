@@ -66,11 +66,11 @@ mlir::LogicalResult getOrder(IE::TransposeOpAdaptor transpose, SmallVector<uint6
 
 mlir::LogicalResult vpux::IE::TransposeOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::TransposeOpAdaptor transpose(operands, attrs);
+    IE::TransposeOpAdaptor transpose(operands, attrs, prop);
     if (mlir::failed(transpose.verify(loc))) {
         return mlir::failure();
     }

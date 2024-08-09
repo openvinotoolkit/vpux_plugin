@@ -18,9 +18,14 @@ NDTypeInterface Const::ScalarMultInverseAttr::inferOutputType(NDTypeInterface in
     return input;
 }
 
+bool vpux::Const::ScalarMultInverseAttr::inferOutputSplat(bool inputIsSplat, vpux::NDTypeInterface) {
+    return inputIsSplat;
+}
+
 Const::Content Const::ScalarMultInverseAttr::transform(Const::Content& input) const {
-    auto output = Const::Content::allocTempBuffer(inferOutputType(input.getType()),
-                                                  mlir::Float32Type::get(getContext()), input.isSplat());
+    auto output =
+            Const::Content::allocTempBuffer(inferOutputType(input.getType()), mlir::Float32Type::get(getContext()),
+                                            inferOutputSplat(input.isSplat(), input.getType()));
     const auto vals = input.getValues<float>();
     auto inversedVals = output.getTempBuf<float>();
 

@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --m2i-batchnorm-fusion --canonicalize %s | FileCheck %s
-// REQUIRES: arch-VPUX40XX
+// REQUIRES: arch-NPU40XX
 
 // CHECK-LABEL: @FuseInterpMultAddTask
 func.func @FuseInterpMultAddTask(%arg0: tensor<1x3x64x64xf16>) -> tensor<1x3x256x256xf16> {

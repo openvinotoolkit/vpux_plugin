@@ -4,17 +4,11 @@
 //
 
 #include "vpux/compiler/dialect/VPU/utils/performance_metrics.hpp"
-#include "vpux/utils/profiling/parser/parser.hpp"
+#include "vpux/compiler/dialect/VPU/transforms/factories/frequency_table.hpp"
+#include "vpux/utils/profiling/parser/freq.hpp"
 
 namespace vpux {
 namespace VPU {
-
-// Base of frequency values used in tables (in MHz)
-static constexpr uint32_t FREQ_BASE_37XX_VALUE_MHZ = 700;
-static constexpr uint32_t FREQ_BASE_40XX_VALUE_MHZ = 900;
-// Step of frequency for each entry in tables (in MHz)
-static constexpr uint32_t FREQ_STEP_37XX_VALUE_MHZ = 150;
-static constexpr uint32_t FREQ_STEP_40XX_VALUE_MHZ = 200;
 
 // Base of bandwidth values used in tables (in MB/s).
 static constexpr uint32_t BW_BASE = 2000;
@@ -22,13 +16,10 @@ static constexpr uint32_t BW_BASE = 2000;
 static constexpr uint32_t BW_STEP = 100;
 // Num entries in table, each entry contains set of values for particular frequency
 static constexpr uint32_t NUM_ENTRIES = 5;
-
-uint32_t getFreqBase(VPU::ArchKind arch) {
-    return arch == VPU::ArchKind::NPU40XX ? FREQ_BASE_40XX_VALUE_MHZ : FREQ_BASE_37XX_VALUE_MHZ;
-}
-uint32_t getFreqStep(VPU::ArchKind arch) {
-    return arch == VPU::ArchKind::NPU40XX ? FREQ_STEP_40XX_VALUE_MHZ : FREQ_STEP_37XX_VALUE_MHZ;
-}
+// Profiling timer block fixed frequency by MHz
+// For NPU37XX it runs at 38.4 MHz
+// TODO: it should be provided by vpunn API per arch
+static constexpr double PROF_CLK = 38.4;
 
 uint32_t getBWBase() {
     return BW_BASE;
@@ -38,6 +29,10 @@ uint32_t getBWStep() {
 }
 uint32_t getNumEntries() {
     return NUM_ENTRIES;
+}
+
+double getProfClk() {
+    return PROF_CLK;
 }
 
 const SmallVector<float>& getBWScales() {
@@ -67,12 +62,13 @@ SmallVector<SmallVector<uint64_t>> getBWTicks(mlir::ModuleOp module) {
 
     // Get corresponding dpu freq (MHz) from vpunn to parse inferenceTimebyDPUCycle
     const auto arch = VPU::getArch(module);
-    size_t dpuBaseFreq = VPU::getDpuFrequency(arch);
+    size_t dpuBaseFreq = VPU::getDpuFrequency(arch, VPU::getRevisionID(module));
     // Convert inference ticks by getProfClk
-    auto profClk = arch == VPU::ArchKind::NPU40XX ? vpux::profiling::ProfClk40XX::PROF_CLK_DEFAULT_VALUE_MHZ
-                                                  : vpux::profiling::ProfClk37XX::PROF_CLK_DEFAULT_VALUE_MHZ;
-    auto freqBase = VPU::getFreqBase(arch);
-    auto freqStep = VPU::getFreqStep(arch);
+    auto profClk = arch == VPU::ArchKind::NPU40XX ? profiling::ProfClk40XX::PROF_CLK_DEFAULT_VALUE_MHZ
+                                                  : profiling::ProfClk37XX::PROF_CLK_DEFAULT_VALUE_MHZ;
+    auto freqTable = VPU::getFrequencyTable(arch);
+    auto freqBase = freqTable().base;
+    auto freqStep = freqTable().step;
     size_t baseTicks = static_cast<double>(inferenceTimebyDPUCycle) / static_cast<double>(dpuBaseFreq) * profClk;
     for (uint32_t i = 0; i < VPU::getNumEntries(); ++i) {
         // Scale baseTicks by different dpu freq
@@ -111,7 +107,7 @@ double getActivityFactor(VPU::ExecutorKind execKind, mlir::ModuleOp module, IERT
             }
             // In below situation, activityFactor may to be >1
             // 1) when the energy reference is not the maximum powervirus. Eg: the powerVirus for INT is smaller
-            // than powerVirus for FLOAT. Now we are using INT8 powervirus as
+            // than powerVirus for FLOAT. Now we are using INT8 powervirus (for NPU2.7 /w v1.5.9 VPUNN releases) as
             // max power reference so that AF>1 is possible 2) If inferenceTime estimation is smaller than the
             // Energy estimated in powervirusDPUCycles their ratio will be >1. This is transitory because in the
             // real world the measured time will be bigger and the RuntimeNN will normalize the numbers considering
@@ -123,7 +119,6 @@ double getActivityFactor(VPU::ExecutorKind execKind, mlir::ModuleOp module, IERT
                                                activityFactor);
             }
             return activityFactor;
-        case VPU::ArchKind::NPU30XX:
         default:
             return activityFactor;
         }

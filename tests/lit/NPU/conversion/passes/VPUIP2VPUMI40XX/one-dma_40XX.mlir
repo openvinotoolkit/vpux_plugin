@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --convert-VPUIP-to-VPUMI40XX %s | FileCheck %s
-// REQUIRES: arch-VPUX40XX
+// REQUIRES: arch-NPU40XX
 
 module @OneDMAWithoutAttributes {
   IE.CNNNetwork entryPoint : @main inputsInfo : {
@@ -16,7 +16,7 @@ module @OneDMAWithoutAttributes {
     VPURT.Task {
       %0 = VPUIP.NNDMA {port = 0 : i64} inputs(%arg0 : memref<1x2x3x4xf16, @DDR>) outputs(%arg1 : memref<1x2x3x4xf16, @DDR>) -> memref<1x2x3x4xf16, @DDR>
     }
-    // CHECK:       %[[VAL0:.*]] = VPUMI40XX.NNDMA {port = 0 : i64} inputs(%arg0 : memref<1x2x3x4xf16, @DDR>) outputs(%arg1 : memref<1x2x3x4xf16, @DDR>) start_after(0) clean_after(0) acceleration_mode(<DISABLE>) -> !VPURegMapped.Index<0:0:0>
+    // CHECK:       %[[VAL0:.*]] = VPUMI40XX.NNDMA {port = 0 : i64} inputs(%arg0 : memref<1x2x3x4xf16, @DDR>) outputs(%arg1 : memref<1x2x3x4xf16, @DDR>) start_after(0) clean_after(0) acceleration_mode(<DISABLE>){{.*}}dma_transaction(#VPUMI40XX.NNDMATransaction<inputType = memref<1x2x3x4xf16, @DDR>, outputType = memref<1x2x3x4xf16, @DDR>>){{.*}}-> !VPURegMapped.Index<0:0:0>
 
     return %arg1 : memref<1x2x3x4xf16, @DDR>
   }
@@ -34,7 +34,7 @@ module @OneDMAWithAttributes {
     VPURT.Task {
       %0 = VPUIP.NNDMA {is_out_of_order, is_critical, port = 0 : i64} inputs(%arg0 : memref<1x2x3x4xf16, @DDR>) outputs(%arg1 : memref<1x2x3x4xf16, @DDR>) -> memref<1x2x3x4xf16, @DDR>
     }
-    // CHECK:       %[[VAL0:.*]] = VPUMI40XX.NNDMA {is_critical, is_out_of_order, port = 0 : i64} inputs(%arg0 : memref<1x2x3x4xf16, @DDR>) outputs(%arg1 : memref<1x2x3x4xf16, @DDR>) start_after(0) clean_after(0) acceleration_mode(<DISABLE>) -> !VPURegMapped.Index<0:0:0>
+    // CHECK:       %[[VAL0:.*]] = VPUMI40XX.NNDMA {is_critical, is_out_of_order, port = 0 : i64} inputs(%arg0 : memref<1x2x3x4xf16, @DDR>) outputs(%arg1 : memref<1x2x3x4xf16, @DDR>) start_after(0) clean_after(0) acceleration_mode(<DISABLE>){{.*}}dma_transaction(#VPUMI40XX.NNDMATransaction<inputType = memref<1x2x3x4xf16, @DDR>, outputType = memref<1x2x3x4xf16, @DDR>>){{.*}}-> !VPURegMapped.Index<0:0:0>
 
     return %arg1 : memref<1x2x3x4xf16, @DDR>
   }
@@ -62,7 +62,7 @@ func.func @UnrollDMAOutput(%arg0: memref<1x16x16x16xf16, @DDR>, %arg1: memref<64
   // CHECK: %[[BUFF_TILE_0:.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<64x32x1x1xf16, #NHWC, [@CMX_NN, 0]>
   // CHECK: %[[BUFF_TILE_1:.*]] = VPURT.DeclareBuffer <CMX_NN> [1] <0> -> memref<64x32x1x1xf16, #NHWC, [@CMX_NN, 1]>
   // CHECK-NOT: VPURT.Task
-  // CHECK: %[[DMA0:.*]] = VPUMI40XX.NNDMA {port = 0 : i64} inputs(%[[CST]] : memref<64x32x1x1xf16, #NHWC, @DDR>) outputs(%[[BUFF_TILE_0]], %[[BUFF_TILE_1]] : memref<64x32x1x1xf16, #NHWC, [@CMX_NN, 0]>, memref<64x32x1x1xf16, #NHWC, [@CMX_NN, 1]>) start_after(0) clean_after(0) acceleration_mode(<DISABLE>) -> !VPURegMapped.Index<0:0:0>
+  // CHECK: %[[DMA0:.*]] = VPUMI40XX.NNDMA {port = 0 : i64} inputs(%[[CST]] : memref<64x32x1x1xf16, #NHWC, @DDR>) outputs(%[[BUFF_TILE_0]], %[[BUFF_TILE_1]] : memref<64x32x1x1xf16, #NHWC, [@CMX_NN, 0]>, memref<64x32x1x1xf16, #NHWC, [@CMX_NN, 1]>) start_after(0) clean_after(0) acceleration_mode(<DISABLE>){{.*}}dma_transaction(#VPUMI40XX.NNDMATransaction<inputType = memref<64x32x1x1xf16, #NHWC, @DDR>, outputType = !VPUIP.DistributedBuffer<64x32x1x1xf16, {order = #NHWC, strides = [32, 1, 32, 32]}, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64, uniform_distributed_segments}>>){{.*}}-> !VPURegMapped.Index<0:0:0>
 
   return %arg1 : memref<64x32x1x1xf16, @DDR>
 }

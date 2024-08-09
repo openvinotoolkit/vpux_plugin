@@ -6,6 +6,7 @@
 #include "vpux/compiler/core/barrier_info.hpp"
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
+#include "vpux/compiler/dialect/VPURT/utils/barrier_legalization_utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/dma.hpp"
 #include "vpux/utils/core/range.hpp"
@@ -243,7 +244,7 @@ size_t vpux::BarrierInfo::getNumOfTasks() const {
 void vpux::BarrierInfo::resizeBitMap(SmallVector<llvm::BitVector>& bitMap, size_t length, uint32_t bits) {
     bitMap.resize(length);
     for (auto& bit : bitMap) {
-        bit.resize(bits);
+        bit.resize(bits, false);
     }
 }
 
@@ -258,23 +259,32 @@ SmallVector<size_t> vpux::BarrierInfo::getBarriersForTaskBlock(size_t blockInd, 
     VPUX_THROW_WHEN(blockInd >= getControlGraphBlockCount(), "Invalid task block index ({0})", blockInd);
     auto [blockStartInd, blockEndInd] = getControlGraphBlockTaskRange(blockInd, blockStartSyncPoint, blockEndSyncPoint);
 
-    std::set<size_t> barrierInd;
+    llvm::BitVector barrierInd(getNumOfVirtualBarriers(), false);  // use of BitVector here is faster than eg std::set
     if (updateBarriers) {
         for (unsigned taskInd = blockStartInd; taskInd <= blockEndInd; ++taskInd) {
             for (auto barIdx : _taskUpdateBarriers[taskInd]) {
-                barrierInd.insert(barIdx);
+                barrierInd.set(barIdx);
             }
         }
     } else {
         for (unsigned taskInd = blockStartInd; taskInd <= blockEndInd; ++taskInd) {
             for (auto barIdx : _taskWaitBarriers[taskInd]) {
-                barrierInd.insert(barIdx);
+                barrierInd.set(barIdx);
             }
         }
     }
-    SmallVector<size_t> barrierIndVec(std::make_move_iterator(barrierInd.begin()),
-                                      std::make_move_iterator(barrierInd.end()));
-    return barrierIndVec;
+
+    auto numOfBarriersInBlock = barrierInd.count();
+    if (numOfBarriersInBlock == 0) {
+        return {};
+    }
+
+    SmallVector<size_t> barriersInBlock;
+    barriersInBlock.reserve(numOfBarriersInBlock);
+    for (auto idx : barrierInd.set_bits()) {
+        barriersInBlock.push_back(idx);
+    }
+    return barriersInBlock;
 }
 
 size_t vpux::BarrierInfo::getControlGraphBlockIndex(size_t taskInd) const {
@@ -1128,6 +1138,147 @@ bool vpux::BarrierInfo::verifyControlGraphSplit() {
     return true;
 }
 
+void vpux::BarrierInfo::splitBarriersWithExceedingVariantCount(size_t availableSlots, size_t maxSlotsSum,
+                                                               size_t maxAvailableSlots) {
+    bool maxSlotsSumLimitEnabled = (maxSlotsSum < maxAvailableSlots);
+    // split barriers if needed
+    splitBarrierProducers(availableSlots, maxSlotsSum, maxSlotsSumLimitEnabled);
+    // split barriers if needed
+    splitBarrierConsumers(availableSlots, maxSlotsSum, maxSlotsSumLimitEnabled);
+}
+
+// split barriers if producer count > AVAILABLE SLOTS
+// will produce ceil(NUM PRODUCERS / AVAILABLE SLOTS) barriers
+// Note: if maxSlotsSumLimitEnabled is true, the maxAvailableSlots passed will be half of MAX_VARIANT_SUM not
+// MAX_VARIANT_COUNT
+/*
+    x1  x2  ... xn             x1  ... x256   x257 ... xn
+     \  \   /   /               \   |   /        \  |  /
+         Bar0         -->          Bar0            Bar1
+          |                            \          /
+          u0                                u0
+*/
+void vpux::BarrierInfo::splitBarrierProducers(VPURT::DeclareVirtualBarrierOp barrierOp, size_t availableSlots) {
+    // producers will be divided into batches
+    const auto& barrierProducers = getBarrierProducers(barrierOp);
+    auto barrierProducersCount = barrierProducers.size();
+    _log.trace("Got barrier: '{0}' at '{1}' with barrier producer count '{2}'", barrierOp->getName(),
+               barrierOp->getLoc(), barrierProducersCount);
+
+    // consumers remain the same for all produced batched barriers
+    const auto barrierConsumers = getBarrierConsumers(barrierOp);
+    // create batches for producers
+    auto producerBatches = createLegalVariantBatches(barrierProducers, availableSlots);
+
+    mlir::OpBuilder builder(barrierOp);
+
+    // create barriers based on batches
+    for (const auto& producerBatch : producerBatches) {
+        builder.setInsertionPoint(barrierOp);
+        auto newBarrier = builder.create<VPURT::DeclareVirtualBarrierOp>(barrierOp->getLoc());
+        _log.trace("Created new barrier '{0}'", newBarrier);
+        addNewBarrier(newBarrier);
+
+        for (const auto& producer : producerBatch) {
+            _log.nest().trace("Add producer '{0}' to new barrier, whose slots are {1}", producer,
+                              getNumOfSlotsUsed(getTaskOpAtIndex(producer)));
+            addProducer(newBarrier, producer);
+        }
+
+        for (const auto& consumer : barrierConsumers) {
+            _log.nest().trace("Add consumer '{0}' to new barrier, whose slots are {1}", consumer,
+                              getNumOfSlotsUsed(getTaskOpAtIndex(consumer)));
+            addConsumer(newBarrier, consumer);
+        }
+    }
+
+    resetBarrier(barrierOp);
+    _log.trace("Barrier successfully replaced with batch of barriers");
+}
+
+// split barriers if consumer count > AVAILABLE SLOTS
+// will produce ceil(NUM PRODUCERS / AVAILABLE SLOTS) barriers
+// Note: if maxSlotsSumLimitEnabled is true, the maxAvailableSlots passed will be half of MAX_VARIANT_SUM not
+// MAX_VARIANT_COUNT
+/*
+          u0                                u0
+          |                            /          \
+         Bar0         -->          Bar0            Bar1
+     /  /   \   \               /   |   \        /  |  \
+    x1  x2  ... xn             x1  ... x256   x257 ... xn
+*/
+void vpux::BarrierInfo::splitBarrierConsumers(VPURT::DeclareVirtualBarrierOp barrierOp, size_t availableSlots) {
+    // consumers will be divided into batches
+    const auto& barrierConsumers = getBarrierConsumers(barrierOp);
+    auto barrierConsumersCount = barrierConsumers.size();
+    _log.trace("Got barrier: '{0}' at '{1}' with barrier consumer count '{2}'", barrierOp->getName(),
+               barrierOp->getLoc(), barrierConsumersCount);
+
+    // producers remain the same for all produced batched barriers
+    const auto barrierProducers = getBarrierProducers(barrierOp);
+    // crete batches for consumers
+    auto consumerBatches = createLegalVariantBatches(barrierConsumers, availableSlots);
+
+    mlir::OpBuilder builder(barrierOp);
+
+    // create barriers based on batches
+    for (const auto& consumerBatch : consumerBatches) {
+        builder.setInsertionPoint(barrierOp);
+        auto newBarrier = builder.create<VPURT::DeclareVirtualBarrierOp>(barrierOp->getLoc());
+        _log.trace("Created new barrier '{0}'", newBarrier);
+        addNewBarrier(newBarrier);
+
+        for (const auto& producer : barrierProducers) {
+            _log.nest().trace("Add producer '{0}' to new barrier, whose slots are {1}", producer,
+                              getNumOfSlotsUsed(getTaskOpAtIndex(producer)));
+            addProducer(newBarrier, producer);
+        }
+
+        for (const auto& consumer : consumerBatch) {
+            _log.nest().trace("Add consumer '{0}' to new barrier, whose slots are {1}", consumer,
+                              getNumOfSlotsUsed(getTaskOpAtIndex(consumer)));
+            addConsumer(newBarrier, consumer);
+        }
+    }
+
+    resetBarrier(barrierOp);
+    _log.trace("Barrier successfully replaced with batch of barriers");
+}
+
+void vpux::BarrierInfo::splitBarrierProducers(size_t availableSlots, size_t maxSlotsSum, bool maxSlotsSumLimitEnabled) {
+    _func->walk([&](VPURT::DeclareVirtualBarrierOp barrierOp) {
+        auto producerNum = getProducerSlotCount(barrierOp);
+        auto consumerNum = getConsumerSlotCount(barrierOp);
+        if (maxSlotsSumLimitEnabled && (producerNum + consumerNum <= maxSlotsSum)) {
+            return;
+        }
+
+        if (producerNum <= availableSlots) {
+            // valid producer configuration - barrier is legal
+            return;
+        }
+
+        splitBarrierProducers(barrierOp, availableSlots);
+    });
+}
+
+void vpux::BarrierInfo::splitBarrierConsumers(size_t availableSlots, size_t maxSlotsSum, bool maxSlotsSumLimitEnabled) {
+    _func->walk([&](VPURT::DeclareVirtualBarrierOp barrierOp) {
+        auto producerNum = getProducerSlotCount(barrierOp);
+        auto consumerNum = getConsumerSlotCount(barrierOp);
+        if (maxSlotsSumLimitEnabled && (producerNum + consumerNum <= maxSlotsSum)) {
+            return;
+        }
+
+        if (consumerNum <= availableSlots) {
+            // valid consumer configuration - barrier is legal
+            return;
+        }
+
+        splitBarrierConsumers(barrierOp, availableSlots);
+    });
+}
+
 void vpux::BarrierInfo::removeSyncTaskAttributes() {
     if (_syncTasksIds.empty()) {
         return;
@@ -1176,7 +1327,7 @@ std::pair<size_t, size_t> vpux::BarrierInfo::getControlGraphBlockTaskRange(size_
 //
 // optimizeBarriers
 //
-void vpux::BarrierInfo::optimizeBarriers() {
+void vpux::BarrierInfo::optimizeBarriers(bool checkValidSlotCount) {
     // A -> B -> C
 
     // If B depends on A and C depends on [A, B] ==> we can remove A from C deps list,
@@ -1204,7 +1355,7 @@ void vpux::BarrierInfo::optimizeBarriers() {
 
         // optimize barriers which have the same producers but different consumers
         _log.trace("Optimize barriers / same producers, different consumers");
-        optimizeBarriersWithSameProducers(taskBlockIndex);
+        optimizeBarriersWithSameProducers(taskBlockIndex, checkValidSlotCount);
 
         // optimize consumers
         _log.trace("Optimize consumers / wait barriers");
@@ -1234,7 +1385,6 @@ void vpux::BarrierInfo::optimizeBarrierProducers(size_t blockIdx) {
 
     SmallVector<llvm::BitVector> updateBarriers;
     resizeBitMap(updateBarriers, blockSize, checked_cast<uint32_t>(barrierSize));
-    resetBitMap(updateBarriers);
 
     _log.nest().trace("Collect redundant dependencies");
     for (auto taskInd = blockEndInd + 1; taskInd-- > blockStartInd;) {
@@ -1297,7 +1447,6 @@ void vpux::BarrierInfo::optimizeBarrierConsumers(size_t blockIdx) {
 
     SmallVector<llvm::BitVector> waitBarriers;
     resizeBitMap(waitBarriers, blockSize, checked_cast<uint32_t>(barrierSize));
-    resetBitMap(waitBarriers);
 
     _log.nest().trace("Collect redundant dependencies");
     for (auto taskInd = blockStartInd; taskInd <= blockEndInd; ++taskInd) {
@@ -1339,7 +1488,7 @@ void vpux::BarrierInfo::optimizeBarrierConsumers(size_t blockIdx) {
     }
 }
 
-void vpux::BarrierInfo::optimizeBarriersWithSameProducers(size_t blockIdx) {
+void vpux::BarrierInfo::optimizeBarriersWithSameProducers(size_t blockIdx, bool checkValidSlotCount) {
     // Collect a vector of barrier indexes for current task range.
     // If a new barrier is created between subsequent calls to optimizeBarrier (eg. during looped linearization),
     // iterating over barriersRangeVec will not imply iterating over largely overlapping barrier index ranges
@@ -1364,6 +1513,11 @@ void vpux::BarrierInfo::optimizeBarriersWithSameProducers(size_t blockIdx) {
 
     // Check the slot count is valid or not if the two barriers are merged
     auto legalMergeSlotCount = [&](const size_t& bar1, const size_t& bar2) {
+        // Currently used by ReduceBArrierDependencies, this is possible to be done here because
+        // SplitExceedingVariantCountBarrier will legalize this in barrierLegalizationPipeline
+        if (!checkValidSlotCount) {
+            return true;
+        }
         size_t slotCount = std::accumulate(_barrierProducerMap[bar1].begin(), _barrierProducerMap[bar1].end(),
                                            static_cast<size_t>(0), addFunc);
         BarrierInfo::TaskSet consumers = _barrierConsumerMap[bar1];
@@ -1373,12 +1527,21 @@ void vpux::BarrierInfo::optimizeBarriersWithSameProducers(size_t blockIdx) {
         return slotCount <= maxVariantCount;
     };
 
+    // copy barrier map onto vector for quicker comparisons between different producer sets
+    SmallVector<SmallVector<size_t>> blockBarrierProducerMap(barriersRangeVec.size());
+    for (size_t ind1 = 0; ind1 < barriersRangeVec.size(); ++ind1) {
+        size_t barInd = barriersRangeVec[ind1];
+        std::copy(_barrierProducerMap[barInd].begin(), _barrierProducerMap[barInd].end(),
+                  std::back_inserter(blockBarrierProducerMap[ind1]));
+    }
+    _log = _log.nest();
+
     for (size_t ind1 = 0; ind1 < barriersRangeVec.size(); ++ind1) {
         size_t barInd = barriersRangeVec[ind1];
         for (size_t ind2 = ind1 + 1; ind2 < barriersRangeVec.size(); ++ind2) {
             size_t childBarInd = barriersRangeVec[ind2];
-            if (_barrierProducerMap[barInd] == _barrierProducerMap[childBarInd]) {
-                _log.nest().trace("Same producers for barId '{0}' '{1}'", barInd, childBarInd);
+            if (blockBarrierProducerMap[ind1] == blockBarrierProducerMap[ind2]) {
+                _log.trace("Same producers for barId '{0}' '{1}'", barInd, childBarInd);
                 if (legalMergeSlotCount(barInd, childBarInd)) {
                     for (auto consumerInd : _barrierConsumerMap[childBarInd]) {
                         // move all consumers to one barrier
@@ -1388,10 +1551,298 @@ void vpux::BarrierInfo::optimizeBarriersWithSameProducers(size_t blockIdx) {
                         _log.trace("New consumers number - {0}", getConsumerSlotCount(getBarrierOpAtIndex(barInd)));
                     }
                     resetBarrier(childBarInd);
+                    blockBarrierProducerMap[ind2].clear();
                 }
             }
         }
     }
+    _log = _log.unnest();
+}
+
+bool vpux::BarrierInfo::canMergeBarriersForTasks(const BarrierInfo::TaskSet& producers, size_t availableSlots) {
+    size_t producerSlotCount = 0;
+    for (const auto& producerInd : producers) {
+        producerSlotCount += getNumOfSlotsUsed(getTaskOpAtIndex(producerInd));
+
+        if (producerSlotCount > availableSlots) {
+            // exceeding producer slot count
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void vpux::BarrierInfo::enableUnevenVariantSplit() {
+    _enableUnevenVariantSplit = true;
+}
+
+// modify barriers for task such that it is driven by a single wait barrier by merging parallel wait barriers
+// or linearizing the producers of parallel wait barriers
+bool vpux::BarrierInfo::mergeParallelWaitBarriers(size_t taskInd, size_t availableSlots) {
+    const auto waitBarriers = getWaitBarriers(taskInd);
+    auto log = _log.nest();
+
+    auto getBarriersProducerTasks = [&](const BarrierInfo::TaskSet& waitBarriers) {
+        BarrierInfo::TaskSet newBarrierProducers;
+        for (auto& waitBarrierInd : waitBarriers) {
+            // merge all producers
+            const auto& barrierProducers = getBarrierProducers(waitBarrierInd);
+            llvm::set_union(newBarrierProducers, barrierProducers);
+        }
+
+        return newBarrierProducers;
+    };
+
+    BarrierInfo::TaskSet parallelConsumers;
+    for (auto& waitBarrier : waitBarriers) {
+        llvm::set_union(parallelConsumers, getBarrierConsumers(waitBarrier));
+    }
+
+    auto getBarriersConsumerTasks = [&](const BarrierInfo::TaskSet& waitBarriers, size_t availableSlotsForConsumer) {
+        // find consumers with same wait barriers
+        BarrierInfo::TaskSet parallelConsumersSameWaitBarriers;
+        size_t parallelConsumerSlotCount = 0;
+
+        for (auto& consumer : parallelConsumers) {
+            if (waitBarriers != getWaitBarriers(consumer)) {
+                continue;
+            }
+
+            parallelConsumerSlotCount += getNumOfSlotsUsed(getTaskOpAtIndex(consumer));
+            if (parallelConsumerSlotCount > availableSlotsForConsumer) {
+                break;
+            }
+
+            parallelConsumersSameWaitBarriers.insert(consumer);
+        }
+
+        return parallelConsumersSameWaitBarriers;
+    };
+
+    auto unlinkTaskFromParallelBarriers = [&](const BarrierInfo::TaskSet& tasks,
+                                              const BarrierInfo::TaskSet& waitBarriers) {
+        // remove consumer task from parallel barriers
+        for (auto& waitBarrierInd : waitBarriers) {
+            const auto barrierConsumers = getBarrierConsumers(waitBarrierInd);
+            const auto waitBarrier = getBarrierOpAtIndex(waitBarrierInd);
+
+            // remove link from parallel barriers
+            if (barrierConsumers.size() == tasks.size()) {
+                // if only consumer, barrier can be reset
+                resetBarrier(waitBarrier);
+            } else {
+                for (auto& taskInd : tasks) {
+                    removeConsumer(waitBarrier, taskInd);
+                }
+            }
+        }
+    };
+
+    log.trace("Got '{0}' parallel wait barriers for '{1}'", waitBarriers.size(), taskInd);
+
+    auto availableSlotsForConsumer = availableSlots;
+    const auto totalSlots = 2 * availableSlots;  // by default the slots are evenly divided for producer and consumer
+    auto parallelProducers = getBarriersProducerTasks(waitBarriers);
+    size_t parallelProducerSlotCount = 0;
+    for (auto& producer : parallelProducers) {
+        parallelProducerSlotCount += getNumOfSlotsUsed(getTaskOpAtIndex(producer));
+    }
+    // make full use of the total slots
+    // originally the slots are evenly split for producers and consumers,
+    // e.g., 64 slots in total, 32 for producer and 32 for consumer
+    // when the producer exceeds 32 the excess producers are linearized, leading to DPU stalls
+    // try to distribute more slots for producer and check the feasibility
+    if (_enableUnevenVariantSplit && (parallelProducerSlotCount > availableSlots) &&
+        (parallelProducerSlotCount < totalSlots)) {
+        // check if every consumer could fit consumer-slots
+        // if false, use equal slots for producer and consumer (original logic)
+        // else, assign slots for producer and use the remaining slots for consumer
+        const bool everyConsumerFitProvidedSlots = llvm::all_of(parallelConsumers, [&](auto consumer) {
+            return waitBarriers != getWaitBarriers(consumer) ||
+                   getNumOfSlotsUsed(getTaskOpAtIndex(consumer)) <= totalSlots - parallelProducerSlotCount;
+        });
+        if (everyConsumerFitProvidedSlots) {
+            availableSlotsForConsumer = totalSlots - parallelProducerSlotCount;
+        }
+    }
+
+    auto parallelConsumersToMerge = getBarriersConsumerTasks(waitBarriers, availableSlotsForConsumer);
+    VPUX_THROW_WHEN(parallelConsumersToMerge.empty(), "parallel consumers are empty");
+
+    if (canMergeBarriersForTasks(parallelProducers, totalSlots - availableSlotsForConsumer)) {
+        log.nest().trace("Can merge '{0}' parallel producers for '{1}'", parallelProducers.size(), taskInd);
+        mergeLegalParallelProducers(taskInd, parallelProducers, parallelConsumersToMerge);
+    } else {
+        log.nest().trace("Have to linearize '{0}' parallel producers for '{1}'", parallelProducers.size(), taskInd);
+        linearizeLegalParallelProducers(taskInd, parallelProducers, parallelConsumersToMerge, availableSlots);
+    }
+
+    for (auto& id : parallelConsumersToMerge) {
+        log.trace("Unlink parallel barriers from '{0}'", id);
+    }
+    unlinkTaskFromParallelBarriers(parallelConsumersToMerge, waitBarriers);
+    log.trace("Task '{0}', now has one parallel wait barrier", taskInd);
+    return true;
+}
+
+SmallVector<BarrierInfo::TaskSet> BarrierInfo::createProducerBatches(const BarrierInfo::TaskSet& waitBarriers,
+                                                                     size_t availableSlots) {
+    // try to create batches of producers using existing barriers if producers satisfy order constraint
+    SmallVector<BarrierInfo::TaskSet> legalBatches;
+
+    auto prevLastUserInd = std::numeric_limits<size_t>::max();
+    for (auto& waitBarrierInd : waitBarriers) {
+        const auto& barrierProducers = getBarrierProducers(waitBarrierInd);
+        if (legalBatches.empty()) {
+            prevLastUserInd = VPURT::getMaxEntry(barrierProducers);
+            legalBatches = canMergeBarriersForTasks(barrierProducers, availableSlots)
+                                   ? SmallVector<BarrierInfo::TaskSet>{barrierProducers}
+                                   : createLegalVariantBatches(barrierProducers, availableSlots);
+            continue;
+        }
+
+        const auto firstUserInd = VPURT::getMinEntry(barrierProducers);
+        if (prevLastUserInd >= firstUserInd) {
+            // producers do not satisfy order constraint
+            return SmallVector<BarrierInfo::TaskSet>{};
+        }
+
+        prevLastUserInd = VPURT::getMaxEntry(barrierProducers);
+        auto currentBatchPlusBarrierProducers = legalBatches.back();
+        llvm::set_union(currentBatchPlusBarrierProducers, barrierProducers);
+
+        if (canMergeBarriersForTasks(currentBatchPlusBarrierProducers, availableSlots)) {
+            // can add to the same batch
+            legalBatches.back() = std::move(currentBatchPlusBarrierProducers);
+        } else {
+            // need to create a new batch
+            if (canMergeBarriersForTasks(barrierProducers, availableSlots)) {
+                legalBatches.push_back(barrierProducers);
+            } else {
+                legalBatches.append(createLegalVariantBatches(barrierProducers, availableSlots));
+            }
+        }
+    }
+
+    return legalBatches;
+}
+
+/*
+    Linearize wait barriers if task wait barrier count > 1 by linearizing legal batches of parallel wait barriers
+
+        x..xn    y..ym             x..xn
+          |        |              /     \
+        Bar0     Bar1     -->   Bar0     Bar1
+       /    \   /    \           |        |
+    u..ui   o..oj   a..ak      u..ui    y..ym
+                                       /     \
+                                     Bar2   Bar3
+                                      |      |
+                                    o..oj   a..ak
+*/
+void vpux::BarrierInfo::linearizeLegalParallelProducers(size_t taskInd, const BarrierInfo::TaskSet& parallelProducers,
+                                                        const BarrierInfo::TaskSet& parallelConsumers,
+                                                        size_t availableSlots) {
+    // create legal batches of barrier producers
+    auto legalBatches = createProducerBatches(getWaitBarriers(taskInd), availableSlots);
+    if (legalBatches.empty()) {
+        // create new batches of producers that satisfy order constraint
+        legalBatches = createLegalVariantBatches(parallelProducers, availableSlots);
+    }
+
+    // last batch is the current task
+    BarrierInfo::TaskSet nextBatch = parallelConsumers;
+    auto taskOp = getTaskOpAtIndex(taskInd);
+    mlir::OpBuilder builder(taskOp);
+
+    // create a new barrier between batches
+    for (const auto& batch : legalBatches | reversed) {
+        auto newBarrier = builder.create<VPURT::DeclareVirtualBarrierOp>(taskOp.getLoc());
+        addNewBarrier(newBarrier);
+
+        for (auto& barrierProducer : batch) {
+            addProducer(newBarrier, barrierProducer);
+        }
+
+        for (auto& barrierConsumer : nextBatch) {
+            addConsumer(newBarrier, barrierConsumer);
+        }
+
+        nextBatch = batch;
+    }
+}
+
+// merge wait barriers if task wait barrier count > 1 by
+// creating a new barrier replacing parallel wait barriers
+/*
+        x..xn    y..ym             x..xn    y..ym
+          |        |              /    \   /    \
+        Bar0     Bar1     -->   Bar0    Bar1    Bar2
+       /    \   /    \           |       |       |
+    u..ui   o..oj   a..ak      u..ui   o..oj   a..ak
+*/
+void vpux::BarrierInfo::mergeLegalParallelProducers(size_t taskInd, const BarrierInfo::TaskSet& parallelProducers,
+                                                    const BarrierInfo::TaskSet& parallelConsumers) {
+    // create a new barrier for all parallel producers
+    auto taskOp = getTaskOpAtIndex(taskInd);
+    mlir::OpBuilder builder(taskOp);
+    auto newBarrier = builder.create<VPURT::DeclareVirtualBarrierOp>(taskOp.getLoc());
+    addNewBarrier(newBarrier);
+
+    // add all legal producers to new barrier
+    for (auto& barrierProducer : parallelProducers) {
+        addProducer(newBarrier, barrierProducer);
+    }
+
+    // add all parallel consumers with same wait barriers
+    for (auto& consumer : parallelConsumers) {
+        addConsumer(newBarrier, consumer);
+    }
+}
+
+// iteratively merge parallel wait barriers
+bool vpux::BarrierInfo::ensureTasksDrivenBySingleBarrier(size_t availableSlots, bool mergeWaitBarriersIteratively) {
+    auto getTasksWithParallelWaitBarriers = [&]() {
+        BarrierInfo::TaskSet tasksWithParallelWaitBarriers;
+        for (size_t taskInd = 0; taskInd < _allTaskOps.size(); taskInd++) {
+            if (getWaitBarriers(taskInd).size() >= 2) {
+                tasksWithParallelWaitBarriers.insert(taskInd);
+            }
+        }
+        return tasksWithParallelWaitBarriers;
+    };
+
+    bool modifiedIR = false;
+    auto tasksWithParallelWaitBarriers = getTasksWithParallelWaitBarriers();
+    size_t iteration = 0;
+    while (tasksWithParallelWaitBarriers.size() > 0) {
+        _log.trace("Encountered {0} tasks with more than one wait barrier in iteration {1}",
+                   tasksWithParallelWaitBarriers.size(), iteration);
+
+        _func->walk([&](VPURT::TaskOp taskOp) {
+            const auto taskInd = getIndex(taskOp);
+            if (getWaitBarriers(taskInd).size() < 2) {
+                // valid configuration
+                return;
+            }
+
+            modifiedIR |= mergeParallelWaitBarriers(taskInd, availableSlots);
+        });
+
+        auto tasksWithParallelWaitBarriersPrevIt = tasksWithParallelWaitBarriers;
+        tasksWithParallelWaitBarriers = getTasksWithParallelWaitBarriers();
+        VPUX_THROW_UNLESS(tasksWithParallelWaitBarriers != tasksWithParallelWaitBarriersPrevIt,
+                          "Merging parallel wait barriers encountered an identical batch of tasks as in previous "
+                          "iteration. Cannot enforce single wait barrier per task.");
+        iteration++;
+
+        if (!mergeWaitBarriersIteratively) {
+            break;
+        }
+    }
+
+    return modifiedIR;
 }
 
 bool vpux::BarrierInfo::inRange(const unsigned low, const unsigned high, const unsigned val) const {
@@ -1574,6 +2025,42 @@ void vpux::BarrierInfo::logBarrierInfo() {
     }
 }
 
+/**
+ * hasBarrierDependency - Checks for common barrier between two taskIdx
+ *
+ *        0
+ *        |
+ *       bar0
+ *        |
+ *        1
+ *        |
+ *       bar1
+ *        |
+ *        2
+ *        |
+ *       bar2
+ *
+ * For the above example for Task 0 and Task 1 the function returns true & bar0
+ * Similarly for Task 0 and Task 2 it returns false as there is no direct barrier dependency
+ */
+
+bool vpux::BarrierInfo::hasBarrierDependency(size_t taskOneIdx, size_t taskTwoIdx, size_t& commonBarrier) {
+    const auto& taskOneUpdateBarriers = getUpdateBarriers(taskOneIdx);
+    const auto& taskTwoWaitBarriers = getWaitBarriers(taskTwoIdx);
+
+    auto hasCommonBarrier = [&commonBarrier](const TaskSet& setOne, const TaskSet& setTwo) {
+        for (const auto& barrier : setOne) {
+            if (setTwo.count(barrier)) {
+                commonBarrier = barrier;
+                return true;
+            }
+        }
+        return false;
+    };
+
+    return hasCommonBarrier(taskOneUpdateBarriers, taskTwoWaitBarriers);
+}
+
 //
 // createLegalVariantBatches
 //
@@ -1716,13 +2203,14 @@ BarrierInfoTest::BarrierMaps vpux::BarrierInfoTest::optimizeBarrierConsumers(siz
     return getOptimizedMaps();
 }
 
-BarrierInfoTest::BarrierMaps vpux::BarrierInfoTest::optimizeBarriersWithSameProducers(size_t blockIdx) {
-    BarrierInfo::optimizeBarriersWithSameProducers(blockIdx);
+BarrierInfoTest::BarrierMaps vpux::BarrierInfoTest::optimizeBarriersWithSameProducers(size_t blockIdx,
+                                                                                      bool checkValidSlotCount) {
+    BarrierInfo::optimizeBarriersWithSameProducers(blockIdx, checkValidSlotCount);
     return getOptimizedMaps();
 }
 
-BarrierInfoTest::BarrierMaps vpux::BarrierInfoTest::optimizeBarriers() {
-    BarrierInfo::optimizeBarriers();
+BarrierInfoTest::BarrierMaps vpux::BarrierInfoTest::optimizeBarriers(bool checkValidSlotCount) {
+    BarrierInfo::optimizeBarriers(checkValidSlotCount);
     return getOptimizedMaps();
 }
 

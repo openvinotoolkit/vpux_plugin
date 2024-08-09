@@ -50,12 +50,13 @@ mlir::LogicalResult VirtualBarrierRewrite::matchAndRewrite(VPURT::DeclareVirtual
 
 class AssignPhysicalBarriersPass final : public VPURT::AssignPhysicalBarriersBase<AssignPhysicalBarriersPass> {
 public:
-    explicit AssignPhysicalBarriersPass(Logger log) {
+    explicit AssignPhysicalBarriersPass(const bool wlmFlag, Logger log): _wlmFlag(wlmFlag) {
         Base::initLogger(log, Base::getArgumentName());
     }
 
 private:
     void safeRunOnFunc() final;
+    bool _wlmFlag;
 };
 
 void AssignPhysicalBarriersPass::safeRunOnFunc() {
@@ -65,7 +66,10 @@ void AssignPhysicalBarriersPass::safeRunOnFunc() {
     const auto numBarriers =
             numBarriersOpt.hasValue() ? std::optional<int64_t>(numBarriersOpt.getValue()) : std::nullopt;
 
-    auto& barrierSim = getAnalysis<VPURT::BarrierSimulator>();
+    const auto wlmFlag = wlmEnableOpt.hasValue() ? static_cast<bool>(wlmEnableOpt.getValue()) : _wlmFlag;
+
+    VPURT::BarrierSimulator barrierSim(func, wlmFlag);
+
     if (!barrierSim.isDynamicBarriers()) {
         return;
     }
@@ -101,6 +105,6 @@ void AssignPhysicalBarriersPass::safeRunOnFunc() {
 // createAssignPhysicalBarriersPass
 //
 
-std::unique_ptr<mlir::Pass> vpux::VPURT::createAssignPhysicalBarriersPass(Logger log) {
-    return std::make_unique<AssignPhysicalBarriersPass>(log);
+std::unique_ptr<mlir::Pass> vpux::VPURT::createAssignPhysicalBarriersPass(const bool wlmFlag, Logger log) {
+    return std::make_unique<AssignPhysicalBarriersPass>(wlmFlag, log);
 }

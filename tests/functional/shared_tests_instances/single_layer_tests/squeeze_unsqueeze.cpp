@@ -27,12 +27,6 @@ protected:
     };
 };
 
-TEST_P(SqueezeUnsqueezeLayerTestCommon, NPU3700) {
-    setSkipCompilationCallback(skipCompilationCallback);
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
-
 TEST_P(SqueezeUnsqueezeLayerTestCommon, NPU3720) {
     setSkipCompilationCallback(skipCompilationCallback);
     setDefaultHardwareMode();

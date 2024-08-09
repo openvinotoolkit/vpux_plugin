@@ -94,30 +94,6 @@ function(enable_warnings_as_errors TARGET_NAME)
     endif()
 endfunction()
 
-# Links provided libraries and include their INTERFACE_INCLUDE_DIRECTORIES as SYSTEM
-function(link_system_libraries TARGET_NAME)
-    set(MODE PRIVATE)
-
-    foreach(arg IN LISTS ARGN)
-        if(arg MATCHES "(PRIVATE|PUBLIC|INTERFACE)")
-            set(MODE ${arg})
-        else()
-            if(TARGET "${arg}")
-                target_include_directories(${TARGET_NAME}
-                    SYSTEM ${MODE}
-                        $<TARGET_PROPERTY:${arg},INTERFACE_INCLUDE_DIRECTORIES>
-                        $<TARGET_PROPERTY:${arg},INTERFACE_SYSTEM_INCLUDE_DIRECTORIES>
-                )
-            endif()
-
-            target_link_libraries(${TARGET_NAME}
-                ${MODE}
-                    ${arg}
-            )
-        endif()
-    endforeach()
-endfunction()
-
 macro(set_llvm_flags)
     set(LLVM_ENABLE_WARNINGS OFF CACHE BOOL "")
     set(LLVM_ENABLE_BINDINGS OFF CACHE BOOL "" FORCE)

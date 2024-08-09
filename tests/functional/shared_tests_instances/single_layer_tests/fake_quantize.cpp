@@ -17,9 +17,6 @@ namespace test {
 
 class FakeQuantizeLayerTestCommon : public FakeQuantizeLayerTest, virtual public VpuOv2LayerTest {};
 
-class FakeQuantizeLayerTest_SW_NPU3700 : public FakeQuantizeLayerTestCommon {};
-class FakeQuantizeLayerTest_HW_NPU3700 : public FakeQuantizeLayerTestCommon {};
-
 class FakeQuantizeLayerTest_SW_NPU3720 : public FakeQuantizeLayerTestCommon {
     //     Use realistic float inputs (default generator produces int data)
     void generate_inputs(const std::vector<ov::Shape>& inputShapes) override {
@@ -58,17 +55,6 @@ class FakeQuantizeLayerTest_SW_NPU3720 : public FakeQuantizeLayerTestCommon {
 class FakeQuantizeLayerTest_HW_NPU3720 : public FakeQuantizeLayerTestCommon {};
 
 class FakeQuantizeLayerTest_SW_NPU4000 : public FakeQuantizeLayerTest_SW_NPU3720 {};
-
-// ------ NPU3700 ------
-TEST_P(FakeQuantizeLayerTest_SW_NPU3700, SW) {
-    setReferenceSoftwareMode();
-    run(Platform::NPU3700);
-}
-
-TEST_P(FakeQuantizeLayerTest_HW_NPU3700, HW) {
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
 
 // ------ NPU3720 ------
 TEST_P(FakeQuantizeLayerTest_SW_NPU3720, SW) {
@@ -121,20 +107,6 @@ const auto fqParamsND =
         ::testing::Combine(::testing::ValuesIn(levels), ::testing::ValuesIn(constShapesND), ::testing::Values(fqArgs),
                            ::testing::Values(ov::op::AutoBroadcastType::NUMPY));
 
-INSTANTIATE_TEST_SUITE_P(
-        smoke_FakeQuantize, FakeQuantizeLayerTest_SW_NPU3700,
-        ::testing::Combine(fqParams,
-                           ::testing::ValuesIn(modelTypes),                                         // Model type
-                           ::testing::ValuesIn(static_shapes_to_test_representation(inputShapes)),  // Input shapes
-                           ::testing::Values(DEVICE_NPU)),                                          // Device name
-        FakeQuantizeLayerTest_SW_NPU3700::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_FakeQuantize_ND, FakeQuantizeLayerTest_SW_NPU3700,
-                         ::testing::Combine(fqParamsND, ::testing::ValuesIn(modelTypes),
-                                            ::testing::ValuesIn(static_shapes_to_test_representation(inputShapesND)),
-                                            ::testing::Values(DEVICE_NPU)),
-                         FakeQuantizeLayerTest_SW_NPU3700::getTestCaseName);
-
 // TODO: support levels=16
 // "Can't convert 12 Bit to Byte" while working u4 precision (!quant.uniform<u4:f16, 0.5:128>)
 const std::vector<size_t> hw_levels = {255, 256};
@@ -145,20 +117,6 @@ const auto hw_fqParams =
 const auto hw_fqParamsND =
         ::testing::Combine(::testing::ValuesIn(hw_levels), ::testing::ValuesIn(constShapesND),
                            ::testing::Values(fqArgs), ::testing::Values(ov::op::AutoBroadcastType::NUMPY));
-
-/* ================================= NPU3700 ================================= */
-
-INSTANTIATE_TEST_SUITE_P(smoke_FakeQuantize, FakeQuantizeLayerTest_HW_NPU3700,
-                         ::testing::Combine(hw_fqParams, ::testing::ValuesIn(modelTypes),
-                                            ::testing::ValuesIn(static_shapes_to_test_representation(inputShapes)),
-                                            ::testing::Values(DEVICE_NPU)),
-                         FakeQuantizeLayerTest_HW_NPU3700::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_FakeQuantize_ND, FakeQuantizeLayerTest_HW_NPU3700,
-                         ::testing::Combine(hw_fqParamsND, ::testing::ValuesIn(modelTypes),
-                                            ::testing::ValuesIn(static_shapes_to_test_representation(inputShapesND)),
-                                            ::testing::Values(DEVICE_NPU)),
-                         FakeQuantizeLayerTest_HW_NPU3700::getTestCaseName);
 
 /* ================================= NPU3720/NPU4000 ================================= */
 // Per-Tensor

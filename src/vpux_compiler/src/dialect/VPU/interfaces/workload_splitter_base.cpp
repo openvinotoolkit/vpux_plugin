@@ -98,8 +98,8 @@ SmallVector<Shape> vpux::VPU::WorkloadSplitterBase::getPerClusterShapesWhenSOK(V
     if (clusterOp != nullptr && clusterOp.getMultiClusterStrategy().has_value() &&
         clusterOp.getMultiClusterStrategy().value() == VPU::MultiClusterStrategy::SplitOverKernel) {
         auto outputType = clusterOp->getResult(0).getType().cast<vpux::NDTypeInterface>();
-        const int64_t OC = outputType.getShape()[Dims4D::Act::C];
-        auto numClusters = VPU::getOptimalNumClusters(clusterOp, OC, VPU::MultiClusterStrategy::SplitOverKernel);
+        auto numClusters = VPU::getOptimalNumClusters(clusterOp, outputType.getShape(),
+                                                      VPU::MultiClusterStrategy::SplitOverKernel);
         auto distributedType = getDistributedOutputTypeFromOp(clusterOp, outputType, numClusters,
                                                               VPU::MultiClusterStrategy::SplitOverKernel);
         perClusterShapes = distributedType.getDistributedTypes()
@@ -262,7 +262,7 @@ mlir::DenseSet<mlir::Operation*> vpux::VPU::WorkloadSplitterBase::findProducersF
 
 // Invariants that produce sparse activations must satisfy two conditions:
 // - all variants must produce the same number of channels
-// - the number of channels is a power of two (for NPU30XX and NPU37XX)
+// - the number of channels is a power of two (for NPU37XX)
 // Additionally, in case a consumer operation has its input produced by multiple NCE operations,
 // all of the producer ops need to have the same number of channels for their variants.
 mlir::DenseSet<mlir::Operation*> vpux::VPU::WorkloadSplitterBase::findInvalidSparseOps(

@@ -14,6 +14,7 @@
 #include "vpux/compiler/NPU40XX/dialect/NPUReg40XX/ops.hpp"
 #include "vpux/compiler/dialect/VPURegMapped/utils.hpp"
 #include "vpux/compiler/init.hpp"
+#include "vpux/compiler/interfaces_registry.hpp"
 
 class MLIR_UnitBase : public testing::Test {
 public:
@@ -25,6 +26,34 @@ public:
 protected:
     mlir::DialectRegistry registry;
 };
+
+class NPUSpecific_UnitTest : public MLIR_UnitBase {
+public:
+    NPUSpecific_UnitTest(vpux::VPU::ArchKind arch) {
+        // We need to register hw-specific interfaces (e.g. NCEOpInterface) for VPU NCE ops
+        auto interfacesRegistry = vpux::createInterfacesRegistry(arch);
+        interfacesRegistry->registerInterfaces(registry);
+        ctx.appendDialectRegistry(registry);
+        ctx.loadDialect<vpux::VPU::VPUDialect>();
+    }
+    mlir::MLIRContext ctx;
+};
+
+namespace vpux::VPU::arch37xx {
+class UnitTest : public NPUSpecific_UnitTest {
+public:
+    UnitTest(): NPUSpecific_UnitTest(vpux::VPU::ArchKind::NPU37XX) {
+    }
+};
+}  // namespace vpux::VPU::arch37xx
+
+namespace vpux::VPU::arch40xx {
+class UnitTest : public NPUSpecific_UnitTest {
+public:
+    UnitTest(): NPUSpecific_UnitTest(vpux::VPU::ArchKind::NPU40XX) {
+    }
+};
+}  // namespace vpux::VPU::arch40xx
 
 using MappedRegValues = std::map<std::string, std::map<std::string, uint64_t>>;
 template <typename HW_REG_TYPE, typename REG_MAPPED_TYPE>

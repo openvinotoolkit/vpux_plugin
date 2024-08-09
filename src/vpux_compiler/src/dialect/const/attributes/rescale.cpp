@@ -56,13 +56,18 @@ vpux::NDTypeInterface vpux::Const::RescaleAttr::inferOutputType(vpux::NDTypeInte
     return input;
 }
 
+bool vpux::Const::RescaleAttr::inferOutputSplat(bool inputIsSplat, vpux::NDTypeInterface) {
+    return inputIsSplat;
+}
+
 //
 // RescaleAttr::transform
 //
 
 Const::Content vpux::Const::RescaleAttr::transform(vpux::Const::Content& input) const {
-    auto output = Const::Content::allocTempBuffer(inferOutputType(input.getType()),
-                                                  mlir::Float32Type::get(getContext()), input.isSplat());
+    auto output =
+            Const::Content::allocTempBuffer(inferOutputType(input.getType()), mlir::Float32Type::get(getContext()),
+                                            inferOutputSplat(input.isSplat(), input.getType()));
 
     const auto values = input.getValues<float>();
     auto scaledVals = output.getTempBuf<float>();

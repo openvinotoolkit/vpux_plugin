@@ -5,24 +5,28 @@
 
 #include <vector>
 
+#include <common_test_utils/ov_tensor_utils.hpp>
 #include "common_test_utils/test_constants.hpp"
 #include "single_op_tests/space_to_depth.hpp"
 #include "vpu_ov2_layer_test.hpp"
 
+using namespace ov::test::utils;
 namespace ov {
 
 namespace test {
 
-class SpaceToDepthLayerTestCommon : public SpaceToDepthLayerTest, virtual public VpuOv2LayerTest {};
+class SpaceToDepthLayerTestCommon : public SpaceToDepthLayerTest, virtual public VpuOv2LayerTest {
+    void generate_inputs(const std::vector<ov::Shape>& targetInputStaticShapes) override {
+        VpuOv2LayerTest::inputs.clear();
+        const auto& funcInputs = VpuOv2LayerTest::function->inputs();
+        ov::Tensor tensorData =
+                create_and_fill_tensor(funcInputs[0].get_element_type(), targetInputStaticShapes[0], 8, 0, 32);
+        VpuOv2LayerTest::inputs.insert({funcInputs[0].get_node_shared_ptr(), tensorData});
+    }
+};
 
-class SpaceToDepthLayerTest_NPU3700 : public SpaceToDepthLayerTestCommon {};
 class SpaceToDepthLayerTest_NPU3720 : public SpaceToDepthLayerTestCommon {};
 class SpaceToDepthLayerTest_NPU4000 : public SpaceToDepthLayerTestCommon {};
-
-TEST_P(SpaceToDepthLayerTest_NPU3700, HW) {
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
 
 TEST_P(SpaceToDepthLayerTest_NPU3720, HW) {
     setDefaultHardwareMode();
@@ -43,7 +47,6 @@ TEST_P(SpaceToDepthLayerTest_NPU4000, SW) {
 
 }  // namespace ov
 
-using ov::test::SpaceToDepthLayerTest_NPU3700;
 using ov::test::SpaceToDepthLayerTest_NPU3720;
 using ov::test::SpaceToDepthLayerTest_NPU4000;
 
@@ -55,30 +58,6 @@ const std::vector<ov::element::Type> inputTypes = {ov::element::f32,
 const std::vector<ov::op::v0::SpaceToDepth::SpaceToDepthMode> modes = {
         ov::op::v0::SpaceToDepth::SpaceToDepthMode::BLOCKS_FIRST,
         ov::op::v0::SpaceToDepth::SpaceToDepthMode::DEPTH_FIRST};
-
-/* ============= NPU 3700 ============= */
-
-const std::vector<std::vector<ov::Shape>> inputShapesBS2 = {
-        {{1, 1, 2, 2}}, {{1, 1, 4, 4}}, {{1, 1, 6, 6}}, {{2, 8, 6, 6}}, {{2, 4, 10, 8}}};
-
-const std::vector<std::vector<ov::Shape>> inputShapesBS3 = {
-        {{1, 1, 3, 3}}, {{1, 1, 6, 6}}, {{1, 1, 9, 9}}, {{2, 4, 9, 9}}, {{2, 3, 15, 12}}};
-
-const auto SpaceToDepthBS2 =
-        ::testing::Combine(::testing::ValuesIn(ov::test::static_shapes_to_test_representation(inputShapesBS2)),
-                           ::testing::ValuesIn(inputTypes), ::testing::ValuesIn(modes), ::testing::Values(2),
-                           ::testing::Values(ov::test::utils::DEVICE_NPU));
-
-const auto SpaceToDepthBS3 =
-        ::testing::Combine(::testing::ValuesIn(ov::test::static_shapes_to_test_representation(inputShapesBS3)),
-                           ::testing::ValuesIn(inputTypes), ::testing::ValuesIn(modes), ::testing::Values(3),
-                           ::testing::Values(ov::test::utils::DEVICE_NPU));
-
-INSTANTIATE_TEST_SUITE_P(smoke_SpaceToDepthBS2, SpaceToDepthLayerTest_NPU3700, SpaceToDepthBS2,
-                         SpaceToDepthLayerTest_NPU3700::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_SpaceToDepthBS3, SpaceToDepthLayerTest_NPU3700, SpaceToDepthBS3,
-                         SpaceToDepthLayerTest_NPU3700::getTestCaseName);
 
 /* ============= NPU 3720/4000 ============= */
 

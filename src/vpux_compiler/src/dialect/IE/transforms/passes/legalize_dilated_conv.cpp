@@ -3,10 +3,13 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
+#include "vpux/compiler/dialect/IE/utils/const_attributes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
 
 #include "vpux/compiler/core/layers.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/error.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
@@ -32,19 +35,6 @@ Shape getSlicedShape(int64_t dilationX, int64_t dilationY, int64_t kernelX, int6
     slicedShape[Dims4D::Kernel::X] = dilationX > 1 ? kernelX : 1;
     slicedShape[Dims4D::Kernel::Y] = dilationY > 1 ? kernelY : 1;
     return slicedShape;
-}
-
-mlir::Value getZerosConst(mlir::PatternRewriter& rewriter, mlir::Operation* origOp, ShapeRef constShape) {
-    const auto elemType = origOp->getOperand(0).getType().cast<vpux::NDTypeInterface>().getElementType();
-    const auto dataStorageType = mlir::RankedTensorType::get(to_small_vector(constShape), elemType);
-
-    mlir::DenseElementsAttr denseElementVal = wrapData(dataStorageType, 0.0f);
-    VPUX_THROW_UNLESS(denseElementVal != nullptr,
-                      "input has incompatible data type {0}, only float16 or float32 are supported", elemType);
-
-    return rewriter
-            .create<Const::DeclareOp>(origOp->getLoc(), dataStorageType, Const::ContentAttr::get(denseElementVal))
-            .getOutput();
 }
 
 mlir::Value createNewOp(mlir::PatternRewriter& rewriter, mlir::Operation* origOp, ArrayRef<mlir::Value> operands,
@@ -236,83 +226,16 @@ mlir::LogicalResult ConvGeneralRewriter<ConcreteOp>::matchAndRewrite(ConcreteOp 
     const auto kernelX = filterShape[Dims4D::Filter::KX];
     const auto expandKernelX = (kernelX - 1) * dilations[Dims4D::Dilation::X] + 1;
     const auto expandKernelY = (kernelY - 1) * dilations[Dims4D::Dilation::Y] + 1;
+    const auto isKernelSupportedByNCE = expandKernelX <= vpux::VPU::NCEInvariant::MAX_KERNEL_SIZE &&
+                                        expandKernelY <= vpux::VPU::NCEInvariant::MAX_KERNEL_SIZE;
+    const auto isFilterConstant = mlir::succeeded(IE::getConstParentOp(origOp.getFilter()));
 
-    if (expandKernelX > vpux::VPU::NCEInvariant::MAX_KERNEL_SIZE ||
-        expandKernelY > vpux::VPU::NCEInvariant::MAX_KERNEL_SIZE) {
-        _log.trace("Split dilated '{0}' layer at '{1}'", origOp->getName(), origOp->getLoc());
-        const auto padStart = Shape(parseIntArrayAttr<int64_t>(origOp.getPadsBegin()));
-        const auto padEnd = Shape(parseIntArrayAttr<int64_t>(origOp.getPadsEnd()));
-        const auto strides = Shape(parseIntArrayAttr<int64_t>(origOp.getStrides()));
-        const auto inputShape = getShape(origOp->getOperand(0));
-        const auto outputShape = getShape(origOp->getResult(0));
-        mlir::MLIRContext* ctx = origOp->getContext();
-
-        auto slicedShape =
-                getSlicedShape(dilations[Dims4D::Dilation::X], dilations[Dims4D::Dilation::Y], kernelX, kernelY);
-
-        // 1. slice Filters
-        SmallVector<mlir::Value> slicedFilters =
-                getSlicedFilters(rewriter, origOp, origOp.getFilter(), slicedShape, filterShape);
-
-        // 2. get activation slice parameters and padding parameters
-        auto activationSliceAndPaddingParameters = getActivationSliceAndPaddingParameters(
-                slicedShape, padStart, padEnd, inputShape, outputShape, dilations, strides);
-        VPUX_THROW_UNLESS(activationSliceAndPaddingParameters.size() > 0, "no any activation slice");
-
-        // 3. slice activation and create new convolution
-        SmallVector<mlir::Value> newConvs;
-        bool biasAdded = false;
-        mlir::Value zeroBias;
-        if (origOp.getBias() != nullptr) {
-            biasAdded = true;
-            zeroBias = getZerosConst(rewriter, origOp, getShape(origOp.getBias()));
-        }
-        for (auto parameter : activationSliceAndPaddingParameters) {
-            Shape offsets(inputShape.size());
-            offsets[Dims4D::Act::W] = parameter.offsetX;
-            offsets[Dims4D::Act::H] = parameter.offsetY;
-            SmallVector<int64_t> sliceShape{inputShape[Dims4D::Act::N], inputShape[Dims4D::Act::C], parameter.sizeY,
-                                            parameter.sizeX};
-            auto slicedActivation =
-                    rewriter.create<IE::SliceOp>(origOp->getLoc(), origOp->getOperand(0),
-                                                 getIntArrayAttr(ctx, offsets.raw()), getIntArrayAttr(ctx, sliceShape));
-
-            SmallVector<mlir::Value> operands;
-            if (origOp.getBias() != nullptr) {
-                operands = {slicedActivation, slicedFilters[parameter.index], biasAdded ? origOp.getBias() : zeroBias};
-                biasAdded = false;
-            } else {
-                operands = {slicedActivation, slicedFilters[parameter.index]};
-            }
-            newConvs.push_back(createNewOp(rewriter, origOp, operands, parameter.padStart, parameter.padEnd, true,
-                                           origOp.getPostOpAttr() != nullptr));
-        }
-
-        // 4. add the new convolution one by one
-        if (newConvs.empty()) {
-            return matchFailed(rewriter, origOp, "no any new conv created.");
-        }
-
-        if (newConvs.size() > 1) {
-            const auto broadcastType =
-                    vpux::IE::AutoBroadcastTypeAttr::get(origOp->getContext(), IE::AutoBroadcastType::NONE_OR_EXPLICIT);
-            mlir::Value add = newConvs.front();
-            for (size_t i = 1; i < newConvs.size(); i++)
-                add = rewriter.create<IE::AddOp>(origOp->getLoc(), add, newConvs[i], broadcastType,
-                                                 (i == newConvs.size() - 1) ? origOp.getClampAttr(),
-                                                 origOp.getPostOpAttr() : nullptr, nullptr)
-                              ->getResult(0);
-            rewriter.replaceOp(origOp, add);
-            return mlir::success();
-        } else {
-            auto conv = newConvs.front().getDefiningOp();
-            if (origOp.getPostOpAttr() != nullptr) {
-                conv->setAttr("post_op", origOp.getPostOpAttr());
-            }
-            rewriter.replaceOp(origOp, conv->getResult(0));
-            return mlir::success();
-        }
-    } else {
+    // The dilation can be resolved by expanding the filter with zeroes by the dilation factor
+    // This can only be done if the expanded filter still satisfies the kernel size limitation of the NCE, otherwise it
+    // would execute on SHAVE and lose performance
+    // Additionally, the filter has to be a constant to ensure that the IE.ExpandDilated operation gets folded into a
+    // constant transformation since there is no full lowering path for this operation
+    if (isKernelSupportedByNCE && isFilterConstant) {
         _log.trace("Expand dilated '{0}' layer at '{1}'", origOp->getName(), origOp->getLoc());
         auto dilatedFilter =
                 rewriter.create<IE::ExpandDilatedOp>(origOp->getLoc(), origOp.getFilter(), origOp.getDilations());
@@ -322,6 +245,83 @@ mlir::LogicalResult ConvGeneralRewriter<ConcreteOp>::matchAndRewrite(ConcreteOp 
         rewriter.replaceOp(origOp, newOp);
         return mlir::success();
     }
+
+    _log.trace("Split dilated '{0}' layer at '{1}'", origOp->getName(), origOp->getLoc());
+    const auto padStart = Shape(parseIntArrayAttr<int64_t>(origOp.getPadsBegin()));
+    const auto padEnd = Shape(parseIntArrayAttr<int64_t>(origOp.getPadsEnd()));
+    const auto strides = Shape(parseIntArrayAttr<int64_t>(origOp.getStrides()));
+    const auto inputShape = getShape(origOp->getOperand(0));
+    const auto outputShape = getShape(origOp->getResult(0));
+    mlir::MLIRContext* ctx = origOp->getContext();
+
+    auto slicedShape = getSlicedShape(dilations[Dims4D::Dilation::X], dilations[Dims4D::Dilation::Y], kernelX, kernelY);
+
+    // 1. slice Filters
+    SmallVector<mlir::Value> slicedFilters =
+            getSlicedFilters(rewriter, origOp, origOp.getFilter(), slicedShape, filterShape);
+
+    // 2. get activation slice parameters and padding parameters
+    auto activationSliceAndPaddingParameters = getActivationSliceAndPaddingParameters(
+            slicedShape, padStart, padEnd, inputShape, outputShape, dilations, strides);
+    VPUX_THROW_UNLESS(activationSliceAndPaddingParameters.size() > 0, "no any activation slice");
+
+    // 3. slice activation and create new convolution
+    SmallVector<mlir::Value> newConvs;
+    bool biasAdded = false;
+    mlir::Value zeroBias;
+    if (origOp.getBias() != nullptr) {
+        biasAdded = true;
+        const auto zeroType = mlir::RankedTensorType::get(
+                getShape(origOp.getBias()).raw(),
+                mlir::cast<NDTypeInterface>(origOp->getOperand(0).getType()).getElementType());
+        zeroBias = Const::createZerosConst(rewriter, origOp->getLoc(), zeroType);
+    }
+    for (auto parameter : activationSliceAndPaddingParameters) {
+        Shape offsets(inputShape.size());
+        offsets[Dims4D::Act::W] = parameter.offsetX;
+        offsets[Dims4D::Act::H] = parameter.offsetY;
+        SmallVector<int64_t> sliceShape{inputShape[Dims4D::Act::N], inputShape[Dims4D::Act::C], parameter.sizeY,
+                                        parameter.sizeX};
+        auto slicedActivation =
+                rewriter.create<IE::SliceOp>(origOp->getLoc(), origOp->getOperand(0),
+                                             getIntArrayAttr(ctx, offsets.raw()), getIntArrayAttr(ctx, sliceShape));
+
+        SmallVector<mlir::Value> operands;
+        if (origOp.getBias() != nullptr) {
+            operands = {slicedActivation, slicedFilters[parameter.index], biasAdded ? origOp.getBias() : zeroBias};
+            biasAdded = false;
+        } else {
+            operands = {slicedActivation, slicedFilters[parameter.index]};
+        }
+        newConvs.push_back(createNewOp(rewriter, origOp, operands, parameter.padStart, parameter.padEnd, true,
+                                       origOp.getPostOpAttr() != nullptr));
+    }
+
+    // 4. add the new convolution one by one
+    if (newConvs.empty()) {
+        return matchFailed(rewriter, origOp, "no any new conv created.");
+    }
+
+    if (newConvs.size() > 1) {
+        const auto broadcastType =
+                vpux::IE::AutoBroadcastTypeAttr::get(origOp->getContext(), IE::AutoBroadcastType::NONE_OR_EXPLICIT);
+        mlir::Value add = newConvs.front();
+        for (size_t i = 1; i < newConvs.size(); i++)
+            add = rewriter.create<IE::AddOp>(origOp->getLoc(), add, newConvs[i], broadcastType,
+                                             (i == newConvs.size() - 1) ? origOp.getClampAttr(),
+                                             origOp.getPostOpAttr() : nullptr, nullptr)
+                          ->getResult(0);
+        rewriter.replaceOp(origOp, add);
+
+    } else {
+        auto conv = newConvs.front().getDefiningOp();
+        if (origOp.getPostOpAttr() != nullptr) {
+            conv->setAttr("post_op", origOp.getPostOpAttr());
+        }
+        rewriter.replaceOp(origOp, conv->getResult(0));
+    }
+
+    return mlir::success();
 }
 
 class LegalizeDilatedConvolutionPass final : public IE::LegalizeDilatedConvolutionBase<LegalizeDilatedConvolutionPass> {

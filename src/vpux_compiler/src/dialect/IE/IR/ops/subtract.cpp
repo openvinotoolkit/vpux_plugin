@@ -10,11 +10,11 @@ using namespace vpux;
 
 mlir::LogicalResult vpux::IE::SubtractOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::SubtractOpAdaptor subtract(operands, attrs);
+    IE::SubtractOpAdaptor subtract(operands, attrs, prop);
     if (mlir::failed(subtract.verify(loc))) {
         return mlir::failure();
     }
@@ -35,12 +35,16 @@ mlir::OpFoldResult vpux::IE::SubtractOp::fold(FoldAdaptor adaptor) {
     auto operands = adaptor.getOperands();
     VPUX_THROW_UNLESS(operands.size() == 2, "Wrong number of operands : {0}", operands.size());
 
-    if (const auto attr = operands[1].dyn_cast_or_null<Const::ContentAttr>()) {
-        const auto content = attr.fold();
-        if (content.isSplat() && content.getSplatValue<float>() == 0.0f) {
-            return getInput1();
-        }
+    const bool shapeChanges = getShape(getInput1()) != getShape(getOutput());
+    if (shapeChanges) {
+        return nullptr;
     }
 
-    return nullptr;
+    const auto attr = mlir::dyn_cast_or_null<Const::ContentAttr>(operands[1]);
+    if (attr == nullptr || !attr.isSplat()) {
+        return nullptr;
+    }
+
+    const auto content = attr.fold();
+    return isDoubleEqual(content.getSplatValue<double>(), 0.0f) ? getInput1() : nullptr;
 }

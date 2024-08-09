@@ -11,6 +11,7 @@
 
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/utils/analysis.hpp"
+#include "vpux/compiler/utils/rewriter.hpp"
 
 #include <mlir/Dialect/Func/IR/FuncOps.h>
 #include <mlir/IR/BuiltinOps.h>
@@ -35,15 +36,23 @@ mlir::Location vpux::IE::getValueLocation(mlir::Value val) {
     }
     // value is a block argument, so a function argument
     if (auto arg = val.dyn_cast<mlir::BlockArgument>()) {
-        auto ownerOp = arg.getOwner()->getParentOp();
-        auto maybeFuncOp = mlir::dyn_cast<mlir::func::FuncOp>(ownerOp);
-        VPUX_THROW_WHEN(maybeFuncOp == nullptr,
+        const auto ownerOp = mlir::dyn_cast<mlir::func::FuncOp>(arg.getOwner()->getParentOp());
+        VPUX_THROW_WHEN(ownerOp == nullptr,
                         "Invalid type of parent operation, expected to get mlir::func::FuncOp, but got {0}",
-                        maybeFuncOp);
-        auto moduleOp = getModuleOp(maybeFuncOp);
-        IE::CNNNetworkOp netOp;
-        IE::CNNNetworkOp::getFromModule(moduleOp, netOp, maybeFuncOp);
-        auto inputsInfo = to_small_vector(netOp.getInputsInfo().getOps<IE::DataInfoOp>());
+                        arg.getOwner()->getParentOp());
+        auto moduleOp = getModuleOp(ownerOp);
+        IE::CNNNetworkOp cnnNetworkOp;
+        mlir::func::FuncOp netFunc;
+        IE::CNNNetworkOp::getFromModule(moduleOp, cnnNetworkOp, netFunc);
+
+        if (ownerOp != netFunc) {
+            // Note: one cannot provably deduce a single location as a
+            // non-net-func could be called multiple times, thus, return the
+            // location of this function.
+            return appendLoc(ownerOp->getLoc(), "arg_{0}", arg.getArgNumber());
+        }
+
+        auto inputsInfo = to_small_vector(cnnNetworkOp.getInputsInfo().getOps<IE::DataInfoOp>());
 
         const size_t inputNum = arg.getArgNumber();
         return inputsInfo[inputNum]->getLoc();

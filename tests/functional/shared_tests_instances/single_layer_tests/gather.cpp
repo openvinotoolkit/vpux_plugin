@@ -24,61 +24,22 @@ void checkInOutRank(int inputRank, int indexRank, int batchDims, std::stringstre
     }
 }
 
-class GatherLayerTest_NPU3700 : public GatherLayerTest, virtual public VpuOv2LayerTest {};
-
 class GatherLayerTest_NPU3720 : public GatherLayerTest, virtual public VpuOv2LayerTest {};
 class GatherLayerTest_NPU4000 : public GatherLayerTest, virtual public VpuOv2LayerTest {};
 
-class Gather7LayerTest_NPU3700 : public Gather7LayerTest, virtual public VpuOv2LayerTest {};
-
 class Gather7LayerTest_NPU3720 : public Gather7LayerTest, virtual public VpuOv2LayerTest {};
-
-class Gather8LayerTest_NPU3700 : public Gather8LayerTest, virtual public VpuOv2LayerTest {};
 
 class Gather8LayerTest_NPU3720 : public Gather8LayerTest, virtual public VpuOv2LayerTest {};
 class Gather8LayerTest_NPU4000 : public Gather8LayerTest, virtual public VpuOv2LayerTest {};
-
-TEST_P(GatherLayerTest_NPU3700, HW) {
-    setSkipCompilationCallback([](std::stringstream& skip) {
-        std::vector<InputShape> inputShape = std::get<3>(GetParam());
-        if (inputShape[0].second[0].size() != 4) {
-            skip << "Runtime only supports 4D input shape";
-        }
-    });
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
 
 TEST_P(GatherLayerTest_NPU3720, HW) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(Gather7LayerTest_NPU3700, HW) {
-    setSkipCompilationCallback([](std::stringstream& skip) {
-        auto inputRank = std::get<0>(GetParam()).size();
-        auto indexRank = std::get<1>(GetParam()).size();
-        auto batchDims = std::get<1>(std::get<2>(GetParam()));
-        checkInOutRank(inputRank, indexRank, batchDims, skip);
-    });
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
-
 TEST_P(Gather7LayerTest_NPU3720, HW) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
-}
-
-TEST_P(Gather8LayerTest_NPU3700, HW) {
-    setSkipCompilationCallback([](std::stringstream& skip) {
-        auto inputRank = std::get<0>(GetParam()).size();
-        auto indexRank = std::get<1>(GetParam()).size();
-        auto batchDims = std::get<1>(std::get<2>(GetParam()));
-        checkInOutRank(inputRank, indexRank, batchDims, skip);
-    });
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
 }
 
 TEST_P(Gather8LayerTest_NPU3720, HW) {
@@ -128,9 +89,6 @@ const auto params =
                          testing::ValuesIn(modelTypes),                                         // Model type
                          testing::Values(DEVICE_NPU));                                          // Device name
 
-// Tracking number [E#85137]
-INSTANTIATE_TEST_SUITE_P(smoke_Gather1, GatherLayerTest_NPU3700, params, GatherLayerTest_NPU3700::getTestCaseName);
-
 INSTANTIATE_TEST_CASE_P(smoke_Gather1, GatherLayerTest_NPU3720, params, GatherLayerTest_NPU3720::getTestCaseName);
 
 INSTANTIATE_TEST_CASE_P(smoke_Gather1, GatherLayerTest_NPU4000, params, GatherLayerTest_NPU4000::getTestCaseName);
@@ -162,8 +120,6 @@ const auto genParams(const ov::Shape inputShape, const int axis, const size_t id
 }
 
 #define GEN_TEST(no, inputShape, axis, numIndices)                                                                  \
-    INSTANTIATE_TEST_CASE_P(conform_Gather1_##no, GatherLayerTest_NPU3700, genParams(inputShape, axis, numIndices), \
-                            GatherLayerTest_NPU3700::getTestCaseName);                                              \
     INSTANTIATE_TEST_CASE_P(conform_Gather1_##no, GatherLayerTest_NPU3720, genParams(inputShape, axis, numIndices), \
                             GatherLayerTest_NPU3720::getTestCaseName)
 
@@ -197,12 +153,6 @@ GEN_PRECOMMIT_NPU3720_TEST(2, (ov::Shape{16, 1, 3, 3}), 0, 27);  //=> {27,1,3,3}
 namespace {  // opset7::Gather tests
 
 #define GEN7_TEST(no, inputShape, indicesShape, axis, batch_dims)                                                 \
-    INSTANTIATE_TEST_CASE_P(smoke_Gather7_##no, Gather7LayerTest_NPU3700,                                         \
-                            testing::Combine(testing::Values(static_shapes_to_test_representation({inputShape})), \
-                                             testing::Values(std::vector<size_t> indicesShape),                   \
-                                             testing::Values(std::tuple<int, int>{axis, batch_dims}),             \
-                                             testing::Values(ov::element::f16), testing::Values(DEVICE_NPU)),     \
-                            Gather7LayerTest_NPU3700::getTestCaseName);                                           \
     INSTANTIATE_TEST_CASE_P(smoke_Gather7_##no, Gather7LayerTest_NPU3720,                                         \
                             testing::Combine(testing::Values(static_shapes_to_test_representation({inputShape})), \
                                              testing::Values(std::vector<size_t> indicesShape),                   \
@@ -235,12 +185,6 @@ namespace {  // opset8::Gather tests
 
 const std::vector<ov::element::Type> modelType = {ov::element::f16, ov::element::u8};
 #define GEN8_TEST(no, inputShape, indicesShape, axis, batch_dims)                                                 \
-    INSTANTIATE_TEST_CASE_P(smoke_Gather8_##no, Gather8LayerTest_NPU3700,                                         \
-                            testing::Combine(testing::Values(static_shapes_to_test_representation({inputShape})), \
-                                             testing::Values(std::vector<size_t> indicesShape),                   \
-                                             testing::Values(std::tuple<int, int>{axis, batch_dims}),             \
-                                             testing::Values(ov::element::f16), testing::Values(DEVICE_NPU)),     \
-                            Gather8LayerTest_NPU3700::getTestCaseName);                                           \
     INSTANTIATE_TEST_CASE_P(smoke_Gather8_##no, Gather8LayerTest_NPU3720,                                         \
                             testing::Combine(testing::Values(static_shapes_to_test_representation({inputShape})), \
                                              testing::Values(std::vector<size_t> indicesShape),                   \

@@ -64,6 +64,10 @@ bool checkPooling(mlir::Operation* op, mlir::Operation* maybePermute) {
     if (!permuteInterface.isSupportedPermutation(maybePermute)) {
         return false;
     }
+    const auto outputType = op->getResult(0).getType().template cast<vpux::NDTypeInterface>();
+    if (mlir::isa<mlir::IntegerType>(outputType.getElementType())) {
+        return false;
+    }
     auto alignInterface = mlir::dyn_cast_or_null<IE::AlignedChannelsOpInterface>(op);
     if (alignInterface == nullptr) {
         return true;

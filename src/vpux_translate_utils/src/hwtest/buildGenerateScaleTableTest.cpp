@@ -17,6 +17,7 @@
 #include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/dialect/const/passes.hpp"
+#include "vpux/compiler/utils/platform_resources.hpp"
 #include "vpux/compiler/utils/quantization.hpp"
 #include "vpux/compiler/utils/swizzle_transform.hpp"
 #include "vpux/compiler/utils/swizzling_utils.hpp"
@@ -167,7 +168,7 @@ void buildGenerateScaleTableTest(const nb::TestCaseJsonDescriptor& testDesc, mli
     auto functionInput = function.getArgument(0);
     auto functionOutput = function.getArgument(1);
 
-    const auto weightsValues = generateWeights(weightsShape, weightsType, ctx, weightsFileName);
+    const auto weightsValues = generateWeights(builder, weightsShape, weightsType, ctx, weightsFileName);
     auto weightsAttribute = generateDefaultWeightsAttr(weightsValues, weightsType);
 
     if (isWeightsPaddingRequired) {
@@ -298,14 +299,18 @@ void buildGenerateScaleTableTest(const nb::TestCaseJsonDescriptor& testDesc, mli
         weightsTableCMX = createDeclareTensorOp(functionBuilder, VPURT::BufferSection::CMX_NN, weightsTableShape, int32,
                                                 DimsOrder::NHWC, cluster, WEIGHTSTABLE_CMX_OFFSET);
     }
-    const int64_t inputCopyBarrierId = 0;
+
+    auto [waitWLMBarrier, freeBarrierId] =
+            insertWLMStartSequence(functionBuilder, testDesc.getWLMParams().isWLMPartialEnabled);
+
+    const int64_t inputCopyBarrierId = freeBarrierId++;
     auto inputCopyBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, inputCopyBarrierId);
     const int64_t actShaveUpdateBarrierId = inputCopyBarrierId + 1;
     auto actShaveUpdateBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, actShaveUpdateBarrierId);
     const int64_t dpuUpdateBarrierId = actShaveUpdateBarrierId + 1;
     auto dpuUpdateBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, dpuUpdateBarrierId);
 
-    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(),
+    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, waitWLMBarrier,
                                           mlir::ValueRange(inputCopyBarrier.getBarrier()), loc, functionInput,
                                           inputCMX.getOperation()->getResult(0), 0);
     VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(
@@ -367,7 +372,8 @@ void buildGenerateScaleTableTest(const nb::TestCaseJsonDescriptor& testDesc, mli
                        /*ppe_fp_bias=*/0.f);
 
     // finalBarrier passed as production barrier to last DMA task
-    auto finalBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, 3);
+    auto finalBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(
+            loc, 3, testDesc.getWLMParams().isWLMPartialEnabled);
 
     VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(dpuUpdateBarrier.getBarrier()),
                                           mlir::ValueRange(finalBarrier.getBarrier()), loc,
@@ -389,11 +395,7 @@ void buildGenerateScaleTableTest(const nb::TestCaseJsonDescriptor& testDesc, mli
         pm.addPass(VPUIP::createCompressWeightsBTCPass(log));
     }
     if (isWeightsSwizzlingRequired) {
-        mlir::OpPassManager::Nesting nesting = pm.getNesting();
-        pm.setNesting(mlir::OpPassManager::Nesting::Explicit);
-        mlir::OpPassManager& constPm = pm.nest<mlir::func::FuncOp>().nest<Const::DeclareOp>();
-        constPm.addPass(Const::createConstantFoldingPass());
-        pm.setNesting(nesting);
+        pm.nest<mlir::func::FuncOp>().addNestedPass<Const::DeclareOp>(Const::createConstantFoldingPass());
     }
 
     VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");

@@ -71,10 +71,6 @@ private:
     VPU::MPEMode _mpeMode;
 };
 
-int64_t computeSplitCostForVPUX30XX(const WorkloadSplit& split, const WorkloadCostParams& params,
-                                    const std::shared_ptr<VPUNN::VPUCostModel>& costModel, LogCb logCb = emptyLogCb);
-int64_t computeSplitCostForVPUX37XX(const WorkloadSplit& split, const WorkloadCostParams& params,
-                                    const std::shared_ptr<VPUNN::VPUCostModel>& costModel, LogCb logCb = emptyLogCb);
 VPUNN::Operation getOperationType(VPUIP::NCETaskType taskType);
 
 }  // namespace VPUIP

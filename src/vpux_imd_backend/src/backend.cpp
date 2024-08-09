@@ -12,9 +12,7 @@
 
 #include "device_helpers.hpp"
 
-using namespace intel_npu;
-
-namespace vpux {
+namespace intel_npu {
 
 const std::shared_ptr<IDevice> IMDBackend::getDevice() const {
     return std::make_shared<IMDDevice>(ov::intel_npu::Platform::NPU3720);
@@ -32,7 +30,12 @@ const std::shared_ptr<IDevice> IMDBackend::getDevice(const ov::AnyMap& params) c
 }
 
 const std::vector<std::string> IMDBackend::getDeviceNames() const {
-    return {"3700", "3720", "4000"};
+    if (const auto* name = std::getenv("IE_NPU_DEVICE_ID")) {
+        return {name};
+    }
+
+    VPUX_THROW("Unknown device. Please set IE_NPU_DEVICE_ID!");
+    return std::vector<std::string>();
 }
 
 const std::string IMDBackend::getName() const {
@@ -50,8 +53,12 @@ bool IMDBackend::isBatchingSupported() const {
     return false;
 }
 
+bool IMDBackend::isCommandQueueExtSupported() const {
+    return false;
+}
+
 OPENVINO_PLUGIN_API void CreateNPUEngineBackend(std::shared_ptr<IEngineBackend>& obj, const Config&) {
     obj = std::make_shared<IMDBackend>();
 }
 
-}  // namespace vpux
+}  // namespace intel_npu

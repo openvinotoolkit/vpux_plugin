@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstring>
 #include <tuple>
+#include <vector>
 
 namespace vpux::profiling {
 
@@ -28,6 +29,9 @@ struct LayerInfo {
     uint64_t dma_ns = 0;
 };
 
+// Size must match L0-ext ze_profiling_layer_info
+static_assert(sizeof(LayerInfo) == 368);
+
 struct TaskInfo {
     char name[256];
     char layer_type[50];
@@ -39,6 +43,23 @@ struct TaskInfo {
     uint32_t stall_cycles = 0;
     uint32_t task_id = -1;
     uint32_t parent_layer_id = -1;  ///< Not used
+};
+
+// Size must match L0-ext ze_profiling_task_info
+static_assert(sizeof(TaskInfo) == 344);
+
+enum class FreqStatus { UNKNOWN, VALID, INVALID, SIM };
+constexpr double UNINITIALIZED_FREQUENCY_VALUE = -1;
+
+struct FreqInfo {
+    double freqMHz = UNINITIALIZED_FREQUENCY_VALUE;
+    FreqStatus freqStatus = FreqStatus::UNKNOWN;
+};
+
+struct ProfInfo {
+    std::vector<TaskInfo> tasks;
+    std::vector<LayerInfo> layers;
+    FreqInfo dpuFreq;
 };
 
 template <typename T>

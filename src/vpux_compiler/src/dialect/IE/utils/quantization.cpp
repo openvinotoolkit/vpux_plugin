@@ -141,6 +141,38 @@ bool IE::isSymmetricQuantType(mlir::quant::QuantizedType type) {
     return false;
 }
 
+mlir::quant::UniformQuantizedType IE::getQuantizedTypeFromFakeQuantize(IE::FakeQuantizeOp fqOp) {
+    if (fqOp == nullptr) {
+        return nullptr;
+    }
+    const auto iLoShape = getShape(fqOp.getInputLow());
+    const auto iHiShape = getShape(fqOp.getInputHigh());
+    const auto oLoShape = getShape(fqOp.getOutputLow());
+    const auto oHiShape = getShape(fqOp.getOutputHigh());
+    const auto expectedShape = Shape{1, 1, 1, 1};
+    if (iLoShape != expectedShape || iHiShape != expectedShape || oLoShape != expectedShape ||
+        oHiShape != expectedShape) {
+        return nullptr;
+    }
+    auto inLowConst = fqOp.getInputLow().getDefiningOp<Const::DeclareOp>();
+    auto inHighConst = fqOp.getInputHigh().getDefiningOp<Const::DeclareOp>();
+    auto outLowConst = fqOp.getOutputLow().getDefiningOp<Const::DeclareOp>();
+    auto outHighConst = fqOp.getOutputHigh().getDefiningOp<Const::DeclareOp>();
+    if (inLowConst == nullptr || inHighConst == nullptr || outLowConst == nullptr || outHighConst == nullptr) {
+        return nullptr;
+    }
+    const auto realType = fqOp.getInput().getType().cast<vpux::NDTypeInterface>();
+    const auto realElemType = realType.getElementType().dyn_cast<mlir::FloatType>();
+    const auto outQuantizeElemType =
+            getQuantizedType(outLowConst.getContentAttr(), outHighConst.getContentAttr(), fqOp.getLevels(),
+                             fqOp.getLowFpType(), realElemType, false, fqOp.getLoc(), fqOp.getAutoBroadcast());
+    if (outQuantizeElemType == nullptr) {
+        return nullptr;
+    }
+
+    return outQuantizeElemType.dyn_cast<mlir::quant::UniformQuantizedType>();
+}
+
 //
 // IE::arch37xx
 //
@@ -249,14 +281,13 @@ bool vpux::IE::checkRescaledQuantApproximationForConvBasedOp(mlir::Operation* op
     broadcast(outQuantScale, OC);
     broadcast(weightsQuantScales, OC);
 
-    auto arch = VPU::getArch(op);
     for (int64_t i = 0; i < OC; i++) {
         uint16_t mult = 0;
         uint8_t shift = 0;
         int8_t postShift = 0;
         double rescale = (weightsQuantScales[i] * inQuantScale[i]) / outQuantScale[i];
         std::tie(mult, shift, postShift) = approximate<decltype(mult)>(15, rescale);
-        if (postShift != 0 && arch != VPU::ArchKind::NPU30XX) {
+        if (postShift != 0) {
             return false;
         }
     }

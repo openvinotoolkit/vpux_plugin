@@ -52,11 +52,10 @@ void MoveOpsIntoSectionsPass::safeRunOnFunc() {
     auto netFunc = getOperation();
 
     // Need to define the DenseMapInfo
-    std::unordered_map<std::string, ELF::ElfSectionInterface> sectionMap;
+    std::unordered_map<ELF::SectionSignature, ELF::ElfSectionInterface> sectionMap;
 
     mlir::OpBuilder builderFunc(&(netFunc.getBody().front().back()));
 
-    builderFunc.create<ELF::ABIVersionOp>(builderFunc.getUnknownLoc());
     builderFunc.create<ELF::PerformanceMetricsOp>(builderFunc.getUnknownLoc());
 
     auto elf = buildElfMainOp(netFunc);
@@ -66,28 +65,26 @@ void MoveOpsIntoSectionsPass::safeRunOnFunc() {
 
     auto sectionBuilder = mlir::OpBuilder::atBlockEnd(&elf.getContent().front());
 
-    auto createSection = [&sectionBuilder, &elf](llvm::StringRef name, bool memFootprint, size_t opAling,
-                                                 ELF::SectionFlagsAttr flags,
-                                                 ELF::SectionTypeAttr type) -> ELF::ElfSectionInterface {
+    auto createSection = [&sectionBuilder, &elf](ELF::SectionSignature signature, bool memFootprint, size_t opAling) {
         // Only enforce LCM alignment in case of sections that get allocated
-        auto secAlignReq = ELF::bitEnumContainsAll(flags, ELF::SectionFlagsAttr::SHF_ALLOC)
+        auto secAlignReq = ELF::bitEnumContainsAll(signature.getFlags(), ELF::SectionFlagsAttr::SHF_ALLOC)
                                    ? ELF::math::lcm(elf::VPU_SH_ADDR_ALIGN_FOR_VPU, opAling)
                                    : opAling;
         if (memFootprint) {
             auto sec = sectionBuilder.create<ELF::DataSectionOp>(elf.getLoc(),
-                                                                 name,         // llvm::StringRef secName
-                                                                 secAlignReq,  // int64_t secAddrAlign
-                                                                 type,         // ELFVPUX40XX secType
-                                                                 flags         // ELFVPUX40XX secFlags
+                                                                 signature.getName(),  // llvm::StringRef secName
+                                                                 secAlignReq,          // int64_t secAddrAlign
+                                                                 signature.getType(),  // ELFVPUX40XX secType
+                                                                 signature.getFlags()  // ELFVPUX40XX secFlags
             );
 
             return mlir::cast<ELF::ElfSectionInterface>(sec.getOperation());
         } else {
             auto sec = sectionBuilder.create<ELF::LogicalSectionOp>(elf.getLoc(),
-                                                                    name,         // llvm::StringRef secName
-                                                                    secAlignReq,  // int64_t secAddrAlign
-                                                                    type,         // ELFVPUX40XX secType
-                                                                    flags         // ELFVPUX40XX secFlags
+                                                                    signature.getName(),  // llvm::StringRef secName
+                                                                    secAlignReq,          // int64_t secAddrAlign
+                                                                    signature.getType(),  // ELFVPUX40XX secType
+                                                                    signature.getFlags()  // ELFVPUX40XX secFlags
             );
 
             return mlir::cast<ELF::ElfSectionInterface>(sec.getOperation());
@@ -110,12 +107,12 @@ void MoveOpsIntoSectionsPass::safeRunOnFunc() {
         if (!wrapOp)
             continue;
 
-        auto signature = wrapOp.getSectionSignature();
-        if (!signature.has_value())
+        auto maybeSignature = wrapOp.getSectionSignature();
+        if (!maybeSignature.has_value())
             continue;
+        auto signature = *maybeSignature;
 
-        auto sectionName = signature.value().getName();
-        auto sectionMapKey = sectionMap.find(sectionName);
+        auto sectionMapKey = sectionMap.find(signature);
 
         if (sectionMapKey != sectionMap.end()) {
             auto secInterface = sectionMapKey->second;
@@ -132,16 +129,14 @@ void MoveOpsIntoSectionsPass::safeRunOnFunc() {
             auto binOp = mlir::cast<ELF::WrappableOpInterface>(op);
             auto opAddrAling = binOp.getAlignmentRequirements();
 
-            ELF::ElfSectionInterface secInterface =
-                    createSection(sectionName, hasMemFootprint, opAddrAling, signature.value().getFlags(),
-                                  signature.value().getType());
+            auto secInterface = createSection(signature, hasMemFootprint, opAddrAling);
 
             replaceRefsWithCandidate(&op, secInterface);
 
             mlir::Block* sectionBlock = secInterface.getBlock();
             op.moveBefore(sectionBlock, sectionBlock->end());
 
-            sectionMap[sectionName] = secInterface;
+            sectionMap[signature] = secInterface;
         }
     }
 

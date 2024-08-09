@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+//
+
 #include <numeric>
 
 #include <mlir/Dialect/Quant/QuantTypes.h>
@@ -16,6 +18,7 @@
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
+#include "vpux/compiler/utils/platform_resources.hpp"
 #include "vpux/compiler/utils/quantization.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
 #include "vpux/hwtest/test_case_json_parser.hpp"
@@ -221,9 +224,9 @@ void buildDoubleConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp 
     auto functionInput = function.getArgument(0);
     auto functionOutput = function.getArgument(1);
 
-    const auto getWeightsAttribute = [&weightsType, &ctx](llvm::SmallVector<std::int64_t> weightsShape,
-                                                          const char* weightsFileName) {
-        const auto weightsValues = generateWeights(weightsShape, weightsType, ctx, weightsFileName);
+    const auto getWeightsAttribute = [&builder, &weightsType, &ctx](llvm::SmallVector<std::int64_t> weightsShape,
+                                                                    const char* weightsFileName) {
+        const auto weightsValues = generateWeights(builder, weightsShape, weightsType, ctx, weightsFileName);
         auto weightsAttribute = vpux::Const::ContentAttr::get(weightsValues);
         weightsAttribute = weightsAttribute.reorder(vpux::DimsOrder::OYXI);
         return weightsAttribute;
@@ -359,13 +362,17 @@ void buildDoubleConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp 
     auto weights1TableCMX = createDeclareTensorOp(functionBuilder, VPURT::BufferSection::CMX_NN, weightsTableShape,
                                                   int32, DimsOrder::NHWC, 0, WEIGHTSTABLE_CMX_OFFSET_CONV_1);
 
-    auto barrier0 = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 0);
-    auto barrier1 = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 1);
-    auto barrier2 = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 2);
-    // finalBarrier passed as production barrier to last DMA task
-    auto barrier3 = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 3);
+    auto [waitWLMBarrier, freeBarrierId] =
+            insertWLMStartSequence(functionBuilder, testDesc.getWLMParams().isWLMPartialEnabled);
 
-    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(), mlir::ValueRange(barrier0.getBarrier()),
+    auto barrier0 = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), freeBarrierId++);
+    auto barrier1 = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), freeBarrierId++);
+    auto barrier2 = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), freeBarrierId++);
+    // finalBarrier passed as production barrier to last DMA task
+    auto finalBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(
+            builder.getUnknownLoc(), freeBarrierId++, testDesc.getWLMParams().isWLMPartialEnabled);
+
+    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, waitWLMBarrier, mlir::ValueRange(barrier0.getBarrier()),
                                           builder.getUnknownLoc(), functionInput, inputCMX.getOperation()->getResult(0),
                                           0);
     VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(), mlir::ValueRange(barrier0.getBarrier()),
@@ -381,7 +388,7 @@ void buildDoubleConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp 
                                           builder.getUnknownLoc(), weights1TableDDR.getOperation()->getResult(0),
                                           weights1TableCMX.getOperation()->getResult(0), 0);
     VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(barrier2.getBarrier()),
-                                          mlir::ValueRange(barrier3.getBarrier()), builder.getUnknownLoc(),
+                                          mlir::ValueRange(finalBarrier.getBarrier()), builder.getUnknownLoc(),
                                           output1CMX.getOperation()->getResult(0), functionOutput, 0);
 
     const auto strides = getIntArrayAttr(ctx, conv.stride);

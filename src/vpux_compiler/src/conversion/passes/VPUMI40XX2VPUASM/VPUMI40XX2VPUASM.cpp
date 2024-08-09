@@ -29,12 +29,12 @@
 #include "vpux/compiler/conversion/rewriters/VPUMI40XX2VPUASM/task_sink_rewriter.hpp"
 #include "vpux/compiler/conversion/rewriters/VPUMI40XX2VPUASM/view_task_range_rewriter.hpp"
 
+#include <mlir/IR/IRMapping.h>
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPURegMapped/utils.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/utils/symbolization.hpp"
-
-#include <mlir/IR/IRMapping.h>
 
 using namespace vpux;
 using namespace vpumi40xx2vpuasm;
@@ -75,6 +75,7 @@ void ConvertVPUMI40XX2VPUASMPass::safeRunOnModule() {
     target.addLegalDialect<VPUASM::VPUASMDialect>();
     target.addLegalOp<mlir::func::FuncOp>();
     target.addLegalOp<mlir::func::ReturnOp>();
+    target.addLegalOp<VPURegMapped::TaskBufferLayoutOp>();
 
     {
         // don't use rewriter infrastructure here as it's not "regular" lowering

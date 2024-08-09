@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW" --insert-identity-pool-before-op %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 // CHECK-LABEL: @InsertAvgPoolToConcatAndLRelu
 func.func @InsertAvgPoolToConcatAndLRelu(%arg0: tensor<1x128x2x32xf16>, %arg1: tensor<1x128x1x32xf16>) -> tensor<1x128x3x32xf16> {
@@ -318,6 +318,30 @@ func.func @SkipMemPermuteWithBatch(%arg0: tensor<2x16x32x64xf16, {order = #NHWC}
 
 // -----
 
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+#NWHC = affine_map<(d0, d1, d2, d3) -> (d0, d3, d2, d1)>
+
+// CHECK-LABEL: @SkipMemPermuteWithUnsupportedType
+func.func @SkipMemPermuteWithUnsupportedType(%arg0: tensor<1x16x32x64xsi32, {order = #NHWC}>)
+    -> tensor<1x32x16x64xsi32, {order = #NHWC}> {
+    %PERMUTE = IE.MemPermute(%arg0) {
+        dst_order = #NHWC,
+        mem_perm = #NWHC
+    } : tensor<1x16x32x64xsi32, {order = #NHWC}> -> tensor<1x32x16x64xsi32, {order = #NHWC}>
+
+    return %PERMUTE : tensor<1x32x16x64xsi32, {order = #NHWC}>
+
+    // CHECK:   [[PERMUTE:%.*]] = IE.MemPermute(%arg0) {
+    // CHECK-SAME:      dst_order = #NHWC,
+    // CHECK-SAME:      mem_perm = #NWHC
+    // CHECK-SAME:      } : tensor<1x16x32x64xsi32, {order = #NHWC}>
+    // CHECK-SAME:      -> tensor<1x32x16x64xsi32, {order = #NHWC}>
+
+    // CHECK:   return [[PERMUTE]] : tensor<1x32x16x64xsi32, {order = #NHWC}>
+}
+
+// -----
+
 // CHECK-LABEL: @SkipLReluWithNCEProducer
 func.func @SkipLReluWithNCEProducer(%arg0: tensor<1x128x2x32xf16>) -> tensor<1x128x2x32xf16> {
     %AVG_POOL = IE.AvgPool(%arg0) {
@@ -520,4 +544,21 @@ func.func @SkipMemPermuteWithNCEAcrossQuantizeCast(%arg0: tensor<1x16x64x64xf16,
     // CHECK:       [[QCAST:%.*]] = IE.QuantizeCast([[ADD]]) {dstElemType = !qElemType} : tensor<1x16x64x64x!qElemType1, {order = #NHWC}> -> tensor<1x16x64x64x!qElemType, {order = #NHWC}>
     // CHECK:       [[MEM_PERM:%.*]] = IE.MemPermute([[QCAST]]) {dst_order = #NHWC, mem_perm = #NHWC} : tensor<1x16x64x64x!qElemType, {order = #NHWC}> -> tensor<1x64x64x16x!qElemType, {order = #NHWC}>
     // CHECK:       return [[MEM_PERM]] : tensor<1x64x64x16x!qElemType, {order = #NHWC}>
+}
+
+// -----
+
+!qElemType = !quant.uniform<u8:f16, 5.000000e-01>
+// CHECK: func.func @InsertAvgPoolToMixedPrecisionAddAndLeakyRelu([[ARG0:%.+]]: tensor<1x128x4x4x!qElemType>) -> tensor<1x128x4x4xf16> {
+func.func @InsertAvgPoolToMixedPrecisionAddAndLeakyRelu(%arg0: tensor<1x128x4x4x!qElemType>) -> tensor<1x128x4x4xf16> {
+    %ADD = IE.Add(%arg0, %arg0) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x128x4x4x!qElemType>, tensor<1x128x4x4x!qElemType> -> tensor<1x128x4x4xf16>
+    %LRELU = IE.LeakyRelu(%ADD) {negative_slope = 0.0999755859375 : f64} : tensor<1x128x4x4xf16> -> tensor<1x128x4x4xf16>
+
+    return %LRELU : tensor<1x128x4x4xf16>
+
+    // CHECK:    [[ADD0:%.*]] = IE.Add([[ARG0]], [[ARG0]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x128x4x4x!qElemType>, tensor<1x128x4x4x!qElemType> -> tensor<1x128x4x4xf16>
+    // CHECK:    [[AVGPOOL:%.*]] = IE.AvgPool([[ADD0]]) {exclude_pads, kernel_size = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]} : tensor<1x128x4x4xf16> -> tensor<1x128x4x4xf16>
+    // CHECK:    [[LEAKY_RELU:%.*]] = IE.LeakyRelu([[AVGPOOL]]) {negative_slope = 0.0999755859375 : f64} : tensor<1x128x4x4xf16> -> tensor<1x128x4x4xf16>
+
+    // CHECK:   return [[LEAKY_RELU]] : tensor<1x128x4x4xf16>
 }

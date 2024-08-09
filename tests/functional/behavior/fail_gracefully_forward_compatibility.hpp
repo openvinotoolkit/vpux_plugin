@@ -5,7 +5,7 @@
 #pragma once
 
 #include "base/ov_behavior_test_utils.hpp"
-#include "common/vpu_test_env_cfg.hpp"
+#include "common/npu_test_env_cfg.hpp"
 #include "common_test_utils/node_builders/constant.hpp"
 #include "functional_test_utils/ov_plugin_cache.hpp"
 
@@ -106,7 +106,7 @@ private:
         const ov::element::Type precision = ov::element::f32;
 
         ov::ParameterVector params{std::make_shared<ov::op::v0::Parameter>(precision, ov::Shape{input_shape})};
-        auto constant = ov::test::utils::deprecated::make_constant(precision, {4096, 1024}, std::vector<float>{}, true);
+        auto constant = ov::test::utils::make_constant(precision, ov::Shape{4096, 1024});
         auto custom_op = std::make_shared<UnsupportedTestOperation>(constant);
 
         ov::NodeVector results{custom_op};

@@ -133,76 +133,6 @@ DimsOrder vpux::moveD0ToTheFront(DimsOrder inOrder) {
     return DimsOrder::fromPermutation(ArrayRef(perm));
 }
 
-VPU::DistributedTensorAttr vpux::applyPermutationOnDistributedTensorAttr(VPU::DistributedTensorAttr inDistribution,
-                                                                         mlir::AffineMap memPerm, DimsOrder srcOrder,
-                                                                         DimsOrder dstOrder, ShapeRef srcShape,
-                                                                         ShapeRef dstShape) {
-    auto ctx = inDistribution.getContext();
-
-    auto permuteAxisOfArray = [&](ArrayRef<int64_t> arr) -> SmallVector<int64_t> {
-        // At VPUIP level, VPU.LayoutCast gets lowered to VPUIP.PermuteCast.
-        // LayoutCast will have same in/out shape but different orders, which cannot be handled
-        // the same way as the VPU.PermuteCast ops which have the same memory shape between input
-        // and output even if orders and logical shapes differ. In such a case, applying the
-        // `toMemoryOrder -> applyPerm -> toLogicalOrder` transformations will not permute the
-        // distributed attr correctly.
-        if (srcShape == dstShape) {
-            return SmallVector<int64_t>(arr);
-        }
-
-        const auto arrInMemOrder = srcOrder.toMemoryOrder(Shape(arr));
-        const auto arrPermutedInMemOrder = applyPerm(arrInMemOrder, memPerm);
-        const auto arrPermutedInLogicalOrder = dstOrder.toLogicalOrder(arrPermutedInMemOrder).raw();
-
-        return arrPermutedInLogicalOrder;
-    };
-
-    auto numTilesAttr = inDistribution.getNumTiles();
-    if (numTilesAttr != nullptr) {
-        const auto numTilesVec = parseIntArrayAttr<int64_t>(numTilesAttr);
-        numTilesAttr = getIntArrayAttr(ctx, permuteAxisOfArray(numTilesVec));
-    }
-
-    auto alignmentAttr = inDistribution.getAlignment();
-    if (alignmentAttr != nullptr) {
-        const auto alignmentVec = parseIntArrayAttr<int64_t>(alignmentAttr);
-        alignmentAttr = getIntArrayAttr(ctx, permuteAxisOfArray(alignmentVec));
-    }
-
-    auto permutePerClusterShapesOffsets = [&](mlir::ArrayAttr shapesOffsetsAttr) -> mlir::ArrayAttr {
-        const auto inPerClusterShapesOffsetsVec = parseIntArrayOfArrayAttr<int64_t>(shapesOffsetsAttr);
-        auto outComputeShapesVec = SmallVector<SmallVector<int64_t>>();
-
-        for (const auto& shapesOffsets : inPerClusterShapesOffsetsVec) {
-            outComputeShapesVec.push_back(permuteAxisOfArray(shapesOffsets));
-        }
-
-        return getIntArrayOfArray(ctx, outComputeShapesVec);
-    };
-
-    auto computeShapesAttr = (inDistribution.getComputeShapes() != nullptr)
-                                     ? permutePerClusterShapesOffsets(inDistribution.getComputeShapes())
-                                     : inDistribution.getComputeShapes();
-
-    auto computeOffsetsAttr = (inDistribution.getComputeOffsets() != nullptr)
-                                      ? permutePerClusterShapesOffsets(inDistribution.getComputeOffsets())
-                                      : inDistribution.getComputeOffsets();
-
-    auto memoryShapesAttr = (inDistribution.getMemoryShapes() != nullptr)
-                                    ? permutePerClusterShapesOffsets(inDistribution.getMemoryShapes())
-                                    : inDistribution.getMemoryShapes();
-
-    auto memoryOffsetsAttr = (inDistribution.getMemoryOffsets() != nullptr)
-                                     ? permutePerClusterShapesOffsets(inDistribution.getMemoryOffsets())
-                                     : inDistribution.getMemoryOffsets();
-
-    return VPU::DistributedTensorAttr::get(
-            ctx, inDistribution.getMode(), numTilesAttr, inDistribution.getKernel(), inDistribution.getPads(),
-            inDistribution.getStrides(), inDistribution.getNumClusters(), alignmentAttr,
-            inDistribution.getUniformDistributedSegments(), computeShapesAttr, computeOffsetsAttr, memoryShapesAttr,
-            memoryOffsetsAttr, inDistribution.getEqualMemoryAndComputeView());
-}
-
 // Normalize permutation vector
 // Example: [1, 3, 7, 6] -> [0, 1, 3, 2]
 void normalizePermutation(SmallVector<uint32_t>& vec) {
@@ -289,21 +219,33 @@ std::pair<SmallVector<uint32_t>, SmallVector<int64_t>> vpux::getMergedPermutatio
     return std::make_pair(mergedPermutation, mergedShape);
 }
 
-void vpux::extendPermutationAndShape(SmallVector<uint32_t>& permutation, SmallVector<int64_t>& shape, int64_t rank) {
-    // Padding to rank dimension if needed
-    // Here always padding to the front of the shape/perm vector. Dim N will be 1, so this mempermute will be
-    // converted to MaxPool in ConvertMemPermuteToPoolPass. Otherwise if N > 1, the mempermute will always be
-    // PermuteDMA.
-    // For example:
-    // shape: [4, 128, 256], permutation: [d1, d0, d2]
-    // will pad like below:
-    // shape: [1, 4, 128, 256], permutation: [d0, d2, d1, d3]
-    // If padding to the end, shape will be [4, 128, 256, 1] with permutation [d1, d0, d2, d3]
-    int64_t padSize = rank - checked_cast<int64_t>(permutation.size());
-    if (padSize > 0) {
-        auto paddedPermutation = SmallVector<uint32_t>(rank);
-        auto paddedShape = SmallVector<int64_t>(rank);
-        for (int64_t i = 0; i < rank; ++i) {
+void vpux::extendPermutationAndShape(SmallVector<uint32_t>& permutation, SmallVector<int64_t>& shape,
+                                     int64_t targetRank) {
+    const int64_t TENSOR_4D_RANK = 4;
+    // Function Description:
+    // This function adjusts the permutation and shape vectors to match a specified target rank.
+    //
+    // Considerations for optimal performance:
+    // 1. Dimension N should be set to 1:
+    //    - It allows the possibility of transforming mempermute operations into MaxPool for enhanced performance
+    //    - If N > 1, the operation defaults to PermuteDMA
+    // 2. For a 2D to 4D case, it's advantageous to extend dimensions N and H by 1:
+    //    - This adjustment aligns with the NCE's requirements for 4D tensor operations, ensuring compatibility and
+    //    potentially improving processing efficiency
+    //
+    // Example:
+    // - 2D to 4D case: shape: [128, 256], permutation: [d1, d0]
+    //   will be transformed to: shape: [1, 128, 1, 256], permutation: [d0, d3, d2, d1]
+    // - 3D to 4D case: shape: [4, 128, 256], permutation: [d1, d0, d2]
+    //   will be transformed to: shape: [1, 4, 128, 256], permutation: [d0, d2, d1, d3]
+    int64_t padSize = targetRank - checked_cast<int64_t>(permutation.size());
+    if (targetRank == TENSOR_4D_RANK && shape.size() == 2) {
+        permutation = SmallVector<uint32_t>{0, 3, 2, 1};
+        shape = SmallVector<int64_t>{1, shape[0], 1, shape[1]};
+    } else if (padSize > 0) {
+        auto paddedPermutation = SmallVector<uint32_t>(targetRank);
+        auto paddedShape = SmallVector<int64_t>(targetRank);
+        for (int64_t i = 0; i < targetRank; ++i) {
             paddedPermutation[i] = i < padSize ? i : permutation[i - padSize] + padSize;
             paddedShape[i] = i < padSize ? 1 : shape[i - padSize];
         }

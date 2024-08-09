@@ -14,7 +14,6 @@ namespace ov {
 namespace test {
 class MatMulLayerTestCommon : public MatMulLayerTest, virtual public VpuOv2LayerTest {};
 
-class MatMulLayerTest_NPU3700 : public MatMulLayerTestCommon {};
 class MatMulLayerTest_HW_NPU3720 : public MatMulLayerTestCommon {};
 class MatMulLayerTest_SW_NPU3720 : public MatMulLayerTestCommon {};
 
@@ -22,44 +21,6 @@ class MatMulLayerTest_HW_NPU4000 : public MatMulLayerTestCommon {};
 class MatMulLayerTest_SW_NPU4000 : public MatMulLayerTestCommon {};
 
 void skipCompilationCallBackImpl() {
-}
-
-TEST_P(MatMulLayerTest_NPU3700, SW) {
-    setSkipCompilationCallback([](std::stringstream& skip) {
-        std::vector<InputShape> inputShapes = std::get<0>(GetParam());
-        ov::element::Type modelType = std::get<2>(GetParam());
-        InputLayerType secondaryInputType = std::get<3>(GetParam());
-        if (inputShapes[0].first[0] == ov::Dimension{1, 2048}) {
-            skip << "Unsupported MLIR case";
-        }
-    });
-    setSkipInferenceCallback([](std::stringstream& skip) {
-        // Tracking number [E#85137]
-        if (getBackendName(*ov::test::utils::PluginCache::get().core()) == "LEVEL0") {
-            skip << "AppendGraphInitialize result 0x70000001";
-        }
-    });
-    setReferenceSoftwareMode();
-    run(Platform::NPU3700);
-}
-
-TEST_P(MatMulLayerTest_NPU3700, HW) {
-    setSkipCompilationCallback([](std::stringstream& skip) {
-        std::vector<InputShape> inputShapes = std::get<0>(GetParam());
-        ov::element::Type modelType = std::get<2>(GetParam());
-        InputLayerType secondaryInputType = std::get<3>(GetParam());
-        if (inputShapes[0].first[0] == ov::Dimension{1, 2048}) {
-            skip << "Unsupported MLIR case";
-        }
-    });
-    setSkipInferenceCallback([](std::stringstream& skip) {
-        // Tracking number [E#85137]
-        if (getBackendName(*ov::test::utils::PluginCache::get().core()) == "LEVEL0") {
-            skip << "AppendGraphInitialize result 0x70000001";
-        }
-    });
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
 }
 
 TEST_P(MatMulLayerTest_HW_NPU3720, HW) {
@@ -177,27 +138,6 @@ const auto matMulParamsBothTrans = ::testing::Combine(
         ::testing::Values(transposeInputs[3]), ::testing::ValuesIn(modelTypes),
         ::testing::ValuesIn(secondaryInputTypes), ::testing::Values(DEVICE_NPU), ::testing::Values(additional_config));
 
-/* ============= NPU3700 ============= */
-
-// Tracking number [E#85137]
-INSTANTIATE_TEST_SUITE_P(DISABLED_smoke_MatMulNoTrans, MatMulLayerTest_NPU3700, matMulParamsNoTrans,
-                         MatMulLayerTest_NPU3700::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(DISABLED_smoke_MatMulFirstTrans, MatMulLayerTest_NPU3700, matMulParamsFirstTrans,
-                         MatMulLayerTest_NPU3700::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(DISABLED_smoke_MatMulSecondTrans, MatMulLayerTest_NPU3700, matMulParamsSecondTrans,
-                         MatMulLayerTest_NPU3700::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(DISABLED_smoke_MatMulBothTrans, MatMulLayerTest_NPU3700, matMulParamsBothTrans,
-                         MatMulLayerTest_NPU3700::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_MatMul_to_FC_caseSecondTrans, MatMulLayerTest_NPU3700,
-                         fullyConnectedCaseSecondTrans, MatMulLayerTest_NPU3700::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_MatMul_to_FC_caseNoTrans, MatMulLayerTest_NPU3700,
-                         fullyConnectedCaseNoTrans, MatMulLayerTest_NPU3700::getTestCaseName);
-
 /* ============= NPU3720 ============= */
 
 INSTANTIATE_TEST_SUITE_P(smoke_precommit_MatMul, MatMulLayerTest_HW_NPU3720, matMulParamsPrecommit,
@@ -264,6 +204,97 @@ const auto matMulParams1 =
                            ::testing::Values(additional_config));
 
 INSTANTIATE_TEST_SUITE_P(smoke_MatMulMagicConfig1, MatMulLayerTest_HW_NPU4000, matMulParams1,
+                         MatMulLayerTest_HW_NPU4000::getTestCaseName);
+
+const std::vector<std::vector<ov::Shape>> shape1dNoTrans = {
+        {{32}, {32}},
+        {{32}, {32, 16}},
+        {{16, 32}, {32}},
+};
+
+const auto matMul1dNoTransParams =
+        ::testing::Combine(::testing::ValuesIn(static_shapes_to_test_representation(shape1dNoTrans)),
+                           ::testing::Values(transposeInputs.at(0)), ::testing::Values(ov::element::f16),
+                           ::testing::Values(InputLayerType::PARAMETER), ::testing::Values(DEVICE_NPU),
+                           ::testing::Values(additional_config));
+
+INSTANTIATE_TEST_SUITE_P(MatMul1dNoTrans, MatMulLayerTest_HW_NPU3720, matMul1dNoTransParams,
+                         MatMulLayerTest_HW_NPU3720::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(MatMul1dNoTrans, MatMulLayerTest_HW_NPU4000, matMul1dNoTransParams,
+                         MatMulLayerTest_HW_NPU4000::getTestCaseName);
+
+const std::vector<std::vector<ov::Shape>> shape1dFirstTrans = {
+        {{32}, {32}},
+        {{32}, {32, 16}},
+        {{64, 32}, {64}},
+};
+
+const auto matMul1dFirstTransParams =
+        ::testing::Combine(::testing::ValuesIn(static_shapes_to_test_representation(shape1dFirstTrans)),
+                           ::testing::Values(transposeInputs.at(2)), ::testing::Values(ov::element::f16),
+                           ::testing::Values(InputLayerType::PARAMETER), ::testing::Values(DEVICE_NPU),
+                           ::testing::Values(additional_config));
+
+INSTANTIATE_TEST_SUITE_P(MatMul1dFirstTrans, MatMulLayerTest_HW_NPU3720, matMul1dFirstTransParams,
+                         MatMulLayerTest_HW_NPU3720::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(MatMul1dFirstTrans, MatMulLayerTest_HW_NPU4000, matMul1dFirstTransParams,
+                         MatMulLayerTest_HW_NPU4000::getTestCaseName);
+
+const std::vector<std::vector<ov::Shape>> shape1dSecondTrans = {
+        {{32}, {32}},
+        {{32}, {16, 32}},
+        {{16, 32}, {32}},
+};
+
+const auto matMul1dSecondTransParams =
+        ::testing::Combine(::testing::ValuesIn(static_shapes_to_test_representation(shape1dSecondTrans)),
+                           ::testing::Values(transposeInputs.at(1)), ::testing::Values(ov::element::f16),
+                           ::testing::Values(InputLayerType::PARAMETER), ::testing::Values(DEVICE_NPU),
+                           ::testing::Values(additional_config));
+
+INSTANTIATE_TEST_SUITE_P(MatMul1dSecondTrans, MatMulLayerTest_HW_NPU3720, matMul1dSecondTransParams,
+                         MatMulLayerTest_HW_NPU3720::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(MatMul1dSecondTrans, MatMulLayerTest_HW_NPU4000, matMul1dSecondTransParams,
+                         MatMulLayerTest_HW_NPU4000::getTestCaseName);
+
+const std::vector<std::vector<ov::Shape>> shapeWithBatch = {
+        {{4, 16, 32}, {32}},
+        {{4, 8, 16}, {4, 16, 64}},
+        {{2, 3, 4, 16}, {16, 32}},
+        {{2, 3, 4, 16}, {2, 3, 16, 32}},
+};
+
+const auto matMulWithBatchParams =
+        ::testing::Combine(::testing::ValuesIn(static_shapes_to_test_representation(shapeWithBatch)),
+                           ::testing::Values(transposeInputs.at(0)), ::testing::Values(ov::element::f16),
+                           ::testing::Values(InputLayerType::PARAMETER), ::testing::Values(DEVICE_NPU),
+                           ::testing::Values(additional_config));
+
+INSTANTIATE_TEST_SUITE_P(MatMulWithBatch, MatMulLayerTest_HW_NPU3720, matMulWithBatchParams,
+                         MatMulLayerTest_HW_NPU3720::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(MatMulWithBatch, MatMulLayerTest_HW_NPU4000, matMulWithBatchParams,
+                         MatMulLayerTest_HW_NPU4000::getTestCaseName);
+
+const std::vector<std::vector<ov::Shape>> shape1dBothTrans = {
+        {{32}, {32}},
+        {{32}, {16, 32}},
+        {{16, 32}, {16}},
+};
+
+const auto matMul1dBothTransParams =
+        ::testing::Combine(::testing::ValuesIn(static_shapes_to_test_representation(shape1dBothTrans)),
+                           ::testing::Values(transposeInputs.at(3)), ::testing::Values(ov::element::f16),
+                           ::testing::Values(InputLayerType::PARAMETER), ::testing::Values(DEVICE_NPU),
+                           ::testing::Values(additional_config));
+
+INSTANTIATE_TEST_SUITE_P(MatMul1dBothTrans, MatMulLayerTest_HW_NPU3720, matMul1dBothTransParams,
+                         MatMulLayerTest_HW_NPU3720::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(MatMul1dBothTrans, MatMulLayerTest_HW_NPU4000, matMul1dBothTransParams,
                          MatMulLayerTest_HW_NPU4000::getTestCaseName);
 
 }  // namespace

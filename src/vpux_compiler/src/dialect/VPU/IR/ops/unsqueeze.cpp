@@ -58,11 +58,11 @@ mlir::FailureOr<SmallVector<int64_t>> getAxes(VPU::UnsqueezeOpAdaptor unsqueeze,
 mlir::LogicalResult vpux::VPU::UnsqueezeOp::inferReturnTypes(mlir::MLIRContext* ctx,
                                                              std::optional<mlir::Location> optLoc,
                                                              mlir::ValueRange operands, mlir::DictionaryAttr attrs,
-                                                             mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+                                                             mlir::OpaqueProperties prop, mlir::RegionRange /*regions*/,
                                                              mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::UnsqueezeOpAdaptor unsqueeze(operands, attrs);
+    VPU::UnsqueezeOpAdaptor unsqueeze(operands, attrs, prop);
     if (mlir::failed(unsqueeze.verify(loc))) {
         return mlir::failure();
     }

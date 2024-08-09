@@ -715,9 +715,12 @@ public:
 
 // u8 single operations should be withing 1 LSB absolute difference wrt openVino
 class PreProcessTest_M2I_u8_single_op : public PreProcessTest_M2I {};
+
 TEST_P(PreProcessTest_M2I_u8_single_op, NPU4000_HW) {
     abs_threshold = 1.001;
     setDefaultHardwareMode();
+    // TODO: E129229
+    configuration["NPU_BACKEND_COMPILATION_PARAMS"] = "enable-partial-workload-management=false";
     run(Platform::NPU4000);
 }
 
@@ -733,6 +736,7 @@ TEST_P(PreProcessTest_M2I_u8_fused_op, NPU4000_HW) {
 
 // operations with f16 output should only use the relative threshold
 class PreProcessTest_M2I_f16_no_csc : public PreProcessTest_M2I {};
+
 TEST_P(PreProcessTest_M2I_f16_no_csc, NPU4000_HW) {
     setSkipCompilationCallback([](std::stringstream& skip) {
         const auto test_type = std::get<0>(GetParam());
@@ -742,6 +746,8 @@ TEST_P(PreProcessTest_M2I_f16_no_csc, NPU4000_HW) {
     });
     abs_threshold = 1.001;
     setDefaultHardwareMode();
+    // TODO: E129229
+    configuration["NPU_BACKEND_COMPILATION_PARAMS"] = "enable-partial-workload-management=false";
     run(Platform::NPU4000);
 }
 

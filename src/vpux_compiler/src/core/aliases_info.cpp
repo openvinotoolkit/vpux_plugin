@@ -154,14 +154,14 @@ void AliasesInfoBase::visitOp(mlir::Operation* op, bool ignoreInnerRegions = fal
                 _log = _log.nest();
 
                 SmallVector<mlir::RegionSuccessor> entries;
-                regionOp.getSuccessorRegions(std::nullopt, entries);
+                regionOp.getSuccessorRegions(mlir::RegionBranchPoint::parent(), entries);
 
                 for (const auto& entry : entries) {
                     auto* entryRegion = entry.getSuccessor();
                     VPUX_THROW_UNLESS(entryRegion != nullptr,
                                       "Entry region without an attached successor region at '{0}'", regionOp->getLoc());
 
-                    const auto outerArgs = regionOp.getSuccessorEntryOperands(entryRegion->getRegionNumber());
+                    const auto outerArgs = regionOp.getEntrySuccessorOperands(mlir::RegionBranchPoint(entryRegion));
                     const auto innerArgs = entry.getSuccessorInputs();
 
                     VPUX_THROW_UNLESS(outerArgs.size() == innerArgs.size(),
@@ -190,20 +190,16 @@ void AliasesInfoBase::visitOp(mlir::Operation* op, bool ignoreInnerRegions = fal
 
                 for (auto& region : regionOp->getRegions()) {
                     SmallVector<mlir::RegionSuccessor> successors;
-                    regionOp.getSuccessorRegions(region.getRegionNumber(), successors);
+                    regionOp.getSuccessorRegions(mlir::RegionBranchPoint(&region), successors);
 
                     for (auto& successor : successors) {
-                        std::optional<unsigned> regionIndex;
-                        if (auto* regionSuccessor = successor.getSuccessor()) {
-                            regionIndex = regionSuccessor->getRegionNumber();
-                        }
-
                         for (auto& block : region) {
-                            auto successorOperands =
-                                    mlir::getRegionBranchSuccessorOperands(block.getTerminator(), regionIndex);
-
-                            if (successorOperands.has_value()) {
-                                const auto innerResults = successorOperands.value();
+                            if (auto opInterface = llvm::dyn_cast<mlir::RegionBranchTerminatorOpInterface>(
+                                        block.getTerminator())) {
+                                mlir::Region* pSuccessor = successor.getSuccessor();
+                                auto branchPoint = (pSuccessor != nullptr) ? mlir::RegionBranchPoint(pSuccessor)
+                                                                           : mlir::RegionBranchPoint::parent();
+                                auto innerResults = opInterface.getSuccessorOperands(branchPoint);
                                 const auto outerResults = successor.getSuccessorInputs();
 
                                 VPUX_THROW_UNLESS(innerResults.size() == outerResults.size(),

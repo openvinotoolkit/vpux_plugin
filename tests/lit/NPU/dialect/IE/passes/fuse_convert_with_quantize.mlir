@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --fuse-convert-with-quantize %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 // CHECK: !qElemType = !quant.uniform<u8:f16, 1.000000e+00>
 !qElemType = !quant.uniform<u8:f16, 0.956:128>
@@ -93,11 +93,10 @@ func.func @PerTensorSI8(%arg0: tensor<1x12x19x19x!qElemType>) -> tensor<1x12x19x
 
    return %1 : tensor<1x12x19x19xsi8>
 
-   //CHECK: [[VAL0:%.*]] IE.Dequantize(%arg0) {dstElemType = f16} : 
+   //CHECK: [[VAL0:%.*]] IE.Dequantize(%arg0) {dstElemType = f16} :
    //CHECK-SAME: tensor<1x12x19x19x!qElemType> -> tensor<1x12x19x19xf16>
-   //CHECK: [[VAL1:%.*]]  = IE.Convert(%0) {dstElemType = si8} : 
+   //CHECK: [[VAL1:%.*]]  = IE.Convert(%0) {dstElemType = si8} :
    //CHECK-SAME: tensor<1x12x19x19xf16> -> tensor<1x12x19x19xsi8>
    //CHECK: return [[VAL1]] :  tensor<1x12x19x19xsi8>
 
 }
-

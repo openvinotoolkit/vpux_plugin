@@ -21,10 +21,30 @@ public:
         Base::initLogger(log, Base::getArgumentName());
     }
 
+    explicit SetOpOffsetsPass(Logger log, bool enableComputeTaskBufferOffsets)
+            : _log(log), _computeTaskBufferOffsets(enableComputeTaskBufferOffsets) {
+        Base::initLogger(log, Base::getArgumentName());
+    }
+
+    mlir::LogicalResult initialize(mlir::MLIRContext* ctx) final;
+
 private:
     void safeRunOnFunc() final;
     Logger _log;
+    bool _computeTaskBufferOffsets = false;
 };
+
+mlir::LogicalResult SetOpOffsetsPass::initialize(mlir::MLIRContext* ctx) {
+    if (mlir::failed(Base::initialize(ctx))) {
+        return mlir::failure();
+    }
+
+    if (computeTaskBufferOffsets.hasValue()) {
+        _computeTaskBufferOffsets = computeTaskBufferOffsets.getValue();
+    }
+
+    return mlir::success();
+}
 
 void SetOpOffsetsPass::safeRunOnFunc() {
     auto netFunc = getOperation();
@@ -68,22 +88,34 @@ void SetOpOffsetsPass::safeRunOnFunc() {
         }
     }
 
-    VPUX_THROW_WHEN(metadataSecVec.size() != 1, "Only 1 metadata section is permitted!");
-    auto metadataSecBlock = metadataSecVec[0].getBlock();
-
-    size_t offsetTracker = 0;
-    size_t tileTracker = 0;
-    for (auto taskBufferOp : metadataSecBlock->getOps<VPUASM::DeclareTaskBufferOp>()) {
-        auto offsetAttr = mlir::IntegerAttr::get(u64Type, mlir::APInt(64, offsetTracker, false));
-        if (tileTracker != taskBufferOp.getTileIndex()) {
-            tileTracker = taskBufferOp.getTileIndex();
-            offsetTracker = 0;
-            offsetAttr = mlir::IntegerAttr::get(u64Type, mlir::APInt(64, offsetTracker, false));
-            offsetTracker += taskBufferOp.getBinarySize();
-        } else {
-            offsetTracker += taskBufferOp.getBinarySize();
+    // In standard flow, offsets for task buffers should already be set up at this stage
+    // In WLM flow, they are not set up yet and need to be computed in this pass, thus the computeTaskBufferOffsets flag
+    // should be set
+    if (_computeTaskBufferOffsets) {
+        // In case of networks e.g. SOL or LIT tests with only DMA tasks we do not have a CMX Metadata Section
+        // For such cases we don't need to setup anything at this stage. It could either be empty or has to be exactly 1
+        // For WLM we use DMAs to copy task descriptors to the metadata buffer in CMX, but if the DMA task desc has to
+        // be in CMX before it can run we're stuck
+        if (metadataSecVec.empty()) {
+            return;
         }
-        taskBufferOp.setMemoryOffset(offsetAttr);
+        VPUX_THROW_WHEN(metadataSecVec.size() != 1, "Only 1 metadata section is permitted!");
+        auto metadataSecBlock = metadataSecVec[0].getBlock();
+
+        size_t offsetTracker = 0;
+        size_t tileTracker = 0;
+        for (auto taskBufferOp : metadataSecBlock->getOps<VPUASM::DeclareTaskBufferOp>()) {
+            auto offsetAttr = mlir::IntegerAttr::get(u64Type, mlir::APInt(64, offsetTracker, false));
+            if (tileTracker != taskBufferOp.getTileIndex()) {
+                tileTracker = taskBufferOp.getTileIndex();
+                offsetTracker = 0;
+                offsetAttr = mlir::IntegerAttr::get(u64Type, mlir::APInt(64, offsetTracker, false));
+                offsetTracker += taskBufferOp.getBinarySize();
+            } else {
+                offsetTracker += taskBufferOp.getBinarySize();
+            }
+            taskBufferOp.setMemoryOffset(offsetAttr);
+        }
     }
 }
 
@@ -93,6 +125,6 @@ void SetOpOffsetsPass::safeRunOnFunc() {
 // createAddELFSymbolTablePass
 //
 
-std::unique_ptr<mlir::Pass> vpux::ELF::createSetOpOffsetsPass(Logger log) {
-    return std::make_unique<SetOpOffsetsPass>(log);
+std::unique_ptr<mlir::Pass> vpux::ELF::createSetOpOffsetsPass(Logger log, bool enableComputeTaskBufferOffsets) {
+    return std::make_unique<SetOpOffsetsPass>(log, enableComputeTaskBufferOffsets);
 }

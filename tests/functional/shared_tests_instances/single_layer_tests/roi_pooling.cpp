@@ -39,21 +39,9 @@ class ROIPoolingLayerTestCommon : public ROIPoolingLayerTest, virtual public Vpu
         }
     }
 };
-class ROIPoolingLayerTest_NPU3700 : public ROIPoolingLayerTestCommon {};
 
 class ROIPoolingLayerTest_NPU3720 : public ROIPoolingLayerTestCommon {};
 class ROIPoolingLayerTest_NPU4000 : public ROIPoolingLayerTestCommon {};
-
-TEST_P(ROIPoolingLayerTest_NPU3700, HW) {
-    setSkipInferenceCallback([](std::stringstream& skip) {
-        // Tracking number [E#85137]
-        if (getBackendName(*ov::test::utils::PluginCache::get().core()) == "LEVEL0") {
-            skip << "Bad results on Level0";
-        }
-    });
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
 
 TEST_P(ROIPoolingLayerTest_NPU3720, SW) {
     setReferenceSoftwareMode();
@@ -99,13 +87,6 @@ const auto test_ROIPooling_bilinear =
         ::testing::Combine(::testing::ValuesIn(inputShapes), ::testing::ValuesIn(pooledShapes_bilinear),
                            ::testing::Values(spatial_scales[1]), ::testing::Values(ROIPoolingTypes::ROI_BILINEAR),
                            ::testing::ValuesIn(modelTypes), ::testing::Values(DEVICE_NPU));
-
-// --------- NPU3700 ---------
-INSTANTIATE_TEST_SUITE_P(smoke_TestsROIPooling_max, ROIPoolingLayerTest_NPU3700, test_ROIPooling_max,
-                         ROIPoolingLayerTest_NPU3700::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_TestsROIPooling_bilinear, ROIPoolingLayerTest_NPU3700, test_ROIPooling_bilinear,
-                         ROIPoolingLayerTest_NPU3700::getTestCaseName);
 
 // --------- NPU3720 ---------
 INSTANTIATE_TEST_SUITE_P(smoke_TestsROIPooling_max, ROIPoolingLayerTest_NPU3720, test_ROIPooling_max,

@@ -4,12 +4,14 @@
 //
 
 #include "vpux/compiler/utils/dma_transaction_utils.hpp"
+#include <vpux/compiler/core/attributes/strides.hpp>
+#include <vpux/compiler/utils/types.hpp>
 
 namespace vpux {
 
 //
 // Below function reduceDimsForDma, tries to collapse contiguous dimensions in memory
-// depending if the strides are compact; such that we'll end up with the most reduced
+// depending on strides being compact; such that we'll end up with the most reduced
 // transfer in terms of dimensionality;
 // This is beneficial since the NPU DMA engines are limited in terms of the rank of the transfers
 // 3D for NPU37XX; 6D for NPU40XX
@@ -94,6 +96,8 @@ namespace vpux {
 // For NPU37XX style DMA it's a bit more peculiar, for which reason we need to product
 // accumulate the sizes from innermost to outermost dimension.
 // So we'd have:
+// Size:   [2, 12, 2]
+//   V
 // Size:   [2 * 12 * 2, 12 * 2, 2]
 //   V
 // Size:   [48, 24, 2]
@@ -106,23 +110,23 @@ namespace vpux {
 // Stride: [64, 4]
 //
 
-DMATransaction reduceDimsForDma(vpux::NDTypeInterface ndType) {
+DMAPattern reduceDimsForDma(vpux::NDTypeInterface ndType) {
     // Get memory view of shape and strides
     // Store them all as bits so to handle sub byte types
     auto memShape = to_small_vector(ndType.getMemShape());
     auto memStrides = to_small_vector(ndType.getMemStrides());
 
     // Extend shape and strides to accommodate for element type size and batch stride
-    const auto elemSizeCount = ndType.getElemTypeSize().count();
-    memShape.push_back(elemSizeCount);
+    const auto elemSize = ndType.getElemTypeSize().count();
+    memShape.push_back(elemSize);
     memStrides.insert(memStrides.begin(), memStrides.front() * memShape.front());
     auto innerMostIndex = memShape.size() - 1;
 
-    llvm::SmallVector<uint64_t> reducedDims;
-    llvm::SmallVector<uint64_t> reducedStrides;
+    llvm::SmallVector<Bit> reducedBitDims;
+    llvm::SmallVector<Bit> reducedBitStrides;
 
     const auto alignToByteBoundary = [&](Bit val) {
-        return alignMemSize(Bit(val), Byte(1)).to<Byte>().count();
+        return alignMemSize(Bit(val), Byte(1));
     };
 
     // Iterate over dim/stride pairs and push cases of non compact strides
@@ -135,9 +139,9 @@ DMATransaction reduceDimsForDma(vpux::NDTypeInterface ndType) {
         accumulatedSize *= currentSize;
         // Found non-compact stride
         if (checked_cast<int64_t>(currentSize) * previousStrideInBits < currentStrideInBits) {
-            reducedDims.push_back(alignToByteBoundary(Bit(accumulatedSize)));
-            reducedStrides.push_back(alignToByteBoundary(currentStrideInBits));
-            accumulatedSize = elemSizeCount;
+            reducedBitDims.push_back(Bit(accumulatedSize));
+            reducedBitStrides.push_back(currentStrideInBits);
+            accumulatedSize = elemSize;
         }
 
         previousStrideInBits = currentStrideInBits;
@@ -145,40 +149,58 @@ DMATransaction reduceDimsForDma(vpux::NDTypeInterface ndType) {
 
     // Flush out remaining accumulated sizes.
     // Also handle scalar cases of 1 byte transfers.
-    if (accumulatedSize > elemSizeCount || reducedDims.size() == 0) {
-        reducedDims.push_back(alignToByteBoundary(Bit(accumulatedSize)));
-        reducedStrides.push_back(alignToByteBoundary(memStrides.front()));
+    if (accumulatedSize > elemSize || reducedBitDims.empty()) {
+        reducedBitDims.emplace_back(accumulatedSize);
+        reducedBitStrides.push_back(memStrides.front());
     }
 
-    // Patch stages for easier later usage
+    // Align all dims to byte size and divide by elemSize except innermost dim
+    auto reducedDims = to_small_vector(reducedBitDims | vpux::transformed(alignToByteBoundary) |
+                                       vpux::transformed([elemSize](auto bitDim) {
+                                           return checked_cast<size_t>(bitDim.count() / elemSize);
+                                       }));
+    // Innermost dim is special
+    reducedDims.front() = Bit(reducedDims.front() * elemSize).to<Byte>().count();
 
-    // Divide by elemSizeCount except innermost dim
-    const auto elemSizeByteCount = static_cast<float>(elemSizeCount) / CHAR_BIT;
-    for (size_t idx = 1; idx < reducedDims.size(); ++idx) {
-        reducedDims[idx] = checked_cast<int64_t>(reducedDims[idx] / elemSizeByteCount);
+    VPUX_THROW_WHEN(std::any_of(std::begin(reducedBitStrides), std::prev(std::end(reducedBitStrides)),
+                                [](auto bitStride) {
+                                    return bitStride.count() % CHAR_BIT != 0;
+                                }),
+                    "Non byte aligned stride value");
+
+    // Align all strides to byte size
+    auto reducedStrides = to_small_vector(reducedBitStrides | vpux::transformed(alignToByteBoundary) |
+                                          vpux::transformed([](auto bitStride) {
+                                              return checked_cast<size_t>(bitStride.template to<Byte>().count());
+                                          }));
+
+    // Validate byte alignment for strides
+    for (auto idx : irange(reducedBitStrides.size() - 1)) {
+        VPUX_THROW_WHEN(reducedBitStrides[idx].count() % CHAR_BIT,
+                        "Non byte aligned stride value '{0}' at index '{1}'.", reducedBitStrides[idx].count(), idx);
     }
 
     // Reverse the arrays such that we keep the same logical order of dimensions as memrefs
     std::reverse(reducedDims.begin(), reducedDims.end());
     std::reverse(reducedStrides.begin(), reducedStrides.end());
 
-    return DMATransaction(reducedDims, reducedStrides);
+    return DMAPattern(std::move(reducedDims), std::move(reducedStrides));
 }
 
-void patchDimsForNPU37XX(DMATransaction& dmaTransactionDetails) {
+void patchDimsForNPU37XX(DMAPattern& dmaPattern) {
     // NPU37XX hacks from here on
 
     // Re - accumulate the reduced shape dims, for NPU37XX purpose;
-    size_t accum = dmaTransactionDetails.dims.back();
-    for (auto rIt = dmaTransactionDetails.dims.rbegin() + 1; rIt != dmaTransactionDetails.dims.rend(); ++rIt) {
+    size_t accum = dmaPattern.dims.back();
+    for (auto rIt = dmaPattern.dims.rbegin() + 1; rIt != dmaPattern.dims.rend(); ++rIt) {
         *rIt *= accum;
         accum = *rIt;
     }
 
     // Drop first pair of dims strides, those will be deduced based on totalLength
-    if (dmaTransactionDetails.dims.size() > 1) {
-        dmaTransactionDetails.dims.erase(dmaTransactionDetails.dims.begin());
-        dmaTransactionDetails.strides.erase(dmaTransactionDetails.strides.begin());
+    if (dmaPattern.dims.size() > 1) {
+        dmaPattern.dims.erase(dmaPattern.dims.begin());
+        dmaPattern.strides.erase(dmaPattern.strides.begin());
     }
 }
 

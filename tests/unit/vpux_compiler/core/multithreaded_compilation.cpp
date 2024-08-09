@@ -428,11 +428,6 @@ private:
     std::vector<std::string> _modelPaths;
 };
 
-TEST_P(CompilationTestModel, NPU3700) {
-    SetPlatform("VPU3720");
-    Run();
-}
-
 TEST_P(CompilationTestModel, NPU3720) {
     SetPlatform("VPU3720");
     Run();

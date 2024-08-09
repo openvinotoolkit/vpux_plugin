@@ -99,6 +99,11 @@ vpux::NDTypeInterface vpux::Const::BitPackAttr::inferOutputType(vpux::NDTypeInte
     return input.changeElemType(outElementType);
 }
 
+bool vpux::Const::BitPackAttr::inferOutputSplat(bool inputIsSplat, vpux::NDTypeInterface) {
+    VPUX_THROW_WHEN(inputIsSplat, "Bit pack does not support splat inputs.");  // as per ::transform()
+    return false;
+}
+
 //
 // BitPackAttr::transform
 //
@@ -112,8 +117,8 @@ Const::Content vpux::Const::BitPackAttr::transform(vpux::Const::Content& input) 
     const auto outputType = inferOutputType(input.getType());
     const Byte outputByteSize = outputType.getTotalAllocSize();
     const size_t tempBufferSize = outputByteSize.count();
-    auto output =
-            Const::Content::allocTempBuffer(outputType, getUInt8Type(getContext()), input.isSplat(), tempBufferSize);
+    auto output = Const::Content::allocTempBuffer(outputType, getUInt8Type(getContext()),
+                                                  inferOutputSplat(input.isSplat(), input.getType()), tempBufferSize);
 
     auto outBuf = output.getRawTempBuf();
     auto outBlobPtr = reinterpret_cast<uint8_t*>(outBuf.data());

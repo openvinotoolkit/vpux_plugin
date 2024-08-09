@@ -17,9 +17,6 @@ namespace test {
 class ConvertColorNV12LayerTestCommon : public ConvertColorNV12LayerTest, virtual public VpuOv2LayerTest {};
 class ConvertColorI420LayerTestCommon : public ConvertColorI420LayerTest, virtual public VpuOv2LayerTest {};
 
-class ConvertColorNV12LayerTest_NPU3700 : public ConvertColorNV12LayerTestCommon {};
-class ConvertColorI420LayerTest_NPU3700 : public ConvertColorI420LayerTestCommon {};
-
 class ConvertColorNV12LayerTest_NPU3720 : public ConvertColorNV12LayerTestCommon {};
 class ConvertColorI420LayerTest_NPU3720 : public ConvertColorI420LayerTestCommon {};
 
@@ -36,17 +33,6 @@ class ConvertColorI420M2ILayerTest_NPU4000 : public ConvertColorI420LayerTestCom
         configuration[ov::intel_npu::compilation_mode_params.name()] = "enable-m2i=true";
     }
 };
-
-// NPU3700
-TEST_P(ConvertColorNV12LayerTest_NPU3700, HW) {
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
-
-TEST_P(ConvertColorI420LayerTest_NPU3700, HW) {
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
 
 // NPU3720
 TEST_P(ConvertColorNV12LayerTest_NPU3720, SW) {
@@ -118,47 +104,12 @@ auto generate_input_static_shapes = [](const std::vector<ov::Shape>& original_sh
 };
 
 // N,H,W,C
-std::vector<ov::Shape> inShapesNPU3700 = {{1, 4, 8, 1}, {1, 64, 32, 1}, {3, 128, 128, 1}};
 std::vector<ov::Shape> inShapes = {{1, 240, 320, 1}, {1, 4, 8, 1}, {1, 662, 982, 1}, {3, 128, 128, 1}};
 std::vector<ov::Shape> inShapeM2I = {{1, 240, 320, 1}, {1, 64, 64, 1}};
 
 ov::element::Type dTypes[] = {
         ov::element::f16,
 };
-
-// Cases for 3700
-auto inputShapeNPU3700TrueI420 = generate_input_static_shapes(inShapesNPU3700, I420, true);
-auto inputShapeNPU3700FalseI420 = generate_input_static_shapes(inShapesNPU3700, I420, false);
-auto inputShapeNPU3700TrueNV12 = generate_input_static_shapes(inShapesNPU3700, NV12, true);
-auto inputShapeNPU3700FalseNV12 = generate_input_static_shapes(inShapesNPU3700, NV12, false);
-// I420
-const auto paramsNPU3700_trueI420 = testing::Combine(
-        testing::ValuesIn(static_shapes_to_test_representation(inputShapeNPU3700TrueI420)),  // Input shape
-        testing::ValuesIn(dTypes),                                                           // elem Type
-        testing::Values(true, false),                                                        // conv_to_RGB
-        testing::Values(true),                                                               // is_single_plane
-        testing::Values(DEVICE_NPU));
-
-const auto paramsNPU3700_falseI420 = testing::Combine(
-        testing::ValuesIn(static_shapes_to_test_representation(inputShapeNPU3700FalseI420)),  // Input shape
-        testing::ValuesIn(dTypes),                                                            // elem Type
-        testing::Values(true, false),                                                         // conv_to_RGB
-        testing::Values(false),                                                               // is_single_plane
-        testing::Values(DEVICE_NPU));
-// NV12
-const auto paramsNPU3700_trueNV12 = testing::Combine(
-        testing::ValuesIn(static_shapes_to_test_representation(inputShapeNPU3700TrueNV12)),  // Input shape
-        testing::ValuesIn(dTypes),                                                           // elem Type
-        testing::Values(true, false),                                                        // conv_to_RGB
-        testing::Values(true),                                                               // is_single_plane
-        testing::Values(DEVICE_NPU));
-
-const auto paramsNPU3700_falseNV12 = testing::Combine(
-        testing::ValuesIn(static_shapes_to_test_representation(inputShapeNPU3700FalseNV12)),  // Input shape
-        testing::ValuesIn(dTypes),                                                            // elem Type
-        testing::Values(true, false),                                                         // conv_to_RGB
-        testing::Values(false),                                                               // is_single_plane
-        testing::Values(DEVICE_NPU));
 
 // Cases for 3720/4000
 auto inputShapeTrueI420 = generate_input_static_shapes(inShapes, I420, true);
@@ -211,16 +162,6 @@ const auto paramsM2INV12 =
                          testing::Values(true),  // is_single_plane
                          testing::Values(DEVICE_NPU));
 
-// NPU3700
-INSTANTIATE_TEST_SUITE_P(smoke_ConvertColorNV12_true, ConvertColorNV12LayerTest_NPU3700, paramsNPU3700_trueNV12,
-                         ConvertColorNV12LayerTest_NPU3700::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(smoke_ConvertColorNV12_false, ConvertColorNV12LayerTest_NPU3700, paramsNPU3700_falseNV12,
-                         ConvertColorNV12LayerTest_NPU3700::getTestCaseName);
-// [Tracking number: E#93409]
-INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_ConvertColorI420_true, ConvertColorI420LayerTest_NPU3700,
-                         paramsNPU3700_trueI420, ConvertColorI420LayerTest_NPU3700::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_ConvertColorI420_false, ConvertColorI420LayerTest_NPU3700,
-                         paramsNPU3700_falseI420, ConvertColorI420LayerTest_NPU3700::getTestCaseName);
 // NPU3720
 INSTANTIATE_TEST_SUITE_P(smoke_ConvertColorNV12_true, ConvertColorNV12LayerTest_NPU3720, params_trueNV12,
                          ConvertColorNV12LayerTest_NPU3720::getTestCaseName);

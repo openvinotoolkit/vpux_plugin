@@ -32,6 +32,7 @@ void printVPUNNLayerConfig(const VPUNN::DPULayer& layer, const VPUNN::VPULayerSt
 void printVPUNNWorkloadConfig(const VPUNN::DPUWorkload& wl, LogCb logCb = globalLogCb);
 float getWeightsSparsityRatio(mlir::Value weights);
 VPUNN::VPUDevice getVPUDeviceType(VPU::ArchKind archKind);
+bool isVPUNNSupportedElementType(mlir::Type type);
 VPUNN::DataType getVPUNNElementType(mlir::Type type);
 VPUNN::Layout getVPUNNLayout(VPUIPDPU::ODUPermuteDataMode oduPermutation);
 VPUNN::VPUTensor getVPUTensor(ShapeRef shape, mlir::Type elemType,

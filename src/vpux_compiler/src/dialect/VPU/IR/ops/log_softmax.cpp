@@ -4,17 +4,21 @@
 //
 
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/explicit_distribution_utils.hpp"
 
 using namespace vpux;
 
 mlir::LogicalResult vpux::VPU::LogSoftmaxOp::inferReturnTypes(mlir::MLIRContext* ctx,
                                                               std::optional<mlir::Location> optLoc,
                                                               mlir::ValueRange operands, mlir::DictionaryAttr attrs,
-                                                              mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+                                                              mlir::OpaqueProperties prop,
+                                                              mlir::RegionRange /*regions*/,
                                                               mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::LogSoftmaxOpAdaptor logSoftmax(operands, attrs);
+    VPU::LogSoftmaxOpAdaptor logSoftmax(operands, attrs, prop);
     if (mlir::failed(logSoftmax.verify(loc))) {
         return mlir::failure();
     }
@@ -73,4 +77,86 @@ mlir::FailureOr<OutputTiling> vpux::VPU::LogSoftmaxOp::getTilingStrategy(TilingM
     log.trace("Isolated tiling strategy: {0}", nTilesOnDim);
     auto origTiles = fillDividedTiles(baseOp, nTilesOnDim, outputShape);
     return origTiles;
+}
+
+//
+// ClusteredOpInterface
+//
+
+bool vpux::VPU::LogSoftmaxOp::checkStrategyCompatibility(VPU::MultiClusterStrategy strategy, size_t) {
+    const auto inputType = getInput().getType().cast<vpux::NDTypeInterface>();
+    const auto outputType = getOutput().getType().cast<vpux::NDTypeInterface>();
+    const auto inShape = inputType.getShape();
+    auto numClusters = VPU::getOptimalNumClusters(getOperation(), outputType.getShape(), strategy).getInt();
+
+    if (strategy == VPU::MultiClusterStrategy::Clustering) {
+        return true;
+    }
+
+    // Split input/output by H dim when axisInd is not point to H
+    if (strategy == VPU::MultiClusterStrategy::SplitOverHeight && getAxisInd() != Dims4D::Act::H.ind() &&
+        inShape[Dims4D::Act::H] >= numClusters) {
+        return true;
+    }
+
+    // Split input/output by C dim when axisInd is not point to C
+    if (strategy == VPU::MultiClusterStrategy::SplitOverKernel && getAxisInd() != Dims4D::Act::C.ind() &&
+        inShape[Dims4D::Act::C] >= numClusters) {
+        return true;
+    }
+
+    // Split input/output by W dim when axisInd is not point to W
+    if (strategy == VPU::MultiClusterStrategy::SplitOverWidth && getAxisInd() != Dims4D::Act::W.ind() &&
+        inShape[Dims4D::Act::W] >= numClusters) {
+        return true;
+    }
+
+    return false;
+}
+
+vpux::VPU::DistributedTensorNative vpux::VPU::LogSoftmaxOp::getExplicitDistributedTensorAttr(
+        vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, ArrayRef<int64_t> numTiles,
+        const int64_t numClusters, ArrayRef<int64_t> alignment, const bool uniformDistributedSegments,
+        const vpux::VPU::OverlapDistributionParams& overlapParams) {
+    return VPU::getSWExplicitDistributedTensorNative(mlir::cast<VPU::SWOpInterface>(getOperation()), shape,
+                                                     distributionMode, numTiles, numClusters, alignment,
+                                                     uniformDistributedSegments, overlapParams);
+}
+
+//
+// SWOpInterface
+//
+
+bool vpux::VPU::LogSoftmaxOp::fitIntoCMX(llvm::ArrayRef<vpux::NDTypeInterface> buffers, Byte reservedMem) {
+    VPUX_THROW_UNLESS(buffers.size() == 2,
+                      "LogSoftmaxOp requires 1 input and 1 output, but the number of buffer is {0}", buffers.size());
+
+    SmallVector<Byte> buffersSize;
+    std::transform(buffers.begin(), buffers.end(), std::back_inserter(buffersSize), [](const auto buffer) {
+        return buffer.getTotalAllocSize();
+    });
+
+    auto totalAvailableCMXSize = reservedMem.count() == 0 ? getTotalCMXSize(getOperation()).count()
+                                                          : getTotalCMXFragmentationAwareSize(getOperation()).count();
+
+    return vpux::VPU::calculateAlignedBuffersMemoryRequirement(getArch(getOperation()), buffersSize).count() +
+                   reservedMem.count() <=
+           totalAvailableCMXSize;
+}
+
+bool vpux::VPU::LogSoftmaxOp::fitIntoCMX(llvm::ArrayRef<vpux::NDTypeInterface> buffers) {
+    return fitIntoCMX(buffers, Byte(0));
+}
+
+bool vpux::VPU::LogSoftmaxOp::supportCycleCostCalculation() {
+    return false;
+}
+
+//
+// build
+//
+
+void vpux::VPU::LogSoftmaxOp::build(::mlir::OpBuilder& odsBuilder, ::mlir::OperationState& odsState,
+                                    ::mlir::Value input, ::mlir::IntegerAttr axisInd) {
+    build(odsBuilder, odsState, input, axisInd, nullptr);
 }

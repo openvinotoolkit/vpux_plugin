@@ -8,6 +8,22 @@
 using namespace vpux;
 
 //
+// Dim3D
+//
+
+const Dim vpux::Dims3D::Act::B(0);
+const Dim vpux::Dims3D::Act::H(1);
+const Dim vpux::Dims3D::Act::IC(2);
+
+const Dim vpux::Dims3D::Filter::B(0);
+const Dim vpux::Dims3D::Filter::IC(1);
+const Dim vpux::Dims3D::Filter::OC(2);
+
+const Dim vpux::Dims3D::Output::B(0);
+const Dim vpux::Dims3D::Output::H(1);
+const Dim vpux::Dims3D::Output::OC(1);
+
+//
 // Dims4D
 //
 
@@ -78,3 +94,37 @@ const Dim vpux::Dims5D::PadsEnd::Right(2);
 const Dim vpux::Dims5D::PadsOutput::Z(0);
 const Dim vpux::Dims5D::PadsOutput::Y(1);
 const Dim vpux::Dims5D::PadsOutput::X(2);
+
+//
+// DimsGroups5D
+//
+
+const Dim vpux::DimsGroups5D::Act::G(0);
+const Dim vpux::DimsGroups5D::Act::N(1);
+const Dim vpux::DimsGroups5D::Act::C(2);
+const Dim vpux::DimsGroups5D::Act::H(3);
+const Dim vpux::DimsGroups5D::Act::W(4);
+
+const Dim vpux::DimsGroups5D::Filter::G(0);
+const Dim vpux::DimsGroups5D::Filter::OC(1);
+const Dim vpux::DimsGroups5D::Filter::IC(2);
+const Dim vpux::DimsGroups5D::Filter::KY(3);
+const Dim vpux::DimsGroups5D::Filter::KX(4);
+
+const Dim vpux::DimsGroups5D::Kernel::Y(0);
+const Dim vpux::DimsGroups5D::Kernel::X(1);
+
+const Dim vpux::DimsGroups5D::Dilation::Y(0);
+const Dim vpux::DimsGroups5D::Dilation::X(1);
+
+const Dim vpux::DimsGroups5D::Strides::Y(0);
+const Dim vpux::DimsGroups5D::Strides::X(1);
+
+const Dim vpux::DimsGroups5D::PadsBegin::Top(0);
+const Dim vpux::DimsGroups5D::PadsBegin::Left(1);
+
+const Dim vpux::DimsGroups5D::PadsEnd::Bottom(0);
+const Dim vpux::DimsGroups5D::PadsEnd::Right(1);
+
+const Dim vpux::DimsGroups5D::PadsOutput::Y(0);
+const Dim vpux::DimsGroups5D::PadsOutput::X(1);

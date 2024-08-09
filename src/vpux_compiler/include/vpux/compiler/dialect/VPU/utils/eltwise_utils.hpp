@@ -16,5 +16,14 @@ namespace VPU {
 bool isNCEEltwiseSupported(VPU::ArchKind arch, vpux::NDTypeInterface input1Type, vpux::NDTypeInterface input2Type,
                            vpux::NDTypeInterface outputType, bool allowDifferentScales, bool allowDifferentZp,
                            bool checkLayout, bool checkChannelAlignment, LogCb logCb);
+
+template <class ConcreteOp>
+bool isEltwiseLhsActivation(ConcreteOp op) {
+    const auto lhsType = op.getInput1().getType().template cast<mlir::ShapedType>();
+    const auto outShapeRes = op.getOutput().getType().template cast<mlir::ShapedType>();
+
+    return (lhsType == outShapeRes);
 }
+
+}  // namespace VPU
 }  // namespace vpux

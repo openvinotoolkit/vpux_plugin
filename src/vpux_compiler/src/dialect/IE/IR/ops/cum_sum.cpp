@@ -25,11 +25,11 @@ mlir::LogicalResult vpux::IE::CumSumOp::verify() {
 
 mlir::LogicalResult vpux::IE::CumSumOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::CumSumOpAdaptor cumsum(operands, attrs);
+    IE::CumSumOpAdaptor cumsum(operands, attrs, prop);
     if (mlir::failed(cumsum.verify(loc))) {
         return mlir::failure();
     }
@@ -67,11 +67,11 @@ mlir::LogicalResult ConvertConstToAttr::matchAndRewrite(IE::CumSumOp cumsumOp, m
         return mlir::failure();
     }
 
-    const auto axisContent = axisConst.getContent();
-    if (!axisContent.isSplat()) {
+    if (const auto attr = axisConst.getContentAttr(); !attr.isSplat()) {
         return mlir::failure();
     }
 
+    const auto axisContent = axisConst.getContent();
     rewriter.replaceOpWithNewOp<IE::CumSumOp>(cumsumOp, cumsumOp.getType(), cumsumOp.getInput(), nullptr,
                                               rewriter.getI64IntegerAttr(axisContent.getSplatValue<int64_t>()),
                                               cumsumOp.getExclusiveAttr(), cumsumOp.getReverseAttr());

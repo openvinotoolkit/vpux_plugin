@@ -12,6 +12,7 @@
 #include "vpux/utils/core/range.hpp"
 
 #include <mlir/IR/Builders.h>
+#include <mlir/IR/Location.h>
 
 using namespace vpux;
 
@@ -76,7 +77,8 @@ IE::MemoryResourceOp vpux::IE::details::addAvailableMemory(mlir::Region& region,
     VPUX_THROW_UNLESS(size.count() > 0, "Trying to set zero size of memory kind '{0}'", memSpace);
     const auto byteSizeAttr = getIntAttr(region.getContext(), size.count());
     auto builder = mlir::OpBuilder::atBlockBegin(&region.front());
-    return builder.create<IE::MemoryResourceOp>(region.getLoc(), memSpace.getLeafReference(), byteSizeAttr, nullptr);
+    return builder.create<IE::MemoryResourceOp>(mlir::UnknownLoc::get(region.getContext()), memSpace.getLeafReference(),
+                                                byteSizeAttr, nullptr);
 }
 
 IE::MemoryResourceOp vpux::IE::addAvailableMemory(mlir::ModuleOp mainModule, mlir::SymbolRefAttr memSpace, Byte size) {
@@ -132,7 +134,8 @@ IE::MemoryResourceOp vpux::IE::details::setUsedMemory(ConcreteOp op, mlir::Symbo
     auto usedMemModule = op.template lookupSymbol<mlir::ModuleOp>(usedMemModuleName);
     if (usedMemModule == nullptr) {
         auto mainBuilder = mlir::OpBuilder::atBlockBegin(op.getBody());
-        usedMemModule = mainBuilder.template create<mlir::ModuleOp>(op->getLoc(), usedMemModuleName);
+        usedMemModule = mainBuilder.template create<mlir::ModuleOp>(mlir::UnknownLoc::get(mainBuilder.getContext()),
+                                                                    usedMemModuleName);
     }
 
     auto res = usedMemModule.template lookupSymbol<IE::MemoryResourceOp>(memSpace);
@@ -142,8 +145,8 @@ IE::MemoryResourceOp vpux::IE::details::setUsedMemory(ConcreteOp op, mlir::Symbo
     }
 
     auto innerBuilder = mlir::OpBuilder::atBlockBegin(usedMemModule.getBody());
-    return innerBuilder.template create<IE::MemoryResourceOp>(usedMemModule->getLoc(), memSpace.getLeafReference(),
-                                                              byteSizeAttr, nullptr);
+    return innerBuilder.template create<IE::MemoryResourceOp>(mlir::UnknownLoc::get(usedMemModule.getContext()),
+                                                              memSpace.getLeafReference(), byteSizeAttr, nullptr);
 }
 
 IE::MemoryResourceOp vpux::IE::setUsedMemory(mlir::ModuleOp mainModule, mlir::SymbolRefAttr memSpace, Byte size) {
@@ -179,7 +182,8 @@ IE::MemoryResourceOp vpux::IE::setUsedMemory(mlir::func::FuncOp func, mlir::Symb
     mlir::ModuleOp tmpModule;
     if (modules.empty()) {
         auto mainBuilder = mlir::OpBuilder::atBlockBegin(&func.getBody().front());
-        tmpModule = mainBuilder.template create<mlir::ModuleOp>(func->getLoc(), usedMemModuleName);
+        tmpModule = mainBuilder.template create<mlir::ModuleOp>(mlir::UnknownLoc::get(mainBuilder.getContext()),
+                                                                usedMemModuleName);
     } else {
         tmpModule = details::getTmpModule(modules);
     }
@@ -192,8 +196,8 @@ IE::MemoryResourceOp vpux::IE::setUsedMemory(mlir::func::FuncOp func, mlir::Symb
     }
 
     auto innerBuilder = mlir::OpBuilder::atBlockBegin(tmpModule.getBody());
-    return innerBuilder.template create<IE::MemoryResourceOp>(tmpModule->getLoc(), memSpace.getLeafReference(),
-                                                              byteSizeAttr, nullptr);
+    return innerBuilder.template create<IE::MemoryResourceOp>(mlir::UnknownLoc::get(tmpModule.getContext()),
+                                                              memSpace.getLeafReference(), byteSizeAttr, nullptr);
 }
 
 IE::MemoryResourceOp vpux::IE::details::getUsedMemory(mlir::SymbolTable symbolTable, mlir::SymbolRefAttr memSpace) {
@@ -299,14 +303,16 @@ IE::MemoryResourceOp vpux::IE::details::addReservedMemoryResource(mlir::ModuleOp
     auto resMemTable = symbolTable.lookup<mlir::ModuleOp>(IE::resMemModuleName);
     if (resMemTable == nullptr) {
         auto mainBuilder = mlir::OpBuilder::atBlockBegin(&region->front());
-        resMemTable = mainBuilder.create<mlir::ModuleOp>(symbolTable.getOp()->getLoc(), IE::resMemModuleName);
+        resMemTable = mainBuilder.create<mlir::ModuleOp>(mlir::UnknownLoc::get(mainBuilder.getContext()),
+                                                         IE::resMemModuleName);
     }
 
     auto resMemBuilder = mlir::OpBuilder::atBlockBegin(resMemTable.getBody());
 
     auto resMemModule = resMemTable.lookupSymbol<mlir::ModuleOp>(reservedMemorySection);
     if (resMemModule == nullptr) {
-        resMemModule = resMemBuilder.create<mlir::ModuleOp>(resMemTable->getLoc(), reservedMemorySection);
+        resMemModule = resMemBuilder.create<mlir::ModuleOp>(mlir::UnknownLoc::get(resMemBuilder.getContext()),
+                                                            reservedMemorySection);
     }
 
     auto* ctx = symbolTable.getOp()->getContext();
@@ -319,8 +325,8 @@ IE::MemoryResourceOp vpux::IE::details::addReservedMemoryResource(mlir::ModuleOp
     }
 
     auto innerBuilder = mlir::OpBuilder::atBlockBegin(resMemModule.getBody());
-    return innerBuilder.create<IE::MemoryResourceOp>(resMemModule->getLoc(), memSpace.getLeafReference(), byteSizeAttr,
-                                                     nullptr);
+    return innerBuilder.create<IE::MemoryResourceOp>(mlir::UnknownLoc::get(resMemModule.getContext()),
+                                                     memSpace.getLeafReference(), byteSizeAttr, nullptr);
 };
 
 IE::MemoryResourceOp vpux::IE::details::getReservedMemoryResource(mlir::ModuleOp mainModule,
@@ -460,7 +466,8 @@ IE::ExecutorResourceOp vpux::IE::details::addExecutor(mlir::Region& region, mlir
     auto* ctx = region.getContext();
     const auto countAttr = getIntAttr(ctx, count);
     auto builder = mlir::OpBuilder::atBlockBegin(&region.front());
-    return builder.create<IE::ExecutorResourceOp>(region.getLoc(), executorAttr.getLeafReference(), countAttr, nullptr);
+    return builder.create<IE::ExecutorResourceOp>(mlir::UnknownLoc::get(ctx), executorAttr.getLeafReference(),
+                                                  countAttr, nullptr);
 }
 
 bool vpux::IE::details::hasExecutor(mlir::SymbolTable symbolTable, mlir::SymbolRefAttr executorAttr) {
@@ -536,7 +543,7 @@ IE::TileResourceOp IE::addTileExecutor(mlir::ModuleOp mainModule, size_t count) 
     auto countAttr = getIntAttr(ctx, count);
     auto builder = mlir::OpBuilder::atBlockBegin(mainModule.getBody());
     auto nameAttr = mlir::StringAttr::get(ctx, stringifyEnum(VPU::ExecutorKind::NCE));
-    auto resOp = builder.create<IE::TileResourceOp>(mainModule->getLoc(), nameAttr, countAttr, nullptr, nullptr);
+    auto resOp = builder.create<IE::TileResourceOp>(mlir::UnknownLoc::get(ctx), nameAttr, countAttr, nullptr, nullptr);
 
     // Operations with a 'SymbolTable' must have exactly one block
     resOp.getRegion().emplaceBlock();

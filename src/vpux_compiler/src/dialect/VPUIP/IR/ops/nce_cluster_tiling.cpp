@@ -193,8 +193,8 @@ mlir::LogicalResult vpux::VPUIP::NCEClusterTilingOp::verify() {
             auto operandType = operand.getType();
             if (auto ndType = operand.getType().dyn_cast<vpux::NDTypeInterface>()) {
                 auto rank = ndType.getRank();
-                if (rank != 4 && rank != 1 && isNceClusterTaskType) {
-                    return errorAt(op->getLoc(), "Only 4D/1D tensors are supported. Got {0}", rank);
+                if (rank != 5 && rank != 4 && rank != 1 && isNceClusterTaskType) {
+                    return errorAt(op->getLoc(), "Only 5D/4D/1D tensors are supported. Got {0}", rank);
                 }
                 continue;
             }

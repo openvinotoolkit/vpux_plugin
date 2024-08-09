@@ -73,10 +73,7 @@ class QuantizedConvClampSubGraphTestCommon :
                                                                 dataInHigh, dataOutLow, dataOutHigh);
 
         // Create FQ for weights
-        const auto weightsU8 =
-                ov::test::utils::deprecated::make_constant<uint8_t>(ov::element::u8, weightsShape, {}, true,
-                                                                    /*upTo=*/1, /*startFrom=*/1);
-
+        const auto weightsU8 = ov::op::v0::Constant::create(ov::element::u8, weightsShape, std::vector<uint8_t>{1});
         const auto weightsFP32 = std::make_shared<ov::op::v0::Convert>(weightsU8, ov::element::f32);
 
         const size_t weightsLevels = 255;
@@ -93,10 +90,10 @@ class QuantizedConvClampSubGraphTestCommon :
             perChannelHigh[i] = 127.0f;
         }
 
-        const auto weightsOutLow = ov::test::utils::deprecated::make_constant<float>(
-                ov::element::f32, {weightsShape[0], 1, 1, 1}, perChannelLow, false);
-        const auto weightsOutHigh = ov::test::utils::deprecated::make_constant<float>(
-                ov::element::f32, {weightsShape[0], 1, 1, 1}, perChannelHigh, false);
+        const auto weightsOutLow =
+                ov::op::v0::Constant::create(ov::element::f32, ov::Shape{weightsShape[0], 1, 1, 1}, perChannelLow);
+        const auto weightsOutHigh =
+                ov::op::v0::Constant::create(ov::element::f32, ov::Shape{weightsShape[0], 1, 1, 1}, perChannelHigh);
 
         const auto weightsFq = std::make_shared<ov::op::v0::FakeQuantize>(weightsFP32, weightsInLow, weightsInHigh,
                                                                           weightsOutLow, weightsOutHigh, weightsLevels);

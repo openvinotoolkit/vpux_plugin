@@ -112,7 +112,7 @@ private:
 
 class BarrierSimulator final {
 public:
-    explicit BarrierSimulator(mlir::func::FuncOp funcOp);
+    explicit BarrierSimulator(mlir::func::FuncOp funcOp, bool wlm = false);
 
 public:
     bool isDynamicBarriers() const {
@@ -133,6 +133,7 @@ public:
 private:
     void parseBarriers(mlir::Operation* parentOp);
     void parseTasks(mlir::Operation* parentOp);
+    void buildBarrierControlMap(mlir::func::FuncOp funcOp);
 
 private:
     enum class Status { Success, Skip, Fail };
@@ -153,6 +154,7 @@ private:
     DenseMap<mlir::Operation*, size_t> _barriersMap;
     SmallVector<BarrierConfig> _barriers;
     bool _isDynamicBarriers = false;
+    bool _samePidTopoDep = false;
 
     SmallVector<SmallVector<BarrierUserConfig>> _dmaTasks;
     std::unordered_map<SmallVector<DmaTaskIdx>, bool> _multiQueueDmaTaskStatus;
@@ -166,6 +168,8 @@ private:
     // barrier legalisation
     SmallVector<std::set<int64_t>> _barrierBatchesToLegalize;
     DenseMap<size_t, mlir::Operation*> _barrierVID;
+
+    SmallVector<llvm::BitVector> _barrierControlMap;
 };
 
 }  // namespace VPURT

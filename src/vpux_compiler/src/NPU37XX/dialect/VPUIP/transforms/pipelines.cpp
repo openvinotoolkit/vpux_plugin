@@ -6,6 +6,7 @@
 #include "vpux/compiler/NPU37XX/dialect/VPUIP/transforms/passes.hpp"
 #include "vpux/compiler/NPU37XX/dialect/VPURT/transforms/passes.hpp"
 #include "vpux/compiler/core/passes.hpp"
+#include "vpux/compiler/core/profiling.hpp"
 #include "vpux/compiler/dialect/VPURT/transforms/passes.hpp"
 #include "vpux/compiler/dialect/const/passes.hpp"
 
@@ -13,10 +14,28 @@
 
 #include "vpux/compiler/utils/rewriter.hpp"
 
+#include "vpux/utils/profiling/common.hpp"
+
 #include <mlir/Pass/PassManager.h>
 #include <mlir/Transforms/Passes.h>
 
 using namespace vpux;
+
+void vpux::VPUIP::arch37xx::buildOptimizeCopiesPipeline(mlir::OpPassManager& pm,
+                                                        const VPUIP::arch37xx::OptimizeCopiesOptions& options,
+                                                        Logger log) {
+    if (options.enableOptimizeCopies) {
+        pm.addPass(VPUIP::createOptimizeCopiesPass(log));
+        pm.addPass(VPUIP::createOptimizeConcatViewCopiesPass(log));
+        pm.addPass(VPUIP::createFuseDDRCopiesIntoConcats(log));
+        pm.addPass(VPUIP::createUnwrapClusterTilingPass(log));
+        pm.addPass(VPUIP::createOptimizeParallelCopiesPass(options.enableOptimizeConstCopies, log));
+        pm.addPass(VPUIP::createFuseLastCopyPass(log));
+        if (options.enableOpsAsDMA) {
+            pm.addPass(VPUIP::createOptimizeTileOpAsNNDMAPass(log));
+        }
+    }
+}
 
 void vpux::VPUIP::arch37xx::buildMemoryAllocationPipeline(mlir::OpPassManager& pm,
                                                           const VPUIP::arch37xx::MemoryAllocationOptions& options,
@@ -41,6 +60,11 @@ void vpux::VPUIP::arch37xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
 
     pm.addPass(VPUIP::createTileActShaveKernelTaskPass(log));
     pm.addPass(mlir::createCanonicalizerPass(grc));
+    if (options.enableOptimizeCopies || options.enableOpsAsDMA) {
+        // This pass is a part of "copy optimization pipeline", but need to be done before because
+        // WrapWithPermuteAsNNDMA depends on it.
+        pm.addPass(VPUIP::createMovePureViewOpBeforeCopyPass(log));
+    }
     if (options.enableOpsAsDMA) {
         pm.addPass(VPUIP::createWrapWithPermuteAsNNDMAPass(log));
     }
@@ -71,17 +95,7 @@ void vpux::VPUIP::arch37xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
     pm.addPass(VPUIP::createUngroupBoundedBuffersPass(log));
     pm.addPass(mlir::createCanonicalizerPass(grc));
 
-    if (options.enableOptimizeCopies) {
-        pm.addPass(VPUIP::createMovePureViewOpBeforeCopyPass(log));
-        pm.addPass(VPUIP::createOptimizeCopiesPass(log));
-        pm.addPass(VPUIP::createOptimizeConcatViewCopiesPass(log));
-        pm.addPass(VPUIP::createFuseDDRCopiesIntoConcats(log));
-        pm.addPass(VPUIP::createOptimizeParallelCopiesPass(options.enableOptimizeConstCopies, log));
-        if (options.enableOpsAsDMA) {
-            pm.addPass(VPUIP::createMovePureViewOpBeforeCopyPass(log));
-            pm.addPass(VPUIP::createWrapWithPermuteAsNNDMAPass(log));
-        }
-    }
+    VPUIP::arch37xx::buildOptimizeCopiesPipeline(pm, VPUIP::arch37xx::OptimizeCopiesOptions(options), log);
 
     pm.addPass(VPUIP::createInsertCopyForEltwiseInPlaceInputPass(log));
 
@@ -91,7 +105,6 @@ void vpux::VPUIP::arch37xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
     pm.addPass(VPUIP::createCopyOpTilingPass(log));
 
     pm.addPass(mlir::createCanonicalizerPass(grc));
-    pm.addPass(VPUIP::createUnwrapClusterTilingPass(log));
     pm.addPass(VPUIP::createConvWeightsCompressionPass(log));
 
     if (VPU::isActSparsityEnabled(options.enableActivationSparsity)) {
@@ -103,6 +116,12 @@ void vpux::VPUIP::arch37xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
     }
 
     pm.addPass(VPUIP::createSwizzlingPass(options.enableWeightsSwizzling, options.enableActivationSwizzling, log));
+
+    // Note: this pass introduces necessary VPUIP.Copy operations, thus, it must
+    // be called *after* all copy optimizations are run (to ensure the
+    // introduced copies are not optimized out).
+    pm.addPass(VPUIP::createLegalizeRepeatingFuncCallsPass(log));
+    pm.addPass(mlir::createCanonicalizerPass(grc));
 
     pm.addPass(VPUIP::createConvertTransferOpsToDMAsPass(log));
 
@@ -116,8 +135,9 @@ void vpux::VPUIP::arch37xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
 
     VPUIP::buildAsyncSchedulingPipeline(pm, log);
 
-    if (options.enableProfiling && options.enableDMAProfiling) {
-        pm.addPass(VPUIP::createDMATaskProfilingReserveMemPass(log));
+    if (options.enableProfiling) {
+        auto dmaProfilingMode = getDMAProfilingMode(VPU::ArchKind::NPU37XX, options.enableDMAProfiling.getValue());
+        pm.addPass(VPUIP::createDMATaskProfilingReserveMemPass(dmaProfilingMode, log));
     }
 
     if (options.enableSWKernelPrefetchingReserveMem) {
@@ -169,6 +189,7 @@ void vpux::VPUIP::arch37xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
     if (options.enableControlGraphSplit) {
         pm.addPass(VPURT::createSplitControlGraphPass(options.controlGraphSplitBlockSize, log));
     }
+    pm.addPass(VPUIP::createReduceBarrierDependenciesPass(log));
 
     if (!options.linearizeSchedule) {
         pm.addPass(VPUIP::createDMABarrierOptimizationPass(log));
@@ -179,7 +200,7 @@ void vpux::VPUIP::arch37xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
                                                      options.reduceParallelControlFlows, log));
     }
 
-    VPURT::buildBarrierLegalizationPipeline(pm, log);
+    VPURT::buildBarrierLegalizationPipeline(pm, false, false, log);
 
     if (options.enableFinalBarrier) {
         pm.addPass(VPURT::arch37xx::createAddFinalBarrierPass(log));
@@ -196,21 +217,22 @@ void vpux::VPUIP::arch37xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
     }
 
     if (options.enableProfiling) {
-        if (options.enableDMAProfiling) {
-            pm.addPass(VPUIP::createDMATaskProfilingAfterBarrierSchedPass(log));
-        }
+        auto dmaProfilingMode = getDMAProfilingMode(VPU::ArchKind::NPU37XX, options.enableDMAProfiling.getValue());
+        pm.addPass(VPUIP::createDMATaskProfilingAfterBarrierSchedPass(dmaProfilingMode, log));
         pm.addPass(VPUIP::createCaptureWorkpointPass(log));
         pm.addPass(VPUIP::createGroupProfilingBuffersPass(log));
         pm.addPass(createMoveDeclarationsToTopPass(log));
     }
 
-    pm.addPass(VPURT::createAssignPhysicalBarriersPass(log));
+    pm.addPass(VPURT::createAssignPhysicalBarriersPass(false, log));
     pm.addPass(VPURT::createBarrierSimulationPass(log));
-    mlir::OpPassManager::Nesting nesting = pm.getNesting();
-    pm.setNesting(mlir::OpPassManager::Nesting::Explicit);
-    mlir::OpPassManager& constPm = pm.nest<mlir::func::FuncOp>().nest<Const::DeclareOp>();
-    constPm.addPass(Const::createConstantFoldingPass());
-    pm.setNesting(nesting);
+    pm.addPass(mlir::createCanonicalizerPass(grc));
+    pm.nest<mlir::func::FuncOp>().addNestedPass<Const::DeclareOp>(Const::createConstantFoldingPass());
+
+    // TODO: #-120399 This is a temporary solution to remove strides from const.declare operations. Ideally,
+    // this would be done by a custom canonicalizer by matching the different dialect's subview operations
+    // and their constant inputs. Strides in constants should have never reached this point in the first place!
+    pm.addPass(mlir::createCanonicalizerPass(grc));
 
     if (options.enableActivityFactor || options.enableScheduleTrace) {
         pm.addPass(VPURT::createInferenceExecutionAnalysisPass(options.scheduleTraceFile, options.enableScheduleTrace,
@@ -224,6 +246,12 @@ void vpux::VPUIP::arch37xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
 }
 
 void vpux::VPUIP::arch37xx::registerVPUIPPipelines() {
+    mlir::PassPipelineRegistration<VPUIP::arch37xx::OptimizeCopiesOptions>(
+            "optimize-copies-pipeline", "Optimize Copies Pipeline",
+            [](mlir::OpPassManager& pm, const VPUIP::arch37xx::OptimizeCopiesOptions& options) {
+                VPUIP::arch37xx::buildOptimizeCopiesPipeline(pm, options);
+            });
+
     mlir::PassPipelineRegistration<VPUIP::arch37xx::MemoryAllocationOptions>(
             "memory-allocation", "Memory Allocation",
             [](mlir::OpPassManager& pm, const VPUIP::arch37xx::MemoryAllocationOptions& options) {

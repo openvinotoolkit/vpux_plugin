@@ -10,9 +10,11 @@
 #include "vpux/compiler/utils/asm.hpp"
 #include "vpux/compiler/utils/error.hpp"
 #include "vpux/compiler/utils/permute_utils.hpp"
+#include "vpux/utils/core/error.hpp"
 
 #include <llvm/ADT/TypeSwitch.h>
 #include <llvm/ADT/bit.h>
+#include <algorithm>
 #define REGION_YOLO_MAX_MASK_SIZE 9   // max mask size for region yolo op
 #define PROPOSAL_MAX_RATIO 3          // max ratio size for proposal op
 #define PROPOSAL_MAX_SCALE 6          // max scale size for proposal op
@@ -528,11 +530,11 @@ mlir::LogicalResult SwKernelOp::verify() {
 
 mlir::LogicalResult SwKernelOp::inferReturnTypes(mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc,
                                                  mlir::ValueRange operands, mlir::DictionaryAttr attrs,
-                                                 mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+                                                 mlir::OpaqueProperties props, mlir::RegionRange /*regions*/,
                                                  mlir::SmallVectorImpl<mlir::Type>& inferredTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPUIP::SwKernelOpAdaptor swKernelOp(operands, attrs);
+    VPUIP::SwKernelOpAdaptor swKernelOp(operands, attrs, props);
     if (mlir::failed(swKernelOp.verify(loc))) {
         return mlir::failure();
     }
@@ -684,8 +686,23 @@ VPUIP::KernelInfo SwKernelOp::getKernelInfo(mlir::Operation* origOp) {
                         scalingAxis.push_back(axis);
                     }
                 }
-                VPUX_THROW_WHEN(scalingAxis.size() > 2, "Unsupported scaling dim size {0} at '{1}'", scalingAxis.size(),
-                                interpolate->getLoc());
+
+                if (scalingAxis.size() == 1) {
+                    if (scalingAxis[0] + 1 < static_cast<int64_t>(initialOutputDim.size())) {
+                        scalingAxis.push_back(scalingAxis[0] + 1);
+                    } else {
+                        scalingAxis.push_back(scalingAxis[0] - 1);
+                    }
+                }
+
+                VPUX_THROW_WHEN(scalingAxis.size() != 2, "Unsupported scaling dim size {0} at '{1}'",
+                                scalingAxis.size(), interpolate->getLoc());
+
+                if (!std::is_sorted(scalingAxis.begin(), scalingAxis.end())) {
+                    std::reverse(scalingAxis.begin(), scalingAxis.end());
+                }
+                VPUX_THROW_WHEN(scalingAxis[0] + 1 != scalingAxis[1],
+                                "Only contiguous axes are supported by the Interpolate kernel");
 
                 const auto initialInputOffset =
                         interpolate.getInitialInputOffsetAttr().has_value()
@@ -708,11 +725,16 @@ VPUIP::KernelInfo SwKernelOp::getKernelInfo(mlir::Operation* origOp) {
                 const auto initialInputOffsetAttr = getIntArrayAttr(ctx, initialInputOffset);
                 const auto initialOutputOffsetAttr = getIntArrayAttr(ctx, initialOutputOffset);
 
-                return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{
-                                                 modeAttr, coordModeAttr, nearestModeAttr, antialiasAttr, tileAttr,
-                                                 initialInputDimsParamAttr, initialOutputDimsParamAttr, axisParamAttr,
-                                                 cubeCoeffParamAttr, initialInputOffsetAttr, initialOutputOffsetAttr},
-                                         {"interpolate"}};
+                // INT64_MIN added as a delimiter to find where MemRefData fields are ended in case of
+                // variadic number of inputs
+                const auto delimiterAttr = getIntAttr(ctx, INT64_MIN);
+
+                return VPUIP::KernelInfo{
+                        SmallVector<mlir::Attribute>{delimiterAttr, modeAttr, coordModeAttr, nearestModeAttr,
+                                                     antialiasAttr, tileAttr, initialInputDimsParamAttr,
+                                                     initialOutputDimsParamAttr, axisParamAttr, cubeCoeffParamAttr,
+                                                     initialInputOffsetAttr, initialOutputOffsetAttr},
+                        {"interpolate"}};
             })
             .Case<VPU::ScatterNDUpdateOp>([&](VPU::ScatterNDUpdateOp) {
                 return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{}, {"scatter_nd_update"}};
@@ -861,9 +883,17 @@ VPUIP::KernelInfo SwKernelOp::getKernelInfo(mlir::Operation* origOp) {
                         {"mvn1_sum"}};
             })
             .Case<VPU::MVN1MeanVarOp>([&](VPU::MVN1MeanVarOp op) {
-                return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{op.getOrigShapeAttr(), op.getAcrossChannelsAttr(),
-                                                                      op.getNormalizeVarianceAttr(), op.getEpsAttr()},
-                                         {"mvn1_mean_var"}};
+                int64_t groupC = 1;
+                if (op.getInternalReshape().has_value()) {
+                    const auto internalReshape = parseIntArrayAttr<int64_t>(op.getInternalReshape().value());
+                    const auto inputShape = getShape(op.getInputs()[0]).raw();
+                    groupC = inputShape[1] / internalReshape[1];
+                }
+                const auto groupChAttr = getIntAttr(ctx, groupC);
+                return VPUIP::KernelInfo{
+                        SmallVector<mlir::Attribute>{op.getOrigShapeAttr(), op.getAcrossChannelsAttr(),
+                                                     op.getNormalizeVarianceAttr(), groupChAttr, op.getEpsAttr()},
+                        {"mvn1_mean_var"}};
             })
             .Case<VPU::MVN1NormalizeOp>([&](VPU::MVN1NormalizeOp op) {
                 return VPUIP::KernelInfo{
@@ -892,9 +922,21 @@ VPUIP::KernelInfo SwKernelOp::getKernelInfo(mlir::Operation* origOp) {
                 return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{getIntArrayAttr(ctx, memPermArr)}, {"reorder"}};
             })
             .Case<VPU::LRNOp>([&](VPU::LRNOp LRN) {
-                return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{LRN.getAlphaAttr(), LRN.getBetaAttr(),
-                                                                      LRN.getBiasAttr(), LRN.getSizeAttr()},
-                                         {"lrn"}};
+                const auto axesVal = parseIntArrayAttr<int64_t>(LRN.getAxes());
+
+                SmallVector<int64_t> memAxes;
+                for (const auto axis : axesVal) {
+                    memAxes.push_back(computeReverseMemDim(LRN.getInput(), axis));
+                }
+                const auto memAxesAttr = getIntArrayAttr(ctx, memAxes);
+
+                const auto numAxes = memAxes.size();
+                const auto numAxesAttr = getIntAttr(ctx, numAxes);
+
+                return VPUIP::KernelInfo{
+                        SmallVector<mlir::Attribute>{LRN.getAlphaAttr(), LRN.getBetaAttr(), LRN.getBiasAttr(),
+                                                     LRN.getSizeAttr(), numAxesAttr, memAxesAttr},
+                        {"lrn"}};
             })
             .Case<VPU::ConvertOp>([&](VPU::ConvertOp) {
                 return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{}, {"convert"}};

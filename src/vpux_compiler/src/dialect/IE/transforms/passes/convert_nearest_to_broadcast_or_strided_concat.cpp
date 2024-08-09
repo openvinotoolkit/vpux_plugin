@@ -7,6 +7,7 @@
 #include "vpux/compiler/dialect/IE/utils/interpolate_utils.hpp"
 
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/types.hpp"
 
 #include <mlir/Transforms/DialectConversion.h>
@@ -14,15 +15,6 @@
 using namespace vpux;
 
 namespace {
-
-Const::DeclareOp createShapeConstForBroadCast(mlir::PatternRewriter& rewriter, mlir::MLIRContext* ctx,
-                                              mlir::Location loc, ShapeRef shape) {
-    auto intType = getSInt64Type(ctx);
-    const auto shapeStorageType = mlir::RankedTensorType::get({static_cast<int64_t>(shape.size())}, intType);
-    const auto shapeDenseAttr = mlir::DenseElementsAttr::get(shapeStorageType, shape.raw());
-    auto newContentAttr = Const::ContentAttr::get(shapeDenseAttr).convertElemType(getSInt32Type(ctx));
-    return rewriter.create<Const::DeclareOp>(loc, shapeStorageType, newContentAttr);
-}
 
 mlir::Value createFQ(mlir::PatternRewriter& rewriter, mlir::Value input, IE::FakeQuantizeOp fq) {
     const auto outputType = fq.getOutput().getType().cast<vpux::NDTypeInterface>();
@@ -98,9 +90,14 @@ mlir::LogicalResult ConvertNearestToBroadcastOrStridedConcatPass::NearestToBroad
         return mlir::failure();
     }
 
-    rewriter.replaceOpWithNewOp<IE::BroadcastOp>(
-            origOp, origOp.getInput(), createShapeConstForBroadCast(rewriter, ctx, origOp->getLoc(), outShape), nullptr,
-            IE::BroadcastTypeAttr::get(ctx, IE::BroadcastType::NUMPY));
+    const auto shapeStorageType =
+            mlir::RankedTensorType::get({static_cast<int64_t>(outShape.size())}, getSInt64Type(ctx));
+    const auto shapeConst = Const::createConst(rewriter, origOp->getLoc(), shapeStorageType, outShape.raw(),
+                                               [&](Const::ContentAttr attr) {
+                                                   return attr.convertElemType(getSInt32Type(rewriter.getContext()));
+                                               });
+    rewriter.replaceOpWithNewOp<IE::BroadcastOp>(origOp, origOp.getInput(), shapeConst, nullptr,
+                                                 IE::BroadcastTypeAttr::get(ctx, IE::BroadcastType::NUMPY));
 
     return mlir::success();
 }

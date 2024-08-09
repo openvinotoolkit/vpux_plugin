@@ -1376,7 +1376,11 @@ void AdjustInputShapePass::safeRunOnFunc() {
     patterns.add<ExpandSingleChannelPoolingRewriter<IE::MaxPoolOp>>(&ctx, benefitLevels[1], _log);
     patterns.add<EltwiseShapeRewriter<IE::AddOp>>(&ctx, _log);
 
-    if (mlir::failed(mlir::applyPatternsAndFoldGreedily(func, std::move(patterns), getDefaultGreedyRewriteConfig()))) {
+    // There is case for `EltwiseShapeRewriter` that the iteration time larger than default value
+    // TODO: E#126695 Refactor to avoid specific maxIterations
+    auto greedyRewriteConfig = getDefaultGreedyRewriteConfig();
+    greedyRewriteConfig.maxIterations *= 2;
+    if (mlir::failed(mlir::applyPatternsAndFoldGreedily(func, std::move(patterns), greedyRewriteConfig))) {
         signalPassFailure();
         return;
     }

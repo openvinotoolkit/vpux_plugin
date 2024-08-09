@@ -5,6 +5,7 @@
 
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
 
 using namespace vpux;
@@ -48,8 +49,7 @@ bool isCompatibleWithMultiClusterNNDMA(VPU::SpaceToDepthOp op, vpux::ShapeRef nu
         // Check distributed tensor types are aligned
         auto userInputType = userOp->getOperand(0).getType().cast<NDTypeInterface>();
         auto userOutputType = userOp->getResult(0).getType().cast<NDTypeInterface>();
-        auto numClusters =
-                VPU::getOptimalNumClusters(userOp, userOutputType.getShape()[Dims4D::Act::C], userStrategy.value());
+        auto numClusters = VPU::getOptimalNumClusters(userOp, userOutputType.getShape(), userStrategy.value());
         auto userInputDistType =
                 getDistributedActivationTypeFromOp(userClusteredOp, userInputType, numClusters, userStrategy.value())
                         .dyn_cast<VPU::DistributedTensorType>();
@@ -84,11 +84,11 @@ bool isCompatibleWithMultiClusterNNDMA(VPU::SpaceToDepthOp op, vpux::ShapeRef nu
 
 mlir::LogicalResult vpux::VPU::SpaceToDepthOp::inferReturnTypes(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange /*regions*/,
         mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::SpaceToDepthOpAdaptor spd(operands, attrs);
+    VPU::SpaceToDepthOpAdaptor spd(operands, attrs, prop);
     if (mlir::failed(spd.verify(loc))) {
         return mlir::failure();
     }
@@ -129,7 +129,8 @@ mlir::LogicalResult vpux::VPU::SpaceToDepthOp::inferReturnTypes(
 
     SmallVector<int64_t> outShape{outN, outC, outH, outW};
 
-    const auto outType = inputType.changeShape(Shape(outShape));
+    auto outType = mlir::RankedTensorType::get(outShape, elementType, createTensorAttrFromType(inputType));
+
     inferredReturnTypes.push_back(outType);
 
     return mlir::success();

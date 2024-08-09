@@ -27,7 +27,7 @@ if(WIN32)
     # Shlwapi.lib is to check file existence.
     target_link_libraries(${FUNCTIONAL_TARGET}
         PUBLIC
-            vpux_driver_compiler
+            npu_driver_compiler
             gtest
             gtest_main
             Shlwapi.lib
@@ -35,8 +35,10 @@ if(WIN32)
 else()
     target_link_libraries(${FUNCTIONAL_TARGET}
         PUBLIC
-            vpux_driver_compiler
-            gtest gtest_main pthread
+            npu_driver_compiler
+            gtest
+            gtest_main
+            pthread
     )
 endif()
 
@@ -59,7 +61,7 @@ target_include_directories(${FUNCTIONAL_TARGET}
         "${CMAKE_SOURCE_DIR}/src/core/include"
 )
 
-link_system_libraries(${FUNCTIONAL_TARGET}
+ov_link_system_libraries(${FUNCTIONAL_TARGET}
     PUBLIC
         openvino::runtime)
 

@@ -4,7 +4,7 @@
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --tiling-strategy-assignment="tiling-mode=ISOLATED enable-shave-ddr-access-optimization=false" %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX
+// REQUIRES: arch-NPU37XX
 
 // CHECK-LABEL: func.func @SplitGatherForLargeIORatio
 // CHECK-SAME:        [[INPUT:%arg[0-9]]]: tensor<51865x512xf16>

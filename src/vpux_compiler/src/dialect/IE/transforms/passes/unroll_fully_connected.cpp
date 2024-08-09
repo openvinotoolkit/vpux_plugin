@@ -23,6 +23,9 @@ public:
 
 private:
     bool checkConcat(IE::ConcatOp concat) const;
+    bool isSupportedPattern(mlir::Operation* op) const;
+    bool isTransposeReshape(mlir::Operation* op) const;
+    bool isReshapeTranspose(mlir::Operation* op) const;
     SmallVector<mlir::Value> findMatMulInputs(IE::FullyConnectedOp matMulOp) const;
     SmallVector<mlir::Value> splitLeftInput(const mlir::Value lhs, const int64_t groups,
                                             mlir::PatternRewriter& rewriter) const;
@@ -47,6 +50,73 @@ bool UnrollFullyConnected::checkConcat(IE::ConcatOp concat) const {
     return std::all_of(concatInputs.begin(), concatInputs.end(), isShapeCompatible);
 }
 
+bool UnrollFullyConnected::isTransposeReshape(mlir::Operation* op) const {
+    // Check that the producer of the right-hand matrix is IE.Transpose
+    if (!mlir::isa_and_nonnull<IE::TransposeOp>(op)) {
+        return false;
+    }
+    auto transpose = mlir::cast<IE::TransposeOp>(op);
+    // Check that transpose transforms [d0, d1] shape into [d1, d0]
+    const auto transposeInShape = getShape(transpose.getInput());
+    if (transposeInShape.size() < 2) {
+        return false;
+    }
+    const auto transposeOutShape = getShape(transpose.getOutput());
+    const auto expectedTransposeOutShape = Shape{transposeInShape[Dim(1)], transposeInShape[Dim(0)]};
+    if (expectedTransposeOutShape != transposeOutShape) {
+        return false;
+    }
+    // IE.Transpose must have IE.AffineReshape producer
+    auto transposeProducer = transpose.getInput().getDefiningOp();
+    if (!mlir::isa_and_nonnull<IE::AffineReshapeOp>(transposeProducer)) {
+        return false;
+    }
+    auto reshape = mlir::cast<IE::AffineReshapeOp>(transposeProducer);
+    // Check that reshape collapses [d0, d1, d2] shape into [d0 * d1, d2]
+    const auto reshapeInputDims = getShape(reshape.getInput());
+    if (reshapeInputDims.size() < 3) {
+        return false;
+    }
+    const Shape expectedOutputShape = {reshapeInputDims[Dim(0)] * reshapeInputDims[Dim(1)], reshapeInputDims[Dim(2)]};
+    const auto reshapeOutputDims = getShape(reshape.getOutput());
+    return reshapeOutputDims == expectedOutputShape;
+}
+
+bool UnrollFullyConnected::isReshapeTranspose(mlir::Operation* op) const {
+    // Check that the producer of the right-hand matrix is IE.AffineReshape
+    if (!mlir::isa_and_nonnull<IE::AffineReshapeOp>(op)) {
+        return false;
+    }
+    auto reshape = mlir::cast<IE::AffineReshapeOp>(op);
+    // Check that reshape collapses [d0, d1, d2] shape into [d0, d1 * d2]
+    const auto reshapeInputDims = getShape(reshape.getInput());
+    if (reshapeInputDims.size() < 3) {
+        return false;
+    }
+    const Shape expectedOutputShape = {reshapeInputDims[Dim(0)], reshapeInputDims[Dim(1)] * reshapeInputDims[Dim(2)]};
+    const auto reshapeOutputDims = getShape(reshape.getOutput());
+    if (expectedOutputShape != reshapeOutputDims) {
+        return false;
+    }
+    // IE.AffineReshape must have IE.Transpose producer
+    auto reshapeProducer = reshape.getInput().getDefiningOp();
+    if (!mlir::isa_and_nonnull<IE::TransposeOp>(reshapeProducer)) {
+        return false;
+    }
+    auto transpose = mlir::cast<IE::TransposeOp>(reshapeProducer);
+    // Check that transpose transforms [d0, d1, d2] shape into [d2, d0, d1]
+    const auto maybeMap = transpose.getOrderValue();
+    if (!maybeMap.has_value()) {
+        return false;
+    }
+    const SmallVector<unsigned> expectedMap = {2, 0, 1};
+    return maybeMap.value() == mlir::AffineMap::getPermutationMap(expectedMap, transpose.getContext());
+}
+
+bool UnrollFullyConnected::isSupportedPattern(mlir::Operation* op) const {
+    return isTransposeReshape(op) || isReshapeTranspose(op);
+}
+
 SmallVector<mlir::Value> UnrollFullyConnected::findMatMulInputs(IE::FullyConnectedOp matMulOp) const {
     // Left-hand matrix must have exactly two dimensions.
     const auto lhs = matMulOp.getInput();
@@ -60,39 +130,21 @@ SmallVector<mlir::Value> UnrollFullyConnected::findMatMulInputs(IE::FullyConnect
     if (rhsType.getRank() != 2) {
         return {};
     }
-    // Right-hand matrix must have IE.Transpose producer
+    if (!isSupportedPattern(rhs.getDefiningOp())) {
+        return {};
+    }
+    // Right-hand matrix must have either IE.Transpose or IE.AffineReshape producer
     auto rhsProducer = rhs.getDefiningOp();
-    if (!mlir::isa_and_nonnull<IE::TransposeOp>(rhsProducer)) {
-        return {};
-    }
-    auto transpose = mlir::cast<IE::TransposeOp>(rhsProducer);
-    // Check that transpose transforms [d0, d1] shape into [d1, d0]
-    const auto transposeInShape = getShape(transpose.getInput());
-    const auto transposeOutShape = getShape(transpose.getOutput());
-    const auto expectedTransposeOutShape = Shape{transposeInShape[Dim(1)], transposeInShape[Dim(0)]};
-    if (expectedTransposeOutShape != transposeOutShape) {
-        return {};
-    }
-    // IE.Transpose must have IE.AffineReshape producer
-    auto transposeProducer = transpose.getInput().getDefiningOp();
-    if (!mlir::isa_and_nonnull<IE::AffineReshapeOp>(transposeProducer)) {
-        return {};
-    }
-    auto reshape = mlir::cast<IE::AffineReshapeOp>(transposeProducer);
-    // Check that reshape collapses [d0, d1, d2] shape into [d0 * d1, d2]
-    const auto reshapeInputDims = getShape(reshape.getInput());
-    const Shape expectedOutputShape = {reshapeInputDims[Dim(0)] * reshapeInputDims[Dim(1)], reshapeInputDims[Dim(2)]};
-    const auto reshapeOutputDims = getShape(reshape.getOutput());
-    if (reshapeOutputDims != expectedOutputShape) {
-        return {};
-    }
-    // IE.Reshape must have IE.Concat producer
-    auto reshapeProducer = reshape.getInput().getDefiningOp();
-    if (!mlir::isa_and_nonnull<IE::ConcatOp>(reshapeProducer)) {
+    // If the producer of rhs is IE.Transpose, next operation must be IE.AffineReshape
+    // If the producer of rhs is IE.AffineReshape, next operation must be IE.Transpose
+    auto nextOp = rhsProducer->getOperand(0).getDefiningOp();
+    // Either way, the pass expects a concatenation to be at the root of the pattern.
+    auto maybeConcat = nextOp->getOperand(0).getDefiningOp();
+    if (!mlir::isa_and_nonnull<IE::ConcatOp>(maybeConcat)) {
         return {};
     }
     // The concat must concatenate [1xHxW, ..., 1xHxW] inputs into CxHxW shape.
-    auto concat = mlir::cast<IE::ConcatOp>(reshapeProducer);
+    auto concat = mlir::cast<IE::ConcatOp>(maybeConcat);
     if (!checkConcat(concat)) {
         return {};
     }

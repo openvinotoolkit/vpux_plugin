@@ -7,6 +7,7 @@
 
 #include "vpux/compiler/dialect/IE/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 
 namespace vpux {
 namespace VPU {
@@ -26,9 +27,7 @@ mlir::Value createInstructionListTableTensor(mlir::OpBuilder& builder, mlir::Loc
 mlir::Value alignDepthWiseWeightsTensor(mlir::OpBuilder& builder, mlir::Location loc, mlir::Value origFilter);
 mlir::Value alignConvWeightsTensor(mlir::OpBuilder& builder, mlir::Location loc, mlir::Value origFilter,
                                    const bool isCMajorConv);
-mlir::Value getZerosConst(mlir::PatternRewriter& rewriter, ShapeRef constShape, mlir::Value input, mlir::Location loc);
-mlir::Value buildWeightsConst(vpux::ShapeRef weightsShape, DimsOrder weightsOrder, ArrayRef<float> weightsValue,
-                              mlir::Value activation, mlir::PatternRewriter& rewriter);
+bool isNullOrConstWithSingleValue(mlir::Value value);
 
 /**
  * @brief calculate memory requirement for given buffer sizes and architecture-dependent allocation requirements
@@ -38,27 +37,12 @@ mlir::Value buildWeightsConst(vpux::ShapeRef weightsShape, DimsOrder weightsOrde
  *
  * @return required memory taking into account the allocation requirements for swizzled buffers [bytes].
  *
- * For NPU30XX this returns the size of combined vectors. Starting with NPU37XX the required memory size is
+ * Starting with NPU37XX the required memory size is
  * calculated according to requirements for CMX allocation for swizzled buffers.
  *
  * NOTE: see also vpux::calculateAlignedBuffersMemoryRequirement
  */
 Byte calculateAlignedBuffersMemoryRequirement(VPU::ArchKind arch, mlir::SmallVector<Byte>& bufferSizes);
-
-Const::DeclareOp declareFloatConst(mlir::OpBuilder& builder, mlir::Location loc, float val,
-                                   mlir::RankedTensorType argType);
-
-mlir::DenseElementsAttr wrapData(const mlir::RankedTensorType dataStorageType, ArrayRef<float> values);
-mlir::FailureOr<Const::DeclareOp> updateConstStorageValues(Const::DeclareOp origConst, ArrayRef<float> constValues,
-                                                           mlir::PatternRewriter& rewriter, Logger log);
-
-bool hasNegativeValues(const Const::Content& content);
-Const::DeclareOp createFloatConst(mlir::RankedTensorType constType, ArrayRef<float> constValues, mlir::Location loc,
-                                  mlir::PatternRewriter& rewriter);
-mlir::Value createIntConst(ShapeRef constShape, DimsOrder constOrder, ArrayRef<int32_t> constData, mlir::Location loc,
-                           mlir::PatternRewriter& rewriter);
-bool isLowPrecisionTypeRange(const Const::Content& lowVal, const Const::Content& highVal, int64_t levels, bool isSigned,
-                             mlir::PatternRewriter& rewriter);
 
 }  // namespace VPU
 }  // namespace vpux

@@ -10,11 +10,11 @@ using namespace vpux;
 
 mlir::LogicalResult vpux::IE::QuantizeOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::QuantizeOpAdaptor quantize(operands, attrs);
+    IE::QuantizeOpAdaptor quantize(operands, attrs, prop);
     if (mlir::failed(quantize.verify(loc))) {
         return mlir::failure();
     }
@@ -43,16 +43,16 @@ mlir::quant::QuantizedType extractQuantizedType(mlir::Value operand) {
 
 mlir::OpFoldResult vpux::IE::QuantizeOp::fold(FoldAdaptor adaptor) {
     auto operands = adaptor.getOperands();
-    if (const auto cst = operands[0].dyn_cast_or_null<Const::ContentAttr>()) {
-        // We can't add convertElemType transformation if content was dequantized before, see E#122631
+    if (auto cst = operands[0].dyn_cast_or_null<Const::ContentAttr>()) {
+        // Compiler must add real quantization of content if dequantization was before
         bool hasDequant = llvm::any_of(cst.getTransformations(), [](mlir::Attribute attr) {
             return attr.isa<Const::DequantizeAttr>();
         });
+        const auto quantType = extractQuantizedType(getOutput());
         if (hasDequant) {
-            return nullptr;
+            return cst.quantize(quantType);
         }
 
-        const auto quantType = extractQuantizedType(getOutput());
         const auto quantStorageType = normalizeQuantStorageType(quantType);
         return cst.convertElemType(quantStorageType).quantCast(quantType);
     }

@@ -29,11 +29,11 @@ mlir::LogicalResult vpux::IE::TopKOp::verify() {
 
 mlir::LogicalResult vpux::IE::TopKOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::TopKOpAdaptor topK(operands, attrs);
+    IE::TopKOpAdaptor topK(operands, attrs, prop);
     if (mlir::failed(topK.verify(loc))) {
         return mlir::failure();
     }

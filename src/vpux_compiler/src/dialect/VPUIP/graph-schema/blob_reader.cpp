@@ -245,13 +245,6 @@ VPU::ArchKind vpux::VPUIP::BlobReader::parseDeviceRevision(const MVCNN::SummaryH
     switch (header->device()) {
     case MVCNN::TargetDevice_NONE:
         return VPU::ArchKind::UNKNOWN;
-    case MVCNN::TargetDevice_VPUX30XX:
-        switch (header->device_revision()) {
-        case MVCNN::TargetDeviceRevision::TargetDeviceRevision_B0:
-            return VPU::ArchKind::NPU30XX;
-        default:
-            VPUX_THROW("Unsupported VPUX30XX Revision '{0}'", header->device_revision());
-        }
     case MVCNN::TargetDevice::TargetDevice_VPUX37XX:
         return VPU::ArchKind::NPU37XX;
     case MVCNN::TargetDevice::TargetDevice_VPUX40XX:
@@ -366,7 +359,7 @@ mlir::Value vpux::VPUIP::BlobReader::createTensorOp(mlir::OpBuilder& builder, co
 
 void vpux::VPUIP::BlobReader::buildRunTimeResourcesOp() {
     const auto arch = parseDeviceRevision();
-    VPU::setArch(_module, arch);
+    VPU::setArch(_module, arch, getMaxArchDPUClusterNum(arch));
 
     const auto* header = _graphFile->header();
     VPUX_THROW_UNLESS(header->resources(), "Blob has no resources");

@@ -14,18 +14,6 @@ namespace test {
 
 class SoftMaxLayerTestCommon : public subgraph::SoftMaxLayerTest, virtual public VpuOv2LayerTest {};
 
-TEST_P(SoftMaxLayerTestCommon, NPU3700_SW) {
-    abs_threshold = 1e-3;
-    setReferenceSoftwareMode();
-    run(Platform::NPU3700);
-}
-
-TEST_P(SoftMaxLayerTestCommon, NPU3700_HW) {
-    abs_threshold = 1e-3;
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
-
 TEST_P(SoftMaxLayerTestCommon, NPU3720_SW) {
     abs_threshold = 0.01;
     setReferenceSoftwareMode();

@@ -94,7 +94,7 @@ mlir::LogicalResult PropagateQuantize::matchAndRewrite(IE::ElemTypeInfoOpInterfa
     }
 
     // All checks passed. Rewrite the sub-graph.
-    rewriter.startRootUpdate(origOp);
+    rewriter.startOpModification(origOp);
     rewriter.setInsertionPoint(origOp);
 
     // 1. Create new Quantize ops, place them on each input of current operation.
@@ -125,7 +125,7 @@ mlir::LogicalResult PropagateQuantize::matchAndRewrite(IE::ElemTypeInfoOpInterfa
     }
 
     // Rewrite done.
-    rewriter.finalizeRootUpdate(origOp);
+    rewriter.finalizeOpModification(origOp);
 
     return mlir::success();
 }
@@ -225,7 +225,7 @@ mlir::LogicalResult PropagateDequantize::matchAndRewrite(IE::ElemTypeInfoOpInter
     }
 
     // 4. Rewrite the sub-graph.
-    rewriter.startRootUpdate(origOp);
+    rewriter.startOpModification(origOp);
 
     const auto inputs = origOp->getOpOperands();
     for (auto idx : irange(inputs.size())) {
@@ -245,7 +245,7 @@ mlir::LogicalResult PropagateDequantize::matchAndRewrite(IE::ElemTypeInfoOpInter
     for (unsigned int outputInd = 0; outputInd < layer->getNumResults(); outputInd++) {
         origOp->getResult(outputInd).setType(inferredTypes[outputInd]);
 
-        const auto output = origOp->getOpResult(outputInd);
+        auto output = origOp->getOpResult(outputInd);
         rewriter.setInsertionPointAfter(origOp);
         auto newLoc = appendLoc(origOp->getLoc(), "_propagated_Dequantize '{0}'", outputInd);
         auto newDequant = rewriter.create<IE::DequantizeOp>(newLoc, output, firstDequantizeOp.getDstElemType());
@@ -254,7 +254,7 @@ mlir::LogicalResult PropagateDequantize::matchAndRewrite(IE::ElemTypeInfoOpInter
         _log.trace("All uses of current layer have been replaced with new Dequantize op at index '{0}'", outputInd);
     }
 
-    rewriter.finalizeRootUpdate(origOp);
+    rewriter.finalizeOpModification(origOp);
     return mlir::success();
 }
 

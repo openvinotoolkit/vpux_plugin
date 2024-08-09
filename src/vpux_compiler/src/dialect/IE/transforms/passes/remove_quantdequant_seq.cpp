@@ -42,6 +42,10 @@ void RemoveQuantDequantSeqPass::safeRunOnFunc() {
             while (operation && !operation->getUsers().empty()) {
                 auto user = *(operation->getUsers().begin());
 
+                if (mlir::isa<IE::ConcatOp>(user)) {
+                    return;
+                }
+
                 if (!mlir::isa<IE::ElemTypeInfoOpInterface, IE::DequantizeOp>(user)) {
                     return;
                 }

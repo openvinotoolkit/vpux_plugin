@@ -12,11 +12,11 @@ using namespace vpux;
 mlir::LogicalResult vpux::VPU::ReorgYoloOp::inferReturnTypes(mlir::MLIRContext* ctx,
                                                              std::optional<mlir::Location> optLoc,
                                                              mlir::ValueRange operands, mlir::DictionaryAttr attrs,
-                                                             mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+                                                             mlir::OpaqueProperties prop, mlir::RegionRange /*regions*/,
                                                              mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::ReorgYoloOpAdaptor reorgYolo(operands, attrs);
+    VPU::ReorgYoloOpAdaptor reorgYolo(operands, attrs, prop);
     if (mlir::failed(reorgYolo.verify(loc))) {
         return mlir::failure();
     }

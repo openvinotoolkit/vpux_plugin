@@ -488,7 +488,7 @@ private:
 //
 
 mlir::LogicalResult convertGeneric(mlir::Operation* origOp, mlir::ValueRange operands,
-                                   mlir::ConversionPatternRewriter& rewriter, mlir::TypeConverter& typeConverter,
+                                   mlir::ConversionPatternRewriter& rewriter, const mlir::TypeConverter& typeConverter,
                                    Logger log) {
     log.trace("Process Operation '{0}' at '{1}", origOp->getName(), origOp->getLoc());
 
@@ -519,7 +519,7 @@ public:
 public:
     mlir::LogicalResult matchAndRewrite(ConcreteOp origOp, OpAdaptor newArgs,
                                         mlir::ConversionPatternRewriter& rewriter) const final {
-        auto* typeConverter = this->getTypeConverter();
+        const auto* typeConverter = this->getTypeConverter();
         VPUX_THROW_UNLESS(typeConverter != nullptr, "TypeConverter was not set");
 
         if (origOp->getOperands().size() == 2) {
@@ -740,7 +740,7 @@ mlir::LogicalResult TopKOpConverter::matchAndRewrite(IE::TopKOp origOp, OpAdapto
 
     for (auto indexResult : origOp->getResults() | indexed) {
         auto idx = checked_cast<unsigned>(indexResult.index());
-        const auto origResult = indexResult.value();
+        auto origResult = indexResult.value();
         const auto outputShapeAttr = getIntArrayAttr(this->getContext(), getShape(origResult));
         const auto newOutputReshape = rewriter.createOrFold<IE::ReshapeOp>(origOp->getLoc(), newTopKOp->getResult(idx),
                                                                            nullptr, false, outputShapeAttr);
@@ -1114,6 +1114,63 @@ mlir::LogicalResult TileConverter::matchAndRewrite(IE::TileOp origOp, OpAdaptor,
 }
 
 //
+// LSTMGatesConverter
+//
+
+class LSTMGatesConverter final : public mlir::OpConversionPattern<IE::LSTMGatesOp> {
+public:
+    LSTMGatesConverter(mlir::TypeConverter& typeConverter, mlir::MLIRContext* ctx, Logger log)
+            : mlir::OpConversionPattern<IE::LSTMGatesOp>(typeConverter, ctx), _log(log) {
+    }
+
+public:
+    mlir::LogicalResult matchAndRewrite(IE::LSTMGatesOp origOp, OpAdaptor newArgs,
+                                        mlir::ConversionPatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+mlir::LogicalResult LSTMGatesConverter::matchAndRewrite(IE::LSTMGatesOp origOp, OpAdaptor,
+                                                        mlir::ConversionPatternRewriter& rewriter) const {
+    _log.trace("[{0}] Found IE::LSTMGatesOp Operation '{1}'", getDebugName(), origOp->getLoc());
+
+    // Build input ReshapeOp
+    SmallVector<mlir::Value> newInputs;
+    for (const auto& origInput : origOp.getInputs()) {
+        const auto origInputType = origInput.getType().cast<vpux::NDTypeInterface>();
+        SmallVector<int64_t> origInputShape = to_small_vector(origInputType.getShape());
+        const auto newInputShape = alignTileShapeRepeatsTo4D(std::move(origInputShape));
+        const auto newInputShapeAttr = getIntArrayAttr(rewriter.getContext(), newInputShape);
+
+        auto inputReshape =
+                rewriter.createOrFold<IE::ReshapeOp>(origOp.getLoc(), origInput, nullptr, false, newInputShapeAttr);
+
+        newInputs.emplace_back(inputReshape);
+    }
+
+    // Update the LSTMGatesOp
+    auto newLSTMGatesOp = rewriter.create<IE::LSTMGatesOp>(origOp.getLoc(), newInputs[0], newInputs[1]);
+
+    // Reshape to original output shape
+    for (const auto& output : origOp.getOutputs() | indexed) {
+        const auto idx = checked_cast<unsigned>(output.index());
+        auto origOutput = output.value();
+        const auto outputShapeAttr = getIntArrayAttr(rewriter.getContext(), getShape(origOutput));
+
+        auto newOutputReshape = rewriter.createOrFold<IE::ReshapeOp>(origOp.getLoc(), newLSTMGatesOp.getOutputs()[idx],
+                                                                     nullptr, false, outputShapeAttr);
+        origOutput.replaceAllUsesWith(newOutputReshape);
+    }
+
+    rewriter.eraseOp(origOp);
+
+    _log.trace("[{0}] Replaced with 'IE::LSTMGatesOp'", getDebugName());
+
+    return mlir::success();
+}
+
+//
 // ConcatConverter
 //
 
@@ -1265,29 +1322,8 @@ mlir::LogicalResult TransposeConverter::matchAndRewrite(IE::TransposeOp origOp, 
     return mlir::success();
 }
 
-//
-// SoftmaxConverter
-//
-
-class SoftmaxConverter final : public mlir::OpConversionPattern<IE::SoftMaxOp> {
-public:
-    SoftmaxConverter(mlir::TypeConverter& typeConverter, mlir::MLIRContext* ctx, Logger log)
-            : mlir::OpConversionPattern<IE::SoftMaxOp>(typeConverter, ctx), _log(log) {
-    }
-
-public:
-    mlir::LogicalResult matchAndRewrite(IE::SoftMaxOp origOp, OpAdaptor newArgs,
-                                        mlir::ConversionPatternRewriter& rewriter) const final;
-
-private:
-    Logger _log;
-};
-
-mlir::LogicalResult SoftmaxConverter::matchAndRewrite(IE::SoftMaxOp origOp, OpAdaptor,
-                                                      mlir::ConversionPatternRewriter& rewriter) const {
-    _log.trace("[{0}] Found IE::Softmax Operation '{1}'", getDebugName(), origOp->getLoc());
-
-    const auto origType = origOp.getInput().getType().cast<vpux::NDTypeInterface>();
+mlir::FailureOr<std::tuple<SmallVector<int64_t>, int64_t>> getNewSoftmaxParam(vpux::NDTypeInterface origType,
+                                                                              int64_t axis) {
     const auto inputShape = origType.getShape().raw();
     // Only support dimension expansion
     if (origType.getRank() >= TARGET_TENSOR_DIM) {
@@ -1302,7 +1338,6 @@ mlir::LogicalResult SoftmaxConverter::matchAndRewrite(IE::SoftMaxOp origOp, OpAd
     // e.g. [32, 10] -> [1, 32, 10, 1]
     //      [1, 51] -> [1, 1, 1, 51]
     //      [1, 32, 10] -> [1, 32, 10, 1]
-    int64_t axis = origOp.getAxisInd();
     if (axis < 0) {
         axis += origType.getRank();
     }
@@ -1346,11 +1381,46 @@ mlir::LogicalResult SoftmaxConverter::matchAndRewrite(IE::SoftMaxOp origOp, OpAd
         }
     }
 
-    const auto newInputShapeAttr = getIntArrayAttr(getContext(), newInputShape);
+    return std::tuple<SmallVector<int64_t>, int64_t>(newInputShape, newAxis);
+}
+
+//
+// SoftmaxConverter
+//
+
+class SoftmaxConverter final : public mlir::OpConversionPattern<IE::SoftMaxOp> {
+public:
+    SoftmaxConverter(mlir::TypeConverter& typeConverter, mlir::MLIRContext* ctx, Logger log)
+            : mlir::OpConversionPattern<IE::SoftMaxOp>(typeConverter, ctx), _log(log) {
+    }
+
+public:
+    mlir::LogicalResult matchAndRewrite(IE::SoftMaxOp origOp, OpAdaptor newArgs,
+                                        mlir::ConversionPatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+mlir::LogicalResult SoftmaxConverter::matchAndRewrite(IE::SoftMaxOp origOp, OpAdaptor,
+                                                      mlir::ConversionPatternRewriter& rewriter) const {
+    _log.trace("[{0}] Found IE::Softmax Operation '{1}'", getDebugName(), origOp->getLoc());
+
+    const auto origType = origOp.getInput().getType().cast<vpux::NDTypeInterface>();
+    int64_t axis = origOp.getAxisInd();
+
+    const auto newSoftmaxParam = getNewSoftmaxParam(origType, axis);
+    if (mlir::failed(newSoftmaxParam)) {
+        _log.trace("Only support dimension expansion");
+        return mlir::failure();
+    }
+    const auto newSoftmaxParamVal = newSoftmaxParam.value();
+    const auto newInputShapeAttr = getIntArrayAttr(getContext(), std::get<0>(newSoftmaxParamVal));
+    const auto axisAttr = getIntAttr(getContext(), std::get<1>(newSoftmaxParamVal));
+
     auto inputReshape = rewriter.createOrFold<IE::ReshapeOp>(origOp->getLoc(), origOp.getInput(), nullptr, false,
                                                              newInputShapeAttr);
 
-    const auto axisAttr = getIntAttr(getContext(), newAxis);
     auto newSoftmaxOp =
             rewriter.create<IE::SoftMaxOp>(origOp->getLoc(), inputReshape, axisAttr, origOp.getPadSizeAttr());
 
@@ -1358,6 +1428,53 @@ mlir::LogicalResult SoftmaxConverter::matchAndRewrite(IE::SoftMaxOp origOp, OpAd
     rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, newSoftmaxOp.getOutput(), nullptr, false, outputShapeAttr);
 
     _log.trace("[{0}] Replaced with 'IE::SoftMaxOp'", getDebugName());
+
+    return mlir::success();
+}
+
+//
+// LogSoftmaxConverter
+//
+
+class LogSoftmaxConverter final : public mlir::OpConversionPattern<IE::LogSoftmaxOp> {
+public:
+    LogSoftmaxConverter(mlir::TypeConverter& typeConverter, mlir::MLIRContext* ctx, Logger log)
+            : mlir::OpConversionPattern<IE::LogSoftmaxOp>(typeConverter, ctx), _log(log) {
+    }
+
+public:
+    mlir::LogicalResult matchAndRewrite(IE::LogSoftmaxOp origOp, OpAdaptor newArgs,
+                                        mlir::ConversionPatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+mlir::LogicalResult LogSoftmaxConverter::matchAndRewrite(IE::LogSoftmaxOp origOp, OpAdaptor,
+                                                         mlir::ConversionPatternRewriter& rewriter) const {
+    _log.trace("[{0}] Found IE::LogSoftmaxOp Operation '{1}'", getDebugName(), origOp->getLoc());
+
+    const auto origType = origOp.getInput().getType().cast<vpux::NDTypeInterface>();
+    int64_t axis = origOp.getAxisInd();
+
+    const auto newSoftmaxParam = getNewSoftmaxParam(origType, axis);
+    if (mlir::failed(newSoftmaxParam)) {
+        _log.trace("Only support dimension expansion");
+        return mlir::failure();
+    }
+    const auto newSoftmaxParamVal = newSoftmaxParam.value();
+    const auto newInputShapeAttr = getIntArrayAttr(getContext(), std::get<0>(newSoftmaxParamVal));
+    const auto axisAttr = getIntAttr(getContext(), std::get<1>(newSoftmaxParamVal));
+
+    auto inputReshape = rewriter.createOrFold<IE::ReshapeOp>(origOp->getLoc(), origOp.getInput(), nullptr, false,
+                                                             newInputShapeAttr);
+
+    auto newSoftmaxOp = rewriter.create<IE::LogSoftmaxOp>(origOp->getLoc(), inputReshape, axisAttr);
+
+    const auto outputShapeAttr = getIntArrayAttr(getContext(), getShape(origOp.getOutput()));
+    rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, newSoftmaxOp.getOutput(), nullptr, false, outputShapeAttr);
+
+    _log.trace("[{0}] Replaced with 'IE::LogSoftmaxOp'", getDebugName());
 
     return mlir::success();
 }
@@ -1745,7 +1862,9 @@ void ConvertShapeTo4DPass::safeRunOnFunc() {
     target.addDynamicallyLegalOp<IE::AbsOp>(isLegalOp);
     target.addDynamicallyLegalOp<IE::AtanOp>(isLegalOp);
     target.addDynamicallyLegalOp<IE::AsinOp>(isLegalOp);
+    target.addDynamicallyLegalOp<IE::LogOp>(isLegalOp);
     target.addDynamicallyLegalOp<IE::AcosOp>(isLegalOp);
+    target.addDynamicallyLegalOp<IE::RoundOp>(isLegalOp);
     target.addDynamicallyLegalOp<IE::PReluOp>(isLegalOp);
     target.addDynamicallyLegalOp<IE::LeakyReluOp>(isLegalOp);
     target.addDynamicallyLegalOp<IE::AddOp>(isLegalEltwiseOp);
@@ -1759,6 +1878,7 @@ void ConvertShapeTo4DPass::safeRunOnFunc() {
     target.addDynamicallyLegalOp<IE::StridedSliceOp>(is4DLegalOp);
     target.addDynamicallyLegalOp<IE::TransposeOp>(isLegalTransposeOp);
     target.addDynamicallyLegalOp<IE::SoftMaxOp>(is4DLegalOp);
+    target.addDynamicallyLegalOp<IE::LogSoftmaxOp>(is4DLegalOp);
     target.addDynamicallyLegalOp<IE::InterpolateOp>(isLegalOp);
     target.addDynamicallyLegalOp<IE::FloorOp>(isLegalOp);
     target.addDynamicallyLegalOp<IE::SquaredDifferenceOp>(isLegalOp);
@@ -1776,6 +1896,7 @@ void ConvertShapeTo4DPass::safeRunOnFunc() {
     target.addDynamicallyLegalOp<IE::ReduceProdOp>(isLegalReduceOp<IE::ReduceProdOp>);
     target.addDynamicallyLegalOp<IE::ReduceSumOp>(isLegalReduceOp<IE::ReduceSumOp>);
     target.addDynamicallyLegalOp<IE::TileOp>(is4DLegalOp);
+    target.addDynamicallyLegalOp<IE::LSTMGatesOp>(is4DLegalOp);
 
     mlir::RewritePatternSet patterns(&ctx);
     patterns.add<GenericConverter<IE::ClampOp>>(typeConverter, &ctx, _log);
@@ -1818,8 +1939,10 @@ void ConvertShapeTo4DPass::safeRunOnFunc() {
     patterns.add<GenericConverter<IE::AbsOp>>(typeConverter, &ctx, _log);
     patterns.add<GenericConverter<IE::AtanOp>>(typeConverter, &ctx, _log);
     patterns.add<GenericConverter<IE::AsinOp>>(typeConverter, &ctx, _log);
+    patterns.add<GenericConverter<IE::LogOp>>(typeConverter, &ctx, _log);
     patterns.add<GenericConverter<IE::AcosOp>>(typeConverter, &ctx, _log);
     patterns.add<GenericConverter<IE::PReluOp>>(typeConverter, &ctx, _log);
+    patterns.add<GenericConverter<IE::RoundOp>>(typeConverter, &ctx, _log);
     patterns.add<GenericConverter<IE::ConvertOp>>(typeConverter, &ctx, _log);
     patterns.add<GenericConverter<IE::LeakyReluOp>>(typeConverter, &ctx, _log);
     patterns.add<GenericConverter<IE::FloorOp>>(typeConverter, &ctx, _log);
@@ -1830,13 +1953,6 @@ void ConvertShapeTo4DPass::safeRunOnFunc() {
     patterns.add<GenericConverter<IE::MatMulOp>>(typeConverter, &ctx, _log);
     patterns.add<GenericConverter<IE::SubtractOp>>(typeConverter, &ctx, _log);
     patterns.add<GenericConverter<IE::SquaredDifferenceOp>>(typeConverter, &ctx, _log);
-
-    auto module = getOperation();
-    const auto arch = VPU::getArch(module);
-    if (arch == VPU::ArchKind::NPU30XX) {
-        target.addDynamicallyLegalOp<IE::GatherOp>(is4DLegalOp);
-        patterns.add<GatherConverter>(typeConverter, &ctx, _log);
-    }
 
     patterns.add<FakeQuantizeConverter>(typeConverter, &ctx, _log);
     patterns.add<TopKOpConverter>(typeConverter, &ctx, _log);
@@ -1854,10 +1970,12 @@ void ConvertShapeTo4DPass::safeRunOnFunc() {
     patterns.add<ConcatConverter>(typeConverter, &ctx, _log);
     patterns.add<TransposeConverter>(typeConverter, &ctx, _log);
     patterns.add<SoftmaxConverter>(typeConverter, &ctx, _log);
+    patterns.add<LogSoftmaxConverter>(typeConverter, &ctx, _log);
     patterns.add<InterpolateConverter>(typeConverter, &ctx, _log);
     patterns.add<AccumulateConverter>(typeConverter, &ctx, _log);
     patterns.add<BroadcastConverter>(typeConverter, &ctx, _log);
     patterns.add<TileConverter>(typeConverter, &ctx, _log);
+    patterns.add<LSTMGatesConverter>(typeConverter, &ctx, _log);
 
     if (mlir::failed(mlir::applyPartialConversion(func, target, std::move(patterns)))) {
         signalPassFailure();

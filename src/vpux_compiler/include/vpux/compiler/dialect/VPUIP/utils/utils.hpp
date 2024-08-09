@@ -25,16 +25,15 @@ namespace VPUIP {
 // Profiling
 //
 
-constexpr uint32_t HW_TIMER_ABSOLUTE_ADDR_30XX = 0x208200BC;
 constexpr uint32_t HW_TIMER_ABSOLUTE_ADDR_37XX = 0x26029000;
 // DMA Profiling consist of 2 32bit timestamps
 constexpr uint16_t HW_DMA_PROFILING_SIZE_BYTES = 8;
 constexpr uint16_t HW_DMA_PROFILING_SIZE_BYTES_40XX = 64;
 constexpr uint32_t HW_DMA_PROFILING_MAX_BUFFER_SIZE = 512;
-// maximal number of profiled DMAs in HWDDR profiling mode - 2^12
-constexpr uint32_t HW_DMA_PROFILING_ID_LIMIT = 4096;
-// DPU Profiling consist of 2 64bit timestamps(start and stop)
-constexpr uint16_t HW_DPU_PROFILING_SIZE_BYTES_30XX = 16;
+// maximal number of profiled DMAs in HWDDR fixed profiling mode - 2^12
+constexpr uint32_t HW_DMA_PROFILING_STATIC_ID_LIMIT = 4096;
+// maximal number of profiled DMAs in HWDDR dynamic profiling mode (lower to avoid big DDR-DDR copies)
+constexpr uint32_t HW_DMA_PROFILING_ID_LIMIT = 64;
 // DPU Profiling for 37XX use MODE0: // 8’h0, odu_tstamp[27:0], odu_wl_duration[27:0], {3’h0,sve_id[4:0]},
 // idu_tstamp[27:0], idu_wl_duration[27:0]
 constexpr uint16_t HW_DPU_PROFILING_SIZE_BYTES_37XX = 16;
@@ -58,8 +57,8 @@ constexpr uint32_t HW_AVAILABLE_CMX_SIZE_4000 = 1024 * 1432;
 
 // SW Kernel reads a few bytes of data for better performance
 // 1024 bytes is safe for 40XX+
-// 256 bytes is safe for 30XX and 37XX due to 4x smaller vector size
-constexpr int64_t MAX_SW_KERNEL_PREFETCH_DATA_SIZE_30XX_37XX = 256;
+// 256 bytes is safe for 37XX due to 4x smaller vector size
+constexpr int64_t MAX_SW_KERNEL_PREFETCH_DATA_SIZE_37XX = 256;
 constexpr int64_t MAX_SW_KERNEL_PREFETCH_DATA_SIZE_40XX = 1024;
 
 // PLL WORKPOINT_CONFIG_MIRROR ADDRESS
@@ -69,12 +68,12 @@ constexpr uint16_t HW_PLL_WORKPOINT_SIZE = 4;
 
 // TODO: E#78647 refactor to use api/vpu_cmx_info_{arch}.h
 const EnumMap<VPU::ArchKind, size_t> firmwareVariantCount = {
-        {VPU::ArchKind::NPU30XX, 512},
         {VPU::ArchKind::NPU37XX, 256},
         {VPU::ArchKind::NPU40XX, 128},
 };
 
 uint16_t getProfWorkloadSize(mlir::ModuleOp module);
+
 //
 // Run-time info
 //
@@ -85,6 +84,15 @@ int64_t getNumTilesUsed(mlir::ModuleOp module);
 int64_t getNumAvailableBarriers(mlir::Operation* parentOp);
 size_t getBarrierMaxVariantCount(mlir::Operation* parentOp);
 size_t getBarrierMaxVariantSum(mlir::Operation* parentOp);
+
+/**
+ * @brief calculate number of slots that can be used by barrier producers or consumers
+ *
+ * @param maxSlotsSum -  Barrier max variant sum
+ * @param maxAvailableSlots -  Barrier max variant count
+ * @return available slots counts
+ */
+size_t getAvailableSlots(size_t maxSlotsSum, size_t maxAvailableSlots);
 int64_t getNumberOfIndependentDmaQueues(mlir::Operation* parentOp);
 
 //
@@ -469,7 +477,7 @@ bool hasDistributedOperand(mlir::Operation* op);
 
 bool isOnlyPadOverIC(Const::ContentAttr content);
 bool canWeightsBeCompressed(VPUIP::NCEClusterTaskOp op);
-bool canTilingWeightsBeCompressed(VPUIP::NCEClusterTilingOp op);
+bool canTilingWeightsBeCompressed(VPUIP::NCEClusterTaskOp op);
 
 // Copy Utilities
 
@@ -493,6 +501,11 @@ int64_t getMaxNumberPlanes(const VPU::ArchKind arch);
 //
 bool isOpOnlySplitOnDim(VPUIP::SubViewOp op, Dim dim);
 Byte getRequiredCMXSize(mlir::Operation* op);
+/// Returns the number of inputs of the func op. This must only be called after
+/// VPU -> VPUIP lowering.
+size_t getNumInputs(mlir::func::FuncOp op);
+/// Returns the number of outputs of the func op.
+size_t getNumOutputs(mlir::func::FuncOp op);
 
 //
 // PermuteAsNNDMA Utility
@@ -652,6 +665,11 @@ VPU::DistributedTensorAttr getDistributedAttrAfterShapeCast(VPU::DistributedType
 //
 
 int64_t getMaximalSWKernelPrefetchDataSize(mlir::ModuleOp module);
+
+// NNDMA split utils
+//
+
+std::pair<int64_t, int64_t> getSplitPartSizes(NDTypeInterface bufferType, vpux::Dim tileDim);
 
 }  // namespace VPUIP
 }  // namespace vpux

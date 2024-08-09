@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+//
+
 #include <numeric>
 
 #include <mlir/Dialect/Quant/QuantTypes.h>
@@ -15,6 +17,7 @@
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
+#include "vpux/compiler/utils/platform_resources.hpp"
 #include "vpux/compiler/utils/types.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
 #include "vpux/hwtest/test_case_json_parser.hpp"
@@ -111,7 +114,8 @@ void buildDWConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp modu
     auto weightData_ddr_type =
             getMemRefType(VPURT::BufferSection::Constant, wt_data_shape_padded, weightsType, DimsOrder::NHWC);
 
-    auto wt_data_vals = generateWeights(wt_data_shape_padded, weightsType, builder.getContext(), weight_file_name);
+    auto wt_data_vals =
+            generateWeights(builder, wt_data_shape_padded, weightsType, builder.getContext(), weight_file_name);
     auto wt_data_attr = Const::ContentAttr::get(wt_data_vals);
     if (auto qty = weightsType.dyn_cast<mlir::quant::QuantizedType>()) {
         wt_data_attr = wt_data_attr.quantCast(qty);
@@ -144,16 +148,19 @@ void buildDWConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp modu
     auto parent_outputcmx =
             createDeclareTensorOp(funcbuilder, outputcmx_type, VPURT::BufferSection::CMX_NN, 0, OUTPUT_CMX_OFFSET);
 
+    auto [waitWLMBarrier, freeBarrierId] =
+            insertWLMStartSequence(funcbuilder, testDesc.getWLMParams().isWLMPartialEnabled);
+
     // barrier config
-    auto barrier0 = funcbuilder.create<VPURT::ConfigureBarrierOp>(loc, 0);
-    auto barrier1 = funcbuilder.create<VPURT::ConfigureBarrierOp>(loc, 1);
+    auto barrier0 = funcbuilder.create<VPURT::ConfigureBarrierOp>(loc, freeBarrierId++);
+    auto barrier1 = funcbuilder.create<VPURT::ConfigureBarrierOp>(loc, freeBarrierId++);
     // finalBarrier passed as production barrier to last DMA task
-    auto barrier2 = funcbuilder.create<VPURT::ConfigureBarrierOp>(loc, 2);
+    auto finalBarrier = funcbuilder.create<VPURT::ConfigureBarrierOp>(loc, freeBarrierId++,
+                                                                      testDesc.getWLMParams().isWLMPartialEnabled);
 
     // DMAs
-    vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(),
-                                                mlir::ValueRange(barrier0.getBarrier()), loc, funcinput,
-                                                inputcmx.getOperation()->getResult(0), 0);
+    vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, waitWLMBarrier, mlir::ValueRange(barrier0.getBarrier()),
+                                                loc, funcinput, inputcmx.getOperation()->getResult(0), 0);
     vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(
             funcbuilder, mlir::ValueRange(), mlir::ValueRange(barrier0.getBarrier()), loc,
             weight_data_ddr.getOperation()->getResult(0), wtData_cmx.getOperation()->getResult(0), 0);
@@ -285,7 +292,7 @@ void buildDWConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp modu
     nceTask.addDPUTask(funcbuilder, start, outEnd, start, inEnd, pad, VPU::MPEMode::CUBOID_8x16);
 
     vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(barrier1.getBarrier()),
-                                                mlir::ValueRange(barrier2.getBarrier()), loc,
+                                                mlir::ValueRange(finalBarrier.getBarrier()), loc,
                                                 outputcmx.getOperation()->getResult(0), funcoutput, 0);
 
     // TODO : return empty as func does not return anything
@@ -293,7 +300,6 @@ void buildDWConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp modu
 
     // set runtime resources
     std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
-
     mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
     auto initCompilerOptions = VPU::InitCompilerOptions(arch, VPU::CompilationMode::DefaultHW);
     initCompilerOptions.numberOfDPUGroups = 1;

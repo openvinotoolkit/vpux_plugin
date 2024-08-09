@@ -95,11 +95,11 @@ mlir::FailureOr<SmallVector<int64_t>> getOutShape(VPU::ReshapeOpAdaptor reshape,
 
 mlir::LogicalResult vpux::VPU::ReshapeOp::inferReturnTypes(mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc,
                                                            mlir::ValueRange operands, mlir::DictionaryAttr attrs,
-                                                           mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+                                                           mlir::OpaqueProperties prop, mlir::RegionRange /*regions*/,
                                                            mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::ReshapeOpAdaptor reshape(operands, attrs);
+    VPU::ReshapeOpAdaptor reshape(operands, attrs, prop);
     if (mlir::failed(reshape.verify(loc))) {
         return mlir::failure();
     }
@@ -138,6 +138,12 @@ mlir::LogicalResult ConvertToShapeCast::matchAndRewrite(VPU::ReshapeOp origOp, m
     auto inputType = origOp.getInput().getType().cast<NDTypeInterface>();
     auto outputType = origOp.getOutput().getType().cast<NDTypeInterface>();
     if (!inputType.getDimsOrder().isIdentity() || inputType.getRank() != outputType.getRank()) {
+        return mlir::failure();
+    }
+
+    auto hasSpecialZero = origOp.getSpecialZero();
+    auto shapeValueAttr = origOp.getShapeValueAttr();
+    if (shapeValueAttr == nullptr || hasSpecialZero) {
         return mlir::failure();
     }
 

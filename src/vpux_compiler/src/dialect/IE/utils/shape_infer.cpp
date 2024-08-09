@@ -177,7 +177,9 @@ mlir::FailureOr<Shape> vpux::IE::getShapeCastExpandedShape(mlir::Operation* oper
         return mlir::failure();
     }
     const auto inputType = operation->getOperand(0).getType().cast<vpux::NDTypeInterface>();
-    const auto sizeToAlign = VPU::NCEInvariant::getAlignment(inputType.getElementType());
+    const auto outputType = operation->getResult(0).getType().cast<vpux::NDTypeInterface>();
+    const auto sizeToAlign = std::max(VPU::NCEInvariant::getAlignment(inputType.getElementType()),
+                                      VPU::NCEInvariant::getAlignment(outputType.getElementType()));
     const auto totalSize = unExpandedShape.totalSize();
 
     auto newExpandedShape = Shape(expandedShape.size(), 1);
@@ -188,7 +190,7 @@ mlir::FailureOr<Shape> vpux::IE::getShapeCastExpandedShape(mlir::Operation* oper
         dimsToAlign.insert(Dims4D::Act::C.ind());
     }
     auto inOrder = inputType.getDimsOrder();
-    auto outOrder = operation->getResult(0).getType().cast<vpux::NDTypeInterface>().getDimsOrder();
+    auto outOrder = outputType.getDimsOrder();
     if (inOrder == DimsOrder::NHWC && outOrder == DimsOrder::NCHW &&
         (unExpandedShape[Dims4D::Act::W] % sizeToAlign == 0)) {
         // if the original width dimension needs to align and is already aligned, keep it
@@ -257,38 +259,32 @@ mlir::FailureOr<Shape> vpux::IE::getShapeCastExpandedShapeInDimC(mlir::Operation
 
 mlir::FailureOr<Shape> vpux::IE::getShapeCastExpandedShapeKeepDimC(mlir::Operation* operation, ShapeRef originShape,
                                                                    Logger log) {
-    if (originShape.empty()) {
-        return mlir::failure();
-    }
     const auto inputType = operation->getOperand(0).getType().cast<vpux::NDTypeInterface>();
     const auto sizeToAlign = VPU::NCEInvariant::getAlignment(inputType.getElementType());
     auto channelSize = originShape[Dims4D::Act::C];
-    auto hwSize = originShape[Dims4D::Act::H] * originShape[Dims4D::Act::W];
-    auto factor = sizeToAlign / channelSize;
-    if (!factor) {
-        return mlir::failure();
-    }
-    int64_t remainingSize;
-    int64_t newChannelSize;
-    if (((sizeToAlign % channelSize) == 0) && ((hwSize % factor) == 0)) {
-        newChannelSize = sizeToAlign;
-        remainingSize = hwSize / factor;
-    } else if ((hwSize % sizeToAlign) == 0) {
-        newChannelSize = channelSize * sizeToAlign;
-        remainingSize = hwSize / sizeToAlign;
-    } else {
-        return mlir::failure();
+
+    // Least Common Multiple
+    auto newChannelSize = std::lcm(channelSize, sizeToAlign);
+
+    auto totalSize = inputType.getShape().totalSize();
+    auto wcSize = originShape[Dims4D::Act::W] * channelSize;
+    // If it's enough to adjust aligned channel just borrowing from weight,
+    // we don't need to change the shape size of height
+    if (wcSize % newChannelSize == 0) {
+        return Shape(
+                {originShape[Dims4D::Act::N], newChannelSize, originShape[Dims4D::Act::H], wcSize / newChannelSize});
+    } else if (totalSize % newChannelSize == 0) {
+        auto factors = getFactors(totalSize / newChannelSize, 2);
+        if (mlir::failed(factors)) {
+            log.trace("Input shape is not divisible to align for op {0} at {1}", operation->getName(),
+                      operation->getLoc());
+            return mlir::failure();
+        }
+        auto hwShape = factors.value();
+        return Shape({originShape[Dims4D::Act::N], newChannelSize, hwShape[0], hwShape[1]});
     }
 
-    auto factors = getFactors(remainingSize, 2);  // Except DimC and DimN
-    if (mlir::failed(factors)) {
-        log.trace("Input shape is not divisible to align for op {0} at {1}", operation->getName(), operation->getLoc());
-        return mlir::failure();
-    }
-
-    auto hwShape = factors.value();
-    Shape newExpandedShape = {originShape[Dims4D::Act::N], newChannelSize, hwShape[0], hwShape[1]};
-    return newExpandedShape;
+    return mlir::failure();
 }
 
 //  Handle the total size can't divisible by the required alignment case.
@@ -397,6 +393,16 @@ bool vpux::IE::isODUPermuteEffectiveForShape(const ShapeRef shape, const int64_t
     // In this case, when isShapeCompatibleWithODUPermute fails, it's not because of the alignment.
     const int64_t neutralAlignment = 1;
     if (!isShapeCompatibleWithODUPermute(shape, neutralAlignment)) {
+        return false;
+    }
+
+    // E116504: NCEPermute's multi-cluster strategy is manually set as SOK on VPUX40XX which
+    // introduces performance issue when dim of H/W is greater than VPU_DIMENSION_LIMIT(8192).
+    // Add checking to avoid converting to PermuteQuantize if dims are out of limits.
+    bool isOutOfDimLimits = std::any_of(shape.begin(), shape.end(), [](const auto& dim) {
+        return dim > VPU::NCEInvariant::VPU_DIMENSION_LIMIT;
+    });
+    if (isOutOfDimLimits) {
         return false;
     }
 

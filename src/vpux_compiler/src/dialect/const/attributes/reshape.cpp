@@ -76,6 +76,10 @@ vpux::NDTypeInterface vpux::Const::ReshapeAttr::inferOutputType(vpux::NDTypeInte
     return input.changeShape(ShapeRef(newShape));
 }
 
+bool vpux::Const::ReshapeAttr::inferOutputSplat(bool inputIsSplat, vpux::NDTypeInterface) {
+    return inputIsSplat;
+}
+
 //
 // ReshapeAttr::transform
 //

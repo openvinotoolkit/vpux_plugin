@@ -4,9 +4,12 @@
 //
 
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
+#include "vpux/compiler/dialect/VPU/IR/native_attributes/distributed_tensor_native.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/IR/types.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
+
+#include "vpux/compiler/interfaces_registry.hpp"
 
 #include "common/utils.hpp"
 
@@ -50,14 +53,19 @@ void testExplicitDistributedAttr(llvm::StringLiteral inputIR, vpux::VPU::Distrib
                 const auto perClusterComputeShapes = VPU::getPerClusterComputeShapes(shape, tempDistribution);
                 const auto perClusterComputeOffsets = VPU::getPerClusterComputeShapeOffsets(shape, tempDistribution);
 
-                overlapParams.memoryShapes = vpux::getIntArrayOfArray(ctx, perClusterMemoryShapes);
-                overlapParams.memoryOffsets = vpux::getIntArrayOfArray(ctx, perClusterMemoryOffsets);
-                overlapParams.computeShapes = vpux::getIntArrayOfArray(ctx, perClusterComputeShapes);
-                overlapParams.computeOffsets = vpux::getIntArrayOfArray(ctx, perClusterComputeOffsets);
+                overlapParams.setMemoryShapes(VPU::arrayOfArrayFromShape(perClusterMemoryShapes));
+                overlapParams.setMemoryOffsets(VPU::arrayOfArrayFromShape(perClusterMemoryOffsets));
+                overlapParams.setComputeShapes(VPU::arrayOfArrayFromShape(perClusterComputeShapes));
+                overlapParams.setComputeOffsets(VPU::arrayOfArrayFromShape(perClusterComputeOffsets));
             }
 
-            auto distributedAttr = clusterOp.getExplicitDistributedTensorAttr(
-                    shape, mode, numTiles, numClusters, alignment, uniformDistributedSeg, overlapParams);
+            auto numTilesArr = numTiles ? parseIntArrayAttr<int64_t>(numTiles) : SmallVector<int64_t>{};
+            auto alignmentArr = alignment ? parseIntArrayAttr<int64_t>(alignment) : SmallVector<int64_t>{};
+
+            auto distributedAttr = VPU::DistributedTensorNative::getAttrFromClass(
+                    ctx, clusterOp.getExplicitDistributedTensorAttr(shape, mode, numTilesArr, numClusters.getInt(),
+                                                                    alignmentArr, uniformDistributedSeg ? true : false,
+                                                                    overlapParams));
 
             ASSERT_EQ(distributedAttr.getMemoryShapes(), expectedDistributedAttr.getMemoryShapes());
             ASSERT_EQ(distributedAttr.getMemoryOffsets(), expectedDistributedAttr.getMemoryOffsets());
@@ -67,7 +75,7 @@ void testExplicitDistributedAttr(llvm::StringLiteral inputIR, vpux::VPU::Distrib
     }
 }
 
-using MLIR_GetExplicitDistributedTensorAttrTest = MLIR_UnitBase;
+using MLIR_GetExplicitDistributedTensorAttrTest = vpux::VPU::arch37xx::UnitTest;
 
 TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, SWOp) {
     constexpr llvm::StringLiteral inputIR = R"(
@@ -82,7 +90,7 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, SWOp) {
                     shape_calc_mode = <SIZES>>, axes_attr = [2, 3],
                     initial_input_dims_attr = [1, 1, 96, 160],
                     initial_output_dims_attr = [1, 1, 192, 320],
-                    operandSegmentSizes = array<i32: 1, 0, 0, 0>,
+                    operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0>,
                     scales_attr = [2.000000e+00, 2.000000e+00],
                     sizes_attr = [192, 320],
                     tile_offset_attr = [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00]}
@@ -91,8 +99,6 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, SWOp) {
             }
         }
     )";
-    mlir::MLIRContext ctx(registry);
-    ctx.loadDialect<VPU::VPUDialect>();
     vpux::Shape outputShape = {1, 1, 192, 320};
     vpux::Shape inputShape = {1, 1, 96, 160};
 
@@ -167,8 +173,7 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, HWOp) {
             }
         }
     )";
-    mlir::MLIRContext ctx(registry);
-    ctx.loadDialect<VPU::VPUDialect>();
+
     vpux::Shape shape = {1, 32, 112, 112};
 
     const auto numTiles = getIntArrayAttr(&ctx, SmallVector<int64_t>({1, 1, 2, 1}));
@@ -268,7 +273,7 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, SparseHWSOKOp) {
             sparsity_map=tensor<1x256x28x28xi1, {order = #NHWC}>>
         module @test {
             func.func @main(%arg0: tensor<1x512x28x28xf16, {order = #NHWC}>) -> !SparseOutputType {
-                %weights = const.Declare tensor<256x512x1x1xf16> = dense<10.0> : tensor<256x512x1x1xf16>
+                %weights = const.Declare tensor<256x512x1x1xf16, {order = #NHWC}> = dense<10.0> : tensor<256x512x1x1xf16, {order = #NHWC}>
                 %wtable = const.Declare tensor<256x1x1x4xsi32> = dense<10> : tensor<256x1x1x4xsi32>
                 %0 = VPU.NCE.Convolution(%arg0, %weights, %wtable) {
                         pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
@@ -282,8 +287,6 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, SparseHWSOKOp) {
             }
         }
     )";
-    mlir::MLIRContext ctx(registry);
-    ctx.loadDialect<VPU::VPUDialect>();
     vpux::Shape shape = {1, 256, 28, 28};
 
     const auto numTiles = getIntArrayAttr(&ctx, SmallVector<int64_t>({1, 6, 1, 1}));
@@ -367,8 +370,6 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, NCEPermuteOp) {
             }
         }
     )";
-    mlir::MLIRContext ctx(registry);
-    ctx.loadDialect<VPU::VPUDialect>();
     vpux::Shape shape = {1, 4, 224, 224};
 
     const auto numTiles = getIntArrayAttr(&ctx, SmallVector<int64_t>({1, 1, 2, 1}));
@@ -479,8 +480,6 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, ConcatOp) {
             }
         }
     )";
-    mlir::MLIRContext ctx(registry);
-    ctx.loadDialect<VPU::VPUDialect>();
     vpux::Shape shape = {1, 96, 32, 32};
 
     const auto numTiles = getIntArrayAttr(&ctx, SmallVector<int64_t>({1, 1, 2, 1}));

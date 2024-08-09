@@ -115,35 +115,30 @@ public:
                                     std::optional<int64_t> sparsityMapOffset = std::nullopt,
                                     std::optional<int64_t> storageElementOffset = std::nullopt,
                                     std::optional<int64_t> storageElementSize = std::nullopt,
-                                    std::optional<int64_t> swizzlingKey = std::nullopt,
-                                    std::optional<uint64_t> descriptor = std::nullopt);
+                                    std::optional<int64_t> swizzlingKey = std::nullopt);
     TensorReference createTensorRef(StringRef name, vpux::NDTypeInterface type, VPURT::BufferSection section,
                                     ArrayRef<int64_t> sectionIndex, int64_t byteOffset,
                                     std::optional<int64_t> sparsityMapOffset = std::nullopt,
                                     std::optional<int64_t> storageElementOffset = std::nullopt,
                                     std::optional<int64_t> storageElementSize = std::nullopt,
-                                    std::optional<int64_t> swizzlingKey = std::nullopt,
-                                    std::optional<uint64_t> descriptor = std::nullopt);
+                                    std::optional<int64_t> swizzlingKey = std::nullopt);
     TensorReference createTensorRef(StringRef name, vpux::NDTypeInterface type, VPURT::BufferSection section,
                                     int64_t sectionIndex, int64_t byteOffset,
                                     std::optional<int64_t> sparsityMapOffset = std::nullopt,
                                     std::optional<int64_t> storageElementOffset = std::nullopt,
                                     std::optional<int64_t> storageElementSize = std::nullopt,
-                                    std::optional<int64_t> swizzlingKey = std::nullopt,
-                                    std::optional<uint64_t> descriptor = std::nullopt);
+                                    std::optional<int64_t> swizzlingKey = std::nullopt);
     TensorReference createTensorRef(mlir::Value val, StringRef name, VPURT::BufferSection section,
                                     ArrayRef<int64_t> sectionIndex, int64_t byteOffset,
                                     std::optional<int64_t> sparsityMapOffset = std::nullopt,
                                     std::optional<int64_t> storageElementOffset = std::nullopt,
                                     std::optional<int64_t> storageElementSize = std::nullopt,
-                                    std::optional<int64_t> swizzlingKey = std::nullopt,
-                                    std::optional<uint64_t> descriptor = std::nullopt);
+                                    std::optional<int64_t> swizzlingKey = std::nullopt);
     TensorReference createTensorRef(mlir::Value val, StringRef name, VPURT::BufferSection section, int64_t sectionIndex,
                                     int64_t byteOffset, std::optional<int64_t> sparsityMapOffset = std::nullopt,
                                     std::optional<int64_t> storageElementOffset = std::nullopt,
                                     std::optional<int64_t> storageElementSize = std::nullopt,
-                                    std::optional<int64_t> swizzlingKey = std::nullopt,
-                                    std::optional<uint64_t> descriptor = std::nullopt);
+                                    std::optional<int64_t> swizzlingKey = std::nullopt);
     TensorReference getTensorRef(mlir::Value val) const;
     const DMADescriptorReference getDepthToSpaceNNDMADescriptorReference(mlir::Operation* op) const;
     const DMADescriptorReference getSpaceToDepthNNDMADescriptorReference(mlir::Operation* op) const;

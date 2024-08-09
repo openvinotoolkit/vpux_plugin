@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --init-compiler="vpu-arch=%arch%" --initial-transformations="convert-fc-to-conv=true" %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 // CHECK-LABEL: @TransformPassesWithFC
 func.func @TransformPassesWithFC(%arg0: tensor<1x16xf32>) -> tensor<1x64xf32> {
@@ -38,8 +38,8 @@ func.func @MatMul4dInputsTo2d(%arg0: tensor<1x2x1x512xf32>) -> tensor<1x2x1x40xf
 
     return %0 : tensor<1x2x1x40xf32>
 
-    // CHECK-DAG:      [[CST_0:%.*]] = const.Declare tensor<40x512xf32> = dense<1.000000e+00> : tensor<1x2x512x40xf32>, [#const.SubView<[0, 1, 0, 0], [1, 1, 512, 40]>, #const.Reshape<[512, 40]>, #const.Transpose<#CN>]
-    // CHECK-DAG:      [[CST_1:%.*]] = const.Declare tensor<40x512xf32> = dense<1.000000e+00> : tensor<1x2x512x40xf32>, [#const.SubView<[0, 0, 0, 0], [1, 1, 512, 40]>, #const.Reshape<[512, 40]>, #const.Transpose<#CN>]
+    // CHECK-DAG:      [[CST_0:%.*]] = const.Declare tensor<40x512xf32> = dense<1.000000e+00>
+    // CHECK-DAG:      [[CST_1:%.*]] = const.Declare tensor<40x512xf32> = dense<1.000000e+00>
     // CHECK:          [[IN_1:%.*]] = IE.Slice %arg0 [0, 0, 0, 0] [1, 1, 1, 512] : tensor<1x2x1x512xf32> to tensor<1x1x1x512xf32>
     // CHECK:          [[IN_1_2D:%.*]] = IE.AffineReshape([[IN_1]])
     // CHECK-SAME{LITERAL}: {dim_mapping = [[0], [0], [0], [1]], shape_value = [1, 512]} : tensor<1x1x1x512xf32> -> tensor<1x512xf32>

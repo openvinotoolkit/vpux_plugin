@@ -15,8 +15,9 @@ mlir::LogicalResult ViewTaskRangeRewriter::symbolize(VPURegMapped::ViewTaskRange
     return mlir::success();
 }
 
-mlir::FlatSymbolRefAttr ViewTaskRangeRewriter::getSymbolicName(VPURegMapped::ViewTaskRangeOp op, size_t) {
-    return findSym(op.getFirst());
+llvm::SmallVector<mlir::FlatSymbolRefAttr> ViewTaskRangeRewriter::getSymbolicNames(VPURegMapped::ViewTaskRangeOp op,
+                                                                                   size_t) {
+    return {findSym(op.getFirst())};
 }
 
 }  // namespace vpumi40xx2vpuasm

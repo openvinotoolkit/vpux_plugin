@@ -6,6 +6,7 @@
 #pragma once
 
 #include <mlir/IR/Attributes.h>
+#include <mlir/IR/Operation.h>
 #include <mlir/IR/Types.h>
 
 #include <functional>
@@ -27,3 +28,10 @@ struct hash<mlir::Type> final {
 };
 
 }  // namespace std
+
+namespace vpux {
+
+// Hash operation based upon their operation name, attributes, operand types and result types.
+llvm::hash_code hashOperation(mlir::Operation* op);
+
+}  // namespace vpux

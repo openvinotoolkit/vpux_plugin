@@ -109,12 +109,17 @@ vpux::NDTypeInterface vpux::Const::SparsifyAttr::inferOutputType(vpux::NDTypeInt
     return inputType;
 }
 
+bool vpux::Const::SparsifyAttr::inferOutputSplat(bool, vpux::NDTypeInterface) {
+    return false;
+}
+
 namespace {
 
 template <typename StorageType>
 Const::Content sparsify(const Const::Content& content, int64_t sparsifyValue, NDTypeInterface inputType,
                         NDTypeInterface outputType) {
-    auto output = Const::Content::allocTempBuffer(outputType, outputType.getElementType(), false);
+    auto output = Const::Content::allocTempBuffer(outputType, outputType.getElementType(),
+                                                  Const::SparsifyAttr::inferOutputSplat(content.isSplat(), inputType));
     output.fillWithZero();
     auto outBuf = output.getRawTempBuf();
     auto outBlobPtr = reinterpret_cast<StorageType*>(outBuf.data());
@@ -180,6 +185,10 @@ Const::Content Const::SparsifyAttr::transform(Const::Content& input) const {
         return sparsify<vpux::type::bfloat16>(input, sparsifyValue, inputType, outputType);
     } else if (inputElementType.isF32()) {
         return sparsify<float>(input, sparsifyValue, inputType, outputType);
+    } else if (inputElementType.isFloat8E5M2()) {
+        return sparsify<vpux::type::float8_e5m2>(input, sparsifyValue, inputType, outputType);
+    } else if (inputElementType.isFloat8E4M3FN()) {
+        return sparsify<vpux::type::float8_e4m3>(input, sparsifyValue, inputType, outputType);
     }
     VPUX_THROW("Unexpected weights data type: {0}", inputElementType);
 }

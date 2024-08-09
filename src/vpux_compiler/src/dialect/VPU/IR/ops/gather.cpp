@@ -5,6 +5,7 @@
 
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 
+#include "vpux/compiler/dialect/VPU/utils/gather_dma_utils.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/utils/error.hpp"
 
@@ -21,11 +22,11 @@ mlir::FailureOr<int64_t> extractAxis(mlir::Location loc, VPU::GatherOpAdaptor ga
             return errorAt(loc, "Only constant input is supported for axis");
         }
 
-        const auto axisContent = axisConst.getContent();
-        if (!axisContent.isSplat()) {
+        if (const auto attr = axisConst.getContentAttr(); !attr.isSplat()) {
             return errorAt(loc, "Axis value must be a scalar");
         }
 
+        const auto axisContent = axisConst.getContent();
         int64_t axisInd = axisContent.getSplatValue<int64_t>();
 
         if (axisInd < 0) {
@@ -47,11 +48,11 @@ mlir::FailureOr<int64_t> extractAxis(mlir::Location loc, VPU::GatherOpAdaptor ga
 
 mlir::LogicalResult vpux::VPU::GatherOp::inferReturnTypes(mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc,
                                                           mlir::ValueRange operands, mlir::DictionaryAttr attrs,
-                                                          mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+                                                          mlir::OpaqueProperties prop, mlir::RegionRange /*regions*/,
                                                           mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::GatherOpAdaptor gather(operands, attrs);
+    VPU::GatherOpAdaptor gather(operands, attrs, prop);
     if (mlir::failed(gather.verify(loc))) {
         return mlir::failure();
     }
@@ -110,8 +111,8 @@ vpux::InputTiling vpux::VPU::GatherOp::backInferTileInfo(const vpux::TileInfo& o
     if (getAxis() != nullptr) {
         auto axisConst = getAxis().getDefiningOp<Const::DeclareOp>();
         VPUX_THROW_UNLESS(axisConst != nullptr, "Only constant input is supported for axis");
+        VPUX_THROW_UNLESS(axisConst.getContentAttr().isSplat(), "Axis value must be a scalar");
         const auto axisContent = axisConst.getContent();
-        VPUX_THROW_UNLESS(axisContent.isSplat(), "Axis value must be a scalar");
         axisValue = axisContent.getSplatValue<int64_t>();
         hasAxisTensor = true;
     }
@@ -140,25 +141,13 @@ mlir::FailureOr<OutputTiling> vpux::VPU::GatherOp::getTilingStrategy(TilingMode 
     if (getAxis() != nullptr) {
         auto axisConst = getAxis().getDefiningOp<Const::DeclareOp>();
         VPUX_THROW_UNLESS(axisConst != nullptr, "Only constant input is supported for axis");
+        VPUX_THROW_UNLESS(axisConst.getContentAttr().isSplat(), "Axis value must be a scalar");
         const auto axisContent = axisConst.getContent();
-        VPUX_THROW_UNLESS(axisContent.isSplat(), "Axis value must be a scalar");
         axisValue = axisContent.getSplatValue<int64_t>();
     }
 
-    auto tilingInfo = mlir::dyn_cast<VPU::TilingInfoOpInterface>(baseOp);
-    VPUX_THROW_WHEN(tilingInfo == nullptr, "Operation '{0}' doesn't implement TilingInfoOpInterface",
-                    baseOp->getName());
     const auto outputType = baseOp->getResult(0).getType().cast<vpux::NDTypeInterface>();
     const auto outputShape = outputType.getShape();
-    Shape nTilesOnDimforGather(outputShape.size(), 1);
-    const auto isSupportedTileSize = [baseOp, &tilingInfo, outputShape, log](ShapeRef nTilesOnDim,
-                                                                             TilingMode tilingMode) -> bool {
-        const auto tiles = fillDividedTiles(baseOp, nTilesOnDim, outputShape);
-        if (mlir::failed(tiles)) {
-            return false;
-        }
-        return tilingInfo.isSupportedTiling(tiles.value(), tilingMode, log);
-    };
 
     int64_t batchDims = 0;
     if (getBatchDimsAttr() != nullptr) {
@@ -198,15 +187,8 @@ mlir::FailureOr<OutputTiling> vpux::VPU::GatherOp::getTilingStrategy(TilingMode 
         tileDimOrder.insert(tileDimOrder.end(), dataBeforeAxisRange.begin(), dataBeforeAxisRange.end());
         tileDimOrder.insert(tileDimOrder.end(), dataAfterAxisRange.begin(), dataAfterAxisRange.end());
     }
-    auto tileDimIter = tileDimOrder.begin();
-    auto dimToTile = *tileDimIter;
-    while (tileDimIter < tileDimOrder.end() && !isSupportedTileSize(nTilesOnDimforGather, tilingMode)) {
-        if (nTilesOnDimforGather[Dim(dimToTile)] >= outputShape[Dim(dimToTile)]) {
-            dimToTile = *(++tileDimIter);
-        } else {
-            ++nTilesOnDimforGather[Dim(dimToTile)];
-        }
-    }
+
+    auto nTilesOnDimforGather = getSupportedNTilesOnDimforGather(tileDimOrder, baseOp, tilingMode, log);
 
     log.trace("Isolated tiling strategy: {0}", nTilesOnDimforGather);
     return fillDividedTiles(baseOp, nTilesOnDimforGather, outputShape);

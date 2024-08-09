@@ -1,13 +1,13 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --convert-subtract-to-add --canonicalize %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX
+// REQUIRES: arch-NPU37XX
 
-// CHECK-LABEL: @SubtractWithConstInputsDiffShapes
-func.func @SubtractWithConstInputsDiffShapes(%arg0: tensor<1x16x32x1xf32>) -> tensor<1x16x32x1xf32> {
+// CHECK-LABEL: @SubtractWithConstAtSecondInputDiffShapes
+func.func @SubtractWithConstAtSecondInputDiffShapes(%arg0: tensor<1x16x32x1xf32>) -> tensor<1x16x32x1xf32> {
     %cst = const.Declare tensor<1x16x1x1xf32> = dense<2.0> : tensor<1x16x1x1xf32>
     %0 = IE.Subtract(%arg0, %cst)
         { auto_broadcast = #IE.auto_broadcast_type<NUMPY> } :
@@ -18,6 +18,26 @@ func.func @SubtractWithConstInputsDiffShapes(%arg0: tensor<1x16x32x1xf32>) -> te
     // CHECK-DAG:       [[CST1:%.*]] = const.Declare tensor<1x16x1x1xf32> = dense<2.000000e+00> : tensor<1x16x1x1xf32>
     // CHECK-SAME:      #const.Rescale<-1.000000e+00 : f64>
     // CHECK:       [[ADD:%.*]] = IE.Add(%arg0, [[CST1]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x16x32x1xf32>, tensor<1x16x1x1xf32> -> tensor<1x16x32x1xf32>
+    // CHECK:       return [[ADD]]
+}
+
+// -----
+
+// CHECK-LABEL: @SubtractWithConstAtFirstInputDiffShapes
+func.func @SubtractWithConstAtFirstInputDiffShapes(%arg0: tensor<1x16x32x32xf32>) -> tensor<1x16x32x32xf32> {
+    %cst = const.Declare tensor<1x1x1x1xf32> = dense<2.0> : tensor<1x1x1x1xf32>
+    %0 = IE.Subtract(%cst, %arg0)
+        { auto_broadcast = #IE.auto_broadcast_type<NUMPY> } :
+        tensor<1x1x1x1xf32>, tensor<1x16x32x32xf32> -> tensor<1x16x32x32xf32>
+
+    return %0 : tensor<1x16x32x32xf32>
+
+    // CHECK-DAG:   [[CST:%.*]] = const.Declare tensor<1x16x32x32xf32> = dense<2.000000e+00> : tensor<1x1x1x1xf32>
+    // CHECK-SAME:      #const.Broadcast<1 : i64, 16 : i64>, #const.Broadcast<2 : i64, 32 : i64>, #const.Broadcast<3 : i64, 32 : i64>
+    // CHECK-DAG:   [[CST_0:%.*]] = const.Declare tensor<16x1x1x1xf32> = dense<-1.000000e+00> : tensor<16x1x1x1xf32>
+    // CHECK:       [[CONV:%.*]] = IE.GroupConvolution(%arg0, [[CST_0]]) {
+    // CHECK-SAME:      dilations = [1, 1], groups = 16 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x16x32x32xf32>, tensor<16x1x1x1xf32> -> tensor<1x16x32x32xf32>
+    // CHECK:       [[ADD:%.*]] = IE.Add([[CONV]], [[CST]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x16x32x32xf32>, tensor<1x16x32x32xf32> -> tensor<1x16x32x32xf32>
     // CHECK:       return [[ADD]]
 }
 
@@ -40,8 +60,8 @@ func.func @SubtractWithConstInputsSameShapes(%arg0: tensor<1x16x32x1xf32>) -> te
 
 // -----
 
-// CHECK-LABEL: @SubtractWithActivationInputDiffShapes
-func.func @SubtractWithActivationInputDiffShapes(%arg0: tensor<1x16x32x1xf32>) -> tensor<1x16x32x1xf32> {
+// CHECK-LABEL: @NotConvertSubtractWithInputNeedsBroadcast
+func.func @NotConvertSubtractWithInputNeedsBroadcast(%arg0: tensor<1x16x32x1xf32>) -> tensor<1x16x32x1xf32> {
     %cst = const.Declare tensor<1x16x1x1xf32> = dense<2.0> : tensor<1x16x1x1xf32>
     %input_2 = IE.ReLU(%cst) : tensor<1x16x1x1xf32> -> tensor<1x16x1x1xf32>
     %0 = IE.Subtract(%arg0, %input_2)
@@ -50,17 +70,9 @@ func.func @SubtractWithActivationInputDiffShapes(%arg0: tensor<1x16x32x1xf32>) -
 
     return %0 : tensor<1x16x32x1xf32>
 
-    // CHECK-DAG:       [[CST1:%.*]] = const.Declare tensor<16x1x1x1xf32> = dense<-1.000000e+00> : tensor<16x1x1x1xf32>
-    // CHECK-DAG:       [[TARGET_SHAPE:%.*]] = const.Declare tensor<4xsi64> = dense<[1, 16, 32, 1]> : tensor<4xsi64>, [#const.ConvertElemType<si32>]
-    // CHECK-DAG:       [[CST2:%.*]] = const.Declare tensor<1x16x1x1xf32> = dense<2.000000e+00> : tensor<1x16x1x1xf32>
-    // CHECK:       [[RELU:%.*]] = IE.ReLU([[CST2]]) : tensor<1x16x1x1xf32> -> tensor<1x16x1x1xf32>
-    // CHECK:       [[GROUP_CONV:%.*]] = IE.GroupConvolution([[RELU]], [[CST1]])
-    // CHECK-SAME:      {dilations = [1, 1], groups = 16 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]}
-    // CHECK-SAME:      tensor<1x16x1x1xf32>, tensor<16x1x1x1xf32> -> tensor<1x16x1x1xf32>
-    // CHECK:       [[BROADCAST:%.*]] = IE.Broadcast([[GROUP_CONV]], [[TARGET_SHAPE]])
-    // CHECK-SAME:      {mode = #IE.broadcast_type<NUMPY>} : tensor<1x16x1x1xf32>, tensor<4xsi64> -> tensor<1x16x32x1xf32>
-    // CHECK:       [[ADD:%.*]] = IE.Add(%arg0, [[BROADCAST]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x16x32x1xf32>, tensor<1x16x32x1xf32> -> tensor<1x16x32x1xf32>
-    // CHECK:       return [[ADD]]
+    // CHECK-DAG:   [[CST:%.*]] = const.Declare tensor<1x16x1x1xf32> = dense<2.000000e+00> : tensor<1x16x1x1xf32>
+    // CHECK:       [[RELU:%.*]] = IE.ReLU([[CST]]) : tensor<1x16x1x1xf32> -> tensor<1x16x1x1xf32>
+    // CHECK:       [[SUBTRACT:%.*]] = IE.Subtract(%arg0, [[RELU]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x16x32x1xf32>, tensor<1x16x1x1xf32> -> tensor<1x16x32x1xf32>
 }
 
 // -----
@@ -149,8 +161,8 @@ func.func @SubtractWithFQConstInputsDiffShape(%arg0: tensor<1x16x32x1xf16>) -> t
 
 // -----
 
-// CHECK-LABEL: @SubtractWithFQActInputsDiffShape
-func.func @SubtractWithFQActInputsDiffShape(%arg0: tensor<1x16x32x1xf16>) -> tensor<1x16x32x1xf16> {
+// CHECK-LABEL: @NotConvertSubtractWithFQActInputNeedsBroadcast
+func.func @NotConvertSubtractWithFQActInputNeedsBroadcast(%arg0: tensor<1x16x32x1xf16>) -> tensor<1x16x32x1xf16> {
     %cst = const.Declare tensor<1x1x32x1xf16> = dense<5.000000e+00> : tensor<1x1x32x1xf16>
     %act_1 = IE.ReLU(%arg0) : tensor<1x16x32x1xf16> -> tensor<1x16x32x1xf16>
     %act_2 = IE.ReLU(%cst) : tensor<1x1x32x1xf16> -> tensor<1x1x32x1xf16>
@@ -163,33 +175,15 @@ func.func @SubtractWithFQActInputsDiffShape(%arg0: tensor<1x16x32x1xf16>) -> ten
 
     return %3 : tensor<1x16x32x1xf16>
 
-    // CHECK-DAG:       [[FILTER:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<-1.000000e+00> : tensor<1x1x1x1xf16>
-    // CHECK-DAG:       [[FQ_MIN_VAL_NEGATED:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<-4.574580e-02> : tensor<1x1x1x1xf16>
-    // CHECK-DAG:       [[FQ_MAX_VAL_2_NEGATED:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<0.000000e+00> : tensor<1x1x1x1xf16>
-    // CHECK-DAG:       [[TARGET_SHAPE:%.*]] = const.Declare tensor<4xsi64> = dense<[1, 16, 32, 1]> : tensor<4xsi64>, [#const.ConvertElemType<si32>]
-    // CHECK-DAG:       [[FQ_MAX_VAL_2:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<4.574580e-02> : tensor<1x1x1x1xf16>
-    // CHECK-DAG:       [[FQ_MAX_VAL_1:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<3.862300e-01> : tensor<1x1x1x1xf16>
-    // CHECK-DAG:       [[RELU_1_INPUT:%.*]] = const.Declare tensor<1x1x32x1xf16> = dense<5.000000e+00> : tensor<1x1x32x1xf16>
+    // CHECK-DAG:       [[CST_0:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<4.574580e-02> : tensor<1x1x1x1xf16>
+    // CHECK-DAG:       [[CST_1:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<3.862300e-01> : tensor<1x1x1x1xf16>
+    // CHECK-DAG:       [[CST_2:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<0.000000e+00> : tensor<1x1x1x1xf16>
+    // CHECK-DAG:       [[CST_3:%.*]] = const.Declare tensor<1x1x32x1xf16> = dense<5.000000e+00> : tensor<1x1x32x1xf16>
     // CHECK-DAG:       [[RELU_0:%.*]] = IE.ReLU(%arg0) : tensor<1x16x32x1xf16> -> tensor<1x16x32x1xf16>
-    // CHECK-DAG:       [[RELU_1:%.*]] = IE.ReLU([[RELU_1_INPUT]]) : tensor<1x1x32x1xf16> -> tensor<1x1x32x1xf16>
-    // CHECK:           [[ADD_INPUT_1:%.*]] = IE.FakeQuantize([[RELU_0]], [[FQ_MAX_VAL_2_NEGATED]], [[FQ_MAX_VAL_1]], [[FQ_MAX_VAL_2_NEGATED]], [[FQ_MAX_VAL_1]])
-    // CHECK-SAME:              auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64
-    // CHECK-SAME:              tensor<1x16x32x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16> -> tensor<1x16x32x1xf16>
-    // CHECK:           [[CONV_FQ_INPUT:%.*]] = IE.FakeQuantize([[RELU_1]], [[FQ_MAX_VAL_2_NEGATED]], [[FQ_MAX_VAL_2]], [[FQ_MAX_VAL_2_NEGATED]], [[FQ_MAX_VAL_2]])
-    // CHECK-SAME:          auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64
-    // CHECK-SAME:          tensor<1x1x32x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16> -> tensor<1x1x32x1xf16>
-    // CHECK:           [[FILTER_FQ:%.*]] = IE.FakeQuantize([[FILTER]], [[FILTER]], [[FILTER]], [[FILTER]], [[FILTER]])
-    // CHECK-SAME:          auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64
-    // CHECK-SAME:          tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16> -> tensor<1x1x1x1xf16>
-    // CHECK:           [[GROUP_CONV:%.*]] = IE.GroupConvolution([[CONV_FQ_INPUT]], [[FILTER_FQ]])
-    // CHECK-SAME:          dilations = [1, 1], groups = 1 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]
-    // CHECK-SAME:          tensor<1x1x32x1xf16>, tensor<1x1x1x1xf16> -> tensor<1x1x32x1xf16>
-    // CHECK:           [[ADD_INPUT_2:%.*]] = IE.FakeQuantize([[GROUP_CONV]], [[FQ_MIN_VAL_NEGATED]], [[FQ_MAX_VAL_2_NEGATED]], [[FQ_MIN_VAL_NEGATED]], [[FQ_MAX_VAL_2_NEGATED]])
-    // CHECK-SAME:          auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64
-    // CHECK-SAME:          tensor<1x1x32x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16> -> tensor<1x1x32x1xf16>
-    // CHECK:           [[BROADCAST:%.*]] = IE.Broadcast([[ADD_INPUT_2]], [[TARGET_SHAPE]]) {mode = #IE.broadcast_type<NUMPY>} : tensor<1x1x32x1xf16>, tensor<4xsi64> -> tensor<1x16x32x1xf16>
-    // CHECK:           [[FQ_8:%.*]] = IE.Add([[ADD_INPUT_1]], [[BROADCAST]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x16x32x1xf16>, tensor<1x16x32x1xf16> -> tensor<1x16x32x1xf16>
-    // CHECK:           return [[FQ_8]]
+    // CHECK-DAG:       [[RELU_1:%.*]] = IE.ReLU([[CST_3]]) : tensor<1x1x32x1xf16> -> tensor<1x1x32x1xf16>
+    // CHECK:           [[FQ_0:%.*]] = IE.FakeQuantize([[RELU_0]], [[CST_2]], [[CST_1]], [[CST_2]], [[CST_1]])
+    // CHECK:           [[FQ_1:%.*]] = IE.FakeQuantize([[RELU_1]], [[CST_2]], [[CST_0]], [[CST_2]], [[CST_0]])
+    // CHECK:           [[SUB:%.*]] = IE.Subtract([[FQ_0]], [[FQ_1]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x16x32x1xf16>, tensor<1x1x32x1xf16> -> tensor<1x16x32x1xf16>
 }
 
 // -----
@@ -239,27 +233,8 @@ func.func @SubtractWithFQActInputsSameShape(%arg0: tensor<1x1x1x64xf16>) -> tens
 
 // -----
 
-// CHECK-LABEL: @ConvertSubtractWithScalarInput2ButSmallInput1
-func.func @ConvertSubtractWithScalarInput2ButSmallInput1(%arg0: tensor<1x1x1x1024xf16>, %arg1: tensor<1x1x1x1xf16>) -> tensor<1x1x1x1024xf16> {
-    %0 = IE.Subtract(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x1x1x1024xf16>, tensor<1x1x1x1xf16> -> tensor<1x1x1x1024xf16>
-    return %0 : tensor<1x1x1x1024xf16>
-
-    // CHECK-DAG: [[WEIGHTS:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<-1.000000e+00> : tensor<1x1x1x1xf16>
-    // CHECK-DAG: [[SHAPE:%.*]] = const.Declare tensor<4xsi64> = dense<[1, 1, 1, 1024]> : tensor<4xsi64>, [#const.ConvertElemType<si32>]
-    // CHECK: [[GROUP_CONV:%.*]] = IE.GroupConvolution(%arg1, [[WEIGHTS]])
-    // CHECK-SAME:  {dilations = [1, 1], groups = 1 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>
-    // CHECK-SAME:   -> tensor<1x1x1x1xf16>
-    // CHECK:  [[BROADCAST:%.*]] = IE.Broadcast([[GROUP_CONV]], [[SHAPE]])
-    // CHECK-SAME:   {mode = #IE.broadcast_type<NUMPY>} : tensor<1x1x1x1xf16>, tensor<4xsi64> -> tensor<1x1x1x1024xf16>
-    // CHECK: [[ADD:%.*]] = IE.Add(%arg0, [[BROADCAST]])
-    // CHECK-SAME:          {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x1x1x1024xf16>, tensor<1x1x1x1024xf16> -> tensor<1x1x1x1024xf16>
-    // CHECK:  return [[ADD]] : tensor<1x1x1x1024xf16>
-}
-
-// -----
-
-// CHECK-LABEL: @NotConvertSubtractWithScalarInput2ButBigInput1
-func.func @NotConvertSubtractWithScalarInput2ButBigInput1(%arg0: tensor<1x1x1x8192xf16>, %arg1: tensor<1x1x1x1xf16>) -> tensor<1x1x1x8192xf16> {
+// CHECK-LABEL: @NotConvertSubtractWithInputNeedsBroadcast
+func.func @NotConvertSubtractWithInputNeedsBroadcast(%arg0: tensor<1x1x1x8192xf16>, %arg1: tensor<1x1x1x1xf16>) -> tensor<1x1x1x8192xf16> {
     %0 = IE.Subtract(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x1x1x8192xf16>, tensor<1x1x1x1xf16> -> tensor<1x1x1x8192xf16>
     return %0 : tensor<1x1x1x8192xf16>
 
@@ -269,21 +244,13 @@ func.func @NotConvertSubtractWithScalarInput2ButBigInput1(%arg0: tensor<1x1x1x81
 
 // -----
 
-// CHECK-LABEL: @ConvertSubtractWithScalarInput2ButInput1HeightNotOne
-func.func @ConvertSubtractWithScalarInput2ButInput1HeightNotOne(%arg0: tensor<1x1x8192x1xf16>, %arg1: tensor<1x1x1x1xf16>) -> tensor<1x1x8192x1xf16> {
-    %0 = IE.Subtract(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x1x8192x1xf16>, tensor<1x1x1x1xf16> -> tensor<1x1x8192x1xf16>
-    return %0 : tensor<1x1x8192x1xf16>
+// CHECK-LABEL: @NotConvertSubtractWithInputNeedsExpansion
+func.func @NotConvertSubtractWithInputNeedsExpansion(%arg0: tensor<1x10x1x57xf16>, %arg1: tensor<1x10x1x57xf16>) -> tensor<1x10x1x57xf16> {
+    %0 = IE.Subtract(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x1x57xf16>, tensor<1x10x1x57xf16> -> tensor<1x10x1x57xf16>
+    return %0 : tensor<1x10x1x57xf16>
 
-    // CHECK-DAG: [[WEIGHTS:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<-1.000000e+00> : tensor<1x1x1x1xf16>
-    // CHECK-DAG: [[SHAPE:%.*]] = const.Declare tensor<4xsi64> = dense<[1, 1, 8192, 1]> : tensor<4xsi64>, [#const.ConvertElemType<si32>]
-    // CHECK: [[GROUP_CONV:%.*]] = IE.GroupConvolution(%arg1, [[WEIGHTS]])
-    // CHECK-SAME:  {dilations = [1, 1], groups = 1 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>
-    // CHECK-SAME:  -> tensor<1x1x1x1xf16>
-    // CHECK:  [[BROADCAST:%.*]]  = IE.Broadcast([[GROUP_CONV]], [[SHAPE]])
-    // CHECK-SAME:  {mode = #IE.broadcast_type<NUMPY>} : tensor<1x1x1x1xf16>, tensor<4xsi64> -> tensor<1x1x8192x1xf16>
-    // CHECK: [[ADD:%.*]] = IE.Add(%arg0, [[BROADCAST]])
-    // CHECK-SAME:          {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x1x8192x1xf16>, tensor<1x1x8192x1xf16> -> tensor<1x1x8192x1xf16>
-    // CHECK: return [[ADD]] : tensor<1x1x8192x1xf16>
+    // CHECK:  [[SUB:%.*]] = IE.Subtract(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x1x57xf16>, tensor<1x10x1x57xf16> -> tensor<1x10x1x57xf16>
+    // CHECK:  return [[SUB]]
 }
 
 // -----

@@ -78,4 +78,79 @@ def VPUASM_IndexedTaskInterface : OpInterface<"IndexedTaskInterface"> {
     ];
 }
 
+def VPUASM_DPUInvariantExpandOpInterface : OpInterface<"DPUInvariantExpandOpInterface"> {
+    let description = "Interface for lowering from VPUASM.DPUInvariant to VPUIPDPU.DPUInvariant blocks";
+
+    let cppNamespace = "vpux::VPUASM";
+
+    let methods = [
+        InterfaceMethod<
+            "Create DPU invariant IDU related ops",
+            "mlir::LogicalResult",
+            "expandIDUConfig", (ins "mlir::OpBuilder&":$builder,
+                              "const Logger&":$log,
+                              "mlir::Block*":$invBlock,
+                              "const std::unordered_map<VPUIPDPU::BlockArg, size_t>&":$invBlockArgsPos,
+                              "ELF::SymbolReferenceMap&":$symRefMap)
+        >,
+        InterfaceMethod<
+            "Create DPU invariant MPE related ops",
+            "mlir::LogicalResult",
+            "expandMPEConfig", (ins "mlir::OpBuilder&":$builder,
+                              "const Logger&":$log,
+                              "mlir::Block*":$invBlock,
+                              "const std::unordered_map<VPUIPDPU::BlockArg, size_t>&":$invBlockArgsPos,
+                              "ELF::SymbolReferenceMap&":$symRefMap)
+        >,
+        InterfaceMethod<
+            "Create DPU invariant PPE related ops",
+            "mlir::LogicalResult",
+            "expandPPEConfig", (ins "mlir::OpBuilder&":$builder,
+                              "const Logger&":$log,
+                              "mlir::Block*":$invBlock,
+                              "const std::unordered_map<VPUIPDPU::BlockArg, size_t>&":$invBlockArgsPos,
+                              "ELF::SymbolReferenceMap&":$symRefMap)
+        >,
+        InterfaceMethod<
+            "Create DPU invariant ODU related ops",
+            "mlir::LogicalResult",
+            "expandODUConfig", (ins "mlir::OpBuilder&":$builder,
+                              "const Logger&":$log,
+                              "mlir::Block*":$invBlock,
+                              "const std::unordered_map<VPUIPDPU::BlockArg, size_t>&":$invBlockArgsPos,
+                              "ELF::SymbolReferenceMap&":$symRefMap)
+        >
+    ];
+}
+
+def VPUASM_DPUVariantExpandOpInterface : OpInterface<"DPUVariantExpandOpInterface"> {
+    let description = "Interface for lowering from VPUASM.DPUVariant to VPUIPDPU.DPUVariant blocks";
+
+    let cppNamespace = "vpux::VPUASM";
+
+    let methods = [
+        InterfaceMethod<
+            "Create DPU variant IDU related ops",
+            "mlir::LogicalResult",
+            "expandIDUConfig", (ins "mlir::OpBuilder&":$builder,
+                              "const Logger&":$log,
+                              "ELF::SymbolReferenceMap&":$symRefMap)
+        >,
+        InterfaceMethod<
+            "Create DPU variant PPE related ops",
+            "mlir::LogicalResult",
+            "expandPPEConfig", (ins "mlir::OpBuilder&":$builder,
+                              "const Logger&":$log,
+                              "ELF::SymbolReferenceMap&":$symRefMap)
+        >,
+        InterfaceMethod<
+            "Create DPU variant ODU related ops",
+            "mlir::LogicalResult",
+            "expandODUConfig", (ins "mlir::OpBuilder&":$builder,
+                              "const Logger&":$log,
+                              "ELF::SymbolReferenceMap&":$symRefMap)
+        >
+    ];
+}
+
 #endif

@@ -86,14 +86,14 @@ void ConvertPowerToMultPass::safeRunOnFunc() {
         if (auto cstOp = powerOp.getInput2().getDefiningOp<Const::DeclareOp>()) {
             // Exponent constant must be a scalar or tensor with
             // all elements equal
-            auto constAttr = cstOp.getContentAttr().fold();
+            auto constAttr = cstOp.getContentAttr();
             if (!constAttr.isSplat()) {
                 return true;
             }
 
             // Currently only convert power to multiply operation
             // only when exponent equals to 2
-            if (constAttr.getSplatValue<double>() == 2) {
+            if (constAttr.fold().getSplatValue<double>() == 2) {
                 return false;
             }
         }

@@ -164,7 +164,12 @@ void ConvertWeightsToI8Pass::safeRunOnFunc() {
     // We can't convert any operations that have operands with symmetric and asymmetric zero points, i.e.: IE::Add
     target.addDynamicallyLegalOp<IE::ConvolutionOp>([&](IE::ConvolutionOp op) {
         auto inputType = op.getInput().getType().cast<vpux::NDTypeInterface>().getElementType();
+        // Input should be F16 and should not be FQ
         if (!inputType.isF16()) {
+            return true;
+        }
+        auto inputOp = op.getInput().getDefiningOp();
+        if (inputOp != nullptr && mlir::isa<IE::FakeQuantizeOp, IE::DequantizeOp>(inputOp)) {
             return true;
         }
         auto filterOp = op.getFilter().getDefiningOp<IE::DequantizeOp>();

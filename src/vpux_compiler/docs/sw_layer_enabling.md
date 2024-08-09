@@ -20,7 +20,6 @@
 - [IE → VPU lowering](#ie--vpu-lowering)
   - [IE → VPU lowering lit-test](#ie--vpu-lowering-lit-test)
 - [You're half way there.](#youre-half-way-there)
-- [GraphFile-schema](#graphfile-schema)
 - [VPUIP Dialect](#vpuip-dialect)
   - [VPUIP table gen](#vpuip-table-gen)
   - [VPUIP UPATask builder](#vpuip-upatask-builder)
@@ -33,7 +32,7 @@
 - [IE → IERT lowering](#ie--iert-lowering)
   - [IE → IERT lowering lit-test](#ie--iert-lowering-lit-test)
 # Introduction
-This instruction will guide you through steps of adding a new NPU3700 software layer to the MLIR compiler. It has step-by-step plan of actions using `CTCGreedyDecoder` layer as an example. For NPU3720 software layer, please refer [npu2_7_sw_layer_enabling.md](../docs/npu2_7_sw_layer_enabling.md)
+ For NPU3720 software layer, please refer [npu2_7_sw_layer_enabling.md](../docs/npu2_7_sw_layer_enabling.md)
 > Be aware, that MLIR compiler is in a rapid development and code snippets might be out of date.
 
 # Debugging tips and tricks
@@ -96,13 +95,13 @@ class CTCGreedyDecoderLayerTestCommon :
         public CTCGreedyDecoderLayerTest,
         virtual public VpuOv2LayerTest {};
 
-class CTCGreedyDecoderLayerTest_NPU3700 :
+class CTCGreedyDecoderLayerTest_NPU3720 :
         public CTCGreedyDecoderLayerTestCommon {
 };
 
-TEST_P(CTCGreedyDecoderLayerTest_NPU3700, HW) { // HW to reflect which pipeline is used, in this case it is DefaultHW
+TEST_P(CTCGreedyDecoderLayerTest_NPU3720, HW) { // HW to reflect which pipeline is used, in this case it is DefaultHW
     setDefaultHardwareMode();
-    run(Platform::NPU3700);
+    run(Platform::NPU3720);
 }
 
 }  // namespace LayerTestsDefinitions
@@ -132,7 +131,7 @@ const auto params = testing::Combine(
 
 INSTANTIATE_TEST_CASE_P(
     smoke_CTCGreedyDecoder,
-    CTCGreedyDecoderLayerTest_NPU3700,
+    CTCGreedyDecoderLayerTest_NPU3720,
     params,
     CTCGreedyDecoderLayerTest::getTestCaseName
 );
@@ -243,10 +242,10 @@ Given input tensors and layer parameters, this function computes output shapes a
 ```cpp
 mlir::LogicalResult vpux::IE::CTCGreedyDecoderOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, Optional<mlir::Location> optLoc, mlir::ValueRange operands, mlir::DictionaryAttr attrs,
-        mlir::RegionRange, SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
+        mlir::OpaqueProperties prop, mlir::RegionRange, SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::CTCGreedyDecoderOpAdaptor ctc(operands, attrs);
+    IE::CTCGreedyDecoderOpAdaptor ctc(operands, attrs, prop);
     if (mlir::failed(ctc.verify(loc))) {
         return mlir::failure();
     }
@@ -593,11 +592,11 @@ It is recommended to opt for `vpux::NDTypeInterface` while working with tensor t
 ```cpp
 mlir::LogicalResult vpux::VPU::CTCGreedyDecoderOp::inferReturnTypes(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange /*regions*/,
         mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::CTCGreedyDecoderOpAdaptor ctc(operands, attrs);
+    VPU::CTCGreedyDecoderOpAdaptor ctc(operands, attrs, prop);
     if (mlir::failed(ctc.verify(loc))) {
         return mlir::failure();
     }
@@ -696,7 +695,7 @@ void ConvertLayers2VPUPass::safeRunOnFunc() {
 
 ### IE → VPU lowering lit-test
 
-The lowering logic should also be tested. For this, create a dedicated lit-test in [convert_layers_to_VPU_30XX.mlir](../../../tests/lit/NPU/conversion/passes/IE2VPU/convert_layers_to_VPU_30XX.mlir) containing the IE operation as input and checks for the resulting VPU operation. If needed, other operations such as constants can be included.
+The lowering logic should also be tested. For this, create a dedicated lit-test in [convert_layers_to_VPU.mlir](../../../tests/lit/NPU/conversion/passes/IE2VPU/convert_layers_to_VPU.mlir) containing the IE operation as input and checks for the resulting VPU operation. If needed, other operations such as constants can be included.
 
 ```cpp
 // CHECK-LABEL: @CTCGreedyDecoder
@@ -713,36 +712,9 @@ func.func @CTCGreedyDecoder(%arg0: tensor<20x8x128xf16>, %arg1: tensor<20x8xf16>
 ## You're half way there.
 You should be able to compile code now. Run single layer test and look for "Unable to legalize VPU::OperationName" message. That means that MLIR compiler was not able to convert VPU::OperationName to VPUIP::OperationName. This will be the next step.
 
-# GraphFile-schema
-GraphFile-schema is a common layer between compiler and runtime. It is a tool for serializing data to the blob.
-
-Before lowering to the VPUIP dialect, make sure that graphFile-schema repository has your operation included. For debugging purposes, you can checkout NPU-plugin schema to the custom branch with the new operation added.
-
-```bash
-cd thirdparty/elf
-git checkout custom_branch
-```
-or you can manually add your layer to the existing schema
-
-> graphFile-schema is a submodule that we can't link with a relative path. Please find files below after thirdparty initialization.
-
-In relative file path is `thirdparty/elf/src/schema/software.fbs` from line `446`
-```cpp
-table CTCDecoderParams {
-  ctc_merge_repeated: bool;
-}
-```
-and in the same file from line `885`
-```cpp
-union SoftwareLayerParams{
-// ...
-  CTCDecoderParams,
-}
-```
-
 # VPUIP Dialect
 
-The VPUIP Dialect represents bufferized version of the VPU Dialect, with platform-specific variants of some operations. For example, hardware operations are all represented as `VPUIP::NCEClusterTaskOp`. Software operations for NPU30XX have UPA tasks representing the SHAVE kernels, while the software operations for NPU37XX use `VPUIP::SWKernelOp`. We will be creating the UPA operation for the new layer. It is worth mentioning that in some cases, multiple VPU operations can be lowered to the same UPA task; e.g. `VPU.AddOp` & `VPU.MultiplyOp` both get lowered to `VPUIP.EltwiseUPAOp`.
+The VPUIP Dialect represents bufferized version of the VPU Dialect, with platform-specific variants of some operations. For example, hardware operations are all represented as `VPUIP::NCEClusterTaskOp`. Software operations for NPU37XX use `VPUIP::SWKernelOp`. We will be creating the UPA operation for the new layer. It is worth mentioning that in some cases, multiple VPU operations can be lowered to the same UPA task; e.g. `VPU.AddOp` & `VPU.MultiplyOp` both get lowered to `VPUIP.EltwiseUPAOp`.
 
 This dialect no longer works with tensor data. Instead, buffers are utilized by making use of `MemRefType`.
 
@@ -802,7 +774,7 @@ def VPUIP_CTCGreedyDecoderUPAOp :
 }
 ```
 ## VPUIP UPATask builder
-Serialize layer to UPATask using graphFile-schema interface.
+Serialize layer to UPATask using elf interface.
 
 [(new) src/vpux_compiler/src/dialect/VPUIP/ops/upa_ctc_greedy_decoder.cpp](../src/dialect/VPUIP/ops/upa_ctc_greedy_decoder.cpp)
 ```cpp
@@ -908,25 +880,30 @@ mlir::LogicalResult LayerRewrite::matchAndRewrite(mlir::Operation* origOp, Array
 Some operations can end up lowered to more than a single UPA task at this step. For such cases, a dedicated rewriter should be created instead. An example can be found with `VPU.LSTMCellOp` which has the `LSTMCellRewrite` class in the same pass.
 
 ### VPU → VPUIP lowering lit-test
-Similar to IE->VPU, the lowering logic will be tested by creating a lit-test in [convert_layers_to_VPUIP_30XX.mlir](../../../tests/lit/NPU/conversion/passes/VPU2VPUIP/convert_layers_to_VPUIP_30XX.mlir). If there are instances where the lowering logic behaves differently for various configurations of the operation, please make sure to cover them all with different tests.
+Similar to IE->VPU, the lowering logic will be tested by creating a lit-test in [bufferize_sw_ops_to_VPUIP_sw_kernel_37XX+.mlir](../../../tests/lit/NPU/conversion/passes/VPU2VPUIP/bufferize_sw_ops_to_VPUIP_sw_kernel_37XX+.mlir). If there are instances where the lowering logic behaves differently for various configurations of the operation, please make sure to cover them all with different tests.
 
 ```cpp
-// CHECK-LABEL: @CTCGreedyDecoder
-func.func @CTCGreedyDecoder(%arg0: memref<20x1x128xf16>, %arg1: memref<20x1xf16>) -> memref<1x20x1x1xf16> {
-    %0 = builtin.unrealized_conversion_cast %arg0 : memref<20x1x128xf16> to tensor<20x1x128xf16>
-    %1 = builtin.unrealized_conversion_cast %arg1 : memref<20x1xf16> to tensor<20x1xf16>
-    %2 = VPU.CTCGreedyDecoder(%0, %1) {mergeRepeated} : tensor<20x1x128xf16>, tensor<20x1xf16> -> tensor<1x20x1x1xf16>
-    %3 = builtin.unrealized_conversion_cast %2 : tensor<1x20x1x1xf16> to memref<1x20x1x1xf16>
-    return %3 : memref<1x20x1x1xf16>
+// CHECK-LABEL:  func.func @ReduceSumSWLayer
+// CHECK-SAME:     ([[INPUT:%.+]]: memref<1x7x2x3xf16, #NHWC>)
+func.func @ReduceSumSWLayer(%input: tensor<1x7x2x3xf16, {order = #NHWC}>) -> tensor<1x1x2x3xf16, {order = #NHWC}> {
+    %output = VPU.ReduceSum(%input) {axes_value = [1], keep_dims} : tensor<1x7x2x3xf16, {order = #NHWC}> -> tensor<1x1x2x3xf16, {order = #NHWC}>
+    return %output : tensor<1x1x2x3xf16, {order = #NHWC}>
 
-    // CHECK:       [[VAR0:%.*]] = memref.alloc() : memref<1x20x1x1xf16>
-    // CHECK:       [[VAR1:%.*]] = VPUIP.CTCGreedyDecoderUPA {mergeRepeated}
-    // CHECK-SAME:      inputs(%arg0 : memref<20x1x128xf16>, %arg1 : memref<20x1xf16>) outputs([[VAR0]] : memref<1x20x1x1xf16>) -> memref<1x20x1x1xf16>
-    // CHECK:       return [[VAR1]] : memref<1x20x1x1xf16>
+    // CHECK: [[ALLOC:%.+]] = memref.alloc() : memref<1x7x2x3xf16, #NHWC, [@CMX_NN, 0]>
+    // CHECK: [[COPY0:%.+]] = VPUIP.Copy inputs([[INPUT]] : memref<1x7x2x3xf16, #NHWC>) outputs([[ALLOC]] : memref<1x7x2x3xf16, #NHWC, [@CMX_NN, 0]>) -> memref<1x7x2x3xf16, #NHWC, [@CMX_NN, 0]>
+
+    // CHECK: [[ALLOC0:%.+]] = memref.alloc() : memref<1x1x2x3xf16, #NHWC, [@CMX_NN, 0]>
+    // CHECK: [[RES:%.+]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_ReduceSum inputs([[COPY0]] as {{[^:]+}}: memref<1x7x2x3xf16, #NHWC, [@CMX_NN, 0]>) outputs([[ALLOC0]] as {{[^:]+}}: memref<1x1x2x3xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<1x1x2x3xf16, #NHWC, [@CMX_NN, 0]>{
+    // CHECK:   VPUIP.SW.Kernel.run {attrs = [1, 1, [0]]}({{[^:]+}}, {{[^:]+}}) : memref<1x7x2x3xf16, #NHWC, [@CMX_NN, 0]>, memref<1x1x2x3xf16, #NHWC, [@CMX_NN, 0]>
+    // CHECK: }
+
+    // CHECK: [[ALLOC1:%.+]] = memref.alloc() : memref<1x1x2x3xf16, #NHWC>
+    // CHECK: [[COPY1:%.+]] = VPUIP.Copy inputs([[RES]] : memref<1x1x2x3xf16, #NHWC, [@CMX_NN, 0]>) outputs([[ALLOC1]] : memref<1x1x2x3xf16, #NHWC>) -> memref<1x1x2x3xf16, #NHWC>
+    // CHECK: return [[COPY1]] : memref<1x1x2x3xf16, #NHWC>
 }
 ```
 
-This test has the function arguments as `memrefs` (buffers), while the VPU operation works with `tensors`. Therefore, a dummy cast layer is present to interpret `memrefs` as `tensors`. When the operation is lowered to VPUIP, the UPA task will also work with buffer data so these casts are no longer necessary - the canonicalizer handles the removal of these operations. That is why the resulting IR of the test has no casts.
+When the operation is lowered to VPUIP, the SW Kernel task will work with buffer data, or `memrefs`, instead of `tensors`.
 
 # IERT Dialect
 InferenceEngine RunTime Dialect The IERT Dialect represents bufferized version of IE Dialect.
@@ -1013,7 +990,7 @@ mlir::LogicalResult LayerRewrite::matchAndRewrite(mlir::Operation* origOp, Array
 ```
 ### IE → IERT lowering lit-test
 
-The bufferization logic will be tested by creating a lit-test in [bufferize_IE_30XX_37XX_40XX.mlir](../../../tests/lit/NPU/conversion/passes/IE2IERT/bufferize_IE_30XX_37XX_40XX.mlir):
+The bufferization logic will be tested by creating a lit-test in [bufferize_IE_37XX_40XX.mlir](../../../tests/lit/NPU/conversion/passes/IE2IERT/bufferize_IE_37XX_40XX.mlir):
 
 ```cpp
 // CHECK-LABEL: @CTCGreedyDecoder

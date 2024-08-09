@@ -82,6 +82,16 @@ struct ReferenceHWOptions37XX final : public ReferenceHWOptions<ReferenceHWOptio
             *this, "enable-explicit-distributed-attr",
             llvm::cl::desc("Enable DistributedTensorAttr with explicit per cluster memory/compute shapes & offsets"),
             llvm::cl::init(false)};
+
+    BoolOption enableGroupedMatMul{*this, "enable-grouped-matmul",
+                                   llvm::cl::desc("Enable execution of grouped MatMul as a single operation."),
+                                   llvm::cl::init(false)};
+
+    BoolOption supportNCEOpInsertion{
+            *this, "support-nce-op-insertion",
+            llvm::cl::desc("Insert a new NCE operation with single user for CMX-Concat to handle the"
+                           "complex case when parent NCE has an extra non-Copy user."),
+            llvm::cl::init(true)};
 };
 
 void buildReferenceHWModePipeline(mlir::OpPassManager& pm, const ReferenceHWOptions37XX& options,

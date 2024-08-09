@@ -11,11 +11,11 @@ using namespace vpux;
 
 mlir::LogicalResult vpux::IE::UpsamplingOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::UpsamplingOpAdaptor upsampling(operands, attrs);
+    IE::UpsamplingOpAdaptor upsampling(operands, attrs, prop);
     if (mlir::failed(upsampling.verify(loc))) {
         return mlir::failure();
     }

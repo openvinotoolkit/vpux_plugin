@@ -5,7 +5,7 @@
 
 
 // RUN: vpux-opt --init-compiler="vpu-arch=%arch%" --setup-location-verifier="mode=off" %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 module @mainModule {
 }

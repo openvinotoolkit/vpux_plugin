@@ -14,11 +14,11 @@ using namespace vpux;
 
 mlir::LogicalResult vpux::IE::NormalizeL2Op::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::NormalizeL2OpAdaptor normalizeL2(operands, attrs);
+    IE::NormalizeL2OpAdaptor normalizeL2(operands, attrs, prop);
     if (mlir::failed(normalizeL2.verify(loc))) {
         return mlir::failure();
     }

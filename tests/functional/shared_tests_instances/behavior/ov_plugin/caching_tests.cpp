@@ -4,8 +4,8 @@
 
 #include "behavior/ov_plugin/caching_tests.hpp"
 #include <utility>
+#include "common/npu_test_env_cfg.hpp"
 #include "common/utils.hpp"
-#include "common/vpu_test_env_cfg.hpp"
 #include "intel_npu/al/config/common.hpp"
 
 using namespace ov::test::behavior;

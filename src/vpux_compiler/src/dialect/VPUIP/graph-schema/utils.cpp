@@ -39,8 +39,6 @@ const EnumMap<ov::element::Type_t, MVCNN::OVNodeType> VPUIP::mapElementType = {
 
 MVCNN::TargetDevice VPUIP::mapTargetDevice(VPU::ArchKind kind) {
     switch (kind) {
-    case VPU::ArchKind::NPU30XX:
-        return MVCNN::TargetDevice::TargetDevice_VPUX30XX;
     case VPU::ArchKind::NPU37XX:
         return MVCNN::TargetDevice::TargetDevice_VPUX37XX;
     case VPU::ArchKind::NPU40XX:
@@ -50,18 +48,12 @@ MVCNN::TargetDevice VPUIP::mapTargetDevice(VPU::ArchKind kind) {
     }
 }
 
-MVCNN::TargetDeviceRevision VPUIP::mapTargetDeviceRevision(VPU::ArchKind kind) {
-    switch (kind) {
-    case VPU::ArchKind::NPU30XX:
-        return MVCNN::TargetDeviceRevision::TargetDeviceRevision_B0;
-    default:
-        return MVCNN::TargetDeviceRevision::TargetDeviceRevision_NONE;
-    }
+MVCNN::TargetDeviceRevision VPUIP::mapTargetDeviceRevision(VPU::ArchKind) {
+    return MVCNN::TargetDeviceRevision::TargetDeviceRevision_NONE;
 }
 
 MVCNN::PerfDataMode VPUIP::mapProfilingMode(VPU::ArchKind kind) {
     switch (kind) {
-    case VPU::ArchKind::NPU30XX:
     case VPU::ArchKind::NPU37XX:
         return MVCNN::PerfDataMode_MODE0;
     case VPU::ArchKind::NPU40XX:

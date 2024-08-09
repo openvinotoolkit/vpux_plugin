@@ -118,8 +118,7 @@ void removeRedundantDependencies(BarrierInfo& barrierInfo, bool considerTaskFifo
     DMA[0] DMA[0]       DMA[0] DMA[0]
 */
 
-void removeExplicitDependencies(mlir::func::FuncOp func, BarrierInfo& barrierInfo) {
-    // TODO: refactor to operate per task block. Ticket: E120987
+void removeExplicitDependencies(BarrierInfo& barrierInfo) {
     const auto findExplicitDependencies = [&](const BarrierInfo::TaskSet& dependencies,
                                               const VPURT::TaskQueueType& type) {
         BarrierInfo::TaskSet dependenciesToRemove;
@@ -134,46 +133,54 @@ void removeExplicitDependencies(mlir::func::FuncOp func, BarrierInfo& barrierInf
         return dependenciesToRemove;
     };
 
-    func->walk([&](VPURT::DeclareVirtualBarrierOp barrierOp) {
-        const auto& barrierProducers = barrierInfo.getBarrierProducers(barrierOp);
+    // Perform optimization in tasks blocks matching the distribution of synchronization points.
+    for (size_t taskBlockIndex = 0; taskBlockIndex < barrierInfo.getControlGraphBlockCount(); ++taskBlockIndex) {
+        // get update barriers range for current block
+        auto blockUpdateBarriers =
+                barrierInfo.getBarriersForTaskBlock(taskBlockIndex, /* blockStartSyncPoint */ true,
+                                                    /* blockEndSyncPoint */ false, /* updateBarriers */ true);
 
-        // try to optimize consumers (1)
-        auto producerTaskQueueType = barrierInfo.haveSameImplicitDependencyTaskQueueType(barrierProducers);
-        if (producerTaskQueueType.has_value()) {
-            // barrier produced by tasks with same type
-            auto consumersToRemove =
-                    findExplicitDependencies(barrierInfo.getBarrierConsumers(barrierOp), producerTaskQueueType.value());
-            // remove consumers
-            barrierInfo.removeConsumers(barrierOp, consumersToRemove);
-        }
-
-        // try to optimize producers (2)
-        const auto& barrierConsumers = barrierInfo.getBarrierConsumers(barrierOp);
-        auto consumerTaskQueueType = barrierInfo.haveSameImplicitDependencyTaskQueueType(barrierConsumers);
-        if (consumerTaskQueueType.has_value() || barrierConsumers.empty()) {
-            // barrier consumed by tasks with same type
-            BarrierInfo::TaskSet producersToRemove;
-            // find producers to remove
-            if (barrierConsumers.empty()) {
-                for (const auto& barProd : barrierProducers) {
-                    if (barrierInfo.isSyncPoint(barProd)) {
-                        continue;
-                    }
-                    producersToRemove.insert(barProd);
-                }
-            } else {
-                producersToRemove = findExplicitDependencies(barrierProducers, consumerTaskQueueType.value());
+        for (auto barrierIdx : blockUpdateBarriers) {
+            // try to optimize consumers (1)
+            const auto& barrierProducers = barrierInfo.getBarrierProducers(barrierIdx);
+            auto producerTaskQueueType = barrierInfo.haveSameImplicitDependencyTaskQueueType(barrierProducers);
+            if (producerTaskQueueType.has_value()) {
+                // barrier produced by tasks with same type
+                auto consumersToRemove = findExplicitDependencies(barrierInfo.getBarrierConsumers(barrierIdx),
+                                                                  producerTaskQueueType.value());
+                // remove consumers
+                barrierInfo.removeConsumers(barrierIdx, consumersToRemove);
             }
 
-            // remove producers
-            barrierInfo.removeProducers(barrierOp, producersToRemove);
-        }
+            // try to optimize producers (2)
+            const auto& barrierConsumers = barrierInfo.getBarrierConsumers(barrierIdx);
+            auto consumerTaskQueueType = barrierInfo.haveSameImplicitDependencyTaskQueueType(barrierConsumers);
+            if (consumerTaskQueueType.has_value() || barrierConsumers.empty()) {
+                // barrier consumed by tasks with same type
+                BarrierInfo::TaskSet producersToRemove;
+                // find producers to remove
+                if (barrierConsumers.empty()) {
+                    for (const auto& barProd : barrierProducers) {
+                        if (barrierInfo.isSyncPoint(barProd)) {
+                            continue;
+                        }
+                        producersToRemove.insert(barProd);
+                    }
+                } else {
+                    producersToRemove = findExplicitDependencies(barrierProducers, consumerTaskQueueType.value());
+                }
 
-        VPUX_THROW_WHEN(
-                barrierInfo.getBarrierConsumers(barrierOp).empty() ^ barrierInfo.getBarrierProducers(barrierOp).empty(),
-                "Invalid optimization : Only barrier {0} became empty for barrier '{1}'",
-                barrierProducers.empty() ? "producers" : "consumers", barrierOp);
-    });
+                // remove producers
+                barrierInfo.removeProducers(barrierIdx, producersToRemove);
+            }
+
+            bool invalidOptimization = barrierInfo.getBarrierConsumers(barrierIdx).empty() ^
+                                       barrierInfo.getBarrierProducers(barrierIdx).empty();
+            VPUX_THROW_WHEN(
+                    invalidOptimization, "Invalid optimization : Only barrier {0} became empty for barrier '{1}'",
+                    barrierProducers.empty() ? "producers" : "consumers", barrierInfo.getBarrierOpAtIndex(barrierIdx));
+        }
+    }
 }
 
 // Merge barriers using FIFO order. DMA-{IR-order}
@@ -187,98 +194,105 @@ void removeExplicitDependencies(mlir::func::FuncOp func, BarrierInfo& barrierInf
 */
 
 void mergeBarriers(BarrierInfo& barrierInfo, ArrayRef<BarrierInfo::TaskSet> origWaitBarriersMap) {
-    // TODO: refactor to operate per task block. Ticket: E120987
-    const auto barrierNum = barrierInfo.getNumOfVirtualBarriers();
+    // Perform optimization in tasks blocks matching the distribution of synchronization points.
+    for (size_t taskBlockIndex = 0; taskBlockIndex < barrierInfo.getControlGraphBlockCount(); ++taskBlockIndex) {
+        // get update barriers range for current block
+        auto blockUpdateBarriers =
+                barrierInfo.getBarriersForTaskBlock(taskBlockIndex, /* blockStartSyncPoint */ true,
+                                                    /* blockEndSyncPoint */ false, /* updateBarriers */ true);
 
-    // Order barriers based on largest producer
-    //
-    // After already applied optimizations in this pass barrier state could have changed
-    // and barriers might not have been ordered based on largest producer value (which corresponds to
-    // largest barrier release time).
-    // For compile time improvement - early termination of merge barrier logic, we need
-    // barriers to be reordered so new vector is prepared that will be used as a base for iterating
-    // over all barriers
-    SmallVector<std::pair<size_t, std::optional<size_t>>> barIndAndMaxProdVec;
-    barIndAndMaxProdVec.reserve(barrierNum);
+        auto numBarriersInBlock = blockUpdateBarriers.size();
 
-    // Store number of barriers which do not have producers which nevertheless are not a candidate
-    // for merge barriers logic. Later this value will be used to skip all the barriers
-    // with no producers. After sorting barIndAndMaxProdVec they will be placed at the beginning
-    size_t numOfBarriersWithNoProducers = 0;
+        // Order barriers based on largest producer
+        //
+        // After already applied optimizations in this pass barrier state could have changed
+        // and barriers might not have been ordered based on largest producer value (which corresponds to
+        // largest barrier release time).
+        // For compile time improvement - early termination of merge barrier logic, we need
+        // barriers to be reordered so new vector is prepared that will be used as a base for iterating
+        // over all barriers
+        SmallVector<std::pair<size_t, std::optional<size_t>>> barIndAndMaxProdVec;
+        barIndAndMaxProdVec.reserve(numBarriersInBlock);
 
-    // For each barrier get the largest producer index
-    for (size_t barrierInd = 0; barrierInd < barrierNum; ++barrierInd) {
-        const auto producers = barrierInfo.getBarrierProducers(barrierInd);
-        std::optional<size_t> maxProducer;
-        if (producers.empty()) {
-            numOfBarriersWithNoProducers++;
-        } else {
-            maxProducer = *std::max_element(producers.begin(), producers.end());
+        // Store number of barriers which do not have producers which nevertheless are not a candidate
+        // for merge barriers logic. Later this value will be used to skip all the barriers
+        // with no producers. After sorting barIndAndMaxProdVec they will be placed at the beginning
+        size_t numOfBarriersWithNoProducers = 0;
+
+        // For each barrier get the largest producer index
+        for (auto barrierInd : blockUpdateBarriers) {
+            const auto producers = barrierInfo.getBarrierProducers(barrierInd);
+            std::optional<size_t> maxProducer;
+            if (producers.empty()) {
+                numOfBarriersWithNoProducers++;
+            } else {
+                maxProducer = *std::max_element(producers.begin(), producers.end());
+            }
+
+            barIndAndMaxProdVec.push_back(std::make_pair(barrierInd, maxProducer));
         }
 
-        barIndAndMaxProdVec.push_back(std::make_pair(barrierInd, maxProducer));
-    }
+        // Sort the barrier indexes based on largest producer value. If barrier has no producers they will
+        // be placed at the beginning
+        llvm::sort(barIndAndMaxProdVec.begin(), barIndAndMaxProdVec.end(), [](const auto& lhs, const auto& rhs) {
+            if (lhs.second == rhs.second) {
+                return lhs.first < rhs.first;
+            }
+            return lhs.second < rhs.second;
+        });
 
-    // Sort the barrier indexes based on largest producer value. If barrier has no producers they will
-    // be placed at the beginning
-    llvm::sort(barIndAndMaxProdVec.begin(), barIndAndMaxProdVec.end(), [](const auto& lhs, const auto& rhs) {
-        if (lhs.second == rhs.second) {
-            return lhs.first < rhs.first;
-        }
-        return lhs.second < rhs.second;
-    });
+        const auto allProducersAfterConsumers = [](const BarrierInfo::TaskSet& producers,
+                                                   const BarrierInfo::TaskSet& consumers) {
+            const auto maxConsumer = *std::max_element(consumers.begin(), consumers.end());
+            const auto minProducer = *std::min_element(producers.begin(), producers.end());
 
-    const auto allProducersAfterConsumers = [](const BarrierInfo::TaskSet& producers,
-                                               const BarrierInfo::TaskSet& consumers) {
-        const auto maxConsumer = *std::max_element(consumers.begin(), consumers.end());
-        const auto minProducer = *std::min_element(producers.begin(), producers.end());
+            return minProducer > maxConsumer;
+        };
 
-        return minProducer > maxConsumer;
-    };
-
-    // Merge barriers if possible.
-    // Skip initial barriers with no producers as they are not candidates for merge
-    for (size_t ind = numOfBarriersWithNoProducers; ind < barrierNum; ++ind) {
-        const auto barrierInd = barIndAndMaxProdVec[ind].first;
-        auto barrierProducersA = barrierInfo.getBarrierProducers(barrierInd);
-        if (barrierProducersA.empty()) {
-            continue;
-        }
-        auto barrierConsumersA = barrierInfo.getBarrierConsumers(barrierInd);
-        if (barrierConsumersA.empty()) {
-            continue;
-        }
-
-        for (auto nextInd = ind + 1; nextInd < barrierNum; ++nextInd) {
-            const auto nextBarrierInd = barIndAndMaxProdVec[nextInd].first;
-            const auto barrierProducersB = barrierInfo.getBarrierProducers(nextBarrierInd);
-            if (barrierProducersB.empty()) {
+        // Merge barriers if possible.
+        // Skip initial barriers with no producers as they are not candidates for merge
+        for (size_t ind = numOfBarriersWithNoProducers; ind < numBarriersInBlock; ++ind) {
+            const auto barrierInd = barIndAndMaxProdVec[ind].first;
+            auto barrierProducersA = barrierInfo.getBarrierProducers(barrierInd);
+            if (barrierProducersA.empty()) {
                 continue;
             }
-            const auto barrierConsumersB = barrierInfo.getBarrierConsumers(nextBarrierInd);
-            if (barrierConsumersB.empty()) {
+            auto barrierConsumersA = barrierInfo.getBarrierConsumers(barrierInd);
+            if (barrierConsumersA.empty()) {
                 continue;
             }
 
-            // If for a given barrier B (nextBarrierInd) all producers are after all consumers of
-            // barrier A (barrierInd) then neither this nor any later barrier will be a candidate to merge
-            // with barrier A as they do not overlap their lifetime in schedule. Such early return is possible
-            // because barriers are processed in order following barrier release time (latest producer)
-            if (allProducersAfterConsumers(barrierProducersB, barrierConsumersA)) {
-                break;
-            }
+            for (auto nextInd = ind + 1; nextInd < numBarriersInBlock; ++nextInd) {
+                const auto nextBarrierInd = barIndAndMaxProdVec[nextInd].first;
+                const auto barrierProducersB = barrierInfo.getBarrierProducers(nextBarrierInd);
+                if (barrierProducersB.empty()) {
+                    continue;
+                }
+                const auto barrierConsumersB = barrierInfo.getBarrierConsumers(nextBarrierInd);
+                if (barrierConsumersB.empty()) {
+                    continue;
+                }
 
-            if (!barrierInfo.canBarriersBeMerged(barrierProducersA, barrierConsumersA, barrierProducersB,
-                                                 barrierConsumersB, origWaitBarriersMap)) {
-                continue;
-            }
+                // If for a given barrier B (nextBarrierInd) all producers are after all consumers of
+                // barrier A (barrierInd) then neither this nor any later barrier will be a candidate to merge
+                // with barrier A as they do not overlap their lifetime in schedule. Such early return is possible
+                // because barriers are processed in order following barrier release time (latest producer)
+                if (allProducersAfterConsumers(barrierProducersB, barrierConsumersA)) {
+                    break;
+                }
 
-            // need to update barriers
-            barrierInfo.addProducers(barrierInd, barrierProducersB);
-            barrierInfo.addConsumers(barrierInd, barrierConsumersB);
-            barrierInfo.resetBarrier(nextBarrierInd);
-            llvm::set_union(barrierProducersA, barrierProducersB);
-            llvm::set_union(barrierConsumersA, barrierConsumersB);
+                if (!barrierInfo.canBarriersBeMerged(barrierProducersA, barrierConsumersA, barrierProducersB,
+                                                     barrierConsumersB, origWaitBarriersMap)) {
+                    continue;
+                }
+
+                // need to update barriers
+                barrierInfo.addProducers(barrierInd, barrierProducersB);
+                barrierInfo.addConsumers(barrierInd, barrierConsumersB);
+                barrierInfo.resetBarrier(nextBarrierInd);
+                llvm::set_union(barrierProducersA, barrierProducersB);
+                llvm::set_union(barrierConsumersA, barrierConsumersB);
+            }
         }
     }
 }
@@ -310,7 +324,7 @@ void DMABarrierOptimizationPass::safeRunOnFunc() {
     // DMA operation in the same FIFO do not require a barrier between them
     // optimize dependencies between DMA tasks in the same FIFO
     removeRedundantDependencies(barrierInfo, _considerTaskFifoDependency, _log);
-    removeExplicitDependencies(func, barrierInfo);
+    removeExplicitDependencies(barrierInfo);
     mergeBarriers(barrierInfo, origWaitBarriersMap);
     removeRedundantDependencies(barrierInfo, _considerTaskFifoDependency, _log);
 

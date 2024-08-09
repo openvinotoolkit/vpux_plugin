@@ -35,6 +35,9 @@ int64_t getInputWorkloadStartCh(NCEOpInterface nceOp, const int64_t outputStartC
             .Case<NCEPermuteOp>([&](mlir::Operation* /*op*/) {
                 return outputStartCh;
             })
+            .Case<NCEMatMulOp>([&](mlir::Operation* /*op*/) {
+                return 0;
+            })
             .Default([&](mlir::Operation * /*op*/) -> int64_t {
                 VPUX_THROW("Unsupported operation type: {0}", nceOp);
             });
@@ -65,6 +68,9 @@ int64_t getInputWorkloadSizeCh(NCEOpInterface nceOp, const int64_t outputSizeCh,
                     return fullInputChannels - outputStartCh;
                 }
                 return outputSizeCh;
+            })
+            .Case<NCEMatMulOp>([&](mlir::Operation* /*op*/) {
+                return fullInputChannels;
             })
             .Default([&](mlir::Operation * /*op*/) -> int64_t {
                 VPUX_THROW("Unsupported operation type: {0}", nceOp);
@@ -165,9 +171,78 @@ SmallVector<Shape> getInputOffsetsPerCluster(NCEOpInterface nceOp, Logger log) {
     return perClusterOffsetsAdjustment;
 }
 
+std::pair<SmallVector<int64_t>, SmallVector<int64_t>> compute5DInputWorkload(NCEOpInterface nceOp,
+                                                                             DPUWorkloadOp dpuTaskOp, Logger log) {
+    const auto outWlStart = parseIntArrayAttr<int64_t>(dpuTaskOp.getOutOffsets());
+    const auto outWlSize = parseIntArrayAttr<int64_t>(dpuTaskOp.getOutSizes());
+
+    const auto inputType = nceOp->getOperand(0).getType().cast<NDTypeInterface>();
+    auto fullInputShape = inputType.getShape();
+    if (auto inputSparseType = inputType.dyn_cast<VPU::SparseTensorType>()) {
+        auto effectiveSparseOutputType = getEffectiveSparseOutputType(inputSparseType);
+        fullInputShape = effectiveSparseOutputType.getShape();
+    }
+
+    const auto fullInputChannels = fullInputShape[DimsGroups5D::Act::C];
+    const auto fullInputHeight = fullInputShape[DimsGroups5D::Act::H];
+    const auto fullInputWidth = fullInputShape[DimsGroups5D::Act::W];
+
+    const auto kernelSz = nceOp.getKernelSizeVal();
+    const auto strides = nceOp.getStridesVal();
+
+    const auto padding = nceOp.getPad();
+    const auto kernelPadTop = padding.getTop().getInt();
+    const auto kernelPadLeft = padding.getLeft().getInt();
+    const auto kernelPadBottom = padding.getBottom().getInt();
+    const auto kernelPadRight = padding.getRight().getInt();
+
+    const DimRange outHeightTile(outWlStart[DimsGroups5D::Act::H.ind()],
+                                 outWlStart[DimsGroups5D::Act::H.ind()] + outWlSize[DimsGroups5D::Act::H.ind()]);
+
+    auto [inHeightTile, heightBefore, heightAfter] = vpux::inputForOutputDim(
+            outHeightTile, kernelSz[DimsGroups5D::Kernel::Y.ind()], strides[DimsGroups5D::Kernel::Y.ind()],
+            {0, fullInputHeight}, kernelPadTop, kernelPadBottom);
+
+    const DimRange outWidthTile(outWlStart[DimsGroups5D::Act::W.ind()],
+                                outWlStart[DimsGroups5D::Act::W.ind()] + outWlSize[DimsGroups5D::Act::W.ind()]);
+    auto [inWidthTile, heightWidthBefore, heightWidthAfter] = vpux::inputForOutputDim(
+            outWidthTile, kernelSz[DimsGroups5D::Kernel::X.ind()], strides[DimsGroups5D::Kernel::X.ind()],
+            {0, fullInputWidth}, kernelPadLeft, kernelPadRight);
+
+    const auto inStartWidth = inWidthTile.begin;
+    const auto inStartHeight = inHeightTile.begin;
+    const auto inStartChannels = getInputWorkloadStartCh(nceOp, outWlStart[DimsGroups5D::Act::C.ind()]);
+
+    const auto start =
+            SmallVector<int64_t>{outWlStart[DimsGroups5D::Act::G.ind()], outWlStart[DimsGroups5D::Act::N.ind()],
+                                 inStartChannels, inStartHeight, inStartWidth};
+
+    const auto inSizeWidth = inWidthTile.end - inWidthTile.begin;
+    const auto inSizeHeight = inHeightTile.end - inHeightTile.begin;
+    const auto inSizeChannels = getInputWorkloadSizeCh(nceOp, outWlSize[DimsGroups5D::Act::C.ind()],
+                                                       outWlStart[DimsGroups5D::Act::C.ind()], fullInputChannels);
+    VPUX_THROW_WHEN((mlir::isa<VPU::NCEPermuteOp>(nceOp.getOperation())) && (inStartWidth != 0) &&
+                            (inSizeWidth != fullInputWidth),
+                    "HW Permute does not support workload segmentation over W. Input workload start = {0}, Input "
+                    "workload size = {1}",
+                    inStartWidth, inSizeWidth);
+
+    const auto size = SmallVector<int64_t>{outWlSize[DimsGroups5D::Act::G.ind()], outWlSize[DimsGroups5D::Act::N.ind()],
+                                           inSizeChannels, inSizeHeight, inSizeWidth};
+
+    log.trace("Computed input workload start/end for operation '{0}': start = {1}, size = {2}", dpuTaskOp.getLoc(),
+              start, size);
+
+    return std::make_pair(start, size);
+}
+
 std::pair<SmallVector<int64_t>, SmallVector<int64_t>> computeInputWorkload(NCEOpInterface nceOp,
                                                                            DPUWorkloadOp dpuTaskOp, Logger log) {
     const auto outWlStart = parseIntArrayAttr<int64_t>(dpuTaskOp.getOutOffsets());
+    if (outWlStart.size() == DimsGroups5D::Act::numDims) {
+        return compute5DInputWorkload(nceOp, dpuTaskOp, log);
+    }
+
     const auto outWlSize = parseIntArrayAttr<int64_t>(dpuTaskOp.getOutSizes());
 
     const auto inputType = nceOp->getOperand(0).getType().cast<NDTypeInterface>();

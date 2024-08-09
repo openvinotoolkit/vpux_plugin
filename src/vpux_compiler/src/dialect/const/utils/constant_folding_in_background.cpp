@@ -12,7 +12,8 @@ using namespace vpux;
 using namespace vpux::Const;
 
 BackgroundConstantFolding::BackgroundConstantFolding(mlir::MLIRContext* ctx, size_t maxConcurrentTasks,
-                                                     bool collectStatistics, Logger log)
+                                                     bool collectStatistics, size_t memoryUsageLimit,
+                                                     double cacheCleanThreshold, Logger log)
         : _ctx(ctx), _maxConcurrentTasks(maxConcurrentTasks), _log(log) {
     if (!_ctx->isMultithreadingEnabled()) {
         _log.warning("Multi thread is disabled, background constant folding is disabled");
@@ -30,6 +31,10 @@ BackgroundConstantFolding::BackgroundConstantFolding(mlir::MLIRContext* ctx, siz
 
     auto& cacheManager = ConstantFoldingCacheManager::getInstance();
     cacheManager.addCache(_ctx);
+    vpux::MB memoryUsageLimitMB(memoryUsageLimit);
+    auto memoryUsageLimitBytes = memoryUsageLimitMB.to<vpux::Byte>();
+    cacheManager.get(_ctx).setMemoryUsageLimit(memoryUsageLimitBytes);
+    cacheManager.get(_ctx).setCacheCleanThreshold(cacheCleanThreshold);
     if (collectStatistics) {
         cacheManager.get(_ctx).enableStatisticsCollection();
     }
@@ -192,8 +197,9 @@ void BackgroundConstantFolding::stopFoldingListener() {
         _log.nest().info("number of cache misses:                     {0}", statistics.numCacheMisses);
         _log.nest().info("maximum number of requests in queue:        {0}", statistics.getMaxNumRequestsInQueue());
         _log.nest().info("maximum number of elements in cache:        {0}", statistics.getMaxCacheSize());
-        _log.nest().info("current memory used by cache:               {0}", statistics.memoryUsedCache);
         _log.nest().info("maximum memory used by cache:               {0}", statistics.getMaxMemoryUsedCache());
+        _log.nest().info("current memory used by cache:               {0}",
+                         cacheManager.get(_ctx).getMemoryUsedCache());
         _log.nest().info("number of duplicated requests:              {0}", statistics.numDuplicatedRequests);
         _log.nest().info("total number of elements added to cache:    {0}", statistics.numElementsAddedToCache);
         _log.nest().info("total number of elements erased from cache: {0}", statistics.numElementsErasedFromCache);

@@ -29,7 +29,5 @@
 // Generated
 //
 
-#include <vpux/compiler/dialect/VPUASM/dialect.hpp.inc>
-
 #define GET_OP_CLASSES
 #include <vpux/compiler/dialect/VPUASM/ops.hpp.inc>

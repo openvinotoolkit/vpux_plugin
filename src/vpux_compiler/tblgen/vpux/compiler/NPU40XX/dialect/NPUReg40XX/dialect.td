@@ -9,10 +9,10 @@
 include "mlir/IR/OpBase.td"
 
 def NPUReg40XX_Dialect : Dialect {
-    let summary = "NPU 40XX HW specifics";
+    let summary = "VPU 40XX HW specifics";
 
     let description = [{
-        The **40XX** encapsulates NPU40XX specific information.
+        The **40XX** encapsulates NPU40XX/40XX specific information.
 
     }];
 

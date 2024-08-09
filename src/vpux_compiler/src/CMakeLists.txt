@@ -13,7 +13,6 @@ set(VPU_COMPILER_SRC_INCLUDE_DIR
 set(VPU_COMPILER_BIN_INCLUDE_DIR
         $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/src/vpux_compiler/tblgen>)
 
-add_subdirectory(VPU30XX)
 add_subdirectory(NPU37XX)
 add_subdirectory(NPU40XX)
 add_subdirectory(conversion)

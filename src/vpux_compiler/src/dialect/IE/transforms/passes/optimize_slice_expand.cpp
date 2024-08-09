@@ -4,6 +4,7 @@
 //
 
 #include "vpux/compiler/dialect/IE/transforms/passes/optimize_slice_expand.hpp"
+#include <llvm/ADT/TypeSwitch.h>
 #include <mlir/Pass/PassManager.h>
 #include <mlir/Transforms/GreedyPatternRewriteDriver.h>
 #include "vpux/compiler/core/layers.hpp"
@@ -24,6 +25,182 @@
 #include <numeric>
 
 using namespace vpux;
+
+// IsLegal functions for support operations
+bool IE::isMiddleOpLegal(IE::SliceOp sliceOp, mlir::Operation* op, IE::ExpandOp expandOp) {
+    return llvm::TypeSwitch<mlir::Operation*, bool>(op)
+            .Case<IE::ConcatOp>([&](IE::ConcatOp concatOp) {
+                return isConcatLegal(sliceOp, concatOp, expandOp);
+            })
+            .Case<IE::PReluOp>([&](IE::PReluOp preluOp) {
+                return isPReluLegal(sliceOp, preluOp, expandOp);
+            })
+            .Default([](mlir::Operation*) -> bool {
+                return false;
+            });
+}
+
+bool IE::isPReluLegal(IE::SliceOp sliceOp, IE::PReluOp preluOp, IE::ExpandOp expandOp) {
+    if (preluOp == nullptr || preluOp->getNumResults() != 1 || !preluOp->hasOneUse()) {
+        return false;
+    }
+
+    const auto expandAxis = IE::getExpandAxis(expandOp);
+    if (!expandAxis.has_value()) {
+        return false;
+    }
+
+    auto patternInShape = getShape(sliceOp.getSource());
+    auto sliceOutShape = getShape(sliceOp.getResult());
+    auto sliceAxis = IE::getSingleDiffAxis(patternInShape, sliceOutShape);
+    if (!sliceAxis.has_value()) {
+        return false;
+    }
+
+    const auto sliceAxisVal = sliceAxis.value();
+    const auto expandAxisVal = expandAxis.value();
+
+    if (sliceAxisVal != expandAxisVal) {
+        return false;
+    }
+
+    auto patternOutShape = getShape(expandOp.getResult());
+    if (patternInShape[sliceAxisVal] != patternOutShape[expandAxisVal]) {
+        return false;
+    }
+
+    for (auto index : irange<unsigned>(1, preluOp->getOperands().size())) {
+        auto input = preluOp.getOperand(index);
+        if (!mlir::isa_and_nonnull<Const::DeclareOp>(input.getDefiningOp())) {
+            auto partialSliceOp = input.getDefiningOp<IE::SliceOp>();
+            if (partialSliceOp == nullptr) {
+                return false;
+            }
+            const auto partialInShape = getShape(partialSliceOp.getSource());
+            if (partialInShape[Dims4D::Act::C] != patternOutShape[Dims4D::Act::C]) {
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+bool IE::isConcatLegal(IE::SliceOp maybeSliceOp, IE::ConcatOp concatOp, IE::ExpandOp expandOp) {
+    if (concatOp == nullptr || concatOp->getNumResults() != 1 || !concatOp->hasOneUse()) {
+        return false;
+    }
+
+    SmallVector<Dim> sliceAxes;
+    SmallVector<std::pair<int32_t, mlir::Operation*>> sliceOpInfos;
+    for (const auto& concatInput : concatOp.getInputs() | indexed) {
+        auto inputOp = concatInput.value().getDefiningOp();
+        if (mlir::isa_and_nonnull<Const::DeclareOp>(inputOp)) {
+            sliceOpInfos.push_back(std::pair<int32_t, mlir::Operation*>(concatInput.index(), inputOp));
+            continue;
+        }
+
+        auto sliceOp = maybeSliceOp;
+        if (sliceOp == nullptr) {
+            sliceOp = mlir::dyn_cast_or_null<IE::SliceOp>(inputOp);
+            if (sliceOp == nullptr) {
+                continue;
+            }
+        }
+
+        auto sliceAxis = IE::getSingleDiffAxis(getShape(sliceOp.getSource()), getShape(sliceOp.getResult()));
+        if (!sliceAxis.has_value()) {
+            return false;
+        }
+
+        if (sliceAxes.empty() || sliceAxis.value() != sliceAxes.back()) {
+            sliceAxes.push_back(sliceAxis.value());
+        }
+
+        sliceOpInfos.push_back(std::pair<int32_t, mlir::Operation*>(concatInput.index(), sliceOp));
+    }
+
+    const auto concatAxis = getConcatAxis(concatOp);
+    const auto expandAxis = getExpandAxis(expandOp);
+
+    if (sliceAxes.size() != 1 || !concatAxis.has_value() || !expandAxis.has_value()) {
+        return false;
+    }
+
+    const auto sliceAxisVal = sliceAxes.front();
+    const auto concatAxisVal = concatAxis.value();
+    const auto expandAxisVal = expandAxis.value();
+
+    if (sliceAxisVal != expandAxisVal) {
+        return false;
+    }
+
+    const auto expandOutShape = to_small_vector(getShape(expandOp.getResult()));
+    const auto expandPadsBegin = parseIntArrayAttr<int64_t>(expandOp.getPadsBegin());
+    const auto expandPadsEnd = parseIntArrayAttr<int64_t>(expandOp.getPadsEnd());
+
+    // Only consider the 'slice' and 'expand' can be completely eliminated currently
+    // TODO(E#95438): Remove part of 'slice' or 'expand' Op
+    const auto checkDim = sliceAxisVal.ind();
+    if (concatAxisVal != sliceAxisVal) {
+        const auto isLegalSliceOp = [&](const auto& sliceOpInfo) {
+            auto op = sliceOpInfo.second;
+            if (mlir::isa_and_nonnull<Const::DeclareOp>(op)) {
+                return true;
+            }
+            auto sliceOp = mlir::cast<IE::SliceOp>(op);
+            const auto sliceInShape = to_small_vector(getShape(sliceOp.getSource()));
+            const auto sliceOffsets = parseIntArrayAttr<int64_t>(sliceOp.getStaticOffsets());
+            return sliceOffsets[checkDim] == expandPadsBegin[checkDim] &&
+                   sliceInShape[checkDim] == expandOutShape[checkDim];
+        };
+
+        if (concatOp.getInputs().size() != sliceOpInfos.size() || !llvm::all_of(sliceOpInfos, isLegalSliceOp)) {
+            return false;
+        }
+    }
+
+    if (concatAxisVal == sliceAxisVal) {
+        const auto isLegalSliceOp = [&](const auto& sliceOpInfo) {
+            auto inputIdx = sliceOpInfo.first;
+            auto op = sliceOpInfo.second;
+            if (mlir::isa_and_nonnull<Const::DeclareOp>(op)) {
+                return true;
+            }
+            auto sliceOp = mlir::cast<IE::SliceOp>(op);
+            const auto sliceInShape = to_small_vector(getShape(sliceOp.getSource()));
+            const auto sliceOffsets = parseIntArrayAttr<int64_t>(sliceOp.getStaticOffsets());
+            const auto sliceStaticSizes = parseIntArrayAttr<int64_t>(sliceOp.getStaticSizes());
+            if (inputIdx == 0) {
+                return sliceOffsets[checkDim] == expandPadsBegin[checkDim] &&
+                       sliceInShape[checkDim] == sliceOffsets[checkDim] + sliceStaticSizes[checkDim];
+            } else if (inputIdx == checked_cast<int64_t>(concatOp.getInputs().size()) - 1) {
+                return sliceOffsets[checkDim] == 0 &&
+                       sliceInShape[checkDim] == expandPadsEnd[checkDim] + sliceStaticSizes[checkDim];
+            } else {
+                return false;
+            }
+        };
+
+        if (!llvm::all_of(sliceOpInfos, isLegalSliceOp)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+mlir::Value createNewConstValue(Const::DeclareOp constOp, Dim expandAxisVal, ShapeRef expandOutShape,
+                                mlir::PatternRewriter& rewriter) {
+    const auto constShape = getShape(constOp);
+    int64_t padding = expandOutShape[expandAxisVal] - constShape[expandAxisVal];
+    auto contentAttr = constOp.getContentAttr();
+    SmallVector<int64_t> padBegin(constShape.size(), 0);
+    SmallVector<int64_t> padEnd(constShape.size(), 0);
+    padEnd[expandAxisVal.ind()] = padding;
+    contentAttr = contentAttr.padWithZero(ShapeRef(padBegin), ShapeRef(padEnd));
+    return rewriter.create<Const::DeclareOp>(constOp->getLoc(), contentAttr.getType(), contentAttr).getResult();
+}
 
 IE::FuseMode vpux::IE::getFuseMode(ShapeRef patternInShape, ShapeRef patternOutShape) {
     VPUX_THROW_UNLESS(patternInShape.size() == patternOutShape.size(),
@@ -376,308 +553,6 @@ mlir::LogicalResult vpux::IE::genericOptimizeSliceImplicitExpand(IE::ExpandOp ex
 }
 
 //
-// OptimizeSliceConcatExpand
-//
-
-namespace {
-
-bool isSliceAxisInLastDim(IE::SliceOp sliceOp, Dim dim) {
-    auto inType = sliceOp.getSource().getType().cast<vpux::NDTypeInterface>();
-    auto inRank = inType.getRank();
-    auto dimsOrder = inType.getDimsOrder();
-    return dimsOrder.toMemDim(dim).ind() == inRank - 1;
-}
-
-SmallVector<Const::DeclareOp> getAllConstInputOp(IE::ConcatOp origOp) {
-    mlir::SmallVector<Const::DeclareOp> inputOps;
-    for (auto preOps : origOp.getInputs()) {
-        auto constOp = preOps.getDefiningOp<Const::DeclareOp>();
-
-        if (constOp != nullptr) {
-            inputOps.emplace_back(constOp);
-        }
-    }
-    return inputOps;
-}
-
-}  // namespace
-
-mlir::LogicalResult vpux::IE::OptimizeSliceConcatExpand::matchAndRewrite(IE::ExpandOp expandOp,
-                                                                         mlir::PatternRewriter& rewriter) const {
-    _log.trace("[{0}] Got '{1}' at '{2}'", getDebugName(), expandOp->getName(), expandOp->getLoc());
-    const auto innerLog = _log.nest();
-
-    auto concatOp = expandOp.getInput().getDefiningOp<IE::ConcatOp>();
-    if (concatOp == nullptr || concatOp->getNumResults() != 1 || !concatOp->hasOneUse()) {
-        innerLog.trace("'Expand' at '{0}' input is not 'Concat' or 'Concat' has more than one users",
-                       expandOp->getLoc());
-        return mlir::failure();
-    }
-
-    SmallVector<Dim> sliceAxes;
-    SmallVector<std::pair<int32_t, IE::SliceOp>> sliceOpInfos;
-    for (const auto& concatInput : concatOp.getInputs() | indexed) {
-        auto sliceOp = concatInput.value().getDefiningOp<IE::SliceOp>();
-        if (sliceOp == nullptr) {
-            continue;
-        }
-
-        auto sliceAxis = vpux::IE::getSingleDiffAxis(getShape(sliceOp.getSource()), getShape(sliceOp.getResult()));
-        if (!sliceAxis.has_value()) {
-            return mlir::failure();
-        }
-
-        if (sliceAxes.empty() || sliceAxis.value() != sliceAxes.back()) {
-            sliceAxes.push_back(sliceAxis.value());
-        }
-
-        sliceOpInfos.push_back(std::pair<int32_t, IE::SliceOp>(concatInput.index(), sliceOp));
-    }
-
-    const auto concatAxis = getConcatAxis(concatOp);
-    const auto expandAxis = getExpandAxis(expandOp);
-
-    if (sliceAxes.size() != 1 || !concatAxis.has_value() || !expandAxis.has_value()) {
-        return mlir::failure();
-    }
-
-    const auto sliceAxisVal = sliceAxes.front();
-    const auto concatAxisVal = concatAxis.value();
-    const auto expandAxisVal = expandAxis.value();
-
-    if (sliceAxisVal != expandAxisVal) {
-        innerLog.trace("'Slice' axis should same with 'Expand' axis, but got '{0}' and '{1}'", sliceAxisVal,
-                       expandAxisVal);
-        return mlir::failure();
-    }
-
-    const auto expandOutShape = to_small_vector(getShape(expandOp.getResult()));
-    const auto expandPadsBegin = parseIntArrayAttr<int64_t>(expandOp.getPadsBegin());
-    const auto expandPadsEnd = parseIntArrayAttr<int64_t>(expandOp.getPadsEnd());
-    // Only consider the 'slice' and 'expand' can be completely eliminated currently
-    // TODO(E#95438): Remove part of 'slice' or 'expand' Op
-    SmallVector<mlir::Value> newConcatInputs;
-    const auto checkDim = sliceAxisVal.ind();
-    if (concatAxisVal != sliceAxisVal) {
-        const auto isLegalSliceOp = [&](const auto& sliceOpInfo) {
-            auto sliceOp = sliceOpInfo.second;
-            const auto sliceInShape = to_small_vector(getShape(sliceOp.getSource()));
-            const auto sliceOffsets = parseIntArrayAttr<int64_t>(sliceOp.getStaticOffsets());
-            return sliceOffsets[checkDim] == expandPadsBegin[checkDim] &&
-                   sliceInShape[checkDim] == expandOutShape[checkDim];
-        };
-
-        if (concatOp.getInputs().size() != sliceOpInfos.size() || !llvm::all_of(sliceOpInfos, isLegalSliceOp)) {
-            innerLog.trace("Ilegal pattern at '{0}'", expandOp->getLoc());
-            return mlir::failure();
-        }
-    }
-
-    if (concatAxisVal == sliceAxisVal) {
-        const auto isLegalSliceOp = [&](const auto& sliceOpInfo) {
-            auto inputIdx = sliceOpInfo.first;
-            auto sliceOp = sliceOpInfo.second;
-            const auto sliceInShape = to_small_vector(getShape(sliceOp.getSource()));
-            const auto sliceOffsets = parseIntArrayAttr<int64_t>(sliceOp.getStaticOffsets());
-            const auto sliceStaticSizes = parseIntArrayAttr<int64_t>(sliceOp.getStaticSizes());
-            if (inputIdx == 0) {
-                return sliceOffsets[checkDim] == expandPadsBegin[checkDim] &&
-                       sliceInShape[checkDim] == sliceOffsets[checkDim] + sliceStaticSizes[checkDim];
-            } else if (inputIdx == checked_cast<int64_t>(concatOp.getInputs().size()) - 1) {
-                return sliceOffsets[checkDim] == 0 &&
-                       sliceInShape[checkDim] == expandPadsEnd[checkDim] + sliceStaticSizes[checkDim];
-            } else {
-                return false;
-            }
-        };
-
-        if (!llvm::all_of(sliceOpInfos, isLegalSliceOp)) {
-            innerLog.trace("Ilegal pattern at '{0}'", expandOp->getLoc());
-            return mlir::failure();
-        }
-    }
-
-    for (const auto& concatInput : concatOp.getInputs()) {
-        if (auto sliceOp = concatInput.getDefiningOp<IE::SliceOp>()) {
-            newConcatInputs.push_back(sliceOp.getSource());
-        } else {
-            newConcatInputs.push_back(concatInput);
-        }
-    }
-
-    innerLog.trace("Optimization completed successfully at '{0}'", expandOp->getLoc());
-    rewriter.replaceOpWithNewOp<IE::ConcatOp>(expandOp, newConcatInputs, concatAxisVal);
-    return mlir::success();
-}
-
-Const::DeclareOp createNewConstInput(mlir::Value concatInput, Dim expandAxisVal, ShapeRef expandInShape,
-                                     mlir::PatternRewriter& rewriter) {
-    auto concatConstInput = concatInput.getDefiningOp<Const::DeclareOp>();
-    const auto constInputshape = getShape(concatConstInput);
-
-    Shape targetShape(constInputshape.size());
-
-    for (auto ind : irange(targetShape.size())) {
-        const auto d = Dim(ind);
-        targetShape[d] = d == expandAxisVal ? expandInShape[expandAxisVal] : constInputshape[d];
-    }
-
-    auto contentAttr = concatConstInput.getContentAttr();
-    auto baseContent = contentAttr.getBaseContent();
-    auto newConstOutputType = concatConstInput.getOutput().getType().cast<vpux::NDTypeInterface>();
-    newConstOutputType = newConstOutputType.changeShape(targetShape);
-
-    Const::ContentAttr newContentAttr = Const::ContentAttr::get(baseContent);
-    for (auto& attr : contentAttr.getTransformations()) {
-        if (attr.isa<Const::PadWithZeroAttr>()) {
-            return nullptr;
-        }
-        auto broadCastAttr = attr.dyn_cast_or_null<Const::BroadcastAttr>();
-        if (broadCastAttr != nullptr) {
-            // If the BroadcastAttr Axis is the same to taget Axis, could not handle.
-            if (broadCastAttr.getAxis().getValue() == expandAxisVal.ind()) {
-                return nullptr;
-            }
-        }
-        newContentAttr = Const::ContentAttr::addTransformation(newContentAttr, attr);
-    }
-
-    newContentAttr = newContentAttr.broadcast(expandAxisVal, targetShape[expandAxisVal]);
-    return rewriter.create<Const::DeclareOp>(concatConstInput.getLoc(), newConstOutputType, newContentAttr);
-}
-
-// For the pattern slice -> concat -> concat -> expand
-// Opimize it to concat -> concat with channel not changed.
-// This is a typical pattern after handle large padds pass.
-mlir::LogicalResult vpux::IE::OptimizeSliceTwoConcatsExpand::matchAndRewrite(IE::ExpandOp expandOp,
-                                                                             mlir::PatternRewriter& rewriter) const {
-    const auto innerLog = _log.nest();
-    innerLog.trace("[{0}] Got '{1}' at '{2}'", getDebugName(), expandOp->getName(), expandOp->getLoc());
-
-    auto concatOp = expandOp.getInput().getDefiningOp<IE::ConcatOp>();
-    if (concatOp == nullptr || concatOp->getNumResults() != 1 || !concatOp->hasOneUse()) {
-        innerLog.trace("'Expand' at '{0}' input is not 'Concat' or 'Concat' has more than one users",
-                       expandOp->getLoc());
-        return mlir::failure();
-    }
-
-    const auto patternCheck = [](IE::ConcatOp concatOp) {
-        // The const input needs to be splat, otherwise could not handle the const expand.
-        const auto isSplatConcatConstInputs = [](Const::DeclareOp constOp) {
-            return IE::isBaseContentSplat(constOp);
-        };
-        // Only handle concat with only one non-const input
-        auto concatOpConstInputs = getAllConstInputOp(concatOp);
-        if (concatOpConstInputs.size() != concatOp.getInputs().size() - 1) {
-            return false;
-        }
-        if (!llvm::all_of(concatOpConstInputs, isSplatConcatConstInputs)) {
-            return false;
-        }
-        return true;
-    };
-
-    if (!patternCheck(concatOp)) {
-        return mlir::failure();
-    }
-
-    // Find the second Concat Op
-    SmallVector<IE::ConcatOp> concatSecondOpCandidates;
-    for (const auto& concatInput : concatOp.getInputs() | indexed) {
-        auto concatOplocal = concatInput.value().getDefiningOp<IE::ConcatOp>();
-        if (concatOplocal == nullptr) {
-            continue;
-        }
-        concatSecondOpCandidates.push_back(concatOplocal);
-    }
-    // Only handle concate -> concate case.
-    if (concatSecondOpCandidates.size() != 1) {
-        return mlir::failure();
-    }
-
-    auto concatSecondOp = concatSecondOpCandidates.front();
-
-    if (!patternCheck(concatSecondOp)) {
-        return mlir::failure();
-    }
-
-    SmallVector<IE::SliceOp> sliceOpCandidate;
-    for (const auto& concatInput : concatSecondOp.getInputs() | indexed) {
-        auto sliceOp = concatInput.value().getDefiningOp<IE::SliceOp>();
-        if (sliceOp == nullptr) {
-            continue;
-        }
-        sliceOpCandidate.push_back(sliceOp);
-    }
-    if (sliceOpCandidate.size() != 1) {
-        return mlir::failure();
-    }
-
-    const auto concatAxis = getConcatAxis(concatOp);
-    const auto concatSecondOpAxis = getConcatAxis(concatSecondOp);
-    auto sliceOpCandidateFront = sliceOpCandidate.front();
-    const auto sliceAxis = vpux::IE::getSingleDiffAxis(getShape(sliceOpCandidateFront.getSource()),
-                                                       getShape(sliceOpCandidateFront.getResult()));
-    const auto expandAxis = getExpandAxis(expandOp);
-    const auto expandAxisVal = expandAxis.value();
-
-    if (!sliceAxis.has_value() || !concatAxis.has_value() || !expandAxis.has_value() ||
-        !concatSecondOpAxis.has_value() || !isSliceAxisInLastDim(sliceOpCandidateFront, sliceAxis.value())) {
-        return mlir::failure();
-    }
-
-    if (sliceAxis.value() != expandAxisVal) {
-        innerLog.trace("'Slice' axis should same with 'Expand' axis, but got '{0}' and '{1}'", sliceAxis.value(),
-                       expandAxisVal);
-        return mlir::failure();
-    }
-    if (sliceAxis.value() == concatAxis.value()) {
-        innerLog.trace("'Slice' axis should be different with 'Concat' axis, but got '{0}' and '{1}'",
-                       sliceAxis.value(), concatAxis.value());
-        return mlir::failure();
-    }
-    if (sliceAxis.value() == concatSecondOpAxis.value()) {
-        innerLog.trace("'Slice' axis should be different with second 'Concat' axis, but got '{0}' and '{1}'",
-                       sliceAxis.value(), concatSecondOpAxis.value());
-        return mlir::failure();
-    }
-
-    SmallVector<mlir::Value> newConcatInputs;
-    const auto expandInShape = getShape(expandOp);
-    for (const auto& concatInput : concatSecondOp.getInputs()) {
-        if (auto sliceOp = concatInput.getDefiningOp<IE::SliceOp>()) {
-            newConcatInputs.push_back(sliceOp.getSource());
-        } else {
-            auto newConstInput = createNewConstInput(concatInput, expandAxisVal, expandInShape, rewriter);
-            if (newConstInput == nullptr) {
-                return mlir::failure();
-            }
-            newConcatInputs.push_back(newConstInput);
-        }
-    }
-
-    auto newConcatSecondOp =
-            rewriter.create<IE::ConcatOp>(concatSecondOp.getLoc(), newConcatInputs, concatSecondOpAxis.value());
-
-    newConcatInputs.clear();
-    for (const auto& concatInput : concatOp.getInputs()) {
-        if (auto concatOpLocal = concatInput.getDefiningOp<IE::ConcatOp>()) {
-            newConcatInputs.push_back(newConcatSecondOp);
-        } else {
-            auto newConstInput = createNewConstInput(concatInput, expandAxisVal, expandInShape, rewriter);
-            if (newConstInput == nullptr) {
-                return mlir::failure();
-            }
-            newConcatInputs.push_back(newConstInput);
-        }
-    }
-
-    innerLog.trace("Optimization completed successfully at '{0}'", expandOp->getLoc());
-    rewriter.replaceOpWithNewOp<IE::ConcatOp>(expandOp, newConcatInputs, concatAxis.value());
-    return mlir::success();
-}
-
-//
 // OptimizeSliceShapeCastExpand
 //
 
@@ -789,5 +664,159 @@ mlir::LogicalResult vpux::IE::genericOptimizeSliceImplicitShapeCastExpand(IE::Ex
                                                            getIntArrayAttr(origOp.getContext(), newShapeCastOutShape));
 
     rewriter.replaceOp(origOp, newShapeCastOp.getResult());
+    return mlir::success();
+}
+
+SmallVector<mlir::Value> vpux::IE::OptimizeSlicePReluExpand::updateInputsForOp(mlir::PatternRewriter& rewriter,
+                                                                               IE::PReluOp origOp,
+                                                                               IE::ExpandOp expandOp) const {
+    SmallVector<mlir::Value> inputs;
+    inputs.push_back(origOp.getInput().getDefiningOp<IE::SliceOp>().getSource());
+    for (auto index : irange<unsigned>(1, origOp->getOperands().size())) {
+        auto input = origOp.getOperand(index);
+        if (auto constOp = input.getDefiningOp<Const::DeclareOp>()) {
+            inputs.push_back(createNewConstValue(constOp, Dims4D::Act::C, getShape(expandOp.getResult()), rewriter));
+        } else {
+            inputs.push_back(input.getDefiningOp<IE::SliceOp>().getSource());
+        }
+    }
+    return inputs;
+}
+
+SmallVector<mlir::Value> vpux::IE::OptimizeSliceConcatExpand::updateInputsForOp(mlir::PatternRewriter& rewriter,
+                                                                                IE::ConcatOp origOp,
+                                                                                IE::ExpandOp expandOp) const {
+    const auto expandAxisVal = getExpandAxis(expandOp).value();
+    SmallVector<mlir::Value> newConcatInputs;
+    for (const auto& concatInput : origOp.getInputs()) {
+        if (auto sliceOp = concatInput.getDefiningOp<IE::SliceOp>()) {
+            newConcatInputs.push_back(sliceOp.getSource());
+        } else if (auto constOp = concatInput.getDefiningOp<Const::DeclareOp>()) {
+            newConcatInputs.push_back(
+                    createNewConstValue(constOp, expandAxisVal, getShape(expandOp.getResult()), rewriter));
+        } else {
+            newConcatInputs.push_back(concatInput);
+        }
+    }
+    return newConcatInputs;
+}
+
+/**
+ * Fuse slice and expand when operations between them are supported with any order and numbers.
+ * Insert Expand and SliceOp between ops, then we can get single SliceOp-Op-ExpandOp patterns and call related pattern
+ * optimizations. It's easier to handle single SliceOp-Op-ExpandOp than many ops between SliceOp and ExpandOp.
+ *
+ *         SliceOp                         SliceOp                      op1
+ *            |                               |                          |
+ *           op1                             op1                        op2
+ *            |                               |                          |
+ *           op2             ->            ExpandOp         ->          op3
+ *            |                               |
+ *           op3                           SliceOp
+ *            |                               |
+ *         ExpandOp                          op2
+ *                                            |
+ *                                         ExpandOp
+ *                                            |
+ *                                         SliceOp
+ *                                            |
+ *                                           op3
+ *                                            |
+ *                                         ExpandOp
+ *
+ */
+mlir::LogicalResult IE::OptimizeSliceOpsExpand::matchAndRewrite(IE::ExpandOp expandOp,
+                                                                mlir::PatternRewriter& rewriter) const {
+    _log.trace("[{0}] Got '{1}' at '{2}'", getDebugName(), expandOp->getName(), expandOp->getLoc());
+
+    // TODO(E#126897) : support more middle ops
+    auto isSupportOpType = [](mlir::Operation* op) -> bool {
+        return mlir::isa_and_nonnull<IE::ConcatOp, IE::PReluOp>(op);
+    };
+
+    auto getNonConstConcatInput = [](IE::ConcatOp concatOp) -> mlir::FailureOr<mlir::Operation*> {
+        SmallVector<mlir::Operation*> previousOpCandidates;
+        for (const auto& concatInput : concatOp.getInputs() | indexed) {
+            auto concatOplocal = concatInput.value().getDefiningOp();
+            if (mlir::isa_and_nonnull<Const::DeclareOp>(concatOplocal)) {
+                continue;
+            }
+            previousOpCandidates.push_back(concatOplocal);
+        }
+        if (previousOpCandidates.size() != 1) {
+            return mlir::failure();
+        }
+        return previousOpCandidates.front();
+    };
+
+    SmallVector<mlir::Operation*> ops;
+    auto inputOp = expandOp.getInput().getDefiningOp();
+    while (isSupportOpType(inputOp)) {
+        ops.push_back(inputOp);
+        if (auto concatOp = mlir::dyn_cast_or_null<IE::ConcatOp>(inputOp)) {
+            // TODO(E#126897) : support multi branch with non-const inputs for multi concat ops in middle
+            auto inputOrFailure = getNonConstConcatInput(concatOp);
+            if (mlir::failed(inputOrFailure)) {
+                _log.trace("Ilegal IE::ConcatOp at '{0}', only one non-const input ConcatOp is supported Now.",
+                           expandOp->getLoc());
+                return mlir::failure();
+            }
+            inputOp = inputOrFailure.value();
+        } else {
+            inputOp = inputOp->getOperand(0).getDefiningOp();
+        }
+    }
+
+    if (ops.size() <= 1) {
+        _log.trace("Only one or no operations between slice and expand.", expandOp->getLoc());
+        return mlir::failure();
+    }
+
+    auto sliceOp = mlir::dyn_cast_or_null<IE::SliceOp>(inputOp);
+    if (sliceOp == nullptr) {
+        _log.trace("Cannot get 'Slice' in the front of the pattern.");
+        return mlir::failure();
+    }
+
+    // Check if all the middle ops are feasible to be optimized.
+    for (auto op : ops) {
+        if (!isMiddleOpLegal(sliceOp, op, expandOp)) {
+            _log.trace("Ilegal Middle operation at '{0}'.", op->getLoc());
+            return mlir::failure();
+        }
+    }
+
+    mlir::Value preOutput = sliceOp.getResult();
+    auto padBegin = expandOp.getPadsBeginAttr();
+    auto padEnd = expandOp.getPadsEndAttr();
+    for (auto iter = ops.rbegin(); iter != ops.rend(); ++iter) {
+        mlir::Operation* op = *iter;
+        mlir::IRMapping mapper;
+        if (auto concatOp = mlir::dyn_cast<IE::ConcatOp>(op)) {
+            for (const auto& concatInput : concatOp.getInputs()) {
+                if (!mlir::isa<Const::DeclareOp>(concatInput.getDefiningOp())) {
+                    mapper.map(concatInput, preOutput);
+                }
+            }
+        } else {
+            mapper.map(op->getOperand(0), preOutput);
+        }
+        auto newOp = rewriter.clone(*op, mapper);
+        vpux::inferReturnTypes(newOp, vpux::InferShapedTypeMode::SHAPE);
+
+        if (iter != ops.rend() - 1) {
+            auto insertExpandOp =
+                    rewriter.create<IE::ExpandOp>(expandOp->getLoc(), newOp->getResult(0), padBegin, padEnd);
+            auto sliceOffset = sliceOp.getStaticOffsetsAttr();
+            auto insertSliceOp =
+                    rewriter.create<IE::SliceOp>(expandOp->getLoc(), insertExpandOp.getResult(), sliceOffset,
+                                                 getIntArrayAttr(expandOp.getContext(), getShape(newOp->getResult(0))));
+            preOutput = insertSliceOp.getResult();
+        } else {
+            preOutput = newOp->getResult(0);
+        }
+    }
+
+    rewriter.replaceOpWithNewOp<IE::ExpandOp>(expandOp, expandOp.getType(), preOutput, padBegin, padEnd);
     return mlir::success();
 }

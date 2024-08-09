@@ -3,11 +3,14 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+//
+
 #pragma once
 
 #include "vpux/utils/core/logger.hpp"
 #include "vpux/utils/profiling/common.hpp"
 #include "vpux/utils/profiling/parser/hw.hpp"
+#include "vpux/utils/profiling/taskinfo.hpp"
 
 #include <cstdint>
 #include <map>
@@ -47,7 +50,6 @@ struct RawData {
     RawDataLayout sections;
     RawProfilingData rawRecords;
     MVCNN::TargetDevice device;
-    std::optional<double> maybe30XXNceFreq;
 };
 
 /**
@@ -65,35 +67,21 @@ RawData getRawProfilingTasks(const uint8_t* blobData, size_t blobSize, const uin
 
 struct FrequenciesSetup {
 public:
-    static constexpr double UNITIALIZED_FREQUENCY_VALUE = -1;
     static constexpr double MIN_FREQ_MHZ = 700.0;
 
 public:
-    double vpuClk = UNITIALIZED_FREQUENCY_VALUE;
-    double dpuClk = UNITIALIZED_FREQUENCY_VALUE;
-    double profClk = UNITIALIZED_FREQUENCY_VALUE;
-    double dmaBandwidth = UNITIALIZED_FREQUENCY_VALUE;
+    double vpuClk = UNINITIALIZED_FREQUENCY_VALUE;
+    double dpuClk = UNINITIALIZED_FREQUENCY_VALUE;
+    double profClk = UNINITIALIZED_FREQUENCY_VALUE;
     bool hasSharedDmaSwCounter = false;
     bool hasSharedDmaDpuCounter = false;
-};
-
-struct ProfClk37XX {
-    // Default perf_clk value after dividing by the default frequency divider
-    static constexpr double PROF_CLK_DEFAULT_VALUE_MHZ = 38.4;
-};
-
-struct ProfClk40XX {
-    // Default perf_clk value after dividing by the default frequency divider
-    static constexpr double PROF_CLK_DEFAULT_VALUE_MHZ = 19.2;
-    // High frequency perf_clk value after dividing by the default frequency divider
-    static constexpr double PROF_CLK_HIGHFREQ_VALUE_MHZ = 200.0;
+    FreqStatus clockStatus = FreqStatus::UNKNOWN;
 };
 
 // freq.cpp
 
 FrequenciesSetup getFrequencySetup(const MVCNN::TargetDevice device, const WorkpointRecords& workpoints,
-                                   const std::optional<double>& maybe30XXNceFreq, bool highFreqPerfClk, bool fpga,
-                                   vpux::Logger& log);
+                                   bool highFreqPerfClk, bool fpga, vpux::Logger& log);
 
 // sync.cpp
 

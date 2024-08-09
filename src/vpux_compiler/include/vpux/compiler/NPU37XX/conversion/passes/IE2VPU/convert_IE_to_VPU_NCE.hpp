@@ -32,6 +32,25 @@ private:
 };
 
 //
+// MatMulToNCE
+//
+
+class MatMulToNCE final : public mlir::OpRewritePattern<IE::MatMulOp> {
+public:
+    MatMulToNCE(mlir::MLIRContext* ctx, VPU::ArchKind arch, Logger log)
+            : mlir::OpRewritePattern<IE::MatMulOp>(ctx), _arch(arch), _log(log) {
+        setDebugName("MatMulToNCE");
+    }
+
+public:
+    mlir::LogicalResult matchAndRewrite(IE::MatMulOp origOp, mlir::PatternRewriter& rewriter) const final;
+
+private:
+    VPU::ArchKind _arch;
+    Logger _log;
+};
+
+//
 // DepthConvToNCE
 //
 

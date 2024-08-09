@@ -4,6 +4,7 @@
 //
 
 #include "vpux/compiler/utils/ELF/utils.hpp"
+
 #include <vpux_elf/accessor.hpp>
 #include <vpux_elf/reader.hpp>
 #include "vpux/compiler/act_kernels/shave_binary_resources.h"
@@ -87,8 +88,7 @@ ArrayRef<uint8_t> vpux::ELF::getKernelELF(mlir::Operation* operation, StringRef 
     const auto arch = getSwKernelArchString(archKind);
     const auto revisionID = VPU::getRevisionID(operation);
     llvm::ArrayRef<uint8_t> elfBlob;
-    if (archKind == VPU::ArchKind::NPU40XX && revisionID.has_value() &&
-        revisionID.value() >= VPU::RevisionID::REVISION_B) {
+    if (archKind == VPU::ArchKind::NPU40XX && revisionID >= VPU::RevisionID::REVISION_B) {
         llvm::StringRef suffix = "B0";
         elfBlob = kernelInfo.getElf(kernelPath, arch, suffix);
     } else {
@@ -163,11 +163,42 @@ void ELF::SymbolReferenceMap::walkAllSymbols() {
 namespace {
 const std::unordered_map<VPU::ArchKind, elf::platform::ArchKind> vpuToElfArchEnumMap = {
         {VPU::ArchKind::UNKNOWN, elf::platform::ArchKind::UNKNOWN},
-        {VPU::ArchKind::NPU30XX, elf::platform::ArchKind::VPUX30XX},
         {VPU::ArchKind::NPU37XX, elf::platform::ArchKind::VPUX37XX},
         {VPU::ArchKind::NPU40XX, elf::platform::ArchKind::VPUX40XX}};
 }  // namespace
 
 elf::platform::ArchKind vpux::ELF::mapVpuArchKindToElfArchKind(const VPU::ArchKind& archKind) {
     return vpuToElfArchEnumMap.at(archKind);
+}
+
+std::pair<uint8_t, uint8_t> vpux::ELF::reduceWaitMaskTo8bit(uint64_t waitMask) {
+    uint8_t barrier_group = 0;
+    uint8_t barrier_mask = 0;
+    for (uint64_t mask = waitMask, group = 1; mask > 0; mask >>= 8, ++group) {
+        if (mask & 0xff) {
+            if (barrier_group == 0) {
+                barrier_group = static_cast<unsigned char>(group);
+                barrier_mask = mask & 0xff;
+            } else {
+                barrier_group = 0;
+                barrier_mask = 0;
+                break;
+            }
+        }
+    }
+    return {barrier_group, barrier_mask};
+}
+
+mlir::MemRefType vpux::ELF::getLinearMemrefType(mlir::MLIRContext* ctx, int64_t memrefSize, mlir::Type dataType,
+                                                VPU::MemoryKind memKind) {
+    VPUX_THROW_UNLESS(dataType.isIntOrFloat(), "Data Type of the MemRef must be an Integer or Float Type");
+
+    const auto memrefShape = SmallVector<int64_t>{memrefSize};
+    auto memKindAttr = mlir::FlatSymbolRefAttr::get(ctx, stringifyEnum(memKind));
+    const auto memKindSymbolAttr = vpux::IndexedSymbolAttr::get(ctx, memKindAttr);
+    unsigned int perm[1] = {0};
+    auto map = mlir::AffineMap::getPermutationMap(to_small_vector(perm), ctx);
+
+    auto memrefType = mlir::MemRefType::get(memrefShape, dataType, map, memKindSymbolAttr);
+    return memrefType;
 }

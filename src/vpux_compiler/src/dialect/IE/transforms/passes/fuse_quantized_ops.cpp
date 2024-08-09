@@ -7,11 +7,13 @@
 
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/utils/quantization.hpp"
+#include "vpux/compiler/dialect/IE/utils/reduce_infer.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/conv_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
 #include "vpux/compiler/dialect/VPUIP/interfaces/nce_invariant.hpp"
 #include "vpux/compiler/utils/VPU/ppe_utils.hpp"
+#include "vpux/compiler/utils/attributes_properties_conversion.hpp"
 #include "vpux/compiler/utils/error.hpp"
 #include "vpux/compiler/utils/quantization.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
@@ -92,7 +94,7 @@ mlir::LogicalResult FuseWithConvBase<ConcreteOp>::matchAndRewrite(IE::QuantizeOp
         return mlir::failure();
     }
 
-    // On VPUX37XX and VPUX40XX the prelu alpha multiplier used for integer input is unsigned, on floating
+    // On VPUX37XX, VPUX40XX the prelu alpha multiplier used for integer input is unsigned, on floating
     // input it is signed. If input is floating, output is integer, quantize output need to be per tensor, this will
     // check in mix-precision pass
     const auto arch = VPU::getArch(quantizeOp->getParentOfType<mlir::ModuleOp>());
@@ -103,7 +105,8 @@ mlir::LogicalResult FuseWithConvBase<ConcreteOp>::matchAndRewrite(IE::QuantizeOp
     if (compatibleTargets.count(arch) > 0) {
         if (convBaseOp.getPostOpAttr() != nullptr &&
             convBaseOp.getPostOpAttr().getName().getValue() == IE::LeakyReluOp::getOperationName()) {
-            IE::LeakyReluOp::Adaptor leakyRelu(std::nullopt, convBaseOp.getPostOpAttr().getAttrs());
+            IE::LeakyReluOp::Adaptor leakyRelu(std::nullopt, nullptr,
+                                               toProperties<IE::LeakyReluOp>(convBaseOp.getPostOpAttr().getAttrs()));
             if (leakyRelu.verify(convBaseOp->getLoc()).succeeded()) {
                 const auto alpha = leakyRelu.getNegativeSlope().convertToDouble();
                 if (alpha < 0.0) {
@@ -565,6 +568,65 @@ mlir::LogicalResult FuseWithConcat::matchAndRewrite(IE::QuantizeOp quantizeOp, m
 }
 
 //
+// FuseWithReduce
+//
+
+//
+//       [input]
+//          |
+//     (dequantize)
+//          |
+//       (reduce)
+//          |
+//       [output]
+//          |
+//      (quantize)
+//
+
+template <class ConcreteOp>
+class FuseWithReduce final : public mlir::OpRewritePattern<IE::QuantizeOp> {
+public:
+    FuseWithReduce(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<IE::QuantizeOp>(ctx), _log(log) {
+        this->setDebugName("FuseWithReduce");
+    }
+
+public:
+    mlir::LogicalResult matchAndRewrite(IE::QuantizeOp quantizeOp, mlir::PatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+template <class ConcreteOp>
+mlir::LogicalResult FuseWithReduce<ConcreteOp>::matchAndRewrite(IE::QuantizeOp quantizeOp,
+                                                                mlir::PatternRewriter& rewriter) const {
+    auto reduceOp = quantizeOp.getInput().getDefiningOp<ConcreteOp>();
+    if (reduceOp == nullptr) {
+        return mlir::failure();
+    }
+
+    if (!areAllUsersQuantized(reduceOp)) {
+        return mlir::failure();
+    }
+
+    auto isNCESupported = VPU::NCEInvariant::isSupported(reduceOp.getOperation(), _log);
+    if (isNCESupported.failed()) {
+        return mlir::failure();
+    }
+
+    auto inputDequantizeOp = reduceOp.getInput().template getDefiningOp<IE::DequantizeOp>();
+    if (inputDequantizeOp == nullptr) {
+        return mlir::failure();
+    }
+    auto axes = getIntArrayAttr(this->getContext(), IE::extractAxes(reduceOp->getLoc(), reduceOp));
+    rewriter.replaceOpWithNewOp<ConcreteOp>(quantizeOp, quantizeOp.getType(), inputDequantizeOp.getInput(),
+                                            /*axes*/ nullptr,
+                                            /*axes_value*/ axes, /*keep_dims*/ true)
+            ->setLoc(reduceOp->getLoc());
+    return mlir::success();
+}
+
+//
 // FuseWithEltwiseConverter
 //
 
@@ -835,11 +897,12 @@ void FuseQuantizedOpsPass::safeRunOnFunc() {
         return mlir::success();
     };
 
+    // Can be used for MultiplyOp and SubtractOp as well
     const auto checkMulInputTypes = [](mlir::Type input1Type, mlir::Type input2Type) -> mlir::LogicalResult {
         auto dequantElemIn1Type = input1Type.cast<mlir::quant::UniformQuantizedType>();
         auto dequantElemIn2Type = input2Type.cast<mlir::quant::UniformQuantizedType>();
 
-        // Perform check for input types. MultiplyOp supports quantization with different scales and zp.
+        // Perform check for input types. MultiplyOp and SubtractOp supports quantization with different scales and zp.
         if (dequantElemIn1Type.getExpressedType() != dequantElemIn2Type.getExpressedType() ||
             dequantElemIn1Type.getStorageType() != dequantElemIn2Type.getStorageType() ||
             dequantElemIn1Type.isSigned() != dequantElemIn2Type.isSigned()) {
@@ -856,9 +919,8 @@ void FuseQuantizedOpsPass::safeRunOnFunc() {
     patterns.add<FuseWithSlice>(&ctx, _log);
     patterns.add<FuseWithMaxPool>(&ctx, _log);
     patterns.add<FuseWithTile>(&ctx, _log);
-    if (arch != VPU::ArchKind::NPU30XX) {
-        patterns.add<FuseWithAveragePool>(&ctx, _log);
-    }
+    patterns.add<FuseWithReduce<IE::ReduceMeanOp>>(&ctx, _log);
+    patterns.add<FuseWithAveragePool>(&ctx, _log);
     patterns.add<FuseWithConcat>(&ctx, _log);
     // VPUX37XX and VPUX40XX NCE does not support element-wise multiplication, skip the fusion
     const std::set<VPU::ArchKind> incompatibleTargets = {

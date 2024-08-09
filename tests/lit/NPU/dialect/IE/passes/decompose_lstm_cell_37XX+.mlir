@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --decompose-lstm-cell %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 // CHECK-LABEL: @DecomposeLSTMCell
 func.func @DecomposeLSTMCell(%arg0: tensor<5x67xf16>, %arg1: tensor<5x64xf16>, %arg2: tensor<5x64xf16>, %arg3: tensor<256x67xf16>, %arg4: tensor<256x64xf16>, %arg5: tensor<256xf16>) -> (tensor<5x64xf16>, tensor<5x64xf16>) {

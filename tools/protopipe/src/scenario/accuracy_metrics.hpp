@@ -6,9 +6,8 @@
 #pragma once
 
 #include <memory>
-#include <string>
-
 #include <opencv2/core/core.hpp>
+#include <string>
 
 #include "result.hpp"
 
@@ -39,4 +38,15 @@ public:
 
 private:
     double m_threshold;
+};
+
+class NRMSE : public IAccuracyMetric {
+public:
+    using Ptr = std::shared_ptr<NRMSE>;
+    explicit NRMSE(const double tolerance);
+    Result compare(const cv::Mat& lhs, const cv::Mat& rhs) override;
+    std::string str() override;
+
+private:
+    double m_tolerance;
 };

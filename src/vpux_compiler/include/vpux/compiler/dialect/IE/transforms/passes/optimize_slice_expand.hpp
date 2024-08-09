@@ -6,6 +6,7 @@
 #pragma once
 
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
+#include "vpux/compiler/utils/rewriter.hpp"
 
 namespace vpux {
 namespace IE {
@@ -28,6 +29,10 @@ mlir::LogicalResult genericOptimizeSliceImplicitExpand(IE::ExpandOp layerOp, mli
 mlir::LogicalResult genericOptimizeSliceImplicitShapeCastExpand(IE::ExpandOp layerOp, IE::ShapeCastOp shapeCastOp,
                                                                 mlir::Operation* implicitOp,
                                                                 mlir::PatternRewriter& rewriter, Logger innerLog);
+
+bool isMiddleOpLegal(IE::SliceOp sliceOp, mlir::Operation* op, IE::ExpandOp expandOp);
+bool isPReluLegal(IE::SliceOp sliceOp, IE::PReluOp preluOp, IE::ExpandOp expandOp);
+bool isConcatLegal(IE::SliceOp sliceOp, IE::ConcatOp concatOp, IE::ExpandOp expandOp);
 
 //
 // OptimizeSliceImplicitExpand
@@ -57,42 +62,6 @@ public:
 private:
     Logger _log;
     bool _hasCalculationCost;
-};
-
-//
-// OptimizeSliceConcatExpand
-//
-
-class OptimizeSliceConcatExpand final : public mlir::OpRewritePattern<IE::ExpandOp> {
-public:
-    OptimizeSliceConcatExpand(mlir::MLIRContext* ctx, Logger log)
-            : mlir::OpRewritePattern<IE::ExpandOp>(ctx), _log(log) {
-        setDebugName("OptimizeSliceConcatExpand");
-    }
-
-public:
-    mlir::LogicalResult matchAndRewrite(IE::ExpandOp layerOp, mlir::PatternRewriter& rewriter) const final;
-
-private:
-    Logger _log;
-};
-
-//
-// OptimizeSliceTwoConcatsExpand
-//
-
-class OptimizeSliceTwoConcatsExpand final : public mlir::OpRewritePattern<IE::ExpandOp> {
-public:
-    OptimizeSliceTwoConcatsExpand(mlir::MLIRContext* ctx, Logger log)
-            : mlir::OpRewritePattern<IE::ExpandOp>(ctx), _log(log) {
-        setDebugName("OptimizeSliceTwoConcatsExpand");
-    }
-
-public:
-    mlir::LogicalResult matchAndRewrite(IE::ExpandOp layerOp, mlir::PatternRewriter& rewriter) const final;
-
-private:
-    Logger _log;
 };
 
 //
@@ -167,6 +136,110 @@ public:
         return genericOptimizeSliceImplicitShapeCastExpand(origOp, shapeCastOp, swOp.getOperation(), rewriter,
                                                            innerLog);
     }
+
+private:
+    Logger _log;
+};
+
+//
+// OptimizeSliceMultiInputsExpand
+//
+
+template <class ConcreteOp>
+class OptimizeSliceMultiInputsExpand : public mlir::OpRewritePattern<IE::ExpandOp> {
+public:
+    OptimizeSliceMultiInputsExpand(mlir::MLIRContext* ctx, Logger log)
+            : mlir::OpRewritePattern<IE::ExpandOp>(ctx), _log(log) {
+        setDebugName("OptimizeSliceMultiInputsExpand");
+    }
+
+public:
+    mlir::LogicalResult matchAndRewrite(IE::ExpandOp expandOp, mlir::PatternRewriter& rewriter) const final {
+        _log.trace("[{0}] Got '{1}' at '{2}'", getDebugName(), expandOp->getName(), expandOp->getLoc());
+
+        auto implicitOp = expandOp.getInput().getDefiningOp<ConcreteOp>();
+        if (implicitOp == nullptr) {
+            return mlir::failure();
+        }
+
+        if (!isOpLegal(implicitOp, expandOp)) {
+            _log.trace("MiddleOp '{0}' is illegal", implicitOp->getName());
+            return mlir::failure();
+        }
+
+        auto newInputValues = updateInputsForOp(rewriter, implicitOp, expandOp);
+
+        mlir::IRMapping mapper;
+        mapper.map(implicitOp.getOperands(), newInputValues);
+        auto newOp = rewriter.clone(*implicitOp, mapper);
+        vpux::inferReturnTypes(newOp, vpux::InferShapedTypeMode::SHAPE);
+
+        rewriter.replaceOp(expandOp, newOp->getResults());
+        _log.trace("Optimization completed successfully at '{0}'", expandOp->getLoc());
+
+        return mlir::success();
+    }
+
+protected:
+    virtual SmallVector<mlir::Value> updateInputsForOp(mlir::PatternRewriter& rewriter, ConcreteOp origOp,
+                                                       IE::ExpandOp expandOp) const = 0;
+    virtual bool isOpLegal(ConcreteOp origOp, IE::ExpandOp expandOp) const = 0;
+
+private:
+    Logger _log;
+};
+
+//
+// OptimizeSlicePReluExpand
+//
+
+class OptimizeSlicePReluExpand final : public OptimizeSliceMultiInputsExpand<IE::PReluOp> {
+public:
+    OptimizeSlicePReluExpand(mlir::MLIRContext* ctx, Logger log)
+            : OptimizeSliceMultiInputsExpand<IE::PReluOp>(ctx, log) {
+        setDebugName("OptimizeSlicePReluExpand");
+    }
+
+private:
+    SmallVector<mlir::Value> updateInputsForOp(mlir::PatternRewriter& rewriter, IE::PReluOp origOp,
+                                               IE::ExpandOp expandOp) const override;
+    bool isOpLegal(IE::PReluOp origOp, IE::ExpandOp expandOp) const override {
+        auto sliceOp = origOp.getInput().getDefiningOp<IE::SliceOp>();
+        return sliceOp != nullptr && isPReluLegal(sliceOp, origOp, expandOp);
+    }
+};
+
+//
+// OptimizeSliceConcatExpand
+//
+
+class OptimizeSliceConcatExpand final : public OptimizeSliceMultiInputsExpand<IE::ConcatOp> {
+public:
+    OptimizeSliceConcatExpand(mlir::MLIRContext* ctx, Logger log)
+            : OptimizeSliceMultiInputsExpand<IE::ConcatOp>(ctx, log) {
+        setDebugName("OptimizeSliceConcatExpand");
+    }
+
+public:
+    SmallVector<mlir::Value> updateInputsForOp(mlir::PatternRewriter& rewriter, IE::ConcatOp origOp,
+                                               IE::ExpandOp expandOp) const override;
+    bool isOpLegal(IE::ConcatOp origOp, IE::ExpandOp expandOp) const override {
+        return isConcatLegal(nullptr, origOp, expandOp);
+    }
+};
+
+//
+// OptimizeSliceOpsExpand
+//
+
+class OptimizeSliceOpsExpand final : public mlir::OpRewritePattern<IE::ExpandOp> {
+public:
+    OptimizeSliceOpsExpand(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<IE::ExpandOp>(ctx), _log(log) {
+        setDebugName("OptimizeSliceOpsExpand");
+    }
+
+public:
+    mlir::LogicalResult matchAndRewrite(IE::ExpandOp origOp, mlir::PatternRewriter& rewriter) const final;
 
 private:
     Logger _log;

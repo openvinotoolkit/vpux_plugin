@@ -2,7 +2,7 @@
 
 ## Introduction
 
-This instruction will guide you through steps of adding a new NPU3720 software layer to the NPU compiler. For NPU3700 software layer, please refer [sw_layer_enabling.md](../docs/sw_layer_enabling.md)
+This instruction will guide you through steps of adding a new NPU3720 software layer to the NPU compiler.
 
 > Be aware, that NPU compiler is in a rapid development and code snippets might be out of date.
 

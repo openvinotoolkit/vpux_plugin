@@ -34,11 +34,11 @@ void vpux::IE::ExpandOp::build(mlir::OpBuilder& builder, mlir::OperationState& s
 
 mlir::LogicalResult vpux::IE::ExpandOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::ExpandOpAdaptor expand(operands, attrs);
+    IE::ExpandOpAdaptor expand(operands, attrs, prop);
     if (mlir::failed(expand.verify(loc))) {
         return mlir::failure();
     }

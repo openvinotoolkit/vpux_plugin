@@ -8,6 +8,7 @@
 #include "vpux/compiler/dialect/IE/utils/elem_type_info_utils.hpp"
 #include "vpux/compiler/dialect/IE/utils/shape_infer.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/analysis.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/empty_node.hpp"
@@ -58,11 +59,11 @@ StridedSliceInputData extractData(mlir::Location loc, IE::StridedSliceOpAdaptor 
 
 mlir::LogicalResult vpux::IE::StridedSliceOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::StridedSliceOpAdaptor slice(operands, attrs);
+    IE::StridedSliceOpAdaptor slice(operands, attrs, prop);
     if (mlir::failed(slice.verify(loc))) {
         return mlir::failure();
     }
@@ -255,15 +256,6 @@ mlir::LogicalResult ConvertConstToAttr::matchAndRewrite(IE::StridedSliceOp slice
     return mlir::success();
 }
 
-Const::DeclareOp createSeqLenConst(mlir::PatternRewriter& rewriter, mlir::MLIRContext* ctx, mlir::Location loc,
-                                   ArrayRef<int64_t> seqLen) {
-    auto intType = getSInt64Type(ctx);
-    const auto dataStorageType = mlir::RankedTensorType::get({static_cast<int64_t>(seqLen.size())}, intType);
-    const auto dataDenseAttr = mlir::DenseElementsAttr::get(dataStorageType, seqLen);
-    auto newContentAttr = Const::ContentAttr::get(dataDenseAttr).convertElemType(getSInt32Type(ctx));
-    return rewriter.create<Const::DeclareOp>(loc, dataStorageType, newContentAttr);
-}
-
 //
 // ConvertNegStrideStridedSlice2Reverse
 //
@@ -306,7 +298,12 @@ mlir::LogicalResult ConvertNegStrideStridedSlice2Reverse::matchAndRewrite(IE::St
         }
     }
 
-    auto seqLenData = createSeqLenConst(rewriter, rewriter.getContext(), slice.getLoc(), seqLen);
+    const auto seqLenStorageType =
+            mlir::RankedTensorType::get({static_cast<int64_t>(seqLen.size())}, getSInt64Type(rewriter.getContext()));
+    const auto seqLenData = Const::createConst(rewriter, slice.getLoc(), seqLenStorageType, ArrayRef(seqLen),
+                                               [&](Const::ContentAttr attr) {
+                                                   return attr.convertElemType(getSInt32Type(rewriter.getContext()));
+                                               });
     rewriter.replaceOpWithNewOp<IE::ReverseSequenceOp>(slice, slice.getInput(), seqLenData,
                                                        getIntAttr(rewriter.getContext(), seqAxis),
                                                        getIntAttr(rewriter.getContext(), 0));
@@ -345,16 +342,6 @@ void vpux::IE::StridedSliceOp::inferElemTypeInfoUp(vpux::IE::LayerDataInfo<mlir:
 //
 
 mlir::LogicalResult vpux::IE::StridedSliceOp::verify() {
-    const auto arch = VPU::getArch(*this);
-    const auto isConst = [](mlir::Value value) {
-        return value == nullptr || value.getDefiningOp<Const::DeclareOp>() != nullptr;
-    };
-    // [E#103473]: extract the arch check from verify
-    const auto nonConstIndeces = !isConst(getBegins()) || !isConst(getEnds()) || !isConst(getStrides());
-    if (arch == VPU::ArchKind::NPU30XX && nonConstIndeces) {
-        return errorAt(*this, "Non-constant begins, ends, strides are not supported for VPUX30XX");
-    }
-
     auto beginsAttr = getBeginsAttr();
     auto endsAttr = getEndsAttr();
     auto stridesAttr = getStridesAttr();

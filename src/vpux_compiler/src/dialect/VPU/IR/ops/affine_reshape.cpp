@@ -1,9 +1,10 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPU/utils/explicit_distribution_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/layout_utils.hpp"
 
 #include "vpux/compiler/utils/attributes.hpp"
@@ -61,11 +62,11 @@ mlir::FailureOr<mlir::Type> inferElemType(VPU::AffineReshapeOpAdaptor affineResh
 
 mlir::LogicalResult vpux::VPU::AffineReshapeOp::inferReturnTypes(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange /*regions*/,
         mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::AffineReshapeOpAdaptor affineReshape(operands, attrs);
+    VPU::AffineReshapeOpAdaptor affineReshape(operands, attrs, prop);
     if (mlir::failed(affineReshape.verify(loc))) {
         return mlir::failure();
     }
@@ -81,21 +82,72 @@ mlir::LogicalResult vpux::VPU::AffineReshapeOp::inferReturnTypes(
         return mlir::failure();
     }
 
-    const auto typeComponents = TypeComponents().setShape(outShape).setDimsOrder(outputLayout.value());
-    vpux::NDTypeInterface outType;
-    // placeholder to enable sparsity, follow E#48483
-    if (auto sparseInputType = ndInType.dyn_cast<VPU::SparseTensorType>()) {
-        const vpux::NDTypeInterface dataType = sparseInputType.getData();
-        outType = VPU::SparseTensorType::get(dataType.changeTypeComponents(typeComponents));
-    } else {
-        outType = ndInType.changeTypeComponents(typeComponents);
-    }
-
+    auto typeComponents = TypeComponents().setShape(outShape).setDimsOrder(outputLayout.value());
     const auto elemTypeInferResult = inferElemType(affineReshape, ndInType.getElementType());
     if (mlir::succeeded(elemTypeInferResult)) {
-        outType = outType.changeElemType(elemTypeInferResult.value());
+        typeComponents = typeComponents.setElementType(elemTypeInferResult.value());
+    }
+
+    auto getOutputType = [&](NDTypeInterface type, const TypeComponents& components) -> NDTypeInterface {
+        auto distributedType = type.dyn_cast<VPU::DistributedTensorType>();
+        if (distributedType == nullptr ||
+            !VPU::isDistributedAttrWithExplicitShapesAndOffsets(distributedType.getDistribution())) {
+            return type.changeTypeComponents(components);
+        }
+
+        auto origDistribution = distributedType.getDistribution();
+        auto distribWithExplicitAttr = VPU::getNonOverlappedDistributedAttr(
+                outShape, origDistribution.getMode(), origDistribution.getNumTiles(), origDistribution.getNumClusters(),
+                origDistribution.getAlignment(), origDistribution.getUniformDistributedSegments(), ctx);
+
+        return distributedType.changeTypeComponentsForExplicitDistribution(components, distribWithExplicitAttr);
+    };
+
+    NDTypeInterface outType;
+    if (auto sparseInputType = ndInType.dyn_cast<VPU::SparseTensorType>()) {
+        const NDTypeInterface dataType = sparseInputType.getData();
+        outType = VPU::SparseTensorType::get(getOutputType(dataType, typeComponents));
+    } else {
+        outType = getOutputType(ndInType, typeComponents);
     }
     inferredReturnTypes.push_back(outType);
 
     return mlir::success();
+}
+
+//
+// DistributedCastOpInterface
+//
+
+mlir::FailureOr<VPU::DistributedTypeInterface> vpux::VPU::AffineReshapeOp::inferCastedDistOutput(
+        VPU::DistributedTensorType inDistributedType) {
+    if (inDistributedType == nullptr || inDistributedType.getDistribution() == nullptr) {
+        return mlir::failure();
+    }
+
+    auto origDistribution = inDistributedType.getDistribution();
+    // TODO: E-128707 - extend for other distribution modes
+    if (origDistribution.getMode().getValue() != VPU::DistributionMode::DUPLICATED) {
+        return mlir::failure();
+    }
+
+    const auto ctx = getContext();
+    const auto dstType = getOutput().getType().cast<NDTypeInterface>();
+    const auto outShape = dstType.getShape();
+    const auto dstElemType = dstType.getElementType();
+
+    if (!VPU::isDistributedAttrWithExplicitShapesAndOffsets(origDistribution)) {
+        const auto typeComponents =
+                TypeComponents().setShape(outShape).setDimsOrder(dstType.getDimsOrder()).setElementType(dstElemType);
+        return inDistributedType.changeTypeComponents(typeComponents).cast<VPU::DistributedTypeInterface>();
+    }
+
+    const auto dstDimsOrderAttr = mlir::AffineMapAttr::get(dstType.getDimsOrder().toAffineMap(ctx));
+    auto distribWithExplicitAttr = VPU::getNonOverlappedDistributedAttr(
+            outShape, origDistribution.getMode(), origDistribution.getNumTiles(), origDistribution.getNumClusters(),
+            origDistribution.getAlignment(), origDistribution.getUniformDistributedSegments(), ctx);
+
+    return VPU::DistributedTensorType::get(ctx, outShape.raw(), dstElemType, dstDimsOrderAttr,
+                                           inDistributedType.getMemSpace(), distribWithExplicitAttr)
+            .cast<VPU::DistributedTypeInterface>();
 }

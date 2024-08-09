@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --uniquify-ops %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
@@ -110,8 +110,8 @@ func.func @UniquifyExpandReorders(%arg0: tensor<1x13x227x227xf16>) -> tensor<2x1
 
     return %6 : tensor<2x16x227x227xf16, {order = #NHWC}>
 
-    // CHECK:       [[REORDER:%.*]] = IE.Reorder(%arg0) {dstOrder = #NHWC} : tensor<1x13x227x227xf16> -> tensor<1x13x227x227xf16, {order = #NHWC}>
-    // CHECK:       [[EXPAND:%.*]] = IE.Expand(%0) {pads_begin = [0, 0, 0, 0], pads_end = [0, 3, 0, 0]} :
+    // CHECK:       [[REORDER:%.*]] = IE.Reorder({{[^:]+}}) {dstOrder = #NHWC} : tensor<1x13x227x227xf16> -> tensor<1x13x227x227xf16, {order = #NHWC}>
+    // CHECK:       [[EXPAND:%.*]] = IE.Expand([[REORDER]]) {pads_begin = [0, 0, 0, 0], pads_end = [0, 3, 0, 0]} :
     // CHECK-SAME:                      tensor<1x13x227x227xf16, {order = #NHWC}> -> tensor<1x16x227x227xf16, {order = #NHWC}>
 
     // CHECK: [[AND0:%.*]] = IE.And([[EXPAND]], [[EXPAND]])
@@ -223,7 +223,7 @@ func.func @UniquifyLayoutCast(%arg0: tensor<1x4x8x64xf16>) -> (tensor<1x4x8x64xf
 
     return %0, %1 : tensor<1x4x8x64xf16, {order = #NHWC}>, tensor<1x4x8x64xf16, {order = #NHWC}>
 
-    // CHECK:   [[LAYOUT_CAST:%.*]] = IE.LayoutCast(%arg0) {
+    // CHECK:   [[LAYOUT_CAST:%.*]] = IE.LayoutCast({{[^:]+}}) {
     // CHECK-NOT:  IE.LayoutCast
     // CHECK:   return [[LAYOUT_CAST]], [[LAYOUT_CAST]]
 }
@@ -243,7 +243,7 @@ func.func @UniquifyMemPermute(%arg0: tensor<1x16x2x3xf16>) ->
 
     return %0, %1 : tensor<1x3x16x2xf16>, tensor<1x3x16x2xf16>
 
-    // CHECK:     [[PERMUTE:%.*]] = IE.MemPermute(%arg0)
+    // CHECK:     [[PERMUTE:%.*]] = IE.MemPermute({{[^:]+}})
     // CHECK-NOT: IE.MemPermute
     // CHECK:     return [[PERMUTE]], [[PERMUTE]] : tensor<1x3x16x2xf16>, tensor<1x3x16x2xf16>
 }
@@ -257,7 +257,7 @@ func.func @UniquifyAffineReshape(%arg0: tensor<15x2xf16>) -> (tensor<30xf16>, te
 
     return %0, %1 : tensor<30xf16>, tensor<30xf16>
 
-    // CHECK: [[VAL0:%.*]] = IE.AffineReshape(%arg0)
+    // CHECK: [[VAL0:%.*]] = IE.AffineReshape({{[^:]+}})
     // CHECK-NOT: IE.AffineReshape
     // CHECK: return [[VAL0]], [[VAL0]] : tensor<30xf16>, tensor<30xf16>
 }
@@ -278,7 +278,7 @@ func.func @UniquifyMemPermute(%arg0: tensor<1x16x2x3xf16>) ->
 
     return %0, %1 : tensor<1x16x2x3xf16, {order = #NHWC}>, tensor<1x16x2x3xf16, {order = #NHWC}>
 
-    // CHECK:     [[PERMUTE:%.*]] = IE.PermuteQuantize(%arg0)
+    // CHECK:     [[PERMUTE:%.*]] = IE.PermuteQuantize({{[^:]+}})
     // CHECK-NOT: IE.PermuteQuantize
     // CHECK:     return [[PERMUTE]], [[PERMUTE]] : tensor<1x16x2x3xf16, {order = #NHWC}>, tensor<1x16x2x3xf16, {order = #NHWC}>
 }
@@ -301,7 +301,7 @@ func.func @UniquifyMemPermuteForTheSameMergedPermutation(%arg0: tensor<1x1x512x1
 
     return %0, %1 : tensor<1x1x1500x512xf16>, tensor<1x1x1500x512xf16, {order = #NHWC}>
 
-    // CHECK:   [[PERMUTE:%.*]] = IE.MemPermute(%arg0)
+    // CHECK:   [[PERMUTE:%.*]] = IE.MemPermute({{[^:]+}})
     // CHECK-SAME:  {dst_order = #NCHW, mem_perm = #NWHC} :
     // CHECK-SAME:  tensor<1x1x512x1500xf16, {order = #NHWC}> -> tensor<1x1x1500x512xf16>
 
@@ -332,7 +332,7 @@ func.func @UniquifyMemPermuteForTheSame3DMergedPermutation(%arg0: tensor<1x2x3x4
 
     return %0, %1 : tensor<1x2x4x3x1xf16>, tensor<1x3x2x4x1xf16, {order = #NDHWC}>
 
-    // CHECK:   [[PERMUTE:%.*]] = IE.MemPermute(%arg0)
+    // CHECK:   [[PERMUTE:%.*]] = IE.MemPermute({{[^:]+}})
     // CHECK-SAME:  {dst_order = #NCDHW, mem_perm = #map} :
     // CHECK-SAME:  tensor<1x2x3x4x1xf16, {order = #NCDHW}> -> tensor<1x2x4x3x1xf16>
 
@@ -371,7 +371,7 @@ func.func @CannotUniquifyAddsWithDifferentInputs(%arg0: tensor<1x128x4x4xf16>, %
     // CHECK-DAG: [[CST0:%.*]] = const.Declare tensor<1x128x1x1xf16> = dense<0.000000e+00> : tensor<1x128x1x1xf16>
     // CHECK-DAG: [[CST1:%.*]] = const.Declare tensor<128x1x3x3xf16> = dense<1.000000e+00> : tensor<128x1x3x3xf16>
     // CHECK-DAG: [[CST2:%.*]] = const.Declare tensor<1x128x1x1xf16> = dense<1.000000e+00> : tensor<1x128x1x1xf16>
-    // CHECK:     [[ADD:%.*]] = IE.Add(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x128x4x4xf16>, tensor<1x128x4x4xf16> -> tensor<1x128x4x4xf16>
+    // CHECK:     [[ADD:%.*]] = IE.Add({{[^:]+}}, {{[^:]+}}) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x128x4x4xf16>, tensor<1x128x4x4xf16> -> tensor<1x128x4x4xf16>
     // CHECK:     [[CONV1:%.*]] = IE.GroupConvolution([[ADD]], [[CST]], [[CST0]]) {dilations = [1, 1], groups = 128 : i64, pads_begin = [1, 1], pads_end = [1, 1], strides = [1, 1]} : tensor<1x128x4x4xf16>, tensor<128x1x3x3xf16>, tensor<1x128x1x1xf16> -> tensor<1x128x4x4xf16>
     // CHECK:     [[CONV2:%.*]] = IE.GroupConvolution([[ADD]], [[CST1]], [[CST2]]) {dilations = [1, 1], groups = 128 : i64, pads_begin = [1, 1], pads_end = [1, 1], strides = [1, 1]} : tensor<1x128x4x4xf16>, tensor<128x1x3x3xf16>, tensor<1x128x1x1xf16> -> tensor<1x128x4x4xf16>
     // CHECK:     [[ADD1:%.*]] = IE.Add([[ADD]], [[CONV1]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x128x4x4xf16>, tensor<1x128x4x4xf16> -> tensor<1x128x4x4xf16>
@@ -396,7 +396,7 @@ func.func @UniquifyAddsSwappedInputs(%arg0: tensor<1x128x4x4xf16>, %arg1: tensor
 
     // CHECK-DAG: [[CST:%.*]] = const.Declare tensor<128x1x3x3xf16> = dense<0.000000e+00> : tensor<128x1x3x3xf16>
     // CHECK-DAG: [[CST0:%.*]] = const.Declare tensor<1x128x1x1xf16> = dense<0.000000e+00> : tensor<1x128x1x1xf16>
-    // CHECK:     [[ADD:%.*]] = IE.Add(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x128x4x4xf16>, tensor<1x128x4x4xf16> -> tensor<1x128x4x4xf16>
+    // CHECK:     [[ADD:%.*]] = IE.Add({{[^:]+}}, {{[^:]+}}) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x128x4x4xf16>, tensor<1x128x4x4xf16> -> tensor<1x128x4x4xf16>
     // CHECK:     [[CONV:%.*]] = IE.GroupConvolution([[ADD]], [[CST]], [[CST0]]) {dilations = [1, 1], groups = 128 : i64, pads_begin = [1, 1], pads_end = [1, 1], strides = [1, 1]} : tensor<1x128x4x4xf16>, tensor<128x1x3x3xf16>, tensor<1x128x1x1xf16> -> tensor<1x128x4x4xf16>
     // CHECK:     [[ADD1:%.*]] = IE.Add([[ADD]], [[CONV]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x128x4x4xf16>, tensor<1x128x4x4xf16> -> tensor<1x128x4x4xf16>
     // CHECK-NOT: IE.ADD
@@ -413,7 +413,7 @@ func.func @UniquifyReshape(%arg0: tensor<1x32x44x44xf16>) -> (tensor<1x32x16x121
 
     return %0, %1 : tensor<1x32x16x121xf16>, tensor<1x32x16x121xf16>
 
-    // CHECK: [[VAL0:%.*]] = IE.Reshape(%arg0)
+    // CHECK: [[VAL0:%.*]] = IE.Reshape({{[^:]+}})
     // CHECK-NOT: IE.Reshape
     // CHECK: return [[VAL0]], [[VAL0]] : tensor<1x32x16x121xf16>, tensor<1x32x16x121xf16>
 }
@@ -427,7 +427,7 @@ func.func @UniquifyConcat(%arg0: tensor<1x32x44x44xf16>, %arg1: tensor<1x32x44x4
     %1 = IE.Concat(%arg0, %arg1) {per_axis = #IE.Concat<axis = 1>} : tensor<1x32x44x44xf16>, tensor<1x32x44x44xf16> -> tensor<1x64x44x44xf16>
     return %0, %1 : tensor<1x64x44x44xf16>, tensor<1x64x44x44xf16>
 
-    //CHECK:        [[CONCAT0:%.*]] = IE.Concat(%arg0, %arg1) {per_axis = #IE.Concat<axis = 1 : i64>} : tensor<1x32x44x44xf16>, tensor<1x32x44x44xf16> -> tensor<1x64x44x44xf16>
+    //CHECK:        [[CONCAT0:%.*]] = IE.Concat({{[^:]+}}, {{[^:]+}}) {per_axis = #IE.Concat<axis = 1 : i64>} : tensor<1x32x44x44xf16>, tensor<1x32x44x44xf16> -> tensor<1x64x44x44xf16>
     //CHECK:        return [[CONCAT0]], [[CONCAT0]] : tensor<1x64x44x44xf16>, tensor<1x64x44x44xf16>
 
 }
@@ -440,8 +440,8 @@ func.func @NotUniquifyConcatDifferentInput(%arg0: tensor<1x32x44x44xf16>, %arg1:
     %1 = IE.Concat(%arg1, %arg0) {per_axis = #IE.Concat<axis = 1>} : tensor<1x32x44x44xf16>, tensor<1x32x44x44xf16> -> tensor<1x64x44x44xf16>
     return %0, %1 : tensor<1x64x44x44xf16>, tensor<1x64x44x44xf16>
 
-    //CHECK:     [[CONCAT0:%.*]] = IE.Concat(%arg0, %arg1)
-    //CHECK:     [[CONCAT1:%.*]] = IE.Concat(%arg1, %arg0)
+    //CHECK:     [[CONCAT0:%.*]] = IE.Concat({{[^:]+}}, {{[^:]+}})
+    //CHECK:     [[CONCAT1:%.*]] = IE.Concat({{[^:]+}}, {{[^:]+}})
     //CHECK:     return [[CONCAT0]], [[CONCAT1]] : tensor<1x64x44x44xf16>, tensor<1x64x44x44xf16>
 }
 
@@ -453,8 +453,8 @@ func.func @NotUniquifyConcatDifferentInputNumber(%arg0: tensor<1x32x44x44xf16>, 
     %1 = IE.Concat(%arg1, %arg0) {per_axis = #IE.Concat<axis = 1>} : tensor<1x32x44x44xf16>, tensor<1x32x44x44xf16> -> tensor<1x64x44x44xf16>
     return %0, %1 : tensor<1x96x44x44xf16>, tensor<1x64x44x44xf16>
 
-    //CHECK:     [[CONCAT0:%.*]] = IE.Concat(%arg0, %arg1, %arg0)
-    //CHECK:     [[CONCAT1:%.*]] = IE.Concat(%arg1, %arg0)
+    //CHECK:     [[CONCAT0:%.*]] = IE.Concat({{[^:]+}}, {{[^:]+}}, {{[^:]+}})
+    //CHECK:     [[CONCAT1:%.*]] = IE.Concat({{[^:]+}}, {{[^:]+}})
     //CHECK:     return [[CONCAT0]], [[CONCAT1]] : tensor<1x96x44x44xf16>, tensor<1x64x44x44xf16>
 }
 
@@ -466,8 +466,8 @@ func.func @NotUniquifyConcatDifferentAxis(%arg0: tensor<1x32x44x44xf16>, %arg1: 
     %1 = IE.Concat(%arg0, %arg1) {per_axis = #IE.Concat<axis = 3>}: tensor<1x32x44x44xf16>, tensor<1x32x44x44xf16> -> tensor<1x32x44x88xf16>
     return %0, %1 : tensor<1x32x88x44xf16>, tensor<1x32x44x88xf16>
 
-    //CHECK:     [[CONCAT0:%.*]] = IE.Concat(%arg0, %arg1)
-    //CHECK:     [[CONCAT1:%.*]] = IE.Concat(%arg0, %arg1)
+    //CHECK:     [[CONCAT0:%.*]] = IE.Concat({{[^:]+}}, {{[^:]+}})
+    //CHECK:     [[CONCAT1:%.*]] = IE.Concat({{[^:]+}}, {{[^:]+}})
     //CHECK:     return [[CONCAT0]], [[CONCAT1]] : tensor<1x32x88x44xf16>, tensor<1x32x44x88xf16>
 }
 
@@ -479,8 +479,8 @@ func.func @NotUniquifyConcatDifferentOffsetStride(%arg0: tensor<1x32x44x44xf16>,
     %1 = IE.Concat(%arg0, %arg1) {per_axis = #IE.Concat<axis = 1>} : tensor<1x32x44x44xf16>, tensor<1x32x44x44xf16> -> tensor<1x64x44x44xf16>
     return %0, %1 : tensor<1x64x44x44xf16>, tensor<1x64x44x44xf16>
 
-    //CHECK:     [[CONCAT0:%.*]] = IE.Concat(%arg0, %arg1)
-    //CHECK:     [[CONCAT1:%.*]] = IE.Concat(%arg0, %arg1)
+    //CHECK:     [[CONCAT0:%.*]] = IE.Concat({{[^:]+}}, {{[^:]+}})
+    //CHECK:     [[CONCAT1:%.*]] = IE.Concat({{[^:]+}}, {{[^:]+}})
     //CHECK:     return [[CONCAT0]], [[CONCAT1]] : tensor<1x64x44x44xf16>, tensor<1x64x44x44xf16>
 }
 
@@ -492,8 +492,8 @@ func.func @NotUniquifyConcatDifferentStaticOffset(%arg0: tensor<1x32x44x44xf16>,
     %1 = IE.Concat(%arg0, %arg1, %arg0) {static_offsets = [[0, 0, 0, 0], [0, 0, 44, 0], [0, 0, 87, 0]]} : tensor<1x32x44x44xf16>, tensor<1x32x44x44xf16>, tensor<1x32x44x44xf16> -> tensor<1x32x131x44xf16>
     return %0, %1 : tensor<1x32x131x44xf16>, tensor<1x32x131x44xf16>
 
-    //CHECK:     [[CONCAT0:%.*]] = IE.Concat(%arg0, %arg1, %arg0)
-    //CHECK:     [[CONCAT1:%.*]] = IE.Concat(%arg0, %arg1, %arg0)
+    //CHECK:     [[CONCAT0:%.*]] = IE.Concat({{[^:]+}}, {{[^:]+}}, {{[^:]+}})
+    //CHECK:     [[CONCAT1:%.*]] = IE.Concat({{[^:]+}}, {{[^:]+}}, {{[^:]+}})
     //CHECK:     return [[CONCAT0]], [[CONCAT1]] : tensor<1x32x131x44xf16>, tensor<1x32x131x44xf16>
 }
 
@@ -506,7 +506,7 @@ func.func @UniquifyTile(%arg0: tensor<1x1x1x44xf16>) -> (tensor<1x2x16x44xf16>, 
     %1 = IE.Tile(%arg0) {repeats_values = [1, 2, 16, 1]} : tensor<1x1x1x44xf16> -> tensor<1x2x16x44xf16>
     return %0, %1 : tensor<1x2x16x44xf16>, tensor<1x2x16x44xf16>
 
-    //CHECK:      [[TILE:%.*]] = IE.Tile(%arg0) {repeats_values = [1, 2, 16, 1]} : tensor<1x1x1x44xf16> -> tensor<1x2x16x44xf16>
+    //CHECK:      [[TILE:%.*]] = IE.Tile({{[^:]+}}) {repeats_values = [1, 2, 16, 1]} : tensor<1x1x1x44xf16> -> tensor<1x2x16x44xf16>
     //CHECK:      return  [[TILE]], [[TILE]] : tensor<1x2x16x44xf16>, tensor<1x2x16x44xf16>
 }
 
@@ -532,7 +532,7 @@ func.func @UniquifyAvgPool(%arg0: tensor<1x1x16x16xf16>) -> (tensor<1x1x8x8xf16>
 
     return %0, %1 : tensor<1x1x8x8xf16>, tensor<1x1x8x8xf16>
 
-    //CHECK:      [[AVGPOOL:%.*]] = IE.AvgPool(%arg0)
+    //CHECK:      [[AVGPOOL:%.*]] = IE.AvgPool({{[^:]+}})
     //CHECK-SAME: {kernel_size = [2, 2], pads_begin = [0, 0], pads_end = [0, 0], rounding_type = #IE.rounding_type<FLOOR>, strides = [2, 2]}
     //CHECK-SAME: tensor<1x1x16x16xf16> -> tensor<1x1x8x8xf16>
     //CHECK:      return  [[AVGPOOL]], [[AVGPOOL]] : tensor<1x1x8x8xf16>, tensor<1x1x8x8xf16>
@@ -560,7 +560,7 @@ func.func @UniquifyMaxPool(%arg0: tensor<1x1x16x16xf16>) -> (tensor<1x1x8x8xf16>
 
     return %0, %1 : tensor<1x1x8x8xf16>, tensor<1x1x8x8xf16>
 
-    //CHECK:      [[MAXPOOL:%.*]] = IE.MaxPool(%arg0)
+    //CHECK:      [[MAXPOOL:%.*]] = IE.MaxPool({{[^:]+}})
     //CHECK-SAME: {kernel_size = [2, 2], pads_begin = [0, 0], pads_end = [0, 0], rounding_type = #IE.rounding_type<FLOOR>, strides = [2, 2]}
     //CHECK-SAME: tensor<1x1x16x16xf16> -> tensor<1x1x8x8xf16>
     //CHECK:      return  [[MAXPOOL]], [[MAXPOOL]] : tensor<1x1x8x8xf16>, tensor<1x1x8x8xf16>
@@ -586,11 +586,11 @@ func.func @DoNotUniquifyAvgPool(%arg0: tensor<1x1x16x16xf16>) -> (tensor<1x1x8x8
 
     return %0, %1 : tensor<1x1x8x8xf16>, tensor<1x1x8x8xf16>
 
-    //CHECK:      [[AVGPOOL0:%.*]] = IE.AvgPool(%arg0)
+    //CHECK:      [[AVGPOOL0:%.*]] = IE.AvgPool({{[^:]+}})
     //CHECK-SAME: {kernel_size = [2, 2], pads_begin = [0, 0], pads_end = [0, 0], rounding_type = #IE.rounding_type<FLOOR>, strides = [2, 2]}
     //CHECK-SAME: tensor<1x1x16x16xf16> -> tensor<1x1x8x8xf16>
 
-    //CHECK:      [[AVGPOOL1:%.*]] = IE.AvgPool(%arg0)
+    //CHECK:      [[AVGPOOL1:%.*]] = IE.AvgPool({{[^:]+}})
     //CHECK-SAME: {kernel_size = [3, 3], pads_begin = [0, 0], pads_end = [1, 1], rounding_type = #IE.rounding_type<FLOOR>, strides = [2, 2]}
     //CHECK-SAME: tensor<1x1x16x16xf16> -> tensor<1x1x8x8xf16>
 
@@ -617,11 +617,11 @@ func.func @DoNotUniquifyMaxPool(%arg0: tensor<1x1x16x16xf16>) -> (tensor<1x1x8x8
 
     return %0, %1 : tensor<1x1x8x8xf16>, tensor<1x1x8x8xf16>
 
-    //CHECK:      [[MAXPOOL0:%.*]] = IE.MaxPool(%arg0)
+    //CHECK:      [[MAXPOOL0:%.*]] = IE.MaxPool({{[^:]+}})
     //CHECK-SAME: {kernel_size = [2, 2], pads_begin = [0, 0], pads_end = [0, 0], rounding_type = #IE.rounding_type<FLOOR>, strides = [2, 2]}
     //CHECK-SAME: tensor<1x1x16x16xf16> -> tensor<1x1x8x8xf16>
 
-    //CHECK:      [[MAXPOOL1:%.*]] = IE.MaxPool(%arg0)
+    //CHECK:      [[MAXPOOL1:%.*]] = IE.MaxPool({{[^:]+}})
     //CHECK-SAME: {kernel_size = [3, 3], pads_begin = [0, 0], pads_end = [1, 1], rounding_type = #IE.rounding_type<FLOOR>, strides = [2, 2]}
     //CHECK-SAME: tensor<1x1x16x16xf16> -> tensor<1x1x8x8xf16>
 
@@ -636,7 +636,7 @@ func.func @UniquifySlice(%arg0: tensor<1x128x96x64xf16>) -> (tensor<1x64x96x64xf
     %1 = IE.Slice %arg0 [0, 0, 0, 0] [1, 64, 96, 64] : tensor<1x128x96x64xf16> to tensor<1x64x96x64xf16>
     return %0, %1 : tensor<1x64x96x64xf16>, tensor<1x64x96x64xf16>
 
-    //CHECK:      [[SLICE:%.*]] = IE.Slice %arg0 [0, 0, 0, 0] [1, 64, 96, 64] : tensor<1x128x96x64xf16> to tensor<1x64x96x64xf16>
+    //CHECK:      [[SLICE:%.*]] = IE.Slice {{[^:]+}} [0, 0, 0, 0] [1, 64, 96, 64] : tensor<1x128x96x64xf16> to tensor<1x64x96x64xf16>
     //CHECK:      return  [[SLICE]], [[SLICE]] : tensor<1x64x96x64xf16>, tensor<1x64x96x64xf16>
 }
 
@@ -649,7 +649,7 @@ func.func @UniquifyMultiSlice(%arg0: tensor<1x128x96x64xf16>) -> (tensor<1x64x96
     %2 = IE.Slice %arg0 [0, 0, 0, 0] [1, 64, 96, 64] : tensor<1x128x96x64xf16> to tensor<1x64x96x64xf16>
     return %0, %1, %2 : tensor<1x64x96x64xf16>, tensor<1x64x96x64xf16>, tensor<1x64x96x64xf16>
 
-    //CHECK:      [[SLICE:%.*]] = IE.Slice %arg0 [0, 0, 0, 0] [1, 64, 96, 64] : tensor<1x128x96x64xf16> to tensor<1x64x96x64xf16>
+    //CHECK:      [[SLICE:%.*]] = IE.Slice {{[^:]+}} [0, 0, 0, 0] [1, 64, 96, 64] : tensor<1x128x96x64xf16> to tensor<1x64x96x64xf16>
     //CHECK:      return  [[SLICE]], [[SLICE]], [[SLICE]] : tensor<1x64x96x64xf16>, tensor<1x64x96x64xf16>, tensor<1x64x96x64xf16>
 }
 
@@ -661,8 +661,8 @@ func.func @NotUniquifySliceWithDifferentOffset(%arg0: tensor<1x128x96x64xf16>) -
     %1 = IE.Slice %arg0 [0, 4, 0, 0] [1, 64, 96, 64] : tensor<1x128x96x64xf16> to tensor<1x64x96x64xf16>
     return %0, %1 : tensor<1x64x96x64xf16>, tensor<1x64x96x64xf16>
 
-    //CHECK:      [[SLICE_0:%.*]] = IE.Slice %arg0 [0, 0, 0, 0] [1, 64, 96, 64] : tensor<1x128x96x64xf16> to tensor<1x64x96x64xf16>
-    //CHECK:      [[SLICE_1:%.*]] = IE.Slice %arg0 [0, 4, 0, 0] [1, 64, 96, 64] : tensor<1x128x96x64xf16> to tensor<1x64x96x64xf16>
+    //CHECK:      [[SLICE_0:%.*]] = IE.Slice {{[^:]+}} [0, 0, 0, 0] [1, 64, 96, 64] : tensor<1x128x96x64xf16> to tensor<1x64x96x64xf16>
+    //CHECK:      [[SLICE_1:%.*]] = IE.Slice {{[^:]+}} [0, 4, 0, 0] [1, 64, 96, 64] : tensor<1x128x96x64xf16> to tensor<1x64x96x64xf16>
     //CHECK:      return  [[SLICE_0]], [[SLICE_1]] : tensor<1x64x96x64xf16>, tensor<1x64x96x64xf16>
 }
 
@@ -674,7 +674,21 @@ func.func @NotUniquifySliceWithDifferentSize(%arg0: tensor<1x128x96x64xf16>) -> 
     %1 = IE.Slice %arg0 [0, 0, 0, 0] [1, 32, 96, 64] : tensor<1x128x96x64xf16> to tensor<1x32x96x64xf16>
     return %0, %1 : tensor<1x64x96x64xf16>, tensor<1x32x96x64xf16>
 
-    //CHECK:      [[SLICE_0:%.*]] = IE.Slice %arg0 [0, 0, 0, 0] [1, 64, 96, 64] : tensor<1x128x96x64xf16> to tensor<1x64x96x64xf16>
-    //CHECK:      [[SLICE_1:%.*]] = IE.Slice %arg0 [0, 0, 0, 0] [1, 32, 96, 64] : tensor<1x128x96x64xf16> to tensor<1x32x96x64xf16>
+    //CHECK:      [[SLICE_0:%.*]] = IE.Slice {{[^:]+}} [0, 0, 0, 0] [1, 64, 96, 64] : tensor<1x128x96x64xf16> to tensor<1x64x96x64xf16>
+    //CHECK:      [[SLICE_1:%.*]] = IE.Slice {{[^:]+}} [0, 0, 0, 0] [1, 32, 96, 64] : tensor<1x128x96x64xf16> to tensor<1x32x96x64xf16>
     //CHECK:      return  [[SLICE_0]], [[SLICE_1]] : tensor<1x64x96x64xf16>, tensor<1x32x96x64xf16>
+}
+
+// -----
+
+// CHECK-LABEL: @UniquifyFloor
+func.func @UniquifyFloor(%arg0: tensor<1x1x1x880xf16>) -> (tensor<1x1x1x880xf16>, tensor<1x1x1x880xf16>) {
+    %0 = IE.Floor(%arg0) : tensor<1x1x1x880xf16> -> tensor<1x1x1x880xf16>
+    %1 = IE.Floor(%arg0) : tensor<1x1x1x880xf16> -> tensor<1x1x1x880xf16>
+
+    return %0, %1 : tensor<1x1x1x880xf16>, tensor<1x1x1x880xf16>
+
+    // CHECK: [[VAL0:%.*]] = IE.Floor({{[^:]+}})
+    // CHECK-NOT: IE.Floor
+    // CHECK: return [[VAL0]], [[VAL0]] : tensor<1x1x1x880xf16>, tensor<1x1x1x880xf16>
 }

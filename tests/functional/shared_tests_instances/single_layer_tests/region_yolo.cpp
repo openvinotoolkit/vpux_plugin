@@ -34,14 +34,8 @@ class RegionYoloLayerTestCommon : public RegionYoloLayerTest, virtual public Vpu
         VpuOv2LayerTest::TearDown();
     }
 };
-class RegionYoloLayerTest_NPU3700 : public RegionYoloLayerTestCommon {};
 class RegionYoloLayerTest_NPU3720 : public RegionYoloLayerTestCommon {};
 class RegionYoloLayerTest_NPU4000 : public RegionYoloLayerTestCommon {};
-
-TEST_P(RegionYoloLayerTest_NPU3700, HW) {
-    VpuOv2LayerTest::setDefaultHardwareMode();
-    VpuOv2LayerTest::run(Platform::NPU3700);
-}
 
 TEST_P(RegionYoloLayerTest_NPU3720, SW) {
     VpuOv2LayerTest::setReferenceSoftwareMode();
@@ -65,18 +59,6 @@ const std::vector<std::vector<size_t>> inputShapes = {{{1, 125, 13, 13}}};
 const std::vector<std::vector<size_t>> inputShapesPrecommit = {{{1, 27, 26, 26}}};
 
 const std::vector<ov::element::Type> modelTypes = {ov::element::f16};
-
-INSTANTIATE_TEST_CASE_P(smoke_RegionYolo, RegionYoloLayerTest_NPU3700,
-                        testing::Combine(testing::ValuesIn(inputShapes),
-                                         testing::Values(20),                               // classes
-                                         testing::Values(4),                                // coords
-                                         testing::Values(5),                                // numRegions
-                                         testing::Values(false, true),                      // doSoftmax
-                                         testing::Values(std::vector<int64_t>({0, 1, 2})),  // mask
-                                         testing::Values(1),                                // startAxis
-                                         testing::Values(3),                                // endAxis
-                                         testing::ValuesIn(modelTypes), testing::Values(DEVICE_NPU)),
-                        RegionYoloLayerTestCommon::getTestCaseName);
 
 const auto regionYoloParams = ::testing::Combine(testing::ValuesIn(inputShapes),
                                                  testing::Values(20),                                     // classes

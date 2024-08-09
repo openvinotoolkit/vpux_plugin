@@ -23,15 +23,24 @@ using namespace vpux;
 
 namespace {
 
-int64_t calculateAlignmentFactor(const vpux::NDTypeInterface sliceInType) {
+// To explicitly control the patterns exec order to assure dependency
+// benefitLevels[0] is highest benefit level and represent the relative pattern is the first one to run
+const uint32_t levelCount = 3;
+SmallVector<mlir::PatternBenefit> benefitLevels = getBenefitLevels(levelCount);
+
+int64_t calculateAlignmentFactor(const vpux::NDTypeInterface sliceInType, const vpux::NDTypeInterface sliceOutType) {
     const auto channelAlignment = VPU::NCEInvariant::getAlignment(sliceInType.getElementType());
 
-    auto calcFactor = [channelAlignment](int64_t channel) {
-        auto leastAlignedChannel = std::lcm(channel, channelAlignment);
-        return (leastAlignedChannel / channel);
-    };
+    const auto sliceInShape = sliceInType.getShape();
+    const auto sliceOutShape = sliceOutType.getShape();
 
-    return calcFactor(sliceInType.getShape()[Dims4D::Act::C]);
+    int64_t factor = 1;
+    while (factor * sliceInShape[Dims4D::Act::C] % channelAlignment != 0 ||
+           factor * sliceOutShape[Dims4D::Act::C] % channelAlignment != 0) {
+        factor++;
+    }
+
+    return factor;
 }
 
 IE::ShapeCastOp reshapeConvInput(mlir::Location loc, mlir::Value input, const int64_t channelAlignment,
@@ -62,7 +71,8 @@ IE::ShapeCastOp reshapeConvOutput(IE::SliceOp origOp, mlir::Value convOutput, ml
 
 class SliceOpConverter final : public mlir::OpRewritePattern<IE::SliceOp> {
 public:
-    SliceOpConverter(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<IE::SliceOp>(ctx), _log(log) {
+    SliceOpConverter(mlir::MLIRContext* ctx, mlir::PatternBenefit benefit, Logger log)
+            : mlir::OpRewritePattern<IE::SliceOp>(ctx, benefit), _log(log) {
     }
 
 public:
@@ -109,12 +119,12 @@ bool SliceOpConverter::isBeneficialToConvert(IE::SliceOp sliceOp) const {
         }
     }
 
-    // Check if the output of slice op cannot fit CMX, it ensure a DDR->DDR copy
+    // Check if the input of slice op cannot fit CMX, it ensure a copy with DDR source
     // E#103384::IE dialect should be HW-agnostic as much as possible, here should not depend on VPU/VPUIP dialect.
     // An option is to use interfaces like registerLayerWithPostOpModelInterface for vpux::VPU::getTotalCMXSize(op)
     // for such op which need to this function to check memory size in IE dialect.
-    if (sliceOutType.getTotalAllocSize() <= vpux::VPU::getTotalCMXSize(sliceOp)) {
-        _log.trace("Slice at {0} is not a DDR -> DDR copy", sliceOp.getLoc());
+    if (sliceInType.getTotalAllocSize() <= vpux::VPU::getTotalCMXSize(sliceOp)) {
+        _log.trace("Slice at {0} is not a copy with DDR source", sliceOp.getLoc());
         return false;
     }
 
@@ -135,22 +145,21 @@ bool SliceOpConverter::isBeneficialToConvert(IE::SliceOp sliceOp) const {
         return false;
     }
 
-    const auto convolutionAlignment = calculateAlignmentFactor(sliceInType);
-    const int64_t kernelOutputChannels = getShape(sliceOp.getResult())[Dims4D::Act::C] * convolutionAlignment;
     const auto channelAlignment = VPU::NCEInvariant::getAlignment(sliceInType.getElementType());
+    const auto origIC = getShape(sliceOp.getSource())[Dims4D::Act::C];
+    // Slicing on the inner most dimension C with very few channel numbers has very poor performance, will need to
+    // convert such Slice layer into Convolution
+    if (origIC >= channelAlignment) {
+        return false;
+    }
+
+    const auto convolutionAlignment = calculateAlignmentFactor(sliceInType, sliceOutType);
+    const int64_t kernelOutputChannels = getShape(sliceOp.getResult())[Dims4D::Act::C] * convolutionAlignment;
     // Here we need to ensure we can borrow factor from W for channel alignment. And if a factor borrowed from W which
     // still cannot satisfy output channel alignment, we need a bigger factor from W to C. It's unefficient because the
     // Conv's channel will be very big
     if (inputW % convolutionAlignment != 0 || kernelOutputChannels % channelAlignment != 0) {
         _log.trace("Slice at {0} cannot borrow suitable factor from W for alignment", sliceOp.getLoc());
-        return false;
-    }
-
-    // Currently only convert slice from PermuteCastOp otherwise it may lead to performance regression. For example, if
-    // slice from a NCE op's output, in optimize copies pass, it may eliminate this DDR to DDR copy. If any other ops
-    // need to support, we can extend here.
-    auto parentOp = sliceOp.getSource().getDefiningOp();
-    if (!mlir::isa_and_nonnull<IE::PermuteCastOp, IE::ConvertOp>(parentOp)) {
         return false;
     }
 
@@ -264,16 +273,18 @@ mlir::LogicalResult SliceOpConverter::matchAndRewrite(IE::SliceOp origOp, mlir::
 
     const auto sliceInput = origOp.getSource();
     const auto sliceInType = sliceInput.getType().cast<vpux::NDTypeInterface>();
-    const auto convolutionAlignment = calculateAlignmentFactor(sliceInType);
+    const auto sliceOutType = origOp.getResult().getType().cast<vpux::NDTypeInterface>();
+    const auto convolutionAlignment = calculateAlignmentFactor(sliceInType, sliceOutType);
 
     auto reshapeIn = reshapeConvInput(origOp.getLoc(), sliceInput, convolutionAlignment, rewriter);
     auto weights = composeWeights(origOp, sliceInType.getElementType(), convolutionAlignment, rewriter);
     auto convOp = createConvolution(origOp, weights, reshapeIn.getResult(), sliceInType.getElementType(), rewriter);
     auto reshapeOut = reshapeConvOutput(origOp, convOp.getOutput(), rewriter);
 
+    _log.trace("Successfully convert IE::SliceOp at {0} to IE::ConvolutionOp", origOp->getLoc());
+
     rewriter.replaceOp(origOp, reshapeOut.getResult());
 
-    _log.trace("Successfully convert IE::SliceOp at {0} to IE::ConvolutionOp", origOp->getLoc());
     return mlir::success();
 }
 
@@ -283,7 +294,8 @@ mlir::LogicalResult SliceOpConverter::matchAndRewrite(IE::SliceOp origOp, mlir::
 
 class SliceConcatRewriter final : public mlir::OpRewritePattern<IE::ConcatOp> {
 public:
-    SliceConcatRewriter(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<IE::ConcatOp>(ctx), _log(log) {
+    SliceConcatRewriter(mlir::MLIRContext* ctx, mlir::PatternBenefit benefit, Logger log)
+            : mlir::OpRewritePattern<IE::ConcatOp>(ctx, benefit), _log(log) {
         setDebugName("SliceConcatRewriter");
     }
 
@@ -445,7 +457,8 @@ mlir::LogicalResult SliceConcatRewriter::matchAndRewrite(IE::ConcatOp concatOp, 
 //
 class FuseSliceWithConvRewriter final : public mlir::OpRewritePattern<IE::SliceOp> {
 public:
-    FuseSliceWithConvRewriter(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<IE::SliceOp>(ctx), _log(log) {
+    FuseSliceWithConvRewriter(mlir::MLIRContext* ctx, mlir::PatternBenefit benefit, Logger log)
+            : mlir::OpRewritePattern<IE::SliceOp>(ctx, benefit), _log(log) {
         setDebugName("FuseSliceWithConvRewriter");
     }
     mlir::LogicalResult matchAndRewrite(IE::SliceOp sliceOp, mlir::PatternRewriter& rewriter) const final;
@@ -483,6 +496,14 @@ mlir::LogicalResult FuseSliceWithConvRewriter::matchAndRewrite(IE::SliceOp slice
     const auto sliceOutputShape = vpux::getShape(sliceOp.getResult());
     auto cstContentAttrFilter = filterCst.getContentAttr();
     const auto subviewOffsets = Shape(parseIntArrayAttr<int64_t>(sliceOp.getStaticOffsets()));
+
+    auto convOutShape = getShape(inConvOp.getOutput());
+    // Current pattern only can optimize slice axis on channel dim
+    if (convOutShape[Dims4D::Act::H] != sliceOutputShape[Dims4D::Act::H] ||
+        convOutShape[Dims4D::Act::W] != sliceOutputShape[Dims4D::Act::W]) {
+        return mlir::failure();
+    }
+
     const auto subviewStaticShape = Shape{sliceOutputShape[vpux::Dims4D::Act::C], filterShape[vpux::Dims4D::Filter::IC],
                                           filterShape[vpux::Dims4D::Filter::KY], filterShape[vpux::Dims4D::Filter::KX]};
     cstContentAttrFilter = cstContentAttrFilter.subview(subviewOffsets, subviewStaticShape);
@@ -531,9 +552,9 @@ void OptimizeSliceWithStridePass::safeRunOnFunc() {
     auto& ctx = getContext();
 
     mlir::RewritePatternSet patterns(&ctx);
-    patterns.add<SliceOpConverter>(&ctx, _log);
-    patterns.add<SliceConcatRewriter>(&ctx, _log);
-    patterns.add<FuseSliceWithConvRewriter>(&ctx, _log);
+    patterns.add<SliceConcatRewriter>(&ctx, benefitLevels[0], _log);
+    patterns.add<FuseSliceWithConvRewriter>(&ctx, benefitLevels[0], _log);
+    patterns.add<SliceOpConverter>(&ctx, benefitLevels[1], _log);
 
     auto func = getOperation();
 

@@ -53,8 +53,7 @@ mlir::Operation* vpux::IERT::IERTDialect::materializeConstant(mlir::OpBuilder& b
         return nullptr;
     }
 
-    return builder.create<Const::DeclareOp>(loc, type.cast<vpux::NDTypeInterface>().eraseTiledInfo(),
-                                            value.cast<Const::ContentAttr>());
+    return builder.create<Const::DeclareOp>(loc, type, value.cast<Const::ContentAttr>());
 }
 
 //===----------------------------------------------------------------------===//

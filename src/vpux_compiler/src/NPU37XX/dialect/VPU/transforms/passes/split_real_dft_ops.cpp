@@ -7,6 +7,7 @@
 #include "vpux/compiler/core/tiling.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 #include "vpux/compiler/utils/types.hpp"
@@ -65,10 +66,7 @@ mlir::Value fftGetTwiddleFactors(mlir::Location loc, T op, ArrayRef<int64_t> axe
     }
     const llvm::SmallVector<int64_t> twiddleShape({size});
     const auto twiddleType = mlir::RankedTensorType::get(twiddleShape, dtype);
-    const auto twiddleAttr = mlir::DenseElementsAttr::get(twiddleType, ArrayRef(twiddleVals));
-    auto twiddleContentAttr = Const::ContentAttr::get(twiddleAttr);
-
-    return rewriter.create<Const::DeclareOp>(loc, twiddleType, twiddleContentAttr);
+    return Const::createConst(rewriter, loc, twiddleType, ArrayRef(twiddleVals));
 }
 
 template <typename T>

@@ -120,7 +120,12 @@ def VPURegMapped_EnqueueOp:
             AttrSizedOperandSegments
         ]> {
 
-        let summary = "Op to represent actual enquement of a range of contigous tasks";
+        let summary = "Op to represent actual enqueue-ment of a range of contiguous tasks";
+
+        let description = [{
+            An enqueue operation refers to pushing of the task descriptors in the HW FIFO. It is performed by the runtime while 
+            ensuring the barrier at which the enqueue is attached has been consumed and reprogrammed
+        }];
 
         let arguments = (ins
             Optional<VPURegMapped_IndexType>:$previousTaskIdx,
@@ -204,7 +209,9 @@ def DeclareTaskBufferOp :
     let summary = "Buffer Op representing a discrete location of a task in runtime metadataBuffer";
 
     let arguments = (ins
-        VPURegMapped_TaskTypeAttr:$task_type
+        VPURegMapped_TaskTypeAttr:$task_type,
+        OptionalAttr<UI64Attr>:$offset
+
     );
 
     let results = (outs
@@ -214,6 +221,16 @@ def DeclareTaskBufferOp :
     let assemblyFormat = [{
         attr-dict
         $task_type `->` type(results)
+    }];
+
+    let extraClassDeclaration = [{
+        uint64_t getMemoryOffset() {
+            return getOffset().value_or(0);
+        }
+
+        void setMemoryOffset(mlir::IntegerAttr offset) {
+            setOffsetAttr(offset);
+        }
     }];
 }
 
@@ -253,7 +270,7 @@ def DeclareTaskAddrBufferOp : VPURegMapped_Op<"DeclareTaskAddrBuffer", [
     let arguments = (ins
         VPURegMapped_IndexType:$first,
         VPURegMapped_IndexType:$last,
-        OptionalAttr<UI32Attr>:$offset
+        OptionalAttr<UI64Attr>:$offset
     );
 
     let results = (outs
@@ -288,6 +305,62 @@ def TaskSinkOp : VPURegMapped_Op<"TaskSink", [
         attr-dict
         `tile` `(` $tile `)` `->` type($output)
     }];
+}
+
+//
+// TaskBufferLayoutOp
+//
+
+def VPURegMapped_TaskBufferLayoutOp :
+        VPURegMapped_Op<"TaskBufferLayout",
+            [
+                IsolatedFromAbove
+            ]
+        > {
+
+    let summary = "Op representing the task memory layout";
+
+    let description = [{
+        This Op represents the complete description of the task layout in CMX memory.
+
+        It accomplishes this by containing a generic DictionaryAttr that is expected to be set up in a specific way:
+
+        ```mlir
+        VPURegMapped.TaskBufferLayout
+            {
+                ActKernelInvocation = [[#VPURegMapped.TaskGroup<dynamicTaskListSize(64 : ui64), staticTaskListSize(64 : ui64), startOffset(53760 : ui64), binaryTaskSize(96 : ui64)>]],
+                ActKernelRange = [[#VPURegMapped.TaskGroup<dynamicTaskListSize(64 : ui64), staticTaskListSize(64 : ui64), startOffset(51200 : ui64), binaryTaskSize(40 : ui64)>]],
+                DMA = [[#VPURegMapped.TaskGroup<dynamicTaskListSize(0 : ui64), staticTaskListSize(32 : ui64), startOffset(59904 : ui64), binaryTaskSize(224 : ui64)>,
+                        #VPURegMapped.TaskGroup<dynamicTaskListSize(0 : ui64), staticTaskListSize(32 : ui64), startOffset(67072 : ui64), binaryTaskSize(224 : ui64)>]],
+                DPUInvariant = [[#VPURegMapped.TaskGroup<dynamicTaskListSize(0 : ui64), staticTaskListSize(64 : ui64), startOffset(0 : ui64), binaryTaskSize(352 : ui64)>]],
+                DPUVariant = [[#VPURegMapped.TaskGroup<dynamicTaskListSize(0 : ui64), staticTaskListSize(128 : ui64), startOffset(22528 : ui64), binaryTaskSize(224 : ui64)>]],
+                M2I = [[#VPURegMapped.TaskGroup<dynamicTaskListSize(0 : ui64), staticTaskListSize(4 : ui64), startOffset(74240 : ui64), binaryTaskSize(240 : ui64)>]]
+            }
+        ```
+
+        The keys of the DictionaryAttr are the stringyfied TaskTypes and they are paired to 2 levels of ArrayAttrs. Top-level ArrayAttr is for tiles and bottom-level ArrayAttr is for lists.
+        The bottom-level ArrayAttrs are expected to contain a TaskGroup for each of the lists.
+
+        Once instantiated, this op provides trivial computation of offsets on the fly.
+        Because of the high configurability, the operation also enables custom layouts to be devised by the compiler.
+    }];
+
+    let arguments = (ins
+        DictionaryAttr:$task_list_size_map
+    );
+
+    let assemblyFormat = [{
+        $task_list_size_map
+        attr-dict
+    }];
+
+    let extraClassDeclaration = [{
+        size_t getDynamicTaskCount(VPURegMapped::TaskType type, size_t tile, size_t list = 0);
+        size_t getStaticTaskCount(VPURegMapped::TaskType type, size_t tile, size_t list = 0);
+        size_t getTaskBufferOffset(VPURegMapped::TaskType type, size_t tile, size_t list, size_t index);
+    }];
+
+    let hasVerifier = 1;
 }
 
 #endif

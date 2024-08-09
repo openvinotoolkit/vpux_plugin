@@ -65,8 +65,16 @@ std::optional<double> getWeightsSparsityThreshold(const DoubleOption& weightsSpa
 
 void vpux::VPU::buildInitCompilerPipeline(mlir::OpPassManager& pm, const VPU::InitCompilerOptions& options,
                                           Logger log) {
+    log.info("InitCompilerOptions:\n arch = {0}\n DPU groups = {1}\n DMA ports = {2}\n"
+             " compilation mode = {3}\n WLM rollback = {4}",
+             options.arch, options.numberOfDPUGroups, options.numberOfDMAPorts, options.compilationMode,
+             options.wlmRollback);
+
     pm.addPass(VPU::createInitResourcesPass(options, log));
+    pm.addPass(VPU::createSetupPipelineOptionsPass(options, log));
     pm.addPass(VPU::createSetupPerBarrierVariantConstraintPass(options, log));
+    pm.addPass(VPU::createSetupChannelsAutoPaddingPass(options, log));
+    pm.addPass(VPU::createSetupIsReduceSupportedPass(options, log));
 }
 
 //
@@ -186,5 +194,7 @@ void vpux::VPU::buildSMPipeline(mlir::OpPassManager& pm, const vpux::MCAndTiling
                                                       options.readStrategyFromJson, readStrategyFileLocation, log));
     }
     pm.addPass(VPU::createApplyTilingPass(log));
-    pm.addPass(VPU::createWrapVPUOpsInNCEClusterTilingPass(options.enableExplicitDistributedTensorAttr, log));
+    pm.addPass(VPU::createMakeOpsWithDistributedTensorPass(options.enableExplicitDistributedTensorAttr, log));
+    pm.addPass(VPU::createAdjustDistributedTensorAroundOpsPass(log));
+    pm.addPass(VPU::createWrapDistributedOpsInNCEClusterTiling(log));
 }

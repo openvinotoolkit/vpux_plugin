@@ -1,12 +1,11 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2021-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
-// XFAIL: *
 // VPU translate expectedly failed dueto unsupported DDR memory for actshave
 // RUN: vpux-opt --init-compiler="vpu-arch=%arch% allow-custom-values=true" %s | vpux-translate --export-VPUIP -o %t
-// REQUIRES: arch-VPUX37XX
+// REQUIRES: arch-NPU37XX
 
 module @Test {
 

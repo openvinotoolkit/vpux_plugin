@@ -5,8 +5,103 @@
 
 #include "vpux/compiler/dialect/VPUIPDPU/rewriters/dpu_invariant_rewriter.hpp"
 #include "vpux/compiler/dialect/VPUIPDPU/ops.hpp"
-#include "vpux/compiler/dialect/VPUIPDPU/rewriters/dpu_invariant_block_rewriters.hpp"
 #include "vpux/compiler/dialect/VPUIPDPU/rewriters/utils.hpp"
+
+using namespace vpux::VPUIPDPU;
+
+namespace {
+
+template <typename CfgOp>
+mlir::LogicalResult insertEntryBlock(mlir::OpBuilder& builder, mlir::Block* block, const mlir::Location& loc,
+                                     const Logger& log) {
+    builder.setInsertionPointToEnd(block);
+
+    auto cfgOp = builder.create<CfgOp>(loc);
+    auto& region = cfgOp.getOperation()->getRegion(0);
+    auto entryBlock = builder.createBlock(&region);
+
+    if (entryBlock == nullptr) {
+        log.error("Error creating entry block for {0}", typeid(CfgOp).name());
+        return mlir::failure();
+    }
+
+    return mlir::success();
+}
+
+mlir::LogicalResult insertInvBlockArgs(VPUASM::DPUInvariantOp op, const Logger& log, mlir::Block* invBlock,
+                                       std::unordered_map<BlockArg, size_t>& invBlockArgsPos,
+                                       ELF::SymbolReferenceMap& symRefMap) {
+    // input activations
+    auto inputType = getBufferType(symRefMap.lookupSymbol(op.getInput()));
+    invBlock->addArgument(inputType, op.getLoc());
+    invBlockArgsPos[BlockArg::ACT_IN] = invBlock->getNumArguments() - 1;
+
+    // input storage elements
+    if (op.getInputStorageElementTable()) {
+        auto inputSETableType = getBufferType(symRefMap.lookupSymbol(op.getInputStorageElementTable().value()));
+        invBlock->addArgument(inputSETableType, op.getLoc());
+        invBlockArgsPos[BlockArg::ACT_SE_IN] = invBlock->getNumArguments() - 1;
+    }
+
+    // input sparsity
+    if (op.getInputSparsityMap()) {
+        auto inputSparsityMapType = getBufferType(symRefMap.lookupSymbol(op.getInputSparsityMap().value()));
+        invBlock->addArgument(inputSparsityMapType, op.getLoc());
+        invBlockArgsPos[BlockArg::ACT_SPARSE_MAP_IN] = invBlock->getNumArguments() - 1;
+    }
+
+    // weights table
+    if (op.getWeightTable()) {
+        auto weightTableType = getBufferType(symRefMap.lookupSymbol(op.getWeightTable().value()));
+        invBlock->addArgument(weightTableType, op.getLoc());
+        invBlockArgsPos[BlockArg::WEIGHTS_TABLE] = invBlock->getNumArguments() - 1;
+    }
+
+    // weights
+    if (op.getWeights()) {
+        auto weightsType = getBufferType(symRefMap.lookupSymbol(op.getWeights().value()));
+        invBlock->addArgument(weightsType, op.getLoc());
+        invBlockArgsPos[BlockArg::WEIGHTS] = invBlock->getNumArguments() - 1;
+    }
+
+    // weights sparsity
+    if (op.getWeightsSparsityMap()) {
+        auto weightsSparsityMapType = getBufferType(symRefMap.lookupSymbol(op.getWeightsSparsityMap().value()));
+        invBlock->addArgument(weightsSparsityMapType, op.getLoc());
+        invBlockArgsPos[BlockArg::WEIGHTS_SPARSE_MAP] = invBlock->getNumArguments() - 1;
+    }
+
+    // spr lookup table
+    if (op.getSprLookupTable()) {
+        auto sprLookupTableType = getBufferType(symRefMap.lookupSymbol(op.getSprLookupTable().value()));
+        invBlock->addArgument(sprLookupTableType, op.getLoc());
+        invBlockArgsPos[BlockArg::SPR_LOOKUP_TABLE] = invBlock->getNumArguments() - 1;
+    }
+
+    // output activations
+    mlir::MemRefType outType;
+    if (!op.getIsContinued() && op.getOutput()) {
+        outType = getBufferType(symRefMap.lookupSymbol(op.getOutput().value()));
+    } else if (op.getIsContinued() && op.getOutputTypeContinued()) {
+        outType = op.getOutputTypeContinued().value().getMemref();
+    } else {
+        log.error("Expected either output buffer or output type for continued mode");
+        return mlir::failure();
+    }
+    invBlock->addArgument(outType, op.getLoc());
+    invBlockArgsPos[BlockArg::ACT_OUT] = invBlock->getNumArguments() - 1;
+
+    // output sparsity
+    if (op.getOutputSparsityMap()) {
+        auto outputSparsityMapType = getBufferType(symRefMap.lookupSymbol(op.getOutputSparsityMap().value()));
+        invBlock->addArgument(outputSparsityMapType, op.getLoc());
+        invBlockArgsPos[BlockArg::ACT_SPARSE_MAP_OUT] = invBlock->getNumArguments() - 1;
+    }
+
+    return mlir::success();
+}
+
+}  // namespace
 
 namespace vpux {
 namespace VPUIPDPU {
@@ -26,23 +121,46 @@ mlir::LogicalResult DPUInvariantRewriter::matchAndRewrite(VPUASM::DPUInvariantOp
 
     auto& invRegion = inv.getRegion();
     auto invBlock = rewriter.createBlock(&invRegion);
-    std::map<DPUInvariantBlockRewriter::BlockArg, size_t> invBlockArgsPos;
+    std::unordered_map<BlockArg, size_t> invBlockArgsPos;
+
+    auto dpuInvariantExpandIface = mlir::dyn_cast<VPUASM::DPUInvariantExpandOpInterface>(op.getOperation());
+    if (dpuInvariantExpandIface == nullptr) {
+        _log.error("Missing expand DPU invariant configuration interface for arch {0}",
+                   stringifyArchKind(VPU::getArch(op)).str());
+        return mlir::failure();
+    }
 
     {
-        auto guard = mlir::OpBuilder::InsertionGuard(rewriter);
-        if (DPUInvariantBlockRewriter::insertInvBlockArgs(op, invBlock, invBlockArgsPos, _log, _symRefMap).failed()) {
+        mlir::OpBuilder::InsertionGuard guard(rewriter);
+        if (insertInvBlockArgs(op, _log, invBlock, invBlockArgsPos, _symRefMap).failed()) {
             return mlir::failure();
         }
-        if (DPUInvariantIDURewriter(op, invBlock, invBlockArgsPos, rewriter, _log).rewrite().failed()) {
+
+        if (insertEntryBlock<VPUIPDPU::IDUCfgOp>(rewriter, invBlock, op.getLoc(), _log).failed()) {
             return mlir::failure();
         }
-        if (DPUInvariantMPERewriter(op, invBlock, invBlockArgsPos, rewriter, _log).rewrite().failed()) {
+        if (dpuInvariantExpandIface.expandIDUConfig(rewriter, _log, invBlock, invBlockArgsPos, _symRefMap).failed()) {
             return mlir::failure();
         }
-        if (DPUInvariantPPERewriter(op, invBlock, invBlockArgsPos, rewriter, _log).rewrite().failed()) {
+
+        if (insertEntryBlock<VPUIPDPU::MPECfgOp>(rewriter, invBlock, op.getLoc(), _log).failed()) {
             return mlir::failure();
         }
-        if (DPUInvariantODURewriter(op, invBlock, invBlockArgsPos, rewriter, _log).rewrite(_symRefMap).failed()) {
+        if (dpuInvariantExpandIface.expandMPEConfig(rewriter, _log, invBlock, invBlockArgsPos, _symRefMap).failed()) {
+            return mlir::failure();
+        }
+
+        if (insertEntryBlock<VPUIPDPU::PPECfgOp>(rewriter, invBlock, op.getLoc(), _log).failed()) {
+            return mlir::failure();
+        }
+        if (dpuInvariantExpandIface.expandPPEConfig(rewriter, _log, invBlock, invBlockArgsPos, _symRefMap).failed()) {
+            return mlir::failure();
+        }
+
+        if (insertEntryBlock<VPUIPDPU::ODUCfgOp>(rewriter, invBlock, op.getLoc(), _log).failed()) {
+            return mlir::failure();
+        }
+        if (dpuInvariantExpandIface.expandODUConfig(rewriter, _log, invBlock, invBlockArgsPos, _symRefMap).failed()) {
             return mlir::failure();
         }
     }

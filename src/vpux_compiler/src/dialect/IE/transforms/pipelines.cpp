@@ -25,6 +25,7 @@ void vpux::IE::buildAdjustPrecisionPipeline(mlir::OpPassManager& pm, const Adjus
     pm.addPass(IE::createConvertPrecisionToI32Pass(log));
     pm.addPass(IE::createUseUserPrecisionPass(log));
     pm.addPass(IE::createAdjustSoftwareOpsPrecisionPass(log));
+    pm.addPass(IE::createAdjustNCEOpsWithI32InputsPass(log));
     pm.addPass(mlir::createCanonicalizerPass(grc));
 }
 
@@ -80,6 +81,7 @@ void vpux::IE::buildOperationConversionPipeline(mlir::OpPassManager& pm, Logger 
     const auto grc = getDefaultGreedyRewriteConfig();
     pm.addPass(IE::createConvertExtractImagePatchesPass(log));
     pm.addPass(IE::createConvertReduceSumToConvPass(log));
+    pm.addPass(IE::createUnrollReduceMinAllAxesPass(log));
     pm.addPass(IE::createConvertReduceToPoolingPass(log));
     pm.addPass(IE::createConvertPowerToMultPass(log));
     pm.addPass(mlir::createCanonicalizerPass(grc));

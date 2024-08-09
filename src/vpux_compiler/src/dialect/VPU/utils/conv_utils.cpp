@@ -38,13 +38,13 @@ bool vpux::VPU::isNCEConvSupported(VPU::ArchKind arch, NDTypeInterface inputType
     const auto inputOrder = inputType.getDimsOrder();
     const auto isChannelMajor = inputOrder == DimsOrder::NCHW;
     const auto inputChannelAlignment =
-            !isChannelMajor ? VPU::NCEConvolutionOp::getInputChannelAlignmentImpl(inputType) : 1;
+            !isChannelMajor ? vpux::VPU::NCEInvariant::getAlignment(inputType.getElementType()) : 1;
 
     if (checkChannelAlignment) {
         if (!NCEInvariant::isInputActTypeSupported(arch, inputType, inputChannelAlignment,
                                                    supportsInputActCompression) ||
-            !NCEInvariant::isOutputActTypeSupported(outputType,
-                                                    VPU::NCEConvolutionOp::getOutputChannelAlignmentImpl(outputType))) {
+            !NCEInvariant::isOutputActTypeSupported(
+                    outputType, vpux::VPU::NCEInvariant::getAlignment(outputType.getElementType()))) {
             logCb(formatv("Misaligned tensor shape"));
             return false;
         }

@@ -19,10 +19,10 @@ namespace vpux {
 
 class IPipelineStrategy {
 public:
-    virtual void buildPipeline(mlir::PassManager& pm, const Config& config, mlir::TimingScope& rootTiming,
+    virtual void buildPipeline(mlir::PassManager& pm, const intel_npu::Config& config, mlir::TimingScope& rootTiming,
                                Logger log) = 0;
 
-    virtual void buildELFPipeline(mlir::PassManager& pm, const Config& config, mlir::TimingScope& rootTiming,
+    virtual void buildELFPipeline(mlir::PassManager& pm, const intel_npu::Config& config, mlir::TimingScope& rootTiming,
                                   Logger log) = 0;
 
     virtual ~IPipelineStrategy() = default;

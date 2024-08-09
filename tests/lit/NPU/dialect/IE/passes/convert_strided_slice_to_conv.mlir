@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --convert-strided-slice-to-conv %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
@@ -76,14 +76,11 @@ func.func @ConvertStridedSliceWithFQ2Conv(%arg0: tensor<1x3x640x640xf16, {order 
     return %1 : tensor<1x3x320x640xf16, {order = #NHWC}>
 
     // CHECK-NOT: IE.StridedSlice
-    // CHECK: [[CST:%.+]] = const.Declare tensor<3x3x1x1xf16> = dense<
-    // CHECK-SAME{LITERAL}: [[[[1.000000e+00]], [[0.000000e+00]], [[0.000000e+00]]],
-    // CHECK-SAME{LITERAL}: [[[0.000000e+00]], [[1.000000e+00]], [[0.000000e+00]]],
-    // CHECK-SAME{LITERAL}: [[[0.000000e+00]], [[0.000000e+00]], [[1.000000e+00]]]]> : tensor<3x3x1x1xf32>, [#const.ConvertElemType<f16>, #const.Reorder<#NCHW>]
-    // CHECK: [[CST0:%.+]] = const.Declare tensor<f16> = dense<0.000000e+00> : tensor<f16>
-    // CHECK: [[CST1:%.+]] = const.Declare tensor<f16> = dense<2.540000e+02> : tensor<f16>
-    // CHECK: [[CST2:%.+]] = const.Declare tensor<1x1x1x1xf16> = dense<3.183590e+00> : tensor<1x1x1x1xf16>
-    // CHECK: [[CST3:%.+]] = const.Declare tensor<1x1x1x1xf16> = dense<3.068360e+00> : tensor<1x1x1x1xf16>
+    // CHECK-DAG: [[CST:%.+]] = const.Declare tensor<3x3x1x1xf16> = dense<{{\[\[\[\[}}1.000000e+00]], {{\[\[}}0.000000e+00]], {{\[\[}}0.000000e+00]]], {{\[\[\[}}0.000000e+00]], {{\[\[}}1.000000e+00]], {{\[\[}}0.000000e+00]]], {{\[\[\[}}0.000000e+00]], {{\[\[}}0.000000e+00]], {{\[\[}}1.000000e+00]]]]> : tensor<3x3x1x1xf32>, [#const.ConvertElemType<f16>, #const.Reorder<#NCHW>]
+    // CHECK-DAG: [[CST0:%.+]] = const.Declare tensor<f16> = dense<0.000000e+00> : tensor<f16>
+    // CHECK-DAG: [[CST1:%.+]] = const.Declare tensor<f16> = dense<2.540000e+02> : tensor<f16>
+    // CHECK-DAG: [[CST2:%.+]] = const.Declare tensor<1x1x1x1xf16> = dense<3.183590e+00> : tensor<1x1x1x1xf16>
+    // CHECK-DAG: [[CST3:%.+]] = const.Declare tensor<1x1x1x1xf16> = dense<3.068360e+00> : tensor<1x1x1x1xf16>
     // CHECK: [[FQ_0:%.+]] = IE.FakeQuantize(%arg0, [[CST3]], [[CST2]], [[CST3]], [[CST2]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64} : tensor<1x3x640x640xf16, {order = #NHWC}>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16> -> tensor<1x3x640x640xf16, {order = #NHWC}>
     // CHECK: [[FQ_1:%.+]] = IE.FakeQuantize([[CST]], [[CST0]], [[CST1]], [[CST0]], [[CST1]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 255 : i64} : tensor<3x3x1x1xf16>, tensor<f16>, tensor<f16>, tensor<f16>, tensor<f16> -> tensor<3x3x1x1xf16>
     // CHECK: [[CONV:%.+]] = IE.Convolution([[FQ_0]], [[FQ_1]]) {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [2, 1]} : tensor<1x3x640x640xf16, {order = #NHWC}>, tensor<3x3x1x1xf16> -> tensor<1x3x320x640xf16, {order = #NHWC}>
@@ -148,16 +145,11 @@ func.func @ConvertParallelStridedSlicesToConvWithFQ(%arg0: tensor<1x3x416x416xf1
     %5 = IE.Concat(%1, %2, %3, %4) {static_offsets = [[0, 0, 0, 0], [0, 3, 0, 0], [0, 6, 0, 0], [0, 9, 0, 0]]} : tensor<1x3x208x208xf16>, tensor<1x3x208x208xf16>, tensor<1x3x208x208xf16>, tensor<1x3x208x208xf16> -> tensor<1x12x208x208xf16>
     return %5 : tensor<1x12x208x208xf16>
 
-    // CHECK:            [[CST:%.*]] = const.Declare tensor<12x3x2x2xf16> = dense<
-    // CHECK-SAME{LITERAL}: "0x0000803F0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000803F0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000803F00000000000000000000000000000000000000000000803F0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000803F0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000803F00000000000000000000803F0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000803F0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000803F00000000000000000000000000000000000000000000803F0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000803F0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000803F"> : tensor<12x3x2x2xf32>, [#const.ConvertElemType<f16>, #const.Reorder<#NCHW>]
-    // CHECK:            [[CST_0:%.*]] = const.Declare tensor<f16> = dense<
-    // CHECK-SAME{LITERAL}: 0.000000e+00> : tensor<f16>
-    // CHECK:            [[CST_1:%.*]] = const.Declare tensor<f16> = dense<
-    // CHECK-SAME{LITERAL}: 2.540000e+02> : tensor<f16>
-    // CHECK:            [[CST_2:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<
-    // CHECK-SAME{LITERAL}: 2.541950e+02> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
-    // CHECK:            [[CST_3:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<
-    // CHECK-SAME{LITERAL}: 0.000000e+00> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
+    // CHECK-DAG:            [[CST:%.*]] = const.Declare tensor<12x3x2x2xf16> = dense<"0x0000803F0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000803F0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000803F00000000000000000000000000000000000000000000803F0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000803F0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000803F00000000000000000000803F0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000803F0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000803F00000000000000000000000000000000000000000000803F0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000803F0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000803F"> : tensor<12x3x2x2xf32>, [#const.ConvertElemType<f16>, #const.Reorder<#NCHW>]
+    // CHECK-DAG:            [[CST_0:%.*]] = const.Declare tensor<f16> = dense<0.000000e+00> : tensor<f16>
+    // CHECK-DAG:            [[CST_1:%.*]] = const.Declare tensor<f16> = dense<2.540000e+02> : tensor<f16>
+    // CHECK-DAG:            [[CST_2:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<2.541950e+02> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
+    // CHECK-DAG:            [[CST_3:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<0.000000e+00> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
     // CHECK: [[FQ_0:%.+]] = IE.FakeQuantize(%arg0, [[CST_3]], [[CST_2]], [[CST_3]], [[CST_2]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64} : tensor<1x3x416x416xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16> -> tensor<1x3x416x416xf16>
     // CHECK: [[FQ_1:%.+]] = IE.FakeQuantize([[CST]], [[CST_0]], [[CST_1]], [[CST_0]], [[CST_1]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 255 : i64} : tensor<12x3x2x2xf16>, tensor<f16>, tensor<f16>, tensor<f16>, tensor<f16> -> tensor<12x3x2x2xf16>
 

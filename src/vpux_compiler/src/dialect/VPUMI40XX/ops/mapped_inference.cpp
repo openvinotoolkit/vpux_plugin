@@ -1,4 +1,5 @@
 #include "vpux/compiler/dialect/VPUMI40XX/ops.hpp"
+#include "vpux/compiler/dialect/VPUMI40XX/utils.hpp"
 
 using namespace vpux;
 
@@ -149,4 +150,92 @@ bool VPUMI40XX::MappedInferenceOp::printAttributes(llvm::raw_ostream&, llvm::Str
 
 DOT::EdgeDir VPUMI40XX::MappedInferenceOp::getEdgeDirection(mlir::Operation*) {
     return DOT::EdgeDir::EDGE_REVERSE;
+}
+
+size_t vpux::VPUMI40XX::MappedInferenceOp::getTaskCount(vpux::VPURegMapped::TaskType taskType, size_t tileIdx,
+                                                        size_t listIdx) {
+    VPUX_THROW_WHEN(((taskType != vpux::VPURegMapped::TaskType::DMA) && listIdx != 0) ||
+                            ((taskType == vpux::VPURegMapped::TaskType::DMA) && (listIdx > 1)),
+                    "Only DMA can have list index == 1");
+
+    switch (taskType) {
+    case vpux::VPURegMapped::TaskType::DMA: {
+        auto dmaCounts = parseIntArrayOfArrayAttr<int64_t>(getDmaCount());
+        return tileIdx > dmaCounts.size() ? 0 : dmaCounts[tileIdx][listIdx];
+    }
+    case vpux::VPURegMapped::TaskType::ActKernelInvocation: {
+        auto kernelInvoCounts = parseIntArrayAttr<int64_t>(getActKernelInvocationsCount());
+        return tileIdx > kernelInvoCounts.size() ? 0 : kernelInvoCounts[tileIdx];
+    }
+    case vpux::VPURegMapped::TaskType::ActKernelRange: {
+        auto kernelRangeCounts = parseIntArrayAttr<int64_t>(getActKernelRangesCount());
+        return tileIdx > kernelRangeCounts.size() ? 0 : kernelRangeCounts[tileIdx];
+    }
+    case vpux::VPURegMapped::TaskType::DPUInvariant: {
+        auto dpuInvariantCounts = parseIntArrayAttr<int64_t>(getInvariantCount());
+        return tileIdx > dpuInvariantCounts.size() ? 0 : dpuInvariantCounts[tileIdx];
+    }
+    case vpux::VPURegMapped::TaskType::DPUVariant: {
+        auto dpuVariantCounts = parseIntArrayAttr<int64_t>(getVariantCount());
+        return tileIdx > dpuVariantCounts.size() ? 0 : dpuVariantCounts[tileIdx];
+    }
+    case vpux::VPURegMapped::TaskType::M2I: {
+        return tileIdx > 0 ? 0 : getMediaCount();
+    }
+    default: {
+        VPUX_THROW("Unrecognized task type");
+        break;
+    }
+    }
+}
+
+size_t vpux::VPUMI40XX::MappedInferenceOp::getMaxTaskTile(vpux::VPURegMapped::TaskType taskType) {
+    auto getMaxUsedTile = [](llvm::SmallVector<int64_t>& taskCountsVec) {
+        auto lastPositiveCount = std::find_if(taskCountsVec.rbegin(), taskCountsVec.rend(), [](int64_t count) {
+            return count > 0;
+        });
+
+        return std::abs(std::distance(taskCountsVec.rend(), lastPositiveCount));
+    };
+
+    switch (taskType) {
+    case vpux::VPURegMapped::TaskType::DMA: {
+        auto dmaCounts = parseIntArrayOfArrayAttr<int64_t>(getDmaCount());
+
+        llvm::SmallVector<int64_t> ddrDmaCounts{}, cmxDmaCounts{};
+        llvm::for_each(dmaCounts, [&ddrDmaCounts, &cmxDmaCounts](auto& vec) {
+            ddrDmaCounts.push_back(vec[static_cast<size_t>(VPUMI40XX::DmaNnSrcType::DDR)]);
+            cmxDmaCounts.push_back(vec[static_cast<size_t>(VPUMI40XX::DmaNnSrcType::CMX_NN)]);
+        });
+
+        auto maxTileDDR = getMaxUsedTile(ddrDmaCounts);
+        auto maxTileCMX = getMaxUsedTile(cmxDmaCounts);
+
+        return std::max(maxTileDDR, maxTileCMX);
+    }
+    case vpux::VPURegMapped::TaskType::ActKernelInvocation: {
+        auto kernelInvoCounts = parseIntArrayAttr<int64_t>(getActKernelInvocationsCount());
+
+        return getMaxUsedTile(kernelInvoCounts);
+    }
+    case vpux::VPURegMapped::TaskType::ActKernelRange: {
+        auto kernelRangeCounts = parseIntArrayAttr<int64_t>(getActKernelRangesCount());
+        return getMaxUsedTile(kernelRangeCounts);
+    }
+    case vpux::VPURegMapped::TaskType::DPUInvariant: {
+        auto dpuInvariantCounts = parseIntArrayAttr<int64_t>(getInvariantCount());
+        return getMaxUsedTile(dpuInvariantCounts);
+    }
+    case vpux::VPURegMapped::TaskType::DPUVariant: {
+        auto dpuVariantCounts = parseIntArrayAttr<int64_t>(getVariantCount());
+        return getMaxUsedTile(dpuVariantCounts);
+    }
+    case vpux::VPURegMapped::TaskType::M2I: {
+        return getMediaCount() > 0;
+    }
+    default: {
+        VPUX_THROW("Unrecognized task type");
+        break;
+    }
+    }
 }

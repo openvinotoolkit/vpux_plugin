@@ -10,6 +10,7 @@
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
 #include "vpux/utils/core/logger.hpp"
 
+#include <llvm/ADT/TypeSwitch.h>
 #include <numeric>
 
 namespace vpux {
@@ -67,6 +68,84 @@ int64_t calculateAlignmentRequirementForExpandOpConversion(const vpux::NDTypeInt
     return leastChannelMultiple / expandInChannels;
 }
 
+bool beneficialToPadHeight(IE::ExpandOp origOp) {
+    const auto expandInType = origOp.getInput().getType().cast<vpux::NDTypeInterface>();
+    const auto expandInShape = expandInType.getShape();
+    const auto convolutionAlignment = IE::calculateAlignmentRequirementForExpandOpConversion(expandInType);
+
+    // TODO (E#128867): need to repeat the experiment of E#118379 and E#120473 for the unaligned case (W%16 != 0), to
+    // understand the correct tradeoff between expand to conv solution and dma solution (expected to be different due to
+    // the overhead of padding) and correctly set up the constraints. Current constraints are only avoiding regressions
+    // manifesting in CI, but they should be formally studied through measurements.
+    if (expandInShape[Dims4D::Act::W] % convolutionAlignment != 0 &&
+        ((expandInShape[Dims4D::Act::H] <= 48) || (expandInShape[Dims4D::Act::H] >= 1440) ||
+         (expandInShape[Dims4D::Act::W] <= 128))) {
+        return false;
+    }
+
+    return true;
+}
+
+bool beneficialToPadWidth(IE::ExpandOp origOp) {
+    const auto expandInType = origOp.getInput().getType().cast<vpux::NDTypeInterface>();
+    const auto expandInShape = expandInType.getShape();
+    const auto expandInW = expandInShape[Dims4D::Act::W];
+    const auto convolutionAlignment = IE::calculateAlignmentRequirementForExpandOpConversion(expandInType);
+
+    //
+    // Padding W to make Expand could convert to Conv
+    // For example:
+    //            Expand         :    1x1x32x79741 -> 1x16x32x79741
+    //              |
+    //            Conv
+    // Convert to:
+    //            Expand         :    1x1x32x79741 -> 1x1x32x79744
+    //              |
+    //            AffineReshape  :    1x1x32x79744 -> 1x16x32x4984xf16
+    //              |
+    //            New Conv
+    //              |
+    //            AffineReshape
+    //              |
+    //            Conv
+    //
+    if (expandInW % convolutionAlignment == 0) {
+        return false;
+    }
+
+    if (!origOp.getResult().hasOneUse()) {
+        return false;
+    }
+
+    mlir::Operation* userOp = *origOp.getResult().getUsers().begin();
+    if (!mlir::isa<IE::ConvolutionOp, IE::TransposedConvolutionOp, IE::MaxPoolOp, IE::AvgPoolOp>(userOp)) {
+        return false;
+    }
+
+    SmallVector<int64_t> padsBegin = {0, 0};
+    SmallVector<int64_t> padsEnd = {0, 0};
+    SmallVector<int64_t> stridesData = {1, 1};
+    llvm::TypeSwitch<mlir::Operation*, void>(userOp)
+            .Case<IE::ConvolutionOp, IE::TransposedConvolutionOp, IE::MaxPoolOp, IE::AvgPoolOp>([&](auto userOp) {
+                padsBegin = parseIntArrayAttr<int64_t>(userOp.getPadsBeginAttr());
+                padsEnd = parseIntArrayAttr<int64_t>(userOp.getPadsEndAttr());
+                stridesData = parseIntArrayAttr<int64_t>(userOp.getStrides());
+            });
+
+    if (padsBegin.size() != 2 || padsBegin.size() != 2) {
+        return false;
+    }
+
+    // Beneficial to pad W for case that the new width / strideX is same as original width then sliceOp is not required
+    const auto alignedExpandInW = alignValUp(expandInShape[Dims4D::Act::W], convolutionAlignment);
+    const auto inWWithPad =
+            expandInW + padsBegin[Dims4D::PadsBegin::Left.ind()] + padsEnd[Dims4D::PadsEnd::Right.ind()];
+    const auto alignedInWWithPad =
+            alignedExpandInW + padsBegin[Dims4D::PadsBegin::Left.ind()] + padsEnd[Dims4D::PadsEnd::Right.ind()];
+    return inWWithPad / stridesData[Dims4D::Strides::X.ind()] ==
+           alignedInWWithPad / stridesData[Dims4D::Strides::X.ind()];
+}
+
 bool isEligibleConvertToConv(IE::ExpandOp expandOp, Logger log, StringRef debugName) {
     const auto expandInType = expandOp.getInput().getType().cast<vpux::NDTypeInterface>();
     const auto expandOutType = expandOp.getOutput().getType().cast<vpux::NDTypeInterface>();
@@ -120,12 +199,6 @@ bool isEligibleConvertToConv(IE::ExpandOp expandOp, Logger log, StringRef debugN
                   expandInShape[Dims4D::Act::N]);
         return false;
     }
-    const auto convolutionAlignment = IE::calculateAlignmentRequirementForExpandOpConversion(expandInType);
-    if (expandInShape[Dims4D::Act::W] % convolutionAlignment != 0) {
-        log.trace("[{0}]: Expand at {1} has width {2}. Width is expected to be a multiple of {3}", debugName,
-                  expandOp.getLoc(), expandInShape[Dims4D::Act::W], convolutionAlignment);
-        return false;
-    }
     if (!expandInType.getElementType().isF16() && !expandInType.getElementType().isa<mlir::quant::QuantizedType>()) {
         log.trace("[{0}]: Expand at {1} has {2} element type. Only float16 and quantized types are supported",
                   debugName, expandOp.getLoc(), expandInType.getElementType());
@@ -147,6 +220,14 @@ bool isEligibleConvertToConv(IE::ExpandOp expandOp, Logger log, StringRef debugN
                   "Converting to convolution is not beneficial",
                   debugName, expandOp.getLoc(), expandInShape[Dims4D::Act::C], expandInShape[Dims4D::Act::H],
                   expandInShape[Dims4D::Act::W]);
+        return false;
+    }
+
+    const auto convolutionAlignment = IE::calculateAlignmentRequirementForExpandOpConversion(expandInType);
+    if (!beneficialToPadHeight(expandOp) && !beneficialToPadWidth(expandOp)) {
+        log.trace("[{0}]: Expand at {1} has width {2} not multiple of {3}. Expand to conv only for case "
+                  "beneficialToPadHeight or beneficialToPadWidth",
+                  debugName, expandOp.getLoc(), expandInShape[Dims4D::Act::W], convolutionAlignment);
         return false;
     }
 

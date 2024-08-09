@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --convert-view-ops-to-declarations %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 // CHECK: func.func @Reshape([[ARG0:%.+]]: memref<1x512xf16>, [[ARG1:%.+]]: memref<1x512xf16>)
 func.func @Reshape(%arg0: memref<1x512xf16>, %arg1: memref<1x512xf16>) -> memref<1x512xf16> {
@@ -596,4 +596,30 @@ func.func @ShapeCast(%arg0: memref<64x3x7x7xf16, #NHWC>, %arg1: memref<1x64x112x
     //CHECK-SAME:           variants :  {
     //CHECK:       DPUTask {mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, outEnd = [111, 111, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     //CHECK:       return [[VAR5]] : memref<1x64x112x112xf16, #NHWC, [@CMX_NN, 0]>
+}
+
+//
+// -----
+//
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+
+!InputDistributedBuffer = !VPUIP.DistributedBuffer<1x32x1x128xf16, #NCHW, @CMX_NN, {
+    mode = "SEGMENTED", num_tiles = [1, 4, 1, 1], num_clusters = 4 : i64, uniform_distributed_segments, 
+    compute_shapes = [[1, 8, 1, 128], [1, 8, 1, 128], [1, 8, 1, 128], [1, 8, 1, 128]], 
+    compute_offsets = [[0, 0, 0, 0], [0, 8, 0, 0], [0, 16, 0, 0], [0, 24, 0, 0]], 
+    memory_shapes = [[1, 8, 1, 128], [1, 8, 1, 128], [1, 8, 1, 128], [1, 8, 1, 128]], 
+    memory_offsets = [[0, 0, 0, 0], [0, 8, 0, 0], [0, 16, 0, 0], [0, 24, 0, 0]]}
+>
+!OutType = memref<1x1x1x128xf16, [@CMX_NN, 2]>
+
+// CHECK-LABEL: @ExtractFlatSlice
+func.func @ExtractFlatSlice() -> !OutType {
+    %0 = VPURT.DeclareBuffer <CMX_NN> <0> -> !InputDistributedBuffer
+    %1 = VPUIP.ExtractFlatSlice {offset = 19 : i64} inputs(%0 : !InputDistributedBuffer) -> memref<1x1x1x128xf16, [@CMX_NN, 2]>
+    return %1 : !OutType
+
+    // CHECK:       [[NEW_SOURCE:%.+]] = VPURT.DeclareBuffer <CMX_NN> [2] <768> -> memref<1x1x1x128xf16, [@CMX_NN, 2]>
+    // CHECK:       return [[NEW_SOURCE]]
+    // CHECK-NOT:   VPUIP.ExtractFlatSlice
 }

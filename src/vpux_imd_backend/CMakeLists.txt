@@ -3,6 +3,11 @@
 # SPDX-License-Identifier: Apache 2.0
 #
 
+# E#129822: Error copying IMD binaries
+if(WIN32)
+  return()
+endif()
+
 ov_dependent_option(IMD_BACKEND_USE_LINKS "Link IMD binaries" OFF "ENABLE_IMD_BACKEND" OFF)
 
 set(TARGET_NAME "npu_imd_backend")
@@ -42,6 +47,10 @@ add_custom_target("${TARGET_NAME}_copy_app" ALL
         ${CMAKE_COMMAND} -E ${ACTION}
         "${IMD_ARTIFACTS_SRC_DIR}/InferenceManagerDemo_vpu_4.elf"
         "${IMD_ARTIFACTS_BIN_DIR}/InferenceManagerDemo_vpu_4.elf"
+    COMMAND
+        ${CMAKE_COMMAND} -E ${ACTION}
+        "${IMD_ARTIFACTS_SRC_DIR}/InferenceManagerDemo_vpu_5.elf"
+        "${IMD_ARTIFACTS_BIN_DIR}/InferenceManagerDemo_vpu_5.elf"
     COMMENT "[IMD] Copy InferenceManagerDemo application"
     VERBATIM
 )
@@ -52,6 +61,7 @@ install(
         "${IMD_ARTIFACTS_SRC_DIR}/InferenceManagerDemo_vpu_2_0.elf"
         "${IMD_ARTIFACTS_SRC_DIR}/InferenceManagerDemo_vpu_2_7.elf"
         "${IMD_ARTIFACTS_SRC_DIR}/InferenceManagerDemo_vpu_4.elf"
+        "${IMD_ARTIFACTS_SRC_DIR}/InferenceManagerDemo_vpu_5.elf"
     DESTINATION "${OV_CPACK_RUNTIMEDIR}/vpux"
     COMPONENT    ${VPUX_PLUGIN_COMPONENT}
 )
@@ -82,10 +92,8 @@ target_include_directories(${TARGET_NAME}
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
 
-link_system_libraries(${TARGET_NAME}
+ov_link_system_libraries(${TARGET_NAME}
     PRIVATE
-        openvino::runtime::dev
-        openvino::runtime
         LLVMSupport
 )
 

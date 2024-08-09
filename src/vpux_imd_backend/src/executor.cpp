@@ -21,11 +21,18 @@
 
 #include <fstream>
 
+using vpux::printToString;
+
 namespace Platform = ov::intel_npu::Platform;
 
-using namespace intel_npu;
+namespace intel_npu {
 
-namespace vpux {
+//
+// setWorkloadType
+//
+void IMDExecutor::setWorkloadType(const ov::WorkloadType /*workloadType*/) const {
+    VPUX_THROW("IMDExecutor does not support WorkloadType");
+}
 
 //
 // getMoviToolsPath
@@ -51,7 +58,7 @@ std::string IMDExecutor::getMoviToolsPath(const Config& config) {
 // isValidElfSignature
 //
 
-bool IMDExecutor::isValidElfSignature(StringRef filePath) {
+bool IMDExecutor::isValidElfSignature(llvm::StringRef filePath) {
     std::ifstream in(std::string(filePath), std::ios_base::binary);
 
     VPUX_THROW_UNLESS(in.is_open(), "Could not open {0}", filePath);
@@ -102,7 +109,7 @@ void IMDExecutor::setMoviSimRunArgs(const std::string_view platform, const Confi
     _app.runProgram = printToString("{0}/moviSim", pathToTools);
 
     if (platform == Platform::NPU3720) {
-        // For some reason, -cv:3720xx doesn't work, while -cv:3700xx works OK for VPU3720
+        // For some reason, -cv:3720xx doesn't work, while -cv:3700xx works OK for NPU3720
         _app.chipsetArg = "-cv:3700xx";
         setElfFile(printToString("{0}/vpux/{1}", ov::util::get_ov_lib_path(), appName));
         _app.imdElfArg = printToString("-l:LRT:{0}", _app.elfFile);
@@ -154,11 +161,6 @@ void IMDExecutor::setMoviDebugRunArgs(const std::string_view platform, const Con
     } else if (platform == Platform::NPU3720) {
         _app.chipsetArg = "-cv:3700xx";
         default_targetArg = "-D:default_target=LRT";
-    } else if (platform == Platform::NPU3700) {
-        _app.chipsetArg = "-cv:ma2490";
-        // dKMB still has different binary for fpga, overwrite the folder
-        setElfFile(printToString("{0}/vpux/{1}/{2}", ov::util::get_ov_lib_path(), vpuElfPlatform, appName));
-        default_targetArg = "-D:default_target=LRT0";
     } else {
         VPUX_THROW("Platform '{0}' is not supported", platform);
     }
@@ -185,7 +187,7 @@ void IMDExecutor::setMoviDebugRunArgs(const std::string_view platform, const Con
         auto test_run_reset_script = printToString("-D:lnl_reset={0}/../make/lnl_reset.tcl", vpuFirmwareDir);
         _app.runArgs.append({"--script", test_run_templateArg});
         _app.runArgs.append({test_run_reset_script});
-    } else if (platform == Platform::NPU3700 || platform == Platform::NPU3720) {
+    } else if (platform == Platform::NPU3720) {
         auto default_mdbg2Arg = printToString("{0}/build/buildSupport/scripts/debug/default_mdbg2.scr", vpuFirmwareDir);
         auto default_pipe_mdbg2Arg =
                 printToString("{0}/build/buildSupport/scripts/debug/default_pipe_mdbg2.scr", vpuFirmwareDir);
@@ -215,31 +217,24 @@ void IMDExecutor::setSimicsRunArgs(const std::string_view platform, const Config
 
     auto binaryFile = "$binary=" + _app.elfFile;
 
+    // common params
+    _app.runArgs = {
+            _app.runProgram,
+            "-batch-mode",
+            "-e",
+            binaryFile,
+    };
+
     if (platform == Platform::NPU4000) {
-        _app.runArgs = {_app.runProgram,
-                        "-batch-mode",
-                        "-no-win",
-                        "-e",
-                        binaryFile,
-                        "-e",
-                        "$VPU_GEN=4",
-                        "-e",
-                        "$VPU_GENSKU=4000",
-                        "-e",
-                        "run-command-file \"%simics%/targets/vpu/vpu.simics\""};
-    } else {
-        _app.runArgs = {_app.runProgram,
-                        "-batch-mode",
-                        "-no-win",
-                        "-e",
-                        binaryFile,
-                        "-e",
-                        "$VPU_GEN=5",
-                        "-e",
-                        "$VPU_GENSKU=5010",
-                        "-e",
-                        "run-command-file \"%simics%/targets/vpu/vpu.simics\""};
-    }
+        _app.runArgs.insert(_app.runArgs.end(), {"-e", "$VPU_GEN=4", "-e", "$VPU_GENSKU=4000", "-e",
+                                                 "run-command-file \"%simics%/targets/vpu/vpu.simics\""});
+    } else
+        VPUX_THROW("Unsupported launch mode '{0}'", platform);
+
+    std::string args("");
+    for (auto& arg : _app.runArgs)
+        args += arg + " ";
+    printf("%s\n", args.c_str());
 }
 
 //
@@ -282,8 +277,8 @@ void IMDExecutor::parseAppConfig(const std::string_view platform, const Config& 
 
 IMDExecutor::IMDExecutor(const std::string_view platform, const std::shared_ptr<const NetworkDescription>& network,
                          const Config& config)
-        : _network(network), _log("InferenceManagerDemo", getLogLevel(config)) {
+        : _network(network), _log("InferenceManagerDemo", vpux::getLogLevel(config)) {
     parseAppConfig(ov::intel_npu::Platform::standardize(platform), config);
 }
 
-}  // namespace vpux
+}  // namespace intel_npu

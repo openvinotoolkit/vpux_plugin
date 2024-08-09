@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW allow-custom-values=true" --multi-cluster-strategy-assignment %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
@@ -276,43 +276,3 @@ func.func @ConvAssignedSOKInCaseOfINFCost(%arg0: tensor<1x4096x1x1xf16, {order =
 
     // CHECK:       return [[CONV]] : tensor<1x5504x1x1xf16, {order = #NHWC}>
 }
-
-// -----
-
-#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
-
-// CHECK-LABEL: @MVN1NormalizeAssignedSplitOverHeight
-func.func @MVN1NormalizeAssignedSplitOverHeight(%arg0: tensor<1x3x20x35971xf16>, %arg1: tensor<1x3x1x1xf16, {order = #NHWC}>) -> tensor<1x3x20x35971xf16> {
-    %0 = VPU.MVN1Normalize(%arg0, %arg1) {across_channels = false, normalize_variance = false} : tensor<1x3x20x35971xf16>, tensor<1x3x1x1xf16, {order = #NHWC}> -> tensor<1x3x20x35971xf16>
-    return %0: tensor<1x3x20x35971xf16>
-
-    //CHECK:        [[VAL0:%.*]] = VPU.MVN1Normalize(%arg0, %arg1) 
-    // CHECK-SAME:      {across_channels = false, multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, normalize_variance = false} : 
-    // CHECK-SAME:      tensor<1x3x20x35971xf16>, tensor<1x3x1x1xf16, {order = #NHWC}> -> tensor<1x3x20x35971xf16>
-
-    //CHECK:        return [[VAL0]] : tensor<1x3x20x35971xf16>
-}
-
-
-// -----
-
-#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
-
-// CHECK-LABEL: @MVN1MeanVarAssignedClustering
-func.func @MVN1MeanVarAssignedClustering(%arg0: tensor<1x1x1x2xf32, {order = #NHWC}>) -> tensor<1x1x1x2xf16, {order = #NHWC}> {
-    %0 = VPU.MVN1MeanVar(%arg0) {
-            across_channels = true,
-            eps = 1.000000e-09 : f64,
-            normalize_variance = true,
-            orig_shape = [1, 1, 1, 515971],
-            output_type = f16} :
-        tensor<1x1x1x2xf32, {order = #NHWC}> -> tensor<1x1x1x2xf16, {order = #NHWC}>
-    return %0: tensor<1x1x1x2xf16, {order = #NHWC}>
-
-    //CHECK:        [[VAL0:%.*]] = VPU.MVN1MeanVar(%arg0)
-    // CHECK-SAME:       multiClusterStrategy = #VPU.multi_cluster_strategy<Clustering>
-
-    //CHECK:        return [[VAL0]] : tensor<1x1x1x2xf16, {order = #NHWC}>
-}
-
-

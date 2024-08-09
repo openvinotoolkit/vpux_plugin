@@ -76,9 +76,16 @@ void WrapDistributedOpsInNCEClusterTiling::safeRunOnFunc() {
 
         _log.trace("Wrap {0} into NCEClusterTilingOp", origOp->getName());
 
+        auto origOpOperands = origOp->getOperands();
+        if (mlir::isa<VPU::NCEEltwiseOp>(origOp)) {
+            // Special case for Eltwise with identical input operands
+            if (origOp->getOperand(0) == origOp->getOperand(1)) {
+                origOpOperands = origOpOperands.take_front(1);
+            }
+        }
         nceBuilder.setInsertionPoint(origOp);
         auto nceClusterOp = nceBuilder.create<vpux::VPU::NCEClusterTilingOp>(origOp->getLoc(), origOp->getResultTypes(),
-                                                                             origOp->getOperands(), bodyBuilder);
+                                                                             origOpOperands, bodyBuilder);
 
         origOp->replaceAllUsesWith(nceClusterOp.getResults());
         origOp->erase();
