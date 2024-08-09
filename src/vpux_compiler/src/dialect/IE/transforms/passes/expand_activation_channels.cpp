@@ -4,6 +4,7 @@
 //
 
 #include "vpux/compiler/dialect/IE/transforms/passes/expand_activation_channels.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/utils/interpolate_utils.hpp"
 
 using namespace vpux;
@@ -34,7 +35,48 @@ Shape calcPadsEnd(vpux::NDTypeInterface origType, int64_t channelAlignment) {
     return calcPadsEnd(origShape, extendedShape);
 }
 
-SmallVector<int64_t> extractMeaningfulOutput(mlir::Operation* origOp, Shape outPadsEnd) {
+Shape getInputPads(vpux::NDTypeInterface origType, const bool transposeA, const int64_t channelAlignment) {
+    const auto origShape = origType.getShape();
+
+    auto extendedShape = origShape.toValues();
+    // IE.MatMul {transposeA = false} in1 = [B, ..., N, IC], in2 = [B, ..., IC, OC]
+    // IC is the last dimension in in1 shape
+    // IE.MatMul {transposeA = true}  in1 = [B, ..., IC, N], in2 = [B, ..., IC, OC]
+    // IC is the penultimate dimension in in1 shape
+    const auto rank = origShape.size();
+    VPUX_THROW_UNLESS(rank >= 2, "Matrix must have rows and columns. Got rank {0}", rank);
+    const auto expandDim = transposeA ? Dim(rank - 2) : Dim(rank - 1);
+    extendedShape[expandDim] = alignValUp(origShape[expandDim], channelAlignment);
+
+    return calcPadsEnd(origShape, extendedShape);
+}
+
+std::pair<Shape, Shape> getFilterPads(vpux::NDTypeInterface origType, const bool transposeB,
+                                      const int64_t inChannelAlignment, const int64_t outChannelAlignment) {
+    const auto origShape = origType.getShape();
+
+    auto extendedShape = origShape.toValues();
+    // IE.MatMul {transposeB = false} in1 = [B, ..., N, IC], in2 = [B, ..., IC, OC]
+    // IC is the penultimate dimension in in2 shape, OC is the last
+    // IE.MatMul {transposeB = true}  in1 = [B, ..., N, IC], in2 = [B, ..., OC, IC]
+    // IC is the last dimension in in2 shape, OC is the penultimate
+    const auto rank = origShape.size();
+    VPUX_THROW_UNLESS(rank >= 2, "Matrix must have rows and columns. Got rank {0}", rank);
+    const auto dimIC = transposeB ? Dim(rank - 1) : Dim(rank - 2);
+    const auto dimOC = transposeB ? Dim(rank - 2) : Dim(rank - 1);
+    extendedShape[dimIC] = alignValUp(origShape[dimIC], inChannelAlignment);
+    auto padsEndIC = calcPadsEnd(origShape, extendedShape);
+    auto extendedShapeOc = extendedShape;
+    extendedShapeOc[dimOC] = alignValUp(origShape[dimOC], outChannelAlignment);
+
+    return std::make_pair(padsEndIC, calcPadsEnd(extendedShape, extendedShapeOc));
+}
+
+bool needsPadding(const int64_t dim) {
+    return dim != 0;
+}
+
+SmallVector<int64_t> extractMeaningfulOutput(mlir::Operation* origOp, ShapeRef outPadsEnd) {
     SmallVector<int64_t> offsets(outPadsEnd.size(), 0);
     auto sliceOp = origOp->getOperand(0).template getDefiningOp<IE::SliceOp>();
     if (sliceOp != nullptr) {
@@ -50,8 +92,8 @@ SmallVector<int64_t> extractMeaningfulOutput(mlir::Operation* origOp, Shape outP
     return offsets;
 }
 
-mlir::Value expandChannelWithOffset(mlir::PatternRewriter& rewriter, mlir::Operation* origOp, IE::SliceOp sliceOp,
-                                    mlir::Value expandValue, ShapeRef inPadsEnd) {
+mlir::Value expandWithOffset(mlir::PatternRewriter& rewriter, mlir::Operation* origOp, IE::SliceOp sliceOp,
+                             mlir::Value expandValue, ShapeRef inPadsEnd, size_t expandDim) {
     const auto inputType = origOp->getOperand(0).getType().cast<vpux::NDTypeInterface>();
     const auto inputShape = inputType.getShape();
 
@@ -63,11 +105,11 @@ mlir::Value expandChannelWithOffset(mlir::PatternRewriter& rewriter, mlir::Opera
     }
     const auto sliceChannelOffset = sliceOffsets[Dims4D::Act::C.ind()];
 
-    if (sliceChannelOffset < inPadsEnd[Dims4D::Act::C]) {
-        padBegin[Dims4D::Act::C.ind()] = sliceChannelOffset;
-        padEnd[Dims4D::Act::C.ind()] = inPadsEnd[Dims4D::Act::C] - sliceChannelOffset;
+    if (sliceChannelOffset < inPadsEnd[Dim(expandDim)]) {
+        padBegin[expandDim] = sliceChannelOffset;
+        padEnd[expandDim] = inPadsEnd[Dim(expandDim)] - sliceChannelOffset;
     } else {
-        padBegin[Dims4D::Act::C.ind()] = inPadsEnd[Dims4D::Act::C];
+        padBegin[expandDim] = inPadsEnd[Dim(expandDim)];
     }
 
     return rewriter.createOrFold<IE::ExpandOp>(origOp->getLoc(), expandValue,
@@ -75,13 +117,14 @@ mlir::Value expandChannelWithOffset(mlir::PatternRewriter& rewriter, mlir::Opera
                                                getIntArrayAttr(rewriter, ArrayRef(padEnd)));
 }
 
-mlir::Value paddingActivation(mlir::Operation* origOp, mlir::PatternRewriter& rewriter, mlir::Value expandValue,
-                              ShapeRef padsEnd) {
+mlir::Value paddingChannel(mlir::Operation* origOp, mlir::PatternRewriter& rewriter, mlir::Value expandValue,
+                           ShapeRef padsEnd, size_t expandDim) {
     auto sliceOp = origOp->getOperand(0).getDefiningOp<IE::SliceOp>();
     if (sliceOp == nullptr) {
         return rewriter.createOrFold<IE::ExpandOp>(origOp->getLoc(), expandValue, std::nullopt, padsEnd);
     }
-    return expandChannelWithOffset(rewriter, origOp, sliceOp, expandValue, padsEnd);
+
+    return expandWithOffset(rewriter, origOp, sliceOp, expandValue, padsEnd, expandDim);
 }
 
 mlir::Value paddingFilter(mlir::Operation* origOp, mlir::PatternRewriter& rewriter, mlir::Value expandValue,
@@ -90,7 +133,7 @@ mlir::Value paddingFilter(mlir::Operation* origOp, mlir::PatternRewriter& rewrit
     if (sliceOp == nullptr) {
         return rewriter.createOrFold<IE::ExpandOp>(origOp->getLoc(), expandValue, std::nullopt, ShapeRef(padsEnd));
     }
-    auto firstExpand = expandChannelWithOffset(rewriter, origOp, sliceOp, expandValue, padsEnd);
+    auto firstExpand = expandWithOffset(rewriter, origOp, sliceOp, expandValue, padsEnd, Dims4D::Act::C.ind());
 
     padsEnd[Dims4D::Filter::IC] = 0;
     return rewriter.createOrFold<IE::ExpandOp>(origOp->getLoc(), firstExpand, std::nullopt, ShapeRef(padsEnd));
@@ -249,7 +292,7 @@ mlir::LogicalResult generalRewrite(mlir::Operation* origOp, mlir::PatternRewrite
         paddedInput = origOp->getOperand(0);
     } else {
         log.trace("Expand input tensor");
-        paddedInput = paddingActivation(origOp, rewriter, origOp->getOperand(0), inPadsEnd);
+        paddedInput = paddingChannel(origOp, rewriter, origOp->getOperand(0), inPadsEnd, Dims4D::Act::C.ind());
     }
 
     log.trace("Create new operation with extended input and output");
@@ -353,6 +396,54 @@ mlir::LogicalResult IE::ConvolutionRewriter::matchAndRewrite(IE::ConvolutionOp o
 }
 
 //
+// MatMulRewriter
+//
+
+mlir::LogicalResult IE::MatMulRewriter::matchAndRewrite(IE::MatMulOp origOp, mlir::PatternRewriter& rewriter) const {
+    _log.trace("[{0}] Got MatMul layer at '{1}'", getDebugName(), origOp->getLoc());
+    const auto inputType = origOp.getInput1().getType().cast<vpux::NDTypeInterface>();
+    const auto filterType = origOp.getInput2().getType().cast<vpux::NDTypeInterface>();
+
+    auto alignedChannelOpInterface = mlir::dyn_cast<IE::AlignedChannelsOpInterface>(origOp.getOperation());
+    auto inputAlignment = alignedChannelOpInterface.getInputChannelAlignment();
+    auto outputAlignment = alignedChannelOpInterface.getOutputChannelAlignment();
+    const auto inputPads = getInputPads(inputType, origOp.getTransposeA(), inputAlignment);
+    const auto [filterPadsIC, filterPadsOC] =
+            getFilterPads(filterType, origOp.getTransposeB(), inputAlignment, outputAlignment);
+    const auto padsBegin = SmallVector<int64_t>(inputType.getShape().size(), 0);
+    mlir::Value expandedInput = origOp.getInput1();
+    if (std::any_of(inputPads.begin(), inputPads.end(), needsPadding)) {
+        expandedInput = rewriter.createOrFold<IE::ExpandOp>(origOp.getLoc(), origOp.getInput1(),
+                                                            getIntArrayAttr(rewriter, ArrayRef(padsBegin)),
+                                                            getIntArrayAttr(rewriter, inputPads.raw()));
+    }
+
+    mlir::Value expandedFilter = origOp.getInput2();
+    if (std::any_of(filterPadsIC.begin(), filterPadsIC.end(), needsPadding)) {
+        expandedFilter = rewriter.createOrFold<IE::ExpandOp>(origOp.getLoc(), origOp.getInput2(),
+                                                             getIntArrayAttr(rewriter, ArrayRef(padsBegin)),
+                                                             getIntArrayAttr(rewriter, filterPadsIC.raw()));
+    }
+    if (std::any_of(filterPadsOC.begin(), filterPadsOC.end(), needsPadding)) {
+        expandedFilter = rewriter.createOrFold<IE::ExpandOp>(origOp.getLoc(), expandedFilter,
+                                                             getIntArrayAttr(rewriter, ArrayRef(padsBegin)),
+                                                             getIntArrayAttr(rewriter, filterPadsOC.raw()));
+    }
+
+    auto newOp = rewriter.create<IE::MatMulOp>(origOp.getLoc(), expandedInput, expandedFilter, origOp.getTransposeA(),
+                                               origOp.getTransposeB());
+
+    const auto outputType = origOp.getOutput().getType().cast<vpux::NDTypeInterface>();
+    const auto outShape = outputType.getShape();
+    const auto offsets = SmallVector<int64_t>(outShape.size(), 0);
+
+    auto ctx = rewriter.getContext();
+    rewriter.replaceOpWithNewOp<IE::SliceOp>(origOp, newOp->getResult(0), getIntArrayAttr(ctx, offsets),
+                                             getIntArrayAttr(ctx, outShape));
+    return mlir::success();
+}
+
+//
 // GroupConvolutionRewriter
 //
 
@@ -371,7 +462,8 @@ mlir::LogicalResult IE::GroupConvolutionRewriter::matchAndRewrite(IE::GroupConvo
             Shape filterPadsEnd(filterShape.size(), 0);
             filterPadsEnd[Dims4D::Filter::OC] = outChanPadEnd;
 
-            paddedFilter = paddingFilter(origOp, rewriter, origOp.getFilter(), std::move(filterPadsEnd));
+            paddedFilter = paddingChannel(origOp, rewriter, origOp.getFilter(), std::move(filterPadsEnd),
+                                          Dims4D::Filter::OC.ind());
         }
 
         mlir::Value paddedBiases;
@@ -385,7 +477,7 @@ mlir::LogicalResult IE::GroupConvolutionRewriter::matchAndRewrite(IE::GroupConvo
                 Shape biasPadsEnd(biasShape.size(), 0);
                 biasPadsEnd[Dims4D::Act::C] = checked_cast<uint32_t>(outChanPadEnd);
 
-                paddedBiases = paddingActivation(origOp, rewriter, origOp.getBias(), biasPadsEnd);
+                paddedBiases = paddingChannel(origOp, rewriter, origOp.getBias(), biasPadsEnd, Dims4D::Act::C.ind());
             }
         }
 
@@ -482,7 +574,7 @@ mlir::LogicalResult IE::TransposedConvolutionRewriter::matchAndRewrite(IE::Trans
                 Shape biasPadsEnd(biasShape.size(), 0);
                 biasPadsEnd[Dims4D::Act::C] = checked_cast<uint32_t>(outChanPadEnd);
 
-                paddedBiases = paddingActivation(origOp, rewriter, origOp.getBias(), biasPadsEnd);
+                paddedBiases = paddingChannel(origOp, rewriter, origOp.getBias(), biasPadsEnd, Dims4D::Act::C.ind());
             }
         }
 

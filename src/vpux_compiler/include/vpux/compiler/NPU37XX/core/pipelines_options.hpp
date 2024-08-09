@@ -41,6 +41,12 @@ struct DefaultHWOptionsDeviceBase : public virtual vpux::DefaultHWOptionsBase {
             *this, "enable-explicit-distributed-attr",
             llvm::cl::desc("Enable DistributedTensorAttr with explicit per cluster memory/compute shapes & offsets"),
             llvm::cl::init(false)};
+
+    BoolOption supportNCEOpInsertion{
+            *this, "support-nce-op-insertion",
+            llvm::cl::desc("Insert a new NCE operation with single user for CMX-Concat to handle the"
+                           "complex case when parent NCE has an extra non-Copy user."),
+            llvm::cl::init(true)};
 };
 
 //

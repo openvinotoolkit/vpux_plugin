@@ -8,6 +8,7 @@
 #include "vpux/compiler/core/layers.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
@@ -17,19 +18,6 @@
 using namespace vpux;
 
 namespace {
-
-mlir::Value getZerosConst(mlir::PatternRewriter& rewriter, const mlir::Value input, ShapeRef constShape,
-                          const mlir::Location loc) {
-    const auto elemType = input.getType().cast<vpux::NDTypeInterface>().getElementType();
-    const auto dataStorageType = mlir::RankedTensorType::get(to_small_vector(constShape), elemType);
-
-    mlir::DenseElementsAttr denseElementVal = wrapData(dataStorageType, 0.0f);
-    VPUX_THROW_UNLESS(denseElementVal != nullptr,
-                      "input has incompatible data type {0}, only float16 or float32 are supported", elemType);
-
-    return rewriter.create<Const::DeclareOp>(loc, dataStorageType, Const::ContentAttr::get(denseElementVal))
-            .getOutput();
-}
 
 // The function will move the padding from layer parameter to its input
 // for example, top pad is 5, but what HW can support is 2, we will update the layer's
@@ -57,7 +45,9 @@ std::tuple<mlir::Value, Shape, Shape> getInputConcatAndPadding(mlir::PatternRewr
     auto createConst = [&](int64_t pad, int64_t kernel, bool isDimX) {
         zeroConstShape[Dims4D::Act::W] = isDimX ? (pad - kernel / 2) : getShape(inputConcat)[Dims4D::Act::W];
         zeroConstShape[Dims4D::Act::H] = isDimX ? getShape(inputConcat)[Dims4D::Act::H] : (pad - kernel / 2);
-        return getZerosConst(rewriter, input, zeroConstShape, origOp->getLoc());
+        const auto zeroType = mlir::RankedTensorType::get(
+                zeroConstShape.raw(), mlir::cast<NDTypeInterface>(input.getType()).getElementType());
+        return Const::createZerosConst(rewriter, origOp->getLoc(), zeroType);
     };
 
     if (padLeft > KX / 2) {

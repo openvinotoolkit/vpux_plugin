@@ -15,14 +15,9 @@ namespace test {
 using namespace ov::test::utils;
 
 class ConvActivationSubgraphTestCommon : public ConvActTest, virtual public VpuOv2LayerTest {};
-class ConvActivationSubgraphTest_NPU3700 : public ConvActivationSubgraphTestCommon {};
 class ConvActivationSubgraphTest_NPU3720 : public ConvActivationSubgraphTestCommon {};
 class ConvActivationSubgraphTest_NPU4000 : public ConvActivationSubgraphTestCommon {};
 
-TEST_P(ConvActivationSubgraphTest_NPU3700, HW) {
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
 }  // namespace test
 }  // namespace ov
 
@@ -85,8 +80,5 @@ const auto convCases =
         ::testing::Combine(activationCases, ::testing::ValuesIn(kernels), ::testing::ValuesIn(strides),
                            ::testing::ValuesIn(padBegins), ::testing::ValuesIn(padEnds), ::testing::ValuesIn(dilations),
                            ::testing::ValuesIn(numOutCannels), ::testing::Values(ov::op::PadType::EXPLICIT));
-
-INSTANTIATE_TEST_SUITE_P(smoke_ConvActivation_Test, ConvActivationSubgraphTest_NPU3700, convCases,
-                         ConvActTest::getTestCaseName);
 
 }  // namespace

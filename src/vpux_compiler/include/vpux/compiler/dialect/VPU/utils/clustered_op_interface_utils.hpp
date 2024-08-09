@@ -38,6 +38,16 @@ bool isOperationSplitOverWidthCompatible(mlir::Operation* op, ShapeRef outputSha
 /// Thus the conditions can be relaxed.
 bool isOperationSplitOverKernelCompatible(mlir::Operation* op, ShapeRef outputShape, ShapeRef offset, ShapeRef axis);
 
+// Each cluster should compute at most one output batch. Therefore, in order for a layer to be SOB compatible it must
+// have an output batch dimension of at most the number of clusters specified for compilation.
+// For example for 4 cluster compilation the output batch must be a maximum of 4.
+bool isOperationSplitOverBatchCompatible(mlir::Operation* op, ShapeRef outputShape);
+
+// Each cluster should compute at least one output group. Therefore, in order for a layer to be SOG compatible it must
+// have output/input groups of at least the number of clusters specified for compilation.
+// For example for 4 cluster compilation the input/output groups number must be a minimum of 4.
+bool isOperationSplitOverGroupCompatible(mlir::Operation* op, const vpux::TileInfo& outputTile);
+
 bool checkMCRestrictions(mlir::Operation*);
 
 bool doesLayerFitIntoCMX(mlir::Operation* op, VPU::MultiClusterStrategy strategy, Byte reservedMem);

@@ -10,9 +10,7 @@
 #include <mlir/IR/Builders.h>
 
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
-#include "vpux/compiler/dialect/VPURegMapped/attributes.hpp"
-#include "vpux/compiler/dialect/VPURegMapped/types.hpp"
-
+#include "vpux/compiler/dialect/VPURegMapped/ops.hpp"
 namespace vpux {
 namespace VPURegMapped {
 
@@ -139,8 +137,19 @@ template <typename REG_TYPE>
 uint64_t checked_cast_reg(double src) {
     constexpr auto BIT_WIDTH = REG_TYPE::getRegFieldWidth();
     constexpr auto RF_TYPE = REG_TYPE::getRegFieldDataType();
-    static_assert(BIT_WIDTH == 64 && RF_TYPE == VPURegMapped::RegFieldDataType::FP,
+    static_assert(((BIT_WIDTH == 64 || BIT_WIDTH == 32 || BIT_WIDTH == 16) &&
+                   RF_TYPE == VPURegMapped::RegFieldDataType::FP) ||
+                          (BIT_WIDTH == 16 && RF_TYPE == VPURegMapped::RegFieldDataType::BF),
                   "checked_cast_reg: invalid RegField params");
+
+    if (RF_TYPE == VPURegMapped::RegFieldDataType::BF && BIT_WIDTH == 16) {
+        return llvm::bit_cast<uint16_t>(checked_cast<vpux::type::bfloat16>(src));
+    } else if (RF_TYPE == VPURegMapped::RegFieldDataType::FP && BIT_WIDTH == 16) {
+        return llvm::bit_cast<uint16_t>(checked_cast<vpux::type::float16>(src));
+    } else if (RF_TYPE == VPURegMapped::RegFieldDataType::FP && BIT_WIDTH == 32) {
+        return llvm::bit_cast<uint32_t>(checked_cast<float>(src));
+    }
+
     return llvm::bit_cast<uint64_t>(src);
 }
 
@@ -153,14 +162,7 @@ uint32_t checked_cast_reg(float src) {
     return llvm::bit_cast<uint32_t>(src);
 }
 
-template <typename REG_TYPE>
-uint16_t checked_cast_reg(vpux::type::float16 src) {
-    constexpr auto BIT_WIDTH = REG_TYPE::getRegFieldWidth();
-    constexpr auto RF_TYPE = REG_TYPE::getRegFieldDataType();
-    static_assert(BIT_WIDTH == 16 && RF_TYPE == VPURegMapped::RegFieldDataType::FP,
-                  "checked_cast_reg: invalid RegField params");
-    return llvm::bit_cast<uint16_t>(src);
-}
+std::optional<TaskBufferLayoutOp> getTaskBufferLayoutOp(mlir::Operation* op);
 
 }  // namespace VPURegMapped
 }  // namespace vpux

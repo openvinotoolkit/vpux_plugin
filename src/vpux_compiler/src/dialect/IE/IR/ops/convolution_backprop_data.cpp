@@ -50,11 +50,11 @@ using namespace vpux;
 
 mlir::LogicalResult vpux::IE::ConvolutionBackpropDataOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::ConvolutionBackpropDataOpAdaptor convBackpropData(operands, attrs);
+    IE::ConvolutionBackpropDataOpAdaptor convBackpropData(operands, attrs, prop);
     if (mlir::failed(convBackpropData.verify(loc))) {
         return mlir::failure();
     }

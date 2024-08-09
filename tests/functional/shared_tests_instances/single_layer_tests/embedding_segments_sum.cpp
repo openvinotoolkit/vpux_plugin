@@ -16,23 +16,15 @@ namespace test {
 
 class EmbeddingSegmentsSumLayerTestCommon : public EmbeddingSegmentsSumLayerTest, virtual public VpuOv2LayerTest {};
 
-class EmbeddingSegmentsSumLayerTest_NPU3700 : public EmbeddingSegmentsSumLayerTestCommon {};
 class EmbeddingSegmentsSumLayerTest_NPU3720 : public EmbeddingSegmentsSumLayerTestCommon {};
 class EmbeddingSegmentsSumLayerTest_NPU4000 : public EmbeddingSegmentsSumLayerTestCommon {};
 
-TEST_P(EmbeddingSegmentsSumLayerTest_NPU3700, SW) {
-    setReferenceSoftwareMode();
-    run(Platform::NPU3700);
-}
-
 TEST_P(EmbeddingSegmentsSumLayerTest_NPU3720, HW) {
-    abs_threshold = 0.06;
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
 TEST_P(EmbeddingSegmentsSumLayerTest_NPU4000, SW) {
-    abs_threshold = 0.06;
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
@@ -60,13 +52,6 @@ const std::vector<bool> withDefaultIndex = {false, true};
 const auto params = testing::Combine(::testing::ValuesIn(indices), ::testing::ValuesIn(segmentIds),
                                      ::testing::ValuesIn(numSegments), ::testing::ValuesIn(defaultIndex),
                                      ::testing::ValuesIn(withWeights), ::testing::ValuesIn(withDefaultIndex));
-
-INSTANTIATE_TEST_CASE_P(smoke_EmbeddingSegmentsSumCheck1, EmbeddingSegmentsSumLayerTest_NPU3700,
-                        ::testing::Combine(params,
-                                           ::testing::ValuesIn(static_shapes_to_test_representation(embTableShape)),
-                                           ::testing::ValuesIn(netPrecisions), ::testing::ValuesIn(indPrecisions),
-                                           ::testing::Values(DEVICE_NPU)),
-                        EmbeddingSegmentsSumLayerTest_NPU3700::getTestCaseName);
 
 INSTANTIATE_TEST_CASE_P(smoke_EmbeddingSegmentsSumCheck1, EmbeddingSegmentsSumLayerTest_NPU3720,
                         ::testing::Combine(params,

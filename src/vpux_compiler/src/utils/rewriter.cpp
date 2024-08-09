@@ -371,9 +371,7 @@ mlir::BaseMemRefType getMemRefTypeForUnknownTensorType(mlir::Type type, mlir::At
 mlir::bufferization::OneShotBufferizationOptions vpux::getOneShotBufferizationOptions() {
     mlir::bufferization::OneShotBufferizationOptions options;
     options.bufferizeFunctionBoundaries = true;
-    options.allowReturnAllocs = true;
     options.allowUnknownOps = true;
-    options.createDeallocs = false;
     options.copyBeforeWrite = false;
     // E#118032: Setting testAnalysisOnly as true does not introduce `bufferization.alloc_tensor`
     // but only adding `__inplace_operands_attr__`. Need to investigate whether it could be set to false,

@@ -74,6 +74,10 @@ vpux::NDTypeInterface vpux::Const::QuantCastAttr::inferOutputType(vpux::NDTypeIn
     return input.changeElemType(normalizeQuantStorageType(quantType));
 }
 
+bool vpux::Const::QuantCastAttr::inferOutputSplat(bool inputIsSplat, vpux::NDTypeInterface) {
+    return inputIsSplat;
+}
+
 //
 // QuantCastAttr::transform
 //

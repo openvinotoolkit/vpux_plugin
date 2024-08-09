@@ -88,12 +88,18 @@ private:
 };
 
 // Adjusts the shape of Softmax to leverage as much shave engines as possible by gather
-// dimensions on tile dimension.
+// dimensions on tile dimension
+// Or fuses batch dim to tile dim, as SplitOverBatch is not supported yet and non-outermost dim tiling will introduce
+// strided copy
 // Examples: (Assume 4 shave engines)
+// * Leverage all shaves
 //   - Softmax(shape=[1, 2, 16, 24], axisInd=3, layout=NCHW) is adjusted to
 //     Softmax(shape=[1, 4, 8, 24], axisInd=3, layout=NCHW)
 //   - Softmax(shape=[1, 24, 2, 16], axisInd=1, layout=NHWC) is adjusted to
 //     Softmax(shape=[1, 24, 4, 8], axisInd=1, layout=NHWC)
+// * Fuse batch dim
+//   - Softmax(shape=[16, 4, 16, 24], axisInd=3, layout=NCHW) is adjusted to
+//     Softmax(shape=[1, 64, 16, 24], axisInd=3, layout=NCHW)
 // Note that these adjustments should not change the real data in memory, and the axis dim
 // should not be the tile dim
 mlir::LogicalResult AdjustShapeForSoftmax::adjustForMultiShaveOpt(Shape& shape, int64_t& axisInd,
@@ -109,6 +115,9 @@ mlir::LogicalResult AdjustShapeForSoftmax::adjustForMultiShaveOpt(Shape& shape, 
     // NCHW tile at C, NHWC tile at H
     const auto tileDim = order.dimAt(1);
 
+    // Fuse batch dim to tile dim
+    const auto batchDim = order.dimAt(0);
+
     // the axis dim on or before the tile dim is not supported
     if (order.dimPos(tileDim) >= order.dimPos(axisDim)) {
         return mlir::failure();
@@ -117,7 +126,7 @@ mlir::LogicalResult AdjustShapeForSoftmax::adjustForMultiShaveOpt(Shape& shape, 
     // no need to adjust if the tile dim is large enough or
     // equal to the max possible dim shape
     const auto maxPossibleDimShape = getTotalSizeBeforeDim(shape, order, axisDim);
-    if (shape[tileDim] >= numActShaves || shape[tileDim] == maxPossibleDimShape) {
+    if ((shape[tileDim] >= numActShaves && shape[batchDim] == 1) || shape[tileDim] == maxPossibleDimShape) {
         return mlir::failure();
     }
 
@@ -370,6 +379,80 @@ mlir::LogicalResult AdjustShapeForMultiply::matchAndRewrite(VPU::MultiplyOp mult
 }
 
 //
+// AdjustShapeForMVN
+//
+
+// This rewritter adjusts shape of MVN with batch size larger than one, otherwise Clustering strategy would be assigned
+class AdjustShapeForMVN final : public mlir::OpRewritePattern<VPU::MVNOp> {
+public:
+    AdjustShapeForMVN(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<VPU::MVNOp>(ctx), _log(log) {
+        this->setDebugName("AdjustShapeForMVN");
+    }
+
+private:
+    mlir::LogicalResult matchAndRewrite(VPU::MVNOp mvnOp, mlir::PatternRewriter& rewriter) const final;
+    mlir::LogicalResult adjustForMultiShaveOpt(Shape& shape, bool& isAcrossChannels, const DimsOrder order) const;
+
+private:
+    Logger _log;
+};
+
+mlir::LogicalResult AdjustShapeForMVN::adjustForMultiShaveOpt(Shape& shape, bool& isAcrossChannels,
+                                                              const DimsOrder order) const {
+    const auto N = shape[Dims4D::Act::N];
+    if (order != DimsOrder::NCHW || N == 1) {
+        return mlir::failure();
+    }
+
+    if (isAcrossChannels) {
+        shape[Dims4D::Act::H] = shape.totalSize() / N;
+        shape[Dims4D::Act::W] = 1;
+        shape[Dims4D::Act::C] = N;
+        isAcrossChannels = false;
+    } else {
+        shape[Dims4D::Act::C] = N * shape[Dims4D::Act::C];
+    }
+    shape[Dims4D::Act::N] = 1;
+
+    return mlir::success();
+}
+
+mlir::LogicalResult AdjustShapeForMVN::matchAndRewrite(VPU::MVNOp mvnOp, mlir::PatternRewriter& rewriter) const {
+    _log.trace("Got {0} at loc '{1}'", mvnOp->getName(), mvnOp->getLoc());
+
+    const auto ctx = getContext();
+
+    const auto origIOType = mvnOp.getOutput().getType().cast<NDTypeInterface>();
+    const auto origIOOrder = origIOType.getDimsOrder();
+    const auto origIOShape = origIOType.getShape();
+
+    auto shape = origIOShape.toValues();
+
+    auto isAcrossChannels = mvnOp.getAcrossChannels();
+    const auto multiShaveOpt = adjustForMultiShaveOpt(shape, isAcrossChannels, origIOOrder);
+    if (mlir::failed(multiShaveOpt)) {
+        return mlir::failure();
+    }
+
+    _log.nest(1).trace("Adjusted shape {0} to {1} for MultiShaveOpt at {1}", origIOShape, shape, mvnOp->getLoc());
+
+    auto reshapeInOp = rewriter.create<VPU::ShapeCastOp>(mvnOp->getLoc(), origIOType.changeShape(shape),
+                                                         mvnOp.getInput(), getIntArrayAttr(ctx, shape));
+
+    auto newMVNOp = rewriter.create<VPU::MVNOp>(mvnOp->getLoc(), reshapeInOp.getResult(),
+                                                mlir::BoolAttr::get(ctx, isAcrossChannels),
+                                                mvnOp.getNormalizeVarianceAttr(), mvnOp.getEpsAttr());
+
+    auto reshapeOutOp = rewriter.create<VPU::ShapeCastOp>(mvnOp->getLoc(), origIOType, newMVNOp.getOutput(),
+                                                          getIntArrayAttr(ctx, origIOShape));
+
+    mvnOp.replaceAllUsesWith(reshapeOutOp.getResult());
+    rewriter.eraseOp(mvnOp);
+
+    return mlir::success();
+}
+
+//
 // AdjustShapeForReduce
 //
 
@@ -472,6 +555,7 @@ void AdjustForOptimizedSwKernelPass::safeRunOnFunc() {
     patterns.add<AdjustShapeForSoftmax>(&ctx, _log);
     patterns.add<AdjustShapeForGelu>(&ctx, _log);
     patterns.add<AdjustShapeForMultiply>(&ctx, _log);
+    patterns.add<AdjustShapeForMVN>(&ctx, _log);
 
     patterns.add<AdjustShapeForReduce<VPU::ReduceMinOp>>(&ctx, _log);
     patterns.add<AdjustShapeForReduce<VPU::ReduceMaxOp>>(&ctx, _log);

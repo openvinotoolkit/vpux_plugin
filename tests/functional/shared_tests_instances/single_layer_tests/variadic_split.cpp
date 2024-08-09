@@ -36,11 +36,6 @@ class VariadicSplitLayerTestAxisInt32_NPU3720 : public VariadicSplitLayerTestCom
     }
 };
 
-TEST_P(VariadicSplitLayerTestCommon, NPU3700) {
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
-
 TEST_P(VariadicSplitLayerTestCommon, NPU3720) {
     setReferenceSoftwareMode();
     run(Platform::NPU3720);

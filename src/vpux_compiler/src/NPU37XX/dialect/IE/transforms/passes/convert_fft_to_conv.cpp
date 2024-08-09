@@ -7,6 +7,7 @@
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 #include "vpux/compiler/dialect/IE/utils/fft_ops_utils.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 #include "vpux/compiler/utils/types.hpp"
@@ -110,9 +111,8 @@ auto reshapeToMatMulNeedRank(mlir::PatternRewriter& rewriter, mlir::Location loc
     return input;
 }
 
-Const::DeclareOp complexFFTGetTwiddleFactors(mlir::Location loc, int64_t axisLength, mlir::Type dtype,
-                                             mlir::PatternRewriter& rewriter, bool isInverseFFT,
-                                             bool isRdftLastAxisCut) {
+mlir::Value complexFFTGetTwiddleFactors(mlir::Location loc, int64_t axisLength, mlir::Type dtype,
+                                        mlir::PatternRewriter& rewriter, bool isInverseFFT, bool isRdftLastAxisCut) {
     const auto complexNoScale = 2;
     int64_t axisLengthOut = axisLength;
     if (isRdftLastAxisCut) {
@@ -141,15 +141,14 @@ Const::DeclareOp complexFFTGetTwiddleFactors(mlir::Location loc, int64_t axisLen
     }
     const SmallVector<int64_t> twiddleShape({axisLengthOut * complexNoScale, axisLength * complexNoScale});
     const auto twiddleType = mlir::RankedTensorType::get(twiddleShape, mlir::Float32Type::get(dtype.getContext()));
-    const auto twiddleAttr = mlir::DenseElementsAttr::get(twiddleType, ArrayRef(twiddleVals));
-    auto twiddleContentAttr = Const::ContentAttr::get(twiddleAttr);
-    auto twiddleTypeAwareContentAttr = twiddleContentAttr.convertElemType(dtype);
-    return rewriter.create<Const::DeclareOp>(loc, twiddleTypeAwareContentAttr.getType(), twiddleTypeAwareContentAttr);
+    return Const::createConst(rewriter, loc, twiddleType, ArrayRef(twiddleVals), [&](Const::ContentAttr attr) {
+        return attr.convertElemType(dtype);
+    });
 }
 
-Const::DeclareOp fftGetTwiddleFactorsForRdftRealInput(mlir::Location loc, int64_t axisLength, mlir::Type dtype,
-                                                      mlir::PatternRewriter& rewriter, bool /*isInverseFFT*/,
-                                                      bool isRdftLastAxisCut) {
+mlir::Value fftGetTwiddleFactorsForRdftRealInput(mlir::Location loc, int64_t axisLength, mlir::Type dtype,
+                                                 mlir::PatternRewriter& rewriter, bool /*isInverseFFT*/,
+                                                 bool isRdftLastAxisCut) {
     const auto complexNoScale = 2;
     int64_t axisLengthOut = axisLength;
     if (isRdftLastAxisCut) {
@@ -171,14 +170,13 @@ Const::DeclareOp fftGetTwiddleFactorsForRdftRealInput(mlir::Location loc, int64_
     }
     const SmallVector<int64_t> twiddleShape({axisLengthOut * complexNoScale, axisLength});
     const auto twiddleType = mlir::RankedTensorType::get(twiddleShape, mlir::Float32Type::get(dtype.getContext()));
-    const auto twiddleAttr = mlir::DenseElementsAttr::get(twiddleType, ArrayRef(twiddleVals));
-    auto twiddleContentAttr = Const::ContentAttr::get(twiddleAttr);
-    auto twiddleTypeAwareContentAttr = twiddleContentAttr.convertElemType(dtype);
-    return rewriter.create<Const::DeclareOp>(loc, twiddleTypeAwareContentAttr.getType(), twiddleTypeAwareContentAttr);
+    return Const::createConst(rewriter, loc, twiddleType, ArrayRef(twiddleVals), [&](Const::ContentAttr attr) {
+        return attr.convertElemType(dtype);
+    });
 }
 
-Const::DeclareOp fftGetTwiddleFactorsForIrdftRealOutput(mlir::Location loc, int64_t axisLength, mlir::Type dtype,
-                                                        mlir::PatternRewriter& rewriter) {
+mlir::Value fftGetTwiddleFactorsForIrdftRealOutput(mlir::Location loc, int64_t axisLength, mlir::Type dtype,
+                                                   mlir::PatternRewriter& rewriter) {
     auto inAxisLength = axisLength;
     auto outAxisLength = (inAxisLength - 1) * 2;
     const auto complexNoScale = 2;
@@ -211,17 +209,16 @@ Const::DeclareOp fftGetTwiddleFactorsForIrdftRealOutput(mlir::Location loc, int6
     }
     const SmallVector<int64_t> twiddleShape({outAxisLength, inAxisLength * complexNoScale});
     const auto twiddleType = mlir::RankedTensorType::get(twiddleShape, mlir::Float32Type::get(dtype.getContext()));
-    const auto twiddleAttr = mlir::DenseElementsAttr::get(twiddleType, ArrayRef(twiddleVals));
-    auto twiddleContentAttr = Const::ContentAttr::get(twiddleAttr);
-    auto twiddleTypeAwareContentAttr = twiddleContentAttr.convertElemType(dtype);
-    return rewriter.create<Const::DeclareOp>(loc, twiddleTypeAwareContentAttr.getType(), twiddleTypeAwareContentAttr);
+    return Const::createConst(rewriter, loc, twiddleType, ArrayRef(twiddleVals), [&](Const::ContentAttr attr) {
+        return attr.convertElemType(dtype);
+    });
 }
 
 auto fftOneAxisDecompose(mlir::PatternRewriter& rewriter, mlir::Location loc, AnyRankedTensor inIter,
                          int64_t axisLength, DimArr curOrder, int64_t lastComplexAxes, int64_t axis, bool isInverseFFT,
                          bool inputIsComplex, bool isRdftLastAxisCut, Logger log,
-                         Const::DeclareOp (*getTwiddleFactors)(mlir::Location, int64_t, mlir::Type,
-                                                               mlir::PatternRewriter&, bool, bool)) {
+                         mlir::Value (*getTwiddleFactors)(mlir::Location, int64_t, mlir::Type, mlir::PatternRewriter&,
+                                                          bool, bool)) {
     log.trace("fftOneAxisDecompose: {0}", inIter);
     const auto inType = inIter.getType().cast<vpux::NDTypeInterface>();
     // Reorder input in order to move axis on last dimension
@@ -240,10 +237,10 @@ auto fftOneAxisDecompose(mlir::PatternRewriter& rewriter, mlir::Location loc, An
     auto reshapeOut =
             reshapeToMatMulNeedRank(rewriter, appendLoc(loc, "ReshapeIn"), transposesOut, inputIsComplex, log);
     // produce constant twiddle factors with ouput type precision. Keep consistent precision.
-    auto twiddleConstantOp = getTwiddleFactors(appendLoc(loc, "TwiddleFactors"), axisLength, inType.getElementType(),
-                                               rewriter, isInverseFFT, isRdftLastAxisCut);
-    auto multiplyOp = rewriter.create<IE::MatMulOp>(appendLoc(loc, "MatMulOp"), reshapeOut,
-                                                    twiddleConstantOp.getOutput(), false, true);
+    auto twiddleConstant = getTwiddleFactors(appendLoc(loc, "TwiddleFactors"), axisLength, inType.getElementType(),
+                                             rewriter, isInverseFFT, isRdftLastAxisCut);
+    auto multiplyOp =
+            rewriter.create<IE::MatMulOp>(appendLoc(loc, "MatMulOp"), reshapeOut, twiddleConstant, false, true);
     // restore original shape
     auto reshapeRestoredOut =
             reshapeRestoreAndComplexAdd(rewriter, appendLoc(loc, "ReshapeOut"), multiplyOp.getOutput(), transposesOut,
@@ -323,11 +320,11 @@ auto irdftLastAxisDecompose(mlir::PatternRewriter& rewriter, mlir::Location loc,
     // MatMull request rank=3. Reshape in order to accumulate rank >3 in rank=3 and cut complex representation
     auto reshapeOut = reshapeToMatMulNeedRank(rewriter, appendLoc(irdftLoc, "ReshapeIn"), transposesOut, true, _log);
     // produce constant twiddle factors with ouput type precision. Keep consistent precision.
-    auto twiddleConstantOp = fftGetTwiddleFactorsForIrdftRealOutput(appendLoc(irdftLoc, "TwiddleFactors"), shape[axis],
-                                                                    inType.getElementType(), rewriter);
+    auto twiddleConstant = fftGetTwiddleFactorsForIrdftRealOutput(appendLoc(irdftLoc, "TwiddleFactors"), shape[axis],
+                                                                  inType.getElementType(), rewriter);
     // mat mull for complex number
-    auto multiplyOp = rewriter.create<IE::MatMulOp>(appendLoc(irdftLoc, "MatMulOp"), reshapeOut,
-                                                    twiddleConstantOp.getOutput(), false, true);
+    auto multiplyOp =
+            rewriter.create<IE::MatMulOp>(appendLoc(irdftLoc, "MatMulOp"), reshapeOut, twiddleConstant, false, true);
     // reshape to output size representation
     auto reshapeRestoredOut = reshapeRestoreIrdftLastAxis(rewriter, appendLoc(irdftLoc, "ReshapeOut"),
                                                           multiplyOp.getOutput(), transposesOut, _log);

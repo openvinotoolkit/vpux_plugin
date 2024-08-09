@@ -1,13 +1,13 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
-// RUN: vpux-opt --init-compiler="vpu-arch=%arch%" --convert-VPUMI37XX-to-ELF %s -o t_dma.mlir
-// RUN: vpux-translate --vpu-arch=%arch% --export-ELF t_dma.mlir -o t_dma.elf
-// RUN: vpux-translate --vpu-arch=%arch% --import-ELF t_dma.elf | FileCheck %s
-// RUN: rm t_dma.elf t_dma.mlir
-// REQUIRES: arch-VPUX37XX
+// RUN: vpux-opt --init-compiler="vpu-arch=%arch%" --convert-VPUMI37XX-to-ELF %s -o %t.mlir
+// RUN: vpux-translate --vpu-arch=%arch% --export-ELF %t.mlir -o %t.elf
+// RUN: vpux-translate --vpu-arch=%arch% --import-ELF %t.elf | FileCheck %s
+// RUN: rm %t.elf %t.mlir
+// REQUIRES: arch-NPU37XX
 //
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>

@@ -6,6 +6,7 @@
 #pragma once
 
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
+#include "vpux/compiler/dialect/VPU/IR/native_attributes/distributed_tensor_native.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/IR/types.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
@@ -16,10 +17,14 @@
 namespace vpux {
 namespace VPU {
 
+OverlapDistributionParams getExplicitOverlapParamsForSWOpInput(SWOpInterface swOp, ShapeRef outShape,
+                                                               ArrayRef<int64_t> numTiles, ArrayRef<int64_t> alignment);
+
 DistributedTensorAttr getSWExplicitDistributedTensorAttr(SWOpInterface swOp, ShapeRef shape,
                                                          DistributionMode distributionMode, mlir::ArrayAttr numTiles,
                                                          mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment,
-                                                         mlir::UnitAttr uniformDistributedSegments);
+                                                         mlir::UnitAttr uniformDistributedSegments,
+                                                         const vpux::VPU::OverlapDistributionParams& overlapParams);
 DistributedTensorAttr getNCEExplicitDistributedTensorAttr(NCEOpInterface nceOp, ShapeRef shape,
                                                           VPU::DistributionMode distributionMode,
                                                           mlir::ArrayAttr numTiles, mlir::IntegerAttr numClusters,
@@ -37,7 +42,7 @@ DistributedTensorAttr getConcatExplicitDistributedAttrForNewShape(VPU::Distribut
 DistributedTensorAttr getExplicitDistrAttrForSliceLikeOps(VPU::DistributedTensorAttr distributionWithProperAlignment,
                                                           ArrayRef<int64_t> sliceShape, ArrayRef<int64_t> originShape,
                                                           mlir::MLIRContext* ctx);
-DistributedTensorAttr getSegmentedExplicitDistrAttrForSliceLikeOps(VPU::DistributedTensorAttr distribution,
+DistributedTensorAttr getSegmentedExplicitDistrAttrForSliceLikeOps(VPU::DistributedTensorAttr distributionAttr,
                                                                    ArrayRef<int64_t> sliceOutputShape,
                                                                    mlir::ArrayAttr explicitOutputShapes,
                                                                    mlir::MLIRContext* ctx);
@@ -56,6 +61,39 @@ DistributedTensorAttr getExplicitDistrAttrForSparsityMap(VPU::DistributedTensorA
                                                          mlir::MLIRContext* ctx);
 DistributedTensorAttr getExplicitDistrAttrForSETable(VPU::DistributedTensorAttr denseDataDistribution,
                                                      const size_t seSize, mlir::MLIRContext* ctx);
+
+//
+DistributedTensorNative getSWExplicitDistributedTensorNative(VPU::SWOpInterface swOp, ShapeRef shape,
+                                                             VPU::DistributionMode distributionMode,
+                                                             ArrayRef<int64_t> numTiles, const int64_t numClusters,
+                                                             ArrayRef<int64_t> alignment,
+                                                             bool uniformDistributedSegments,
+                                                             const vpux::VPU::OverlapDistributionParams& overlapParams);
+
+VPU::DistributedTensorNative getNCEExplicitDistributedTensorNative(
+        VPU::NCEOpInterface nceOp, ShapeRef shape, VPU::DistributionMode distributionMode, ArrayRef<int64_t> numTiles,
+        const int64_t numClusters, ArrayRef<int64_t> alignment, bool uniformDistributedSegments,
+        const vpux::VPU::OverlapDistributionParams& overlapParams);
+
+VPU::DistributedTensorNative getConcatExplicitDistributedNative(
+        ShapeRef shape, VPU::DistributionMode distributionMode, ArrayRef<int64_t> numTiles, int64_t numClusters,
+        ArrayRef<int64_t> alignment, bool uniformDistributedSegments,
+        const vpux::VPU::OverlapDistributionParams& overlapParams);
+
+VPU::DistributedTensorNative getExplicitDistrNativeForSliceLikeOps(
+        const VPU::DistributedTensorNative& distributionWithProperAlignment, ArrayRef<int64_t> sliceShape,
+        ArrayRef<int64_t> originShape);
+
+VPU::DistributedTensorNative getSegmentedExplicitDistrNativeForSliceLikeOps(
+        const VPU::DistributedTensorNative& distribution, ArrayRef<int64_t> sliceOutputShape,
+        ArrayRef<SmallVector<int64_t>> explicitShapes);
+
+DistributedTensorNative getNonOverlappedDistributedNative(ShapeRef shape, VPU::DistributionMode distrMode,
+                                                          ArrayRef<int64_t> numTiles, int64_t numClusters,
+                                                          ArrayRef<int64_t> alignment, bool uniformDistributedSegments);
+
+VPU::DistributedTensorNative getConcatExplicitDistributedNativeForNewShape(
+        const VPU::DistributedTensorNative& originDistribution, vpux::ShapeRef newShape);
 
 template <typename T,
           std::enable_if_t<or_<std::is_same<VPU::SparseTensorType, T>, std::is_same<VPUIP::SparseBufferType, T>>::value,

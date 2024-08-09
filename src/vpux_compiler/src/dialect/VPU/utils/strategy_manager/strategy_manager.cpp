@@ -6,6 +6,7 @@
 #include "vpux/compiler/dialect/VPU/utils/strategy_manager/strategy_manager.hpp"
 #include <llvm/ADT/TypeSwitch.h>
 #include <unordered_map>
+#include "vpux/compiler/core/layers.hpp"
 
 using namespace vpux;
 using namespace VPU;
@@ -24,7 +25,9 @@ void StrategyManager::assignMultiClusterStrategy(bool enableMultiClusterForSWLay
             strategy == VPU::MultiClusterStrategy::SplitOverKernel ||
             strategy == VPU::MultiClusterStrategy::Clustering ||
             strategy == VPU::MultiClusterStrategy::SplitOverHeightOverlapped ||
-            strategy == VPU::MultiClusterStrategy::HKSwitch || strategy == VPU::MultiClusterStrategy::SplitOverWidth) {
+            strategy == VPU::MultiClusterStrategy::HKSwitch || strategy == VPU::MultiClusterStrategy::SplitOverWidth ||
+            strategy == VPU::MultiClusterStrategy::SplitOverBatch ||
+            strategy == VPU::MultiClusterStrategy::SplitOverGroup) {
             llvm::TypeSwitch<mlir::Operation*, void>(op).Case<ClusteredOpInterface>(
                     [strategy](ClusteredOpInterface clusterOp) {
                         clusterOp.setMultiClusterStrategy(strategy);
@@ -43,27 +46,37 @@ void StrategyManager::assignMultiClusterStrategy(bool enableMultiClusterForSWLay
         // TODO: #E81820
         for (const auto& input : op->getOperands()) {
             const auto inputShape = input.getType().cast<vpux::NDTypeInterface>().getShape();
-            if (inputShape.size() != RANK_REQUIRED_FOR_TILING) {
+            if (inputShape.size() != RANK_REQUIRED_FOR_TILING && inputShape.size() != DimsGroups5D::Act::numDims) {
                 return;
             }
         }
         for (const auto& output : op->getResults()) {
             const auto outputShape = output.getType().cast<vpux::NDTypeInterface>().getShape();
-            if (outputShape.size() != RANK_REQUIRED_FOR_TILING) {
+            if (outputShape.size() != RANK_REQUIRED_FOR_TILING && outputShape.size() != DimsGroups5D::Act::numDims) {
                 return;
             }
         }
 
         llvm::TypeSwitch<mlir::Operation*, void>(op)
                 .Case<NCEMaxPoolOp>([&](NCEMaxPoolOp origOp) {
-                    auto bestStrategy = _costModel.getOptimalLayerStrategy(
-                            mlir::cast<VPU::ClusteredOpInterface>(origOp.getOperation()));
-                    setLayerStrategy(bestStrategy, origOp.getOperation());
+                    const auto inputBatch = getShape(origOp.getInput())[Dims4D::Act::N];
+                    if (inputBatch > VPU::NCEInvariant::SUPPORTED_BATCH_SIZE) {
+                        setLayerStrategy(VPU::MultiClusterStrategy::SplitOverBatch, origOp.getOperation());
+                    } else {
+                        auto bestStrategy = _costModel.getOptimalLayerStrategy(
+                                mlir::cast<VPU::ClusteredOpInterface>(origOp.getOperation()));
+                        setLayerStrategy(bestStrategy, origOp.getOperation());
+                    }
                 })
                 .Case<NCEAveragePoolOp>([&](NCEAveragePoolOp origOp) {
-                    auto bestStrategy = _costModel.getOptimalLayerStrategy(
-                            mlir::cast<VPU::ClusteredOpInterface>(origOp.getOperation()));
-                    setLayerStrategy(bestStrategy, origOp.getOperation());
+                    const auto inputBatch = getShape(origOp.getInput())[Dims4D::Act::N];
+                    if (inputBatch > VPU::NCEInvariant::SUPPORTED_BATCH_SIZE) {
+                        setLayerStrategy(VPU::MultiClusterStrategy::SplitOverBatch, origOp.getOperation());
+                    } else {
+                        auto bestStrategy = _costModel.getOptimalLayerStrategy(
+                                mlir::cast<VPU::ClusteredOpInterface>(origOp.getOperation()));
+                        setLayerStrategy(bestStrategy, origOp.getOperation());
+                    }
                 })
                 .Case<NCEEltwiseOp>([&](NCEEltwiseOp origOp) {
                     auto bestStrategy = _costModel.getOptimalLayerStrategy(
@@ -71,25 +84,19 @@ void StrategyManager::assignMultiClusterStrategy(bool enableMultiClusterForSWLay
                     setLayerStrategy(bestStrategy, origOp.getOperation());
                 })
                 .Case<NCEConvolutionOp>([&](NCEConvolutionOp origOp) {
-                    const auto arch = VPU::getArch(origOp.getOperation());
                     if (DimsOrder::fromValue(origOp.getInput()) == DimsOrder::NHWC) {
                         auto bestStrategy = _costModel.getOptimalLayerStrategy(
                                 mlir::cast<VPU::ClusteredOpInterface>(origOp.getOperation()));
                         setLayerStrategy(bestStrategy, origOp.getOperation());
                     } else if (DimsOrder::fromValue(origOp.getInput()) == DimsOrder::NCHW) {
-                        const auto canUseCMajor = VPU::NCEInvariant::isChannelMajorCompatible(
-                                arch, origOp.getInput().getType().cast<vpux::NDTypeInterface>());
-
-                        if (canUseCMajor && origOp.isOperationSplitOverHeightCompatible(
-                                                    /*vpux::TileInfo=*/vpux::TileInfo(ShapeRef()))) {
-                            setLayerStrategy(VPU::MultiClusterStrategy::SplitOverHeightOverlapped,
-                                             origOp.getOperation());
-                        } else {
-                            setLayerStrategy(VPU::MultiClusterStrategy::Clustering, origOp.getOperation());
-                        }
+                        setLayerStrategy(VPU::MultiClusterStrategy::Clustering, origOp.getOperation());
                     } else {
                         VPUX_THROW("Unsupported input layout {0} to convolution ",
                                    DimsOrder::fromValue(origOp.getInput()));
+                    }
+                    const auto inputBatch = getShape(origOp.getInput())[Dims4D::Act::N];
+                    if (inputBatch > VPU::NCEInvariant::SUPPORTED_BATCH_SIZE) {
+                        setLayerStrategy(VPU::MultiClusterStrategy::SplitOverBatch, origOp.getOperation());
                     }
                 })
                 .Case<NCECompressConvolutionOp>([&](NCECompressConvolutionOp origOp) {
@@ -131,14 +138,16 @@ void StrategyManager::assignMultiClusterStrategy(bool enableMultiClusterForSWLay
                     // Non 4D Tensor or Tensor with larger batch size cannot be tiled properly.
                     // [E90039]MC support for Non 4D Tensor.
                     std::optional<VPU::MultiClusterStrategy> bestStrategy;
-                    if ((inputShape.front() > SINGLE_BATCH && !mlir::isa<VPU::MVN1NormalizeOp>(op)) ||
+                    if ((inputShape.front() > SINGLE_BATCH && isSingleBatchRequired(op)) ||
                         inputShape.size() != RANK_REQUIRED_FOR_TILING ||
                         outputShape.size() != RANK_REQUIRED_FOR_TILING) {
                         _log.trace("Operation '{0}' at '{1}' has input shape {2} forcing clustering", origOp->getName(),
                                    origOp->getLoc(), inputShape);
                         bestStrategy = VPU::MultiClusterStrategy::Clustering;
                     } else {
-                        if (origOp.supportCycleCostCalculation()) {
+                        if (origOp.supportCycleCostCalculation() &&
+                            _costModel.doesLayerHaveVPUNNSupportedTypes(
+                                    mlir::cast<VPU::ClusteredOpInterface>(origOp.getOperation()))) {
                             bestStrategy = _costModel.getOptimalLayerStrategy(
                                     mlir::cast<VPU::ClusteredOpInterface>(origOp.getOperation()));
                         } else {
@@ -242,7 +251,7 @@ void StrategyManager::assignMultiClusterStrategy(bool enableMultiClusterForSWLay
                     const auto isSplitOverChannelPreferred = [&](VPU::NCEPermuteOp permuteOp) {
                         // Check if permute can use multi clusters
                         const auto outputShape = getShape(permuteOp.getOutput());
-                        const auto numClusters = VPU::getOptimalNumClusters(permuteOp, outputShape[Dims4D::Act::C],
+                        const auto numClusters = VPU::getOptimalNumClusters(permuteOp, outputShape,
                                                                             VPU::MultiClusterStrategy::SplitOverKernel);
                         if (numClusters.getInt() <= 1) {
                             return false;
@@ -266,6 +275,13 @@ void StrategyManager::assignMultiClusterStrategy(bool enableMultiClusterForSWLay
                         setLayerStrategy(VPU::MultiClusterStrategy::SplitOverKernel, origOp.getOperation());
                     } else if (checkTileDim(Dims4D::Act::H)) {
                         setLayerStrategy(VPU::MultiClusterStrategy::SplitOverHeightOverlapped, origOp.getOperation());
+                    }
+                })
+                .Case<NCEMatMulOp>([&](NCEMatMulOp origOp) {
+                    // NCEMatMulOp is supposed to be grouped layer with 5D shape like GNCHW and it can be multiclustered
+                    // only over G
+                    if (origOp.checkStrategyCompatibility(VPU::MultiClusterStrategy::SplitOverGroup, _numTiles)) {
+                        setLayerStrategy(VPU::MultiClusterStrategy::SplitOverGroup, origOp.getOperation());
                     }
                 })
                 .Default([&](mlir::Operation* unknownOp) -> void {

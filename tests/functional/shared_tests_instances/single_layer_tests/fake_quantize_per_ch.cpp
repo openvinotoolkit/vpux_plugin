@@ -98,12 +98,14 @@ TEST_P(FakeQuantPerChLayerTest_NPU3720, HW) {
 }
 
 TEST_P(FakeQuantPerChLayerTestConfig_NPU3720, SW) {
+    rel_threshold = 0.001;
     abs_threshold = 0.2;
     setReferenceSoftwareMode();
     run(Platform::NPU3720);
 }
 
 TEST_P(FakeQuantPerChLayerTest_NPU4000, SW) {
+    rel_threshold = 0.001;
     abs_threshold = 0.2;
     setReferenceSoftwareMode();
     run(Platform::NPU4000);

@@ -12,7 +12,7 @@
 
 using namespace intel_npu;
 
-namespace vpux {
+namespace intel_npu {
 
 IMDDevice::IMDDevice(const std::string_view platform): _platform(platform) {
     VPUX_THROW_UNLESS(platformSupported(platform), "Unsupported VPUX platform '{0}'", platform);
@@ -31,4 +31,18 @@ std::string IMDDevice::getFullDeviceName() const {
     return "Intel(R) NPU (IMD)";
 }
 
-}  // namespace vpux
+uint32_t IMDDevice::getSubDevId() const {
+    return 0;
+}
+
+uint32_t IMDDevice::getMaxNumSlices() const {
+    if (_platform == ov::intel_npu::Platform::NPU3720) {
+        return 2;
+    } else if (_platform == ov::intel_npu::Platform::NPU4000) {
+        return 6;
+    } else {
+        VPUX_THROW("Unknown nummber of slices for '{0}'", _platform);
+    }
+}
+
+}  // namespace intel_npu

@@ -4,7 +4,7 @@
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --wrap-distributed-ops-in-nceclustertiling %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
@@ -509,4 +509,3 @@ func.func @SparseConvolution(%input: !SparseInput,
 //CHECK-SAME:                     -> !VPU.SparseTensor<data=tensor<1x128x14x14xf16, {mem_space = @CMX_NN, order = #NHWC}>, sparsity_map=tensor<1x128x14x14xi1, {mem_space = @CMX_NN, order = #NHWC}>>
 //CHECK:      VPU.Yield [[INNER_OP_OUT]]
 //CHECK:    return [[NCE_CLUSTER_TILING]] : !VPU.SparseTensor<data=!VPU.DistributedTensor<1x128x14x14xf16, #NHWC, @CMX_NN, {mode = "DUPLICATED|SEGMENTED", num_tiles = [1, 2, 1, 1], num_clusters = 2 : i64, alignment = [1, 16, 1, 1]}>, sparsity_map=!VPU.DistributedTensor<1x128x14x14xi1, #NHWC, @CMX_NN, {mode = "DUPLICATED|SEGMENTED", num_tiles = [1, 2, 1, 1], num_clusters = 2 : i64, alignment = [1, 16, 1, 1]}>>
-

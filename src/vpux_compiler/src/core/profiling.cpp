@@ -68,6 +68,31 @@ VPUIP::M2IProfilingMetadataAttr vpux::getM2IProfilingMetaAttr(mlir::MLIRContext*
     return VPUIP::M2IProfilingMetadataAttr::get(ctx, getIntAttr(ctx, bufferId), getIntAttr(ctx, bufferOffset));
 }
 
+DMAProfilingMode vpux::getDMAProfilingMode(VPU::ArchKind arch, const std::string& optionValue) {
+    if (optionValue == "false") {
+        return arch == VPU::ArchKind::NPU40XX ? DMAProfilingMode::SCRATCH : DMAProfilingMode::DISABLED;
+    }
+    switch (arch) {
+    case VPU::ArchKind::NPU37XX:
+        if (optionValue == "true") {
+            return DMAProfilingMode::SW;
+        } else {
+            VPUX_THROW("Unsupported dma-profiling option value: {0}", optionValue);
+        }
+    case VPU::ArchKind::NPU40XX:
+        if (optionValue == "true") {
+            return DMAProfilingMode::DYNAMIC_HWP;
+        } else if (optionValue == "static") {
+            return DMAProfilingMode::STATIC_HWP;
+        } else {
+            VPUX_THROW("Unsupported dma-profiling option value: {0}", optionValue);
+        }
+        break;
+    default:
+        VPUX_THROW("Unsupported arch for profiling: {0}", arch);
+    }
+}
+
 mlir::BlockArgument vpux::addNewProfilingOutput(mlir::MLIRContext* ctx, mlir::func::FuncOp& netFunc,
                                                 IE::CNNNetworkOp& netOp, mlir::MemRefType outputType,
                                                 profiling::ExecutorType execType) {

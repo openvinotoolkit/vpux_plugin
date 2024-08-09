@@ -4,7 +4,7 @@
 //
 
 // RUN: vpux-opt --init-compiler="vpu-arch=%arch%" --canonicalize %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 // CHECK: func.func @SingleLayerDynamicWBounds([[ARG0:%.+]]: tensor<?x3x?x?xf16, {bounds = [2, 3, 20, 20]}>) -> tensor<?x3x?x?xf16, {bounds = [2, 3, 20, 20]}>
 func.func @SingleLayerDynamicWBounds(%arg0: tensor<?x3x?x?xf16, {bounds = [2, 3, 20, 20]}>) -> tensor<?x3x?x?xf16, {bounds = [2, 3, 20, 20]}> {

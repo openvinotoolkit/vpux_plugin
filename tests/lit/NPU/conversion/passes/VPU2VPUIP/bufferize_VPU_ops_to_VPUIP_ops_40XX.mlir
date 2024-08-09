@@ -4,16 +4,36 @@
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --one-shot-bufferize-VPU-to-VPUIP --canonicalize %s | FileCheck %s
-// REQUIRES: arch-VPUX40XX
+// REQUIRES: arch-NPU40XX
 
+// CHECK-LABEL: func.func @ConvertFP32ToFP16UsingConvertDMA
+// CHECK-SAME: ([[ARG:%.+]]: memref<1x3x4x4xf32>)
 func.func @ConvertFP32ToFP16UsingConvertDMA(%arg0: tensor<1x3x4x4xf32>) -> tensor<1x3x4x4xf16> {
     %0 = VPU.Convert(%arg0) {dstElemType = f16} : tensor<1x3x4x4xf32> -> tensor<1x3x4x4xf16>
     return %0 : tensor<1x3x4x4xf16>
 
     // CHECK:       [[ALLOC:%.*]] = memref.alloc() : memref<1x3x4x4xf16>
-    // CHECK:       [[OUT:%.*]] = VPUIP.ConvertDMA inputs({{[^:]+}} : memref<1x3x4x4xf32>) outputs([[ALLOC]] : memref<1x3x4x4xf16>) -> memref<1x3x4x4xf16>
+    // CHECK:       [[OUT:%.*]] = VPUIP.ConvertDMA inputs([[ARG]] : memref<1x3x4x4xf32>) outputs([[ALLOC]] : memref<1x3x4x4xf16>) -> memref<1x3x4x4xf16>
 }
 
+// -----
+// CHECK-LABEL: func.func @ConvertFP64ToFP16UsingSWKernel
+// CHECK-SAME: ([[ARG:%.+]]: memref<1x1x1x1xf64>)
+func.func @ConvertFP64ToFP16UsingSWKernel(%arg0: tensor<1x1x1x1xf64>) -> tensor<1x1x1x1xf16> {
+    %0 = VPU.Convert(%arg0) {dstElemType = f16} : tensor<1x1x1x1xf64> -> tensor<1x1x1x1xf16>
+    return %0 : tensor<1x1x1x1xf16>
+    // CHECK:   [[ALLOC:%.+]] = memref.alloc() : memref<1x1x1x1xf64, [@CMX_NN, 0]>
+    // CHECK:   [[ARG_CMX:%.+]] = VPUIP.Copy inputs([[ARG]] : memref<1x1x1x1xf64>) outputs([[ALLOC]] : memref<1x1x1x1xf64, [@CMX_NN, 0]>) -> memref<1x1x1x1xf64, [@CMX_NN, 0]>
+    // CHECK:   [[ALLOC_0:%.+]] = memref.alloc() : memref<1x1x1x1xf16, [@CMX_NN, 0]>
+    // CHECK:   [[RES:%.+]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Convert inputs([[ARG_CMX]] as [[ARG_1:%.+]]: memref<1x1x1x1xf64, [@CMX_NN, 0]>) outputs([[ALLOC_0]] as [[ARG_2:%.+]]: memref<1x1x1x1xf16, [@CMX_NN, 0]>) on tile 0 -> memref<1x1x1x1xf16, [@CMX_NN, 0]>{
+    // CHECK:       VPUIP.SW.Kernel.run([[ARG_1]], [[ARG_2]]) : memref<1x1x1x1xf64, [@CMX_NN, 0]>, memref<1x1x1x1xf16, [@CMX_NN, 0]>
+    // CHECK:   }
+    // CHECK:   [[ALLOC_1:%.+]] = memref.alloc() : memref<1x1x1x1xf16>
+    // CHECK:   [[OUT:%.+]] = VPUIP.Copy inputs([[RES]] : memref<1x1x1x1xf16, [@CMX_NN, 0]>) outputs([[ALLOC_1]] : memref<1x1x1x1xf16>) -> memref<1x1x1x1xf16>
+    // CHECK:   [[OUT]] : memref<1x1x1x1xf16>
+}
+
+// -----
 // CHECK-LABEL: @GatherDMA
 // CHECK-SAME: ([[ARG0:%.*]]: memref<30522x22xf16>, [[ARG1:%.*]]:  memref<512x1xi64>)
 func.func @GatherDMA(%arg0: tensor<30522x22xf16>, %arg1:  tensor<512x1xi64>) -> tensor<1x512x22xf16, {mem_space = @DDR, order = affine_map<(d0, d1, d2) -> (d0, d1, d2)>}> {

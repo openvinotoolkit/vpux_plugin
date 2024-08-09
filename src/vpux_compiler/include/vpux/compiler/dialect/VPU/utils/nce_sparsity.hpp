@@ -81,6 +81,17 @@ inline VPU::SparsitySupport bitwiseNot(const VPU::SparsitySupport bits) {
     return static_cast<VPU::SparsitySupport>(~static_cast<uint32_t>(bits));
 }
 
+// 5D weights.
+int32_t get5DWeightPtrStep(mlir::Value weights);
+
+std::vector<int32_t> create5DWeightsTableData(mlir::Value opInput, mlir::Value opOutput, mlir::Value weights,
+                                              Const::ContentAttr bias, int64_t outputChannels,
+                                              vpux::VPU::PPETaskAttr ppeTaskAttr, VPU::ArchKind _arch,
+                                              vpux::IE::PostOpAttr postOpAttr);
+
+mlir::Value create5DWeightsTableTensor(mlir::OpBuilder& builder, mlir::Location loc, ArrayRef<int32_t> weightsTable,
+                                       int64_t outputChannels, int64_t groups);
+
 //
 // Convert real numbers to fixed point S16.16 format.
 //

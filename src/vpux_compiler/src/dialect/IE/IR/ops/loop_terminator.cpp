@@ -13,7 +13,7 @@ using namespace mlir;
 // RegionBranchTerminatorOpInterface
 //
 
-mlir::MutableOperandRange vpux::IE::LoopTerminatorOp::getMutableSuccessorOperands(std::optional<unsigned>) {
+mlir::MutableOperandRange vpux::IE::LoopTerminatorOp::getMutableSuccessorOperands(::mlir::RegionBranchPoint) {
     return getOperandsMutable();
 }
 

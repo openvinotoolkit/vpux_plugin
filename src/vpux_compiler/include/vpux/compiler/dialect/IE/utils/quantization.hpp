@@ -29,6 +29,7 @@ Const::details::ContentRange<float> getConst(Const::DeclareOp declOp);
 mlir::Value findQuantizedInput(mlir::Value opInput, bool allowPerAxisQuantize);
 bool isSymmetricQuantType(mlir::quant::QuantizedType type);
 bool hasLeakyReLUPostOp(mlir::Operation* op);
+mlir::quant::UniformQuantizedType getQuantizedTypeFromFakeQuantize(IE::FakeQuantizeOp fqOp);
 
 bool checkRescaledQuantApproximationForConvBasedOp(mlir::Operation* op);
 

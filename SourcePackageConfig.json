@@ -4,6 +4,7 @@
         "^/\\.editorconfig*",
         "^/\\.infrastructure/.*",
         "^/\\.vscode/.*",
+        "^/artifacts/.*",
         "^/cmake/dependencies\\.cmake",
         "^/cmake/source_package\\.cmake",
         "^/cmake/lit.*",
@@ -36,6 +37,7 @@
         "^/guides/how-to-use-profiling.md",
         "^/guides/how-to-use-tbh-bypass.md",
 
+        "^/sw_runtime_kernels/jtag_tests/.*",
         "^/sw_runtime_kernels/firmware_vpu_revision\\.txt",
         "^/sw_runtime_kernels/kernels/3720/.*",
         "^/sw_runtime_kernels/kernels/act_runtime/.*",

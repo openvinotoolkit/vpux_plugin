@@ -122,20 +122,19 @@ def MultiClusterStrategyAssignment : PassBase<"multi-cluster-strategy-assignment
 }
 
 //
-// Wrap multi-cluster layers in NCEClusterTiling
+// Make individual ops with distributed tensor for input and or output
 //
 
-def WrapVPUOpsInNCEClusterTiling : PassBase<"wrap-vpu-ops-in-ncecluster-tiling", "vpux::FunctionPass"> {
-    let summary = "This pass wraps vpu operations that should be executed across multiple clusters in NCEClusterTiling operations";
+def MakeOpsWithDistributedTensor : PassBase<"make-ops-with-distributed-tensor", "vpux::FunctionPass"> {
+    let summary = "This pass creates vpu operations that should be executed across multiple clusters";
 
     let description = [{
         This pass builds an IR in order to represent multi-cluster compilation. It performs a number of functions.
         1) It creates variations of distributed tensors depending on the multi-cluster strategy of the layer.
-        2) It creates DMA operations DDR->CMX and wraps the DMAs in NCEClusterTiling.
-        3) It wraps hardware executable operations in NCEClusterTiling.
+        2) It creates DMA operations DDR->CMX
     }];
 
-    let constructor = "vpux::VPU::createWrapVPUOpsInNCEClusterTilingPass()";
+    let constructor = "vpux::VPU::createMakeOpsWithDistributedTensorPass()";
 
     let options = [
         Option<
@@ -144,6 +143,28 @@ def WrapVPUOpsInNCEClusterTiling : PassBase<"wrap-vpu-ops-in-ncecluster-tiling",
             "Flag to enable generating explicit DistributedTensorAttr for Distributed data type."
         >
     ];
+
+    let dependentDialects = [
+        "vpux::VPU::VPUDialect"
+    ];
+}
+
+//
+// AdjustDistributedTensorAroundOps
+//
+
+def AdjustDistributedTensorAroundOps : PassBase<"adjust-distributed-tensor-around-ops", "vpux::FunctionPass"> {
+    let summary = "This pass adjusts distributed tensor type for ops that should be executed across multiple clusters";
+
+    let description = [{
+        This pass will adjust the activation distributed tensor type for ops that should be executed across multiple clusters,
+        so that the copy op chains can be optimized in further passes.
+        For subgraph:
+           Op0-> Overlapped type0 -> Copy0(CMX2DDR) -> Copy1(DDR2CMX) -> Overlapped type1 -> Op1
+        When type0's compute shape is equal to type1's memory shape
+    }];
+
+    let constructor = "vpux::VPU::createAdjustDistributedTensorAroundOpsPass()";
 
     let dependentDialects = [
         "vpux::VPU::VPUDialect"
@@ -526,25 +547,13 @@ def CMXConcat : PassBase<"cmx-concat", "vpux::FunctionPass"> {
     let dependentDialects = [
         "vpux::VPU::VPUDialect"
     ];
-}
 
-//
-// SplitDDRConcatIntoCMX
-//
-
-def SplitDDRConcatIntoCMX : PassBase<"split-ddr-concat", "vpux::FunctionPass"> {
-    let summary = "Split a big concat executed in DDR into a set of smaller sub concats executed in CMX and later concatenated in DDR";
-
-    let constructor = "vpux::VPU::createSplitDDRConcatIntoCMXPass()";
-
-    let description = [{
-        This pass will try to check if a Concat operation in DDR can be split into a set of sub concats that can fit in NNCMX
-        with few restrictions and if so move the sub concats from DDR to NNCMX and execute a final Concat in DDR.
-        This allows to reduce considerably the number of DMA copies in case the concatenation inputs are a lot of small tensors.
-    }];
-
-    let dependentDialects = [
-        "vpux::VPU::VPUDialect"
+    let options = [
+        Option<
+            "supportNCEOpInsertion", "support-nce-op-insertion",
+            "bool", "true",
+            "Flag to support NCE op insertion for CMX-Concat to handle the complex case when parent NCE has an extra non-Copy user"
+        >
     ];
 }
 
@@ -1018,6 +1027,41 @@ def DetectionOutputDecomposition : PassBase<"detection-output-decomposition", "v
 }
 
 //
+// ComputeInterpolateCoordinates
+//
+
+def ComputeInterpolateCoordinates : PassBase<"compute-interpolate-coordinates", "vpux::FunctionPass"> {
+    let summary = "Compute interpolate coordinates and lambdas for the innermost axis.";
+
+    let description = [{
+        The interpolate coordinates and lambdas coefficients are computed at
+        compile time to improve performance and simplify the kernel.
+
+        This computation is only done for the innermost axis because this is
+        where the kernel's main loop operates and where the most complexity
+        lies. Without this pass, the kernel would need to calculate these
+        constants multiple times to avoid excessive stack usage. Calculating
+        these constants for other axes would make the multi-cluster and
+        multi-shave tiling more restrictive.
+
+        This pass has to run after the Interpolate operation is tiled to fit
+        into CMX and before the operation is wrapped into NCEClusterTiling.
+        Additionally, the interpolate operation must ensure that the constants
+        calculated by this pass will also fit into CMX.
+
+        The coordinates are byte offsets in the tiled input. The lambdas
+        contain two interleaved values for each coordinate.
+
+    }];
+
+    let constructor = "vpux::VPU::createComputeInterpolateCoordinatesPass()";
+
+    let dependentDialects = [
+        "vpux::VPU::VPUDialect"
+    ];
+}
+
+//
 // SetupPPEPass
 //
 
@@ -1101,6 +1145,32 @@ def OptimizeConcat : PassBase<"optimize-concat", "vpux::FunctionPass"> {
 }
 
 //
+// SetupPipelineOptions
+//
+
+def SetupPipelineOptions : PassBase<"setup-pipeline-options", "vpux::ModulePass"> {
+    let summary = "Initialize the symbol table for global options in the model/IR";
+
+    let description = [{
+        Creates a PipelineOptionsOp structure in the IR so the constraints could be exposed globally
+    }];
+
+    let constructor = "vpux::VPU::createSetupPipelineOptionsPass()";
+
+    let options = [
+        Option<
+            "allowCustomValues", "allow-custom-values",
+            "bool", "",
+            "[Optional] Allows keep predefined values in IR"
+        >
+    ];
+
+    let dependentDialects = [
+        "vpux::VPU::VPUDialect"
+    ];
+}
+
+//
 // SetupPerBarrierVariantConstraint
 //
 
@@ -1108,7 +1178,7 @@ def SetupPerBarrierVariantConstraint : PassBase<"setup-per-barrier-variant-const
     let summary = "Set per barrier variant constraints in the model/IR";
 
     let description = [{
-        Creates a PipelineOptionsOp structure in the IR so the constraints could be exposed globally
+        Uses the PipelineOptionsOp structure from the IR so the constraints could be exposed globally
     }];
 
     let constructor = "vpux::VPU::createSetupPerBarrierVariantConstraintPass()";
@@ -1128,6 +1198,68 @@ def SetupPerBarrierVariantConstraint : PassBase<"setup-per-barrier-variant-const
             "wlmRollback", "wlm-rollback",
             "bool", "false",
             "[Optional] Indicates that compilation might rollback to wlm-disabled pipeline"
+        >
+    ];
+
+    let dependentDialects = [
+        "vpux::VPU::VPUDialect"
+    ];
+}
+
+//
+// SetupChannelsAutoPadding
+//
+
+def SetupChannelsAutoPadding : PassBase<"setup-channels-auto-padding", "vpux::ModulePass"> {
+    let summary = "Enable the auto padding for input/output channels and store it in the model/IR";
+
+    let description = [{
+        Uses the PipelineOptionsOp structure from the IR so the options could be exposed globally
+    }];
+
+    let constructor = "vpux::VPU::createSetupChannelsAutoPaddingPass()";
+
+    let options = [
+        Option<
+            "enableAutoPaddingODU", "enable-auto-padding-odu",
+            "bool", "false",
+            "[Optional] Set auto padding for ODU to true/false"
+        >,
+        Option<
+            "allowCustomValues", "allow-custom-values",
+            "bool", "",
+            "[Optional] Allows keep predefined values in IR"
+        >
+    ];
+
+    let dependentDialects = [
+        "vpux::VPU::VPUDialect"
+    ];
+}
+
+//
+// SetupIsReduceSupported
+//
+
+def SetupIsReduceSupported : PassBase<"setup-is-reduce-supported", "vpux::ModulePass"> {
+    let summary = "Enable Reduce operations to be supported on NCE";
+
+    let description = [{
+        Uses the PipelineOptionsOp structure from the IR so the options could be exposed globally
+    }];
+
+    let constructor = "vpux::VPU::createSetupIsReduceSupportedPass()";
+
+    let options = [
+        Option<
+            "enableIsReduceSupported", "enable-is-reduce-supported",
+            "bool", "false",
+            "[Optional] Set IsReduceSupported for NCE to true/false"
+        >,
+        Option<
+            "allowCustomValues", "allow-custom-values",
+            "bool", "",
+            "[Optional] Allows keep predefined values in IR"
         >
     ];
 
@@ -1158,6 +1290,27 @@ def ConvertOpToDMAForPerformantExecution : PassBase<"convert-op-to-dma-for-perfo
         "vpux::VPU::VPUDialect"
     ];
 }
+
+//
+// TileGather
+//
+
+def TileGather : PassBase<"tile-gather", "vpux::FunctionPass"> {
+    let summary = "Tile Gather Op";
+
+    let description = [{
+        GatherOp will convert to Gather DMA in VPUX40XX+ pipelines.
+        But Gather DMA has some limitation, the input size after axis shold less than 4096.
+        The pass will tile gather from the dimention after axis
+    }];
+
+    let constructor = "vpux::VPU::createTileGatherPass()";
+
+    let dependentDialects = [
+        "vpux::VPU::VPUDialect"
+    ];
+}
+
 
 #endif
 

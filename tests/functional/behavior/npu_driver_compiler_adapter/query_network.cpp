@@ -5,8 +5,8 @@
 #include <gtest/gtest.h>
 #include <openvino/op/op.hpp>
 #include "base/ov_behavior_test_utils.hpp"
+#include "common/npu_test_env_cfg.hpp"
 #include "common/utils.hpp"
-#include "common/vpu_test_env_cfg.hpp"
 #include "common_test_utils/node_builders/constant.hpp"
 #include "common_test_utils/subgraph_builders/conv_pool_relu.hpp"
 #include "common_test_utils/subgraph_builders/conv_pool_relu_non_zero.hpp"
@@ -49,7 +49,7 @@ std::shared_ptr<ov::Model> createModelWithUnknownNode() {
     const ov::Shape input_shape = {1, 4096};
     const ov::element::Type precision = ov::element::f32;
     ov::ParameterVector params = {std::make_shared<ov::op::v0::Parameter>(precision, ov::Shape{input_shape})};
-    auto constant = ov::test::utils::deprecated::make_constant(precision, {4096, 1024}, std::vector<float>{}, true);
+    auto constant = ov::test::utils::make_constant(precision, ov::Shape{4096, 1024});
     auto custom_op = std::make_shared<UnsupportedTestOp>(constant);
 
     ov::NodeVector results{custom_op};

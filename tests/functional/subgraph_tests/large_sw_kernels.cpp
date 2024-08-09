@@ -106,6 +106,8 @@ class TwoMishTest_NPU4000 : public TwoMishTest_NPU3720 {};
 
 TEST_P(TwoMishTest_NPU4000, HW) {
     setDefaultHardwareMode();
+    // TODO: E129229
+    configuration["NPU_BACKEND_COMPILATION_PARAMS"] = "enable-partial-workload-management=false";
     run(Platform::NPU4000);
 }
 
@@ -124,15 +126,14 @@ class TwoScatterUpdateTest_NPU3720 : public VpuOv2LayerTest, public testing::Wit
         input->set_friendly_name("input_0");
         const ov::ParameterVector params{input};
 
-        auto scatterIndices =
-                ov::test::utils::deprecated::make_constant<int64_t>(ov::element::i64, ov::Shape{32, 2}, {2}, false);
-        auto axis1 = ov::test::utils::deprecated::make_constant<int64_t>(ov::element::i64, ov::Shape{1}, {1}, false);
-        auto updates1 = ov::test::utils::deprecated::make_constant<float>(
-                ov::element::f16, ov::Shape{inputShape[0], 32, 2, inputShape[2], inputShape[3]}, {1.0f}, false);
+        auto scatterIndices = ov::op::v0::Constant::create(ov::element::i64, ov::Shape{32, 2}, {2});
+        auto axis1 = ov::op::v0::Constant::create(ov::element::i64, ov::Shape{1}, {1});
+        auto updates1 = ov::op::v0::Constant::create(
+                ov::element::f16, ov::Shape{inputShape[0], 32, 2, inputShape[2], inputShape[3]}, {1.0f});
         auto scatterUpdate1 = std::make_shared<ov::op::v3::ScatterUpdate>(input, scatterIndices, updates1, axis1);
 
-        auto updates2 = ov::test::utils::deprecated::make_constant<float>(
-                ov::element::f16, ov::Shape{inputShape[0], 32, 2, inputShape[2], inputShape[3]}, {1.0f}, false);
+        auto updates2 = ov::op::v0::Constant::create(
+                ov::element::f16, ov::Shape{inputShape[0], 32, 2, inputShape[2], inputShape[3]}, {1.0f});
         auto scatterUpdate2 =
                 std::make_shared<ov::op::v3::ScatterUpdate>(scatterUpdate1, scatterIndices, updates2, axis1);
         auto result = std::make_shared<ov::op::v0::Result>(scatterUpdate2);

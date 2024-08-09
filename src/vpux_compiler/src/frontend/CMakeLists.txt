@@ -31,7 +31,7 @@ target_include_directories(${TARGET_NAME}
     PRIVATE
         $<TARGET_PROPERTY:openvino::npu_al,INTERFACE_INCLUDE_DIRECTORIES>)
 
-link_system_libraries(${TARGET_NAME}
+ov_link_system_libraries(${TARGET_NAME}
     PUBLIC
         npu_ngraph_transformations)
 add_src_target(${TARGET_NAME})

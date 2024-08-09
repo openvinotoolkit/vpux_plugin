@@ -16,7 +16,7 @@ namespace vpux::profiling {
 void printProfilingAsText(const std::vector<TaskInfo>& tasks, const std::vector<LayerInfo>& layers,
                           std::ostream& output);
 void printProfilingAsTraceEvent(const std::vector<TaskInfo>& tasks, const std::vector<LayerInfo>& layers,
-                                std::ostream& output, Logger& log = Logger::global());
+                                FreqInfo dpuFreq, std::ostream& output, Logger& log = Logger::global());
 
 //
 //  Run profiling post-processing and profilng environemnt hooks

@@ -10,6 +10,7 @@
 #include "vpux/compiler/NPU37XX/dialect/IE/IR/ops_interfaces.hpp"
 #include "vpux/compiler/NPU37XX/dialect/VPU/IR/ops_interfaces.hpp"
 #include "vpux/compiler/NPU37XX/dialect/VPUIP/IR/ops_interfaces.hpp"
+#include "vpux/compiler/NPU37XX/dialect/VPUIPDPU/ops_interfaces.hpp"
 
 namespace vpux {
 
@@ -19,9 +20,11 @@ void InterfacesRegistry37XX::registerInterfaces(mlir::DialectRegistry& registry)
     VPU::arch37xx::registerLayoutInfoOpInterfaces(registry);
     VPU::arch37xx::registerDDRAccessOpModelInterface(registry);
     VPU::arch37xx::registerLayerWithPermuteInterfaceForIE(registry);
+    VPU::arch37xx::registerNCEOpInterface(registry);
     VPUIP::arch37xx::registerAlignedChannelsOpInterfaces(registry);
     VPUIP::arch37xx::registerAlignedWorkloadChannelsOpInterfaces(registry);
     vpux::arch37xx::registerBufferizableOpInterfaces(registry);
+    VPUIPDPU::arch37xx::registerVerifiersOpInterfaces(registry);
 }
 
 }  // namespace vpux

@@ -4,7 +4,7 @@
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --convert-VPUIPDPU-to-NPUReg40XX="dpu-dry-run=stub" %s | FileCheck %s
-// REQUIRES: arch-VPUX40XX
+// REQUIRES: arch-NPU40XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 module @DPUDryRunTest {
@@ -95,6 +95,7 @@ module @DPUDryRunTest {
 // CHECK-DAG:      UINT workload_operation at 14 size 2 = 0
 // CHECK-DAG:      UINT elop_wload at 0 size 1 = 1
 // CHECK-DAG:      UINT elop_wload_type at 3 size 1 = 1
+// CHECK-DAG:      UINT nthw at 25 size 2 = 1
 // CHECK-DAG:      UINT te_dim_y at 0 size 13 = 0
 // CHECK-DAG:      UINT te_dim_z at 13 size 13 = 0xF
 // CHECK-DAG:      UINT te_dim_x at 0 size 13 = 0
@@ -108,8 +109,8 @@ module @DPUDryRunTest {
 // CHECK-DAG:  UINT pad_count_left at 17 size 3 = 0
 // CHECK-DAG:  UINT pad_count_down at 20 size 3 = 0
 // CHECK-DAG:  UINT pad_count_right at 23 size 3 = 0
-// CHECK-DAG:  UINT workload_start_x at 0 size 14 = 1
-// CHECK-DAG:  UINT workload_start_y at 14 size 14 = 1
+// CHECK-DAG:  UINT workload_start_x at 0 size 14 = 0
+// CHECK-DAG:  UINT workload_start_y at 14 size 14 = 0
 // CHECK-DAG:  UINT workload_start_z at 0 size 14 = 0
 // CHECK-DAG:  weight_size offset 180 size 32 = UINT 0x10
 // CHECK-DAG:  weight_num offset 184 size 32 = UINT 0x10

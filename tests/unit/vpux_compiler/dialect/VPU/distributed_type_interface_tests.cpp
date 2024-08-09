@@ -373,6 +373,61 @@ TEST_F(MLIR_DistributedTypesIfMethodsForExplicitDistribution, DistributedTensorT
     }
 }
 
+TEST_F(MLIR_DistributedTypesIfMethodsForExplicitDistribution, DistributedTensorType5D) {
+    mlir::MLIRContext ctx(registry);
+    ctx.loadDialect<VPU::VPUDialect>();
+
+    const auto shape = SmallVector<int64_t>({3, 1, 64, 13, 16});
+    const auto elemType = mlir::Float16Type::get(&ctx);
+    const auto dimsOrder = mlir::AffineMapAttr::get(DimsOrder::GNHWC.toAffineMap(&ctx));
+    const auto dimsSpace = vpux::IndexedSymbolAttr::get(&ctx, CMX_NAME);
+
+    const auto distributionMode = VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::SEGMENTED);
+    const auto numTiles = getIntArrayAttr(&ctx, SmallVector<int64_t>({3, 1, 1, 1, 1}));
+    const auto numClusters = getIntAttr(&ctx, 2);
+
+    const PerClusterShapesOffsetsVec perClusterShapes(
+            {SmallVector<int64_t>{1, 64, 13, 16}, SmallVector<int64_t>{2, 64, 13, 16}});
+    const PerClusterShapesOffsetsVec perClusterOffsets(
+            {SmallVector<int64_t>{0, 0, 0, 0}, SmallVector<int64_t>{1, 0, 0, 0}});
+    const auto perClusterShapesAttr = getIntArrayOfArray(&ctx, perClusterShapes);
+    const auto perClusterOffsetsAttr = getIntArrayOfArray(&ctx, perClusterOffsets);
+
+    const auto distributedAttr = VPU::DistributedTensorAttr::get(
+            &ctx, distributionMode, numTiles, nullptr, nullptr, nullptr, numClusters, nullptr, nullptr,
+            perClusterShapesAttr, perClusterOffsetsAttr, perClusterShapesAttr, perClusterOffsetsAttr, nullptr);
+
+    const auto distributedTypeIf =
+            VPU::DistributedTensorType::get(&ctx, shape, elemType, dimsOrder, dimsSpace, distributedAttr)
+                    .dyn_cast<VPU::DistributedTypeInterface>();
+
+    {
+        const auto newShape = SmallVector<int64_t>({2, 1, 64, 13, 16});
+        const PerClusterShapesOffsetsVec expectedPerClusterShapes(
+                {SmallVector<int64_t>{1, 64, 13, 16}, SmallVector<int64_t>{1, 64, 13, 16}});
+        const PerClusterShapesOffsetsVec expectedPerClusterOffsets(
+                {SmallVector<int64_t>{0, 0, 0, 0}, SmallVector<int64_t>{1, 0, 0, 0}});
+
+        const auto expectedPerClusterShapesAttr = getIntArrayOfArray(&ctx, expectedPerClusterShapes);
+        const auto expectedPerClusterOffsetsAttr = getIntArrayOfArray(&ctx, expectedPerClusterOffsets);
+
+        const auto distributedAttrForNewShape = VPU::DistributedTensorAttr::get(
+                &ctx, distributionMode, numTiles, nullptr, nullptr, nullptr, numClusters, nullptr, nullptr,
+                expectedPerClusterShapesAttr, expectedPerClusterOffsetsAttr, expectedPerClusterShapesAttr,
+                expectedPerClusterOffsetsAttr, nullptr);
+
+        auto newType =
+                distributedTypeIf.changeShapeForExplicitDistribution(ShapeRef(newShape), distributedAttrForNewShape)
+                        .dyn_cast<VPU::DistributedTypeInterface>();
+
+        ASSERT_NE(newType, nullptr);
+
+        const auto newDistribution =
+                newType.getDistributedTypes().front().cast<VPU::DistributedTensorType>().getDistribution();
+        EXPECT_EQ(newDistribution, distributedAttrForNewShape);
+    }
+}
+
 TEST_F(MLIR_DistributedTypesIfMethodsForExplicitDistribution, SparseBufferTypeDataAndSparsityMap) {
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<VPU::VPUDialect>();

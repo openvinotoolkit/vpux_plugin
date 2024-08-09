@@ -48,11 +48,11 @@ bool vpux::VPU::M2INormOp::isSupported(IE::BatchNormInferenceOp op, LogCb logCb,
 
 mlir::LogicalResult vpux::VPU::M2INormOp::inferReturnTypes(mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc,
                                                            mlir::ValueRange operands, mlir::DictionaryAttr attrs,
-                                                           mlir::OpaqueProperties, mlir::RegionRange,
+                                                           mlir::OpaqueProperties prop, mlir::RegionRange,
                                                            mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    M2INormOpAdaptor op(operands, attrs);
+    M2INormOpAdaptor op(operands, attrs, prop);
     if (mlir::failed(op.verify(loc))) {
         return mlir::failure();
     }

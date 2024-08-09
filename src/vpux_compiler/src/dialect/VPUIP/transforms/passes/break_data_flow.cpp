@@ -31,7 +31,7 @@ void BreakDataFlowPass::safeRunOnFunc() {
     auto funcOp = getOperation();
 
     funcOp.walk([](VPUIP::LayerOpInterface op) {
-        for (const auto res : op->getOpResults()) {
+        for (auto res : op->getOpResults()) {
             const auto ind = res.getResultNumber();
             const auto resBuf = op.getOutputs()[ind];
             res.replaceAllUsesWith(resBuf);

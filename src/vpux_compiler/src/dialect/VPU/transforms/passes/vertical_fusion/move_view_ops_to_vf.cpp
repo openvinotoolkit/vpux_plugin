@@ -39,10 +39,31 @@ private:
 
 mlir::LogicalResult ViewOpsRewriter::matchAndRewrite(VPU::VerticalFusionOp vfOp,
                                                      mlir::PatternRewriter& rewriter) const {
+    auto isOpWeightsFromVFOperandIndex = [](mlir::Operation* op, size_t operandIdx) -> bool {
+        auto nceOp = mlir::dyn_cast<VPU::NCEOpInterface>(op);
+        if (nceOp == nullptr) {
+            return false;
+        }
+        if (auto opWeights = llvm::cast_if_present<mlir::BlockArgument>(nceOp.getWeightsOperand())) {
+            return opWeights.getArgNumber() == operandIdx;
+        }
+        return false;
+    };
+    auto tilingStrategy = parseIntArrayAttr<int64_t>(vfOp.getTilingStrategy());
+
     for (auto vfOperand : vfOp->getOperands() | indexed) {
         auto parentOp = vfOperand.value().getDefiningOp<VPU::TilingViewLikeOpInterface>();
 
-        if (!parentOp || !VPU::isPureViewOp(parentOp)) {
+        if (parentOp == nullptr || !VPU::isPureViewOp(parentOp)) {
+            continue;
+        }
+
+        // Exclude weights moving for non-SOC tiling
+        // As only under SOC case, the producer op for weights (if exists) need to be tiled and merged into VF
+        if (llvm::any_of(vfOp.getBody()->getArgument(vfOperand.index()).getUsers(), [&](auto user) {
+                return isOpWeightsFromVFOperandIndex(user, vfOperand.index()) &&
+                       (tilingStrategy[Dims4D::Act::C.ind()] == 1);
+            })) {
             continue;
         }
 

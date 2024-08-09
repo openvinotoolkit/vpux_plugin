@@ -40,15 +40,13 @@ void vpux::VPU::GroupSparseTensorOp::build(mlir::OpBuilder& builder, mlir::Opera
 // inferReturnTypes
 //
 
-mlir::LogicalResult vpux::VPU::GroupSparseTensorOp::inferReturnTypes(mlir::MLIRContext* ctx,
-                                                                     std::optional<mlir::Location> optLoc,
-                                                                     mlir::ValueRange operands,
-                                                                     mlir::DictionaryAttr attrs, mlir::OpaqueProperties,
-                                                                     mlir::RegionRange /*ranges*/,
-                                                                     SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
+mlir::LogicalResult vpux::VPU::GroupSparseTensorOp::inferReturnTypes(
+        mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueRange operands,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange /*ranges*/,
+        SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::GroupSparseTensorOpAdaptor groupOp(operands, attrs);
+    VPU::GroupSparseTensorOpAdaptor groupOp(operands, attrs, prop);
     if (mlir::failed(groupOp.verify(loc))) {
         return mlir::failure();
     }

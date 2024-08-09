@@ -36,17 +36,21 @@ mlir::LogicalResult vpux::VPUIP::PermuteCastOp::verify() {
     auto distributedInType = getSource().getType().dyn_cast<VPUIP::DistributedBufferType>();
     auto distributedOutType = getResult().getType().dyn_cast<VPUIP::DistributedBufferType>();
     if (distributedInType && distributedOutType) {
-        auto inputDistribution = distributedInType.getDistribution();
         auto outputDistribution = distributedOutType.getDistribution();
 
         auto expectedOutputDistribution = applyPermutationOnDistributedTensorAttr(
-                inputDistribution, getMemPerm(), distributedInType.getDimsOrder(), distributedOutType.getDimsOrder(),
+                distributedInType, getMemPerm(), distributedInType.getDimsOrder(), distributedOutType.getDimsOrder(),
                 distributedInType.getShape(), distributedOutType.getShape());
-        if (outputDistribution != expectedOutputDistribution) {
+        if (mlir::failed(expectedOutputDistribution)) {
+            return errorAt(op, "PermuteCast unsupported input distribution: in = {0}",
+                           distributedInType.getDistribution());
+        }
+
+        if (outputDistribution != expectedOutputDistribution.value()) {
             return errorAt(op,
                            "PermuteCast input and output distributions are incompatible: in = {0}, out = {1},"
                            "expected = {2}",
-                           inputDistribution, outputDistribution, expectedOutputDistribution);
+                           distributedInType.getDistribution(), outputDistribution, expectedOutputDistribution.value());
         }
     }
 

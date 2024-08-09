@@ -16,10 +16,11 @@ using namespace VPUMI40XX;
 void NNDMAOp::build(mlir::OpBuilder& odsBuilder, mlir::OperationState& odsState, VPURegMapped::IndexType index,
                     mlir::Value taskLocation, mlir::Value input, mlir::Value output_buff, mlir::Value previousDma,
                     mlir::ValueRange waitBarriers, mlir::ValueRange updateBarriers,
-                    VPUIP::DMADescriptorAttr dma_descriptor) {
+                    VPUMI40XX::DMATransactionAttr dma_transaction, VPUIP::DMADescriptorAttr dma_descriptor) {
     build(odsBuilder, odsState, index, taskLocation, input, mlir::ValueRange(output_buff), previousDma, waitBarriers,
-          updateBarriers, 0, 0, false, false, false, 0, VPUIP::DMAAccMode::DISABLE, nullptr, dma_descriptor, 0, nullptr,
-          0, nullptr);
+          updateBarriers, 0, 0, false, false, false, 0, VPUIP::DMAAccMode::DISABLE,
+          /*act_compression_size_entry*/ nullptr, /*act_compression_sparsity_map*/ nullptr, dma_transaction,
+          dma_descriptor, 0, nullptr, 0, nullptr);
 }
 
 mlir::LogicalResult NNDMAOp::verify() {

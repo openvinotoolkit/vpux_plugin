@@ -15,7 +15,7 @@ public:
     using Base::Base;
     mlir::LogicalResult symbolize(VPUMI40XX::ActShaveRtOp op, SymbolMapper& mapper,
                                   mlir::ConversionPatternRewriter& rewriter) const override;
-    mlir::FlatSymbolRefAttr getSymbolicName(VPUMI40XX::ActShaveRtOp, size_t) override;
+    llvm::SmallVector<mlir::FlatSymbolRefAttr> getSymbolicNames(VPUMI40XX::ActShaveRtOp, size_t) override;
 };
 
 }  // namespace vpumi40xx2vpuasm

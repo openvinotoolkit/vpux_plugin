@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --init-compiler="vpu-arch=%arch% allow-custom-values=true" --convert-VPUMI37XX-to-ELF %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX
+// REQUIRES: arch-NPU37XX
 //
 
 module @Test attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilationMode = #VPU.compilation_mode<ReferenceHW>} {

@@ -96,15 +96,24 @@ mlir::LogicalResult PropagateSoftmax::matchAndRewrite(IE::SoftMaxOp origOp, mlir
     };
 
     auto maybeAddOp = origOp.getInput().getDefiningOp<IE::AddOp>();
-    if (maybeAddOp != nullptr && (maybeAddOp.getInput2().getDefiningOp<Const::DeclareOp>() == nullptr ||
-                                  getShape(maybeAddOp.getInput2()).totalSize() != 1)) {
-        return matchFailed(_log, rewriter, origOp, "Found invalid AddOp before SoftmaxOp");
-    }
-
     auto concatOp = maybeAddOp == nullptr ? origOp.getInput().getDefiningOp<IE::ConcatOp>()
                                           : maybeAddOp.getInput1().getDefiningOp<IE::ConcatOp>();
     if (concatOp == nullptr || !isBatchConcat(concatOp) || !llvm::all_of(concatOp.getInputs(), isEnabledInput)) {
         return matchFailed(_log, rewriter, origOp, "No valid ConcatOp found");
+    }
+
+    const auto isValidAddOp = [&](IE::AddOp addOp, IE::ConcatOp concatOp) {
+        auto input2 = addOp.getInput2();
+        if ((input2.getDefiningOp<Const::DeclareOp>() != nullptr && getShape(input2).totalSize() == 1)) {
+            return true;
+        }
+
+        return llvm::all_of(concatOp.getInputs(), [&](mlir::Value input) {
+            return getShape(input) == getShape(input2);
+        });
+    };
+    if (maybeAddOp != nullptr && !isValidAddOp(maybeAddOp, concatOp)) {
+        return matchFailed(_log, rewriter, origOp, "Found invalid AddOp before SoftmaxOp");
     }
 
     // Concat axis must be different from softmax axis
@@ -116,25 +125,42 @@ mlir::LogicalResult PropagateSoftmax::matchAndRewrite(IE::SoftMaxOp origOp, mlir
         return matchFailed(_log, rewriter, origOp, "Concat axis conflicts with softmax axis");
     }
 
-    rewriter.startRootUpdate(concatOp);
-    rewriter.setInsertionPoint(concatOp);
+    auto concatInputShape = getShape(concatOp.getInputs()[0]);
+    auto oneAndOnlySoftmaxAxisNotOne = [&]() {
+        SmallVector<Dim> nonOneDims = getNonOneDim(concatInputShape);
+        if (nonOneDims.size() == 1) {
+            auto nonOneDim = nonOneDims.front();
+            if (nonOneDim.ind() == softmaxAxis) {
+                return true;
+            }
+        }
 
+        return false;
+    };
+    if (oneAndOnlySoftmaxAxisNotOne()) {
+        return matchFailed(_log, rewriter, origOp,
+                           "No dim left for Multi-Cluster and Multi-SHAVEs tiling after propagation");
+    }
+
+    SmallVector<mlir::Value> newConcatInputs;
     for (auto concatInput : concatOp.getInputs() | indexed) {
-        auto sliceSoftmaxInput =
-                maybeAddOp == nullptr
-                        ? concatInput.value()
-                        : rewriter.create<IE::AddOp>(
-                                  takeOpLoc(maybeAddOp, llvm::StringLiteral("slice_{0}"), concatInput.index()),
-                                  concatInput.value(), maybeAddOp.getInput2(), maybeAddOp.getAutoBroadcastAttr(),
-                                  maybeAddOp.getPostOpAttr(), maybeAddOp.getClampAttr());
+        mlir::Value sliceSoftmaxInput = concatInput.value();
+        if (maybeAddOp != nullptr) {
+            auto newAddOp = rewriter.create<IE::AddOp>(
+                    takeOpLoc(maybeAddOp, llvm::StringLiteral("slice_{0}"), concatInput.index()), concatInput.value(),
+                    maybeAddOp.getInput2(), maybeAddOp.getAutoBroadcastAttr(), maybeAddOp.getPostOpAttr(),
+                    maybeAddOp.getClampAttr());
+            sliceSoftmaxInput = newAddOp.getOutput();
+        }
+
         auto sliceSoftmaxOp =
                 rewriter.create<IE::SoftMaxOp>(takeOpLoc(origOp, llvm::StringLiteral("slice_{0}"), concatInput.index()),
                                                sliceSoftmaxInput, origOp.getAxisIndAttr(), origOp.getPadSizeAttr());
-        concatOp.setOperand(checked_cast<uint32_t>(concatInput.index()), sliceSoftmaxOp.getOutput());
+        newConcatInputs.push_back(sliceSoftmaxOp.getOutput());
     }
 
-    rewriter.replaceOp(origOp, concatOp->getResults());
-    rewriter.finalizeRootUpdate(concatOp);
+    auto newConcatOp = rewriter.create<IE::ConcatOp>(concatOp->getLoc(), newConcatInputs, Dim(concatAxis));
+    rewriter.replaceOp(origOp, newConcatOp.getOutput());
 
     return mlir::success();
 }
@@ -252,7 +278,7 @@ mlir::LogicalResult PropagateFakeQuantize::matchAndRewrite(IE::FakeQuantizeOp or
         return matchFailed(_log, rewriter, origOp, "Concat axis conflicts with per channel FakeQuantize axis");
     }
 
-    rewriter.startRootUpdate(concatOp);
+    rewriter.startOpModification(concatOp);
     rewriter.setInsertionPoint(concatOp);
 
     for (auto concatInput : concatOp.getInputs() | indexed) {
@@ -266,7 +292,7 @@ mlir::LogicalResult PropagateFakeQuantize::matchAndRewrite(IE::FakeQuantizeOp or
     }
 
     rewriter.replaceOp(origOp, concatOp->getResults());
-    rewriter.finalizeRootUpdate(concatOp);
+    rewriter.finalizeOpModification(concatOp);
 
     return mlir::success();
 }

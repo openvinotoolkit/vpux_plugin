@@ -10,11 +10,11 @@ using namespace vpux;
 
 mlir::LogicalResult vpux::IE::GreaterOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::GreaterOpAdaptor greater(operands, attrs);
+    IE::GreaterOpAdaptor greater(operands, attrs, prop);
     if (mlir::failed(greater.verify(loc))) {
         return mlir::failure();
     }
@@ -26,7 +26,7 @@ mlir::LogicalResult vpux::IE::GreaterOp::inferReturnTypeComponents(
             IE::broadcastEltwiseShape(in1Type.getShape(), in2Type.getShape(), greater.getAutoBroadcast(), loc);
 
     if (mlir::succeeded(outShapeRes)) {
-        inferredReturnShapes.emplace_back(outShapeRes.value(), in1Type.getElementType());
+        inferredReturnShapes.emplace_back(outShapeRes.value(), getBool8Type(ctx));
     }
 
     return outShapeRes;

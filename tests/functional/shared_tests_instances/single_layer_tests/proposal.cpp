@@ -202,14 +202,8 @@ protected:
     }
 };
 
-class ProposalLayerTest_NPU3700 : public ProposalLayerTestCommon {};
 class ProposalLayerTest_NPU3720 : public ProposalLayerTestCommon {};
 class ProposalLayerTest_NPU4000 : public ProposalLayerTestCommon {};
-
-TEST_P(ProposalLayerTest_NPU3700, HW) {
-    setDefaultHardwareMode();
-    run(Platform::NPU3720);
-}
 
 TEST_P(ProposalLayerTest_NPU3720, HW) {
     setDefaultHardwareMode();
@@ -260,17 +254,6 @@ const auto proposalParams1 = ::testing::Combine(
                            ::testing::ValuesIn(std::vector<std::string>{"tensowflow"})),
         ::testing::Values(ov::element::f16), ::testing::Values(DEVICE_NPU));
 
-const auto proposalParams2 = ::testing::Combine(
-        ::testing::Combine(::testing::ValuesIn(std::vector<size_t>{16}), ::testing::ValuesIn(std::vector<size_t>{6000}),
-                           ::testing::ValuesIn(std::vector<size_t>{300}),
-                           ::testing::ValuesIn(std::vector<float>{0.69999998807907104f}),
-                           ::testing::ValuesIn(std::vector<size_t>{16}),
-                           ::testing::ValuesIn(std::vector<std::vector<float>>{{0.5f, 1.0f, 2.0f}}),
-                           ::testing::ValuesIn(std::vector<std::vector<float>>{{8.0f, 16.0f, 32.0f}}),
-                           ::testing::ValuesIn(std::vector<bool>{true}), ::testing::ValuesIn(std::vector<bool>{false}),
-                           ::testing::ValuesIn(std::vector<std::string>{""})),
-        ::testing::Values(ov::element::f16), ::testing::Values(DEVICE_NPU));
-
 const auto proposalParams3 = ::testing::Combine(
         ::testing::Combine(::testing::ValuesIn(std::vector<size_t>{4}), ::testing::ValuesIn(std::vector<size_t>{6000}),
                            ::testing::ValuesIn(std::vector<size_t>{300}),
@@ -292,19 +275,6 @@ const auto proposalParams4 = ::testing::Combine(
                            ::testing::ValuesIn(std::vector<bool>{true}), ::testing::ValuesIn(std::vector<bool>{false}),
                            ::testing::ValuesIn(std::vector<std::string>{""})),
         ::testing::Values(ov::element::f16), ::testing::Values(DEVICE_NPU));
-
-INSTANTIATE_TEST_SUITE_P(smoke_Proposal_tests, ProposalLayerTest_NPU3700,
-                         ::testing::Combine(proposalParams0, ::testing::Values(ov::element::f16),
-                                            ::testing::Values(DEVICE_NPU)),
-                         ProposalLayerTest_NPU3700::getTestCaseName);
-
-// conformance "Proposal_108377"
-INSTANTIATE_TEST_SUITE_P(smoke_Proposal_conformance_108377, ProposalLayerTest_NPU3700, proposalParams1,
-                         ProposalLayerTest_NPU3700::getTestCaseName);
-
-// conformance "Proposal_129693"
-INSTANTIATE_TEST_SUITE_P(smoke_Proposal_conformance_129693, ProposalLayerTest_NPU3700, proposalParams2,
-                         ProposalLayerTest_NPU3700::getTestCaseName);
 
 INSTANTIATE_TEST_SUITE_P(smoke_Proposal_conformance_tf, ProposalLayerTest_NPU3720, proposalParams1,
                          ProposalLayerTest_NPU3720::getTestCaseName);

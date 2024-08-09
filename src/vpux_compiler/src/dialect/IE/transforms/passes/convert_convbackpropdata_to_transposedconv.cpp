@@ -128,12 +128,12 @@ mlir::LogicalResult ConvolutionBackpropDataConversion::matchAndRewrite(IE::Convo
         auto outputLow = transposeFqInput(filterFqOp.getOutputLow());
         auto outputHigh = transposeFqInput(filterFqOp.getOutputHigh());
         newFilter = rewriter.createOrFold<IE::FakeQuantizeOp>(
-                filterFqOp.getLoc(), newFilter, inputLow, inputHigh, outputLow, outputHigh, filterFqOp.getLevelsAttr(),
+                filterOp.getLoc(), newFilter, inputLow, inputHigh, outputLow, outputHigh, filterFqOp.getLevelsAttr(),
                 filterFqOp.getLowFpTypeAttr(), filterFqOp.getAutoBroadcastAttr());
     }
 
     if (filterConvertOp != nullptr) {
-        newFilter = rewriter.createOrFold<IE::ConvertOp>(filterConvertOp.getLoc(), newFilter,
+        newFilter = rewriter.createOrFold<IE::ConvertOp>(filterOp.getLoc(), newFilter,
                                                          filterConvertOp.getDstElemTypeAttr());
     }
 

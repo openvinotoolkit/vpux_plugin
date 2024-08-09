@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2023-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --vpu-arch=%arch% --inference-execution-analysis %s | FileCheck %s
-// REQUIRES: arch-VPUX40XX
+// REQUIRES: arch-NPU40XX
 
 !qElemType = !quant.uniform<u8:f16, 1.000000e+00>
 !qElemType1 = !quant.uniform<u8:f16, 1.000000e+00>

@@ -4,7 +4,7 @@
 //
 
 // RUN: vpux-opt --mlir-print-debuginfo --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW" --convert-VPUIP-to-VPUMI37XX %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX
+// REQUIRES: arch-NPU37XX
 
 module @basicDMA {
   func.func @main(%arg0: memref<1x2x3x4xf16, @DDR>, %arg1: memref<1x2x3x4xf16, @DDR>) -> memref<1x2x3x4xf16, @DDR> {

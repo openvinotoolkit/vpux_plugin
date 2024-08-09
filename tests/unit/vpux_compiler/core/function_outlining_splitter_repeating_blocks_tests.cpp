@@ -525,8 +525,9 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, BranchingSimilarProducers) {
             EXPECT_EQ(getName(irSlice.operations[1]), "maxpool4");
             EXPECT_EQ(getName(irSlice.operations[2]), "add2");
 
-            ASSERT_EQ(irSlice.inputs.size(), 1);
+            ASSERT_EQ(irSlice.inputs.size(), 2);
             EXPECT_EQ(getName(irSlice.inputs[0].getDefiningOp()), "add1");
+            EXPECT_EQ(getName(irSlice.inputs[1].getDefiningOp()), "add1");
             ASSERT_EQ(irSlice.outputs.size(), 1);
             EXPECT_EQ(getName(irSlice.outputs[0].getDefiningOp()), "add2");
         }
@@ -1019,8 +1020,9 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, MultipleBlocks) {
                 EXPECT_EQ(getName(irSlice.operations[0]), "add1");
                 EXPECT_EQ(getName(irSlice.operations[1]), "multiply1");
 
-                ASSERT_EQ(irSlice.inputs.size(), 1);
+                ASSERT_EQ(irSlice.inputs.size(), 2);
                 EXPECT_EQ(getName(irSlice.inputs[0].getDefiningOp()), "softmax");
+                EXPECT_EQ(getName(irSlice.inputs[1].getDefiningOp()), "softmax");
                 ASSERT_EQ(irSlice.outputs.size(), 1);
                 EXPECT_EQ(getName(irSlice.outputs[0].getDefiningOp()), "multiply1");
             }
@@ -1030,8 +1032,9 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, MultipleBlocks) {
                 EXPECT_EQ(getName(irSlice.operations[0]), "add2");
                 EXPECT_EQ(getName(irSlice.operations[1]), "multiply2");
 
-                ASSERT_EQ(irSlice.inputs.size(), 1);
+                ASSERT_EQ(irSlice.inputs.size(), 2);
                 EXPECT_EQ(getName(irSlice.inputs[0].getDefiningOp()), "avgpool4");
+                EXPECT_EQ(getName(irSlice.inputs[1].getDefiningOp()), "avgpool4");
                 ASSERT_EQ(irSlice.outputs.size(), 1);
                 EXPECT_EQ(getName(irSlice.outputs[0].getDefiningOp()), "multiply2");
             }
@@ -1140,8 +1143,9 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, RepeatingProducersWithDifferentC
 
                 ASSERT_EQ(irSlice.inputs.size(), 1);
                 EXPECT_TRUE(mlir::isa<mlir::BlockArgument>(irSlice.inputs[0]));
-                ASSERT_EQ(irSlice.outputs.size(), 1);
-                EXPECT_EQ(getName(irSlice.outputs[0].getDefiningOp()), "avgpool2");
+                ASSERT_EQ(irSlice.outputs.size(), 2);
+                EXPECT_EQ(getName(irSlice.outputs[0].getDefiningOp()), "maxpool2");
+                EXPECT_EQ(getName(irSlice.outputs[1].getDefiningOp()), "avgpool2");
             }
         }
         {
@@ -1522,8 +1526,99 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, RepeatingMultipleProducersWithDi
             ASSERT_EQ(irSlice.inputs.size(), 2);
             EXPECT_EQ(getName(irSlice.inputs[0].getDefiningOp()), "maxpool3");
             EXPECT_EQ(getName(irSlice.inputs[1].getDefiningOp()), "add1");
-            ASSERT_EQ(irSlice.outputs.size(), 1);
+            ASSERT_EQ(irSlice.outputs.size(), 2);
+            EXPECT_EQ(getName(irSlice.outputs[0].getDefiningOp()), "maxpool4");
+            EXPECT_EQ(getName(irSlice.outputs[1].getDefiningOp()), "add2");
+        }
+    }
+}
+
+/**
+ *    [input1] [input2]
+ *       \        /
+ *        \      /
+ *          Add
+ *           |
+ *       ----|
+ *       | ReLU
+ *       \   |
+ *        \  |
+ *          Add
+ *           |
+ *         ReLU
+ *           |
+ *        [output]
+ */
+TEST_F(MLIR_FunctionOutliningSplitterRepeating, FirstInstanceInputReuse) {
+    mlir::DialectRegistry registry;
+    vpux::registerDialects(registry);
+    vpux::registerCommonInterfaces(registry);
+
+    mlir::MLIRContext ctx(registry);
+    ctx.loadDialect<IE::IEDialect>();
+
+    constexpr StringLiteral inputIR = R"(
+        module @test {
+            func.func @main(%input: tensor<1x48x60x60xf32>) -> tensor<1x48x60x60xf32> {
+                %add1 = IE.Add(%input, %input) {auto_broadcast = #IE.auto_broadcast_type<NONE_OR_EXPLICIT>}
+                    : tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32> -> tensor<1x48x60x60xf32> loc("add1")
+                %relu1 = IE.ReLU(%add1) : tensor<1x48x60x60xf32> -> tensor<1x48x60x60xf32> loc("relu1")
+
+                %add2 = IE.Add(%add1, %relu1) {auto_broadcast = #IE.auto_broadcast_type<NONE_OR_EXPLICIT>}
+                    : tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32> -> tensor<1x48x60x60xf32> loc("add2")
+                %relu2 = IE.ReLU(%add2) : tensor<1x48x60x60xf32> -> tensor<1x48x60x60xf32> loc("relu2")
+
+                return %relu2: tensor<1x48x60x60xf32>
+            }
+        }
+    )";
+
+    auto module = mlir::parseSourceString<mlir::ModuleOp>(inputIR, &ctx);
+    ASSERT_TRUE(module.get() != nullptr);
+
+    auto func = module.get().lookupSymbol<mlir::func::FuncOp>("main");
+    ASSERT_TRUE(func != nullptr);
+
+    {
+        const size_t minOpsInBlock = 2;
+        const size_t maxNumIterations = 10;
+        FunctionOutlinerRepeatingBlocks splitter(minOpsInBlock, maxNumIterations, Logger::global());
+        const auto functionInstances = splitter.getOutliningTargets(func);
+        ASSERT_EQ(functionInstances.size(), 1);
+
+        auto& function = functionInstances[0];
+        ASSERT_EQ(function.size(), 2) << "Expected two IR slices to be outlined into this function";
+        {
+            auto& irSlice = function[0];
+            ASSERT_EQ(irSlice.operations.size(), 2);
+            EXPECT_EQ(getName(irSlice.operations[0]), "add1");
+            EXPECT_EQ(getName(irSlice.operations[1]), "relu1");
+
+            ASSERT_EQ(irSlice.inputs.size(), 2);
+            EXPECT_TRUE(mlir::isa<mlir::BlockArgument>(irSlice.inputs[0]));
+            EXPECT_TRUE(mlir::isa<mlir::BlockArgument>(irSlice.inputs[1]));
+            ASSERT_EQ(irSlice.outputs.size(), 2);
+            EXPECT_EQ(getName(irSlice.outputs[0].getDefiningOp()), "add1");
+            EXPECT_EQ(getName(irSlice.outputs[1].getDefiningOp()), "relu1");
+
+            ASSERT_EQ(irSlice.inputUserMapping.size(), 2);
+            EXPECT_TRUE(getName(irSlice.inputUserMapping[0].first) == "add1" &&
+                        irSlice.inputUserMapping[0].second == 0);
+            EXPECT_TRUE(getName(irSlice.inputUserMapping[1].first) == "add1" &&
+                        irSlice.inputUserMapping[1].second == 1);
+        }
+        {
+            auto& irSlice = function[1];
+            ASSERT_EQ(irSlice.operations.size(), 2);
+            EXPECT_EQ(getName(irSlice.operations[0]), "add2");
+            EXPECT_EQ(getName(irSlice.operations[1]), "relu2");
+
+            ASSERT_EQ(irSlice.inputs.size(), 2);
+            EXPECT_EQ(getName(irSlice.inputs[0].getDefiningOp()), "add1");
+            EXPECT_EQ(getName(irSlice.inputs[1].getDefiningOp()), "relu1");
+            ASSERT_EQ(irSlice.outputs.size(), 2);
             EXPECT_EQ(getName(irSlice.outputs[0].getDefiningOp()), "add2");
+            EXPECT_EQ(getName(irSlice.outputs[1].getDefiningOp()), "relu2");
         }
     }
 }

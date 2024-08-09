@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --propagate-quantize-dequantize %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 !qElemType = !quant.uniform<u8:f16, 0.0016544117647058823>
 
 // CHECK-LABEL: @PropagateDequantReshape
@@ -1427,7 +1427,7 @@ func.func @PropagateDequantMaxPoolNCE(%arg0: tensor<1x8x1x4x!qElemType>) -> tens
     //CHECK: [[DEQUANT:%.*]] = IE.Dequantize([[MAXPOOL]]) {dstElemType = f16} : tensor<1x8x1x4x!qElemType> -> tensor<1x8x1x4xf16>
     //CHECK: [[ADD:%.*]] = IE.Add([[DEQUANT]], [[DEQUANT]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x8x1x4xf16>, tensor<1x8x1x4xf16> -> tensor<1x8x1x4xf16>
     //CHECK: return [[ADD]] : tensor<1x8x1x4xf16>
-  
+
 }
 
 // -----
@@ -1448,5 +1448,23 @@ func.func @QuantizePropagationMaxPoolNCE(%arg0: tensor<1x8x1x4xf16>) -> tensor<1
     //CHECK: [[QUANTIZE:%.*]]  = IE.Quantize(%arg0) {dstElemType = !qElemType} : tensor<1x8x1x4xf16> -> tensor<1x8x1x4x!qElemType>
     //CHECK: [[MAXPOOL:%.*]] = IE.MaxPool([[QUANTIZE]]) {kernel_size = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]} : tensor<1x8x1x4x!qElemType> -> tensor<1x8x1x4x!qElemType>
     //CHECK: return [[MAXPOOL]] : tensor<1x8x1x4x!qElemType>
+
+}
+
+// -----
+
+!qElemType = !quant.uniform<u8:f16, 1.0000000000000000E-1>
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @DequantizePropagationReorder
+func.func @DequantizePropagationReorder(%arg0: tensor<1x3x24x24x!qElemType, {order = #NCHW}>) -> tensor<1x3x24x24xf16, {order = #NHWC}> {
+  %0 = IE.Dequantize(%arg0) {dstElemType = f16} : tensor<1x3x24x24x!qElemType, {order = #NCHW}> -> tensor<1x3x24x24xf16>
+  %1 = IE.Reorder(%0) {dstOrder = #NHWC} : tensor<1x3x24x24xf16> -> tensor<1x3x24x24xf16, {order = #NHWC}>
+  return %1 : tensor<1x3x24x24xf16, {order = #NHWC}>
+  // CHECK: [[REORDER:%.*]] = IE.Reorder(%arg0) {dstOrder = #NHWC} : tensor<1x3x24x24x!qElemType, {order = #NCHW}> -> tensor<1x3x24x24x!qElemType, {order = #NHWC}>
+  // CHECK: [[DEQUANT:%.*]] = IE.Dequantize([[REORDER]]) {dstElemType = f16} : tensor<1x3x24x24x!qElemType, {order = #NHWC}> -> tensor<1x3x24x24xf16, {order = #NHWC}>
+  // CHECK: return [[DEQUANT]] : tensor<1x3x24x24xf16, {order = #NHWC}>
 
 }

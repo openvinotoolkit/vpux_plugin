@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+//
+
 #pragma once
 
 #include "vpux/compiler/dialect/VPURegMapped/ops.hpp"
@@ -22,23 +24,32 @@ namespace VPURegMapped {
 // Passes
 //
 
-// pass object stores callable, so it cannot llvm::function_ref
-using UpperBoundCallable = std::function<size_t(VPURegMapped::TaskType, VPURegMapped::IndexType)>;
+struct TaskBufferSize {
+    TaskBufferSize(size_t dynamicSize, size_t staticSize): dynamicSize(dynamicSize), staticSize(staticSize){};
+    TaskBufferSize() = default;
+
+    size_t dynamicSize = 0;
+    size_t staticSize = 0;
+};
 
 class ResolveTaskLocationPass : public vpux::FunctionPass {
 public:
     using vpux::FunctionPass::FunctionPass;
 
 protected:
-    void createTaskLocationBuffers();
     template <typename Content>
-    using MetadataBuffersContainer =
+    using MetadataBuffersContainerType =
             llvm::SmallVector<llvm::DenseMap<VPURegMapped::TaskType, llvm::SmallVector<Content>>>;
+    struct MetadataBuffersContainer {
+        MetadataBuffersContainerType<llvm::SmallVector<mlir::Value>> data;
+        MetadataBuffersContainerType<TaskBufferSize> sizes;
+    };
 
-    MetadataBuffersContainer<size_t> _metadataBuffersSizes;
-
-private:
-    MetadataBuffersContainer<llvm::SmallVector<mlir::Value>> _metadataBuffers;
+    void createTaskLocationBuffers(VPURegMapped::TaskBufferLayoutOp taskLayoutOp,
+                                   MetadataBuffersContainer& metadataBuffers);
+    llvm::SmallVector<VPURegMapped::TaskType> _supportedTaskTypes =
+            {};  // needs to be populated by correspondent pass with the task types supported by the arch in the
+                 // specific order that the FW expects
 };
 
 }  // namespace VPURegMapped

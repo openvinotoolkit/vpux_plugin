@@ -1,13 +1,13 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --canonicalize %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
-// CHECK-LABEL: @ConvertConstToAttrVPUX37XX
-func.func @ConvertConstToAttrVPUX37XX(%arg0: tensor<5x6xf16>) -> tensor<2x6xf16> {
+// CHECK-LABEL: @ConvertConstToAttr
+func.func @ConvertConstToAttr(%arg0: tensor<5x6xf16>) -> tensor<2x6xf16> {
     %cst = const.Declare tensor<5xsi32> = dense<[0, 1, 2, 2, 3]> : tensor<5xsi32>
     %cst_0 = const.Declare tensor<2xsi32> = dense<[0, 2]> : tensor<2xsi32>
     %cst_1 = const.Declare tensor<1xsi32> = dense<0> : tensor<si32>, [#const.Reshape<[1]>]

@@ -27,7 +27,7 @@ VpuOv2LayerTest::VpuOv2LayerTest(): testTool(envConfig) {
     this->targetDevice = ov::test::utils::DEVICE_NPU;
 
     if (!envConfig.IE_NPU_TESTS_LOG_LEVEL.empty()) {
-        const auto logLevel = vpux::OptionParser<ov::log::Level>::parse(envConfig.IE_NPU_TESTS_LOG_LEVEL);
+        const auto logLevel = ::intel_npu::OptionParser<ov::log::Level>::parse(envConfig.IE_NPU_TESTS_LOG_LEVEL);
         _log.setLevel(vpux::getLogLevel(logLevel));
     }
 }
@@ -94,7 +94,7 @@ void VpuOv2LayerTest::exportReference(const std::vector<ov::Tensor>& refs) {
     for (const auto& output : compiledModel.outputs()) {
         const auto& name = output.get_node()->get_name();
 
-        auto& ref = refs.at(i);
+        auto& ref = refs.at(i++);
         const auto ext = vpux::printToString(".{0}.{1}", name, "ref");
         testTool.exportTensor(ref, filesysName(testing::UnitTest::GetInstance()->current_test_info(), ext,
                                                !envConfig.IE_NPU_TESTS_LONG_FILE_NAME));
@@ -117,6 +117,9 @@ std::vector<ov::Tensor> VpuOv2LayerTest::importReference() {
 
 void VpuOv2LayerTest::run(const std::string_view platform) {
     setPlatform(platform);
+    if (envConfig.IE_NPU_SINGLE_CLUSTER_MODE) {
+        setSingleClusterMode();
+    }
     run();
 }
 

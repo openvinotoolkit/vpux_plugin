@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --convert-VPUASM-to-NPUReg40XX-relocs %s | FileCheck %s
-// REQUIRES: arch-VPUX40XX
+// REQUIRES: arch-NPU40XX
 
 module @OneDMAWithoutAttributes {
   IE.CNNNetwork entryPoint : @main inputsInfo : {

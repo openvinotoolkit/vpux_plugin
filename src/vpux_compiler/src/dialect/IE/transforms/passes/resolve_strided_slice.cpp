@@ -91,6 +91,7 @@ mlir::LogicalResult ResolveStridedSlicePass::SlicePlanning::matchAndRewrite(IE::
     const auto plan = getSlicePlan(origOp);
 
     auto beginAttr = getIntArrayAttr(getContext(), plan.begins);
+    const auto reverseAxis = plan.reverse_axes.to_vector();
     IE::LayerOpInterface newOp;
     if (llvm::any_of(plan.strides, [](int64_t val) {
             return val > 1;
@@ -104,13 +105,33 @@ mlir::LogicalResult ResolveStridedSlicePass::SlicePlanning::matchAndRewrite(IE::
                                                     stridesAttr, zeroesArrayAttr, zeroesArrayAttr, zeroesArrayAttr,
                                                     zeroesArrayAttr, zeroesArrayAttr);
     } else {
+        auto source = origOp.getInput();
+        if (!reverseAxis.empty()) {
+            VPUX_THROW_UNLESS(reverseAxis.size() == 1, "Currently only support reverse on one axis");
+            const auto axis = reverseAxis[0];
+            const auto inShape = getShape(source);
+            const auto sliceNums = inShape[Dim(axis)];
+
+            SmallVector<mlir::Value> concatInputs;
+            SmallVector<int64_t> sliceOffset(inShape.size(), 0);
+            SmallVector<int64_t> sliceShape(inShape.begin(), inShape.end());
+            sliceShape[axis] = 1;
+            for (int64_t i = 0; i < sliceNums; i++) {
+                sliceOffset[axis] = i;
+                concatInputs.push_back(
+                        rewriter.create<IE::SliceOp>(origOp.getLoc(), source, sliceOffset, sliceShape).getResult());
+            }
+            std::reverse(concatInputs.begin(), concatInputs.end());
+
+            auto concatOp = rewriter.create<IE::ConcatOp>(origOp.getLoc(), concatInputs, Dim(axis));
+            source = concatOp.getOutput();
+        }
         auto sizes = std::vector<int64_t>(plan.ends.size());
         std::transform(plan.ends.cbegin(), plan.ends.cend(), plan.begins.cbegin(), sizes.begin(),
                        std::minus<int64_t>());
-        auto source = origOp.getInput();
 
         auto it = std::adjacent_find(sizes.begin(), sizes.end());
-        auto newInputShape = std::vector<int64_t>(getShape(origOp.getInput()).raw());
+        auto newInputShape = std::vector<int64_t>(getShape(source).raw());
         auto index = it - sizes.begin();
         // Merge the adjacent dims if their values are both 1 and not slice dim
         // For example: 1x1x9x16x1000 -> 1x1x9x16x478
@@ -175,6 +196,7 @@ void ResolveStridedSlicePass::safeRunOnFunc() {
     mlir::ConversionTarget target(ctx);
     target.addDynamicallyLegalOp<IE::StridedSliceOp>(isLegalOp);
     target.addLegalOp<IE::ReshapeOp>();
+    target.addLegalOp<IE::ConcatOp>();
     target.addLegalOp<IE::SliceOp>();
 
     mlir::RewritePatternSet patterns(&ctx);

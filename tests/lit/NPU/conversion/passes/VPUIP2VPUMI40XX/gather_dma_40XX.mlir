@@ -4,7 +4,7 @@
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW" --convert-VPUIP-to-VPUMI40XX %s | FileCheck %s
-// REQUIRES: arch-VPUX40XX
+// REQUIRES: arch-NPU40XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 module @GatherDMA {
@@ -28,7 +28,7 @@ module @GatherDMA {
     }
 //
     // CHECK-NOT: VPUIP.GatherDMA
-    // CHECK: %[[VAL2:.*]] = VPUMI40XX.NNDMA {allow_different_in_out_shapes, port = 0 : i64} inputs(%0 : memref<1x1x16x256xf16, #NHWC, @DDR>) outputs(%1 : memref<1x1x8x256xf16, #NHWC, [@CMX_NN, 0]>) start_after(0) clean_after(0) acceleration_mode(<DISABLE>) indices(%3 : memref<1x1x8x1xi64, #NHWC, [@CMX_NN, 0]>) -> !VPURegMapped.Index<0:0:0>
+    // CHECK: %[[VAL2:.*]] = VPUMI40XX.NNDMA {allow_different_in_out_shapes, port = 0 : i64} inputs(%0 : memref<1x1x16x256xf16, #NHWC, @DDR>) outputs(%1 : memref<1x1x8x256xf16, #NHWC, [@CMX_NN, 0]>) start_after(0) clean_after(0) acceleration_mode(<DISABLE>){{.*}}indices(%3 : memref<1x1x8x1xi64, #NHWC, [@CMX_NN, 0]>) -> !VPURegMapped.Index<0:0:0>
 
     return %arg1 : memref<1x1x16x256xf16, #NHWC, @DDR>
   }

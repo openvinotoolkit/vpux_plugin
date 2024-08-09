@@ -4,7 +4,7 @@
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --convert-divide-to-multiply --canonicalize %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 !qElemType = !quant.uniform<u8:f16, 0.01013327205882353>
 

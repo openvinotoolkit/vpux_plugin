@@ -9,7 +9,7 @@
 namespace vpux {
 namespace vpumi37xx2vpuasm {
 
-mlir::FlatSymbolRefAttr NNDMARewriter::getSymbolicName(VPUMI37XX::NNDMAOp op, size_t) {
+llvm::SmallVector<mlir::FlatSymbolRefAttr> NNDMARewriter::getSymbolicNames(VPUMI37XX::NNDMAOp op, size_t) {
     auto fullName = VPUMI37XX::NNDMAOp::getOperationName();
     auto opName = fullName.drop_front(VPUMI37XX::VPUMI37XXDialect::getDialectNamespace().size() + 1);
 
@@ -19,7 +19,7 @@ mlir::FlatSymbolRefAttr NNDMARewriter::getSymbolicName(VPUMI37XX::NNDMAOp op, si
 
     auto symName = mlir::StringAttr::get(op.getContext(), opName + "_" + tileIdx + "_" + srcTypeIdx + "_" + opIdx);
 
-    return mlir::FlatSymbolRefAttr::get(symName);
+    return {mlir::FlatSymbolRefAttr::get(symName)};
 }
 
 llvm::SmallVector<std::pair<uint32_t, int32_t>> NNDMARewriter::reduce_dims_for_dma(mlir::Value val) {
@@ -175,7 +175,8 @@ mlir::LogicalResult NNDMARewriter::symbolize(VPUMI37XX::NNDMAOp op, SymbolMapper
     rewriter.create<VPUASM::NNDMAOp>(op.getLoc(), symName, taskIdx, taskLocation, nextLink, input, outputs, waitAttr,
                                      updateAttr, startAfter, cleanAfter, accelerationMode, isOutOfOrder, isCritical,
                                      /*enable_msc*/ nullptr,
-                                     /*act_compression_size_entry*/ nullptr, descriptor,
+                                     /*act_compression_size_entry*/ nullptr, /*act_compression_sparsity_map*/ nullptr,
+                                     descriptor,
                                      /*dma_hwp_id*/ nullptr, /*tile_indexes*/ nullptr, nullptr);
 
     rewriter.eraseOp(op);

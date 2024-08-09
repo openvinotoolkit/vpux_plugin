@@ -997,7 +997,7 @@ def IE_LessOp :
     );
 
     let results = (outs
-        RankedTensorOf<[F16, F32, SI32, SI64]>:$output
+        RankedTensorOf<[Bool8]>:$output
     );
 }
 
@@ -1022,7 +1022,7 @@ def IE_LessEqualOp :
     );
 
     let results = (outs
-        RankedTensorOf<[F16, F32, SI32, SI64]>:$output
+        RankedTensorOf<[Bool8]>:$output
     );
 }
 
@@ -1047,7 +1047,7 @@ def IE_GreaterOp :
     );
 
     let results = (outs
-        RankedTensorOf<[F16, F32, SI32, SI64]>:$output
+        RankedTensorOf<[Bool8]>:$output
     );
 }
 
@@ -1072,7 +1072,7 @@ def IE_GreaterEqualOp :
     );
 
     let results = (outs
-        RankedTensorOf<[F16, F32, SI32, SI64]>:$output
+        RankedTensorOf<[Bool8]>:$output
     );
 }
 
@@ -1323,9 +1323,9 @@ def IE_ConvolutionOp :
     let summary = "InferenceEngine Convolution layer";
 
     let arguments = (ins
-        RankedTensorOf<[F16, F32, quant_QuantizedType]>:$input,
-        RankedTensorOf<[F16, F32, quant_QuantizedType]>:$filter,
-        Optional<RankedTensorOf<[F16, F32]>>:$bias,
+        RankedTensorOf<[F16, F32, quant_QuantizedType, SI32]>:$input,
+        RankedTensorOf<[F16, F32, quant_QuantizedType, SI32]>:$filter,
+        Optional<RankedTensorOf<[F16, F32, SI32]>>:$bias,
 
         I64ArrayAttr:$strides,
         I64ArrayAttr:$pads_begin,
@@ -1338,7 +1338,7 @@ def IE_ConvolutionOp :
     );
 
     let results = (outs
-        RankedTensorOf<[F16, F32, quant_QuantizedType]>:$output
+        RankedTensorOf<[F16, F32, quant_QuantizedType, SI32]>:$output
     );
 
     let hasCanonicalizer = 1;
@@ -1357,8 +1357,8 @@ def IE_GroupConvolutionOp :
     let summary = "InferenceEngine GroupConvolution layer";
 
     let arguments = (ins
-        RankedTensorOf<[F16, F32, quant_QuantizedType]>:$input,
-        RankedTensorOf<[F16, F32, quant_QuantizedType]>:$filter,
+        RankedTensorOf<[F16, F32, quant_QuantizedType, SI32]>:$input,
+        RankedTensorOf<[F16, F32, quant_QuantizedType, SI32]>:$filter,
         Optional<RankedTensorOf<[F16, F32]>>:$bias,
 
         I64ArrayAttr:$strides,
@@ -1372,7 +1372,7 @@ def IE_GroupConvolutionOp :
     );
 
     let results = (outs
-        RankedTensorOf<[F16, F32, quant_QuantizedType]>:$output
+        RankedTensorOf<[F16, F32, quant_QuantizedType, SI32]>:$output
     );
 
     let hasCanonicalizer = 1;
@@ -1955,7 +1955,9 @@ def IE_LRNOp :
 
     let arguments = (ins
         RankedTensorOf<[F16, F32]>:$input,
-        AnyRankedTensor:$axis,
+        Optional<1DTensorOf<[SI32, SI64]>>:$axes,
+
+        OptionalAttr<I64ArrayAttr>:$axes_value,
 
         F64Attr:$alpha,
         F64Attr:$beta,
@@ -1966,6 +1968,8 @@ def IE_LRNOp :
     let results = (outs
         RankedTensorOf<[F16, F32]>:$output
     );
+
+    let hasCanonicalizer = 1;
 }
 
 //
@@ -2366,6 +2370,7 @@ def IE_FakeQuantizeOp :
         RankedTensorOf<[F16, F32]>:$output
     );
 
+    let hasCanonicalizer = 1;
     let hasFolder = 1;
     let hasVerifier = 1;
 }
@@ -3476,12 +3481,26 @@ def IE_MVNOp :
 
         BoolAttr:$across_channels,
         BoolAttr:$normalize_variance,
-        F64Attr:$eps
+        F64Attr:$eps,
+        OptionalAttr<I64ArrayAttr>:$internal_reshape
     );
 
     let results = (outs
         AnyRankedTensor:$output
     );
+
+    let builders = [
+        OpBuilder<(ins
+            "::mlir::Value":$input,
+            "::mlir::BoolAttr":$across_channels,
+            "::mlir::BoolAttr":$normalize_variance,
+            "::mlir::FloatAttr":$eps
+        )>
+    ];
+
+    let extraClassDeclaration = [{
+        bool channelsFitIntoCMX();
+    }] # baseExtraClassDeclaration;
 }
 
 //
@@ -4135,13 +4154,13 @@ def IE_FullyConnectedOp:
     let summary = "InferenceEngine FullyConnected layer";
 
     let arguments = (ins
-        RankedTensorOf<[F16, F32]>:$input,
-        RankedTensorOf<[F16, F32]>:$weights,
-        Optional<RankedTensorOf<[F16, F32]>>:$bias
+        RankedTensorOf<[F16, F32, SI32]>:$input,
+        RankedTensorOf<[F16, F32, SI32]>:$weights,
+        Optional<RankedTensorOf<[F16, F32, SI32]>>:$bias
     );
 
     let results = (outs
-        RankedTensorOf<[F16, F32]>:$output
+        RankedTensorOf<[F16, F32, SI32]>:$output
     );
 
     let hasCanonicalizer = 1;
@@ -4306,7 +4325,7 @@ def IE_LSTMGatesOp :
     let description = [{
         This operation is intended to be run as a software stage after computing and adding LSTM matrix multiplications.
 
-        - **gatesInput** - tensor of shape **[batchSize, 4 * hiddenSize]**. Formula:
+        - **gatesInput** - tensor of shape **[batchSize, 4 * hiddenSize]** or **[1, 1, batchSize, 4 * hiddenSize]**. Formula:
             ```
             gatesInput = (inputData * weights) + (initialHiddenState * recurrenceWeights) + biases
             * - Matrix multiplication
@@ -4316,13 +4335,13 @@ def IE_LSTMGatesOp :
     }];
 
     let arguments = (ins
-        2DTensorOf<[F16, F32]>:$gatesInput,
-        2DTensorOf<[F16, F32]>:$initialCellState
+        AnyTypeOf<[2DTensorOf<[F16, F32]>, 4DTensorOf<[F16, F32]>]>:$gatesInput,
+        AnyTypeOf<[2DTensorOf<[F16, F32]>, 4DTensorOf<[F16, F32]>]>:$initialCellState
     );
 
     let results = (outs
-        2DTensorOf<[F16, F32]>:$outputHiddenState,
-        2DTensorOf<[F16, F32]>:$outputCellState
+        AnyTypeOf<[2DTensorOf<[F16, F32]>, 4DTensorOf<[F16, F32]>]>:$outputHiddenState,
+        AnyTypeOf<[2DTensorOf<[F16, F32]>, 4DTensorOf<[F16, F32]>]>:$outputCellState
     );
 
     let hasVerifier = 1;
@@ -4385,8 +4404,8 @@ def IE_SubtractOp :
     let summary = "InferenceEngine Subtract layer";
 
     let arguments = (ins
-        RankedTensorOf<[F16, F32, SI32, SI64, UI8, UI16, UI32, UI64]>:$input1,
-        RankedTensorOf<[F16, F32, SI32, SI64, UI8, UI16, UI32, UI64]>:$input2,
+        RankedTensorOf<[F16, F32, SI32, SI64, UI8, UI16, UI32, UI64, quant_QuantizedType]>:$input1,
+        RankedTensorOf<[F16, F32, SI32, SI64, UI8, UI16, UI32, UI64, quant_QuantizedType]>:$input2,
 
         IE_AutoBroadcastTypeAttr:$auto_broadcast,
         OptionalAttr<IE_PostOpAttr>:$post_op,
@@ -4394,7 +4413,7 @@ def IE_SubtractOp :
     );
 
     let results = (outs
-        RankedTensorOf<[F16, F32, SI32, SI64, UI8, UI16, UI32, UI64]>:$output
+        RankedTensorOf<[F16, F32, SI32, SI64, UI8, UI16, UI32, UI64, quant_QuantizedType]>:$output
     );
 
     let hasFolder = 1;
@@ -4710,7 +4729,7 @@ def IE_NotEqualOp :
     );
 
     let results = (outs
-        RankedTensorOf<[F16, F32, SI32, SI64]>:$output
+        RankedTensorOf<[Bool8]>:$output
     );
 }
 
@@ -5610,7 +5629,7 @@ def IE_NonZeroOp :
     let summary = "InferenceEngine NonZero layer";
 
     let arguments = (ins
-        RankedTensorOf<[F16, F32, SI32, SI64]>:$input,
+        RankedTensorOf<[F16, F32, SI32, SI64, Bool8]>:$input,
 
         TypeAttr:$dstElemType
     );

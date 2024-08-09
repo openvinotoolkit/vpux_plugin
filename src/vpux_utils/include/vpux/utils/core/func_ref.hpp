@@ -4,6 +4,8 @@
 //
 
 //
+
+//
 // Light-weight non-owning wrapper for callback functions.
 //
 // Can be used to pass some callback to another function in case if the callback

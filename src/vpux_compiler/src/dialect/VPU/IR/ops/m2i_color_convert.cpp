@@ -70,11 +70,11 @@ bool vpux::VPU::M2IColorConvertOp::isSupported(IE::YuvToRgbOp op, LogCb logCb, b
 
 mlir::LogicalResult vpux::VPU::M2IColorConvertOp::inferReturnTypes(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    M2IColorConvertOpAdaptor op(operands, attrs);
+    M2IColorConvertOpAdaptor op(operands, attrs, prop);
     if (mlir::failed(op.verify(loc))) {
         return mlir::failure();
     }

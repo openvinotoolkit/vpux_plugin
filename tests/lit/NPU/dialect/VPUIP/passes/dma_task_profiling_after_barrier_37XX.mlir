@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
-// RUN: vpux-opt --init-compiler="vpu-arch=%arch% allow-custom-values=true" --dma-task-profiling-after-barrier %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX
+// RUN: vpux-opt --init-compiler="vpu-arch=%arch% allow-custom-values=true" --dma-task-profiling-after-barrier="dma-profiling=true" %s | FileCheck %s
+// REQUIRES: arch-NPU37XX
 
 !dataType = memref<1x16x4x4xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>
 
@@ -142,6 +142,6 @@ module @DMAGraph {
 // CHECK:    [[PROF_BUF_CMX_PORT1:%.+]] = VPURT.DeclareBuffer <CMX_NN> [0] <128> -> memref<4xui64, [@CMX_NN, 0]>
 // CHECK:    [[PROF_OUTPUT_1:%.+]] = VPURT.DeclareBuffer <ProfilingOutput> [0] <16> -> memref<4xui64>
 // CHECK:    VPURT.Task
-// CHECK-NEXT:    VPUIP.NNDMA {port = 1 : i64}
+// CHECK-NEXT:    VPUIP.NNDMA {port = 1 : i64, profiling_buffer_mgmt}
 // CHECK-SAME:        inputs([[PROF_BUF_CMX_PORT1]]
 // CHECK-SAME:        outputs([[PROF_OUTPUT_1]]

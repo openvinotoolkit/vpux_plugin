@@ -13,14 +13,8 @@ namespace test {
 
 class GatherNDLayerTestCommon : public GatherND8LayerTest, virtual public VpuOv2LayerTest {};
 
-class GatherNDLayerTest_NPU3700 : public GatherNDLayerTestCommon {};
 class GatherNDLayerTest_NPU3720 : public GatherNDLayerTestCommon {};
 class GatherNDLayerTest_NPU4000 : public GatherNDLayerTestCommon {};
-
-TEST_P(GatherNDLayerTest_NPU3700, SW) {
-    setReferenceSoftwareMode();
-    run(Platform::NPU3700);
-}
 
 TEST_P(GatherNDLayerTest_NPU3720, HW) {
     setDefaultHardwareMode();
@@ -73,13 +67,6 @@ const auto gatherNDArgsSubsetTiling = testing::Combine(
         testing::ValuesIn(static_shapes_to_test_representation(iShapeSubsetTiling)),
         testing::ValuesIn(std::vector<ov::Shape>({{2, 1, 100, 2}})), testing::ValuesIn(std::vector<int>({1})),
         testing::Values(ov::element::i32), testing::Values(ov::element::i32), testing::Values(DEVICE_NPU));
-
-// ------ NPU3700 ------
-INSTANTIATE_TEST_SUITE_P(smoke_GatherND_Set1, GatherNDLayerTest_NPU3700, gatherNDArgsSubset1,
-                         GatherND8LayerTest::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_GatherND_Set2, GatherNDLayerTest_NPU3700, gatherNDArgsSubset2,
-                         GatherND8LayerTest::getTestCaseName);
 
 // ------ NPU3720 ------
 INSTANTIATE_TEST_SUITE_P(smoke_GatherND, GatherNDLayerTest_NPU3720, gatherNDArgsSubset1,

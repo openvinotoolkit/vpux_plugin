@@ -12,6 +12,7 @@
 //
 
 #include "vpux/compiler/utils/custom_pwl_table.hpp"
+#include "vpux/compiler/utils/attributes_properties_conversion.hpp"
 #include "vpux/compiler/utils/prelu_pwl_table.hpp"
 #include "vpux/utils/core/numeric.hpp"
 
@@ -36,7 +37,7 @@ std::optional<vpux::PWLTableEntry> findLeakyReluPWLEntry(const float reluSlope, 
 }
 
 std::optional<vpux::PWLTableEntry> getLeakyReluPWLEntry(IE::PostOpAttr postOp, mlir::Type outElemType) {
-    IE::LeakyReluOp::Adaptor leakyRelu(std::nullopt, postOp.getAttrs());
+    IE::LeakyReluOp::Adaptor leakyRelu(std::nullopt, nullptr, toProperties<IE::LeakyReluOp>(postOp.getAttrs()));
     VPUX_THROW_UNLESS(leakyRelu.verify(mlir::UnknownLoc::get(postOp.getContext())).succeeded(),
                       "Wrong attributes '{0}' for '{1}' PostOp", postOp.getAttrs(), postOp.getName());
 

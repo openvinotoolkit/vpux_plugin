@@ -189,11 +189,11 @@ mlir::FailureOr<mlir::Type> inferReturnElemTypeWithOffsets(IE::ConcatOpAdaptor c
 
 mlir::LogicalResult vpux::IE::ConcatOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::ConcatOpAdaptor concat(operands, attrs);
+    IE::ConcatOpAdaptor concat(operands, attrs, prop);
     if (mlir::failed(concat.verify(loc))) {
         return mlir::failure();
     }

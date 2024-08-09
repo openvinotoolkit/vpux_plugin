@@ -39,11 +39,11 @@ mlir::LogicalResult vpux::IE::HardSigmoidOp::verify() {
 
 mlir::LogicalResult vpux::IE::HardSigmoidOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::HardSigmoidOpAdaptor hardSigmoid(operands, attrs);
+    IE::HardSigmoidOpAdaptor hardSigmoid(operands, attrs, prop);
     if (mlir::failed(hardSigmoid.verify(loc))) {
         return mlir::failure();
     }
@@ -81,18 +81,17 @@ mlir::LogicalResult ConvertConstToAttr::matchAndRewrite(IE::HardSigmoidOp hardSi
     auto alphaConst = alpha.getDefiningOp<Const::DeclareOp>();
     auto betaConst = beta.getDefiningOp<Const::DeclareOp>();
 
-    if ((alphaConst == nullptr) || (betaConst == nullptr)) {
+    const auto isSplat = [](Const::DeclareOp op) {
+        return (op != nullptr) && op.getContentAttr().isSplat();
+    };
+    if (!isSplat(alphaConst) || !isSplat(betaConst)) {
         return mlir::failure();
     }
 
     const auto alphaContent = alphaConst.getContent();
-    const auto betaContent = betaConst.getContent();
-
-    if ((!alphaContent.isSplat()) || (!betaContent.isSplat())) {
-        return mlir::failure();
-    }
-
     const auto alphaValue = alphaContent.getSplatValue<float>();
+
+    const auto betaContent = betaConst.getContent();
     const auto betaValue = betaContent.getSplatValue<float>();
 
     rewriter.replaceOpWithNewOp<IE::HardSigmoidOp>(hardSigmoidOp, hardSigmoidOp.getType(), hardSigmoidOp.getInput(),

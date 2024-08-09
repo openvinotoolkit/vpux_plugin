@@ -78,16 +78,16 @@ def VPU_ClusteredOpInterface : OpInterface<"ClusteredOpInterface"> {
                 "mlir::IntegerAttr", "getOptimalNumClusters", (ins "vpux::ShapeRef":$shape, "vpux::VPU::MultiClusterStrategy":$strategy),
                 [{}],
                 [{
-                    return vpux::VPU::getOptimalNumClusters($_op, shape[Dims4D::Act::C], strategy);
+                    return vpux::VPU::getOptimalNumClusters($_op, shape, strategy);
                 }]
                 >,
 
         InterfaceMethod<
                 "Get DistributedTensorAttr with per cluster shapes/offsets defined explicitly, rather than through params such as kernel/pad/stride etc.",
-                "vpux::VPU::DistributedTensorAttr", "getExplicitDistributedTensorAttr",
+                "vpux::VPU::DistributedTensorNative", "getExplicitDistributedTensorAttr",
                 (ins "vpux::ShapeRef":$shape, "vpux::VPU::DistributionMode":$distributionMode,
-                "mlir::ArrayAttr":$numTiles, "mlir::IntegerAttr":$numClusters, "mlir::ArrayAttr":$alignment,
-                "mlir::UnitAttr":$uniformDistributedSegments, "const vpux::VPU::OverlapDistributionParams&":$overlapParams)
+                "ArrayRef<int64_t>":$numTiles, "const int64_t":$numClusters, "ArrayRef<int64_t>":$alignment,
+                "const bool":$uniformDistributedSegments, "const vpux::VPU::OverlapDistributionParams&":$overlapParams)
                 >,
 
         InterfaceMethod<
@@ -117,6 +117,26 @@ def VPU_ClusteredOpInterface : OpInterface<"ClusteredOpInterface"> {
                 [{}],
                 [{
                     return VPU::checkMCRestrictions($_op) && vpux::VPU::isOperationSplitOverKernelCompatible($_op, outputShape, offset, axis);
+                }]
+                >,
+
+        InterfaceMethod<
+                "Verifies if the operation is compatible with the SplitOverBatch multi-cluster strategy",
+                "bool", "isOperationSplitOverBatchCompatible",
+                (ins "vpux::ShapeRef":$outputShape),
+                [{}],
+                [{
+                    return VPU::checkMCRestrictions($_op) && vpux::VPU::isOperationSplitOverBatchCompatible($_op, outputShape);
+                }]
+                >,
+
+        InterfaceMethod<
+                "Verifies if the operation is compatible with the SplitOverGroup multi-cluster strategy",
+                "bool", "isOperationSplitOverGroupCompatible",
+                (ins "const vpux::TileInfo&":$outputTile),
+                [{}],
+                [{
+                    return vpux::VPU::isOperationSplitOverGroupCompatible($_op, outputTile);
                 }]
                 >,
 
@@ -212,6 +232,7 @@ def VPU_NCEOpInterface : OpInterface<"NCEOpInterface"> {
         InterfaceMethod<
             "Get NCE operation PPE",
             "std::optional<vpux::VPU::PPETaskAttr>", "getPPE", (ins),
+            [{}],
             [{
                 return $_op.getPpe();
             }]
@@ -220,6 +241,7 @@ def VPU_NCEOpInterface : OpInterface<"NCEOpInterface"> {
         InterfaceMethod<
             "Set NCE operation PPE",
             "void", "setPPE", (ins "vpux::VPU::PPETaskAttr":$ppe_task_attr),
+            [{}],
             [{
                 $_op->setAttr($_op.getPpeAttrName(), ppe_task_attr);
             }]
@@ -267,58 +289,28 @@ def VPU_NCEOpInterface : OpInterface<"NCEOpInterface"> {
         InterfaceMethod<
             "Get all workloads",
             "mlir::Region&", "getWorkloads", (ins),
+            [{}],
             [{
                 return $_op.getWorkloads();
             }]
         >,
 
-
         InterfaceMethod<
             "verify input type",
             "mlir::LogicalResult", "verifyInputType",
-            (ins "vpux::NDTypeInterface":$inputType)
-        >
+            (ins "vpux::NDTypeInterface":$inputType),
+            [{}],
+            [{
+                return vpux::VPU::details::verifyInputTypeOp($_op, inputType);
+            }]
+        >,
 
+        InterfaceMethod<
+            "Get MPE mode",
+            "vpux::VPU::MPEMode", "getMpeMode",
+            (ins "mlir::Type":$inElemType, "mlir::Type":$outElemType, "ShapeRef":$shape)
+        >,
     ];
-
-    let extraTraitClassDeclaration = [{
-        mlir::LogicalResult verifyChannels() {
-            auto arch = getArch($_op);
-            return mlir::success(
-                vpux::VPU::NCEInvariant::isInputActTypeSupported(arch,
-                    $_op->getOperand(0).getType().template cast<vpux::NDTypeInterface>(),
-                    mlir::cast<ConcreteOp>($_op).getInputChannelAlignment(), false) &&
-                vpux::VPU::NCEInvariant::isOutputActTypeSupported(
-                    $_op->getResult(0).getType().template cast<vpux::NDTypeInterface>(),
-                    mlir::cast<ConcreteOp>($_op).getOutputChannelAlignment()));
-        }
-
-        static int64_t getInputChannelAlignmentImpl(vpux::NDTypeInterface inputType) {
-            return vpux::VPU::NCEInvariant::getAlignment(inputType.getElementType());
-        }
-        static int64_t getOutputChannelAlignmentImpl(vpux::NDTypeInterface outputType) {
-            return vpux::VPU::NCEInvariant::getAlignment(outputType.getElementType());
-        }
-
-        int64_t getInputChannelAlignment() {
-            const auto inputType = $_op->getOperand(0).getType().template cast<vpux::NDTypeInterface>();
-            return ConcreteOp::getInputChannelAlignmentImpl(inputType);
-        }
-        int64_t getOutputChannelAlignment() {
-            const auto outputType = $_op->getResult(0).getType().template cast<vpux::NDTypeInterface>();
-            return ConcreteOp::getOutputChannelAlignmentImpl(outputType);
-        }
-
-        bool checkChannelRestrictions(int64_t /*channels*/) {
-            return true;
-        }
-
-
-    }];
-
-    let verify = [{
-        return vpux::VPU::verifyNCEOp($_op);
-    }];
 }
 
 //
@@ -385,6 +377,26 @@ def VPU_TilingViewLikeOpInterface : OpInterface<"TilingViewLikeOpInterface"> {
             "Infer input tiles information from the output tile",
             "vpux::TilingInfo", "backInferTileInfo",
             (ins "const vpux::TileInfo&":$outputTile, "vpux::Logger":$log)
+        >,
+
+        InterfaceMethod<
+            "Infer input tiling strategy from the output tiling strategy",
+            "mlir::SmallVector<int64_t>", "backInferTilingStrategy",
+            (ins "mlir::ArrayRef<int64_t>":$outputTilingStrategy),
+            [{}],
+            [{
+                return mlir::SmallVector<int64_t>(outputTilingStrategy);
+            }]
+        >,
+
+        InterfaceMethod<
+            "Infer input tiling dim from the output tiling dim",
+            "vpux::Dim", "backInferTilingDim",
+            (ins "vpux::Dim":$outputDim),
+            [{}],
+            [{
+                return outputDim;
+            }]
         >,
 
         InterfaceMethod<

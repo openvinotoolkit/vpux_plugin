@@ -105,7 +105,8 @@ RawProfilingRecords parseDmaHwTaskProfiling(
         VPUX_THROW_WHEN(task->isProfBegin(), "DMA HWP do not use profBegin tasks");
 
         unsigned recordNumber = task->dataIndex();
-        VPUX_THROW_UNLESS(recordNumber < totalDmaTasks, "Can't process DMA profiling data.");
+        VPUX_THROW_UNLESS(recordNumber < totalDmaTasks, "Can't process DMA profiling data: {0} out of {1}",
+                          recordNumber, totalDmaTasks);
         VPUX_THROW_UNLESS(recordNumber * sizeof(HwpDma40Data_t) < outputLen, "Invalid profiling data");
 
         auto outputBin = reinterpret_cast<const HwpDma40Data_t*>(output);
@@ -119,22 +120,14 @@ RawProfilingRecords parseDmaHwTaskProfiling(
 
 RawProfilingRecords parseDmaSwTaskProfiling(
         const flatbuffers::Vector<flatbuffers::Offset<ProfilingFB::DMATask>>* dmaTaskList, const void* output,
-        size_t outputLen, MVCNN::TargetDevice device) {
+        size_t outputLen, MVCNN::TargetDevice) {
     if (dmaTaskList == nullptr) {
         return {};
     }
 
-    uint64_t overflowShift = 0;
-    uint32_t lastTime = 0;
-
     size_t totalDmaTasks = 0;
-    if (device != MVCNN::TargetDevice::TargetDevice_VPUX37XX) {
-        VPUX_THROW_WHEN(outputLen % sizeof(DMA20Data_t) != 0, "Invalid section size");
-        totalDmaTasks = outputLen / sizeof(DMA20Data_t);
-    } else {
-        VPUX_THROW_WHEN(outputLen % sizeof(DMA27Data_t) != 0, "Invalid section size");
-        totalDmaTasks = outputLen / sizeof(DMA27Data_t);
-    }
+    VPUX_THROW_WHEN(outputLen % sizeof(DMA27Data_t) != 0, "Invalid section size");
+    totalDmaTasks = outputLen / sizeof(DMA27Data_t);
 
     RawProfilingRecord::BarriersSet lastProfilingRecordWaitBarriers;
     uint32_t foundDmaTasks = 0;
@@ -148,29 +141,12 @@ RawProfilingRecords parseDmaSwTaskProfiling(
 
             VPUX_THROW_UNLESS(recordNumber < totalDmaTasks, "Can't process DMA profiling data.");
 
-            if (device != MVCNN::TargetDevice::TargetDevice_VPUX37XX) {
-                VPUX_THROW_WHEN(recordNumber * sizeof(DMA20Data_t) >= outputLen, "Invalid profiling data");
+            VPUX_THROW_WHEN(recordNumber * sizeof(DMA27Data_t) >= outputLen, "Invalid profiling data");
 
-                auto outputBin = reinterpret_cast<const DMA20Data_t*>(output);
-                const auto record = outputBin[recordNumber];
-
-                // Catch overflow and increase overflow shift for absolute start time
-                if (lastTime > 0x7F000000 && record.startCycle < 0x7F000000) {
-                    overflowShift += 0x100000000;
-                }
-                lastTime = record.startCycle;
-
-                rawRecords.push_back(
-                        std::make_shared<RawProfilingDMA20Record>(record, taskMetadata, lastProfilingRecordWaitBarriers,
-                                                                  updateBarriers, overflowShift, recordNumber));
-            } else {
-                VPUX_THROW_WHEN(recordNumber * sizeof(DMA27Data_t) >= outputLen, "Invalid profiling data");
-
-                auto outputBin = reinterpret_cast<const DMA27Data_t*>(output);
-                const auto record = outputBin[recordNumber];
-                rawRecords.push_back(std::make_shared<RawProfilingDMA27Record>(
-                        record, taskMetadata, lastProfilingRecordWaitBarriers, updateBarriers, recordNumber));
-            }
+            auto outputBin = reinterpret_cast<const DMA27Data_t*>(output);
+            const auto record = outputBin[recordNumber];
+            rawRecords.push_back(std::make_shared<RawProfilingDMA27Record>(
+                    record, taskMetadata, lastProfilingRecordWaitBarriers, updateBarriers, recordNumber));
         } else {
             lastProfilingRecordWaitBarriers = RawProfilingRecord::getWaitBarriersFromTask(taskMetadata);
         }
@@ -261,8 +237,6 @@ size_t getDpuRecordSize(MVCNN::TargetDevice device) {
         return sizeof(HwpDpuIduOduData_t);
     case MVCNN::TargetDevice::TargetDevice_VPUX37XX:
         return sizeof(HwpDpu27Mode0Data_t);
-    case MVCNN::TargetDevice::TargetDevice_VPUX30XX:
-        return sizeof(SwDpuData_t);
     default:
         VPUX_THROW("TargetDevice {0} is not supported ", MVCNN::EnumNameTargetDevice(device));
     }
@@ -277,7 +251,7 @@ struct DpuMetaComparator {
 
 RawProfilingRecords parseDPUTaskProfiling(
         const flatbuffers::Vector<flatbuffers::Offset<ProfilingFB::DPUTask>>* dpuTaskList, const void* output,
-        size_t outputLen, MVCNN::TargetDevice device, bool ignoreSanitizationErrors) {
+        size_t outputLen, MVCNN::TargetDevice device, vpux::Logger& log, bool ignoreSanitizationErrors) {
     if (dpuTaskList == nullptr) {
         return {};
     }
@@ -287,8 +261,6 @@ RawProfilingRecords parseDPUTaskProfiling(
     unsigned currentPos = 0;
     std::set<const ProfilingFB::DPUTask*, DpuMetaComparator> profInfoAggregator(dpuTaskList->begin(),
                                                                                 dpuTaskList->end());
-    vpux::Logger log = vpux::Logger::global();
-
     RawProfilingRecords rawRecords;
     size_t clusterBeginning = 0;
     using TaskLocationDescriptor = std::tuple<size_t, size_t>;
@@ -325,10 +297,6 @@ RawProfilingRecords parseDPUTaskProfiling(
                             reinterpret_cast<const HwpDpu27Mode0Data_t*>(output)[currentPos];
                     record = std::make_shared<RawProfilingDPUHW27Record>(dpuTimings, taskMeta, variantId, currentPos,
                                                                          inClusterIndex);
-                } else {
-                    const SwDpuData_t dpuTimings = reinterpret_cast<const SwDpuData_t*>(output)[currentPos];
-                    record = std::make_shared<RawProfilingDPUSWRecord>(dpuTimings, taskMeta, variantId, currentPos,
-                                                                       inClusterIndex);
                 }
                 record->checkDataOrDie();
                 rawRecords.push_back(record);
@@ -357,7 +325,7 @@ std::vector<std::pair<WorkpointConfiguration_t, size_t>> getWorkpointData(const 
 
 RawProfilingData parseProfilingTaskLists(const RawDataLayout& sections, MVCNN::TargetDevice device,
                                          const uint8_t* profData, const ProfilingFB::ProfilingMeta* profilingSchema,
-                                         bool ignoreSanitizationErrors) {
+                                         vpux::Logger& log, bool ignoreSanitizationErrors) {
     RawProfilingData rawProfData;
 
     for (const auto& section : sections) {
@@ -388,7 +356,7 @@ RawProfilingData parseProfilingTaskLists(const RawDataLayout& sections, MVCNN::T
         }
         case ExecutorType::DPU: {
             rawProfData.dpuTasks = parseDPUTaskProfiling(profilingSchema->dpuTasks(), profData + offset, length, device,
-                                                         ignoreSanitizationErrors);
+                                                         log, ignoreSanitizationErrors);
             rawProfData.parseOrder.emplace_back(ExecutorType::DPU, offset);
             break;
         }
@@ -410,40 +378,6 @@ RawProfilingData parseProfilingTaskLists(const RawDataLayout& sections, MVCNN::T
         }
     }
     return rawProfData;
-}
-
-double getNceFreq(const MVCNN::GraphFile* graphFile) {
-    double frcSpeedMhz = 0;
-    auto processor_frequencies = graphFile->header()->resources()->processor_frequencies();
-    VPUX_THROW_UNLESS(processor_frequencies, "Blob contains no processor_frequencies");
-    for (auto frequency : *processor_frequencies) {
-        if (frequency->item() == MVCNN::PhysicalProcessor_NCE_Cluster) {
-            frcSpeedMhz = frequency->number();
-            break;
-        }
-    }
-
-    if (!frcSpeedMhz) {
-        switch (graphFile->header()->device()) {
-        case MVCNN::TargetDevice::TargetDevice_VPUX30XX:
-            switch (graphFile->header()->device_revision()) {
-            case MVCNN::TargetDeviceRevision::TargetDeviceRevision_A0:
-                frcSpeedMhz = 500;
-                break;
-            case MVCNN::TargetDeviceRevision::TargetDeviceRevision_B0:
-                frcSpeedMhz = 700;
-                break;
-            default:
-                VPUX_THROW("TargetDeviceRevision {0} is not supported",
-                           EnumNameTargetDeviceRevision(graphFile->header()->device_revision()));
-            }
-            break;
-        default:
-            VPUX_THROW("TargetDevice {0} is not supported ", EnumNameTargetDevice(graphFile->header()->device()));
-        }
-    }
-
-    return frcSpeedMhz;
 }
 
 RawDataLayout getRawDataLayoutFB(const ProfilingFB::ProfilingBuffer* profBuffer, size_t actualBufferSize) {
@@ -504,15 +438,9 @@ RawProfilingRecords makeFakeDpuInvariants(const RawProfilingRecords& variants) {
 
 // At parse time we don't know frequency for some platforms, so data is collected in cycles format. We need
 // to determine frequency to convert from cycles to nanoseconds
-std::vector<TaskInfo> convertRawTasksToTaskInfo(const RawData& profData, bool fpga, VerbosityLevel verbosity,
-                                                bool highFreqPerfClk) {
-    auto log = vpux::Logger::global();
-    const auto rawTasks = profData.rawRecords;
-    const auto device = profData.device;
-
-    FrequenciesSetup frequenciesSetup =
-            getFrequencySetup(device, rawTasks.workpoints, profData.maybe30XXNceFreq, highFreqPerfClk, fpga, log);
-
+std::vector<TaskInfo> convertRawTasksToTaskInfo(const RawProfilingData& rawTasks,
+                                                const FrequenciesSetup& frequenciesSetup, VerbosityLevel verbosity,
+                                                vpux::Logger& log) {
     for (const auto& taskList : {rawTasks.dmaTasks, rawTasks.dpuTasks, rawTasks.swTasks, rawTasks.m2iTasks}) {
         for (const auto& task : taskList) {
             task->sanitize(log, frequenciesSetup);
@@ -601,6 +529,8 @@ std::vector<TaskInfo> convertRawTasksToTaskInfo(const RawData& profData, bool fp
     allTaskInfo.insert(allTaskInfo.end(), swTaskInfo.begin(), swTaskInfo.end());
     allTaskInfo.insert(allTaskInfo.end(), m2iTaskInfo.begin(), m2iTaskInfo.end());
 
+    std::sort(allTaskInfo.begin(), allTaskInfo.end(), profilingTaskStartTimeComparator<TaskInfo>);
+
     return allTaskInfo;
 }
 
@@ -612,15 +542,7 @@ RawData getRawProfilingTasks(const uint8_t* blobData, size_t blobSize, const uin
         VPUX_THROW("Empty input data");
     }
 
-    std::optional<double> maybe30XXFreq;
-    if (!isElfBinary(blobData, blobSize)) {
-        const auto graphFile = getGraphFileVerified(blobData, blobSize);
-        if (graphFile->header()->device() == MVCNN::TargetDevice::TargetDevice_VPUX30XX) {
-            maybe30XXFreq = getNceFreq(graphFile);
-        }
-    }
-
-    const auto log = vpux::Logger::global();
+    auto log = vpux::Logger::global();
     const auto profilingDataSchema = getProfilingSectionMeta(blobData, blobSize);
     auto device = (MVCNN::TargetDevice)profilingDataSchema->platform()->device();
     VPUX_THROW_WHEN(device == MVCNN::TargetDevice::TargetDevice_NONE, "Unknown device");
@@ -630,15 +552,36 @@ RawData getRawProfilingTasks(const uint8_t* blobData, size_t blobSize, const uin
     const auto sections = getRawDataLayoutFB(profilingBufferMeta, profSize);
 
     RawProfilingData rawProfData =
-            parseProfilingTaskLists(sections, device, profData, profilingDataSchema, ignoreSanitizationErrors);
+            parseProfilingTaskLists(sections, device, profData, profilingDataSchema, log, ignoreSanitizationErrors);
 
-    return {sections, std::move(rawProfData), device, maybe30XXFreq};
+    return {sections, std::move(rawProfData), device};
+}
+
+ProfInfo getProfInfo(const uint8_t* blobData, size_t blobSize, const uint8_t* profData, size_t profSize,
+                     VerbosityLevel verbosity, bool fpga, bool highFreqPerfClk) try {
+    const auto rawData = getRawProfilingTasks(blobData, blobSize, profData, profSize);
+
+    auto log = vpux::Logger::global();
+    FrequenciesSetup frequenciesSetup =
+            getFrequencySetup(rawData.device, rawData.rawRecords.workpoints, highFreqPerfClk, fpga, log);
+    ProfInfo profInfo;
+    profInfo.tasks = convertRawTasksToTaskInfo(rawData.rawRecords, frequenciesSetup, verbosity, log);
+    profInfo.layers = getLayerInfo(profInfo.tasks);
+    profInfo.dpuFreq.freqMHz = frequenciesSetup.dpuClk;
+    profInfo.dpuFreq.freqStatus = frequenciesSetup.clockStatus;
+    return profInfo;
+} catch (const std::exception& ex) {
+    VPUX_THROW("Profiling post-processing failed. {0}", ex.what());
 }
 
 std::vector<TaskInfo> getTaskInfo(const uint8_t* blobData, size_t blobSize, const uint8_t* profData, size_t profSize,
                                   VerbosityLevel verbosity, bool fpga, bool highFreqPerfClk) try {
-    const auto rawProfData = getRawProfilingTasks(blobData, blobSize, profData, profSize);
-    return convertRawTasksToTaskInfo(rawProfData, fpga, verbosity, highFreqPerfClk);
+    const auto rawData = getRawProfilingTasks(blobData, blobSize, profData, profSize);
+
+    auto log = vpux::Logger::global();
+    FrequenciesSetup frequenciesSetup =
+            getFrequencySetup(rawData.device, rawData.rawRecords.workpoints, highFreqPerfClk, fpga, log);
+    return convertRawTasksToTaskInfo(rawData.rawRecords, frequenciesSetup, verbosity, log);
 } catch (const std::exception& ex) {
     VPUX_THROW("Profiling post-processing failed. {0}", ex.what());
 }
@@ -654,13 +597,12 @@ std::vector<LayerInfo> getLayerInfo(const std::vector<TaskInfo>& taskInfo) {
     std::vector<LayerInfo> layerInfo;
     for (const auto& task : taskInfo) {
         LayerInfo* layer;
-        std::string taskName(task.name);
-        if (!getVariantFromName(taskName).empty()) {
+        if (!getVariantFromName(task.name).empty()) {
             // Skipping high verbose tasks with variant info
             continue;
         }
 
-        std::string layerName = getLayerName(taskName);
+        std::string layerName = getLayerName(task.name);
         auto result = std::find_if(begin(layerInfo), end(layerInfo), [&](const LayerInfo& item) {
             return layerName == item.name;
         });
@@ -697,6 +639,7 @@ std::vector<LayerInfo> getLayerInfo(const std::vector<TaskInfo>& taskInfo) {
         }
     }
 
+    std::sort(layerInfo.begin(), layerInfo.end(), profilingTaskStartTimeComparator<LayerInfo>);
     return layerInfo;
 }
 

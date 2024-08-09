@@ -7,6 +7,8 @@
 
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/utils/handle_kernels_utils.hpp"
+#include "vpux/compiler/dialect/IE/utils/reduce_infer.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 
 #include <mlir/Transforms/DialectConversion.h>
@@ -344,12 +346,10 @@ mlir::LogicalResult ReduceSumRewriter::matchAndRewrite(IE::ReduceSumOp origOp, m
                 for (const auto& axis : axes) {
                     reductionDimsCount *= inputShape[axis];
                 }
-                const auto reductionDimsCountFP16 = static_cast<vpux::type::float16>(reductionDimsCount);
-                const auto baseAttr = mlir::DenseElementsAttr::get(dataStorageTensor, reductionDimsCountFP16);
-                auto cst = rewriter.create<Const::DeclareOp>(loc, dataStorageTensor, Const::ContentAttr::get(baseAttr));
+                const auto cstOutput = Const::createFloatConst(rewriter, loc, dataStorageTensor, reductionDimsCount);
 
                 const auto broadCastAttr = IE::AutoBroadcastTypeAttr::get(ctx, IE::AutoBroadcastType::NUMPY);
-                return rewriter.create<IE::MultiplyOp>(loc, input, cst.getOutput(), broadCastAttr, nullptr, nullptr);
+                return rewriter.create<IE::MultiplyOp>(loc, input, cstOutput, broadCastAttr, nullptr, nullptr);
             });
 }
 
@@ -441,17 +441,6 @@ void ConvertReduceToPoolingPass::safeRunOnFunc() {
 
         const bool isHWCompilationMode = VPU::getCompilationMode(op) == VPU::CompilationMode::ReferenceHW ||
                                          VPU::getCompilationMode(op) == VPU::CompilationMode::DefaultHW;
-
-        auto module = getOperation();
-        const auto arch = VPU::getArch(module);
-        // TODO: #71539
-        if (arch == VPU::ArchKind::NPU30XX) {
-            // Check that axis dimensions <= 255 otherwise this conversion is not applicable
-            const int upaMaxAxisDimensions = 255;
-            auto upaCompatible = mergedDim <= upaMaxAxisDimensions;
-
-            return !((upaCompatible && !isHWCompilationMode) || (dpuCompatible && isHWCompilationMode));
-        }
 
         // Apply the conversion only if the resulting Pooling operation can run on DPU
         return !(dpuCompatible && isHWCompilationMode);

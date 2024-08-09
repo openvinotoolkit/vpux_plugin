@@ -31,9 +31,6 @@ using namespace vpux;
 uint16_t vpux::VPUIP::getProfWorkloadSize(mlir::ModuleOp module) {
     uint16_t profilingWorkloadSize;
     switch (VPU::getArch(module)) {
-    case VPU::ArchKind::NPU30XX:
-        profilingWorkloadSize = VPUIP::HW_DPU_PROFILING_SIZE_BYTES_30XX;
-        break;
     case VPU::ArchKind::NPU37XX:
         profilingWorkloadSize = VPUIP::HW_DPU_PROFILING_SIZE_BYTES_37XX;
         break;
@@ -89,9 +86,8 @@ int64_t vpux::VPUIP::getNumTilesUsed(mlir::ModuleOp module) {
 int64_t vpux::VPUIP::getNumAvailableBarriers(mlir::Operation* parentOp) {
     // TODO: E#78647 refactor to use api/vpu_cmx_info_{arch}.h
     const EnumMap<VPU::ArchKind, int64_t> MAX_BARRIERS_PER_INFERENCE = {
-            {VPU::ArchKind::NPU30XX, 64 / 2},  // half barries are used (runtime limitation)
-            {VPU::ArchKind::NPU37XX, 64},      //
-            {VPU::ArchKind::NPU40XX, 96},      //
+            {VPU::ArchKind::NPU37XX, 64},  //
+            {VPU::ArchKind::NPU40XX, 96},  //
     };
 
     const auto arch = VPU::getArch(parentOp);
@@ -135,6 +131,13 @@ size_t vpux::VPUIP::getBarrierMaxVariantCount(mlir::Operation* parentOp) {
 // TODO: E#107973: allow uneven split to further decrease barrier number
 size_t vpux::VPUIP::getBarrierMaxVariantSum(mlir::Operation* parentOp) {
     return VPU::getPerBarrierVariantConstraint(parentOp, VPU::BARR_MAX_VARIANT_SUM);
+}
+
+size_t vpux::VPUIP::getAvailableSlots(size_t maxSlotsSum, size_t maxAvailableSlots) {
+    // divide max available slots equally for producers and consumers to a barrier
+    // for a unified solution for all architectures
+    // TODO: E#107973: allow a unequal/uneven barrier slots assignment
+    return std::min(maxSlotsSum, maxAvailableSlots) / 2;
 }
 
 int64_t vpux::VPUIP::getNumberOfIndependentDmaQueues(mlir::Operation* parentOp) {
@@ -1325,6 +1328,9 @@ bool vpux::VPUIP::isMemoryContiguousWithTiling(VPUIP::DistributedBufferType dist
 }
 
 bool vpux::VPUIP::hasDistributedOperand(mlir::Operation* op) {
+    if (op == nullptr) {
+        return false;
+    }
     for (const auto& operand : op->getOperands()) {
         auto resultType = operand.getType();
         if (mlir::isa<VPUIP::DistributedBufferType>(resultType)) {
@@ -1338,10 +1344,22 @@ bool vpux::VPUIP::hasDistributedOperand(mlir::Operation* op) {
 // Compressed Convolution utility
 //
 namespace {
-bool hasTransposeAttr(Const::ContentAttr content) {
+// Getting shape from base content is wrong in some cases
+// Consider the following situation:
+// %cst = const.Declare memref<128x16x1x1xf16, #NHWC> = dense<1.0> : tensor<1x1x128x9xf32>, [
+//      #const.Reshape<[128, 9]>,
+//      #const.Reshape<[128, 9, 1, 1]>,
+//      #const.ConvertElemType<f16>,
+//      #const.Reorder<#NHWC>,
+//      #const.PadWithZero<[0, 0, 0, 0], [0, 7, 0, 0]>
+// ]
+// Base content type is tensor<1x1x128x9xf32>.
+// This is not helpful because the type before padding is tensor<128x9x1x1xf16>.
+// Compression must get [128, 9, 1, 1][IC] = 9, not [1, 1, 128, 9][IC] = 1
+bool hasShapeChangeAttr(Const::ContentAttr content) {
     const auto transformations = content.getTransformations();
     for (auto transform : transformations) {
-        if (auto transpose = transform.dyn_cast<vpux::Const::TransposeAttr>()) {
+        if (mlir::isa<vpux::Const::TransposeAttr, vpux::Const::ReshapeAttr>(transform)) {
             return true;
         }
     }
@@ -1362,6 +1380,7 @@ bool inChannelGreaterThanAlignValue(Const::DeclareOp weightsInput) {
 // just padding over input channels.
 bool vpux::VPUIP::isOnlyPadOverIC(Const::ContentAttr content) {
     const auto transformations = content.getTransformations();
+    bool transformsOnlyPadOverIC = false;
 
     // Checks if the only padding applied is over IC dim
     for (auto& transform : transformations) {
@@ -1378,11 +1397,11 @@ bool vpux::VPUIP::isOnlyPadOverIC(Const::ContentAttr content) {
                 padAfter[Dims4D::Filter::KX.ind()] != 0 || padAfter[Dims4D::Filter::OC.ind()] != 0) {
                 return false;
             }
-            return true;
+            transformsOnlyPadOverIC = true;
         }
     }
 
-    return false;
+    return transformsOnlyPadOverIC;
 }
 
 bool vpux::VPUIP::canWeightsBeCompressed(VPUIP::NCEClusterTaskOp op) {
@@ -1416,7 +1435,7 @@ bool vpux::VPUIP::canWeightsBeCompressed(VPUIP::NCEClusterTaskOp op) {
     }
     auto weightsContentAttr = weightsInput.getContentAttr();
     // Temporary solution until [E#57202] implementation
-    if (hasTransposeAttr(weightsContentAttr)) {
+    if (hasShapeChangeAttr(weightsContentAttr)) {
         return false;
     }
 
@@ -1427,12 +1446,7 @@ bool vpux::VPUIP::canWeightsBeCompressed(VPUIP::NCEClusterTaskOp op) {
     return !inChannelGreaterThanAlignValue(weightsInput);
 }
 
-bool vpux::VPUIP::canTilingWeightsBeCompressed(VPUIP::NCEClusterTilingOp op) {
-    auto nceOp = mlir::dyn_cast_or_null<VPUIP::NCEClusterTaskOp>(op.getInnerTaskOp());
-    if (nceOp == nullptr) {
-        return false;
-    }
-
+bool vpux::VPUIP::canTilingWeightsBeCompressed(VPUIP::NCEClusterTaskOp nceOp) {
     if (nceOp.getTaskType() != VPUIP::NCETaskType::CONV) {
         return false;
     }
@@ -1468,7 +1482,7 @@ bool vpux::VPUIP::canTilingWeightsBeCompressed(VPUIP::NCEClusterTilingOp op) {
 
     auto weightsContentAttr = weightsInput.getContentAttr();
     // Temporary solution until [E#57202] implementation
-    if (hasTransposeAttr(weightsContentAttr)) {
+    if (hasShapeChangeAttr(weightsContentAttr)) {
         return false;
     }
 
@@ -1514,7 +1528,7 @@ bool vpux::VPUIP::isChannelOffsetsAndTileDimCompatibleWithClusterCopy(SmallVecto
     auto realOffsetIndexVal = distributedTypeDimOrder.dimPos(Dim(offsetIndexVal));
     auto realTileIndexVal = distributedTypeDimOrder.dimPos(Dim(tileIndexVal));
 
-    if (realOffsetIndexVal < realTileIndexVal) {
+    if (realOffsetIndexVal <= realTileIndexVal) {
         return false;
     }
 
@@ -1692,9 +1706,8 @@ vpux::Dim vpux::VPUIP::getCopyDMATilingDimForLargePlaneNum(mlir::Operation* op) 
 int64_t vpux::VPUIP::getMaxStridingLevel(const VPU::ArchKind arch) {
     int64_t maxStridingLevel = 0;
     switch (arch) {
-    case VPU::ArchKind::NPU30XX:
     case VPU::ArchKind::NPU37XX:
-        maxStridingLevel = VPUIP::CMX_DMA_MAX_STRIDING_LEVEL_30XX_37XX;
+        maxStridingLevel = VPUIP::CMX_DMA_MAX_STRIDING_LEVEL_37XX;
         break;
     case VPU::ArchKind::NPU40XX:
         maxStridingLevel = VPUIP::CMX_DMA_MAX_STRIDING_LEVEL_40XX;
@@ -1709,9 +1722,8 @@ int64_t vpux::VPUIP::getMaxStridingLevel(const VPU::ArchKind arch) {
 int64_t vpux::VPUIP::getMaxNumberPlanes(const VPU::ArchKind arch) {
     int64_t maxNumberPlanes = 0;
     switch (arch) {
-    case VPU::ArchKind::NPU30XX:
     case VPU::ArchKind::NPU37XX:
-        maxNumberPlanes = VPUIP::CMX_DMA_MAX_NUM_PLANES_30XX_37XX;
+        maxNumberPlanes = VPUIP::CMX_DMA_MAX_NUM_PLANES_37XX;
         break;
     case VPU::ArchKind::NPU40XX:
         maxNumberPlanes = VPUIP::CMX_DMA_MAX_NUM_PLANES_40XX;
@@ -1845,6 +1857,16 @@ Byte VPUIP::getRequiredCMXSize(mlir::Operation* op) {
         }
     }
     return VPU::getRequiredCMXSize(operandTypes);
+}
+
+size_t VPUIP::getNumInputs(mlir::func::FuncOp op) {
+    VPUX_THROW_WHEN(op == nullptr, "Expecting a valid function");
+    return op.getNumArguments() - getNumOutputs(op);
+}
+
+size_t VPUIP::getNumOutputs(mlir::func::FuncOp op) {
+    VPUX_THROW_WHEN(op == nullptr, "Expecting a valid function");
+    return op.getNumResults();
 }
 
 Shape VPUIP::backInferD2SInputShape(Shape outShape, int64_t paddedOC, int64_t paddedIC, int64_t blockSize) {
@@ -2051,8 +2073,7 @@ int64_t vpux::VPUIP::getSOHMinimalHeightAlignment(vpux::ShapeRef shape, int64_t 
 
 int64_t vpux::VPUIP::getMaximalSWKernelPrefetchDataSize(mlir::ModuleOp module) {
     const EnumMap<VPU::ArchKind, int64_t> MAX_PREFETCH_DATA_SIZE = {
-            {VPU::ArchKind::NPU30XX, VPUIP::MAX_SW_KERNEL_PREFETCH_DATA_SIZE_30XX_37XX},
-            {VPU::ArchKind::NPU37XX, VPUIP::MAX_SW_KERNEL_PREFETCH_DATA_SIZE_30XX_37XX},
+            {VPU::ArchKind::NPU37XX, VPUIP::MAX_SW_KERNEL_PREFETCH_DATA_SIZE_37XX},
             {VPU::ArchKind::NPU40XX, VPUIP::MAX_SW_KERNEL_PREFETCH_DATA_SIZE_40XX},
     };
 
@@ -2062,4 +2083,15 @@ int64_t vpux::VPUIP::getMaximalSWKernelPrefetchDataSize(mlir::ModuleOp module) {
     VPUX_THROW_WHEN(sizeIt == MAX_PREFETCH_DATA_SIZE.end(), "Unsupported VPU architecture '{0}'", arch);
 
     return sizeIt->second;
+}
+
+//
+// NNDMA split utils
+//
+
+std::pair<int64_t, int64_t> vpux::VPUIP::getSplitPartSizes(NDTypeInterface bufferType, vpux::Dim tileDim) {
+    const int64_t tileDimSize = bufferType.getShape()[tileDim];
+    const int64_t firstPartSize = tileDimSize / 2;
+    const int64_t secondPartSize = tileDimSize - firstPartSize;
+    return {firstPartSize, secondPartSize};
 }

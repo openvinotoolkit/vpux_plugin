@@ -19,6 +19,6 @@ if (ENABLE_DIALECT_SHARED_LIBRARIES)
     add_subdirectory(smoke)
 endif()
 
-if (ENABLE_VPUX_FUZZ_TESTS)
+if (ENABLE_NPU_FUZZ_TESTS)
     add_subdirectory(fuzz)
 endif()

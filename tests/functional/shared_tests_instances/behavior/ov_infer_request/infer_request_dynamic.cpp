@@ -8,15 +8,18 @@
 #include <vector>
 
 #include "behavior/ov_infer_request/infer_request_dynamic.hpp"
+#include "common/npu_test_env_cfg.hpp"
 #include "common/utils.hpp"
-#include "common/vpu_test_env_cfg.hpp"
+#include "intel_npu/al/config/common.hpp"
 
 using namespace ov::test::behavior;
 
 namespace {
 // TODO: extend to test DRIVER config: E#88902
 auto configs = []() {
-    return std::vector<ov::AnyMap>{{{"NPU_COMPILER_TYPE", "MLIR"}, {"NPU_COMPILATION_MODE", "ReferenceSW"}}};
+    return std::vector<ov::AnyMap>{{{ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::MLIR),
+                                     ov::intel_npu::platform(ov::test::utils::getTestsPlatformCompilerInPlugin()),
+                                     {"NPU_COMPILATION_MODE", "ReferenceSW"}}}};
 };
 
 std::shared_ptr<ov::Model> getFunction() {
@@ -34,7 +37,7 @@ std::shared_ptr<ov::Model> getFunction() {
 
 }  // namespace
 
-class NPUInferRequestDynamicTests_NPU3720 : public OVInferRequestDynamicTests {
+class NPUInferRequestDynamicTests : public OVInferRequestDynamicTests {
 protected:
     void checkOutputFP16(const ov::Tensor& in, const ov::Tensor& actual) {
         auto net = ie->compile_model(function, ov::test::utils::DEVICE_TEMPLATE);
@@ -51,7 +54,7 @@ protected:
     }
 };
 
-TEST_P(NPUInferRequestDynamicTests_NPU3720, InferDynamicNetworkWithImport) {
+TEST_P(NPUInferRequestDynamicTests, InferDynamicNetwork) {
     std::vector<ov::Shape> vectorShapes{inOutShapes[0].first, inOutShapes[0].first};
     const std::string inputName = "Parameter_1";
     std::map<std::string, ov::PartialShape> shapes;
@@ -73,7 +76,7 @@ TEST_P(NPUInferRequestDynamicTests_NPU3720, InferDynamicNetworkWithImport) {
 }
 
 INSTANTIATE_TEST_SUITE_P(
-        DISABLED_TMP_smoke_BehaviorTests, NPUInferRequestDynamicTests_NPU3720,
+        smoke_BehaviorTests, NPUInferRequestDynamicTests,
         ::testing::Combine(::testing::Values(getFunction()),
                            ::testing::Values(std::vector<std::pair<std::vector<size_t>, std::vector<size_t>>>{
                                    {{1, 10, 12}, {1, 10, 12}}, {{1, 18, 15}, {1, 18, 15}}}),

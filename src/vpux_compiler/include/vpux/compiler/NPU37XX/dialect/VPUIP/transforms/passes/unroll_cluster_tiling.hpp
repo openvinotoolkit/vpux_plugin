@@ -29,6 +29,33 @@ private:
     mlir::ModuleOp _module;
 };
 
+//
+// ClusterNCERewriter
+//
+
+class ClusterNCERewriter final : public ClusterNCEBaseRewriter {
+public:
+    ClusterNCERewriter(mlir::MLIRContext* ctx, Logger log): ClusterNCEBaseRewriter(ctx, log) {
+    }
+
+private:
+    void getOutputBuffers(SmallVector<mlir::Value>& parentOutputBuffs, SmallVector<mlir::Value>& outputBuffs,
+                          SmallVector<mlir::Value>& parentOutputSparsityMap,
+                          SmallVector<mlir::Value>& outputSparsityMapBuffs,
+                          SmallVector<SmallVector<mlir::Value>>& outputItiBuffs, mlir::Location loc,
+                          VPUIP::NCEClusterTaskOp nceTask, const int64_t numClusters,
+                          mlir::OpBuilder& builder) const override;
+
+    void getInputBuffers(SmallVector<mlir::Value>& parentInputBuffs, SmallVector<mlir::Value>& inputBuffs,
+                         SmallVector<mlir::Value>& parentInputSparsityMap,
+                         SmallVector<mlir::Value>& inputSparsityMapBuffs, SmallVector<mlir::Value>& parentInputSETable,
+                         SmallVector<mlir::Value>& inputSETableBuffs, mlir::Location loc,
+                         VPUIP::NCEClusterTaskOp nceTask, const int64_t numClusters,
+                         mlir::OpBuilder& builder) const override;
+
+    mlir::UnitAttr isSegmentedNCETask(VPUIP::DistributedBufferType inputType) const override;
+};
+
 }  // namespace arch37xx
 }  // namespace VPUIP
 }  // namespace vpux

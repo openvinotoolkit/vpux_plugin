@@ -210,7 +210,8 @@ std::map<CompressSpillDmaPass::SpillDataKey, CompressSpillDmaPass::SpillDataVal>
             continue;
         }
 
-        if (inType.getMemoryKind() == VPU::MemoryKind::CMX_NN && outType.getMemoryKind() == VPU::MemoryKind::DDR) {
+        if (inType.getMemoryKind() == VPU::MemoryKind::CMX_NN && outType.getMemoryKind() == VPU::MemoryKind::DDR &&
+            isSupportedBufferSizeForCompression(inType)) {
             auto cmxIdx = inType.getMemSpace().getIndex().value_or(0);
 
             SpillDataKey spillDataKey{spillId, cmxIdx};
@@ -224,7 +225,7 @@ std::map<CompressSpillDmaPass::SpillDataKey, CompressSpillDmaPass::SpillDataVal>
             _log.trace("Spill-write op, index - '{0}', port - '{1}', cmxIdx - '{2}', spillId - '{3}'", i, portValue,
                        cmxIdx, spillId);
         } else if (inType.getMemoryKind() == VPU::MemoryKind::DDR &&
-                   outType.getMemoryKind() == VPU::MemoryKind::CMX_NN) {
+                   outType.getMemoryKind() == VPU::MemoryKind::CMX_NN && isSupportedBufferSizeForCompression(outType)) {
             auto cmxIdx = outType.getMemSpace().getIndex().value_or(0);
 
             SpillDataKey spillDataKey{spillId, cmxIdx};
@@ -233,6 +234,7 @@ std::map<CompressSpillDmaPass::SpillDataKey, CompressSpillDmaPass::SpillDataVal>
                 _log.trace("Unexpected Spill Read as Spill Write for CMX '{0}' and spillId '{1}' has not been "
                            "identified before",
                            cmxIdx, spillId);
+                continue;
             }
 
             spillDataMap[spillDataKey].spillReadIndeces.insert(i);
@@ -418,7 +420,8 @@ void createCompressDma(VPURT::TaskOp spillWriteTaskOp, mlir::Value actCompSizeBu
     outputType = vpux::setCompressionState(outputType, VPUIP::CompressionState::RuntimeCompressed);
     outputBuf.setType(outputType);
 
-    builder.create<VPUIP::CompressDMAOp>(loc, dmaOp.getInput(), actCompSizeBuffer, outputBuf, dmaOp.getPortAttr(),
+    builder.create<VPUIP::CompressDMAOp>(loc, dmaOp.getInput(), actCompSizeBuffer,
+                                         /*act_compression_sparsity_map*/ nullptr, outputBuf, dmaOp.getPortAttr(),
                                          dmaOp.getIsOutOfOrderAttr(), dmaOp.getIsCriticalAttr(),
                                          /*dmaHwpId=*/nullptr,
                                          /*profilingMetadata=*/nullptr);
@@ -441,8 +444,9 @@ void createDecompressDma(VPURT::TaskOp spillReadTaskOp, mlir::Value actCompSizeB
     inputType = vpux::setCompressionState(inputType, VPUIP::CompressionState::RuntimeCompressed);
     inputBuf.setType(inputType);
 
-    builder.create<VPUIP::DecompressDMAOp>(loc, inputBuf, actCompSizeBuffer, dmaOp.getOutputBuff(), dmaOp.getPortAttr(),
-                                           dmaOp.getIsOutOfOrderAttr(), dmaOp.getIsCriticalAttr(),
+    builder.create<VPUIP::DecompressDMAOp>(loc, inputBuf, actCompSizeBuffer, /*act_compression_sparsity_map*/ nullptr,
+                                           dmaOp.getOutputBuff(), dmaOp.getPortAttr(), dmaOp.getIsOutOfOrderAttr(),
+                                           dmaOp.getIsCriticalAttr(),
                                            /* dma_hwp_id= */ nullptr,
                                            /* profilingMetadata= */ nullptr);
     dmaOp.erase();

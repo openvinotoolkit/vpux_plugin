@@ -13,14 +13,8 @@ namespace test {
 
 class PriorBoxClusteredLayerTestCommon : public PriorBoxClusteredLayerTest, virtual public VpuOv2LayerTest {};
 
-class PriorBoxClusteredLayerTest_NPU3700 : public PriorBoxClusteredLayerTestCommon {};
 class PriorBoxClusteredLayerTest_NPU3720 : public PriorBoxClusteredLayerTestCommon {};
 class PriorBoxClusteredLayerTest_NPU4000 : public PriorBoxClusteredLayerTestCommon {};
-
-TEST_P(PriorBoxClusteredLayerTest_NPU3700, HW) {
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
 
 TEST_P(PriorBoxClusteredLayerTest_NPU3720, SW) {
     setReferenceSoftwareMode();
@@ -77,11 +71,6 @@ const auto paramsPrecommit = testing::Combine(
         precommit_layerSpeficParams, testing::Values(ov::element::f16),
         testing::Values(static_shapes_to_test_representation(std::vector<ov::Shape>{{4, 4}, {13, 13}})),
         testing::Values(DEVICE_NPU));
-
-// ------ NPU3700 ------
-
-INSTANTIATE_TEST_CASE_P(smoke_PriorBoxClustered, PriorBoxClusteredLayerTest_NPU3700, params,
-                        PriorBoxClusteredLayerTest_NPU3700::getTestCaseName);
 
 // ------ NPU3720 ------
 

@@ -14,6 +14,7 @@
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
+#include "vpux/compiler/utils/platform_resources.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
 #include "vpux/hwtest/ops/act_shave_op.hpp"
 #include "vpux/hwtest/test_case_json_parser.hpp"
@@ -101,7 +102,7 @@ void buildReadAfterWriteACTDPUTest(const nb::TestCaseJsonDescriptor& testDesc, m
     auto functionInput = function.getArgument(0);
     auto functionOutput = function.getArgument(1);
 
-    const auto weightsValues = generateWeights(weightsShape, weightsType, ctx, weightsFileName);
+    const auto weightsValues = generateWeights(builder, weightsShape, weightsType, ctx, weightsFileName);
     const auto weightsAttribute = generateDefaultWeightsAttr(weightsValues, weightsType);
 
     const auto weightsDDRType =
@@ -143,15 +144,17 @@ void buildReadAfterWriteACTDPUTest(const nb::TestCaseJsonDescriptor& testDesc, m
     auto weightsTableCMX = createDeclareTensorOp(functionBuilder, VPURT::BufferSection::CMX_NN, weightsTableShape,
                                                  int32, DimsOrder::NHWC, cluster, WEIGHTSTABLE_CMX_OFFSET);
 
-    auto updateBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, 0);
+    auto [waitWLMBarrier, freeBarrierId] =
+            insertWLMStartSequence(functionBuilder, testDesc.getWLMParams().isWLMPartialEnabled);
+
+    auto updateBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, freeBarrierId++);
 
     SmallVector<vpux::VPURT::DeclareBufferOp> inputCMXVec;
     inputCMXVec.push_back(createDeclareTensorOp(functionBuilder, VPURT::BufferSection::CMX_NN, inputShape, inputType,
                                                 vpux::DimsOrder::NHWC, cluster, INPUT_CMX_OFFSET));
 
-    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(),
-                                          mlir::ValueRange(updateBarrier.getBarrier()), loc, functionInput,
-                                          inputCMXVec[0].getOperation()->getResult(0), 0);
+    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, waitWLMBarrier, mlir::ValueRange(updateBarrier.getBarrier()),
+                                          loc, functionInput, inputCMXVec[0].getOperation()->getResult(0), 0);
     VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(
             functionBuilder, mlir::ValueRange(), mlir::ValueRange(updateBarrier.getBarrier()), loc,
             weightsDDR.getOperation()->getResult(0), weightsCMX.getOperation()->getResult(0), 0);
@@ -172,8 +175,9 @@ void buildReadAfterWriteACTDPUTest(const nb::TestCaseJsonDescriptor& testDesc, m
     inputTypes.push_back(inputParamType);
     inputTypes.push_back(outputParamType);
 
-    for (std::size_t i = 1; i + 1 < iterationCount; i += 2) {
-        if (i != 1) {
+    auto startIter = freeBarrierId++;
+    for (std::size_t i = startIter; i + 1 < iterationCount; i += 2) {
+        if (i != startIter) {
             inputCMXVec[0] = outputACTCMX;
             OUTPUT_DPU_CMX_OFFSET = OUTPUT_ACT_CMX_OFFSET + outputACTCMXSize - rewritable_bytes;
             outputDPUCMX = createDeclareTensorOp(functionBuilder, VPURT::BufferSection::CMX_NN, outputShape, outputType,
@@ -218,7 +222,8 @@ void buildReadAfterWriteACTDPUTest(const nb::TestCaseJsonDescriptor& testDesc, m
     }
 
     // finalBarrier passed as production barrier to last DMA task
-    auto finalBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, iterationCount);
+    auto finalBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(
+            loc, iterationCount, testDesc.getWLMParams().isWLMPartialEnabled);
 
     VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(waitBarrier.getBarrier()),
                                           mlir::ValueRange(finalBarrier.getBarrier()), loc,

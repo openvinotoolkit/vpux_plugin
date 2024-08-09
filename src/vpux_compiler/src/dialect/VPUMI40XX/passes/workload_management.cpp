@@ -42,38 +42,6 @@ void reindexList(VPUMI40XX::MappedInferenceOp mpi, VPURegMapped::FetchTaskOp fir
     mpi.setDmaCountAttr(getIntArrayOfArray(ctx, dmaCount));
 }
 
-VPUMI40XX::NNDMAOp createWLMSyncDMA(mlir::OpBuilder& builder, mlir::ValueRange waitBarriers,
-                                    mlir::ValueRange updateBarriers, VPUMI40XX::NNDMAOp previousDMA) {
-    auto ctx = builder.getContext();
-    auto dummyDmaLoc = mlir::NameLoc::get(mlir::StringAttr::get(ctx, "wlm_sync_dma"));
-    auto zeroAttr = vpux::getIntAttr(ctx, 0);
-    auto indexType = previousDMA.getIndexType();
-    auto dmaDescriptorAttr = VPUIP::DMADescriptorAttr::get(ctx, /*numPlane*/ zeroAttr, /*len*/ zeroAttr,
-                                                           /*srcWidth*/ zeroAttr, /*srcStride*/ zeroAttr,
-                                                           /*srcPlaneStride*/ zeroAttr, /*dstWidth*/ zeroAttr,
-                                                           /*dstStride*/ zeroAttr, /*dstPlaneStride*/
-                                                           zeroAttr);
-    auto inputBuff = VPUIP::createDummyBuffer(builder);
-    auto outputBuff = VPUIP::createDummyBuffer(builder);
-    llvm::SmallVector<mlir::Value> dmaResults = {outputBuff};
-    auto newDma = builder.create<VPUMI40XX::NNDMAOp>(
-            dummyDmaLoc, indexType, nullptr, inputBuff, dmaResults, previousDMA.getResult(),
-            mlir::ValueRange(waitBarriers), mlir::ValueRange(updateBarriers), 0, 0, false, false, false, 0,
-            VPUIP::DMAAccMode::DISABLE, nullptr, dmaDescriptorAttr, nullptr, nullptr, false, nullptr);
-
-    // Adjust the producer count for update barriers
-    std::for_each(updateBarriers.begin(), updateBarriers.end(), [](auto barr) {
-        auto barrier = mlir::cast<VPUMI40XX::ConfigureBarrierOp>(barr.getDefiningOp());
-        barrier.setProducerCount(barrier.getProducerCount().value() + 1);
-    });
-    // Adjust the consumer count for update barriers
-    std::for_each(waitBarriers.begin(), waitBarriers.end(), [](auto barr) {
-        auto barrier = mlir::cast<VPUMI40XX::ConfigureBarrierOp>(barr.getDefiningOp());
-        barrier.setConsumerCount(barrier.getConsumerCount().value() + 1);
-    });
-    return newDma;
-}
-
 VPUMI40XX::NNDMAOp getNextDma(VPURegMapped::FetchTaskOp fetch) {
     auto nextDma = [](VPURegMapped::TaskOpInterface taskOp) -> VPURegMapped::TaskOpInterface {
         auto dmaIt = llvm::find_if(taskOp.getResult().getUsers(), [&taskOp](mlir::Operation* op) {
@@ -190,7 +158,7 @@ VPUMI40XX::NNDMAOp findFirstDma(VPURegMapped::ExecutionGroupOp op, uint32_t list
 
     } while (barriers.size());
 
-    VPUX_THROW("Could not find a minimum DMA consumer for {0}", op);
+    VPUX_THROW_TYPED(WlmRollbackException, "Could not find a minimum DMA consumer for {0}", op);
     return nullptr;
 }
 
@@ -217,7 +185,7 @@ VPUMI40XX::NNDMAOp findLastDma(VPURegMapped::ExecutionGroupOp op, uint32_t listI
 
     } while (barriers.size());
 
-    VPUX_THROW("Could not find a maximum DMA producer for {0}", op);
+    VPUX_THROW_TYPED(WlmRollbackException, "Could not find a maximum DMA producer for {0}", op);
     return nullptr;
 }
 
@@ -231,7 +199,7 @@ VPUMI40XX::NNDMAOp findLastDma(VPURegMapped::ExecutionGroupOp op, uint32_t listI
 // - assume all DMA-s are in the IR AFTER all DPU tasks - guarantee due to current reordering passes
 
 void addFetchTasks(VPUMI40XX::MappedInferenceOp mpi, const int64_t tilesCount, const size_t fetchTaskTileIdx,
-                   const size_t fetchTaskListIdx, const VPURegMapped::TaskType taskType, Logger log) {
+                   const size_t fetchTaskListIdx, const VPURegMapped::TaskType taskType) {
     auto ctx = mpi.getContext();
     auto dmaComp = [](VPUMI40XX::NNDMAOp lhs, VPUMI40XX::NNDMAOp rhs) {
         return lhs.getType().getValue() < rhs.getType().getValue();
@@ -277,21 +245,9 @@ void addFetchTasks(VPUMI40XX::MappedInferenceOp mpi, const int64_t tilesCount, c
                                                  : findLastDma(parentGroup, 0, 0);
 
             auto lastDma = findLastDma(travelingGroup, 0, 0);
-            if (lastDma.getType().getValue() <= insertionDma.getType().getValue() && grandParentGroup) {
-                builder.setInsertionPointAfter(insertionDma.getOperation());
-                auto syncDma = createWLMSyncDMA(builder, {}, lastDma.getUpdateBarriers(), insertionDma);
-                insertionDma.getResult().replaceAllUsesExcept(syncDma.getIndex(), syncDma.getOperation());
-
-                // Reindex the list incase we added a new DMA else we would never see new position of lastDma in the
-                // list
-                reindexList(mpi, firstFetch, fetchTaskTileIdx, fetchTaskListIdx);
-                lastDma = findLastDma(travelingGroup, 0, 0);
-                log.trace("Inserted additional sync DMAs '{0}' after '{1}'", syncDma, insertionDma);
-            }
-
-            // In case we still end up with this case, throw exception
-            VPUX_THROW_WHEN(lastDma.getType().getValue() <= insertionDma.getType().getValue(),
-                            "Could not find a suitable DMA location to fetch group {0}", travelingGroup);
+            VPUX_THROW_TYPED_WHEN(WlmRollbackException,
+                                  lastDma.getType().getValue() <= insertionDma.getType().getValue(),
+                                  "Could not find a suitable DMA location to fetch group {0}", travelingGroup);
 
             // set the insertion point after the finalDMa
             builder.setInsertionPointAfter(insertionDma.getOperation());
@@ -327,8 +283,8 @@ void WorkloadManagementPass::safeRunOnFunc() {
     const size_t DMA_DDR2CMX_LISTIDX = 0;
     const size_t DMA_WLM_TILEIDX = 0;  // all WLM dma's should be on tile0 for now;
 
-    addFetchTasks(mpi, tilesCount, DMA_WLM_TILEIDX, DMA_DDR2CMX_LISTIDX, VPURegMapped::TaskType::DPUInvariant, _log);
-    addFetchTasks(mpi, tilesCount, DMA_WLM_TILEIDX, DMA_DDR2CMX_LISTIDX, VPURegMapped::TaskType::ActKernelRange, _log);
+    addFetchTasks(mpi, tilesCount, DMA_WLM_TILEIDX, DMA_DDR2CMX_LISTIDX, VPURegMapped::TaskType::DPUInvariant);
+    addFetchTasks(mpi, tilesCount, DMA_WLM_TILEIDX, DMA_DDR2CMX_LISTIDX, VPURegMapped::TaskType::ActKernelRange);
 
     return;
 }

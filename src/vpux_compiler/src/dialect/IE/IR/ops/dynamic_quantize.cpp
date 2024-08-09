@@ -9,11 +9,11 @@ using namespace vpux;
 
 mlir::LogicalResult vpux::IE::DynamicQuantizeOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::DynamicQuantizeOpAdaptor quantize(operands, attrs);
+    IE::DynamicQuantizeOpAdaptor quantize(operands, attrs, prop);
     if (mlir::failed(quantize.verify(loc))) {
         return mlir::failure();
     }

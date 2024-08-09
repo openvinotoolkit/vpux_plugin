@@ -46,8 +46,7 @@ void OneShotBufferizeVPU2VPUIPPass::safeRunOnModule() {
         }
     }
 
-    if (mlir::failed(mlir::bufferization::bufferizeOp(moduleOp, options, options.copyBeforeWrite,
-                                                      /*opFilter=*/nullptr, /*statistics=*/nullptr))) {
+    if (mlir::failed(mlir::bufferization::bufferizeOp(moduleOp, options, /*statistics=*/nullptr))) {
         signalPassFailure();
         return;
     }

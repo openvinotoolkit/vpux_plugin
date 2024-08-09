@@ -19,11 +19,11 @@ void vpux::VPU::StorageElementTableOp::build(mlir::OpBuilder& odsBuilder, mlir::
 
 mlir::LogicalResult vpux::VPU::StorageElementTableOp::inferReturnTypes(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange /*regions*/,
         mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::StorageElementTableOpAdaptor setOp(operands, attrs);
+    VPU::StorageElementTableOpAdaptor setOp(operands, attrs, prop);
     if (mlir::failed(setOp.verify(loc))) {
         return mlir::failure();
     }

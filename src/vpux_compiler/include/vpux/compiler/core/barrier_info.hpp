@@ -39,6 +39,7 @@ public:
     uint32_t getIndex(VPURT::DeclareVirtualBarrierOp barrierOp) const;
     virtual VPURT::TaskOp getTaskOpAtIndex(size_t opIdx) const;
     VPURT::DeclareVirtualBarrierOp getBarrierOpAtIndex(size_t opIdx) const;
+    void enableUnevenVariantSplit();
 
 private:
     void addTaskOp(VPURT::TaskOp taskOp);
@@ -53,14 +54,24 @@ private:
 
     void optimizeBarrierProducers(size_t blockIdx);
     void optimizeBarrierConsumers(size_t blockIdx);
-    void optimizeBarriersWithSameProducers(size_t blockIdx);
+    void optimizeBarriersWithSameProducers(size_t blockIdx, bool checkValidSlotCount = true);
 
     bool inRange(const unsigned low, const unsigned high, const unsigned val) const;
     void setBarrierMask(llvm::BitVector& mask, const BarrierInfo::TaskSet& barriers, size_t offset = 0);
+    void splitBarrierProducers(VPURT::DeclareVirtualBarrierOp barrierOp, size_t availableSlots);
+    void splitBarrierConsumers(VPURT::DeclareVirtualBarrierOp barrierOp, size_t availableSlots);
+    SmallVector<BarrierInfo::TaskSet> createProducerBatches(const BarrierInfo::TaskSet& waitBarriers,
+                                                            size_t availableSlots);
+    void linearizeLegalParallelProducers(size_t taskInd, const BarrierInfo::TaskSet& parallelProducers,
+                                         const BarrierInfo::TaskSet& parallelConsumers, size_t availableSlots);
+    bool canMergeBarriersForTasks(const BarrierInfo::TaskSet& producers, size_t availableSlots);
+    bool mergeParallelWaitBarriers(size_t taskInd, size_t availableSlots);
+    void mergeLegalParallelProducers(size_t taskInd, const BarrierInfo::TaskSet& parallelProducers,
+                                     const BarrierInfo::TaskSet& parallelConsumers);
 
 public:
     void logBarrierInfo();
-    void optimizeBarriers();
+    void optimizeBarriers(bool checkValidSlotCount = true);
 
     void buildTaskQueueTypeMap(bool considerTaskFifoDependency = true);
     std::pair<SmallVector<llvm::BitVector>, size_t> buildTaskControlMap(size_t blockIdx,
@@ -103,7 +114,12 @@ public:
     SmallVector<TaskSet> getWaitBarriersMap();
     void splitControlGraphToBlocks(size_t blockSize);
     bool verifyControlGraphSplit();
+    void splitBarriersWithExceedingVariantCount(size_t availableSlots, size_t maxSlotsSum, size_t maxAvailableSlots);
+    void splitBarrierProducers(size_t availableSlots, size_t maxSlotsSum, bool maxSlotsSumLimitEnabled);
+    void splitBarrierConsumers(size_t availableSlots, size_t maxSlotsSum, bool maxSlotsSumLimitEnabled);
+    bool ensureTasksDrivenBySingleBarrier(size_t availableSlots, bool mergeWaitBarriersIteratively = false);
     void removeSyncTaskAttributes();
+    bool hasBarrierDependency(size_t, size_t, size_t&);
     bool isSyncPoint(size_t taskIdx);
 
     /**
@@ -161,6 +177,8 @@ private:
     SmallVector<VPURT::TaskOp> _allTaskOps;
     SmallVector<VPURT::DeclareVirtualBarrierOp> _allBarrierOps;
 
+    bool _enableUnevenVariantSplit{false};
+
     // Store maximal number of tasks that are present in single control
     // graph block after split performed in splitControlGraphToBlocks method
     // Example:  number of all task: 1200, split size: 500
@@ -215,10 +233,10 @@ public:
     size_t getNumOfSlotsUsedByTask(VPURT::TaskOp op) const override;
     VPURT::TaskOp getTaskOpAtIndex(size_t opIdx) const override;
     BarrierInfoTest::BarrierMaps optimizeBarrierProducers(size_t blockIdx);
-    BarrierInfoTest::BarrierMaps optimizeBarriersWithSameProducers(size_t blockIdx);
+    BarrierInfoTest::BarrierMaps optimizeBarriersWithSameProducers(size_t blockIdx, bool checkValidSlotCount = true);
     BarrierInfoTest::BarrierMaps optimizeBarrierConsumers(size_t blockIdx);
     BarrierInfoTest::BarrierMaps getOptimizedMaps();
-    BarrierInfoTest::BarrierMaps optimizeBarriers();
+    BarrierInfoTest::BarrierMaps optimizeBarriers(bool checkValidSlotCount = true);
     SmallVector<BarrierInfo::TaskSet> toTaskSet(SmallVector<SmallVector<size_t>>& map);
     SmallVector<SmallVector<size_t>> toTaskVec(SmallVector<BarrierInfo::TaskSet>& map);
 

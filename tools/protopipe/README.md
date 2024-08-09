@@ -70,17 +70,21 @@ Examples:
 ```
 #### ONNXRT parameters
 - `ep` - **Optional**. Specifies the parameters for particular execution provider.
+- `session_options` - **Optional**. Set various session options for the ONNX Runtime.
+
 ##### Supported Execution Providers
 - [OpenVINO Execution Provider](https://onnxruntime.ai/docs/execution-providers/OpenVINO-ExecutionProvider.html)
   - `name: OV` - **Required**. Enables OpenVINO Execution Provider.
-  - `device_type` - **Required**. The device type: _NPU_U8_, _CPU_FP32_, etc.
+  - `device_type` - **Optional**.The device type: _NPU_U8_, _CPU_FP32_, etc.
+  - `params` - **Optional**. Accepts a map of options and their corresponding values that can be passed to OV EP.
 
 **Note**: If none of the supported execution providers are specified, the default `MLAS` will be used.
 
 Examples:
 ```
 - { name: model.onnx, framework: onnxrt } # Default (MLAS) EP will be used
-- { name: model.onnx, framework: onnxrt, ep: { name: OV, device_type: NPU_U8 } } # OpenVINO EP will be used
+- { name: model.onnx, framework: onnxrt, session_options: { session.disable_cpu_ep_fallback: 1 } } # Default (MLAS) EP with the sessions options will be used
+- { name: model.onnx, framework: onnxrt, ep: { name: OV, device_type: NPU_U8, params: { enable_qdq_optimizer: False, model_priority: LOW } } } # OpenVINO EP will be used
 ```
 
 ### Graph structure
@@ -405,6 +409,12 @@ Parameters:
 Parameters:
     - `name: cosine` - **Required**. Enables cosine similarity metric.
 	- `threshold` - **Required**. If value of metric is lower than **threshold** it will be treated as **FAIL**.
+3. NRMSE : $$\text{NRMSE}(\mathbf{A}, \mathbf{B}) = \frac{1}{D}\sqrt{\frac{1}{N}\sum_{i=1}^N(A_i - B_i)^2}$$
+Where,
+$$D = \text{max}(0.001, \text{max}(A_{max}-A_{min}\text{, } B_{max}-B_{min}))$$
+Parameters:
+    - `name: nrmse` - **Required**. Enables nrmse metric.
+	- `tolerance` - **Required**. If value of metric is greater than **tolerance** it will be treated as **FAIL**.
 
 ### Example
 Consider the following `config.yaml`:
@@ -454,7 +464,7 @@ Iteration <number>:
 1. Clone OpenCV repo:
     ```
     git clone https://github.com/opencv/opencv
-    cd opencv && git checkout 8e43c8f200
+    cd opencv && git checkout dcce2b8b24
     ```
 2. Build OpenCV G-API:
 	```

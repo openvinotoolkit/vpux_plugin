@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 
 #include "vpux/utils/core/func_ref.hpp"
@@ -18,13 +19,13 @@ namespace vpux {
 Shape calcPadsEnd(ShapeRef origShape, ShapeRef extendedShape);
 Shape calcPadsEnd(vpux::NDTypeInterface origType, int64_t channelAlignment);
 
-mlir::Value expandChannelWithOffset(mlir::PatternRewriter& rewriter, mlir::Operation* origOp, IE::SliceOp sliceOp,
-                                    mlir::Value expandValue, ShapeRef inPadsEnd);
-mlir::Value paddingActivation(mlir::Operation* origOp, mlir::PatternRewriter& rewriter, mlir::Value expandValue,
-                              ShapeRef filterPadsEnd);
+mlir::Value expandWithOffset(mlir::PatternRewriter& rewriter, mlir::Operation* origOp, IE::SliceOp sliceOp,
+                             mlir::Value expandValue, ShapeRef inPadsEnd, size_t expandDim);
+mlir::Value paddingChannel(mlir::Operation* origOp, mlir::PatternRewriter& rewriter, mlir::Value expandValue,
+                           ShapeRef filterPadsEnd, size_t expandDim);
 mlir::Value paddingFilter(mlir::Operation* origOp, mlir::PatternRewriter& rewriter, mlir::Value expandValue,
                           Shape filterPadsEnd);
-SmallVector<int64_t> extractMeaningfulOutput(mlir::Operation* origOp, Shape outPadsEnd);
+SmallVector<int64_t> extractMeaningfulOutput(mlir::Operation* origOp, ShapeRef outPadsEnd);
 
 //
 // generalRewrite
@@ -77,6 +78,22 @@ private:
 };
 
 //
+// MatmulRewriter
+//
+
+class MatMulRewriter final : public mlir::OpRewritePattern<IE::MatMulOp> {
+public:
+    MatMulRewriter(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<IE::MatMulOp>(ctx), _log(log) {
+        setDebugName("MatMulRewriter");
+    }
+
+    mlir::LogicalResult matchAndRewrite(IE::MatMulOp origOp, mlir::PatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+//
 // EltwiseRewriter
 //
 
@@ -114,7 +131,8 @@ mlir::LogicalResult EltwiseRewriter<ConcreteOp>::matchAndRewrite(ConcreteOp orig
             const auto padsEnd = calcPadsEnd(origShape, extendedShape);
 
             auto sliceOp = origOp.getInput1().template getDefiningOp<IE::SliceOp>();
-            expandedInput2 = expandChannelWithOffset(rewriter, origOp, sliceOp, origOp.getInput2(), padsEnd);
+            expandedInput2 =
+                    expandWithOffset(rewriter, origOp, sliceOp, origOp.getInput2(), padsEnd, Dims4D::Act::C.ind());
         }
 
         const Shape outPadBefore(checked_cast<size_t>(origOp.getType().getRank()), 0);

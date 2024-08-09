@@ -367,10 +367,6 @@ vcl_result_t BuildInfo::prepareBuildFlags(const std::string& descOptions) {
         "AUTO_DETECT" == config[ov::intel_npu::platform.name()]) {
         // Set platform
         switch (pvc->getCompilerDesc().platform) {
-        case VCL_PLATFORM_VPU3700:
-            config[ov::intel_npu::platform.name()] = "3700";
-            config[ov::device::id.name()] = "3700";
-            break;
         case VCL_PLATFORM_VPU3720:
             config[ov::intel_npu::platform.name()] = "3720";
             config[ov::device::id.name()] = "3720";
@@ -394,7 +390,7 @@ vcl_result_t BuildInfo::prepareBuildFlags(const std::string& descOptions) {
 
     /// Update default compilation config options with the new values we parsed from user descriptions
     try {
-        parsedConfig.update(config, OptionMode::CompileTime);
+        parsedConfig.update(config, intel_npu::OptionMode::CompileTime);
     } catch (const std::exception& error) {
         logger->outputError(error.what());
         return VCL_RESULT_ERROR_INVALID_ARGUMENT;

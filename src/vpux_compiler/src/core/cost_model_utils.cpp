@@ -42,7 +42,7 @@ VPUNN::DataType getElementType(mlir::Type type) {
     return VPUNN::DataType::BFLOAT16;
 }
 
-VPUNN::MemoryLocation getMemoryLocation(mlir::Type type) {
+VPUNN::MemoryLocation vpux::getMemoryLocation(mlir::Type type) {
     auto memKind = type.cast<vpux::NDTypeInterface>().getMemoryKind();
     if (memKind == VPU::MemoryKind::CMX_NN) {
         return VPUNN::MemoryLocation::CMX;

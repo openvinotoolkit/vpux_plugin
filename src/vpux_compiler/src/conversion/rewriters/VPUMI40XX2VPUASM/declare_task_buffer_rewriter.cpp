@@ -13,12 +13,15 @@ mlir::LogicalResult DeclareTaskBufferRewriter::symbolize(VPURegMapped::DeclareTa
                                                          mlir::ConversionPatternRewriter& rewriter) const {
     auto symName = findSym(op.getResult()).getRootReference();
     auto taskIdx = mlir::TypeAttr::get(op.getType());
-    rewriter.create<VPUASM::DeclareTaskBufferOp>(op.getLoc(), symName, taskIdx, op.getTaskTypeAttr());
+
+    rewriter.create<VPUASM::DeclareTaskBufferOp>(op.getLoc(), symName, taskIdx, op.getTaskTypeAttr(),
+                                                 op.getOffsetAttr());
     rewriter.eraseOp(op);
     return mlir::success();
 }
 
-mlir::FlatSymbolRefAttr DeclareTaskBufferRewriter::getSymbolicName(VPURegMapped::DeclareTaskBufferOp op, size_t) {
+llvm::SmallVector<mlir::FlatSymbolRefAttr> DeclareTaskBufferRewriter::getSymbolicNames(
+        VPURegMapped::DeclareTaskBufferOp op, size_t) {
     auto opName = op->getName().stripDialect();
     auto taskTypeString = VPURegMapped::stringifyTaskType(op.getTaskType());
 
@@ -28,7 +31,8 @@ mlir::FlatSymbolRefAttr DeclareTaskBufferRewriter::getSymbolicName(VPURegMapped:
 
     auto symName = mlir::StringAttr::get(
             op.getContext(), opName + "_" + taskTypeString + "_" + tileIdx + "_" + srcTypeIdx + "_" + opIdx);
-    return mlir::FlatSymbolRefAttr::get(symName);
+
+    return {mlir::FlatSymbolRefAttr::get(symName)};
 }
 
 }  // namespace vpumi40xx2vpuasm

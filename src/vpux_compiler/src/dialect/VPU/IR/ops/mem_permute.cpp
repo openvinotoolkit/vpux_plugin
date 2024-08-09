@@ -42,11 +42,12 @@ mlir::LogicalResult ConvertToPermuteCast::matchAndRewrite(VPU::MemPermuteOp memP
 mlir::LogicalResult vpux::VPU::MemPermuteOp::inferReturnTypes(mlir::MLIRContext* ctx,
                                                               std::optional<mlir::Location> optLoc,
                                                               mlir::ValueRange operands, mlir::DictionaryAttr attrs,
-                                                              mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+                                                              mlir::OpaqueProperties prop,
+                                                              mlir::RegionRange /*regions*/,
                                                               mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::MemPermuteOpAdaptor mem_permute(operands, attrs);
+    VPU::MemPermuteOpAdaptor mem_permute(operands, attrs, prop);
     if (mlir::failed(mem_permute.verify(loc))) {
         return mlir::failure();
     }

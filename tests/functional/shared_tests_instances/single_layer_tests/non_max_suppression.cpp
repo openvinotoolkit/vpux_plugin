@@ -133,14 +133,8 @@ protected:
     }
 };
 
-class NmsLayerTest_NPU3700 : public NmsLayerTestCommon {};
 class NmsLayerTest_NPU3720 : public NmsLayerTestCommon {};
 class NmsLayerTest_NPU4000 : public NmsLayerTestCommon {};
-
-TEST_P(NmsLayerTest_NPU3700, HW) {
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
 
 TEST_P(NmsLayerTest_NPU3720, HW) {
     setDefaultHardwareMode();
@@ -156,7 +150,6 @@ TEST_P(NmsLayerTest_NPU4000, HW) {
 
 }  // namespace ov
 
-using ov::test::NmsLayerTest_NPU3700;
 using ov::test::NmsLayerTest_NPU3720;
 using ov::test::NmsLayerTest_NPU4000;
 
@@ -188,7 +181,7 @@ std::vector<ov::element::Type> thrType = {
         ov::element::f16,
 };
 
-// ------- NPU3700/3720/4000 full scope -------
+// ------- NPU3720/4000 full scope -------
 const auto nmsParams = ::testing::Combine(
         ::testing::ValuesIn(inShapeParams),
         ::testing::Combine(::testing::ValuesIn(paramsType), ::testing::ValuesIn(maxBoxType),
@@ -197,7 +190,6 @@ const auto nmsParams = ::testing::Combine(
         ::testing::ValuesIn(sigmaThreshold), ::testing::ValuesIn(encodType), ::testing::ValuesIn(sortResDesc),
         ::testing::ValuesIn(outType), ::testing::Values(ov::test::utils::DEVICE_NPU));
 
-INSTANTIATE_TEST_CASE_P(smoke_NmsLayerTest, NmsLayerTest_NPU3700, nmsParams, NmsLayerTest_NPU3700::getTestCaseName);
 INSTANTIATE_TEST_CASE_P(DISABLED_TMP_smoke_NmsLayerTest, NmsLayerTest_NPU3720, nmsParams,
                         NmsLayerTest_NPU3720::getTestCaseName);
 INSTANTIATE_TEST_CASE_P(DISABLED_TMP_smoke_NmsLayerTest, NmsLayerTest_NPU4000, nmsParams,

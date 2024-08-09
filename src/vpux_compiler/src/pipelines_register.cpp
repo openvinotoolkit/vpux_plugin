@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-#include "vpux/compiler/VPU30XX/pipelines_register.hpp"
 #include "vpux/compiler/NPU37XX/pipelines_register.hpp"
 #include "vpux/compiler/NPU40XX/pipelines_register.hpp"
 
@@ -17,8 +16,6 @@ using namespace vpux;
 
 std::unique_ptr<IPipelineRegistry> vpux::createPipelineRegistry(VPU::ArchKind arch) {
     switch (arch) {
-    case VPU::ArchKind::NPU30XX:
-        return std::make_unique<PipelineRegistry30XX>();
     case VPU::ArchKind::NPU37XX:
         return std::make_unique<PipelineRegistry37XX>();
     case VPU::ArchKind::NPU40XX:

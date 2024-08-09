@@ -83,8 +83,7 @@ std::ofstream openProfilingStream(ProfilingFormat* format) {
     return output;
 }
 
-void saveProfilingDataToFile(ProfilingFormat format, std::ostream& output, const std::vector<LayerInfo>& layers,
-                             const std::vector<TaskInfo>& tasks) {
+void saveProfilingDataToFile(std::ostream& output, ProfilingFormat format, const ProfInfo& profInfo) {
     static const std::map<std::string, size_t> VERBOSITY_TO_NUM_FILTERS = {
             {"LOW", 1},
             {"MEDIUM", 0},
@@ -99,21 +98,22 @@ void saveProfilingDataToFile(ProfilingFormat format, std::ostream& output, const
     auto numFilters = VERBOSITY_TO_NUM_FILTERS.at(verbosityValue);
     std::vector<TaskInfo> filteredTasks;
     // Driver return tasks at maximum verbosity, so filter them to needed level
-    std::copy_if(tasks.begin(), tasks.end(), std::back_inserter(filteredTasks), [&](const TaskInfo& task) {
-        bool toKeep = true;
-        for (size_t filterId = 0; filterId < numFilters; ++filterId) {
-            toKeep &= !verbosityFilters[filterId](task);
-        }
-        return toKeep;
-    });
+    std::copy_if(profInfo.tasks.begin(), profInfo.tasks.end(), std::back_inserter(filteredTasks),
+                 [&](const TaskInfo& task) {
+                     bool toKeep = true;
+                     for (size_t filterId = 0; filterId < numFilters; ++filterId) {
+                         toKeep &= !verbosityFilters[filterId](task);
+                     }
+                     return toKeep;
+                 });
 
     output.exceptions(std::ios::badbit | std::ios::failbit);
     switch (format) {
     case ProfilingFormat::JSON:
-        printProfilingAsTraceEvent(filteredTasks, layers, output);
+        printProfilingAsTraceEvent(filteredTasks, profInfo.layers, profInfo.dpuFreq, output);
         break;
     case ProfilingFormat::TEXT:
-        printProfilingAsText(filteredTasks, layers, output);
+        printProfilingAsText(filteredTasks, profInfo.layers, output);
         break;
     case ProfilingFormat::RAW:
     case ProfilingFormat::NONE:
@@ -130,23 +130,17 @@ void saveRawDataToFile(const uint8_t* rawBuffer, size_t size, std::ostream& outp
 
 std::vector<LayerInfo> getLayerProfilingInfoHook(const uint8_t* profData, size_t profSize, const uint8_t* blobData,
                                                  size_t blobSize) {
-    ProfilingFormat format = ProfilingFormat::NONE;
-    std::ofstream outFile = openProfilingStream(&format);
-
-    std::vector<LayerInfo> layerData;
-    if (outFile.is_open()) {
-        if (format == ProfilingFormat::RAW) {
-            saveRawDataToFile(profData, profSize, outFile);
-            layerData = getLayerInfo(blobData, blobSize, profData, profSize);
-        } else {
-            auto taskData = getTaskInfo(blobData, blobSize, profData, profSize, VerbosityLevel::HIGH);
-            layerData = getLayerInfo(taskData);
-            saveProfilingDataToFile(format, outFile, layerData, taskData);
-        }
-    } else {
-        layerData = getLayerInfo(blobData, blobSize, profData, profSize);
+    auto format = ProfilingFormat::NONE;
+    auto output = openProfilingStream(&format);
+    if (format == ProfilingFormat::RAW) {
+        // Save raw data first in case post-processing fails
+        saveRawDataToFile(profData, profSize, output);
     }
-    return layerData;
+    auto profInfo = getProfInfo(blobData, blobSize, profData, profSize, VerbosityLevel::HIGH);
+    if (format != ProfilingFormat::NONE && format != ProfilingFormat::RAW) {
+        saveProfilingDataToFile(output, format, profInfo);
+    }
+    return profInfo.layers;
 }
 
 std::vector<LayerInfo> getLayerProfilingInfoHook(const std::vector<uint8_t>& data, const std::vector<uint8_t>& blob) {

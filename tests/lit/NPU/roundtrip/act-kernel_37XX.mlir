@@ -1,14 +1,12 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
-// Unmaintained ELF import feature, test expected to fail
-// XFAIL: *
-// RUN: vpux-translate --vpu-arch=%arch% --export-ELF %s -o t.elf
-// RUN: vpux-translate --vpu-arch=%arch% --import-ELF t.elf | FileCheck %s
-// RUN: rm t.elf
-// REQUIRES: arch-VPUX37XX
+// RUN: vpux-translate --vpu-arch=%arch% --export-ELF %s -o %t.elf
+// RUN: vpux-translate --vpu-arch=%arch% --import-ELF %t.elf | FileCheck %s
+// RUN: rm %t.elf
+// REQUIRES: arch-NPU37XX
 //
 
 module @Test attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilationMode = #VPU.compilation_mode<ReferenceHW>} {

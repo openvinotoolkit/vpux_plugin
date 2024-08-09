@@ -143,6 +143,30 @@ bool arePerClusterMemoryShapeAndOffsetsEqual(T sourceType, T targetType) {
 template <typename T, std::enable_if_t<or_<std::is_same<VPU::DistributedTensorType, T>,
                                            std::is_same<VPUIP::DistributedBufferType, T>>::value,
                                        bool> = true>
+bool arePerClusterMemoryShapeAndOffsetsEqual(T sourceType, VPU::DistributedTensorAttr explicitDistribution) {
+    // Ensure the memory view for the source type and target explicit distribution are the same,
+    // no matter the attributes of the distribution.
+    // For example, given:
+    // sourceAttr = SEGMENTED across 2 clusters without uniformDistributedSegments
+    // targetAttr = SEGMENTED across 2 clusters with uniformDistributedSegments
+    // memory view will always be the same, so the distribution attrs are compatible.
+
+    VPUX_THROW_WHEN(
+            explicitDistribution.getMemoryShapes() == nullptr || explicitDistribution.getMemoryOffsets() == nullptr,
+            "Target distribution is not explicit = {0}", explicitDistribution);
+
+    auto srcMemoryOffsets = sourceType.getPerClusterMemoryShapeOffsets();
+    auto targetMemoryOffsets = VPU::arrayAttrToVecOfShapes(explicitDistribution.getMemoryOffsets());
+
+    auto srcMemoryShapes = sourceType.getPerClusterMemoryShapes();
+    auto targetMemoryShapes = VPU::arrayAttrToVecOfShapes(explicitDistribution.getMemoryShapes());
+
+    return (srcMemoryOffsets == targetMemoryOffsets) && (srcMemoryShapes == targetMemoryShapes);
+}
+
+template <typename T, std::enable_if_t<or_<std::is_same<VPU::DistributedTensorType, T>,
+                                           std::is_same<VPUIP::DistributedBufferType, T>>::value,
+                                       bool> = true>
 mlir::LogicalResult areDistributionAttrsCompatible(T sourceType, T targetType,
                                                    const bool allowDifferentPerClusterMemoryView = false) {
     const auto sourceAttr = sourceType.getDistribution();

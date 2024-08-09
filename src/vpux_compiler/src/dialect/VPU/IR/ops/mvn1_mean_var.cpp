@@ -13,11 +13,12 @@ using namespace vpux;
 mlir::LogicalResult vpux::VPU::MVN1MeanVarOp::inferReturnTypes(mlir::MLIRContext* ctx,
                                                                std::optional<mlir::Location> optLoc,
                                                                mlir::ValueRange operands, mlir::DictionaryAttr attrs,
-                                                               mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+                                                               mlir::OpaqueProperties prop,
+                                                               mlir::RegionRange /*regions*/,
                                                                mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::MVN1MeanVarOpAdaptor op(operands, attrs);
+    VPU::MVN1MeanVarOpAdaptor op(operands, attrs, prop);
     if (mlir::failed(op.verify(loc))) {
         return mlir::failure();
     }
@@ -42,8 +43,8 @@ mlir::LogicalResult vpux::VPU::MVN1MeanVarOp::inferReturnTypes(mlir::MLIRContext
     const auto outW = op.getNormalizeVariance() ? 2 : 1;  // {mean, var} or {mean}
 
     SmallVector<int64_t> oShape{inN, outC, 1, outW};
-    auto oShapeType = iType.changeShape(Shape(oShape));
-    auto oType = oShapeType.changeElemType(op.getOutputType());
+    auto oType = mlir::RankedTensorType::get(oShape, op.getOutputType(), createTensorAttrFromType(iType));
+
     inferredReturnTypes.push_back(oType);
 
     return mlir::success();
@@ -57,13 +58,13 @@ bool vpux::VPU::MVN1MeanVarOp::checkStrategyCompatibility(VPU::MultiClusterStrat
     return strategy == VPU::MultiClusterStrategy::Clustering;
 }
 
-vpux::VPU::DistributedTensorAttr vpux::VPU::MVN1MeanVarOp::getExplicitDistributedTensorAttr(
-        vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, mlir::ArrayAttr numTiles,
-        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::UnitAttr uniformDistributedSegments,
-        const vpux::VPU::OverlapDistributionParams& /*overlapParams*/) {
-    return VPU::getSWExplicitDistributedTensorAttr(mlir::dyn_cast<VPU::SWOpInterface>(getOperation()), shape,
-                                                   distributionMode, numTiles, numClusters, alignment,
-                                                   uniformDistributedSegments);
+vpux::VPU::DistributedTensorNative vpux::VPU::MVN1MeanVarOp::getExplicitDistributedTensorAttr(
+        vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, ArrayRef<int64_t> numTiles,
+        const int64_t numClusters, ArrayRef<int64_t> alignment, const bool uniformDistributedSegments,
+        const vpux::VPU::OverlapDistributionParams& overlapParams) {
+    return VPU::getSWExplicitDistributedTensorNative(mlir::dyn_cast<VPU::SWOpInterface>(getOperation()), shape,
+                                                     distributionMode, numTiles, numClusters, alignment,
+                                                     uniformDistributedSegments, overlapParams);
 }
 
 //
@@ -101,5 +102,13 @@ bool vpux::VPU::MVN1MeanVarOp::supportCycleCostCalculation() {
 void vpux::VPU::MVN1MeanVarOp::build(::mlir::OpBuilder& builder, ::mlir::OperationState& state, ::mlir::Value sum,
                                      ::mlir::ArrayAttr orig_shape, bool across_channels, bool normalize_variance,
                                      ::mlir::APFloat eps, ::mlir::Type output_type) {
-    build(builder, state, sum, orig_shape, across_channels, normalize_variance, eps, output_type, {});
+    build(builder, state, sum, orig_shape, across_channels, normalize_variance, std::move(eps), output_type, {}, {});
+}
+
+void vpux::VPU::MVN1MeanVarOp::build(::mlir::OpBuilder& builder, ::mlir::OperationState& state, ::mlir::Value sum,
+                                     ::mlir::ArrayAttr orig_shape, bool across_channels, bool normalize_variance,
+                                     ::mlir::APFloat eps, ::mlir::Type output_type,
+                                     ::mlir::ArrayAttr internal_reshape) {
+    build(builder, state, sum, orig_shape, across_channels, normalize_variance, std::move(eps), output_type,
+          internal_reshape, {});
 }

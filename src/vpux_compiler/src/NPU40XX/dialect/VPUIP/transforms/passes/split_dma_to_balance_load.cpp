@@ -9,6 +9,7 @@
 #include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/task.hpp"
+#include "vpux/utils/core/error.hpp"
 
 #include <mlir/Transforms/GreedyPatternRewriteDriver.h>
 
@@ -17,13 +18,6 @@ using namespace vpux;
 namespace {
 
 using BuffersPair = std::pair<mlir::Value, mlir::Value>;
-
-std::pair<int64_t, int64_t> getSplitPartSizes(NDTypeInterface bufferType, vpux::Dim tileDim) {
-    const int64_t tileDimSize = bufferType.getShape()[tileDim];
-    const int64_t firstPartSize = tileDimSize / 2;
-    const int64_t secondPartSize = tileDimSize - firstPartSize;
-    return {firstPartSize, secondPartSize};
-}
 
 Shape getSplitShape(NDTypeInterface bufferType, vpux::Dim tileDim, int64_t newDimSize) {
     Shape subShape = bufferType.getShape().toValues();
@@ -37,6 +31,34 @@ NDTypeInterface getNewBufferType(NDTypeInterface bufferType, vpux::Dim tileDim, 
     newOffset[tileDim] = dimOffset;
 
     NDTypeInterface newType;
+    if (auto distributedType = bufferType.dyn_cast<VPUIP::DistributedBufferType>()) {
+        const auto origDistAttr = distributedType.getDistribution();
+        VPUX_THROW_UNLESS(VPU::isDuplicated(origDistAttr), "Only support DUPLICATED distributed buffer type");
+
+        // When DistributedTensorAttr has explicit per cluster memory/compute shapes, recompute them for the new shape
+        // Since changeShape is not appliable for explicit distribution
+        if (VPU::isDistributedAttrWithExplicitShapesAndOffsets(origDistAttr)) {
+            auto ctx = bufferType.getContext();
+            auto duplicatedOutputMode = VPU::DistributionModeAttr::get(ctx, VPU::DistributionMode::DUPLICATED);
+            auto newDistribution = VPU::getNonOverlappedDistributedAttr(
+                    newShape, duplicatedOutputMode, nullptr, origDistAttr.getNumClusters(), nullptr,
+                    origDistAttr.getUniformDistributedSegments(), ctx);
+
+            auto newElemType = bufferType.getElementType();
+            if (auto qType = bufferType.getElementType().dyn_cast<mlir::quant::UniformQuantizedPerAxisType>()) {
+                newElemType = tileScalesAndZP(qType, newShape, newOffset);
+            }
+
+            auto order = mlir::AffineMapAttr::get(bufferType.getDimsOrder().toAffineMap(ctx));
+            auto memSpace = bufferType.cast<VPUIP::DistributedBufferType>().getMemSpace();
+
+            newType = VPUIP::DistributedBufferType::get(ctx, newShape.raw(), newElemType, order, memSpace,
+                                                        newDistribution);
+
+            return VPUIP::tileTypeSparsityCompression(newType, newOffset, newShape);
+        }
+    }
+
     if (auto qType = bufferType.getElementType().dyn_cast<mlir::quant::UniformQuantizedPerAxisType>()) {
         auto newElemType = tileScalesAndZP(qType, newShape, newOffset);
         newType = bufferType.changeShapeElemType(newShape, newElemType);
@@ -69,7 +91,7 @@ BuffersPair getReplacementBuffers(mlir::Value originalBuffer, vpux::Dim tileDim,
                 ->getResult(0);
     };
 
-    const auto [firstPartSize, secondPartSize] = getSplitPartSizes(bufferType, tileDim);
+    const auto [firstPartSize, secondPartSize] = VPUIP::getSplitPartSizes(bufferType, tileDim);
     const auto extraOffset = Byte(firstPartSize * origStrides[tileDim]).count();
 
     auto firstBuff = getTiledBuf(/*dimOffset=*/0, firstPartSize, /*byteOffset=*/0, "_first_part");
@@ -93,7 +115,7 @@ BuffersPair getConstantParts(mlir::Value originalConstant, vpux::Dim tileDim, ml
         return builder.createOrFold<VPUIP::SubViewOp>(newLoc, cstOp, offset.raw(), newShape.raw());
     };
 
-    const auto [firstPartSize, secondPartSize] = getSplitPartSizes(cstType, tileDim);
+    const auto [firstPartSize, secondPartSize] = VPUIP::getSplitPartSizes(cstType, tileDim);
     auto firstCst = createCstPart(0, firstPartSize, "_first_part");
     auto secondCst = createCstPart(firstPartSize, secondPartSize, "_second_part");
 
@@ -148,7 +170,7 @@ void splitFoldedConstToBufferDma(VPURT::TaskOp taskOp, VPUIP::NNDMAOp dmaOp, Con
         log.trace("Can't split constant with non-byte stride");
         return;
     }
-    auto [firstPartSize, secondPartSize] = getSplitPartSizes(cstType, tileDim);
+    auto [firstPartSize, secondPartSize] = VPUIP::getSplitPartSizes(cstType, tileDim);
     if (firstPartSize != secondPartSize) {
         log.trace("Can't split constant with odd tiling dim");
         return;

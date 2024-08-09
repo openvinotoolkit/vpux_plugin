@@ -6,7 +6,7 @@
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 #include "vpux/compiler/dialect/IE/utils/interpolate_utils.hpp"
-#include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
@@ -257,10 +257,12 @@ mlir::LogicalResult SplitBilinerIntoHAndWPass::BilinearInterpolateOpConverter::m
         }
     }
 
-    const DimsOrder weighOrder = DimsOrder::OYXI;
-
-    auto weight = VPU::buildWeightsConst(ShapeRef(weightShape), weighOrder, ArrayRef(weights),
-                                         interpolateOnH.getOutput(), rewriter);
+    const DimsOrder weightOrder = DimsOrder::OYXI;
+    const auto weightType = mlir::RankedTensorType::get(
+            weightShape.raw(), mlir::cast<NDTypeInterface>(interpolateOnH.getOutput().getType()).getElementType(),
+            getTensorAttr(rewriter.getContext(), weightOrder, nullptr, nullptr));
+    auto weight =
+            Const::buildWeightsConst(rewriter, interpolateOnH.getOutput().getLoc(), weightType, ArrayRef(weights));
 
     const auto convOutputShape = Shape{inputShape[Dims4D::Act::N], inputShape[Dims4D::Act::C] * 2,
                                        inputShape[Dims4D::Act::H] * 2, inputShape[Dims4D::Act::W] - 1};

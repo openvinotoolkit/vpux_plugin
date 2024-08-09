@@ -352,36 +352,72 @@ bool checkExpandU8Pattern(VPUIP::ExpandOp expandOp, Logger log) {
 bool checkExpandFP16Pattern(VPUIP::ExpandOp expandOp, Logger log) {
     log.trace("Got ExpandOpFP16 at {0}. Try to find fuse pattern.", expandOp->getLoc());
 
-    /*The expandOp was inserted because align to 16 on channel dim. So the expand data is useless. We can fill any data
-     * to the expand data. But for convolution, when expand with FP16 precision the expand data will affect the
-     * calculation results, if we fill unnormal data like null.*/
+    const auto hasOneOrSameUser = [](mlir::Operation* op) -> bool {
+        auto users = op->getUsers();
+        if (users.empty()) {
+            return false;
+        }
+        auto firstUser = *users.begin();
+        return std::all_of(std::next(users.begin()), users.end(), [&](mlir::Operation* userOp) {
+            return firstUser == userOp;
+        });
+    };
 
-    VPUIP::NCEClusterTaskOp nceTask;
-    if (auto expandCopyOutOp = mlir::dyn_cast<VPUIP::CopyOp>(*(expandOp->getUsers().begin()))) {
-        nceTask = mlir::dyn_cast<VPUIP::NCEClusterTaskOp>(*(expandCopyOutOp->getUsers().begin()));
-    } else if (auto clusterCopyOutOp = mlir::dyn_cast<VPUIP::NCEClusterTilingOp>(*(expandOp->getUsers().begin()))) {
-        auto innerCopyOp = mlir::dyn_cast<VPUIP::CopyOp>(clusterCopyOutOp.getInnerTaskOp());
-
-        if (innerCopyOp == nullptr) {
+    const auto isCopyOpWithOneUser = [&](mlir::Operation* op) -> bool {
+        if (!hasOneOrSameUser(op)) {
             return false;
         }
 
-        auto clusterNCETaskOp = mlir::dyn_cast<VPUIP::NCEClusterTilingOp>(*(clusterCopyOutOp->getUsers().begin()));
+        if (auto clusterCopyOp = mlir::dyn_cast<VPUIP::NCEClusterTilingOp>(op)) {
+            return mlir::isa_and_nonnull<VPUIP::CopyOp>(clusterCopyOp.getInnerTaskOp());
+        }
 
-        if (clusterNCETaskOp == nullptr) {
+        return mlir::isa_and_nonnull<VPUIP::CopyOp>(op);
+    };
+
+    const auto isNceButNotConvOpWithOneUser = [&](mlir::Operation* op) -> bool {
+        if (!hasOneOrSameUser(op)) {
             return false;
         }
 
-        nceTask = mlir::dyn_cast<VPUIP::NCEClusterTaskOp>(clusterNCETaskOp.getInnerTaskOp());
-    } else {
+        auto nceTask = mlir::dyn_cast<VPUIP::NCEClusterTaskOp>(op);
+        if (nceTask == nullptr) {
+            if (auto clusterTilingOp = mlir::dyn_cast<VPUIP::NCEClusterTilingOp>(op)) {
+                nceTask = mlir::dyn_cast<VPUIP::NCEClusterTaskOp>(clusterTilingOp.getInnerTaskOp());
+            }
+        }
+        return nceTask != nullptr && nceTask.getTaskType() != VPUIP::NCETaskType::CONV;
+    };
+
+    // ExpandOp aligns channels to multiples of 16 due to HW constraints
+    // ExpandDMA copies only the actively used data; the expanded portion may contain uninitialized data
+    // - For operations like Pooling or GroupConvolution, computations are performed per channel
+    //   Thus, any data, including uninitialized memory, can serve as the expanded data without affecting outcomes
+    // - However, for Convolution operations, the expanded channels are included in computations
+    //   Therefore, filling these channels with abnormal data (e.g., null values) can adversely affect the results
+    //
+    // Illegal Pattern: "Expand -> NceExceptConv -> Convolution -> Subview"
+    //   Dirty data impacts Convolution
+    // Legal Pattern: "Expand -> NceExceptConv x N -> Subview"
+    //   Multiple non-conv NCE operations between Expand and Subview are supported
+
+    auto potentialCopyOrNceOp = *expandOp->getUsers().begin();
+    while (isCopyOpWithOneUser(potentialCopyOrNceOp) || isNceButNotConvOpWithOneUser(potentialCopyOrNceOp)) {
+        potentialCopyOrNceOp = *potentialCopyOrNceOp->getUsers().begin();
+    }
+
+    const auto expandInput = to_small_vector(getShape(expandOp.getInput()));
+    const auto expandBegin = parseIntArrayAttr<int64_t>(expandOp.getPadsBegin());
+
+    auto subviewOp = mlir::dyn_cast<VPUIP::SubViewOp>(potentialCopyOrNceOp);
+    if (subviewOp == nullptr || subviewOp.getStaticStrides().has_value()) {
         return false;
     }
 
-    if (nceTask == nullptr) {
-        return false;
-    }
-
-    if (nceTask.getTaskType() == VPUIP::NCETaskType::CONV) {
+    const auto staticOffsets = parseIntArrayAttr<int64_t>(subviewOp.getStaticOffsets());
+    const auto staticSizes = parseIntArrayAttr<int64_t>(subviewOp.getStaticSizes());
+    if (expandBegin[Dims4D::Act::C.ind()] != staticOffsets[Dims4D::Act::C.ind()] ||
+        staticSizes[Dims4D::Act::C.ind()] != expandInput[Dims4D::Act::C.ind()]) {
         return false;
     }
 
@@ -1065,8 +1101,11 @@ mlir::LogicalResult FuseExpandWithUpsampling::matchAndRewrite(VPUIP::ExpandOp or
     const auto upsamplingFactorVectorTmp = parseIntArrayAttr<int64_t>(upsamplingOp.getUpsamplingFactor());
     SmallVector<int64_t> upsamplingFactorVector = {1, upsamplingFactorVectorTmp[2], upsamplingFactorVectorTmp[1],
                                                    upsamplingFactorVectorTmp[0]};
-
-    auto constZeros = VPU::getZerosConst(rewriter, outputShape.toValues(), upsamplingOp.getInput(), origOp.getLoc());
+    const auto inputType = mlir::cast<NDTypeInterface>(upsamplingOp.getInput().getType());
+    const auto zeroType =
+            mlir::cast<NDTypeInterface>(mlir::MemRefType::get(outputShape.raw(), inputType.getElementType()))
+                    .changeDimsOrder(inputType.getDimsOrder());
+    auto constZeros = Const::createZerosConst(rewriter, origOp.getLoc(), mlir::cast<mlir::MemRefType>(zeroType));
 
     auto copyZeroOp = rewriter.create<VPUIP::CopyOp>(origOp->getLoc(), constZeros, origOp.getOutputBuff());
     auto upsampleFactorAttr = getIntArrayAttr(origOp.getContext(), upsamplingFactorVector);
@@ -1976,482 +2015,6 @@ mlir::LogicalResult FuseClusterMemPermuteWithViewLikeOps::matchAndRewrite(VPUIP:
     return mlir::success();
 }
 
-namespace {
-
-//
-// FuseTileWithConcatClusteredCopy
-//
-
-/*
-    Decompose SW TileOp into several PerAxisTileDMA ops and fuse the last PerAxisTileDMA into child ClusterTiling Copy
-ops.
-    Convert below pattern:
-                    Root Tensor
-                         |
-                       Copy
-                    (DDR -> CMX)
-               /         |         \
-      SW Kernel       SW Kernel      SW Kernel
-       (TileOp)        (TileOp)       (TileOp)
-          |              |              |
-        Copy            Copy  ...      Copy
-    (CMX -> DDR)    (CMX -> DDR)    (CMX -> DDR)
-                 \       |       /
-                     ConcatView
-                    /          \
-            SubView              SubView
-              /                      \
-    ClusterTilingCopy             ClusterTilingCopy
-      (DDR -> CMX)                  (DDR -> CMX)
-           |                              |
-        NCETask                        NCETask
-    to:
-                        Root Tensor
-                    /                \
-      PerAxisTileDMA                  PerAxisTileDMA
-       (DDR -> DDR)                    (DDR -> DDR)
-            |                               |
-ClusterTilingPerAxisTileDMA     ClusterTilingPerAxisTileDMA
-       (DDR -> CMX)                    (DDR -> CMX)
-            |                               |
-         NCETask                         NCETask
-*/
-
-struct InputPattern {
-    VPUIP::CopyOp copyDDR2CMX;
-    VPUIP::SwKernelOp swTileOp;
-    VPUIP::CopyOp copyCMX2DDR;
-
-    InputPattern(VPUIP::CopyOp copyIn, VPUIP::SwKernelOp swOp, VPUIP::CopyOp copyOut)
-            : copyDDR2CMX(copyIn), swTileOp(swOp), copyCMX2DDR(copyOut) {
-    }
-
-    virtual ~InputPattern() = default;
-};
-
-struct OutputPattern {
-    VPUIP::SubViewOp subViewOp;
-    VPUIP::NCEClusterTilingOp clusterCopyOp;
-
-    OutputPattern(VPUIP::SubViewOp subView, VPUIP::NCEClusterTilingOp clusterOp)
-            : subViewOp(subView), clusterCopyOp(clusterOp) {
-    }
-
-    virtual ~OutputPattern() = default;
-};
-
-class FuseTileWithConcatClusteredCopy final : public mlir::OpRewritePattern<VPUIP::ConcatViewOp> {
-public:
-    FuseTileWithConcatClusteredCopy(mlir::MLIRContext* ctx, Logger log)
-            : mlir::OpRewritePattern<VPUIP::ConcatViewOp>(ctx), _log(log) {
-        setDebugName("FuseTileWithConcatClusteredCopy");
-    }
-
-public:
-    mlir::LogicalResult matchAndRewrite(VPUIP::ConcatViewOp concatViewOp, mlir::PatternRewriter& rewriter) const final;
-
-private:
-    Logger _log;
-
-    SmallVector<int64_t> extractRepeats(VPUIP::SwKernelOp swKernelTask) const;
-    mlir::FailureOr<SmallVector<InputPattern>> getValidConcatInputs(VPUIP::ConcatViewOp concatViewOp) const;
-    mlir::FailureOr<SmallVector<OutputPattern>> getValidConcatOutputs(VPUIP::ConcatViewOp concatViewOp,
-                                                                      ShapeRef origInputShape,
-                                                                      ArrayRef<int64_t> repeatsAxes) const;
-    bool checkOutputsDistributionCompatibility(ArrayRef<OutputPattern> concatOutputs,
-                                               ArrayRef<int64_t> repeatsAxes) const;
-};
-
-SmallVector<int64_t> FuseTileWithConcatClusteredCopy::extractRepeats(VPUIP::SwKernelOp swKernelTask) const {
-    VPUX_THROW_UNLESS(isTileSwKernel(swKernelTask), "Not Sw Kernel Tile", swKernelTask->getLoc());
-
-    VPUX_THROW_WHEN(swKernelTask.getBody().getOps<VPUIP::SwKernelRun>().empty(),
-                    "Cannot get VPUIP.SwKernelRun at '{0}'", swKernelTask->getLoc());
-
-    auto kernelRun = *(swKernelTask.getBody().getOps<VPUIP::SwKernelRun>().begin());
-    VPUX_THROW_UNLESS(kernelRun.getAttrs().has_value(), "Cannot find attribute at '{0}'", kernelRun->getLoc());
-
-    const mlir::ArrayAttr arrayAttrs = kernelRun.getAttrs().value();
-    VPUX_THROW_UNLESS(arrayAttrs.size() == 2, "Wrong numbers of attribute at '{0}', expected 2 but got '{1}'",
-                      kernelRun->getLoc(), arrayAttrs.size());
-
-    auto repeatsAttr = arrayAttrs.getValue()[1].dyn_cast<mlir::ArrayAttr>();
-    VPUX_THROW_UNLESS(repeatsAttr != nullptr, "Failed to extract repeatsAttr at '{0}'", kernelRun->getLoc());
-
-    SmallVector<int64_t> repeatsAxes;
-    auto repeats = parseIntArrayAttr<int64_t>(repeatsAttr);
-    for (int64_t i = 0; i < checked_cast<int64_t>(repeats.size()); i++) {
-        if (repeats[i] > 1) {
-            repeatsAxes.push_back(i);
-        }
-    }
-
-    VPUX_THROW_WHEN(repeatsAxes.empty(), "Cannot find axis to expansion, repeats {0}", repeats);
-
-    return repeatsAxes;
-}
-
-mlir::FailureOr<SmallVector<InputPattern>> FuseTileWithConcatClusteredCopy::getValidConcatInputs(
-        VPUIP::ConcatViewOp concatViewOp) const {
-    const auto isCMX2DDRCopy = [](mlir::Value input) {
-        auto op = mlir::dyn_cast_or_null<VPUIP::CopyOp>(input.getDefiningOp());
-        if (op == nullptr) {
-            return false;
-        }
-
-        // check if output buff is a SubView for safety
-        auto subViewOp = op.getOutputBuff().getDefiningOp<VPUIP::SubViewOp>();
-        if (subViewOp == nullptr) {
-            return false;
-        }
-
-        if (subViewOp.getStaticStridesAttr() != nullptr) {
-            auto strides = parseIntArrayAttr<int64_t>(subViewOp.getStaticStridesAttr());
-            auto hasStrides = llvm::any_of(strides, [](auto stride) {
-                return stride > 1;
-            });
-            if (hasStrides) {
-                return false;
-            }
-        }
-
-        return VPUIP::isCopyToDDR(op) && !VPUIP::isCopyFromDDR(op);
-    };
-
-    SmallVector<InputPattern> concatInputs;
-    SmallVector<int64_t> repeatsAxesOfPrevSwTile;
-    mlir::Operation* parentOpOfPrevSwTile = nullptr;
-    for (const auto& input : concatViewOp.getInputs()) {
-        // A valid input chain is CopyOp(DDR2CMX) -> SW TileOp -> CopyOp(CMX2DDR)
-        if (!isCMX2DDRCopy(input)) {
-            _log.nest().trace("[{0}] Invalid input: not a valid Copy", getDebugName());
-            return mlir::failure();
-        }
-
-        auto copyCMX2DDR = mlir::dyn_cast<VPUIP::CopyOp>(input.getDefiningOp());
-        VPUX_THROW_WHEN(copyCMX2DDR == nullptr, "Can not get CMX to DDR Copy");
-        if (!copyCMX2DDR->hasOneUse()) {
-            _log.nest().trace("[{0}] Invalid input: CopyOp has multiple users", getDebugName());
-            return mlir::failure();
-        }
-
-        auto swKernelTask = copyCMX2DDR.getInput().getDefiningOp<VPUIP::SwKernelOp>();
-        if (swKernelTask == nullptr || !VPUIP::isTileSwKernel(swKernelTask) || !swKernelTask->hasOneUse()) {
-            _log.nest().trace("[{0}] Invalid input: not a Sw Tile before Copy or op has multiple users",
-                              getDebugName());
-            return mlir::failure();
-        }
-
-        // All Sw Tiles should have the same repeats axes
-        auto repeatsAxesOfCurrSwTile = extractRepeats(swKernelTask);
-        if (repeatsAxesOfPrevSwTile.empty()) {
-            repeatsAxesOfPrevSwTile = std::move(repeatsAxesOfCurrSwTile);
-        } else if (repeatsAxesOfCurrSwTile != repeatsAxesOfPrevSwTile) {
-            _log.nest().trace("[{0}] Invalid input: Sw Tiles have different repeats axes", getDebugName());
-            return mlir::failure();
-        }
-
-        auto copyDDR2CMX = swKernelTask->getOperand(0).getDefiningOp<VPUIP::CopyOp>();
-        if (copyDDR2CMX == nullptr || !VPUIP::isCopyFromDDR(copyDDR2CMX) || VPUIP::isCopyToDDR(copyDDR2CMX)) {
-            _log.nest().trace("[{0}] Invalid input: can't get DDR to CMX Copy", getDebugName());
-            return mlir::failure();
-        }
-
-        // All Sw Tiles should have the same root
-        mlir::Operation* parentOpOfCurrSwTile = copyDDR2CMX;
-        if (parentOpOfPrevSwTile == nullptr) {
-            parentOpOfPrevSwTile = parentOpOfCurrSwTile;
-        } else if (parentOpOfCurrSwTile != parentOpOfPrevSwTile) {
-            _log.nest().trace("[{0}] Invalid input: Sw Tiles don't have the same root", getDebugName());
-            return mlir::failure();
-        }
-
-        concatInputs.push_back({copyDDR2CMX, swKernelTask, copyCMX2DDR});
-    }
-
-    if (concatInputs.empty()) {
-        return mlir::failure();
-    }
-
-    auto rootCopyOp = concatInputs.front().copyDDR2CMX;
-    if (concatInputs.size() !=
-        static_cast<size_t>(std::distance(rootCopyOp->getUsers().begin(), rootCopyOp->getUsers().end()))) {
-        _log.nest().trace("[{0}] Invalid input: root CopyOp has a child which is not a Sw Tile", getDebugName());
-        return mlir::failure();
-    }
-
-    return concatInputs;
-}
-
-mlir::FailureOr<SmallVector<OutputPattern>> FuseTileWithConcatClusteredCopy::getValidConcatOutputs(
-        VPUIP::ConcatViewOp concatViewOp, ShapeRef origInputShape, ArrayRef<int64_t> repeatsAxes) const {
-    const auto isDDR2CMXClusterCopyOp = [this](mlir::Operation* op) {
-        auto clusterOp = mlir::dyn_cast_or_null<VPUIP::NCEClusterTilingOp>(op);
-        if (clusterOp == nullptr) {
-            return false;
-        }
-
-        auto innerOp = clusterOp.getInnerTaskOpOfType<VPUIP::CopyOp>();
-        if (innerOp == nullptr || !VPUIP::isCopyFromDDR(innerOp) || VPUIP::isCopyToDDR(innerOp)) {
-            return false;
-        }
-
-        auto outputBuffer = clusterOp.getOutputBuffs()[0];
-        auto masterBuffer = VPUIP::getRootAlloc<VPURT::AllocDistributed>(outputBuffer);
-        if (masterBuffer == nullptr) {
-            _log.nest().trace("[{0}] Invalid output: buffer isn't master buffer", getDebugName());
-            return false;
-        }
-
-        return true;
-    };
-
-    const auto isSubViewCompatibleWithTileInput = [](VPUIP::SubViewOp subView, ShapeRef inputShape,
-                                                     ArrayRef<int64_t> repeatsAxes) {
-        auto staticOffsets = parseIntArrayAttr<int64_t>(subView.getStaticOffsetsAttr());
-        auto staticShapes = parseIntArrayAttr<int64_t>(subView.getStaticSizesAttr());
-        auto inputShapeVec = inputShape.raw();
-
-        if (staticOffsets.size() != inputShapeVec.size() || staticShapes.size() != inputShapeVec.size()) {
-            return false;
-        }
-
-        // Offsets and shape sizes of output SubView should be aligned with input data shape on repeats axes, so that it
-        // doesn't break the repeated input data block
-        for (int64_t axisIdx : repeatsAxes) {
-            if (checked_cast<size_t>(axisIdx) >= staticOffsets.size() ||
-                staticOffsets[axisIdx] % inputShapeVec[axisIdx] != 0 ||
-                staticShapes[axisIdx] % inputShapeVec[axisIdx] != 0) {
-                return false;
-            }
-        }
-
-        SmallVector<int64_t> diffShapeAxes;
-        for (size_t i = 0; i < staticShapes.size(); i++) {
-            if (staticShapes[i] != inputShape[Dim(i)]) {
-                diffShapeAxes.push_back(checked_cast<int64_t>(i));
-            }
-        }
-        // Conversion is not appliable when shape size is changed on non-repeats axes
-        // For example, for below case: PerAxisTileDMA can only change shape with repeats attribute on Dim W and Dim H
-        // But can't change shape size on Dim C
-        // rootShape [1, 1280, 1, 1]
-        // subShape [1, 640, 32, 32]
-        // repeats axes are [H, W]
-        if (diffShapeAxes != repeatsAxes) {
-            return false;
-        }
-
-        return true;
-    };
-
-    SmallVector<OutputPattern> concatOutputs;
-
-    for (auto user : concatViewOp->getUsers()) {
-        auto childSubViewOp = mlir::dyn_cast<VPUIP::SubViewOp>(user);
-        if (childSubViewOp == nullptr || !childSubViewOp->hasOneUse()) {
-            return mlir::failure();
-        }
-
-        if (childSubViewOp.getStaticStridesAttr() != nullptr) {
-            auto strides = parseIntArrayAttr<int64_t>(childSubViewOp.getStaticStridesAttr());
-            auto hasStrides = llvm::any_of(strides, [](auto stride) {
-                return stride > 1;
-            });
-            if (hasStrides) {
-                _log.nest().trace("[{0}] Invalid output: strided slice is not supported", getDebugName());
-                return mlir::failure();
-            }
-        }
-
-        if (!isSubViewCompatibleWithTileInput(childSubViewOp, origInputShape, repeatsAxes)) {
-            _log.nest().trace("[{0}] Invalid output: SubView {0} is not compatible with input shape {1}",
-                              getDebugName(), childSubViewOp, origInputShape);
-            return mlir::failure();
-        }
-
-        auto childClusterOp = mlir::dyn_cast<VPUIP::NCEClusterTilingOp>(*childSubViewOp->getUsers().begin());
-        if (!isDDR2CMXClusterCopyOp(childClusterOp)) {
-            return mlir::failure();
-        }
-
-        auto outputType = childClusterOp->getResult(0).getType().cast<NDTypeInterface>();
-        const auto outReqs = StrideReqs::compact(outputType.getRank());
-        if (!outReqs.checkStrides(outputType)) {
-            _log.nest().trace("[{0}] Invalid output: output is strided", getDebugName());
-            return mlir::failure();
-        }
-
-        concatOutputs.push_back({childSubViewOp, childClusterOp});
-    }
-
-    if (concatOutputs.empty()) {
-        return mlir::failure();
-    }
-
-    return concatOutputs;
-}
-
-// Tile op is decomposed into several PerAxisTile op
-// The last PerAxisTile can be fused into ClusterTiling Copy when repeat axis is different with
-// cluster-tiling axis
-// We don't have a chance to fuse Tile op into ClusterTiling Copy when it repeats data on single dimension and this
-// dimension is the same with cluster-tiling axis
-bool FuseTileWithConcatClusteredCopy::checkOutputsDistributionCompatibility(ArrayRef<OutputPattern> concatOutputs,
-                                                                            ArrayRef<int64_t> repeatsAxes) const {
-    auto checkOutputDistributionCompatibility = [&](OutputPattern output) {
-        // We can choose to repeat data on the cluster-tiling axis on DDR first if we have multiple repeats axes
-        // But if we only have single repeat axis, we need to check if it's the same with cluster-tiling axis
-        if (repeatsAxes.size() != 1) {
-            return true;
-        }
-
-        auto childClusterOp = output.clusterCopyOp;
-        const auto clusterOutput = *childClusterOp.getOutputs().begin();
-        const auto clusterOutputType = clusterOutput.getType().cast<vpux::NDTypeInterface>();
-
-        auto tilingDimIndex = VPUIP::getTilingDimIndex(clusterOutputType);
-        if (!tilingDimIndex.has_value()) {
-            return true;
-        }
-
-        return tilingDimIndex != repeatsAxes.front();
-    };
-
-    return llvm::all_of(concatOutputs, checkOutputDistributionCompatibility);
-}
-
-mlir::LogicalResult FuseTileWithConcatClusteredCopy::matchAndRewrite(VPUIP::ConcatViewOp concatViewOp,
-                                                                     mlir::PatternRewriter& rewriter) const {
-    // Get valid concat inputs
-    auto checkInputs = getValidConcatInputs(concatViewOp);
-    if (mlir::failed(checkInputs)) {
-        _log.nest().trace("[{0}] Invalid inputs for '{1}' at '{2}'", getDebugName(), concatViewOp->getName(),
-                          concatViewOp->getLoc());
-        return mlir::failure();
-    }
-
-    auto concatInputs = checkInputs.value();
-    VPUX_THROW_WHEN(concatInputs.empty(), "Can't get valid inputs for concatView");
-
-    auto rootCopyOp = concatInputs.front().copyDDR2CMX;
-    auto rootCopyInput = rootCopyOp->getOperand(0);
-    auto rootShape = getShape(rootCopyInput);
-
-    auto firstSwTile = concatInputs.front().swTileOp;
-    auto repeatsAxesOfFirstSwTile = extractRepeats(firstSwTile);
-
-    // Get valid concat outputs
-    auto checkOutputs = getValidConcatOutputs(concatViewOp, rootShape, repeatsAxesOfFirstSwTile);
-    if (mlir::failed(checkOutputs)) {
-        _log.nest().trace("[{0}] Invalid outputs for '{1}' at '{2}'", getDebugName(), concatViewOp->getName(),
-                          concatViewOp->getLoc());
-        return mlir::failure();
-    }
-
-    // Check if output distribution is compatible with input Tile op
-    auto concatOutputs = checkOutputs.value();
-    if (!checkOutputsDistributionCompatibility(concatOutputs, repeatsAxesOfFirstSwTile)) {
-        _log.nest().trace("[{0}] Output is not compatible for '{1}' at '{2}'", getDebugName(), concatViewOp->getName(),
-                          concatViewOp->getLoc());
-        return mlir::failure();
-    }
-
-    // Rewrite and replace sub graph
-    auto ctx = concatViewOp->getContext();
-    for (auto output : concatOutputs) {
-        auto childSubViewOp = output.subViewOp;
-        auto childClusterOp = output.clusterCopyOp;
-        const auto clusterOutput = *childClusterOp.getOutputs().begin();
-        const auto clusterOutputType = clusterOutput.getType().cast<vpux::NDTypeInterface>();
-
-        SmallVector<size_t> repeatAxes;
-        const auto inShape = rootShape;
-        const auto outShape = clusterOutputType.getShape();
-        for (size_t idx = 0; idx < checked_cast<size_t>(rootShape.size()); ++idx) {
-            if (inShape[Dim(idx)] == outShape[Dim(idx)]) {
-                continue;
-            }
-            repeatAxes.push_back(idx);
-        }
-
-        // Sort repeats axes to repeat data on the cluster-tiling axis on DDR first
-        // This can ensure the last PerAxisTile op's repeat axis is different with cluster-tiling axis
-        auto tilingDimIndex = VPUIP::getTilingDimIndex(clusterOutputType);
-        if (tilingDimIndex.has_value()) {
-            auto dimIt = std::find(repeatAxes.begin(), repeatAxes.end(), checked_cast<size_t>(tilingDimIndex.value()));
-            if (dimIt != repeatAxes.end()) {
-                repeatAxes.erase(dimIt);
-                repeatAxes.insert(repeatAxes.begin(), tilingDimIndex.value());
-            }
-        }
-
-        mlir::Value perAxisTileInput = rootCopyInput;
-        mlir::Value perAxisTileOutput;
-        for (size_t i = 0; i < checked_cast<size_t>(repeatAxes.size()); ++i) {
-            size_t idx = repeatAxes[i];
-
-            VPUX_THROW_UNLESS(outShape[Dim(idx)] % inShape[Dim(idx)] == 0 && outShape[Dim(idx)] / inShape[Dim(idx)] > 1,
-                              "Unexpected Tile Op inshape '{0}' outShape '{1}' idx {2}", inShape, outShape, idx);
-            const auto repeats = outShape[Dim(idx)] / inShape[Dim(idx)];
-            const auto repeatsAttr = mlir::IntegerAttr::get(getInt64Type(ctx), repeats);
-            const auto axisAttr = mlir::IntegerAttr::get(getInt64Type(ctx), idx);
-
-            if (i != repeatAxes.size() - 1) {
-                auto inputType = perAxisTileInput.getType().cast<vpux::NDTypeInterface>();
-                auto newOutShape = to_small_vector(inputType.getShape());
-                newOutShape[idx] = outShape[Dim(idx)];
-
-                auto newMemRefOutputType = inputType.changeShape(ShapeRef(newOutShape));
-                auto outputBuffer = rewriter.create<mlir::memref::AllocOp>(
-                        appendLoc(concatViewOp->getLoc(), "_new_buffer"), newMemRefOutputType.cast<mlir::MemRefType>());
-
-                rewriter.setInsertionPointAfter(perAxisTileInput.getDefiningOp());
-                auto newPerAxisTileDMAOp = rewriter.create<VPUIP::PerAxisTileDMAOp>(
-                        appendLoc(concatViewOp->getLoc(), "_new_perAxisDMA_{0}", i), perAxisTileInput, outputBuffer,
-                        axisAttr, repeatsAttr, nullptr);
-                if (newPerAxisTileDMAOp->isBeforeInBlock(outputBuffer)) {
-                    VPUIP::moveRootAllocBefore(outputBuffer, newPerAxisTileDMAOp);
-                }
-                perAxisTileOutput = newPerAxisTileDMAOp.getOutput();
-                perAxisTileInput = perAxisTileOutput;
-            } else {
-                const auto bodyBuilder = [&](mlir::OpBuilder& builder, mlir::Location, mlir::ValueRange newOperands) {
-                    builder.create<VPUIP::PerAxisTileDMAOp>(appendLoc(concatViewOp->getLoc(), "_new_perAxisDMA_{0}", i),
-                                                            newOperands[0], newOperands[1], axisAttr, repeatsAttr,
-                                                            nullptr);
-                };
-
-                SmallVector<mlir::Value> newNceClusterTilingOperands;
-                newNceClusterTilingOperands.push_back(perAxisTileInput);
-                newNceClusterTilingOperands.push_back(childClusterOp.getOutputBuffs()[0]);
-
-                rewriter.setInsertionPointAfter(childClusterOp);
-                perAxisTileOutput = rewriter.create<VPUIP::NCEClusterTilingOp>(
-                                                    appendLoc(concatViewOp->getLoc(), "_new_clusterCopy"),
-                                                    clusterOutputType, newNceClusterTilingOperands, bodyBuilder)
-                                            ->getResult(0);
-            }
-        }
-        rewriter.replaceOp(childClusterOp, perAxisTileOutput);
-        rewriter.eraseOp(childSubViewOp);
-    }
-
-    rewriter.eraseOp(concatViewOp);
-    for (auto input : concatInputs) {
-        rewriter.eraseOp(input.copyCMX2DDR);
-        rewriter.eraseOp(input.swTileOp);
-    }
-    rewriter.eraseOp(rootCopyOp);
-
-    _log.trace("[{0}] Finished subgraph rewriting for '{1}' at '{2}'", getDebugName(), concatViewOp->getName(),
-               concatViewOp->getLoc());
-
-    return mlir::success();
-}
-
-}  // namespace
-
 //
 // WrapWithPermuteAsNNDMAPass
 //
@@ -2489,7 +2052,6 @@ void WrapWithPermuteAsNNDMAPass::safeRunOnFunc() {
     patterns.add<FuseSpaceToDepthAndPermute>(&ctx, _log);
     patterns.add<FuseSpaceToDepthWithClusterCopy>(&ctx, _log);
     patterns.add<WrapDepthToSpaceAsClusterNNDMA>(&ctx, _log);
-    patterns.add<FuseTileWithConcatClusteredCopy>(&ctx, _log);
 
     auto func = getOperation();
     if (mlir::failed(applyPatternsAndFoldGreedily(func, std::move(patterns), getDefaultGreedyRewriteConfig()))) {

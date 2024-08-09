@@ -21,6 +21,7 @@
 #include "vpux/compiler/conversion/rewriters/VPUMI37XX2VPUASM/kernel_text_rewriter.hpp"
 #include "vpux/compiler/conversion/rewriters/VPUMI37XX2VPUASM/mapped_inference_rewriter.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUASM/ops.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPUMI37XX/kernel_params_utils.hpp"
 #include "vpux/compiler/dialect/VPUMI37XX/ops.hpp"

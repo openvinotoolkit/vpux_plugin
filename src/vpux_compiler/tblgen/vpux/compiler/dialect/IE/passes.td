@@ -68,11 +68,77 @@ def Outliner : PassBase<"outliner", "vpux::ModulePass"> {
 
     let options = [
         Option<
+            "mode", "mode",
+            "std::string", [{"naive"}],
+            "Selects the outlining mode: `naive` or `repeating-blocks`"
+        >,
+        Option<
             "numParts", "num-parts",
             "size_t", "0",
-            "Number of parts of the function to split into separate functions"
+            "Applicable for the naive mode. Number of parts of the function to split into separate functions"
+        >,
+        Option<
+            "minOpsInBlock", "min-ops-in-block",
+            "size_t", "30",
+            "Applicable for the repeating-blocks mode. Minimum number of operations in a repeating block for it to be valid"
+        >,
+        Option<
+            "maxNumIterations", "max-num-iterations",
+            "size_t", "50",
+            "Applicable for the repeating-blocks mode. The maximum number of iterations to execute while searching for repeating blocks"
         >
     ];
+}
+
+//
+// Debatcher
+//
+
+def Debatcher : PassBase<"debatcher", "vpux::FunctionPass"> {
+    let summary = "Downcast input batched tensor arguments of a `main`-function to single batch tensors, which is supposed to unblock further transformations dedicated to support batched models compilation. . This is a frontend of 'Debatcher-Outliner-DeDebatcher' approach";
+
+    let description = [{
+        This pass is used together the Outliner pass, simplifying outlining routine
+        by eliminating necessity in debatching every input & output of outlined operations.
+        Instead, it just debatches the input tensor rather than intruding in outliner logic
+
+    }];
+
+    let constructor = "vpux::IE::createDebatcherPass()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+
+    let options = [
+        Option<
+            "extraArgs", "extra-args",
+            "std::string", [{""}],
+            "Debatcher extra arguments"
+        >
+    ];
+
+}
+
+//
+// DeDebatcher
+//
+
+def DeDebatcher : PassBase<"de-debatcher", "vpux::FunctionPass"> {
+    let summary = "Rollback DeDebatcher tensors downcasting operations from N->1 by adding a body function N-respective repetitions";
+
+    let description = [{
+        This pass is used together with the Debatcher-Outliner pass. It finalizes batching tensors compilation routine
+        by adding repetitions an outlined function, which representing an IR body.
+        The total number of repetitions is the initial N dimension value, which was previously downcasted into N
+    }];
+
+    let constructor = "vpux::IE::createDeDebatcherPass()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+
 }
 
 //
@@ -127,6 +193,25 @@ def AdjustLayouts : PassBase<"adjust-layouts", "vpux::FunctionPass"> {
             "bool", "false",
             "This flag identifies operations that are still a work in progress and can be executed using the Storage Element hardware feature."
         >
+    ];
+}
+
+//
+// FuseReshapeMvnPass
+//
+
+def FuseReshapeMvn : PassBase<"fuse-reshape-mvn", "vpux::FunctionPass"> {
+    let summary = "Fuse Reshape->MVN->Reshape (back to initial shape) into MVN with internal Reshape";
+
+    let description = [{
+        The pass is a part of `IECommon` pipeline.
+        Can only succeed in NHWC layout, for large tensors that require MVN-decomposition.
+    }];
+
+    let constructor = "vpux::IE::createFuseReshapeMvnPass()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
     ];
 }
 
@@ -453,6 +538,26 @@ def AdjustSoftwareOpsPrecision : PassBase<"adjust-software-ops-precision", "vpux
 }
 
 //
+// AdjustNCEOpsWithI32Inputs
+//
+
+def AdjustNCEOpsWithI32Inputs : PassBase<"adjust-nce-ops-with-i32-inputs", "vpux::ModulePass"> {
+    let summary = "Adjust precision for some NCE ops with i32 inputs";
+
+    let description = [{
+        The pass is a part of `AdjustPrecision` pipeline.
+
+        Currently NCE ops only support f16 or quantized inputs. In some cases, such ops with i32 inputs need conversion layers.
+    }];
+
+    let constructor = "vpux::IE::createAdjustNCEOpsWithI32InputsPass()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+}
+
+//
 // ConvertDepth2SpaceToTransposedConv
 //
 
@@ -543,6 +648,24 @@ def ConvertScalarToTensor : PassBase<"convert-scalar-to-tensor", "vpux::Function
     }];
 
     let constructor = "vpux::IE::createConvertScalarToTensorPass()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+}
+
+//
+// ConvertMinMaxToClamp
+//
+
+def ConvertMinMaxToClamp : PassBase<"convert-min-max-to-clamp", "vpux::FunctionPass"> {
+    let summary = "Convert Min and Max to Clamp";
+
+    let description = [{
+        This pass replaces MinimumOp and MaximumOp, having one input as tensor(2D,3D,4D) and the other one as scalar, with ClampOp.
+    }];
+
+    let constructor = "vpux::IE::createConvertMinMaxToClampPass()";
 
     let dependentDialects = [
         "vpux::IE::IEDialect"
@@ -645,6 +768,14 @@ def MatMulInputsTo2d : PassBase<"matmul-inputs-to-2d", "vpux::FunctionPass"> {
 
     let dependentDialects = [
         "vpux::IE::IEDialect"
+    ];
+
+    let options = [
+        Option<
+            "enableGroupedMatMul", "enable-grouped-matmul",
+            "bool", "false",
+            "Flag to enable or disable grouped MatMul execution"
+        >
     ];
 }
 
@@ -1031,7 +1162,7 @@ def ConvertSubtractToAdd : PassBase<"convert-subtract-to-add", "vpux::FunctionPa
     let summary = "Convert Subtract operation to Add with either Negative or DW Conv operations";
 
     let description = [{
-        This pass replaces `Subtract` operation with `Add` with `Negative` operations on VPUX30XX or `Add` with `DW Conv` operations on VPUX37XX.
+        This pass replaces `Subtract` operation with `Add` with `DW Conv` operations.
     }];
 
     let constructor = "vpux::IE::createConvertSubtractToAddPass()";
@@ -1339,6 +1470,26 @@ def ConvertToMemPermute : PassBase<"convert-to-mem-permute", "vpux::FunctionPass
 }
 
 //
+// ConvertMVN6ToMVN1Pass
+//
+
+def ConvertMVN6ToMVN1 : PassBase<"convert-mvn6-to-mvn1", "vpux::FunctionPass"> {
+    let summary = "Convert MVN6 ops to MVN1 operation";
+
+    let description = [{
+        The pass is a part of `InitialTransformations` pipeline.
+
+        This pass replaces `MVN6` operations with `MVN1` operation, for specific cases.
+    }];
+
+    let constructor = "vpux::IE::createConvertMVN6ToMVN1Pass()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+}
+
+//
 // SwapMemPermuteAndExpand
 //
 
@@ -1518,6 +1669,14 @@ def WeightsDequantizeToFakeQuantize : PassBase<"weights-dequantize-to-fake-quant
         Constant (i8) -> Convert (to fp) -> FakeQuantize -> deducing levels and FakeQuantize limits according to actual values in the weights Constant
     }];
 
+    let options = [
+        Option<
+            "enableWDBlockArgumentInput", "enable-wd-blockarg-input",
+            "bool", "false",
+            "Enable WeightsDequantizeToFakeQuantizePass on structures with BlockArgument input"
+        >
+    ];
+
     let constructor = "vpux::IE::createWeightsDequantizeToFakeQuantizePass()";
 
     let dependentDialects = [
@@ -1638,6 +1797,14 @@ def ConvertToDequantize : PassBase<"convert-to-dequantize", "vpux::FunctionPass"
 
     let constructor = "vpux::IE::createConvertToDequantizePass()";
 
+    let options = [
+        Option<
+            "enableWDBlockArgumentInput", "enable-wd-blockarg-input",
+            "bool", "false",
+            "Enable ConvertToDequantize on structures with BlockArgument input"
+        >
+    ];
+
     let dependentDialects = [
         "vpux::IE::IEDialect"
     ];
@@ -1748,6 +1915,26 @@ def FuseFQAndMul : PassBase<"fuse-fq-and-mul", "vpux::FunctionPass"> {
     }];
 
     let constructor = "vpux::IE::createFuseFQAndMulPass()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+}
+
+//
+// EltwiseFakeQuantizeFusion
+//
+
+def EltwiseFakeQuantizeFusion : PassBase<"eltwise-fake-quantize-fusion", "vpux::FunctionPass"> {
+    let summary = "Fuse Eltwise into FakeQuantize if one of Eltwise's input is a constant scalar (can be also a quantized constant)";
+
+    let description = [{
+        The pass is a part of `LowPrecision` pipeline.
+
+        Fuse constant scalar Eltwise's input into FakeQuantize consumer input range.
+    }];
+
+    let constructor = "vpux::IE::createEltwiseFakeQuantizeFusionPass()";
 
     let dependentDialects = [
         "vpux::IE::IEDialect"
@@ -2214,6 +2401,24 @@ def ConvertReduceToPooling : PassBase<"convert-reduce-to-pooling", "vpux::Functi
 }
 
 //
+// UnrollReduceMinAllAxes
+//
+
+def UnrollReduceMinAllAxes : PassBase<"unroll-reducemin-all-axes", "vpux::FunctionPass"> {
+    let summary = "unroll reducemin on all axes which cannot be convert to efficient nce pooling ops";
+
+    let description = [{
+        The pass is to unroll reducemin operations.
+    }];
+
+    let constructor = "vpux::IE::createUnrollReduceMinAllAxesPass()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+}
+
+//
 // HandleExcludePadForAvgPool
 //
 
@@ -2389,6 +2594,25 @@ def PropagateAffineReshape : PassBase<"propagate-affine-reshape", "vpux::Functio
     }];
 
     let constructor = "vpux::IE::createPropagateAffineReshapePass()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+}
+
+//
+// PropagateShapeCast
+//
+
+def PropagateShapeCast : PassBase<"propagate-shape-cast", "vpux::FunctionPass"> {
+    let summary = "Moves ops post ShapeCast operation";
+
+    let description = [{
+        Supported cases:
+        * Move through Abs, Gelu, Swish, HSwish, Sigmoid, Tanh
+    }];
+
+    let constructor = "vpux::IE::createPropagateShapeCastPass()";
 
     let dependentDialects = [
         "vpux::IE::IEDialect"
@@ -2610,7 +2834,7 @@ def ExpandActivationWidth : PassBase<"expand-activation-width", "vpux::FunctionP
         Supported operations:
         * IE.PermuteQuantize
             To avoid blocking optimization of permuteQuantize, place the pass after buildMemPermuteProcessingPipeline()
-            for VPUX37XX and VPUX40XX.
+            for VPUX37XX, VPUX40XX.
     }];
 
     let constructor = "vpux::IE::createExpandActivationWidthPass()";
@@ -2677,7 +2901,7 @@ def AdjustInputShape: PassBase<"adjust-input-shape", "vpux::FunctionPass"> {
            Insert ShapeCast ops to the outputs before the next non-eltwise op.
         2. Insert ShapeCast op and Expand op to the input of pooling ops when the pooling has KY=1, SY=1.
            Insert ShapeCast op, Slice Op and Expand op to the outputs.
-        Platforms VPUX37XX and VPUX40XX all benefit.
+        Platforms VPUX37XX, VPUX40XX all benefit.
     }];
 
     let constructor = "vpux::IE::createAdjustInputShapePass()";
@@ -3044,7 +3268,27 @@ def PropagateMemPermuteThroughSoftMax : PassBase<"propagate-mem-permute-through-
     ];
 }
 
+//
+// ExpandMatMulSoftMaxMatMul
+//
 
+def ExpandMatMulSoftMaxMatMul : PassBase<"expand-matmul-softmax-matmul", "vpux::FunctionPass"> {
+    let summary = "Expand buffers for operators in a specific Matmul-Softmax-Matmul pattern";
+
+    let description = [{
+       For a better performance, we need to round the MatMul buffer dimensions to 64, in a specific
+       software case. This pass will introduce in the pattern the next operators:
+       Expand for second input of first MatMul 32x49 -> 32x64
+       Expand second input of second MatMul 49x32 -> 49x64
+       Slice output of second MatMul back to 49x32
+    }];
+
+    let constructor = "vpux::IE::createExpandMatMulSoftMaxMatMulPass()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+}
 
 //
 // OptimizeIdentityPool
@@ -3455,27 +3699,168 @@ def FuseScalesToAccumulate : PassBase<"fuse-scales-to-accumulate", "vpux::Functi
     ];
 }
 
-def FuseMultiplyToConv : PassBase<"fuse-multiply-to-conv", "vpux::FunctionPass"> {
-    let summary = "Fuses suitable `IE.Multiply` with const operand to `IE.Convolution`";
+def SwapMultiplyWithMatmul : PassBase<"swap-multiply-with-matmul", "vpux::FunctionPass"> {
+    let summary = "Swap suitable `IE.Multiply` with `IE.Matmul`";
 
     let description = [{
         This transformation takes the following subgraph:
         ```
-                                        Const.Declare
-                                            |
-            IE.Convolution -> ... -> IE.Multiply
+                                        (1x32x1024x80)      (1x1x1x1)
+                                            \               /
+                        (1x32x1x80)   IE.Multiply (1x32x1024x80)
+                            \            /
+                            IE.Matmul(1x32x1x1024)
         ```
-        and fuses the `IE.Multiply` into `IE.Convolution` (see `static_scale`
-        attribute and weights table generation for details).
-
-        Fusing multiplication by a constant to a convolution makes the
-        multiplication itself effectively no-op on several HW architectures.
+        To:
+        ```
+                        (1x32x1x80)    1x32x1024x80)
+                            \            /
+                            IE.Matmul(1x32x1x1024)     (1x1x1x1)
+                                    \                   /
+                                    IE.Multiply (1x32x1x1024)
+        ```
+        If matmul output size is smaller than input, after swap multiply with matmul, we will
+        reduce the computation of multiply. For above case, 80 times saving.
     }];
 
-    let constructor = "vpux::IE::createFuseMultiplyToConvPass()";
+    let constructor = "vpux::IE::createSwapMultiplyWithMatmulPass()";
 
     let dependentDialects = [
         "vpux::IE::IEDialect"
+    ];
+}
+
+//
+// SwapD2SAndScaleShift
+//
+
+def SwapD2SAndScaleShift : PassBase<"swap-d2s-and-scale-shift", "vpux::FunctionPass"> {
+    let summary = "Swap Depth2Space and ScaleShift";
+
+    let description = [{
+        Swap Depth2Space and ScaleShift in order to fuse ScaleShift to the parent op of Depth2Space if possible.
+        This pass has a dependency to ConvertDepth2SpaceToTransposedConv pass,
+        only those ops are not converted to TransposedConvolution will be propagated.
+    }];
+
+    let constructor = "vpux::IE::createSwapD2SAndScaleShiftPass()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+}
+
+//
+// OptimizeGroupConvConcat
+//
+
+def OptimizeGroupConvConcat : PassBase<"optimize-group-conv-concat", "vpux::FunctionPass"> {
+    let summary = "Optimize GroupConvolution concat";
+
+    let description = [{
+        Below pattern is not performant when concat inputs on channel dimension.
+
+        Root(1x16x144x144)             Weights(16x1x3x3)
+       /               \                  /
+      |                GroupConv(1x16x144x144)
+       \                    /
+        Concat(1x32x144x144)
+
+        The pass creates a new Convolution to replace the pattern to avoid concat on the inner most
+        dimension like below:
+
+        Root(1x16x144x144)             Weights(32x1x3x3)
+                    \                     /
+                    Convolution(1x32x144x144)
+    }];
+
+    let constructor = "vpux::IE::createOptimizeGroupConvConcatPass()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+}
+
+//
+// OptimizeAvgPoolWithUnalignedChannels
+//
+
+def OptimizeAvgPoolWithUnalignedChannels : PassBase<"optimize-avg-pool-with-unaligned-channels", "vpux::FunctionPass"> {
+    let summary = "Optimize Avg Pool with unaligned channels";
+
+    let description = [{
+        This pass converts IE.AvgPool with unaligned channels to IE.Convolution operation.
+        Then adjust-convolution-shape pass can adjust shape for it to avoid expand & slice.
+
+        Take the IE.AvgPool with below configuration as an example:
+        - input shape [1, 3, 640, 640]
+        - output shape [1, 3, 640, 640]
+        - filter shape [2, 2]
+        - strides [2, 2]
+
+        This pass will create a new IE.Convolution with filter shape [3, 3, 2, 2].
+        Some filter constant values will be assigned to 1 / ( KX * KY) to perform average pooling.
+        Weights structure goes like below, value A represents 1 / ( KX * KY)
+        | idx   |    0 |    1 |    2 |    3 |    4 |    5 |    6 |    7 |    8 |    9 |   10 |   11 |
+        | ----- | ---- | ---- | ---- | ---- | ---- | ---- | ---- | ---- | ---- | ---- | ---- | ---- |
+        | OC 0  |    A |    A |    A |    A |    0 |    0 |    0 |    0 |    0 |    0 |    0 |    0 |
+        | OC 1  |    0 |    0 |    0 |    0 |    A |    A |    A |    A |    0 |    0 |    0 |    0 |
+        | OC 2  |    0 |    0 |    0 |    0 |    0 |    0 |    0 |    0 |    A |    A |    A |    A |
+
+        In the end, the new IE.Convolution can be optimized by adjust-convolution-shape pass.
+    }];
+
+    let constructor = "vpux::IE::createOptimizeAvgPoolWithUnalignedChannelsPass()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+}
+
+def ReshapeMatMulInputs : PassBase<"reshape-matmul-inputs", "vpux::FunctionPass"> {
+    let summary = "Reshape inputs of `IE.MatMul`";
+
+    let description = [{
+        1. Unsqueeze 1d inputs to 2d.
+        2. Insert `IE.Transpose` if transpose_a is set. Transform
+        ```
+            IE.MatMul(16x32, 16x64) {transpose_a = true}
+        ```
+        into
+        ```
+            IE.Transpose(16x32 -> 32x16) -> IE.MatMul(16x32, 16x64) {transpose_a = false}
+        ```
+        3. Insert `IE.Transpose` if transpose_b is not set.
+        ```
+            IE.MatMul(16x32, 32x64) {transpose_b = false}
+        ```
+        into
+        ```
+            IE.Transpose(32x64 -> 64x32) -> IE.MatMul(16x32, 64x32) {transpose_b = true}
+        ```
+        4. Fold batch dimensions. 2x3x4x5x6 becomes 1x24x5x6.
+        5. Collapse batch dimension into rows when the second input has 2d shape.
+        ```
+            IE.MatMul(1x4x32x64, 64x32) {transpose_b = true}
+        ```
+        becomes
+        ```
+            IE.Reshape(1x4x32x64 -> 128x64) -> IE.FullyConnected(128x64, 64x32)
+        ```
+    }];
+
+    let constructor = "vpux::IE::createReshapeMatMulInputsPass()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+
+    let options = [
+        Option<
+            "enableGroupedMatMul", "enable-grouped-matmul",
+            "bool", "false",
+            "Flag to enable or disable grouped MatMul execution"
+        >
     ];
 }
 

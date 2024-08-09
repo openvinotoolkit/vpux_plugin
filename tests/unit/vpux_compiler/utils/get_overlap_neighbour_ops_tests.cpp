@@ -9,6 +9,7 @@
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/overlap_distribution_utils.hpp"
 #include "vpux/compiler/init.hpp"
+#include "vpux/compiler/interfaces_registry.hpp"
 
 #include "common/utils.hpp"
 
@@ -105,6 +106,8 @@ TEST_P(GetOverlapSiblingsTests, GetOps) {
     mlir::DialectRegistry registry;
     vpux::registerDialects(registry);
     vpux::registerCommonInterfaces(registry);
+    auto interfacesRegistry = vpux::createInterfacesRegistry(vpux::VPU::ArchKind::NPU40XX);
+    interfacesRegistry->registerInterfaces(registry);
 
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<VPU::VPUDialect>();
@@ -135,6 +138,8 @@ TEST_P(GetActivationOverlapTests, GetParams) {
     mlir::DialectRegistry registry;
     vpux::registerDialects(registry);
     vpux::registerCommonInterfaces(registry);
+    auto interfacesRegistry = vpux::createInterfacesRegistry(vpux::VPU::ArchKind::NPU40XX);
+    interfacesRegistry->registerInterfaces(registry);
 
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<VPU::VPUDialect>();
@@ -164,10 +169,10 @@ TEST_P(GetActivationOverlapTests, GetParams) {
         }
 
         auto actualOverlappedParams =
-                VPU::getActivationOverlappedParams(op, numTiles, uniformDistributedSegments, inputType);
+                VPU::getActivationOverlappedParams(op, numTiles, uniformDistributedSegments ? true : false, inputType);
 
-        const auto memShapes = vpux::parseIntArrayOfArrayAttr<int64_t>(actualOverlappedParams.memoryShapes);
-        const auto memOffsets = vpux::parseIntArrayOfArrayAttr<int64_t>(actualOverlappedParams.memoryOffsets);
+        const auto memShapes = actualOverlappedParams.getMemoryShapes();
+        const auto memOffsets = actualOverlappedParams.getMemoryOffsets();
 
         for (size_t idx = 0; idx < memShapes.size(); idx++) {
             const auto& clusterMemShapes = memShapes[idx];
@@ -195,6 +200,8 @@ TEST_P(GetOutputOverlapTests, GetParams) {
     mlir::DialectRegistry registry;
     vpux::registerDialects(registry);
     vpux::registerCommonInterfaces(registry);
+    auto interfacesRegistry = vpux::createInterfacesRegistry(vpux::VPU::ArchKind::NPU40XX);
+    interfacesRegistry->registerInterfaces(registry);
 
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<VPU::VPUDialect>();
@@ -217,17 +224,21 @@ TEST_P(GetOutputOverlapTests, GetParams) {
         }
 
         auto producerOverlappedParams =
-                VPU::getOutputOverlappedParams(op, numTiles, uniformDistributedSegments, outputType);
+                VPU::getOutputOverlappedParams(op, numTiles, uniformDistributedSegments ? true : false, outputType);
 
         if (mlir::isa<VPU::NCEMaxPoolOp>(op.getOperation())) {
             // MaxPool producer is used when not all produces should have the same set of consumers.
             // We check the memory view of the AvgPool against the expected one.
             // As a result MaxPool will not have the same memory view as the expected one.
-            EXPECT_NE(producerOverlappedParams.memoryShapes, getIntArrayOfArray(&ctx, expectedMemoryShapes));
-            EXPECT_NE(producerOverlappedParams.memoryOffsets, getIntArrayOfArray(&ctx, expectedMemoryOffsets));
+            EXPECT_NE(SmallVector<SmallVector<int64_t>>(producerOverlappedParams.getMemoryShapes()),
+                      expectedMemoryShapes);
+            EXPECT_NE(SmallVector<SmallVector<int64_t>>(producerOverlappedParams.getMemoryOffsets()),
+                      expectedMemoryOffsets);
         } else {
-            EXPECT_EQ(producerOverlappedParams.memoryShapes, getIntArrayOfArray(&ctx, expectedMemoryShapes));
-            EXPECT_EQ(producerOverlappedParams.memoryOffsets, getIntArrayOfArray(&ctx, expectedMemoryOffsets));
+            EXPECT_EQ(SmallVector<SmallVector<int64_t>>(producerOverlappedParams.getMemoryShapes()),
+                      expectedMemoryShapes);
+            EXPECT_EQ(SmallVector<SmallVector<int64_t>>(producerOverlappedParams.getMemoryOffsets()),
+                      expectedMemoryOffsets);
         }
     }
 }

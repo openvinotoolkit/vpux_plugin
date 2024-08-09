@@ -65,19 +65,15 @@ bool SubgraphOptimizer::isValidStrategy(VPU::ClusteredOpInterface clusteredOp, V
     }
 
     auto isCompatibleStrategy = [&](VPU::ClusteredOpInterface op, VPU::MultiClusterStrategy targetStrategy) {
-        const auto arch = VPU::getArch(clusteredOp);
-        const auto isChannelMajor = (DimsOrder::fromValue(clusteredOp->getOperand(0)) == DimsOrder::NCHW) &&
-                                    VPU::NCEInvariant::isChannelMajorCompatible(
-                                            arch, clusteredOp->getOperand(0).getType().cast<vpux::NDTypeInterface>());
         const auto isCompressConv = mlir::isa<vpux::VPU::NCECompressConvolutionOp>(clusteredOp);
         auto isCompatible = false;
         switch (targetStrategy) {
         case MultiClusterStrategy::SplitOverHeightOverlapped:
-            isCompatible = (isChannelMajor || isCompressConv || mlir::isa<vpux::VPU::NCEPermuteOp>(clusteredOp)) &&
+            isCompatible = (isCompressConv || mlir::isa<vpux::VPU::NCEPermuteOp>(clusteredOp)) &&
                            op.isOperationSplitOverHeightCompatible(/*vpux::TileInfo=*/vpux::TileInfo(ShapeRef()));
             break;
         case MultiClusterStrategy::SplitOverHeight:
-            isCompatible = !isChannelMajor && !isCompressConv &&
+            isCompatible = !isCompressConv &&
                            op.isOperationSplitOverHeightCompatible(/*vpux::TileInfo=*/vpux::TileInfo(ShapeRef()));
             break;
         case MultiClusterStrategy::SplitOverKernel:
@@ -107,7 +103,7 @@ VPU::MultiClusterStrategy SubgraphOptimizer::getBestInSOKLikeStrategies(VPU::Clu
     double HKCost = _layerCostModel.COST_MAX;
 
     if (isValidStrategy(clusteredOp, VPU::MultiClusterStrategy::HKSwitch)) {
-        HKCost = _layerCostModel.getLayerCost(clusteredOp, VPU::MultiClusterStrategy::HKSwitch);
+        HKCost = _layerCostModel.getLayerCost(clusteredOp.getOperation(), VPU::MultiClusterStrategy::HKSwitch);
         _log.trace("HKSwitch has compute cost {0}", HKCost);
         auto spillingCost = getInputSpillingCostToMultiClusterLayer(clusteredOp, VPU::MultiClusterStrategy::HKSwitch,
                                                                     _configForFindingRollbackStrategy) +
@@ -119,7 +115,7 @@ VPU::MultiClusterStrategy SubgraphOptimizer::getBestInSOKLikeStrategies(VPU::Clu
 
     double SOKCost = _layerCostModel.COST_MAX;
     if (isValidStrategy(clusteredOp, VPU::MultiClusterStrategy::SplitOverKernel)) {
-        SOKCost = _layerCostModel.getLayerCost(clusteredOp, VPU::MultiClusterStrategy::SplitOverKernel);
+        SOKCost = _layerCostModel.getLayerCost(clusteredOp.getOperation(), VPU::MultiClusterStrategy::SplitOverKernel);
         _log.trace("SplitOverKernel has compute cost {0}", SOKCost);
         auto spillingCost =
                 getInputSpillingCostToMultiClusterLayer(clusteredOp, VPU::MultiClusterStrategy::SplitOverKernel,
@@ -132,7 +128,8 @@ VPU::MultiClusterStrategy SubgraphOptimizer::getBestInSOKLikeStrategies(VPU::Clu
 
     double clusteringCost = _layerCostModel.COST_MAX;
     if (isValidStrategy(clusteredOp, VPU::MultiClusterStrategy::Clustering)) {
-        clusteringCost = _layerCostModel.getLayerCost(clusteredOp, VPU::MultiClusterStrategy::Clustering);
+        clusteringCost =
+                _layerCostModel.getLayerCost(clusteredOp.getOperation(), VPU::MultiClusterStrategy::Clustering);
         _log.trace("Clustering has compute cost {0}", clusteringCost);
         auto spillingCost = getInputSpillingCostToMultiClusterLayer(clusteredOp, VPU::MultiClusterStrategy::Clustering,
                                                                     _configForFindingRollbackStrategy) +
@@ -172,7 +169,7 @@ VPU::MultiClusterStrategy SubgraphOptimizer::getBestInSOHLikeStrategies(VPU::Clu
     double SOHCost = _layerCostModel.COST_MAX;
     double SOHOverlappedCost = _layerCostModel.COST_MAX;
     if (isValidStrategy(clusteredOp, VPU::MultiClusterStrategy::SplitOverHeight)) {
-        SOHCost = _layerCostModel.getLayerCost(clusteredOp, VPU::MultiClusterStrategy::SplitOverHeight);
+        SOHCost = _layerCostModel.getLayerCost(clusteredOp.getOperation(), VPU::MultiClusterStrategy::SplitOverHeight);
         _log.trace("SplitOverHeight has compute cost {0}", SOHCost);
         auto spillingCost =
                 getInputSpillingCostToMultiClusterLayer(clusteredOp, VPU::MultiClusterStrategy::SplitOverHeight,
@@ -185,8 +182,8 @@ VPU::MultiClusterStrategy SubgraphOptimizer::getBestInSOHLikeStrategies(VPU::Clu
     // Currently only compressedConv op has SplitOverHeightOverlapped strategy on VPUX37XX
     // For general implementation, we consider both SOH & SOHO.
     if (isValidStrategy(clusteredOp, VPU::MultiClusterStrategy::SplitOverHeightOverlapped)) {
-        SOHOverlappedCost =
-                _layerCostModel.getLayerCost(clusteredOp, VPU::MultiClusterStrategy::SplitOverHeightOverlapped);
+        SOHOverlappedCost = _layerCostModel.getLayerCost(clusteredOp.getOperation(),
+                                                         VPU::MultiClusterStrategy::SplitOverHeightOverlapped);
         _log.trace("SplitOverHeightOverlapped has compute cost {0}", SOHOverlappedCost);
         auto spillingCost = getInputSpillingCostToMultiClusterLayer(
                                     clusteredOp, VPU::MultiClusterStrategy::SplitOverHeightOverlapped,
@@ -201,7 +198,7 @@ VPU::MultiClusterStrategy SubgraphOptimizer::getBestInSOHLikeStrategies(VPU::Clu
     double HKCost = _layerCostModel.COST_MAX;
 
     if (isValidStrategy(clusteredOp, VPU::MultiClusterStrategy::HKSwitch)) {
-        HKCost = _layerCostModel.getLayerCost(clusteredOp, VPU::MultiClusterStrategy::HKSwitch);
+        HKCost = _layerCostModel.getLayerCost(clusteredOp.getOperation(), VPU::MultiClusterStrategy::HKSwitch);
         _log.trace("HKSwitch has compute cost {0}", HKCost);
         auto spillingCost = getInputSpillingCostToMultiClusterLayer(clusteredOp, VPU::MultiClusterStrategy::HKSwitch,
                                                                     _configForFindingRollbackStrategy) +
@@ -560,8 +557,8 @@ SubgraphOptimizer::ShortcutMapTy SubgraphOptimizer::detectShortcuts() {
             auto parent = input.getDefiningOp();
             // propagate cast ops
             // TODO: support to propagate more cast/viewLike ops in Strategy Manager, refer to E#65795
-            if (mlir::isa_and_nonnull<VPU::DistributedCastOpInterface, VPU::ShapeCastOp, VPU::GroupSparseTensorOp>(
-                        parent)) {
+            if (mlir::isa_and_nonnull<VPU::DistributedCastOpInterface, VPU::ShapeCastOp, VPU::QuantizeCastOp,
+                                      VPU::GroupSparseTensorOp>(parent)) {
                 if (parent->getOperand(0).isa<mlir::BlockArgument>()) {
                     continue;
                 }
@@ -850,10 +847,6 @@ bool SubgraphOptimizer::hasOutputSpillingToMultiClusterLayer(VPU::ClusteredOpInt
         userOp = *userOp->getResult(0).getUsers().begin();
     }
 
-    if (mlir::isa<VPU::SWOpInterface>(userOp) && VPU::getArch(userOp) == VPU::ArchKind::NPU30XX) {
-        return false;
-    }
-
     auto origOpCastedOutputDistType = _layerCostModel.getDistributedOutputType(origClusteredOp, origStrategy);
 
     // E#119697: Remove the checking when propagation OVERLAPPED through ShapeCastOp can be supported
@@ -1088,10 +1081,6 @@ void SubgraphOptimizer::optimizeStrategyAvoidSpillingOnSubgraph(VPU::ClusteredOp
                 continue;
             }
 
-            if (mlir::isa<SWOpInterface>(parent) && VPU::getArch(parent) == VPU::ArchKind::NPU30XX) {
-                continue;
-            }
-
             if (!doesLayerNeedRollbackStrategy(parent)) {
                 continue;
             }
@@ -1132,8 +1121,8 @@ void SubgraphOptimizer::optimizeStrategyAvoidSpillingOnSubgraph(VPU::ClusteredOp
         auto oldStrategy = _layerCostModel.getMultiClusterStrategyValue(clusteredTask);
 
         // compute cost + weights dma cost
-        auto originalBasicCost = _layerCostModel.getLayerCost(clusteredTask, oldStrategy);
-        auto rollbackBasicCost = _layerCostModel.getLayerCost(clusteredTask, newStrategy);
+        auto originalBasicCost = _layerCostModel.getLayerCost(clusteredTask.getOperation(), oldStrategy);
+        auto rollbackBasicCost = _layerCostModel.getLayerCost(clusteredTask.getOperation(), newStrategy);
         // workaround for incorrect strategy rollback when INVALID_COST is caught
         // it can be remove when INPUT_TOO_BIG issue is solved in E#79152
         if (originalBasicCost >= VPU::INVALID_COST_BASE) {
@@ -1272,8 +1261,8 @@ void SubgraphOptimizer::optimizeStrategyAvoidSpillingOnModel() {
                     if (strategyAttr.has_value() && currentStrategyAttr.has_value()) {
                         auto strategy = strategyAttr.value();
                         auto currentStrategy = currentStrategyAttr.value();
-                        auto numClusters = VPU::getOptimalNumClusters(
-                                parentClusterOp, outputTensorType.getShape()[Dims4D::Act::C], strategyAttr.value());
+                        auto numClusters = VPU::getOptimalNumClusters(parentClusterOp, outputTensorType.getShape(),
+                                                                      strategyAttr.value());
                         if (strategy != currentStrategy &&
                             isStrategySOXCompatible(clusteredOp, strategy, numClusters.getInt())) {
                             _log.trace("Update strategy from: {0} to: {1} for op: {2}", currentStrategy, strategy,

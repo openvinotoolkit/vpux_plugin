@@ -68,11 +68,11 @@ mlir::Value VPUIP::SubViewOp::getViewSource() {
 
 mlir::LogicalResult VPUIP::SubViewOp::inferReturnTypes(mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc,
                                                        mlir::ValueRange operands, mlir::DictionaryAttr attrs,
-                                                       mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+                                                       mlir::OpaqueProperties props, mlir::RegionRange /*regions*/,
                                                        mlir::SmallVectorImpl<mlir::Type>& inferredTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPUIP::SubViewOpAdaptor subViewOp(operands, attrs);
+    VPUIP::SubViewOpAdaptor subViewOp(operands, attrs, props);
     if (mlir::failed(subViewOp.verify(loc))) {
         return mlir::failure();
     }
@@ -101,6 +101,8 @@ mlir::LogicalResult VPUIP::SubViewOp::inferReturnTypes(mlir::MLIRContext* ctx, s
                                             ArrayRef<int64_t> inShape) -> VPU::DistributedTensorAttr {
         auto mode = origDistribution.getMode().getValue();
         if (hasExplcitOutputShapes) {
+            // Track #E125638
+            // Other modes should be supported
             VPUX_THROW_UNLESS(mode == VPU::DistributionMode::SEGMENTED, "Can not set explicit shapes with mode {0}",
                               VPU::stringifyDistributionMode(mode));
             auto explicitOutputShapes = subViewOp.getExplicitOutputShapes().value();
@@ -320,8 +322,8 @@ mlir::LogicalResult VPUIP::SubViewOp::verify() {
         std::ignore = errorAt(op, "{0}", msg.str());
     };
     mlir::SmallVector<mlir::Type> inferredTypes;
-    if (inferReturnTypes(getContext(), getLoc(), op->getOperands(), op->getAttrDictionary(), nullptr, op->getRegions(),
-                         inferredTypes)
+    if (inferReturnTypes(getContext(), getLoc(), op->getOperands(), op->getAttrDictionary(), op->getPropertiesStorage(),
+                         op->getRegions(), inferredTypes)
                 .failed()) {
         logCb(formatv("Can't infer return types"));
         return mlir::failure();

@@ -6,8 +6,8 @@
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 #include "vpux/compiler/dialect/IE/utils/roll_utils.hpp"
-#include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/se_roll_utils.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/permute_utils.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
@@ -247,9 +247,12 @@ mlir::LogicalResult TransposeRoll::matchAndRewrite(IE::RollOp origOp, mlir::Patt
 
     const auto newAxes = axes.size() == 1 ? SmallVector<int32_t>{Dims4D::Act::H.ind()}
                                           : SmallVector<int32_t>{Dims4D::Act::H.ind(), Dims4D::Act::W.ind()};
+    const auto newAxesElems = checked_cast<int64_t>(axes.size());
     const auto axesDimOrder = origOp.getAxes().getType().cast<vpux::NDTypeInterface>().getDimsOrder();
-    const auto newAxesValue = VPU::createIntConst(Shape{checked_cast<int64_t>(axes.size())}, axesDimOrder, newAxes,
-                                                  origOp.getAxes().getLoc(), rewriter);
+    const auto newAxesType =
+            mlir::RankedTensorType::get(ArrayRef(newAxesElems), origOp.getAxes().getType().getElementType(),
+                                        getTensorAttr(rewriter.getContext(), axesDimOrder, nullptr, nullptr));
+    const auto newAxesValue = Const::createConst(rewriter, origOp.getAxes().getLoc(), newAxesType, ArrayRef(newAxes));
 
     auto newRollOp = rewriter.create<IE::RollOp>(origOp.getLoc(), newRollInput.getType(), newRollInput,
                                                  origOp.getShift(), newAxesValue);

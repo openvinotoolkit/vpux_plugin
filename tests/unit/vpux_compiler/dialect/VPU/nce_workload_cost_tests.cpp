@@ -9,6 +9,9 @@
 #include "vpux/compiler/dialect/VPU/utils/cost_model/cost_model.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
 #include "vpux/compiler/dialect/VPUIP/interfaces/dpu_tiler.hpp"
+#include "vpux/compiler/dialect/VPUIP/transforms/factories/split_cost_getter.hpp"
+
+#include "vpux/utils/core/logger.hpp"
 
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/Support/FileSystem.h>
@@ -43,7 +46,7 @@ vpux::VPUIP::WorkloadCostParams buildWorkloadCost(const NceOpTensorShape& tensor
     costParams.kernelSize = {1, 1};
     costParams.kernelStride = {1, 1};
     costParams.nceTaskType = vpux::VPUIP::NCETaskType::CONV;
-    costParams.arch = vpux::VPU::ArchKind::NPU30XX;
+    costParams.arch = vpux::VPU::ArchKind::NPU37XX;
     costParams.numDPU = numDPU;
     return costParams;
 }
@@ -52,11 +55,10 @@ vpux::VPUIP::WorkloadCostParams buildWorkloadCost(const NceOpTensorShape& tensor
 TEST(MLIR_VPU_WorkloadCost, VPUNNCostInterface) {
     mlir::MLIRContext ctx;
 
-    // For VPUX30XX, only VECTOR & MATRIX mode are supported. CUBOID mode is not supported.
     llvm::SmallVector<vpux::VPU::MPEMode> mpeModeList{vpux::VPU::MPEMode::VECTOR_FP16, vpux::VPU::MPEMode::VECTOR,
                                                       vpux::VPU::MPEMode::MATRIX};
 
-    const auto costModel = vpux::VPU::createCostModel(vpux::VPU::ArchKind::NPU30XX);
+    const auto costModel = vpux::VPU::createCostModel(vpux::VPU::ArchKind::NPU37XX);
 
     llvm::SmallVector<NceOpTensorShape> testTensorLists;
     for (int64_t h = initDimensionValue; h < maxDimensionValue; h *= testStep) {
@@ -88,8 +90,8 @@ TEST(MLIR_VPU_WorkloadCost, VPUNNCostInterface) {
                 singleSplit.emplace_back(std::move(outTile), mpeMode);
             }
 
-            auto baseHardwareExecutionCost =
-                    vpux::VPUIP::computeSplitCostForVPUX30XX(singleSplit, costParams, costModel);
+            auto splitCostCb = vpux::VPUIP::getSplitCostCb(costParams.arch);
+            auto baseHardwareExecutionCost = splitCostCb(singleSplit, costParams, *costModel, vpux::emptyLogCb);
 
             vpux::VPUIP::WorkloadSplitPool splitPool;
 
@@ -99,7 +101,7 @@ TEST(MLIR_VPU_WorkloadCost, VPUNNCostInterface) {
             }
 
             for (auto iter = splitPool.begin(); iter != splitPool.end(); iter++) {
-                auto hardwareExecutionCost = vpux::VPUIP::computeSplitCostForVPUX30XX(*iter, costParams, costModel);
+                auto hardwareExecutionCost = splitCostCb(*iter, costParams, *costModel, vpux::emptyLogCb);
                 EXPECT_LE(hardwareExecutionCost, baseHardwareExecutionCost);
             }
         }

@@ -64,8 +64,7 @@ if (ENABLE_NPU_MONO)
     set (NPU_MONO_ROOT ${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/..)
 endif()
 
-find_package(OpenVINODeveloperPackage REQUIRED
-             PATHS "${InferenceEngineDeveloperPackage_DIR}")
+find_package(OpenVINODeveloperPackage REQUIRED)
 
 get_directory_property(defs DIRECTORY ${CMAKE_SOURCE_DIR} COMPILE_DEFINITIONS)
 set(OV_BUILD_POSTFIX_VAR)
@@ -89,8 +88,9 @@ include(cmake/bundle_static_library.cmake)
 include(cmake/embed_bin_file.cmake)
 include(cmake/add_tool_target.cmake)
 include(cmake/coverage.cmake)
+include(cmake/mv_tools.cmake)
 
-if(ENABLE_TESTS)
+if(ENABLE_PRIVATE_TESTS)
     enable_testing()
 endif()
 
@@ -158,7 +158,7 @@ endif()
 
 add_subdirectory(src)
 
-if(ENABLE_TESTS)
+if(ENABLE_PRIVATE_TESTS)
     include(cmake/lit_tests.cmake)
     add_subdirectory(tests)
 endif()

@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
-// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW" --split-NCE-ops-onto-workloads %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX || arch-VPUX40XX
+// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW  allow-custom-values=true" --split-NCE-ops-onto-workloads %s | FileCheck %s
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
@@ -1078,4 +1078,156 @@ func.func @NCEPermuteOverlap(%arg0: !Input_DDR) -> !Output_CMX {
     // CHECK-SAME:      <left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>
     // CHECK-SAME:      cluster_id = 1
 
+}
+
+// -----
+
+#GNHWC = affine_map<(d0, d1, d2, d3, d4) -> (d0, d1, d3, d4, d2)>
+#GNCHW = affine_map<(d0, d1, d2, d3, d4) -> (d0, d1, d2, d3, d4)>
+
+!InputDistributed = !VPU.DistributedTensor<6x1x16x4x1xf16, #GNHWC, @CMX_NN,
+{mode = "SEGMENTED", num_tiles = [6, 1, 1, 1, 1], num_clusters = 6 : i64}>
+
+!WeightsDistributed = !VPU.DistributedTensor<6x32x16x1x1xf16, #GNHWC, @CMX_NN,
+ {mode = "SEGMENTED", num_tiles = [6, 1, 1, 1, 1], num_clusters = 6 : i64}>
+
+
+ !OutputDistributed = !VPU.DistributedTensor<6x1x32x4x1xf16, #GNHWC, @CMX_NN,
+ {mode = "SEGMENTED", num_tiles = [6, 1, 1, 1, 1], num_clusters = 6 : i64}>
+
+module @executors {
+IE.TileResource 6 of @NCE at 1.700000e+03 MHz
+// CHECK-LABEL: @MatMulRewriter
+func.func @MatMulRewriter(%arg0: !InputDistributed,%arg1: !WeightsDistributed) -> tensor<6x1x32x4x1xf16, {order =#GNHWC}> {
+    %cst = const.Declare tensor<6x32x1x1x4xsi32, {mem_space = @CMX, order = #GNCHW}> = dense<1> : tensor<6x32x1x1x4xsi32,  {mem_space = @CMX}>
+
+    %10 = VPU.NCE.ClusterTiling (%arg0 as %arg2: tensor<6x1x16x4x1xf16, {mem_space = @CMX_NN, order = #GNHWC}>,
+                                 %arg1 as %arg3: tensor<6x32x16x1x1xf16, {mem_space = @CMX_NN, order = #GNHWC}>,
+                                 %cst as %arg4: tensor<6x32x1x1x4xsi32, {mem_space = @CMX_NN, order = #GNCHW}>) ->  !OutputDistributed {
+        %15 = VPU.NCE.MatMul(%arg2, %arg3, %arg4)
+        {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverGroup>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
+         ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
+          fp_prelu_alpha = 1.000000e+00 : f64>, rawFilterShape = [6, 32, 16, 1, 1], strides = [1, 1]} -> tensor<6x1x32x4x1xf16, {mem_space = @CMX_NN, order = #GNHWC}>
+        VPU.Yield %15
+    }
+
+    %4 = VPU.Copy(%10) :!OutputDistributed
+        -> tensor<6x1x32x4x1xf16, {order = #GNHWC}>
+
+    // CHECK:       VPU.NCE.MatMul
+
+    // CHECK:       VPU.DPU.Workload
+    // CHECK-SAME:      outOffsets [0, 0, 0, 0, 0] outSizes [1, 1, 32, 4, 1]
+    // CHECK-SAME:      <left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>
+    // CHECK-SAME:      cluster_id = 0
+
+    // CHECK:       VPU.DPU.Workload
+    // CHECK-SAME:      outOffsets [1, 0, 0, 0, 0] outSizes [1, 1, 32, 4, 1]
+    // CHECK-SAME:      <left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>
+    // CHECK-SAME:      cluster_id = 1
+
+        // CHECK:       VPU.DPU.Workload
+    // CHECK-SAME:      outOffsets [2, 0, 0, 0, 0] outSizes [1, 1, 32, 4, 1]
+    // CHECK-SAME:      <left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>
+    // CHECK-SAME:      cluster_id = 2
+
+        // CHECK:       VPU.DPU.Workload
+    // CHECK-SAME:      outOffsets [3, 0, 0, 0, 0] outSizes [1, 1, 32, 4, 1]
+    // CHECK-SAME:      <left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>
+    // CHECK-SAME:      cluster_id = 3
+
+        // CHECK:       VPU.DPU.Workload
+    // CHECK-SAME:      outOffsets [4, 0, 0, 0, 0] outSizes [1, 1, 32, 4, 1]
+    // CHECK-SAME:      <left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>
+    // CHECK-SAME:      cluster_id = 4
+
+        // CHECK:       VPU.DPU.Workload
+    // CHECK-SAME:      outOffsets [5, 0, 0, 0, 0] outSizes [1, 1, 32, 4, 1]
+    // CHECK-SAME:      <left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>
+    // CHECK-SAME:      cluster_id = 5
+
+    return %4 : tensor<6x1x32x4x1xf16, {order = #GNHWC}>
+
+}
+}
+
+// -----
+
+#GNHWC = affine_map<(d0, d1, d2, d3, d4) -> (d0, d1, d3, d4, d2)>
+#GNCHW = affine_map<(d0, d1, d2, d3, d4) -> (d0, d1, d2, d3, d4)>
+
+!InputDistributed = !VPU.DistributedTensor<6x1x16x4x1xf16, #GNHWC,
+ @CMX_NN, {mode = "SEGMENTED", num_tiles = [4, 1, 1, 1, 1], num_clusters = 4 : i64, uniform_distributed_segments,
+ compute_shapes = [[2, 1, 16, 4, 1], [2, 1, 16, 4, 1], [1, 1, 16, 4, 1], [1, 1, 16, 4, 1]],
+ compute_offsets = [[0, 0, 0, 0, 0], [2, 0, 0, 0, 0], [4, 0, 0, 0, 0], [5, 0, 0, 0, 0]],
+ memory_shapes = [[2, 1, 16, 4, 1], [2, 1, 16, 4, 1], [1, 1, 16, 4, 1], [1, 1, 16, 4, 1]],
+ memory_offsets = [[0, 0, 0, 0, 0], [2, 0, 0, 0, 0], [4, 0, 0, 0, 0], [5, 0, 0, 0, 0]]}>
+
+!WeightsDistributed = !VPU.DistributedTensor<6x32x16x1x1xf16, #GNHWC,
+ @CMX_NN, {mode = "SEGMENTED", num_tiles = [4, 1, 1, 1, 1], num_clusters = 4 : i64, uniform_distributed_segments,
+  compute_shapes = [[2, 32, 16, 1, 1], [2, 32, 16, 1, 1], [1, 32, 16, 1, 1], [1, 32, 16, 1, 1]],
+  compute_offsets = [[0, 0, 0, 0, 0], [2, 0, 0, 0, 0], [4, 0, 0, 0, 0], [5, 0, 0, 0, 0]],
+  memory_shapes = [[2, 32, 16, 1, 1], [2, 32, 16, 1, 1], [1, 32, 16, 1, 1], [1, 32, 16, 1, 1]],
+  memory_offsets = [[0, 0, 0, 0, 0], [2, 0, 0, 0, 0], [4, 0, 0, 0, 0], [5, 0, 0, 0, 0]]}>
+
+
+!WeightsTableDistributed = !VPU.DistributedTensor<6x32x1x1x4xsi32, #GNCHW,
+  @CMX_NN, {mode = "SEGMENTED", num_tiles = [4, 1, 1, 1, 1], num_clusters = 4 : i64, uniform_distributed_segments,
+   compute_shapes = [[2, 32, 1, 1, 4], [2, 32, 1, 1, 4], [1, 32, 1, 1, 4], [1, 32, 1, 1, 4]],
+   compute_offsets = [[0, 0, 0, 0, 0], [2, 0, 0, 0, 0], [4, 0, 0, 0, 0], [5, 0, 0, 0, 0]],
+   memory_shapes = [[2, 32, 1, 1, 4], [2, 32, 1, 1, 4], [1, 32, 1, 1, 4], [1, 32, 1, 1, 4]],
+   memory_offsets = [[0, 0, 0, 0, 0], [2, 0, 0, 0, 0], [4, 0, 0, 0, 0], [5, 0, 0, 0, 0]]}>
+
+ !OutputDistributed = !VPU.DistributedTensor<6x1x32x4x1xf16, #GNHWC,
+  @CMX_NN, {mode = "SEGMENTED", num_tiles = [4, 1, 1, 1, 1], num_clusters = 4 : i64, uniform_distributed_segments,
+   compute_shapes = [[2, 1, 32, 4, 1], [2, 1, 32, 4, 1], [1, 1, 32, 4, 1], [1, 1, 32, 4, 1]],
+   compute_offsets = [[0, 0, 0, 0, 0], [2, 0, 0, 0, 0], [4, 0, 0, 0, 0], [5, 0, 0, 0, 0]],
+   memory_shapes = [[2, 1, 32, 4, 1], [2, 1, 32, 4, 1], [1, 1, 32, 4, 1], [1, 1, 32, 4, 1]],
+   memory_offsets = [[0, 0, 0, 0, 0], [2, 0, 0, 0, 0], [4, 0, 0, 0, 0], [5, 0, 0, 0, 0]]}>
+
+
+module @executors {
+IE.TileResource 4 of @NCE at 1.700000e+03 MHz
+// CHECK-LABEL: @MatMulUnevenDistributionRewriter
+func.func @MatMulUnevenDistributionRewriter(%arg0: !InputDistributed,%arg1: !WeightsDistributed) -> tensor<6x1x32x4x1xf16, {order =#GNHWC}> {
+    %cst = const.Declare tensor<6x32x1x1x4xsi32, {mem_space = @CMX, order = #GNCHW}> = dense<1> : tensor<6x32x1x1x4xsi32,  {mem_space = @CMX}>
+
+    %10 = VPU.NCE.ClusterTiling (%arg0 as %arg2: tensor<6x1x16x4x1xf16, {mem_space = @CMX_NN, order = #GNHWC}>,
+                                 %arg1 as %arg3: tensor<6x32x16x1x1xf16, {mem_space = @CMX_NN, order = #GNHWC}>,
+                                 %cst as %arg4: tensor<6x32x1x1x4xsi32, {mem_space = @CMX_NN, order = #GNCHW}>) ->  !OutputDistributed {
+        %15 = VPU.NCE.MatMul(%arg2, %arg3, %arg4)
+        {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverGroup>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
+         ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
+          fp_prelu_alpha = 1.000000e+00 : f64>, rawFilterShape = [6, 32, 16, 1, 1], strides = [1, 1]} -> tensor<6x1x32x4x1xf16, {mem_space = @CMX_NN, order = #GNHWC}>
+        VPU.Yield %15
+    }
+
+    %4 = VPU.Copy(%10) :!OutputDistributed
+        -> tensor<6x1x32x4x1xf16, {order = #GNHWC}>
+
+    // CHECK:       VPU.NCE.MatMul
+
+    // CHECK:       VPU.DPU.Workload
+    // CHECK-SAME:      outOffsets [0, 0, 0, 0, 0] outSizes [2, 1, 32, 4, 1]
+    // CHECK-SAME:      <left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>
+    // CHECK-SAME:      cluster_id = 0
+
+    // CHECK:       VPU.DPU.Workload
+    // CHECK-SAME:      outOffsets [2, 0, 0, 0, 0] outSizes [2, 1, 32, 4, 1]
+    // CHECK-SAME:      <left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>
+    // CHECK-SAME:      cluster_id = 1
+
+        // CHECK:       VPU.DPU.Workload
+    // CHECK-SAME:      outOffsets [2, 0, 0, 0, 0] outSizes [1, 1, 32, 4, 1]
+    // CHECK-SAME:      <left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>
+    // CHECK-SAME:      cluster_id = 2
+
+        // CHECK:       VPU.DPU.Workload
+    // CHECK-SAME:      [3, 0, 0, 0, 0] outSizes [1, 1, 32, 4, 1]
+    // CHECK-SAME:      <left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>
+    // CHECK-SAME:      cluster_id = 3
+
+    return %4 : tensor<6x1x32x4x1xf16, {order = #GNHWC}>
+
+}
 }

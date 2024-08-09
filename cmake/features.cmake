@@ -3,12 +3,19 @@
 # SPDX-License-Identifier: Apache 2.0
 #
 
+# private tests should be disabled when building in OV CI
 if(NOT ENABLE_TESTS)
-    set(ENABLE_TESTS OFF)
+    set(ENABLE_PRIVATE_TESTS OFF)
+else()
+    if (NOT ENABLE_PRIVATE_TESTS AND ${PROJECT_BINARY_DIR} MATCHES "build-modules")
+        set(ENABLE_PRIVATE_TESTS OFF)
+    else()
+        set(ENABLE_PRIVATE_TESTS ON)
+    endif()
 endif()
-ov_dependent_option(ENABLE_TESTS "Unit, behavior and functional tests" ${ENABLE_TESTS} "ENABLE_TESTS" OFF)
+ov_option(ENABLE_PRIVATE_TESTS "NPU private unit, behavior and functional tests" OFF)
 
-ov_dependent_option(ENABLE_VPUX_FUZZ_TESTS "NPU Fuzz tests" OFF "ENABLE_TESTS" OFF)
+ov_dependent_option(ENABLE_NPU_FUZZ_TESTS "NPU Fuzz tests" OFF "ENABLE_TESTS" OFF)
 
 if(NOT ENABLE_LTO)
     set(ENABLE_LTO OFF)

@@ -15,23 +15,12 @@ namespace ov {
 namespace test {
 
 class GroupConvolutionLayerTestCommon : public GroupConvolutionLayerTest, virtual public VpuOv2LayerTest {};
-class GroupConvolutionLayerTest_NPU3700 : public GroupConvolutionLayerTestCommon {};
 
 using GroupConvolutionLayerTest_NPU3720_HW = GroupConvolutionLayerTestCommon;
 using GroupConvolutionLayerTest_NPU3720_SW = GroupConvolutionLayerTestCommon;
 
 class GroupConvolutionLayerTest_NPU4000_SW : public GroupConvolutionLayerTestCommon {};
 class GroupConvolutionLayerTest_NPU4000_HW : public GroupConvolutionLayerTestCommon {};
-
-TEST_P(GroupConvolutionLayerTest_NPU3700, SW) {
-    setReferenceSoftwareMode();
-    run(Platform::NPU3700);
-}
-
-TEST_P(GroupConvolutionLayerTest_NPU3700, HW) {
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
 
 TEST_P(GroupConvolutionLayerTest_NPU3720_HW, HW) {
     rel_threshold = 0.01;
@@ -95,13 +84,6 @@ const auto groupConv1D_AutoPadValid = testing::Combine(
         groupConv1DParams_AutoPadValid, ::testing::ValuesIn(modelTypes),
         ::testing::ValuesIn(static_shapes_to_test_representation(inputShapes1d)), ::testing::Values(DEVICE_NPU));
 
-// ------ NPU3700 ------
-INSTANTIATE_TEST_SUITE_P(smoke_GroupConvolution1D_ExplicitPadding, GroupConvolutionLayerTest_NPU3700,
-                         groupConv1D_ExplicitPadding, GroupConvolutionLayerTest::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_GroupConvolution1D_AutoPadValid, GroupConvolutionLayerTest_NPU3700,
-                         groupConv1D_AutoPadValid, GroupConvolutionLayerTest::getTestCaseName);
-
 // ------ NPU3720 ------
 INSTANTIATE_TEST_CASE_P(smoke_GroupConvolution1D_ExplicitPadding, GroupConvolutionLayerTest_NPU3720_SW,
                         groupConv1D_ExplicitPadding, GroupConvolutionLayerTest::getTestCaseName);
@@ -151,16 +133,6 @@ const auto groupConv2D_LargeStrides = testing::Combine(
         groupConv2DParams_LargeStrides, ::testing::ValuesIn(modelTypes),
         ::testing::ValuesIn({static_shapes_to_test_representation({inputShapes[1]})}), ::testing::Values(DEVICE_NPU));
 
-// ------ NPU3700 ------
-INSTANTIATE_TEST_SUITE_P(smoke_GroupConvolution2D_ExplicitPadding, GroupConvolutionLayerTest_NPU3700,
-                         groupConv2D_ExplicitPadding, GroupConvolutionLayerTest::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_GroupConvolution2D_AutoPadValid, GroupConvolutionLayerTest_NPU3700,
-                         groupConv2D_AutoPadValid, GroupConvolutionLayerTest::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_GroupConvolution2D_LargeStrides, GroupConvolutionLayerTest_NPU3700,
-                        groupConv2D_LargeStrides, GroupConvolutionLayerTest::getTestCaseName);
-
 // ------ NPU3720 ------
 INSTANTIATE_TEST_SUITE_P(smoke_GroupConvolution2D_ExplicitPadding, GroupConvolutionLayerTest_NPU3720_SW,
                          groupConv2D_ExplicitPadding, GroupConvolutionLayerTest::getTestCaseName);
@@ -197,21 +169,6 @@ const auto groupConv3DParams_AutoPadValid =
                            ::testing::Values(std::vector<ptrdiff_t>({0, 0, 0})),
                            ::testing::Values(std::vector<ptrdiff_t>({0, 0, 0})), ::testing::ValuesIn(dilations3d),
                            ::testing::Values(4), ::testing::Values(2), ::testing::Values(ov::op::PadType::VALID));
-
-// Tracking number [E#85137]
-INSTANTIATE_TEST_SUITE_P(DISABLED_smoke_GroupConvolution3D_ExplicitPadding, GroupConvolutionLayerTest_NPU3700,
-                         ::testing::Combine(groupConv3DParams_ExplicitPadding, ::testing::ValuesIn(modelTypes),
-                                            ::testing::ValuesIn(static_shapes_to_test_representation(inputShapes3d)),
-                                            ::testing::Values(DEVICE_NPU)),
-                         GroupConvolutionLayerTest::getTestCaseName);
-
-// Tracking number [E#85137]
-INSTANTIATE_TEST_SUITE_P(
-        DISABLED_smoke_GroupConvolution3D_AutoPadValid, GroupConvolutionLayerTest_NPU3700,
-        ::testing::Combine(groupConv3DParams_AutoPadValid, ::testing::ValuesIn(modelTypes),
-                           ::testing::Values(static_shapes_to_test_representation({ov::Shape{1, 4, 10, 10, 10}})),
-                           ::testing::Values(DEVICE_NPU)),
-        GroupConvolutionLayerTest::getTestCaseName);
 
 // ------ NPU3720 ------
 

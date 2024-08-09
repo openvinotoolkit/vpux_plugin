@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --init-compiler="vpu-arch=%arch%" --patch-weight-table %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX
+// REQUIRES: arch-NPU37XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
@@ -58,7 +58,7 @@ func.func @PatchFusedConstantWithSwizzling() -> !IpOp_Stub {
     %5 = async.await %r1 : !async.value<memref<1x64x104x104xf16, #NHWC, [@CMX_NN, 0]>>
     return %5 : memref<1x64x104x104xf16, #NHWC, [@CMX_NN, 0]>
     // CHECK-DAG:   [[FUSED_CONSTANT:%.*]] = const.Declare memref<1x1x1x5120xui8, {order = #NCHW, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 512 : i64>}> = dense<
-    // CHECK-SAME: #const.RelocateWeightsTable<weightsPtr=[1405952], sparsityPtr=16777215 : i64, offsets=[0], weightsTableSize=1024 : i64, weightsElemBitSize=16 : i64>, #const.SwizzleConstant<5 : i64, 3 : i64>
+    // CHECK-SAME: #const.RelocateWeightsTable<weightsPtr=[1405952], sparsityPtr=16777215 : i64, offsets=[0], weightsTableSize=1024 : i64, weightsElemBitSize=16 : i64, channelOffset=0 : i64>, #const.SwizzleConstant<5 : i64, 3 : i64>
     // CHECK:   [[INPUT:%.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <512> -> memref<1x64x104x104xf16, #NHWC, [@CMX_NN, 0]>
     // CHECK:   [[OUTPUT:%.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <692736> -> memref<1x64x104x104xf16, #NHWC, [@CMX_NN, 0]>
     // CHECK:   [[FUSED_BUF:%.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <1404928> -> memref<1x1x1x5120xui8, {order = #NCHW, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 512 : i64>}, [@CMX_NN, 0]>

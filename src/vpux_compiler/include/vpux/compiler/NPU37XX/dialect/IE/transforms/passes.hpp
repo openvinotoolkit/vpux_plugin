@@ -25,13 +25,15 @@ std::unique_ptr<mlir::Pass> createFusePermuteQuantizeExpandPass(Logger log = Log
 std::unique_ptr<mlir::Pass> createExpandActivationChannelsPass(const bool seOpsEnabled = false,
                                                                const bool seExperimentalOpsEnabled = false,
                                                                Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createUnrollBatchPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createUnrollBatchPass(Logger log = Logger::global(), const bool skipUnrollBatch = false);
 std::unique_ptr<mlir::Pass> createConvertFFTToConvPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createConvertSubGRUSequenceToConvPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createConvertToMixedPrecision(const bool enableFloatInQuantWeightsMixedMode = true,
                                                           Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createOptimizeNetworkInputConvertPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createConvertWeightsToI8Pass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createProcessAsymmetricZeroPointsForConvolutionPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createFuseOutstandingDequant(Logger log = Logger::global());
 
 //
 // Pipelines
@@ -52,8 +54,6 @@ void buildOptimizeMemPermuteAndActivationChannelsExpandPipeline(mlir::OpPassMana
                                                                 const ExpandActivationChannelsOptions& options,
                                                                 Logger log = Logger::global());
 
-void buildInitialLowPrecisionTransformationsPipeline(mlir::OpPassManager& pm, Logger log = Logger::global());
-
 void buildLowPrecisionPipeline(mlir::OpPassManager& pm, const LowPrecisionOptions& options,
                                Logger log = Logger::global());
 
@@ -64,16 +64,24 @@ struct TransformOptions : mlir::PassPipelineOptions<TransformOptions> {
                                      llvm::cl::init(true)};
     BoolOption enableConvertFFTToConv{*this, "convert-fft-to-conv", llvm::cl::desc("Enable convert-fft-to-conv pass"),
                                       llvm::cl::init(true)};
+    BoolOption enableGroupedMatMul{*this, "enable-grouped-matmul",
+                                   llvm::cl::desc("Enable execution of grouped MatMul as a single operation."),
+                                   llvm::cl::init(false)};
 
     template <class OtherOptions>
     explicit TransformOptions(const OtherOptions& options) {
         enableConvertFCToConv = options.enableConvertFCToConv;
         enableConvertFFTToConv = options.enableConvertFFTToConv;
+        enableGroupedMatMul = options.enableGroupedMatMul;
     }
 };
 
 void buildInitialTransformationsPipeline(mlir::OpPassManager& pm, const TransformOptions& options,
                                          Logger log = Logger::global());
+
+void buildInitialLowPrecisionTransformationsPipeline(mlir::OpPassManager& pm,
+                                                     const IE::LowPrecisionTransformOptions& options,
+                                                     Logger log = Logger::global());
 
 //
 // DefaultHWOptions
@@ -109,6 +117,7 @@ void buildAdjustLayoutPipeline(mlir::OpPassManager& pm, const AdjustLayoutOption
 std::unique_ptr<mlir::Pass> createPropagateReorderToNCEPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createSwapMaxPoolWithActivation(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createFuseReordersPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createFuseMultiplyToConvPass(Logger log = Logger::global());
 
 //
 // Generated

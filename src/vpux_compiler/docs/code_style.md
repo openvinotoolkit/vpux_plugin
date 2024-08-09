@@ -3,6 +3,14 @@ This guide is not intended to cover all possible coding problems. Its ultimate g
 - to formalize the existing practices;
 - to collect some useful programming techniques aimed to enhance the readability and maintainability of our code base.
 
+## Resources/Links
+- [C++ Core Guidelines](https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines)
+- [Clang Format](https://clang.llvm.org/docs/ClangFormat.html)
+    - [Our Clang-Format configuration](../../../.clang-format)
+- [Clang Tidy](https://clang.llvm.org/extra/clang-tidy/)
+    - [List of checks](https://clang.llvm.org/extra/clang-tidy/checks/list.html)
+    - [Our Clang-Tidy configuration](../../../.clang-tidy)
+
 ## Naming
 
 ### Variables and functions
@@ -78,7 +86,41 @@ if (temp / len < maxCount) {
 }
 ```
 
-## Operators
+## Style Preferences
+
+### Uninitialised variables
+Where possible, variables should not remain uninitialised and should be given a sane default value. There are some cases
+where you might need this delayed initialisation (i.e. it depends on some flag). In such cases, you should prefer to use
+either a ternary expression or IIFE (Immediately Invoked Function Expression).
+
+```cpp
+int x;
+
+if (foo) {  // BAD
+    x = 5;
+} else {
+    x = 3;
+}
+```
+
+##### Simple case:
+```cpp
+int x = foo ? 5 : 3;  // GOOD
+```
+
+##### Complex case:
+```cpp
+int x = [&] () {
+    if (foo) {
+        // some complex logic...
+        return foo;
+    }
+
+    return bar;
+} ();
+```
+
+### Operators
 
 It is preferred to use symbols in place of keywords for operators i.e. `&&` should be used in place of `and`.
 
@@ -97,6 +139,32 @@ if (sourceOp != nullptr && sourceOp->getResult(0).use_empty()) { // OK
 - `not` => `!`
 
 Check [here](https://en.cppreference.com/w/cpp/language/operator_alternative) for more examples.
+
+### Type Inference
+
+In most cases it should be preferred to use `auto` for the sake of correctness, flexibility and
+maintainability.
+
+- Prefer to write code against interfaces rather than implementations (care about "what", not "how")
+- Reduces needless verbosity of types like iterators
+- Prevents unintentional implicit conversions and guarantees correct type (if you need a conversion, be explicit: `auto x = type{y}`)
+- Avoids creating temporaries and uses move
+
+```cpp
+auto op = currentOp.source().getDefiningOp();  // OK
+```
+
+```cpp
+bool hasMultiBranches = VPU::hasMultiBranches(op);  // OK but type could be deduced from wording of function: "has".
+```
+
+```cpp
+IE::ShapeCastOp shapeCast = mlir::dyn_cast<IE::ShapeCastOp>(op);  // BAD: we repeat the type twice.
+```
+
+```cpp
+llvm::ArrayRef<int64_t>::reverse_iterator it = shape.rbegin();  // BAD: too verbose, we already know it's an iterator.
+```
 
 ## Methods
 
@@ -133,6 +201,7 @@ void justPrintArray(const SmallVector<mlir::Value>& array); // BAD: pass it by A
 ```
 
 ## Formatting
+> Note: Make sure to use clang-format and review our configuration [here](./clang-format).
 
 ### General Rules
 
@@ -645,3 +714,103 @@ rewriters](./guides/mlir_good_practices.md#running-multiple-rewriters-within-one
 // RUN: vpux-opt --init-compiler="vpu-arch=%arch%" --swap-operations --fuse-post-ops %s | FileCheck %s
 ```
 - We allow calling pipelines multiples times to express dependencies in code
+
+## Locations
+
+Locations are objects attached to operations and represent information about operation source. Locations originate from nGraph information (such as friendly_name) and must be preserved throughout compilation. Locations are used to name tasks in profiling reports. Each task must have unique location and unambiguously points to original nGraph node. To achieve it compiler has `LocationsVerifier` instrumentation, which checks uniqueness of locations after each pass, if enabled. 
+
+Locations are defined as objects of `mlir::FusedLoc` in form `fused<{name = "input", type = "Parameter"}>["input", "converted_to_fp32"]`. Fields `name` and `type` are filled according to nGraph information and should not change during compilation.
+
+### Creation of new location
+
+Due to the above restrictions locations of new ops shall not be created from scratch but should be derived from existing ones. Relevant helpers are defined in `vpux/compiler/utils/rewriter.hpp`.
+
+```cpp
+
+SmallVector<mlir::Value> getPerClusterBuffers(mlir::MLIRContext* ctx, mlir::Location loc, StringRef bufferName,  mlir::Value operand) {
+    for (int64_t clusterId = 0; clusterId < tileCount; ++clusterId) {
+        const auto newLoc = appendLoc(loc, "{0}_cluster_{1}", bufferName, clusterId); // GOOD, use appendLoc to extend existing with information about new operation
+        auto newCmxBuffer = VPURT::createOp<VPURT::DeclareBufferOp>(
+                    builder, insertionPoint, newLoc, ...);
+    }
+}
+
+const auto newLoc = mlir::UnknownLoc::get(ctx); // BAD, must originate from existing loc
+const auto newLoc = mlir::NameLoc::get(mlir::StringAttr::get(ctx, "MySlice")); // BAD, must originate from existing loc
+rewriter.create<IE::SliceOp>(newLoc, yuvToRgbOp.getInput1(), getIntArrayAttr(ctx, input2Offsets), getIntArrayAttr(ctx, input2Sizes));
+
+const auto newLoc = appendLoc(origOp->getLoc(), "slice_in"); // BAD, use takeOpLoc
+const auto newLoc = takeOpLoc(origOp, "slice_in"); // OK
+
+rewriter.create<IE::SliceOp>(takeOpLoc(origOp, "vertical_split_{0}_horizontal_split_{1}", i, j), yuvToRgbOp.getInput1(), getIntArrayAttr(ctx, input2_offsets), getIntArrayAttr(ctx, input2_sizes)); // BAD, move location to variable
+
+void implementPattern(IE::ConvolutionOp origOp) {
+    auto* newConvOp = rewriter.clone(*origOp.getOperation(), mapper);
+    rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, newConvOp->getResult(0), nullptr, false, outputShapeAttr); // BAD, newConv and Reshape has same locations
+
+    // OK, locations are preserved
+    auto outReshape = rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, newConvOp->getResult(0), nullptr, false, outputShapeAttr);
+    extendOpLoc(outReshape, "reshape_out");
+
+    // BAD, use extendOpLoc
+    outReshape->setLoc(appendLoc(outReshape->getLoc(), "reshape_out"));
+}
+```
+
+However, `mlir::UnknownLoc` and `mlir::NameLoc` can be used in cases, where operation does not originate from original nGraph network or represents compiler internals. Usually such operations belongs to top-level module op. PSS tests and mapped-inference related passes are also an exception.
+
+```cpp
+innerBuilder.create<IE::MemoryResourceOp>(mlir::UnknownLoc::get(ctx), memSpace.getLeafReference(), byteSizeAttr, nullptr); // OK, memory reservation is not a real operation
+
+auto newFuncOp = innerModuleBuilder.create<mlir::func::FuncOp>(mlir::UnknownLoc::get(ctx), functionName, funcType); // OK, funcOp here is external shave function
+
+_builder.create<mlir::memref::AllocOp>(mlir::NameLoc::get(mlir::StringAttr::get(_ctx, "profiling_buffer")), profBuffType); // OK, profiling buffers does not represent operation from nGraph
+```
+
+### Location format
+
+Each `appendLoc` or similar function adds new element to `FusedLoc` list and should represent new level of transformation or legalization of operation. During serialization all elements are joined with help of `/` symbol, so `/` should not be used in the location parts to avoid misunderstanding.
+
+Use the following guidelines when constructing new location information:
+
+- Use `"{transform}_{operand}"` format for new operations. Prefer tablegen defined operand name of the original operation and a new operation type as transform. Use `in` for main input, `out` for operation result and `in1`/`in2` for eltwise operations. For example `reshape_in`, `transpose_out`, `quantize_filter`.
+- Use `"as_{new_op_type}"` format if operation type was changed.
+- Split words using `_`. Do not use `_` prefix.
+- For splitted or cloned operations use indices. For example `slice_in_{0}_{1}`.
+- Provide location and operand name or location suffix to functions, which create new subgraph.
+- Do not use long or too verbose names, consider it as a hint for code search, not a code comment.
+- Do not append or use other locations.
+
+Examples:
+```cpp
+const auto newLoc = takeOpLoc(origOp, "fused_with_{0}", sourceOp->getLoc()); // BAD, nested locations can break parsing
+const auto newLoc = takeOpLoc(origOp, "fused_with_dwconv"); // OK
+
+auto newTransposeOp = rewriter.create<IE::TransposeOp>(takeOpLoc(origOp, "transpose_in"), origOp.getInput(), nullptr, orderAttr); // OK
+auto newTransposeOp = rewriter.create<IE::TransposeOp>(takeOpLoc(origOp, "transpose_input"), origOp.getInput(), nullptr, orderAttr); // BAD, use shorter version
+
+
+mlir::LogicalResult ConvertFCToConvPass::FullyConnectedOpConverter::matchAndRewrite(
+        IE::FullyConnectedOp origOp) {
+    auto newInput = rewriter.create<IE::ReshapeOp>(takeOpLoc(origOp, "reshape_in"), origOp.getInput(), ...);
+    auto newFilter = rewriter.create<IE::ReshapeOp>(takeOpLoc(origOp, "reshape_filter"), origOp.getWeights(), ...); // filter is tablegen name for IE.Convolution, but weights are OK too
+    auto convOp = rewriter.create<IE::ConvolutionOp>(takeOpLoc(origOp, "as_conv"), newInput, newFilter, ...) // OK
+    auto newOp = rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, convOp.getOutput(), ...);
+    extendOpLoc(newOp, "reshape_out"); // GOOD
+}
+
+// Provide explicit location or use operation as source
+mlir::Value createSubAvgPool(IE::AvgPoolOp origOp, ..., StringRef locSuffix) {
+    auto stridedSliceOp = rewriter.createOrFold<IE::StridedSliceOp>(takeOpLoc(origOp, "slice_{0}", locSuffix), origOp.getInput(), ...);
+    auto avgPoolOp = rewriter.create<IE::AvgPoolOp>(takeOpLoc(origOp, "pool_{0}", locSuffix), ...); // OK
+}
+createSubAvgPool(origOp, ..., "center");    // OK
+createSubAvgPool(origOp, ..., "top_left");  // OK
+createSubAvgPool(origOp, ..., "1");         // BAD, spatial indexation was chosen already
+
+for (int64_t actIndex = 0; actIndex < outputShape[Dims5D::Act::D]; actIndex++) {
+    for (int64_t depthIndex = 0; depthIndex < kernelZ; depthIndex++) {
+        rewriter.create<IE::SliceOp>(takeOpLoc(origOp, "slice_{0}_{1}", actIndex, depthIndex), ...); // OK, numerical indexation
+    }
+}
+```

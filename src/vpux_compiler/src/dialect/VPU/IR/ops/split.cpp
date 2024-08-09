@@ -38,14 +38,14 @@ mlir::FailureOr<Dim> extractAxis(mlir::Location loc, VPU::SplitOpAdaptor split) 
             return errorAt(loc, "Only constant input is supported for axis");
         }
 
-        const auto axisContent = axisConst.getContent();
-        if (!axisContent.isSplat()) {
+        if (const auto attr = axisConst.getContentAttr(); !attr.isSplat()) {
             return errorAt(loc, "Axis value must be a scalar");
         }
 
         const auto inType = split.getInput().getType().cast<vpux::NDTypeInterface>();
         const auto inRank = inType.getRank();
 
+        const auto axisContent = axisConst.getContent();
         auto axisInd = axisContent.getSplatValue<int64_t>();
 
         // Negative value means counting dimension from the end
@@ -68,11 +68,11 @@ mlir::FailureOr<Dim> extractAxis(mlir::Location loc, VPU::SplitOpAdaptor split) 
 
 mlir::LogicalResult vpux::VPU::SplitOp::inferReturnTypes(mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc,
                                                          mlir::ValueRange operands, mlir::DictionaryAttr attrs,
-                                                         mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+                                                         mlir::OpaqueProperties prop, mlir::RegionRange /*regions*/,
                                                          mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::SplitOpAdaptor split(operands, attrs);
+    VPU::SplitOpAdaptor split(operands, attrs, prop);
     if (mlir::failed(split.verify(loc))) {
         return mlir::failure();
     }

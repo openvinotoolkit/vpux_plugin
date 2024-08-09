@@ -4,7 +4,7 @@
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --fuse-scales-to-accumulate %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 #CN = affine_map<(d0, d1) -> (d1, d0)>
 
@@ -57,19 +57,8 @@ func.func @FuseScales(%arg0: tensor<3x64xf32>) -> tensor<3x16xf32> {
     // CHECK-DAG:   [[FQ_OUT_LO:%.*]] = const.Declare tensor<1x1x16xf32> = dense<-1.280000e+02>
     // CHECK-DAG:   [[FQ_OUT_HI:%.*]] = const.Declare tensor<1x1x16xf32> = dense<1.260000e+02>
 
-    // CHECK-DAG:   [[SCALE_0:%.*]] = const.Declare tensor<16xf32> = dense<[
-    // CHECK-DAG-SAME:      1.000000e+00, 2.000000e+00, 3.000000e+00, 4.000000e+00,
-    // CHECK-DAG-SAME:      5.000000e+00, 6.000000e+00, 7.000000e+00, 1.000000e+00,
-    // CHECK-DAG-SAME:      2.000000e+00, 3.000000e+00, 4.000000e+00, 5.000000e+00,
-    // CHECK-DAG-SAME:      6.000000e+00, 7.000000e+00, 1.000000e+00, 2.000000e+00
-    // CHECK-DAG-SAME:  ]> : tensor<16xf32>
-
-    // CHECK-DAG:   [[SCALE_1:%.*]] = const.Declare tensor<16xf32> = dense<[
-    // CHECK-DAG-SAME:      3.000000e+00, 4.000000e+00, 5.000000e+00, 6.000000e+00,
-    // CHECK-DAG-SAME:      7.000000e+00, 1.000000e+00, 2.000000e+00, 3.000000e+00,
-    // CHECK-DAG-SAME:      4.000000e+00, 5.000000e+00, 6.000000e+00, 7.000000e+00,
-    // CHECK-DAG-SAME:      1.000000e+00, 2.000000e+00, 3.000000e+00, 4.000000e+00
-    // CHECK-DAG-SAME:  ]> : tensor<16xf32>
+    // CHECK-DAG:   [[SCALE_0:%.*]] = const.Declare tensor<16xf32> = dense<[1.000000e+00, 2.000000e+00, 3.000000e+00, 4.000000e+00, 5.000000e+00, 6.000000e+00, 7.000000e+00, 1.000000e+00, 2.000000e+00, 3.000000e+00, 4.000000e+00, 5.000000e+00, 6.000000e+00, 7.000000e+00, 1.000000e+00, 2.000000e+00]> : tensor<16xf32>
+    // CHECK-DAG:   [[SCALE_1:%.*]] = const.Declare tensor<16xf32> = dense<[3.000000e+00, 4.000000e+00, 5.000000e+00, 6.000000e+00, 7.000000e+00, 1.000000e+00, 2.000000e+00, 3.000000e+00, 4.000000e+00, 5.000000e+00, 6.000000e+00, 7.000000e+00, 1.000000e+00, 2.000000e+00, 3.000000e+00, 4.000000e+00]> : tensor<16xf32>
 
     %FQ_IN_LO = const.Declare tensor<1x1x1xf32> = dense<-1.270000e+02> : tensor<1x1x1xf32>
     // CHECK-DAG:   [[FQ_IN_LO:%.*]] = const.Declare tensor<1x1x1xf32> = dense<-1.270000e+02>

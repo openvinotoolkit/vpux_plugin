@@ -15,15 +15,15 @@ The following components are necessary:
 
 In order to build and run the fuzz tests, the plugin has to be built using `clang` compiler since `libFuzzer` depends on it. A debug build is recommended.
 
-To build the tests, enable the `ENABLE_VPUX_FUZZ_TESTS` option. Additionally, the `ENABLE_FUZZING` and `ENABLE_SANITIZER` options should be enabled as they will enable the fuzzing and address sanitizers, as well as the instrumentation necessary to analyze code coverage. If these two options are not enabled, the tests can still be build, but they will mostly function as crash reproducers (e.g. for debugging or resolving found issues).
+To build the tests, enable the `ENABLE_NPU_FUZZ_TESTS` option. Additionally, the `ENABLE_FUZZING` and `ENABLE_SANITIZER` options should be enabled as they will enable the fuzzing and address sanitizers, as well as the instrumentation necessary to analyze code coverage. If these two options are not enabled, the tests can still be build, but they will mostly function as crash reproducers (e.g. for debugging or resolving found issues).
 
-From your project's [build directory](../../guides/how-to-build.md), you can set the following variables:
+The recommended way to build the project is by using the `npuFuzzingBuild` preset. Running the following from the root of the project will configure all the necessary values and perform the build:
 
 ```sh
-CC=clang CXX=clang++ cmake .. -DENABLE_VPUX_FUZZ_TESTS=ON -DENABLE_FUZZING=ON -DENABLE_SANITIZER=ON
+OPENVINO_HOME=/path/to/openvino cmake --preset npuFuzzingBuild .
+cd ./build-x86_64/Debug
+cmake --build .
 ```
-
-The plugin can then be built as normally (e.g. using `make` or `ninja`).
 
 ## Running fuzz tests
 
@@ -37,6 +37,13 @@ cd fuzz
 
 # Example: ../fuzz_pipeline_default_hw_mode CORPUS /path/to/vpux-plugin/tests/fuzz/src/pipeline_default_hw_mode/seeds
 /path/to/fuzz/test/executable CORPUS /path/to/seeds
+```
+
+**Note:** in case you encounter an error saying `ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD`, you may need to manually provide the path to the ASAN library via `LD_PRELOAD`:
+
+```sh
+# Example path for clang-18
+LD_PRELOAD="/usr/lib/llvm-18/lib/clang/18/lib/linux/libclang_rt.asan-x86_64.so" /path/to/fuzz/test/executable CORPUS /path/to/seeds
 ```
 
 Creating a dedicated directory in which to run the test is recommended as it will be populated with artifacts, such as crash reproducers. An empty corpus directory is also recommended when starting from the seeds or from scratch, since it will be populated with all the relevant found inputs. Using the seeds directory directly or an existing corpus is also possible (e.g. `/path/to/fuzz/test/executable CORPUS`), but please be aware that the content of the directory will be changed by the test run.

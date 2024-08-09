@@ -16,7 +16,6 @@ add_mlir_library(${TARGET_NAME}
         npu_ov_utils
         npu_llvm_utils
         npu_profiling_utils
-        npu_compiler_dialect_vpumi37xx
         npu_elf
         flatbuffers
         # E#98178: remove depedency on firmware headers

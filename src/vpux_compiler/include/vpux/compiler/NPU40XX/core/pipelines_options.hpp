@@ -50,6 +50,16 @@ struct DefaultHWOptionsDeviceBase : public virtual vpux::DefaultHWOptionsBase {
 
     BoolOption shaveDryRun{*this, "shave-dry-run", llvm::cl::desc("Enable shave dry run stripping"),
                            llvm::cl::init(false)};
+
+    BoolOption enablePartialWorkloadManagement{*this, "enable-partial-workload-management",
+                                               llvm::cl::desc("Enable partial workload management"),
+                                               llvm::cl::init(true)};
+
+    BoolOption supportNCEOpInsertion{
+            *this, "support-nce-op-insertion",
+            llvm::cl::desc("Insert a new NCE operation with single user for CMX-Concat to handle the"
+                           "complex case when parent NCE has an extra non-Copy user."),
+            llvm::cl::init(true)};
 };
 
 //

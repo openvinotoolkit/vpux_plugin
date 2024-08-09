@@ -10,11 +10,11 @@ using namespace vpux;
 mlir::LogicalResult vpux::VPU::LeakyReluOp::inferReturnTypes(mlir::MLIRContext* ctx,
                                                              std::optional<mlir::Location> optLoc,
                                                              mlir::ValueRange operands, mlir::DictionaryAttr attrs,
-                                                             mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+                                                             mlir::OpaqueProperties prop, mlir::RegionRange /*regions*/,
                                                              mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::LeakyReluOpAdaptor leaky_relu(operands, attrs);
+    VPU::LeakyReluOpAdaptor leaky_relu(operands, attrs, prop);
     if (mlir::failed(leaky_relu.verify(loc))) {
         return mlir::failure();
     }

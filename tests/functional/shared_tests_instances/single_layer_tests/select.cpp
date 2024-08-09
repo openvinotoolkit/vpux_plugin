@@ -37,14 +37,8 @@ class SelectLayerTestCommon : public SelectLayerTest, virtual public VpuOv2Layer
     }
 };
 
-class SelectLayerTest_NPU3700 : public SelectLayerTestCommon {};
 class SelectLayerTest_NPU3720 : public SelectLayerTestCommon {};
 class SelectLayerTest_NPU4000 : public SelectLayerTestCommon {};
-
-TEST_P(SelectLayerTest_NPU3700, SW) {
-    setReferenceSoftwareMode();
-    run(Platform::NPU3700);
-}
 
 TEST_P(SelectLayerTest_NPU3720, SW) {
     setReferenceSoftwareMode();
@@ -60,7 +54,6 @@ TEST_P(SelectLayerTest_NPU4000, SW) {
 
 }  // namespace ov
 
-using ov::test::SelectLayerTest_NPU3700;
 using ov::test::SelectLayerTest_NPU3720;
 using ov::test::SelectLayerTest_NPU4000;
 
@@ -95,15 +88,6 @@ const auto selectTestParams_highDims =
 const auto selectTestParams1 = ::testing::Combine(
         ::testing::ValuesIn(ov::test::static_shapes_to_test_representation(inShapes)), ::testing::ValuesIn(inputTypes),
         ::testing::Values(ov::op::AutoBroadcastType::NUMPY), ::testing::Values(ov::test::utils::DEVICE_NPU));
-
-// --------- NPU3700 ---------
-
-INSTANTIATE_TEST_CASE_P(smoke_select_common, SelectLayerTest_NPU3700, selectTestParams0,
-                        SelectLayerTest_NPU3700::getTestCaseName);
-
-// Tracking number [E#85137]
-INSTANTIATE_TEST_CASE_P(DISABLED_smoke_select_highDims, SelectLayerTest_NPU3700, selectTestParams_highDims,
-                        SelectLayerTest_NPU3700::getTestCaseName);
 
 // --------- NPU3720 ---------
 

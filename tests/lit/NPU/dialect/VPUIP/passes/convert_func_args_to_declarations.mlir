@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --convert-func-args-to-declarations --canonicalize --move-declarations-to-top %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 module @WithoutInputs {
     IE.CNNNetwork entryPoint : @main
@@ -387,5 +387,75 @@ module @ThreeFunctions {
         // CHECK:   func.call @foo3([[DDR2]], [[DDR3]], [[OUT0]]) : (memref<1x2x10x12xf16, @DDR>, memref<1x2x10x12xf16, @DDR>, memref<1x3x10x12xf16, @DDR>)
 
         // CHECK: return [[ARG1]], [[ARG2]] : memref<1x3x10x12xf16, @DDR>, memref<1x4x10x12xf16, @DDR>
+    }
+}
+
+// -----
+
+module @FuncArgHasNoUses {
+    IE.CNNNetwork entryPoint : @main inputsInfo : {
+        DataInfo "input" : tensor<1x4x5x5xf16>
+    } outputsInfo : {
+        DataInfo "output" : tensor<1x4x5x5xf16>
+    }
+
+    // CHECK: func.func @foo([[ARG0:%.+]]: memref<1x4x5x5xf16, @DDR>, [[ARG1:%.+]]: memref<1x4x5x5xf16, @DDR>)
+    func.func @foo(%arg0: memref<1x4x5x5xf16, @DDR>, %arg1: memref<1x4x5x5xf16, @DDR>) -> memref<1x4x5x5xf16, @DDR> {
+        // arg0 has no uses
+        // this should not happen and it should be handled in another pass(outliner, for example)
+        // but at the same time, this should not lead to a failure of the  pass
+
+        %cst = const.Declare memref<1x4x5x5xf16, @DDR> = dense<1.0> : tensor<1x4x5x5xf16>
+        VPURT.Task {
+            %0 = VPUIP.NNDMA inputs(%cst : memref<1x4x5x5xf16, @DDR>) outputs(%arg1 : memref<1x4x5x5xf16, @DDR>) -> memref<1x4x5x5xf16, @DDR>
+        }
+        return %arg1 : memref<1x4x5x5xf16, @DDR>
+
+        //CHECK-DAG: [[CST:%.+]] = const.Declare memref<1x4x5x5xf16, @DDR> = dense<1.000000e+00> : tensor<1x4x5x5xf16>
+        //CHECK-DAG: [[TMP_OUT:%.+]] = VPURT.DeclareBuffer <DDR> <100> -> memref<1x4x5x5xf16, @DDR>
+
+        //CHECK:    VPURT.Task {
+        //CHECK:        VPUIP.NNDMA inputs([[CST]] : memref<1x4x5x5xf16, @DDR>)
+        //CHECK-SAME:                outputs([[TMP_OUT]] : memref<1x4x5x5xf16, @DDR>)
+
+        //CHECK: return [[ARG1]] : memref<1x4x5x5xf16, @DDR>
+    }
+
+    // CHECK: func.func @main([[ARG0:%.+]]: memref<1x4x5x5xf16, @DDR>, [[ARG1:%.+]]: memref<1x4x5x5xf16, @DDR>)
+    func.func @main(%arg0: memref<1x4x5x5xf16, @DDR>, %arg1: memref<1x4x5x5xf16, @DDR>) -> memref<1x4x5x5xf16, @DDR> {
+        %tmp_in = VPURT.DeclareBuffer <DDR> <0> -> memref<1x4x5x5xf16, @DDR>
+        %tmp_out = VPURT.DeclareBuffer <DDR> <100> -> memref<1x4x5x5xf16, @DDR>
+
+        %barr1 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+        %barr2 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+
+        VPURT.Task updates(%barr1 : !VPURT.Barrier) {
+            %0 = VPUIP.NNDMA inputs(%arg0 : memref<1x4x5x5xf16, @DDR>) outputs(%tmp_in : memref<1x4x5x5xf16, @DDR>) -> memref<1x4x5x5xf16, @DDR>
+        }
+
+        VPURT.Task waits(%barr1 : !VPURT.Barrier) updates(%barr2 : !VPURT.Barrier) {
+            %0 = func.call @foo(%tmp_in, %tmp_out) : (memref<1x4x5x5xf16, @DDR>, memref<1x4x5x5xf16, @DDR>) -> memref<1x4x5x5xf16, @DDR>
+        }
+
+        VPURT.Task waits(%barr2 : !VPURT.Barrier) {
+            %0 = VPUIP.NNDMA inputs(%tmp_out : memref<1x4x5x5xf16, @DDR>) outputs(%arg1 : memref<1x4x5x5xf16, @DDR>) -> memref<1x4x5x5xf16, @DDR>
+        }
+        return %arg1 : memref<1x4x5x5xf16, @DDR>
+
+        //CHECK: [[IN:%.+]] = VPURT.DeclareBuffer <NetworkInput> [0] <0> -> memref<1x4x5x5xf16, @DDR>
+        //CHECK: [[OUT:%.+]] = VPURT.DeclareBuffer <NetworkOutput> [0] <0> -> memref<1x4x5x5xf16, @DDR>
+        //CHECK: [[TMP_IN:%.+]] = VPURT.DeclareBuffer <DDR> <0> -> memref<1x4x5x5xf16, @DDR>
+        //CHECK: [[TMP_OUT:%.+]] = VPURT.DeclareBuffer <DDR> <100> -> memref<1x4x5x5xf16, @DDR>
+
+        //CHECK:    VPURT.Task
+        //CHECK:        VPUIP.NNDMA inputs([[IN]] : memref<1x4x5x5xf16, @DDR>) outputs([[TMP_IN]] : memref<1x4x5x5xf16, @DDR>)
+
+        //CHECK:    VPURT.Task
+        //CHECK:        func.call @foo([[TMP_IN]], [[TMP_OUT]]) : (memref<1x4x5x5xf16, @DDR>, memref<1x4x5x5xf16, @DDR>)
+
+        //CHECK:    VPURT.Task
+        //CHECK:        VPUIP.NNDMA inputs([[TMP_OUT]] : memref<1x4x5x5xf16, @DDR>) outputs([[OUT]] : memref<1x4x5x5xf16, @DDR>)
+
+        //CHECK: return [[ARG1]] : memref<1x4x5x5xf16, @DDR>
     }
 }

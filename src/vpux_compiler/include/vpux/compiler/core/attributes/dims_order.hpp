@@ -55,6 +55,9 @@ public:
     static const DimsOrder NHCW;
     static const DimsOrder NCDHW;
     static const DimsOrder NDHWC;
+    static const DimsOrder GNCHW;
+    static const DimsOrder GNHWC;
+    static const DimsOrder GHNWC;
     static const DimsOrder NWHC;
     static const DimsOrder NWCH;
     static const DimsOrder NCWH;
@@ -62,12 +65,16 @@ public:
     static const DimsOrder WHNC;
     static const DimsOrder HWCN;
     static const DimsOrder HCNW;
+    static const DimsOrder HNWC;
     static const DimsOrder CWNH;
 
     // Orders for 2D Convolution weights
     static const DimsOrder OIYX;
     static const DimsOrder OYXI;
     static const DimsOrder YXOI;
+
+    static const DimsOrder GOIYX;
+    static const DimsOrder GOYXI;
 
     // Order for 2D ConvolutionBackpropData weights
     static const DimsOrder IOYX;

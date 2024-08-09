@@ -13,6 +13,7 @@
 #include "vpux/compiler/dialect/VPUMI37XX/utils.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
+#include "vpux/compiler/utils/ELF/utils.hpp"
 
 #include <npu_37xx_nnrt.hpp>
 
@@ -1028,8 +1029,8 @@ void ConvertVPUMI37XX2ELFPass::setupActKernelRtConfigs(mlir::func::FuncOp func, 
         mappedInferenceOp.getActShaveRtMutable().assign(actShaveRt);
 
     } else {
-        auto actRtCodeBufferMemrefType =
-                vpux::getLinearMemrefType(ctx, ACT_RT_CODE_BUFFER_SIZE, vpux::getInt8Type(ctx), VPU::MemoryKind::DDR);
+        auto actRtCodeBufferMemrefType = vpux::ELF::getLinearMemrefType(ctx, ACT_RT_CODE_BUFFER_SIZE,
+                                                                        vpux::getInt8Type(ctx), VPU::MemoryKind::DDR);
 
         auto declareBufferOp = builderFunc.create<VPURT::DeclareBufferOp>(builderFunc.getUnknownLoc(),
                                                                           actRtCodeBufferMemrefType,  // Type

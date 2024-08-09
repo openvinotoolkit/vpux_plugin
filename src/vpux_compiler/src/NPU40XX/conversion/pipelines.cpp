@@ -8,12 +8,15 @@
 #include "vpux/compiler/NPU40XX/dialect/ELF/passes.hpp"
 #include "vpux/compiler/conversion.hpp"
 #include "vpux/compiler/core/passes.hpp"
+#include "vpux/compiler/core/profiling.hpp"
 #include "vpux/compiler/dialect/ELFNPU37XX/passes.hpp"
 #include "vpux/compiler/dialect/VPUASM/passes.hpp"
 #include "vpux/compiler/dialect/VPUIP/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPUIPDPU/passes.hpp"
 #include "vpux/compiler/dialect/VPUMI40XX/passes.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
+
+#include "vpux/compiler/NPU40XX/dialect/NPUReg40XX/abi_version.hpp"
 
 #include <mlir/Transforms/Passes.h>
 
@@ -26,16 +29,28 @@ using namespace vpux;
 void vpux::arch40xx::buildLowerVPUIP2ELFPipeline(mlir::OpPassManager& pm,
                                                  const BackendCompilationOptions40XX& backendCompilationOptions,
                                                  Logger log, VPU::DPUDryRunMode dpuDryRunMode) {
+    log.info("BackendCompilationOptions:\n"
+             "  enablePartialWorkloadManagement = {0}\n"
+             "  wlmOptimizationThreshold = {1}\n"
+             "  enableMemorySideCache = {2}\n"
+             "  enableDMAProfiling = {3}\n",
+             backendCompilationOptions.enablePartialWorkloadManagement,
+             backendCompilationOptions.wlmOptimizationThreshold, backendCompilationOptions.enableMemorySideCache,
+             backendCompilationOptions.enableDMAProfiling);
+
     pm.addPass(createConvertVPUIP2VPUMI40XXPass(log, backendCompilationOptions.enableMemorySideCache));
-    pm.addPass(VPUMI40XX::createSetupProfilingVPUMI40XXPass(log));
+    auto dmaProfilingMode =
+            getDMAProfilingMode(VPU::ArchKind::NPU40XX, backendCompilationOptions.enableDMAProfiling.getValue());
+    pm.addPass(VPUMI40XX::createSetupProfilingVPUMI40XXPass(dmaProfilingMode, log));
     pm.addPass(mlir::createCanonicalizerPass());
 
     elfSubsetPipeline(pm, backendCompilationOptions, log);
 
+    pm.addPass(ELF::createAddABIVersionPass(log, NPUReg40XX::ABI_VERSION_MAJOR, NPUReg40XX::ABI_VERSION_MINOR,
+                                            NPUReg40XX::ABI_VERSION_PATCH));
     pm.addPass(ELF::createMoveOpsIntoSectionsPass(log));
     pm.addPass(ELF::createAddInnerSectionPaddingPass(log));
     pm.addPass(ELF::createAddELFSymbolTablePass(log));
-    pm.addPass(createMoveIOBuffersToSectionsPass(log));
     pm.addPass(ELF::createSetEntryPointPass(log));
     pm.addPass(ELF::createAddNetworkMetadataPass(log));
     pm.addPass(VPUASM::createAddProfilingSectionPass(log));
@@ -44,7 +59,7 @@ void vpux::arch40xx::buildLowerVPUIP2ELFPipeline(mlir::OpPassManager& pm,
     pm.addPass(
             createConvertVPUASM2NPUReg40XXRelocsPass(log, backendCompilationOptions.enablePartialWorkloadManagement));
     pm.addPass(createConvertVPUIPDPU2NPUReg40XXPass(log, dpuDryRunMode));
-    pm.addPass(ELF::createSetOpOffsetsPass(log));
+    pm.addPass(ELF::createSetOpOffsetsPass(log, backendCompilationOptions.enablePartialWorkloadManagement));
     pm.addPass(ELF::createAddELFRelocationsPass(log));
     pm.addPass(ELF::createUpdateELFSectionFlagsPass(log));
     pm.addPass(createConvertVPUASM2NPUReg40XXPass(log));
@@ -81,6 +96,7 @@ void vpux::arch40xx::elfSubsetPipeline(mlir::OpPassManager& pm,
         pm.addPass(VPUMI40XX::createAddEnqueueOpsPass(log));
         pm.addPass(VPUMI40XX::createUnrollFetchTaskOpsPass(log));
         pm.addPass(VPUMI40XX::createAddBootstrapOpsPass(log));
+        pm.addPass(VPUMI40XX::createSplitEnqueueOpsPass(log));
         pm.addPass(VPUMI40XX::createLinkEnqueueTargetsPass(log));
         pm.addPass(VPUMI40XX::createUnrollEnqueueOpsPass(log));
 

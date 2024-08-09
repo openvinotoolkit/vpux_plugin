@@ -88,6 +88,10 @@ vpux::NDTypeInterface vpux::Const::ChangeShapeAndElemTypeAttr::inferOutputType(v
     return input.changeShapeElemType(ShapeRef(newShape), newElemType);
 }
 
+bool vpux::Const::ChangeShapeAndElemTypeAttr::inferOutputSplat(bool inputIsSplat, vpux::NDTypeInterface) {
+    return inputIsSplat;
+}
+
 //
 // ChangeShapeAndElemTypeAttr::transform
 //

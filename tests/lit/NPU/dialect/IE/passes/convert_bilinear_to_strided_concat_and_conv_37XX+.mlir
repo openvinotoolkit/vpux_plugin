@@ -4,7 +4,7 @@
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --convert-bilinear-to-strided-concat-and-conv --canonicalize %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 // CHECK-LABEL: @ConvertInterpolateWithChannelNeedAlign
 func.func @ConvertInterpolateWithChannelNeedAlign(%arg0: tensor<1x3x160x160xf16>) -> tensor<1x3x320x320xf16> {

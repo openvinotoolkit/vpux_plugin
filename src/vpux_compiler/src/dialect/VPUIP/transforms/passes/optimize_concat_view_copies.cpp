@@ -3,10 +3,13 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#include "vpux/compiler/dialect/IE/utils/slice_utils.hpp"
+#include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPUIP/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
 #include "vpux/compiler/utils/allocate_buffers.hpp"
+#include "vpux/compiler/utils/dma.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
 #include <mlir/IR/PatternMatch.h>
@@ -20,6 +23,14 @@ namespace {
 //
 // AvoidConcatExtraChannel
 //
+
+struct InputUpdateInfo {
+    VPUIP::NCEClusterTilingOp tilingCopyOp;
+    SmallVector<int64_t, 4> copyInOffsets;
+    SmallVector<int64_t, 4> copyOutOffsets;
+    SmallVector<int64_t, 4> copySizes;
+};
+
 class AvoidConcatExtraChannel : public mlir::OpRewritePattern<VPUIP::ConcatViewOp> {
 public:
     AvoidConcatExtraChannel(mlir::MLIRContext* ctx, Logger log)
@@ -27,35 +38,37 @@ public:
     }
 
 public:
-    mlir::LogicalResult matchAndRewrite(VPUIP::ConcatViewOp copyOp, mlir::PatternRewriter& rewriter) const final;
+    mlir::LogicalResult matchAndRewrite(VPUIP::ConcatViewOp concatOp, mlir::PatternRewriter& rewriter) const final;
 
 private:
-    mlir::LogicalResult checkConcatUsers(mlir::Value output, int64_t& channels, int64_t& channelOffsets) const;
-    mlir::LogicalResult checkConcatInputs(mlir::ValueRange inputs, int64_t& channels,
-                                          SmallVector<VPUIP::NCEClusterTilingOp>& tilingCopies) const;
+    mlir::LogicalResult checkConcatUsers(mlir::Value concatOutput, std::optional<int64_t>& patternOutChannelSize,
+                                         std::optional<int64_t>& patternOutChannelOffset) const;
+    mlir::LogicalResult checkConcatInputs(mlir::ValueRange concatInputs, mlir::Value concatOutput,
+                                          const int64_t patternOutChannelSize, const int64_t patternOutChannelOffset,
+                                          SmallVector<InputUpdateInfo>& inTilingCopiesInfo) const;
 
-    mlir::Operation* createAlloc(mlir::PatternRewriter& rewriter, VPUIP::NCEClusterTilingOp copyOp,
-                                 int64_t channels) const;
+    mlir::Operation* createOutputBuffer(mlir::PatternRewriter& rewriter, VPUIP::NCEClusterTilingOp copyOp,
+                                        int64_t channels) const;
 
     Logger _log;
 };
 
-/*
- Check if all Concat users are Subview with same channels slice
- less than Concat channels
-                          Concat (m output channels)
-        |                                        |
-    Subview (n output channels)              Subview (n output channels)
-    m > n
-
-*/
-mlir::LogicalResult AvoidConcatExtraChannel::checkConcatUsers(mlir::Value output, int64_t& channels,
-                                                              int64_t& channelOffsets) const {
-    auto subviews = output.getUsers();
+// Check if all Concat users are Subview with same channels slice
+// less than Concat channels (m > n)
+//
+//                      Concat (m output channels)
+//                          |       ...       |
+//  Subview (n output channels)     ...      Subview (n output channels)
+//
+mlir::LogicalResult AvoidConcatExtraChannel::checkConcatUsers(mlir::Value concatOutput,
+                                                              std::optional<int64_t>& patternOutChannelSize,
+                                                              std::optional<int64_t>& patternOutChannelOffset) const {
+    auto subviews = concatOutput.getUsers();
     if (subviews.empty()) {
         return mlir::failure();
     }
 
+    const auto concatOutChannelSize = getShape(concatOutput)[Dims4D::Act::C];
     for (const auto user : subviews) {
         auto subview = mlir::dyn_cast_or_null<VPUIP::SubViewOp>(user);
 
@@ -70,47 +83,74 @@ mlir::LogicalResult AvoidConcatExtraChannel::checkConcatUsers(mlir::Value output
             return mlir::failure();
         }
 
-        if (channelOffsets != 0 && channelOffsets != offsets[Dims4D::Act::C.ind()]) {
+        if (patternOutChannelOffset.has_value() && patternOutChannelOffset.value() != offsets[Dims4D::Act::C.ind()]) {
             return mlir::failure();
         }
 
-        if (channels != 0 && channels != sizes[Dims4D::Act::C.ind()]) {
+        if (patternOutChannelSize.has_value() && patternOutChannelSize.value() != sizes[Dims4D::Act::C.ind()]) {
             return mlir::failure();
         }
 
-        channels = sizes[Dims4D::Act::C.ind()];
-        channelOffsets = offsets[Dims4D::Act::C.ind()];
+        if (concatOutChannelSize <= sizes[Dims4D::Act::C.ind()]) {
+            return mlir::failure();
+        }
+
+        patternOutChannelSize = sizes[Dims4D::Act::C.ind()];
+        patternOutChannelOffset = offsets[Dims4D::Act::C.ind()];
     }
 
     return mlir::success();
 }
 
-/*
- Check if all Concat inputs copy NCE result with more channels
- than Subview after Concat
- Concat joins its inputs not by channel dimension
-
-            Op                              Op
-            |                                 |
-        TilingCopy (m output channels)     TilingCopy (m output channels)
-            |                                 |
-          Subview (m output channels)       Subview (m output channels)
-            |                                 |
-                                Concat (m output channels)
-                                   |
-                                Subview (n output channels)
-    m > n
-
-*/
-mlir::LogicalResult AvoidConcatExtraChannel::checkConcatInputs(
-        mlir::ValueRange inputs, int64_t& channels, SmallVector<VPUIP::NCEClusterTilingOp>& tilingCopies) const {
-    if (inputs.empty()) {
+// Check if all Concat inputs copy NCE result with more channels
+// than Subview after Concat
+//
+// Scenario 1: Concat joins its inputs not by channel dimension (m > n)
+//
+//                 Input0                      Input1
+//                    |                           |
+//        TilingCopy (m channels)     TilingCopy (m channels)
+//            |               |          |                 |
+//    Subview (m)          Concat (m channels)          Subview (m)
+//                                 |
+//                        Subview (n channels)
+//
+// Scenario 2: Concat joins its inputs by channel dimension (p > m && p > n && p > q)
+//
+//                 Input0                      Input1
+//                    |                           |
+//        TilingCopy (m channels)      TilingCopy (n channels)
+//            |               |          |                  |
+//    Subview (m)          Concat (p channels)           Subview (n)
+//                                  |
+//                         Subview (q channels)
+//
+mlir::LogicalResult AvoidConcatExtraChannel::checkConcatInputs(mlir::ValueRange concatInputs, mlir::Value concatOutput,
+                                                               const int64_t patternOutChannelSize,
+                                                               const int64_t patternOutChannelOffset,
+                                                               SmallVector<InputUpdateInfo>& inTilingCopiesInfo) const {
+    if (concatInputs.empty() || concatOutput == nullptr) {
         return mlir::failure();
     }
 
-    for (auto input : inputs) {
-        auto tilingCopy = input.getDefiningOp<VPUIP::NCEClusterTilingOp>();
+    auto getConcatDims = [](ShapeRef inShape, ShapeRef outShape) {
+        VPUX_THROW_UNLESS(inShape.size() == outShape.size(), "Got unexpect input and output shape");
+        SmallVector<Dim> concatDims;
+        auto ioShapes = zip(inShape, outShape);
+        for (const auto& ioShape : ioShapes | indexed) {
+            const auto inSize = std::get<0>(ioShape.value());
+            const auto outSize = std::get<1>(ioShape.value());
+            if (inSize != outSize) {
+                concatDims.push_back(Dim(ioShape.index()));
+            }
+        }
+        return concatDims;
+    };
 
+    const auto concatOutShape = getShape(concatOutput);
+    const auto concatChannels = concatOutShape[Dims4D::Act::C];
+    for (auto input : concatInputs) {
+        auto tilingCopy = input.getDefiningOp<VPUIP::NCEClusterTilingOp>();
         if (tilingCopy == nullptr || tilingCopy.getInnerTaskOpOfType<VPUIP::CopyOp>() == nullptr) {
             return mlir::failure();
         }
@@ -120,21 +160,8 @@ mlir::LogicalResult AvoidConcatExtraChannel::checkConcatInputs(
         }
 
         auto copyOpOutput = tilingCopy.getOutputs()[0];
-
         auto subview = copyOpOutput.getDefiningOp<VPUIP::SubViewOp>();
-
         if (subview == nullptr) {
-            return mlir::failure();
-        }
-
-        auto offsets = parseIntArrayAttr<int64_t>(subview.getStaticOffsetsAttr());
-        auto sizes = parseIntArrayAttr<int64_t>(subview.getStaticSizesAttr());
-
-        if (offsets[Dims4D::Act::C.ind()] != 0) {
-            return mlir::failure();
-        }
-
-        if (channels >= sizes[Dims4D::Act::C.ind()]) {
             return mlir::failure();
         }
 
@@ -142,14 +169,88 @@ mlir::LogicalResult AvoidConcatExtraChannel::checkConcatInputs(
             return mlir::failure();
         }
 
-        tilingCopies.push_back(tilingCopy);
+        if (subview.getStaticStrides().has_value()) {
+            return mlir::failure();
+        }
+
+        auto offsets = parseIntArrayAttr<int64_t>(subview.getStaticOffsetsAttr());
+        auto sizes = parseIntArrayAttr<int64_t>(subview.getStaticSizesAttr());
+
+        auto concatDims = getConcatDims(Shape(sizes), concatOutShape);
+        if (concatDims.size() != 1) {
+            return mlir::failure();
+        }
+
+        SmallVector<int64_t, 4> copyInOffsets(4, 0);
+        SmallVector<int64_t, 4> copyOutOffsets(offsets.begin(), offsets.end());
+        SmallVector<int64_t, 4> copySizes(sizes.begin(), sizes.end());
+        const auto channelIdx = Dims4D::Act::C.ind();
+        if (concatDims.front() == Dims4D::Act::C) {
+            const auto currentInputChannelBegin = offsets[channelIdx];
+            const auto currentInputChannelEnd = currentInputChannelBegin + sizes[channelIdx];
+            const auto patternChannelBegin = patternOutChannelOffset;
+            const auto patternChannelEnd = patternChannelBegin + patternOutChannelSize;
+
+            bool isPatternBeginInside =
+                    patternChannelBegin >= currentInputChannelBegin && patternChannelBegin <= currentInputChannelEnd;
+            bool isPatternEndInside =
+                    patternChannelEnd >= currentInputChannelBegin && patternChannelEnd <= currentInputChannelEnd;
+
+            copyOutOffsets[channelIdx] = currentInputChannelBegin - patternChannelBegin;
+            // ConcatView Across Channels:
+            // |   Input_0   |   Input_1   |   Input_2   |   ...   |   Input_n   |
+            // When the slice starts inside Input_0, it's legal scenario:
+            //    | Input_0' |   Input_1   |   Input_2   |   ...   |   Input_n   |
+            // When the slice starts inside an input other than Input_0, it is illegal scenario:
+            //                   | Input_1'|   Input_2   |   ...   |   Input_n   |
+            // When both the pattern start and end are inside an input, it is illegal scenario:
+            //   |Input_0'|
+            // For these two illegal cases, some inputs are unnecessary and can be removed
+            // Although unlikely to appear in real models, it's better to have checks in place
+            if (isPatternBeginInside) {
+                if (currentInputChannelBegin != 0 || isPatternEndInside) {
+                    return mlir::failure();
+                }
+                copyInOffsets[channelIdx] = patternChannelBegin;
+                copyOutOffsets[channelIdx] = 0;
+                copySizes[channelIdx] = sizes[channelIdx] - patternChannelBegin;
+            }
+
+            // Similar logic to isPatternBeginInside scenario
+            // The slice must start in the first input and end in the last input
+            if (isPatternEndInside) {
+                if (currentInputChannelEnd != concatChannels || isPatternBeginInside) {
+                    return mlir::failure();
+                }
+                copyInOffsets[channelIdx] = 0;
+                copySizes[channelIdx] = patternChannelEnd - currentInputChannelBegin;
+            }
+        } else {
+            copyInOffsets[channelIdx] = patternOutChannelOffset;
+            copySizes[channelIdx] = patternOutChannelSize;
+        }
+
+        auto copyOpInput = tilingCopy.getInputs()[0];
+        if (auto distributedType = copyOpInput.getType().dyn_cast<VPUIP::DistributedBufferType>()) {
+            const auto tileIndex = VPUIP::getTilingDimIndex(distributedType);
+            if (tileIndex.has_value()) {
+                auto tileIndexVal = tileIndex.value();
+                if (!VPUIP::isChannelOffsetsAndTileDimCompatibleWithClusterCopy(to_small_vector(copyInOffsets),
+                                                                                tileIndexVal, distributedType)) {
+                    return mlir::failure();
+                }
+            }
+        }
+
+        inTilingCopiesInfo.push_back(
+                InputUpdateInfo{tilingCopy, std::move(copyInOffsets), std::move(copyOutOffsets), std::move(copySizes)});
     }
 
     return mlir::success();
 }
 
-mlir::Operation* AvoidConcatExtraChannel::createAlloc(mlir::PatternRewriter& rewriter, VPUIP::NCEClusterTilingOp copyOp,
-                                                      int64_t channels) const {
+mlir::Operation* AvoidConcatExtraChannel::createOutputBuffer(mlir::PatternRewriter& rewriter,
+                                                             VPUIP::NCEClusterTilingOp copyOp, int64_t channels) const {
     auto copyOpOutput = copyOp.getOutputs()[0];
 
     auto subview = copyOpOutput.getDefiningOp<VPUIP::SubViewOp>();
@@ -171,117 +272,117 @@ void recursivelyInferReturnTypes(VPUIP::SubViewOp subView) {
     }
 }
 
-/*
-
-            Op                                Op
-            |                                 |
-        TilingCopy (m output channels)     TilingCopy (m output channels)
-            |                                 |
-          Subview (m output channels)       Subview (m output channels)
-            |                                 |
-                                Concat (m output channels)
-                                   |
-                                Subview (n output channels)
-    m > n
-
-    is converted to pattern
-
-            Op (m output channels)           Op (m output channels)
-            |                                 |
-          Subview (n output channels)       Subview (n output channels)
-            |                                 |
-        TilingCopy (n output channels)     TilingCopy (n output channels)
-            |                                 |
-                                Concat (n output channels)
-
-*/
+// Scenario 1: Concat joins its inputs not by channel dimension (m > n)
+//
+//                 Input0                      Input1
+//                    |                           |
+//        TilingCopy (m channels)     TilingCopy (m channels)
+//            |               |          |                 |
+//    Subview (m)          Concat (m channels)          Subview (m)
+//                                 |
+//                        Subview (n channels)
+//
+// is converted to pattern
+//
+//        Input0 (m channels)             Input1 (m channels)
+//                  |                            |
+//        Subview (n channels)           Subview (n channels)
+//                  |                            |
+//        TilingCopy (n channels)     TilingCopy (n channels)
+//           |               |            |            |
+//    Subview (n)         Concat (n channels)        Subview (n)
+//
+// Scenario 2: Concat joins its inputs by channel dimension (p > m && p > n && p > q)
+//
+//                 Input0                      Input1
+//                    |                           |
+//        TilingCopy (m channels)      TilingCopy (n channels)
+//            |               |          |                  |
+//    Subview (m)          Concat (p channels)           Subview (n)
+//                                  |
+//                         Subview (q channels)
+//
+// is converted to pattern
+//
+//        Input0 (m channels)     Input1 (n channels)
+//                |                         |
+//                |               Subview (n - (p - q) channels)
+//                |                         |
+//    TilingCopy (m channels)     TilingCopy (n - (p - q) channels)
+//           |           |           |           |
+//    Subview (m)      Concat (q channels)    Subview (n - (p - q))
+//
 mlir::LogicalResult AvoidConcatExtraChannel::matchAndRewrite(VPUIP::ConcatViewOp concatOp,
                                                              mlir::PatternRewriter& rewriter) const {
     _log.trace("Got VPUIP.ConcatViewOp at '{0}'", concatOp->getLoc());
     auto nestedLogger = _log.nest();
 
     auto concatOutput = concatOp.getOutput();
-    int64_t numChannels = 0;
-    int64_t channelOffsets = 0;
-    if (checkConcatUsers(concatOutput, numChannels, channelOffsets).failed()) {
+    if (getShape(concatOutput).size() != 4) {
+        nestedLogger.trace("Cannot optimize because of shape rank not being 4");
+        return mlir::failure();
+    }
+
+    std::optional<int64_t> patternOutChannelSize = std::nullopt;
+    std::optional<int64_t> patternOutChannelOffset = std::nullopt;
+    if (checkConcatUsers(concatOutput, patternOutChannelSize, patternOutChannelOffset).failed()) {
         nestedLogger.trace("Cannot optimize because of users requirements");
         return mlir::failure();
     }
 
-    if (numChannels == 0 || numChannels >= getShape(concatOp.getOutput())[Dims4D::Act::C]) {
-        nestedLogger.trace("Cannot optimize because of channels requirements");
-        return mlir::failure();
-    }
-
-    auto inputs = concatOp.getInputs();
-    SmallVector<VPUIP::NCEClusterTilingOp> inputsCopies;
-    inputsCopies.reserve(inputs.size());
-    if (checkConcatInputs(inputs, numChannels, inputsCopies).failed() || inputsCopies.empty()) {
+    auto concatInputs = concatOp.getInputs();
+    SmallVector<InputUpdateInfo> inTilingCopiesInfo;
+    inTilingCopiesInfo.reserve(concatInputs.size());
+    if (checkConcatInputs(concatInputs, concatOutput, patternOutChannelSize.value(), patternOutChannelOffset.value(),
+                          inTilingCopiesInfo)
+                .failed()) {
         nestedLogger.trace("Cannot optimize because of input requirements");
         return mlir::failure();
     }
 
-    SmallVector<int64_t> newOffset(concatOp.getType().cast<vpux::NDTypeInterface>().getRank(), 0);
-    newOffset[Dims4D::Act::C.ind()] = channelOffsets;
-
-    for (auto copy : inputsCopies) {
-        auto copyOpInput = copy.getInputs()[0];
-
-        if (auto distributedType = copyOpInput.getType().dyn_cast<VPUIP::DistributedBufferType>()) {
-            const auto tileIndex = VPUIP::getTilingDimIndex(distributedType);
-            if (tileIndex.has_value()) {
-                auto tileIndexVal = tileIndex.value();
-                if (!VPUIP::isChannelOffsetsAndTileDimCompatibleWithClusterCopy(newOffset, tileIndexVal,
-                                                                                distributedType)) {
-                    return mlir::failure();
-                }
-            }
-        }
-    }
-
-    auto* alloc = createAlloc(rewriter, inputsCopies.front(), numChannels);
-
-    if (alloc == nullptr) {
-        nestedLogger.trace("Cannot allocate new buffer");
+    auto* outputBuffer =
+            createOutputBuffer(rewriter, inTilingCopiesInfo.front().tilingCopyOp, patternOutChannelSize.value());
+    if (outputBuffer == nullptr) {
+        nestedLogger.trace("Cannot allocate new output buffer");
         return mlir::failure();
     }
 
-    SmallVector<mlir::Value> concatInputs;
-    concatInputs.reserve(inputs.size());
-
-    for (auto copy : inputsCopies) {
-        auto copyOpInput = copy.getInputs()[0];
-        auto copyOpOutput = copy.getOutputs()[0];
+    SmallVector<mlir::Value> newConcatInputs;
+    newConcatInputs.reserve(concatInputs.size());
+    for (auto inTilingCopyInfo : inTilingCopiesInfo) {
+        auto copyOp = inTilingCopyInfo.tilingCopyOp;
+        auto copyOpInput = copyOp.getInputs()[0];
+        auto copyOpOutput = copyOp.getOutputs()[0];
 
         auto subview = copyOpOutput.getDefiningOp<VPUIP::SubViewOp>();
 
-        auto sizes = parseIntArrayAttr<int64_t>(subview.getStaticSizesAttr());
-        sizes[Dims4D::Act::C.ind()] = numChannels;
+        auto newCopyInSubview = copyOpInput;
+        if (Shape(inTilingCopyInfo.copySizes) != getShape(copyOpInput)) {
+            newCopyInSubview = rewriter.create<VPUIP::SubViewOp>(
+                    subview.getLoc(), copyOpInput,
+                    getIntArrayAttr(subview.getContext(), inTilingCopyInfo.copyInOffsets),
+                    getIntArrayAttr(subview.getContext(), inTilingCopyInfo.copySizes));
+        }
 
-        SmallVector<int64_t> newSizes = to_small_vector(getShape(copyOpInput).raw());
-        newSizes[Dims4D::Act::C.ind()] = numChannels;
-
-        auto newSubviewNCE = rewriter.create<VPUIP::SubViewOp>(
-                subview.getLoc(), copyOpInput, getIntArrayAttr(subview.getContext(), ArrayRef(newOffset)),
-                getIntArrayAttr(subview.getContext(), ArrayRef(newSizes)));
-
-        auto newSubviewCopy =
-                rewriter.create<VPUIP::SubViewOp>(subview.getLoc(), alloc->getResult(0), subview.getStaticOffsetsAttr(),
-                                                  getIntArrayAttr(subview.getContext(), ArrayRef(sizes)));
+        auto newCopyOutSubview = rewriter.create<VPUIP::SubViewOp>(
+                subview.getLoc(), outputBuffer->getResult(0),
+                getIntArrayAttr(subview.getContext(), inTilingCopyInfo.copyOutOffsets),
+                getIntArrayAttr(subview.getContext(), inTilingCopyInfo.copySizes));
 
         const auto copyOutBodyBuilder = [&](mlir::OpBuilder& builder, mlir::Location loc,
                                             mlir::ValueRange newOperands) {
             builder.create<VPUIP::CopyOp>(loc, newOperands[0], newOperands[1]);
         };
 
-        SmallVector<mlir::Value> inputsOutputOperands = {newSubviewNCE, newSubviewCopy};
-        auto newTilingCopy = rewriter.create<VPUIP::NCEClusterTilingOp>(copy->getLoc(), newSubviewCopy.getType(),
+        SmallVector<mlir::Value> inputsOutputOperands = {newCopyInSubview, newCopyOutSubview};
+        auto newTilingCopy = rewriter.create<VPUIP::NCEClusterTilingOp>(copyOp->getLoc(), newCopyOutSubview.getType(),
                                                                         inputsOutputOperands, copyOutBodyBuilder);
 
-        concatInputs.push_back(newTilingCopy.getResults()[0]);
+        newConcatInputs.push_back(newTilingCopy.getResults()[0]);
     }
 
-    auto newOp = rewriter.replaceOpWithNewOp<VPUIP::ConcatViewOp>(concatOp, concatInputs, alloc->getResult(0));
+    auto newOp =
+            rewriter.replaceOpWithNewOp<VPUIP::ConcatViewOp>(concatOp, newConcatInputs, outputBuffer->getResult(0));
 
     for (auto user : newOp.getOutput().getUsers()) {
         if (auto subviewOp = mlir::dyn_cast<VPUIP::SubViewOp>(user)) {
@@ -295,11 +396,11 @@ mlir::LogicalResult AvoidConcatExtraChannel::matchAndRewrite(VPUIP::ConcatViewOp
         }
     }
 
-    for (auto copy : inputsCopies) {
-        rewriter.eraseOp(copy);
+    for (auto inTilingCopyInfo : inTilingCopiesInfo) {
+        rewriter.eraseOp(inTilingCopyInfo.tilingCopyOp);
     }
 
-    nestedLogger.trace("Successfully optimized CMX->DDR->CMX pattern");
+    nestedLogger.trace("Successfully Avoid Concat Extra Channel");
     return mlir::success();
 }
 
@@ -803,11 +904,6 @@ VPUIP::DistributedBufferType MoveConcatViewWithClusteredCopyToCMX::getDuplicated
     return VPUIP::DistributedBufferType::get(ctx, shape.raw(), elemType, orderMap, memSpace, newDistribution);
 };
 
-bool isDuplicated(VPU::DistributionMode mode) {
-    return VPU::bitEnumContainsAny(mode, VPU::DistributionMode::DUPLICATED) ||
-           VPU::bitEnumContainsAny(mode, VPU::DistributionMode::MULTICASTED);
-}
-
 // Check inputs of ConcatView, below pattern is expected.
 //   ClusterTilingCopy  ...     CopyOp
 //      (CMX -> DDR)          (DDR -> DDR)
@@ -856,7 +952,7 @@ mlir::FailureOr<ConcatInputs> MoveConcatViewWithClusteredCopyToCMX::getValidConc
         VPUX_THROW_UNLESS(inDistributedType != nullptr, "Cannot get distributedType");
 
         auto distribution = inDistributedType.getDistribution();
-        return isDuplicated(distribution.getMode().getValue());
+        return VPU::isDuplicated(distribution);
     };
 
     struct ConcatInputs validInputs;
@@ -952,7 +1048,7 @@ mlir::FailureOr<ConcatOutputs> MoveConcatViewWithClusteredCopyToCMX::getValidCon
         VPUX_THROW_UNLESS(outputDistributedType != nullptr, "Cannot get distributedType");
 
         auto distribution = outputDistributedType.getDistribution();
-        return isDuplicated(distribution.getMode().getValue());
+        return VPU::isDuplicated(distribution);
     };
 
     auto childOp = copyAfterViewLikeOps.value();
@@ -1147,6 +1243,692 @@ mlir::LogicalResult MoveConcatViewWithClusteredCopyToCMX::matchAndRewrite(VPUIP:
 }
 
 //
+// OptimizeConcatSubviewPattern
+//
+
+class OptimizeConcatSubviewPattern : public mlir::OpRewritePattern<VPUIP::ConcatViewOp> {
+public:
+    OptimizeConcatSubviewPattern(mlir::MLIRContext* ctx, Logger log)
+            : mlir::OpRewritePattern<VPUIP::ConcatViewOp>(ctx), _log(log) {
+    }
+
+public:
+    mlir::LogicalResult matchAndRewrite(VPUIP::ConcatViewOp concatOp, mlir::PatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+/*
+Optimize subgraph like below, note that for copy0 and copy2, copy1 and copy3, they should have same size and offsets
+  Input0      Input1
+    |           |
+   Copy0      Copy1
+     \        /                 |         |
+     ConcatView       =>      Input0    Input1
+     /        \                 |         |
+  Subview0   Subview1
+    |           |
+   Copy2      Copy3
+
+*/
+mlir::LogicalResult OptimizeConcatSubviewPattern::matchAndRewrite(VPUIP::ConcatViewOp concatOp,
+                                                                  mlir::PatternRewriter& rewriter) const {
+    auto nestedLogger = _log.nest();
+
+    auto concatOutput = concatOp.getOutput();
+    if (getShape(concatOutput).size() != 4) {
+        nestedLogger.trace("Cannot optimize because of shape rank not being 4");
+        return mlir::failure();
+    }
+
+    SmallVector<VPUIP::SubViewOp> inputSubViews;
+    SmallVector<VPUIP::SubViewOp> outputSubViews;
+    SmallVector<VPUIP::NCEClusterTilingOp> inputTilingCopies;
+    SmallVector<VPUIP::NCEClusterTilingOp> outputTilingCopies;
+
+    // check input
+    for (auto input : concatOp.getInputs()) {
+        auto tilingCopy = input.getDefiningOp<VPUIP::NCEClusterTilingOp>();
+        if (tilingCopy == nullptr || !tilingCopy->hasOneUse() ||
+            tilingCopy.getInnerTaskOpOfType<VPUIP::CopyOp>() == nullptr) {
+            return mlir::failure();
+        }
+
+        auto copyOpOutput = tilingCopy.getOutputs()[0];
+        auto subview = copyOpOutput.getDefiningOp<VPUIP::SubViewOp>();
+        if (subview == nullptr) {
+            return mlir::failure();
+        }
+
+        if (VPUIP::getRootAlloc<mlir::memref::AllocOp>(subview.getSource()) == nullptr) {
+            return mlir::failure();
+        }
+
+        inputSubViews.push_back(subview);
+        inputTilingCopies.push_back(tilingCopy);
+    }
+
+    // check output
+    for (auto user : concatOp->getUsers()) {
+        auto subview = mlir::dyn_cast_or_null<VPUIP::SubViewOp>(user);
+        if (subview == nullptr || !subview->hasOneUse()) {
+            return mlir::failure();
+        }
+
+        auto tilingCopy = mlir::dyn_cast_or_null<VPUIP::NCEClusterTilingOp>(*(subview->getUsers().begin()));
+        if (tilingCopy == nullptr || tilingCopy.getInnerTaskOpOfType<VPUIP::CopyOp>() == nullptr) {
+            return mlir::failure();
+        }
+
+        outputSubViews.push_back(subview);
+        outputTilingCopies.push_back(tilingCopy);
+    }
+
+    if (inputSubViews.empty() || (outputSubViews.empty())) {
+        return mlir::failure();
+    }
+
+    auto isSameAttrSubview = [](VPUIP::SubViewOp inSubview, VPUIP::SubViewOp outSubview) {
+        return inSubview.getStaticOffsetsAttr() == outSubview.getStaticOffsetsAttr() &&
+               inSubview.getStaticSizesAttr() == outSubview.getStaticSizesAttr() &&
+               inSubview.getStaticStridesAttr() == outSubview.getStaticStridesAttr();
+    };
+    auto isSameDistributedTypeCopy = [](VPUIP::NCEClusterTilingOp inCopy, VPUIP::NCEClusterTilingOp outCopy) {
+        auto inputValue = inCopy.getInputs()[0];
+        auto inputDistributedType = inputValue.getType().dyn_cast<VPUIP::DistributedBufferType>();
+        if (inputDistributedType == nullptr) {
+            return false;
+        }
+
+        auto outputValue = outCopy->getResult(0);
+        auto outputDistributedType = outputValue.getType().dyn_cast<VPUIP::DistributedBufferType>();
+        if (outputDistributedType == nullptr) {
+            return false;
+        }
+        return mlir::succeeded(VPU::isDistributedCastCompatible(inputDistributedType, outputDistributedType));
+    };
+
+    mlir::DenseMap<int64_t, int64_t> outIndexToInIndex;
+    auto inRange = irange(inputSubViews.size());
+    for (auto outIdx : irange(outputSubViews.size())) {
+        auto iter = llvm::find_if(inRange, [&](auto inIdx) {
+            return isSameAttrSubview(inputSubViews[inIdx], outputSubViews[outIdx]) &&
+                   isSameDistributedTypeCopy(inputTilingCopies[inIdx], outputTilingCopies[outIdx]);
+        });
+        if (iter == inRange.end()) {
+            return mlir::failure();
+        }
+        auto inIdx = std::distance(inRange.begin(), iter);
+        outIndexToInIndex[outIdx] = inIdx;
+    }
+
+    nestedLogger.trace("optimize concat->subview pattern at {0}", concatOp->getLoc());
+
+    for (const auto& item : outIndexToInIndex) {
+        const auto& outIdx = item.first;
+        const auto& inIdx = item.second;
+        auto& outputCopy = outputTilingCopies[outIdx];
+        auto& inputCopy = inputTilingCopies[inIdx];
+        auto newOutput = rewriter.createOrFold<VPUIP::DistributedCastOp>(
+                outputCopy->getLoc(), outputCopy.getResult(0).getType(), inputCopy.getInputs()[0]);
+
+        rewriter.replaceAllUsesWith(outputCopy.getResult(0), newOutput);
+        rewriter.eraseOp(outputCopy);
+        rewriter.eraseOp(outputSubViews[outIdx]);
+    }
+
+    rewriter.eraseOp(concatOp);
+
+    for (auto ind : irange(inputTilingCopies.size())) {
+        rewriter.eraseOp(inputTilingCopies[ind]);
+        rewriter.eraseOp(inputSubViews[ind]);
+    }
+
+    return mlir::success();
+}
+
+template <class OpType>
+OpType getSingleUserOfType(mlir::Operation* op) {
+    return op->hasOneUse() ? mlir::dyn_cast<OpType>(*op->getUsers().begin()) : nullptr;
+}
+
+/*
+    LeftBranch: [View]BlockArg(DDR) ------------\                                              /  SubView0 -> TiledCopy
+                                                 \                                            /   SubView1 -> TiledCopy
+                                                 | -> Concat -> GenericReshape -> PermCast -> |   SubView2 -> TiledCopy
+                                                 /                                            \   SubView3 -> TiledCopy
+    RightBranch:  DistrBuf(CMX) -> TiledCopy  --/                                              \  SubViewN -> TiledCopy
+
+    To
+
+    LeftBranch  -> GenericReshape -> PermCast \
+    RightBranch -> GenericReshape -> PermCast |
+                                              +-> Subview0Left  \
+                                              |                 |-> Concat -> NCEClusterTiling
+                                              +-> Subview0Right /
+                                              ...
+                                              +-> SubviewNLeft  \
+                                              |                 |-> Concat -> NCEClusterTiling
+                                              +-> SubviewNRight /
+
+    In case of large DDR input, what is common for KV cache models, original pattern creates large DDR->DDR,
+    which scheduled in the beginning of the inference and blocks prefetch/execution. New pattern is more friendly
+    and can be distributed across schedule.
+    This pattern has specific requirements for GenericReshape, see checkConcatReshapeCompatibility
+
+    Concat(Left[1, 32, 128, 1023], Right[1, 32, 128, 1]) -> Reshape[32 * 128, 1024] -> PermCast -> Views
+    to
+    Reshape [32 * 128, 1]    -> PermCast -> View -\
+                                                  |-> Concat
+    Reshape [32 * 128, 1023] -> PermCast -> View -/
+*/
+class SplitUnbalancedDDRConcatBase : public mlir::OpRewritePattern<VPUIP::ConcatViewOp> {
+protected:
+    // Describes parameters of original concat.
+    struct PatternParamsInfo {
+        int64_t leftConcatInputSize;  // Dim size of left buffer on concat axis.
+        int64_t leftInputSize;   // If left buffer was viewed, DimSize of input, otherwise equals to leftConcatInputSize
+        int64_t leftViewOffset;  // Offset from begging if was viewed
+        int64_t rightInputSize;
+        Dim origConcatDim;
+        Dim newConcatDim;  // Concat Dim after GReshape
+        VPUIP::PermuteCastOp castOp;
+    };
+
+public:
+    SplitUnbalancedDDRConcatBase(mlir::MLIRContext* ctx, Logger log)
+            : mlir::OpRewritePattern<VPUIP::ConcatViewOp>(ctx), _log(log) {
+    }
+
+private:
+    // Suffix of child rewriter
+    virtual StringRef getRewriterSuffix() const = 0;
+    // Check compatibility of concat in CMX. Since consumers are segmented, we must ensure that we can do split.
+    // If view/concat axis is the same with tiling axis, we can't do concatenation in same buffer.
+    // To avoid it we must do concat in temporary buffer and then distribute
+    virtual bool isSplitSupported(Dim newConcatDim, int64_t tilingDim) const = 0;
+
+    // Input of the right side and copy operation
+    virtual std::pair<mlir::Value, mlir::Operation*> getRightBranchInput(VPUIP::ConcatViewOp concatOp) const = 0;
+
+    virtual mlir::Value prepareRightBranch(mlir::PatternRewriter& rewriter, mlir::Value rightBranchInput,
+                                           mlir::Operation* rightBranchCopy, VPUIP::PermuteCastOp permuteCastOp,
+                                           mlir::Location loc) const = 0;
+
+    virtual mlir::Value createNewConcatBuffer(mlir::PatternRewriter& rewriter, VPUIP::SubViewOp origView,
+                                              VPUIP::NCEClusterTilingOp clusterCopy,
+                                              mlir::Location bufferLoc) const = 0;
+
+    virtual void rewriteSubview(mlir::PatternRewriter& rewriter, VPUIP::ConcatViewOp origConcatOp,
+                                VPUIP::SubViewOp subViewOp, VPUIP::NCEClusterTilingOp clusterCopy,
+                                mlir::Value newLeftBranch, mlir::Value newRightBranch, const PatternParamsInfo& params,
+                                size_t index) const = 0;
+
+protected:
+    // Propage reshape and cast through concat to split large DDR->DDR DMAs on sequence of small DDR->CMX, which can be
+    // interleaved with NCE tasks
+    mlir::Value propagateReshapeCast(mlir::PatternRewriter& rewriter, mlir::Value branchInput,
+                                     VPUIP::PermuteCastOp permuteCastOp, mlir::Location loc,
+                                     StringRef locSuffix) const {
+        auto inputType = branchInput.getType().cast<vpux::NDTypeInterface>();
+        auto origShape = inputType.getShape();
+        Shape newShape = origShape.toValues();
+        newShape[Dim(0)] = origShape[Dim(1)] * origShape[Dim(2)];
+        newShape[Dim(1)] = origShape[Dim(3)];
+        newShape[Dim(2)] = 1;
+        newShape[Dim(3)] = 1;
+        auto afterReshapeType = inputType.changeShape(newShape);
+        auto newReshapeOp = rewriter.createOrFold<VPUIP::GenericReshapeOp>(appendLoc(loc, "greshape_{0}", locSuffix),
+                                                                           afterReshapeType, branchInput);
+
+        auto permCastDimsOrder = permuteCastOp->getResultTypes()[0].cast<vpux::NDTypeInterface>().getDimsOrder();
+        auto afterPermCastType = afterReshapeType.changeDimsOrder(permCastDimsOrder);
+        return rewriter.create<VPUIP::PermuteCastOp>(appendLoc(loc, "permcast_{0}", locSuffix), afterPermCastType,
+                                                     newReshapeOp, permuteCastOp.getDstOrderAttr(),
+                                                     permuteCastOp.getMemPermAttr());
+    }
+
+    mlir::Value createNewCopyBranch(mlir::PatternRewriter& rewriter, mlir::Value src, mlir::Value dst,
+                                    ShapeRef copyShape, ShapeRef srcOffset, ShapeRef dstOffset, mlir::Location baseLoc,
+                                    StringRef locSuffix, size_t opId) const {
+        mlir::Value srcView = rewriter.createOrFold<VPUIP::SubViewOp>(
+                appendLoc(baseLoc, "{0}_src_view_{1}", locSuffix, opId), src, srcOffset, copyShape);
+        mlir::Value dstView = rewriter.createOrFold<VPUIP::SubViewOp>(
+                appendLoc(baseLoc, "{0}_dst_view_{1}", locSuffix, opId), dst, dstOffset, copyShape);
+
+        auto copyLoc = appendLoc(baseLoc, "{0}_copy_{1}", locSuffix, opId);
+        if (dst.getDefiningOp<VPURT::AllocDistributed>() != nullptr) {
+            const auto copyOutBodyBuilder = [&](mlir::OpBuilder& builder, mlir::Location loc,
+                                                mlir::ValueRange newOperands) {
+                builder.create<VPUIP::CopyOp>(loc, newOperands[0], newOperands[1]);
+            };
+            SmallVector<mlir::Value> inputsOutputOperands{srcView, dstView};
+            return rewriter
+                    .create<VPUIP::NCEClusterTilingOp>(copyLoc, dstView.getType(), inputsOutputOperands,
+                                                       copyOutBodyBuilder)
+                    ->getResult(0);
+        } else {
+            return rewriter.create<VPUIP::CopyOp>(copyLoc, srcView, dstView);
+        }
+    }
+
+private:
+    bool checkConcatReshapeCompatibility(VPUIP::ConcatViewOp concatOp, VPUIP::GenericReshapeOp genReshapeOp,
+                                         vpux::Logger log) const {
+        auto genReshapeType = vpux::getBufferType(genReshapeOp.getOutput());
+        auto concatType = vpux::getBufferType(concatOp.getOutput());
+
+        if (genReshapeType.getRank() != 4 || concatType.getRank() != 4) {
+            log.trace("Only 4D tensors are supported");
+            return false;
+        }
+
+        auto reshapeShape = genReshapeType.getShape();
+        auto concatShape = concatType.getShape();
+        if (concatShape[Dim(0)] != 1) {
+            log.trace("Only Batch size 1 is supported");
+            return false;
+        }
+
+        // [1, A, B, C] -> [A*B, C, 1, 1]
+        bool compatible = reshapeShape[Dim(0)] == concatShape[Dim(1)] * concatShape[Dim(2)] &&
+                          reshapeShape[Dim(1)] == concatShape[Dim(3)] &&
+                          genReshapeType.getNumElements() == concatType.getNumElements();
+        if (!compatible) {
+            log.trace("Concat->Reshape shapes are not compatible: {0} vs {1}", concatType, reshapeShape);
+            return false;
+        }
+        return true;
+    }
+
+    // Input of the left side, must be block argument
+    std::pair<mlir::Value, VPUIP::SubViewOp> getLeftBranchInput(VPUIP::ConcatViewOp concatOp) const {
+        const size_t LEFT_INPUT_ID = 0;  // Left must be always first to preserve concat order
+        auto inputCopy = concatOp.getInputs()[LEFT_INPUT_ID];
+        if (auto copyOp = inputCopy.getDefiningOp<VPUIP::CopyOp>()) {
+            auto input = copyOp.getInput();
+            if (mlir::isa<mlir::BlockArgument>(input)) {
+                return {input, nullptr};
+            }
+            if (auto viewOp = input.getDefiningOp<VPUIP::SubViewOp>()) {
+                auto viewInput = viewOp.getSource();
+                auto validInputView = viewOp->hasOneUse() && mlir::isa<mlir::BlockArgument>(viewInput);
+                if (validInputView) {
+                    return {viewInput, viewOp};
+                }
+            }
+        }
+        return {nullptr, nullptr};
+    }
+
+    mlir::Value prepareLeftBranch(mlir::PatternRewriter& rewriter, mlir::Value leftBranchInput,
+                                  VPUIP::PermuteCastOp permuteCastOp, mlir::Location loc) const {
+        return propagateReshapeCast(rewriter, leftBranchInput, permuteCastOp, loc, "left");
+    }
+
+    std::optional<int64_t> getTilingAxis(mlir::Type type) const {
+        auto outDistributedType = type.dyn_cast<VPUIP::DistributedBufferType>();
+        if (outDistributedType == nullptr) {
+            return std::nullopt;
+        }
+
+        const auto distAttr = outDistributedType.getDistribution();
+        const auto distMode = distAttr.getMode().getValue();
+        if (distMode != VPU::DistributionMode::SEGMENTED) {
+            return std::nullopt;
+        }
+        const auto numTiles = distAttr.getNumTiles();
+        const auto tilingScheme = parseIntArrayAttr<int64_t>(numTiles);
+        return VPU::getDistributedTilingAxis(tilingScheme);
+    };
+
+public:
+    mlir::LogicalResult matchAndRewrite(VPUIP::ConcatViewOp concatOp, mlir::PatternRewriter& rewriter) const final {
+        _log.trace("SplitUnbalancedDDRConcat{0}: Got Concat at '{1}'", getRewriterSuffix(), concatOp.getLoc());
+        auto nestedLog = _log.nest();
+
+        if (concatOp.getInputs().size() != 2) {
+            nestedLog.trace("Only 2 inputs supported");
+            return mlir::failure();
+        }
+
+        // Output type is same as type of all inputs
+        auto isDdrConcat = vpux::getBufferType(concatOp).getMemoryKind() == VPU::MemoryKind::DDR;
+        if (!isDdrConcat) {
+            nestedLog.trace("All inputs must be DDR copies");
+            return mlir::failure();
+        }
+
+        auto genReshapeOp = getSingleUserOfType<VPUIP::GenericReshapeOp>(concatOp);
+        if (genReshapeOp == nullptr) {
+            nestedLog.trace("ConcatOp must followed by only one GenericReshape");
+            return mlir::failure();
+        }
+        if (!checkConcatReshapeCompatibility(concatOp, genReshapeOp, nestedLog)) {
+            return mlir::failure();
+        }
+
+        auto permuteCastOp = getSingleUserOfType<VPUIP::PermuteCastOp>(genReshapeOp);
+        if (permuteCastOp == nullptr) {
+            nestedLog.trace("GenericReshape must followed by only one PermuteCast");
+            return mlir::failure();
+        }
+
+        const auto concatAxes =
+                vpux::IE::getDiffInOutSizeDims(getShape(concatOp.getOperands()[0]), getShape(concatOp.getResult()));
+        if (concatAxes.size() != 1) {
+            nestedLog.trace("Cannot extract concat axis");
+            return mlir::failure();
+        }
+        auto origConcatDim = concatAxes.front();
+        Dim newConcatDim(0);
+        // 0 - invalid, 1-2 -> 0, 3->1
+        if (origConcatDim == Dim(0)) {
+            nestedLog.trace("Unsupported orig concat dim {0}", origConcatDim);
+            return mlir::failure();
+        }
+        if (origConcatDim == Dim(3)) {
+            newConcatDim = Dim(1);
+        }
+        // GenericReshape collapses 1,2 axis into 0, and 3 to 1, see checkConcatReshapeCompatibility
+        nestedLog.trace("Concat axis transformation: {0} -> {1}", origConcatDim, newConcatDim);
+
+        auto [leftBranchInput, leftBranchViewOp] = getLeftBranchInput(concatOp);
+        if (leftBranchInput == nullptr) {
+            nestedLog.trace("Can't get left branch input");
+            return mlir::failure();
+        }
+        SmallVector<int64_t> leftViewOffsets;
+        int64_t leftSizeOnConcatDim = getShape(leftBranchInput)[origConcatDim];
+        int64_t leftViewOffsetOnConcatDim = 0;
+        if (leftBranchViewOp != nullptr) {
+            leftViewOffsets = parseIntArrayAttr<int64_t>(leftBranchViewOp.getStaticOffsets());
+            auto viewOffsetOnConcatDim = leftViewOffsets[origConcatDim.ind()];
+            if (viewOffsetOnConcatDim != 1) {
+                nestedLog.trace("Only off by one offset is supported");
+                return mlir::failure();
+            }
+            leftSizeOnConcatDim = getShape(leftBranchViewOp->getResult(0))[origConcatDim];
+            leftViewOffsetOnConcatDim = viewOffsetOnConcatDim;
+        }
+
+        auto [rightBranchInput, rightBranchCopyOp] = getRightBranchInput(concatOp);
+        if (rightBranchInput == nullptr || rightBranchCopyOp == nullptr) {
+            nestedLog.trace("Can't get right branch input");
+            return mlir::failure();
+        }
+        VPUX_THROW_WHEN(leftBranchInput == rightBranchInput, "Branches must have different inputs");
+
+        SmallVector<VPUIP::SubViewOp> views;
+        SmallVector<VPUIP::NCEClusterTilingOp> clusteredCopies;
+        for (auto user : permuteCastOp->getUsers()) {
+            if (auto viewOp = mlir::dyn_cast<VPUIP::SubViewOp>(user)) {
+                if (!viewOp->hasOneUse()) {
+                    nestedLog.trace("ViewOp at '{0}' must have only one user", viewOp->getLoc());
+                    return mlir::failure();
+                }
+                views.push_back(viewOp);
+
+                auto clusterOp = getSingleUserOfType<VPUIP::NCEClusterTilingOp>(viewOp);
+                if (clusterOp == nullptr || clusterOp.getInnerTaskOpOfType<VPUIP::CopyOp>() == nullptr) {
+                    nestedLog.trace("View at '{0}' user is not a Clustered Copy", viewOp->getLoc());
+                    return mlir::failure();
+                }
+                clusteredCopies.push_back(clusterOp);
+            } else {
+                nestedLog.trace("All users must be View operations");
+                return mlir::failure();
+            }
+        }
+        if (views.empty()) {
+            nestedLog.trace("Cannot find any SubView->NCEClusterTiling[Copy] consumers");
+            return mlir::failure();
+        }
+
+        if (clusteredCopies.size() < 1) {
+            nestedLog.trace("Expected at least 2 users after concat");
+            return mlir::failure();
+        }
+
+        auto maybeTilingAxis = getTilingAxis(clusteredCopies.front().getResultTypes()[0]);
+        if (!maybeTilingAxis.has_value()) {
+            nestedLog.trace("Only SEGMENTED distribution is supported for consumers");
+            return mlir::failure();
+        }
+
+        auto tilingAxis = maybeTilingAxis.value();
+        if (tilingAxis != 0) {
+            nestedLog.trace("Only tiling on major dim is supported");
+            return mlir::failure();
+        }
+
+        auto allTilingAxisAreSame = llvm::all_of(clusteredCopies, [&](VPUIP::NCEClusterTilingOp tiledCopy) {
+            auto currentTilingAxis = getTilingAxis(tiledCopy.getResultTypes()[0]);
+            return currentTilingAxis.has_value() && currentTilingAxis.value() == tilingAxis;
+        });
+        if (!allTilingAxisAreSame) {
+            nestedLog.trace("Concat users have different distribution axis");
+            return mlir::failure();
+        }
+
+        nestedLog.trace("Found {0} copies to split. newConcatDim: {1}, segmentationDim: d{2}", views.size(),
+                        newConcatDim, tilingAxis);
+        if (!isSplitSupported(newConcatDim, tilingAxis)) {
+            nestedLog.trace("Not supported combination of tiling/concat");
+            return mlir::failure();
+        }
+        PatternParamsInfo params{leftSizeOnConcatDim,
+                                 getShape(leftBranchInput)[origConcatDim],
+                                 leftViewOffsetOnConcatDim,
+                                 getShape(rightBranchInput)[origConcatDim],
+                                 origConcatDim,
+                                 newConcatDim,
+                                 permuteCastOp};
+
+        mlir::Value newLeftBranch = prepareLeftBranch(rewriter, leftBranchInput, permuteCastOp, concatOp->getLoc());
+        mlir::Value newRightBranch =
+                prepareRightBranch(rewriter, rightBranchInput, rightBranchCopyOp, permuteCastOp, concatOp->getLoc());
+
+        for (size_t i = 0; i < clusteredCopies.size(); ++i) {
+            VPUIP::NCEClusterTilingOp clusterCopy = clusteredCopies[i];
+            VPUIP::SubViewOp subViewOp = views[i];
+
+            rewriter.setInsertionPoint(clusterCopy);
+            rewriteSubview(rewriter, concatOp, subViewOp, clusterCopy, newLeftBranch, newRightBranch, params, i);
+        }
+
+        SmallVector<mlir::Value> concatInputs(concatOp.getInputs());
+        rewriter.eraseOp(permuteCastOp);
+        rewriter.eraseOp(genReshapeOp);
+        rewriter.eraseOp(concatOp);
+        for (mlir::Value val : concatInputs) {
+            if (auto defOp = val.getDefiningOp()) {
+                if (defOp->use_empty()) {
+                    rewriter.eraseOp(defOp);
+                }
+            }
+        }
+        nestedLog.trace("Done");
+        _log.unnest();
+        return mlir::success();
+    }
+
+private:
+    Logger _log;
+};
+
+/*
+    Concat(Left[1, 32, 1023, 128], Right[1, 32, 1, 128]) -> Reshape[32 * 1024, 128] -> PermCast -> Views
+    to
+    Reshape [32 * 1023, 128] -> PermCast -> View -\
+                                                  |-> Concat -> TiledCopy to CMX
+    FlatView -> Reshape [1, 128] -> PermCast     -/
+*/
+class SplitUnbalancedDDRConcatOnOtherAxis : public SplitUnbalancedDDRConcatBase {
+public:
+    using SplitUnbalancedDDRConcatBase::SplitUnbalancedDDRConcatBase;
+
+private:
+    StringRef getRewriterSuffix() const override {
+        return "OnOtherAxis";
+    }
+
+    bool isSplitSupported(Dim newConcatDim, int64_t tilingDim) const override {
+        return newConcatDim.ind() != tilingDim;
+    }
+
+    std::pair<mlir::Value, mlir::Operation*> getRightBranchInput(VPUIP::ConcatViewOp concatOp) const override {
+        const size_t RIGHT_INPUT_ID = 1;  // Right must be always second to preserve concat order
+        auto inputCopy = concatOp.getInputs()[RIGHT_INPUT_ID];
+        if (auto copyOp = inputCopy.getDefiningOp<VPUIP::CopyOp>()) {
+            if (!mlir::isa<mlir::BlockArgument>(copyOp.getInput())) {
+                return {copyOp.getInput(), copyOp};
+            }
+        }
+        return {nullptr, nullptr};
+    }
+
+    mlir::Value prepareRightBranch(mlir::PatternRewriter& rewriter, mlir::Value rightBranchInput, mlir::Operation*,
+                                   VPUIP::PermuteCastOp permuteCastOp, mlir::Location loc) const override {
+        return propagateReshapeCast(rewriter, rightBranchInput, permuteCastOp, loc, "right");
+    }
+
+    // Buffer remains the same
+    mlir::Value createNewConcatBuffer(mlir::PatternRewriter& rewriter, VPUIP::SubViewOp,
+                                      VPUIP::NCEClusterTilingOp clusterCopy, mlir::Location bufferLoc) const override {
+        auto dstBufferType = clusterCopy.getOutputBuffs()[0].getType();
+        return rewriter.create<VPURT::AllocDistributed>(bufferLoc, dstBufferType, nullptr, nullptr);
+    }
+
+    void rewriteSubview(mlir::PatternRewriter& rewriter, VPUIP::ConcatViewOp origConcatOp, VPUIP::SubViewOp subViewOp,
+                        VPUIP::NCEClusterTilingOp clusterCopy, mlir::Value newLeftBranch, mlir::Value newRightBranch,
+                        const PatternParamsInfo& params, size_t index) const override {
+        auto dstBuffer = createNewConcatBuffer(rewriter, subViewOp, clusterCopy,
+                                               takeOpLoc(origConcatOp, StringLiteral("buf_{0}"), index));
+
+        // Concat on other axis, so original offset is used
+        auto srcOffset = Shape(parseIntArrayAttr<int64_t>(subViewOp.getStaticOffsets()));
+        auto createViewBranch = [&](mlir::Value src, int64_t origDimSize, int64_t dstOffsetVal, int64_t srcOffsetVal,
+                                    StringRef locSuffix) -> mlir::Value {
+            auto copyShape = getShape(subViewOp->getResult(0)).toValues();
+            copyShape[params.newConcatDim] = origDimSize;
+
+            Shape newSrcOffset(srcOffset);
+            newSrcOffset[params.newConcatDim] = srcOffsetVal;
+
+            Shape dstOffset(SmallVector<int64_t>(copyShape.size(), 0));
+            dstOffset[params.newConcatDim] = dstOffsetVal;
+
+            return createNewCopyBranch(rewriter, src, dstBuffer, copyShape, newSrcOffset, dstOffset,
+                                       origConcatOp->getLoc(), locSuffix, index);
+        };
+
+        auto newLeftViewBranch = createViewBranch(newLeftBranch, params.leftConcatInputSize, /*dstOffsetVal=*/0,
+                                                  params.leftViewOffset, "left");
+        auto newRightViewBranch = createViewBranch(newRightBranch, params.rightInputSize, params.leftConcatInputSize,
+                                                   /*srcOffsetVal=*/0, "right");
+
+        SmallVector<mlir::Value> concatInputs{newLeftViewBranch, newRightViewBranch};
+        auto newConcatOp = rewriter.create<VPUIP::ConcatViewOp>(
+                takeOpLoc(origConcatOp, StringLiteral("concat_{0}"), index), concatInputs, dstBuffer);
+        rewriter.replaceAllUsesWith(clusterCopy->getResult(0), newConcatOp);
+        rewriter.eraseOp(clusterCopy);
+        rewriter.eraseOp(subViewOp);
+    }
+};
+
+class SplitUnbalancedDDRConcatOnSameAxis : public SplitUnbalancedDDRConcatBase {
+public:
+    using SplitUnbalancedDDRConcatBase::SplitUnbalancedDDRConcatBase;
+
+private:
+    StringRef getRewriterSuffix() const override {
+        return "OnSameAxis";
+    }
+
+    bool isSplitSupported(Dim newConcatDim, int64_t tilingDim) const override {
+        return newConcatDim.ind() == tilingDim;
+    }
+
+    std::pair<mlir::Value, mlir::Operation*> getRightBranchInput(VPUIP::ConcatViewOp concatOp) const override {
+        for (auto inputCopy : concatOp.getInputs()) {
+            if (auto clusterOp = inputCopy.getDefiningOp<VPUIP::NCEClusterTilingOp>()) {
+                bool isValidOp = !mlir::isa<mlir::BlockArgument>(clusterOp->getOperand(0)) &&
+                                 clusterOp.getInnerTaskOpOfType<VPUIP::CopyOp>();
+                if (isValidOp) {
+                    return {clusterOp->getOperand(0), clusterOp};
+                }
+            }
+        }
+        return {nullptr, nullptr};
+    }
+
+    mlir::Value prepareRightBranch(mlir::PatternRewriter&, mlir::Value rightBranchInput, mlir::Operation*,
+                                   VPUIP::PermuteCastOp, mlir::Location) const override {
+        return rightBranchInput;
+    }
+
+    mlir::Value createNewConcatBuffer(mlir::PatternRewriter& rewriter, VPUIP::SubViewOp,
+                                      VPUIP::NCEClusterTilingOp clusterCopy, mlir::Location bufferLoc) const override {
+        auto dstBufferType = clusterCopy.getOutputBuffs()[0].getType();
+        return rewriter.create<VPURT::AllocDistributed>(bufferLoc, dstBufferType, nullptr, nullptr);
+    }
+
+    void rewriteSubview(mlir::PatternRewriter& rewriter, VPUIP::ConcatViewOp origConcatOp, VPUIP::SubViewOp subViewOp,
+                        VPUIP::NCEClusterTilingOp clusterCopy, mlir::Value newLeftBranch, mlir::Value newRightBranch,
+                        const PatternParamsInfo& params, size_t index) const override {
+        auto dstBuffer = createNewConcatBuffer(rewriter, subViewOp, clusterCopy,
+                                               takeOpLoc(origConcatOp, StringLiteral("buf_{0}"), index));
+
+        auto newConcatDim = params.newConcatDim;
+        // Concat on same axis, so must do manual strided access
+        auto srcOffset = Shape(parseIntArrayAttr<int64_t>(subViewOp.getStaticOffsets()));
+        auto origConcatDimSize = getShape(origConcatOp->getResult(0))[params.origConcatDim];
+        auto viewMultiplier = srcOffset[newConcatDim] / origConcatDimSize;
+        mlir::Value newLeftViewBranch = nullptr;
+        {
+            auto copyShape = getShape(subViewOp->getResult(0)).toValues();
+            copyShape[newConcatDim] = params.leftConcatInputSize;
+
+            Shape srcOffset(SmallVector<int64_t>(copyShape.size(), 0));
+            srcOffset[newConcatDim] = params.leftInputSize * viewMultiplier + params.leftViewOffset;
+
+            Shape dstOffset(SmallVector<int64_t>(copyShape.size(), 0));
+            newLeftViewBranch = createNewCopyBranch(rewriter, newLeftBranch, dstBuffer, copyShape, srcOffset, dstOffset,
+                                                    origConcatOp->getLoc(), "left", index);
+        }
+
+        mlir::Value newRightViewBranch = nullptr;
+        {
+            auto baseLoc = origConcatOp->getLoc();
+            auto previewShape = getShape(newRightBranch).toValues();
+            previewShape[Dim(1)] = params.rightInputSize;
+            auto singleAxisView = rewriter.createOrFold<VPUIP::ExtractFlatSliceOp>(
+                    appendLoc(baseLoc, "pseudo_dst_view_{1}", index), newRightBranch, viewMultiplier);
+            auto normalizedShape = propagateReshapeCast(rewriter, singleAxisView, params.castOp, baseLoc,
+                                                        printToString("right_{0}", index));
+
+            auto dstView = rewriter.createOrFold<VPUIP::ExtractFlatSliceOp>(
+                    appendLoc(baseLoc, "right_dst_view_{0}", index), dstBuffer, params.leftConcatInputSize);
+
+            auto copyShape = getShape(subViewOp->getResult(0)).toValues();
+            copyShape[params.newConcatDim] = params.rightInputSize;
+
+            newRightViewBranch = rewriter.create<VPUIP::CopyOp>(appendLoc(baseLoc, "right_copy_{0}", index),
+                                                                normalizedShape, dstView);
+        };
+
+        SmallVector<mlir::Value> concatInputs{newLeftViewBranch, newRightViewBranch};
+        auto newConcatOp = rewriter.create<VPUIP::ConcatViewOp>(
+                takeOpLoc(origConcatOp, StringLiteral("concat_{0}"), index), concatInputs, dstBuffer);
+        rewriter.replaceAllUsesWith(clusterCopy->getResult(0), newConcatOp);
+        rewriter.eraseOp(clusterCopy);
+        rewriter.eraseOp(subViewOp);
+    }
+};
+
+//
 // OptimizeConcatViewCopiesPass
 //
 
@@ -1173,6 +1955,9 @@ void OptimizeConcatViewCopiesPass::safeRunOnFunc() {
     patterns.add<FuseConcatView>(&ctx, _log);
     patterns.add<RemoveDDRToDDRCopyAfterConcatView>(&ctx, _log);
     patterns.add<MoveConcatViewWithClusteredCopyToCMX>(&ctx, _log);
+    patterns.add<OptimizeConcatSubviewPattern>(&ctx, _log);
+    patterns.add<SplitUnbalancedDDRConcatOnOtherAxis>(&ctx, _log);
+    patterns.add<SplitUnbalancedDDRConcatOnSameAxis>(&ctx, _log);
 
     if (mlir::failed(mlir::applyPatternsAndFoldGreedily(func, std::move(patterns), getDefaultGreedyRewriteConfig()))) {
         signalPassFailure();

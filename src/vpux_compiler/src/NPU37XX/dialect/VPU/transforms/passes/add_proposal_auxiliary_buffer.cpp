@@ -9,6 +9,7 @@
 #include "vpux/compiler/NPU37XX/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 #include "vpux/compiler/utils/types.hpp"
@@ -65,11 +66,8 @@ mlir::LogicalResult ProposalAuxiliaryBufferPass::matchAndRewrite(VPU::ProposalOp
 
     const SmallVector<int64_t> shape({auxiliaryBuffSize});
     const auto auxiliaryType = mlir::RankedTensorType::get(shape, getUInt8Type(origOp.getContext()));
-    const auto auxiliaryAttr = mlir::DenseElementsAttr::get(auxiliaryType, ArrayRef(vals));
-    auto auxiliaryContentAttr = Const::ContentAttr::get(auxiliaryAttr);
-
-    auto auxBuff = rewriter.create<Const::DeclareOp>(mlir::UnknownLoc::get(origOp.getContext()),
-                                                     auxiliaryContentAttr.getType(), auxiliaryContentAttr);
+    auto auxBuff =
+            Const::createConst(rewriter, mlir::UnknownLoc::get(origOp.getContext()), auxiliaryType, ArrayRef(vals));
 
     rewriter.replaceOpWithNewOp<VPU::ProposalOp>(origOp, origOp.getClassProbs(), origOp.getBboxDeltas(),
                                                  origOp.getImageShape(), auxBuff, origOp.getProposalAttrsAttr());

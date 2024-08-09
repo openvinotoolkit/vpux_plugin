@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+//
+
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -143,6 +145,18 @@ nb::MemoryLocation nb::to_memory_location(StringRef str) {
     if (isEqual(str, "CMX1")) {
         return nb::MemoryLocation::CMX1;
     }
+    if (isEqual(str, "CMX2")) {
+        return nb::MemoryLocation::CMX2;
+    }
+    if (isEqual(str, "CMX3")) {
+        return nb::MemoryLocation::CMX3;
+    }
+    if (isEqual(str, "CMX4")) {
+        return nb::MemoryLocation::CMX4;
+    }
+    if (isEqual(str, "CMX5")) {
+        return nb::MemoryLocation::CMX5;
+    }
     if (isEqual(str, "DDR")) {
         return nb::MemoryLocation::DDR;
     }
@@ -156,6 +170,14 @@ std::string nb::to_string(nb::MemoryLocation memoryLocation) {
         return "CMX0";
     case MemoryLocation::CMX1:
         return "CMX1";
+    case MemoryLocation::CMX2:
+        return "CMX2";
+    case MemoryLocation::CMX3:
+        return "CMX3";
+    case MemoryLocation::CMX4:
+        return "CMX4";
+    case MemoryLocation::CMX5:
+        return "CMX5";
     case MemoryLocation::DDR:
         return "DDR";
     default:
@@ -197,6 +219,12 @@ nb::ActivationType nb::to_activation_type(StringRef str) {
     if (isEqual(str, "Rsqrt")) {
         return nb::ActivationType::Rsqrt;
     }
+    if (isEqual(str, "Sin")) {
+        return nb::ActivationType::Sin;
+    }
+    if (isEqual(str, "Tanh")) {
+        return nb::ActivationType::Tanh;
+    }
     return nb::ActivationType::Unknown;
 }
 
@@ -233,8 +261,10 @@ std::string nb::to_string(CaseType case_) {
     switch (case_) {
     case CaseType::DMA:
         return "DMA";
-    case CaseType::DMAcompressAct:
-        return "DMAcompressAct";
+    case CaseType::DMACompressActDense:
+        return "DMACompressActDense";
+    case CaseType::DMACompressActSparse:
+        return "DMACompressActSparse";
     case CaseType::ZMajorConvolution:
         return "ZMajorConvolution";
     case CaseType::SparseZMajorConvolution:
@@ -291,6 +321,10 @@ std::string nb::to_string(CaseType case_) {
         return "DualChannelDMA";
     case CaseType::GenerateScaleTable:
         return "GenerateScaleTable";
+    case CaseType::ReduceMean:
+        return "ReduceMean";
+    case CaseType::ReduceSumSquare:
+        return "ReduceSumSquare";
     default:
         return "unknown";
     }
@@ -299,8 +333,10 @@ std::string nb::to_string(CaseType case_) {
 nb::CaseType nb::to_case(StringRef str) {
     if (isEqual(str, "DMA"))
         return CaseType::DMA;
-    if (isEqual(str, "DMAcompressAct"))
-        return CaseType::DMAcompressAct;
+    if (isEqual(str, "DMACompressActDense"))
+        return CaseType::DMACompressActDense;
+    if (isEqual(str, "DMACompressActSparse"))
+        return CaseType::DMACompressActSparse;
     if (isEqual(str, "GatherDMA"))
         return CaseType::GatherDMA;
     if (isEqual(str, "ZMajorConvolution"))
@@ -361,6 +397,10 @@ nb::CaseType nb::to_case(StringRef str) {
         return CaseType::DualChannelDMA;
     if (isEqual(str, "GenerateScaleTable"))
         return CaseType::GenerateScaleTable;
+    if (isEqual(str, "ReduceMean"))
+        return CaseType::ReduceMean;
+    if (isEqual(str, "ReduceSumSquare"))
+        return CaseType::ReduceSumSquare;
     return CaseType::Unknown;
 };
 
@@ -388,13 +428,6 @@ nb::M2iInterp nb::to_m2i_interp(StringRef str) {
     return nb::M2iInterp::UNKNOWN;
 }
 
-std::string nb::to_string(nb::CompilerBackend compilerBackend) {
-    if (compilerBackend == nb::CompilerBackend::ELF)
-        return "ELF";
-    else
-        return "unknown";
-}
-
 std::string nb::to_string(nb::SegmentationType segmentationType) {
     switch (segmentationType) {
     case nb::SegmentationType::SOK:
@@ -407,6 +440,17 @@ std::string nb::to_string(nb::SegmentationType segmentationType) {
         return "SOHW";
     case nb::SegmentationType::SOHK:
         return "SOHK";
+    default:
+        return "Unknown";
+    }
+}
+
+std::string nb::to_string(nb::BackendFlow backendFlow) {
+    switch (backendFlow) {
+    case nb::BackendFlow::Default:
+        return "Default";
+    case nb::BackendFlow::WLMPartial:
+        return "WLMPartial";
     default:
         return "Unknown";
     }
@@ -665,21 +709,24 @@ nb::DMAparams nb::TestCaseJsonDescriptor::loadDMAParams(llvm::json::Object* json
     VPUX_THROW_UNLESS(srcMemLoc.has_value(), "Source memory location doesn't provided");
     result.srcLocation = to_memory_location(srcMemLoc.value());
 
-    auto dstMemLoc = params->getString("dst_memory_location");
-    VPUX_THROW_UNLESS(dstMemLoc.has_value(), "Destination memory location doesn't provided");
-    result.dstLocation = to_memory_location(dstMemLoc.value());
+    const auto* jsonDstMemLocations = params->getArray("dst_memory_location");
+    VPUX_THROW_UNLESS(jsonDstMemLocations != nullptr, "Destination memory location(s) not provided");
+
+    result.dstLocations.resize(jsonDstMemLocations->size());
+    for (size_t i = 0; i < jsonDstMemLocations->size(); i++) {
+        auto memLoc = (*jsonDstMemLocations)[i].getAsString();
+        VPUX_THROW_UNLESS(memLoc.has_value(), "Error processing destination memory locations");
+        result.dstLocations[i] = to_memory_location(memLoc.value());
+    }
+    VPUX_THROW_UNLESS(!result.dstLocations.empty(), "No destination memory location was provided");
 
     auto dmaEngine = params->getInteger("dma_engine");
     VPUX_THROW_UNLESS(dmaEngine.has_value(), "DMA engine doesn't provided");
     result.engine = dmaEngine.value();
 
     if (architecture_ == vpux::VPU::ArchKind::NPU40XX) {
-        auto actCompressDenseMode = params->getBoolean("actCompressDenseMode");
-        VPUX_THROW_UNLESS(actCompressDenseMode.has_value(), "Activation Compression wasn't provided");
-        result.actCompressDenseMode = actCompressDenseMode.value();
         auto indicesMemLoc = params->getString("indicesMemoryLocation");
-        result.indicesLocation =
-                indicesMemLoc.has_value() ? to_memory_location(dstMemLoc.value()) : MemoryLocation::Unknown;
+        result.indicesLocation = indicesMemLoc.has_value() ? result.dstLocations.front() : MemoryLocation::Unknown;
         auto convertDatatypeEn = params->getBoolean("convert_datatype_en");
         result.doConvert = convertDatatypeEn.has_value() ? convertDatatypeEn.value() : false;
         auto testMemSideCache = params->getBoolean("memory_side_cache");
@@ -995,6 +1042,17 @@ nb::SETableParams nb::TestCaseJsonDescriptor::loadSETableParams(llvm::json::Obje
     return result;
 };
 
+nb::WLMParams nb::TestCaseJsonDescriptor::loadWLMParams(llvm::json::Object* jsonObj) {
+    nb::WLMParams wlmParams;
+    auto backendFlow = jsonObj->getString("backend_flow");
+
+    VPUX_THROW_UNLESS(backendFlow.has_value(), "loadWLMParams: no backendFlow provided");
+
+    wlmParams.isWLMPartialEnabled = backendFlow.value().equals(to_string(nb::BackendFlow::WLMPartial)) ? true : false;
+
+    return wlmParams;
+}
+
 nb::TestCaseJsonDescriptor::TestCaseJsonDescriptor(StringRef jsonString) {
     if (!jsonString.empty()) {
         parse(parse2JSON(jsonString));
@@ -1018,11 +1076,6 @@ void nb::TestCaseJsonDescriptor::parse(llvm::json::Object json_obj) {
     }
     architecture_ = architectureSymbol.value();
 
-    auto compilerBackendStr = json_obj.getString("compiler_backend");
-    if (!compilerBackendStr) {
-        throw std::runtime_error{"Failed to get compiler_backend"};
-    }
-
     auto case_type = json_obj.getString("case_type");
     if (!case_type) {
         throw std::runtime_error{"Failed to get case type"};
@@ -1033,14 +1086,22 @@ void nb::TestCaseJsonDescriptor::parse(llvm::json::Object json_obj) {
     inLayers_ = loadInputLayer(&json_obj);
     outLayers_ = loadOutputLayer(&json_obj);
     activationLayer_ = loadActivationLayer(&json_obj);
+    WLMParams_ = loadWLMParams(&json_obj);
 
     // Load conv json attribute values. Similar implementation for ALL HW layers (DW, group conv, Av/Max pooling and
     // eltwise needed).
     switch (caseType_) {
-    case CaseType::GatherDMA:
+    case CaseType::GatherDMA: {
         gatherIndices_ = loadGatherIndices(&json_obj);
-        [[fallthrough]];
-    case CaseType::DMAcompressAct:
+        DMAparams_ = loadDMAParams(&json_obj);
+        break;
+    }
+    case CaseType::DMACompressActSparse: {
+        inSMs_ = loadInputSMs(&json_obj);
+        DMAparams_ = loadDMAParams(&json_obj);
+        break;
+    }
+    case CaseType::DMACompressActDense:
     case CaseType::DMA: {
         DMAparams_ = loadDMAParams(&json_obj);
         break;

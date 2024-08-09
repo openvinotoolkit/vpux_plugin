@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --broadcast-input-for-add  %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 // CHECK-LABEL: @BroadcastTensorInput
 func.func @BroadcastTensorInput(%arg0: tensor<1x16x16x32xf16>, %arg1: tensor<1x16x16x1xf16>) -> tensor<1x16x16x32xf16> {
@@ -12,9 +12,9 @@ func.func @BroadcastTensorInput(%arg0: tensor<1x16x16x32xf16>, %arg1: tensor<1x1
 
     return %0 : tensor<1x16x16x32xf16>
 
-    // CHECK-DAG:   [[TARGET_SHAPE:%.+]] = const.Declare tensor<4xsi64> = dense<[1, 16, 16, 32]> : tensor<4xsi64>, [#const.ConvertElemType<si32>]
+    // CHECK-DAG:   [[TARGET_SHAPE:%.+]] = const.Declare tensor<4xsi32> = dense<[1, 16, 16, 32]> : tensor<4xsi64>, [#const.ConvertElemType<si32>]
     // CHECK:       [[BROADCAST:%.+]] = IE.Broadcast(%arg1, [[TARGET_SHAPE]])
-    // CHECK-SAME:      {mode = #IE.broadcast_type<NUMPY>} : tensor<1x16x16x1xf16>, tensor<4xsi64> -> tensor<1x16x16x32xf16>
+    // CHECK-SAME:      {mode = #IE.broadcast_type<NUMPY>} : tensor<1x16x16x1xf16>, tensor<4xsi32> -> tensor<1x16x16x32xf16>
     // CHECK:       [[ADD_RES:%.+]] = IE.Add(%arg0, [[BROADCAST]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x16x16x32xf16>, tensor<1x16x16x32xf16> -> tensor<1x16x16x32xf16>
 
     // CHECK:       return [[ADD_RES]]
@@ -28,9 +28,9 @@ func.func @BroadcastSingleNonTrivialDimInput(%arg0: tensor<1x16x16x32xf16>, %arg
 
     return %0 : tensor<1x16x16x32xf16>
 
-    // CHECK-DAG:   [[TARGET_SHAPE:%.+]] = const.Declare tensor<4xsi64> = dense<[1, 16, 16, 32]> : tensor<4xsi64>, [#const.ConvertElemType<si32>]
+    // CHECK-DAG:   [[TARGET_SHAPE:%.+]] = const.Declare tensor<4xsi32> = dense<[1, 16, 16, 32]> : tensor<4xsi64>, [#const.ConvertElemType<si32>]
     // CHECK:       [[BROADCAST:%.+]] = IE.Broadcast(%arg1, [[TARGET_SHAPE]])
-    // CHECK-SAME:      {mode = #IE.broadcast_type<NUMPY>} : tensor<1x16x1x1xf16>, tensor<4xsi64> -> tensor<1x16x16x32xf16>
+    // CHECK-SAME:      {mode = #IE.broadcast_type<NUMPY>} : tensor<1x16x1x1xf16>, tensor<4xsi32> -> tensor<1x16x16x32xf16>
     // CHECK:       [[ADD_RES:%.+]] = IE.Add(%arg0, [[BROADCAST]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x16x16x32xf16>, tensor<1x16x16x32xf16> -> tensor<1x16x16x32xf16>
 
     // CHECK:       return [[ADD_RES]]
@@ -44,11 +44,11 @@ func.func @BroadcastTwoInputs(%arg0: tensor<1x16x1x32xf16>, %arg1: tensor<1x16x1
 
     return %0 : tensor<1x16x16x32xf16>
 
-    // CHECK-DAG:   [[TARGET_SHAPE:%.+]] = const.Declare tensor<4xsi64> = dense<[1, 16, 16, 32]> : tensor<4xsi64>, [#const.ConvertElemType<si32>]
+    // CHECK-DAG:   [[TARGET_SHAPE:%.+]] = const.Declare tensor<4xsi32> = dense<[1, 16, 16, 32]> : tensor<4xsi64>, [#const.ConvertElemType<si32>]
     // CHECK:       [[BROADCAST0:%.+]] = IE.Broadcast(%arg0, [[TARGET_SHAPE]])
-    // CHECK-SAME:      {mode = #IE.broadcast_type<NUMPY>} : tensor<1x16x1x32xf16>, tensor<4xsi64> -> tensor<1x16x16x32xf16>
+    // CHECK-SAME:      {mode = #IE.broadcast_type<NUMPY>} : tensor<1x16x1x32xf16>, tensor<4xsi32> -> tensor<1x16x16x32xf16>
     // CHECK:       [[BROADCAST1:%.+]] = IE.Broadcast(%arg1, [[TARGET_SHAPE]])
-    // CHECK-SAME:      {mode = #IE.broadcast_type<NUMPY>} : tensor<1x16x16x1xf16>, tensor<4xsi64> -> tensor<1x16x16x32xf16>
+    // CHECK-SAME:      {mode = #IE.broadcast_type<NUMPY>} : tensor<1x16x16x1xf16>, tensor<4xsi32> -> tensor<1x16x16x32xf16>
     // CHECK:       [[ADD_RES:%.+]] = IE.Add([[BROADCAST0]], [[BROADCAST1]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x16x16x32xf16>, tensor<1x16x16x32xf16> -> tensor<1x16x16x32xf16>
 
     // CHECK:       return [[ADD_RES]]

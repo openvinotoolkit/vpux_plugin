@@ -40,11 +40,13 @@ const EnumMap<ov::element::Type_t, elf::OVNodeType> mapElementType = {
         {ov::element::Type_t::u16, elf::OVNodeType::OVNodeType_U16},
         {ov::element::Type_t::u32, elf::OVNodeType::OVNodeType_U32},
         {ov::element::Type_t::u64, elf::OVNodeType::OVNodeType_U64},
+        {ov::element::Type_t::f8e4m3, elf::OVNodeType::OVNodeType_F8E4M3},
+        {ov::element::Type_t::f8e5m2, elf::OVNodeType::OVNodeType_F8E5M2},
 };
 
 elf::NetworkMetadata constructMetadata(mlir::ModuleOp module, IE::CNNNetworkOp netOp, mlir::func::FuncOp netFunc,
                                        const std::vector<std::shared_ptr<const ov::Node>>& parameters,
-                                       const std::vector<std::shared_ptr<const ov::Node>>& results);
+                                       const std::vector<std::shared_ptr<const ov::Node>>& results, vpux::Logger log);
 
 elf::TensorRef createTensorRef(mlir::Value val, StringRef name);
 elf::TensorRef createTensorRef(vpux::NDTypeInterface type, StringRef name);

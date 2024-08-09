@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --convert-async-ops-to-tasks --canonicalize --move-declarations-to-top %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX
+// REQUIRES: arch-NPU37XX
 
 // CHECK-LABEL: @WithProfiling
 func.func @WithProfiling(%arg0: memref<1x512xf16>, %arg1: memref<1x512xf16>) -> memref<1x512xf16> {

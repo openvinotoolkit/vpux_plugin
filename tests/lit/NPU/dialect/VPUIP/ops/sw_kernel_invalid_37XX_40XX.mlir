@@ -4,7 +4,7 @@
 //
 
 // RUN: vpux-opt --split-input-file --verify-diagnostics --init-compiler="vpu-arch=%arch%" %s
-// REQUIRES: arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 module {
   module @VPU.SW {

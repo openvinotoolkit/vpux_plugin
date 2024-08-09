@@ -327,11 +327,11 @@ mlir::FailureOr<mlir::Type> inferOutElemTypeWithOffsets(VPU::ConcatOpAdaptor con
 
 mlir::LogicalResult vpux::VPU::ConcatOp::inferReturnTypes(mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc,
                                                           mlir::ValueRange operands, mlir::DictionaryAttr attrs,
-                                                          mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+                                                          mlir::OpaqueProperties prop, mlir::RegionRange /*regions*/,
                                                           mlir::SmallVectorImpl<mlir::Type>& inferredTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::ConcatOpAdaptor concat(operands, attrs);
+    VPU::ConcatOpAdaptor concat(operands, attrs, prop);
     if (mlir::failed(concat.verify(loc))) {
         return mlir::failure();
     }
@@ -896,12 +896,12 @@ bool vpux::VPU::ConcatOp::checkStrategyCompatibility(VPU::MultiClusterStrategy s
            strategy == VPU::MultiClusterStrategy::SplitOverHeight || strategy == VPU::MultiClusterStrategy::Clustering;
 }
 
-vpux::VPU::DistributedTensorAttr vpux::VPU::ConcatOp::getExplicitDistributedTensorAttr(
-        vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, mlir::ArrayAttr numTiles,
-        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::UnitAttr uniformDistributedSegments,
+vpux::VPU::DistributedTensorNative vpux::VPU::ConcatOp::getExplicitDistributedTensorAttr(
+        vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, ArrayRef<int64_t> numTiles,
+        const int64_t numClusters, ArrayRef<int64_t> alignment, const bool uniformDistributedSegments,
         const vpux::VPU::OverlapDistributionParams& overlapParams) {
-    return vpux::VPU::getConcatExplicitDistributedAttr(shape, distributionMode, numTiles, numClusters, alignment,
-                                                       uniformDistributedSegments, overlapParams, getContext());
+    return vpux::VPU::getConcatExplicitDistributedNative(shape, distributionMode, numTiles, numClusters, alignment,
+                                                         uniformDistributedSegments, overlapParams);
 }
 
 bool VPU::ConcatOp::isOperationSplitOverHeightCompatible(const vpux::TileInfo& outputTile) {
@@ -954,9 +954,17 @@ bool VPU::ConcatOp::isOperationSplitOverKernelCompatible(ShapeRef outputShape, S
 bool VPU::ConcatOp::doesLayerFitIntoCMX(VPU::MultiClusterStrategy strategy, Byte reservedMem) {
     auto concatOp = mlir::cast<VPU::ConcatOp>(getOperation());
     const auto outputType = concatOp->getResult(0).getType().cast<vpux::NDTypeInterface>();
-    auto numClusters = VPU::getOptimalNumClusters(concatOp, outputType.getShape()[Dims4D::Act::C], strategy);
-    return fitIntoCMX(getDistributedOutputTypeFromOp(concatOp, concatOp.getOutput().getType(), numClusters, strategy),
-                      reservedMem);
+    auto numClusters = VPU::getOptimalNumClusters(concatOp, outputType.getShape(), strategy);
+
+    SmallVector<Byte> buffersSize{VPU::getTotalAllocSizeWithDistribution(
+            getOutput().getType(),
+            getOutputDistributionAttrFromOp(concatOp, getOutput().getType(), numClusters.getInt(), strategy))};
+
+    auto totalAvailableCMXSize = reservedMem.count() == 0 ? getTotalCMXSize(getOperation()).count()
+                                                          : getTotalCMXFragmentationAwareSize(getOperation()).count();
+    return vpux::VPU::calculateAlignedBuffersMemoryRequirement(getArch(getOperation()), buffersSize).count() +
+                   reservedMem.count() <=
+           totalAvailableCMXSize;
 }
 
 bool vpux::VPU::ConcatOp::fitIntoCMX(vpux::NDTypeInterface output, Byte reservedMem) {

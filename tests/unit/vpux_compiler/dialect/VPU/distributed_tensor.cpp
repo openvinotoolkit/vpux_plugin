@@ -114,6 +114,199 @@ TEST_F(MLIR_NDTypeInterface, SegmentedDistributedTensorType) {
     EXPECT_ANY_THROW(ndType.pad(vpux::ShapeRef(pads), vpux::ShapeRef(pads)));
 }
 
+// 5D case where split dimension is 0 that is Group
+TEST_F(MLIR_NDTypeInterface, Segmented5DDistributedTensorType) {
+    mlir::MLIRContext ctx(registry);
+    ctx.loadDialect<VPU::VPUDialect>();
+
+    const auto distributionMode = VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::SEGMENTED);
+    const auto numTiles = getIntArrayAttr(&ctx, SmallVector<int64_t>({4, 1, 1, 1, 1}));
+    const auto numClusters = getIntAttr(&ctx, 4);
+    const auto distributedAttr =
+            VPU::DistributedTensorAttr::get(&ctx, distributionMode, numTiles, nullptr, nullptr, nullptr, numClusters,
+                                            nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+
+    const auto shape = SmallVector<int64_t>({64, 1, 64, 32, 1});
+    const auto elemType = mlir::Float16Type::get(&ctx);
+    const auto dimsOrder = mlir::AffineMapAttr::get(DimsOrder::GNHWC.toAffineMap(&ctx));
+    const auto dimsSpace = vpux::IndexedSymbolAttr::get(&ctx, CMX_NAME);
+
+    const auto ndType = VPU::DistributedTensorType::get(&ctx, shape, elemType, dimsOrder, dimsSpace, distributedAttr)
+                                .dyn_cast<vpux::NDTypeInterface>();
+    ASSERT_TRUE(ndType != nullptr) << "Tensor is not of vpux::NDTypeInterface type";
+
+    EXPECT_EQ(ndType.getShape(), vpux::ShapeRef({64, 1, 64, 32, 1}));
+    EXPECT_EQ(ndType.getMemShape(), vpux::MemShape({64, 1, 32, 1, 64}));
+
+    EXPECT_TRUE(ndType.hasRank());
+    EXPECT_EQ(ndType.getRank(), 5);
+    EXPECT_EQ(ndType.getNumElements(), 64 * 64 * 32 * 1);
+
+    EXPECT_TRUE(ndType.getElementType().isa<mlir::Float16Type>());
+
+    EXPECT_EQ(ndType.getDimsOrder(), vpux::DimsOrder::GNHWC);
+
+    EXPECT_EQ(ndType.getMemSpace().getLeafName(), CMX_NAME);
+    EXPECT_EQ(ndType.getMemoryKind(), vpux::VPU::MemoryKind::CMX_NN);
+
+    const SmallVector<vpux::Bit> strides({32768_Bit, 32768_Bit, 16_Bit, 1024_Bit, 1024_Bit});
+    const SmallVector<vpux::Bit> memStrides({32768_Bit, 32768_Bit, 1024_Bit, 1024_Bit, 16_Bit});
+
+    EXPECT_EQ(ndType.getStrides().raw(), strides);
+    EXPECT_EQ(ndType.getMemStrides().raw(), memStrides);
+
+    EXPECT_EQ(ndType.getElemTypeSize().count(), 16);
+    // [type size in bytes] * [G/4] * N * C * H * W
+    EXPECT_EQ(ndType.getTotalAllocSize().count(), 2 * 16 * 1 * 64 * 32 * 1);
+    EXPECT_EQ(ndType.getCompactAllocSize().count(), 2 * 16 * 1 * 64 * 32 * 1);
+
+    // Change shape
+    const SmallVector<int64_t> newShape({32, 1, 64, 32, 1});
+    const auto changedShape = ndType.changeShape(vpux::ShapeRef(newShape));
+    EXPECT_EQ(changedShape.getShape(), vpux::ShapeRef(newShape));
+    const auto changedShape2 = ndType.changeTypeComponents(TypeComponents().setShape(ShapeRef(newShape)));
+    EXPECT_EQ(changedShape2.getShape(), vpux::ShapeRef(newShape));
+
+    // Change element type
+    const auto changedElemType = ndType.changeElemType(mlir::Float32Type::get(&ctx));
+    EXPECT_TRUE(changedElemType.getElementType().isa<mlir::Float32Type>());
+
+    // Change shape and element type
+    const SmallVector<int64_t> newShape2({32, 1, 64, 32, 1});
+    const auto changedShapeElemType =
+            ndType.changeShapeElemType(vpux::ShapeRef(newShape2), mlir::IntegerType::get(&ctx, 8));
+    EXPECT_EQ(changedShapeElemType.getShape(), vpux::ShapeRef(newShape2));
+    EXPECT_TRUE(changedShapeElemType.getElementType().isa<mlir::IntegerType>());
+
+    // Change dims order
+    const auto newDimsOrder = DimsOrder::GNCHW;
+    const auto changedDimsOrder = ndType.changeDimsOrder(newDimsOrder);
+    EXPECT_EQ(changedDimsOrder.getDimsOrder(), newDimsOrder);
+
+    // Change mem space
+    const auto newMemSpace = vpux::IndexedSymbolAttr::get(&ctx, DDR_NAME);
+    const auto changedMemSpace = ndType.changeMemSpace(newMemSpace);
+    EXPECT_EQ(changedMemSpace.getMemSpace().getLeafName(), DDR_NAME);
+
+    // Change strides, expect exception
+    const SmallVector<Bit> newStrides({425984_Bit, 16_Bit, 16384_Bit, 1024_Bit, 128_Bit});
+    EXPECT_ANY_THROW(ndType.changeStrides(StridesRef(newStrides)));
+
+    // Extarct dense tile, slice over H
+    const SmallVector<int64_t> tileOffset({0, 0, 0, 0, 0});
+    const SmallVector<int64_t> tileShape({64, 1, 32, 32, 1});
+    const SmallVector<Bit> tileStrides({16384_Bit, 16384_Bit, 16_Bit, 512_Bit, 512_Bit});
+    const auto denseTile = ndType.extractDenseTile(ShapeRef(tileOffset), ShapeRef(tileShape));
+    EXPECT_EQ(denseTile.getShape(), ShapeRef(tileShape));
+    EXPECT_EQ(denseTile.getStrides().raw(), tileStrides);
+
+    // Extarct view tile, expect exception
+    const SmallVector<int64_t> tileElemStrides({1, 1, 1, 1, 1});
+    EXPECT_ANY_THROW(ndType.extractViewTile(vpux::ShapeRef(tileOffset), vpux::ShapeRef(tileShape),
+                                            vpux::ShapeRef(tileElemStrides)));
+
+    // Erase tiled info
+    EXPECT_EQ(ndType.eraseTiledInfo(), ndType);
+    const SmallVector<int64_t> pads({0, 0, 2, 2, 1});
+    EXPECT_ANY_THROW(ndType.pad(vpux::ShapeRef(pads), vpux::ShapeRef(pads)));
+}
+
+TEST_F(MLIR_NDTypeInterface, Segmented5DDistributedTensorTypeNonDivisible) {
+    mlir::MLIRContext ctx(registry);
+    ctx.loadDialect<VPU::VPUDialect>();
+
+    const auto distributionMode = VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::SEGMENTED);
+    const auto numTiles = getIntArrayAttr(&ctx, SmallVector<int64_t>({6, 1, 1, 1, 1}));
+    const auto numClusters = getIntAttr(&ctx, 6);
+    const auto distributedAttr =
+            VPU::DistributedTensorAttr::get(&ctx, distributionMode, numTiles, nullptr, nullptr, nullptr, numClusters,
+                                            nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+
+    const auto shape = SmallVector<int64_t>({64, 1, 64, 32, 1});
+    const auto elemType = mlir::Float16Type::get(&ctx);
+    const auto dimsOrder = mlir::AffineMapAttr::get(DimsOrder::GNHWC.toAffineMap(&ctx));
+    const auto dimsSpace = vpux::IndexedSymbolAttr::get(&ctx, CMX_NAME);
+
+    const auto ndType = VPU::DistributedTensorType::get(&ctx, shape, elemType, dimsOrder, dimsSpace, distributedAttr)
+                                .dyn_cast<vpux::NDTypeInterface>();
+    ASSERT_TRUE(ndType != nullptr) << "Tensor is not of vpux::NDTypeInterface type";
+
+    EXPECT_EQ(ndType.getShape(), vpux::ShapeRef({64, 1, 64, 32, 1}));
+    EXPECT_EQ(ndType.getMemShape(), vpux::MemShape({64, 1, 32, 1, 64}));
+
+    EXPECT_TRUE(ndType.hasRank());
+    EXPECT_EQ(ndType.getRank(), 5);
+    EXPECT_EQ(ndType.getNumElements(), 64 * 64 * 32 * 1);
+
+    EXPECT_TRUE(ndType.getElementType().isa<mlir::Float16Type>());
+
+    EXPECT_EQ(ndType.getDimsOrder(), vpux::DimsOrder::GNHWC);
+
+    EXPECT_EQ(ndType.getMemSpace().getLeafName(), CMX_NAME);
+    EXPECT_EQ(ndType.getMemoryKind(), vpux::VPU::MemoryKind::CMX_NN);
+
+    const SmallVector<vpux::Bit> strides({32768_Bit, 32768_Bit, 16_Bit, 1024_Bit, 1024_Bit});
+    const SmallVector<vpux::Bit> memStrides({32768_Bit, 32768_Bit, 1024_Bit, 1024_Bit, 16_Bit});
+
+    EXPECT_EQ(ndType.getStrides().raw(), strides);
+    EXPECT_EQ(ndType.getMemStrides().raw(), memStrides);
+
+    EXPECT_EQ(ndType.getElemTypeSize().count(), 16);
+    // [type size in bytes] * [G/6] * N * C * H * W
+    EXPECT_EQ(ndType.getTotalAllocSize().count(), 2 * 11 * 1 * 64 * 32 * 1);
+    EXPECT_EQ(ndType.getCompactAllocSize().count(), 2 * 11 * 1 * 64 * 32 * 1);
+
+    // Change shape
+    const SmallVector<int64_t> newShape({32, 1, 64, 32, 1});
+    const auto changedShape = ndType.changeShape(vpux::ShapeRef(newShape));
+    EXPECT_EQ(changedShape.getShape(), vpux::ShapeRef(newShape));
+    const auto changedShape2 = ndType.changeTypeComponents(TypeComponents().setShape(ShapeRef(newShape)));
+    EXPECT_EQ(changedShape2.getShape(), vpux::ShapeRef(newShape));
+
+    // Change element type
+    const auto changedElemType = ndType.changeElemType(mlir::Float32Type::get(&ctx));
+    EXPECT_TRUE(changedElemType.getElementType().isa<mlir::Float32Type>());
+
+    // Change shape and element type
+    const SmallVector<int64_t> newShape2({32, 1, 64, 32, 1});
+    const auto changedShapeElemType =
+            ndType.changeShapeElemType(vpux::ShapeRef(newShape2), mlir::IntegerType::get(&ctx, 8));
+    EXPECT_EQ(changedShapeElemType.getShape(), vpux::ShapeRef(newShape2));
+    EXPECT_TRUE(changedShapeElemType.getElementType().isa<mlir::IntegerType>());
+
+    // Change dims order
+    const auto newDimsOrder = DimsOrder::GNCHW;
+    const auto changedDimsOrder = ndType.changeDimsOrder(newDimsOrder);
+    EXPECT_EQ(changedDimsOrder.getDimsOrder(), newDimsOrder);
+
+    // Change mem space
+    const auto newMemSpace = vpux::IndexedSymbolAttr::get(&ctx, DDR_NAME);
+    const auto changedMemSpace = ndType.changeMemSpace(newMemSpace);
+    EXPECT_EQ(changedMemSpace.getMemSpace().getLeafName(), DDR_NAME);
+
+    // Change strides, expect exception
+    const SmallVector<Bit> newStrides({425984_Bit, 16_Bit, 16384_Bit, 1024_Bit, 128_Bit});
+    EXPECT_ANY_THROW(ndType.changeStrides(StridesRef(newStrides)));
+
+    // Extarct dense tile, slice over G
+    const SmallVector<int64_t> tileOffset({0, 0, 0, 0, 0});
+    const SmallVector<int64_t> tileShape({32, 1, 64, 32, 1});
+    const SmallVector<Bit> tileStrides({32768_Bit, 32768_Bit, 16_Bit, 1024_Bit, 1024_Bit});
+    const auto denseTile = ndType.extractDenseTile(ShapeRef(tileOffset), ShapeRef(tileShape));
+    EXPECT_EQ(denseTile.getShape(), ShapeRef(tileShape));
+    EXPECT_EQ(denseTile.getStrides().raw(), tileStrides);
+
+    // Extarct view tile, expect exception
+    const SmallVector<int64_t> tileElemStrides({1, 1, 1, 1, 1});
+    EXPECT_ANY_THROW(ndType.extractViewTile(vpux::ShapeRef(tileOffset), vpux::ShapeRef(tileShape),
+                                            vpux::ShapeRef(tileElemStrides)));
+
+    // Erase tiled info
+    EXPECT_EQ(ndType.eraseTiledInfo(), ndType);
+    const SmallVector<int64_t> pads({0, 0, 2, 2, 1});
+    EXPECT_ANY_THROW(ndType.pad(vpux::ShapeRef(pads), vpux::ShapeRef(pads)));
+}
+
 // Test out combination of SEGMENTED | DUPLICATED mode
 
 TEST_F(MLIR_NDTypeInterface, SegmentedDuplicatedDistributedTensorType) {

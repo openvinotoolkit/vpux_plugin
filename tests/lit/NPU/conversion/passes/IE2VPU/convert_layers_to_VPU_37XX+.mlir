@@ -5,7 +5,7 @@
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW" --convert-layers-to-VPU %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 #C = affine_map<(d0) -> (d0)>
 
@@ -75,4 +75,20 @@ func.func @ConvertAccumulateWithScales(
 
     return %ACCUMULATE : tensor<1x64x16x1xf16, {order = #NHWC}>
     // CHECK:   return [[ACCUMULATE]] : tensor<1x64x16x1xf16, {order = #NHWC}>
+}
+
+// -----
+
+!qElemType = !quant.uniform<i4:f16:1, {0.0090698242187499996,0.0081949869791666674,0.0094848632812500003,0.0088582356770833329}>
+!qElemType1 = !quant.uniform<i4:f16:0, {0.0090698242187499996,0.0081949869791666674,0.0094848632812500003,0.0088582356770833329}>
+
+// CHECK-LABEL: @ConvertAffineReshapeOnQuantAxis
+func.func @ConvertAffineReshapeOnQuantAxis(%arg0: tensor<1x4x1x4096x!qElemType>) -> tensor<4x4096x1x1x!qElemType1> {
+    %0 = IE.AffineReshape(%arg0) {dim_mapping = [[0], [0], [0], [1, 2, 3]], shape_value = [4, 4096, 1, 1]} :
+        tensor<1x4x1x4096x!qElemType> -> tensor<4x4096x1x1x!qElemType1>
+    // CHECK:   [[RESHAPE:%.*]] = VPU.AffineReshape(%arg0)
+    // CHECK-SAME{LITERAL}:    {dim_mapping = [[0], [0], [0], [1, 2, 3]], shape_value = [4, 4096, 1, 1]} :
+    // CHECK-SAME:    tensor<1x4x1x4096x!qElemType> -> tensor<4x4096x1x1x!qElemType1>
+    return %0 : tensor<4x4096x1x1x!qElemType1>
+    // CHECK:    return [[RESHAPE]] : tensor<4x4096x1x1x!qElemType1>
 }

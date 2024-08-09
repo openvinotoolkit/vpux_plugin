@@ -4,7 +4,7 @@
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --convert-sub-gru-sequence-to-conv %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX
+// REQUIRES: arch-NPU37XX
 
 // CHECK-LABEL: @ConvertSubGRUSequenceToConv
 // CHECK-SAME:      [[INPUT0:%arg[0-9]]]: tensor<1x80x256xf16>

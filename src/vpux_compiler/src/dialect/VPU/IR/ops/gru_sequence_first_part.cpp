@@ -9,11 +9,11 @@ using namespace vpux;
 
 mlir::LogicalResult vpux::VPU::GRUSequenceFirstPartOp::inferReturnTypes(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         mlir::SmallVectorImpl<mlir::Type>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::GRUSequenceFirstPartOpAdaptor gru(operands, attrs);
+    VPU::GRUSequenceFirstPartOpAdaptor gru(operands, attrs, prop);
     if (mlir::failed(gru.verify(loc))) {
         return mlir::failure();
     }

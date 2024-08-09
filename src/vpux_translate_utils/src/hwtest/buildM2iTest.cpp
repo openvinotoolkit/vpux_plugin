@@ -386,7 +386,6 @@ void buildM2iTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
         VPUX_THROW("Input tensor size is bigger than m2i max supported size: {0}",
                    static_cast<uint32_t>(maxM2iHwBlockInputSize));
     }
-    int barrierNumber = 0;
 
     // Input Buffers
     std::vector<vpux::VPURT::DeclareBufferOp> networkInputBuffers;
@@ -456,6 +455,10 @@ void buildM2iTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
         }
     }
 
+    auto [waitWLMBarrier, freeBarrierId] =
+            insertWLMStartSequence(funcBuilder, testDesc.getWLMParams().isWLMPartialEnabled);
+
+    int barrierNumber = freeBarrierId++;
     auto updateBarrier = funcBuilder.create<vpux::VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), barrierNumber++);
 
     mlir::IntegerType uint32Type = mlir::IntegerType::get(ctx, 32, mlir::IntegerType::Unsigned);
@@ -463,14 +466,14 @@ void buildM2iTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
     // DMA input
     if (params.doTiling) {
         for (auto tile = 0; tile < nrOfInputTiles; tile++) {
-            VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcBuilder, mlir::ValueRange(),
+            VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcBuilder, waitWLMBarrier,
                                                   mlir::ValueRange(updateBarrier.getBarrier()), builder.getUnknownLoc(),
                                                   networkInputBuffers.at(tile).getOperation()->getResult(0),
                                                   inCMXTiles.at(tile).getOperation()->getResult(0), 0);
         }
     } else {
         VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcBuilder,
-                                              mlir::ValueRange(),                            // waits
+                                              waitWLMBarrier,                                // waits
                                               mlir::ValueRange(updateBarrier.getBarrier()),  // updates
                                               builder.getUnknownLoc(),
                                               funcInput0,                                     // src (DDR)
@@ -551,7 +554,8 @@ void buildM2iTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
     mlir::SmallVector<mlir::Value> funcOutputs;
 
     // finalBarrier passed as production barrier to last DMA task
-    auto finalBarrier = funcBuilder.create<vpux::VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), barrierNumber++);
+    auto finalBarrier = funcBuilder.create<vpux::VPURT::ConfigureBarrierOp>(
+            builder.getUnknownLoc(), barrierNumber++, testDesc.getWLMParams().isWLMPartialEnabled);
     // copy output from CMX to DDR
     VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcBuilder,
                                           mlir::ValueRange(waitBarrier.getBarrier()),   // waits

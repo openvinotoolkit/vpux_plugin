@@ -10,11 +10,11 @@ using namespace mlir;
 
 mlir::LogicalResult vpux::VPU::ConditionalCopyOp::inferReturnTypes(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange /*regions*/,
         mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::ConditionalCopyOpAdaptor conditionalCopyOp(operands, attrs);
+    VPU::ConditionalCopyOpAdaptor conditionalCopyOp(operands, attrs, prop);
     if (mlir::failed(conditionalCopyOp.verify(loc))) {
         return mlir::failure();
     }

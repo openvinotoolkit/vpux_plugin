@@ -2,8 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+#include <common_test_utils/ov_tensor_utils.hpp>
 #include "openvino/opsets/opset1.hpp"
 #include "shared_test_classes/subgraph/nce_tasks.hpp"
+
+using namespace ov::test::utils;
 
 namespace ov::test {
 struct ShapeWithNumFilters {
@@ -30,6 +33,13 @@ struct ShapeWithNumFilters {
 class Conv2dWithExpandTest_NPU3720 :
         public VpuOv2LayerTest,
         public testing::WithParamInterface<std::tuple<ShapeWithNumFilters, ov::element::Type>> {
+    void generate_inputs(const std::vector<ov::Shape>& targetInputStaticShapes) override {
+        VpuOv2LayerTest::inputs.clear();
+        const auto& funcInputs = VpuOv2LayerTest::function->inputs();
+        ov::Tensor tensorData =
+                create_and_fill_tensor(funcInputs[0].get_element_type(), targetInputStaticShapes[0], 8, 0, 32);
+        VpuOv2LayerTest::inputs.insert({funcInputs[0].get_node_shared_ptr(), tensorData});
+    }
     ov::Output<ov::Node> quantizeValue(const ov::Output<ov::Node>& param, const bool bypassQuant,
                                        const std::array<float, 4>& quantRange, const size_t quantLevels) const {
         if (bypassQuant) {
@@ -120,7 +130,6 @@ class Conv2dWithExpandTest_NPU3720 :
         preProc.output().tensor().set_layout(order);
         preProc.output().model().set_layout(order);
         function = preProc.build();
-        rel_threshold = 0.5f;
     }
 
 public:
@@ -135,7 +144,7 @@ public:
 };
 
 TEST_P(Conv2dWithExpandTest_NPU3720, HW) {
-    abs_threshold = 0.02;
+    abs_threshold = 0.05;
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }

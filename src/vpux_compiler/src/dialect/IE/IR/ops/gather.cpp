@@ -23,11 +23,11 @@ mlir::FailureOr<int64_t> extractAxis(mlir::Location loc, IE::GatherOpAdaptor gat
             return errorAt(loc, "Only constant input is supported for axis");
         }
 
-        const auto axisContent = axisConst.getContent();
-        if (!axisContent.isSplat()) {
+        if (const auto attr = axisConst.getContentAttr(); !attr.isSplat()) {
             return errorAt(loc, "Axis value must be a scalar");
         }
 
+        const auto axisContent = axisConst.getContent();
         int64_t axisInd = axisContent.getSplatValue<int64_t>();
 
         if (axisInd < 0) {
@@ -49,11 +49,11 @@ mlir::FailureOr<int64_t> extractAxis(mlir::Location loc, IE::GatherOpAdaptor gat
 
 mlir::LogicalResult vpux::IE::GatherOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::GatherOpAdaptor gather(operands, attrs);
+    IE::GatherOpAdaptor gather(operands, attrs, prop);
     if (mlir::failed(gather.verify(loc))) {
         return mlir::failure();
     }
@@ -122,11 +122,11 @@ mlir::LogicalResult ConvertConstToAttr::matchAndRewrite(IE::GatherOp gatherOp, m
         return mlir::failure();
     }
 
-    const auto axisContent = axisConst.getContent();
-    if (!axisContent.isSplat()) {
+    if (const auto attr = axisConst.getContentAttr(); !attr.isSplat()) {
         return mlir::failure();
     }
 
+    const auto axisContent = axisConst.getContent();
     int64_t axisInd = axisContent.getSplatValue<int64_t>();
     if (axisInd < 0) {
         const auto inType = gatherOp.getInput().getType().cast<mlir::ShapedType>();

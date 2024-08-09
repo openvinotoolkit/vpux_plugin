@@ -35,11 +35,11 @@ mlir::LogicalResult vpux::VPU::DetectionOutputNormalizeOp::verify() {
 
 mlir::LogicalResult VPU::DetectionOutputNormalizeOp::inferReturnTypes(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange /*regions*/,
         mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::DetectionOutputNormalizeOpAdaptor normalize(operands, attrs);
+    VPU::DetectionOutputNormalizeOpAdaptor normalize(operands, attrs, prop);
     if (mlir::failed(normalize.verify(loc))) {
         return mlir::failure();
     }

@@ -32,11 +32,9 @@ target_include_directories(${TARGET_NAME}
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 )
 
-link_system_libraries(${TARGET_NAME}
+ov_link_system_libraries(${TARGET_NAME}
     PUBLIC
         openvino::reference
-        openvino::runtime
-        openvino::runtime::dev
 )
 
 target_link_libraries(${TARGET_NAME}

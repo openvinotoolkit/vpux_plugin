@@ -16,7 +16,6 @@ std::unique_ptr<ICaptureWorkpointStrategy> createCaptureWorkpointStrategy(VPU::A
         return std::make_unique<VPUIP::arch37xx::CaptureWorkpointStrategy>();
     case VPU::ArchKind::NPU40XX:
         return std::make_unique<VPUIP::ICaptureWorkpointStrategy>();
-    case VPU::ArchKind::NPU30XX:
     default:
         VPUX_THROW("Arch '{0}' is not supported", arch);
     }

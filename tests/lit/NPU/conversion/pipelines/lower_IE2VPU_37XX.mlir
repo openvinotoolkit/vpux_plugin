@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --mlir-elide-elementsattrs-if-larger 8 --lower-IE-to-VPU %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX
+// REQUIRES: arch-NPU37XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
@@ -60,5 +60,56 @@ module @TwoFunctions {
         // CHECK: [[FOO1_RES:%.+]] = call @foo1([[CONVERT]]) : (tensor<1x3x62x62xf16>) -> tensor<1x48x60x60xf16>
         // CHECK: [[FOO2_RES:%.+]] = call @foo2([[FOO1_RES]]) : (tensor<1x48x60x60xf16>) -> tensor<1x48x60x60xf16>
         // CHECK: return [[FOO2_RES]] : tensor<1x48x60x60xf16>
+    }
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @RepeatingBlocks
+module @RepeatingBlocks  {
+    IE.CNNNetwork entryPoint : @main inputsInfo : {
+        DataInfo "input" : tensor<1x48x60x60xf32>
+    } outputsInfo : {
+        DataInfo "output" : tensor<1x48x60x60xf16>
+    }
+
+    // CHECK: func.func private @main_fn1([[ARG0:%.+]]: tensor<1x48x60x60xf16>) -> tensor<1x48x60x60xf16>
+    func.func private @main_fn1(%arg0: tensor<1x48x60x60xf16>) -> tensor<1x48x60x60xf16> {
+        %cst = const.Declare tensor<48x48x3x3xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<48x48x3x3xf32>, [#const.ConvertElemType<f16>, #const.Reorder<#NHWC>]
+        %shape_cast1 = IE.ShapeCast {shape = [1, 48, 225, 16]} inputs(%arg0 : tensor<1x48x60x60xf16>) -> tensor<1x48x225x16xf16>
+        %permute_quantize = IE.PermuteQuantize(%shape_cast1) {dstElemType = f16, dst_order = #NHWC, mem_perm = #NHWC, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0]} : tensor<1x48x225x16xf16> -> tensor<1x48x225x16xf16, {order = #NHWC}>
+        %shape_cast2 = IE.ShapeCast {shape = [1, 48, 60, 60]} inputs(%permute_quantize : tensor<1x48x225x16xf16, {order = #NHWC}>) -> tensor<1x48x60x60xf16, {order = #NHWC}>
+        %conv = IE.Convolution(%shape_cast2, %cst) {dilations = [1, 1], pads_begin = [1, 1], pads_end = [1, 1], post_op = #IE.PostOp<name = "IE.ReLU", attrs = {}>, strides = [1, 1]} : tensor<1x48x60x60xf16, {order = #NHWC}>, tensor<48x48x3x3xf16, {order = #NHWC}> -> tensor<1x48x60x60xf16>
+        return %conv : tensor<1x48x60x60xf16>
+
+        // CHECK-DAG:   [[CST_WEIGHTS_TABLE:%.+]] = const.Declare tensor<48x1x1x4xsi32>
+        // CHECK-DAG:   [[CST_WEIGHTS:%.+]] = const.Declare tensor<48x48x3x3xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<48x48x3x3xf32>, [#const.ConvertElemType<f16>, #const.Reorder<#NHWC>]
+
+        // CHECK:       [[SHAPE_CAST1:%.+]] = VPU.ShapeCast {shape = [1, 48, 225, 16]} inputs([[ARG0]] : tensor<1x48x60x60xf16>) -> tensor<1x48x225x16xf16>
+        // CHECK:       [[PERMUTE_QUANT:%.+]] = VPU.NCE.Permute([[SHAPE_CAST1]]) {dstElemType = f16, dstOrder = #NHWC, expandedChannels = 48 : i64} -> tensor<1x48x225x16xf16, {order = #NHWC}>
+        // CHECK:       [[SHAPE_CAST2:%.+]] = VPU.ShapeCast {shape = [1, 48, 60, 60]} inputs([[PERMUTE_QUANT]] : tensor<1x48x225x16xf16, {order = #NHWC}>) -> tensor<1x48x60x60xf16, {order = #NHWC}>
+
+        // CHECK:       [[CONV:%.+]] = VPU.NCE.Convolution([[SHAPE_CAST2]], [[CST_WEIGHTS]], [[CST_WEIGHTS_TABLE]]) {
+        // CHECK-SAME:      pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
+        // CHECK-SAME:      ppe = #VPU.PPETask<mode = <LRELU>, clamp_low = 0 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64>,
+        // CHECK-SAME:      rawFilterShape = [48, 48, 3, 3],
+        // CHECK-SAME:      strides = [1, 1]
+        // CHECK-SAME:  } -> tensor<1x48x60x60xf16>
+        // CHECK:       return [[CONV]]
+    }
+
+    // CHECK: func.func @main([[INPUT:%.+]]: tensor<1x48x60x60xf32>) -> tensor<1x48x60x60xf16>
+    func.func @main(%input: tensor<1x48x60x60xf32>) -> tensor<1x48x60x60xf16> {
+        %convert = IE.Convert(%input) {dstElemType = f16} : tensor<1x48x60x60xf32> -> tensor<1x48x60x60xf16>
+        %call1 = call @main_fn1(%convert) : (tensor<1x48x60x60xf16>) -> tensor<1x48x60x60xf16>
+        %call2 = call @main_fn1(%call1) : (tensor<1x48x60x60xf16>) -> tensor<1x48x60x60xf16>
+        return %call2 : tensor<1x48x60x60xf16>
+
+        // CHECK:  [[CONVERT:%.+]] = VPU.Convert([[INPUT]]) {dstElemType = f16} : tensor<1x48x60x60xf32> -> tensor<1x48x60x60xf16>
+        // CHECK:  [[CALL1:%.+]] = call @main_fn1([[CONVERT]]) : (tensor<1x48x60x60xf16>) -> tensor<1x48x60x60xf16>
+        // CHECK:  [[CALL2:%.+]] = call @main_fn1([[CALL1]]) : (tensor<1x48x60x60xf16>) -> tensor<1x48x60x60xf16>
+        // CHECK:  return [[CALL2]]
     }
 }

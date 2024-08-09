@@ -67,14 +67,10 @@ std::optional<double> MVNFusion::getEpsValue(mlir::Value epsInput, bool isOutsid
     if (convertOp) {
         constOp = convertOp.getInput().getDefiningOp<Const::DeclareOp>();
     }
-    if (constOp == nullptr) {
+    if (constOp == nullptr || !constOp.getContentAttr().isSplat()) {
         return std::nullopt;
     }
     const auto epsContent = constOp.getContent();
-    if (!epsContent.isSplat()) {
-        return std::nullopt;
-    }
-
     const auto epsValue = epsContent.getSplatValue<double>();
     if (isOutsideEps && epsValue > EPS_THRESHOLD) {
         return std::nullopt;
@@ -223,9 +219,9 @@ mlir::LogicalResult MVNFusion::matchAndRewrite(IE::DivideOp origOp, mlir::Patter
     auto mvnOp = rewriter.create<IE::MVNOp>(origOp.getLoc(), preReshapeOp.getOutput(), acrossChannelsAttr,
                                             normVarianceAttr, epsAttr);
 
+    _log.trace("Replace '{0}' with new op '{1}'", origOp.getLoc(), mvnOp);
     rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, mvnOp.getOutput(), nullptr, false,
                                                getIntArrayAttr(ctx, getShape(origOp.getOutput())));
-    _log.trace("Replace '{0}' with new op '{1}'", origOp.getLoc(), mvnOp);
     return mlir::success();
 }
 

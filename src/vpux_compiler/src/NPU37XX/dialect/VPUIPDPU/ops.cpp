@@ -72,20 +72,11 @@ namespace vpux {
 namespace VPUIPDPU {
 
 mlir::LogicalResult IDUEltWiseCfgOp::verify() {
-    auto elopScaleAFpAttr = mlir::dyn_cast_or_null<mlir::FloatAttr>(getElopScaleAAttr());
-    auto elopScaleBFpAttr = mlir::dyn_cast_or_null<mlir::FloatAttr>(getElopScaleBAttr());
-    auto elopScaleAAttr = mlir::dyn_cast_or_null<mlir::IntegerAttr>(getElopScaleAAttr());
-    auto elopScaleBAttr = mlir::dyn_cast_or_null<mlir::IntegerAttr>(getElopScaleBAttr());
-    if ((elopScaleAFpAttr && !elopScaleBFpAttr) || (!elopScaleAFpAttr && elopScaleBFpAttr) ||
-        (elopScaleAAttr && !elopScaleBAttr) || (!elopScaleAAttr && elopScaleBAttr)) {
-        return errorAt(getLoc(),
-                       "Operation {0}: parameters types are invalid,"
-                       " combination of FloatAttr and IntegerAttr is not supported.",
-                       getOperationName());
-    }
-
-    if (!elopScaleAFpAttr && !elopScaleBFpAttr && !elopScaleAAttr && !elopScaleBAttr) {
-        return errorAt(getLoc(), "Operation {0}: no parameters set.", getOperationName());
+    if (getElopScaleAAttr().getTypeID() != getElopScaleBAttr().getTypeID()) {
+        return errorAt(
+                getLoc(),
+                "Operation {0}: parameters types are invalid, combinations of IntegerAttr and FloatAttr not supported.",
+                getOperationName());
     }
 
     return ::mlir::success();

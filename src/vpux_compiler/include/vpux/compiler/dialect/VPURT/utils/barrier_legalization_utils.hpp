@@ -17,7 +17,8 @@ std::map<VPURT::TaskQueueType, SmallVector<uint32_t>> getTaskOpQueues(
         mlir::func::FuncOp funcOp, BarrierInfo& barrierInfo,
         std::optional<VPU::ExecutorKind> targetExecutorKind = std::nullopt);
 void postProcessBarrierOps(mlir::func::FuncOp func);
-void verifyBarrierSlots(mlir::func::FuncOp func, Logger log);
+bool verifyBarrierSlots(mlir::func::FuncOp func, Logger log);
+bool verifyOneWaitBarrierPerTask(mlir::func::FuncOp funcOp, Logger log);
 void orderExecutionTasksAndBarriers(mlir::func::FuncOp funcOp, BarrierInfo& barrierInfo,
                                     bool orderByConsumption = false);
 

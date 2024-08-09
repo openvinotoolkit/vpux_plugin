@@ -6,6 +6,7 @@
 #include "vpux/compiler/dialect/VPURegMapped/types.hpp"
 #include "vpux/compiler/dialect/VPURegMapped/ops.hpp"
 #include "vpux/compiler/dialect/VPURegMapped/utils.hpp"
+#include "vpux/utils/core/helper_macros.hpp"
 
 #include <llvm/ADT/TypeSwitch.h>
 #include <llvm/Support/Format.h>
@@ -96,6 +97,13 @@ mlir::Type VPURegMapped::IndexType::parse(mlir::AsmParser& parser) {
 mlir::LogicalResult vpux::VPURegMapped::RegFieldType::verify(
         ::llvm::function_ref<::mlir::InFlightDiagnostic()> emitError, uint32_t width, uint32_t pos, uint64_t value,
         std::string name, vpux::VPURegMapped::RegFieldDataType /*dataType*/) {
+#ifdef NDEBUG
+    VPUX_UNUSED(emitError);
+    VPUX_UNUSED(width);
+    VPUX_UNUSED(pos);
+    VPUX_UNUSED(value);
+    VPUX_UNUSED(name);
+#else
     if (calcMinBitsRequirement(value) > width) {
         return printTo(emitError(),
                        "RegFieldType - provided width {0} is not enough to store provided value {1} for field {2}",
@@ -111,6 +119,8 @@ mlir::LogicalResult vpux::VPURegMapped::RegFieldType::verify(
     if (name.empty()) {
         return printTo(emitError(), "RegFieldType - name is empty.");
     }
+#endif
+
     return mlir::success();
 }
 
@@ -204,6 +214,14 @@ vpux::VPURegMapped::RegFieldType vpux::VPURegMapped::RegisterType::getField(cons
 mlir::LogicalResult vpux::VPURegMapped::RegisterType::verify(
         ::llvm::function_ref<::mlir::InFlightDiagnostic()> emitError, uint32_t size, std::string name, uint32_t address,
         ::mlir::ArrayAttr regFields, bool allowOverlap) {
+#ifdef NDEBUG
+    VPUX_UNUSED(emitError);
+    VPUX_UNUSED(size);
+    VPUX_UNUSED(name);
+    VPUX_UNUSED(address);
+    VPUX_UNUSED(regFields);
+    VPUX_UNUSED(allowOverlap);
+#else
     if (name.empty()) {
         return printTo(emitError(), "RegisterType - name is empty.");
     }
@@ -252,6 +270,7 @@ mlir::LogicalResult vpux::VPURegMapped::RegisterType::verify(
     if (!allowOverlap && (totalWidth > size)) {
         return printTo(emitError(), "RegisterType - {0} - invalid size {1}.", name, totalWidth);
     }
+#endif
 
     return mlir::success();
 }
@@ -391,6 +410,11 @@ vpux::VPURegMapped::RegisterType vpux::VPURegMapped::RegMappedType::getRegister(
 
 mlir::LogicalResult vpux::VPURegMapped::RegMappedType::verify(
         ::llvm::function_ref<::mlir::InFlightDiagnostic()> emitError, std::string name, ::mlir::ArrayAttr regs) {
+#ifdef NDEBUG
+    VPUX_UNUSED(emitError);
+    VPUX_UNUSED(name);
+    VPUX_UNUSED(regs);
+#else
     if (name.empty()) {
         return printTo(emitError(), "RegMappedType - name is empty.");
     }
@@ -408,6 +432,7 @@ mlir::LogicalResult vpux::VPURegMapped::RegMappedType::verify(
             return printTo(emitError(), "RegMappedType {0} - invalid.", name);
         }
     }
+#endif
 
     return mlir::success();
 }

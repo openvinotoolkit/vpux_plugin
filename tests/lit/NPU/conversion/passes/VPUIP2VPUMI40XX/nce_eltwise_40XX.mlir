@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --convert-VPUIP-to-VPUMI40XX %s | FileCheck %s
-// REQUIRES: arch-VPUX40XX
+// REQUIRES: arch-NPU40XX
 
 module @mainModule {
 
@@ -48,10 +48,13 @@ func.func @singleEltwise(%arg0: memref<1x32x56x56x!quant.uniform<u8<0:3>:f32, 1.
 // CHECK: VPUMI40XX.ConfigureBarrier {consumer_count = 1 : ui8, producer_count = 1 : ui8} <1, -1> -> !VPURegMapped.Index<0:0:1>
 // CHECK-NOT: VPURT.Task
 // CHECK-NEXT: VPUMI40XX.NNDMA
+// CHECK-SAME: VPUMI40XX.NNDMATransaction
 // CHECK-NOT: VPURT.Task
 // CHECK-NEXT: VPUMI40XX.NNDMA
+// CHECK-SAME: VPUMI40XX.NNDMATransaction
 // CHECK-NOT: VPURT.Task
 // CHECK-NEXT: VPUMI40XX.NNDMA
+// CHECK-SAME: VPUMI40XX.NNDMATransaction
 // CHECK-NOT: VPURT.Task
 // CHECK-NEXT: VPUMI40XX.DPUInvariant
 // CHECK: VPUMI40XX.DPUVariant

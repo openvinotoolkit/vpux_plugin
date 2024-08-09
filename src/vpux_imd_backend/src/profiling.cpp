@@ -10,11 +10,11 @@
 
 #include <vector>
 
-namespace vpux::profiling {
+namespace intel_npu {
 
 LayerStatistics getLayerStatistics(const uint8_t* profData, size_t profSize, const std::vector<uint8_t>& blob) {
-    auto layerData = getLayerProfilingInfoHook(profData, profSize, blob);
-    return intel_npu::profiling::convertLayersToIeProfilingInfo(layerData);
+    auto layerData = vpux::profiling::getLayerProfilingInfoHook(profData, profSize, blob);
+    return profiling::convertLayersToIeProfilingInfo(layerData);
 }
 
-}  // namespace vpux::profiling
+}  // namespace intel_npu

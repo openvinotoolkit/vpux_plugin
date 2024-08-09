@@ -84,6 +84,7 @@ void ConvertPrecisionToI32Pass::safeRunOnModule() {
     target.addDynamicallyLegalOp<IE::BitwiseNotOp>(isLegalOp);
     target.addDynamicallyLegalOp<IE::OneHotOp>(isLegalOp);
     target.addDynamicallyLegalOp<mlir::func::ReturnOp>(isLegalOp);
+    target.addDynamicallyLegalOp<mlir::func::CallOp>(isLegalOp);
     target.addLegalOp<mlir::ModuleOp>();
     target.addDynamicallyLegalOp<mlir::func::FuncOp>([&](mlir::func::FuncOp funcOp) {
         return typeConverter.isSignatureLegal(funcOp.getFunctionType());

@@ -4,7 +4,7 @@
 //
 
 // RUN: vpux-opt --init-compiler="vpu-arch=%arch%" --assign-full-kernel-path-VPUMI37XX %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX
+// REQUIRES: arch-NPU37XX
 
 module @Test {
 

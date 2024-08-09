@@ -175,28 +175,26 @@ SmallVector<SmallVector<T>> parseFPArrayOfArrayAttr(mlir::ArrayAttr arr) {
     return arrayOfArray;
 }
 
-inline mlir::DenseElementsAttr wrapData(const mlir::RankedTensorType dataStorageType, float value) {
-    const auto elemType = dataStorageType.getElementType();
+/// Returns a dense<> attribute of the specified type. Performs value
+/// conversions (e.g. float -> float16) if necessary.
+inline mlir::DenseElementsAttr wrapData(mlir::RankedTensorType type, ArrayRef<float> array) {
+    const auto elemType = type.getElementType();
     if (elemType.isF32()) {
-        return mlir::DenseElementsAttr::get(dataStorageType, value);
-    } else if (elemType.isF16()) {
-        const vpux::type::float16 valFP16 = value;
-        return mlir::DenseElementsAttr::get(dataStorageType, valFP16);
-    }
-    VPUX_THROW("Unsupported element type '{0}'", elemType);
-}
-
-inline mlir::DenseElementsAttr wrapArrayRef(const mlir::RankedTensorType dataStorageType, ArrayRef<float> array) {
-    const auto elemType = dataStorageType.getElementType();
-    if (elemType.isF32()) {
-        return mlir::DenseElementsAttr::get(dataStorageType, array);
+        return mlir::DenseElementsAttr::get(type, array);
     } else if (elemType.isF16()) {
         const auto arrayFP16 = to_small_vector(array | transformed([](float val) {
                                                    return static_cast<vpux::type::float16>(val);
                                                }));
-        return mlir::DenseElementsAttr::get(dataStorageType, ArrayRef(arrayFP16));
+        return mlir::DenseElementsAttr::get(type, ArrayRef(arrayFP16));
     }
     VPUX_THROW("Unsupported element type '{0}'", elemType);
+    return nullptr;
+}
+
+/// Returns a dense<> attribute of the specified type. Performs value
+/// conversions (e.g. float -> float16) if necessary.
+inline mlir::DenseElementsAttr wrapData(mlir::RankedTensorType type, float value) {
+    return wrapData(type, ArrayRef(value));
 }
 
 }  // namespace vpux

@@ -1,4 +1,4 @@
-# Copyright (C) 2022-2023 Intel Corporation
+# Copyright (C) 2022-2024 Intel Corporation
 # SPDX-License-Identifier: Apache 2.0
 
 cmake_minimum_required(VERSION 3.13.4)
@@ -88,6 +88,7 @@ if(ENABLE_SHAVE_BINARIES_BUILD)
     "${MV_TOOLS_PATH}/common/moviCompile/lib/40xxxx/mlibc_lite_lgpl.a"
     "${MV_TOOLS_PATH}/common/moviCompile/lib/40xxxx/mlibcrt.a"
   )
+
 else()
   set(use_prebuilt_binaries ON)
 
@@ -161,6 +162,8 @@ foreach(kernel_descrip ${kernel_descrip_list})
   set(always_inline "${always_inline_default}")
   set(rt_kernel "${rt_kernel_default}")
   set(extra_src_list "")
+  set(asm_src_list "")
+  set(asm_include_list "")
   set(lsu0_wo "")
   set(B_stepping_only "")
   set(link_script_file "${CMAKE_CURRENT_SOURCE_DIR}/prebuild/shave_kernel.ld")
@@ -186,6 +189,7 @@ foreach(kernel_descrip ${kernel_descrip_list})
         "-shave-vpu4-load-store-distance=9"
         "-mllvm"
         "--shave-has-LSU1-fu=false"
+        "-DUSE_A_STEPPING_WA"
       )
     endif()
   endif()
@@ -204,7 +208,7 @@ foreach(kernel_descrip ${kernel_descrip_list})
 
   set(kernel_src_file "${kernel_src_dir}/${kernel_src}")
 
-  if(lsu0_wo STREQUAL "ON")
+  if(lsu0_wo STREQUAL "ON") # MTL DDR split access workaround
     set(blob_text_data_target "${target_prefix}${kernel_name}${kernel_cpu_suffix}_lsu0_wo")
     set(blob_text_file "${target_prefix}${kernel_name}${kernel_cpu_suffix}_lsu0_wo${blob_text_suffix}")
     set(blob_data_file "${target_prefix}${kernel_name}${kernel_cpu_suffix}_lsu0_wo${blob_data_suffix}")
@@ -304,6 +308,29 @@ foreach(kernel_descrip ${kernel_descrip_list})
     endforeach()
   endif()
 
+  if(NOT asm_src_list STREQUAL "")
+    foreach(asm_src_file ${asm_src_list})
+      get_filename_component(src_name ${asm_src_file} NAME_WE)
+      get_filename_component(dir_name ${asm_src_file} DIRECTORY)
+
+      # Discard full path, just keep name of the dir the file is in
+      get_filename_component(dir_name ${dir_name} NAME_WE)
+
+      # Some asm_src files have the same filename so the .o files
+      # must be in separate directories to avoid overwriting.
+      file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/asm_src/${kernel_cpu}/${dir_name})
+      set(obj_file "${CMAKE_CURRENT_BINARY_DIR}/asm_src/${kernel_cpu}/${dir_name}/${src_name}.${kernel_cpu}${obj_suffix}")
+
+      add_custom_command(
+        OUTPUT "${obj_file}"
+        DEPENDS "${kernel_src_file}"
+        COMMAND "${mv_tools_compile}" -mcpu=${kernel_cpu} ${asm_include_list} -c "${asm_src_file}" -o "${obj_file}"
+      )
+
+      list(APPEND obj_file_list "${obj_file}")
+    endforeach()
+  endif()
+
   if(kernel_cpunum STREQUAL "4000" AND B_stepping_only STREQUAL "yes")
     add_custom_command(
       OUTPUT "${elf_path}"
@@ -318,11 +345,18 @@ foreach(kernel_descrip ${kernel_descrip_list})
     )
   endif()
 
-  # Delete extra sources after compile such that we can apply different optimizations if needed
+  # Delete extra and asm sources after compile such that we can apply different optimizations if needed
   if(NOT extra_src_list STREQUAL "")
     foreach(extra_src_file ${extra_src_list})
       get_filename_component(src_name ${extra_src_file} NAME_WE)
       file(REMOVE_RECURSE "${CMAKE_CURRENT_BINARY_DIR}/extra_src/${kernel_cpu}/${dir_name}/${src_name}.${kernel_cpu}${obj_suffix}")
+    endforeach()
+  endif()
+
+  if(NOT asm_src_list STREQUAL "")
+    foreach(asm_src_file ${asm_src_list})
+      get_filename_component(src_name ${asm_src_file} NAME_WE)
+      file(REMOVE_RECURSE "${CMAKE_CURRENT_BINARY_DIR}/asm_src/${kernel_cpu}/${dir_name}/${src_name}.${kernel_cpu}${obj_suffix}")
     endforeach()
   endif()
 
@@ -337,7 +371,7 @@ foreach(kernel_descrip ${kernel_descrip_list})
 
   add_dependencies(act_shave_kernels_build "${blob_text_data_target}")
 
-  # NPU40XX B0 workaround removal binaries
+  # LNL B0 workaround removal binaries
   # E-116865: We also need to support duplicating the same binary for B0 and A0 when workaround disabeled due to compiler limitation
   if(kernel_cpunum STREQUAL "4000")
     set(link_libraries_list ${link_libraries_list_VPU4000_B0})
@@ -381,13 +415,36 @@ foreach(kernel_descrip ${kernel_descrip_list})
       endforeach()
     endif()
 
+    if(NOT asm_src_list STREQUAL "")
+      foreach(asm_src_file ${asm_src_list})
+        get_filename_component(src_name ${asm_src_file} NAME_WE)
+        get_filename_component(dir_name ${asm_src_file} DIRECTORY)
+
+        # Discard full path, just keep name of the dir the file is in
+        get_filename_component(dir_name ${dir_name} NAME_WE)
+
+        # Some asm_src files have the same filename so the .o files
+        # must be in separate directories to avoid overwriting.
+        file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/asm_src/${kernel_cpu}/${dir_name})
+        set(obj_file "${CMAKE_CURRENT_BINARY_DIR}/asm_src/${kernel_cpu}/${dir_name}/${src_name}.${kernel_cpu}_B0${obj_suffix}")
+
+        add_custom_command(
+          OUTPUT "${obj_file}"
+          DEPENDS "${kernel_src_file}"
+          COMMAND "${mv_tools_compile}" -mcpu=${kernel_cpu} ${asm_include_list} -c "${asm_src_file}" -o "${obj_file}"
+        )
+
+        list(APPEND obj_file_list "${obj_file}")
+      endforeach()
+    endif()
+
     add_custom_command(
       OUTPUT "${elf_path}"
       DEPENDS ${obj_file_list}
       COMMAND "${mv_tools_link}" --script "${link_script_file}" -entry "${kernel_entry}" --gc-sections --strip-debug --discard-all -zmax-page-size=16 ${obj_file_list} -EL ${link_libraries_list_VPU4000_B0} --output "${elf_path}"
     )
 
-    # Delete extra sources after compile such that we can apply different optimizations if needed
+    # Delete extra and asm sources after compile such that we can apply different optimizations if needed
     if(NOT extra_src_list STREQUAL "")
       foreach(extra_src_file ${extra_src_list})
         get_filename_component(src_name ${extra_src_file} NAME_WE)
@@ -395,8 +452,15 @@ foreach(kernel_descrip ${kernel_descrip_list})
       endforeach()
     endif()
 
-      set(blob_text_path "${target_binary_dir}/${blob_text_file}")
-      set(blob_data_path "${target_binary_dir}/${blob_data_file}")
+    if(NOT asm_src_list STREQUAL "")
+      foreach(asm_src_file ${asm_src_list})
+        get_filename_component(src_name ${asm_src_file} NAME_WE)
+        file(REMOVE_RECURSE "${CMAKE_CURRENT_BINARY_DIR}/asm_src/${kernel_cpu}/${dir_name}/${src_name}.${kernel_cpu}${obj_suffix}")
+      endforeach()
+    endif()
+
+    set(blob_text_path "${target_binary_dir}/${blob_text_file}")
+    set(blob_data_path "${target_binary_dir}/${blob_data_file}")
 
     add_custom_target("${blob_text_data_target}"
       COMMAND "${mv_tools_objcopy}" -O binary --only-section=.text "${elf_path}" "${blob_text_path}"

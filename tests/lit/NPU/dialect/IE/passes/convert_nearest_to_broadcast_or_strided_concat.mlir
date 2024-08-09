@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --convert-nearest-to-broadcast-or-strided-concat %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 // CHECK-LABEL: @ConvertNearestToStridedConcat_HW
 func.func @ConvertNearestToStridedConcat_HW(%arg0: tensor<1x128x6x10xf32>) -> tensor<1x128x12x20xf32> {
@@ -272,8 +272,8 @@ func.func @NearestToBroadCastConverterWithSIZESMode(%arg0: tensor<1x96x1x1xf32>)
     return %0 : tensor<1x96x33x33xf32>
 
     // CHECK-NOT: IE.Interpolate
-    // CHECK: [[CST:%.*]] = const.Declare tensor<4xsi64> = dense<[1, 96, 33, 33]> : tensor<4xsi64>, [#const.ConvertElemType<si32>]
-    // CHECK: [[CONCAT_OUT:%.*]] = IE.Broadcast(%arg0, [[CST]]) {mode = #IE.broadcast_type<NUMPY>} : tensor<1x96x1x1xf32>, tensor<4xsi64> -> tensor<1x96x33x33xf32>
+    // CHECK: [[CST:%.*]] = const.Declare tensor<4xsi32> = dense<[1, 96, 33, 33]> : tensor<4xsi64>, [#const.ConvertElemType<si32>]
+    // CHECK: [[CONCAT_OUT:%.*]] = IE.Broadcast(%arg0, [[CST]]) {mode = #IE.broadcast_type<NUMPY>} : tensor<1x96x1x1xf32>, tensor<4xsi32> -> tensor<1x96x33x33xf32>
     // CHECK: return [[CONCAT_OUT]] : tensor<1x96x33x33xf32>
 }
 
@@ -288,7 +288,7 @@ func.func @NearestToBroadCastConverterWithSCALESMode(%arg0: tensor<1x96x1x1xf32>
     return %0 : tensor<1x96x33x33xf32>
 
     // CHECK-NOT: IE.Interpolate
-    // CHECK: [[CST:%.*]] = const.Declare tensor<4xsi64> = dense<[1, 96, 33, 33]> : tensor<4xsi64>, [#const.ConvertElemType<si32>]
-    // CHECK: [[CONCAT_OUT:%.*]] = IE.Broadcast(%arg0, [[CST]]) {mode = #IE.broadcast_type<NUMPY>} : tensor<1x96x1x1xf32>, tensor<4xsi64> -> tensor<1x96x33x33xf32>
+    // CHECK: [[CST:%.*]] = const.Declare tensor<4xsi32> = dense<[1, 96, 33, 33]> : tensor<4xsi64>, [#const.ConvertElemType<si32>]
+    // CHECK: [[CONCAT_OUT:%.*]] = IE.Broadcast(%arg0, [[CST]]) {mode = #IE.broadcast_type<NUMPY>} : tensor<1x96x1x1xf32>, tensor<4xsi32> -> tensor<1x96x33x33xf32>
     // CHECK: return [[CONCAT_OUT]] : tensor<1x96x33x33xf32>
 }

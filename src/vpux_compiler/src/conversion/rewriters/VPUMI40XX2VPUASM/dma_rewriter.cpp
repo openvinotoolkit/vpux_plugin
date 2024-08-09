@@ -10,7 +10,7 @@
 namespace vpux {
 namespace vpumi40xx2vpuasm {
 
-mlir::FlatSymbolRefAttr NNDMARewriter::getSymbolicName(VPUMI40XX::NNDMAOp op, size_t) {
+llvm::SmallVector<mlir::FlatSymbolRefAttr> NNDMARewriter::getSymbolicNames(VPUMI40XX::NNDMAOp op, size_t) {
     auto fullName = VPUMI40XX::NNDMAOp::getOperationName();
     auto opName = fullName.drop_front(VPUMI40XX::VPUMI40XXDialect::getDialectNamespace().size() + 1);
 
@@ -20,7 +20,7 @@ mlir::FlatSymbolRefAttr NNDMARewriter::getSymbolicName(VPUMI40XX::NNDMAOp op, si
 
     auto symName = mlir::StringAttr::get(op.getContext(), opName + "_" + tileIdx + "_" + srcTypeIdx + "_" + opIdx);
 
-    return mlir::FlatSymbolRefAttr::get(symName);
+    return {mlir::FlatSymbolRefAttr::get(symName)};
 }
 
 VPUIP::DMADescriptorAttr NNDMARewriter::getDmaTransactionTraits(VPUMI40XX::NNDMAOp op, mlir::MLIRContext* ctx) const {
@@ -82,18 +82,30 @@ VPUIP::DMADescriptorAttr NNDMARewriter::getDmaTransactionTraits(VPUMI40XX::NNDMA
         num_planes = totalLength / reduced_dims_input.dims[0];
 
         plane_len = totalLength / num_planes;
-        dst_width = std::min(static_cast<uint32_t>(dst_width), plane_len);
-        dst_stride = std::min(static_cast<uint32_t>(dst_stride), plane_len);
-        dst_plane_stride = (plane_len / dst_width) * dst_stride;
+        if (totalLength == static_cast<int64_t>(dst_width)) {
+            dst_width = plane_len;
+            dst_stride = plane_len;
+            dst_plane_stride = plane_len;
+        } else {
+            dst_plane_stride = (plane_len * dst_stride) / dst_width;
+            dst_width = std::min(static_cast<uint32_t>(dst_width), plane_len);
+            dst_stride = std::min(static_cast<uint32_t>(dst_stride), plane_len);
+        }
     } else if (outputTransferRank == 2) {
         // 2D to 3D transaction
         dst_plane_stride = reduced_dims_output.strides[0];
         num_planes = totalLength / reduced_dims_output.dims[0];
 
         plane_len = totalLength / num_planes;
-        src_width = std::min(static_cast<uint32_t>(src_width), plane_len);
-        src_stride = std::min(static_cast<uint32_t>(src_stride), plane_len);
-        src_plane_stride = (plane_len / src_width) * src_stride;
+        if (totalLength == static_cast<int64_t>(src_width)) {
+            src_width = plane_len;
+            src_stride = plane_len;
+            src_plane_stride = plane_len;
+        } else {
+            src_plane_stride = (plane_len * src_stride) / src_width;
+            src_width = std::min(static_cast<uint32_t>(src_width), plane_len);
+            src_stride = std::min(static_cast<uint32_t>(src_stride), plane_len);
+        }
     } else {
         src_plane_stride = 0;
         dst_plane_stride = 0;
@@ -183,6 +195,10 @@ mlir::LogicalResult NNDMARewriter::symbolize(VPUMI40XX::NNDMAOp op, SymbolMapper
 
     auto indices = op.getIndices();
     mlir::SymbolRefAttr indicesAttr = indices ? findSym(indices) : nullptr;
+
+    mlir::SymbolRefAttr sparsityMapAttr =
+            op.getActCompressionSparsityMap() ? findSym(op.getActCompressionSparsityMap()) : nullptr;
+
     auto waitAttr = vectorizeBarriers(op.getWaitBarriers());
     auto updateAttr = vectorizeBarriers(op.getUpdateBarriers());
 
@@ -192,8 +208,8 @@ mlir::LogicalResult NNDMARewriter::symbolize(VPUMI40XX::NNDMAOp op, SymbolMapper
 
     rewriter.create<VPUASM::NNDMAOp>(op.getLoc(), symName, taskIdx, taskLocation, nextLink, input, outputs, waitAttr,
                                      updateAttr, startAfter, cleanAfter, accelerationMode, isOutOfOrder, isCritical,
-                                     enableMSC, actCompressionSizeEntryAttr, descriptor, dmaHwpIdAttr, cmxTiles,
-                                     indicesAttr);
+                                     enableMSC, actCompressionSizeEntryAttr, sparsityMapAttr, descriptor, dmaHwpIdAttr,
+                                     cmxTiles, indicesAttr);
 
     rewriter.eraseOp(op);
 

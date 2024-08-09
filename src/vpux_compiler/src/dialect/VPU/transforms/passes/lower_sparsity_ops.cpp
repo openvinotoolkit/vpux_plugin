@@ -12,6 +12,7 @@
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
 #include "vpux/compiler/utils/VPU/ppe_utils.hpp"
 
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/sparsity.hpp"
 #include "vpux/compiler/utils/types.hpp"
@@ -24,7 +25,7 @@ using namespace vpux;
 
 namespace {
 
-Const::DeclareOp createActSparsityMap(mlir::PatternRewriter& rewriter, mlir::Type type) {
+mlir::Value createActSparsityMap(mlir::PatternRewriter& rewriter, mlir::Type type) {
     auto dataType = type.cast<vpux::NDTypeInterface>();
     auto ctx = rewriter.getContext();
     if (auto sparseType = type.dyn_cast<VPU::SparseTensorType>()) {
@@ -33,10 +34,8 @@ Const::DeclareOp createActSparsityMap(mlir::PatternRewriter& rewriter, mlir::Typ
     const auto sparsityMapType = dataType.changeElemType(mlir::IntegerType::get(ctx, 1, mlir::IntegerType::Signless))
                                          .cast<mlir::RankedTensorType>();
 
-    const auto dataAttr = mlir::DenseElementsAttr::get(sparsityMapType, /*splatValue=*/true);
-    const auto content = Const::ContentAttr::get(dataAttr);
-
-    return rewriter.create<Const::DeclareOp>(mlir::UnknownLoc::get(ctx), sparsityMapType, content);
+    return Const::createConst(rewriter, mlir::UnknownLoc::get(ctx), sparsityMapType,
+                              /*splatValue=*/ArrayRef<bool>(true));
 }
 
 std::tuple<mlir::Value, Shape> insertExpandToAlign(mlir::PatternRewriter& rewriter, mlir::Value input,
@@ -122,7 +121,7 @@ mlir::LogicalResult rewriteSparsityOpWithEltwiseOp(mlir::PatternRewriter& rewrit
 
     const auto maybeRequantizedOutputType = outputType;
 
-    auto alignment = VPU::NCEEltwiseOp::getInputChannelAlignmentImpl(inputType);
+    auto alignment = vpux::VPU::NCEInvariant::getAlignment(inputType.getElementType());
     const auto arch = VPU::getArch(origOp);
     bool needAlignment = !vpux::VPU::NCEInvariant::isAligned(inputType, alignment, arch, logCb);
     bool isAlignmentResolvedByReshape = false;
@@ -292,7 +291,7 @@ mlir::LogicalResult rewriteSparsityOpWithConv(mlir::PatternRewriter& rewriter, m
     const auto maybeRequantizedOutputType = outputType;
 
     const auto arch = VPU::getArch(origOp);
-    auto alignment = VPU::NCEConvolutionOp::getInputChannelAlignmentImpl(inputType);
+    auto alignment = vpux::VPU::NCEInvariant::getAlignment(inputType.getElementType());
     bool needAlignment = !vpux::VPU::NCEInvariant::isAligned(inputType, alignment, arch, logCb);
     if (needAlignment) {
         Shape alignedShape;
@@ -450,8 +449,8 @@ mlir::LogicalResult RewriteSparsify::matchAndRewrite(VPU::SparsifyOp sparsifyOp,
     }
 
     const auto sparsityMap = createActSparsityMap(rewriter, sparsifyOp.getInput().getType());
-    auto groupedView = rewriter.create<VPU::GroupSparseTensorOp>(sparsifyOp.getLoc(), sparsifyOp.getInput(),
-                                                                 sparsityMap->getResult(0));
+    auto groupedView =
+            rewriter.create<VPU::GroupSparseTensorOp>(sparsifyOp.getLoc(), sparsifyOp.getInput(), sparsityMap);
     // GroupSparseTensorOp result have new type, so cant just replaceOpWithNewOp
     sparsifyOp.getOutput().replaceAllUsesWith(groupedView->getResult(0));
     rewriter.eraseOp(sparsifyOp);

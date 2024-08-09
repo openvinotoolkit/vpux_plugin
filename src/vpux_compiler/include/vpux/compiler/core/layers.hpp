@@ -12,6 +12,50 @@
 namespace vpux {
 
 //
+// Dims3D
+//
+
+struct Dims3D final {
+    // Matmul3d activations
+
+    struct Act final {
+        static const Dim B;
+        static const Dim H;
+        static const Dim IC;
+
+        static constexpr size_t numSpatialDims = 2;
+
+        static Dim getSpatialDim(size_t index) {
+            VPUX_THROW_UNLESS(index < 1, "Dims3D::Act: Wrong spatial dimension index '{0}'", index);
+            return Dim(index + 1);
+        }
+    };
+
+    // Matmul3d filter
+
+    struct Filter final {
+        static const Dim B;
+        static const Dim IC;
+        static const Dim OC;
+
+        static constexpr size_t numSpatialDims = 2;
+
+        static Dim getSpatialDim(size_t index) {
+            VPUX_THROW_UNLESS(index < 1, "Dims3D::Filter: Wrong spatial dimension index '{0}'", index);
+            return Dim(index + 1);
+        }
+    };
+
+    // Matmul3d output
+
+    struct Output final {
+        static const Dim B;
+        static const Dim H;
+        static const Dim OC;
+    };
+};
+
+//
 // Dims4D
 //
 
@@ -168,6 +212,77 @@ struct Dims5D final {
 
     struct PadsOutput final {
         static const Dim Z;
+        static const Dim Y;
+        static const Dim X;
+    };
+};
+
+// Layer itself is 2D, but several layers are grouped without sharing weights
+struct DimsGroups5D final {
+    // Grouped layer activations
+    struct Act final {
+        static const Dim G;
+        static const Dim N;
+        static const Dim C;
+        static const Dim H;
+        static const Dim W;
+
+        static constexpr size_t numDims = 5;
+        static constexpr size_t numSpatialDims = 2;
+
+        static Dim getSpatialDim(size_t index) {
+            VPUX_THROW_UNLESS(index < 2, "DimsGroups5D::Act: Wrong spatial dimension index '{0}'", index);
+            return Dim(index + 3);
+        }
+    };
+
+    // Grouped layer filter
+    struct Filter final {
+        static const Dim G;
+        static const Dim OC;
+        static const Dim IC;
+        static const Dim KY;
+        static const Dim KX;
+
+        static constexpr size_t numDims = 5;
+        static constexpr size_t numSpatialDims = 2;
+
+        static Dim getSpatialDim(size_t index) {
+            VPUX_THROW_UNLESS(index < 2, "DimsGroups5D::Filter: Wrong spatial dimension index '{0}'", index);
+            return Dim(index + 3);
+        }
+    };
+
+    // Grouped layer kernel
+    struct Kernel final {
+        static const Dim Y;
+        static const Dim X;
+    };
+
+    // Grouped layer strides
+    struct Strides final {
+        static const Dim Y;
+        static const Dim X;
+    };
+
+    // Grouped layer dilations
+    struct Dilation final {
+        static const Dim Y;
+        static const Dim X;
+    };
+
+    // Grouped layer paddings
+    struct PadsBegin final {
+        static const Dim Top;
+        static const Dim Left;
+    };
+    struct PadsEnd final {
+        static const Dim Bottom;
+        static const Dim Right;
+    };
+
+    // Grouped layer output paddings
+    struct PadsOutput final {
         static const Dim Y;
         static const Dim X;
     };

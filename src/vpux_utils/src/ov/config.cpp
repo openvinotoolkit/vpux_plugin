@@ -3,16 +3,17 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+//
+
 #include "vpux/utils/IE/config.hpp"
 #include "intel_npu/al/config/common.hpp"
 
 #include <openvino/core/except.hpp>
 #include <openvino/runtime/properties.hpp>
 
-using namespace vpux;
-using namespace intel_npu;
+namespace vpux {
 
-vpux::LogLevel vpux::getLogLevel(ov::log::Level level) {
+LogLevel getLogLevel(ov::log::Level level) {
     switch (level) {
     case ov::log::Level::NO:
         return LogLevel::None;
@@ -31,7 +32,9 @@ vpux::LogLevel vpux::getLogLevel(ov::log::Level level) {
     OPENVINO_THROW("Invalid log level.");
 }
 
-vpux::LogLevel vpux::getLogLevel(const Config& config) {
-    ov::log::Level ovLevel = config.get<LOG_LEVEL>();
+LogLevel getLogLevel(const intel_npu::Config& config) {
+    ov::log::Level ovLevel = config.get<intel_npu::LOG_LEVEL>();
     return getLogLevel(ovLevel);
 }
+
+}  // namespace vpux

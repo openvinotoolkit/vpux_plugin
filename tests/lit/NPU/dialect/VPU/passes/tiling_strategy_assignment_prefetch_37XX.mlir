@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --tiling-strategy-assignment %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX
+// REQUIRES: arch-NPU37XX
 
 // CHECK-LABEL: func.func @SplitSwConvOverOC
 // CHECK-SAME:        [[INPUT:%arg[0-9]]]: tensor<1x32x64x64xf16>,
@@ -98,19 +98,15 @@ func.func @InterpSplitOverC(
         %input1: tensor<1x32x64x64xf16>)
             -> tensor<1x32x256x256xf16> {
 
-    %0 = const.Declare tensor<2xsi64> = dense<[256, 256]> : tensor<2xsi64>
-    %1 = const.Declare tensor<2xf32>  = dense<[4.000000e+00, 4.00000e+00]> : tensor<2xf32>
-    %2 = const.Declare tensor<2xsi64> = dense<[2, 3]> : tensor<2xsi64>
-
-    %3 = VPU.Interpolate(%input1, %0, %1, %2) {
+    %0 = VPU.Interpolate(%input1) {
             attr = #IE.Interpolate<antialias = false, coord_mode = <HALF_PIXEL>, cube_coeff = -7.500000e-01, mode = <LINEAR>, nearest_mode = <ROUND_PREFER_FLOOR>, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], shape_calc_mode = <SIZES>>,
-            operandSegmentSizes = array<i32: 1, 1, 1, 1> } :
-        tensor<1x32x64x64xf16>, tensor<2xsi64>, tensor<2xf32>, tensor<2xsi64> -> tensor<1x32x256x256xf16>
+            axes_attr = [2, 3], sizes_attr = [256, 256], operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0> } :
+        tensor<1x32x64x64xf16> -> tensor<1x32x256x256xf16>
 
-    return %3 : tensor<1x32x256x256xf16>
+    return %0 : tensor<1x32x256x256xf16>
 
     // CHECK:       [[INTERP0:%.+]] = VPU.Interpolate([[INPUT]]
-    // CHECK-SAME:      tilingStrategy = [1, 3, 1, 1]
+    // CHECK-SAME:      tilingStrategy = [1, 1, 3, 1]
     // CHECK-SAME:      : tensor<1x32x64x64xf16>
     // CHECK-SAME:      -> tensor<1x32x256x256xf16>
 
@@ -129,14 +125,14 @@ func.func @InterpSplitOverH(
     %0 = VPU.Interpolate(%arg0) {
         attr = #IE.Interpolate<antialias = false, coord_mode = <ASYMMETRIC>, cube_coeff = -7.500000e-01 : f64, mode = <LINEAR_ONNX>, nearest_mode = <ROUND_PREFER_FLOOR>, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], shape_calc_mode = <SIZES>>,
         axes_attr = [2, 3],
-        operandSegmentSizes = array<i32: 1, 0, 0, 0>,
+        operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0>,
         sizes_attr = [192, 320],
         tile_offset_attr = [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00]} :
         tensor<1x64x48x80xf16, {order = #NHWC}> -> tensor<1x64x192x320xf16, {order = #NHWC}>
     return %0 : tensor<1x64x192x320xf16, {order = #NHWC}>
 
     // CHECK:  [[INTERP0:%.+]] = VPU.Interpolate(%arg0)
-    // CHECK-SAME:  tilingStrategy = [1, 1, 6, 1]
+    // CHECK-SAME:  tilingStrategy = [1, 1, 1, 5]
     // CHECH-SAME:  : tensor<1x64x48x80xf16, {order = #NHWC}>
     // CHECH-SAME:  -> tensor<1x64x192x320xf16, {order = #NHWC}>
 
@@ -155,13 +151,13 @@ func.func @InterpSplitOverHW(
     %0 = VPU.Interpolate(%input1) {
         attr = #IE.Interpolate<antialias = false, coord_mode = <HALF_PIXEL>, cube_coeff = -7.500000e-01, mode = <LINEAR>, nearest_mode = <ROUND_PREFER_FLOOR>, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], shape_calc_mode = <SIZES>>,
         axes_attr = [2, 3],
-        operandSegmentSizes = array<i32: 1, 0, 0, 0>,
+        operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0>,
         sizes_attr = [168, 335]} :
         tensor<1x128x35x35xf16, {order = #NHWC}> -> tensor<1x128x168x335xf16, {order = #NHWC}>
     return %0 : tensor<1x128x168x335xf16, {order = #NHWC}>
 
     // CHECK:  [[INTERP0:%.+]] = VPU.Interpolate(%arg0)
-    // CHECK-SAME:  tilingStrategy = [1, 1, 7, 5]
+    // CHECK-SAME:  tilingStrategy = [1, 1, 1, 8]
     // CHECH-SAME:  : tensor<1x128x35x35xf16, {order = #NHWC}>
     // CHECH-SAME:  -> tensor<1x128x168x335xf16, {order = #NHWC}>
 
@@ -181,14 +177,14 @@ func.func @InterpSplitOverCNoCommonFactor(
     %0 = VPU.Interpolate(%arg0) {
         attr = #IE.Interpolate<antialias = false, coord_mode = <ASYMMETRIC>, cube_coeff = -7.500000e-01 : f64, mode = <LINEAR_ONNX>, nearest_mode = <ROUND_PREFER_FLOOR>, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], shape_calc_mode = <SIZES>>,
         axes_attr = [2, 3],
-        operandSegmentSizes = array<i32: 1, 0, 0, 0>,
+        operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0>,
         sizes_attr = [121, 121],
         tile_offset_attr = [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00]} :
         tensor<1x64x31x31xf16, {order = #NHWC}> -> tensor<1x64x121x121xf16, {order = #NHWC}>
     return %0 : tensor<1x64x121x121xf16, {order = #NHWC}>
 
     // CHECK:  [[INTERP0:%.+]] = VPU.Interpolate(%arg0)
-    // CHECK-SAME:  tilingStrategy = [1, 2, 1, 1]
+    // CHECK-SAME:  tilingStrategy = [1, 1, 2, 1]
     // CHECH-SAME:  : tensor<1x64x31x31xf16, {order = #NHWC}>
     // CHECH-SAME:  -> tensor<1x64x121x121xf16, {order = #NHWC}>
 
@@ -859,15 +855,15 @@ func.func @SplitEqualEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tensor<1x
 // -----
 
 // CHECK-LABEL: @SplitNotEqualEltwiseSw
-// CHECK-SAME:      [[INPUT_0:%arg[0-9]]]: tensor<1x10x256x256xf16>, [[INPUT_1:%arg[0-9]]]: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xf16>
-func.func @SplitNotEqualEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xf16> {
-    %0 = VPU.NotEqual(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xf16>
-    return %0 : tensor<1x10x256x256xf16>
+// CHECK-SAME:      [[INPUT_0:%arg[0-9]]]: tensor<1x10x256x256xf16>, [[INPUT_1:%arg[0-9]]]: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xi8>
+func.func @SplitNotEqualEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xi8> {
+    %0 = VPU.NotEqual(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xi8>
+    return %0 : tensor<1x10x256x256xi8>
 
     // CHECK:       [[OUTPUT:%.+]] = VPU.NotEqual([[INPUT_0]], [[INPUT_1]]) {
-    // CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>, tilingStrategy = [1, 1, 2, 1]} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xf16>
+    // CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>, tilingStrategy = [1, 1, 2, 1]} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xi8>
 
-    // CHECK:       return [[OUTPUT]] : tensor<1x10x256x256xf16>
+    // CHECK:       return [[OUTPUT]] : tensor<1x10x256x256xi8>
 }
 
 // -----
@@ -887,55 +883,55 @@ func.func @SplitSoftPlusActivationSw(%arg0: tensor<1x8x80x1280xf16>) -> tensor<1
 // -----
 
 // CHECK-LABEL: @SplitLessEltwiseSw
-// CHECK-SAME:      [[INPUT_0:%arg[0-9]]]: tensor<1x10x256x256xf16>, [[INPUT_1:%arg[0-9]]]: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xf16>
-func.func @SplitLessEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xf16> {
-    %0 = VPU.Less(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xf16>
-    return %0 : tensor<1x10x256x256xf16>
+// CHECK-SAME:      [[INPUT_0:%arg[0-9]]]: tensor<1x10x256x256xf16>, [[INPUT_1:%arg[0-9]]]: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xi8>
+func.func @SplitLessEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xi8> {
+    %0 = VPU.Less(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xi8>
+    return %0 : tensor<1x10x256x256xi8>
     // CHECK:       [[OUTPUT:%.+]] = VPU.Less([[INPUT_0]], [[INPUT_1]]) {
-    // CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>, tilingStrategy = [1, 1, 2, 1]} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xf16>
+    // CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>, tilingStrategy = [1, 1, 2, 1]} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xi8>
 
-    // CHECK:       return [[OUTPUT]] : tensor<1x10x256x256xf16>
+    // CHECK:       return [[OUTPUT]] : tensor<1x10x256x256xi8>
 }
 
 // -----
 
 // CHECK-LABEL: @SplitLessEqualEltwiseSw
-// CHECK-SAME:      [[INPUT_0:%arg[0-9]]]: tensor<1x10x256x256xf16>, [[INPUT_1:%arg[0-9]]]: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xf16>
-func.func @SplitLessEqualEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xf16> {
-    %0 = VPU.LessEqual(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xf16>
-    return %0 : tensor<1x10x256x256xf16>
+// CHECK-SAME:      [[INPUT_0:%arg[0-9]]]: tensor<1x10x256x256xf16>, [[INPUT_1:%arg[0-9]]]: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xi8>
+func.func @SplitLessEqualEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xi8> {
+    %0 = VPU.LessEqual(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xi8>
+    return %0 : tensor<1x10x256x256xi8>
     // CHECK:       [[OUTPUT:%.+]] = VPU.LessEqual([[INPUT_0]], [[INPUT_1]]) {
-    // CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>, tilingStrategy = [1, 1, 2, 1]} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xf16>
+    // CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>, tilingStrategy = [1, 1, 2, 1]} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xi8>
 
-    // CHECK:       return [[OUTPUT]] : tensor<1x10x256x256xf16>
+    // CHECK:       return [[OUTPUT]] : tensor<1x10x256x256xi8>
 }
 
 // -----
 
 // CHECK-LABEL: @SplitGreaterEltwiseSw
-// CHECK-SAME:      [[INPUT_0:%arg[0-9]]]: tensor<1x10x256x256xf16>, [[INPUT_1:%arg[0-9]]]: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xf16>
-func.func @SplitGreaterEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xf16> {
-    %0 = VPU.Greater(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xf16>
-    return %0 : tensor<1x10x256x256xf16>
+// CHECK-SAME:      [[INPUT_0:%arg[0-9]]]: tensor<1x10x256x256xf16>, [[INPUT_1:%arg[0-9]]]: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xi8>
+func.func @SplitGreaterEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xi8> {
+    %0 = VPU.Greater(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xi8>
+    return %0 : tensor<1x10x256x256xi8>
 
     // CHECK:       [[OUTPUT:%.+]] = VPU.Greater([[INPUT_0]], [[INPUT_1]]) {
-    // CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>, tilingStrategy = [1, 1, 2, 1]} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xf16>
+    // CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>, tilingStrategy = [1, 1, 2, 1]} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xi8>
 
-    // CHECK:       return [[OUTPUT]] : tensor<1x10x256x256xf16>
+    // CHECK:       return [[OUTPUT]] : tensor<1x10x256x256xi8>
 }
 
 // -----
 
 // CHECK-LABEL: @SplitGreaterEqualEltwiseSw
-// CHECK-SAME:      [[INPUT_0:%arg[0-9]]]: tensor<1x10x256x256xf16>, [[INPUT_1:%arg[0-9]]]: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xf16>
-func.func @SplitGreaterEqualEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xf16> {
-    %0 = VPU.GreaterEqual(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xf16>
-    return %0 : tensor<1x10x256x256xf16>
+// CHECK-SAME:      [[INPUT_0:%arg[0-9]]]: tensor<1x10x256x256xf16>, [[INPUT_1:%arg[0-9]]]: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xi8>
+func.func @SplitGreaterEqualEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xi8> {
+    %0 = VPU.GreaterEqual(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xi8>
+    return %0 : tensor<1x10x256x256xi8>
 
     // CHECK:       [[OUTPUT:%.+]] = VPU.GreaterEqual([[INPUT_0]], [[INPUT_1]]) {
-    // CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>, tilingStrategy = [1, 1, 2, 1]} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xf16>
+    // CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>, tilingStrategy = [1, 1, 2, 1]} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xi8>
 
-    // CHECK:       return [[OUTPUT]] : tensor<1x10x256x256xf16>
+    // CHECK:       return [[OUTPUT]] : tensor<1x10x256x256xi8>
 }
 
 // -----

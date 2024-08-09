@@ -4,7 +4,7 @@
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --adjust-for-optimized-sw-kernel %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
@@ -218,4 +218,34 @@ func.func @NotAdjustForMultiplyMultiShaveOptForConstInput(%arg0: tensor<1x1x128x
     // CHECK:        [[MULTIPLY:%.*]] = VPU.Multiply([[INPUT]], [[CST]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x1x128x32xf16>, tensor<1x1x128x32xf16> -> tensor<1x1x128x32xf16>
     // CHECK-NOT:    VPU.ShapeCast
     // CHECK:        return [[MULTIPLY]]
+}
+
+// -----
+
+// CHECK-LABEL:   @AdjustForMVNWithBatchAndAcrossChannels
+// CHECK-SAME:    [[INPUT:%.*]]: tensor<8x16x2x8xf16>
+func.func @AdjustForMVNWithBatchAndAcrossChannels(%arg0: tensor<8x16x2x8xf16>) -> tensor<8x16x2x8xf16> {
+    %0 = VPU.MVN(%arg0) {across_channels = true, eps = 6.0892105102539063E-4 : f64, normalize_variance = true} : tensor<8x16x2x8xf16> -> tensor<8x16x2x8xf16>
+
+    return %0 : tensor<8x16x2x8xf16>
+
+    // CHECK:        [[SHAPECAST_IN:%.*]] = VPU.ShapeCast {shape = [1, 8, 256, 1]} inputs([[INPUT]] : tensor<8x16x2x8xf16>) -> tensor<1x8x256x1xf16>
+    // CHECK:        [[MVN:%.*]] = VPU.MVN([[SHAPECAST_IN]]) {across_channels = false, eps = 6.0892105102539063E-4 : f64, normalize_variance = true} : tensor<1x8x256x1xf16> -> tensor<1x8x256x1xf16>
+    // CHECK:        [[SHAPECAST_OUT:%.*]] = VPU.ShapeCast {shape = [8, 16, 2, 8]} inputs([[MVN]] : tensor<1x8x256x1xf16>) -> tensor<8x16x2x8xf16>
+    // CHECK:        return [[SHAPECAST_OUT]]
+}
+
+// -----
+
+// CHECK-LABEL:   @AdjustForMVNWithBatchAndNotAcrossChannels
+// CHECK-SAME:    [[INPUT:%.*]]: tensor<8x16x2x8xf16>
+func.func @AdjustForMVNWithBatchAndNotAcrossChannels(%arg0: tensor<8x16x2x8xf16>) -> tensor<8x16x2x8xf16> {
+    %0 = VPU.MVN(%arg0) {across_channels = false, eps = 6.0892105102539063E-4 : f64, normalize_variance = true} : tensor<8x16x2x8xf16> -> tensor<8x16x2x8xf16>
+
+    return %0 : tensor<8x16x2x8xf16>
+
+    // CHECK:        [[SHAPECAST_IN:%.*]] = VPU.ShapeCast {shape = [1, 128, 2, 8]} inputs([[INPUT]] : tensor<8x16x2x8xf16>) -> tensor<1x128x2x8xf16>
+    // CHECK:        [[MVN:%.*]] = VPU.MVN([[SHAPECAST_IN]]) {across_channels = false, eps = 6.0892105102539063E-4 : f64, normalize_variance = true} : tensor<1x128x2x8xf16> -> tensor<1x128x2x8xf16>
+    // CHECK:        [[SHAPECAST_OUT:%.*]] = VPU.ShapeCast {shape = [8, 16, 2, 8]} inputs([[MVN]] : tensor<1x128x2x8xf16>) -> tensor<8x16x2x8xf16>
+    // CHECK:        return [[SHAPECAST_OUT]]
 }

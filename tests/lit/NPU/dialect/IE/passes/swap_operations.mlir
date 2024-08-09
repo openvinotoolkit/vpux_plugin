@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --swap-operations %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 #NHCW = affine_map<(d0, d1, d2, d3) -> (d0, d2, d1, d3)>
 
@@ -245,6 +245,30 @@ func.func @SwapWithClamp(%arg0: tensor<4x512x1x1xf16>) -> tensor<1x2048x4x1xf16>
     // CHECK: IE.Convolution
     // CHECK-SAME: tensor<4x512x1x1xf16>, tensor<2048x512x1x1xf16> -> tensor<4x2048x1x1xf16>
     // CHECK: IE.Clamp
+    // CHECK-SAME: tensor<4x2048x1x1xf16> -> tensor<4x2048x1x1xf16>
+    // CHECK: IE.AffineReshape
+    // CHECK-SAME: tensor<4x2048x1x1xf16> -> tensor<1x4x2048x1xf16>
+    // CHECK: IE.Transpose
+    // CHECK-SAME: tensor<1x4x2048x1xf16> -> tensor<1x2048x4x1xf16>
+}
+
+// -----
+
+#NHCW = affine_map<(d0, d1, d2, d3) -> (d0, d2, d1, d3)>
+
+// CHECK-LABEL: @SwapWithGelu
+func.func @SwapWithGelu(%arg0: tensor<4x512x1x1xf16>) -> tensor<1x2048x4x1xf16> {
+    %cst = const.Declare tensor<2048x512x1x1xf16> = dense<1.000000e+00> : tensor<2048x512xf16>, [#const.Reshape<[2048, 512, 1, 1]>]
+    %0 = IE.Convolution(%arg0, %cst) {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<4x512x1x1xf16>, tensor<2048x512x1x1xf16> -> tensor<4x2048x1x1xf16>
+    %1 = IE.AffineReshape(%0) {dim_mapping = [[0, 1], [2], [3], [3]], shape_value = [1, 4, 2048, 1]} : tensor<4x2048x1x1xf16> -> tensor<1x4x2048x1xf16>
+    %2 = IE.Transpose(%1) {order_value = #NHCW} : tensor<1x4x2048x1xf16> -> tensor<1x2048x4x1xf16>
+    %3 = IE.Gelu(%2) : tensor<1x2048x4x1xf16> -> tensor<1x2048x4x1xf16>
+
+    return %3 : tensor<1x2048x4x1xf16>
+
+    // CHECK: IE.Convolution
+    // CHECK-SAME: tensor<4x512x1x1xf16>, tensor<2048x512x1x1xf16> -> tensor<4x2048x1x1xf16>
+    // CHECK: IE.Gelu
     // CHECK-SAME: tensor<4x2048x1x1xf16> -> tensor<4x2048x1x1xf16>
     // CHECK: IE.AffineReshape
     // CHECK-SAME: tensor<4x2048x1x1xf16> -> tensor<1x4x2048x1xf16>

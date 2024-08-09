@@ -11,18 +11,28 @@ using namespace vpux;
 // build
 //
 
-void VPUIP::UngroupSparseBufferOp::build(mlir::OpBuilder& builder, mlir::OperationState& state, mlir::Type data,
+// TODO: #-122030 Remove these builders when possible.
+// These builders were originally implemented due to a bug in the auto-generated builders from MLIR.
+// This bug is fixed, but now there is a different bug that prevents us from using the auto-generated
+// ones. As soon as https://discourse.llvm.org/t/generic-operation-builder-does-not-set-up-properties/78552/
+// is fixed/implemented these builders can be removed and the auto-generated ones should be used.
+
+void VPUIP::UngroupSparseBufferOp::build(mlir::OpBuilder&, mlir::OperationState& state, mlir::Type data,
                                          mlir::Type sparsityMap, mlir::Type storageElementTable, mlir::Value input) {
     state.addOperands(input);
     state.addTypes(data);
-    if (sparsityMap) {
+    if (sparsityMap != nullptr) {
         state.addTypes(sparsityMap);
     }
-    if (storageElementTable) {
+    if (storageElementTable != nullptr) {
         state.addTypes(storageElementTable);
     }
-    state.addAttribute(getResultSegmentSizesAttrName(state.name),
-                       builder.getDenseI32ArrayAttr({1, (sparsityMap ? 1 : 0), (storageElementTable ? 1 : 0)}));
+
+    const int32_t sparsityMapAttrVal = (sparsityMap != nullptr) ? 1 : 0;
+    const int32_t seTableAttrVal = (storageElementTable != nullptr) ? 1 : 0;
+
+    auto& properties = state.getOrAddProperties<VPUIP::UngroupSparseBufferOp::Properties>();
+    properties.setResultSegmentSizes({1, sparsityMapAttrVal, seTableAttrVal});
 }
 
 void VPUIP::UngroupSparseBufferOp::build(mlir::OpBuilder& builder, mlir::OperationState& state, mlir::Value input) {
@@ -42,8 +52,9 @@ void VPUIP::UngroupSparseBufferOp::build(mlir::OpBuilder& builder, mlir::Operati
     VPUX_THROW_WHEN(sparseInput == nullptr, "Input type ({0}) is not a sparse buffer", input.getType());
     const int32_t sparsityMapAttrVal = (sparseInput.getSparsityMap() != nullptr) ? 1 : 0;
     const int32_t seTableAttrVal = (sparseInput.getStorageElementTable() != nullptr) ? 1 : 0;
-    state.addAttribute(getResultSegmentSizesAttrName(state.name),
-                       builder.getDenseI32ArrayAttr({1, sparsityMapAttrVal, seTableAttrVal}));
+
+    auto& properties = state.getOrAddProperties<VPUIP::UngroupSparseBufferOp::Properties>();
+    properties.setResultSegmentSizes({1, sparsityMapAttrVal, seTableAttrVal});
 }
 
 //

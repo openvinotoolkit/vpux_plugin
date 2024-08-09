@@ -68,13 +68,13 @@ void checkBarrierMaps(const BarrierInfoTest::BarrierMaps& expectedResult,
  *        0                     0
  *       /  \                   |
  *       |   \                  |
- *      bar0  \                bar0
- *       |  \  \                |  \
+ *      b0    \                b0
+ *       | \   \                | \
  *       |   1  |               |   1
  *       |    \ |               |    \
- *       |     b1    =>         |     b1
+ *       |     b1      =>       |     b1
  *       |      |               |      |
- *       2      |        =>     2      |
+ *       2      |               2      |
  *       |     /                |     /
  *      bar2  /                bar2  /
  *       |   /                  |   /
@@ -143,6 +143,187 @@ std::pair<BarrierInfoTest::BarrierMaps, BarrierInfoTest::BarrierMaps> redundantP
             {1},  // barrier 1
             {2},  // barrier 2
     };
+
+    return std::make_pair(inputBarrierMaps, expectedBarrierMaps);
+}
+
+/**
+ *
+ * This graph tests optimization of parallel branches depending on limit of allowed number of variants per barrier.
+ * If _maxVariantCountPerBarrier = 4 the schedule will not be optimized as tested in
+ * optimizeParallelBlocksWithTooFewVariantsPerBarrier.
+ *
+ * Setting in the test body to
+ *
+ *      barrierInfoTest.setMaxVariantCountPerBarrier(64);
+ *
+ * optimizes the graph correctly.
+ *
+ *        0..7                                  0..7
+ *         /\                                     |
+ *    fully connected                             |
+ *  b0              b1                           b0
+ *  |               |                             |
+ *  /\              |                            / \
+ * 8..16            |                           8..16
+ *  \/              |              =>            \ /
+ *  b2              |                            b2
+ *   |              |                             |
+ *  17              |                            17
+ *   |              |                             |
+ *  b3              |                            b3
+ *   |              |                             |
+ *   \-------------\|                             |
+ *                  |                             |
+ *                 / \                           / \
+ *                18..28                        18..28
+ *                 \ /                           \ /
+ *                  b4                            b4
+ *                  |                             |
+ *                  29                            29
+ *
+ */
+std::pair<BarrierInfoTest::BarrierMaps, BarrierInfoTest::BarrierMaps> parallelBlocksConfig() {
+    BarrierInfoTest::BarrierMaps inputBarrierMaps;
+    BarrierInfoTest::BarrierMaps expectedBarrierMaps;
+    inputBarrierMaps.taskUpdateBarriers = {
+            {0, 1},  // task 0
+            {0, 1},  // task 1
+            {0, 1},  // task 2
+            {0, 1},  // task 3
+            {0, 1},  // task 4
+            {0, 1},  // task 5
+            {0, 1},  // task 6
+            {0, 1},  // task 7
+            {2},     // task 8
+            {2},     // task 9
+            {2},     // task 10
+            {2},     // task 11
+            {2},     // task 12
+            {2},     // task 13
+            {2},     // task 14
+            {2},     // task 15
+            {2},     // task 16
+            {3},     // task 17 -- end of 1st block
+            {4},     // task 18
+            {4},     // task 19
+            {4},     // task 20
+            {4},     // task 21
+            {4},     // task 22
+            {4},     // task 23
+            {4},     // task 24
+            {4},     // task 25
+            {4},     // task 26
+            {4},     // task 27
+            {4},     // task 28
+            {},      // task 29
+    };
+
+    inputBarrierMaps.taskWaitBarriers = {
+            {},      // task 0
+            {},      // task 1
+            {},      // task 2
+            {},      // task 3
+            {},      // task 4
+            {},      // task 5
+            {},      // task 6
+            {},      // task 7
+            {0},     // task 8
+            {0},     // task 9
+            {0},     // task 10
+            {0},     // task 11
+            {0},     // task 12
+            {0},     // task 13
+            {0},     // task 14
+            {0},     // task 15
+            {0},     // task 16
+            {2},     // task 17 -- end of 1st block
+            {1, 3},  // task 18
+            {1, 3},  // task 19
+            {1, 3},  // task 20
+            {1, 3},  // task 21
+            {1, 3},  // task 22
+            {1, 3},  // task 23
+            {1, 3},  // task 24
+            {1, 3},  // task 25
+            {1, 3},  // task 26
+            {1, 3},  // task 27
+            {1, 3},  // task 28
+            {4},     // task 29
+    };
+
+    fillProducersAndConsumers(inputBarrierMaps);
+    inputBarrierMaps.controlGraphBlockSize = 0;  // Control graph split is not done
+    inputBarrierMaps.Ntasks = 30;
+    inputBarrierMaps.Nbarriers = 5;
+
+    expectedBarrierMaps.taskUpdateBarriers = {
+            {0},  // task 0
+            {0},  // task 1
+            {0},  // task 2
+            {0},  // task 3
+            {0},  // task 4
+            {0},  // task 5
+            {0},  // task 6
+            {0},  // task 7
+            {2},  // task 8
+            {2},  // task 9
+            {2},  // task 10
+            {2},  // task 11
+            {2},  // task 12
+            {2},  // task 13
+            {2},  // task 14
+            {2},  // task 15
+            {2},  // task 16
+            {3},  // task 17 -- end of 1st block
+            {4},  // task 18
+            {4},  // task 19
+            {4},  // task 20
+            {4},  // task 21
+            {4},  // task 22
+            {4},  // task 23
+            {4},  // task 24
+            {4},  // task 25
+            {4},  // task 26
+            {4},  // task 27
+            {4},  // task 28
+            {},   // task 29
+    };
+
+    expectedBarrierMaps.taskWaitBarriers = {
+            {},   // task 0
+            {},   // task 1
+            {},   // task 2
+            {},   // task 3
+            {},   // task 4
+            {},   // task 5
+            {},   // task 6
+            {},   // task 7
+            {0},  // task 8
+            {0},  // task 9
+            {0},  // task 10
+            {0},  // task 11
+            {0},  // task 12
+            {0},  // task 13
+            {0},  // task 14
+            {0},  // task 15
+            {0},  // task 16
+            {2},  // task 17 -- end of 1st block
+            {3},  // task 18
+            {3},  // task 19
+            {3},  // task 20
+            {3},  // task 21
+            {3},  // task 22
+            {3},  // task 23
+            {3},  // task 24
+            {3},  // task 25
+            {3},  // task 26
+            {3},  // task 27
+            {3},  // task 28
+            {4},  // task 29
+    };
+
+    fillProducersAndConsumers(expectedBarrierMaps);
 
     return std::make_pair(inputBarrierMaps, expectedBarrierMaps);
 }
@@ -606,5 +787,30 @@ TEST_F(BarrierInfoTests, optimizeBarrierConsumersWithTwoTaskBlocks) {
     std::tie(barrierConfig, expectedResult) = redundantConsumersWithTwoBlockTaskSplitConfig(blocksToOptimize);
     barrierInfoTest.initializeBarrierMaps(barrierConfig);
     optimizedResult = barrierInfoTest.optimizeBarrierConsumers(/* blockIdx */ 1);
+    checkBarrierMaps(expectedResult, optimizedResult);
+}
+
+/**
+ * Test BarrierInfo::optimizeBarriers
+ *
+ */
+TEST_F(BarrierInfoTests, optimizeParallelBlocks) {
+    auto [barrierConfig, expectedResult] = parallelBlocksConfig();
+    BarrierInfoTest barrierInfoTest(barrierConfig);
+    barrierInfoTest.setMaxVariantCountPerBarrier(64);
+    auto optimizedResult = barrierInfoTest.optimizeBarriers();
+    checkBarrierMaps(expectedResult, optimizedResult);
+}
+
+TEST_F(BarrierInfoTests, optimizeParallelBlocksWithTooFewVariantsPerBarrier) {
+    auto [barrierConfig, expectedResult] = parallelBlocksConfig();
+    BarrierInfoTest barrierInfoTest(barrierConfig);
+    barrierInfoTest.setMaxVariantCountPerBarrier(4);
+    auto optimizedResult = barrierInfoTest.optimizeBarriers();
+    // we do not expect optimized result when there are insufficient slots
+    checkBarrierMaps(barrierConfig, optimizedResult);
+
+    // force optimization without slot count checks
+    optimizedResult = barrierInfoTest.optimizeBarriers(/* checkValidSlotCount */ false);
     checkBarrierMaps(expectedResult, optimizedResult);
 }

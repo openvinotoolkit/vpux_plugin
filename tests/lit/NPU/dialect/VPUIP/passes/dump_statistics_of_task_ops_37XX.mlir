@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: env IE_NPU_LOG_FILTER="dump-statistics-of-task-ops" vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW" --dump-statistics-of-task-ops -o /dev/null %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX
+// REQUIRES: arch-NPU37XX
 
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
@@ -150,6 +150,33 @@ module @DumpOpsStatisticsTest {
 // CHECK:     Swizzled constants     - count: 0, size: 0 bytes
 // CHECK:     Not swizzled constants - count: 1, size: 4.50 KB
 
+// -----
+
+#CHW = affine_map<(d0, d1, d2) -> (d0, d1, d2)>
+
+module @DumpOpsStatisticsTest {
+
+    func.func @NNDMAWithStrideOutput(%arg0: memref<1x15460x21xf16, [@CMX_NN, 0]>, %arg1: memref<1x15460x21xf16, {order = #CHW, strides = [989440, 64, 1]}, @DDR>
+                                ) -> memref<1x15460x21xf16, {order = #CHW, strides = [989440, 64, 1]}, @DDR> {
+        VPURT.Task attributes {isTrailingSWLayer = false} {
+            %1 = VPUIP.NNDMA {set_crit = false, set_ord = true}
+                inputs(%arg0 : memref<1x15460x21xf16, [@CMX_NN, 0]>)
+                outputs(%arg1 : memref<1x15460x21xf16, {order = #CHW, strides = [989440, 64, 1]}, @DDR>) -> memref<1x15460x21xf16, {order = #CHW, strides = [989440, 64, 1]}, @DDR>
+        }
+        return %arg1 : memref<1x15460x21xf16, {order = #CHW, strides = [989440, 64, 1]}, @DDR>
+    } // func
+}
+
+// CHECK:   Input size - 634.10 KB Output size - 1.88 MB
+// CHECK:   VPUIP tasks statistics:
+// CHECK:   VPUIP Tasks - 1 ops
+// CHECK:     VPUIP.NNDMA - 1 ops : Size - 634.10 KB
+// CHECK:       CMX2DDR - 1 ops : Size - 634.10 KB
+// CHECK:   Weights statistics
+// CHECK:     Total weights - count: 0, size: 0 bytes (no compression)
+// CHECK:   Const swizzling statistics:
+// CHECK:     Swizzled constants     - count: 0, size: 0 bytes
+// CHECK:     Not swizzled constants - count: 0, size: 0 bytes
 
 // -----
 

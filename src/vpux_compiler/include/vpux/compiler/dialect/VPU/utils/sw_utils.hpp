@@ -35,6 +35,8 @@ VPU::DistributionMode getSWInputTensorDistributionMode(VPU::DetectionOutputSortO
                                                        vpux::NDTypeInterface inputType);
 VPU::DistributionMode getSWInputTensorDistributionMode(VPU::MatMulOp op, VPU::MultiClusterStrategy strategy,
                                                        vpux::NDTypeInterface inputType);
+VPU::DistributionMode getSWInputTensorDistributionMode(VPU::LSTMGatesOp lstmGatesOp, VPU::MultiClusterStrategy strategy,
+                                                       vpux::NDTypeInterface inputType);
 VPU::DistributionMode getSWInputTensorDistributionMode(VPU::MVN1NormalizeOp op, VPU::MultiClusterStrategy strategy,
                                                        vpux::NDTypeInterface inputType);
 
@@ -60,6 +62,8 @@ SmallVector<int64_t> getSWInputTensorNumTiles(VPU::AccumulateOp accumulateOp,
 SmallVector<int64_t> getSWInputTensorNumTiles(VPU::DetectionOutputSortOp op, int64_t numClustersAvailableForCompilation,
                                               VPU::MultiClusterStrategy strategy, vpux::NDTypeInterface inputType);
 SmallVector<int64_t> getSWInputTensorNumTiles(VPU::MatMulOp op, int64_t numClustersAvailableForCompilation,
+                                              VPU::MultiClusterStrategy strategy, vpux::NDTypeInterface inputType);
+SmallVector<int64_t> getSWInputTensorNumTiles(VPU::LSTMGatesOp lstmGatesOp, int64_t numClustersAvailableForCompilation,
                                               VPU::MultiClusterStrategy strategy, vpux::NDTypeInterface inputType);
 SmallVector<int64_t> getSWInputTensorNumTiles(VPU::MVN1NormalizeOp op, int64_t numClustersAvailableForCompilation,
                                               VPU::MultiClusterStrategy strategy, vpux::NDTypeInterface inputType);

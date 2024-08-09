@@ -11,7 +11,7 @@
 
 #include <chrono>
 
-namespace vpux {
+namespace intel_npu {
 
 //
 // MV_TOOLS_PATH
@@ -117,4 +117,4 @@ struct MV_RUN_TIMEOUT final : OptionBase<MV_RUN_TIMEOUT, std::chrono::seconds> {
     }
 };
 
-}  // namespace vpux
+}  // namespace intel_npu

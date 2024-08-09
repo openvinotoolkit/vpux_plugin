@@ -139,11 +139,20 @@ struct InitCompilerOptions : mlir::PassPipelineOptions<InitCompilerOptions> {
     // SetupBarrierVariantConstraints pass options
     BoolOption enablePartialWorkloadManagement{*this, "enable-partial-workload-management",
                                                llvm::cl::desc("Enable partial workload management"),
-                                               llvm::cl::init(false)};
+                                               llvm::cl::init(true)};
     BoolOption wlmRollback{
             *this, "wlm-rollback",
             llvm::cl::desc("When compilation with WLM fails, automatically switches to WLM-disabled pipeline"),
             llvm::cl::init(true)};
+
+    // SetupChannelsAutoPadding pass options
+    BoolOption enableAutoPaddingODU{*this, "enable-auto-padding-odu",
+                                    llvm::cl::desc("Enable auto padding for output channels"), llvm::cl::init(false)};
+
+    // SetupIsReduceSupported pass options
+    BoolOption enableIsReduceSupported{*this, "enable-is-reduce-supported",
+                                       ::llvm::cl::desc("[Optional] Set IsReduceSupported for NCE to true/false"),
+                                       ::llvm::cl::init(false)};
 
     InitCompilerOptions() = default;
 
@@ -170,7 +179,8 @@ struct InitCompilerOptions : mlir::PassPipelineOptions<InitCompilerOptions> {
                         std::optional<int> revisionIDParam = std::nullopt,
                         std::optional<int> numberOfDPUGroupsParam = std::nullopt,
                         std::optional<int> numberOfDMAPortsParam = std::nullopt,
-                        std::optional<bool> wlmRollbackParam = std::nullopt) {
+                        std::optional<bool> wlmRollbackParam = std::nullopt,
+                        std::optional<Byte> availableCMXMemoryParam = std::nullopt) {
         arch = std::string(VPU::stringifyEnum(archParam));
         compilationMode = std::string(VPU::stringifyEnum(compilationModeParam));
 
@@ -178,6 +188,7 @@ struct InitCompilerOptions : mlir::PassPipelineOptions<InitCompilerOptions> {
         maybeSetValue(numberOfDPUGroups, numberOfDPUGroupsParam);
         maybeSetValue(numberOfDMAPorts, numberOfDMAPortsParam);
         maybeSetValue(wlmRollback, wlmRollbackParam);
+        setAvailableCMXMemory(availableCMXMemoryParam);
     }
 
 public:
@@ -213,13 +224,13 @@ std::unique_ptr<mlir::Pass> createInitResourcesPass(const InitCompilerOptions& i
                                                     Logger log = Logger::global());
 
 std::unique_ptr<mlir::Pass> createOptimizeSharedInputCopyForConcatPass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createCMXConcatPass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createSplitDDRConcatIntoCMXPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createCMXConcatPass(Logger log = Logger::global(), bool supportNCEOpInsertion = true);
 std::unique_ptr<mlir::Pass> createSplitNCEOpsOntoWorkloadsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createResolveEltwiseWithZTiledWorkloadsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createShiftOutputWorkloadsForHaloPass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createWrapVPUOpsInNCEClusterTilingPass(bool enableExplicitDistributedTensorAttr = false,
+std::unique_ptr<mlir::Pass> createMakeOpsWithDistributedTensorPass(bool enableExplicitDistributedTensorAttr = false,
                                                                    Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createAdjustDistributedTensorAroundOpsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createWrapDistributedOpsInNCEClusterTiling(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createAdjustMemorySpacePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createMultiClusterStrategyAssignmentPass(bool enablePrefetchTiling = true,
@@ -240,6 +251,7 @@ std::unique_ptr<mlir::Pass> createManualStrategyUtilsPass(bool writeStrategyToJS
 std::unique_ptr<mlir::Pass> createResolvePWLPostOpsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createDetectionOutputDecompositionPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createSplitGRUSequencePass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createComputeInterpolateCoordinatesPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createDetectInPlaceEltwisePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createFuseNCEInterpolateConsumersPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createAddExplicitPaddingBeforeNCEPermutePass(Logger log = Logger::global());
@@ -279,6 +291,7 @@ std::unique_ptr<mlir::Pass> createLowerOpsToSENCEPass(const bool seOpsEnabled = 
                                                       Logger log = Logger::global());
 
 std::unique_ptr<mlir::Pass> createConvertOpToDMAForPerformantExecutionPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createTileGatherPass(Logger log = Logger::global());
 
 //
 // Tiling
@@ -322,12 +335,36 @@ void buildSMPipeline(mlir::OpPassManager& pm, const vpux::MCAndTilingOptionsBase
                      Logger log = Logger::global());
 
 //
+// Setup Pipeline Options
+//
+
+std::unique_ptr<mlir::Pass> createSetupPipelineOptionsPass();
+std::unique_ptr<mlir::Pass> createSetupPipelineOptionsPass(const InitCompilerOptions& initCompilerOptions,
+                                                           Logger log = Logger::global());
+
+//
 // Barrier Variant Constraints
 //
 
 std::unique_ptr<mlir::Pass> createSetupPerBarrierVariantConstraintPass();
 std::unique_ptr<mlir::Pass> createSetupPerBarrierVariantConstraintPass(const InitCompilerOptions& initCompilerOptions,
                                                                        Logger log = Logger::global());
+
+//
+// Channels Auto Padding
+//
+
+std::unique_ptr<mlir::Pass> createSetupChannelsAutoPaddingPass();
+std::unique_ptr<mlir::Pass> createSetupChannelsAutoPaddingPass(const InitCompilerOptions& initCompilerOptions,
+                                                               Logger log = Logger::global());
+
+//
+// Reduce Operation
+//
+
+std::unique_ptr<mlir::Pass> createSetupIsReduceSupportedPass();
+std::unique_ptr<mlir::Pass> createSetupIsReduceSupportedPass(const InitCompilerOptions& initCompilerOptions,
+                                                             Logger log = Logger::global());
 
 //
 // DefaultHWOptions(for all devices)

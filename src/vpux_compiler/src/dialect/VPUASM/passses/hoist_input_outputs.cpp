@@ -5,6 +5,7 @@
 
 #include <mlir/Transforms/DialectConversion.h>
 #include <vector>
+#include "vpux/compiler/dialect/VPUASM/dialect.hpp"
 #include "vpux/compiler/dialect/VPUASM/passes.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
 

@@ -3,8 +3,8 @@
 //
 
 #include "behavior/fail_gracefully_forward_compatibility.hpp"
+#include "common/npu_test_env_cfg.hpp"
 #include "common/utils.hpp"
-#include "common/vpu_test_env_cfg.hpp"
 #include "intel_npu/al/config/common.hpp"
 
 using namespace ov::test::behavior;

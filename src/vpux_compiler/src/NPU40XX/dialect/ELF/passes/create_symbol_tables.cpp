@@ -30,31 +30,38 @@ void AddElfSymbolTablePass::safeRunOnFunc() {
     mlir::MLIRContext* ctx = &getContext();
     auto netFunc = getOperation();
 
+    std::unordered_map<ELF::SectionSignature, ELF::CreateSymbolTableSectionOp> symTabMap;
+
     auto mainOps = to_small_vector(netFunc.getOps<ELF::MainOp>());
     VPUX_THROW_UNLESS(mainOps.size() == 1, "Expected exactly one ELF mainOp. Got {0}", mainOps.size());
     auto elfMain = mainOps[0];
 
     auto sectionBuilder = mlir::OpBuilder::atBlockEnd(&elfMain.getContent().front());
-    auto symTab = sectionBuilder.create<ELF::CreateSymbolTableSectionOp>(elfMain.getLoc(), "symtab",
-                                                                         ELF::SectionFlagsAttr::SHF_NONE);
 
-    auto symbolBuilder = mlir::OpBuilder::atBlockBegin(symTab.getBlock());
-
-    auto validSection = [](mlir::Operation* op) -> bool {
-        return mlir::isa<ELF::DataSectionOp>(op) || mlir::isa<ELF::LogicalSectionOp>(op);
-    };
+    mlir::OpBuilder symbolBuilder(ctx);
 
     for (auto section : elfMain.getOps<ELF::ElfSectionInterface>()) {
-        if (!validSection(section.getOperation()))
+        auto symbolicallyRepresentedSection =
+                mlir::dyn_cast<ELF::SymbolicallyRepresentedOpInterface>(section.getOperation());
+        if (!symbolicallyRepresentedSection) {
             continue;
+        }
 
-        auto sectionSymbol = mlir::cast<mlir::SymbolOpInterface>(section.getOperation());
-        auto sectionName = sectionSymbol.getNameAttr();
-        auto sectionRef = mlir::FlatSymbolRefAttr::get(sectionName);
+        auto symTabSignature = section.getSymbolTableSectionSignature();
+        ELF::CreateSymbolTableSectionOp symTab;
 
-        auto symbolOpName = mlir::StringAttr::get(ctx, ELF::SymbolOp::getDefaultNamePrefix() + sectionName.strref());
+        if (auto symTabEntry = symTabMap.find(symTabSignature); symTabEntry != symTabMap.end()) {
+            symTab = symTabEntry->second;
+        } else {
+            symTab = sectionBuilder.create<ELF::CreateSymbolTableSectionOp>(elfMain.getLoc(), symTabSignature.getName(),
+                                                                            symTabSignature.getFlags());
+            symTabMap[symTabSignature] = symTab;
+        }
 
-        symbolBuilder.create<ELF::SymbolOp>(section.getLoc(), symbolOpName, sectionRef, ELF::SymbolType::STT_SECTION);
+        auto symbolSignature = symbolicallyRepresentedSection.getSymbolSignature();
+
+        symbolBuilder.setInsertionPointToEnd(symTab.getBlock());
+        symbolBuilder.create<ELF::SymbolOp>(section.getLoc(), symbolSignature);
     }
 
     return;

@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW" --lower-ops-to-se-nce="se-ops-enabled=true" %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
@@ -22,7 +22,7 @@ func.func @DoNotLowerInterpolateBilinearAlignCorners(%arg0: tensor<1x16x3x3xf16,
             axes_attr = [2, 3],
             scales_attr = [2.000000e+00, 2.000000e+00],
             sizes_attr = [6, 6],
-            operandSegmentSizes = array<i32: 1, 0, 0, 0>
+            operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0>
         } : tensor<1x16x3x3xf16, {order = #NHWC}> -> tensor<1x16x6x6xf16, {order = #NHWC}>
 
     return %0 : tensor<1x16x6x6xf16, {order = #NHWC}>
@@ -54,7 +54,7 @@ func.func @DoNotLowerInterpolateBilinearTFHALFPIXELFORNN(%arg0: tensor<1x16x3x3x
             axes_attr = [2, 3],
             scales_attr = [2.000000e+00, 2.000000e+00],
             sizes_attr = [6, 6],
-            operandSegmentSizes = array<i32: 1, 0, 0, 0>
+            operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0>
         } : tensor<1x16x3x3xf16, {order = #NHWC}> -> tensor<1x16x6x6xf16, {order = #NHWC}>
 
     return %0 : tensor<1x16x6x6xf16, {order = #NHWC}>
@@ -86,7 +86,7 @@ func.func @DoNotLowerInterpolateBilinearFloatScales(%arg0: tensor<1x16x3x3xf16, 
             axes_attr = [2, 3],
             scales_attr = [2.999999e+00, 2.999999e+00],
             sizes_attr = [8, 8],
-            operandSegmentSizes = array<i32: 1, 0, 0, 0>
+            operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0>
         } : tensor<1x16x3x3xf16, {order = #NHWC}> -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
     return %0 : tensor<1x16x8x8xf16, {order = #NHWC}>
@@ -118,7 +118,7 @@ func.func @DoNotLowerInterpolateBilinearAsymmetricLargeKernel(%arg0: tensor<1x16
             axes_attr = [2, 3],
             scales_attr = [12.000000e+00, 12.0000000e+00],
             sizes_attr = [36, 36],
-            operandSegmentSizes = array<i32: 1, 0, 0, 0>
+            operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0>
         } : tensor<1x16x3x3xf16, {order = #NHWC}> -> tensor<1x16x36x36xf16, {order = #NHWC}>
 
     return %0 : tensor<1x16x36x36xf16, {order = #NHWC}>
@@ -151,7 +151,7 @@ func.func @DoNotLowerInterpolateBilinearHalfPixelLargeKernel(%arg0: tensor<1x16x
             axes_attr = [2, 3],
             scales_attr = [6.000000e+00, 6.0000000e+00],
             sizes_attr = [18, 18],
-            operandSegmentSizes = array<i32: 1, 0, 0, 0>
+            operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0>
         } : tensor<1x16x3x3xf16, {order = #NHWC}> -> tensor<1x16x18x18xf16, {order = #NHWC}>
 
     return %0 : tensor<1x16x18x18xf16, {order = #NHWC}>
@@ -184,7 +184,7 @@ func.func @DoNotLowerInterpolateBilinearAlignCornersWithIllegalScales(%arg0: ten
             axes_attr = [2, 3],
             scales_attr = [1.000000e+00, 1.0000000e+00],
             sizes_attr = [6, 6],
-            operandSegmentSizes = array<i32: 1, 0, 0, 0>
+            operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0>
         } : tensor<1x16x3x3xf16, {order = #NHWC}> -> tensor<1x16x6x6xf16, {order = #NHWC}>
 
     return %0 : tensor<1x16x6x6xf16, {order = #NHWC}>

@@ -19,6 +19,7 @@ constexpr size_t PROFILING_SECTION_ALIGNMENT = 64;
 constexpr size_t WORKPOINT_BUFFER_SIZE = 64;  // must be in a separate cache line
 
 constexpr char PROFILING_CMX_2_DDR_OP_NAME[] = "ProfilingCMX2DDR";
+constexpr char PROFILING_DDR_2_DDR_OP_NAME[] = "ProfilingDDR2DDR";
 constexpr char PROFILING_WORKPOINT_READ_ATTR[] = "PROFWORKPOINT_READ";
 constexpr char PROFILING_OUTPUT_NAME[] = "profilingOutput";
 

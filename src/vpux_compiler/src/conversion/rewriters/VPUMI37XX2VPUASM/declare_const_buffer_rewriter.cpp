@@ -9,13 +9,14 @@
 namespace vpux {
 namespace vpumi37xx2vpuasm {
 
-mlir::FlatSymbolRefAttr DeclareConstBufferRewriter::getSymbolicName(Const::DeclareOp op, size_t counter) {
+llvm::SmallVector<mlir::FlatSymbolRefAttr> DeclareConstBufferRewriter::getSymbolicNames(Const::DeclareOp op,
+                                                                                        size_t counter) {
     auto fullName = Const::DeclareOp::getOperationName();
     auto opName = fullName.drop_front(Const::ConstDialect::getDialectNamespace().size() + 1);
 
     auto index = std::to_string(counter);
     auto symName = mlir::StringAttr::get(op.getContext(), opName + index);
-    return mlir::FlatSymbolRefAttr::get(symName);
+    return {mlir::FlatSymbolRefAttr::get(symName)};
 }
 
 mlir::LogicalResult DeclareConstBufferRewriter::symbolize(Const::DeclareOp op, SymbolMapper&,

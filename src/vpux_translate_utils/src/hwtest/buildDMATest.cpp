@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+//
+
 #include <climits>
 #include <numeric>
 
@@ -12,10 +14,12 @@
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/VPURT/transforms/passes.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
+#include "vpux/compiler/utils/platform_resources.hpp"
 #include "vpux/compiler/utils/types.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
 #include "vpux/utils/core/error.hpp"
@@ -76,6 +80,9 @@ void buildDMA(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module,
         VPUX_THROW_UNLESS(inputType == outputType, "buildDMA: inputType and outputType don't match");
     }
 
+    VPUX_THROW_UNLESS(!dmaParams.dstLocations.empty(), "buildDMA: no destination location");
+    nb::MemoryLocation dstMemLocation = dmaParams.dstLocations.front();
+
     auto inputTotalSize = totalTensorSize(inShape, inputType);
     auto outputTotalSize = totalTensorSize(outShape, outputType);
 
@@ -90,7 +97,7 @@ void buildDMA(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module,
     auto func = builder.create<mlir::func::FuncOp>(
             builder.getUnknownLoc(),
             printToString("dma_from_{0}_{1}_to_{2}_{3}", nb::to_string(dmaParams.srcLocation), inputType,
-                          nb::to_string(dmaParams.dstLocation), outputType),
+                          nb::to_string(dstMemLocation), outputType),
             funcType, builder.getStringAttr("private"), /*arg_attrs=*/nullptr, /*res_attrs=*/nullptr);
 
     auto funcbuilder = mlir::OpBuilder::atBlockBegin(func.addEntryBlock(), builder.getListener());
@@ -99,13 +106,14 @@ void buildDMA(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module,
     auto funcInput0 = func.getArgument(0);
     auto funcOutput = func.getArgument(1);
 
-    // input - output tensors
+    auto [waitWLMBarrier, freeBarrierId] =
+            insertWLMStartSequence(funcbuilder, testDesc.getWLMParams().isWLMPartialEnabled, true);
 
-    llvm::SmallVector<mlir::Value> waitBarriers;
+    // input - output tensors
     mlir::Value DMAinput;
     size_t CMX0_AVAILABLE_OFFSET = 0;
     size_t CMX1_AVAILABLE_OFFSET = 0;
-    VPURT::DeclareVirtualBarrierOp DMAtaskBarrier;
+    auto inputDMABarrier = waitWLMBarrier;
     if (dmaParams.srcLocation == nb::MemoryLocation::DDR) {
         DMAinput = funcInput0;
     } else if (dmaParams.srcLocation == nb::MemoryLocation::CMX0 || dmaParams.srcLocation == nb::MemoryLocation::CMX1) {
@@ -121,13 +129,13 @@ void buildDMA(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module,
             CMX1_AVAILABLE_OFFSET += inputTotalSize;
         }
 
-        DMAtaskBarrier = funcbuilder.create<VPURT::DeclareVirtualBarrierOp>(builder.getUnknownLoc());
+        inputDMABarrier.clear();
+        inputDMABarrier.emplace_back(
+                funcbuilder.create<VPURT::DeclareVirtualBarrierOp>(builder.getUnknownLoc()).getBarrier());
 
-        VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(),
-                                              mlir::ValueRange(DMAtaskBarrier.getBarrier()), builder.getUnknownLoc(),
+        VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, waitWLMBarrier, inputDMABarrier, builder.getUnknownLoc(),
                                               funcInput0, inputCMX.getOperation()->getResult(0), dmaParams.engine);
 
-        waitBarriers.emplace_back(DMAtaskBarrier.getBarrier());
         DMAinput = inputCMX.getOperation()->getResult(0);
     } else {
         VPUX_THROW("Unsupported src memory location {0}", nb::to_string(dmaParams.srcLocation));
@@ -144,8 +152,8 @@ void buildDMA(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module,
         mlir::MemRefType inputMSCBufferType, outputMSCBufferType;
         vpux::VPURT::DeclareBufferOp inputMSC, outputMSC;
 
-        auto waitBarrier = DMAtaskBarrier;
-        DMAtaskBarrier = funcbuilder.create<VPURT::DeclareVirtualBarrierOp>(builder.getUnknownLoc());
+        auto waitBarrier = inputDMABarrier;
+        auto updateBarrier = funcbuilder.create<VPURT::DeclareVirtualBarrierOp>(builder.getUnknownLoc()).getBarrier();
 
         // setup input/output buffers
         if (dmaParams.srcLocation == nb::MemoryLocation::DDR) {
@@ -172,7 +180,7 @@ void buildDMA(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module,
                     createDeclareTensorOp(funcbuilder, inputMSCBufferType, srcBufferSection, srcSectionIdx, srcOffset);
         }
 
-        if (dmaParams.dstLocation == nb::MemoryLocation::DDR) {
+        if (dstMemLocation == nb::MemoryLocation::DDR) {
             dstBufferSection = VPURT::BufferSection::DDR;
             dstOffset = DDR_AVAILABLE_OFFSET;
             DDR_AVAILABLE_OFFSET += inputTotalSize;
@@ -181,7 +189,7 @@ void buildDMA(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module,
             outputMSC = createDeclareTensorOp(funcbuilder, outputMSCBufferType, dstBufferSection, dstOffset);
         } else {
             dstBufferSection = VPURT::BufferSection::CMX_NN;
-            if (dmaParams.dstLocation == nb::MemoryLocation::CMX0) {
+            if (dstMemLocation == nb::MemoryLocation::CMX0) {
                 dstOffset = CMX0_AVAILABLE_OFFSET;
                 CMX0_AVAILABLE_OFFSET += inputTotalSize;
                 dstSectionIdx = 0;
@@ -202,34 +210,25 @@ void buildDMA(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module,
         // setup input as function inputs
         if (dmaParams.srcLocation == nb::MemoryLocation::DDR) {
             inputBufferMSC = inputMSC;
-            VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(),
-                                                  mlir::ValueRange(DMAtaskBarrier.getBarrier()),
-                                                  builder.getUnknownLoc(), DMAinput, inputBufferMSC, dmaParams.engine);
-
         } else {
             inputBufferMSC = inputMSC.getOperation()->getResult(0);
-            VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(waitBarrier.getBarrier()),
-                                                  mlir::ValueRange(DMAtaskBarrier.getBarrier()),
-                                                  builder.getUnknownLoc(), DMAinput, inputBufferMSC, dmaParams.engine);
         }
+        VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, waitBarrier, updateBarrier, builder.getUnknownLoc(),
+                                              DMAinput, inputBufferMSC, dmaParams.engine);
 
-        if (dmaParams.dstLocation == nb::MemoryLocation::DDR) {
+        if (dstMemLocation == nb::MemoryLocation::DDR) {
             outputBufferMSC = outputMSC;
         } else {
             outputBufferMSC = outputMSC.getOperation()->getResult(0);
         }
 
         for (auto dmaTransactionCount = 0; dmaTransactionCount < 10; ++dmaTransactionCount) {
-            waitBarrier = DMAtaskBarrier;
-            DMAtaskBarrier = funcbuilder.create<VPURT::DeclareVirtualBarrierOp>(builder.getUnknownLoc());
-
-            VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(waitBarrier.getBarrier()),
-                                                  mlir::ValueRange(DMAtaskBarrier.getBarrier()),
-                                                  builder.getUnknownLoc(), inputBufferMSC, outputBufferMSC,
-                                                  dmaParams.engine);
-            waitBarrier = DMAtaskBarrier;
-            DMAtaskBarrier = funcbuilder.create<VPURT::DeclareVirtualBarrierOp>(builder.getUnknownLoc());
-
+            auto waitBarrier = updateBarrier;
+            updateBarrier = funcbuilder.create<VPURT::DeclareVirtualBarrierOp>(builder.getUnknownLoc()).getBarrier();
+            VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, waitBarrier, updateBarrier, builder.getUnknownLoc(),
+                                                  inputBufferMSC, outputBufferMSC, dmaParams.engine);
+            waitBarrier = updateBarrier;
+            updateBarrier = {funcbuilder.create<VPURT::DeclareVirtualBarrierOp>(builder.getUnknownLoc()).getBarrier()};
             if (dmaParams.cacheTrashing) {
                 if (dmaParams.srcLocation == nb::MemoryLocation::DDR) {
                     inputBufferMSC = createDeclareTensorOp(funcbuilder, inputMSCBufferType, srcBufferSection,
@@ -240,13 +239,11 @@ void buildDMA(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module,
                 }
             }
 
-            VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(waitBarrier.getBarrier()),
-                                                  mlir::ValueRange(DMAtaskBarrier.getBarrier()),
-                                                  builder.getUnknownLoc(), outputBufferMSC, inputBufferMSC,
-                                                  dmaParams.engine);
+            VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, waitBarrier, updateBarrier, builder.getUnknownLoc(),
+                                                  outputBufferMSC, inputBufferMSC, dmaParams.engine);
 
             if (dmaParams.cacheTrashing) {
-                if (dmaParams.dstLocation == nb::MemoryLocation::DDR) {
+                if (dstMemLocation == nb::MemoryLocation::DDR) {
                     outputBufferMSC = createDeclareTensorOp(funcbuilder, outputMSCBufferType, dstBufferSection,
                                                             DDR_AVAILABLE_OFFSET);
                     DDR_AVAILABLE_OFFSET =
@@ -254,54 +251,55 @@ void buildDMA(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module,
                 }
             }
         }
+        inputDMABarrier.clear();
+        inputDMABarrier.emplace_back(updateBarrier);
     }
 
     mlir::Value DMAoutput;
-    if (dmaParams.dstLocation == nb::MemoryLocation::DDR) {
+    if (dstMemLocation == nb::MemoryLocation::DDR) {
         DMAoutput = funcOutput;
-    } else if (dmaParams.dstLocation == nb::MemoryLocation::CMX0 || dmaParams.dstLocation == nb::MemoryLocation::CMX1) {
-        const auto sectionIdx = dmaParams.dstLocation == nb::MemoryLocation::CMX0 ? 0 : 1;
+    } else if (dstMemLocation == nb::MemoryLocation::CMX0 || dstMemLocation == nb::MemoryLocation::CMX1) {
+        const auto sectionIdx = dstMemLocation == nb::MemoryLocation::CMX0 ? 0 : 1;
         auto outputCMXtype =
                 getMemRefType(VPURT::BufferSection::CMX_NN, sectionIdx, outShape, outputType, DimsOrder::NHWC);
         auto outputCMX = createDeclareTensorOp(
                 funcbuilder, outputCMXtype, VPURT::BufferSection::CMX_NN, sectionIdx,
-                dmaParams.dstLocation == nb::MemoryLocation::CMX0 ? CMX0_AVAILABLE_OFFSET : CMX1_AVAILABLE_OFFSET);
-        if (dmaParams.dstLocation == nb::MemoryLocation::CMX0) {
+                dstMemLocation == nb::MemoryLocation::CMX0 ? CMX0_AVAILABLE_OFFSET : CMX1_AVAILABLE_OFFSET);
+        if (dstMemLocation == nb::MemoryLocation::CMX0) {
             CMX0_AVAILABLE_OFFSET += outputTotalSize;
         } else {
             CMX1_AVAILABLE_OFFSET += outputTotalSize;
         }
         DMAoutput = outputCMX.getOperation()->getResult(0);
     } else {
-        VPUX_THROW("Unsupported dst memory location {0}", nb::to_string(dmaParams.dstLocation));
+        VPUX_THROW("Unsupported dst memory location {0}", nb::to_string(dstMemLocation));
     }
 
-    if (dmaParams.dstLocation == nb::MemoryLocation::CMX0 || dmaParams.dstLocation == nb::MemoryLocation::CMX1) {
-        if (dmaParams.testMemSideCache) {
-            waitBarriers.emplace_back(DMAtaskBarrier.getBarrier());
-        }
-        DMAtaskBarrier = funcbuilder.create<VPURT::DeclareVirtualBarrierOp>(builder.getUnknownLoc());
+    mlir::Value outputDMABarrier;
+
+    if (dstMemLocation == nb::MemoryLocation::CMX0 || dstMemLocation == nb::MemoryLocation::CMX1) {
+        outputDMABarrier = funcbuilder.create<VPURT::DeclareVirtualBarrierOp>(builder.getUnknownLoc()).getBarrier();
     }
 
     // finalBarrier passed as production barrier to last DMA task
-    auto finalBarrier = funcbuilder.create<VPURT::DeclareVirtualBarrierOp>(builder.getUnknownLoc());
+    auto finalBarrier = funcbuilder
+                                .create<VPURT::DeclareVirtualBarrierOp>(builder.getUnknownLoc(),
+                                                                        testDesc.getWLMParams().isWLMPartialEnabled)
+                                .getBarrier();
     if (!dmaParams.doConvert) {
-        VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(llvm::ArrayRef<mlir::Value>(waitBarriers)),
-                                              dmaParams.dstLocation == nb::MemoryLocation::DDR
-                                                      ? mlir::ValueRange(finalBarrier.getBarrier())
-                                                      : mlir::ValueRange(DMAtaskBarrier.getBarrier()),
-                                              builder.getUnknownLoc(), DMAinput, DMAoutput, dmaParams.engine);
+        VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(
+                funcbuilder, inputDMABarrier,
+                dstMemLocation == nb::MemoryLocation::DDR ? finalBarrier : outputDMABarrier, builder.getUnknownLoc(),
+                DMAinput, DMAoutput, dmaParams.engine);
     } else {
         VPURT::wrapIntoTaskOp<VPUIP::ConvertDMAOp>(
-                funcbuilder, mlir::ValueRange(llvm::ArrayRef<mlir::Value>(waitBarriers)),
-                dmaParams.dstLocation == nb::MemoryLocation::DDR ? mlir::ValueRange()
-                                                                 : mlir::ValueRange(DMAtaskBarrier.getBarrier()),
-                builder.getUnknownLoc(), DMAinput, DMAoutput, dmaParams.engine);
+                funcbuilder, inputDMABarrier,
+                dstMemLocation == nb::MemoryLocation::DDR ? finalBarrier : outputDMABarrier, builder.getUnknownLoc(),
+                DMAinput, DMAoutput, dmaParams.engine);
     }
 
-    if (dmaParams.dstLocation == nb::MemoryLocation::CMX0 || dmaParams.dstLocation == nb::MemoryLocation::CMX1) {
-        VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, mlir::ValueRange(DMAtaskBarrier.getBarrier()),
-                                              mlir::ValueRange(finalBarrier.getBarrier()), builder.getUnknownLoc(),
+    if (dstMemLocation == nb::MemoryLocation::CMX0 || dstMemLocation == nb::MemoryLocation::CMX1) {
+        VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcbuilder, outputDMABarrier, finalBarrier, builder.getUnknownLoc(),
                                               DMAoutput, funcOutput, dmaParams.engine);
     }
 
@@ -322,7 +320,7 @@ void buildDMA(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module,
     VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
 
     // assign physical barriers instead of virtual barriers
-    pm.addPass(VPURT::createAssignPhysicalBarriersPass(log));
+    pm.addPass(VPURT::createAssignPhysicalBarriersPass(false, log));
     pm.addPass(VPURT::createBarrierSimulationPass(log));
 
     VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");

@@ -12,11 +12,11 @@ using namespace vpux;
 
 mlir::LogicalResult vpux::VPU::MVN1NormalizeOp::inferReturnTypes(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange /*regions*/,
         mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::MVN1NormalizeOpAdaptor op(operands, attrs);
+    VPU::MVN1NormalizeOpAdaptor op(operands, attrs, prop);
     if (mlir::failed(op.verify(loc))) {
         return mlir::failure();
     }
@@ -56,13 +56,13 @@ bool vpux::VPU::MVN1NormalizeOp::checkStrategyCompatibility(VPU::MultiClusterStr
            strategy == VPU::MultiClusterStrategy::SplitOverWidth;
 }
 
-vpux::VPU::DistributedTensorAttr vpux::VPU::MVN1NormalizeOp::getExplicitDistributedTensorAttr(
-        vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, mlir::ArrayAttr numTiles,
-        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::UnitAttr uniformDistributedSegments,
-        const vpux::VPU::OverlapDistributionParams& /*overlapParams*/) {
-    return VPU::getSWExplicitDistributedTensorAttr(mlir::dyn_cast<VPU::SWOpInterface>(getOperation()), shape,
-                                                   distributionMode, numTiles, numClusters, alignment,
-                                                   uniformDistributedSegments);
+vpux::VPU::DistributedTensorNative vpux::VPU::MVN1NormalizeOp::getExplicitDistributedTensorAttr(
+        vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, ArrayRef<int64_t> numTiles,
+        const int64_t numClusters, ArrayRef<int64_t> alignment, const bool uniformDistributedSegments,
+        const vpux::VPU::OverlapDistributionParams& overlapParams) {
+    return VPU::getSWExplicitDistributedTensorNative(mlir::cast<VPU::SWOpInterface>(getOperation()), shape,
+                                                     distributionMode, numTiles, numClusters, alignment,
+                                                     uniformDistributedSegments, overlapParams);
 }
 
 //

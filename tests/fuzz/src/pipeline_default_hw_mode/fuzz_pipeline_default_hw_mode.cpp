@@ -58,9 +58,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         const auto log = vpux::Logger::global();
 
         mlir::PassManager pm(moduleOp.get()->getName(), mlir::OpPassManager::Nesting::Implicit);
-        auto initCompilerOptions = VPU::InitCompilerOptions(VPU::ArchKind::NPU37XX, VPU::CompilationMode::DefaultHW);
+        auto initCompilerOptions = VPU::InitCompilerOptions(VPU::ArchKind::NPU40XX, VPU::CompilationMode::DefaultHW);
 
-        VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log));
+        VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
 
         const DefaultHWOptions37XX options;
         buildDefaultHWModePipeline(pm, options, log.nest());

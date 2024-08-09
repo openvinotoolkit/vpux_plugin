@@ -10,11 +10,11 @@ using namespace vpux;
 
 mlir::LogicalResult vpux::VPU::GreaterEqualOp::inferReturnTypes(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange /*regions*/,
         mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::GreaterOpAdaptor greatereq(operands, attrs);
+    VPU::GreaterOpAdaptor greatereq(operands, attrs, prop);
     if (mlir::failed(greatereq.verify(loc))) {
         return mlir::failure();
     }
@@ -26,7 +26,7 @@ mlir::LogicalResult vpux::VPU::GreaterEqualOp::inferReturnTypes(
                                                        greatereq.getAutoBroadcast(), loc);
 
     if (mlir::succeeded(outShapeRes)) {
-        const auto outType = in1Type.changeShape(Shape(outShapeRes.value()));
+        const auto outType = in1Type.changeShapeElemType(Shape(outShapeRes.value()), getBool8Type(ctx));
         inferredReturnTypes.push_back(outType);
     }
 

@@ -66,7 +66,6 @@ Byte getStridedAllocSize(const StridedShape& stridedTiledShape, ShapeRef strided
     }
     return Byte(totalBytes);
 }
-
 }  // namespace
 
 //

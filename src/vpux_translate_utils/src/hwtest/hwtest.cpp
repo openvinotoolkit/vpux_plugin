@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+//
+
 #include "vpux/hwtest/hwtest.hpp"
 #include <llvm/Support/ToolOutputFile.h>
 #include <mlir/Dialect/Quant/QuantTypes.h>
@@ -93,11 +95,19 @@ mlir::OwningOpRef<mlir::ModuleOp> importHWTEST(llvm::StringRef sourceJson, mlir:
 
     switch (jsonDesc.getCaseType()) {
     case nb::CaseType::DMA: {
-        hwtest::buildDMA(jsonDesc, module, builder, log, input_types.front(), output_type);
+        if (jsonDesc.getDMAparams().dstLocations.size() == 1) {
+            hwtest::buildDMA(jsonDesc, module, builder, log, input_types.front(), output_type);
+        } else {
+            hwtest::buildDMABroadcast(jsonDesc, module, builder, log, input_types.front(), output_type);
+        }
         break;
     }
-    case nb::CaseType::DMAcompressAct: {
-        hwtest::buildDMACompressAct(jsonDesc, module, builder, log, input_types.front(), output_type);
+    case nb::CaseType::DMACompressActDense: {
+        hwtest::buildDMACompressActDense(jsonDesc, module, builder, log, input_types.front(), output_type);
+        break;
+    }
+    case nb::CaseType::DMACompressActSparse: {
+        hwtest::buildDMACompressActSparse(jsonDesc, module, builder, log, input_types.front(), output_type);
         break;
     }
     case nb::CaseType::GatherDMA: {
@@ -264,38 +274,37 @@ mlir::OwningOpRef<mlir::ModuleOp> importHWTEST(llvm::StringRef sourceJson, mlir:
     const std::vector<std::shared_ptr<const ov::Node>> params;
     const std::vector<std::shared_ptr<const ov::Node>> results;
 
-    if (jsonDesc.getCompilerBackend() == nb::CompilerBackend::ELF) {
-        mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
+    mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
 
-        auto getLoweringPipeline = [&jsonDesc](vpux::VPU::ArchKind arch, mlir::OpPassManager& pm, Logger log) {
-            switch (arch) {
-            case vpux::VPU::ArchKind::NPU40XX: {
-                auto backendCompilationOptions40XX = BackendCompilationOptions40XX();
-                if (jsonDesc.getCaseType() == nb::CaseType::DMA && jsonDesc.getDMAparams().testMemSideCache == true &&
-                    jsonDesc.getDMAparams().cacheEnabled == false) {
-                    backendCompilationOptions40XX.enableMemorySideCache = false;
-                }
-                return vpux::arch40xx::buildLowerVPUIP2ELFPipeline(pm, backendCompilationOptions40XX, log);
+    auto getLoweringPipeline = [&jsonDesc](vpux::VPU::ArchKind arch, nb::ProfilingParams, mlir::OpPassManager& pm,
+                                           Logger log) {
+        switch (arch) {
+        case vpux::VPU::ArchKind::NPU40XX: {
+            auto backendCompilationOptions40XX = BackendCompilationOptions40XX();
+            if (jsonDesc.getCaseType() == nb::CaseType::DMA && jsonDesc.getDMAparams().testMemSideCache == true &&
+                jsonDesc.getDMAparams().cacheEnabled == false) {
+                backendCompilationOptions40XX.enableMemorySideCache = false;
             }
-            default:
-                return vpux::arch37xx::buildLowerVPUIP2ELFPipeline(pm, log);
-            }
-        };
-        auto getExportToELFfunc = [](vpux::VPU::ArchKind arch) {
-            if (arch == vpux::VPU::ArchKind::NPU40XX)
-                return ELF::exportToELF;
-            return ELFNPU37XX::exportToELF;
-        };
 
-        getLoweringPipeline(jsonDesc.getArchitecture(), pm, log);
+            backendCompilationOptions40XX.enablePartialWorkloadManagement = jsonDesc.getWLMParams().isWLMPartialEnabled;
+            return vpux::arch40xx::buildLowerVPUIP2ELFPipeline(pm, backendCompilationOptions40XX, log);
+        }
+        default:
+            return vpux::arch37xx::buildLowerVPUIP2ELFPipeline(pm, log);
+        }
+    };
+    auto getExportToELFfunc = [](vpux::VPU::ArchKind arch) {
+        if (arch == vpux::VPU::ArchKind::NPU40XX)
+            return ELF::exportToELF;
+        return ELFNPU37XX::exportToELF;
+    };
 
-        VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Failed to lower test model to ELF");
-        auto blob = getExportToELFfunc(jsonDesc.getArchitecture())(module, params, results, log);
+    getLoweringPipeline(jsonDesc.getArchitecture(), jsonDesc.getProfilingParams(), pm, log);
 
-        serialize(blob.data(), blob.size(), log);
-    } else {
-        VPUX_THROW("Encountered unsupported compile backend {}", nb::to_string(jsonDesc.getCompilerBackend()));
-    }
+    VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Failed to lower test model to ELF");
+    auto blob = getExportToELFfunc(jsonDesc.getArchitecture())(module, params, results, log);
+
+    serialize(blob.data(), blob.size(), log);
 
     return module;
 }

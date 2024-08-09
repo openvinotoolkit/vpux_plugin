@@ -29,6 +29,13 @@ mlir::FailureOr<SmallVector<double>> extractFPVector(mlir::Location loc, const m
 SmallVector<int64_t> getInterpAxesVal(mlir::Location loc, const mlir::Value value,
                                       const std::optional<mlir::ArrayAttr>& attr, NDTypeInterface inType);
 
+// Get the innermost axis from `axes` according to the `dimsOrder`.
+// For example, if the `dimsOrder` is NHWC and `axes` are `[1, 2]`, it will return 1.
+mlir::FailureOr<int64_t> getInnermostAxis(mlir::Location loc, DimsOrder dimsOrder, ArrayRef<int64_t> axes);
+
+int64_t getInterpCoordinatesSize(mlir::Value output, int64_t innermostAxis);
+int64_t getInterpLambdasSize(mlir::Value output, int64_t innermostAxis);
+
 void applyInterpPads(MutableArrayRef<int64_t> outShape, ArrayRef<int64_t> padsBegin, ArrayRef<int64_t> padsEnd);
 SmallVector<int64_t> inferInterpOutShape(mlir::Location loc, ArrayRef<int64_t> axes, ShapeRef origShape,
                                          mlir::FailureOr<ArrayRef<int64_t>> padsBegin,

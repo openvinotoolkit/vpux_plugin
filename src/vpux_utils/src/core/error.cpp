@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+//
+
 #include "vpux/utils/core/error.hpp"
 
 #include "vpux/utils/core/logger.hpp"
@@ -15,7 +17,8 @@ using namespace vpux;
 // Exceptions
 //
 
-[[noreturn]] void vpux::details::throwFormat(const char* file, int line, const std::string& message) {
+template <typename ExceptionT>
+void vpux::details::throwFormat(const char* file, int line, const std::string& message) {
     VPUX_UNUSED(file);
     VPUX_UNUSED(line);
 
@@ -33,5 +36,9 @@ using namespace vpux;
 #endif
             << message;
     // E#94973 TODO catch this exception and rethrow as ov::Exception in OV linked layer
-    throw Exception(strm.str());
+    throw ExceptionT(strm.str());
 }
+
+template void vpux::details::throwFormat<vpux::Exception>(const char* file, int line, const std::string& message);
+template void vpux::details::throwFormat<vpux::WlmRollbackException>(const char* file, int line,
+                                                                     const std::string& message);

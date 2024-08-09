@@ -7,10 +7,30 @@
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/strides_utils.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
+#include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/error.hpp"
 #include "vpux/compiler/utils/reshape_utils.hpp"
 
 using namespace vpux;
+
+//
+// build
+//
+
+void VPUIP::ShapeCastOp::build(mlir::OpBuilder& builder, mlir::OperationState& state, mlir::Value input,
+                               ShapeRef shape) {
+    build(builder, state, input, shape.raw());
+}
+
+void VPUIP::ShapeCastOp::build(mlir::OpBuilder& builder, mlir::OperationState& state, mlir::Value input,
+                               ArrayRef<int64_t> shape) {
+    build(builder, state, input, getIntArrayAttr(builder.getContext(), shape));
+}
+
+void VPUIP::ShapeCastOp::build(mlir::OpBuilder& builder, mlir::OperationState& state, mlir::Value input,
+                               mlir::ArrayAttr shape) {
+    build(builder, state, input, shape, nullptr, nullptr);
+}
 
 mlir::Value VPUIP::ShapeCastOp::getViewSource() {
     return getSource();
@@ -35,6 +55,9 @@ mlir::LogicalResult vpux::VPUIP::ShapeCastOp::verify() {
     if (inType.getMemSpace() != outType.getMemSpace()) {
         return errorAt(op, "Input mem space '{0}' doesn't match output mem space '{1}'", inType.getMemSpace(),
                        outType.getMemSpace());
+    }
+    if (getExplicitOutputShapes().has_value() != getExplicitOutputOffsets().has_value()) {
+        return errorAt(op, "Only explicit output shape or offset is assigned");
     }
 
     return mlir::success();
@@ -123,11 +146,11 @@ std::optional<Strides> inferShapeCastOutputStrides(vpux::NDTypeInterface inType,
 
 mlir::LogicalResult VPUIP::ShapeCastOp::inferReturnTypes(mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc,
                                                          mlir::ValueRange operands, mlir::DictionaryAttr attrs,
-                                                         mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+                                                         mlir::OpaqueProperties props, mlir::RegionRange /*regions*/,
                                                          mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPUIP::ShapeCastOpAdaptor shapeCast(operands, attrs);
+    VPUIP::ShapeCastOpAdaptor shapeCast(operands, attrs, props);
     if (mlir::failed(shapeCast.verify(loc))) {
         return mlir::failure();
     }
@@ -137,22 +160,54 @@ mlir::LogicalResult VPUIP::ShapeCastOp::inferReturnTypes(mlir::MLIRContext* ctx,
     const auto inType = shapeCast.getSource().getType().cast<NDTypeInterface>();
     const auto outShape = parseIntArrayAttr<int64_t>(shapeCast.getShape());
 
+    const auto hasExplicitOutputShapesAndOffsets =
+            shapeCast.getExplicitOutputShapes().has_value() && shapeCast.getExplicitOutputOffsets().has_value();
+
+    auto inferExplicitDistributedAttr = [&](VPU::DistributedTensorAttr origDistribution) -> VPU::DistributedTensorAttr {
+        auto mode = origDistribution.getMode().getValue();
+        VPUX_THROW_UNLESS(hasExplicitOutputShapesAndOffsets, "ExplicitOutputShapes or ExplicitOutputOffsets not set");
+        // Track #E125638
+        // Other modes should be supported
+        VPUX_THROW_UNLESS(mode == VPU::DistributionMode::SEGMENTED, "Can not set explicit shapes with mode {0}",
+                          VPU::stringifyDistributionMode(mode));
+
+        return VPU::DistributedTensorAttr::get(
+                ctx, origDistribution.getMode(), origDistribution.getNumTiles(), origDistribution.getKernel(),
+                origDistribution.getPads(), origDistribution.getStrides(), origDistribution.getNumClusters(),
+                origDistribution.getAlignment(), origDistribution.getUniformDistributedSegments(),
+                shapeCast.getExplicitOutputShapes().value(), shapeCast.getExplicitOutputOffsets().value(),
+                shapeCast.getExplicitOutputShapes().value(), shapeCast.getExplicitOutputOffsets().value(),
+                origDistribution.getEqualMemoryAndComputeView());
+    };
+
+    const auto updateStrides = [&](const vpux::NDTypeInterface& inType,
+                                   const vpux::NDTypeInterface& outType) -> mlir::FailureOr<vpux::NDTypeInterface> {
+        const auto outputStrides = inferShapeCastOutputStrides(inType, outType);
+        if (!outputStrides.has_value()) {
+            return mlir::failure();
+        }
+        const auto outputStridesVal = outputStrides.value();
+        return outType.getStrides() != outputStridesVal ? outType.changeStrides(outputStridesVal) : outType;
+    };
+    const auto distributedIn = inType.dyn_cast<VPU::DistributedTypeInterface>();
     vpux::NDTypeInterface outType;
-    auto inTypeDistr = inType.dyn_cast<VPU::DistributedTypeInterface>();
-    if (inTypeDistr != nullptr && inTypeDistr.containsDistributedTypes()) {
-        outType = checkAndUpdateDistributedType(inTypeDistr, outShape, arch);
+    if (distributedIn != nullptr && distributedIn.containsDistributedTypes()) {
+        auto distribution =
+                distributedIn.getDistributedTypes().front().cast<VPUIP::DistributedBufferType>().getDistribution();
+        if (hasExplicitOutputShapesAndOffsets) {
+            const auto explicitDistributedAttr = inferExplicitDistributedAttr(distribution);
+            outType = distributedIn.changeShapeForExplicitDistribution(ShapeRef(outShape), explicitDistributedAttr);
+        } else {
+            outType = checkAndUpdateDistributedType(distributedIn, outShape, arch);
+        }
     } else {
         outType = inType.changeShape(ShapeRef(outShape));
     }
-
-    const auto outputStrides = inferShapeCastOutputStrides(inType, outType);
-    if (!outputStrides.has_value()) {
+    const auto strideUpdatedOutType = updateStrides(inType, outType);
+    if (mlir::failed(strideUpdatedOutType)) {
         return mlir::failure();
     }
-    const auto outputStridesVal = outputStrides.value();
-
-    inferredReturnTypes.push_back(outType.getStrides() != outputStridesVal ? outType.changeStrides(outputStridesVal)
-                                                                           : outType);
+    inferredReturnTypes.push_back(strideUpdatedOutType.value());
 
     return mlir::success();
 }

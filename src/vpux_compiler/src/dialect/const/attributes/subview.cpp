@@ -111,6 +111,10 @@ vpux::NDTypeInterface vpux::Const::SubViewAttr::inferOutputType(vpux::NDTypeInte
     return input.extractDenseTile(ShapeRef(offset), ShapeRef(shape));
 }
 
+bool vpux::Const::SubViewAttr::inferOutputSplat(bool inputIsSplat, vpux::NDTypeInterface) {
+    return inputIsSplat;
+}
+
 //
 // SubViewAttr::transform
 //
@@ -122,7 +126,7 @@ Const::Content vpux::Const::SubViewAttr::transform(vpux::Const::Content& input) 
                       input.getStorageElemType());
 
     auto output = Const::Content::allocTempBuffer(inferOutputType(input.getType()), input.getStorageElemType(),
-                                                  input.isSplat());
+                                                  inferOutputSplat(input.isSplat(), input.getType()));
 
     const auto inBuf = input.getRawStorageBuf();
     auto outBuf = output.getRawTempBuf();

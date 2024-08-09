@@ -13,7 +13,6 @@ set(TARGET_NAME npu_ov_utils)
 
 list(APPEND SOURCES
         config.cpp
-        logger_adapter.cpp
 )
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${SOURCES})
 
@@ -38,9 +37,8 @@ target_include_directories(${TARGET_NAME}
 target_compile_definitions(${TARGET_NAME} PUBLIC
         $<TARGET_PROPERTY:openvino::itt,INTERFACE_COMPILE_DEFINITIONS>)
 
-link_system_libraries(${TARGET_NAME}
+ov_link_system_libraries(${TARGET_NAME}
     PUBLIC
-        openvino::reference
         openvino::runtime
         openvino::runtime::dev
 )

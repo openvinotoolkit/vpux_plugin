@@ -168,6 +168,19 @@ mlir::LogicalResult AdjustConvWeights::matchAndRewrite(IE::ExpandOp expandOp, ml
         if (!sliceOp) {
             concatInputs.push_back(input);
         } else {
+            auto sliceInShape = getShape(sliceOp.getSource());
+            auto sliceOutShape = getShape(sliceOp.getResult());
+            auto sliceAxis = vpux::IE::getSingleDiffAxis(sliceInShape, sliceOutShape);
+            if (!sliceAxis.has_value()) {
+                return mlir::failure();
+            }
+            // This optimization is achieved by adjusting the weights channel of the convolution to avoid certain DMA
+            // operations. It can only handle cases where slice on C.
+            if (sliceAxis.value() != Dims4D::Act::C) {
+                innerLog.trace("'Slice' at '{0}' don't slice on C", sliceOp);
+                return mlir::failure();
+            }
+
             hasSlice = true;
             concatInputs.push_back(sliceOp.getInputs().front());
         }

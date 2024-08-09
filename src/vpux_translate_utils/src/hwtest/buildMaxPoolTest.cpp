@@ -16,6 +16,7 @@
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
+#include "vpux/compiler/utils/platform_resources.hpp"
 #include "vpux/compiler/utils/types.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
 #include "vpux/utils/core/error.hpp"
@@ -125,6 +126,7 @@ void buildMaxPool(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
 
     VPURT::DeclareBufferOp dpuProfOutput0Cmx;
     VPURT::DeclareBufferOp dpuProfOutput0Ddr;
+    VPURT::DeclareBufferOp dmaProfBufferDdr;
     VPURT::DeclareBufferOp dmaProfOutput0Ddr;
 
     if (profilingParams.profilingEnabled()) {
@@ -142,6 +144,10 @@ void buildMaxPool(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
         }
         if (profilingParams.dmaProfilingEnabled) {
             offset = vpux::alignValUp(offset, HWP_DMA_BYTES_PER_ENTRY);
+            dmaProfBufferDdr = createDeclareTensorOp(
+                    funcBuilder,
+                    getMemRefType(VPURT::BufferSection::DDR, dmaProfShapeUI64, getUInt64Type(ctx), DimsOrder::C),
+                    VPURT::BufferSection::DDR, 0);
             dmaProfOutput0Ddr = createDeclareTensorOp(funcBuilder,
                                                       getMemRefType(VPURT::BufferSection::ProfilingOutput,
                                                                     dmaProfShapeUI64, getUInt64Type(ctx), DimsOrder::C),
@@ -157,15 +163,20 @@ void buildMaxPool(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
             offset += workpointProfilingBufferSizeBytes;
         }
     }
+
+    auto [waitWLMBarrier, freeBarrierId] =
+            insertWLMStartSequence(funcBuilder, testDesc.getWLMParams().isWLMPartialEnabled);
+
     // barrier config
-    auto barrier0 = funcBuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 0);
-    auto barrier1 = funcBuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 1);
+    auto barrier0 = funcBuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), freeBarrierId++);
+    auto barrier1 = funcBuilder.create<VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), freeBarrierId++);
     // finalBarrier passed as production barrier to last DMA task
-    auto finalBarrier = funcBuilder.create<vpux::VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), 2);
+    auto finalBarrier = funcBuilder.create<vpux::VPURT::ConfigureBarrierOp>(
+            builder.getUnknownLoc(), freeBarrierId++, testDesc.getWLMParams().isWLMPartialEnabled);
 
     // DMA input-->cmx
     auto nndmaOp = VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(
-            funcBuilder, mlir::ValueRange(), mlir::ValueRange(barrier0.getBarrier()),
+            funcBuilder, waitWLMBarrier, barrier0.getBarrier(),
             mlir::NameLoc::get(mlir::StringAttr::get(ctx, "maxpool?t_MaxPool/cluster_0")), funcInput0,
             input0Cmx.getOperation()->getResult(0), 0);
 
@@ -335,6 +346,14 @@ void buildMaxPool(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
                                               dpuProfOutput0Ddr.getOperation()->getResult(0), 0);
     }
 
+    if (profilingParams.dmaProfilingEnabled) {
+        // copy DMA profiling data into DDR
+        VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcBuilder, mlir::ValueRange(barrier1.getBarrier()),
+                                              mlir::ValueRange(finalBarrier.getBarrier()), builder.getUnknownLoc(),
+                                              dmaProfBufferDdr.getOperation()->getResult(0),
+                                              dmaProfOutput0Ddr.getOperation()->getResult(0), 0);
+    }
+
     // create ReturnOp
     mlir::SmallVector<mlir::Value> funcOutputs;
     funcOutputs.push_back(funcOutput);
@@ -379,6 +398,11 @@ void buildMaxPool(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
     if (profilingParams.profilingEnabled()) {
         auto memSpaceAttr = mlir::SymbolRefAttr::get(ctx, stringifyEnum(VPU::MemoryKind::CMX_NN));
         IE::setDmaProfilingReservedMemory(module, memSpaceAttr, HWP_DMA_PROFILING_MAX_BUFFER_SIZE);
+        IE::setDmaProfilingReservedMemory(module, mlir::SymbolRefAttr::get(ctx, stringifyEnum(VPU::MemoryKind::DDR)),
+                                          HWP_DMA_ID_LIMIT * HWP_DMA_BYTES_PER_ENTRY);
+        // set offset for reserved DDR memory manually to 0 so that SetupProfilingVPUMI40XX pass works
+        IE::MemoryResourceOp ddrReservedMem = IE::getDmaProfilingReservedMemory(module, VPU::MemoryKind::DDR);
+        ddrReservedMem.setOffsetAttr(getIntAttr(ctx, 0));
     }
     buildCNNOp(builder, func.getName(), {getTensorType(ShapeRef(inputShape), inputType, DimsOrder::NHWC, nullptr)},
                {getTensorType(ShapeRef(outputShape), outputType, DimsOrder::NHWC, nullptr)}, profilingDataSections);

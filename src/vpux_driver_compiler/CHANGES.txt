@@ -1,5 +1,20 @@
 Change Log:
 -----------
+VPUXCompilerL0 5.8.0:
+  - Remove vpux_driver_compiler target and vpux_driver_compiler.h
+
+VPUXCompilerL0 5.7.0:
+  - Add support for optimization-level and performance-hint-override options of COMPILATION_MODE_PARAMS config
+
+VPUXCompilerL0 5.6.2:
+  - Assign fixed value to vcl_platform_t
+
+VPUXCompilerL0 5.6.1:
+  - Add npu_driver_compiler target and npu_driver_compiler.h
+
+VPUXCompilerL0 5.6.0:
+  - Add support for EXECUTION_MODE_HINT property.
+
 VPUXCompilerL0 5.5.0:
   - Add support for NPU_BATCH_MODE option.
 

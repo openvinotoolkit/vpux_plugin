@@ -14,14 +14,8 @@ namespace ov {
 namespace test {
 
 class TransposeLayerTestCommon : public TransposeLayerTest, virtual public VpuOv2LayerTest {};
-class TransposeLayerTest_NPU3700 : public TransposeLayerTestCommon {};
 class TransposeLayerTest_NPU3720 : public TransposeLayerTestCommon {};
 class TransposeLayerTest_NPU4000 : public TransposeLayerTestCommon {};
-
-TEST_P(TransposeLayerTest_NPU3700, HW) {
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
 
 TEST_P(TransposeLayerTest_NPU3720, HW) {
     setDefaultHardwareMode();
@@ -37,7 +31,6 @@ TEST_P(TransposeLayerTest_NPU4000, SW) {
 
 }  // namespace ov
 
-using ov::test::TransposeLayerTest_NPU3700;
 using ov::test::TransposeLayerTest_NPU3720;
 using ov::test::TransposeLayerTest_NPU4000;
 
@@ -82,44 +75,10 @@ const std::vector<std::vector<size_t>> inputOrderMemPermNWCH = {
         std::vector<size_t>{0, 3, 1, 2},
 };
 
-/* ============= NPU3700  ============= */
-
-const auto params2D = testing::Combine(testing::ValuesIn(inputOrder2D), testing::ValuesIn(modelTypes),
-                                       testing::ValuesIn(ov::test::static_shapes_to_test_representation(inputShapes2D)),
-                                       testing::Values(ov::test::utils::DEVICE_NPU));
-
-const auto params4D = testing::Combine(testing::ValuesIn(inputOrder4D), testing::ValuesIn(modelTypes),
-                                       testing::ValuesIn(ov::test::static_shapes_to_test_representation(inputShapes4D)),
-                                       testing::Values(ov::test::utils::DEVICE_NPU));
-
-const auto paramsMemPermNCHWtoNHWC =
-        testing::Combine(testing::ValuesIn(inputOrderMemPerm), testing::ValuesIn(modelTypes),
-                         testing::ValuesIn(ov::test::static_shapes_to_test_representation(inputShapesMemPerm)),
-                         testing::Values(ov::test::utils::DEVICE_NPU));
-
 const auto paramsMemPermNWCHtoNHWC =
         testing::Combine(testing::ValuesIn(inputOrderMemPermNWCH), testing::ValuesIn(modelTypes),
                          testing::ValuesIn(ov::test::static_shapes_to_test_representation(inputShapesMemPermchannel16)),
                          testing::Values(ov::test::utils::DEVICE_NPU));
-
-const auto paramsMemPermInNHWC =
-        testing::Combine(testing::ValuesIn(inputOrderMemPerm), testing::ValuesIn(modelTypes),
-                         testing::ValuesIn(ov::test::static_shapes_to_test_representation(inputShapesMemPerm)),
-                         testing::Values(ov::test::utils::DEVICE_NPU));
-
-// [Track number: W#7312]
-INSTANTIATE_TEST_SUITE_P(DISABLED_smoke_Transpose2D, TransposeLayerTest_NPU3700, params2D,
-                         TransposeLayerTest_NPU3700::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_Transpose4D, TransposeLayerTest_NPU3700, params4D,
-                         TransposeLayerTest_NPU3700::getTestCaseName);
-
-// MLIR 4D MemPermute instantiation
-INSTANTIATE_TEST_CASE_P(smoke_TransposeMemPermNCHW, TransposeLayerTest_NPU3700, paramsMemPermNCHWtoNHWC,
-                        TransposeLayerTest_NPU3700::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_TransposeMemPermNHWC, TransposeLayerTest_NPU3700, paramsMemPermInNHWC,
-                        TransposeLayerTest_NPU3700::getTestCaseName);
 
 /* ============= NPU3720  ============= */
 

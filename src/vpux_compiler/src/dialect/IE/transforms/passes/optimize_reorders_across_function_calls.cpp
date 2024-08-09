@@ -313,7 +313,7 @@ std::map<size_t, size_t> OptimizeReordersAcrossFunctionCallsPass::updateFunction
             continue;
         }
 
-        for (auto origArgUser : arg.getUsers()) {
+        for (auto origArgUser : llvm::make_early_inc_range(arg.getUsers())) {
             if (mlir::isa<IE::ReorderOp>(origArgUser)) {
                 origArgUser->erase();
             }
@@ -549,6 +549,12 @@ void OptimizeReordersAcrossFunctionCallsPass::safeRunOnModule() {
             return;
         }
 
+        if (_functionCalls[funcOp].size() > 1) {
+            _log.nest().trace("Function has {0} calls. Currently supporting cases with a single call",
+                              _functionCalls[funcOp].size());
+            return;
+        }
+
         const auto argOperations = getOptimizableArguments(funcOp);
         if (argOperations.empty()) {
             return;
@@ -563,7 +569,7 @@ void OptimizeReordersAcrossFunctionCallsPass::safeRunOnModule() {
 }  // namespace
 
 //
-// createOutlinerPass
+// createOptimizeReordersAcrossFunctionCallsPass
 //
 
 std::unique_ptr<mlir::Pass> vpux::IE::createOptimizeReordersAcrossFunctionCallsPass(const bool seOpsEnabled,

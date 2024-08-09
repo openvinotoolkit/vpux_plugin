@@ -4,7 +4,7 @@
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW" --mlir-elide-elementsattrs-if-larger 8 --default-hw-mode-ie="function-outlining=true" %s | FileCheck %s --strict-whitespace
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 #loc1 = loc("input")
 #loc17 = loc(fused<{name = "input", type = "Parameter"}>[#loc1])
@@ -47,8 +47,8 @@ module @DefaultHWTestWithOutliner {
         %add = IE.Add(%soft_max2, %fake_quant) { auto_broadcast = #IE.auto_broadcast_type<NUMPY> } : tensor<1x3x62x62xf32>, tensor<1x3x62x62xf32> -> tensor<1x3x62x62xf32> loc(#loc31)
 
         return %add: tensor<1x3x62x62xf32> loc(#loc32)
-    }loc(#loc)
-}loc(#loc)
+    }loc(#loc34)
+}loc(#loc33)
 #loc = loc(unknown)
 #loc2 = loc("output")
 #loc3 = loc("Constant_conv")
@@ -80,6 +80,8 @@ module @DefaultHWTestWithOutliner {
 #loc30 = loc(fused<{name = "SoftMax2", type = "SoftMax"}>[#loc14])
 #loc31 = loc(fused<{name = "Add", type = "Add"}>[#loc15])
 #loc32 = loc(fused<{name = "OUT", type = "Output"}>[#loc16])
+#loc33 = loc(fused<{name = "module", type = "Module"}>["module"])
+#loc34 = loc(fused<{name = "func", type = "Func"}>["func"])
 
 // CHECK: func.func private @main_part1(%arg0: tensor<1x3x62x62xf16>) -> tensor<1x3x62x62xf16> {
 // CHECK: }

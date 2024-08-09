@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW" --tiling="enable-prefetch=true" %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX
+// REQUIRES: arch-NPU37XX
 
 // CHECK-LABEL: func.func @SplitSwConvOverOC
 // CHECK-SAME:        [[INPUT:%arg[0-9]]]: tensor<1x32x64x64xf16>,
@@ -211,33 +211,29 @@ func.func @InterpSplitOverC(
         %input1: tensor<1x24x64x64xf16>)
             -> tensor<1x24x256x256xf16> {
 
-    %0 = const.Declare tensor<2xsi64> = dense<[256, 256]> : tensor<2xsi64>
-    %1 = const.Declare tensor<2xf32>  = dense<[4.000000e+00, 4.00000e+00]> : tensor<2xf32>
-    %2 = const.Declare tensor<2xsi64> = dense<[2, 3]> : tensor<2xsi64>
-
-    %3 = VPU.Interpolate(%input1, %0, %1, %2) {
+    %0 = VPU.Interpolate(%input1) {
             attr = #IE.Interpolate<antialias = false, coord_mode = <HALF_PIXEL>, cube_coeff = -7.500000e-01, mode = <LINEAR>, nearest_mode = <ROUND_PREFER_FLOOR>, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], shape_calc_mode = <SIZES>>,
-            operandSegmentSizes = array<i32: 1, 1, 1, 1> } :
-        tensor<1x24x64x64xf16>, tensor<2xsi64>, tensor<2xf32>, tensor<2xsi64> -> tensor<1x24x256x256xf16>
+            axes_attr = [2, 3], sizes_attr = [256, 256], operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0> } :
+        tensor<1x24x64x64xf16> -> tensor<1x24x256x256xf16>
 
-    return %3 : tensor<1x24x256x256xf16>
+    return %0 : tensor<1x24x256x256xf16>
 }
 
-// CHECK:       [[TILE0:%.+]] = VPU.Slice %arg0 [0, 0, 0, 0] [1, 12, 64, 64]
-// CHECK-SAME:      : tensor<1x24x64x64xf16> to tensor<1x12x64x64xf16>
+// CHECK:       [[TILE0:%.+]] = VPU.Slice %arg0 [0, 0, 0, 0] [1, 24, 33, 64]
+// CHECK-SAME:      : tensor<1x24x64x64xf16> to tensor<1x24x33x64xf16>
 // CHECK:       [[INTERP0:%.+]] = VPU.Interpolate([[TILE0]]
 // CHECK-SAME:      pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0]
-// CHECK-SAME:      : tensor<1x12x64x64xf16>
-// CHECK-SAME:      -> tensor<1x12x256x256xf16>
-// CHECK:       [[TILE1:%.+]] = VPU.Slice %arg0 [0, 12, 0, 0] [1, 12, 64, 64]
-// CHECK-SAME:      : tensor<1x24x64x64xf16> to tensor<1x12x64x64xf16>
+// CHECK-SAME:      : tensor<1x24x33x64xf16>
+// CHECK-SAME:      -> tensor<1x24x128x256xf16>
+// CHECK:       [[TILE1:%.+]] = VPU.Slice %arg0 [0, 0, 31, 0] [1, 24, 33, 64]
+// CHECK-SAME:      : tensor<1x24x64x64xf16> to tensor<1x24x33x64xf16>
 // CHECK:       [[INTERP1:%.+]] = VPU.Interpolate([[TILE1]]
 // CHECK-SAME:      pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0]
-// CHECK-SAME:      : tensor<1x12x64x64xf16>
-// CHECK-SAME:      -> tensor<1x12x256x256xf16>
+// CHECK-SAME:      : tensor<1x24x33x64xf16>
+// CHECK-SAME:      -> tensor<1x24x128x256xf16>
 // CHECK:       [[OUTPUT:%.+]] = VPU.Concat([[INTERP0]], [[INTERP1]]) {
-// CHECK-SAME:      static_offsets = {{\[\[}}0, 0, 0, 0], [0, 12, 0, 0]]}
-// CHECK-SAME:      : tensor<1x12x256x256xf16>, tensor<1x12x256x256xf16> -> tensor<1x24x256x256xf16>
+// CHECK-SAME:      static_offsets = {{\[\[}}0, 0, 0, 0], [0, 0, 128, 0]]}
+// CHECK-SAME:      : tensor<1x24x128x256xf16>, tensor<1x24x128x256xf16> -> tensor<1x24x256x256xf16>
 // CHECK:       return [[OUTPUT]] : tensor<1x24x256x256xf16>
 
 // -----
@@ -251,55 +247,49 @@ func.func @InterpSplitOverCDueToUglyScalingFactor(%arg0: tensor<1x21x65x65xf16, 
     attr = #IE.Interpolate<antialias = false, coord_mode = <ASYMMETRIC>, cube_coeff = -7.500000e-01 : f64, mode =  <LINEAR_ONNX>, nearest_mode = <SIMPLE>, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], shape_calc_mode = <SCALES>>,
     axes_attr = [2, 3],
     multiClusterStrategy = #VPU.multi_cluster_strategy<Clustering>,
-    operandSegmentSizes = array<i32: 1, 0, 0, 0>,
+    operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0>,
     scales_attr = [7.8923077583312988, 7.8923077583312988],
     sizes_attr = [513, 513]} : tensor<1x21x65x65xf16, {order = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>}> -> tensor<1x21x513x513xf16, {order = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>}>
   return %0 : tensor<1x21x513x513xf16, {order = #NHWC}>
 
-// CHECK:       [[TILE0:%.+]] = VPU.Slice %arg0 [0, 0, 0, 0] [1, 3, 65, 65]
-// CHECK-SAME:      : tensor<1x21x65x65xf16, {order = #NHWC}> to tensor<1x3x65x65xf16, {order = #NHWC}>
+// CHECK:       [[TILE0:%.+]] = VPU.Slice %arg0 [0, 0, 0, 0] [1, 21, 12, 65]
+// CHECK-SAME:      : tensor<1x21x65x65xf16, {order = #NHWC}> to tensor<1x21x12x65xf16, {order = #NHWC}>
 // CHECK:       [[INTERP0:%.+]] = VPU.Interpolate([[TILE0]]) {
 // CHECK-SAME:      pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0]
-// CHECK-SAME:      : tensor<1x3x65x65xf16, {order = #NHWC}>
-// CHECK-SAME:      -> tensor<1x3x513x513xf16, {order = #NHWC}>
-// CHECK:       [[TILE1:%.+]] = VPU.Slice %arg0 [0, 3, 0, 0] [1, 3, 65, 65]
-// CHECK-SAME:      : tensor<1x21x65x65xf16, {order = #NHWC}> to tensor<1x3x65x65xf16, {order = #NHWC}>
+// CHECK-SAME:      : tensor<1x21x12x65xf16, {order = #NHWC}>
+// CHECK-SAME:      -> tensor<1x21x86x513xf16, {order = #NHWC}>
+// CHECK:       [[TILE1:%.+]] = VPU.Slice %arg0 [0, 0, 10, 0] [1, 21, 13, 65]
+// CHECK-SAME:      : tensor<1x21x65x65xf16, {order = #NHWC}> to tensor<1x21x13x65xf16, {order = #NHWC}>
 // CHECK:       [[INTERP1:%.+]] = VPU.Interpolate([[TILE1]]) {
 // CHECK-SAME:      pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0]
-// CHECK-SAME:      : tensor<1x3x65x65xf16, {order = #NHWC}>
-// CHECK-SAME:      -> tensor<1x3x513x513xf16, {order = #NHWC}>
-// CHECK:       [[TILE2:%.+]] = VPU.Slice %arg0 [0, 6, 0, 0] [1, 3, 65, 65]
-// CHECK-SAME:      : tensor<1x21x65x65xf16, {order = #NHWC}> to tensor<1x3x65x65xf16, {order = #NHWC}>
+// CHECK-SAME:      : tensor<1x21x13x65xf16, {order = #NHWC}>
+// CHECK-SAME:      -> tensor<1x21x86x513xf16, {order = #NHWC}>
+// CHECK:       [[TILE2:%.+]] = VPU.Slice %arg0 [0, 0, 21, 0] [1, 21, 13, 65]
+// CHECK-SAME:      : tensor<1x21x65x65xf16, {order = #NHWC}> to tensor<1x21x13x65xf16, {order = #NHWC}>
 // CHECK:       [[INTERP2:%.+]] = VPU.Interpolate([[TILE2]]) {
 // CHECK-SAME:      pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0]
-// CHECK-SAME:      : tensor<1x3x65x65xf16, {order = #NHWC}>
-// CHECK-SAME:      -> tensor<1x3x513x513xf16, {order = #NHWC}>
-// CHECK:       [[TILE3:%.+]] = VPU.Slice %arg0 [0, 9, 0, 0] [1, 3, 65, 65]
-// CHECK-SAME:      : tensor<1x21x65x65xf16, {order = #NHWC}> to tensor<1x3x65x65xf16, {order = #NHWC}>
+// CHECK-SAME:      : tensor<1x21x13x65xf16, {order = #NHWC}>
+// CHECK-SAME:      -> tensor<1x21x86x513xf16, {order = #NHWC}>
+// CHECK:       [[TILE3:%.+]] = VPU.Slice %arg0 [0, 0, 32, 0] [1, 21, 13, 65]
+// CHECK-SAME:      : tensor<1x21x65x65xf16, {order = #NHWC}> to tensor<1x21x13x65xf16, {order = #NHWC}>
 // CHECK:       [[INTERP3:%.+]] = VPU.Interpolate([[TILE3]]) {
 // CHECK-SAME:      pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0]
-// CHECK-SAME:      : tensor<1x3x65x65xf16, {order = #NHWC}>
-// CHECK-SAME:      -> tensor<1x3x513x513xf16, {order = #NHWC}>
-// CHECK:       [[TILE4:%.+]] = VPU.Slice %arg0 [0, 12, 0, 0] [1, 3, 65, 65]
-// CHECK-SAME:      : tensor<1x21x65x65xf16, {order = #NHWC}> to tensor<1x3x65x65xf16, {order = #NHWC}>
+// CHECK-SAME:      : tensor<1x21x13x65xf16, {order = #NHWC}>
+// CHECK-SAME:      -> tensor<1x21x85x513xf16, {order = #NHWC}>
+// CHECK:       [[TILE4:%.+]] = VPU.Slice %arg0 [0, 0, 43, 0] [1, 21, 13, 65]
+// CHECK-SAME:      : tensor<1x21x65x65xf16, {order = #NHWC}> to tensor<1x21x13x65xf16, {order = #NHWC}>
 // CHECK:       [[INTERP4:%.+]] = VPU.Interpolate([[TILE4]]) {
 // CHECK-SAME:      pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0]
-// CHECK-SAME:      : tensor<1x3x65x65xf16, {order = #NHWC}>
-// CHECK-SAME:      -> tensor<1x3x513x513xf16, {order = #NHWC}>
-// CHECK:       [[TILE5:%.+]] = VPU.Slice %arg0 [0, 15, 0, 0] [1, 3, 65, 65]
-// CHECK-SAME:      : tensor<1x21x65x65xf16, {order = #NHWC}> to tensor<1x3x65x65xf16, {order = #NHWC}>
+// CHECK-SAME:      : tensor<1x21x13x65xf16, {order = #NHWC}>
+// CHECK-SAME:      -> tensor<1x21x85x513xf16, {order = #NHWC}>
+// CHECK:       [[TILE5:%.+]] = VPU.Slice %arg0 [0, 0, 54, 0] [1, 21, 11, 65]
+// CHECK-SAME:      : tensor<1x21x65x65xf16, {order = #NHWC}> to tensor<1x21x11x65xf16, {order = #NHWC}>
 // CHECK:       [[INTERP5:%.+]] = VPU.Interpolate([[TILE5]]) {
 // CHECK-SAME:      pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0]
-// CHECK-SAME:      : tensor<1x3x65x65xf16, {order = #NHWC}>
-// CHECK-SAME:      -> tensor<1x3x513x513xf16, {order = #NHWC}>
-// CHECK:       [[TILE6:%.+]] = VPU.Slice %arg0 [0, 18, 0, 0] [1, 3, 65, 65]
-// CHECK-SAME:      : tensor<1x21x65x65xf16, {order = #NHWC}> to tensor<1x3x65x65xf16, {order = #NHWC}>
-// CHECK:       [[INTERP6:%.+]] = VPU.Interpolate([[TILE6]]) {
-// CHECK-SAME:      pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0]
-// CHECK-SAME:      : tensor<1x3x65x65xf16, {order = #NHWC}>
-// CHECK-SAME:      -> tensor<1x3x513x513xf16, {order = #NHWC}>
-// CHECK:       [[CONCAT:%.+]] = VPU.Concat([[INTERP0]], [[INTERP1]], [[INTERP2]], [[INTERP3]], [[INTERP4]], [[INTERP5]], [[INTERP6]]) {
-// CHECK-SAME:      static_offsets = {{\[\[}}0, 0, 0, 0], [0, 3, 0, 0], [0, 6, 0, 0], [0, 9, 0, 0], [0, 12, 0, 0], [0, 15, 0, 0], [0, 18, 0, 0]]} : tensor<1x3x513x513xf16, {order = #NHWC}>, tensor<1x3x513x513xf16, {order = #NHWC}>, tensor<1x3x513x513xf16, {order = #NHWC}>, tensor<1x3x513x513xf16, {order = #NHWC}>, tensor<1x3x513x513xf16, {order = #NHWC}>, tensor<1x3x513x513xf16, {order = #NHWC}>, tensor<1x3x513x513xf16, {order = #NHWC}> -> tensor<1x21x513x513xf16, {order = #NHWC}>
+// CHECK-SAME:      : tensor<1x21x11x65xf16, {order = #NHWC}>
+// CHECK-SAME:      -> tensor<1x21x85x513xf16, {order = #NHWC}>
+// CHECK:       [[CONCAT:%.+]] = VPU.Concat([[INTERP0]], [[INTERP1]], [[INTERP2]], [[INTERP3]], [[INTERP4]], [[INTERP5]]) {
+// CHECK-SAME:      static_offsets = {{\[\[}}0, 0, 0, 0], [0, 0, 86, 0], [0, 0, 172, 0], [0, 0, 258, 0], [0, 0, 343, 0], [0, 0, 428, 0]]} : tensor<1x21x86x513xf16, {order = #NHWC}>, tensor<1x21x86x513xf16, {order = #NHWC}>, tensor<1x21x86x513xf16, {order = #NHWC}>, tensor<1x21x85x513xf16, {order = #NHWC}>, tensor<1x21x85x513xf16, {order = #NHWC}>, tensor<1x21x85x513xf16, {order = #NHWC}> -> tensor<1x21x513x513xf16, {order = #NHWC}>
 // CHECK:       return [[CONCAT]] : tensor<1x21x513x513xf16, {order = #NHWC}>
 }
 
@@ -314,7 +304,7 @@ func.func @InterpSplitOverCDueTo1Size(%arg0: tensor<1x256x1x1xf16, {order = #NHW
     attr = #IE.Interpolate<antialias = false, coord_mode = <ASYMMETRIC>, cube_coeff = -7.500000e-01 : f64, mode =  <LINEAR_ONNX>, nearest_mode = <SIMPLE>, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], shape_calc_mode = <SCALES>>,
     axes_attr = [2, 3],
     multiClusterStrategy = #VPU.multi_cluster_strategy<Clustering>,
-    operandSegmentSizes = array<i32: 1, 0, 0, 0>,
+    operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0>,
     scales_attr = [6.500000e+01, 6.500000e+01],
     sizes_attr = [65, 65]} : tensor<1x256x1x1xf16, {order = #NHWC}> -> tensor<1x256x65x65xf16, {order = #NHWC}>
 
@@ -891,14 +881,10 @@ func.func @LargeConstPipeliningSOKFor(
 
     return %0 : tensor<1x512x14x14xf16, {order = #NHWC}>
 
-    // CHECK-DAG:       [[WEIGHTS_TABLE2:%.+]] = const.Declare tensor<256x1x1x4xsi32>
-    // CHECK-SAME:          [#const.SubView<[256, 0, 0, 0], [256, 1, 1, 4]>]
-    // CHECK-DAG:       [[WEIGHTS2:%.+]] = const.Declare tensor<256x256x3x3xf16, {order = #NHWC}>
-    // CHECK-SAME:          [#const.SubView<[256, 0, 0, 0], [256, 256, 3, 3]>, #const.Reorder<#NHWC>]
-    // CHECK-DAG:       [[WEIGHTS_TABLE1:%.+]] = const.Declare tensor<256x1x1x4xsi32>
-    // CHECK-SAME:          [#const.SubView<[0, 0, 0, 0], [256, 1, 1, 4]>]
-    // CHECK-DAG:       [[WEIGHTS1:%.+]] = const.Declare tensor<256x256x3x3xf16, {order = #NHWC}>
-    // CHECK-SAME:          [#const.SubView<[0, 0, 0, 0], [256, 256, 3, 3]>, #const.Reorder<#NHWC>]
+    // CHECK-DAG:       [[WEIGHTS_TABLE2:%.+]] = const.Declare tensor<256x1x1x4xsi32> = dense<1> : tensor<512x1x1x4xsi32>, [#const.SubView<[256, 0, 0, 0], [256, 1, 1, 4]>]
+    // CHECK-DAG:       [[WEIGHTS2:%.+]] = const.Declare tensor<256x256x3x3xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<512x256x3x3xf16>, [#const.SubView<[256, 0, 0, 0], [256, 256, 3, 3]>, #const.Reorder<#NHWC>]
+    // CHECK-DAG:       [[WEIGHTS_TABLE1:%.+]] = const.Declare tensor<256x1x1x4xsi32> = dense<1> : tensor<512x1x1x4xsi32>,  [#const.SubView<[0, 0, 0, 0], [256, 1, 1, 4]>]
+    // CHECK-DAG:       [[WEIGHTS1:%.+]] = const.Declare tensor<256x256x3x3xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<512x256x3x3xf16>, [#const.SubView<[0, 0, 0, 0], [256, 256, 3, 3]>, #const.Reorder<#NHWC>]
 
     // CHECK:       [[CONV1:%.+]] = VPU.NCE.Convolution([[INPUT]], [[WEIGHTS1]], [[WEIGHTS_TABLE1]])
     // CHECK-SAME:          multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverKernel>
@@ -1575,13 +1561,13 @@ func.func @SplitEqualEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tensor<1x
 
 // -----
 
-func.func @SplitNotEqualEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xf16> {
-  %0 = VPU.NotEqual(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xf16>
-  return %0 : tensor<1x10x256x256xf16>
+func.func @SplitNotEqualEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xi8> {
+  %0 = VPU.NotEqual(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xi8>
+  return %0 : tensor<1x10x256x256xi8>
 }
 
 // CHECK-LABEL: @SplitNotEqualEltwiseSw
-// CHECK-SAME:      [[INPUT_0:%arg[0-9]]]: tensor<1x10x256x256xf16>, [[INPUT_1:%arg[0-9]]]: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xf16> {
+// CHECK-SAME:      [[INPUT_0:%arg[0-9]]]: tensor<1x10x256x256xf16>, [[INPUT_1:%arg[0-9]]]: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xi8> {
 
 // CHECK:       [[INPUT_TILE0:%.+]] = VPU.Slice [[INPUT_0]] [0, 0, 0, 0] [1, 10, 128, 256]
 // CHECK-SAME:   : tensor<1x10x256x256xf16> to tensor<1x10x128x256xf16>
@@ -1590,7 +1576,7 @@ func.func @SplitNotEqualEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tensor
 // CHECK-SAME:   : tensor<1x10x256x256xf16> to tensor<1x10x128x256xf16>
 
 // CHECK:       [[OUTPUT_TILE0:%.+]] = VPU.NotEqual([[INPUT_TILE0]], [[INPUT_TILE1]]) {
-// CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x128x256xf16>, tensor<1x10x128x256xf16> -> tensor<1x10x128x256xf16>
+// CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x128x256xf16>, tensor<1x10x128x256xf16> -> tensor<1x10x128x256xi8>
 
 // CHECK:       [[INPUT_TILE2:%.+]] = VPU.Slice [[INPUT_0]] [0, 0, 128, 0] [1, 10, 128, 256]
 // CHECK-SAME:   : tensor<1x10x256x256xf16> to tensor<1x10x128x256xf16>
@@ -1599,13 +1585,13 @@ func.func @SplitNotEqualEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tensor
 // CHECK-SAME:   : tensor<1x10x256x256xf16> to tensor<1x10x128x256xf16>
 
 // CHECK:       [[OUTPUT_TILE1:%.+]] = VPU.NotEqual([[INPUT_TILE2]], [[INPUT_TILE3]]) {
-// CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x128x256xf16>, tensor<1x10x128x256xf16> -> tensor<1x10x128x256xf16>
+// CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x128x256xf16>, tensor<1x10x128x256xf16> -> tensor<1x10x128x256xi8>
 
 // CHECK:       [[OUTPUT:%.+]] = VPU.Concat([[OUTPUT_TILE0]], [[OUTPUT_TILE1]])
 // CHECK-SAME:  [0, 0, 0, 0], [0, 0, 128, 0]
-// CHECK-SAME:  : tensor<1x10x128x256xf16>, tensor<1x10x128x256xf16> -> tensor<1x10x256x256xf16>
+// CHECK-SAME:  : tensor<1x10x128x256xi8>, tensor<1x10x128x256xi8> -> tensor<1x10x256x256xi8>
 
-// CHECK:       return [[OUTPUT]] : tensor<1x10x256x256xf16>
+// CHECK:       return [[OUTPUT]] : tensor<1x10x256x256xi8>
 
 // -----
 
@@ -1637,13 +1623,13 @@ func.func @SplitSoftPlusActivationSw(%arg0: tensor<1x8x80x1280xf16>) -> tensor<1
 
 // -----
 
-func.func @SplitLessEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xf16> {
-  %0 = VPU.Less(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xf16>
-  return %0 : tensor<1x10x256x256xf16>
+func.func @SplitLessEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xi8> {
+  %0 = VPU.Less(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xi8>
+  return %0 : tensor<1x10x256x256xi8>
 }
 
 // CHECK-LABEL: @SplitLessEltwiseSw
-// CHECK-SAME:      [[INPUT_0:%arg[0-9]]]: tensor<1x10x256x256xf16>, [[INPUT_1:%arg[0-9]]]: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xf16> {
+// CHECK-SAME:      [[INPUT_0:%arg[0-9]]]: tensor<1x10x256x256xf16>, [[INPUT_1:%arg[0-9]]]: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xi8> {
 
 // CHECK:       [[INPUT_TILE0:%.+]] = VPU.Slice [[INPUT_0]] [0, 0, 0, 0] [1, 10, 128, 256]
 // CHECK-SAME:   : tensor<1x10x256x256xf16> to tensor<1x10x128x256xf16>
@@ -1652,7 +1638,7 @@ func.func @SplitLessEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tensor<1x1
 // CHECK-SAME:   : tensor<1x10x256x256xf16> to tensor<1x10x128x256xf16>
 
 // CHECK:       [[OUTPUT_TILE0:%.+]] = VPU.Less([[INPUT_TILE0]], [[INPUT_TILE1]]) {
-// CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x128x256xf16>, tensor<1x10x128x256xf16> -> tensor<1x10x128x256xf16>
+// CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x128x256xf16>, tensor<1x10x128x256xf16> -> tensor<1x10x128x256xi8>
 
 // CHECK:       [[INPUT_TILE2:%.+]] = VPU.Slice [[INPUT_0]] [0, 0, 128, 0] [1, 10, 128, 256]
 // CHECK-SAME:   : tensor<1x10x256x256xf16> to tensor<1x10x128x256xf16>
@@ -1661,23 +1647,23 @@ func.func @SplitLessEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tensor<1x1
 // CHECK-SAME:   : tensor<1x10x256x256xf16> to tensor<1x10x128x256xf16>
 
 // CHECK:       [[OUTPUT_TILE1:%.+]] = VPU.Less([[INPUT_TILE2]], [[INPUT_TILE3]]) {
-// CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x128x256xf16>, tensor<1x10x128x256xf16> -> tensor<1x10x128x256xf16>
+// CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x128x256xf16>, tensor<1x10x128x256xf16> -> tensor<1x10x128x256xi8>
 
 // CHECK:       [[OUTPUT:%.+]] = VPU.Concat([[OUTPUT_TILE0]], [[OUTPUT_TILE1]])
 // CHECK-SAME:  [0, 0, 0, 0], [0, 0, 128, 0]
-// CHECK-SAME:  : tensor<1x10x128x256xf16>, tensor<1x10x128x256xf16> -> tensor<1x10x256x256xf16>
+// CHECK-SAME:  : tensor<1x10x128x256xi8>, tensor<1x10x128x256xi8> -> tensor<1x10x256x256xi8>
 
-// CHECK:       return [[OUTPUT]] : tensor<1x10x256x256xf16>
+// CHECK:       return [[OUTPUT]] : tensor<1x10x256x256xi8>
 
 // -----
 
-func.func @SplitLessEqualEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xf16> {
-  %0 = VPU.LessEqual(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xf16>
-  return %0 : tensor<1x10x256x256xf16>
+func.func @SplitLessEqualEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xi8> {
+  %0 = VPU.LessEqual(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xi8>
+  return %0 : tensor<1x10x256x256xi8>
 }
 
 // CHECK-LABEL: @SplitLessEqualEltwiseSw
-// CHECK-SAME:      [[INPUT_0:%arg[0-9]]]: tensor<1x10x256x256xf16>, [[INPUT_1:%arg[0-9]]]: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xf16> {
+// CHECK-SAME:      [[INPUT_0:%arg[0-9]]]: tensor<1x10x256x256xf16>, [[INPUT_1:%arg[0-9]]]: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xi8> {
 
 // CHECK:       [[INPUT_TILE0:%.+]] = VPU.Slice [[INPUT_0]] [0, 0, 0, 0] [1, 10, 128, 256]
 // CHECK-SAME:   : tensor<1x10x256x256xf16> to tensor<1x10x128x256xf16>
@@ -1686,7 +1672,7 @@ func.func @SplitLessEqualEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tenso
 // CHECK-SAME:   : tensor<1x10x256x256xf16> to tensor<1x10x128x256xf16>
 
 // CHECK:       [[OUTPUT_TILE0:%.+]] = VPU.LessEqual([[INPUT_TILE0]], [[INPUT_TILE1]]) {
-// CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x128x256xf16>, tensor<1x10x128x256xf16> -> tensor<1x10x128x256xf16>
+// CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x128x256xf16>, tensor<1x10x128x256xf16> -> tensor<1x10x128x256xi8>
 
 // CHECK:       [[INPUT_TILE2:%.+]] = VPU.Slice [[INPUT_0]] [0, 0, 128, 0] [1, 10, 128, 256]
 // CHECK-SAME:   : tensor<1x10x256x256xf16> to tensor<1x10x128x256xf16>
@@ -1695,23 +1681,23 @@ func.func @SplitLessEqualEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tenso
 // CHECK-SAME:   : tensor<1x10x256x256xf16> to tensor<1x10x128x256xf16>
 
 // CHECK:       [[OUTPUT_TILE1:%.+]] = VPU.LessEqual([[INPUT_TILE2]], [[INPUT_TILE3]]) {
-// CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x128x256xf16>, tensor<1x10x128x256xf16> -> tensor<1x10x128x256xf16>
+// CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x128x256xf16>, tensor<1x10x128x256xf16> -> tensor<1x10x128x256xi8>
 
 // CHECK:       [[OUTPUT:%.+]] = VPU.Concat([[OUTPUT_TILE0]], [[OUTPUT_TILE1]])
 // CHECK-SAME:  [0, 0, 0, 0], [0, 0, 128, 0]
-// CHECK-SAME:  : tensor<1x10x128x256xf16>, tensor<1x10x128x256xf16> -> tensor<1x10x256x256xf16>
+// CHECK-SAME:  : tensor<1x10x128x256xi8>, tensor<1x10x128x256xi8> -> tensor<1x10x256x256xi8>
 
-// CHECK:       return [[OUTPUT]] : tensor<1x10x256x256xf16>
+// CHECK:       return [[OUTPUT]] : tensor<1x10x256x256xi8>
 
 // -----
 
-func.func @SplitGreaterEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xf16> {
-  %0 = VPU.Greater(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xf16>
-  return %0 : tensor<1x10x256x256xf16>
+func.func @SplitGreaterEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xi8> {
+  %0 = VPU.Greater(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xi8>
+  return %0 : tensor<1x10x256x256xi8>
 }
 
 // CHECK-LABEL: @SplitGreaterEltwiseSw
-// CHECK-SAME:      [[INPUT_0:%arg[0-9]]]: tensor<1x10x256x256xf16>, [[INPUT_1:%arg[0-9]]]: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xf16> {
+// CHECK-SAME:      [[INPUT_0:%arg[0-9]]]: tensor<1x10x256x256xf16>, [[INPUT_1:%arg[0-9]]]: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xi8> {
 
 // CHECK:       [[INPUT_TILE0:%.+]] = VPU.Slice [[INPUT_0]] [0, 0, 0, 0] [1, 10, 128, 256]
 // CHECK-SAME:   : tensor<1x10x256x256xf16> to tensor<1x10x128x256xf16>
@@ -1720,7 +1706,7 @@ func.func @SplitGreaterEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tensor<
 // CHECK-SAME:   : tensor<1x10x256x256xf16> to tensor<1x10x128x256xf16>
 
 // CHECK:       [[OUTPUT_TILE0:%.+]] = VPU.Greater([[INPUT_TILE0]], [[INPUT_TILE1]]) {
-// CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x128x256xf16>, tensor<1x10x128x256xf16> -> tensor<1x10x128x256xf16>
+// CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x128x256xf16>, tensor<1x10x128x256xf16> -> tensor<1x10x128x256xi8>
 
 // CHECK:       [[INPUT_TILE2:%.+]] = VPU.Slice [[INPUT_0]] [0, 0, 128, 0] [1, 10, 128, 256]
 // CHECK-SAME:   : tensor<1x10x256x256xf16> to tensor<1x10x128x256xf16>
@@ -1729,23 +1715,23 @@ func.func @SplitGreaterEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tensor<
 // CHECK-SAME:   : tensor<1x10x256x256xf16> to tensor<1x10x128x256xf16>
 
 // CHECK:       [[OUTPUT_TILE1:%.+]] = VPU.Greater([[INPUT_TILE2]], [[INPUT_TILE3]]) {
-// CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x128x256xf16>, tensor<1x10x128x256xf16> -> tensor<1x10x128x256xf16>
+// CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x128x256xf16>, tensor<1x10x128x256xf16> -> tensor<1x10x128x256xi8>
 
 // CHECK:       [[OUTPUT:%.+]] = VPU.Concat([[OUTPUT_TILE0]], [[OUTPUT_TILE1]])
 // CHECK-SAME:  [0, 0, 0, 0], [0, 0, 128, 0]
-// CHECK-SAME:  : tensor<1x10x128x256xf16>, tensor<1x10x128x256xf16> -> tensor<1x10x256x256xf16>
+// CHECK-SAME:  : tensor<1x10x128x256xi8>, tensor<1x10x128x256xi8> -> tensor<1x10x256x256xi8>
 
-// CHECK:       return [[OUTPUT]] : tensor<1x10x256x256xf16>
+// CHECK:       return [[OUTPUT]] : tensor<1x10x256x256xi8>
 
 // -----
 
-func.func @SplitGreaterEqualEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xf16> {
-  %0 = VPU.GreaterEqual(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xf16>
-  return %0 : tensor<1x10x256x256xf16>
+func.func @SplitGreaterEqualEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xi8> {
+  %0 = VPU.GreaterEqual(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x256x256xf16>, tensor<1x10x256x256xf16> -> tensor<1x10x256x256xi8>
+  return %0 : tensor<1x10x256x256xi8>
 }
 
 // CHECK-LABEL: @SplitGreaterEqualEltwiseSw
-// CHECK-SAME:      [[INPUT_0:%arg[0-9]]]: tensor<1x10x256x256xf16>, [[INPUT_1:%arg[0-9]]]: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xf16> {
+// CHECK-SAME:      [[INPUT_0:%arg[0-9]]]: tensor<1x10x256x256xf16>, [[INPUT_1:%arg[0-9]]]: tensor<1x10x256x256xf16>) -> tensor<1x10x256x256xi8> {
 
 // CHECK:       [[INPUT_TILE0:%.+]] = VPU.Slice [[INPUT_0]] [0, 0, 0, 0] [1, 10, 128, 256]
 // CHECK-SAME:   : tensor<1x10x256x256xf16> to tensor<1x10x128x256xf16>
@@ -1754,7 +1740,7 @@ func.func @SplitGreaterEqualEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: te
 // CHECK-SAME:   : tensor<1x10x256x256xf16> to tensor<1x10x128x256xf16>
 
 // CHECK:       [[OUTPUT_TILE0:%.+]] = VPU.GreaterEqual([[INPUT_TILE0]], [[INPUT_TILE1]]) {
-// CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x128x256xf16>, tensor<1x10x128x256xf16> -> tensor<1x10x128x256xf16>
+// CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x128x256xf16>, tensor<1x10x128x256xf16> -> tensor<1x10x128x256xi8>
 
 // CHECK:       [[INPUT_TILE2:%.+]] = VPU.Slice [[INPUT_0]] [0, 0, 128, 0] [1, 10, 128, 256]
 // CHECK-SAME:   : tensor<1x10x256x256xf16> to tensor<1x10x128x256xf16>
@@ -1763,13 +1749,13 @@ func.func @SplitGreaterEqualEltwiseSw(%arg0: tensor<1x10x256x256xf16>, %arg1: te
 // CHECK-SAME:   : tensor<1x10x256x256xf16> to tensor<1x10x128x256xf16>
 
 // CHECK:       [[OUTPUT_TILE1:%.+]] = VPU.GreaterEqual([[INPUT_TILE2]], [[INPUT_TILE3]]) {
-// CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x128x256xf16>, tensor<1x10x128x256xf16> -> tensor<1x10x128x256xf16>
+// CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x128x256xf16>, tensor<1x10x128x256xf16> -> tensor<1x10x128x256xi8>
 
 // CHECK:       [[OUTPUT:%.+]] = VPU.Concat([[OUTPUT_TILE0]], [[OUTPUT_TILE1]])
 // CHECK-SAME:  [0, 0, 0, 0], [0, 0, 128, 0]
-// CHECK-SAME:  : tensor<1x10x128x256xf16>, tensor<1x10x128x256xf16> -> tensor<1x10x256x256xf16>
+// CHECK-SAME:  : tensor<1x10x128x256xi8>, tensor<1x10x128x256xi8> -> tensor<1x10x256x256xi8>
 
-// CHECK:       return [[OUTPUT]] : tensor<1x10x256x256xf16>
+// CHECK:       return [[OUTPUT]] : tensor<1x10x256x256xi8>
 
 // -----
 
@@ -2688,17 +2674,10 @@ func.func  @SplitQuantNCEConvOverOCKeepInputShape(%arg0: tensor<1x1024x14x14x!qE
 
     return %0 : tensor<1x1024x7x7x!qElemType1, {order = #NHWC}>
 
-    // CHECK-DAG:        [[WEIGHTS_TABLE_TILE1:%.+]] = const.Declare tensor<512x1x1x4xsi32> = dense<10>
-    // CHECK-SAME:      : tensor<1024x1x1x4xsi32>, [#const.SubView<[512, 0, 0, 0], [512, 1, 1, 4]>]
-
-    // CHECK-DAG:        [[FILTER_TILE1:%.+]] = const.Declare tensor<512x1024x1x1x!qElemType2, {order = #NHWC}> = dense<1.000000e+00>
-    // CHECK-SAME:      : tensor<1024x1024x1x1xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType2>, #const.SubView<[512, 0, 0, 0], [512, 1024, 1, 1]>, #const.Reorder<#NHWC>]
-
-    // CHECK-DAG:        [[WEIGHTS_TABLE_TILE0:%.+]] = const.Declare tensor<512x1x1x4xsi32> = dense<10>
-    // CHECK-SAME:      : tensor<1024x1x1x4xsi32>, [#const.SubView<[0, 0, 0, 0], [512, 1, 1, 4]>]
-
-    // CHECK-DAG:        [[FILTER_TILE0:%.+]] = const.Declare tensor<512x1024x1x1x!qElemType2, {order = #NHWC}> = dense<1.000000e+00>
-    // CHECK-SAME:      : tensor<1024x1024x1x1xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType2>, #const.SubView<[0, 0, 0, 0], [512, 1024, 1, 1]>, #const.Reorder<#NHWC>]
+    // CHECK-DAG:        [[WEIGHTS_TABLE_TILE1:%.+]] = const.Declare tensor<512x1x1x4xsi32> = dense<10> : tensor<1024x1x1x4xsi32>, [#const.SubView<[512, 0, 0, 0], [512, 1, 1, 4]>]
+    // CHECK-DAG:        [[FILTER_TILE1:%.+]] = const.Declare tensor<512x1024x1x1x!qElemType2, {order = #NHWC}> = dense<1.000000e+00> : tensor<1024x1024x1x1xf16>, [#const.SubView<[512, 0, 0, 0], [512, 1024, 1, 1]>, #const.ConvertElemType<ui8>, #const.QuantCast<!qElemType2>, #const.Reorder<#NHWC>]
+    // CHECK-DAG:        [[WEIGHTS_TABLE_TILE0:%.+]] = const.Declare tensor<512x1x1x4xsi32> = dense<10> : tensor<1024x1x1x4xsi32>, [#const.SubView<[0, 0, 0, 0], [512, 1, 1, 4]>]
+    // CHECK-DAG:        [[FILTER_TILE0:%.+]] = const.Declare tensor<512x1024x1x1x!qElemType2, {order = #NHWC}> = dense<1.000000e+00> : tensor<1024x1024x1x1xf16>, [#const.SubView<[0, 0, 0, 0], [512, 1024, 1, 1]>, #const.ConvertElemType<ui8>, #const.QuantCast<!qElemType2>, #const.Reorder<#NHWC>]
 
     // CHECK:       [[OUTPUT_TILE0:%.+]] = VPU.NCE.Convolution([[INPUT]], [[FILTER_TILE0]], [[WEIGHTS_TABLE_TILE0]])
     // CHECK-SAME:          pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,

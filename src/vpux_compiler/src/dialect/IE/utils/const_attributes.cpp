@@ -37,10 +37,10 @@ mlir::IntegerAttr getIntAttrValue(mlir::Value operand, mlir::PatternRewriter& re
         return nullptr;
     }
     auto constOp = operand.getDefiningOp<Const::DeclareOp>();
-    const auto content = constOp.getContent();
-    if (!content.isSplat()) {
+    if (const auto attr = constOp.getContentAttr(); !attr.isSplat()) {
         return nullptr;
     }
+    const auto content = constOp.getContent();
     const auto attrValue = content.getSplatValue<int32_t>();
     return rewriter.getI32IntegerAttr(attrValue);
 }

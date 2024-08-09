@@ -64,6 +64,31 @@ IE::TransposeOp createTransposeForLayerInput(mlir::PatternRewriter& rewriter, ml
     return rewriter.create<IE::TransposeOp>(newLoc, input, nullptr, orderAttr);
 }
 
+void reshapeForEltwiseAdd(IE::AddOp addOp, mlir::PatternRewriter& rewriter) {
+    const auto ctx = addOp->getContext();
+    auto inputShape1 = getShape(addOp.getInput1());
+    auto inputShape2 = getShape(addOp.getInput2());
+    auto outputShape = getShape(addOp.getOutput());
+
+    Shape newInShape1 = Shape(inputShape1);
+    newInShape1[Dims4D::Act::N] = 1;
+    newInShape1[Dims4D::Act::C] = inputShape1[Dims4D::Act::C] * inputShape1[Dims4D::Act::N];
+    Shape newInShape2 = Shape(inputShape2);
+    newInShape2[Dims4D::Act::N] = 1;
+    newInShape2[Dims4D::Act::C] = inputShape2[Dims4D::Act::C] * inputShape2[Dims4D::Act::N];
+
+    auto inShapeCast1 =
+            rewriter.create<IE::ShapeCastOp>(addOp->getLoc(), addOp.getInput1(), getIntArrayAttr(ctx, newInShape1));
+    auto inShapeCast2 =
+            rewriter.create<IE::ShapeCastOp>(addOp->getLoc(), addOp.getInput2(), getIntArrayAttr(ctx, newInShape2));
+
+    auto newAddOp =
+            rewriter.create<IE::AddOp>(addOp->getLoc(), inShapeCast1.getResult(), inShapeCast2.getResult(),
+                                       addOp.getAutoBroadcastAttr(), addOp.getPostOpAttr(), addOp.getClampAttr());
+
+    rewriter.replaceOpWithNewOp<IE::ShapeCastOp>(addOp, newAddOp.getOutput(), getIntArrayAttr(ctx, outputShape));
+}
+
 //
 // LayerConverter
 //
@@ -88,6 +113,13 @@ template <class ConcreteOp>
 mlir::LogicalResult LayerConverter<ConcreteOp>::matchAndRewrite(ConcreteOp origOp,
                                                                 mlir::PatternRewriter& rewriter) const {
     _log.trace("Got layer at '{0}'", origOp->getLoc());
+    auto addOp = mlir::dyn_cast<IE::AddOp>(*origOp);
+    if (addOp != nullptr && !getDimEqualsToOne({addOp.getInput1(), addOp.getInput2()}).has_value()) {
+        reshapeForEltwiseAdd(addOp, rewriter);
+        _log.trace("Reshape directly for not suitable transpose cases");
+        return mlir::success();
+    }
+
     mlir::AffineMapAttr transPermAttr = nullptr;
     auto mapper = mapOperands(origOp, transPermAttr, rewriter);
     VPUX_THROW_WHEN(transPermAttr == nullptr, "Can not get order value from input tranpose");
@@ -167,6 +199,82 @@ bool isLegalPoolOp(ConcreteOp op) {
 }
 
 //
+// SigmoidConverter
+//
+
+class SigmoidConverter final : public mlir::OpRewritePattern<IE::SigmoidOp> {
+public:
+    SigmoidConverter(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<IE::SigmoidOp>(ctx), _log(log) {
+    }
+
+public:
+    mlir::LogicalResult matchAndRewrite(IE::SigmoidOp origOp, mlir::PatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+IE::AffineReshapeOp buildAffineReshape(mlir::Location loc, mlir::Value input, ArrayRef<int64_t> targetShape,
+                                       mlir::PatternRewriter& rewriter, IE::SigmoidOp replacedOp) {
+    const auto ctx = rewriter.getContext();
+    const auto srcType = input.getType().cast<vpux::NDTypeInterface>();
+    const auto dstType = srcType.changeShape(ShapeRef(targetShape));
+
+    SmallVector<SmallVector<int64_t>> inDimMapping{{Dims4D::Act::N.ind(), Dims4D::Act::C.ind()},
+                                                   {Dims4D::Act::C.ind()},
+                                                   {Dims4D::Act::H.ind()},
+                                                   {Dims4D::Act::W.ind()}};
+    SmallVector<SmallVector<int64_t>> outDimMapping{{Dims4D::Act::N.ind()},
+                                                    {Dims4D::Act::N.ind(), Dims4D::Act::C.ind()},
+                                                    {Dims4D::Act::H.ind()},
+                                                    {Dims4D::Act::W.ind()}};
+    auto dimMapping = replacedOp == nullptr ? inDimMapping : outDimMapping;
+
+    auto reshapeOp = replacedOp == nullptr ? rewriter.create<IE::AffineReshapeOp>(loc, dstType, input,
+                                                                                  getIntArrayOfArray(ctx, dimMapping),
+                                                                                  getIntArrayAttr(ctx, targetShape))
+                                           : rewriter.replaceOpWithNewOp<IE::AffineReshapeOp>(
+                                                     replacedOp, dstType, input, getIntArrayOfArray(ctx, dimMapping),
+                                                     getIntArrayAttr(ctx, targetShape));
+
+    return reshapeOp;
+}
+
+IE::AffineReshapeOp affineReshapeInput(mlir::Location loc, mlir::Value input, ShapeRef origShape,
+                                       mlir::PatternRewriter& rewriter) {
+    Shape targetShape(origShape.raw());
+
+    targetShape[Dims4D::Act::C] *= targetShape[Dims4D::Act::N];
+    targetShape[Dims4D::Act::N] = 1;
+
+    const auto reshapedLoc = appendLoc(loc, "reshape input for Sigmoid");
+    return buildAffineReshape(reshapedLoc, input, ArrayRef(targetShape.raw()), rewriter, nullptr);
+}
+
+IE::AffineReshapeOp affineReshapeOutput(IE::SigmoidOp origOp, mlir::Value sigmoidOutput,
+                                        mlir::PatternRewriter& rewriter) {
+    const Shape origShape = getShape(origOp.getOutput()).toValues();
+    const SmallVector<int64_t> targetShape = origShape.raw();
+
+    const auto reshapedLoc = appendLoc(origOp.getLoc(), "reshape output for Sigmoid");
+    return buildAffineReshape(reshapedLoc, sigmoidOutput, ArrayRef(targetShape), rewriter, origOp);
+}
+
+mlir::LogicalResult SigmoidConverter::matchAndRewrite(IE::SigmoidOp origOp, mlir::PatternRewriter& rewriter) const {
+    // Create affineReshapeOp for input
+    const auto sigmoidInShape = getShape(origOp.getInput());
+    auto reshapeIn = affineReshapeInput(origOp.getLoc(), origOp.getInput(), sigmoidInShape, rewriter);
+
+    // Create new sigmoidOp
+    auto newSigmoidOp = rewriter.create<IE::SigmoidOp>(origOp.getLoc(), reshapeIn);
+
+    // Create affineReshapeOp for output
+    affineReshapeOutput(origOp, newSigmoidOp.getOutput(), rewriter);
+
+    return mlir::success();
+}
+
+//
 // ConvertBatchedLayerTo1NPass
 //
 
@@ -214,11 +322,20 @@ void ConvertBatchedLayerTo1NPass::safeRunOnFunc() {
             hasPerAxisQuantization) {
             return true;
         }
-        auto transposedDim = getDimEqualsToOne({op.getInput1(), op.getInput2()});
-        return !transposedDim.has_value();
+        return false;
+    });
+
+    target.addDynamicallyLegalOp<IE::SigmoidOp>([&](IE::SigmoidOp op) -> bool {
+        auto hasPerAxisQuantization = isPerAxisQuant(op.getInput()) || isPerAxisQuant(op.getOutput());
+        if (!isShapeRankEq4(op.getInput()) || isEqualToOne(op.getInput(), Dims4D::Act::N) || hasPerAxisQuantization) {
+            return true;
+        }
+        return false;
     });
 
     target.addLegalOp<IE::TransposeOp>();
+    target.addLegalOp<IE::ShapeCastOp>();
+    target.addLegalOp<IE::AffineReshapeOp>();
 
     mlir::RewritePatternSet patterns(&ctx);
     patterns.add<LayerConverter<IE::ConvolutionOp>>(&ctx, _log);
@@ -226,6 +343,7 @@ void ConvertBatchedLayerTo1NPass::safeRunOnFunc() {
     patterns.add<LayerConverter<IE::MaxPoolOp>>(&ctx, _log);
     patterns.add<LayerConverter<IE::AvgPoolOp>>(&ctx, _log);
     patterns.add<LayerConverter<IE::AddOp>>(&ctx, _log);
+    patterns.add<SigmoidConverter>(&ctx, _log);
 
     auto func = getOperation();
     if (mlir::failed(mlir::applyPartialConversion(func, target, std::move(patterns)))) {

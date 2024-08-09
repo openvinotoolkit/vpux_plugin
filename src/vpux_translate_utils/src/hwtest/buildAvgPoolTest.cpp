@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+//
+
 #include <numeric>
 
 #include <mlir/Dialect/Quant/QuantTypes.h>
@@ -17,6 +19,7 @@
 #include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/utils/VPU/ppe_utils.hpp"
+#include "vpux/compiler/utils/platform_resources.hpp"
 #include "vpux/compiler/utils/types.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
 #include "vpux/hwtest/test_case_json_parser.hpp"
@@ -111,16 +114,19 @@ void buildAvgpool(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
     auto parentOutputCmx =
             createDeclareTensorOp(funcBuilder, outputCmxType, VPURT::BufferSection::CMX_NN, 0, OUTPUT_CMX_OFFSET);
 
+    auto [waitWLMBarrier, freeBarrierId] =
+            insertWLMStartSequence(funcBuilder, testDesc.getWLMParams().isWLMPartialEnabled);
+
     // barrier config
-    auto barrier0 = funcBuilder.create<VPURT::ConfigureBarrierOp>(loc, 0);
-    auto barrier1 = funcBuilder.create<VPURT::ConfigureBarrierOp>(loc, 1);
+    auto barrier0 = funcBuilder.create<VPURT::ConfigureBarrierOp>(loc, freeBarrierId++);
+    auto barrier1 = funcBuilder.create<VPURT::ConfigureBarrierOp>(loc, freeBarrierId++);
     // finalBarrier passed as production barrier to last DMA task
-    auto barrier2 = funcBuilder.create<VPURT::ConfigureBarrierOp>(loc, 2);
+    auto finalBarrier = funcBuilder.create<VPURT::ConfigureBarrierOp>(loc, freeBarrierId++,
+                                                                      testDesc.getWLMParams().isWLMPartialEnabled);
 
     // DMA input-->cmx
-    vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcBuilder, mlir::ValueRange(),
-                                                mlir::ValueRange(barrier0.getBarrier()), loc, funcInput,
-                                                inputCmx.getOperation()->getResult(0), 0);
+    vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcBuilder, waitWLMBarrier, mlir::ValueRange(barrier0.getBarrier()),
+                                                loc, funcInput, inputCmx.getOperation()->getResult(0), 0);
 
     mlir::Value wtTblValue;
     auto qPerChType = outputType.dyn_cast_or_null<mlir::quant::UniformQuantizedPerAxisType>();
@@ -208,7 +214,7 @@ void buildAvgpool(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
     createDPUTaskOp(funcBuilder, variantbuilder, outShape, inShape, paddingVec, VPU::MPEMode::CUBOID_16x16);
 
     vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcBuilder, mlir::ValueRange(barrier1.getBarrier()),
-                                                mlir::ValueRange(barrier2.getBarrier()), loc,
+                                                mlir::ValueRange(finalBarrier.getBarrier()), loc,
                                                 outputCmx.getOperation()->getResult(0), funcOutput, 0);
 
     funcBuilder.create<mlir::func::ReturnOp>(loc, funcOutput);

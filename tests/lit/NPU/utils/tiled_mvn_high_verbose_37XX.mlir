@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-translate --vpu-arch=%arch% --export-VPUIP -o %t %s && prof_parser -b %t -p %data_path_npu%/profiling-0-37XX-MVN.bin -f json -vv | FileCheck %s
-// REQUIRES: arch-VPUX37XX
+// REQUIRES: arch-NPU37XX
 
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 #loc = loc(unknown)
@@ -777,42 +777,42 @@ module @MVN_case1 attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilatio
 // CHECK-NEXT: {"name":"Div_0?t_Reshape/converted_to_f32/_cluster_1", "cat":"DMA", "ph":"X", "ts":55.469, "dur":0.703, "pid":0, "tid":1},
 // CHECK-NEXT: {"name":"Div_0?t_Reshape/converted_to_f32/_cluster_0", "cat":"DMA", "ph":"X", "ts":60.781, "dur":0.651, "pid":0, "tid":0},
 // CHECK-NEXT: {"name":"Div_0?t_Reshape/converted_to_f32/_cluster_1", "cat":"DMA", "ph":"X", "ts":60.937, "dur":0.338, "pid":0, "tid":1},
-// CHECK-NEXT: {"name":"converted_to_f16?cluster_0", "cat":"SW", "ph":"X", "ts":12.526, "dur":5.390, "pid":1, "tid":0},
-// CHECK-NEXT: {"name":"MVN_0?t_MVN/tile_0/cluster_0", "cat":"SW", "ph":"X", "ts":20.833, "dur":9.765, "pid":1, "tid":0},
-// CHECK-NEXT: {"name":"MVN_0?t_MVN/tile_1/cluster_0", "cat":"SW", "ph":"X", "ts":21.094, "dur":9.635, "pid":1, "tid":1},
-// CHECK-NEXT: {"name":"MVN_1?t_MVN/tile_1/cluster_0", "cat":"SW", "ph":"X", "ts":31.849, "dur":2.708, "pid":1, "tid":0},
-// CHECK-NEXT: {"name":"MVN_1?t_MVN/tile_0/cluster_0", "cat":"SW", "ph":"X", "ts":31.979, "dur":2.838, "pid":1, "tid":1},
-// CHECK-NEXT: {"name":"Swish_0?t_Swish/tile_0/cluster_0", "cat":"SW", "ph":"X", "ts":36.015, "dur":3.098, "pid":1, "tid":0},
-// CHECK-NEXT: {"name":"Swish_0?t_Swish/tile_1/cluster_0", "cat":"SW", "ph":"X", "ts":36.276, "dur":2.968, "pid":1, "tid":1},
-// CHECK-NEXT: {"name":"MVN_2?t_MVN/tile_0/cluster_0", "cat":"SW", "ph":"X", "ts":40.364, "dur":2.812, "pid":1, "tid":0},
-// CHECK-NEXT: {"name":"MVN_2?t_MVN/tile_1/cluster_0", "cat":"SW", "ph":"X", "ts":40.625, "dur":2.812, "pid":1, "tid":1},
-// CHECK-NEXT: {"name":"MVN_3?t_MVN/tile_0/cluster_0", "cat":"SW", "ph":"X", "ts":44.427, "dur":2.994, "pid":1, "tid":0},
-// CHECK-NEXT: {"name":"MVN_3?t_MVN/tile_1/cluster_0", "cat":"SW", "ph":"X", "ts":44.765, "dur":2.916, "pid":1, "tid":1},
-// CHECK-NEXT: {"name":"Tanh_0?t_Tanh/tile_0/cluster_0", "cat":"SW", "ph":"X", "ts":50.286, "dur":3.515, "pid":1, "tid":0},
-// CHECK-NEXT: {"name":"Tanh_0?t_Tanh/tile_1/cluster_0", "cat":"SW", "ph":"X", "ts":50.547, "dur":3.385, "pid":1, "tid":1},
-// CHECK-NEXT: {"name":"Div_0?t_Reshape/converted_to_f32/cluster_0", "cat":"SW", "ph":"X", "ts":56.693, "dur":3.385, "pid":1, "tid":0},
-// CHECK-NEXT: {"name":"converted_to_f16?cluster_1", "cat":"SW", "ph":"X", "ts":12.396, "dur":5.390, "pid":2, "tid":0},
-// CHECK-NEXT: {"name":"MVN_0?t_MVN/tile_1/cluster_1", "cat":"SW", "ph":"X", "ts":20.963, "dur":9.895, "pid":2, "tid":0},
-// CHECK-NEXT: {"name":"MVN_0?t_MVN/tile_0/cluster_1", "cat":"SW", "ph":"X", "ts":21.224, "dur":9.765, "pid":2, "tid":1},
-// CHECK-NEXT: {"name":"MVN_1?t_MVN/tile_0/cluster_1", "cat":"SW", "ph":"X", "ts":32.109, "dur":2.578, "pid":2, "tid":0},
-// CHECK-NEXT: {"name":"MVN_1?t_MVN/tile_1/cluster_1", "cat":"SW", "ph":"X", "ts":32.396, "dur":2.734, "pid":2, "tid":1},
-// CHECK-NEXT: {"name":"Swish_0?t_Swish/tile_0/cluster_1", "cat":"SW", "ph":"X", "ts":36.146, "dur":2.708, "pid":2, "tid":0},
-// CHECK-NEXT: {"name":"Swish_0?t_Swish/tile_1/cluster_1", "cat":"SW", "ph":"X", "ts":36.458, "dur":2.526, "pid":2, "tid":1},
-// CHECK-NEXT: {"name":"MVN_2?t_MVN/tile_0/cluster_1", "cat":"SW", "ph":"X", "ts":40.104, "dur":2.942, "pid":2, "tid":0},
-// CHECK-NEXT: {"name":"MVN_2?t_MVN/tile_1/cluster_1", "cat":"SW", "ph":"X", "ts":40.234, "dur":3.072, "pid":2, "tid":1},
-// CHECK-NEXT: {"name":"MVN_3?t_MVN/tile_0/cluster_1", "cat":"SW", "ph":"X", "ts":44.297, "dur":2.994, "pid":2, "tid":0},
-// CHECK-NEXT: {"name":"MVN_3?t_MVN/tile_1/cluster_1", "cat":"SW", "ph":"X", "ts":44.557, "dur":2.994, "pid":2, "tid":1},
-// CHECK-NEXT: {"name":"Tanh_0?t_Tanh/tile_0/cluster_1", "cat":"SW", "ph":"X", "ts":50.156, "dur":3.385, "pid":2, "tid":0},
-// CHECK-NEXT: {"name":"Tanh_0?t_Tanh/tile_1/cluster_1", "cat":"SW", "ph":"X", "ts":50.416, "dur":3.255, "pid":2, "tid":1},
-// CHECK-NEXT: {"name":"Div_0?t_Reshape/converted_to_f32/cluster_1", "cat":"SW", "ph":"X", "ts":56.562, "dur":3.385, "pid":2, "tid":0},
-// CHECK-NEXT: {"name":"converted_to_f16", "cat":"Layer", "ph":"X", "ts":0.000, "dur":19.531, "pid":3, "tid":0, "args":{"Layer type": "<unknown>"}},
-// CHECK-NEXT: {"name":"MVN_0", "cat":"Layer", "ph":"X", "ts":19.765, "dur":11.224, "pid":3, "tid":0, "args":{"Layer type": "MVN"}},
-// CHECK-NEXT: {"name":"MVN_1", "cat":"Layer", "ph":"X", "ts":31.849, "dur":3.281, "pid":3, "tid":0, "args":{"Layer type": "MVN"}},
-// CHECK-NEXT: {"name":"Swish_0", "cat":"Layer", "ph":"X", "ts":36.015, "dur":3.229, "pid":3, "tid":0, "args":{"Layer type": "Swish"}},
-// CHECK-NEXT: {"name":"MVN_2", "cat":"Layer", "ph":"X", "ts":40.104, "dur":3.333, "pid":3, "tid":0, "args":{"Layer type": "MVN"}},
-// CHECK-NEXT: {"name":"MVN_3", "cat":"Layer", "ph":"X", "ts":44.297, "dur":4.530, "pid":3, "tid":0, "args":{"Layer type": "MVN"}},
-// CHECK-NEXT: {"name":"Tanh_0", "cat":"Layer", "ph":"X", "ts":49.062, "dur":6.015, "pid":3, "tid":0, "args":{"Layer type": "Tanh"}},
-// CHECK-NEXT: {"name":"Div_0", "cat":"Layer", "ph":"X", "ts":55.312, "dur":6.120, "pid":3, "tid":0, "args":{"Layer type": "Reshape"}}
+// CHECK-NEXT: {"name":"converted_to_f16?cluster_0", "cat":"SW", "ph":"X", "ts":12.526, "dur":5.390, "pid":1, "tid":0, "args":{"Active cycles:": "5237", "Stall cycles:": "805"}},
+// CHECK-NEXT: {"name":"MVN_0?t_MVN/tile_0/cluster_0", "cat":"SW", "ph":"X", "ts":20.833, "dur":9.765, "pid":1, "tid":0, "args":{"Active cycles:": "9496", "Stall cycles:": "1367"}},
+// CHECK-NEXT: {"name":"MVN_0?t_MVN/tile_1/cluster_0", "cat":"SW", "ph":"X", "ts":21.094, "dur":9.635, "pid":1, "tid":1, "args":{"Active cycles:": "9490", "Stall cycles:": "1715"}},
+// CHECK-NEXT: {"name":"MVN_1?t_MVN/tile_1/cluster_0", "cat":"SW", "ph":"X", "ts":31.849, "dur":2.708, "pid":1, "tid":0, "args":{"Active cycles:": "2629", "Stall cycles:": "962"}},
+// CHECK-NEXT: {"name":"MVN_1?t_MVN/tile_0/cluster_0", "cat":"SW", "ph":"X", "ts":31.979, "dur":2.838, "pid":1, "tid":1, "args":{"Active cycles:": "2635", "Stall cycles:": "1042"}},
+// CHECK-NEXT: {"name":"Swish_0?t_Swish/tile_0/cluster_0", "cat":"SW", "ph":"X", "ts":36.015, "dur":3.098, "pid":1, "tid":0, "args":{"Active cycles:": "2772", "Stall cycles:": "876"}},
+// CHECK-NEXT: {"name":"Swish_0?t_Swish/tile_1/cluster_0", "cat":"SW", "ph":"X", "ts":36.276, "dur":2.968, "pid":1, "tid":1, "args":{"Active cycles:": "2761", "Stall cycles:": "1075"}},
+// CHECK-NEXT: {"name":"MVN_2?t_MVN/tile_0/cluster_0", "cat":"SW", "ph":"X", "ts":40.364, "dur":2.812, "pid":1, "tid":0, "args":{"Active cycles:": "2818", "Stall cycles:": "1148"}},
+// CHECK-NEXT: {"name":"MVN_2?t_MVN/tile_1/cluster_0", "cat":"SW", "ph":"X", "ts":40.625, "dur":2.812, "pid":1, "tid":1, "args":{"Active cycles:": "2536", "Stall cycles:": "1053"}},
+// CHECK-NEXT: {"name":"MVN_3?t_MVN/tile_0/cluster_0", "cat":"SW", "ph":"X", "ts":44.427, "dur":2.994, "pid":1, "tid":0, "args":{"Active cycles:": "2984", "Stall cycles:": "1203"}},
+// CHECK-NEXT: {"name":"MVN_3?t_MVN/tile_1/cluster_0", "cat":"SW", "ph":"X", "ts":44.765, "dur":2.916, "pid":1, "tid":1, "args":{"Active cycles:": "2644", "Stall cycles:": "1140"}},
+// CHECK-NEXT: {"name":"Tanh_0?t_Tanh/tile_0/cluster_0", "cat":"SW", "ph":"X", "ts":50.286, "dur":3.515, "pid":1, "tid":0, "args":{"Active cycles:": "3271", "Stall cycles:": "999"}},
+// CHECK-NEXT: {"name":"Tanh_0?t_Tanh/tile_1/cluster_0", "cat":"SW", "ph":"X", "ts":50.547, "dur":3.385, "pid":1, "tid":1, "args":{"Active cycles:": "3262", "Stall cycles:": "1242"}},
+// CHECK-NEXT: {"name":"Div_0?t_Reshape/converted_to_f32/cluster_0", "cat":"SW", "ph":"X", "ts":56.693, "dur":3.385, "pid":1, "tid":0, "args":{"Active cycles:": "3261", "Stall cycles:": "851"}},
+// CHECK-NEXT: {"name":"converted_to_f16?cluster_1", "cat":"SW", "ph":"X", "ts":12.396, "dur":5.390, "pid":2, "tid":0, "args":{"Active cycles:": "5239", "Stall cycles:": "693"}},
+// CHECK-NEXT: {"name":"MVN_0?t_MVN/tile_1/cluster_1", "cat":"SW", "ph":"X", "ts":20.963, "dur":9.895, "pid":2, "tid":0, "args":{"Active cycles:": "9508", "Stall cycles:": "1488"}},
+// CHECK-NEXT: {"name":"MVN_0?t_MVN/tile_0/cluster_1", "cat":"SW", "ph":"X", "ts":21.224, "dur":9.765, "pid":2, "tid":1, "args":{"Active cycles:": "9466", "Stall cycles:": "1694"}},
+// CHECK-NEXT: {"name":"MVN_1?t_MVN/tile_0/cluster_1", "cat":"SW", "ph":"X", "ts":32.109, "dur":2.578, "pid":2, "tid":0, "args":{"Active cycles:": "2562", "Stall cycles:": "1095"}},
+// CHECK-NEXT: {"name":"MVN_1?t_MVN/tile_1/cluster_1", "cat":"SW", "ph":"X", "ts":32.396, "dur":2.734, "pid":2, "tid":1, "args":{"Active cycles:": "2640", "Stall cycles:": "1013"}},
+// CHECK-NEXT: {"name":"Swish_0?t_Swish/tile_0/cluster_1", "cat":"SW", "ph":"X", "ts":36.146, "dur":2.708, "pid":2, "tid":0, "args":{"Active cycles:": "2762", "Stall cycles:": "967"}},
+// CHECK-NEXT: {"name":"Swish_0?t_Swish/tile_1/cluster_1", "cat":"SW", "ph":"X", "ts":36.458, "dur":2.526, "pid":2, "tid":1, "args":{"Active cycles:": "2319", "Stall cycles:": "616"}},
+// CHECK-NEXT: {"name":"MVN_2?t_MVN/tile_0/cluster_1", "cat":"SW", "ph":"X", "ts":40.104, "dur":2.942, "pid":2, "tid":0, "args":{"Active cycles:": "2859", "Stall cycles:": "963"}},
+// CHECK-NEXT: {"name":"MVN_2?t_MVN/tile_1/cluster_1", "cat":"SW", "ph":"X", "ts":40.234, "dur":3.072, "pid":2, "tid":1, "args":{"Active cycles:": "2898", "Stall cycles:": "1096"}},
+// CHECK-NEXT: {"name":"MVN_3?t_MVN/tile_0/cluster_1", "cat":"SW", "ph":"X", "ts":44.297, "dur":2.994, "pid":2, "tid":0, "args":{"Active cycles:": "2909", "Stall cycles:": "1093"}},
+// CHECK-NEXT: {"name":"MVN_3?t_MVN/tile_1/cluster_1", "cat":"SW", "ph":"X", "ts":44.557, "dur":2.994, "pid":2, "tid":1, "args":{"Active cycles:": "2741", "Stall cycles:": "1082"}},
+// CHECK-NEXT: {"name":"Tanh_0?t_Tanh/tile_0/cluster_1", "cat":"SW", "ph":"X", "ts":50.156, "dur":3.385, "pid":2, "tid":0, "args":{"Active cycles:": "3295", "Stall cycles:": "719"}},
+// CHECK-NEXT: {"name":"Tanh_0?t_Tanh/tile_1/cluster_1", "cat":"SW", "ph":"X", "ts":50.416, "dur":3.255, "pid":2, "tid":1, "args":{"Active cycles:": "3266", "Stall cycles:": "1056"}},
+// CHECK-NEXT: {"name":"Div_0?t_Reshape/converted_to_f32/cluster_1", "cat":"SW", "ph":"X", "ts":56.562, "dur":3.385, "pid":2, "tid":0, "args":{"Active cycles:": "3267", "Stall cycles:": "688"}},
+// CHECK-NEXT: {"name":"converted_to_f16", "cat":"Layer", "ph":"X", "ts":0.000, "dur":19.531, "pid":3, "tid":0, "args":{"Layer type": "<unknown>", "Shave time:": "10us 780ns", "DMA time:": "2us 30ns"}},
+// CHECK-NEXT: {"name":"MVN_0", "cat":"Layer", "ph":"X", "ts":19.765, "dur":11.224, "pid":3, "tid":0, "args":{"Layer type": "MVN", "Shave time:": "39us 60ns", "DMA time:": "1us 40ns"}},
+// CHECK-NEXT: {"name":"MVN_1", "cat":"Layer", "ph":"X", "ts":31.849, "dur":3.281, "pid":3, "tid":0, "args":{"Layer type": "MVN", "Shave time:": "10us 858ns"}},
+// CHECK-NEXT: {"name":"Swish_0", "cat":"Layer", "ph":"X", "ts":36.015, "dur":3.229, "pid":3, "tid":0, "args":{"Layer type": "Swish", "Shave time:": "11us 300ns"}},
+// CHECK-NEXT: {"name":"MVN_2", "cat":"Layer", "ph":"X", "ts":40.104, "dur":3.333, "pid":3, "tid":0, "args":{"Layer type": "MVN", "Shave time:": "11us 638ns"}},
+// CHECK-NEXT: {"name":"MVN_3", "cat":"Layer", "ph":"X", "ts":44.297, "dur":4.530, "pid":3, "tid":0, "args":{"Layer type": "MVN", "Shave time:": "11us 898ns", "DMA time:": "624ns"}},
+// CHECK-NEXT: {"name":"Tanh_0", "cat":"Layer", "ph":"X", "ts":49.062, "dur":6.015, "pid":3, "tid":0, "args":{"Layer type": "Tanh", "Shave time:": "13us 540ns", "DMA time:": "1us 664ns"}},
+// CHECK-NEXT: {"name":"Div_0", "cat":"Layer", "ph":"X", "ts":55.312, "dur":6.120, "pid":3, "tid":0, "args":{"Layer type": "Reshape", "Shave time:": "6us 770ns", "DMA time:": "2us 395ns"}}
 // CHECK-NEXT: ],
 // CHECK-NEXT: "taskStatistics": {
 // CHECK-NEXT: "total duration":61.432,
@@ -832,5 +832,6 @@ module @MVN_case1 attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilatio
 // CHECK-NEXT: "Sum of SW task durations":115.844,
 // CHECK-NEXT: "Sum of M2I task durations":0.000
 // CHECK-NEXT: },
+// CHECK-NEXT: "workpoint": { "freq": 1300.0, "status": "OK" },
 // CHECK-NEXT: "displayTimeUnit": "ns"
 // CHECK-NEXT: }

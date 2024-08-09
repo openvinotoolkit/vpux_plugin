@@ -148,3 +148,140 @@ mlir::Type VPUIP::tileTypeSparsityCompression(mlir::Type type, ShapeRef tileOffs
     const auto tiledSparsityCompression = VPUIP::tileSparsityCompression(sparsityCompression, tileOffsets, tileShape);
     return VPUIP::setSparsityCompressionAttr(type, tiledSparsityCompression);
 }
+
+//
+// CustomPrinterOutwardHaloRegionAttr
+//
+
+::mlir::Attribute VPUIP::OutwardHaloRegionAttr::parse(::mlir::AsmParser& odsParser,
+                                                      [[maybe_unused]] ::mlir::Type odsType) {
+    ::mlir::Builder odsBuilder(odsParser.getContext());
+    ::llvm::SMLoc odsLoc = odsParser.getCurrentLocation();
+    (void)odsLoc;
+    ::mlir::FailureOr<mlir::ArrayAttr> resultShape;
+    ::mlir::FailureOr<mlir::ArrayAttr> resultOffset;
+    ::mlir::FailureOr<mlir::IntegerAttr> resultClusterId;
+    ::mlir::FailureOr<mlir::ArrayAttr> resultInwardHaloRegions;
+    // Parse literal '<'
+    if (odsParser.parseLess())
+        return {};
+    // Parse parameter struct
+    bool seenShape = false;
+    bool seenOffset = false;
+    bool seenClusterId = false;
+    bool seenInwardHaloRegions = false;
+    {
+        const auto loopBody = [&](::llvm::StringRef paramKey) -> bool {
+            // Parse literal '='
+            if (odsParser.parseEqual())
+                return {};
+            if (!seenShape && paramKey == "shape") {
+                seenShape = true;
+
+                // Parse variable 'shape'
+                resultShape = ::mlir::FieldParser<mlir::ArrayAttr>::parse(odsParser);
+                if (::mlir::failed(resultShape)) {
+                    odsParser.emitError(odsParser.getCurrentLocation(),
+                                        "failed to parse VPUIP_OutwardHaloRegionAttr parameter 'shape' which is to be "
+                                        "a `mlir::ArrayAttr`");
+                    return {};
+                }
+            } else if (!seenOffset && paramKey == "offset") {
+                seenOffset = true;
+
+                // Parse variable 'offset'
+                resultOffset = ::mlir::FieldParser<mlir::ArrayAttr>::parse(odsParser);
+                if (::mlir::failed(resultOffset)) {
+                    odsParser.emitError(odsParser.getCurrentLocation(),
+                                        "failed to parse VPUIP_OutwardHaloRegionAttr parameter 'offset' which is to be "
+                                        "a `mlir::ArrayAttr`");
+                    return {};
+                }
+            } else if (!seenClusterId && paramKey == "cluster_id") {
+                seenClusterId = true;
+
+                // Parse variable 'cluster_id'
+                resultClusterId = ::mlir::FieldParser<mlir::IntegerAttr>::parse(odsParser);
+                if (::mlir::failed(resultClusterId)) {
+                    odsParser.emitError(odsParser.getCurrentLocation(),
+                                        "failed to parse VPUIP_OutwardHaloRegionAttr parameter 'cluster_id' which is "
+                                        "to be a `mlir::IntegerAttr`");
+                    return {};
+                }
+            } else if (!seenInwardHaloRegions && paramKey == "inwardHaloRegions") {
+                seenInwardHaloRegions = true;
+
+                // Parse variable 'inwardHaloRegions'
+                resultInwardHaloRegions = ::mlir::FieldParser<mlir::ArrayAttr>::parse(odsParser);
+                if (::mlir::failed(resultInwardHaloRegions)) {
+                    odsParser.emitError(odsParser.getCurrentLocation(),
+                                        "failed to parse VPUIP_OutwardHaloRegionAttr parameter 'inwardHaloRegions' "
+                                        "which is to be a `mlir::ArrayAttr`");
+                    return {};
+                }
+            } else {
+                odsParser.emitError(odsParser.getCurrentLocation(), "duplicate or unknown struct parameter name: ")
+                        << paramKey;
+                return {};
+            }
+            return true;
+        };
+        for (unsigned odsStructIndex = 0; odsStructIndex < 4; ++odsStructIndex) {
+            ::llvm::StringRef paramKey;
+            if (odsParser.parseKeyword(&paramKey)) {
+                odsParser.emitError(odsParser.getCurrentLocation(), "expected a parameter name in struct");
+                return {};
+            }
+            if (!loopBody(paramKey))
+                return {};
+            if ((odsStructIndex != 4 - 1) && odsParser.parseComma())
+                return {};
+        }
+    }
+    // Parse literal '>'
+    if (odsParser.parseGreater())
+        return {};
+    assert(::mlir::succeeded(resultShape));
+    assert(::mlir::succeeded(resultOffset));
+    assert(::mlir::succeeded(resultClusterId));
+    assert(::mlir::succeeded(resultInwardHaloRegions));
+    return OutwardHaloRegionAttr::get(odsParser.getContext(), mlir::ArrayAttr((*resultShape)),
+                                      mlir::ArrayAttr((*resultOffset)), mlir::IntegerAttr((*resultClusterId)),
+                                      mlir::ArrayAttr((*resultInwardHaloRegions)));
+}
+
+void VPUIP::OutwardHaloRegionAttr::print(::mlir::AsmPrinter& odsPrinter) const {
+    odsPrinter << "<";
+
+    odsPrinter << "shape = ";
+    odsPrinter.printStrippedAttrOrType(getShape());
+
+    odsPrinter << ", ";
+    odsPrinter << "offset = ";
+    odsPrinter.printStrippedAttrOrType(getOffset());
+
+    odsPrinter << ", ";
+    odsPrinter << "cluster_id = ";
+    odsPrinter.printStrippedAttrOrType(getClusterId());
+
+    odsPrinter << ", inwardHaloRegions = [";
+
+    odsPrinter.increaseIndent();
+    odsPrinter.increaseIndent();
+    odsPrinter.printNewline();
+
+    const auto inwardHaloRegions = getInwardHaloRegions();
+    for (const auto haloRegion : inwardHaloRegions) {
+        odsPrinter.printStrippedAttrOrType(haloRegion);
+        if (haloRegion != *(inwardHaloRegions.end() - 1)) {
+            odsPrinter << ",";
+            odsPrinter.printNewline();
+        }
+    }
+    odsPrinter.decreaseIndent();
+    odsPrinter.decreaseIndent();
+    odsPrinter.printNewline();
+    odsPrinter << "]";
+
+    odsPrinter << ">";
+}

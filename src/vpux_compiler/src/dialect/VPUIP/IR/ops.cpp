@@ -68,7 +68,7 @@ bool isSupportedIsolatedTilingConvBased(ConcreteOp origOp, const OutputTiling& t
             VPUX_THROW_WHEN(clusteredOp == nullptr, "Op {0} has multiClusterStrategy but is not an ClusteredOp",
                             origOp->getLoc());
 
-            auto numClusters = vpux::VPU::getOptimalNumClusters(clusteredOp, outputTileType.getShape()[Dims4D::Act::C],
+            auto numClusters = vpux::VPU::getOptimalNumClusters(clusteredOp, outputTileType.getShape(),
                                                                 clusteredOp.getMultiClusterStrategy().value());
             return origOp.fitIntoCMX(
                     VPU::getDistributedActivationTypeFromOp(clusteredOp, inputTileType, numClusters, nullptr,
@@ -192,7 +192,7 @@ bool isSupportedIsolatedTiling(VPU::NCEMaxPoolOp origOp, const OutputTiling& til
             VPUX_THROW_WHEN(clusteredOp == nullptr, "Op {0} has multiClusterStrategy but is not an ClusteredOp",
                             origOp->getLoc());
 
-            auto numClusters = VPU::getOptimalNumClusters(clusteredOp, outputTileType.getShape()[Dims4D::Act::C],
+            auto numClusters = VPU::getOptimalNumClusters(clusteredOp, outputTileType.getShape(),
                                                           clusteredOp.getMultiClusterStrategy().value());
             return origOp.fitIntoCMX(
                     VPU::getDistributedActivationTypeFromOp(clusteredOp, inputTileType, numClusters, nullptr,
@@ -231,7 +231,7 @@ bool isSupportedIsolatedTiling(VPU::NCEAveragePoolOp origOp, const OutputTiling&
             auto clusteredOp = mlir::dyn_cast<VPU::ClusteredOpInterface>(origOp.getOperation());
             VPUX_THROW_WHEN(clusteredOp == nullptr, "Op {0} has multiClusterStrategy but is not an ClusteredOp",
                             origOp->getLoc());
-            auto numClusters = VPU::getOptimalNumClusters(clusteredOp, outputTileType.getShape()[Dims4D::Act::C],
+            auto numClusters = VPU::getOptimalNumClusters(clusteredOp, outputTileType.getShape(),
                                                           clusteredOp.getMultiClusterStrategy().value());
             return origOp.fitIntoCMX(
                     VPU::getDistributedActivationTypeFromOp(clusteredOp, inputTileType, numClusters, nullptr,
@@ -262,7 +262,7 @@ bool isSupportedIsolatedTilingEltwise(mlir::Operation* origOp, const OutputTilin
                             origOp->getLoc());
             auto module = clusteredOp->getParentOfType<mlir::ModuleOp>();
             auto numClusters = VPU::getOptimalNumClusters(
-                    clusteredOp, outputTileType.getShape()[Dims4D::Act::C],
+                    clusteredOp, outputTileType.getShape(),
                     clusteredOp->getAttr(VPU::multiClusterStrategy).cast<VPU::MultiClusterStrategyAttr>().getValue());
 
             return mlir::succeeded(VPU::NCEEltwiseOp::verifyEltwiseCMX(
@@ -315,13 +315,12 @@ bool isSupportedIsolatedTilingSwInterface(VPU::SWOpInterface origOp, const Outpu
         auto clusteredOp = mlir::dyn_cast<VPU::ClusteredOpInterface>(origOp.getOperation());
         VPUX_THROW_WHEN(clusteredOp == nullptr, "Op {0} has multiClusterStrategy but is not an ClusteredOp",
                         origOp->getLoc());
-        auto numClusters = VPU::getOptimalNumClusters(clusteredOp, outputTileTypes[0].getShape()[Dims4D::Act::C],
+        auto numClusters = VPU::getOptimalNumClusters(clusteredOp, outputTileTypes[0].getShape(),
                                                       clusteredOp.getMultiClusterStrategy().value());
 
         if (!llvm::all_of(outputTileTypes, [&](const vpux::NDTypeInterface& outputTileType) {
-                auto numClustersOfPerOutput =
-                        VPU::getOptimalNumClusters(clusteredOp, outputTileType.getShape()[Dims4D::Act::C],
-                                                   clusteredOp.getMultiClusterStrategy().value());
+                auto numClustersOfPerOutput = VPU::getOptimalNumClusters(clusteredOp, outputTileType.getShape(),
+                                                                         clusteredOp.getMultiClusterStrategy().value());
                 return numClustersOfPerOutput == numClusters;
             })) {
             return false;
@@ -441,6 +440,40 @@ bool isSupportedIsolatedTilingGRUSequenceLastPart(VPU::GRUSequenceLastPartOp op,
     });
 }
 
+bool isSupportedIsolatedTilingGatherDMA(VPU::GatherDMAOp op, const OutputTiling& tiles, Logger log) {
+    const auto origOp = op.getOperation();
+    auto tilingOp = mlir::dyn_cast<VPU::TilingBuilderOpInterface>(origOp);
+    VPUX_THROW_UNLESS(tilingOp != nullptr, "Not a tileable operation {0}", origOp->getName());
+
+    const auto cmxAvailableBytes = vpux::VPU::getTotalCMXSize(origOp).to<Byte>().count();
+
+    const auto inputOutputTilesFitCMX = [&](const TileInfo& firstOutputTile) {
+        const auto computeRequiredMemory = [&](const auto& operand, const TileInfo& tilingInfo) {
+            const auto tensorType = operand.getType().template cast<vpux::NDTypeInterface>();
+            const auto denseTile = tensorType.extractDenseTile(tilingInfo.offsets, tilingInfo.shape);
+            return denseTile.getTotalAllocSize().count();
+        };
+
+        const auto inputTilingInfo = tilingOp.backInferTileInfo(firstOutputTile, log);
+        const auto indicesMemorySize = computeRequiredMemory(op.getIndices(), inputTilingInfo.tiles[1]);
+
+        const auto outputTiles = tilingOp.getOutputTiling(firstOutputTile, log);
+        const auto outputMemorySize = computeRequiredMemory(op.getOutput(), outputTiles[0]);
+        // For gather DMA only indices and output are copy to CMX.
+        const auto requiredCMX = indicesMemorySize + outputMemorySize;
+
+        if (requiredCMX > cmxAvailableBytes) {
+            log.trace("Op '{0}' doesn't fit into CMX: required {1}, available {2}", origOp->getLoc(), requiredCMX,
+                      cmxAvailableBytes);
+            return false;
+        }
+
+        return true;
+    };
+
+    return llvm::all_of(tiles, inputOutputTilesFitCMX);
+}
+
 bool isSupportedIsolatedTilingGeneric(mlir::Operation* origOp, const OutputTiling& firstOutputTiles, Logger log) {
     auto tilingOp = mlir::dyn_cast<VPU::TilingBuilderOpInterface>(origOp);
     VPUX_THROW_UNLESS(tilingOp != nullptr, "Not a tileable operation {0}", origOp->getName());
@@ -511,7 +544,7 @@ bool isSupportedIsolatedTiling(VPU::NCEPermuteOp origOp, const OutputTiling& til
             VPUX_THROW_WHEN(clusteredOp == nullptr, "Op {0} has multiClusterStrategy but is not an ClusteredOp",
                             origOp->getLoc());
             auto numClusters = VPU::getOptimalNumClusters(
-                    clusteredOp, outputTileType.getShape()[Dims4D::Act::C],
+                    clusteredOp, outputTileType.getShape(),
                     clusteredOp->getAttr(VPU::multiClusterStrategy).cast<VPU::MultiClusterStrategyAttr>().getValue());
             return origOp.fitIntoCMX(
                     VPU::getDistributedActivationTypeFromOp(clusteredOp, inputTileType, numClusters, nullptr,
@@ -548,8 +581,8 @@ bool isSupportedIsolatedTilingDetectionOutputSort(VPU::DetectionOutputSortOp ori
                 clusteredOp->getAttr(VPU::multiClusterStrategy).cast<VPU::MultiClusterStrategyAttr>().getValue();
         VPUX_THROW_UNLESS(multiClusterStrategy == VPU::MultiClusterStrategy::SplitOverHeight,
                           "Only 'SplitOverHeight' strategy is supported for {0}", origOp->getName());
-        auto numClusters = VPU::getOptimalNumClusters(clusteredOp, firstOutputTileType.getShape()[Dims4D::Act::H],
-                                                      multiClusterStrategy);
+        auto numClusters =
+                VPU::getOptimalNumClusters(clusteredOp, firstOutputTileType.getShape(), multiClusterStrategy);
 
         auto distributedTiles = mlir::SmallVector<vpux::NDTypeInterface>();
         for (const auto& [operand, tile] : zip(operands, inputTiles)) {
@@ -594,6 +627,9 @@ bool isSupportedIsolatedTilingSwLayer(mlir::Operation* origOp, const OutputTilin
             })
             .Case<VPU::GRUSequenceLastPartOp>([&](VPU::GRUSequenceLastPartOp op) {
                 return isSupportedIsolatedTilingGRUSequenceLastPart(op, tiles, log);
+            })
+            .Case<VPU::GatherDMAOp>([&](VPU::GatherDMAOp op) {
+                return isSupportedIsolatedTilingGatherDMA(op, tiles, log);
             })
             .Default([&](mlir::Operation* op) -> bool {
                 return isSupportedIsolatedTilingGeneric(op, tiles, log);
@@ -1128,6 +1164,7 @@ void vpux::VPUIP::VPUIPDialect::setupExtraInterfaces(mlir::DialectRegistry& regi
         VPU::QuantizeOp::attachInterface<SwLayerTilingInfoOpModel<VPU::QuantizeOp>>(*ctx);
         VPU::DequantizeOp::attachInterface<SwLayerTilingInfoOpModel<VPU::DequantizeOp>>(*ctx);
         VPU::GatherOp::attachInterface<SwLayerTilingInfoOpModel<VPU::GatherOp>>(*ctx);
+        VPU::GatherDMAOp::attachInterface<SwLayerTilingInfoOpModel<VPU::GatherDMAOp>>(*ctx);
         VPU::GatherNDOp::attachInterface<SwLayerTilingInfoOpModel<VPU::GatherNDOp>>(*ctx);
         VPU::ConvertOp::attachInterface<SwLayerTilingInfoOpModel<VPU::ConvertOp>>(*ctx);
         VPU::SigmoidOp::attachInterface<SwLayerTilingInfoOpModel<VPU::SigmoidOp>>(*ctx);
@@ -1528,6 +1565,27 @@ Byte vpux::VPUIP::SubViewOp::getByteOffset() {
     return offset;
 }
 
+Byte vpux::VPUIP::ExtractFlatSliceOp::getByteOffset() {
+    auto distributedType = getSource().getType().dyn_cast<VPUIP::DistributedBufferType>();
+    auto tileIndex = VPUIP::getTilingDimIndex(distributedType);
+    auto tileDim = Dim(tileIndex.value());
+
+    auto resMemSpace = getResult().getType().cast<NDTypeInterface>().getMemSpace();
+    auto targetCluster = resMemSpace.cast<IndexedSymbolAttr>().getIndex().value_or(0);
+    auto perClusterShapes = distributedType.getPerClusterMemoryShapes();
+    int64_t clusterStart = 0;
+    for (auto i = 0; i < targetCluster; ++i) {
+        clusterStart += perClusterShapes[i][tileDim];
+    }
+    // Consider taking slice with offset 19 from Distributed<1x32x128xf16, SEGMENTED, num_tiles=[1, 4, 1, 1]>
+    // Slice is allocated on cluster [@CMX_NN, 2](8+8+3) and offset from cluster begin is 3
+    // Then, byte offset is 3 * strides[Dim(1)] = 3 * 128 * 2 = 768 Bytes
+    auto dimOffset = getOffset() - clusterStart;
+    auto strides = getStrides(getSource());
+    Byte offset = strides[tileDim] * dimOffset;
+
+    return offset;
+}
 //
 // Generated
 //

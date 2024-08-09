@@ -45,14 +45,22 @@ const DimsOrder vpux::DimsOrder::WCHN = DimsOrder(0x4231);
 const DimsOrder vpux::DimsOrder::WHNC = DimsOrder(0x4312);
 const DimsOrder vpux::DimsOrder::HWCN = DimsOrder(0x3421);
 const DimsOrder vpux::DimsOrder::HCNW = DimsOrder(0x3214);
+const DimsOrder vpux::DimsOrder::HNWC = DimsOrder(0x3142);
 const DimsOrder vpux::DimsOrder::CWNH = DimsOrder(0x2413);
 
 const DimsOrder vpux::DimsOrder::NCDHW = DimsOrder(0x12345);
 const DimsOrder vpux::DimsOrder::NDHWC = DimsOrder(0x13452);
 
+const DimsOrder vpux::DimsOrder::GNCHW = DimsOrder(0x12345);
+const DimsOrder vpux::DimsOrder::GNHWC = DimsOrder(0x12453);
+const DimsOrder vpux::DimsOrder::GHNWC = DimsOrder(0x14253);
+
 const DimsOrder vpux::DimsOrder::OIYX = DimsOrder(0x1234);
 const DimsOrder vpux::DimsOrder::OYXI = DimsOrder(0x1342);
 const DimsOrder vpux::DimsOrder::YXOI = DimsOrder(0x3412);
+
+const DimsOrder vpux::DimsOrder::GOIYX = DimsOrder(0x12345);
+const DimsOrder vpux::DimsOrder::GOYXI = DimsOrder(0x12453);
 
 const DimsOrder vpux::DimsOrder::IOYX = DimsOrder(0x2134);
 
@@ -359,8 +367,14 @@ StringLiteral vpux::DimsOrder::getCanonicalName() const {
         return StringLiteral("NCDHW");
     } else if (*this == DimsOrder::NDHWC) {
         return StringLiteral("NDHWC");
+    } else if (*this == DimsOrder::GNHWC) {
+        return StringLiteral("GNHWC");
     } else if (*this == DimsOrder::YXOI) {
         return StringLiteral("YXOI");
+    } else if (*this == DimsOrder::GOIYX) {
+        return StringLiteral("GOIYX");
+    } else if (*this == DimsOrder::GOYXI) {
+        return StringLiteral("GOYXI");
     } else {
         return StringLiteral("");
     }

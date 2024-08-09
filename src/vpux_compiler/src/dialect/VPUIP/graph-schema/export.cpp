@@ -12,6 +12,7 @@
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
 #include "vpux/compiler/dialect/IERT/ops.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
+#include "vpux/compiler/dialect/VPU/transforms/factories/frequency_table.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPUIP/generated/schema/gf_version.h"
 #include "vpux/compiler/dialect/VPUIP/graph-schema/blob_writer.hpp"
@@ -136,9 +137,11 @@ flatbuffers::Offset<MVCNN::PerformanceMetrics> createPerformanceMetrics(VPUIP::B
                 MVCNN::CreateInferenceTimingByBandwidth(writer, writer.createVector(byBWTicks[i])));
     }
 
-    auto arch = vpux::VPU::getArch(module);
-    auto freqBase = VPU::getFreqBase(arch);
-    auto freqStep = VPU::getFreqStep(arch);
+    auto arch = VPU::getArch(module);
+    auto freqTable = VPU::getFrequencyTable(arch);
+    auto freqBase = freqTable().base;
+    auto freqStep = freqTable().step;
+
     return MVCNN::CreatePerformanceMetrics(
             writer, freqBase, freqStep, VPU::getBWBase(), VPU::getBWStep(),
             MVCNN::CreateScalability(writer, writer.createVector(scaleByFreq)),
@@ -485,13 +488,9 @@ void serializeTensorDecls(VPUIP::BlobWriter& writer, mlir::func::FuncOp netFunc,
                                      const std::optional<int64_t> storageElementOffset = std::nullopt,
                                      const std::optional<int64_t> storageElementSize = std::nullopt) {
         auto sectionIndex = bufOp.getNonEmptySectionIndex();
-        std::optional<uint64_t> descriptor;
-        if (auto value = bufOp->getAttr("DescriptorHandle").dyn_cast_or_null<mlir::IntegerAttr>()) {
-            descriptor = value.getUInt();
-        }
         writer.createTensorRef(bufOp.getBuffer(), printToString("temp-{0}", tempTensorInd), bufOp.getSection(),
                                sectionIndex, bufOp.getByteOffset(), sparsityMapOffset, storageElementOffset,
-                               storageElementSize, bufOp.getSwizzlingKey(), descriptor);
+                               storageElementSize, bufOp.getSwizzlingKey());
         tempTensorInd++;
     };
 

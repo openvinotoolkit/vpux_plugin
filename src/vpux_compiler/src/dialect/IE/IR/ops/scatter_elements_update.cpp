@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+//
+
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/utils/error.hpp"
 
@@ -33,11 +35,11 @@ mlir::LogicalResult vpux::IE::ScatterElementsUpdateOp::verify() {
 
 mlir::LogicalResult vpux::IE::ScatterElementsUpdateOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::ScatterElementsUpdateOpAdaptor scatterElementsUpdate(operands, attrs);
+    IE::ScatterElementsUpdateOpAdaptor scatterElementsUpdate(operands, attrs, prop);
     if (mlir::failed(scatterElementsUpdate.verify(loc))) {
         return mlir::failure();
     }
@@ -72,15 +74,11 @@ mlir::LogicalResult ConvertConstToAttr::matchAndRewrite(IE::ScatterElementsUpdat
     }
 
     auto axisConst = axis.getDefiningOp<Const::DeclareOp>();
-    if (axisConst == nullptr) {
+    if (axisConst == nullptr || !axisConst.getContentAttr().isSplat()) {
         return mlir::failure();
     }
 
     const auto axisContent = axisConst.getContent();
-    if (!axisContent.isSplat()) {
-        return mlir::failure();
-    }
-
     const auto axisValue = static_cast<int64_t>(axisContent.getSplatValue<int32_t>());
     rewriter.replaceOpWithNewOp<IE::ScatterElementsUpdateOp>(
             scatterElementsUpdateOp, scatterElementsUpdateOp.getType(), scatterElementsUpdateOp.getInput(),

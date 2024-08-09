@@ -126,12 +126,8 @@ mlir::LogicalResult vpux::bufferizeOp(mlir::MLIRContext* ctx, VPU::NCEClusterTil
             outerArg = skipProducerCast(outerArg);
 
             if (mlir::isa<mlir::TensorType, VPU::DistributedTensorType, VPU::SparseTensorType>(outerArg.getType())) {
-                // Note: The insertion of mlir::UnrealizedConversionCastOp is intended to convert the input
-                // arguments of the VPUIP UngroupSparseBufferOp from tensor to buffer for Dialect conversion.
                 auto outerType = vpux::getBufferType(outerArg.getType());
-                outerArg = rewriter.create<mlir::UnrealizedConversionCastOp>(op->getLoc(), mlir::TypeRange{outerType},
-                                                                             mlir::ValueRange{outerArg})
-                                   ->getResult(0);
+                outerArg = rewriter.create<mlir::bufferization::ToMemrefOp>(op->getLoc(), outerType, outerArg);
             }
 
             mlir::IRMapping mapper;
@@ -171,12 +167,8 @@ mlir::LogicalResult vpux::bufferizeOp(mlir::MLIRContext* ctx, VPU::NCEClusterTil
             outerInput = skipProducerCast(outerInput);
 
             if (mlir::isa<mlir::TensorType, VPU::DistributedTensorType, VPU::SparseTensorType>(outerInput.getType())) {
-                // Note: The insertion of mlir::UnrealizedConversionCastOp is intended to convert the
-                // input arguments of the VPUIP pureViewOp from tensor to buffer for Dialect conversion.
                 auto outerType = vpux::getBufferType(outerInput.getType());
-                outerInput = rewriter.create<mlir::UnrealizedConversionCastOp>(op->getLoc(), mlir::TypeRange{outerType},
-                                                                               mlir::ValueRange{outerInput})
-                                     ->getResult(0);
+                outerInput = rewriter.create<mlir::bufferization::ToMemrefOp>(op->getLoc(), outerType, outerInput);
             }
 
             mapper.map(operand, outerInput);
@@ -306,8 +298,18 @@ mlir::LogicalResult vpux::bufferizeOp(mlir::MLIRContext* ctx, VPU::NCEClusterTil
         }
     });
     if (outputGroupingOp != nullptr) {
-        auto groupOp = rewriter.create<VPUIP::GroupSparseBufferOp>(outputGroupingOp->getLoc(), outputResults,
-                                                                   outputGroupingOp->getAttrs());
+        auto gop = mlir::cast<VPUIP::GroupSparseBufferOp>(outputGroupingOp);
+
+        // TODO: #-122030 Remove call to these builders when possible.
+        // We have to do this to avoid calling the broken properties builder.
+        mlir::Value data = outputResults.size() > 0 ? outputResults[0] : nullptr;
+        mlir::Value sparsityMap = outputResults.size() > 1 ? outputResults[1] : nullptr;
+        mlir::Value storageElementTable = outputResults.size() > 2 ? outputResults[2] : nullptr;
+
+        auto groupOp = rewriter.create<VPUIP::GroupSparseBufferOp>(outputGroupingOp->getLoc(), data, sparsityMap,
+                                                                   storageElementTable, gop.getIsWeights(),
+                                                                   gop.getSparsityCompressionAttr());
+
         outputResults = groupOp->getResults();
     }
 

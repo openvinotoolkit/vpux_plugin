@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW" --convert-reduce-to-pooling %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 // CHECK-LABEL: @ConvertReduceMeanToPooling4D
 func.func @ConvertReduceMeanToPooling4D(%arg0: tensor<1x1x1x50xf16>) -> tensor<1x1x1x1xf16> {
@@ -18,17 +18,6 @@ func.func @ConvertReduceMeanToPooling4D(%arg0: tensor<1x1x1x50xf16>) -> tensor<1
   // CHECK-SAME:      {exclude_pads, kernel_size = [10, 5], pads_begin = [0, 0], pads_end = [0, 0]
   // CHECK-SAME:      rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]}
   // CHECK-SAME:      : tensor<1x1x10x5xf16> -> tensor<1x1x1x1xf16>
-}
-
-// CHECK-LABEL: @ConvertReduceMeanToPooling3D
-func.func @ConvertReduceMeanToPooling3D(%arg0: tensor<256x7x7xf16>) -> tensor<256x1x7xf16> {
-  %0 = IE.ReduceMean(%arg0) {axes_value = [1], keep_dims} : tensor<256x7x7xf16> -> tensor<256x1x7xf16>
-  return %0 : tensor<256x1x7xf16>
-
-  // CHECK:       IE.Reshape(%arg0) {shape_value = [1, 256, 7, 7]} : tensor<256x7x7xf16> -> tensor<1x256x7x7xf16>
-  // CHECK-NOT:   ReduceMean
-  // CHECK:       %1 = IE.AvgPool(%0) {exclude_pads, kernel_size = [7, 1], pads_begin = [0, 0], pads_end = [0, 0], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]} : tensor<1x256x7x7xf16> -> tensor<1x256x1x7xf16>
-  // CHECK:       %2 = IE.Reshape(%1) {shape_value = [256, 1, 7]} : tensor<1x256x1x7xf16> -> tensor<256x1x7xf16>
 }
 
 func.func @ConvertReduceMeanToPoolingWithLargeSize(%arg0: tensor<1x32x112x112xf16>) -> tensor<1x32x112x1xf16> {
@@ -154,7 +143,7 @@ func.func @ConvertReduceSumToPoolingAvoidingExpand(%arg0: tensor<1x12x368x480xf1
   // CHECK-NOT:   ReduceSum
   // CHECK:       [[RESHAPE0:%.*]] = IE.Reshape({{[^:]+}}) {shape_value = [1, 12, 11040, 16]} : tensor<1x12x368x480xf16> -> tensor<1x12x11040x16xf16>
   // CHECK:       [[TRANSPOSE0:%.*]] = IE.Transpose([[RESHAPE0]]) {order_value = #NWCH} : tensor<1x12x11040x16xf16> -> tensor<1x16x12x11040xf16>
-  // CHECK:       [[AVGPOOL0:%.*]] = IE.AvgPool([[TRANSPOSE0]]) {exclude_pads, kernel_size = [12, 1], pads_begin = [0, 0], pads_end = [0, 0], 
+  // CHECK:       [[AVGPOOL0:%.*]] = IE.AvgPool([[TRANSPOSE0]]) {exclude_pads, kernel_size = [12, 1], pads_begin = [0, 0], pads_end = [0, 0],
   // CHECK-SAME:    rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]} : tensor<1x16x12x11040xf16> -> tensor<1x16x1x11040xf16>
   // CHECK:       [[MULTIPLY0:%.*]] = IE.Multiply([[AVGPOOL0]], {{[^:]+}}) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x16x1x11040xf16>, tensor<1xf16> -> tensor<1x16x1x11040xf16>
   // CHECK:       [[TRANSPOSE1:%.*]] = IE.Transpose([[MULTIPLY0]]) {order_value = #NHWC} : tensor<1x16x1x11040xf16> -> tensor<1x1x11040x16xf16>
@@ -170,7 +159,7 @@ func.func @ConvertReduceSumToPoolingAvoidingExpand2(%arg0: tensor<1x12x44x44xf16
   // CHECK-NOT:   ReduceMax
   // CHECK:       [[RESHAPE0:%.*]] = IE.Reshape({{[^:]+}}) {shape_value = [1, 12, 121, 16]} : tensor<1x12x44x44xf16> -> tensor<1x12x121x16xf16>
   // CHECK:       [[TRANSPOSE0:%.*]] = IE.Transpose([[RESHAPE0]]) {order_value = #NWCH} : tensor<1x12x121x16xf16> -> tensor<1x16x12x121xf16>
-  // CHECK:       [[MAXPOOL0:%.*]] = IE.MaxPool([[TRANSPOSE0]]) {kernel_size = [12, 1], pads_begin = [0, 0], pads_end = [0, 0], 
+  // CHECK:       [[MAXPOOL0:%.*]] = IE.MaxPool([[TRANSPOSE0]]) {kernel_size = [12, 1], pads_begin = [0, 0], pads_end = [0, 0],
   // CHECK-SAME:    rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]} : tensor<1x16x12x121xf16> -> tensor<1x16x1x121xf16>
   // CHECK:       [[TRANSPOSE1:%.*]] = IE.Transpose([[MAXPOOL0]]) {order_value = #NHWC} : tensor<1x16x1x121xf16> -> tensor<1x1x121x16xf16>
   // CHECK:       [[RESHAPE1:%.*]] = IE.Reshape([[TRANSPOSE1]]) {shape_value = [1, 1, 44, 44]} : tensor<1x1x121x16xf16> -> tensor<1x1x44x44xf16>

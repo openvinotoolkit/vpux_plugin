@@ -12,20 +12,8 @@ namespace ov {
 namespace test {
 
 class LogSoftmaxLayerTestCommon : public LogSoftmaxLayerTest, virtual public VpuOv2LayerTest {};
-class LogSoftmaxLayerTest_NPU3700 : public LogSoftmaxLayerTestCommon {};
 class LogSoftmaxLayerTest_NPU3720 : public LogSoftmaxLayerTestCommon {};
 class LogSoftmaxLayerTest_NPU4000 : public LogSoftmaxLayerTestCommon {};
-
-// Disabled as 'convert-subtract-to-negative-add' pass is not ready for one/more platforms in `ReferenceSW` mode
-// These tests shall be re-enabled and revalidate once such pass is added to 'ReferenceSW' pipeline
-TEST_P(LogSoftmaxLayerTest_NPU3700, DISABLED_SW) {
-    setReferenceSoftwareMode();
-    run(Platform::NPU3700);
-}
-TEST_P(LogSoftmaxLayerTest_NPU3700, HW) {
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
 
 TEST_P(LogSoftmaxLayerTest_NPU3720, HW) {
     setDefaultHardwareMode();
@@ -46,36 +34,7 @@ namespace {
 
 const std::vector<ov::element::Type> modelType = {ov::element::f16};
 
-/* ============= 2D/3D/4D LogSoftmax NPU3700 ============= */
-
-std::vector<std::vector<ov::Shape>> inShapes2D_NPU3700 = {
-        {{12, 5}}, {{1200, 5}}  // real case
-};
-
-// Tracking number [E#85137]
-std::vector<std::vector<ov::Shape>> inShapes4D_NPU3700 = {
-        {{1, 20, 256, 512}},
-        {{1, 10, 256, 512}},
-};
-
-std::vector<int64_t> axis = {2, 3};
 std::vector<int64_t> axis2D = {0, 1};
-
-const auto params2D_NPU3700 =
-        testing::Combine(testing::ValuesIn(modelType),                                                 // Model type
-                         testing::ValuesIn(static_shapes_to_test_representation(inShapes2D_NPU3700)),  // Input shapes
-                         testing::ValuesIn(axis2D),                                                    // Axis
-                         testing::Values(DEVICE_NPU));                                                 // Target device
-
-const auto params3D_4D_NPU3700 = testing::Combine(
-        testing::ValuesIn(modelType), testing::ValuesIn(static_shapes_to_test_representation(inShapes4D_NPU3700)),
-        testing::ValuesIn(axis), testing::Values(DEVICE_NPU));
-
-INSTANTIATE_TEST_SUITE_P(smoke_LogSoftmax_2D, LogSoftmaxLayerTest_NPU3700, params2D_NPU3700,
-                         LogSoftmaxLayerTest_NPU3700::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_LogSoftmax_3D_4D, LogSoftmaxLayerTest_NPU3700, params3D_4D_NPU3700,
-                         LogSoftmaxLayerTest_NPU3700::getTestCaseName);
 
 /* ============= LogSoftmax NPU3720/NPU4000 ============= */
 

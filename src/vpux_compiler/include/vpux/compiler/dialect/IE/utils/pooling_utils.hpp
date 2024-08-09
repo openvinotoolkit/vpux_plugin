@@ -49,6 +49,7 @@ mlir::Operation* createIdentityMaxPool(mlir::Value input, mlir::Type outType, ml
 bool isQuantizedPurposeAvgPool(IE::AvgPoolOp avgPool);
 
 bool isQuantizedAvgPoolPermutation(IE::AvgPoolOp avgPool);
+bool isAddOutputQuantized(IE::AddOp add);
 
 }  // namespace IE
 }  // namespace vpux

@@ -187,7 +187,12 @@ void UnrollClusterTilingPass::safeRunOnFunc() {
     const ClusterNCERewriter nceRewriter(&ctx, _log);
     const ClusterConvertDMARewriter convertDMARewriter(&ctx, dmaPortCount, _log);
 
-    func.walk([&](mlir::Operation* op) {
+    func.walk<mlir::WalkOrder::PostOrder>([&](VPURT::TaskOp vpurtTask) {
+        auto op = vpurtTask.getInnerTaskOp();
+        if (op == nullptr) {
+            return;
+        }
+
         mlir::OpBuilder builder(op);
         if (auto nndmaOp = mlir::dyn_cast<VPUIP::NNDMAOp>(op)) {
             dmaRewriter.matchAndRewrite(nndmaOp, builder, /*isDataOverlapped*/ true);

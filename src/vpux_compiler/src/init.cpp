@@ -14,7 +14,8 @@
 #include "vpux/compiler/dialect/IERT/ops.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/IR/dialect.hpp"
-#include "vpux/compiler/dialect/VPUASM/ops.hpp"
+#include "vpux/compiler/dialect/VPU/IR/ops_interfaces.hpp"
+#include "vpux/compiler/dialect/VPUASM/dialect.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPUIPDPU/dialect.hpp"
@@ -100,6 +101,7 @@ void vpux::registerCommonInterfaces(mlir::DialectRegistry& registry, bool enable
     Const::ConstDialect::setupExtraInterfaces(registry);
     IERT::IERTDialect::setupExtraInterfaces(registry);
     VPUIP::VPUIPDialect::setupExtraInterfaces(registry);
+    VPU::registerAlignedChannelsOpInterfacesVPU(registry);
 
     if (enableDummyOp) {
         VPUIP::VPUIPDialect::setupExtraInterfacesAdditional(registry);

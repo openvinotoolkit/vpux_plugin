@@ -1,11 +1,11 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --convert-groupconv-to-conv %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 // CHECK-LABEL: @ConvertGroupConvToSingleConv
 func.func @ConvertGroupConvToSingleConv(%arg0: tensor<1x64x80x80xf16>) -> tensor<1x64x80x80xf16> {
@@ -169,6 +169,33 @@ func.func @NotConvertForDWConv(%arg0: tensor<1x16x80x80xf16>) -> tensor<1x16x80x
     // CHECK:       [[CONV_0:%.+]] = IE.GroupConvolution(%arg0, [[WEIGHTS]], [[BIAS]])
     // CHECK-SAME:      {dilations = [1, 1], groups = 16 : i64, pads_begin = [1, 1], pads_end = [1, 1], strides = [1, 1]}
     // CHECK-SAME:      : tensor<1x16x80x80xf16>, tensor<16x1x3x3xf16>, tensor<1x16x1x1xf16> -> tensor<1x16x80x80xf16>
+}
+
+// -----
+
+// CHECK-LABEL: @ConvertForDWConvIfCannotLoweringToNCEDepthConv
+// CHECK-SAME:      [[INPUT:%.+]]: tensor<1x6x1x31xf16>
+func.func @ConvertForDWConvIfCannotLoweringToNCEDepthConv(%arg0: tensor<1x6x1x31xf16>) -> tensor<1x6x1x16xf16> {
+    %weights = const.Declare tensor<6x1x1x16xf16> = dense<1.0> : tensor<6x1x1x16xf16>
+    %result = IE.GroupConvolution(%arg0, %weights) {dilations = [1, 1], groups = 6 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x6x1x31xf16>, tensor<6x1x1x16xf16> -> tensor<1x6x1x16xf16>
+
+    return %result : tensor<1x6x1x16xf16>
+
+    // CHECK-DAG:   [[CST:%.+]] = const.Declare tensor<6x1x1x16xf16> = dense<1.000000e+00> : tensor<6x1x1x16xf16>
+    // CHECK-DAG:   [[CST0:%.+]] = const.Declare tensor<1x6x1x16xf16> = dense<1.000000e+00> : tensor<6x1x1x16xf16>, [#const.SubView<[0, 0, 0, 0], [1, 1, 1, 16]>, #const.PadWithZero<[0, 0, 0, 0], [0, 5, 0, 0]>]
+    // CHECK-DAG:   [[CST1:%.+]] = const.Declare tensor<1x6x1x16xf16> = dense<1.000000e+00> : tensor<6x1x1x16xf16>, [#const.SubView<[1, 0, 0, 0], [1, 1, 1, 16]>, #const.PadWithZero<[0, 1, 0, 0], [0, 4, 0, 0]>]
+    // CHECK-DAG:   [[CST2:%.+]] = const.Declare tensor<1x6x1x16xf16> = dense<1.000000e+00> : tensor<6x1x1x16xf16>, [#const.SubView<[2, 0, 0, 0], [1, 1, 1, 16]>, #const.PadWithZero<[0, 2, 0, 0], [0, 3, 0, 0]>]
+    // CHECK-DAG:   [[CST3:%.+]] = const.Declare tensor<1x6x1x16xf16> = dense<1.000000e+00> : tensor<6x1x1x16xf16>, [#const.SubView<[3, 0, 0, 0], [1, 1, 1, 16]>, #const.PadWithZero<[0, 3, 0, 0], [0, 2, 0, 0]>]
+    // CHECK-DAG:   [[CST4:%.+]] = const.Declare tensor<1x6x1x16xf16> = dense<1.000000e+00> : tensor<6x1x1x16xf16>, [#const.SubView<[4, 0, 0, 0], [1, 1, 1, 16]>, #const.PadWithZero<[0, 4, 0, 0], [0, 1, 0, 0]>]
+    // CHECK-DAG:   [[CST5:%.+]] = const.Declare tensor<1x6x1x16xf16> = dense<1.000000e+00> : tensor<6x1x1x16xf16>, [#const.SubView<[5, 0, 0, 0], [1, 1, 1, 16]>, #const.PadWithZero<[0, 5, 0, 0], [0, 0, 0, 0]>]
+
+    // CHECK:       [[CONCAT:%.+]] = IE.Concat([[CST0]], [[CST1]], [[CST2]], [[CST3]], [[CST4]], [[CST5]]) {per_axis = #IE.Concat<axis = 0 : i64>} :
+    // CHECK-SAME:                      tensor<1x6x1x16xf16>, tensor<1x6x1x16xf16>, tensor<1x6x1x16xf16>, tensor<1x6x1x16xf16>, tensor<1x6x1x16xf16>, tensor<1x6x1x16xf16> -> tensor<6x6x1x16xf16>
+    // CHECK:       [[CONV:%.+]] = IE.Convolution([[INPUT]], [[CONCAT]])
+    // CHECK-SAME:      {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]}
+    // CHECK-SAME:      : tensor<1x6x1x31xf16>, tensor<6x6x1x16xf16> -> tensor<1x6x1x16xf16>
+
+    // CHECK:       return [[CONV]] : tensor<1x6x1x16xf16>
 }
 
 // -----

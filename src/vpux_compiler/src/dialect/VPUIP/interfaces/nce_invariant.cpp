@@ -32,7 +32,6 @@ mlir::LogicalResult vpux::VPUIP::NCEInvariant::verifyChannels(IE::ConvolutionOp 
 
     auto loc = origOp->getLoc();
     auto inputType = origOp.getInput().getType().cast<vpux::NDTypeInterface>();
-    auto outputType = origOp.getOutput().getType().cast<vpux::NDTypeInterface>();
     auto filterType = origOp.getFilter().getType().cast<vpux::NDTypeInterface>();
 
     if (filterType.getRank() != 4) {
@@ -43,7 +42,9 @@ mlir::LogicalResult vpux::VPUIP::NCEInvariant::verifyChannels(IE::ConvolutionOp 
     const auto filterShape = filterType.getShape();
 
     const auto OC = filterShape[Dims4D::Filter::OC];
-    if (OC % VPU::NCEInvariant::getAlignment(outputType.getElementType()) != 0) {
+    auto channelsInfo = mlir::dyn_cast<IE::AlignedChannelsOpInterface>(origOp.getOperation());
+    const auto outAlignment = channelsInfo.getOutputChannelAlignment();
+    if (OC % outAlignment != 0) {
         log.trace("[{0}] Convolution output channels are not aligned", loc);
         return mlir::failure();
     }
@@ -120,8 +121,27 @@ mlir::LogicalResult vpux::VPUIP::NCEInvariant::verifyChannels(VPU::NCEAveragePoo
 }
 
 //
-// verifyEltwiseChannels
+// verifyReduceChannels
 //
+
+mlir::LogicalResult vpux::VPUIP::NCEInvariant::verifyReduceChannels(mlir::Location loc, vpux::NDTypeInterface inputType,
+                                                                    Logger log) {
+    log.setName("NCEInvariant");
+    if (inputType.getRank() != 4) {
+        log.trace("[{0}] Reduce input shape does not have 4 dimensions. Not supported.", loc);
+        return mlir::failure();
+    }
+
+    const auto inputShape = inputType.getShape();
+    const auto IC = inputShape[Dims4D::Act::C];
+
+    if (IC % VPU::NCEInvariant::getAlignment(inputType.getElementType()) != 0) {
+        log.trace("[{0}] Reduce input channels are not aligned", loc);
+        return mlir::failure();
+    }
+
+    return mlir::success();
+}
 
 mlir::LogicalResult vpux::VPUIP::NCEInvariant::verifyEltwiseChannels(mlir::Location loc,
                                                                      vpux::NDTypeInterface firstInputType,
@@ -174,6 +194,11 @@ mlir::LogicalResult vpux::VPUIP::NCEInvariant::verifyChannels(IE::SubtractOp ori
     return verifyEltwiseChannels(origOp->getLoc(), input1Type, input2Type, log);
 }
 
+mlir::LogicalResult vpux::VPUIP::NCEInvariant::verifyChannels(IE::ReduceMeanOp origOp, Logger log) {
+    auto inputType = origOp.getInput().getType().cast<vpux::NDTypeInterface>();
+    return verifyReduceChannels(origOp->getLoc(), inputType, log);
+}
+
 mlir::LogicalResult vpux::VPUIP::NCEInvariant::verifyChannels(IE::AndOp origOp, Logger log) {
     auto input1Type = origOp.getInput1().getType().cast<vpux::NDTypeInterface>();
     auto input2Type = origOp.getInput2().getType().cast<vpux::NDTypeInterface>();
@@ -191,7 +216,9 @@ mlir::LogicalResult vpux::VPUIP::NCEInvariant::verifyChannels(VPU::NCEEltwiseOp,
 
 mlir::LogicalResult vpux::VPUIP::NCEInvariant::verifyGroupConvChannels(mlir::Location loc,
                                                                        vpux::NDTypeInterface inputType,
-                                                                       vpux::NDTypeInterface filterType, Logger log) {
+                                                                       vpux::NDTypeInterface filterType,
+                                                                       IE::AlignedChannelsOpInterface channelsIface,
+                                                                       Logger log) {
     log.setName("NCEInvariant");
 
     if (inputType.getRank() != 4) {
@@ -219,7 +246,7 @@ mlir::LogicalResult vpux::VPUIP::NCEInvariant::verifyGroupConvChannels(mlir::Loc
         return mlir::failure();
     }
 
-    if (OC % VPU::NCEInvariant::getAlignment(filterType.getElementType()) != 0) {
+    if (OC % channelsIface.getOutputChannelAlignment() != 0) {
         log.trace("[{0}] Group Convolution output channels are not aligned", loc);
         return mlir::failure();
     }
@@ -229,7 +256,8 @@ mlir::LogicalResult vpux::VPUIP::NCEInvariant::verifyGroupConvChannels(mlir::Loc
 
 mlir::LogicalResult vpux::VPUIP::NCEInvariant::verifyChannels(IE::GroupConvolutionOp origOp, Logger log) {
     return verifyGroupConvChannels(origOp->getLoc(), origOp.getInput().getType().cast<vpux::NDTypeInterface>(),
-                                   origOp.getFilter().getType().cast<vpux::NDTypeInterface>(), log);
+                                   origOp.getFilter().getType().cast<vpux::NDTypeInterface>(),
+                                   mlir::cast<IE::AlignedChannelsOpInterface>(origOp.getOperation()), log);
 }
 
 mlir::LogicalResult vpux::VPUIP::NCEInvariant::verifyChannels(VPU::NCEDepthConvolutionOp, Logger) {
@@ -257,7 +285,9 @@ mlir::LogicalResult vpux::VPUIP::NCEInvariant::verifyChannels(IE::InterpolateOp 
         log.trace("[{0}] Interpolate input channels '{1}' are not aligned", loc, IC);
         return mlir::failure();
     }
-    if (OC % VPU::NCEInvariant::getAlignment(outputType.getElementType()) != 0) {
+    auto channelsInfo = mlir::dyn_cast<IE::AlignedChannelsOpInterface>(origOp.getOperation());
+    const auto outAlignment = channelsInfo.getOutputChannelAlignment();
+    if (OC % outAlignment != 0) {
         log.trace("[{0}] Interpolate output channels '{1}' are not aligned", loc, OC);
         return mlir::failure();
     }
@@ -281,7 +311,9 @@ mlir::LogicalResult vpux::VPUIP::NCEInvariant::verifyChannels(IE::TransposedConv
 
     const auto filterShape = filterType.getShape();
     const auto OC = filterShape[Dims4D::Filter::OC];
-    if (OC % VPU::NCEInvariant::getAlignment(filterType.getElementType()) != 0) {
+    auto channelsInfo = mlir::dyn_cast<IE::AlignedChannelsOpInterface>(origOp.getOperation());
+    const auto outAlignment = channelsInfo.getOutputChannelAlignment();
+    if (OC % outAlignment != 0) {
         log.trace("[{0}] Output channels '{1}' are not aligned", origOp->getLoc(), OC);
         return mlir::failure();
     }
@@ -311,8 +343,46 @@ mlir::LogicalResult vpux::VPUIP::NCEInvariant::verifyChannels(IE::PadOp origOp, 
         log.trace("[{0}] Pad input channels '{1}' are not aligned", loc, IC);
         return mlir::failure();
     }
-    if (OC % VPU::NCEInvariant::getAlignment(outputType.getElementType()) != 0) {
+
+    auto channelsInfo = mlir::dyn_cast<IE::AlignedChannelsOpInterface>(origOp.getOperation());
+    const auto outAlignment = channelsInfo.getOutputChannelAlignment();
+    if (OC % outAlignment != 0) {
         log.trace("[{0}] Pad output channels '{1}' are not aligned", loc, OC);
+        return mlir::failure();
+    }
+
+    return mlir::success();
+}
+
+mlir::LogicalResult vpux::VPUIP::NCEInvariant::verifyChannels(IE::MatMulOp origOp, Logger log) {
+    log.setName("NCEInvariant");
+
+    auto loc = origOp->getLoc();
+    auto inputType = origOp.getInput1().getType().cast<vpux::NDTypeInterface>();
+    if (inputType.getRank() != 4) {
+        log.trace("[{0}] Input has unsupported rank: {1}", loc, inputType.getRank());
+        return mlir::failure();
+    }
+
+    auto outputType = origOp.getOutput().getType().cast<vpux::NDTypeInterface>();
+    if (outputType.getRank() != 4) {
+        log.trace("[{0}] Output has unsupported rank: {1}", loc, outputType.getRank());
+        return mlir::failure();
+    }
+
+    const auto outputShape = outputType.getShape();
+    const auto OC = outputShape.back();
+    if (OC % VPU::NCEInvariant::getAlignment(outputType.getElementType()) != 0) {
+        log.trace("[{0}] MatMul output channels are not aligned", loc);
+        return mlir::failure();
+    }
+
+    VPUX_THROW_WHEN(origOp.getTransposeA(), "MatMul with transposeA is not supported.");
+
+    const auto inputShape = inputType.getShape();
+    const auto IC = inputShape.back();
+    if (IC % VPU::NCEInvariant::getAlignment(inputType.getElementType()) != 0) {
+        log.trace("[{0}] MatMul input channels are not aligned", loc);
         return mlir::failure();
     }
 
@@ -787,17 +857,19 @@ mlir::LogicalResult vpux::VPUIP::NCEInvariant::verifyPipeliningCMX(VPU::NCEDepth
 
     auto module = origOp->getParentOfType<mlir::ModuleOp>();
     const auto cmxSize = getCMXSizeForTiling(module);
-
+    auto cmxWithFragmentationRatio = Byte(static_cast<int64_t>(
+            std::ceil(static_cast<double>(cmxSize.count()) * FRAGMENTATION_AVOID_RATIO_PIPELINING)));
     Byte requiredCMX = Byte(0);
 
     requiredCMX = VPU::getRequiredCMXSizeForNCEOps(getRequiredOperandsForPipelining(origOp, tiling),
                                                    getRequiredChannelSizeForPipelining(origOp, tiling));
+
     if (origOp.getActivationWindow() != nullptr) {
         requiredCMX += getRequiredActWindowForPipelining(origOp);
     }
-    if (requiredCMX > cmxSize) {
+    if (requiredCMX > cmxWithFragmentationRatio) {
         log.trace("[{0}] CMX memory is not enough for prefetch pipeline, available '{1}', required '{2}'",
-                  origOp->getLoc(), cmxSize, requiredCMX);
+                  origOp->getLoc(), cmxWithFragmentationRatio, requiredCMX);
         return mlir::failure();
     }
 

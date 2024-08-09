@@ -55,7 +55,7 @@ mlir::LogicalResult insertCmxCopies(mlir::Operation* origOp, mlir::PatternRewrit
         mlir::OpBuilder::InsertionGuard guard(rewriter);
         rewriter.setInsertionPointAfter(origOp);
         const auto newOutType = origOutType.changeMemSpace(memSpaceCMX);
-        rewriter.updateRootInPlace(origOp, [&]() {
+        rewriter.modifyOpInPlace(origOp, [&]() {
             origOutput.setType(newOutType);
             const auto copiedOutput =
                     copyIntoMemSpace(rewriter, appendLoc(origOp->getLoc(), "output-DDR"), origOutput, origOutMemSpace);

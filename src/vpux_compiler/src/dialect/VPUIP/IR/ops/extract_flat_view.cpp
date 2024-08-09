@@ -1,0 +1,127 @@
+//
+// Copyright (C) 2022 Intel Corporation.
+// SPDX-License-Identifier: Apache 2.0
+//
+
+#include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
+#include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/explicit_distribution_utils.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+
+#include "vpux/compiler/utils/attributes.hpp"
+#include "vpux/compiler/utils/error.hpp"
+
+#include <mlir/IR/PatternMatch.h>
+
+using namespace vpux;
+
+//
+// ViewLikeOpInterface
+//
+
+mlir::Value VPUIP::ExtractFlatSliceOp::getViewSource() {
+    return getSource();
+}
+
+//
+// InferTypeOpInterface
+//
+
+mlir::LogicalResult VPUIP::ExtractFlatSliceOp::inferReturnTypes(mlir::MLIRContext* ctx,
+                                                                std::optional<mlir::Location> optLoc,
+                                                                mlir::ValueRange operands, mlir::DictionaryAttr attrs,
+                                                                mlir::OpaqueProperties props,
+                                                                mlir::RegionRange /*regions*/,
+                                                                mlir::SmallVectorImpl<mlir::Type>& inferredTypes) {
+    const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
+
+    VPUIP::ExtractFlatSliceOpAdaptor extractOp(operands, attrs, props);
+    if (mlir::failed(extractOp.verify(loc))) {
+        return mlir::failure();
+    }
+
+    const auto distributedType = extractOp.getSource().getType().dyn_cast<VPUIP::DistributedBufferType>();
+    if (distributedType == nullptr) {
+        return errorAt(loc, "ExtractFlatSliceOp must operate on Distributed buffers");
+    }
+    if (distributedType.getElementType().isa<mlir::quant::UniformQuantizedPerAxisType>()) {
+        return errorAt(loc, "ExtractFlatSliceOp doesnot support UniformQuantizedPerAxisType");
+    }
+
+    auto inputShape = distributedType.getShape();
+    auto stridesReq = StrideReqs::compact(inputShape.size());
+    if (!stridesReq.checkStrides(distributedType)) {
+        return errorAt(loc, "ExtractFlatSliceOp must operate on compact buffers");
+    }
+
+    const auto distribution = distributedType.getDistribution();
+    const auto distMode = distribution.getMode().getValue();
+    if (distMode != VPU::DistributionMode::SEGMENTED) {
+        return errorAt(loc, "ExtractFlatSliceOp must operate on SEGMENTED Distributed buffers");
+    }
+
+    auto maybeTileIndex = VPUIP::getTilingDimIndex(distributedType);
+    if (!maybeTileIndex.has_value()) {
+        return errorAt(loc, "Cannot infer tiling dim for ExtractFlatSliceOp");
+    }
+    auto tileIndex = maybeTileIndex.value();
+
+    for (int64_t i = 0; i < tileIndex; ++i) {
+        // Compiler expects to feed this operation to GenericReshape, which can operate on compact buffer. If
+        // tiling dim if not leading we'll get strided memref, which is not supported yet
+        if (inputShape[Dim(i)] != 1) {
+            return errorAt(loc, "Tiling dim must be first not one dim");
+        }
+    }
+    auto tileDim = Dim(tileIndex);
+
+    auto tilingDimOffset = extractOp.getOffset();
+    auto shape = distributedType.getShape();
+    if (tilingDimOffset < 0 || tilingDimOffset >= shape[tileDim]) {
+        return errorAt(loc, "Offset is exceeding original shape");
+    }
+    auto perClusterShapes = distributedType.getPerClusterMemoryShapes();
+    std::optional<size_t> clusterId;
+    int64_t currentClusterOffset = 0;
+    for (size_t idx = 0; idx < perClusterShapes.size(); ++idx) {
+        auto clusterShape = perClusterShapes[idx];
+        auto nextClusterOffset = currentClusterOffset + clusterShape[tileDim];
+        if (tilingDimOffset < nextClusterOffset) {
+            clusterId = idx;
+            break;
+        }
+        currentClusterOffset = nextClusterOffset;
+    }
+    if (!clusterId.has_value()) {
+        return errorAt(loc, "Cannot infer cluster id");
+    }
+
+    auto newShape = shape.toValues();
+    newShape[tileDim] = 1;
+
+    const auto memSpaceCMX =
+            vpux::IndexedSymbolAttr::get(loc.getContext(), stringifyEnum(VPU::MemoryKind::CMX_NN), clusterId.value());
+
+    auto newType = vpux::getMemRefType(newShape, distributedType.getElementType(), distributedType.getDimsOrder(),
+                                       memSpaceCMX);
+
+    inferredTypes.push_back(newType);
+
+    return mlir::success();
+}
+
+mlir::LogicalResult VPUIP::ExtractFlatSliceOp::verify() {
+    const auto op = getOperation();
+    const auto logCb = [op](const formatv_object_base& msg) {
+        std::ignore = errorAt(op, "{0}", msg.str());
+    };
+    mlir::SmallVector<mlir::Type> inferredTypes;
+    if (inferReturnTypes(getContext(), getLoc(), op->getOperands(), op->getAttrDictionary(), op->getPropertiesStorage(),
+                         op->getRegions(), inferredTypes)
+                .failed()) {
+        logCb(formatv("Can't infer return types"));
+        return mlir::failure();
+    }
+
+    return mlir::success();
+}

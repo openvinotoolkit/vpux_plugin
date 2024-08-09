@@ -9,6 +9,7 @@
 
 #include "vpux/compiler/dialect/const/attributes/content.hpp"
 #include "vpux/compiler/dialect/const/utils/content.hpp"
+#include "vpux/utils/core/mem_size.hpp"
 
 #include <mlir/IR/MLIRContext.h>
 
@@ -53,11 +54,26 @@ struct ContentAttrHash {
     }
 };
 
+//
+// CachedContent
+//
+// Contains two elements:
+// - content: Represents the folded content
+// - refCount: An integer that represents the number of times the content has been queried minus the number of times it
+// has been retrieved. Based on observation, the more times the content is queried, the more likely it is going to be
+// used in the future. Conversely, the more times the content is retrieved, the less likely it is going to be used in
+// the future. Therefore, a smaller refCount indicates a higher priority for removing the cache entry if the memory
+// limit is reached. This is a temporary solution for the basic cache clean mechanism and will be further optimized in
+// the future.
+struct CachedContent {
+    Const::Content content;
+    std::atomic<int> refCount{1};
+};
+
 using RequestQueue = tbb::concurrent_bounded_queue<FoldingRequest>;
-using ContentMap = tbb::concurrent_hash_map<Const::ContentAttr, Const::Content, ContentAttrHash>;
+using ContentMap = tbb::concurrent_hash_map<Const::ContentAttr, CachedContent, ContentAttrHash>;
 
 struct CacheStatistics {
-    std::atomic<size_t> memoryUsedCache = 0;
     std::atomic<size_t> numElementsAddedToCache = 0;
     std::atomic<size_t> numElementsErasedFromCache = 0;
     std::atomic<size_t> numCacheHits = 0;
@@ -120,6 +136,42 @@ public:
     void addContent(Const::ContentAttr attr, const Const::Content& content);
 
     /**
+     * @brief Sets the memory usage limit for the cache
+     * @details This method is not thread-safe but assumed not to be used in contexts
+     * where multi-threading scenarios are involved
+     * @param `memoryUsageLimit`: the memory usage limit in bytes
+     */
+    void setMemoryUsageLimit(vpux::Byte memoryUsageLimit);
+
+    /**
+     * @brief Sets the cache clean threshold
+     * @details This method is not thread-safe but assumed not to be used in contexts
+     * where multi-threading scenarios are involved
+     * @param `cacheCleanThreshold`: the cache clean ratio
+     */
+    void setCacheCleanThreshold(double cacheCleanThreshold);
+
+    /**
+     * @brief Gets the memory used by the cache
+     * @details This method is not thread-safe but assumed not to be used in contexts
+     * where multi-threading scenarios are involved
+     */
+    size_t getMemoryUsedCache() const;
+
+    /**
+     * @brief Clean the cache to cacheCleanThreshold based on the refCount
+     * @details This method is thread-safe
+     */
+    void cleanUpCache();
+
+    /**
+     * @brief Checks if the cache memory consumption has reached the limit
+     * @details This method is not thread-safe but assumed not to be used in contexts
+     * where multi-threading scenarios are involved
+     */
+    bool isMemoryLimitReached() const;
+
+    /**
      * @brief Removes a folding result from the cache
      * @details This method is thread-safe
      * @param `attr`: the folding request whose folding result should be removed from the cache
@@ -175,7 +227,11 @@ private:
     Const::details::RequestQueue _requestQueue{};
     Const::details::ContentMap _cache{};
 
+    std::mutex _mutex;
     bool _collectStatistics = false;
+    size_t _memoryUsageLimit = 0;
+    double _cacheCleanThreshold = 0.8;
+    std::atomic<size_t> _memoryUsedCache = 0;
     Const::details::CacheStatistics _statistics{};
 };
 

@@ -4,7 +4,7 @@
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --simplify-schedule %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 // CHECK-LABEL: @tasksWithoutDeclareBuffer
 func.func @tasksWithoutDeclareBuffer(%arg0: memref<1x1x1x1xf16>, %arg1: memref<1x1x1x1xf16>) -> memref<1x1x1x1xf16> {

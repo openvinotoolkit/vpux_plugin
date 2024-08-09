@@ -49,11 +49,12 @@ mlir::ValueRange VPUIP::GroupSparseBufferOp::getViewSources() {
 mlir::LogicalResult VPUIP::GroupSparseBufferOp::inferReturnTypes(mlir::MLIRContext* ctx,
                                                                  std::optional<mlir::Location> optLoc,
                                                                  mlir::ValueRange operands, mlir::DictionaryAttr attrs,
-                                                                 mlir::OpaqueProperties, mlir::RegionRange /*ranges*/,
+                                                                 mlir::OpaqueProperties props,
+                                                                 mlir::RegionRange /*ranges*/,
                                                                  SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPUIP::GroupSparseBufferOpAdaptor groupOp(operands, attrs);
+    VPUIP::GroupSparseBufferOpAdaptor groupOp(operands, attrs, props);
     if (mlir::failed(groupOp.verify(loc))) {
         return mlir::failure();
     }
@@ -63,6 +64,7 @@ mlir::LogicalResult VPUIP::GroupSparseBufferOp::inferReturnTypes(mlir::MLIRConte
     const auto storageElementTableType =
             groupOp.getStorageElementTable() != nullptr ? groupOp.getStorageElementTable().getType() : nullptr;
 
+    // sparsityMapType is at some point null which it shouldn't be
     inferredReturnTypes.push_back(
             VPUIP::SparseBufferType::get(dataType, sparsityMapType, storageElementTableType, groupOp.getIsWeightsAttr(),
                                          groupOp.getSparsityCompressionAttr(), groupOp.getSeAttrAttr()));

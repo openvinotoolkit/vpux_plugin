@@ -74,15 +74,18 @@ void buildReadAfterWriteACTDMATest(const nb::TestCaseJsonDescriptor& testDesc, m
     auto outputCMX = createDeclareTensorOp(functionBuilder, VPURT::BufferSection::CMX_NN, outputShape, outputType,
                                            DimsOrder::NHWC, cluster, OUTPUT_CMX_OFFSET);
 
-    auto updateBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, 0);
+    auto [waitWLMBarrier, freeBarrierId] =
+            insertWLMStartSequence(functionBuilder, testDesc.getWLMParams().isWLMPartialEnabled);
 
-    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(),
-                                          mlir::ValueRange(updateBarrier.getBarrier()), loc, functionInput,
-                                          inputCMXVec[0].getOperation()->getResult(0), 0);
+    auto updateBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, freeBarrierId++);
+
+    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, waitWLMBarrier, mlir::ValueRange(updateBarrier.getBarrier()),
+                                          loc, functionInput, inputCMXVec[0].getOperation()->getResult(0), 0);
 
     auto waitBarrier = updateBarrier;
-    for (std::size_t i = 1; i + 1 < iterationCount; i += 2) {
-        if (i != 1) {
+    auto startIter = freeBarrierId++;
+    for (std::size_t i = startIter; i + 1 < iterationCount; i += 2) {
+        if (i != startIter) {
             inputCMXVec[0] = outputCMX;
             OUTPUT_CMX_OFFSET = OUTPUT_CMX_OFFSET + outputCMXSize;
             outputCMX = createDeclareTensorOp(functionBuilder, VPURT::BufferSection::CMX_NN, outputShape, outputType,
@@ -109,7 +112,8 @@ void buildReadAfterWriteACTDMATest(const nb::TestCaseJsonDescriptor& testDesc, m
     }
 
     // finalBarrier passed as production barrier to last DMA task
-    auto finalBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, iterationCount);
+    auto finalBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(
+            loc, iterationCount, testDesc.getWLMParams().isWLMPartialEnabled);
 
     VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(waitBarrier.getBarrier()),
                                           mlir::ValueRange(finalBarrier.getBarrier()), loc,

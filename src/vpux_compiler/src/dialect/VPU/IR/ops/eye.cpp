@@ -4,16 +4,17 @@
 //
 
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPU/utils/type_infer.hpp"
 
 using namespace vpux;
 
 mlir::LogicalResult vpux::VPU::EyeOp::inferReturnTypes(mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc,
                                                        mlir::ValueRange operands, mlir::DictionaryAttr attrs,
-                                                       mlir::OpaqueProperties, mlir::RegionRange,
+                                                       mlir::OpaqueProperties prop, mlir::RegionRange,
                                                        mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::EyeOpAdaptor eye(operands, attrs);
+    VPU::EyeOpAdaptor eye(operands, attrs, prop);
     if (mlir::failed(eye.verify(loc))) {
         return mlir::failure();
     }
@@ -30,7 +31,7 @@ mlir::LogicalResult vpux::VPU::EyeOp::inferReturnTypes(mlir::MLIRContext* ctx, s
     }
 
     const auto inType = eye.getDiagonalIndex().getType().cast<NDTypeInterface>();
-    const auto outType = inType.changeShapeElemType(Shape(outShape), eye.getOutputType());
+    const auto outType = mlir::RankedTensorType::get(outShape, eye.getOutputType(), createTensorAttrFromType(inType));
     inferredReturnTypes.push_back(outType);
     return mlir::success();
 }

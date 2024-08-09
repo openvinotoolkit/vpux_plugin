@@ -16,14 +16,8 @@ namespace ov {
 namespace test {
 
 class GRNLayerTestCommon : public GrnLayerTest, virtual public VpuOv2LayerTest {};
-class GRNLayerTest_NPU3700 : public GRNLayerTestCommon {};
 class GRNLayerTest_NPU3720 : public GRNLayerTestCommon {};
 class GRNLayerTest_NPU4000 : public GRNLayerTestCommon {};
-
-TEST_P(GRNLayerTest_NPU3700, HW) {
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
 
 TEST_P(GRNLayerTest_NPU3720, HW) {
     setDefaultHardwareMode();
@@ -47,21 +41,10 @@ const std::vector<ov::element::Type> modelTypes = {
         ov::element::f16   // tests: GRNLayerTest, SplitLayerTest, CTCGreedyDecoderLayerTest
 };
 
-const std::vector<std::vector<ov::Shape>> inShapesNPU3700 = {
-        {{{1, 3, 30, 30}}},
-        {{{1, 24, 128, 224}}},
-};
-
 const std::vector<float> biases = {
         0.33f,
         1.1f,
 };
-
-const auto params = testing::Combine(testing::ValuesIn(modelTypes),
-                                     testing::ValuesIn(static_shapes_to_test_representation(inShapesNPU3700)),
-                                     testing::ValuesIn(biases), testing::Values(DEVICE_NPU));
-
-INSTANTIATE_TEST_SUITE_P(smoke_GRN_test, GRNLayerTest_NPU3700, params, GrnLayerTest::getTestCaseName);
 
 /* ============= NPU 3720 ============= */
 

@@ -15,7 +15,7 @@
 #include "vpux/compiler/dialect/VPUMI40XX/utils.hpp"
 #include "vpux/compiler/dialect/VPURegMapped/types.hpp"
 #include "vpux/compiler/dialect/VPURegMapped/utils.hpp"
-#include "vpux/compiler/utils/elf_utils.hpp"
+#include "vpux/compiler/utils/ELF/utils.hpp"
 
 #include <npu_40xx_nnrt.hpp>
 

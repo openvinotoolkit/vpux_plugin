@@ -4653,6 +4653,10 @@ def ExtendedCallOp : IERT_Op<"ExtendedCall",
         void setCalleeFromCallable(mlir::CallInterfaceCallable callee) {
             setCalleeAttr(callee.get<mlir::SymbolRefAttr>());
         }
+
+        ::mlir::MutableOperandRange getArgOperandsMutable() {
+            return getOperandsMutable();
+        }
     }];
 
     let assemblyFormat = [{

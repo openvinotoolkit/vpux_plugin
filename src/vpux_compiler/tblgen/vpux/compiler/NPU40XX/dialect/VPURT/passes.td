@@ -59,4 +59,5 @@ def OptimizeSyncTasks : PassBase<"optimize-sync-tasks", "vpux::FunctionPass"> {
     let constructor = "vpux::VPURT::arch40xx::createOptimizeSyncTasksPass()";
 }
 
+
 #endif

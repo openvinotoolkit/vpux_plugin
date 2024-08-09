@@ -16,11 +16,9 @@ int64_t extractMaxOutputBoxesPerClass(IE::NonMaxSuppressionOpAdaptor nms) {
 
     if (nms.getMaxOutputBoxesPerClass() != nullptr) {
         auto maxBoxesConst = nms.getMaxOutputBoxesPerClass().getDefiningOp<Const::DeclareOp>();
-        if (maxBoxesConst != nullptr) {
+        if (maxBoxesConst != nullptr && maxBoxesConst.getContentAttr().isSplat()) {
             const auto maxBoxesContent = maxBoxesConst.getContent();
-            if (maxBoxesContent.isSplat()) {
-                return maxBoxesContent.getSplatValue<int64_t>();
-            }
+            return maxBoxesContent.getSplatValue<int64_t>();
         }
     }
     if (nms.getMaxOutputBoxesPerClassValueAttr() != nullptr) {
@@ -34,11 +32,9 @@ double extractNMSAttrValue(mlir::Value constName, mlir::FloatAttr attrName) {
     double attrValue = 0.0f;
     if (constName != nullptr) {
         vpux::Const::DeclareOp attrConst = constName.getDefiningOp<Const::DeclareOp>();
-        if (attrConst != nullptr) {
+        if (attrConst != nullptr && attrConst.getContentAttr().isSplat()) {
             vpux::Const::Content attrContent = attrConst.getContent();
-            if (attrContent.isSplat()) {
-                attrValue = attrContent.getSplatValue<float>();
-            }
+            attrValue = attrContent.getSplatValue<float>();
         }
     } else if (attrName != nullptr) {
         attrValue = attrName.getValueAsDouble();
@@ -50,11 +46,11 @@ double extractNMSAttrValue(mlir::Value constName, mlir::FloatAttr attrName) {
 
 mlir::LogicalResult vpux::IE::NonMaxSuppressionOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::NonMaxSuppressionOpAdaptor nms(operands, attrs);
+    IE::NonMaxSuppressionOpAdaptor nms(operands, attrs, prop);
     if (mlir::failed(nms.verify(loc))) {
         return mlir::failure();
     }

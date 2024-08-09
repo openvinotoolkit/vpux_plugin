@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --fuse-mem-permute  %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX
+// REQUIRES: arch-NPU37XX
 
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
@@ -142,7 +142,7 @@ func.func @MemPermuteNHWC(%arg0: tensor<1x16x32x64xf16, {order = #NHWC}>) -> ten
     // CHECK-SAME: -> tensor<1x16x32x64xf16, {order = #NWCH}>
     // CHECK-NOT: IE.MemPermute
 
-    // CHECK:   [[PERMUTE_CAST:%.*]] = IE.PermuteCast([[CONV]]) {dst_order = #NCHW, mem_perm = #NCHW} :  
+    // CHECK:   [[PERMUTE_CAST:%.*]] = IE.PermuteCast([[CONV]]) {dst_order = #NCHW, mem_perm = #NCHW} :
     // CHECK-SAME:  tensor<1x16x32x64xf16, {order = #NWCH}>
     // CHECK-SAME:  -> tensor<1x64x16x32xf16>
     // CHECK:   return [[PERMUTE_CAST]] : tensor<1x64x16x32xf16>

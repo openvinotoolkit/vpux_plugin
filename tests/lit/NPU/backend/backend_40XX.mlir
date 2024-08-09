@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -7,7 +7,7 @@
 // RUN: flatc --raw-binary --json %vpuip_schema_file% -- %t
 // RUN: FileCheck %s --input-file %basename_t.json
 // RUN: rm %basename_t.json
-// REQUIRES: arch-VPUX40XX
+// REQUIRES: arch-NPU40XX
 
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>

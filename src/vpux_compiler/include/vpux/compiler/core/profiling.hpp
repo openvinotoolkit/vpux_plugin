@@ -31,6 +31,10 @@ VPUIP::SwProfilingMetadataAttr getSwProfilingMetadataFromUpa(mlir::Operation* op
 
 VPUIP::M2IProfilingMetadataAttr getM2IProfilingMetaAttr(mlir::MLIRContext* ctx, size_t bufferId, size_t bufferOffset);
 
+enum class DMAProfilingMode { DISABLED, SCRATCH, SW, STATIC_HWP, DYNAMIC_HWP };
+
+DMAProfilingMode getDMAProfilingMode(VPU::ArchKind arch, const std::string& optionValue);
+
 // Post processing of profiling is relay on uniqueness of locations, but this may be violated. To ensure that all names
 // are unique this class is used
 class NameUniqifier {

@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+//
+
 #ifndef VPUX_COMPILER_DIALECT_VPUREGMAPPED_OPS_INTERFACES
 #define VPUX_COMPILER_DIALECT_VPUREGMAPPED_OPS_INTERFACES
 
@@ -52,7 +54,18 @@ def VPURegMapped_TaskOpInterface : OpInterface<"TaskOpInterface"> {
                     return nullptr;
             }]
         >,
-
+        InterfaceMethod<
+            "Get next task",
+            "::vpux::VPURegMapped::TaskOpInterface", "getNextTask", (ins), [{
+                const auto users = $_op.getResult().getUsers();
+                const auto isNextTask = [&](auto operation) {
+                    auto task = ::mlir::dyn_cast_if_present<Interface>(operation);
+                    return task && task.getPreviousTask() == $_self;
+                };
+                const auto nextTaskIter = ::llvm::find_if(users, isNextTask);
+                return nextTaskIter == ::std::end(users) ? nullptr : ::mlir::cast<Interface>(*nextTaskIter);
+            }]
+        >,
         InterfaceMethod<
             "Get the previous task Value",
             "mlir::Value", "getPreviousValue", (ins),

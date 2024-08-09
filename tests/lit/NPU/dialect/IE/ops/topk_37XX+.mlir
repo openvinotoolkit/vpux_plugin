@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --canonicalize --init-compiler="vpu-arch=%arch%" --canonicalize %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 // CHECK-LABEL: @ConvertConstToAttrForTopK
 func.func @ConvertConstToAttrForTopK(%arg0: tensor<1x151x513x513xf32>) -> tensor<1x1x513x513xsi32> {

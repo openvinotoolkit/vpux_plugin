@@ -180,11 +180,9 @@ target_link_libraries(${COMPILER_TARGET}
     PRIVATE
         npu_profiling_utils
 )
-link_system_libraries(${COMPILER_TARGET}
+ov_link_system_libraries(${COMPILER_TARGET}
     PRIVATE
-        openvino::reference
         openvino::runtime
-        openvino::runtime::dev
 )
 target_link_libraries(${COMPILER_TARGET} PUBLIC ${VPU_SRC_LIBS})
 

@@ -81,7 +81,7 @@ void AdjustSoftwareOpsPrecisionPass::safeRunOnModule() {
 
     const auto isLegalTopKOp = [](IE::TopKOp op) {
         const auto inputElemType = op.getInput().getType().cast<vpux::NDTypeInterface>().getElementType();
-        return inputElemType.isF16();
+        return inputElemType.isF16() || inputElemType.isF32() || inputElemType.isInteger(32);
     };
 
     mlir::ConversionTarget target(ctx);

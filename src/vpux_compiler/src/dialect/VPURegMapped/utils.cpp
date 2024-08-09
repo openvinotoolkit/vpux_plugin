@@ -36,5 +36,19 @@ void updateRegMappedInitializationValues(std::map<std::string, std::map<std::str
     }
 }
 
+std::optional<TaskBufferLayoutOp> getTaskBufferLayoutOp(mlir::Operation* op) {
+    VPUX_THROW_UNLESS(op->hasTrait<mlir::OpTrait::OneRegion>(),
+                      "VPURegMapped::TaskBufferLayoutOp should only exist under OneRegion-type ops");
+
+    auto taskBufferOpsRange = op->getRegion(0).getOps<TaskBufferLayoutOp>();
+    if (taskBufferOpsRange.empty()) {
+        return std::nullopt;
+    }
+
+    VPUX_THROW_WHEN(std::distance(taskBufferOpsRange.begin(), taskBufferOpsRange.end()) > 1,
+                    "Only one VPURegMapped::TaskBufferLayoutOp should exist");
+    return *(taskBufferOpsRange.begin());
+}
+
 }  // namespace VPURegMapped
 }  // namespace vpux

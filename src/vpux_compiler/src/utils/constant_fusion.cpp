@@ -4,6 +4,7 @@
 //
 
 #include "vpux/compiler/utils/constant_fusion.hpp"
+#include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/explicit_distribution_utils.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
 #include "vpux/utils/core/custom_float.hpp"
@@ -226,12 +227,8 @@ void ConstantFusing::getCopyAndDeclareOpForFusion(mlir::Value nceOperand, VPUIP:
     auto constantTypeDistributed = nceOperand.getType().dyn_cast<VPUIP::DistributedBufferType>();
     // Op is Tiled
     if (constantTypeDistributed != nullptr) {
-        // Get distribution mode
-        auto isDuplicated =
-                constantTypeDistributed.getDistribution().getMode().getValue() == VPU::DistributionMode::DUPLICATED;
-
         // Only Fuse if the constants are broadcasted/duplicated
-        if (isDuplicated) {
+        if (VPU::isDuplicated(constantTypeDistributed.getDistribution())) {
             foundAllocDistributed = copyOp.getOutputBuff().getDefiningOp<VPURT::AllocDistributed>();
             declareOp = copyOp.getInput().getDefiningOp<Const::DeclareOp>();
         }

@@ -51,14 +51,8 @@ class ReverseSequenceLayerTestCommon : public ReverseSequenceLayerTest, virtual 
     }
 };
 
-class ReverseSequenceLayerTest_NPU3700 : public ReverseSequenceLayerTestCommon {};
 class ReverseSequenceLayerTest_NPU3720 : public ReverseSequenceLayerTestCommon {};
 class ReverseSequenceLayerTest_NPU4000 : public ReverseSequenceLayerTestCommon {};
-
-TEST_P(ReverseSequenceLayerTest_NPU3700, HW) {
-    VpuOv2LayerTest::setDefaultHardwareMode();
-    VpuOv2LayerTest::run(Platform::NPU3700);
-}
 
 TEST_P(ReverseSequenceLayerTest_NPU3720, HW) {
     VpuOv2LayerTest::setDefaultHardwareMode();
@@ -88,16 +82,6 @@ const std::vector<std::vector<size_t>> inputShapes = {{3, 10}};  //, 10, 20
 const std::vector<std::vector<size_t>> inputShapesNPU3720 = {{3, 10}, {3, 10, 12}, {3, 10, 11, 20}};
 
 const std::vector<std::vector<size_t>> reversSeqLengthsVecShapes = {{3}};
-
-const std::vector<InputLayerType> secondaryInputTypes = {InputLayerType::CONSTANT, InputLayerType::PARAMETER};
-
-INSTANTIATE_TEST_SUITE_P(smoke_Basic, ReverseSequenceLayerTest_NPU3700,
-                         ::testing::Combine(::testing::ValuesIn(batchAxisIndices), ::testing::ValuesIn(seqAxisIndices),
-                                            ::testing::ValuesIn(inputShapes),
-                                            ::testing::ValuesIn(reversSeqLengthsVecShapes),
-                                            ::testing::ValuesIn(secondaryInputTypes),
-                                            ::testing::ValuesIn(netPrecisions), ::testing::Values(DEVICE_NPU)),
-                         ReverseSequenceLayerTest_NPU3700::getTestCaseName);
 
 INSTANTIATE_TEST_SUITE_P(smoke_ReverseSequence, ReverseSequenceLayerTest_NPU3720,
                          ::testing::Combine(::testing::ValuesIn(batchAxisIndices), ::testing::ValuesIn(seqAxisIndices),

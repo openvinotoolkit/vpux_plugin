@@ -51,11 +51,16 @@ vpux::NDTypeInterface vpux::Const::ReverseAttr::inferOutputType(vpux::NDTypeInte
     return input;
 }
 
+bool vpux::Const::ReverseAttr::inferOutputSplat(bool inputIsSplat, vpux::NDTypeInterface) {
+    return inputIsSplat;
+}
+
 template <typename StorageType>
-Const::Content reverseImpl(const Const::Content& input, NDTypeInterface outputType, int64_t axis) {
-    auto output = Const::Content::allocTempBuffer(outputType, outputType.getElementType(), false);
-    auto outBuf = output.getRawTempBuf();
-    auto outBufPtr = reinterpret_cast<StorageType*>(outBuf.data());
+Const::Content reverseImpl(Const::Content& input, NDTypeInterface outputType, int64_t axis) {
+    const bool nothingToDo = input.isSplat();
+    if (nothingToDo) {
+        return Const::Content::moveBuffer(outputType, std::move(input));
+    }
 
     const auto inputType = input.getType();
     auto inputShape = ShapeRef(inputType.getShape());
@@ -68,20 +73,22 @@ Const::Content reverseImpl(const Const::Content& input, NDTypeInterface outputTy
         spatialDims *= inputShape[Dim(axisIt)];
     }
 
-    auto inputValues = input.getValues<StorageType>();
-    size_t inputSize = inputValues.end() - inputValues.begin();
-    SmallVector<StorageType> reversedVals(inputSize);
+    auto output =
+            Const::Content::allocTempBuffer(outputType, outputType.getElementType(),
+                                            Const::ReverseAttr::inferOutputSplat(input.isSplat(), input.getType()));
+    auto outBuf = output.getTempBuf<StorageType>();
+
+    const auto inputValues = input.getValues<StorageType>();
+    const size_t inputSize = inputValues.end() - inputValues.begin();
     for (size_t i = 0; i < inputSize; i++) {
         auto it = inputValues.begin() + i; /* avoiding using ++ operators in implementation of base class iterator
                                               which is slow in DEBUG mode compilations */
-        reversedVals[i] = *it;
+        outBuf[i] = *it;
     }
 
-    for (auto it = reversedVals.begin(); it < reversedVals.end(); it += spatialDims) {
+    for (auto it = outBuf.begin(); it < outBuf.end(); it += spatialDims) {
         std::reverse(it, it + spatialDims);
     }
-
-    std::copy_n(reversedVals.data(), reversedVals.size(), outBufPtr);
 
     return output;
 }

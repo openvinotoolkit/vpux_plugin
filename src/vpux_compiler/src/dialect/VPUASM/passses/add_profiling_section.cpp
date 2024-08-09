@@ -4,6 +4,7 @@
 //
 
 #include "vpux/compiler/NPU40XX/dialect/ELF/ops.hpp"
+#include "vpux/compiler/dialect/VPUASM/dialect.hpp"
 #include "vpux/compiler/dialect/VPUASM/ops.hpp"
 #include "vpux/compiler/dialect/VPUASM/passes.hpp"
 #include "vpux/compiler/utils/logging.hpp"

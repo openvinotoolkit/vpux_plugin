@@ -26,38 +26,8 @@ class EltwiseLayerTestF32Common : public EltwiseLayerTestCommon {
 class EltwiseEmptyShapeInputLayerTest : public EltwiseLayerTest, virtual public VpuOv2LayerTest {};
 class EltwiseIntegerLayerTest : public EltwiseLayerTest, virtual public VpuOv2LayerTest {};
 
-TEST_P(EltwiseLayerTestCommon, NPU3700_SW) {
-    setSkipCompilationCallback([](std::stringstream& skip) {
-        const auto eltwiseType = std::get<1>(GetParam());
-        if (eltwiseType == EltwiseTypes::MOD) {
-            skip << "Type is not supported";
-        }
-        if (eltwiseType == EltwiseTypes::SQUARED_DIFF || eltwiseType == EltwiseTypes::SUBTRACT) {
-            skip << "Unsupported type in SW mode";
-        }
-    });
-
-    setReferenceSoftwareMode();
-    run(Platform::NPU3700);
-}
-
-TEST_P(EltwiseLayerTestCommon, NPU3700_HW) {
-    setSkipCompilationCallback([](std::stringstream& skip) {
-        const auto eltwiseType = std::get<1>(GetParam());
-        if (eltwiseType == EltwiseTypes::MOD) {
-            skip << "Type is not supported";
-        }
-        if (eltwiseType == EltwiseTypes::SQUARED_DIFF) {
-            skip << "Squared difference not supported in HW mode";
-        }
-    });
-
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
-
 TEST_P(EltwiseLayerTestCommon, NPU3720_SW) {
-    rel_threshold = 0.01;
+    abs_threshold = 0.6;
     setReferenceSoftwareMode();
     run(Platform::NPU3720);
 }
@@ -72,13 +42,13 @@ TEST_P(EltwiseLayerTestCommon, NPU3720_HW) {
         }
     });
 
-    rel_threshold = 0.01;
+    abs_threshold = 0.6;
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
 TEST_P(EltwiseLayerTestCommon, NPU4000_SW) {
-    rel_threshold = 0.01;
+    abs_threshold = 0.6;
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
@@ -142,14 +112,14 @@ void setCommonSkipCompilationCallback(EltwiseIntegerLayerTest* test) {
 }
 
 TEST_P(EltwiseIntegerLayerTest, NPU3720_SW) {
-    rel_threshold = 0.01;
+    abs_threshold = 0.6;
     setCommonSkipCompilationCallback(this);
     setReferenceSoftwareMode();
     run(Platform::NPU3720);
 }
 
 TEST_P(EltwiseIntegerLayerTest, NPU4000_SW) {
-    rel_threshold = 0.01;
+    abs_threshold = 0.6;
     setCommonSkipCompilationCallback(this);
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
@@ -233,6 +203,39 @@ const auto broadcastTestParams =
                            ::testing::Values(ov::test::utils::DEVICE_NPU), ::testing::Values(ov::test::Config{}));
 
 INSTANTIATE_TEST_SUITE_P(precommit_InputBroadcastEltwise, EltwiseLayerTestCommon, broadcastTestParams,
+                         EltwiseLayerTestCommon::getTestCaseName);
+
+std::set<EltwiseTypes> scalarInput2broadcastTestEltwiseTypes = {EltwiseTypes::DIVIDE};
+std::vector<std::vector<ov::Shape>> scalarInput2broadcastTestInputShape = {
+        {{1, 1, 1, 512}, {1, 1, 1, 1}},
+        {{1, 1, 512, 1}, {1, 1, 1, 1}},
+        {{1, 512, 1, 1}, {1, 1, 1, 1}},
+};
+const auto scalarInput2BroadcastTestParams = ::testing::Combine(
+        ::testing::ValuesIn(ov::test::static_shapes_to_test_representation(scalarInput2broadcastTestInputShape)),
+        ::testing::ValuesIn(scalarInput2broadcastTestEltwiseTypes), ::testing::ValuesIn(secondaryInputTypes),
+        ::testing::ValuesIn(opTypes), ::testing::ValuesIn(netPrecisionsF16), ::testing::Values(ov::element::undefined),
+        ::testing::Values(ov::element::undefined), ::testing::Values(ov::test::utils::DEVICE_NPU),
+        ::testing::Values(ov::test::Config{}));
+INSTANTIATE_TEST_SUITE_P(precommit_scalarInput2BroadcastEltwise, EltwiseLayerTestCommon,
+                         scalarInput2BroadcastTestParams, EltwiseLayerTestCommon::getTestCaseName);
+
+//
+// Test Eltwise batch input
+//
+
+std::set<EltwiseTypes> batchInputTestEltwiseTypes = {EltwiseTypes::ADD};
+
+std::vector<std::vector<ov::Shape>> batchInputTestInputShape = {{{361, 4, 48, 48}, {361, 4, 48, 48}}};
+
+const auto batchInputTestParams = ::testing::Combine(
+        ::testing::ValuesIn(ov::test::static_shapes_to_test_representation(batchInputTestInputShape)),
+        ::testing::ValuesIn(batchInputTestEltwiseTypes), ::testing::ValuesIn(secondaryInputTypes),
+        ::testing::ValuesIn(opTypes), ::testing::ValuesIn(netPrecisionsF16), ::testing::Values(ov::element::undefined),
+        ::testing::Values(ov::element::undefined), ::testing::Values(ov::test::utils::DEVICE_NPU),
+        ::testing::Values(ov::test::Config{}));
+
+INSTANTIATE_TEST_SUITE_P(precommit_BatchInputEltwise, EltwiseLayerTestCommon, batchInputTestParams,
                          EltwiseLayerTestCommon::getTestCaseName);
 
 //

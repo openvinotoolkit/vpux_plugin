@@ -9,6 +9,7 @@
 #include "vpux/compiler/dialect/VPU/utils/strategy_manager/sparsity_strategy.hpp"
 
 #include "vpux/compiler/utils/attributes.hpp"
+#include "vpux/compiler/utils/loop.hpp"
 #include "vpux/compiler/utils/sparsity.hpp"
 #include "vpux/compiler/utils/types.hpp"
 
@@ -64,6 +65,11 @@ void SparsifyWeightsPass::safeRunOnFunc() {
     int64_t numCandidatesSparseWeights = 0;
     int64_t numSparsifiedWeights = 0;
 
+    llvm::SmallVector<std::pair<VPU::SparseOpInterface, Const::DeclareOp>> sparseCandidates;
+
+    auto innerLog = _log.nest();
+
+    // Walk the IR and find all sparse weights candidates
     func->walk([&](VPU::SparseOpInterface sparsifiableOp) {
         if (!VPU::supportsSparseWeights(sparsifiableOp.getOperation())) {
             return;
@@ -90,9 +96,6 @@ void SparsifyWeightsPass::safeRunOnFunc() {
 
         _log.trace("Op '{0}' at '{1}' is a candidate for sparsifying its weights", sparsifiableOp->getName(),
                    sparsifiableOp->getLoc());
-        auto innerLog = _log.nest();
-
-        ++numCandidatesSparseWeights;
 
         if (weights.getType().isa<VPU::SparseTensorType>()) {
             innerLog.trace("Weights are already sparse");
@@ -110,19 +113,30 @@ void SparsifyWeightsPass::safeRunOnFunc() {
             return;
         }
 
+        sparseCandidates.push_back(std::make_pair(sparsifiableOp, weightsOp));
+        ++numCandidatesSparseWeights;
+    });
+
+    std::mutex irModificationMutex;
+
+    // In parallel, count sparse elements in sparse candidates and decide which ones should be made sparse
+    loop_1d(LoopExecPolicy::Parallel, &getContext(), sparseCandidates.size(), [&](const size_t index) {
+        auto [sparsifiableOp, weightsOp] = sparseCandidates[index];
+        auto nceOp = mlir::dyn_cast<VPU::NCEOpInterface>(sparsifiableOp.getOperation());
+        const auto weights = nceOp.getWeightsOperand();
+        auto weightsType = weights.getType().cast<vpux::NDTypeInterface>();
+
         const auto foldedContent = weightsOp.getContent();
         const auto foldedElemType = foldedContent.getType().getElementType();
-        const auto numNonSparseElemsPerOC = vpux::countNonSparseElementsPerOC(foldedContent, foldedElemType);
         const auto inputType = sparsifiableOp->getOperand(0).getType().cast<vpux::NDTypeInterface>();
         const auto hasFloatInput = inputType.getElementType().isa<mlir::FloatType>();
+        const auto numNonSparseElemsPerOC = vpux::countNonSparseElementsPerOC(foldedContent, foldedElemType);
         if (!enablementStrategy->shouldSparsifyWeights(innerLog, weightsType, numNonSparseElemsPerOC, hasFloatInput)) {
             innerLog.trace("Weights will not be sparsified", sparsifiableOp->getName(), sparsifiableOp->getLoc());
             return;
         }
-
         innerLog.trace("Sparsifying weights for op '{0}' at '{1}'", sparsifiableOp->getName(),
                        sparsifiableOp->getLoc());
-
         const auto numElemsType =
                 mlir::RankedTensorType::get({static_cast<int64_t>(numNonSparseElemsPerOC.size())}, getInt64Type(&ctx));
         const auto numElemsAttr = mlir::DenseElementsAttr::get(numElemsType, ArrayRef(numNonSparseElemsPerOC));
@@ -152,6 +166,9 @@ void SparsifyWeightsPass::safeRunOnFunc() {
         if (auto qType = foldedElemType.dyn_cast<mlir::quant::QuantizedType>()) {
             newContentAttr = newContentAttr.quantCast(qType);
         }
+
+        // IR modification is not thread safe according to MLIR documentation.
+        std::lock_guard<std::mutex> guard(irModificationMutex);
 
         mlir::OpBuilder builder(weightsOp);
         const auto sparsityMapContent = newContentAttr.getSparsityMap();

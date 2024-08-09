@@ -15,7 +15,7 @@ public:
     using Base::Base;
     mlir::LogicalResult symbolize(Const::DeclareOp op, SymbolMapper& mapper,
                                   mlir::ConversionPatternRewriter& rewriter) const override;
-    mlir::FlatSymbolRefAttr getSymbolicName(Const::DeclareOp op, size_t counter) override;
+    llvm::SmallVector<mlir::FlatSymbolRefAttr> getSymbolicNames(Const::DeclareOp op, size_t counter) override;
 };
 
 }  // namespace vpumi40xx2vpuasm

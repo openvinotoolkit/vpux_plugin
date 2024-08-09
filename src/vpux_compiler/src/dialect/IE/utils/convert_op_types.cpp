@@ -41,7 +41,7 @@ mlir::LogicalResult ConvertOpTypes::matchAndRewrite(mlir::Operation* origOp, vpu
                                                     mlir::ConversionPatternRewriter& rewriter) const {
     _log.trace("Process Operation '{0}'", origOp->getLoc());
 
-    auto* converter = getTypeConverter();
+    const auto* converter = getTypeConverter();
     VPUX_THROW_UNLESS(converter != nullptr, "TypeConverter was not set");
 
     const auto origOperands = origOp->getOperands();

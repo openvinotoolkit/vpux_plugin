@@ -232,6 +232,54 @@ std::vector<DMAReductionTestParams> dmaReductionTestValues = {
          /*expectedReducedStrides=*/{64, 32, 8}},
 };
 
+INSTANTIATE_TEST_SUITE_P(ArbitraryTest, DMAReductionTest, testing::ValuesIn(dmaReductionTestValues));
+
+class DMAReductionTestExpectFail : public testing::TestWithParam<DMAReductionTestParams> {};
+
+TEST_P(DMAReductionTestExpectFail, GetParams) {
+    const auto params = GetParam();
+    const auto dims = params.dims;
+    const auto strides = params.strides;
+    const auto storageOrder = params.storageOrder;
+    const auto elementType = params.elementType;
+    const auto expectedReducedDims = params.expectedReducedDims;
+    const auto expectedReducedStrides = params.expectedReducedStrides;
+
+    mlir::DialectRegistry registry;
+    vpux::registerDialects(registry);
+    vpux::registerCommonInterfaces(registry);
+    mlir::MLIRContext ctx(registry);
+
+    const auto shape = Shape(dims);
+    const auto dimsOrder = DimsOrder::fromCode(storageOrder);
+    const auto orderAttr = mlir::AffineMapAttr::get(dimsOrder.toAffineMap(&ctx));
+    const auto stridesAttr = getIntArrayAttr(&ctx, strides);
+    const auto layout = vpux::MemRefAttr::get(orderAttr, stridesAttr,
+                                              /*allocSize=*/nullptr, &ctx);
+
+    const auto dTypeResolution = [&](mlir::StringRef typeStr) -> mlir::Type {
+        if ("f16" == typeStr) {
+            return mlir::Float16Type::get(&ctx);
+        } else if ("u8" == typeStr) {
+            return mlir::IntegerType::get(&ctx, 8, mlir::IntegerType::SignednessSemantics::Unsigned);
+        } else if ("i8" == typeStr) {
+            return mlir::IntegerType::get(&ctx, 8, mlir::IntegerType::SignednessSemantics::Signed);
+        } else if ("u4" == typeStr) {
+            return mlir::IntegerType::get(&ctx, 4, mlir::IntegerType::SignednessSemantics::Unsigned);
+        } else if ("i4" == typeStr) {
+            return mlir::IntegerType::get(&ctx, 4, mlir::IntegerType::SignednessSemantics::Signed);
+        }
+        VPUX_THROW("Unsupported dtype {0}", typeStr);
+    };
+
+    const auto memSpace = IndexedSymbolAttr::get(&ctx, DDR_NAME);
+    const auto memrefType = mlir::MemRefType::get(shape.raw(), dTypeResolution(elementType), layout, memSpace);
+
+    const auto ndType = memrefType.dyn_cast<vpux::NDTypeInterface>();
+
+    EXPECT_ANY_THROW(reduceDimsForDma(ndType));
+}
+
 // To add a test that throws an error #E118627
 std::vector<DMAReductionTestParams> EXPECT_THROW_DmaReductionTestValues = {
         {// Breaking case - expect throw (strides should be byte aligned)
@@ -242,4 +290,5 @@ std::vector<DMAReductionTestParams> EXPECT_THROW_DmaReductionTestValues = {
          /*expectedReducedDims=*/{/*12, */ 1},
          /*expectedReducedStrides=*/{/*24, */ 2}}};
 
-INSTANTIATE_TEST_SUITE_P(ArbitraryTest, DMAReductionTest, testing::ValuesIn(dmaReductionTestValues));
+INSTANTIATE_TEST_SUITE_P(ArbitraryTest, DMAReductionTestExpectFail,
+                         testing::ValuesIn(EXPECT_THROW_DmaReductionTestValues));

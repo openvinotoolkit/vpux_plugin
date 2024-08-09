@@ -117,6 +117,20 @@ mlir::Operation* vpux::VPU::details::addWorkload(mlir::Region& workloads, mlir::
     return builder.create<DPUWorkloadOp>(loc, offsetsAttr, sizesAttr, pad, mpeMode, clusterId);
 }
 
+mlir::LogicalResult vpux::VPU::details::verifyInputTypeOp(mlir::Operation* op, vpux::NDTypeInterface inputType) {
+    // TODO: #123810 split verifier into arch-specific parts
+    const auto arch = getArch(op);
+    bool supportsInputActCompression = false;
+    auto alignment = VPU::NCEInvariant::getAlignment(inputType.getElementType());
+    if (mlir::isa<VPU::NCECompressConvolutionOp>(op)) {
+        alignment = vpux::VPU::NCEInvariant::VPU_COMPRESSED_INPUT_CHANNEL_NUM;
+        supportsInputActCompression = true;
+    }
+
+    return mlir::success(
+            vpux::VPU::NCEInvariant::isInputActTypeSupported(arch, inputType, alignment, supportsInputActCompression));
+}
+
 //
 // TilingBuilderOpInterface
 //
@@ -203,11 +217,12 @@ mlir::LogicalResult vpux::VPU::verifyNCEOp(mlir::Operation* op) {
         return mlir::failure();
     }
 
-    if (auto iface = mlir::dyn_cast<IE::AlignedChannelsOpInterface>(op)) {
-        return iface.verifyChannels();
+    auto iface = mlir::dyn_cast<IE::AlignedChannelsOpInterface>(op);
+    if (!iface) {
+        return errorAt(op, "NCE Operation '{0}' must attach AlignedChannelsOpInterface", op->getName());
     }
 
-    return mlir::success();
+    return iface.verifyChannels();
 }
 
 //

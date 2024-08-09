@@ -20,12 +20,13 @@ namespace {
 
 bool isSupportedHWPostOp(mlir::Operation* mainOp, mlir::Operation* postOp, const LogCb& logCb) {
     return llvm::TypeSwitch<mlir::Operation*, bool>(postOp)
-            .Case<IE::ReLUOp, IE::LeakyReluOp>([&](auto) {
+            .Case<IE::ReLUOp>([&](auto) {
                 if (mlir::isa<IE::MaxPoolOp>(mainOp)) {
                     logCb(llvm::formatv("{0} does not support fusing with {1} for this HW platform at `{2}`",
                                         mainOp->getName(), postOp->getName(), postOp->getLoc()));
                     return false;
                 }
+
                 return true;
             })
             // TODO: remove option after E-83187
@@ -39,6 +40,24 @@ bool isSupportedHWPostOp(mlir::Operation* mainOp, mlir::Operation* postOp, const
                         return false;
                     }
                 }
+                return true;
+            })
+            .Case<IE::LeakyReluOp>([&](auto) {
+                if (mlir::isa<IE::MaxPoolOp>(mainOp)) {
+                    logCb(llvm::formatv("{0} does not support fusing with {1} for this HW platform at `{2}`",
+                                        mainOp->getName(), postOp->getName(), postOp->getLoc()));
+                    return false;
+                }
+
+                const auto inElemType = mainOp->getOperand(0).getType().cast<vpux::NDTypeInterface>().getElementType();
+                const auto outElemType = mainOp->getResult(0).getType().cast<vpux::NDTypeInterface>().getElementType();
+                // Because of the convert to float, the prelu shift will be bypassed. Check PPE diagram
+                if (inElemType.isa<mlir::quant::QuantizedType>() && !outElemType.isa<mlir::quant::QuantizedType>()) {
+                    logCb(llvm::formatv("{0} does not support fusing with {1} for this HW platform at `{2}`",
+                                        mainOp->getName(), postOp->getName(), postOp->getLoc()));
+                    return false;
+                }
+
                 return true;
             })
             .Default([&](mlir::Operation*) {

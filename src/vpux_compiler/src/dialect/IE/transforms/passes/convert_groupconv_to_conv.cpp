@@ -3,11 +3,13 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+//
+
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 #include "vpux/compiler/dialect/IE/utils/convolution_utils.hpp"
 #include "vpux/compiler/dialect/IE/utils/quantization.hpp"
-#include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
@@ -62,7 +64,7 @@ std::optional<int64_t> getZeroPoint(IE::FakeQuantizeOp fqOp) {
                       "Cannot get low and high constant of FakeQuantizeOp {0}", fqOp->getLoc());
     const auto quantizeElemType = getQuantizedType(
             inLowConst.getContentAttr(), inHighConst.getContentAttr(), fqOp.getLevels(), fqOp.getLowFpType(),
-            realElemType, VPU::hasNegativeValues(inLowConst.getContent()), fqOp.getLoc(), fqOp.getAutoBroadcast());
+            realElemType, Const::hasNegativeValues(inLowConst.getContent()), fqOp.getLoc(), fqOp.getAutoBroadcast());
 
     if (auto uniformQuantType = quantizeElemType.dyn_cast_or_null<mlir::quant::UniformQuantizedType>()) {
         return uniformQuantType.getZeroPoint();
@@ -83,17 +85,7 @@ std::optional<int64_t> getZeroPoint(IE::FakeQuantizeOp fqOp) {
 mlir::Value createConstantOpForPadding(ShapeRef padShape, mlir::Type elemType, const int64_t padValue,
                                        mlir::PatternRewriter& rewriter, mlir::Location loc) {
     const auto dataStorageType = mlir::RankedTensorType::get(padShape.raw(), elemType);
-
-    auto getDenseElementsAttr = [&]() {
-        if (elemType.isF16()) {
-            return mlir::DenseElementsAttr::get(dataStorageType, static_cast<vpux::type::float16>(padValue));
-        } else if (elemType.isF32()) {
-            return mlir::DenseElementsAttr::get(dataStorageType, static_cast<float>(padValue));
-        }
-        VPUX_THROW("UnSupported element data type {0}", elemType);
-    };
-
-    return rewriter.create<Const::DeclareOp>(loc, dataStorageType, Const::ContentAttr::get(getDenseElementsAttr()));
+    return Const::createFloatConst(rewriter, loc, dataStorageType, static_cast<float>(padValue));
 }
 
 mlir::LogicalResult ConvertGroupConvToConvPass::GroupConvToSingleConvConverter::matchAndRewrite(

@@ -3,8 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --outliner="num-parts=4" --canonicalize %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --outliner="mode=naive num-parts=4" --canonicalize %s | FileCheck %s
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 module @OneInputOneOutput {
 

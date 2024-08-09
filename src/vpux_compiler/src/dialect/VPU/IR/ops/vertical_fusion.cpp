@@ -12,16 +12,21 @@ using namespace vpux;
 // RegionBranchOpInterface
 //
 
-mlir::OperandRange vpux::VPU::VerticalFusionOp::getSuccessorEntryOperands(std::optional<unsigned> index) {
-    VPUX_THROW_UNLESS(index.has_value() && *index == 0, "Invalid region index: {0}", index);
+mlir::OperandRange vpux::VPU::VerticalFusionOp::getEntrySuccessorOperands(mlir::RegionBranchPoint point) {
+    mlir::Region* pRegion = point.getRegionOrNull();
+    unsigned int index = (pRegion != nullptr) ? pRegion->getRegionNumber() : 0;
+    VPUX_THROW_UNLESS(index == 0, "Invalid region index: {0}", index);
     return getOperands();
 }
 
-void vpux::VPU::VerticalFusionOp::getSuccessorRegions(std::optional<unsigned> index, ArrayRef<mlir::Attribute>,
+void vpux::VPU::VerticalFusionOp::getSuccessorRegions(mlir::RegionBranchPoint point,
                                                       SmallVectorImpl<mlir::RegionSuccessor>& regions) {
-    if (index.has_value()) {
-        VPUX_THROW_WHEN(*index != 0, "Invalid region index: {0}", *index);
-        regions.emplace_back(getResults());
+    mlir::Region* pRegion = point.getRegionOrNull();
+
+    if (pRegion != nullptr) {
+        unsigned int index = pRegion->getRegionNumber();
+        VPUX_THROW_UNLESS(index == 0, "Invalid region index: {0}", index);
+        regions.push_back(mlir::RegionSuccessor(getResults()));
         return;
     }
 
@@ -173,23 +178,6 @@ mlir::LogicalResult vpux::VPU::VerticalFusionOp::verify() {
     const auto numYieldOps = std::distance(yieldOps.begin(), yieldOps.end());
     if (numYieldOps != 1) {
         return errorAt(op->getLoc(), "Operation have to contain one YieldOp, but it has {0}", numYieldOps);
-    }
-
-    // check multicluster strategy for all ops
-    auto clusterOps = getOps().getOps<VPU::ClusteredOpInterface>();
-    if (!clusterOps.empty()) {
-        const auto firstMCAttr = (*clusterOps.begin()).getMultiClusterStrategy();
-
-        const auto anyMCDiff = llvm::any_of(clusterOps, [&](auto op) {
-            const auto currentMCAttr = op.getMultiClusterStrategy();
-            return firstMCAttr.has_value() ^ currentMCAttr.has_value() ||
-                   (firstMCAttr.has_value() && currentMCAttr.has_value() &&
-                    firstMCAttr.value() != currentMCAttr.value());
-        });
-
-        if (anyMCDiff) {
-            return errorAt(op->getLoc(), "Operations in the block have different MC strategies");
-        }
     }
 
     return mlir::success();

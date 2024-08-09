@@ -36,11 +36,11 @@ SmallVector<int64_t> getResultShapeBidirectional(SmallVector<int64_t>& inShape, 
 
 mlir::LogicalResult vpux::IE::BroadcastOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::BroadcastOpAdaptor broadcast(operands, attrs);
+    IE::BroadcastOpAdaptor broadcast(operands, attrs, prop);
     if (mlir::failed(broadcast.verify(loc))) {
         return mlir::failure();
     }

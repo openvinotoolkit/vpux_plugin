@@ -58,6 +58,8 @@ ElfDDRAccessManager::Config createDefaultElfDDRAccessManagerConfig() {
 
     return config;
 }
+constexpr size_t headerTableSize = 3;
+constexpr size_t indexToCheck = 1;
 
 }  // namespace
 
@@ -70,17 +72,36 @@ TEST(ELFReaderTests, ELFReaderThrowsOnIncorrectMagic) {
 }
 
 TEST(ELFReaderTests, ReadingTheCorrectELFHeaderDoesntThrow) {
+    std::vector<SectionHeader> sectionHeaders(headerTableSize);
+
     auto fileHeader = createTemplateFileHeader();
-    auto accessor = ElfDDRAccessManager(reinterpret_cast<uint8_t*>(&fileHeader), sizeof(fileHeader));
+    fileHeader.e_shnum = headerTableSize;
+    sectionHeaders[indexToCheck].sh_offset = sizeof(fileHeader);
+
+    std::vector<uint8_t> buffer;
+    buffer.insert(buffer.end(), reinterpret_cast<uint8_t*>(&fileHeader),
+                  reinterpret_cast<uint8_t*>(&fileHeader) + sizeof(fileHeader));
+    buffer.insert(buffer.end(), reinterpret_cast<uint8_t*>(sectionHeaders.data()),
+                  reinterpret_cast<uint8_t*>(sectionHeaders.data()) + sizeof(SectionHeader) * headerTableSize);
+    auto accessor = ElfDDRAccessManager(buffer.data(), buffer.size());
 
     OV_ASSERT_NO_THROW(auto reader = Reader<ELF_Bitness::Elf64>(&accessor));
 }
 
 TEST(ELFReaderTests, ELFHeaderIsReadCorrectly) {
-    auto fileHeader = createTemplateFileHeader();
+    std::vector<SectionHeader> sectionHeaders(headerTableSize);
 
-    auto accessor = ElfDDRAccessManager(reinterpret_cast<uint8_t*>(&fileHeader), sizeof(fileHeader),
-                                        createDefaultElfDDRAccessManagerConfig());
+    auto fileHeader = createTemplateFileHeader();
+    fileHeader.e_shnum = headerTableSize;
+    sectionHeaders[indexToCheck].sh_offset = sizeof(fileHeader);
+
+    std::vector<uint8_t> buffer;
+    buffer.insert(buffer.end(), reinterpret_cast<uint8_t*>(&fileHeader),
+                  reinterpret_cast<uint8_t*>(&fileHeader) + sizeof(fileHeader));
+    buffer.insert(buffer.end(), reinterpret_cast<uint8_t*>(sectionHeaders.data()),
+                  reinterpret_cast<uint8_t*>(sectionHeaders.data()) + sizeof(SectionHeader) * headerTableSize);
+    auto accessor = ElfDDRAccessManager(buffer.data(), buffer.size());
+
     const auto reader = Reader<ELF_Bitness::Elf64>(&accessor);
     auto parsedFileHeader = *reader.getHeader();
 
@@ -96,9 +117,6 @@ TEST(ELFReaderTests, ELFReaderThrowsOnInvalidSectionHeaderCount) {
 
     ASSERT_ANY_THROW(auto reader = Reader<ELF_Bitness::Elf64>(&accessor));
 }
-
-constexpr size_t headerTableSize = 3;
-constexpr size_t indexToCheck = 1;
 
 TEST(ELFReaderTests, SectionHeadersAreReadCorrectly) {
     std::vector<SectionHeader> sectionHeaders(headerTableSize);
@@ -124,7 +142,6 @@ TEST(ELFReaderTests, SectionHeadersAreReadCorrectly) {
 
 TEST(ELFReaderTests, PointerToSectionDataIsResolvedCorrectly) {
     std::vector<SectionHeader> sectionHeaders(headerTableSize);
-    std::vector<uint64_t> sectionsData(headerTableSize);
 
     auto fileHeader = createTemplateFileHeader();
     fileHeader.e_shnum = headerTableSize;

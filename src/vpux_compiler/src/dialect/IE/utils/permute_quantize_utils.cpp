@@ -47,3 +47,11 @@ bool IE::isLegalReorderAvgPoolPattern(IE::ReorderOp origOp) {
 
     return false;
 }
+
+bool IE::isBeneficialConvertToPermuteQuantize(ShapeRef shape) {
+    // experiments show that shave is far more performant when C == 1, C == 3 or C == 4 than DMA-MemPermute
+    if ((shape[Dims4D::Act::C] != 1) && (shape[Dims4D::Act::C] != 3) && (shape[Dims4D::Act::C] != 4)) {
+        return false;
+    }
+    return shape[Dims4D::Act::N] == 1;
+}

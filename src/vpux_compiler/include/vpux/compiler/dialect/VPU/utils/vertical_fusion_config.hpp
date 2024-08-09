@@ -11,6 +11,11 @@
 namespace vpux {
 namespace VPU {
 
+// the length of VF pipelining pattern
+// should match the pattern DPU-SW-DPU for now
+// E#95184
+constexpr int64_t VF_PIPELINE_LENGTH = 3;
+
 // structure to incapsulate all necessary objects for VF subgraph
 class VFConfig {
 public:

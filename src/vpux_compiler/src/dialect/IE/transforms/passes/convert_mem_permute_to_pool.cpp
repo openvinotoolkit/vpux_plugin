@@ -6,6 +6,7 @@
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 #include "vpux/compiler/dialect/IE/utils/expand_utils.hpp"
 #include "vpux/compiler/dialect/IE/utils/pooling_utils.hpp"
+#include "vpux/compiler/dialect/IE/utils/resources.hpp"
 #include "vpux/compiler/utils/permute_utils.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
@@ -122,7 +123,8 @@ SmallVector<std::pair<Shape, DimsOrder>> calculateConversions(ShapeRef originInp
 
 class MemPermuteRewriter final : public mlir::OpRewritePattern<IE::MemPermuteOp> {
 public:
-    MemPermuteRewriter(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<IE::MemPermuteOp>(ctx), _log(log) {
+    MemPermuteRewriter(mlir::MLIRContext* ctx, int64_t numClusters, Logger log)
+            : mlir::OpRewritePattern<IE::MemPermuteOp>(ctx), _numClusters(numClusters), _log(log) {
         this->setDebugName("MemPermuteRewriter");
     }
 
@@ -130,6 +132,7 @@ private:
     mlir::LogicalResult matchAndRewrite(IE::MemPermuteOp origOp, mlir::PatternRewriter& rewriter) const final;
 
 private:
+    int64_t _numClusters;
     Logger _log;
 };
 
@@ -141,9 +144,15 @@ mlir::LogicalResult MemPermuteRewriter::matchAndRewrite(IE::MemPermuteOp origOp,
     const auto inShape = getShape(origOp.getInput());
     const auto inMemShape = inOrder.toMemoryOrder(inShape);
 
+    // E-128307: Replace with using a robust NCE-Op supported datatype checking mechanism
     const auto elementType = origOp.getType().cast<NDTypeInterface>().getElementType();
-    if (elementType.isInteger(8)) {
-        return matchFailed(_log.nest(), rewriter, origOp, "MaxPool not support 8 bit integer");
+    if (elementType.isSignedInteger() || elementType.isUnsignedInteger()) {
+        return matchFailed(_log.nest(), rewriter, origOp, "NCE MaxPool does not support signed or unsigned integer");
+    }
+    if (elementType.isa<mlir::FloatType>() &&
+        elementType.cast<mlir::FloatType>().getWidth() > mlir::Float16Type::get(rewriter.getContext()).getWidth()) {
+        return matchFailed(_log.nest(), rewriter, origOp,
+                           "NCE MaxPool does not support float type larger than 16 bits");
     }
     if (inShape[Dim(0)] != 1) {
         return matchFailed(_log.nest(), rewriter, origOp, "MemPermuteOp with dim N > 1");
@@ -198,9 +207,14 @@ mlir::LogicalResult MemPermuteRewriter::matchAndRewrite(IE::MemPermuteOp origOp,
         rewriter.eraseOp(maxPool);
 
         auto conversionMap = calculateConversions(targetInShape, alignedChannel, targetOrder);
-        auto needSpillingWithMultiConversions =
-                conversionMap.size() > 1 && maxPoolOutType.getTotalAllocSize() * 2 > vpux::VPU::getTotalCMXSize(origOp);
-        auto isNotPerformant = memPerm == DimsOrder::NHCW && needSpillingWithMultiConversions;
+        auto hasSmallHeightNum = [this](const std::pair<Shape, DimsOrder>& map) {
+            const int64_t PERFORMANT_HEIGHT_NUM_OF_PER_CLUSTER = 4;
+            return map.first[Dims4D::Act::H] < _numClusters * PERFORMANT_HEIGHT_NUM_OF_PER_CLUSTER;
+        };
+        bool hasToSplitOnDimC = llvm::any_of(conversionMap, hasSmallHeightNum);
+        // If new MaxPool has to be split on Dim C which is the inner most dimension,
+        // it is not performant because of strided DMA.
+        auto isNotPerformant = memPerm == DimsOrder::NHCW && (hasToSplitOnDimC || conversionMap.size() > 2);
         if (conversionMap.empty() || isNotPerformant) {
             rewriter.eraseOp(reshapedInput);
             rewriter.eraseOp(inLayoutCast);
@@ -253,10 +267,13 @@ private:
 
 void ConvertMemPermuteToPoolPass::safeRunOnFunc() {
     auto& ctx = getContext();
-    mlir::RewritePatternSet patterns(&ctx);
-    patterns.add<MemPermuteRewriter>(&ctx, _log);
-
     auto func = getOperation();
+    auto tileOp = IE::getTileExecutor(func);
+    auto numClusters = tileOp.getCount();
+
+    mlir::RewritePatternSet patterns(&ctx);
+    patterns.add<MemPermuteRewriter>(&ctx, numClusters, _log);
+
     if (mlir::failed(applyPatternsAndFoldGreedily(func, std::move(patterns), getDefaultGreedyRewriteConfig()))) {
         signalPassFailure();
     }

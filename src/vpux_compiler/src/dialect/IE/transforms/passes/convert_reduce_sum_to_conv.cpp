@@ -6,7 +6,7 @@
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
-#include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
@@ -115,9 +115,11 @@ mlir::Value ReduceSumToConvRewriter::createConvFilter(mlir::Value activation, ml
         weights[i] = 1.0f;
     }
 
-    const DimsOrder weighOrder = DimsOrder::OIYX;
-
-    return VPU::buildWeightsConst(ShapeRef(weightShape), weighOrder, ArrayRef(weights), activation, rewriter);
+    const DimsOrder weightOrder = DimsOrder::OIYX;
+    const auto weightType = mlir::RankedTensorType::get(
+            weightShape.raw(), mlir::cast<NDTypeInterface>(activation.getType()).getElementType(),
+            getTensorAttr(rewriter.getContext(), weightOrder, nullptr, nullptr));
+    return Const::buildWeightsConst(rewriter, activation.getLoc(), weightType, ArrayRef(weights));
 }
 
 mlir::LogicalResult ReduceSumToConvRewriter::matchAndRewrite(IE::ReduceSumOp origOp,

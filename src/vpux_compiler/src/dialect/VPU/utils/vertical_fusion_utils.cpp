@@ -78,6 +78,16 @@ mlir::FailureOr<TilingStorage> vpux::VPU::calculateTilingRegions(mlir::Operation
             VPUX_THROW("Unsupported operation type {0} for VF", operation->getName());
         }
 
+        if (auto alignInterface = mlir::dyn_cast<IE::AlignedChannelsOpInterface>(operation)) {
+            auto types = getTileTypes(operation, tile, inputTiling);
+            VPUX_THROW_WHEN(types.empty(), "Cannot get tile types for operation {0} and tile {1}", operation->getName(),
+                            tile);
+            if (!vpux::VPU::NCEInvariant::isOutputActTypeSupported(types.back(),
+                                                                   alignInterface.getOutputChannelAlignment())) {
+                return mlir::failure();
+            }
+        }
+
         const auto tileNumber = numTile.value_or(item.index());
 
         if (opStorage != nullptr) {
@@ -125,18 +135,43 @@ mlir::FailureOr<TilingStorage> vpux::VPU::calculateTilingRegions(VPU::VerticalFu
 }
 
 int64_t vpux::VPU::getTilingLimit(Dim axis, ArrayRef<mlir::Operation*> operations) {
-    const auto axisLengths =
-            to_small_vector(operations | transformed([&](auto* op) {
-                                auto limit = getMaxNumTiles(op)[axis.ind()];
-                                if (axis.ind() >= Dims4D::Act::getSpatialDim(0).ind()) {
-                                    limit /= MINIMUM_LENGTH_TILING;
-                                }
+    SmallVector<int64_t> axisLengths;
+    auto hasChannelAxis = axis == Dims4D::Act::C;
+    // Using queue to traverse all ops in VF block and back-infer their tiling dims
+    // The data structure pattern - {(op, tilingDim)...}
+    std::queue<std::pair<mlir::Operation*, Dim>> opQueue;
+    opQueue.push({operations.back(), axis});
+    while (!opQueue.empty()) {
+        auto curOp = opQueue.front().first;
+        auto curAxis = opQueue.front().second;
+        opQueue.pop();
 
-                                limit = std::min(limit, VPU::NCEInvariant::VPU_DIMENSION_LIMIT / MINIMUM_LENGTH_TILING);
-                                return limit;
-                            }));
+        auto limit = getMaxNumTiles(curOp)[curAxis.ind()];
+        if (curAxis.ind() >= Dims4D::Act::getSpatialDim(0).ind()) {
+            limit /= MINIMUM_LENGTH_TILING;
+        }
+        limit = std::min(limit, VPU::NCEInvariant::VPU_DIMENSION_LIMIT / MINIMUM_LENGTH_TILING);
+        axisLengths.push_back(limit);
+
+        // Get the next parent ops in this VF region
+        for (auto input : curOp->getOperands()) {
+            auto parentOp = input.getDefiningOp();
+            if (parentOp != nullptr && llvm::find(operations, parentOp) != operations.end()) {
+                if (auto tilingViewLikeOp = mlir::dyn_cast<VPU::TilingViewLikeOpInterface>(curOp)) {
+                    curAxis = tilingViewLikeOp.backInferTilingDim(curAxis);
+                    hasChannelAxis = hasChannelAxis || curAxis == Dims4D::Act::C;
+                }
+                opQueue.push({parentOp, curAxis});
+            }
+        }
+    }
 
     auto axisIncrement = getVFAxisIncrement(axis);
+    if (hasChannelAxis && axis != Dims4D::Act::C) {
+        // If there exists channel tiling, use the channel axis increment logic to get divisible factors
+        // otherwise, use the default axis increment
+        axisIncrement = getVFAxisIncrement(Dims4D::Act::C);
+    }
     VPUX_THROW_WHEN(axisIncrement == nullptr, "Cannot get functions to get values for axis {0}", axis);
 
     return axisIncrement->getLimitValue(axisLengths);
@@ -231,25 +266,122 @@ mlir::FailureOr<Dim> vpux::VPU::getVFTilingDim(ArrayRef<int64_t> tilingStrategy,
 }
 
 DimArr vpux::VPU::getAllowedDims(ArrayRef<mlir::Operation*> operations, Logger log) {
-    auto order = DimsOrder::NHWC;
-    const auto dimComparator = [&](Dim lhs, Dim rhs) -> bool {
-        return order.hasDim(lhs) && order.hasDim(rhs) && order.dimPos(lhs) < order.dimPos(rhs);
-    };
+    DimArr allowedDims;
+    auto outputOp = operations.back();
+    auto outputTilingDims = getTileDimOrder(outputOp, TilingMode::ISOLATED, log);
 
-    DimArr allowedDims = order.toPermutation();
-    for (auto tiledOperation : operations) {
-        auto currentTiling = getTileDimOrder(tiledOperation, TilingMode::ISOLATED, log);
-        llvm::sort(currentTiling, dimComparator);
-        DimArr intersect;
-        for (auto dim : currentTiling) {
-            if (llvm::find(allowedDims, dim) != allowedDims.end()) {
-                intersect.push_back(dim);
+    for (auto outputDim : outputTilingDims) {
+        std::queue<std::pair<mlir::Operation*, Dim>> opQueue;
+        opQueue.push({outputOp, outputDim});
+        bool isAllowed = true;
+        while (!opQueue.empty()) {
+            auto curOp = opQueue.front().first;
+            auto curAxis = opQueue.front().second;
+            opQueue.pop();
+
+            auto curAllowedDims = getTileDimOrder(curOp, TilingMode::ISOLATED, log);
+            if (llvm::find(curAllowedDims, curAxis) == curAllowedDims.end()) {
+                isAllowed = false;
+                break;
+            }
+
+            if (auto tilingViewLikeOp = mlir::dyn_cast<VPU::TilingViewLikeOpInterface>(curOp)) {
+                curAxis = tilingViewLikeOp.backInferTilingDim(curAxis);
+            }
+
+            for (auto input : curOp->getOperands()) {
+                auto parentOp = input.getDefiningOp();
+                if (parentOp != nullptr && llvm::find(operations, parentOp) != operations.end()) {
+                    opQueue.push({parentOp, curAxis});
+                }
             }
         }
-        allowedDims = std::move(intersect);
+
+        if (isAllowed) {
+            allowedDims.push_back(outputDim);
+        }
     }
 
     return allowedDims;
+}
+
+// Back-infer the tiling for the given operation according to infer strategy
+template <typename ArgType, typename ResultType>
+ResultType vpux::VPU::backInfer(VPU::TilingViewLikeOpInterface opIf, ArgType tiling, VPU::BackInferStrategy strategy) {
+    std::variant<std::function<vpux::Dim(vpux::Dim)>,
+                 std::function<mlir::SmallVector<int64_t>(mlir::ArrayRef<int64_t>)>>
+            variantFunc;
+
+    switch (strategy) {
+    case VPU::BackInferStrategy::TILING_DIM:
+        variantFunc = std::bind(&VPU::TilingViewLikeOpInterface::backInferTilingDim, opIf, std::placeholders::_1);
+        break;
+    case VPU::BackInferStrategy::TILING_STRATEGY:
+        variantFunc = std::bind(&VPU::TilingViewLikeOpInterface::backInferTilingStrategy, opIf, std::placeholders::_1);
+        break;
+    default:
+        VPUX_THROW("Unsupported back-infer strategy algorithm");
+    }
+
+    return std::get<std::function<ResultType(ArgType)>>(variantFunc)(tiling);
+}
+
+// Template method for inputs tiling dim (or strategy) back-infer
+// Infer logic is decided by the passed strategy
+// opTilingMap - record all ops in VF block and their tiling dims (or strategies) when back-infer given outputTiling
+template <typename ArgType, typename ResultType>
+SmallVector<ResultType> vpux::VPU::backInferVFTiling(VPU::VerticalFusionOp vfOp, ArgType outputTiling,
+                                                     VPU::BackInferStrategy strategy,
+                                                     std::unordered_map<mlir::Operation*, ResultType>& opTilingMap) {
+    // Vector index is the operand index in the VF op
+    SmallVector<ResultType> inputTilings(vfOp.getNumOperands(), ResultType(outputTiling));
+    auto vfConfig = VFConfig(vfOp);
+    auto vfOps = vfConfig.getVFOperations();
+    VPUX_THROW_WHEN(vfConfig.getOutputs().empty(), "No output operation in VF block {0}", vfOp);
+    auto outputOp = vfConfig.getOutputs().front();
+
+    // Using queue to traverse all ops in VF block and back-infer their tiling dims (strategies)
+    // The data structure pattern like {(op, tilingDims)...}
+    std::queue<std::pair<mlir::Operation*, ResultType>> opQueue;
+    opQueue.push({outputOp, ResultType(outputTiling)});
+    while (!opQueue.empty()) {
+        auto curOp = opQueue.front().first;
+        auto curTiling = opQueue.front().second;
+        opQueue.pop();
+
+        opTilingMap[curOp] = curTiling;
+
+        if (auto tilingViewLikeOp = mlir::dyn_cast<VPU::TilingViewLikeOpInterface>(curOp)) {
+            curTiling = VPU::backInfer<ArgType, ResultType>(tilingViewLikeOp, curTiling, strategy);
+        }
+
+        for (auto operand : curOp->getOperands()) {
+            if (auto arg = mlir::dyn_cast<mlir::BlockArgument>(operand)) {
+                inputTilings[arg.getArgNumber()] = curTiling;
+            }
+
+            auto parentOp = operand.getDefiningOp();
+            if (llvm::find(vfOps, parentOp) != vfOps.end()) {
+                opQueue.push({parentOp, curTiling});
+            }
+        }
+    }
+
+    return inputTilings;
+}
+
+// Helper how to back-infer the tiling strategy using template method
+SmallVector<SmallVector<int64_t>> vpux::VPU::backInferVFTilingStrategy(
+        VPU::VerticalFusionOp vfOp, ArrayRef<int64_t> tilingStrategy,
+        std::unordered_map<mlir::Operation*, SmallVector<int64_t>>& opStrategyMap) {
+    return backInferVFTiling<mlir::ArrayRef<int64_t>, mlir::SmallVector<int64_t>>(
+            vfOp, tilingStrategy, BackInferStrategy::TILING_STRATEGY, opStrategyMap);
+}
+
+// Helper how to back-infer the tiling dim using template method
+SmallVector<vpux::Dim> vpux::VPU::backInferVFTilingDim(VPU::VerticalFusionOp vfOp, vpux::Dim outputDim,
+                                                       std::unordered_map<mlir::Operation*, vpux::Dim>& opDimMap) {
+    return backInferVFTiling<vpux::Dim, vpux::Dim>(vfOp, outputDim, BackInferStrategy::TILING_DIM, opDimMap);
 }
 
 // calculate limit for number of tiles that can be supported by all operations in the VF block and all operations can
@@ -447,72 +579,50 @@ StrategyCost getVFCostPipelined(const int tilesNumber, VFConfig& config,
     // create a structure which reflects the execution order of the IR
     // same way as scheduler does
 
-    auto pipelinedStructure = VFContainerPipelineStorage();
+    auto pipelinedStructure = SmallVector<VFPipelineContainer>();
 
     // first "tile" is fully filled as it is,
     // next tile might be pipelined
     auto& operations = config.getVFOperations();
 
-    // everything will be in one container with index 0 to simplify
-    int containerIndex = 0;
-
-    // storage size is flexible. minimum number of "containers" is a number of operations
-    auto storageSize = operations.size();
-    std::map<size_t, size_t> opStorageMapping;
     for (auto index : irange(tilesNumber)) {
         // first row should be presented in the container
         // DPU -> SW -> DPU
         // next line has to be pipelined
-        // DPU -> SW  -> DPU
-        //        DPU -> SW  -> DPU
+        // 1. SW Engine compute bottleneck
+
+        // DPU ENGINE  | DPU0 | DPU1 |          | DPU0 | DPU 2 |  | DPU 1 |         | DPU 2 |
+        // SW ENGINE         |       SW0       |       SW1       |       SW2       |
+
+        // 2. DPU Engine compute bottleneck
+
+        // DPU ENGINE  |  DPU0  |  DPU 1  |  DPU 0  |  DPU 2  |  DPU 1  |  DPU2  |
+        // SW ENGINE           |  SW0  | |  SW1 |            | SW2  |
         // E#95184 for extending the case
-        if (index % 2 == 0) {
+        if (index == 0) {
             for (auto opIndex : irange(operations.size())) {
-                pipelinedStructure.insert(
-                        opIndex, containerIndex,
-                        VFPipelineContainer(operations[opIndex], fillInCostParam(operations[opIndex], opStorage, index,
-                                                                                 log, config.isPipelined())));
+                pipelinedStructure.emplace_back(VFPipelineContainer(
+                        operations[opIndex],
+                        fillInCostParam(operations[opIndex], opStorage, index, log, config.isPipelined())));
             }
-            ++containerIndex;
             continue;
         }
 
         for (auto opIndex : irange(operations.size())) {
             auto tilingInfo = fillInCostParam(operations[opIndex], opStorage, index, log, config.isPipelined());
-            auto foundMapping = opStorageMapping.find(opIndex);
-            auto containerNumber = opIndex;
-            if (foundMapping != opStorageMapping.end()) {
-                containerNumber = foundMapping->second;
-            } else {
-                ++containerNumber;
-                do {
-                    auto currentPipeline = pipelinedStructure.get(containerNumber, containerIndex - 1);
-                    if (!currentPipeline.has_value() || currentPipeline.value().hasOperType(operations[opIndex])) {
-                        break;
-                    }
-                    ++containerNumber;
-                } while (containerNumber < storageSize);
-                opStorageMapping[opIndex] = containerNumber;
-            }
+            auto containerNumber = pipelinedStructure.size() - VF_PIPELINE_LENGTH + 1 + opIndex;
 
-            auto pipeline = pipelinedStructure.get(containerNumber, containerIndex);
-            if (!pipeline.has_value()) {
-                pipelinedStructure.insert(containerNumber, containerIndex,
-                                          VFPipelineContainer(operations[opIndex], tilingInfo));
-                ++storageSize;
+            if (containerNumber >= pipelinedStructure.size()) {
+                pipelinedStructure.emplace_back(VFPipelineContainer(operations[opIndex], tilingInfo));
             } else {
-                pipeline.value().addOperation(operations[opIndex], tilingInfo);
+                pipelinedStructure[containerNumber].addOperation(operations[opIndex], tilingInfo);
             }
         }
     }
 
     // iterate through the structure, accumulate the cost for each "container", taking maximum from it.
-    for (auto opIndex : irange(storageSize)) {
-        StrategyCost cost = 0;
-        for (auto container : pipelinedStructure.gatherValue(opIndex)) {
-            cost = std::max(cost, container.maxCost(costFunction));
-        }
-        pipelinedCost += cost;
+    for (auto& container : pipelinedStructure) {
+        pipelinedCost += container.maxCost(costFunction);
     }
 
     return pipelinedCost;
@@ -616,12 +726,15 @@ bool vpux::VPU::validateCMXSize(VFConfig& config, const TilingOperationStorage::
     const auto index = 0;
     auto inputSize = Byte(0);
 
+    llvm::DenseMap<mlir::Operation*, SmallVector<vpux::NDTypeInterface>> tileTypesCache;
     for (auto op : config.getInputs()) {
         auto tileInfo = opStorage->get(op, index);
         VPUX_THROW_WHEN(!tileInfo.has_value(), "There is no information about tile {0} of operation {1}", index, *op);
 
         auto tileTypes = getTileTypes(op, tileInfo.value().second, tileInfo.value().first);
         VPUX_THROW_WHEN(tileTypes.empty(), "There are not enough types for tile of operation {0}", *op);
+        tileTypesCache[op] = tileTypes;
+
         // exclude output type information
         tileTypes.pop_back();
         for (auto type : tileTypes) {
@@ -637,6 +750,7 @@ bool vpux::VPU::validateCMXSize(VFConfig& config, const TilingOperationStorage::
 
         auto tileTypes = getTileTypes(op, tileInfo.value().second, tileInfo.value().first);
         VPUX_THROW_WHEN(tileTypes.empty(), "There is no output type for tile of operation {0}", *op);
+        tileTypesCache[op] = tileTypes;
 
         auto type = tileTypes.back();
         outputSize += type.getTotalAllocSize();
@@ -651,6 +765,42 @@ bool vpux::VPU::validateCMXSize(VFConfig& config, const TilingOperationStorage::
                 VPU::getRequiredCMX(largest, opTiling.value().second, log, opTiling.value().first) >=
         thresholdCMXSize) {
         return false;
+    }
+
+    // the memory required by constants should be less than the threshold
+    // otherwise there might be spilling
+    const auto constAllowedCMXSize = VPU::getTotalCMXSize(largest).count() * VF_CONST_RATIO;
+    const auto withBlockArgs = [](mlir::Operation* op) {
+        return llvm::any_of(op->getOperands(), [](mlir::Value operand) {
+            return operand.dyn_cast<mlir::BlockArgument>() != nullptr;
+        });
+    };
+    for (auto op : config.getVFOperations() | filtered(withBlockArgs)) {
+        SmallVector<vpux::NDTypeInterface> tileTypes;
+        if (tileTypesCache.find(op) != tileTypesCache.end()) {
+            tileTypes = tileTypesCache[op];
+        } else {
+            auto tileInfo = opStorage->get(op, index);
+            VPUX_THROW_WHEN(!tileInfo.has_value(), "There is no information about tile {0} of operation {1}", index,
+                            *op);
+
+            tileTypes = getTileTypes(op, tileInfo.value().second, tileInfo.value().first);
+        }
+        VPUX_THROW_WHEN(tileTypes.empty(), "There are not enough types for tile of operation {0}", *op);
+        // exclude output type information
+        tileTypes.pop_back();
+        auto tiledInputsSize = tileTypes.size();
+        auto blockArgSize = Byte(0);
+        for (size_t inIndex = 0; inIndex < op->getNumOperands(); ++inIndex) {
+            if (inIndex < tiledInputsSize && op->getOperand(inIndex).dyn_cast<mlir::BlockArgument>() != nullptr) {
+                blockArgSize += tileTypes[inIndex].getTotalAllocSize();
+            }
+        }
+
+        if (constAllowedCMXSize <= blockArgSize.count()) {
+            log.trace("Required const memory exceeds the total memory size");
+            return false;
+        }
     }
 
     return true;

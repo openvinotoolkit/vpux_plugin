@@ -3,8 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --convert-precision-to-fp16="compute-layers-with-higher-precision=SoftMax,ReLU" %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --convert-precision-to-fp16="compute-layers-with-higher-precision=SoftMax,ReLU,Subtract" %s | FileCheck %s
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 // CHECK-LABEL: @NotConvertSoftMaxToFP16
 module @NotConvertSoftMaxToFP16 {
@@ -61,4 +61,46 @@ func.func @main(%arg0: tensor<1x8x128x128xf32>) -> tensor<1x8x128x128xf32> {
     // CHECK-NEXT: return %[[OUT]] : tensor<1x8x128x128xf16>
 }
 
+}
+
+// -----
+
+// CHECK-LABEL: @NotConvertTwoArgOpToFP16
+module @NotConvertTwoArgOpToFP16 {
+
+IE.CNNNetwork
+    entryPoint : @main
+    inputsInfo : {
+        // CHECK: DataInfo "data" : tensor<1x1000xf32>
+        DataInfo "data" : tensor<1x1000xf32>
+    }
+    outputsInfo : {
+        // CHECK: DataInfo "prob" : tensor<1x1000xf32>
+        DataInfo "prob" : tensor<1x1000xf32>
+    }
+
+    // CHECK: func.func private @foo(%[[ARG0:.+]]: tensor<1x1000xf16>, %[[ARG1:.+]]: tensor<1x1000xf16>)
+    // CHECK-SAME: -> tensor<1x1000xf16>
+    func.func private @foo(%arg0: tensor<1x1000xf32>, %arg1: tensor<1x1000xf32>) -> tensor<1x1000xf32> {
+        %res = IE.Subtract(%arg0, %arg1) { auto_broadcast = #IE.auto_broadcast_type<NUMPY> }
+            : tensor<1x1000xf32>, tensor<1x1000xf32> -> tensor<1x1000xf32>
+        // CHECK-DAG: %[[CVT_IN0:.+]] = IE.Convert(%[[ARG0]]) {{.*}} -> tensor<1x1000xf32>
+        // CHECK-DAG: %[[CVT_IN1:.+]] = IE.Convert(%[[ARG1]]) {{.*}} -> tensor<1x1000xf32>
+        // CHECK: %[[SUB:.+]] = IE.Subtract(%[[CVT_IN0]], %[[CVT_IN1]])
+        // CHECK-SAME: tensor<1x1000xf32>, tensor<1x1000xf32> -> tensor<1x1000xf32>
+        // CHECK: %[[OUT:.+]] = IE.Convert(%[[SUB]]) {{.*}} -> tensor<1x1000xf16>
+
+        return %res : tensor<1x1000xf32>
+        // CHECK: return %[[OUT]]
+    }
+
+    // CHECK: func.func @main([[ARG0:.+]]: tensor<1x1000xf16>) -> tensor<1x1000xf16>
+    func.func @main(%arg0: tensor<1x1000xf32>) -> tensor<1x1000xf32> {
+        %res = func.call @foo(%arg0, %arg0) : (tensor<1x1000xf32>, tensor<1x1000xf32>) -> tensor<1x1000xf32>
+        // CHECK: %[[OUT:.+]] = call @foo([[ARG0]], [[ARG0]])
+        // CHECK-SAME: (tensor<1x1000xf16>, tensor<1x1000xf16>) -> tensor<1x1000xf16>
+
+        return %res : tensor<1x1000xf32>
+        // CHECK: return %[[OUT]]
+    }
 }

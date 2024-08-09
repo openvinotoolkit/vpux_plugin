@@ -51,13 +51,18 @@ vpux::NDTypeInterface vpux::Const::AddAttr::inferOutputType(vpux::NDTypeInterfac
     return input;
 }
 
+bool vpux::Const::AddAttr::inferOutputSplat(bool inputIsSplat, vpux::NDTypeInterface) {
+    return inputIsSplat;
+}
+
 //
 // AddAttr::transform
 //
 
 Const::Content vpux::Const::AddAttr::transform(vpux::Const::Content& input) const {
-    auto output = Const::Content::allocTempBuffer(inferOutputType(input.getType()),
-                                                  mlir::Float32Type::get(getContext()), input.isSplat());
+    auto output =
+            Const::Content::allocTempBuffer(inferOutputType(input.getType()), mlir::Float32Type::get(getContext()),
+                                            inferOutputSplat(input.isSplat(), input.getType()));
 
     const auto values = input.getValues<float>();
     auto shiftedVals = output.getTempBuf<float>();

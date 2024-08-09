@@ -107,6 +107,7 @@ TEST_F(MLIR_ConstContentAttrTest, FromDenseElementsAttr) {
     const auto content = contentAttr.fold();
     EXPECT_EQ(content.getType(), baseType);
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     const auto contentVals = content.getValues<float>();
     EXPECT_EQ(contentVals.size(), vals.size());
@@ -131,6 +132,7 @@ TEST_F(MLIR_ConstContentAttrTest, FromEmptyDenseElementsAttr) {
     const auto content = contentAttr.fold();
     EXPECT_EQ(content.getType(), baseType);
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
     ASSERT_TRUE(content.getValues<float>().empty());
 }
 
@@ -147,6 +149,7 @@ TEST_F(MLIR_ConstContentAttrTest, FromSplatDenseElementsAttr) {
     const auto content = contentAttr.fold();
     EXPECT_EQ(content.getType(), baseType);
     EXPECT_TRUE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     EXPECT_EQ(content.getSplatValue<float>(), splatVal);
 
@@ -187,6 +190,7 @@ TEST_F(MLIR_ConstContentAttrTest, FromDenseResourceElementsAttr) {
     const auto content = contentAttr.fold();
     EXPECT_EQ(content.getType(), baseType);
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     const auto contentVals = content.getValues<float>();
     EXPECT_EQ(contentVals.size(), baseType.getNumElements());
@@ -219,6 +223,7 @@ TEST_F(MLIR_ConstContentAttrTest, FromDenseResourceElementsAttrNonOwning) {
     const auto content = contentAttr.fold();
     EXPECT_EQ(content.getType(), baseType);
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     const auto contentVals = content.getValues<float>();
     EXPECT_EQ(contentVals.size(), baseType.getNumElements());
@@ -252,6 +257,7 @@ TEST_F(MLIR_ConstContentAttrTest, FromSplatDenseResourceElementsAttr) {
     const auto content = contentAttr.fold();
     EXPECT_EQ(content.getType(), baseType);
     EXPECT_TRUE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
     EXPECT_EQ(content.getSplatValue<float>(), splatVal);
 
     const auto contentVals = content.getValues<float>();
@@ -283,6 +289,7 @@ TEST_F(MLIR_ConstContentAttrTest, FromEmptyDenseResourceElementsAttr) {
     const auto content = contentAttr.fold();
     EXPECT_EQ(content.getType(), baseType);
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
     ASSERT_TRUE(content.getValues<float>().empty());
 }
 
@@ -310,6 +317,7 @@ TEST_F(MLIR_ConstContentAttrTest, FromEqualElementsSplatDenseResourceElementsAtt
     const auto content = contentAttr.fold();
     EXPECT_EQ(content.getType(), baseType);
     EXPECT_TRUE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
     EXPECT_EQ(content.getSplatValue<float>(), splatVal);
 
     const auto contentVals = content.getValues<float>();
@@ -359,6 +367,7 @@ TEST_F(MLIR_ConstContentAttrTest, ConvertStorageElemType) {
     const auto content = contentAttr.fold();
     EXPECT_EQ(content.getType(), baseType);
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     const auto contentVals = content.getValues<int32_t>();
     EXPECT_EQ(contentVals.size(), vals.size());
@@ -381,6 +390,7 @@ TEST_F(MLIR_ConstContentAttrTest, CopyTo_FP32) {
     const auto content = contentAttr.fold();
     EXPECT_EQ(content.getType(), baseType);
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     const auto bufSizeBytes = checked_cast<size_t>(content.getType().getTotalAllocSize().count());
     const auto bufSize = bufSizeBytes / sizeof(float);
@@ -406,6 +416,7 @@ TEST_F(MLIR_ConstContentAttrTest, CopyTo_U8) {
     const auto content = contentAttr.fold();
     EXPECT_EQ(content.getType(), baseType);
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     const auto bufSizeBytes = checked_cast<size_t>(content.getType().getTotalAllocSize().count());
     std::vector<uint8_t> tempBuf(bufSizeBytes);
@@ -435,6 +446,7 @@ TEST_F(MLIR_ConstContentAttrTest, CopyTo_I4) {
 
     const auto content = contentAttr.fold();
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     const auto bufSizeBytes = checked_cast<size_t>(content.getType().getTotalAllocSize().count());
     std::vector<uint8_t> tempBuf(bufSizeBytes);
@@ -465,6 +477,7 @@ TEST_F(MLIR_ConstContentAttrTest, CopyTo_I1) {
 
     const auto content = contentAttr.fold();
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     const auto bufSizeBytes = checked_cast<size_t>(content.getType().getTotalAllocSize().count());
     std::vector<uint8_t> tempBuf(bufSizeBytes);
@@ -490,6 +503,7 @@ TEST_F(MLIR_ConstContentAttrTest, Splat_CopyTo_FP32) {
     const auto content = contentAttr.fold();
     EXPECT_EQ(content.getType(), baseType);
     EXPECT_TRUE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     const auto bufSizeBytes = checked_cast<size_t>(content.getType().getTotalAllocSize().count());
     const auto bufSize = bufSizeBytes / sizeof(float);
@@ -515,6 +529,7 @@ TEST_F(MLIR_ConstContentAttrTest, Splat_CopyTo_U8) {
     const auto content = contentAttr.fold();
     EXPECT_EQ(content.getType(), baseType);
     EXPECT_TRUE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     const auto bufSizeBytes = checked_cast<size_t>(content.getType().getTotalAllocSize().count());
     std::vector<uint8_t> tempBuf(bufSizeBytes);
@@ -541,6 +556,7 @@ TEST_F(MLIR_ConstContentAttrTest, Splat_CopyTo_I4) {
 
     const auto content = contentAttr.fold();
     EXPECT_TRUE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     const auto bufSizeBytes = checked_cast<size_t>(content.getType().getTotalAllocSize().count());
     std::vector<uint8_t> tempBuf(bufSizeBytes);
@@ -568,6 +584,7 @@ TEST_F(MLIR_ConstContentAttrTest, Splat_CopyTo_I1) {
 
     const auto content = contentAttr.fold();
     EXPECT_TRUE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     const auto bufSizeBytes = checked_cast<size_t>(content.getType().getTotalAllocSize().count());
     std::vector<uint8_t> tempBuf(bufSizeBytes);
@@ -598,6 +615,7 @@ TEST_F(MLIR_ConstContentAttrTest, CopyTo_I1_With_Enough_Buffer) {
 
     const auto content = contentAttr.fold();
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     // Offer a large enough buffer to copy the data. The data not will be packed.
     int bufSizeBytes = 512;
@@ -628,6 +646,7 @@ TEST_F(MLIR_ConstContentAttrTest, ConvertElemType) {
     const auto content = contentAttr.fold();
     EXPECT_NE(content.getType(), baseType);
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     const auto contentVals = content.getValues<int32_t>();
     EXPECT_EQ(contentVals.size(), vals.size());
@@ -654,6 +673,7 @@ TEST_F(MLIR_ConstContentAttrTest, ConvertElemTypeSplat) {
     const auto content = contentAttr.fold();
     EXPECT_NE(content.getType(), baseType);
     EXPECT_TRUE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     EXPECT_EQ(content.getSplatValue<int32_t>(), static_cast<int32_t>(splatVal));
 
@@ -683,6 +703,7 @@ TEST_F(MLIR_ConstContentAttrTest, ConvertElemTypeSubByte) {
     const auto content = contentAttr.fold();
     EXPECT_NE(content.getType(), baseType);
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     const auto contentVals = content.getValues<bool>();
     EXPECT_EQ(contentVals.size(), vals.size());
@@ -715,6 +736,7 @@ TEST_F(MLIR_ConstContentAttrTest, Add) {
     const auto content = contentAttr.fold();
     EXPECT_EQ(content.getType(), baseType);
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     const auto contentVals = content.getValues<float>();
     EXPECT_EQ(contentVals.size(), vals.size());
@@ -746,6 +768,7 @@ TEST_F(MLIR_ConstContentAttrTest, QuantCast) {
     const auto content = contentAttr.fold();
     EXPECT_NE(content.getType(), baseType);
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     const auto contentVals = content.getValues<uint8_t>();
     EXPECT_EQ(contentVals.size(), vals.size());
@@ -785,6 +808,7 @@ TEST_F(MLIR_ConstContentAttrTest, Dequantize) {
     const auto content = contentAttr.fold();
     EXPECT_NE(content.getType(), baseType);
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     const auto contentVals = content.getValues<float>();
     EXPECT_EQ(contentVals.size(), vals.size());
@@ -812,6 +836,7 @@ TEST_F(MLIR_ConstContentAttrTest, Reshape) {
     const auto content = contentAttr.fold();
     EXPECT_NE(content.getType(), baseType);
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     const auto contentVals = content.getValues<float>();
     EXPECT_EQ(contentVals.size(), vals.size());
@@ -842,6 +867,7 @@ TEST_F(MLIR_ConstContentAttrTest, ReverseCWise) {
     const auto content = contentAttr.fold();
     EXPECT_EQ(content.getType(), baseType);
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     const auto contentVals = content.getValues<float>();
     EXPECT_EQ(contentVals.size(), vals.size());
@@ -880,6 +906,7 @@ TEST_F(MLIR_ConstContentAttrTest, ReverseNWise) {
     const auto content = contentAttr.fold();
     EXPECT_EQ(content.getType(), baseType);
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     const auto contentVals = content.getValues<float>();
     EXPECT_EQ(contentVals.size(), vals.size());
@@ -895,6 +922,33 @@ TEST_F(MLIR_ConstContentAttrTest, ReverseNWise) {
             }
         }
     }
+}
+
+TEST_F(MLIR_ConstContentAttrTest, Reverse_Splat) {
+    const int64_t N = 2;
+    const int64_t C = 3;
+    const int64_t H = 4;
+    const int64_t W = 5;
+    const auto baseType = mlir::RankedTensorType::get({N, C, H, W}, mlir::Float32Type::get(&ctx));
+
+    constexpr float splatVal = 42.f;
+    const std::vector<float> vals = {splatVal};
+    const auto baseAttr = mlir::DenseElementsAttr::get(baseType, ArrayRef(vals));
+
+    const auto baseContentAttr = Const::ContentAttr::get(baseAttr);
+    ASSERT_NE(baseContentAttr, nullptr);
+    EXPECT_EQ(baseContentAttr.getType(), baseType);
+
+    const auto contentAttr = baseContentAttr.reverse(Dim(0));
+    ASSERT_NE(contentAttr, nullptr);
+    EXPECT_EQ(contentAttr.getType(), baseType);
+
+    const auto content = contentAttr.fold();
+    EXPECT_EQ(content.getType(), baseType);
+    EXPECT_TRUE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
+
+    EXPECT_EQ(content.getSplatValue<float>(), splatVal);
 }
 
 TEST_F(MLIR_ConstContentAttrTest, Reorder) {
@@ -918,6 +972,7 @@ TEST_F(MLIR_ConstContentAttrTest, Reorder) {
     const auto content = contentAttr.fold();
     EXPECT_NE(content.getType(), baseType);
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     const auto contentVals = content.getValues<float>();
     EXPECT_EQ(contentVals.size(), vals.size());
@@ -956,6 +1011,7 @@ TEST_F(MLIR_ConstContentAttrTest, ReorderAfterReshape) {
     const auto content = contentAttr.fold();
     EXPECT_NE(content.getType(), baseType);
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     const auto contentVals = content.getValues<float>();
     EXPECT_EQ(contentVals.size(), vals.size());
@@ -997,6 +1053,7 @@ TEST_F(MLIR_ConstContentAttrTest, Pad) {
     const auto content = contentAttr.fold();
     EXPECT_NE(content.getType(), baseType);
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     const auto contentVals = content.getValues<int32_t>();
     EXPECT_GT(contentVals.size(), vals.size());
@@ -1028,6 +1085,7 @@ TEST_F(MLIR_ConstContentAttrTest, PadSplat) {
     const auto content = contentAttr.fold();
     EXPECT_NE(content.getType(), baseType);
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     std::vector<int32_t> vals(baseType.getNumElements(), splatVal);
     checkPaddedBuffer<int32_t>(content, vals, {IC, IH, IW}, {PC, PH, PW}, 0);
@@ -1069,6 +1127,7 @@ TEST_F(MLIR_ConstContentAttrTest, PadUniformQuant) {
     const auto content = contentAttr.fold();
     EXPECT_NE(content.getType(), baseType);
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     const auto contentVals = content.getValues<int32_t>();
     EXPECT_GT(contentVals.size(), vals.size());
@@ -1118,6 +1177,7 @@ TEST_F(MLIR_ConstContentAttrTest, PadPerAxisQuant) {
     const auto content = contentAttr.fold();
     EXPECT_NE(content.getType(), baseType);
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     const auto contentVals = content.getValues<int32_t>();
     EXPECT_GT(contentVals.size(), vals.size());
@@ -1165,6 +1225,7 @@ TEST_F(MLIR_ConstContentAttrTest, SubView) {
     const auto content = contentAttr.fold();
     EXPECT_NE(content.getType(), baseType);
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     const auto contentVals = content.getValues<int32_t>();
     EXPECT_LT(contentVals.size(), vals.size());
@@ -1213,6 +1274,7 @@ TEST_F(MLIR_ConstContentAttrTest, SubViewI1) {
     const auto content = contentAttr.fold();
     EXPECT_NE(content.getType(), baseType);
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     // getValues is not realized for sub-byte types
     // therefore access through raw buffer
@@ -1260,6 +1322,7 @@ TEST_F(MLIR_ConstContentAttrTest, SubViewSplat) {
     const auto content = contentAttr.fold();
     EXPECT_NE(content.getType(), baseType);
     EXPECT_TRUE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     EXPECT_EQ(content.getSplatValue<int32_t>(), splatVal);
 }
@@ -1358,6 +1421,7 @@ TEST_F(MLIR_ConstContentAttrTest, Transpose) {
     const auto content = contentAttr.fold();
     EXPECT_NE(content.getType(), baseType);
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     const auto contentVals = content.getValues<float>();
     EXPECT_EQ(contentVals.size(), vals.size());
@@ -1396,6 +1460,7 @@ TEST_F(MLIR_ConstContentAttrTest, MemPermute) {
     const auto content = contentAttr.fold();
     EXPECT_NE(content.getType(), baseType);
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     const auto contentVals = content.getValues<float>();
     EXPECT_EQ(contentVals.size(), vals.size());
@@ -1486,6 +1551,7 @@ TEST_F(MLIR_ConstContentAttrTest, ExpandDilated) {
     const auto content = contentAttr.fold();
     EXPECT_NE(content.getType(), baseType);
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     const int64_t dKY = KY + (KY - 1) * (dilY - 1);
     const int64_t dKX = KX + (KX - 1) * (dilX - 1);
@@ -1727,6 +1793,7 @@ TEST_F(MLIR_ConstContentAttrTest, ChangeShapeAndElemType) {
     const auto content = quantContentAttr.fold();
     EXPECT_NE(content.getType(), baseType);
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(quantContentAttr.isSplat(), content.isSplat());
 
     const auto contentVals = content.getValues<uint8_t>();
     EXPECT_EQ(contentVals.size(), vals.size());
@@ -1767,7 +1834,9 @@ TEST_F(MLIR_ConstContentAttrTest, ChangeShapeAndElemTypePerAxisQuant) {
     EXPECT_NE(content2.getType(), baseType);
     EXPECT_NE(content1.getType(), content2.getType());
     EXPECT_FALSE(content1.isSplat());
+    EXPECT_EQ(quantContentAttr1.isSplat(), content1.isSplat());
     EXPECT_FALSE(content2.isSplat());
+    EXPECT_EQ(quantContentAttr2.isSplat(), content2.isSplat());
 
     const auto contentVals1 = content1.getValues<uint8_t>();
     const auto contentVals2 = content2.getValues<uint8_t>();
@@ -1797,6 +1866,7 @@ TEST_F(MLIR_ConstContentAttrTest, ChangeShapeAndElemTypeFloat) {
     const auto content = newContentAttr.fold();
     EXPECT_NE(content.getType(), baseType);
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(newContentAttr.isSplat(), content.isSplat());
 
     const auto contentVals = content.getValues<int32_t>();
     EXPECT_EQ(contentVals.size(), vals.size());
@@ -1888,6 +1958,7 @@ TEST_F(MLIR_ConstContentAttrTest, SwizzleConstant_SubBytes_I1) {
 
     const auto content = contentAttr1.fold();
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
     VPU::ArchKind archKind = static_cast<VPU::ArchKind>(VPU::ArchKind::NPU37XX);
     auto acheAlignSize = static_cast<size_t>(
             alignSizeForSwizzling(contentType.getTotalAllocSize().count(), getSizeAlignmentForSwizzling(archKind)));
@@ -1929,6 +2000,7 @@ TEST_F(MLIR_ConstContentAttrTest, SwizzleConstant_SubBytes_I4) {
 
     const auto content = contentAttr1.fold();
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     VPU::ArchKind archKind = static_cast<VPU::ArchKind>(VPU::ArchKind::NPU37XX);
     auto acheAlignSize = static_cast<size_t>(
@@ -1966,6 +2038,7 @@ TEST_F(MLIR_ConstContentAttrTest, SwizzleConstant_U8) {
 
     const auto content = contentAttr.fold();
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
     VPU::ArchKind archKind = static_cast<VPU::ArchKind>(VPU::ArchKind::NPU37XX);
     auto acheAlignSize = static_cast<size_t>(
             alignSizeForSwizzling(contentType.getTotalAllocSize().count(), getSizeAlignmentForSwizzling(archKind)));
@@ -2000,6 +2073,7 @@ TEST_F(MLIR_ConstContentAttrTest, SwizzleConstant_FP32) {
 
     const auto content = contentAttr.fold();
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
     VPU::ArchKind archKind = static_cast<VPU::ArchKind>(VPU::ArchKind::NPU37XX);
     auto acheAlignSize = static_cast<size_t>(
             alignSizeForSwizzling(contentType.getTotalAllocSize().count(), getSizeAlignmentForSwizzling(archKind)));
@@ -2039,6 +2113,7 @@ TEST_F(MLIR_ConstContentAttrTest, SwizzleConstant_SubBytes_Splat_I1) {
 
     const auto content = contentAttr1.fold();
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr1.isSplat(), content.isSplat());
 
     VPU::ArchKind archKind = static_cast<VPU::ArchKind>(VPU::ArchKind::NPU37XX);
     auto acheAlignSize = static_cast<size_t>(
@@ -2081,6 +2156,7 @@ TEST_F(MLIR_ConstContentAttrTest, SwizzleConstant_SubBytes_Splat_I4) {
 
     const auto content = contentAttr1.fold();
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr1.isSplat(), content.isSplat());
 
     VPU::ArchKind archKind = static_cast<VPU::ArchKind>(VPU::ArchKind::NPU37XX);
     auto acheAlignSize = static_cast<size_t>(
@@ -2120,6 +2196,7 @@ TEST_F(MLIR_ConstContentAttrTest, SwizzleConstant_Splat_U8) {
 
     const auto content = contentAttr.fold();
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     VPU::ArchKind archKind = static_cast<VPU::ArchKind>(VPU::ArchKind::NPU37XX);
     auto acheAlignSize = static_cast<size_t>(
@@ -2159,6 +2236,7 @@ TEST_F(MLIR_ConstContentAttrTest, SwizzleConstant_Splat_FP32) {
 
     const auto content = contentAttr.fold();
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     VPU::ArchKind archKind = static_cast<VPU::ArchKind>(VPU::ArchKind::NPU37XX);
     auto acheAlignSize = static_cast<size_t>(
@@ -2203,6 +2281,7 @@ TEST_F(MLIR_ConstContentAttrTest, ScalarMultInverse) {
     const auto content = contentAttr.fold();
     EXPECT_EQ(content.getType(), baseType);
     EXPECT_FALSE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     const auto contentVals = content.getValues<float>();
     EXPECT_EQ(contentVals.size(), vals.size());
@@ -2231,6 +2310,7 @@ TEST_F(MLIR_ConstContentAttrTest, ScalarMultInverse_Splat) {
     const auto content = contentAttr.fold();
     EXPECT_EQ(content.getType(), baseType);
     EXPECT_TRUE(content.isSplat());
+    EXPECT_EQ(contentAttr.isSplat(), content.isSplat());
 
     const auto contentVals = content.getValues<float>();
     EXPECT_EQ(contentVals.size(), static_cast<size_t>(baseType.getNumElements()));
@@ -2327,3 +2407,113 @@ INSTANTIATE_TEST_SUITE_P(
                     return mlir::DenseResourceElementsAttr::get(
                             type, manager.insert("MLIR_ConstContentAttrTypedTest_resource", std::move(blob)));
                 }));
+
+TEST_F(MLIR_ConstContentAttrTest, Quantize) {
+    ctx.loadDialect<mlir::quant::QuantizationDialect>();
+
+    const auto baseType = mlir::RankedTensorType::get({1, 16}, mlir::Float32Type::get(&ctx));
+    std::vector<float> vals = {-2.0, -1.75, -1.5, -1.25, -1.0, -0.75, -0.5, -0.25,
+                               0.0,  0.25,  0.5,  0.75,  1.0,  1.25,  1.5,  1.75};
+    const auto baseAttr = mlir::DenseElementsAttr::get(baseType, ArrayRef(vals));
+
+    const auto baseContentAttr = Const::ContentAttr::get(baseAttr);
+    ASSERT_NE(baseContentAttr, nullptr);
+    EXPECT_EQ(baseContentAttr.getType(), baseType);
+
+    // Quantize to 1/127;56 type => [-1.4409448818897637; 0.5590551181102362]
+    const double scale = 1.0 / 127.0;
+    const auto quantType =
+            mlir::quant::UniformQuantizedType::get(mlir::quant::QuantizationFlags::Signed, getSInt8Type(&ctx),
+                                                   mlir::Float32Type::get(&ctx), scale, 56, -127, 127);
+    const auto contentAttr = baseContentAttr.quantize(quantType);
+    ASSERT_NE(contentAttr, nullptr);
+    EXPECT_NE(contentAttr.getType(), baseType);
+
+    const auto content = contentAttr.fold();
+    EXPECT_NE(content.getType(), baseType);
+    EXPECT_FALSE(content.isSplat());
+
+    const auto contentVals = content.getValues<char>();
+    EXPECT_EQ(contentVals.size(), vals.size());
+
+    std::vector<char> target = {-127, -127, -127, -103, -71, -39, -7, 24, 56, 88, 120, 127, 127, 127, 127, 127};
+    for (size_t i = 0; i < contentVals.size(); ++i) {
+        EXPECT_EQ(contentVals[i], target[i]);
+    }
+}
+
+TEST_F(MLIR_ConstContentAttrTest, PerAxisQuantize) {
+    ctx.loadDialect<mlir::quant::QuantizationDialect>();
+
+    const auto baseType = mlir::RankedTensorType::get({2, 16}, mlir::Float32Type::get(&ctx));
+    std::vector<float> vals(baseType.getNumElements());
+    for (size_t i = 0; i < 2; ++i) {
+        for (size_t j = 0; j < 16; ++j) {
+            vals[16 * i + j] = -2.0f + j * 0.25f;
+        }
+    }
+    const auto baseAttr = mlir::DenseElementsAttr::get(baseType, ArrayRef(vals));
+
+    const auto baseContentAttr = Const::ContentAttr::get(baseAttr);
+    ASSERT_NE(baseContentAttr, nullptr);
+    EXPECT_EQ(baseContentAttr.getType(), baseType);
+
+    // first axis qType to 1/127;56 type => [-1.4409448818897637; 0.5590551181102362]
+    // second axis qType 0.003;-21; type => [-0.318; 0.444]
+    std::vector<double> scales{1.0 / 127.0, 0.003};
+    std::vector<int64_t> zeroPoints{56, -21};
+    const auto quantType = mlir::quant::UniformQuantizedPerAxisType::get(
+            mlir::quant::QuantizationFlags::Signed, getSInt8Type(&ctx), mlir::Float32Type::get(&ctx), scales,
+            zeroPoints, 0, -127, 127);
+
+    const auto contentAttr = baseContentAttr.quantize(quantType);
+    ASSERT_NE(contentAttr, nullptr);
+    EXPECT_NE(contentAttr.getType(), baseType);
+
+    const auto content = contentAttr.fold();
+    EXPECT_NE(content.getType(), baseType);
+    EXPECT_FALSE(content.isSplat());
+
+    const auto contentVals = content.getValues<char>();
+    EXPECT_EQ(contentVals.size(), vals.size());
+
+    std::vector<char> targetAxis0 = {-127, -127, -127, -103, -71, -39, -7, 24, 56, 88, 120, 127, 127, 127, 127, 127};
+    std::vector<char> targetAxis1 = {-127, -127, -127, -127, -127, -127, -127, -104,
+                                     -21,  62,   127,  127,  127,  127,  127,  127};
+    for (size_t i = 0; i < 16; ++i) {
+        EXPECT_EQ(contentVals[i], targetAxis0[i]);
+        EXPECT_EQ(contentVals[16 + i], targetAxis1[i]);
+    }
+}
+
+TEST_F(MLIR_ConstContentAttrTest, DequantizeQuantize) {
+    ctx.loadDialect<mlir::quant::QuantizationDialect>();
+
+    const auto si8Type = getSInt8Type(&ctx);
+    // Quantize to 0.003;-21;<-120;120> type => [-0.297;0.423]
+    const auto quantType = mlir::quant::UniformQuantizedType::get(mlir::quant::QuantizationFlags::Signed, si8Type,
+                                                                  mlir::Float16Type::get(&ctx), 0.003, 56, -120, 120);
+
+    const auto baseType = mlir::RankedTensorType::get({1, 16}, si8Type);
+    std::vector<char> vals(baseType.getNumElements());
+    for (size_t i = 0; i < vals.size(); ++i) {
+        vals[i] = -120 + 15 * i;
+    }
+    const auto baseAttr = mlir::DenseElementsAttr::get(baseType, ArrayRef(vals));
+    const auto baseContentAttr = Const::ContentAttr::get(baseAttr);
+    ASSERT_NE(baseContentAttr, nullptr);
+    EXPECT_EQ(baseContentAttr.getType(), baseType);
+
+    const auto contentAttr = baseContentAttr.quantCast(quantType).dequantize().quantize(quantType);
+    ASSERT_NE(contentAttr, nullptr);
+
+    const auto content = contentAttr.fold();
+    EXPECT_FALSE(content.isSplat());
+
+    const auto contentVals = content.getValues<char>();
+    EXPECT_EQ(contentVals.size(), vals.size());
+
+    for (size_t i = 0; i < contentVals.size(); ++i) {
+        EXPECT_EQ(contentVals[i], vals[i]);
+    }
+}

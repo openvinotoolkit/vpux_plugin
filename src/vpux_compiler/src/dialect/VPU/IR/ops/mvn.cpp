@@ -13,11 +13,11 @@ using namespace vpux;
 
 mlir::LogicalResult vpux::VPU::MVNOp::inferReturnTypes(mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc,
                                                        mlir::ValueRange operands, mlir::DictionaryAttr attrs,
-                                                       mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+                                                       mlir::OpaqueProperties prop, mlir::RegionRange /*regions*/,
                                                        mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::MVNOpAdaptor mvn(operands, attrs);
+    VPU::MVNOpAdaptor mvn(operands, attrs, prop);
     if (mlir::failed(mvn.verify(loc))) {
         return mlir::failure();
     }
@@ -60,13 +60,13 @@ bool vpux::VPU::MVNOp::checkStrategyCompatibility(VPU::MultiClusterStrategy stra
     return false;
 }
 
-vpux::VPU::DistributedTensorAttr vpux::VPU::MVNOp::getExplicitDistributedTensorAttr(
-        vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, mlir::ArrayAttr numTiles,
-        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::UnitAttr uniformDistributedSegments,
-        const vpux::VPU::OverlapDistributionParams& /*overlapParams*/) {
-    return VPU::getSWExplicitDistributedTensorAttr(mlir::dyn_cast<VPU::SWOpInterface>(getOperation()), shape,
-                                                   distributionMode, numTiles, numClusters, alignment,
-                                                   uniformDistributedSegments);
+vpux::VPU::DistributedTensorNative vpux::VPU::MVNOp::getExplicitDistributedTensorAttr(
+        vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, ArrayRef<int64_t> numTiles,
+        const int64_t numClusters, ArrayRef<int64_t> alignment, const bool uniformDistributedSegments,
+        const vpux::VPU::OverlapDistributionParams& overlapParams) {
+    return VPU::getSWExplicitDistributedTensorNative(mlir::cast<VPU::SWOpInterface>(getOperation()), shape,
+                                                     distributionMode, numTiles, numClusters, alignment,
+                                                     uniformDistributedSegments, overlapParams);
 }
 
 //
@@ -76,6 +76,13 @@ vpux::VPU::DistributedTensorAttr vpux::VPU::MVNOp::getExplicitDistributedTensorA
 bool vpux::VPU::MVNOp::fitIntoCMX(llvm::ArrayRef<vpux::NDTypeInterface> buffers, Byte reservedMem) {
     VPUX_THROW_UNLESS(buffers.size() == 2, "MVNOp requires 1 input and 1 output, but the number of buffer is {0}",
                       buffers.size());
+
+    if (getInternalReshape().has_value()) {
+        // This is in fact a big-MVN instance that cannot be tiled.
+        // Declared shape is tileable, but actual working shape (internal_reshape) is not,
+        // so need to rely on 'DecomposeMVNPass'.
+        return false;
+    }
 
     SmallVector<Byte> buffersSize;
     std::transform(buffers.begin(), buffers.end(), std::back_inserter(buffersSize), [](const auto buffer) {
@@ -105,5 +112,11 @@ bool vpux::VPU::MVNOp::supportCycleCostCalculation() {
 void vpux::VPU::MVNOp::build(::mlir::OpBuilder& builder, ::mlir::OperationState& state, ::mlir::Value input,
                              ::mlir::BoolAttr across_channels, ::mlir::BoolAttr normalize_variance,
                              ::mlir::FloatAttr eps) {
-    build(builder, state, input.getType(), input, across_channels, normalize_variance, eps, {});
+    build(builder, state, input.getType(), input, across_channels, normalize_variance, eps, {}, nullptr);
+}
+
+void vpux::VPU::MVNOp::build(::mlir::OpBuilder& builder, ::mlir::OperationState& state, ::mlir::Value input,
+                             ::mlir::BoolAttr across_channels, ::mlir::BoolAttr normalize_variance,
+                             ::mlir::FloatAttr eps, ::mlir::ArrayAttr internal_reshape) {
+    build(builder, state, input.getType(), input, across_channels, normalize_variance, eps, internal_reshape, nullptr);
 }

@@ -111,9 +111,8 @@ def OneShotBufferizeVPU2VPUIP : PassBase<"one-shot-bufferize-VPU-to-VPUIP", "vpu
     let description = [{
         One shot bufferize ops from VPU to VPUIP dialect, include converting:
         (1) software ops from VPU to VPUIP::SWKernel ops. (37XX+)
-        (2) software ops from VPU to VPUIP::XXXUPAOp ops. (30XX)
-        (3) ops which can be executed on NCE to VPUIP::NCEClusterTask ops. (30XX+)
-        (4) VPU::NCEClusterTiling ops to VPUIP::NCEClusterTiling. (30XX+)
+        (2) ops which can be executed on NCE to VPUIP::NCEClusterTask ops. (37XX+)
+        (3) VPU::NCEClusterTiling ops to VPUIP::NCEClusterTiling. (37XX+)
     }];
 
     let constructor = "vpux::createOneShotBufferizeVPU2VPUIPPass()";
@@ -305,30 +304,6 @@ def ConvertVPUMI37XX2ELF : PassBase<"convert-VPUMI37XX-to-ELF", "vpux::ModulePas
 //=================================================================================
 // Lower VPUASM2ELF
 //=================================================================================
-
-//
-// Move IO Buffers to ELF sections
-//
-
-def MoveIOBuffersToElfSections : PassBase<"move-io-buffers-to-elf-sections", "vpux::ModulePass"> {
-    let summary = "Wrap IO DeclareBuffs into ELF section operations";
-
-    let description = [{
-        IO buffers, more specifically, DeclareBufferOps with location at NetworkInput and NetworkOutput,
-        are handled differently in terms of allocations. Their allocation is not owned or driven by the compilation
-        process, but rather by the execution process. By contract we would recieve only their addresses.
-        In the compiler we still abstract them as allocated buffers.
-        Since ELF dialect materializes the memory allocation process, we would handle these ops differently,
-        with semantics identifiable by the rest of the toolchain.
-    }];
-
-    let constructor = "vpux::createMoveIOBuffersToSectionsPass()";
-
-    let dependentDialects = [
-        "vpux::VPUASM::VPUASMDialect",
-        "vpux::ELF::ELFDialect"
-    ];
-}
 
 //
 // ConvertVPUASM2NPUReg40XX

@@ -24,8 +24,8 @@ using namespace vpux;
 // PipelineStrategy37XX::buildPipeline
 //
 
-void PipelineStrategy37XX::buildPipeline(mlir::PassManager& pm, const Config& config, mlir::TimingScope& rootTiming,
-                                         Logger log) {
+void PipelineStrategy37XX::buildPipeline(mlir::PassManager& pm, const intel_npu::Config& config,
+                                         mlir::TimingScope& rootTiming, Logger log) {
     auto buildTiming = rootTiming.nest("Build compilation pipeline");
 
     const auto initCompilerOptions = getInitCompilerOptions(config);
@@ -68,8 +68,8 @@ void PipelineStrategy37XX::buildPipeline(mlir::PassManager& pm, const Config& co
     }
 }
 
-void PipelineStrategy37XX::buildELFPipeline(mlir::PassManager& pm, const Config&, mlir::TimingScope& rootTiming,
-                                            Logger log) {
+void PipelineStrategy37XX::buildELFPipeline(mlir::PassManager& pm, const intel_npu::Config&,
+                                            mlir::TimingScope& rootTiming, Logger log) {
     auto buildTiming = rootTiming.nest("Build compilation pipeline");
     arch37xx::buildLowerVPUIP2ELFPipeline(pm, log.nest());
 }

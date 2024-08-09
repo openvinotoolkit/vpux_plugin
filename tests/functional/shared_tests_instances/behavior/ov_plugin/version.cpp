@@ -3,8 +3,8 @@
 //
 
 #include "behavior/ov_plugin/version.hpp"
+#include "common/npu_test_env_cfg.hpp"
 #include "common/utils.hpp"
-#include "common/vpu_test_env_cfg.hpp"
 
 namespace ov {
 namespace test {

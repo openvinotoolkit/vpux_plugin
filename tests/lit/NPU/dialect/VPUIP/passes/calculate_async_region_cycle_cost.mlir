@@ -11,7 +11,7 @@
 // implied warranties, other than those that are expressly stated in the License.
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% allow-custom-values=true" --calculate-async-region-cycle-cost  %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 #NWHC = affine_map<(d0, d1, d2, d3) -> (d0, d3, d2, d1)>
 !MemRef1 = memref<1x128x64x32xf16, #NWHC>

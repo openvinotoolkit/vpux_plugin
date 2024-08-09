@@ -4,7 +4,7 @@
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --convert-to-spatial-op="se-experimental-ops-enabled=true" %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 // CHECK-LABEL: @ConvertToSpatialInterpolation
 func.func @ConvertToSpatialInterpolation(%arg0: tensor<1x16x16x64xf16>) -> tensor<1x32x32x64xf16> {

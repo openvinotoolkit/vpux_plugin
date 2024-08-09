@@ -71,6 +71,7 @@ public:
     static mlir::LogicalResult verifyChannels(VPU::NCEAveragePoolOp origOp, Logger log = Logger::global());
 
     static mlir::LogicalResult verifyChannels(IE::AddOp origOp, Logger log = Logger::global());
+    static mlir::LogicalResult verifyChannels(IE::ReduceMeanOp origOp, Logger log = Logger::global());
     static mlir::LogicalResult verifyChannels(IE::MultiplyOp origOp, Logger log = Logger::global());
     static mlir::LogicalResult verifyChannels(IE::SubtractOp origOp, Logger log = Logger::global());
     static mlir::LogicalResult verifyChannels(IE::AndOp origOp, Logger log = Logger::global());
@@ -78,18 +79,23 @@ public:
     static mlir::LogicalResult verifyEltwiseChannels(mlir::Location loc, vpux::NDTypeInterface firstInputType,
                                                      vpux::NDTypeInterface secondInputType,
                                                      Logger log = Logger::global());
+    static mlir::LogicalResult verifyReduceChannels(mlir::Location loc, vpux::NDTypeInterface inputType,
+                                                    Logger log = Logger::global());
 
     static mlir::LogicalResult verifyChannels(IE::GroupConvolutionOp origOp, Logger log = Logger::global());
     static mlir::LogicalResult verifyChannels(VPU::NCEDepthConvolutionOp origOp, Logger log = Logger::global());
     static mlir::LogicalResult verifyChannels(VPU::NCEPermuteOp origOp, Logger log = Logger::global());
     static mlir::LogicalResult verifyGroupConvChannels(mlir::Location loc, vpux::NDTypeInterface inputType,
-                                                       vpux::NDTypeInterface filterType, Logger log = Logger::global());
+                                                       vpux::NDTypeInterface filterType,
+                                                       IE::AlignedChannelsOpInterface channelIface,
+                                                       Logger log = Logger::global());
 
     static mlir::LogicalResult verifyChannels(IE::InterpolateOp origOp, Logger log = Logger::global());
     static mlir::LogicalResult verifyChannels(VPU::NCEInterpolateOp origOp, Logger log = Logger::global());
 
     static mlir::LogicalResult verifyChannels(IE::TransposedConvolutionOp origOp, Logger log = Logger::global());
     static mlir::LogicalResult verifyChannels(IE::PadOp origOp, Logger log = Logger::global());
+    static mlir::LogicalResult verifyChannels(IE::MatMulOp origOp, Logger log = Logger::global());
 
 public:
     static mlir::LogicalResult isSupported(mlir::Operation* origOp, Logger log = Logger::global());

@@ -125,12 +125,17 @@ mlir::LogicalResult ConvertBiasToScaleShift<BiasTypeOp>::matchAndRewrite(BiasTyp
     const auto outShapeRes = biasOp.getOutput().getType().template cast<vpux::NDTypeInterface>();
 
     bool lhsIsActivation = (lhsType == outShapeRes);
-    auto activationInput = lhsIsActivation ? biasOp.getInput1() : biasOp.getInput2();
-    auto biasInput = lhsIsActivation ? biasOp.getInput2() : biasOp.getInput1();
+    mlir::Value activationInput = lhsIsActivation ? biasOp.getInput1() : biasOp.getInput2();
+    mlir::Value biasInput = lhsIsActivation ? biasOp.getInput2() : biasOp.getInput1();
 
     auto findBiasConst = IE::getConstParentOp(biasInput);
     if (mlir::failed(findBiasConst)) {
         _log.nest().trace("op {0} input is not constant", biasOp->getName());
+        return mlir::failure();
+    }
+
+    if (mlir::isa<IE::SubtractOp>(biasOp) && !lhsIsActivation) {
+        _log.nest().trace("op {0} activation is not the first input", biasOp->getName());
         return mlir::failure();
     }
 
@@ -148,10 +153,10 @@ mlir::LogicalResult ConvertBiasToScaleShift<BiasTypeOp>::matchAndRewrite(BiasTyp
     //
     // Tensor              Const
     //    |                  |
-    //    |               Negative
-    //    |                  |
-    //     \______AddOp______/
-    //              |
+    //    |               Negative        Tensor              Const
+    //    |                  |               |                  |
+    //     \______AddOp______/                \______SubOp______/
+    //              |                                  |
     //
     // To:
     //
@@ -162,20 +167,10 @@ mlir::LogicalResult ConvertBiasToScaleShift<BiasTypeOp>::matchAndRewrite(BiasTyp
     //     \___ScaleShift___/
     //              |
 
-    if (mlir::isa<IE::NegativeOp>(biasInput.getDefiningOp())) {
+    if (mlir::isa<IE::NegativeOp>(biasInput.getDefiningOp()) || mlir::isa<IE::SubtractOp>(biasOp)) {
         const auto negativeConstAttr = biasConst.getContentAttr().rescale(-1.0);
-        auto newBiasInput =
-                rewriter.create<Const::DeclareOp>(biasConst->getLoc(), biasConst.getType(), negativeConstAttr);
-        _log.nest().trace("replacing op {0} with ScaleShift", biasOp->getName());
-        rewriter.replaceOpWithNewOp<IE::ScaleShiftOp>(biasOp, biasOp.getType(), activationInput, nullptr, newBiasInput);
-
-        return mlir::success();
-    }
-
-    if (mlir::isa<IE::SubtractOp>(biasOp)) {
-        const auto negativeConstAttr = biasConst.getContentAttr().rescale(-1.0);
-        rewriter.replaceOpWithNewOp<Const::DeclareOp>(biasConst, biasConst.getType(), negativeConstAttr)
-                ->setLoc(biasConst->getLoc());
+        biasInput = rewriter.create<Const::DeclareOp>(biasConst->getLoc(), biasConst.getType(), negativeConstAttr)
+                            .getOutput();
     }
 
     _log.nest().trace("replaced op {0} with ScaleShift", biasOp->getName());
@@ -223,6 +218,11 @@ mlir::LogicalResult ConvertMultiplyToScaleShift::matchAndRewrite(IE::MultiplyOp 
 
     // Activation shape and scaleShift output shape should be consistent
     if (getShape(activationInput) != mulOutShape) {
+        return mlir::failure();
+    }
+
+    if (mulOutShape[Dim(Dims4D::Act::C)] > VPU::NCEInvariant::VPU_DIMENSION_LIMIT) {
+        _log.trace("Multiply with C Dim > 8192 will not be converted to ScaleShift since it is faster on Shave.");
         return mlir::failure();
     }
 

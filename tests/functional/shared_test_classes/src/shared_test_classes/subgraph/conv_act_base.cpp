@@ -109,7 +109,7 @@ void ConvActTest::buildFQFunction() {
             make_fake_quantize(params[0], ov::element::f32, dataLevels, {}, dataLow, dataHigh, dataLow, dataHigh);
 
     /// building weights FQ - through convert layer
-    const auto weightsU8 = deprecated::make_constant<uint8_t>(ov::element::u8, weightsShape, {}, true, 255, 1);
+    const auto weightsU8 = make_constant(ov::element::u8, weightsShape, ov::test::utils::InputGenerateData(1, 255));
     const auto weightsFP32 = std::make_shared<ov::op::v0::Convert>(weightsU8, ov::element::f32);
 
     const size_t weightsLevels = 255;

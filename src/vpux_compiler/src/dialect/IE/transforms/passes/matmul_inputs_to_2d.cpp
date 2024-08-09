@@ -5,14 +5,25 @@
 
 #include <llvm/ADT/SmallVector.h>
 #include <mlir/Support/LogicalResult.h>
+#include <climits>
+#include <cstdint>
 #include "vpux/compiler/core/attributes/shape.hpp"
+#include "vpux/compiler/core/type_interfaces.hpp"
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
+#include "vpux/compiler/dialect/IE/utils/quantization.hpp"
+#include "vpux/compiler/dialect/IE/utils/resources.hpp"
+#include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/interfaces/nce_invariant.hpp"
+#include "vpux/compiler/utils/analysis.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
+#include "vpux/utils/core/checked_cast.hpp"
+#include "vpux/utils/core/error.hpp"
 #include "vpux/utils/core/small_vector.hpp"
+#include "vpux/utils/core/type/float16.hpp"
 
 using namespace vpux;
 
@@ -29,9 +40,12 @@ SmallVector<mlir::PatternBenefit> benefitLevels = getBenefitLevels(levelCount);
 
 class MatMulInputsTo2dPass final : public IE::MatMulInputsTo2dBase<MatMulInputsTo2dPass> {
 public:
-    explicit MatMulInputsTo2dPass(Logger log) {
+    explicit MatMulInputsTo2dPass(const bool enableGroupedMatMul, Logger log)
+            : _enableGroupedMatMul(enableGroupedMatMul) {
         Base::initLogger(log, Base::getArgumentName());
     }
+
+    mlir::LogicalResult initialize(mlir::MLIRContext* ctx) final;
 
 public:
     class ReshapeNDInputConverter;
@@ -39,7 +53,20 @@ public:
 
 private:
     void safeRunOnFunc() final;
+    bool _enableGroupedMatMul;
 };
+
+mlir::LogicalResult MatMulInputsTo2dPass::initialize(mlir::MLIRContext* ctx) {
+    if (mlir::failed(Base::initialize(ctx))) {
+        return mlir::failure();
+    }
+    if (!enableGroupedMatMul.hasValue()) {
+        return mlir::success();
+    }
+
+    _enableGroupedMatMul = enableGroupedMatMul;
+    return mlir::success();
+}
 
 //
 // MatMulOpConverter
@@ -47,8 +74,8 @@ private:
 
 class MatMulInputsTo2dPass::MatMulOpConverter final : public mlir::OpRewritePattern<IE::MatMulOp> {
 public:
-    MatMulOpConverter(mlir::MLIRContext* ctx, mlir::PatternBenefit benefit, Logger log)
-            : mlir::OpRewritePattern<IE::MatMulOp>(ctx, benefit), _log(log) {
+    MatMulOpConverter(mlir::MLIRContext* ctx, mlir::PatternBenefit benefit, Logger log, bool enableGroupedMatMul)
+            : mlir::OpRewritePattern<IE::MatMulOp>(ctx, benefit), _log(log), _enableGroupedMatMul(enableGroupedMatMul) {
     }
 
 public:
@@ -56,6 +83,7 @@ public:
 
 private:
     Logger _log;
+    bool _enableGroupedMatMul;
 };
 
 static SmallVector<mlir::Value> sliceTensor(const mlir::Value tensorToSplit, const mlir::Location location,
@@ -106,6 +134,80 @@ static SmallVector<mlir::Value> sliceTensor(const mlir::Value tensorToSplit, con
     return weightSlices;
 }
 
+mlir::quant::UniformQuantizedType getQuantizedTypeFromPossibleFakeQuantize(mlir::Value value) {
+    auto op = value.getDefiningOp();
+    if (op == nullptr) {
+        return nullptr;
+    }
+    while (mlir::isa_and_nonnull<IE::ViewLikeOpInterface, IE::TransposeOp>(op)) {
+        op = op->getOperand(0).getDefiningOp();
+    }
+
+    return IE::getQuantizedTypeFromFakeQuantize(mlir::dyn_cast_or_null<IE::FakeQuantizeOp>(op));
+}
+
+IE::FakeQuantizeOp getMatmulOutputFakeQuantize(IE::MatMulOp matmulOp) {
+    auto resultUsers = matmulOp.getOutput().getUsers();
+    if (!matmulOp.getOutput().hasOneUse()) {
+        return nullptr;
+    }
+    return mlir::dyn_cast<IE::FakeQuantizeOp>(*resultUsers.begin());
+}
+
+int64_t getExpandedCMXUsage(IE::MatMulOp matmulOp, ShapeRef input1Shape, ShapeRef input2Shape) {
+    VPUX_THROW_UNLESS(input1Shape.size() == 3 && input2Shape.size() == 3,
+                      "Matmul Dimensions for batched Matmul must be 3d");
+    const auto transposeA = matmulOp.getTransposeA();
+    const auto transposeB = matmulOp.getTransposeB();
+    const auto dimOfIC = transposeA ? Dims3D::Act::H : Dims3D::Act::IC;
+    const auto dimOfOC = transposeB ? Dims3D::Filter::IC : Dims3D::Filter::OC;
+    const int64_t sizeofIC{input1Shape[dimOfIC]};
+    const int64_t sizeofOC{input2Shape[dimOfOC]};
+    // Following expansion is done at expandActivationChannelsPass, example assuming no transpose A/B
+    // We calculate CMX size following expansion and assumed tiling
+    // WE mean W Expanded
+    // Input1 Input2 Output  -> After Expansion Input1  Input2   Output
+    // BxHxIC  BxICxOC BxHxOC ------------------- BxHxICE  BxICExOCE BxHxOCE
+
+    // Here we preemptively estimate CMX usage in VPU after tiling, if data does not fit
+    // into CMX we dont run with batched matmul
+    // OC dimension must be expanded to be multiple of 16
+
+    auto alignedChannelOpInterface = mlir::cast<IE::AlignedChannelsOpInterface>(matmulOp.getOperation());
+    const auto inputChannelAlignment = alignedChannelOpInterface.getInputChannelAlignment();
+    const auto outputChannelAlignment = alignedChannelOpInterface.getOutputChannelAlignment();
+    constexpr auto float16Size = sizeof(type::float16);
+    constexpr auto int32Size = sizeof(int32_t);
+    const auto sizeOfICE = alignValUp(sizeofIC, inputChannelAlignment);
+    const auto sizeOfOCE = alignValUp(sizeofOC, outputChannelAlignment);
+    const auto input1QuantizedType = getQuantizedTypeFromPossibleFakeQuantize(matmulOp.getInput1());
+    const auto elementSizeInput1 = input1QuantizedType ? input1QuantizedType.getStorageTypeIntegralWidth() / CHAR_BIT
+                                                       : checked_cast<double>(float16Size);
+    const auto input1Size = details::calcTotalShapeSize(input1Shape) * elementSizeInput1 * sizeOfICE / sizeofIC;
+    const auto input2QuantizedType = getQuantizedTypeFromPossibleFakeQuantize(matmulOp.getInput2());
+    const auto elementSizeInput2 = input2QuantizedType ? input2QuantizedType.getStorageTypeIntegralWidth() / CHAR_BIT
+                                                       : checked_cast<double>(float16Size);
+    // To cover transpose case without conditional we multiply all then remove expanded dimension
+    const auto input2Size = input2Shape[Dims3D::Filter::B] * sizeOfICE * sizeOfOCE * elementSizeInput2;
+
+    auto possibleOutputFQOp = getMatmulOutputFakeQuantize(matmulOp);
+    const auto outputQuantizedType = IE::getQuantizedTypeFromFakeQuantize(possibleOutputFQOp);
+    const auto elementSizeOutput = outputQuantizedType != nullptr
+                                           ? outputQuantizedType.getStorageTypeIntegralWidth() / CHAR_BIT
+                                           : checked_cast<double>(float16Size);
+    const auto sizeH = transposeA ? input1Shape[Dim(2)] : input1Shape[Dim(1)];
+    const auto outputSize = input1Shape[Dims3D::Act::B] * sizeH * sizeOfOCE * elementSizeOutput;
+
+    const auto weightTableSize =
+            input1Shape[Dims3D::Act::B] * sizeOfOCE * VPUIP::NCEInvariant::WEIGHT_TABLE_NUM_ELEMENTS_PER_OC * int32Size;
+
+    const auto module = getModuleOp(matmulOp);
+    auto tileOp = IE::getTileExecutor(module);
+    const auto numOfTiles = tileOp.getCount();
+    // Calculation is not totally accurate, we are not considering if input2 is being duplicated instead of being tiled
+    return (input1Size / numOfTiles) + (input2Size / numOfTiles) + (outputSize / numOfTiles) + weightTableSize;
+}
+
 mlir::LogicalResult MatMulInputsTo2dPass::MatMulOpConverter::matchAndRewrite(IE::MatMulOp matmulOp,
                                                                              mlir::PatternRewriter& rewriter) const {
     // E-122051:
@@ -146,6 +248,19 @@ mlir::LogicalResult MatMulInputsTo2dPass::MatMulOpConverter::matchAndRewrite(IE:
         return mlir::failure();
     }
 
+    // Ideally this should be skipped using calculation from ReshapeNDInputConverter
+    if (_enableGroupedMatMul) {
+        const auto availableCMXBytes = vpux::VPU::getTotalCMXSize(matmulOp);
+        Shape input1Shape3d =
+                input1Shape.size() > 3 ? Shape(input1Shape.begin() + 1, input1Shape.end()) : input1Shape.toValues();
+        auto input2Shape3d =
+                input2Shape.size() > 3 ? Shape(input2Shape.begin() + 1, input2Shape.end()) : input2Shape.toValues();
+        const auto expandedCMXUsage = getExpandedCMXUsage(matmulOp, input1Shape3d, input2Shape3d);
+        if (input1Shape3d[Dim(0)] == 1 || expandedCMXUsage < availableCMXBytes.count()) {
+            return mlir::failure();
+        }
+    }
+
     SmallVector<mlir::Value> activationSlices =
             sliceTensor(matmulOp.getInput1(), matmulOp->getLoc(), rewriter, "activation");
     SmallVector<mlir::Value> weightSlices = sliceTensor(matmulOp.getInput2(), matmulOp->getLoc(), rewriter, "weights");
@@ -182,8 +297,8 @@ mlir::LogicalResult MatMulInputsTo2dPass::MatMulOpConverter::matchAndRewrite(IE:
 
 class MatMulInputsTo2dPass::ReshapeNDInputConverter final : public mlir::OpRewritePattern<IE::MatMulOp> {
 public:
-    ReshapeNDInputConverter(mlir::MLIRContext* ctx, mlir::PatternBenefit benefit, Logger log)
-            : mlir::OpRewritePattern<IE::MatMulOp>(ctx, benefit), _log(log) {
+    ReshapeNDInputConverter(mlir::MLIRContext* ctx, mlir::PatternBenefit benefit, Logger log, bool enableGroupedMatMul)
+            : mlir::OpRewritePattern<IE::MatMulOp>(ctx, benefit), _log(log), _enableGroupedMatMul(enableGroupedMatMul) {
     }
 
 public:
@@ -191,6 +306,7 @@ public:
 
 private:
     Logger _log;
+    bool _enableGroupedMatMul;
 };
 
 mlir::LogicalResult MatMulInputsTo2dPass::ReshapeNDInputConverter::matchAndRewrite(
@@ -245,9 +361,16 @@ mlir::LogicalResult MatMulInputsTo2dPass::ReshapeNDInputConverter::matchAndRewri
         newIn1Shape.erase(newIn1Shape.begin());
         newIn1Shape[Dim(0)] = newIn1Shape[Dim(0)] * batchSize;
     }
-
     if (newIn1Shape == input1Shape && newIn2Shape == input2Shape) {
         return mlir::failure();
+    }
+    if (_enableGroupedMatMul == true && newIn1Shape.size() > 2 && newIn2Shape.size() > 2 && newIn1Shape.front() != 1 &&
+        newIn2Shape.front() != 1) {
+        const auto availableCMXBytes = vpux::VPU::getTotalCMXSize(matmulOp);
+        const auto expandedCMXUsage = getExpandedCMXUsage(matmulOp, newIn1Shape, newIn2Shape);
+        if (expandedCMXUsage < availableCMXBytes.count()) {
+            return mlir::failure();
+        }
     }
 
     // Check if the original input shapes are either both 3D or both 4D without batch
@@ -278,7 +401,6 @@ mlir::LogicalResult MatMulInputsTo2dPass::ReshapeNDInputConverter::matchAndRewri
     auto newOp = rewriter.replaceOpWithNewOp<IE::ReshapeOp>(matmulOp, newMatMul.getOutput(), nullptr, false,
                                                             origOutShapeAttr);
     extendOpLoc(newOp, "out_reshape");
-
     return mlir::success();
 }
 
@@ -291,9 +413,8 @@ void MatMulInputsTo2dPass::safeRunOnFunc() {
     auto func = getOperation();
 
     mlir::RewritePatternSet patterns(&ctx);
-    patterns.add<ReshapeNDInputConverter>(&ctx, benefitLevels[0], _log);
-    patterns.add<MatMulOpConverter>(&ctx, benefitLevels[1], _log);
-
+    patterns.add<ReshapeNDInputConverter>(&ctx, benefitLevels[0], _log, _enableGroupedMatMul);
+    patterns.add<MatMulOpConverter>(&ctx, benefitLevels[1], _log, _enableGroupedMatMul);
     if (mlir::failed(mlir::applyPatternsAndFoldGreedily(func, std::move(patterns), getDefaultGreedyRewriteConfig()))) {
         signalPassFailure();
     }
@@ -305,6 +426,6 @@ void MatMulInputsTo2dPass::safeRunOnFunc() {
 // createMatMulInputsTo2dPass
 //
 
-std::unique_ptr<mlir::Pass> vpux::IE::createMatMulInputsTo2dPass(Logger log) {
-    return std::make_unique<MatMulInputsTo2dPass>(log);
+std::unique_ptr<mlir::Pass> vpux::IE::createMatMulInputsTo2dPass(const bool enableGroupedMatMul, Logger log) {
+    return std::make_unique<MatMulInputsTo2dPass>(enableGroupedMatMul, log);
 }

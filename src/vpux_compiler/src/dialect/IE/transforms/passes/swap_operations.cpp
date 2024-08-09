@@ -200,7 +200,7 @@ mlir::LogicalResult SwapWithBias::matchAndRewrite(IE::AddOp origOp, mlir::Patter
         }
     }
 
-    rewriter.startRootUpdate(parentOp);
+    rewriter.startOpModification(parentOp);
     rewriter.setInsertionPoint(parentOp);
 
     // Create new Add ops for each input of parent operation.
@@ -243,7 +243,7 @@ mlir::LogicalResult SwapWithBias::matchAndRewrite(IE::AddOp origOp, mlir::Patter
     rewriter.replaceOp(origOp, parentOp->getResults());
 
     // Rewrite done.
-    rewriter.finalizeRootUpdate(parentOp);
+    rewriter.finalizeOpModification(parentOp);
 
     return mlir::success();
 }
@@ -316,7 +316,7 @@ mlir::LogicalResult SwapWithActivation<Activation>::matchAndRewrite(Activation o
         return mlir::failure();
     }
 
-    rewriter.startRootUpdate(parentOp);
+    rewriter.startOpModification(parentOp);
     rewriter.setInsertionPoint(parentOp);
 
     const auto parentOpInputs = parentOp->getOperands();
@@ -329,7 +329,7 @@ mlir::LogicalResult SwapWithActivation<Activation>::matchAndRewrite(Activation o
 
     rewriter.replaceOp(origOp, parentOp->getResults());
 
-    rewriter.finalizeRootUpdate(parentOp);
+    rewriter.finalizeOpModification(parentOp);
 
     return mlir::success();
 }
@@ -514,6 +514,7 @@ void SwapOperationsPass::safeRunOnFunc() {
     patterns.add<SwapWithActivation<IE::ClampOp>>(&ctx, _log.nest(), _seOpsEnabled);
     patterns.add<SwapWithActivation<IE::LeakyReluOp>>(&ctx, _log.nest(), _seOpsEnabled);
     patterns.add<SwapWithActivation<IE::ExpOp>>(&ctx, _log.nest(), _seOpsEnabled);
+    patterns.add<SwapWithActivation<IE::GeluOp>>(&ctx, _log.nest(), _seOpsEnabled);
     patterns.add<SwapWithBias>(&ctx, _log.nest());
     // TODO: E#18651 Support ElemTypeInfoOpInterface for Slice
     patterns.add<SwapTanhSlice>(&ctx, _log.nest());

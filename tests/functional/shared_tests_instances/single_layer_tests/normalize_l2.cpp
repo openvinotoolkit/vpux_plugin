@@ -12,43 +12,32 @@ using namespace ov::test::utils;
 namespace ov {
 namespace test {
 class NormalizeL2LayerTestCommon : public NormalizeL2LayerTest, virtual public VpuOv2LayerTest {};
-class NormalizeL2LayerTest_NPU3700 : public NormalizeL2LayerTestCommon {};
 class NormalizeL2LayerTest_NPU3720 : public NormalizeL2LayerTestCommon {};
 class NormalizeL2LayerTest_NPU4000 : public NormalizeL2LayerTestCommon {};
 class NormalizeL2LayerTest_NPU4000_6DPU : public NormalizeL2LayerTestCommon {};
 class NormalizeL2LayerTest_NPU4000_2DPU : public NormalizeL2LayerTestCommon {};
 
-TEST_P(NormalizeL2LayerTest_NPU3700, HW) {
-    rel_threshold = 0.04;
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
-
 TEST_P(NormalizeL2LayerTest_NPU3720, HW) {
-    abs_threshold = 0.04;
-    rel_threshold = 0.04;
+    abs_threshold = 0.02;
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
 TEST_P(NormalizeL2LayerTest_NPU4000, HW) {
-    abs_threshold = 0.04;
-    rel_threshold = 0.04;
+    abs_threshold = 0.02;
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
 
 TEST_P(NormalizeL2LayerTest_NPU4000_6DPU, HW) {
-    abs_threshold = 0.04;
-    rel_threshold = 0.04;
+    abs_threshold = 0.02;
     setDefaultHardwareMode();
     run(Platform::NPU4000);
     configuration["NPU_DPU_GROUPS"] = "6";
 }
 
 TEST_P(NormalizeL2LayerTest_NPU4000_2DPU, HW) {
-    abs_threshold = 0.04;
-    rel_threshold = 0.04;
+    abs_threshold = 0.02;
     setDefaultHardwareMode();
     run(Platform::NPU4000);
     configuration["NPU_DPU_GROUPS"] = "2";
@@ -67,18 +56,6 @@ const std::vector<ov::op::EpsMode> epsMode = {
         ov::op::EpsMode::ADD,
         ov::op::EpsMode::MAX,
 };
-
-/* ============= NPU 3700 ============= */
-const std::vector<std::vector<int64_t>> axesNPU3700 = {
-        {1},
-};
-
-// Values from real neural networks
-// Contains eps > threshold. Incorrect kernel work, because the "max" mode isn't supported. [Track number: E#21695]
-const std::vector<float> epsNPU3700 = {1.000000013351432e-10, 9.999999960041972e-13};
-
-// [Track number: S#52943 E#85137]
-std::vector<std::vector<ov::Shape>> shapesNPU3700 = {{{1, 128}}, {{1, 512}}, {{1, 8, 24, 64}}, {{1, 512, 64, 64}}};
 
 /* ============= NPU 3720/4000 ============= */
 
@@ -110,11 +87,6 @@ std::vector<std::vector<ov::Shape>> shapes4D = {
 
 std::vector<std::vector<ov::Shape>> shapesTiling4D = {{{1, 512, 36, 36}}, {{1, 512, 37, 37}}, {{1, 512, 44, 43}}};
 
-const auto params =
-        testing::Combine(testing::ValuesIn(axesNPU3700), testing::ValuesIn(epsNPU3700), testing::ValuesIn(epsMode),
-                         testing::ValuesIn(static_shapes_to_test_representation(shapesNPU3700)),
-                         testing::ValuesIn(modelTypes), testing::Values(DEVICE_NPU));
-
 const auto params2D = testing::Combine(testing::ValuesIn(axes2D), testing::ValuesIn(eps), testing::ValuesIn(epsMode),
                                        testing::ValuesIn(static_shapes_to_test_representation(shapes2D)),
                                        testing::ValuesIn(modelTypes), testing::Values(DEVICE_NPU));
@@ -131,11 +103,6 @@ const auto paramsMini4D =
         testing::Combine(testing::ValuesIn(axesMini4D), testing::Values(eps[0]), testing::Values(epsMode[0]),
                          testing::ValuesIn(static_shapes_to_test_representation(shapes4D)),
                          testing::ValuesIn(modelTypes), testing::Values(DEVICE_NPU));
-
-/* ============= NPU 3700 ============= */
-
-INSTANTIATE_TEST_SUITE_P(smoke_NormalizeL2, NormalizeL2LayerTest_NPU3700, params,
-                         NormalizeL2LayerTest_NPU3700::getTestCaseName);
 
 /* ============= NPU 3720 ============= */
 

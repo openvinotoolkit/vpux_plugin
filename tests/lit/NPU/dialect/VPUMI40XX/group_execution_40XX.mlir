@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --vpu-arch=%arch% --group-execution-ops %s | FileCheck %s
-// REQUIRES: arch-VPUX40XX
+// REQUIRES: arch-NPU40XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 #NWCH = affine_map<(d0, d1, d2, d3) -> (d0, d3, d1, d2)>
@@ -70,13 +70,13 @@ module @TestConvolution attributes {VPU.arch = #VPU.arch_kind<NPU40XX>} {
 //CHECK:  [[VAL12:%.*]] = VPUMI40XX.ConfigureBarrier
 //CHECK:  [[VAL13:%.*]] = VPUMI40XX.ConfigureBarrier
 
-//CHECK: %startIndexes:2, %endIndexes:2 = "VPURegMapped.ExecutionGroup"([[VAL10]], [[VAL12]]) ({
+//CHECK: %startIndexes:2, %endIndexes:2 = "VPURegMapped.ExecutionGroup"([[VAL10]], [[VAL12]]) <{operandSegmentSizes = array<i32: 0, 1, 1>, resultSegmentSizes = array<i32: 2, 2>, task_type = #VPURegMapped.task_type<DPUInvariant>}> ({
 //CHECK:  [[VAL18:%.*]] = VPUMI40XX.DPUInvariant
 //CHECK:  [[VAL19:%.*]] = VPUMI40XX.DPUInvariant
 //CHECK:  [[VAL20:%.*]] = VPUMI40XX.DPUVariant
 //CHECK:  [[VAL21:%.*]] = VPUMI40XX.DPUVariant
-//CHECK:  "VPURegMapped.GroupYield"([[VAL18]], [[VAL20]], [[VAL19]], [[VAL21]]) {operandSegmentSizes = array<i32: 2, 2>} : (!VPURegMapped.Index<0:0:0>, !VPURegMapped.Index<0:0:0>, !VPURegMapped.Index<0:0:1>, !VPURegMapped.Index<0:0:1>) -> ()
-//CHECK:}) {operandSegmentSizes = array<i32: 0, 1, 1>, resultSegmentSizes = array<i32: 2, 2>, task_type = #VPURegMapped.task_type<DPUInvariant>} : (!VPURegMapped.Index<0:0:0>, !VPURegMapped.Index<0:0:2>) -> (!VPURegMapped.Index<0:0:0>, !VPURegMapped.Index<0:0:0>, !VPURegMapped.Index<0:0:1>, !VPURegMapped.Index<0:0:1>)
+//CHECK:  "VPURegMapped.GroupYield"([[VAL18]], [[VAL20]], [[VAL19]], [[VAL21]]) <{operandSegmentSizes = array<i32: 2, 2>}> : (!VPURegMapped.Index<0:0:0>, !VPURegMapped.Index<0:0:0>, !VPURegMapped.Index<0:0:1>, !VPURegMapped.Index<0:0:1>) -> ()
+//CHECK:}) : (!VPURegMapped.Index<0:0:0>, !VPURegMapped.Index<0:0:2>) -> (!VPURegMapped.Index<0:0:0>, !VPURegMapped.Index<0:0:0>, !VPURegMapped.Index<0:0:1>, !VPURegMapped.Index<0:0:1>)
 
 
 // -----

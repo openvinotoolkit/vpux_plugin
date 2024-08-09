@@ -41,7 +41,6 @@ class QuantizedSEInterpSubGraphTestCommon :
         std::vector<ov::test::InputShape> inputShape;
         std::vector<float> interpScales;
         std::tie(inType, outType, dataFQRanges, inputShape, interpScales) = GetParam();
-        rel_threshold = 0.1f;
 
         init_input_shapes(inputShape);
 

@@ -4,29 +4,22 @@
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --convert-d2s-to-transposed-conv %s | FileCheck %s
-// REQUIRES: arch-VPUX40XX
+// REQUIRES: arch-NPU40XX
 
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
 // CHECK-LABEL: func.func @ConvertD2SToTransConvBS2
-// CHECK-SAME:     ([[INPUT:%.+]]: tensor<1x4x3x3xf16>)
-func.func @ConvertD2SToTransConvBS2(%input: tensor<1x4x3x3xf16>) -> tensor<1x1x6x6xf16> {
+// CHECK-SAME:     ([[INPUT:%.+]]: tensor<1x32x3x3xf16>)
+func.func @ConvertD2SToTransConvBS2(%input: tensor<1x32x3x3xf16>) -> tensor<1x8x6x6xf16> {
     %d2s = IE.DepthToSpace(%input) {
         block_size = 2 : i64,
         mode = #IE.depth_to_space_mode<DEPTH_FIRST>
-    } : tensor<1x4x3x3xf16> -> tensor<1x1x6x6xf16>
+    } : tensor<1x32x3x3xf16> -> tensor<1x8x6x6xf16>
 
-    return %d2s : tensor<1x1x6x6xf16>
+    return %d2s : tensor<1x8x6x6xf16>
 
-    // CHECK:                [[WEIGHTS:%.+]] = const.Declare tensor<1x4x2x2xf16> =
-    // CHECK-SAME{LITERAL}:      dense<[[[[0, 0], [0, 1]],
-    // CHECK-SAME{LITERAL}:              [[0, 0], [1, 0]],
-    // CHECK-SAME{LITERAL}:              [[0, 1], [0, 0]],
-    // CHECK-SAME{LITERAL}:              [[1, 0], [0, 0]]]]> :
-    // CHECK-SAME:               tensor<1x4x2x2xui8, {order = #NHWC}>,
-    // CHECK-SAME:               [#const.ConvertElemType<f16>, #const.Reorder<#NCHW>]
-
+    // CHECK:                [[WEIGHTS:%.+]] = const.Declare tensor<8x32x2x2xf16>
     // CHECK:                [[INPUTRANGE:%.+]] = const.Declare tensor<1x1x1x1xf16> = dense<0.000000e+00> : tensor<1x1x1x1xf16>
     // CHECK:                [[OUTPUTRANGE:%.+]] = const.Declare tensor<1x1x1x1xf16> = dense<1.000000e+00> : tensor<1x1x1x1xf16>
 
@@ -42,19 +35,16 @@ func.func @ConvertD2SToTransConvBS2(%input: tensor<1x4x3x3xf16>) -> tensor<1x1x6
     // CHECK-SAME:               pads_begin = [0, 0],
     // CHECK-SAME:               pads_end = [0, 0],
     // CHECK-SAME:               strides = [2, 2]
-    // CHECK-SAME:           } : tensor<1x4x3x3xf16>, tensor<1x4x2x2xf16> -> tensor<1x1x6x6xf16>
+    // CHECK-SAME:           } : tensor<1x32x3x3xf16>, tensor<8x32x2x2xf16> -> tensor<1x8x6x6xf16>
 
     // CHECK:                return [[TRANSCONV]]
 }
 
 // -----
 
-#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
-#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
-
-// CHECK-LABEL: func.func @ConvertD2SToTransConvBS3
+// CHECK-LABEL: func.func @NotConvertD2SToTransConvBS3
 // CHECK-SAME:     ([[INPUT:%.+]]: tensor<1x9x3x3xf16>)
-func.func @ConvertD2SToTransConvBS3(%input: tensor<1x9x3x3xf16>) -> tensor<1x1x9x9xf16> {
+func.func @NotConvertD2SToTransConvBS3(%input: tensor<1x9x3x3xf16>) -> tensor<1x1x9x9xf16> {
     %d2s = IE.DepthToSpace(%input) {
         block_size = 3 : i64,
         mode = #IE.depth_to_space_mode<DEPTH_FIRST>
@@ -62,35 +52,59 @@ func.func @ConvertD2SToTransConvBS3(%input: tensor<1x9x3x3xf16>) -> tensor<1x1x9
 
     return %d2s : tensor<1x1x9x9xf16>
 
-    // CHECK:                [[WEIGHTS:%.+]]  = const.Declare tensor<1x9x3x3xf16> =
-    // CHECK-SAME{LITERAL}:      dense<[[[[0, 0, 0], [0, 0, 0], [0, 0, 1]],
-    // CHECK-SAME{LITERAL}:              [[0, 0, 0], [0, 0, 0], [0, 1, 0]],
-    // CHECK-SAME{LITERAL}:              [[0, 0, 0], [0, 0, 0], [1, 0, 0]],
-    // CHECK-SAME{LITERAL}:              [[0, 0, 0], [0, 0, 1], [0, 0, 0]],
-    // CHECK-SAME{LITERAL}:              [[0, 0, 0], [0, 1, 0], [0, 0, 0]],
-    // CHECK-SAME{LITERAL}:              [[0, 0, 0], [1, 0, 0], [0, 0, 0]],
-    // CHECK-SAME{LITERAL}:              [[0, 0, 1], [0, 0, 0], [0, 0, 0]],
-    // CHECK-SAME{LITERAL}:              [[0, 1, 0], [0, 0, 0], [0, 0, 0]],
-    // CHECK-SAME{LITERAL}:              [[1, 0, 0], [0, 0, 0], [0, 0, 0]]]]> :
-    // CHECK-SAME:               tensor<1x9x3x3xui8, {order = #NHWC}>,
-    // CHECK-SAME:               [#const.ConvertElemType<f16>, #const.Reorder<#NCHW>]
+    // CHECK:        [[D2S:%.+]] = IE.DepthToSpace([[INPUT]]) {
+    // CHECK-SAME:      block_size = 3 : i64,
+    // CHECK-SAME:      mode = #IE.depth_to_space_mode<DEPTH_FIRST>
+    // CHECK-SAME:   } : tensor<1x9x3x3xf16> -> tensor<1x1x9x9xf16>
+    // CHECK:        return [[D2S]]
+}
 
-    // CHECK:                [[INPUTRANGE:%.+]] = const.Declare tensor<1x1x1x1xf16> = dense<0.000000e+00> : tensor<1x1x1x1xf16>
-    // CHECK:                [[OUTPUTRANGE:%.+]] = const.Declare tensor<1x1x1x1xf16> = dense<1.000000e+00> : tensor<1x1x1x1xf16>
+// -----
 
-    // CHECK:                [[FAKEQUANTIZE:%.+]] = IE.FakeQuantize([[WEIGHTS]], [[INPUTRANGE]], [[OUTPUTRANGE]], [[INPUTRANGE]], [[OUTPUTRANGE]]) {
-    // CHECK-SAME:               auto_broadcast = #IE.auto_broadcast_type<NUMPY>,
-    // CHECK-SAME:               levels = 2 : i64
-    // CHECK-SAME:           }
+// CHECK-LABEL: func.func @NotConvertD2SToTransConvBS4
+// CHECK-SAME:     ([[INPUT:%.+]]: tensor<1x16x5x4xf16>)
+func.func @NotConvertD2SToTransConvBS4(%input: tensor<1x16x5x4xf16>) -> tensor<1x1x20x16xf16> {
+    %d2s = IE.DepthToSpace(%input) {
+        block_size = 4 : i64,
+        mode = #IE.depth_to_space_mode<DEPTH_FIRST>
+    } : tensor<1x16x5x4xf16> -> tensor<1x1x20x16xf16>
 
-    // CHECK:                [[TRANSCONV:%.+]] = IE.TransposedConvolution([[INPUT]], [[FAKEQUANTIZE]]) {
-    // CHECK-SAME:               dilations = [1, 1],
-    // CHECK-SAME:               operandSegmentSizes = array<i32: 1, 1, 0, 0>,
-    // CHECK-SAME:               output_padding = [0, 0],
-    // CHECK-SAME:               pads_begin = [0, 0],
-    // CHECK-SAME:               pads_end = [0, 0],
-    // CHECK-SAME:               strides = [3, 3]
-    // CHECK-SAME:           } : tensor<1x9x3x3xf16>, tensor<1x9x3x3xf16> -> tensor<1x1x9x9xf16>
+    return %d2s : tensor<1x1x20x16xf16>
 
-    // CHECK:                return [[TRANSCONV]]
+    // CHECK:        [[D2S:%.+]] = IE.DepthToSpace([[INPUT]]) {
+    // CHECK-SAME:      block_size = 4 : i64,
+    // CHECK-SAME:      mode = #IE.depth_to_space_mode<DEPTH_FIRST>
+    // CHECK-SAME:   } : tensor<1x16x5x4xf16> -> tensor<1x1x20x16xf16>
+    // CHECK:        return [[D2S]]
+}
+
+
+// -----
+
+// CHECK-LABEL: func.func @ConvertD2SToTransConvBS4
+// CHECK-SAME:     ([[INPUT:%.+]]: tensor<1x128x5x4xf16>)
+func.func @ConvertD2SToTransConvBS4(%input: tensor<1x128x5x4xf16>) -> tensor<1x8x20x16xf16> {
+    %d2s = IE.DepthToSpace(%input) {
+        block_size = 4 : i64,
+        mode = #IE.depth_to_space_mode<DEPTH_FIRST>
+    } : tensor<1x128x5x4xf16> -> tensor<1x8x20x16xf16>
+
+    return %d2s : tensor<1x8x20x16xf16>
+
+    // CHECK:        [[WEIGHTS:%.+]] = const.Declare tensor<8x128x4x4xf16>
+    // CHECK:        [[INPUTRANGE:%.+]] = const.Declare tensor<1x1x1x1xf16> = dense<0.000000e+00> : tensor<1x1x1x1xf16>
+    // CHECK:        [[OUTPUTRANGE:%.+]] = const.Declare tensor<1x1x1x1xf16> = dense<1.000000e+00> : tensor<1x1x1x1xf16>
+    // CHECK:        [[FAKEQUANTIZE:%.+]] = IE.FakeQuantize([[WEIGHTS]], [[INPUTRANGE]], [[OUTPUTRANGE]], [[INPUTRANGE]], [[OUTPUTRANGE]]) {
+    // CHECK-SAME:          auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 2 : i64
+    // CHECK-SAME:       } : tensor<8x128x4x4xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16> -> tensor<8x128x4x4xf16>
+    // CHECK:        [[TRANSPOSEDCONV:%.+]] = IE.TransposedConvolution([[INPUT]], [[FAKEQUANTIZE]]) {
+    // CHECK-SAME:          dilations = [1, 1],
+    // CHECK-SAME:          operandSegmentSizes = array<i32: 1, 1, 0, 0>,
+    // CHECK-SAME:          output_padding = [0, 0],
+    // CHECK-SAME:          pads_begin = [0, 0],
+    // CHECK-SAME:          pads_end = [0, 0],
+    // CHECK-SAME:          strides = [4, 4]
+    // CHECK-SAME:      } : tensor<1x128x5x4xf16>, tensor<8x128x4x4xf16> -> tensor<1x8x20x16xf16>
+
+    // CHECK:        return [[TRANSPOSEDCONV]] : tensor<1x8x20x16xf16>
 }

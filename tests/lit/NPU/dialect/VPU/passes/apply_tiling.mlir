@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --apply-tiling --canonicalize %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
@@ -1051,3 +1051,152 @@ func.func @TilePadOverHeightWidth(%arg0: tensor<1x3x580x580xf16>) -> tensor<1x16
 
     // CHECK:        return [[CONCAT]] : tensor<1x16x600x600xf16>
 }
+
+// -----
+
+// CHECK-LABEL: func.func @ApplyTilingConvertSubByteInput
+// CHECK-SAME:          [[INPUT:%arg[0-9]]]: tensor<1x1x1333x1777xui4>
+func.func @ApplyTilingConvertSubByteInput(%arg0: tensor<1x1x1333x1777xui4>) -> tensor<1x1x1333x1777xf16> {
+    %0 = VPU.Convert(%arg0) {
+        dstElemType = f16, tilingStrategy = [1, 1, 3, 3]
+        } : tensor<1x1x1333x1777xui4> -> tensor<1x1x1333x1777xf16>
+    return %0 : tensor<1x1x1333x1777xf16>
+
+    // CHECK:   [[SLICE0:%.*]] = VPU.Slice [[INPUT]] [0, 0, 0, 0] [1, 1, 446, 594]
+    // CHECK:   [[CONVERT0:%.*]] = VPU.Convert([[SLICE0]]) {dstElemType = f16}
+
+    // CHECK:   [[SLICE1:%.*]] = VPU.Slice [[INPUT]] [0, 0, 0, 594] [1, 1, 446, 594]
+    // CHECK:   [[CONVERT1:%.*]] = VPU.Convert([[SLICE1]]) {dstElemType = f16}
+
+    // CHECK:   [[SLICE2:%.*]] = VPU.Slice [[INPUT]] [0, 0, 0, 1188] [1, 1, 446, 589]
+    // CHECK:   [[CONVERT2:%.*]] = VPU.Convert([[SLICE2]]) {dstElemType = f16}
+
+    // CHECK:   [[SLICE3:%.*]] = VPU.Slice [[INPUT]] [0, 0, 446, 0] [1, 1, 446, 594]
+    // CHECK:   [[CONVERT3:%.*]] = VPU.Convert([[SLICE3]]) {dstElemType = f16}
+
+    // CHECK:   [[SLICE4:%.*]] = VPU.Slice [[INPUT]] [0, 0, 446, 594] [1, 1, 446, 594]
+    // CHECK:   [[CONVERT4:%.*]] = VPU.Convert([[SLICE4]]) {dstElemType = f16}
+
+    // CHECK:   [[SLICE5:%.*]] = VPU.Slice [[INPUT]] [0, 0, 446, 1188] [1, 1, 446, 589]
+    // CHECK:   [[CONVERT5:%.*]] = VPU.Convert([[SLICE5]]) {dstElemType = f16}
+
+    // CHECK:   [[SLICE6:%.*]] = VPU.Slice [[INPUT]] [0, 0, 892, 0] [1, 1, 441, 594]
+    // CHECK:   [[CONVERT6:%.*]] = VPU.Convert([[SLICE6]]) {dstElemType = f16}
+
+    // CHECK:   [[SLICE7:%.*]] = VPU.Slice [[INPUT]] [0, 0, 892, 594] [1, 1, 441, 594]
+    // CHECK:   [[CONVERT7:%.*]] = VPU.Convert([[SLICE7]]) {dstElemType = f16}
+
+    // CHECK:   [[SLICE8:%.*]] = VPU.Slice [[INPUT]] [0, 0, 892, 1188] [1, 1, 441, 589]
+    // CHECK:   [[CONVERT8:%.*]] = VPU.Convert([[SLICE8]]) {dstElemType = f16}
+
+    // CHECK:   [[CONCAT:%.*]] = VPU.Concat([[CONVERT0]], [[CONVERT1]], [[CONVERT2]], [[CONVERT3]], [[CONVERT4]], [[CONVERT5]], [[CONVERT6]], [[CONVERT7]], [[CONVERT8]])
+
+    // CHECK: return [[CONCAT]] : tensor<1x1x1333x1777xf16>
+}
+
+// -----
+
+// CHECK-LABEL: func.func @ApplyTilingConvertNotSubByteInput
+// CHECK-SAME:          [[INPUT:%arg[0-9]]]: tensor<1x1x1333x1777xui8>
+func.func @ApplyTilingConvertNotSubByteInput(%arg0: tensor<1x1x1333x1777xui8>) -> tensor<1x1x1333x1777xf16> {
+    %0 = VPU.Convert(%arg0) {
+        dstElemType = f16, tilingStrategy = [1, 1, 3, 3]
+        } : tensor<1x1x1333x1777xui8> -> tensor<1x1x1333x1777xf16>
+    return %0 : tensor<1x1x1333x1777xf16>
+
+    // CHECK:   [[SLICE0:%.*]] = VPU.Slice [[INPUT]] [0, 0, 0, 0] [1, 1, 445, 593]
+    // CHECK:   [[CONVERT0:%.*]] = VPU.Convert([[SLICE0]]) {dstElemType = f16}
+
+    // CHECK:   [[SLICE1:%.*]] = VPU.Slice [[INPUT]] [0, 0, 0, 593] [1, 1, 445, 592]
+    // CHECK:   [[CONVERT1:%.*]] = VPU.Convert([[SLICE1]]) {dstElemType = f16}
+
+    // CHECK:   [[SLICE2:%.*]] = VPU.Slice [[INPUT]] [0, 0, 0, 1185] [1, 1, 445, 592]
+    // CHECK:   [[CONVERT2:%.*]] = VPU.Convert([[SLICE2]]) {dstElemType = f16}
+
+    // CHECK:   [[SLICE3:%.*]] = VPU.Slice [[INPUT]] [0, 0, 445, 0] [1, 1, 444, 593]
+    // CHECK:   [[CONVERT3:%.*]] = VPU.Convert([[SLICE3]]) {dstElemType = f16}
+
+    // CHECK:   [[SLICE4:%.*]] = VPU.Slice [[INPUT]] [0, 0, 445, 593] [1, 1, 444, 592]
+    // CHECK:   [[CONVERT4:%.*]] = VPU.Convert([[SLICE4]]) {dstElemType = f16}
+
+    // CHECK:   [[SLICE5:%.*]] = VPU.Slice [[INPUT]] [0, 0, 445, 1185] [1, 1, 444, 592]
+    // CHECK:   [[CONVERT5:%.*]] = VPU.Convert([[SLICE5]]) {dstElemType = f16}
+
+    // CHECK:   [[SLICE6:%.*]] = VPU.Slice [[INPUT]] [0, 0, 889, 0] [1, 1, 444, 593]
+    // CHECK:   [[CONVERT6:%.*]] = VPU.Convert([[SLICE6]]) {dstElemType = f16}
+
+    // CHECK:   [[SLICE7:%.*]] = VPU.Slice [[INPUT]] [0, 0, 889, 593] [1, 1, 444, 592]
+    // CHECK:   [[CONVERT7:%.*]] = VPU.Convert([[SLICE7]]) {dstElemType = f16}
+
+    // CHECK:   [[SLICE8:%.*]] = VPU.Slice [[INPUT]] [0, 0, 889, 1185] [1, 1, 444, 592]
+    // CHECK:   [[CONVERT8:%.*]] = VPU.Convert([[SLICE8]]) {dstElemType = f16}
+
+    // CHECK:   [[CONCAT:%.*]] = VPU.Concat([[CONVERT0]], [[CONVERT1]], [[CONVERT2]], [[CONVERT3]], [[CONVERT4]], [[CONVERT5]], [[CONVERT6]], [[CONVERT7]], [[CONVERT8]])
+
+    // CHECK: return [[CONCAT]] : tensor<1x1x1333x1777xf16>
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+!qElemType = !quant.uniform<u4:f16, 1.1534313725490195>
+// CHECK-LABEL: func.func @ApplyTilingConvU4Weights
+// CHECK-SAME:          [[INPUT:%arg[0-9]]]: tensor<1x32x64x64xf16, {order = #NHWC}>
+func.func @ApplyTilingConvU4Weights(%arg0: tensor<1x32x64x64xf16, {order = #NHWC}>) -> tensor<1x256x64x64xf16, {order = #NHWC}> {
+    %weights = const.Declare tensor<256x32x3x3x!qElemType, {order = #NHWC}> = dense<1.000000e+00> : tensor<256x32x3x3xf16>, [#const.ConvertElemType<ui4>, #const.QuantCast<!qElemType>, #const.Reorder<#NHWC>]
+    %weights_table = const.Declare tensor<256x1x1x4xsi32> = dense<1> : tensor<256x1x1x4xsi32>
+    %0 = VPU.NCE.Convolution(%arg0, %weights, %weights_table) {
+        pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
+        rawFilterShape = [256, 32, 3, 3],
+        strides = [1, 1],
+        tilingStrategy = [1, 1, 3, 1]
+    } -> tensor<1x256x64x64xf16, {order = #NHWC}>
+
+    return %0 : tensor<1x256x64x64xf16, {order = #NHWC}>
+
+    // CHECK:   [[WEIGHTS:%.*]] = const.Declare tensor<256x32x3x3x!qElemType, {order = #NHWC}> = dense<1.000000e+00> : tensor<256x32x3x3xf16>, [#const.ConvertElemType<ui4>, #const.QuantCast<!qElemType>, #const.Reorder<#NHWC>]
+    // CHECK:   [[WEIGHTS_TABLE:%.*]] = const.Declare tensor<256x1x1x4xsi32> = dense<1> : tensor<256x1x1x4xsi32>
+
+    // CHECK:   [[SLICE0:%.*]] = VPU.Slice [[INPUT]] [0, 0, 0, 0] [1, 32, 23, 64]
+    // CHECK:   [[CONV0:%.*]] = VPU.NCE.Convolution([[SLICE0]], [[WEIGHTS]], [[WEIGHTS_TABLE]]) {pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 0 : i64>, rawFilterShape = [256, 32, 3, 3], strides = [1, 1]} -> tensor<1x256x22x64xf16, {order = #NHWC}>
+
+    // CHECK:   [[SLICE1:%.*]] = VPU.Slice [[INPUT]] [0, 0, 21, 0] [1, 32, 23, 64]
+    // CHECK:   [[CONV1:%.*]] = VPU.NCE.Convolution([[SLICE1]], [[WEIGHTS]], [[WEIGHTS_TABLE]]) {pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 0 : i64, bottom = 0 : i64>, rawFilterShape = [256, 32, 3, 3], strides = [1, 1]} -> tensor<1x256x21x64xf16, {order = #NHWC}>
+
+    // CHECK:   [[SLICE2:%.*]] = VPU.Slice [[INPUT]] [0, 0, 42, 0] [1, 32, 22, 64]
+    // CHECK:   [[CONV2:%.*]] = VPU.NCE.Convolution([[SLICE2]], [[WEIGHTS]], [[WEIGHTS_TABLE]]) {pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 0 : i64, bottom = 1 : i64>, rawFilterShape = [256, 32, 3, 3], strides = [1, 1]} -> tensor<1x256x21x64xf16, {order = #NHWC}>
+
+    // CHECK:   [[CONCAT:%.*]] = VPU.Concat([[CONV0]], [[CONV1]], [[CONV2]])
+
+    // CHECK: return [[CONCAT]] : tensor<1x256x64x64xf16, {order = #NHWC}>
+}
+
+// -----
+
+#NC = affine_map<(d0, d1) -> (d0, d1)>
+func.func @TileGatherDMA(%arg0: tensor<880x960xf16>, %arg1: tensor<1x880xsi32>) -> tensor<1x880x960xf16> {
+    %0 = VPU.Reshape(%arg1) {shape_value = [880, 1]} : tensor<1x880xsi32> -> tensor<880x1xsi32>
+    %1 = VPU.Convert(%0) {dstElemType = i64} : tensor<880x1xsi32> -> tensor<880x1xi64>
+    %2 = VPU.Copy(%1) {out_mem_space = [@CMX_NN, 0]} : tensor<880x1xi64> -> tensor<880x1xi64, {mem_space = [@CMX_NN, 0], order = #NC}>
+    %3 = VPU.GatherDMA(%arg0, %2) {axis_value = 0 : i64, batch_dims = 0 : i64, tilingStrategy = [1, 2]} : tensor<880x960xf16>, tensor<880x1xi64, {mem_space = [@CMX_NN, 0], order = #NC}> -> tensor<880x960xf16, {mem_space = [@CMX_NN, 0], order = #NC}>
+    %4 = VPU.Copy(%3) {out_mem_space = @DDR} : tensor<880x960xf16, {mem_space = [@CMX_NN, 0], order = #NC}> -> tensor<880x960xf16>
+    %5 = VPU.Reshape(%4) {shape_value = [1, 880, 960]} : tensor<880x960xf16> -> tensor<1x880x960xf16>
+
+    return %5 : tensor<1x880x960xf16>
+
+
+    // CHECK:        [[RESHAPE0:%.*]] = VPU.ShapeCast {shape = [880, 1]} inputs({{[^:]+}} : tensor<1x880xsi32>) -> tensor<880x1xsi32>
+    // CHECK:        [[CONVERT:%.*]] = VPU.Convert([[RESHAPE0]]) {dstElemType = i64} : tensor<880x1xsi32> -> tensor<880x1xi64>
+    // CHECK:        [[COPY0:%.*]] = VPU.Copy([[CONVERT]]) {out_mem_space = [@CMX_NN, 0]} : tensor<880x1xi64> -> tensor<880x1xi64, {mem_space = [@CMX_NN, 0], order = #NC}>
+    // CHECK:        [[SLICE0:%.*]] = VPU.Slice {{[^:]+}} [0, 0] [880, 480] : tensor<880x960xf16> to tensor<880x480xf16>
+    // CHECK:        [[GATHERDMA0:%.*]] = VPU.GatherDMA([[SLICE0]], [[COPY0]]) {axis_value = 0 : i64, batch_dims = 0 : i64} : tensor<880x480xf16>, tensor<880x1xi64, {mem_space = [@CMX_NN, 0], order = #NC}> -> tensor<880x480xf16, {mem_space = [@CMX_NN, 0], order = #NC}>
+    // CHECK:        [[COPY1:%.*]] = VPU.Copy([[GATHERDMA0]]) {out_mem_space = @DDR} : tensor<880x480xf16, {mem_space = [@CMX_NN, 0], order = #NC}> -> tensor<880x480xf16, {mem_space = @DDR, order = #NC}>
+    // CHECK:        [[SLICE1:%.*]] = VPU.Slice {{[^:]+}} [0, 480] [880, 480] : tensor<880x960xf16> to tensor<880x480xf16>
+    // CHECK:        [[GATHERDMA1:%.*]] = VPU.GatherDMA([[SLICE1]], [[COPY0]]) {axis_value = 0 : i64, batch_dims = 0 : i64} : tensor<880x480xf16>, tensor<880x1xi64, {mem_space = [@CMX_NN, 0], order = #NC}> -> tensor<880x480xf16, {mem_space = [@CMX_NN, 0], order = #NC}>
+    // CHECK:        [[COPY2:%.*]] = VPU.Copy([[GATHERDMA1]]) {out_mem_space = @DDR} : tensor<880x480xf16, {mem_space = [@CMX_NN, 0], order = #NC}> -> tensor<880x480xf16, {mem_space = @DDR, order = #NC}>
+    // CHECK:        [[CONCAT:%.*]] = VPU.Concat([[COPY1]], [[COPY2]])
+    // CHECK-SAME{LITERAL}: {static_offsets = [[0, 0], [0, 480]]} : tensor<880x480xf16, {mem_space = @DDR, order = #NC}>, tensor<880x480xf16, {mem_space = @DDR, order = #NC}> -> tensor<880x960xf16>
+    // CHECK:        [[RESHAPE1:%.*]] = VPU.Reshape([[CONCAT]]) {shape_value = [1, 880, 960]} : tensor<880x960xf16> -> tensor<1x880x960xf16>
+
+    // CHECK:        return [[RESHAPE1]] : tensor<1x880x960xf16>
+  }

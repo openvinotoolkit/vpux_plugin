@@ -5,6 +5,7 @@
 
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 #include "vpux/compiler/dialect/IE/utils/quantization.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 
 #include "vpux/compiler/utils/rewriter.hpp"
 
@@ -80,14 +81,12 @@ void appendFqValues(mlir::Value fqInput, std::vector<float>& totalValues) {
     std::copy(inValues.begin(), inValues.end(), std::back_inserter(totalValues));
 }
 
-Const::DeclareOp createFqTensor(mlir::Location loc, const std::vector<float>& totalFqValues,
-                                mlir::PatternRewriter& rewriter) {
+mlir::Value createFqTensor(mlir::Location loc, const std::vector<float>& totalFqValues,
+                           mlir::PatternRewriter& rewriter) {
     // Build FQ input using concatenated values
     const auto tensorType = mlir::RankedTensorType::get({1, checked_cast<int64_t>(totalFqValues.size()), 1, 1},
                                                         mlir::Float32Type::get(rewriter.getContext()));
-    const auto tensorAttr = mlir::DenseElementsAttr::get(tensorType, ArrayRef(totalFqValues));
-    const auto tensorContentAttr = Const::ContentAttr::get(tensorAttr);
-    return rewriter.create<Const::DeclareOp>(loc, tensorType, tensorContentAttr);
+    return Const::createConst(rewriter, loc, tensorType, ArrayRef(totalFqValues));
 }
 
 mlir::LogicalResult PerAxisFQConcatPass::ConcatOpConverter::matchAndRewrite(IE::ConcatOp origOp,

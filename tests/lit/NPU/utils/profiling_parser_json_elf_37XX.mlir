@@ -1,11 +1,11 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
-// RUN: vpux-opt --mlir-print-debuginfo --init-compiler="vpu-arch=%arch% allow-custom-values=true" --lower-VPUIP-to-ELF %data_path_npu%/profiling-37XX.mlir.txt | vpux-translate --vpu-arch=%arch% --export-ELF -o %t
+// RUN: vpux-translate --vpu-arch=%arch% --export-VPUIP -o %t %data_path_npu%/profiling-37XX.mlir.txt
 // RUN: prof_parser -b %t -p %data_path_npu%/profiling-0-37XX.bin -f json | FileCheck %s
-// REQUIRES: arch-VPUX37XX
+// REQUIRES: arch-NPU37XX
 
 // CHECK: {"traceEvents":[
 // CHECK-NEXT: {"name": "process_name", "ph": "M", "pid":0, "args": {"name" : "DMA"}},
@@ -61,24 +61,24 @@
 // CHECK-NEXT: {"name":"relu1?t_Relu/cluster_0", "cat":"DPU", "ph":"X", "ts":45.680, "dur":10.095, "pid":1, "tid":0},
 // CHECK-NEXT: {"name":"conv2/WithoutBiases?t_Convolution/cluster_0", "cat":"DPU", "ph":"X", "ts":56.393, "dur":10.192, "pid":1, "tid":0},
 // CHECK-NEXT: {"name":"relu2?t_Relu/cluster_0", "cat":"DPU", "ph":"X", "ts":67.196, "dur":4.357, "pid":1, "tid":0},
-// CHECK-NEXT: {"name":"data?t_Parameter/converted_to_f16/tile_0/cluster_0", "cat":"SW", "ph":"X", "ts":17.526, "dur":6.848, "pid":1, "tid":1},
-// CHECK-NEXT: {"name":"data?t_Parameter/converted_to_f16/tile_1/cluster_0", "cat":"SW", "ph":"X", "ts":17.656, "dur":6.979, "pid":1, "tid":2},
-// CHECK-NEXT: {"name":"relu2?t_Relu/converted_to_f32/tile_0/cluster_0", "cat":"SW", "ph":"X", "ts":77.864, "dur":4.921, "pid":1, "tid":1},
-// CHECK-NEXT: {"name":"relu2?t_Relu/converted_to_f32/tile_1/cluster_0", "cat":"SW", "ph":"X", "ts":78.125, "dur":4.401, "pid":1, "tid":2},
+// CHECK-NEXT: {"name":"data?t_Parameter/converted_to_f16/tile_0/cluster_0", "cat":"SW", "ph":"X", "ts":17.526, "dur":6.848, "pid":1, "tid":1, "args":{"Active cycles:": "6765", "Stall cycles:": "1201"}},
+// CHECK-NEXT: {"name":"data?t_Parameter/converted_to_f16/tile_1/cluster_0", "cat":"SW", "ph":"X", "ts":17.656, "dur":6.979, "pid":1, "tid":2, "args":{"Active cycles:": "6862", "Stall cycles:": "1276"}},
+// CHECK-NEXT: {"name":"relu2?t_Relu/converted_to_f32/tile_0/cluster_0", "cat":"SW", "ph":"X", "ts":77.864, "dur":4.921, "pid":1, "tid":1, "args":{"Active cycles:": "4639", "Stall cycles:": "973"}},
+// CHECK-NEXT: {"name":"relu2?t_Relu/converted_to_f32/tile_1/cluster_0", "cat":"SW", "ph":"X", "ts":78.125, "dur":4.401, "pid":1, "tid":2, "args":{"Active cycles:": "4593", "Stall cycles:": "1344"}},
 // CHECK-NEXT: {"name":"conv1/WithoutBiases?t_Convolution/cluster_1", "cat":"DPU", "ph":"X", "ts":29.189, "dur":0.649, "pid":2, "tid":0},
 // CHECK-NEXT: {"name":"conv1/WithoutBiases?t_Convolution/Duplicated_2/cluster_1", "cat":"DPU", "ph":"X", "ts":36.874, "dur":7.922, "pid":2, "tid":0},
 // CHECK-NEXT: {"name":"relu1?t_Relu/cluster_1", "cat":"DPU", "ph":"X", "ts":45.832, "dur":6.895, "pid":2, "tid":0},
 // CHECK-NEXT: {"name":"conv2/WithoutBiases?t_Convolution/cluster_1", "cat":"DPU", "ph":"X", "ts":55.896, "dur":10.761, "pid":2, "tid":0},
 // CHECK-NEXT: {"name":"relu2?t_Relu/cluster_1", "cat":"DPU", "ph":"X", "ts":67.309, "dur":3.535, "pid":2, "tid":0},
-// CHECK-NEXT: {"name":"data?t_Parameter/converted_to_f16/tile_0/cluster_1", "cat":"SW", "ph":"X", "ts":17.395, "dur":7.109, "pid":2, "tid":1},
-// CHECK-NEXT: {"name":"data?t_Parameter/converted_to_f16/tile_1/cluster_1", "cat":"SW", "ph":"X", "ts":17.786, "dur":6.979, "pid":2, "tid":2},
-// CHECK-NEXT: {"name":"relu2?t_Relu/converted_to_f32/tile_1/cluster_1", "cat":"SW", "ph":"X", "ts":77.734, "dur":4.921, "pid":2, "tid":1},
-// CHECK-NEXT: {"name":"relu2?t_Relu/converted_to_f32/tile_0/cluster_1", "cat":"SW", "ph":"X", "ts":77.994, "dur":4.921, "pid":2, "tid":2},
-// CHECK-NEXT: {"name":"data", "cat":"Layer", "ph":"X", "ts":0.000, "dur":27.134, "pid":3, "tid":0, "args":{"Layer type": "Parameter"}},
-// CHECK-NEXT: {"name":"conv1/WithoutBiases", "cat":"Layer", "ph":"X", "ts":2.213, "dur":42.583, "pid":3, "tid":1, "args":{"Layer type": "Convolution"}},
-// CHECK-NEXT: {"name":"conv2/WithoutBiases", "cat":"Layer", "ph":"X", "ts":37.031, "dur":29.626, "pid":3, "tid":0, "args":{"Layer type": "Convolution"}},
-// CHECK-NEXT: {"name":"relu1", "cat":"Layer", "ph":"X", "ts":45.680, "dur":10.095, "pid":3, "tid":1, "args":{"Layer type": "Relu"}},
-// CHECK-NEXT: {"name":"relu2", "cat":"Layer", "ph":"X", "ts":67.196, "dur":18.507, "pid":3, "tid":0, "args":{"Layer type": "Relu"}}
+// CHECK-NEXT: {"name":"data?t_Parameter/converted_to_f16/tile_0/cluster_1", "cat":"SW", "ph":"X", "ts":17.395, "dur":7.109, "pid":2, "tid":1, "args":{"Active cycles:": "6776", "Stall cycles:": "1092"}},
+// CHECK-NEXT: {"name":"data?t_Parameter/converted_to_f16/tile_1/cluster_1", "cat":"SW", "ph":"X", "ts":17.786, "dur":6.979, "pid":2, "tid":2, "args":{"Active cycles:": "6860", "Stall cycles:": "1441"}},
+// CHECK-NEXT: {"name":"relu2?t_Relu/converted_to_f32/tile_1/cluster_1", "cat":"SW", "ph":"X", "ts":77.734, "dur":4.921, "pid":2, "tid":1, "args":{"Active cycles:": "4665", "Stall cycles:": "861"}},
+// CHECK-NEXT: {"name":"relu2?t_Relu/converted_to_f32/tile_0/cluster_1", "cat":"SW", "ph":"X", "ts":77.994, "dur":4.921, "pid":2, "tid":2, "args":{"Active cycles:": "4615", "Stall cycles:": "1114"}},
+// CHECK-NEXT: {"name":"data", "cat":"Layer", "ph":"X", "ts":0.000, "dur":27.134, "pid":3, "tid":0, "args":{"Layer type": "Parameter", "Shave time:": "27us 915ns", "DMA time:": "5us 126ns"}},
+// CHECK-NEXT: {"name":"conv1/WithoutBiases", "cat":"Layer", "ph":"X", "ts":2.213, "dur":42.583, "pid":3, "tid":1, "args":{"Layer type": "Convolution", "DPU time:": "16us 19ns", "DMA time:": "14us 319ns"}},
+// CHECK-NEXT: {"name":"conv2/WithoutBiases", "cat":"Layer", "ph":"X", "ts":37.031, "dur":29.626, "pid":3, "tid":0, "args":{"Layer type": "Convolution", "DPU time:": "20us 953ns", "DMA time:": "2us 500ns"}},
+// CHECK-NEXT: {"name":"relu1", "cat":"Layer", "ph":"X", "ts":45.680, "dur":10.095, "pid":3, "tid":1, "args":{"Layer type": "Relu", "DPU time:": "16us 990ns"}},
+// CHECK-NEXT: {"name":"relu2", "cat":"Layer", "ph":"X", "ts":67.196, "dur":18.507, "pid":3, "tid":0, "args":{"Layer type": "Relu", "DPU time:": "7us 892ns", "Shave time:": "19us 164ns", "DMA time:": "10us 724ns"}}
 // CHECK-NEXT: ],
 // CHECK-NEXT: "taskStatistics": {
 // CHECK-NEXT: "total duration":85.703,
@@ -98,6 +98,6 @@
 // CHECK-NEXT: "Sum of SW task durations":47.079,
 // CHECK-NEXT: "Sum of M2I task durations":0.000
 // CHECK-NEXT: },
+// CHECK-NEXT: "workpoint": { "freq": 1300.0, "status": "OK" },
 // CHECK-NEXT: "displayTimeUnit": "ns"
 // CHECK-NEXT: }
- 

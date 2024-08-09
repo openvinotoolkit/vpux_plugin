@@ -7,6 +7,7 @@
 
 #include "vpux/compiler/core/attributes/shape.hpp"
 #include "vpux/compiler/core/type_interfaces.hpp"
+#include "vpux/utils/core/numeric.hpp"
 
 #include "vpux/compiler/dialect/IE/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/attributes.hpp"
@@ -104,7 +105,7 @@ public:
     int64_t shift() const;
 
 private:
-    // VPUX30XX mult is int8_t, VPUX37XX mult is uint16_t - using int32_t as common storage
+    // VPUX37XX mult is uint16_t - using int32_t as common storage
     int32_t _mult;
     uint8_t _shift;
 };
@@ -121,7 +122,7 @@ mlir::quant::QuantizedType getQuantizedType(mlir::Attribute lowConstAttr, mlir::
                                             std::optional<int64_t> levels, std::optional<mlir::Type> lowFpType,
                                             mlir::FloatType realType, bool isSigned, mlir::Location loc,
                                             IE::AutoBroadcastType broadcast = IE::AutoBroadcastType::NONE_OR_EXPLICIT,
-                                            const Logger& log = Logger::global());
+                                            bool ignoreZPCheck = false, const Logger& log = Logger::global());
 
 void getFakeQuantParams(mlir::quant::UniformQuantizedType qElemType, int64_t& levels, float& rMin, float& rMax);
 
@@ -136,6 +137,41 @@ std::tuple<int64_t, int64_t, mlir::Type> getStorageParams(mlir::MLIRContext* ctx
 std::tuple<int64_t, int64_t, mlir::Type> getStorageParams(mlir::MLIRContext* ctx, mlir::Type lowFpType);
 mlir::FailureOr<std::tuple<float, float>> getFp8Range(mlir::Type lowFpType);
 
+/// Returns whether lowVals and highVals represet correct quantization range
+/// specified by quantization levels and sign.
+template <typename Range>
+bool isLowPrecisionTypeRange(mlir::MLIRContext* ctx, Range lowVals, Range highVals, int64_t levels, bool isSigned) {
+    VPUX_THROW_UNLESS(lowVals.size() == highVals.size(), "Sizes of valLow and valHigh arrays are not equal: {0} != {1}",
+                      lowVals.size(), highVals.size());
+
+    int64_t qLow = 0;
+    int64_t qHigh = 0;
+    std::tie(qLow, qHigh, std::ignore) = getStorageParams(ctx, levels, isSigned);
+    const auto fLow = checked_cast<float>(qLow);
+    const auto fHigh = checked_cast<float>(qHigh);
+    // In order to decide if FakeQuantize input constant need to be requantized it is needed to check the FakeQuantize
+    // input range.
+    // Quantized weights have the content in the low precision data type - I/U 16,8,4...,1. For example, U8 quantized
+    // weights are stored in U8 constants. Because NPU compiler relies on legacy weights de-quantization representation
+    // which is: Const(FP16/32)->FakeQuantize(inLow = 0, inHigh = 255, ...), the WeightsDequantizeToFakeQuantize pass is
+    // required to be applied. After this pass weights constant is FP16/32 data type and its content is floating point
+    // values from 0.0 to 255.0 - just a cast of the U8 values - work in progress to keep the values in low precision
+    // storage type: E#107322. There are passes that alter the weights content or create artificial FakeQuantize
+    // (example: ConvertSubtractToAdd) and modify also FakeQuantize input range, which will no longer match the low
+    // precision storage type as it initially was. It is needed to treat also the case when FakeQuantize inLow ==
+    // inHigh, this is a special use case when re-quantization is not needed.
+    const auto isEqualToLowPrecisionTypeRange = [&](float lowVal, float highVal) -> bool {
+        return (isFloatEqual(lowVal, fLow) && isFloatEqual(highVal, fHigh)) || isFloatEqual(lowVal, highVal);
+    };
+
+    for (size_t i = 0; i < lowVals.size(); ++i) {
+        if (!isEqualToLowPrecisionTypeRange(lowVals[i], highVals[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
 //
 // Dequantize support
 //
@@ -148,15 +184,7 @@ inline float dequantize(int64_t qVal, double scale, int64_t zeroPoint) {
 // FakeQuantize support
 //
 
-inline float fakeQuantize(float inVal, float inLow, float inHigh, float qLow, float qHigh, float fLevels) {
-    if (inVal <= inLow) {
-        return qLow;
-    } else if (inVal > inHigh) {
-        return qHigh;
-    } else {
-        return std::round((inVal - inLow) / (inHigh - inLow) * (fLevels - 1)) / (fLevels - 1) * (qHigh - qLow) + qLow;
-    }
-}
+float fakeQuantize(float inVal, float inLow, float inHigh, float qLow, float qHigh, float fLevels);
 
 // Broadcasting
 

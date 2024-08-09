@@ -45,11 +45,11 @@ mlir::SmallVector<int64_t> calcTileOutputShape(mlir::Value input, ArrayRef<int64
 
 mlir::LogicalResult vpux::IE::TileOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::TileOpAdaptor tile(operands, attrs);
+    IE::TileOpAdaptor tile(operands, attrs, prop);
     if (mlir::failed(tile.verify(loc))) {
         return mlir::failure();
     }
@@ -192,11 +192,11 @@ mlir::OpFoldResult vpux::IE::TileOp::fold(FoldAdaptor adaptor) {
 
 mlir::LogicalResult vpux::IE::PerAxisTileOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::PerAxisTileOpAdaptor perAxisTile(operands, attrs);
+    IE::PerAxisTileOpAdaptor perAxisTile(operands, attrs, prop);
     if (mlir::failed(perAxisTile.verify(loc))) {
         return mlir::failure();
     }

@@ -238,7 +238,9 @@ mlir::Value UniformNonTiledActShaveProfiler::copyToDdr(ProfilingResults profilin
                     _ctx, mlir::StringRef("actshaveProfilingConcat") + std::to_string(currentDDROffset))),
             concatInputs, cmxMemOp->getResult(0));
 
-    return _builder.create<VPUIP::NNDMAOp>(copyLoc, concatview.getOutput(), subDDR.getResult());
+    auto dmaOp = _builder.create<VPUIP::NNDMAOp>(copyLoc, concatview.getOutput(), subDDR.getResult());
+    dmaOp.setProfilingBufferMgmt(true);
+    return dmaOp;
 }
 
 // Get a SubView of profiling buffer instance so that given ActShave task is given required chunk of it
@@ -264,17 +266,19 @@ mlir::Value UniformNonTiledActShaveProfiler::replaceOpWithProfiledOp(VPUIP::SwKe
                                                                      VPUIP::SwProfilingMetadataAttr profMeta) {
     _log.trace("Replace op with new profiled task '{0}'", loc);
 
-    SmallVector<mlir::Type> newResultTypes(origSwTask.getResultTypes());
-    newResultTypes.push_back(profilingBuffer.getType());
-
-    auto swTask = _builder.create<VPUIP::SwKernelOp>(loc, origSwTask.getInputs(), origSwTask.getOutputBuffs(),
-                                                     profilingBuffer, origSwTask.getKernelFunction(),
-                                                     origSwTask.getTileIndexAttr(), origSwTask.getStridesAttr());
-    swTask.setProfilingMetadataAttr(profMeta);
+    auto swTask = _builder.create<VPUIP::SwKernelOp>(
+            loc, origSwTask.getResults().getTypes(), origSwTask.getDynamicOutputShapes().getTypes(),
+            profilingBuffer.getType(), origSwTask.getKernelFunction(), origSwTask.getInputs(),
+            origSwTask.getDynamicInputShapes(), origSwTask.getDynamicInputShapesMapAttr(), origSwTask.getOutputBuffs(),
+            origSwTask.getDynamicOutputShapeBuffs(), origSwTask.getDynamicOutputShapesMapAttr(), profilingBuffer,
+            origSwTask.getTileIndexAttr(), origSwTask.getStridesAttr(), profMeta);
 
     swTask.getRegion().takeBody(origSwTask.getRegion());
 
-    origSwTask->replaceAllUsesWith(swTask.getResults());
+    // can't use origSwTask.replaceAllUsesWith() because swTask has 1 more result than origSwTask
+    for (unsigned i = 0; i < origSwTask->getNumResults(); i++) {
+        origSwTask->getResult(i).replaceAllUsesWith(swTask->getResult(i));
+    }
 
     return swTask.getProfilingOutput();
 }
@@ -352,7 +356,9 @@ mlir::Value NCETiledActShaveProfiler::copyToDdr(ProfilingResults profilingResult
                     _ctx, mlir::StringRef("actshaveProfilingConcat") + std::to_string(currentDDROffset))),
             concatInputs, cmxMemOp->getResult(0));
 
-    return _builder.create<VPUIP::NNDMAOp>(copyLoc, concatview.getOutput(), subDDR.getResult());
+    auto dmaOp = _builder.create<VPUIP::NNDMAOp>(copyLoc, concatview.getOutput(), subDDR.getResult());
+    dmaOp.setProfilingBufferMgmt(true);
+    return dmaOp;
 }
 
 // Get a SubView of profiling buffer instance so that given ActShave task is given required chunk of it
@@ -387,13 +393,19 @@ mlir::Value NCETiledActShaveProfiler::replaceOpWithProfiledOp(VPUIP::SwKernelOp 
         profilingSlot = viewOp.getResult();
     }
 
-    auto swTask = _builder.create<VPUIP::SwKernelOp>(loc, origSwTask.getInputs(), origSwTask.getOutputBuffs(),
-                                                     profilingSlot, origSwTask.getKernelFunction(),
-                                                     origSwTask.getTileIndexAttr(), origSwTask.getStridesAttr());
-    swTask.setProfilingMetadataAttr(profMeta);
+    auto swTask = _builder.create<VPUIP::SwKernelOp>(
+            loc, origSwTask.getResults().getTypes(), origSwTask.getDynamicOutputShapes().getTypes(),
+            profilingSlot.getType(), origSwTask.getKernelFunction(), origSwTask.getInputs(),
+            origSwTask.getDynamicInputShapes(), origSwTask.getDynamicInputShapesMapAttr(), origSwTask.getOutputBuffs(),
+            origSwTask.getDynamicOutputShapeBuffs(), origSwTask.getDynamicOutputShapesMapAttr(), profilingSlot,
+            origSwTask.getTileIndexAttr(), origSwTask.getStridesAttr(), profMeta);
 
     swTask.getRegion().takeBody(origSwTask.getRegion());
-    origSwTask->replaceAllUsesWith(swTask.getResults());
+
+    // can't use origSwTask.replaceAllUsesWith() because swTask has 1 more result than origSwTask
+    for (unsigned i = 0; i < origSwTask->getNumResults(); i++) {
+        origSwTask->getResult(i).replaceAllUsesWith(swTask->getResult(i));
+    }
 
     return swTask.getProfilingOutput();
 }

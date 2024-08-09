@@ -22,6 +22,8 @@ private:
     Logger _log;
     VPU::DPUDryRunMode _dryRunMode;
 
+    mlir::LogicalResult verifyDPUVariant(VPUIPDPU::DPUVariantOp op) const;
+
     void fillIDUCfg(mlir::Region& DPURegion, std::map<std::string, std::map<std::string, uint64_t>>& initValues) const;
     void fillODUCfg(mlir::Region& DPURegion, std::map<std::string, std::map<std::string, uint64_t>>& initValues) const;
     void fillBarrierCfg(VPUIPDPU::DPUVariantOp op,

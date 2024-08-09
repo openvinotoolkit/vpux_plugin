@@ -19,8 +19,25 @@ using namespace vpux;
 //
 
 void PassesRegistry40XX::registerPasses() {
-    vpux::IE::arch37xx::registerIEPasses();
+    vpux::IE::arch37xx::registerConvertFFTToConv();
+    vpux::IE::arch37xx::registerConvertToMixedPrecision();
+    vpux::IE::arch37xx::registerFuseOutstandingDequant();
+    vpux::IE::arch37xx::registerConvertWeightsToI8();
+    vpux::IE::arch37xx::registerExpandActivationChannelsPass();  //
+    vpux::IE::arch37xx::registerFuseMultiplyToConv();
+    vpux::IE::arch37xx::registerFusePermuteQuantizeExpand();
+    vpux::IE::arch37xx::registerFuseReordersPass();
+    vpux::IE::arch37xx::registerInsertIdentityPoolBeforeOp();
+    vpux::IE::arch37xx::registerOptimizeNetworkInputConvert();
+    vpux::IE::arch37xx::registerOptimizeSliceExpand();
+    vpux::IE::arch37xx::registerProcessAsymmetricZeroPointsForConvolution();
+    vpux::IE::arch37xx::registerPropagateExpand();
+    vpux::IE::arch37xx::registerPropagateReorderToNCE();
+    vpux::IE::arch37xx::registerSwapMaxPoolWithActivation();
+    vpux::IE::arch37xx::registerUnrollBatch();
+    vpux::IE::arch37xx::registerConvertSubGRUSequenceToConv();
 
+    vpux::IE::arch40xx::registerIEPasses();
     vpux::VPU::arch37xx::registerAdjustForOptimizedSwKernelPass();
     vpux::VPU::arch37xx::registerDecomposeMVNPass();
     vpux::VPU::arch37xx::registerSplitRealDFTOpsPass();

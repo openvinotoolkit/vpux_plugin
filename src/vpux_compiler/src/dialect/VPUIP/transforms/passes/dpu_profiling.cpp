@@ -13,6 +13,7 @@
 
 #include "vpux/compiler/dialect/VPUIP/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/transforms/factories/profiling_info.hpp"
 #include "vpux/compiler/dialect/VPUIP/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
@@ -43,27 +44,10 @@ public:
 
 private:
     void safeRunOnModule() final;
-    void setWorkloadIds(VPUIP::NCEClusterTaskOp nceClusterTaskOp);
 
 private:
     VPUIP::MemKindCreateFunc _memKindCb;
 };
-
-void DPUProfilingPass::setWorkloadIds(VPUIP::NCEClusterTaskOp nceClusterTaskOp) {
-    int32_t workloadId = 0;
-    int32_t prevClusterId = -1;
-    nceClusterTaskOp.walk([&](VPUIP::DPUTaskOp dpuTaskOp) {
-        if (dpuTaskOp.getClusterId().has_value()) {
-            int32_t clusterId = checked_cast<int32_t>(dpuTaskOp.getClusterId().value());
-            if (prevClusterId != clusterId) {
-                workloadId = 0;
-            }
-            prevClusterId = clusterId;
-        }
-        dpuTaskOp.setWorkloadIdAttr(vpux::getIntAttr(dpuTaskOp->getContext(), workloadId));
-        ++workloadId;
-    });
-}
 
 // DPU profiling pass
 // Add profiling buffer for the all DPU Clusters in the network
@@ -111,9 +95,8 @@ void DPUProfilingPass::safeRunOnModule() {
                     numClusters, profilingWorkloadSize, builder, ctx, memKind, netFunc, nameUniqifier));
         }
         clusterSchedulers[numClusters]->scheduleNceTask(nceClusterTaskOp);
-        if (arch == VPU::ArchKind::NPU37XX || arch == VPU::ArchKind::NPU40XX) {
-            setWorkloadIds(nceClusterTaskOp);
-        }
+        auto workloadsIdsCb = VPUIP::setWorkloadsIdsCb(arch);
+        workloadsIdsCb(nceClusterTaskOp);
     });
 
     unsigned totalDpuDdrProfilingOutputSize =

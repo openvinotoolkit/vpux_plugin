@@ -352,7 +352,7 @@ void EnsureNCEOpsSizeRequirementsPass::safeRunOnFunc() {
             if (!outSizeWrongDims.empty()) {
                 _log.nest(2).info("Output size has dims greater than HW requirements: {0}", outSizeWrongDims);
             }
-            return !(!inSizeWrongDims.empty() || !outSizeWrongDims.empty());
+            return inSizeWrongDims.empty() && outSizeWrongDims.empty();
         }
 
         return true;

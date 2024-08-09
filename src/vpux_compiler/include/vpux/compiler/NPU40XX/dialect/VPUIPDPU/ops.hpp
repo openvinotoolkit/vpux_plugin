@@ -6,10 +6,6 @@
 #pragma once
 
 #include "vpux/compiler/NPU37XX/dialect/VPUIPDPU/ops.hpp"
-#include "vpux/compiler/dialect/VPU/IR/ops_interfaces.hpp"
-#include "vpux/compiler/dialect/VPUASM/ops_interfaces.hpp"
-#include "vpux/compiler/dialect/VPUIPDPU/attributes.hpp"
-#include "vpux/compiler/dialect/VPURegMapped/types.hpp"
 
 //
 // Generated

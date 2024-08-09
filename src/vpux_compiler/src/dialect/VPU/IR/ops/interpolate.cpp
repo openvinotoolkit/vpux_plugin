@@ -3,32 +3,46 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#include "vpux/compiler/core/attributes/dims_order.hpp"
+#include "vpux/compiler/core/attributes/shape.hpp"
 #include "vpux/compiler/core/tiling.hpp"
+#include "vpux/compiler/dialect/IE/IR/attributes.hpp"
 #include "vpux/compiler/dialect/IE/utils/interpolate_utils.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/explicit_distribution_utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
+#include "vpux/utils/core/error.hpp"
+#include "vpux/utils/core/logger.hpp"
+#include "vpux/utils/core/range.hpp"
+
+#include <mlir/IR/BuiltinAttributes.h>
+#include <mlir/IR/Location.h>
+#include <optional>
+#include <utility>
 
 using namespace vpux;
 
 mlir::LogicalResult vpux::VPU::InterpolateOp::inferReturnTypes(mlir::MLIRContext* ctx,
                                                                std::optional<mlir::Location> optLoc,
                                                                mlir::ValueRange operands, mlir::DictionaryAttr attrs,
-                                                               mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+                                                               mlir::OpaqueProperties prop,
+                                                               mlir::RegionRange /*regions*/,
                                                                mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::InterpolateOpAdaptor interpolate(operands, attrs);
+    VPU::InterpolateOpAdaptor interpolate(operands, attrs, prop);
     if (mlir::failed(interpolate.verify(loc))) {
         return mlir::failure();
     }
 
     auto outShape = IE::calcOutputShapes(interpolate, loc, Logger::global(), ctx);
+    const auto inputType = interpolate.getInput().getType().cast<vpux::NDTypeInterface>();
 
-    const auto inType = interpolate.getInput().getType().cast<vpux::NDTypeInterface>();
-    const auto outType = inType.changeShape(Shape(outShape));
-    inferredReturnTypes.push_back(outType);
+    auto outputType =
+            mlir::RankedTensorType::get(outShape, inputType.getElementType(), createTensorAttrFromType(inputType));
+
+    inferredReturnTypes.push_back(outputType);
 
     return mlir::success();
 }
@@ -37,33 +51,45 @@ mlir::LogicalResult vpux::VPU::InterpolateOp::inferReturnTypes(mlir::MLIRContext
 // ClusteredOpInterface
 //
 
-bool vpux::VPU::InterpolateOp::checkStrategyCompatibility(VPU::MultiClusterStrategy strategy, size_t) {
-    if (strategy == VPU::MultiClusterStrategy::Clustering ||
-        strategy == VPU::MultiClusterStrategy::SplitOverHeightOverlapped) {
+bool vpux::VPU::InterpolateOp::checkStrategyCompatibility(VPU::MultiClusterStrategy strategy, size_t numTiles) {
+    const auto inputShape = getShape(getInput());
+    const auto outputShape = getShape(getOutput());
+
+    const auto isCompatibleStrategy{[&](auto strategyToCheck, auto dimensionToCheck) {
+        return strategy == strategyToCheck && inputShape[dimensionToCheck] >= static_cast<int64_t>(numTiles) &&
+               outputShape[dimensionToCheck] >= static_cast<int64_t>(numTiles);
+    }};
+
+    if (isCompatibleStrategy(VPU::MultiClusterStrategy::SplitOverHeightOverlapped, Dims4D::Act::H)) {
+        return true;
+    }
+
+    if (strategy == VPU::MultiClusterStrategy::Clustering) {
         return true;
     }
 
     return false;
 }
 
-vpux::VPU::DistributedTensorAttr vpux::VPU::InterpolateOp::getExplicitDistributedTensorAttr(
-        vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, mlir::ArrayAttr numTiles,
-        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::UnitAttr uniformDistributedSegments,
-        const vpux::VPU::OverlapDistributionParams& /*overlapParams*/) {
-    return VPU::getSWExplicitDistributedTensorAttr(mlir::dyn_cast<VPU::SWOpInterface>(getOperation()), shape,
-                                                   distributionMode, numTiles, numClusters, alignment,
-                                                   uniformDistributedSegments);
+vpux::VPU::DistributedTensorNative vpux::VPU::InterpolateOp::getExplicitDistributedTensorAttr(
+        vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, ArrayRef<int64_t> numTiles,
+        const int64_t numClusters, ArrayRef<int64_t> alignment, const bool uniformDistributedSegments,
+        const vpux::VPU::OverlapDistributionParams& overlapParams) {
+    return VPU::getSWExplicitDistributedTensorNative(mlir::cast<VPU::SWOpInterface>(getOperation()), shape,
+                                                     distributionMode, numTiles, numClusters, alignment,
+                                                     uniformDistributedSegments, overlapParams);
 }
 
 void vpux::VPU::InterpolateOp::build(
         ::mlir::OpBuilder& odsBuilder, ::mlir::OperationState& odsState, ::mlir::Value input,
         /*optional*/ ::mlir::Value sizes, /*optional*/ ::mlir::Value scales, /*optional*/ ::mlir::Value axes,
+        /*optional*/ ::mlir::Value coordinates, /*optional*/ ::mlir::Value lambdas,
         /*optional*/ ::mlir::ArrayAttr sizes_attr, /*optional*/ ::mlir::ArrayAttr scales_attr,
         /*optional*/ ::mlir::ArrayAttr axes_attr, /*optional*/ ::mlir::ArrayAttr tile_offset_attr,
         /*optional*/ ::mlir::ArrayAttr initial_input_dims_attr, /*optional*/ ::mlir::ArrayAttr initial_output_dims_attr,
         vpux::IE::InterpolateAttr attr) {
-    build(odsBuilder, odsState, input, sizes, scales, axes, sizes_attr, scales_attr, axes_attr, tile_offset_attr,
-          initial_input_dims_attr, initial_output_dims_attr, nullptr, nullptr, nullptr, attr);
+    build(odsBuilder, odsState, input, sizes, scales, axes, coordinates, lambdas, sizes_attr, scales_attr, axes_attr,
+          tile_offset_attr, initial_input_dims_attr, initial_output_dims_attr, nullptr, nullptr, nullptr, attr);
 }
 
 //
@@ -71,15 +97,42 @@ void vpux::VPU::InterpolateOp::build(
 //
 
 bool vpux::VPU::InterpolateOp::fitIntoCMX(llvm::ArrayRef<vpux::NDTypeInterface> buffers, Byte reservedMem) {
-    VPUX_THROW_UNLESS(buffers.size() >= 2 && buffers.size() <= 5,
-                      "InterpolateOp requires 1 input, 3 optional attribution inputs and 1 output, but the "
-                      "number of buffer is {0}",
+    VPUX_THROW_UNLESS(buffers.size() >= 2 && buffers.size() <= 7,
+                      "InterpolateOp can have a maximum of 1 input, 5 optional inputs and 1 output, but the "
+                      "number of buffers is {0}",
                       buffers.size());
 
     SmallVector<Byte> buffersSize;
     std::transform(buffers.begin(), buffers.end(), std::back_inserter(buffersSize), [](const auto buffer) {
         return buffer.getTotalAllocSize();
     });
+
+    const auto coordinates = getCoordinates();
+    const auto lambdas = getLambdas();
+    const auto interpolateMode = getAttr().getMode().getValue();
+    // Computing coordinates at compile time is a feature supported only for linear interpolate modes.
+    // The ticket for adding support for all interpolate modes is E#129853.
+    if ((coordinates == nullptr || lambdas == nullptr) &&
+        (interpolateMode == IE::InterpolateMode::LINEAR || interpolateMode == IE::InterpolateMode::LINEAR_ONNX)) {
+        const auto inOrder = getInput().getType().cast<NDTypeInterface>().getDimsOrder();
+
+        const auto axesResult = IE::extractIntVector(getLoc(), getAxes(), getAxesAttrAttr());
+        VPUX_THROW_WHEN(mlir::failed(axesResult), "Failed to extract axes");
+        const auto innermostAxisResult = IE::getInnermostAxis(getLoc(), inOrder, axesResult.value());
+        VPUX_THROW_WHEN(mlir::failed(innermostAxisResult), "Failed to get the innermost axis");
+        const auto innermostAxis = innermostAxisResult.value();
+
+        if (coordinates == nullptr) {
+            const auto coordinatesSize = IE::getInterpCoordinatesSize(getOutput(), innermostAxis);
+            const auto coordinatesElemSize = 4_Byte;
+            buffersSize.push_back(coordinatesSize * coordinatesElemSize);
+        }
+        if (lambdas == nullptr) {
+            const auto lambdasSize = IE::getInterpLambdasSize(getOutput(), innermostAxis);
+            const auto lambdasElemSize = 2_Byte;
+            buffersSize.push_back(lambdasSize * lambdasElemSize);
+        }
+    }
 
     auto totalAvailableCMXSize = reservedMem.count() == 0 ? getTotalCMXSize(getOperation()).count()
                                                           : getTotalCMXFragmentationAwareSize(getOperation()).count();
@@ -144,8 +197,19 @@ InputTiling vpux::VPU::InterpolateOp::backInferTileInfo(const vpux::TileInfo& ou
     auto interpolateMode = getAttr().getMode().getValue();
     auto nearestMode = getAttr().getNearestMode().getValue();
     auto currentInputShape = to_small_vector(getShape(getInput()));
+
+    std::optional<SmallVector<int64_t>> coordinatesShape = std::nullopt;
+    std::optional<SmallVector<int64_t>> lambdasShape = std::nullopt;
+    if (const auto coordinates = getCoordinates(); coordinates != nullptr) {
+        coordinatesShape = to_small_vector(getShape(coordinates));
+    }
+    if (const auto lambdas = getLambdas(); lambdas != nullptr) {
+        lambdasShape = to_small_vector(getShape(lambdas));
+    }
+
     auto inTiles = vpux::backInferInterpolateTile(outputTile, iShape, oShape, initialInputOffsets, initialOutputOffsets,
-                                                  currentInputShape, interpolateMode, coordMode, nearestMode, log);
+                                                  currentInputShape, coordinatesShape, lambdasShape, interpolateMode,
+                                                  coordMode, nearestMode, log);
     auto newInputOffset = to_small_vector(inTiles.tiles[0].offsets);
 
     // Recalculate the backward scale based on the new input/output shape
@@ -158,7 +222,7 @@ InputTiling vpux::VPU::InterpolateOp::backInferTileInfo(const vpux::TileInfo& ou
     auto forwardInferedShape = IE::inferInterpOutShape(
             getLoc(), axesVal, inTiles.tiles[0].shape, {beginPads}, {endPads}, shapeCalcMode,
             IE::extractIntVector(getLoc(), getSizes(), getSizesAttr().value_or<mlir::ArrayAttr>({})), {fwdScales},
-            mlir::Float32Type::get(getContext()), log);
+            mlir::Float64Type::get(getContext()), log);
 
     // TODO: E#36319 we counting only endpads - begin pad might matter for offsets not for dims
     auto shapeArray = to_small_vector(outputTile.shape);
@@ -167,22 +231,11 @@ InputTiling vpux::VPU::InterpolateOp::backInferTileInfo(const vpux::TileInfo& ou
             endPads[shapeOrig.index()] = shapeOrig.value() - forwardInferedShape[shapeOrig.index()];
         }
     }
-    auto convertShape = [](::mlir::Value plainShape) {
-        auto origShape = getShape(plainShape);
-        TileInfo tileShape{origShape.size()};
-        tileShape.shape = getShape(plainShape).toValues();
-        return tileShape;
-    };
 
-    if (auto size = getSizes()) {
-        inTiles.tiles.push_back(convertShape(size));
-    }
-    if (auto scale = getScales()) {
-        inTiles.tiles.push_back(convertShape(scale));
-    }
-    if (auto axis = getAxes()) {
-        inTiles.tiles.push_back(convertShape(axis));
-    }
+    VPUX_THROW_WHEN(getSizes() != nullptr, "Interpolate `sizes` input should have been converted to an attribute.");
+    VPUX_THROW_WHEN(getScales() != nullptr, "Interpolate `scales` input should have been converted to an attribute.");
+    VPUX_THROW_WHEN(getAxes() != nullptr, "Interpolate `axes` input should have been converted to an attribute.");
+
     inTiles.pads = {0, endPads[2], 0, endPads[3]};
     return inTiles;
 }
@@ -239,121 +292,6 @@ void vpux::VPU::InterpolateOp::adjustAttrs(const TilingInfo& inputTiling, const 
     setScalesAttrAttr(builder.getF64ArrayAttr(scale));
 }
 
-// Generates a list of tiles of the output tensor that satisfy the CMX memory constrains and don't alter the original
-// scaling factors. When generating the tiles the following characteristics are taken into consideration:
-// 1. The data layout, in order to find an optimal manner of transferring the data between CMX and DDR
-//    NCHW -> the tiling dim order is C, H, W
-//    NHWC -> the tiling dim order is H, W, C
-// 2. Scaling factor, based on value of the scaling factor is in one axis, the following decisions are taken:
-//    If the greatest common factor between in dim and out dim is 1 then remove axis from tiling axis
-//    If the greatest common factor > 1 then choose the smallest common factor that satisfies constrains
-//    If in and out dim are equal (scaling factor == 1) then iteratively increase the number of tiles on this axis since
-//    the constrains are satisfied or the number of tiles is equal with minimum value between in and out dim
 mlir::FailureOr<OutputTiling> vpux::VPU::InterpolateOp::getTilingStrategy(TilingMode tilingMode, Logger log) {
-    auto op = this->getOperation();
-    auto origOp = mlir::dyn_cast<VPU::InterpolateOp>(op);
-    auto tilingInfo = mlir::dyn_cast<VPU::TilingInfoOpInterface>(op);
-    VPUX_THROW_WHEN(tilingInfo == nullptr, "Operation '{0}' doesn't implement TilingInfoOpInterface", op->getName());
-    auto tilingBuilder = mlir::dyn_cast<VPU::TilingBuilderOpInterface>(op);
-    VPUX_THROW_WHEN(tilingBuilder == nullptr, "Operation '{0}' doesn't implement TilingBuilderOpInterface",
-                    op->getName());
-    VPUX_THROW_WHEN(tilingMode != TilingMode::ISOLATED,
-                    "Only supporting isolated tiling for SW currently, for op {0} at '{1}'", op->getName(),
-                    op->getLoc());
-
-    const auto inType = origOp.getInput().getType().cast<vpux::NDTypeInterface>();
-    const auto inShapeArray = inType.getShape().raw();
-    const auto outType = origOp.getOutput().getType().cast<vpux::NDTypeInterface>();
-    const auto outShape = outType.getShape();
-    const auto outShapeArray = outType.getShape().raw();
-    const auto axes = IE::extractIntVector(op->getLoc(), origOp.getAxes(), origOp.getAxesAttr());
-    const auto axesVal = axes.value();
-    Shape nTilesOnDim(outShapeArray.size(), 1);
-
-    auto getTileDimOrder = [&]() {
-        VPUX_THROW_UNLESS(outType.getDimsOrder() == DimsOrder::NCHW || outType.getDimsOrder() == DimsOrder::NHWC,
-                          "Interpolate Op only support NCHW and NHWC layout, but got '{0}'", outType.getDimsOrder());
-
-        auto dimOrder = outType.getDimsOrder().toPermutation();
-        // Get greatest common factor between two values
-        auto getGreaterCommonFactor = [&](int64_t firstVal, int64_t secondVal) {
-            while (firstVal != secondVal) {
-                if (firstVal > secondVal) {
-                    firstVal = firstVal - secondVal;
-                } else {
-                    secondVal = secondVal - firstVal;
-                }
-            }
-            return firstVal;
-        };
-
-        for (auto axis : axesVal | indexed) {
-            const auto axisDim = Dim(axis.value());
-            // Check if greatest common factor between current in and out dim is 1 and if yes remove the axis from the
-            // list of tiling dims
-            if (getGreaterCommonFactor(inShapeArray[axisDim.ind()], outShapeArray[axisDim.ind()]) == 1) {
-                llvm::erase_if(dimOrder, [axisDim](Dim dim) {
-                    return (dim == axisDim);
-                });
-            }
-        }
-
-        log.nest(2).debug("getTilingStrategy: dimOrder = {0}", dimOrder);
-        return dimOrder;
-    };
-
-    const auto tileDimOrder = getTileDimOrder();
-
-    auto tileDimIter = tileDimOrder.begin();
-    auto dimToTile = *tileDimIter;
-
-    const auto isSupportedTileSize = [op, &tilingInfo, outShape, log](ShapeRef nTilesOnDim,
-                                                                      TilingMode tilingMode) -> bool {
-        const auto tiles = fillDividedTiles(op, nTilesOnDim, outShape);
-        if (mlir::failed(tiles)) {
-            return false;
-        }
-        return tilingInfo.isSupportedTiling(tiles.value(), tilingMode, log);
-    };
-    // Compute next common factor of two integer values greater or equal then currFactor
-    // if it doesn't exist getNextCommonFactor returns 0
-    auto getNextCommonFactor = [&](int64_t firstVal, int64_t secondVal, int64_t currFactor) -> int64_t {
-        auto minVal = std::min(firstVal, secondVal);
-        while (currFactor < minVal) {
-            currFactor++;
-            if (firstVal % currFactor == 0 && secondVal % currFactor == 0) {
-                return currFactor;
-            }
-        }
-        return 0;
-    };
-
-    // Get an feasible isolated tiling strategy
-    while (!isSupportedTileSize(nTilesOnDim, tilingMode)) {
-        while (tileDimIter < tileDimOrder.end() &&
-               nTilesOnDim[dimToTile] >=
-                       std::min(inShapeArray[(*tileDimIter).ind()], outShapeArray[(*tileDimIter).ind()])) {
-            dimToTile = *(++tileDimIter);
-        }
-        VPUX_THROW_WHEN(tileDimIter == tileDimOrder.end(), "Failed to tile {0} at '{1}'", op->getName(), op->getLoc());
-        // Check if current tiling axis is an interpolation axis and if yes increase the number of tiles to
-        // next common factor between in and out dim on current axis
-        auto axesIt = llvm::find(axesVal, (*tileDimIter).ind());
-        if (axesIt != axesVal.end() && inShapeArray[*axesIt] != outShapeArray[*axesIt]) {
-            // If getNextCommonFactor returns > 0 then updates the number of tiles in current axis to returned value
-            // else move to next axis considered for tiling
-            auto nextFactor =
-                    getNextCommonFactor(inShapeArray[*axesIt], outShapeArray[*axesIt], nTilesOnDim[dimToTile]);
-            if (nextFactor > 0) {
-                nTilesOnDim[Dim((*axesIt))] = nextFactor;
-            } else {
-                dimToTile = *(++tileDimIter);
-            }
-        } else {
-            ++nTilesOnDim[dimToTile];
-        }
-    }
-
-    log.trace("Isolated tiling strategy: {0}", nTilesOnDim);
-    return fillDividedTiles(op, nTilesOnDim, outShape);
+    return vpux::getSWLayerTilingStrategy(getOperation(), tilingMode, std::move(log));
 }

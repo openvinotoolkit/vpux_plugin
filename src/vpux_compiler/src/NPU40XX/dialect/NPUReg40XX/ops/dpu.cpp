@@ -129,30 +129,6 @@ std::vector<ELF::RelocationInfo> DPUInvariantOp::getRelocationInfo(ELF::SymbolRe
     }
 
     //
-    // Tensor2 Relocs
-    //
-    // tensor2_start needs to be set for dual elops (ELTWISE with 2 input tensors) in case of per output channel
-    // scaling, i.e. when weightTable is provided
-    if (getWeightTable().has_value() && opType == VPUIP::NCETaskType::ELTWISE) {
-        if (auto weights = getWeights().value_or(nullptr)) {
-            auto addend = ELF::getOffsetOfSymRef(symRefMap, weights);
-            relocs.push_back(ELF::RelocationInfo(weights, targetSection,
-                                                 regsOffset + offsetof(nn_public::VpuDPUInvariantRegisters, reserved0),
-                                                 ELF::RelocationType::R_VPU_LO_21_RSHIFT_4, addend));
-        }
-    }
-
-    //
-    // sprLookupTable Relocs
-    //
-    if (auto sprLookupTable = getSprLookupTable().value_or(nullptr)) {
-        auto addend = ELF::getOffsetOfSymRef(symRefMap, sprLookupTable);
-        relocs.push_back(ELF::RelocationInfo(sprLookupTable, targetSection,
-                                             regsOffset + offsetof(nn_public::VpuDPUInvariantRegisters, reserved1),
-                                             ELF::RelocationType::R_VPU_16_LSB_17_RSHIFT_5, addend));
-    }
-
-    //
     // Output Relocs
     //
     // no output in case of continued conv

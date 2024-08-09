@@ -26,6 +26,12 @@ def Const_TransformAttrInterface : AttrInterface<"TransformAttrInterface"> {
             (ins "vpux::NDTypeInterface":$input)
         >,
 
+        StaticInterfaceMethod<
+            "Tell whether the data will be splat after this transformation",
+            "bool", "inferOutputSplat",
+            (ins "bool":$inputIsSplat, "vpux::NDTypeInterface":$input)
+        >,
+
         InterfaceMethod<
             "Transform the constant content",
             "vpux::Const::Content", "transform",

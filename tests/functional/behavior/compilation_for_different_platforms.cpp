@@ -7,8 +7,8 @@
 #include <string>
 #include <vector>
 #include "common/functions.h"
+#include "common/npu_test_env_cfg.hpp"
 #include "common/utils.hpp"
-#include "common/vpu_test_env_cfg.hpp"
 #include "intel_npu/al/config/common.hpp"
 #include "npu_private_properties.hpp"
 
@@ -59,13 +59,10 @@ TEST_P(CompileForDifferentPlatformsTests, CompilationForSpecificPlatform) {
 }
 
 const std::vector<ov::AnyMap> configs = {
-        {{ov::intel_npu::platform(ov::intel_npu::Platform::NPU3700)},
-         ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::MLIR)},
         {{ov::intel_npu::platform(ov::intel_npu::Platform::NPU3720)},
          ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::MLIR)},
         {{ov::intel_npu::platform(ov::intel_npu::Platform::NPU4000)},
          ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::MLIR)},
-        {{ov::device::id("3700")}, ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::MLIR)},
         {{ov::device::id("3720")}, ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::MLIR)},
         {{ov::device::id("4000")}, ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::MLIR)},
 };
@@ -73,13 +70,10 @@ const std::vector<ov::AnyMap> configs = {
 // Driver compiler type config
 const std::vector<ov::AnyMap> driverCompilerConfigs = {
         {ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::DRIVER)},
-        {{ov::intel_npu::platform(ov::intel_npu::Platform::NPU3700)},
-         ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::DRIVER)},
         {{ov::intel_npu::platform(ov::intel_npu::Platform::NPU3720)},
          ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::DRIVER)},
         {{ov::intel_npu::platform(ov::intel_npu::Platform::NPU4000)},
          ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::DRIVER)},
-        {{ov::device::id("3700")}, ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::DRIVER)},
         {{ov::device::id("3720")}, ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::DRIVER)},
         {{ov::device::id("4000")}, ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::DRIVER)}};
 

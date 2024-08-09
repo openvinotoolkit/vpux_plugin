@@ -56,7 +56,7 @@ public:
      *
      * @return std::shared_ptr<const OptionsDesc> The options can be used to do compilation
      */
-    std::shared_ptr<const vpux::OptionsDesc> getOptions() const {
+    std::shared_ptr<const intel_npu::OptionsDesc> getOptions() const {
         return _options;
     }
 
@@ -87,10 +87,10 @@ public:
     vcl_result_t queryNetwork(const BuildInfo& buildInfo, VPUXQueryNetworkL0* pQueryNetwork);
 
 private:
-    std::shared_ptr<vpux::OptionsDesc> _options;    ///< The default compilation configs
-    std::unique_ptr<vpux::CompilerImpl> _compiler;  ///< The handle of MLIR compiler
-    vcl_compiler_properties_t _compilerProp;        ///< The capabilities of compiler
-    vcl_compiler_desc_t _compilerDesc;              ///< The info of platform and debug level
+    std::shared_ptr<intel_npu::OptionsDesc> _options;  ///< The default compilation configs
+    std::unique_ptr<vpux::CompilerImpl> _compiler;     ///< The handle of MLIR compiler
+    vcl_compiler_properties_t _compilerProp;           ///< The capabilities of compiler
+    vcl_compiler_desc_t _compilerDesc;                 ///< The info of platform and debug level
     VCLLogger* _logger;
 };
 

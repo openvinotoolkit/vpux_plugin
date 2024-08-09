@@ -53,6 +53,9 @@ Byte ViewLikeRewrite::calculateOffset(mlir::Value val) const {
     if (auto subViewOp = mlir::dyn_cast_or_null<VPUIP::SubViewOp>(val.getDefiningOp())) {
         offset += subViewOp.getByteOffset();
     }
+    if (auto extractFlatViewOp = mlir::dyn_cast_or_null<VPUIP::ExtractFlatSliceOp>(val.getDefiningOp())) {
+        offset += extractFlatViewOp.getByteOffset();
+    }
 
     return offset;
 }
@@ -61,7 +64,7 @@ mlir::LogicalResult ViewLikeRewrite::matchAndRewrite(mlir::ViewLikeOpInterface o
                                                      mlir::PatternRewriter& rewriter) const {
     if (!mlir::isa<VPUIP::GenericReshapeOp, VPUIP::SubViewOp, VPUIP::PermuteCastOp, VPUIP::QuantizeCastOp,
                    VPUIP::DistributedCastOp, VPUIP::NonDistributedCastOp, VPUIP::ShapeCastOp, VPUIP::StubOp,
-                   VPUIP::ViewOp, VPUIP::WorkloadCastOp>(origOp.getOperation())) {
+                   VPUIP::ViewOp, VPUIP::WorkloadCastOp, VPUIP::ExtractFlatSliceOp>(origOp.getOperation())) {
         return matchFailed(rewriter, origOp, "Unknown view-like operation '{0}'", origOp->getName());
     }
 
@@ -134,7 +137,8 @@ void ConvertViewOpsToDeclarationsPass::safeRunOnFunc() {
     // Leave ConcatView illegal here for sanity check
     target.addIllegalOp<VPUIP::GenericReshapeOp, VPUIP::SubViewOp, VPUIP::ConcatViewOp, VPUIP::PermuteCastOp,
                         VPUIP::QuantizeCastOp, VPUIP::DistributedCastOp, VPUIP::NonDistributedCastOp,
-                        VPUIP::ShapeCastOp, VPUIP::StubOp, VPUIP::ViewOp, VPUIP::WorkloadCastOp>();
+                        VPUIP::ShapeCastOp, VPUIP::StubOp, VPUIP::ViewOp, VPUIP::WorkloadCastOp,
+                        VPUIP::ExtractFlatSliceOp>();
     target.addLegalOp<VPUIP::SwKernelOp>();
     target.markOpRecursivelyLegal<VPUIP::SwKernelOp>([&](mlir::Operation*) {
         return true;

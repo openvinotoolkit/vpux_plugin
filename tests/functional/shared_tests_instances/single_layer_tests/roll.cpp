@@ -11,11 +11,6 @@ namespace test {
 
 class RollLayerTestCommon : public RollLayerTest, virtual public VpuOv2LayerTest {};
 
-TEST_P(RollLayerTestCommon, NPU3700) {
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
-
 TEST_P(RollLayerTestCommon, NPU3720) {
     setReferenceSoftwareMode();
     run(Platform::NPU3720);

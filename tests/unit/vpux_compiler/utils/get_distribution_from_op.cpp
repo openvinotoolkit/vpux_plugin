@@ -46,7 +46,7 @@ void testDType(mlir::MLIRContext* ctx, VPU::ClusteredOpInterface clusteredOp,
     EXPECT_EQ(distributedType, expectedType);
 }
 
-using MLIR_GetDistributedTypeFromOpSOKAlignmentTest = MLIR_UnitBase;
+using MLIR_GetDistributedTypeFromOpSOKAlignmentTest = vpux::VPU::arch37xx::UnitTest;
 
 TEST_F(MLIR_GetDistributedTypeFromOpSOKAlignmentTest, SWOpSOKAlignmentDuringTiling) {
     constexpr llvm::StringLiteral inputIR = R"(
@@ -90,8 +90,6 @@ TEST_F(MLIR_GetDistributedTypeFromOpSOKAlignmentTest, SWOpSOKAlignmentDuringTili
         }
     )";
 
-    mlir::MLIRContext ctx(registry);
-    ctx.loadDialect<VPU::VPUDialect>();
     auto module = mlir::parseSourceString<mlir::ModuleOp>(inputIR, &ctx);
     ASSERT_TRUE(module.get() != nullptr);
 
@@ -168,8 +166,6 @@ TEST_F(MLIR_GetDistributedTypeFromOpSOKAlignmentTest, SWOpSOKAlignmentAfterSlice
         }
     )";
 
-    mlir::MLIRContext ctx(registry);
-    ctx.loadDialect<VPU::VPUDialect>();
     auto module = mlir::parseSourceString<mlir::ModuleOp>(inputIR, &ctx);
     ASSERT_TRUE(module.get() != nullptr);
 
@@ -244,8 +240,6 @@ TEST_F(MLIR_GetDistributedTypeFromOpSOKAlignmentTest, SWOpSOKAlignmentAfterSlice
         }
     )";
 
-    mlir::MLIRContext ctx(registry);
-    ctx.loadDialect<VPU::VPUDialect>();
     auto module = mlir::parseSourceString<mlir::ModuleOp>(inputIR, &ctx);
     ASSERT_TRUE(module.get() != nullptr);
 
@@ -309,6 +303,8 @@ TEST_P(GetDistributedTypeFromSOKOpTests, SegmentedOverChannelsDistribution) {
     mlir::DialectRegistry registry;
     vpux::registerDialects(registry);
     vpux::registerCommonInterfaces(registry);
+    auto interfacesRegistry = vpux::createInterfacesRegistry(vpux::VPU::ArchKind::NPU37XX);
+    interfacesRegistry->registerInterfaces(registry);
 
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<VPU::VPUDialect>();
@@ -516,3 +512,231 @@ INSTANTIATE_TEST_SUITE_P(VFWrappedSOKConvWithSOKSWOpConsumer, GetDistributedType
                          testing::ValuesIn(verticalFusionWrappingParams));
 INSTANTIATE_TEST_SUITE_P(SOKNCEAvgPoolWithSOKSWOpProducer, GetDistributedTypeFromSOKOpTests,
                          testing::ValuesIn(segmentedAvgPoolParams));
+
+using MLIR_GetDistributedTypeFromSwOpTest = MLIR_UnitBase;
+
+TEST_F(MLIR_GetDistributedTypeFromSwOpTest, OverlappedSingleInputSWOpDuringTiling) {
+    constexpr llvm::StringLiteral inputIR = R"(
+        module @test {
+            IE.TileResource 4 of @NCE at 6.000000e+02 MHz
+            func.func @main(%arg0: tensor<1x21x513x513xf16>) -> tensor<1x21x513x513xf32> {
+                %0 = VPU.Convert(%arg0) {
+                    dstElemType = f32, multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeightOverlapped>}
+                    : tensor<1x21x513x513xf16> -> tensor<1x21x513x513xf32>
+                return %0 : tensor<1x21x513x513xf32>
+            }
+        }
+    )";
+
+    mlir::MLIRContext ctx(registry);
+    ctx.loadDialect<VPU::VPUDialect>();
+    auto module = mlir::parseSourceString<mlir::ModuleOp>(inputIR, &ctx);
+    ASSERT_TRUE(module.get() != nullptr);
+
+    auto func = module.get().lookupSymbol<mlir::func::FuncOp>("main");
+    ASSERT_TRUE(func != nullptr);
+
+    const auto numTiles = getIntArrayAttr(&ctx, SmallVector<int64_t>({1, 1, 4, 1}));
+    const auto numClusters = getIntAttr(&ctx, 4);
+
+    const auto outTile = vpux::TileInfo(vpux::Shape(/*shape=*/{1, 21, 257, 513}), /*offsets=*/vpux::Shape({0, 0, 0, 0}),
+                                        /*axis=*/vpux::Shape({1, 1, 2, 1}), /*isCompletedTile=*/true);
+
+    const SmallVector<SmallVector<int64_t>> expectedShapes = {{1, 21, 129, 513},
+                                                              {1, 21, 128, 513},
+                                                              {1, 21, 128, 513},
+                                                              {1, 21, 128, 513}};
+    const SmallVector<SmallVector<int64_t>> expectedOffsets = {{0, 0, 0, 0},
+                                                               {0, 0, 129, 0},
+                                                               {0, 0, 257, 0},
+                                                               {0, 0, 385, 0}};
+    auto expectedShapesAttr = getIntArrayOfArray(&ctx, expectedShapes);
+    auto expectedOffsetsAttr = getIntArrayOfArray(&ctx, expectedOffsets);
+
+    const auto overlapDistributionMode = VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::OVERLAPPED);
+    auto expectedDistribution = VPU::DistributedTensorAttr::get(
+            &ctx, overlapDistributionMode, numTiles, nullptr, nullptr, nullptr, numClusters, /*alignment=*/nullptr,
+            mlir::UnitAttr::get(&ctx), expectedShapesAttr, expectedOffsetsAttr, expectedShapesAttr, expectedOffsetsAttr,
+            nullptr);
+
+    const SmallVector<SmallVector<int64_t>> expectedTiledShapes = {{1, 21, 65, 513},
+                                                                   {1, 21, 64, 513},
+                                                                   {1, 21, 64, 513},
+                                                                   {1, 21, 64, 513}};
+    const SmallVector<SmallVector<int64_t>> expectedTiledOffsets = {{0, 0, 0, 0},
+                                                                    {0, 0, 65, 0},
+                                                                    {0, 0, 129, 0},
+                                                                    {0, 0, 193, 0}};
+    auto expectedTiledShapesAttr = getIntArrayOfArray(&ctx, expectedTiledShapes);
+    auto expectedTiledOffsetsAttr = getIntArrayOfArray(&ctx, expectedTiledOffsets);
+    auto expectedTiledDistribution = VPU::DistributedTensorAttr::get(
+            &ctx, overlapDistributionMode, numTiles, nullptr, nullptr, nullptr, numClusters, /*alignment=*/nullptr,
+            mlir::UnitAttr::get(&ctx), expectedTiledShapesAttr, expectedTiledOffsetsAttr, expectedTiledShapesAttr,
+            expectedTiledOffsetsAttr, nullptr);
+
+    func.walk([&](VPU::SWOpInterface op) {
+        auto clusteredOp = mlir::cast<VPU::ClusteredOpInterface>(op.getOperation());
+
+        testDType(&ctx, clusteredOp, expectedDistribution, numClusters, true);  // test activation distributed type
+
+        auto inputType = clusteredOp->getOperand(0).getType().cast<NDTypeInterface>();
+        auto outputType = clusteredOp->getResult(0).getType().cast<NDTypeInterface>();
+
+        auto tileOp = mlir::cast<VPU::TilingBuilderOpInterface>(op.getOperation());
+        const auto outputTileType = outputType.extractDenseTile(outTile.offsets, outTile.shape);
+        const auto inputTileInfo = tileOp.backInferTileInfo(outTile, Logger::global());
+        const auto inputTileType =
+                inputType.extractDenseTile(inputTileInfo.tiles[0].offsets, inputTileInfo.tiles[0].shape);
+
+        testDType(&ctx, clusteredOp, expectedTiledDistribution, numClusters, true, inputTileType,
+                  outputTileType);  // test tiled activation distributed type
+    });
+}
+
+// Bug in getSWInputTensorDistributionMode: Interpolate inputs are identified by comparing interpolate's
+// getInput(0).getType() with the inputType passed to the func. When tiling is done on the act input, the two
+// will not be the same even if they reprsent the same tensor. As a consequence, the below test will fail
+// for the tiled scenario because it assigns DUPLICATED mode for input 0, though it should assign OVERLAPPED.
+// Tracked by: E#125874
+TEST_F(MLIR_GetDistributedTypeFromSwOpTest, DISABLED_OverlappedMultiInputSWOpDuringTiling) {
+    constexpr llvm::StringLiteral inputIR = R"(
+        module @test {
+            IE.TileResource 4 of @NCE at 6.000000e+02 MHz
+            func.func @main(%arg0: tensor<1x21x65x65xf16>) -> tensor<1x21x513x513xf16> {
+                %0 = VPU.Interpolate(%arg0) {
+                    attr = #IE.Interpolate<
+                            mode = <LINEAR_ONNX>,
+                            shape_calc_mode = <SIZES>,
+                            coord_mode = <ASYMMETRIC>,
+                            nearest_mode = <ROUND_PREFER_FLOOR>,
+                            antialias = false,
+                            pads_begin = [0, 0, 0, 0],
+                            pads_end = [0, 0, 0, 0],
+                            cube_coeff = -7.500000e-01 : f64>,
+                            axes_attr = [0, 1, 2, 3],
+                            multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeightOverlapped>,
+                            operandSegmentSizes = array<i32: 1, 0, 0, 0>,
+                            scales_attr = [1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00],
+                            sizes_attr = [1, 21, 513, 513]}
+                    : tensor<1x21x65x65xf16> -> tensor<1x21x513x513xf16>
+                return %0 : tensor<1x21x513x513xf16>
+            }
+        }
+    )";
+
+    mlir::MLIRContext ctx(registry);
+    ctx.loadDialect<VPU::VPUDialect>();
+    auto module = mlir::parseSourceString<mlir::ModuleOp>(inputIR, &ctx);
+    ASSERT_TRUE(module.get() != nullptr);
+
+    auto func = module.get().lookupSymbol<mlir::func::FuncOp>("main");
+    ASSERT_TRUE(func != nullptr);
+
+    const auto numTiles = getIntArrayAttr(&ctx, SmallVector<int64_t>({1, 1, 4, 1}));
+    const auto numClusters = getIntAttr(&ctx, 4);
+
+    const auto outTile = vpux::TileInfo(vpux::Shape(/*shape=*/{1, 21, 257, 513}), /*offsets=*/vpux::Shape({0, 0, 0, 0}),
+                                        /*axis=*/vpux::Shape({1, 1, 2, 1}), /*isCompletedTile=*/true);
+
+    const SmallVector<SmallVector<int64_t>> expectedShapes = {{1, 21, 18, 65},
+                                                              {1, 21, 18, 65},
+                                                              {1, 21, 18, 65},
+                                                              {1, 21, 17, 65}};
+    const SmallVector<SmallVector<int64_t>> expectedOffsets = {{0, 0, 0, 0},
+                                                               {0, 0, 16, 0},
+                                                               {0, 0, 32, 0},
+                                                               {0, 0, 48, 0}};
+    auto expectedShapesAttr = getIntArrayOfArray(&ctx, expectedShapes);
+    auto expectedOffsetsAttr = getIntArrayOfArray(&ctx, expectedOffsets);
+
+    const auto overlapDistributionMode = VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::OVERLAPPED);
+    auto expectedDistribution = VPU::DistributedTensorAttr::get(
+            &ctx, overlapDistributionMode, numTiles, nullptr, nullptr, nullptr, numClusters, /*alignment=*/nullptr,
+            mlir::UnitAttr::get(&ctx), expectedShapesAttr, expectedOffsetsAttr, expectedShapesAttr, expectedOffsetsAttr,
+            nullptr);
+
+    const SmallVector<SmallVector<int64_t>> expectedTiledShapes = {{1, 21, 10, 65},
+                                                                   {1, 21, 10, 65},
+                                                                   {1, 21, 10, 65},
+                                                                   {1, 21, 10, 65}};
+    const SmallVector<SmallVector<int64_t>> expectedTiledOffsets = {{0, 0, 0, 0},
+                                                                    {0, 0, 8, 0},
+                                                                    {0, 0, 16, 0},
+                                                                    {0, 0, 24, 0}};
+    auto expectedTiledShapesAttr = getIntArrayOfArray(&ctx, expectedTiledShapes);
+    auto expectedTiledOffsetsAttr = getIntArrayOfArray(&ctx, expectedTiledOffsets);
+    auto expectedTiledDistribution = VPU::DistributedTensorAttr::get(
+            &ctx, overlapDistributionMode, numTiles, nullptr, nullptr, nullptr, numClusters, /*alignment=*/nullptr,
+            mlir::UnitAttr::get(&ctx), expectedTiledShapesAttr, expectedTiledOffsetsAttr, expectedTiledShapesAttr,
+            expectedTiledOffsetsAttr, nullptr);
+
+    func.walk([&](VPU::SWOpInterface op) {
+        auto clusteredOp = mlir::cast<VPU::ClusteredOpInterface>(op.getOperation());
+
+        testDType(&ctx, clusteredOp, expectedDistribution, numClusters, true);  // test activation distributed type
+
+        auto inputType = clusteredOp->getOperand(0).getType().cast<NDTypeInterface>();
+        auto outputType = clusteredOp->getResult(0).getType().cast<NDTypeInterface>();
+
+        auto tileOp = mlir::cast<VPU::TilingBuilderOpInterface>(op.getOperation());
+        const auto outputTileType = outputType.extractDenseTile(outTile.offsets, outTile.shape);
+        const auto inputTileInfo = tileOp.backInferTileInfo(outTile, Logger::global());
+        const auto inputTileType =
+                inputType.extractDenseTile(inputTileInfo.tiles[0].offsets, inputTileInfo.tiles[0].shape);
+
+        testDType(&ctx, clusteredOp, expectedTiledDistribution, numClusters, true, inputTileType,
+                  outputTileType);  // test tiled activation distributed type
+    });
+}
+
+using MLIR_GetDistributedTypeFromDepthwiseOpTest = vpux::VPU::arch40xx::UnitTest;
+
+TEST_F(MLIR_GetDistributedTypeFromDepthwiseOpTest, MaxPoolOpWithODUPermuteToNCXXAssignedSOC) {
+    constexpr llvm::StringLiteral inputIR = R"(
+        #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+        #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+        module @test {
+            IE.TileResource 6 of @NCE at 1.700000e+03 MHz
+            func.func @main(%arg0: tensor<1x3136x4x32xf16, {order = #NHWC}>) -> tensor<1x128x784x4xf16, {order = #NHWC}> {
+                %cst = const.Declare tensor<128x1x1x4xsi32> = dense<10> : tensor<128x1x1x4xsi32>
+                %cst_0 = const.Declare tensor<128x128x1x1xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<128x128x1x1xf16, {order = #NHWC}>
+                %0 = VPU.NCE.MaxPool(%arg0) {
+                    kernel_size = [1, 1],
+                    multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverKernel>,
+                    pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, strides = [1, 1]
+                } -> tensor<1x3136x4x32xf16> 
+                %1 = VPU.AffineReshape(%0) {dim_mapping = [[0], [1], [1], [2, 3]], shape_value = [1, 784, 4, 128]} : tensor<1x3136x4x32xf16> -> tensor<1x784x4x128xf16>
+                %2 = VPU.PermuteCast(%1) {dst_order = #NHWC, mem_perm = #NCHW} : tensor<1x784x4x128xf16> -> tensor<1x128x784x4xf16, {order = #NHWC}>
+                %3 = VPU.NCE.Convolution(%2, %cst_0, %cst) {
+                    multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
+                    pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
+                    rawFilterShape = [128, 128, 1, 1],
+                    strides = [1, 1]
+                } -> tensor<1x128x784x4xf16, {order = #NHWC}> 
+                return %3 : tensor<1x128x784x4xf16, {order = #NHWC}>
+            }
+        }
+    )";
+
+    auto module = mlir::parseSourceString<mlir::ModuleOp>(inputIR, &ctx);
+    ASSERT_TRUE(module.get() != nullptr);
+
+    auto func = module.get().lookupSymbol<mlir::func::FuncOp>("main");
+    ASSERT_TRUE(func != nullptr);
+
+    const auto numTiles = getIntArrayAttr(&ctx, SmallVector<int64_t>({1, 6, 1, 1}));
+    const auto numClusters = getIntAttr(&ctx, 6);
+
+    auto expectedAlignment = getIntArrayAttr(&ctx, SmallVector<int64_t>({1, 16, 1, 1}));
+    auto expectedDistribution = VPU::DistributedTensorAttr::get(
+            &ctx, VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::SEGMENTED), numTiles, nullptr, nullptr,
+            nullptr, numClusters, expectedAlignment, mlir::UnitAttr::get(&ctx), nullptr, nullptr, nullptr, nullptr,
+            nullptr);
+
+    func.walk([&](VPU::NCEMaxPoolOp op) {
+        auto clusteredOp = mlir::cast<VPU::ClusteredOpInterface>(op.getOperation());
+
+        testDType(&ctx, clusteredOp, expectedDistribution, numClusters, true);   // test activation distributed type
+        testDType(&ctx, clusteredOp, expectedDistribution, numClusters, false);  // test output distributed type
+    });
+}

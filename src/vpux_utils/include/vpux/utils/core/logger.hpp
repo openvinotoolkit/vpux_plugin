@@ -40,7 +40,6 @@ void globalLogCb(const formatv_object_base&);
 
 class Logger {
 public:
-    friend struct LoggerAdapter;
     static Logger& global();
 
 public:

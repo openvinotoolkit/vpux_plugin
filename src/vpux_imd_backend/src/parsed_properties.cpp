@@ -6,7 +6,7 @@
 #include "vpux/IMD/parsed_properties.hpp"
 #include "vpux/utils/core/error.hpp"
 
-namespace vpux {
+namespace intel_npu {
 
 //
 // LAUNCH_MODE
@@ -43,4 +43,4 @@ std::chrono::seconds MV_RUN_TIMEOUT::defaultValue() {
     return RUN_TIMEOUT;
 }
 
-}  // namespace vpux
+}  // namespace intel_npu

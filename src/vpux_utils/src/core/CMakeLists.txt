@@ -37,15 +37,7 @@ target_include_directories(${TARGET_NAME}
     PUBLIC
         ${VPUX_UTILS_CURRENT_SOURCE_DIR}/include
 )
-target_include_directories(${TARGET_NAME}
-    SYSTEM PUBLIC
-        ${LLVM_SOURCE_DIR}/include
-        $<BUILD_INTERFACE:${LLVM_BINARY_DIR}/include> # llvm/Config/llvm-config.h
-)
-
-if(NOT ENABLE_PREBUILT_LLVM_MLIR_LIBS)
-    add_dependencies(${TARGET_NAME}
+target_link_libraries(${TARGET_NAME}
+    PUBLIC
         LLVMSupport
-    )
-endif()
-
+)

@@ -1,11 +1,11 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 
 // RUN: vpux-opt --vpu-arch=%arch% --update-ELF-section-flags %s | FileCheck %s
-// REQUIRES: arch-VPUX40XX
+// REQUIRES: arch-NPU40XX
 
 module @mainModule attributes {VPU.arch = #VPU.arch_kind<NPU40XX>} {
 

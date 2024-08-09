@@ -4,6 +4,8 @@
 //
 
 //
+
+//
 // RAII wrapper for callback to call it at the end of current scope.
 //
 

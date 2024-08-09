@@ -13,6 +13,7 @@
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
+#include "vpux/compiler/utils/platform_resources.hpp"
 #include "vpux/compiler/utils/sparsity.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
 #include "vpux/hwtest/test_case_json_parser.hpp"
@@ -40,6 +41,19 @@ namespace hwtest {
 //                  [output]
 //
 // *weights are in sparse format, without sparsity map(SM), but the SM is produced in builder
+
+vpux::VPU::PPEMode getPPEMode(nb::ActivationType activationType) {
+    switch (activationType) {
+    case nb::ActivationType::LeakyReLU:
+        return vpux::VPU::PPEMode::LPRELU;
+        break;
+    case nb::ActivationType::ReLUX:
+        return vpux::VPU::PPEMode::LRELUX;
+        break;
+    default:
+        VPUX_THROW("Encountered unsupported activation type '{0}'", nb::to_string(activationType));
+    }
+}
 
 void buildSparseZMajorConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module, mlir::OpBuilder builder,
                            Logger& log, mlir::Type inputType, mlir::Type weightsType, mlir::Type outputType) {
@@ -156,7 +170,7 @@ void buildSparseZMajorConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mod
         VPUX_THROW_UNLESS(qty.getStorageType().getIntOrFloatBitWidth() >= CHAR_BIT,
                           "buildSparseZMajorConv: types with sizeof less than BYTE is not supported for weights");
     }
-    const auto weightsValues = generateWeights(weightsShape, weightsType, ctx, weightsFileName);
+    const auto weightsValues = generateWeights(builder, weightsShape, weightsType, ctx, weightsFileName);
     auto weightsAttribute = vpux::Const::ContentAttr::get(weightsValues);
     weightsAttribute = weightsAttribute.reorder(vpux::DimsOrder::OYXI);
 
@@ -256,12 +270,14 @@ void buildSparseZMajorConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mod
     auto weightsTableCMX_0 = createDeclareTensorOp(functionBuilder, VPURT::BufferSection::CMX_NN, weightsTableShape,
                                                    int32, DimsOrder::NHWC, 0, WEIGHTSTABLE_CMX_OFFSET);
 
-    auto updateBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, 0);
+    auto [waitWLMBarrier, freeBarrierId] =
+            insertWLMStartSequence(functionBuilder, testDesc.getWLMParams().isWLMPartialEnabled);
+
+    auto updateBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, freeBarrierId++);
     VPURT::ConfigureBarrierOp waitBarrier;
 
-    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(),
-                                          mlir::ValueRange(updateBarrier.getBarrier()), loc, functionInput,
-                                          inputCMX.getOperation()->getResult(0), 0);
+    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, waitWLMBarrier, mlir::ValueRange(updateBarrier.getBarrier()),
+                                          loc, functionInput, inputCMX.getOperation()->getResult(0), 0);
     if (conv.act_sparsity) {
         VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(),
                                               mlir::ValueRange(updateBarrier.getBarrier()), builder.getUnknownLoc(),
@@ -285,7 +301,7 @@ void buildSparseZMajorConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mod
     llvm::SmallVector<std::int64_t> kernel = {weightsShape[2], weightsShape[3]};
     const auto kernelSize = getIntArrayAttr(ctx, kernel);
 
-    updateBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, 1);
+    updateBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, freeBarrierId++);
     auto nceTask_0 = VPURT::wrapIntoTaskOp<VPUIP::NCEClusterTaskOp>(
             functionBuilder, mlir::ValueRange(waitBarrier.getBarrier()), mlir::ValueRange(updateBarrier.getBarrier()),
             loc, inputCMX.getBuffer(), /*input_sparsity_map=*/inputSMCmxBuffer,
@@ -308,11 +324,66 @@ void buildSparseZMajorConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mod
     nceTask_0.addDPUTask(functionBuilder, start, outEnd, start, inEnd, pad, conv.cube_mode);
     waitBarrier = updateBarrier;
 
+    const auto ppeConfiguration = testDesc.getActivationLayer();
+
+    int64_t clampLow = std::numeric_limits<int32_t>::min();
+    int64_t clampHigh = std::numeric_limits<int32_t>::max();
+    const int64_t lreluMult = 1;
+    const int64_t lreluShift = 0;
+    auto outputScale = 1.0 / output.qp.scale.front();
+    const auto scaleApproximation = QuantizationApproximation(testDesc.getArchitecture(), outputScale);
+    if (const auto outElemQType = outputType.template dyn_cast<mlir::quant::QuantizedType>()) {
+        clampLow = outElemQType.getStorageTypeMin();
+        clampHigh = outElemQType.getStorageTypeMax();
+    }
+
+    if (ppeConfiguration.activationType != nb::ActivationType::None) {
+        if (ppeConfiguration.maximum != 0) {
+            clampHigh = static_cast<int64_t>(ppeConfiguration.maximum);
+        }
+
+        const auto preluScale = ppeConfiguration.alpha;
+        const auto alphaApproximation = PReLUApproximation(testDesc.getArchitecture(), preluScale);
+        nceTask_0.addPPETask(functionBuilder, getPPEMode(ppeConfiguration.activationType), clampLow, clampHigh,
+                             alphaApproximation.mult(), alphaApproximation.shift(), scaleApproximation.mult(),
+                             scaleApproximation.shift(), /*quant_post_shift=*/0, /*quant_scale=*/1,
+                             /*in1_quant_mult=*/0, /*in2_quant_mult=*/0, ppeConfiguration.alpha);
+    } else {
+        if (const auto outElemQType = outputType.template dyn_cast<mlir::quant::QuantizedType>()) {
+            SmallVector<double> quantMults;
+            SmallVector<double> quantShifts;
+            const auto scalesAndZps = extractScalesAndZeroPoints(outElemQType);
+            const auto scales = scalesAndZps.first;
+            const auto zps = scalesAndZps.second;
+
+            quantMults.resize(scales.size());
+            quantShifts.resize(scales.size());
+            for (std::size_t i = 0; i < scales.size(); ++i) {
+                const auto quantScaleApproximation = QuantizationApproximation(testDesc.getArchitecture(), scales[i]);
+                quantMults[i] = quantScaleApproximation.mult();
+                quantShifts[i] = quantScaleApproximation.shift();
+            }
+
+            nceTask_0.addPPETask(functionBuilder, VPU::PPEModeAttr::get(ctx, VPU::PPEMode::NOOP),
+                                 getIntAttr(ctx, clampLow), getIntAttr(ctx, clampHigh), getIntAttr(ctx, lreluMult),
+                                 getIntAttr(ctx, lreluShift), getIntArrayAttr(ctx, quantMults),
+                                 getIntArrayAttr(ctx, quantShifts), getIntAttr(ctx, scaleApproximation.postShift()),
+                                 getFPArrayAttr(ctx, ArrayRef<double>{outputScale}), /*in1_quant_mult=*/nullptr,
+                                 /*in2_quant_mult=*/nullptr, /*fp_prelu_alpha*/ nullptr, /*ppe_fp_scale*/ nullptr,
+                                 /*ppe_fp_bias*/ nullptr);
+        } else {
+            nceTask_0.addPPETask(functionBuilder, VPU::PPEMode::NOOP, clampLow, clampHigh, lreluMult, lreluShift,
+                                 scaleApproximation.mult(), scaleApproximation.shift(), scaleApproximation.postShift(),
+                                 outputScale);
+        }
+    }
+
     // finalBarrier passed as production barrier to last DMA task
-    auto barrier2 = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, 2);
+    auto finalBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(
+            loc, freeBarrierId++, testDesc.getWLMParams().isWLMPartialEnabled);
 
     VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(waitBarrier.getBarrier()),
-                                          mlir::ValueRange(barrier2.getBarrier()), loc,
+                                          mlir::ValueRange(finalBarrier.getBarrier()), loc,
                                           outputCMX.getOperation()->getResult(0), functionOutput, 0);
 
     functionBuilder.create<mlir::func::ReturnOp>(loc, mlir::ValueRange{functionOutput});

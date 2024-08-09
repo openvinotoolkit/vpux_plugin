@@ -10,11 +10,11 @@ using namespace vpux;
 
 mlir::LogicalResult vpux::IE::HSigmoidOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::HSigmoidOpAdaptor hsigmoid(operands, attrs);
+    IE::HSigmoidOpAdaptor hsigmoid(operands, attrs, prop);
     if (mlir::failed(hsigmoid.verify(loc))) {
         return mlir::failure();
     }

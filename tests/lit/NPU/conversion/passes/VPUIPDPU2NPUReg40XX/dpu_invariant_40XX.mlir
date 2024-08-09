@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --convert-VPUIPDPU-to-NPUReg40XX %s | FileCheck %s
-// REQUIRES: arch-VPUX40XX
+// REQUIRES: arch-NPU40XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 module @Test {
@@ -127,15 +127,15 @@ module @Test {
                     // CHECK:  UINT ppe_prelu_mult at 16 size 11 = 1
                     // CHECK:  ppe_scale_hclamp offset 160 size 32 = SINT 0xFF,
                     // CHECK:  ppe_scale_lclamp offset 164 size 32 = SINT 0,
-                    // CHECK:  UINT ppe_i32_convert at 2 size 2 = 0
+                    // CHECK:  UINT ppe_i32_convert at 8 size 2 = 0
                     // CHECK:  UINT ppe_fp_convert at 0 size 3 = 0,
                     // CHECK:  UINT ppe_fp_bypass at 3 size 1 = 1,
 
                     VPUIPDPU.BarrierCfg waits([3 : ui8, 5 : ui8]) updates([1 : ui8, 7 : ui8, 8 : ui8]) start_after(0) clean_after(0)
                     // CHECK:  UINT barriers_wait_mask_hi_ at 0 size 32 = 0
-                    // CHECK:  barriers_wait_mask_lo_ offset 288 size 64 = UINT 0x28,
+                    // CHECK:  barriers_wait_mask_lo_ offset 296 size 64 = UINT 0x28,
                     // CHECK:  UINT barriers_post_mask_hi_ at 0 size 32 = 0
-                    // CHECK:  barriers_post_mask_lo_ offset 304 size 64 = UINT 0x182,
+                    // CHECK:  barriers_post_mask_lo_ offset 312 size 64 = UINT 0x182,
                     // CHECK:  UINT group_ at 0 size 8 = 1,
                     // CHECK:  UINT mask_ at 8 size 8 = 0x28
                 }
@@ -227,15 +227,15 @@ module @Test {
                     // CHECK:  UINT ppe_prelu_shift at 8 size 5 = 0,
                     // CHECK:  ppe_scale_hclamp offset 160 size 32 = SINT 0xFF,
                     // CHECK:  ppe_scale_lclamp offset 164 size 32 = SINT 0,
-                    // CHECK:  UINT ppe_i32_convert at 2 size 2 = 0
+                    // CHECK:  UINT ppe_i32_convert at 8 size 2 = 0
                     // CHECK:  UINT ppe_fp_convert at 0 size 3 = 0,
                     // CHECK:  UINT ppe_fp_bypass at 3 size 1 = 1,
 
                     VPUIPDPU.BarrierCfg waits([0 : ui8]) updates([]) start_after(0) clean_after(0)
                     // CHECK:  UINT barriers_wait_mask_hi_ at 0 size 32 = 0
-                    // CHECK:  barriers_wait_mask_lo_ offset 288 size 64 = UINT 1,
+                    // CHECK:  barriers_wait_mask_lo_ offset 296 size 64 = UINT 1,
                     // CHECK:  UINT barriers_post_mask_hi_ at 0 size 32 = 0
-                    // CHECK:  barriers_post_mask_lo_ offset 304 size 64 = UINT 0,
+                    // CHECK:  barriers_post_mask_lo_ offset 312 size 64 = UINT 0,
                     // CHECK:  UINT group_ at 0 size 8 = 1,
                     // CHECK:  UINT mask_ at 8 size 8 = 1
                 }
@@ -303,7 +303,7 @@ module @Test {
                     // CHECK:  UINT ppe_scale_override at 0 size 1 = 0,
                     // CHECK:  UINT ppe_prelu_mult at 16 size 11 = 0
                     // CHECK:  ppe_scale_hclamp offset 160 size 32 = SINT 0x46,
-                    // CHECK:  UINT ppe_i32_convert at 2 size 2 = 1
+                    // CHECK:  UINT ppe_i32_convert at 8 size 2 = 1
                     // CHECK:  UINT ppe_fp_convert at 0 size 3 = 0,
                     // CHECK:  UINT ppe_fp_bypass at 3 size 1 = 1,
                 }
@@ -385,9 +385,9 @@ module @Test {
                     // CHECK:  ppe_scale_hclamp offset 160 size 32 = SINT 0x7FFFFFFF,
                     // CHECK:  ppe_scale_lclamp offset 164 size 32 = SINT 0x80000000,
                     // Note:              0x80000000(Hex) = 2147483648(Dec:uint64_t) is 2's complement representation of = -2147483648(Dec:int32_t)
-                    // CHECK:  UINT ppe_fp16_ftz at 0 size 1 = 0,
-                    // CHECK:  UINT ppe_fp16_clamp at 1 size 1 = 1,
-                    // CHECK:  UINT ppe_i32_convert at 2 size 2 = 0
+                    // CHECK:  UINT ppe_fp16_ftz at 6 size 1 = 0,
+                    // CHECK:  UINT ppe_fp16_clamp at 7 size 1 = 1,
+                    // CHECK:  UINT ppe_i32_convert at 8 size 2 = 0
                     // CHECK:  ppe_fp_prelu offset 180 size 32 = FP 0x3DCCCCCD,
                     // Note:              0x3DCCCCCD(Hex) = 1036831949(Dec) = 0.1 in IEEE floating-point format
                     // CHECK:  UINT ppe_fp_convert at 0 size 3 = 1,

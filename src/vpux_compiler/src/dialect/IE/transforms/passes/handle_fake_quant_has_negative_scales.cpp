@@ -5,9 +5,9 @@
 
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 
-#include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/dialect/const/utils/content.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/loop.hpp"
 #include "vpux/compiler/utils/quantization.hpp"
 
@@ -47,7 +47,7 @@ mlir::LogicalResult HandleConstWeightsFakeQuant::matchAndRewrite(IE::FakeQuantiz
     int64_t quantMin = 0;
     int64_t quantMax = 0;
     std::tie(quantMin, quantMax, storageType) = getStorageParams(origOp.getContext(), origOp.getLevels().value(),
-                                                                 VPU::hasNegativeValues(inLowConst.getContent()));
+                                                                 Const::hasNegativeValues(inLowConst.getContent()));
 
     const auto outLowContent = outLowConst.getContent();
     auto outLowVals = SmallVector<float>(outLowContent.getValues<float>());
@@ -106,9 +106,9 @@ mlir::LogicalResult HandleConstWeightsFakeQuant::matchAndRewrite(IE::FakeQuantiz
     }
 
     // Update constant data
-    auto newQuantWeights = VPU::updateConstStorageValues(quantWeights, newWeightsVal, rewriter, innerLog);
-    auto newOutLowConst = VPU::updateConstStorageValues(outLowConst, newOutLowVals, rewriter, innerLog);
-    auto newOutHighConst = VPU::updateConstStorageValues(outHighConst, newOutHighVals, rewriter, innerLog);
+    auto newQuantWeights = Const::updateConstStorageValues(innerLog, rewriter, quantWeights, newWeightsVal);
+    auto newOutLowConst = Const::updateConstStorageValues(innerLog, rewriter, outLowConst, newOutLowVals);
+    auto newOutHighConst = Const::updateConstStorageValues(innerLog, rewriter, outHighConst, newOutHighVals);
     if (mlir::failed(newQuantWeights) || mlir::failed(newOutLowConst) || mlir::failed(newOutHighConst)) {
         innerLog.trace("Cannot update constant storage values");
         return mlir::failure();

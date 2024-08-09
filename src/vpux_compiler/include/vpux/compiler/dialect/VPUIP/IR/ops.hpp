@@ -46,10 +46,10 @@ constexpr KB SHAVE_LIB_DATA_SIZE = 112_KB;
 
 // According to the documentation, total transfer length (LEN) field is stored in 24 bits that means max value is 16MB
 constexpr Byte DMA_LIMIT = MB(16).to<Byte>() - Byte(1);
-constexpr int64_t CMX_DMA_MAX_NUM_PLANES_30XX_37XX = 255;
-// According to the documentation, size of the highest dimension is stored in 16 bits on NPU40XX
+constexpr int64_t CMX_DMA_MAX_NUM_PLANES_37XX = 255;
+// According to the documentation, size of the highest dimension is stored in 16 bits on NPU40XX.0
 constexpr int64_t CMX_DMA_MAX_NUM_PLANES_40XX = INT16_MAX;
-constexpr int64_t CMX_DMA_MAX_STRIDING_LEVEL_30XX_37XX = 2;
+constexpr int64_t CMX_DMA_MAX_STRIDING_LEVEL_37XX = 2;
 constexpr int64_t CMX_DMA_MAX_STRIDING_LEVEL_40XX = 6;
 
 }  // namespace VPUIP

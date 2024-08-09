@@ -19,6 +19,7 @@
 #include "vpux/compiler/utils/infer_output_shape.hpp"
 #include "vpux/compiler/utils/logging.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
+#include "vpux/compiler/utils/strings.hpp"
 #include "vpux/compiler/utils/types.hpp"
 
 #include "vpux/passes/align_scales.hpp"
@@ -54,7 +55,6 @@
 #include <openvino/pass/manager.hpp>
 #include <openvino/pass/serialize.hpp>
 
-#include "vpux/passes/convert_MVN6_to_MVN1.hpp"
 #include "vpux/passes/fuse_mvn.hpp"
 
 #include <transformations/common_optimizations/add_fake_quantize_fusion.hpp>
@@ -99,6 +99,7 @@
 #include <transformations/op_conversions/convert_scatter_elements_update12_downgrade.hpp>
 #include <transformations/op_conversions/convert_sequences_to_tensor_iterator.hpp>
 #include <transformations/op_conversions/convert_shapeof3.hpp>
+#include <transformations/op_conversions/convert_slice_to_strided_slice.hpp>
 #include <transformations/op_conversions/convert_softmax_upgrade.hpp>
 #include <transformations/op_conversions/convert_topk11_downgrade.hpp>
 #include <transformations/op_conversions/detection_output_downgrade.hpp>
@@ -150,158 +151,158 @@ NGraphImporter::Callback NGraphImporter::getParser(const std::shared_ptr<ov::Nod
             {ov::op::v0::Parameter::get_type_info_static(), &NGraphImporter::parseEmpty},
             {ov::op::v0::Result::get_type_info_static(), &NGraphImporter::parseEmpty},
 
-            MAP_ENTRY(ov::opset7::Constant),
-            MAP_ENTRY(ov::opset7::Convert),
-            MAP_ENTRY(ov::opset7::ConvertLike),
+            MAP_ENTRY(ov::opset1::Constant),
+            MAP_ENTRY(ov::opset1::Convert),
+            MAP_ENTRY(ov::opset1::ConvertLike),
             MAP_ENTRY(ov::opset8::Softmax),
-            MAP_ENTRY(ov::opset7::LogSoftmax),
-            MAP_ENTRY(ov::opset7::Tile),
-            MAP_ENTRY(ov::opset7::Split),
-            MAP_ENTRY(ov::opset7::Power),
-            MAP_ENTRY(ov::opset7::Multiply),
-            MAP_ENTRY(ov::opset7::Relu),
-            MAP_ENTRY(ov::opset7::Convolution),
-            MAP_ENTRY(ov::opset7::GroupConvolution),
-            MAP_ENTRY(ov::opset7::ConvolutionBackpropData),
-            MAP_ENTRY(ov::opset7::GroupConvolutionBackpropData),
-            MAP_ENTRY(ov::opset7::AvgPool),
-            MAP_ENTRY(ov::opset7::MaxPool),
+            MAP_ENTRY(ov::opset5::LogSoftmax),
+            MAP_ENTRY(ov::opset1::Tile),
+            MAP_ENTRY(ov::opset1::Split),
+            MAP_ENTRY(ov::opset1::Power),
+            MAP_ENTRY(ov::opset1::Multiply),
+            MAP_ENTRY(ov::opset1::Relu),
+            MAP_ENTRY(ov::opset1::Convolution),
+            MAP_ENTRY(ov::opset1::GroupConvolution),
+            MAP_ENTRY(ov::opset1::ConvolutionBackpropData),
+            MAP_ENTRY(ov::opset1::GroupConvolutionBackpropData),
+            MAP_ENTRY(ov::opset1::AvgPool),
+            MAP_ENTRY(ov::opset1::MaxPool),
             MAP_ENTRY(ov::opset8::AdaptiveAvgPool),
             MAP_ENTRY(ov::opset8::AdaptiveMaxPool),
-            MAP_ENTRY(ov::opset7::ShuffleChannels),
+            MAP_ENTRY(ov::opset1::ShuffleChannels),
             MAP_ENTRY(ov::opset8::Gather),
             MAP_ENTRY(ov::opset8::GatherND),
-            MAP_ENTRY(ov::opset7::GatherTree),
+            MAP_ENTRY(ov::opset1::GatherTree),
             MAP_ENTRY(ov::opset8::NV12toRGB),
             MAP_ENTRY(ov::opset8::NV12toBGR),
             MAP_ENTRY(ov::opset8::I420toRGB),
             MAP_ENTRY(ov::opset8::I420toBGR),
             MAP_ENTRY(ov::opset8::RandomUniform),
-            MAP_ENTRY(ov::opset7::OneHot),
-            MAP_ENTRY(ov::opset7::BatchNormInference),
-            MAP_ENTRY(ov::opset7::GatherElements),
-            MAP_ENTRY(ov::opset7::ScatterNDUpdate),
-            MAP_ENTRY(ov::opset7::ScatterUpdate),
-            MAP_ENTRY(ov::opset7::ScatterElementsUpdate),
-            MAP_ENTRY(ov::opset7::Clamp),
-            MAP_ENTRY(ov::opset7::Elu),
-            MAP_ENTRY(ov::opset7::Reshape),
-            MAP_ENTRY(ov::opset7::Squeeze),
-            MAP_ENTRY(ov::opset7::Sigmoid),
+            MAP_ENTRY(ov::opset1::OneHot),
+            MAP_ENTRY(ov::opset5::BatchNormInference),
+            MAP_ENTRY(ov::opset6::GatherElements),
+            MAP_ENTRY(ov::opset4::ScatterNDUpdate),
+            MAP_ENTRY(ov::opset3::ScatterUpdate),
+            MAP_ENTRY(ov::opset3::ScatterElementsUpdate),
+            MAP_ENTRY(ov::opset1::Clamp),
+            MAP_ENTRY(ov::opset1::Elu),
+            MAP_ENTRY(ov::opset1::Reshape),
+            MAP_ENTRY(ov::opset1::Squeeze),
+            MAP_ENTRY(ov::opset1::Sigmoid),
             MAP_ENTRY(ov::opset9::GridSample),
-            MAP_ENTRY(ov::opset7::LRN),
-            MAP_ENTRY(ov::opset7::ReduceMax),
-            MAP_ENTRY(ov::opset7::ReduceMean),
-            MAP_ENTRY(ov::opset7::ReduceLogicalOr),
-            MAP_ENTRY(ov::opset7::ReduceLogicalAnd),
-            MAP_ENTRY(ov::opset7::ReduceProd),
-            MAP_ENTRY(ov::opset7::ReduceSum),
-            MAP_ENTRY(ov::opset7::ReduceMin),
-            MAP_ENTRY(ov::opset7::ReduceL1),
-            MAP_ENTRY(ov::opset7::ReduceL2),
-            MAP_ENTRY(ov::opset7::Unsqueeze),
-            MAP_ENTRY(ov::opset7::Minimum),
-            MAP_ENTRY(ov::opset7::Maximum),
-            MAP_ENTRY(ov::opset7::Add),
-            MAP_ENTRY(ov::opset7::Divide),
-            MAP_ENTRY(ov::opset7::SquaredDifference),
-            MAP_ENTRY(ov::opset7::FloorMod),
-            MAP_ENTRY(ov::opset7::Mod),
-            MAP_ENTRY(ov::opset7::Proposal),
-            MAP_ENTRY(ov::opset7::FakeQuantize),
+            MAP_ENTRY(ov::opset1::LRN),
+            MAP_ENTRY(ov::opset1::ReduceMax),
+            MAP_ENTRY(ov::opset1::ReduceMean),
+            MAP_ENTRY(ov::opset1::ReduceLogicalOr),
+            MAP_ENTRY(ov::opset1::ReduceLogicalAnd),
+            MAP_ENTRY(ov::opset1::ReduceProd),
+            MAP_ENTRY(ov::opset1::ReduceSum),
+            MAP_ENTRY(ov::opset1::ReduceMin),
+            MAP_ENTRY(ov::opset4::ReduceL1),
+            MAP_ENTRY(ov::opset4::ReduceL2),
+            MAP_ENTRY(ov::opset1::Unsqueeze),
+            MAP_ENTRY(ov::opset1::Minimum),
+            MAP_ENTRY(ov::opset1::Maximum),
+            MAP_ENTRY(ov::opset1::Add),
+            MAP_ENTRY(ov::opset1::Divide),
+            MAP_ENTRY(ov::opset1::SquaredDifference),
+            MAP_ENTRY(ov::opset1::FloorMod),
+            MAP_ENTRY(ov::opset1::Mod),
+            MAP_ENTRY(ov::opset4::Proposal),
+            MAP_ENTRY(ov::opset1::FakeQuantize),
             MAP_ENTRY(ov::op::v13::FakeConvert),
-            MAP_ENTRY(ov::opset7::MatMul),
-            MAP_ENTRY(ov::opset7::Tan),
-            MAP_ENTRY(ov::opset7::Tanh),
-            MAP_ENTRY(ov::opset7::Sin),
-            MAP_ENTRY(ov::opset7::Cos),
-            MAP_ENTRY(ov::opset7::Sqrt),
-            MAP_ENTRY(ov::opset7::Sinh),
-            MAP_ENTRY(ov::opset7::Cosh),
-            MAP_ENTRY(ov::opset7::Asinh),
-            MAP_ENTRY(ov::opset7::Acosh),
-            MAP_ENTRY(ov::opset7::Atanh),
-            MAP_ENTRY(ov::opset7::Log),
-            MAP_ENTRY(ov::opset7::Selu),
+            MAP_ENTRY(ov::opset1::MatMul),
+            MAP_ENTRY(ov::opset1::Tan),
+            MAP_ENTRY(ov::opset1::Tanh),
+            MAP_ENTRY(ov::opset1::Sin),
+            MAP_ENTRY(ov::opset1::Cos),
+            MAP_ENTRY(ov::opset1::Sqrt),
+            MAP_ENTRY(ov::opset1::Sinh),
+            MAP_ENTRY(ov::opset1::Cosh),
+            MAP_ENTRY(ov::opset4::Asinh),
+            MAP_ENTRY(ov::opset4::Acosh),
+            MAP_ENTRY(ov::opset4::Atanh),
+            MAP_ENTRY(ov::opset1::Log),
+            MAP_ENTRY(ov::opset1::Selu),
             MAP_ENTRY(ov::opset2::Gelu),
-            MAP_ENTRY(ov::opset7::Exp),
-            MAP_ENTRY(ov::opset7::HSwish),
-            MAP_ENTRY(ov::opset7::Floor),
-            MAP_ENTRY(ov::opset7::Round),
-            MAP_ENTRY(ov::opset7::Mish),
-            MAP_ENTRY(ov::opset7::Erf),
-            MAP_ENTRY(ov::opset7::Broadcast),
-            MAP_ENTRY(ov::opset7::Bucketize),
-            MAP_ENTRY(ov::opset7::Transpose),
-            MAP_ENTRY(ov::opset7::Interpolate),
-            MAP_ENTRY(ov::opset7::TopK),
+            MAP_ENTRY(ov::opset1::Exp),
+            MAP_ENTRY(ov::opset4::HSwish),
+            MAP_ENTRY(ov::opset1::Floor),
+            MAP_ENTRY(ov::opset5::Round),
+            MAP_ENTRY(ov::opset4::Mish),
+            MAP_ENTRY(ov::opset1::Erf),
+            MAP_ENTRY(ov::opset3::Broadcast),
+            MAP_ENTRY(ov::opset3::Bucketize),
+            MAP_ENTRY(ov::opset1::Transpose),
+            MAP_ENTRY(ov::opset4::Interpolate),
             MAP_ENTRY(ov::opset1::TopK),
-            MAP_ENTRY(ov::opset7::RegionYolo),
-            MAP_ENTRY(ov::opset7::ReorgYolo),
+            MAP_ENTRY(ov::opset3::TopK),
+            MAP_ENTRY(ov::opset1::RegionYolo),
+            MAP_ENTRY(ov::opset2::ReorgYolo),
             MAP_ENTRY(ov::opset1::DetectionOutput),
-            MAP_ENTRY(ov::opset7::NormalizeL2),
-            MAP_ENTRY(ov::opset7::CumSum),
+            MAP_ENTRY(ov::opset1::NormalizeL2),
+            MAP_ENTRY(ov::opset3::CumSum),
             MAP_ENTRY(ov::opset9::Eye),
             MAP_ENTRY(ov::opset4::MVN),
             MAP_ENTRY(ov::opset6::MVN),
-            MAP_ENTRY(ov::opset7::Concat),
-            MAP_ENTRY(ov::opset7::ROIPooling),
-            MAP_ENTRY(ov::opset7::PSROIPooling),
+            MAP_ENTRY(ov::opset1::Concat),
+            MAP_ENTRY(ov::opset2::ROIPooling),
+            MAP_ENTRY(ov::opset1::PSROIPooling),
             MAP_ENTRY(ov::op::v9::ROIAlign),
-            MAP_ENTRY(ov::opset7::StridedSlice),
-            MAP_ENTRY(ov::opset7::PRelu),
-            MAP_ENTRY(ov::opset7::Swish),
-            MAP_ENTRY(ov::opset7::GRN),
-            MAP_ENTRY(ov::opset7::Negative),
-            MAP_ENTRY(ov::opset7::Sign),
-            MAP_ENTRY(ov::opset7::CTCGreedyDecoder),
-            MAP_ENTRY(ov::opset7::CTCGreedyDecoderSeqLen),
+            MAP_ENTRY(ov::opset1::StridedSlice),
+            MAP_ENTRY(ov::opset1::PRelu),
+            MAP_ENTRY(ov::opset4::Swish),
+            MAP_ENTRY(ov::opset1::GRN),
+            MAP_ENTRY(ov::opset1::Negative),
+            MAP_ENTRY(ov::opset1::Sign),
+            MAP_ENTRY(ov::opset1::CTCGreedyDecoder),
+            MAP_ENTRY(ov::opset6::CTCGreedyDecoderSeqLen),
             MAP_ENTRY(ov::opset1::Pad),
-            MAP_ENTRY(ov::opset7::LSTMCell),
-            MAP_ENTRY(ov::opset7::Subtract),
-            MAP_ENTRY(ov::opset7::LogicalAnd),
-            MAP_ENTRY(ov::opset7::LSTMSequence),
-            MAP_ENTRY(ov::opset7::Ceiling),
-            MAP_ENTRY(ov::opset7::SoftPlus),
-            MAP_ENTRY(ov::opset7::Equal),
-            MAP_ENTRY(ov::opset7::Select),
+            MAP_ENTRY(ov::opset4::LSTMCell),
+            MAP_ENTRY(ov::opset1::Subtract),
+            MAP_ENTRY(ov::opset1::LogicalAnd),
+            MAP_ENTRY(ov::opset1::LSTMSequence),
+            MAP_ENTRY(ov::opset1::Ceiling),
+            MAP_ENTRY(ov::opset4::SoftPlus),
+            MAP_ENTRY(ov::opset1::Equal),
+            MAP_ENTRY(ov::opset1::Select),
             MAP_ENTRY(ov::opset9::NonMaxSuppression),
             MAP_ENTRY(ov::op::internal::NonMaxSuppressionIEInternal),
-            MAP_ENTRY(ov::opset7::DepthToSpace),
-            MAP_ENTRY(ov::opset7::ReverseSequence),
-            MAP_ENTRY(ov::opset7::Less),
-            MAP_ENTRY(ov::opset7::LessEqual),
-            MAP_ENTRY(ov::opset7::NotEqual),
-            MAP_ENTRY(ov::opset7::Greater),
-            MAP_ENTRY(ov::opset7::GreaterEqual),
-            MAP_ENTRY(ov::opset7::LogicalNot),
-            MAP_ENTRY(ov::opset7::LogicalOr),
-            MAP_ENTRY(ov::opset7::LogicalXor),
+            MAP_ENTRY(ov::opset1::DepthToSpace),
+            MAP_ENTRY(ov::opset1::ReverseSequence),
+            MAP_ENTRY(ov::opset1::Less),
+            MAP_ENTRY(ov::opset1::LessEqual),
+            MAP_ENTRY(ov::opset1::NotEqual),
+            MAP_ENTRY(ov::opset1::Greater),
+            MAP_ENTRY(ov::opset1::GreaterEqual),
+            MAP_ENTRY(ov::opset1::LogicalNot),
+            MAP_ENTRY(ov::opset1::LogicalOr),
+            MAP_ENTRY(ov::opset1::LogicalXor),
             MAP_ENTRY(ov::op::v13::BitwiseAnd),
             MAP_ENTRY(ov::op::v13::BitwiseOr),
             MAP_ENTRY(ov::op::v13::BitwiseXor),
             MAP_ENTRY(ov::op::v13::BitwiseNot),
-            MAP_ENTRY(ov::opset7::SpaceToDepth),
-            MAP_ENTRY(ov::opset7::BatchToSpace),
-            MAP_ENTRY(ov::opset7::SpaceToBatch),
-            MAP_ENTRY(ov::opset7::ExtractImagePatches),
-            MAP_ENTRY(ov::opset7::Abs),
-            MAP_ENTRY(ov::opset7::Atan),
-            MAP_ENTRY(ov::opset7::Asin),
-            MAP_ENTRY(ov::opset7::Acos),
+            MAP_ENTRY(ov::opset1::SpaceToDepth),
+            MAP_ENTRY(ov::opset2::BatchToSpace),
+            MAP_ENTRY(ov::opset2::SpaceToBatch),
+            MAP_ENTRY(ov::opset3::ExtractImagePatches),
+            MAP_ENTRY(ov::opset1::Abs),
+            MAP_ENTRY(ov::opset1::Atan),
+            MAP_ENTRY(ov::opset1::Asin),
+            MAP_ENTRY(ov::opset1::Acos),
             MAP_ENTRY(ov::opset7::Roll),
-            MAP_ENTRY(ov::opset7::HSigmoid),
-            MAP_ENTRY(ov::opset7::HardSigmoid),
-            MAP_ENTRY(ov::opset7::EmbeddingBagOffsetsSum),
-            MAP_ENTRY(ov::opset7::EmbeddingSegmentsSum),
-            MAP_ENTRY(ov::opset7::EmbeddingBagPackedSum),
+            MAP_ENTRY(ov::opset5::HSigmoid),
+            MAP_ENTRY(ov::opset1::HardSigmoid),
+            MAP_ENTRY(ov::opset3::EmbeddingBagOffsetsSum),
+            MAP_ENTRY(ov::opset3::EmbeddingSegmentsSum),
+            MAP_ENTRY(ov::opset3::EmbeddingBagPackedSum),
             MAP_ENTRY(ov::opset3::Assign),
             MAP_ENTRY(ov::opset3::ReadValue),
             MAP_ENTRY(ov::opset6::Assign),
             MAP_ENTRY(ov::opset6::ReadValue),
-            MAP_ENTRY(ov::opset7::GRUCell),
-            MAP_ENTRY(ov::opset7::GRUSequence),
-            MAP_ENTRY(ov::opset7::DeformablePSROIPooling),
+            MAP_ENTRY(ov::opset3::GRUCell),
+            MAP_ENTRY(ov::opset5::GRUSequence),
+            MAP_ENTRY(ov::opset1::DeformablePSROIPooling),
             MAP_ENTRY(ov::opset1::TensorIterator),
             MAP_ENTRY(ov::opset7::DFT),
             MAP_ENTRY(ov::opset7::IDFT),
@@ -309,7 +310,7 @@ NGraphImporter::Callback NGraphImporter::getParser(const std::shared_ptr<ov::Nod
             MAP_ENTRY(ov::opset9::IRDFT),
             MAP_ENTRY(ov::opset8::If),
             MAP_ENTRY(ov::opset1::ShapeOf),
-            MAP_ENTRY(ov::opset7::NonZero),
+            MAP_ENTRY(ov::opset3::NonZero),
     };
 
 #undef MAP_ENTRY
@@ -454,9 +455,9 @@ mlir::func::FuncOp NGraphImporter::buildMainFunc(mlir::OpBuilder& moduleBuilder,
         outputTypes.push_back(importTensor(boundedTensorShape, result->get_input_element_type(0)));
     }
 
+    const auto funcLoc = IE::createLayerLocation(_ctx, "main", "Func");
     const auto funcType = mlir::FunctionType::get(_ctx, ArrayRef(inputTypes), ArrayRef(outputTypes));
-
-    auto func = moduleBuilder.create<mlir::func::FuncOp>(mlir::UnknownLoc::get(_ctx), funcName, funcType);
+    auto func = moduleBuilder.create<mlir::func::FuncOp>(funcLoc, funcName, funcType);
 
     OpBuilderLogger builderLog(_log.nest());
     auto builder = mlir::OpBuilder::atBlockBegin(func.addEntryBlock(), &builderLog);
@@ -628,14 +629,20 @@ void NGraphImporter::buildBlockFromBody(mlir::Location loc, mlir::OpBuilder& bui
     }
 
     for (const auto& origNode : _netGraph->get_ordered_ops()) {
-        _log.trace("Convert {0} layer {1}", origNode->get_type_name(), origNode->get_friendly_name());
         const auto parser = NGraphImporter::getParser(origNode);
 
+        // Add tensor iterator loc as prefix for node name to make node loc unique
+        auto origName = origNode->get_friendly_name();
+        origNode->set_friendly_name(stringifyPrimaryLocation(loc) + "/" + origName);
         if (parser != nullptr) {
             (this->*parser)(builder, origNode);
         } else {
             parseNodeAsStub(builder, origNode);
         }
+        _log.trace("Convert {0} layer {1}", origNode->get_type_name(), origNode->get_friendly_name());
+        // Here restore the node name to generate clean names.
+        // In some cases, 2 tensor iterator node share the same _netGraph.
+        origNode->set_friendly_name(origName);
     }
     SmallVector<mlir::Value> blockOutputs;
     blockOutputs.reserve(_netGraph->get_results().size());
@@ -723,7 +730,7 @@ void NGraphImporter::parseNodeAsStub(mlir::OpBuilder& builder, const OrigNodePtr
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::BatchToSpace>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset2::BatchToSpace>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::opset7::BatchToSpace>::value,
                   "opset operation mismatch");
 
@@ -737,7 +744,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Constant>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Constant>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::Constant>::value,
                   "opset operation mismatch");
 
@@ -786,7 +793,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Convert>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Convert>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::Convert>::value,
                   "opset operation mismatch");
 
@@ -801,7 +808,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::ConvertLike>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::ConvertLike>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::ConvertLike>::value,
                   "opset operation mismatch");
 
@@ -828,7 +835,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::LogSoftmax>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset5::LogSoftmax>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::opset7::LogSoftmax>::value,
                   "opset operation mismatch");
 
@@ -843,7 +850,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Tile>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Tile>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::Tile>::value,
                   "opset operation mismatch");
 
@@ -854,7 +861,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Relu>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Relu>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::Relu>::value,
                   "opset operation mismatch");
 
@@ -866,7 +873,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Split>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Split>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::Split>::value,
                   "opset operation mismatch");
 
@@ -881,7 +888,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Power>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Power>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::Power>::value,
                   "opset operation mismatch");
 
@@ -896,7 +903,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Multiply>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Multiply>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::Multiply>::value,
                   "opset operation mismatch");
 
@@ -911,7 +918,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::MatMul>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::MatMul>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::MatMul>::value,
                   "opset operation mismatch");
 
@@ -924,7 +931,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Convolution>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Convolution>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::Convolution>::value,
                   "opset operation mismatch");
 
@@ -943,7 +950,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
 }
 
 void NGraphImporter::parseNode(mlir::OpBuilder& builder,
-                               const std::shared_ptr<ov::opset7::GroupConvolution>& origNode) {
+                               const std::shared_ptr<ov::opset1::GroupConvolution>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::GroupConvolution>::value,
                   "opset operation mismatch");
 
@@ -965,7 +972,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder,
 }
 
 void NGraphImporter::parseNode(mlir::OpBuilder& builder,
-                               const std::shared_ptr<ov::opset7::ConvolutionBackpropData>& origNode) {
+                               const std::shared_ptr<ov::opset1::ConvolutionBackpropData>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::ConvolutionBackpropData>::value,
                   "opset operation mismatch");
 
@@ -988,7 +995,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder,
 }
 
 void NGraphImporter::parseNode(mlir::OpBuilder& builder,
-                               const std::shared_ptr<ov::opset7::GroupConvolutionBackpropData>& origNode) {
+                               const std::shared_ptr<ov::opset1::GroupConvolutionBackpropData>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::GroupConvolutionBackpropData>::value,
                   "opset operation mismatch");
 
@@ -1010,7 +1017,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder,
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::AvgPool>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::AvgPool>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::AvgPool>::value,
                   "opset operation mismatch");
 
@@ -1032,7 +1039,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::MaxPool>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::MaxPool>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::MaxPool>::value,
                   "opset operation mismatch");
 
@@ -1094,7 +1101,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Divide>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Divide>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::Divide>::value,
                   "opset operation mismatch");
 
@@ -1110,7 +1117,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
 }
 
 void NGraphImporter::parseNode(mlir::OpBuilder& builder,
-                               const std::shared_ptr<ov::opset7::SquaredDifference>& origNode) {
+                               const std::shared_ptr<ov::opset1::SquaredDifference>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::SquaredDifference>::value,
                   "opset operation mismatch");
 
@@ -1125,7 +1132,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder,
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::FloorMod>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::FloorMod>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::FloorMod>::value,
                   "opset operation mismatch");
 
@@ -1140,7 +1147,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Mod>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Mod>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::Mod>::value,
                   "opset operation mismatch");
 
@@ -1155,7 +1162,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::ShuffleChannels>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::ShuffleChannels>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::ShuffleChannels>::value,
                   "opset operation mismatch");
 
@@ -1201,7 +1208,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::GatherTree>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::GatherTree>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::opset7::GatherTree>::value,
                   "opset operation mismatch");
 
@@ -1304,7 +1311,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::OneHot>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset12::OneHot>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::OneHot>::value,
                   "opset operation mismatch");
 
@@ -1322,7 +1329,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
 }
 
 void NGraphImporter::parseNode(mlir::OpBuilder& builder,
-                               const std::shared_ptr<ov::opset7::BatchNormInference>& origNode) {
+                               const std::shared_ptr<ov::opset5::BatchNormInference>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v5::BatchNormInference>::value,
                   "opset operation mismatch");
 
@@ -1337,7 +1344,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder,
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::GatherElements>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset6::GatherElements>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v6::GatherElements>::value,
                   "opset operation mismatch");
 
@@ -1354,7 +1361,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::ScatterNDUpdate>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset4::ScatterNDUpdate>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v3::ScatterNDUpdate>::value,
                   "opset operation mismatch");
 
@@ -1366,7 +1373,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::ScatterUpdate>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset3::ScatterUpdate>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v3::ScatterUpdate>::value,
                   "opset operation mismatch");
 
@@ -1380,7 +1387,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
 }
 
 void NGraphImporter::parseNode(mlir::OpBuilder& builder,
-                               const std::shared_ptr<ov::opset7::ScatterElementsUpdate>& origNode) {
+                               const std::shared_ptr<ov::opset3::ScatterElementsUpdate>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v3::ScatterElementsUpdate>::value,
                   "opset operation mismatch");
 
@@ -1394,7 +1401,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder,
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Reshape>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Reshape>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::Reshape>::value,
                   "opset operation mismatch");
 
@@ -1407,7 +1414,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Minimum>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Minimum>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::Minimum>::value,
                   "opset operation mismatch");
 
@@ -1422,7 +1429,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Maximum>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Maximum>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::Maximum>::value,
                   "opset operation mismatch");
 
@@ -1437,7 +1444,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Clamp>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Clamp>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::Clamp>::value,
                   "opset operation mismatch");
 
@@ -1454,7 +1461,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Proposal>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset4::Proposal>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v4::Proposal>::value,
                   "opset operation mismatch");
 
@@ -1470,7 +1477,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Unsqueeze>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Unsqueeze>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::Unsqueeze>::value,
                   "opset operation mismatch");
 
@@ -1482,7 +1489,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::LRN>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::LRN>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::LRN>::value,
                   "opset operation mismatch");
 
@@ -1500,12 +1507,12 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     const auto biasAttr = getFPAttr(_ctx, bias);
     const auto sizeAttr = getIntAttr(_ctx, size);
 
-    auto op = builder.create<IE::LRNOp>(createLocation(origNode), inputs[0], inputs[1], alphaAttr, betaAttr, biasAttr,
-                                        sizeAttr);
+    auto op = builder.create<IE::LRNOp>(createLocation(origNode), inputs[0], inputs[1], nullptr, alphaAttr, betaAttr,
+                                        biasAttr, sizeAttr);
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Broadcast>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset3::Broadcast>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v3::Broadcast>::value,
                   "opset operation mismatch");
 
@@ -1526,7 +1533,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Bucketize>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset3::Bucketize>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v3::Bucketize>::value,
                   "opset operation mismatch");
 
@@ -1546,7 +1553,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::ReduceMax>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::ReduceMax>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::ReduceMax>::value,
                   "opset operation mismatch");
 
@@ -1560,7 +1567,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::ReduceMean>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::ReduceMean>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::ReduceMean>::value,
                   "opset operation mismatch");
 
@@ -1574,7 +1581,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::ReduceLogicalOr>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::ReduceLogicalOr>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::ReduceLogicalOr>::value,
                   "opset operation mismatch");
 
@@ -1589,7 +1596,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
 }
 
 void NGraphImporter::parseNode(mlir::OpBuilder& builder,
-                               const std::shared_ptr<ov::opset7::ReduceLogicalAnd>& origNode) {
+                               const std::shared_ptr<ov::opset1::ReduceLogicalAnd>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::ReduceLogicalAnd>::value,
                   "opset operation mismatch");
 
@@ -1604,7 +1611,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder,
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::ReduceProd>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::ReduceProd>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::ReduceProd>::value,
                   "opset operation mismatch");
 
@@ -1618,7 +1625,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::ReduceSum>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::ReduceSum>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::ReduceSum>::value,
                   "opset operation mismatch");
 
@@ -1632,7 +1639,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::ReduceMin>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::ReduceMin>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::ReduceMin>::value,
                   "opset operation mismatch");
 
@@ -1646,7 +1653,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::ReduceL1>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset4::ReduceL1>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v4::ReduceL1>::value,
                   "opset operation mismatch");
 
@@ -1660,7 +1667,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::ReduceL2>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset4::ReduceL2>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v4::ReduceL2>::value,
                   "opset operation mismatch");
 
@@ -1674,7 +1681,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Sigmoid>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Sigmoid>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::Sigmoid>::value,
                   "opset operation mismatch");
 
@@ -1703,7 +1710,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Squeeze>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Squeeze>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::Squeeze>::value,
                   "opset operation mismatch");
 
@@ -1720,7 +1727,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     }
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Transpose>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Transpose>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::Transpose>::value,
                   "opset operation mismatch");
 
@@ -1733,7 +1740,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Tan>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Tan>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::Tan>::value,
                   "opset operation mismatch");
 
@@ -1745,7 +1752,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Tanh>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Tanh>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::Tanh>::value,
                   "opset operation mismatch");
 
@@ -1757,7 +1764,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Sin>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Sin>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::Sin>::value,
                   "opset operation mismatch");
 
@@ -1803,7 +1810,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Cosh>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Cosh>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::Cosh>::value,
                   "opset operation mismatch");
     const auto inputs = getInputs(origNode);
@@ -1814,7 +1821,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Asinh>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset4::Asinh>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v3::Asinh>::value,
                   "opset operation mismatch");
     const auto inputs = getInputs(origNode);
@@ -1825,7 +1832,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Acosh>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset4::Acosh>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v3::Acosh>::value,
                   "opset operation mismatch");
     const auto inputs = getInputs(origNode);
@@ -1836,7 +1843,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Atanh>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset4::Atanh>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v3::Atanh>::value,
                   "opset operation mismatch");
     const auto inputs = getInputs(origNode);
@@ -1859,7 +1866,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Log>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Log>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::Log>::value,
                   "opset operation mismatch");
     const auto inputs = getInputs(origNode);
@@ -1870,7 +1877,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Selu>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Selu>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::Selu>::value,
                   "opset operation mismatch");
 
@@ -1895,7 +1902,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Elu>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Elu>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::Elu>::value,
                   "opset operation mismatch");
 
@@ -1910,7 +1917,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::HSwish>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset4::HSwish>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v4::HSwish>::value,
                   "opset operation mismatch");
 
@@ -1933,7 +1940,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Round>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset5::Round>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v5::Round>::value,
                   "opset operation mismatch");
     const auto inputs = getInputs(origNode);
@@ -1944,7 +1951,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Mish>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset4::Mish>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v4::Mish>::value,
                   "opset operation mismatch");
 
@@ -1956,7 +1963,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Erf>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Erf>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::Erf>::value,
                   "opset operation mismatch");
 
@@ -1968,7 +1975,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::FakeQuantize>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::FakeQuantize>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::FakeQuantize>::value,
                   "opset operation mismatch");
 
@@ -2018,7 +2025,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Exp>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Exp>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::Exp>::value,
                   "opset operation mismatch");
 
@@ -2030,7 +2037,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::StridedSlice>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::StridedSlice>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::StridedSlice>::value,
                   "opset operation mismatch");
 
@@ -2050,7 +2057,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::ROIPooling>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset2::ROIPooling>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::ROIPooling>::value,
                   "opset operation mismatch");
 
@@ -2087,7 +2094,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Concat>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Concat>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::Concat>::value,
                   "opset operation mismatch");
 
@@ -2102,7 +2109,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Interpolate>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset4::Interpolate>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v4::Interpolate>::value,
                   "opset operation mismatch");
 
@@ -2161,7 +2168,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::RegionYolo>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::RegionYolo>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::RegionYolo>::value,
                   "opset operation mismatch");
 
@@ -2183,7 +2190,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::ReorgYolo>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset2::ReorgYolo>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::ReorgYolo>::value,
                   "opset operation mismatch");
 
@@ -2227,7 +2234,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::NormalizeL2>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::NormalizeL2>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::NormalizeL2>::value,
                   "opset operation mismatch");
 
@@ -2243,7 +2250,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::CumSum>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset3::CumSum>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::opset7::CumSum>::value,
                   "opset operation mismatch");
 
@@ -2315,7 +2322,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::PRelu>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::PRelu>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::PRelu>::value,
                   "opset operation mismatch");
 
@@ -2327,7 +2334,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Swish>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset4::Swish>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v4::Swish>::value,
                   "opset operation mismatch");
 
@@ -2347,7 +2354,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::GRN>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::GRN>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::GRN>::value,
                   "opset operation mismatch");
 
@@ -2361,7 +2368,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Negative>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Negative>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::Negative>::value,
                   "opset operation mismatch");
 
@@ -2373,7 +2380,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Sign>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Sign>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::Sign>::value,
                   "opset operation mismatch");
 
@@ -2386,7 +2393,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
 }
 
 void NGraphImporter::parseNode(mlir::OpBuilder& builder,
-                               const std::shared_ptr<ov::opset7::CTCGreedyDecoder>& origNode) {
+                               const std::shared_ptr<ov::opset1::CTCGreedyDecoder>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::CTCGreedyDecoder>::value,
                   "opset operation mismatch");
 
@@ -2400,7 +2407,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder,
 }
 
 void NGraphImporter::parseNode(mlir::OpBuilder& builder,
-                               const std::shared_ptr<ov::opset7::CTCGreedyDecoderSeqLen>& origNode) {
+                               const std::shared_ptr<ov::opset6::CTCGreedyDecoderSeqLen>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v6::CTCGreedyDecoderSeqLen>::value,
                   "opset operation mismatch");
 
@@ -2439,7 +2446,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     }
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::LSTMCell>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset4::LSTMCell>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v4::LSTMCell>::value,
                   "opset operation mismatch");
 
@@ -2461,8 +2468,8 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::LSTMSequence>& origNode) {
-    static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::opset7::LSTMSequence>::value,
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::LSTMSequence>& origNode) {
+    static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::opset1::LSTMSequence>::value,
                   "opset operation mismatch");
     const auto inputs = getInputs(origNode);
     VPUX_THROW_UNLESS(inputs.size() == 7, "nGraph LSTMSequence node '{0}' has unsupported number of inputs '{1}'",
@@ -2505,7 +2512,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Subtract>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Subtract>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::Subtract>::value,
                   "opset operation mismatch");
 
@@ -2520,7 +2527,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::LogicalAnd>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::LogicalAnd>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::opset7::LogicalAnd>::value,
                   "opset operation mismatch");
 
@@ -2535,7 +2542,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Ceiling>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Ceiling>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::Ceiling>::value,
                   "opset operation mismatch");
 
@@ -2547,7 +2554,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Equal>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Equal>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::Equal>::value,
                   "opset operation mismatch");
 
@@ -2562,7 +2569,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Select>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Select>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::Select>::value,
                   "opset operation mismatch");
 
@@ -2626,7 +2633,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder,
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::ReverseSequence>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::ReverseSequence>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::ReverseSequence>::value,
                   "opset operation mismatch");
 
@@ -2643,7 +2650,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::SoftPlus>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset4::SoftPlus>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v4::SoftPlus>::value,
                   "opset operation mismatch");
 
@@ -2656,7 +2663,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Less>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Less>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::Less>::value,
                   "opset operation mismatch");
 
@@ -2671,7 +2678,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::LessEqual>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::LessEqual>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::LessEqual>::value,
                   "opset operation mismatch");
 
@@ -2687,7 +2694,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Greater>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Greater>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::Greater>::value,
                   "opset operation mismatch");
 
@@ -2702,7 +2709,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::GreaterEqual>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::GreaterEqual>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::GreaterEqual>::value,
                   "opset operation mismatch");
 
@@ -2718,7 +2725,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::NotEqual>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::NotEqual>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::NotEqual>::value,
                   "opset operation mismatch");
 
@@ -2733,7 +2740,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::DepthToSpace>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::DepthToSpace>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::DepthToSpace>::value,
                   "opset operation mismatch");
 
@@ -2805,7 +2812,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::LogicalNot>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::LogicalNot>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::LogicalNot>::value,
                   "opset operation mismatch");
 
@@ -2817,7 +2824,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::LogicalOr>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::LogicalOr>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::LogicalOr>::value,
                   "opset operation mismatch");
 
@@ -2832,7 +2839,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::LogicalXor>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::LogicalXor>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::LogicalXor>::value,
                   "opset operation mismatch");
 
@@ -2847,7 +2854,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::SpaceToDepth>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::SpaceToDepth>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::SpaceToDepth>::value,
                   "opset operation mismatch");
 
@@ -2863,7 +2870,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::SpaceToBatch>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset2::SpaceToBatch>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::opset7::SpaceToBatch>::value,
                   "opset operation mismatch");
 
@@ -2878,7 +2885,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
 }
 
 void NGraphImporter::parseNode(mlir::OpBuilder& builder,
-                               const std::shared_ptr<ov::opset7::ExtractImagePatches>& origNode) {
+                               const std::shared_ptr<ov::opset3::ExtractImagePatches>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v3::ExtractImagePatches>::value,
                   "opset operation mismatch");
     const auto inputs = getInputs(origNode);
@@ -2896,7 +2903,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder,
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Abs>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Abs>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::Abs>::value,
                   "opset operation mismatch");
 
@@ -2908,7 +2915,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::HSigmoid>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset5::HSigmoid>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v5::HSigmoid>::value,
                   "opset operation mismatch");
 
@@ -2920,7 +2927,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Atan>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Atan>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::Atan>::value,
                   "opset operation mismatch");
 
@@ -2944,7 +2951,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::Acos>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Acos>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::Acos>::value,
                   "opset operation mismatch");
 
@@ -2955,7 +2962,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     auto op = builder.create<IE::AcosOp>(createLocation(origNode), inputs[0]);
     addOutputs(origNode, op);
 }
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::PSROIPooling>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::PSROIPooling>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::PSROIPooling>::value,
                   "opset operation mismatch");
 
@@ -2975,7 +2982,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::HardSigmoid>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::HardSigmoid>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::HardSigmoid>::value,
                   "opset operation mismatch");
 
@@ -2990,7 +2997,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
 }
 
 void NGraphImporter::parseNode(mlir::OpBuilder& builder,
-                               const std::shared_ptr<ov::opset7::EmbeddingBagOffsetsSum>& origNode) {
+                               const std::shared_ptr<ov::opset3::EmbeddingBagOffsetsSum>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v3::EmbeddingBagOffsetsSum>::value,
                   "opset operation mismatch");
 
@@ -3004,7 +3011,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder,
 }
 
 void NGraphImporter::parseNode(mlir::OpBuilder& builder,
-                               const std::shared_ptr<ov::opset7::EmbeddingSegmentsSum>& origNode) {
+                               const std::shared_ptr<ov::opset3::EmbeddingSegmentsSum>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v3::EmbeddingSegmentsSum>::value,
                   "opset operation mismatch");
 
@@ -3023,7 +3030,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder,
 }
 
 void NGraphImporter::parseNode(mlir::OpBuilder& builder,
-                               const std::shared_ptr<ov::opset7::EmbeddingBagPackedSum>& origNode) {
+                               const std::shared_ptr<ov::opset3::EmbeddingBagPackedSum>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v3::EmbeddingBagPackedSum>::value,
                   "opset operation mismatch");
 
@@ -3093,7 +3100,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::GRUCell>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset3::GRUCell>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v3::GRUCell>::value,
                   "opset operation mismatch");
 
@@ -3119,7 +3126,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::GRUSequence>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset5::GRUSequence>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v5::GRUSequence>::value,
                   "opset operation mismatch");
 
@@ -3170,7 +3177,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
 }
 
 void NGraphImporter::parseNode(mlir::OpBuilder& builder,
-                               const std::shared_ptr<ov::opset7::DeformablePSROIPooling>& origNode) {
+                               const std::shared_ptr<ov::opset1::DeformablePSROIPooling>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v1::DeformablePSROIPooling>::value,
                   "opset operation mismatch");
 
@@ -3243,7 +3250,7 @@ void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<o
     addOutputs(origNode, op);
 }
 
-void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::NonZero>& origNode) {
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset3::NonZero>& origNode) {
     static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v3::NonZero>::value,
                   "opset operation mismatch");
 
@@ -3567,20 +3574,20 @@ IE::ProposalAttr NGraphImporter::importProposalAttrs(const ov::op::v0::Proposal:
                                  boxSizeScaleAttr, boxCoordinateScaleAttr, frameworkAttr, inferProbsAttr);
 }
 
-IE::InterpolateAttr NGraphImporter::importInterpolateAttrs(const ov::opset7::Interpolate::InterpolateAttrs& val) {
+IE::InterpolateAttr NGraphImporter::importInterpolateAttrs(const ov::opset4::Interpolate::InterpolateAttrs& val) {
     // mode
     IE::InterpolateModeAttr modeAttr;
     switch (val.mode) {
-    case ov::opset7::Interpolate::InterpolateMode::NEAREST:
+    case ov::opset4::Interpolate::InterpolateMode::NEAREST:
         modeAttr = IE::InterpolateModeAttr::get(_ctx, IE::InterpolateMode::NEAREST);
         break;
-    case ov::opset7::Interpolate::InterpolateMode::LINEAR:
+    case ov::opset4::Interpolate::InterpolateMode::LINEAR:
         modeAttr = IE::InterpolateModeAttr::get(_ctx, IE::InterpolateMode::LINEAR);
         break;
-    case ov::opset7::Interpolate::InterpolateMode::LINEAR_ONNX:
+    case ov::opset4::Interpolate::InterpolateMode::LINEAR_ONNX:
         modeAttr = IE::InterpolateModeAttr::get(_ctx, IE::InterpolateMode::LINEAR_ONNX);
         break;
-    case ov::opset7::Interpolate::InterpolateMode::CUBIC:
+    case ov::opset4::Interpolate::InterpolateMode::CUBIC:
         modeAttr = IE::InterpolateModeAttr::get(_ctx, IE::InterpolateMode::CUBIC);
         break;
     default:
@@ -3590,10 +3597,10 @@ IE::InterpolateAttr NGraphImporter::importInterpolateAttrs(const ov::opset7::Int
     // shape calculation mode
     IE::InterpolateCalcModeAttr calcModeAttr;
     switch (val.shape_calculation_mode) {
-    case ov::opset7::Interpolate::ShapeCalcMode::SIZES:
+    case ov::opset4::Interpolate::ShapeCalcMode::SIZES:
         calcModeAttr = IE::InterpolateCalcModeAttr::get(_ctx, IE::InterpolateCalcMode::SIZES);
         break;
-    case ov::opset7::Interpolate::ShapeCalcMode::SCALES:
+    case ov::opset4::Interpolate::ShapeCalcMode::SCALES:
         calcModeAttr = IE::InterpolateCalcModeAttr::get(_ctx, IE::InterpolateCalcMode::SCALES);
         break;
     default:
@@ -3603,19 +3610,19 @@ IE::InterpolateAttr NGraphImporter::importInterpolateAttrs(const ov::opset7::Int
     // coordinate transformation mode
     IE::InterpolateCoordModeAttr coordModeAttr;
     switch (val.coordinate_transformation_mode) {
-    case ov::opset7::Interpolate::CoordinateTransformMode::HALF_PIXEL:
+    case ov::opset4::Interpolate::CoordinateTransformMode::HALF_PIXEL:
         coordModeAttr = IE::InterpolateCoordModeAttr::get(_ctx, IE::InterpolateCoordMode::HALF_PIXEL);
         break;
-    case ov::opset7::Interpolate::CoordinateTransformMode::PYTORCH_HALF_PIXEL:
+    case ov::opset4::Interpolate::CoordinateTransformMode::PYTORCH_HALF_PIXEL:
         coordModeAttr = IE::InterpolateCoordModeAttr::get(_ctx, IE::InterpolateCoordMode::PYTORCH_HALF_PIXEL);
         break;
-    case ov::opset7::Interpolate::CoordinateTransformMode::ASYMMETRIC:
+    case ov::opset4::Interpolate::CoordinateTransformMode::ASYMMETRIC:
         coordModeAttr = IE::InterpolateCoordModeAttr::get(_ctx, IE::InterpolateCoordMode::ASYMMETRIC);
         break;
-    case ov::opset7::Interpolate::CoordinateTransformMode::TF_HALF_PIXEL_FOR_NN:
+    case ov::opset4::Interpolate::CoordinateTransformMode::TF_HALF_PIXEL_FOR_NN:
         coordModeAttr = IE::InterpolateCoordModeAttr::get(_ctx, IE::InterpolateCoordMode::TF_HALF_PIXEL_FOR_NN);
         break;
-    case ov::opset7::Interpolate::CoordinateTransformMode::ALIGN_CORNERS:
+    case ov::opset4::Interpolate::CoordinateTransformMode::ALIGN_CORNERS:
         coordModeAttr = IE::InterpolateCoordModeAttr::get(_ctx, IE::InterpolateCoordMode::ALIGN_CORNERS);
         break;
     default:
@@ -3625,19 +3632,19 @@ IE::InterpolateAttr NGraphImporter::importInterpolateAttrs(const ov::opset7::Int
     // coordinate transformation mode
     IE::InterpolateNearestModeAttr nearestModeAttr;
     switch (val.nearest_mode) {
-    case ov::opset7::Interpolate::NearestMode::ROUND_PREFER_FLOOR:
+    case ov::opset4::Interpolate::NearestMode::ROUND_PREFER_FLOOR:
         nearestModeAttr = IE::InterpolateNearestModeAttr::get(_ctx, IE::InterpolateNearestMode::ROUND_PREFER_FLOOR);
         break;
-    case ov::opset7::Interpolate::NearestMode::ROUND_PREFER_CEIL:
+    case ov::opset4::Interpolate::NearestMode::ROUND_PREFER_CEIL:
         nearestModeAttr = IE::InterpolateNearestModeAttr::get(_ctx, IE::InterpolateNearestMode::ROUND_PREFER_CEIL);
         break;
-    case ov::opset7::Interpolate::NearestMode::FLOOR:
+    case ov::opset4::Interpolate::NearestMode::FLOOR:
         nearestModeAttr = IE::InterpolateNearestModeAttr::get(_ctx, IE::InterpolateNearestMode::FLOOR);
         break;
-    case ov::opset7::Interpolate::NearestMode::CEIL:
+    case ov::opset4::Interpolate::NearestMode::CEIL:
         nearestModeAttr = IE::InterpolateNearestModeAttr::get(_ctx, IE::InterpolateNearestMode::CEIL);
         break;
-    case ov::opset7::Interpolate::NearestMode::SIMPLE:
+    case ov::opset4::Interpolate::NearestMode::SIMPLE:
         nearestModeAttr = IE::InterpolateNearestModeAttr::get(_ctx, IE::InterpolateNearestMode::SIMPLE);
         break;
     default:
@@ -3932,6 +3939,9 @@ mlir::RankedTensorType importUserTensor(mlir::MLIRContext* ctx, const ov::descri
 //
 
 static void addCommonOptimizationsPasses(ov::pass::Manager& manager) {
+    // MOCTransformations contain StridedSliceOptimization transformation,
+    // so we must call SliceToStridedSlice before MOCTransformations call
+    manager.register_pass<ov::pass::SliceToStridedSlice>(true);
     // Disable low_precision_enabled as all plugins handle low-precision sub-graph manually
     // before CommonOptimization pipeline execution
     manager.register_pass<ov::pass::MOCTransformations>(true, false);
@@ -4046,13 +4056,12 @@ void NGraphPasses::runNGraphPasses(const std::shared_ptr<ov::Model>& netGraph, m
 
     // MVN Conversion passes
     manager.register_pass<vpux::passes::ConvertLayerNormToMVN>();
-    manager.register_pass<vpux::passes::ConvertMVN6toMVN1>();
 
     manager.register_pass<vpux::passes::ConvertVariadicSplitToStridedSliceOp>();
 
 #if defined(VPUX_DEVELOPER_BUILD) || !defined(NDEBUG)
     if (const auto serializeCanonicalModel = std::getenv("NPU_SERIALIZE_CANONICAL_MODEL")) {
-        if (vpux::envVarStrToBool("NPU_SERIALIZE_CANONICAL_MODEL", serializeCanonicalModel)) {
+        if (intel_npu::envVarStrToBool("NPU_SERIALIZE_CANONICAL_MODEL", serializeCanonicalModel)) {
             const std::string graphName = netGraph->get_friendly_name();
             manager.register_pass<ov::pass::Serialize>(graphName + "_canonical.xml", graphName + "_canonical.bin");
         }
@@ -4181,7 +4190,8 @@ mlir::OwningOpRef<mlir::ModuleOp> vpux::IE::importNetwork(mlir::MLIRContext* ctx
     log.trace("Run common nGraph passes");
     NGraphPasses::runNGraphPasses(model, rootTiming, arch);
 
-    auto module = mlir::ModuleOp::create(mlir::UnknownLoc::get(ctx), StringRef(model->get_friendly_name()));
+    const auto moduleLoc = IE::createLayerLocation(ctx, "module", "Module");
+    auto module = mlir::ModuleOp::create(moduleLoc, StringRef(model->get_friendly_name()));
     addSparsityStatistics(model, module, log);
     const auto mainFuncName = mlir::FlatSymbolRefAttr::get(ctx, "main");
 

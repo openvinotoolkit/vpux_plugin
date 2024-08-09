@@ -5,6 +5,7 @@
 
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/utils/core/range.hpp"
 
@@ -15,21 +16,11 @@ using namespace vpux;
 
 namespace {
 
-mlir::Value getZerosConst(mlir::PatternRewriter& rewriter, ShapeRef constShape, IE::UpsamplingOp origOp) {
-    const auto elemType = origOp.getInput().getType().cast<vpux::NDTypeInterface>().getElementType();
-    const auto dataStorageType = mlir::RankedTensorType::get(to_small_vector(constShape), elemType);
-
-    mlir::DenseElementsAttr denseElementVal = wrapData(dataStorageType, 0.0f);
-    VPUX_THROW_UNLESS(denseElementVal != nullptr,
-                      "Upsampling has incompatible data type {0}, only float16 or float32 are supported", elemType);
-
-    return rewriter.create<Const::DeclareOp>(origOp.getLoc(), dataStorageType, Const::ContentAttr::get(denseElementVal))
-            .getOutput();
-}
-
 auto getConcatResult(mlir::PatternRewriter& rewriter, vpux::Dim axis, int64_t factor, mlir::Value input,
-                     Shape constShape, IE::UpsamplingOp origOp) {
-    auto constZeros = getZerosConst(rewriter, constShape, origOp);
+                     ShapeRef constShape, IE::UpsamplingOp origOp) {
+    const auto zeroType = mlir::RankedTensorType::get(
+            constShape, mlir::cast<NDTypeInterface>(origOp.getInput().getType()).getElementType());
+    auto constZeros = Const::createZerosConst(rewriter, origOp->getLoc(), zeroType);
 
     SmallVector<mlir::Value> concatInputs;
     concatInputs.push_back(input);
@@ -122,7 +113,7 @@ mlir::LogicalResult ConvertUpsamplingToStridedConcatPass::UpsamplingOpConverter:
         for (size_t i = 0; i < upsamplingFactorVector.size(); i++) {
             if (upsamplingFactorVector[i] > 1 && inputShape[Dim(i)] > 1) {
                 upsamplingResult = getConcatResult(rewriter, Dim(i), upsamplingFactorVector[i], upsamplingResult,
-                                                   getShape(upsamplingResult).raw(), origOp);
+                                                   getShape(upsamplingResult), origOp);
             }
         }
         if (needSlicing && (sliceShape != inputShape)) {

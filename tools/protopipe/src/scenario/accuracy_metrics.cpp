@@ -74,3 +74,48 @@ std::string Cosine::str() {
     ss << "Cosine{threshold: " << m_threshold << "}";
     return ss.str();
 }
+
+NRMSE::NRMSE(const double tolerance): m_tolerance(tolerance){};
+
+Result NRMSE::compare(const cv::Mat& lhs, const cv::Mat& rhs) {
+    cv::Mat lhsf32, rhsf32;
+    lhs.convertTo(lhsf32, CV_32F);
+    rhs.convertTo(rhsf32, CV_32F);
+
+    const auto size = lhsf32.total();
+    if (size == 0) {
+        std::stringstream ss;
+        ss << "Empty output and reference tensors, nrmse loss set to 0" << std::endl;
+        return Success{};
+    }
+
+    const auto* lhsptr = lhsf32.ptr<float>();
+    const auto* rhsptr = rhsf32.ptr<float>();
+
+    double error = 0.0;
+    float lhsmax = 0.0, rhsmax = 0.0, lhsmin = 0.0, rhsmin = 0.0;
+
+    for (size_t i = 0; i < size; ++i) {
+        const auto diff = lhsptr[i] - rhsptr[i];
+        error += diff * diff;
+        lhsmax = std::max(lhsptr[i], lhsmax);
+        rhsmax = std::max(rhsptr[i], rhsmax);
+        lhsmin = std::min(lhsptr[i], lhsmin);
+        rhsmin = std::min(rhsptr[i], rhsmin);
+    }
+
+    double nrmse = sqrt(error / size) / std::max(0.001f, std::max(lhsmax - lhsmin, rhsmax - rhsmin));
+
+    if (m_tolerance < nrmse) {
+        std::stringstream ss;
+        ss << nrmse << " > " << m_tolerance;
+        return Error{ss.str()};
+    }
+    return Success{};
+}
+
+std::string NRMSE::str() {
+    std::stringstream ss;
+    ss << "nrmse{tolerance: " << m_tolerance << "}";
+    return ss.str();
+}

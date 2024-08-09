@@ -16,11 +16,11 @@ using namespace vpux;
 
 mlir::LogicalResult vpux::VPU::AvgPoolOp::inferReturnTypes(mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc,
                                                            mlir::ValueRange operands, mlir::DictionaryAttr attrs,
-                                                           mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+                                                           mlir::OpaqueProperties prop, mlir::RegionRange /*regions*/,
                                                            mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::AvgPoolOpAdaptor avgPool(operands, attrs);
+    VPU::AvgPoolOpAdaptor avgPool(operands, attrs, prop);
     if (mlir::failed(avgPool.verify(loc))) {
         return mlir::failure();
     }

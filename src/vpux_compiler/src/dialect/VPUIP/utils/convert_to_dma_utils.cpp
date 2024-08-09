@@ -70,35 +70,10 @@ bool isBeneficialForUsingSWDepthToSpace(VPUIP::SwKernelOp swKernelOp, VPU::ArchK
  * @return true if it's beneficial for using DMA, otherwise false.
  */
 bool isBeneficialForUsingPermuteDMA(NDTypeInterface inType, NDTypeInterface outType, mlir::AffineMap memPerm,
-                                    VPU::ArchKind arch, int64_t dmaPortCount, vpux::Logger log) {
+                                    int64_t dmaPortCount, vpux::Logger log) {
     auto subShapes = VPUIP::getPermuteDMASubInputShapes(inType, outType, memPerm, dmaPortCount, log);
     if (!subShapes.has_value()) {
         return false;
-    }
-
-    if (arch == VPU::ArchKind::NPU30XX) {
-        if (VPUIP::isSplitNeededForPermuteDMA(inType, memPerm)) {
-            log.trace("PermuteDMA split is not supported for VPUX30XX.");
-            return false;
-        }
-
-        // This is a empirical value to set limitation for DMA number.
-        // In some specific case, for example: 1x8x256x256 #NHWC  ->  1x8x256x256 #NCHW
-        // This permuteUPA should be replaced with 256 DMA. Each DMA just with size 8x256. It is inefficient.
-        // It's supposed to get the related DMA and UPA cost by VPUNN in future, please refer ticket #41221.
-        if (subShapes.value().size() > VPUIP::PER_PERMUTE_MAX_DMA_NUMBER) {
-            log.trace("PermuteDMA number should less than {0}, but got {1}.", VPUIP::PER_PERMUTE_MAX_DMA_NUMBER,
-                      subShapes.value().size());
-            return false;
-        }
-
-        return llvm::all_of(subShapes.value(), [](ShapeRef shape) {
-            const auto C = shape[Dims4D::Act::C];
-            // This is a empirical value to set limitation for the src_width in the DMA descriptor. For dst_with
-            // fixed as element size, with smaller src_width, performance tends to be better. It's supposed to get the
-            // related DMA and UPA cost by VPUNN in future, please refer ticket #41221.
-            return C < VPUIP::PERMUTE_DMA_MAX_LENGTH;
-        });
     }
     return true;
 }
@@ -109,34 +84,40 @@ SmallVector<Shape> computeDMASubShape(ShapeRef shape, Dim numPlaneDim, int64_t d
                       "Shape size should be 2 or 3 or 4, but got {0}", shapeSize);
     VPUX_THROW_UNLESS(static_cast<size_t>(numPlaneDim.ind()) < shapeSize,
                       "numPlaneDim index {0} doesn't match shape size {1}", numPlaneDim.ind(), shapeSize);
-    const auto totalNumPlane = shape[numPlaneDim];
-    auto numberDMAs = divUp(totalNumPlane, VPUIP::DMA_MAX_NUMBER_PLANES);
+
+    const auto totalPlaneCount = shape[numPlaneDim];
+    // Enforce hardware limitation: Each DMA plane number must be less than 256
+    //  - 'requiredDMACount' represents the minimum number of DMAs needed to handle the data
+    // Given multiple DMA ports can operate in parallel to move data
+    //  - 'optimizedDMACount' adjusts the DMA count to fully utilize available DMA sources
+    // Example scenario:
+    // Input: 520x16, Output: 16x520, Plane number is 520, DMA Port number is 2
+    // With 2 available DMA ports, the initial 'requiredDMACount' is 3, allowing only the first two PermuteDMAs to run
+    // concurrently. 'optimizedDMACount' adjusts this to 4 to ensure all DMAs are utilized efficiently
+    auto requiredDMACount = divUp(totalPlaneCount, VPUIP::DMA_MAX_NUMBER_PLANES);
+    auto optimizedDMACount = divUp(requiredDMACount, dmaPortCount) * dmaPortCount;
+
+    // Aim to distribute the data size as evenly as possible across PermuteDMAs
+    // Example scenario:
+    // - Input: 521x16, Output: 16x521, Plane number is 521, DMA Port number is 2
+    //   The data is evenly divided into four PermuteDMAs
+    // - The resulting input shapes for the PermuteDMAs are:
+    //   Three segments of 130x16 and one segment of 131x16
+    auto baseSize = totalPlaneCount / optimizedDMACount;
+    auto extraSizeCount = totalPlaneCount % optimizedDMACount;
+    SmallVector<Shape> subOutputShapes;
     auto subShape = Shape(shape.raw());
-
-    if (numberDMAs > 1) {
-        subShape[numPlaneDim] = VPUIP::DMA_MAX_NUMBER_PLANES;
-        SmallVector<Shape> subOutputShapes(numberDMAs - 1, subShape);
-        subShape[numPlaneDim] = totalNumPlane - VPUIP::DMA_MAX_NUMBER_PLANES * (numberDMAs - 1);
-        subOutputShapes.push_back(subShape);
-        return subOutputShapes;
+    if (baseSize != 0) {
+        subShape[numPlaneDim] = baseSize;
+        subOutputShapes.insert(subOutputShapes.end(), optimizedDMACount - extraSizeCount, subShape);
     }
-    if (numberDMAs == 1 && dmaPortCount > 1) {
-        const auto origShapeValue = subShape[numPlaneDim];
-        const auto divideOrigShapeValue = origShapeValue / dmaPortCount;
-        SmallVector<Shape> subOutputShapes;
 
-        for (int index = 0; index < dmaPortCount - 1; index++) {
-            subShape[numPlaneDim] = divideOrigShapeValue;
-            subOutputShapes.push_back(subShape);
-        }
-        subShape[numPlaneDim] = origShapeValue % dmaPortCount > 0 ? divideOrigShapeValue + origShapeValue % dmaPortCount
-                                                                  : divideOrigShapeValue;
-        subOutputShapes.push_back(subShape);
-        return subOutputShapes;
+    if (extraSizeCount != 0) {
+        subShape[numPlaneDim] = baseSize + 1;
+        subOutputShapes.insert(subOutputShapes.end(), extraSizeCount, subShape);
     }
-    SmallVector<Shape> resultSubShape;
-    resultSubShape.push_back(std::move(subShape));
-    return resultSubShape;
+
+    return subOutputShapes;
 }
 }  // namespace
 
@@ -229,6 +210,9 @@ std::optional<Shape> vpux::VPUIP::getPermuteDMAInputShape(NDTypeInterface inType
         } else if (mergedMemPerm == DimsOrder::CWNH.toAffineMap(inType.getContext())) {
             // Check for permute pattern: [d0, d1, d2, d3] -> [d1, d3, d0, d2]
             return Shape{newInputShape[Dim(1)], newInputShape[Dim(3)], newInputShape[Dim(0)], newInputShape[Dim(2)]};
+        } else if (mergedMemPerm == DimsOrder::HNWC.toAffineMap(inType.getContext())) {
+            // Check for permute pattern: [d0, d1, d2, d3] -> [d2, d0, d3, d1]
+            return Shape{newInputShape[Dim(2)], newInputShape[Dim(0)], newInputShape[Dim(3)], newInputShape[Dim(1)]};
         } else {
             return std::nullopt;
         }
@@ -363,7 +347,7 @@ bool vpux::VPUIP::isSplitNeededForPermuteDMA(vpux::NDTypeInterface inType, mlir:
 
     return mergedPerm == DimsOrder::WHC.toAffineMap(ctx) || mergedPerm == DimsOrder::NHCW.toAffineMap(ctx) ||
            mergedPerm == DimsOrder::HCNW.toAffineMap(ctx) || mergedPerm == DimsOrder::NWHC.toAffineMap(ctx) ||
-           mergedPerm == DimsOrder::CWNH.toAffineMap(ctx);
+           mergedPerm == DimsOrder::CWNH.toAffineMap(ctx) || mergedPerm == DimsOrder::HNWC.toAffineMap(ctx);
 }
 
 SmallVector<DimArr> vpux::VPUIP::getPermuteDMAOutputMergedDimList(vpux::NDTypeInterface outputType,
@@ -553,14 +537,6 @@ bool vpux::VPUIP::isLegalConvertToDMA(mlir::Operation* op, vpux::Logger log, boo
             })
             .Case<IE::DepthToSpaceOp, VPU::DepthToSpaceOp, VPUIP::DepthToSpaceUPAOp>([&](mlir::Operation* op) {
                 log.trace("Got DepthToSpaceOp Op at {0}.", op->getLoc());
-                const auto arch = VPU::getArch(op);
-
-                // Memory check only for dKMB
-                if (arch == VPU::ArchKind::NPU30XX && checkCMXSize && !VPUIP::doesSWLayerFitIntoCMX(op, log)) {
-                    log.trace("Memory size of SW Op at {0} is larger than CMX cannot convert to DepthToSpaceDMA.",
-                              op->getLoc());
-                    return false;
-                }
 
                 log.trace("DepthToSpaceOp at {0} can convert to DepthToSpaceDMA.", op->getLoc());
                 return true;
@@ -715,7 +691,7 @@ bool vpux::VPUIP::isLegalAndBeneficialConvertToDMA(mlir::Operation* op, vpux::Lo
         const auto inputType = op->getOperand(0).getType().cast<vpux::NDTypeInterface>();
         const auto outputType = op->getResult(0).getType().cast<vpux::NDTypeInterface>();
         const auto memPerm = permuteUPAOp.getOrderValue();
-        return isBeneficialForUsingPermuteDMA(inputType, outputType, memPerm, arch, dmaPortNum, log);
+        return isBeneficialForUsingPermuteDMA(inputType, outputType, memPerm, dmaPortNum, log);
     }
     if (auto swKernelOp = mlir::dyn_cast<VPUIP::SwKernelOp>(op)) {
         if (VPUIP::isDepthToSpaceSwKernel(swKernelOp)) {
@@ -729,7 +705,7 @@ bool vpux::VPUIP::isLegalAndBeneficialConvertToDMA(mlir::Operation* op, vpux::Lo
 
             const auto inputType = op->getOperand(0).getType().cast<vpux::NDTypeInterface>();
             const auto outputType = op->getResult(0).getType().cast<vpux::NDTypeInterface>();
-            return isBeneficialForUsingPermuteDMA(inputType, outputType, memPerm.value(), arch, dmaPortNum, log);
+            return isBeneficialForUsingPermuteDMA(inputType, outputType, memPerm.value(), dmaPortNum, log);
         }
 
         return false;

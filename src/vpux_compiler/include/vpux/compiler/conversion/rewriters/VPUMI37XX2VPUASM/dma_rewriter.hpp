@@ -15,7 +15,7 @@ public:
     using Base::Base;
     mlir::LogicalResult symbolize(VPUMI37XX::NNDMAOp op, SymbolMapper& mapper,
                                   mlir::ConversionPatternRewriter& rewriter) const override;
-    mlir::FlatSymbolRefAttr getSymbolicName(VPUMI37XX::NNDMAOp op, size_t) override;
+    llvm::SmallVector<mlir::FlatSymbolRefAttr> getSymbolicNames(VPUMI37XX::NNDMAOp op, size_t) override;
 
 private:
     // E#36225: can we have this reduction at a pass at memref level? Need to place

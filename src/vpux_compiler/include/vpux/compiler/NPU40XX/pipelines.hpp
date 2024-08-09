@@ -26,6 +26,12 @@ namespace vpux {
 struct ReferenceSWOptions40XX final : public ReferenceSWOptions<ReferenceSWOptions40XX> {
     BoolOption enableConvertFFTToConv{*this, "convert-fft-to-conv", llvm::cl::desc("Enable convert-fft-to-conv pass"),
                                       llvm::cl::init(false)};
+
+    BoolOption enableStartBarrier{*this, "enable-start-barrier", llvm::cl::desc("Enable start barrier"),
+                                  llvm::cl::init(true)};
+
+    BoolOption enableFinalBarrier{*this, "enable-final-barrier", llvm::cl::desc("Enable final barrier"),
+                                  llvm::cl::init(true)};
 };
 
 void buildReferenceSWModePipeline(mlir::OpPassManager& pm, const ReferenceSWOptions40XX& options,
@@ -89,6 +95,22 @@ struct ReferenceHWOptions40XX final : public ReferenceHWOptions<ReferenceHWOptio
             *this, "enable-explicit-distributed-attr",
             llvm::cl::desc("Enable DistributedTensorAttr with explicit per cluster memory/compute shapes & offsets"),
             llvm::cl::init(true)};
+
+    BoolOption enableGroupedMatMul{*this, "enable-grouped-matmul",
+                                   llvm::cl::desc("Enable execution of grouped MatMul as a single operation."),
+                                   llvm::cl::init(false)};
+
+    BoolOption supportNCEOpInsertion{
+            *this, "support-nce-op-insertion",
+            llvm::cl::desc("Insert a new NCE operation with single user for CMX-Concat to handle the"
+                           "complex case when parent NCE has an extra non-Copy user."),
+            llvm::cl::init(true)};
+
+    BoolOption enableStartBarrier{*this, "enable-start-barrier", llvm::cl::desc("Enable start barrier"),
+                                  llvm::cl::init(true)};
+
+    BoolOption enableFinalBarrier{*this, "enable-final-barrier", llvm::cl::desc("Enable final barrier"),
+                                  llvm::cl::init(true)};
 };
 
 void buildReferenceHWModePipeline(mlir::OpPassManager& pm, const ReferenceHWOptions40XX& options,
@@ -117,7 +139,11 @@ struct BackendCompilationOptions40XX final : public mlir::PassPipelineOptions<Ba
                                      llvm::cl::init(false)};
     BoolOption enablePartialWorkloadManagement{*this, "enable-partial-workload-management",
                                                llvm::cl::desc("Enable partial workload management"),
-                                               llvm::cl::init(false)};
+                                               llvm::cl::init(true)};
+    StrOption enableDMAProfiling{*this, "dma-profiling",
+                                 llvm::cl::desc("Enable DMA task profiling (true|static|false)"),
+                                 llvm::cl::init("false")};
+
     IntOption wlmOptimizationThreshold{*this, "wlm-barriers-threshold",
                                        llvm::cl::desc("Threshold for WLM optimization"), llvm::cl::init(3000)};
 };

@@ -27,5 +27,11 @@ bool isNotDimShrinkReshape(ShapeRef origShape, ShapeRef reshapeShape);
 
 IE::ShapeCastOp buildShapeCast(mlir::Location loc, mlir::Value input, ArrayRef<int64_t> targetShape,
                                mlir::PatternRewriter& rewriter);
+
+bool isEligibleToFoldStrideKernel(vpux::NDTypeInterface inputType, vpux::NDTypeInterface outputType, int64_t kernelX,
+                                  int64_t strideX, int64_t inAlignment, int64_t outAlignment, const Logger& log);
+
+Shape getNewShapeAfterStrideFolding(ShapeRef origShape, int64_t SX);
+
 }  // namespace IE
 }  // namespace vpux

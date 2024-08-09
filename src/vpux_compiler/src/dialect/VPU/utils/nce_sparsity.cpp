@@ -10,6 +10,7 @@
 #include "vpux/compiler/core/layers.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
+#include "vpux/compiler/utils/attributes_properties_conversion.hpp"
 #include "vpux/compiler/utils/loop.hpp"
 #include "vpux/compiler/utils/quantization.hpp"
 #include "vpux/compiler/utils/types.hpp"
@@ -50,7 +51,7 @@ int64_t getWindowSize(int64_t KX, int64_t SX, mlir::Type elemType) {
     auto actualType = getBaseStorageType(elemType);
     VPUX_THROW_UNLESS(actualType.isInteger(CHAR_BIT) || actualType.isF16() || actualType.isBF16() ||
                               actualType.isFloat8E5M2() || actualType.isFloat8E4M3FN(),
-                      "Supported only U8/I8 and FP16/BF16 and BF8/HF8 types {0}", actualType);
+                      "Supported only U8/I8 , BF8/HF8 and FP16/BF16 types. Type received: {0}", actualType);
 
     // Only MPE0, MPE4, MPE8 and MPE12 support FP16 data format
     const int mpeNumLimit = actualType.isF16() ? 4 : 16;
@@ -188,9 +189,11 @@ llvm::unique_function<int32_t(size_t)> getMultShiftFunc(mlir::Type inElemType, m
     // FP input and I8 weights are supported in case of mixed precision
     // While Quant input and FP weights are never supported
     if (weightsType != nullptr) {
+        auto inStorageType = mlir::quant::QuantizedType::castToStorageType(inElemType);
         if ((!inElemType.isa<mlir::quant::QuantizedType>() && weightsType.isa<mlir::quant::QuantizedType>() &&
              !isMixedPrecisionSupported(arch)) ||
-            (inElemType.isa<mlir::quant::QuantizedType>() && !weightsType.isa<mlir::quant::QuantizedType>())) {
+            (inElemType.isa<mlir::quant::QuantizedType>() && !weightsType.isa<mlir::quant::QuantizedType>() &&
+             !inStorageType.isFloat8E5M2() && !inStorageType.isFloat8E4M3FN())) {
             VPUX_THROW("Unsupported In/Wt mixed precision. Got: in type {0}, wt type {1}", inElemType, weightsType);
         }
     }
@@ -378,7 +381,7 @@ bool isQuantLeakyRelu025(VPU::ArchKind arch, mlir::Type inElemType, mlir::Type o
         return false;
     }
 
-    IE::LeakyReluOp::Adaptor leakyRelu(std::nullopt, postOpAttr.getAttrs());
+    IE::LeakyReluOp::Adaptor leakyRelu(std::nullopt, nullptr, toProperties<IE::LeakyReluOp>(postOpAttr.getAttrs()));
     auto dummyLocation = mlir::UnknownLoc::get(inElemType.getContext());
     if (leakyRelu.verify(dummyLocation).failed()) {
         return false;
@@ -426,18 +429,6 @@ std::vector<int32_t> vpux::VPU::NCESparsity::getWeightsTable(mlir::Type inElemTy
                     "Weights pointers size {0} different than output channels {1}", weightsPtrs.size(), OC);
     VPUX_THROW_WHEN(static_cast<int64_t>(sparsityPtrs.size()) != OC,
                     "Sparsity pointers size {0} different than output channels {1}", sparsityPtrs.size(), OC);
-
-    // mixed precision for VPUX30XX
-    if (inElemType.isa<mlir::quant::QuantizedType>() && !outElemType.isa<mlir::quant::QuantizedType>() &&
-        arch == VPU::ArchKind::NPU30XX) {
-        const auto newScale = static_cast<double>(std::pow(2, -16));
-        const int64_t zeroPoint = 0;
-
-        auto qType = inElemType.cast<mlir::quant::QuantizedType>();
-        outElemType = mlir::quant::UniformQuantizedType::get(qType.getFlags(), qType.getStorageType(),
-                                                             qType.getExpressedType(), newScale, zeroPoint,
-                                                             qType.getStorageTypeMin(), qType.getStorageTypeMax());
-    }
 
     const auto isSpecialRelu = isQuantLeakyRelu025(arch, inElemType, outElemType, postOpAttr);
     auto getMultShift = getMultShiftFunc(inElemType, outElemType, weightsElemType, ppe, arch, checked_cast<size_t>(OC),
@@ -733,4 +724,62 @@ bool vpux::VPU::NCESparsity::RuntimeSparsityStatsProvider::likelySparsityConsume
         return ratio >= MINIMAL_SPARSITY_THRESHOLD;
     }
     return false;
+}
+
+//
+// 5D weights
+//
+
+int32_t vpux::VPU::NCESparsity::get5DWeightPtrStep(mlir::Value weights) {
+    if (weights == nullptr) {
+        return 0;
+    }
+
+    const auto filterShape = getShape(weights);
+
+    const auto IC = filterShape[DimsGroups5D::Filter::IC];
+    const auto KY = filterShape[DimsGroups5D::Filter::KY];
+    const auto KX = filterShape[DimsGroups5D::Filter::KX];
+
+    const auto origFilterType = weights.getType().cast<vpux::NDTypeInterface>();
+    const auto convAlignment = VPU::NCEInvariant::getAlignment(origFilterType.getElementType());
+    const auto weightsElementCount = IC * KY * KX;
+
+    VPUX_THROW_WHEN((weightsElementCount % convAlignment) != 0,
+                    "NCEMatMul weights size must be a multiple of {0} but got {1}", convAlignment, weightsElementCount);
+
+    const Bit eltSize = getElemTypeSize(weights.getType());
+
+    return checked_cast<int32_t>(Byte(eltSize * IC * KY * KX).count());
+}
+
+std::vector<int32_t> vpux::VPU::NCESparsity::create5DWeightsTableData(
+        mlir::Value opInput, mlir::Value opOutput, mlir::Value weights, Const::ContentAttr bias, int64_t outputChannels,
+        vpux::VPU::PPETaskAttr ppeTaskAttr, VPU::ArchKind _arch, vpux::IE::PostOpAttr postOpAttr) {
+    const auto weightPtrOffset = 0;
+    const auto sparsityPtrOffset = 0;
+    const auto weightPtrStep = VPU::NCESparsity::get5DWeightPtrStep(weights);
+    const auto sparsityPtrStep = 0;
+
+    const auto inElemType = opInput.getType().cast<vpux::NDTypeInterface>().getElementType();
+    const auto outElemType = opOutput.getType().cast<vpux::NDTypeInterface>().getElementType();
+    const auto weightsElemType = weights ? weights.getType().cast<vpux::NDTypeInterface>().getElementType() : nullptr;
+
+    return VPU::NCESparsity::getWeightsTable(inElemType, outElemType, weightPtrOffset, weightPtrStep, sparsityPtrOffset,
+                                             sparsityPtrStep, _arch, outputChannels, weightsElemType, bias, ppeTaskAttr,
+                                             postOpAttr);
+}
+
+mlir::Value vpux::VPU::NCESparsity::create5DWeightsTableTensor(mlir::OpBuilder& builder, mlir::Location loc,
+                                                               ArrayRef<int32_t> weightsTable, int64_t outputChannels,
+                                                               int64_t groups) {
+    const auto elemType = getSInt32Type(builder.getContext());
+    const Shape weightTableShape = {groups, outputChannels, 1, 1, VPU::NCEInvariant::WEIGHT_TABLE_NUM_ELEMENTS_PER_OC};
+
+    const auto dataStorageType = mlir::RankedTensorType::get(weightTableShape.raw(), elemType);
+    const auto dataAttr = mlir::DenseElementsAttr::get(dataStorageType, weightsTable);
+
+    auto dataConstOp = builder.create<Const::DeclareOp>(loc, dataStorageType, Const::ContentAttr::get(dataAttr));
+
+    return dataConstOp.getOutput();
 }

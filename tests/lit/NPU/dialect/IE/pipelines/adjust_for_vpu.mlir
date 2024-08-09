@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW" --adjust-for-vpu %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 // CHECK: func.func @ConvertNonDepthWiseGroupTransposedConvToConv([[ARG0:%.+]]: tensor<1x32x64x64xf16>) -> tensor<1x32x128x128xf16> {
 func.func @ConvertNonDepthWiseGroupTransposedConvToConv(%arg0: tensor<1x32x64x64xf16>) -> tensor<1x32x128x128xf16> {

@@ -257,7 +257,9 @@ mlir::Value SingleClusterScheduler::copyToDDR(mlir::BlockArgument& profilingResu
             mlir::NameLoc::get(mlir::StringAttr::get(_ctx, name + "ProfilingConcat" + std::to_string(offset))),
             dpuProfilingOutputs, cmxMemOp->getResult(0));
 
-    return _builder.create<VPUIP::NNDMAOp>(copyLoc2, concatview.getOutput(), subDDR).getOutput();
+    auto dmaOp = _builder.create<VPUIP::NNDMAOp>(copyLoc2, concatview.getOutput(), subDDR);
+    dmaOp.setProfilingBufferMgmt(true);
+    return dmaOp.getOutput();
 }
 
 mlir::Value SingleClusterScheduler::getViewToBuffer(mlir::Operation* currentProfilingBuffer,
@@ -331,7 +333,9 @@ mlir::Value MultiClusterScheduler::copyToDDR(mlir::BlockArgument& profilingResul
     auto concatview = _builder.create<VPUIP::ConcatViewOp>(concatLoc, resultTypeDistributed, dpuProfilingOutputs,
                                                            cmxMemOp->getResult(0));
 
-    return _builder.create<VPUIP::NNDMAOp>(copyLoc, concatview.getOutput(), subDDR.getResult());
+    auto dmaOp = _builder.create<VPUIP::NNDMAOp>(copyLoc, concatview.getOutput(), subDDR.getResult());
+    dmaOp.setProfilingBufferMgmt(true);
+    return dmaOp;
 }
 
 }  // namespace vpux

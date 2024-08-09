@@ -8,6 +8,7 @@
 
 #include <numeric>
 
+#include "vpux/compiler/utils/attributes_properties_conversion.hpp"
 #include "vpux/compiler/utils/custom_pwl_table.hpp"
 #include "vpux/compiler/utils/quantization.hpp"
 
@@ -332,7 +333,7 @@ std::optional<VPU::PostOpParams> parsePostOp(IE::PostOpAttr postOp, const mlir::
 
         return PostOpParams{VPU::PPEMode::LRELU, clampLow, clampHigh, LreluMult, LreluShift};
     } else if (postOp.getName().getValue() == IE::ClampOp::getOperationName()) {
-        IE::ClampOp::Adaptor clamp(std::nullopt, postOp.getAttrs());
+        IE::ClampOp::Adaptor clamp(std::nullopt, nullptr, toProperties<IE::ClampOp>(postOp.getAttrs()));
         VPUX_THROW_UNLESS(clamp.verify(loc).succeeded(), "Wrong attributes '{0}' for '{1}' PostOp", postOp.getAttrs(),
                           postOp.getName());
 
@@ -358,7 +359,7 @@ std::optional<VPU::PostOpParams> parsePostOp(IE::PostOpAttr postOp, const mlir::
             return getCustomPwlPostOpParams(postOp, outElemType);
         }
 
-        IE::LeakyReluOp::Adaptor leakyRelu(std::nullopt, postOp.getAttrs());
+        IE::LeakyReluOp::Adaptor leakyRelu(std::nullopt, nullptr, toProperties<IE::LeakyReluOp>(postOp.getAttrs()));
         VPUX_THROW_UNLESS(leakyRelu.verify(loc).succeeded(), "Wrong attributes '{0}' for '{1}' PostOp",
                           postOp.getAttrs(), postOp.getName());
 

@@ -8,6 +8,7 @@
 #include <mlir/IR/PatternMatch.h>
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/utils/pooling_utils.hpp"
+#include "vpux/compiler/utils/attributes_properties_conversion.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
 using namespace vpux;
@@ -134,11 +135,13 @@ mlir::LogicalResult FuseIdentityAvgPoolWithPostOp::matchAndRewrite(IE::AvgPoolOp
     auto postOp = avgPoolOp->getResult(0).getDefiningOp();
     auto postOpAttrName = avgPoolOp.getPostOpAttr().getName().getValue();
     if (postOpAttrName == IE::ClampOp::getOperationName()) {
-        IE::ClampOp::Adaptor clamp(std::nullopt, avgPoolOp.getPostOpAttr().getAttrs());
+        IE::ClampOp::Adaptor clamp(std::nullopt, nullptr,
+                                   toProperties<IE::ClampOp>(avgPoolOp.getPostOpAttr().getAttrs()));
         postOp = rewriter.create<IE::ClampOp>(avgPoolOp->getLoc(), avgPoolOp.getInput(), clamp.getMinAttr(),
                                               clamp.getMaxAttr());
     } else if (postOpAttrName == IE::LeakyReluOp::getOperationName()) {
-        IE::LeakyReluOp::Adaptor leakyRelu(std::nullopt, avgPoolOp.getPostOpAttr().getAttrs());
+        IE::LeakyReluOp::Adaptor leakyRelu(std::nullopt, nullptr,
+                                           toProperties<IE::LeakyReluOp>(avgPoolOp.getPostOpAttr().getAttrs()));
         postOp = rewriter.create<IE::LeakyReluOp>(avgPoolOp->getLoc(), avgPoolOp.getInput(),
                                                   leakyRelu.getNegativeSlopeAttr());
     } else if (postOpAttrName == IE::ReLUOp::getOperationName()) {
@@ -150,6 +153,7 @@ mlir::LogicalResult FuseIdentityAvgPoolWithPostOp::matchAndRewrite(IE::AvgPoolOp
     };
     if (!producerOp.isSupportedPostOp(postOp, logCb)) {
         _log.nest().trace("avgPoolOp producer does not support the post-processing in avgPoolOp!");
+        rewriter.eraseOp(postOp);
         return mlir::failure();
     }
     rewriter.eraseOp(postOp);
@@ -205,6 +209,76 @@ mlir::LogicalResult FuseIdentityQuantizedAvgPool::matchAndRewrite(IE::AvgPoolOp 
 }
 
 //
+// FuseIdentityWithQuantizedAdd
+//
+
+class FuseIdentityWithQuantizedAdd final : public mlir::OpRewritePattern<IE::AddOp> {
+public:
+    FuseIdentityWithQuantizedAdd(mlir::MLIRContext* ctx, Logger log)
+            : mlir::OpRewritePattern<IE::AddOp>(ctx), _log(log) {
+    }
+
+public:
+    mlir::LogicalResult matchAndRewrite(IE::AddOp origOp, mlir::PatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+mlir::LogicalResult FuseIdentityWithQuantizedAdd::matchAndRewrite(IE::AddOp origOp,
+                                                                  mlir::PatternRewriter& rewriter) const {
+    if (!IE::isAddOutputQuantized(origOp)) {
+        _log.trace("no quantized add");
+        return mlir::failure();
+    }
+
+    auto hasMoreUses = llvm::any_of(origOp.getInput1().getUsers(), [&](auto userOp) {
+        return userOp != origOp;
+    });
+
+    if (hasMoreUses || origOp.getInput1() != origOp.getInput2()) {
+        _log.trace("ProducerOp has multiple users");
+        return mlir::failure();
+    }
+
+    auto parentPoolOp = origOp.getInput1().getDefiningOp<IE::AvgPoolOp>();
+
+    if (parentPoolOp == nullptr || !isIdentityAvgPoolWithPostOp(parentPoolOp)) {
+        _log.trace("There is no parent pool with postop");
+        return mlir::failure();
+    }
+
+    mlir::Operation* postOp;
+    auto postOpAttrName = parentPoolOp.getPostOpAttr().getName().getValue();
+    if (postOpAttrName == IE::LeakyReluOp::getOperationName()) {
+        IE::LeakyReluOp::Adaptor leakyRelu(std::nullopt, nullptr,
+                                           toProperties<IE::LeakyReluOp>(parentPoolOp.getPostOpAttr().getAttrs()));
+        postOp = rewriter.create<IE::LeakyReluOp>(parentPoolOp->getLoc(), parentPoolOp.getInput(),
+                                                  leakyRelu.getNegativeSlopeAttr());
+    } else {
+        _log.trace("No Prelu post op");
+        return mlir::failure();
+    }
+
+    const auto logCb = [&](const formatv_object_base& msg) {
+        _log.trace("{0}", msg.str());
+    };
+    if (!mlir::dyn_cast<IE::LayerWithPostOpInterface>(origOp.getOperation()).isSupportedPostOp(postOp, logCb)) {
+        _log.nest().trace("avgPoolOp producer does not support the post-processing in AddOp!");
+        rewriter.eraseOp(postOp);
+        return mlir::failure();
+    }
+    rewriter.eraseOp(postOp);
+
+    origOp->setAttr("post_op", parentPoolOp.getPostOpAttr());
+    origOp.setOperand(0, parentPoolOp.getInput());
+    origOp.setOperand(1, parentPoolOp.getInput());
+    rewriter.eraseOp(parentPoolOp);
+
+    return mlir::success();
+}
+
+//
 // OptimizeIdentityPoolPass
 //
 
@@ -226,6 +300,7 @@ void OptimizeIdentityPoolPass::safeRunOnFunc() {
     patterns.add<RemoveIdentityPool<IE::AvgPoolOp>>(&ctx, _log);
     patterns.add<FuseIdentityAvgPoolWithPostOp>(&ctx, _log);
     patterns.add<FuseIdentityQuantizedAvgPool>(&ctx, _log);
+    patterns.add<FuseIdentityWithQuantizedAdd>(&ctx, _log);
 
     auto func = getOperation();
     if (mlir::failed(mlir::applyPatternsAndFoldGreedily(func, std::move(patterns), getDefaultGreedyRewriteConfig()))) {

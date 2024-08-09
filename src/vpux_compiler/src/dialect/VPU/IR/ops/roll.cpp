@@ -9,19 +9,19 @@ using namespace vpux;
 
 mlir::LogicalResult vpux::VPU::RollOp::inferReturnTypes(mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc,
                                                         mlir::ValueRange operands, mlir::DictionaryAttr attrs,
-                                                        mlir::OpaqueProperties, mlir::RegionRange,
+                                                        mlir::OpaqueProperties prop, mlir::RegionRange,
                                                         mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::RollOpAdaptor roll(operands, attrs);
+    VPU::RollOpAdaptor roll(operands, attrs, prop);
     if (mlir::failed(roll.verify(loc))) {
         return mlir::failure();
     }
 
-    const auto shiftContent = roll.getShift().getDefiningOp<Const::DeclareOp>().getContent();
+    const bool shiftContentIsSplat = roll.getShift().getDefiningOp<Const::DeclareOp>().getContentAttr().isSplat();
     const auto inShapeShift = getShape(roll.getShift());
 
-    if (!shiftContent.isSplat() && inShapeShift.size() == 1) {
+    if (!shiftContentIsSplat && inShapeShift.size() == 1) {
         auto shiftData = IE::constInputToData(loc, roll.getShift());
         if (mlir::failed(shiftData)) {
             return mlir::failure();

@@ -53,16 +53,12 @@ target_include_directories(${TARGET_NAME}
         ${VPUX_UTILS_CURRENT_SOURCE_DIR}/include
 )
 
-link_system_libraries(${TARGET_NAME}
+ov_link_system_libraries(${TARGET_NAME}
     PRIVATE
         flatbuffers
         npu_elf
         npu_mlir_compiler_schema
         npu_profiling_schema
-)
-
-add_dependencies(${TARGET_NAME}
-    LLVMSupport
 )
 
 target_link_libraries(${TARGET_NAME} PRIVATE npu_core_utils npu_llvm_utils)

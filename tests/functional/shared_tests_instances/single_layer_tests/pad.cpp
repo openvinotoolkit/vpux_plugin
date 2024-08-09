@@ -11,18 +11,12 @@ using namespace ov::test::utils;
 namespace ov {
 namespace test {
 
-class PadLayerTest_NPU3700 : public PadLayerTest, virtual public VpuOv2LayerTest {};
-
+class Pad12LayerTestCommon : public Pad12LayerTest, virtual public VpuOv2LayerTest {};
 class PadLayerTestCommon : public PadLayerTest, virtual public VpuOv2LayerTest {
     void configure_model() override {  // allow both f16/f32 tests
         configuration[ov::intel_npu::compilation_mode_params.name()] = "convert-precision-to-fp16=false";
     }
 };
-
-TEST_P(PadLayerTest_NPU3700, HW) {
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
 
 TEST_P(PadLayerTestCommon, NPU3720) {
     setDefaultHardwareMode();
@@ -33,51 +27,22 @@ TEST_P(PadLayerTestCommon, NPU4000) {
     run(Platform::NPU4000);
 }
 
+TEST_P(Pad12LayerTestCommon, NPU3720_HW) {
+    setDefaultHardwareMode();
+    run(Platform::NPU3720);
+}
+
+TEST_P(Pad12LayerTestCommon, NPU4000_SW) {
+    setReferenceSoftwareMode();
+    run(Platform::NPU4000);
+}
+
 }  // namespace test
 }  // namespace ov
 
 using namespace ov::test;
 
 namespace {
-
-/* ================================= Pad NPU3700 ================================= */
-
-const std::vector<ov::element::Type> modelType = {ov::element::f16};
-const std::vector<std::vector<int64_t>> padsBegin4D = {{0, 0, 0, 0}, {0, 1, 1, 1}, {0, 0, 1, 0}, {0, 3, 0, 1}};
-const std::vector<std::vector<int64_t>> padsEnd4D = {{0, 0, 0, 0}, {0, 1, 1, 1}, {0, 0, 0, 1}, {0, 3, 2, 0}};
-const std::vector<float> argPadValue = {0.f, 1.f, 2.f, -1.f};
-const std::vector<ov::op::PadMode> padMode = {ov::op::PadMode::EDGE, ov::op::PadMode::REFLECT,
-                                              ov::op::PadMode::SYMMETRIC};
-
-const auto pad4DConstparams = testing::Combine(
-        testing::ValuesIn(padsBegin4D), testing::ValuesIn(padsEnd4D), testing::ValuesIn(argPadValue),
-        testing::Values(ov::op::PadMode::CONSTANT), testing::ValuesIn(modelType),
-        testing::ValuesIn(static_shapes_to_test_representation(std::vector<std::vector<ov::Shape>>{{{1, 5, 10, 11}}})),
-        testing::Values(DEVICE_NPU));
-
-INSTANTIATE_TEST_SUITE_P(DISABLED_smoke_Pad4DConst, PadLayerTest_NPU3700, pad4DConstparams,
-                         PadLayerTest_NPU3700::getTestCaseName);
-
-const auto pad4Dparams = testing::Combine(
-        testing::ValuesIn(padsBegin4D), testing::ValuesIn(padsEnd4D), testing::Values(0), testing::ValuesIn(padMode),
-        testing::ValuesIn(modelType),
-        testing::ValuesIn(static_shapes_to_test_representation(std::vector<std::vector<ov::Shape>>{{{1, 5, 10, 11}}})),
-        testing::Values(DEVICE_NPU));
-
-INSTANTIATE_TEST_SUITE_P(smoke_Pad4D, PadLayerTest_NPU3700, pad4Dparams, PadLayerTest_NPU3700::getTestCaseName);
-
-const std::vector<std::vector<int64_t>> padsBeginForConcat = {{0, 0, 0, 0}, {4, 2, 1, 3}, {8, 0, 0, 0}, {0, 0, 2, 0}};
-const std::vector<std::vector<int64_t>> padsEndForConcat = {{0, 0, 0, 0}, {5, 2, 6, 1}, {8, 0, 0, 0}, {0, 1, 0, 3}};
-
-const auto padConvertToConcat = testing::Combine(
-        testing::ValuesIn(padsBeginForConcat), testing::ValuesIn(padsEndForConcat), testing::Values(0, 1),
-        testing::Values(ov::op::PadMode::CONSTANT), testing::ValuesIn(modelType),
-        testing::ValuesIn(static_shapes_to_test_representation(std::vector<std::vector<ov::Shape>>{{{1, 10, 20, 30}}})),
-        testing::Values(DEVICE_NPU));
-
-// Tracking number [E#85137]
-INSTANTIATE_TEST_SUITE_P(smoke_PadConvertToConcat, PadLayerTest_NPU3700, padConvertToConcat,
-                         PadLayerTest_NPU3700::getTestCaseName);
 
 /* ================================= Pad arch >= NPU3720 ================================= */
 // Note (subject to change):
@@ -119,5 +84,18 @@ INSTANTIATE_TEST_SUITE_P(smoke_precommit_Pad, PadLayerTestCommon, ::testing::Val
 
 INSTANTIATE_TEST_SUITE_P(custom_Pad, PadLayerTestCommon, ::testing::ValuesIn(customParams),
                          PadLayerTestCommon::getTestCaseName);
+
+}  // namespace
+
+namespace {  // Pad12
+
+INSTANTIATE_TEST_SUITE_P(smoke_Pad12, Pad12LayerTestCommon,
+                         testing::Combine(testing::Values(std::vector<int64_t>({0, 1, 1, 1})),
+                                          testing::Values(std::vector<int64_t>({0, 1, 1, 1})), testing::Values(1.f),
+                                          testing::Values(ov::op::PadMode::CONSTANT), testing::Values(ov::element::f16),
+                                          testing::Values(ov::test::static_shapes_to_test_representation(
+                                                  std::vector<ov::Shape>{{1, 5, 10, 11}})),
+                                          testing::Values(ov::test::utils::DEVICE_NPU)),
+                         Pad12LayerTestCommon::getTestCaseName);
 
 }  // namespace

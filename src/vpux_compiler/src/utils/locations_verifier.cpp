@@ -87,9 +87,9 @@ bool hasExcludedPatterns(mlir::Operation* op) {
         const auto stringifiedLoc = stringifyPrimaryLocation(loc);
         // Right now profiling LIT tests has locations in old format, so ignore them until all passes will be
         // handled
-        const std::vector<std::string> profilingRelatedPatterns = {profiling::PROFILING_CMX_2_DDR_OP_NAME,
-                                                                   profiling::PROFILING_WORKPOINT_READ_ATTR,
-                                                                   "combinedProfilingDataOutputInfo"};
+        const std::vector<std::string> profilingRelatedPatterns = {
+                profiling::PROFILING_CMX_2_DDR_OP_NAME, profiling::PROFILING_DDR_2_DDR_OP_NAME,
+                profiling::PROFILING_WORKPOINT_READ_ATTR, "combinedProfilingDataOutputInfo"};
         return std::any_of(profilingRelatedPatterns.begin(), profilingRelatedPatterns.end(),
                            [&](const std::string& pattern) {
                                return stringifiedLoc.find(pattern) != std::string::npos;

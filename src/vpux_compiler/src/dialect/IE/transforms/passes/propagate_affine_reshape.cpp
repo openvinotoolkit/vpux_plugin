@@ -5,66 +5,28 @@
 
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
+#include "vpux/compiler/dialect/IE/transforms/rewriters/propagate_transpose_affine_reshape_common.hpp"
 
 #include "vpux/compiler/dialect/IE/utils/concat_utils.hpp"
-#include "vpux/compiler/utils/attributes_utils.hpp"
+#include "vpux/compiler/dialect/IE/utils/pooling_utils.hpp"
+#include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/utils/error.hpp"
+#include "vpux/compiler/utils/passes.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
 #include <mlir/IR/IRMapping.h>
 #include <mlir/IR/PatternMatch.h>
 #include <mlir/Transforms/GreedyPatternRewriteDriver.h>
+#include <optional>
 
 using namespace vpux;
 
 namespace {
 
 constexpr Byte DMA_DATA_PATH_LEN_BYTE = Byte(32);
-SmallVector<int64_t> invertDimMappingWithAxesNotSplitOrMerged(ArrayRef<SmallVector<int64_t>> dimMapping,
-                                                              ShapeRef affineInShape, ShapeRef affineOutShape) {
-    SmallVector<int64_t> invertedDimMapping(affineOutShape.size(), 0);
 
-    for (size_t inDim = 0; inDim < dimMapping.size(); inDim++) {
-        auto dimsArr = dimMapping[inDim];
-        for (size_t i = 0; i < dimsArr.size(); i++) {
-            auto outDim = dimsArr[i];
-            if (affineInShape[Dim(inDim)] == affineOutShape[Dim(outDim)]) {
-                invertedDimMapping[dimsArr[i]] = inDim;
-                break;
-            }
-        }
-    }
-
-    return invertedDimMapping;
-}
-
-bool areModifiedAxesSplitOrMerged(ArrayRef<SmallVector<int64_t>> dimMapping, ShapeRef affineInShape,
-                                  ShapeRef affineOutShape, mlir::DenseSet<int64_t> modifiedAxes, bool swapOrder,
-                                  Logger log) {
-    for (size_t inIdx = 0; inIdx < dimMapping.size(); inIdx++) {
-        auto mappedDim = dimMapping[inIdx];
-
-        for (size_t mapId = 0; mapId < mappedDim.size(); mapId++) {
-            size_t outIdx = mappedDim[mapId];
-            if (swapOrder) { /*Op->AffineReshape*/
-                if (modifiedAxes.contains(inIdx)) {
-                    if (affineOutShape[Dim(outIdx)] != 1 && affineInShape[Dim(inIdx)] != affineOutShape[Dim(outIdx)]) {
-                        log.trace("Modified axis '{0}' was split or merged from several axes.", inIdx);
-                        return true;
-                    }
-                }
-            } else { /*AffineReshape->Op*/
-                if (modifiedAxes.contains(outIdx)) {
-                    if (affineInShape[Dim(inIdx)] != 1 && affineInShape[Dim(inIdx)] != affineOutShape[Dim(outIdx)]) {
-                        log.trace("Modified axis '{0}' was split or merged from several axes.", outIdx);
-                        return true;
-                    }
-                }
-            }
-        }
-    }
-
-    return false;
+int64_t accumulateSizeBeforeDim(MemShapeRef memShape, MemDim dim) {
+    return std::accumulate(memShape.begin(), memShape.begin() + dim.ind(), 1, std::multiplies<int64_t>());
 }
 
 //
@@ -106,7 +68,7 @@ mlir::LogicalResult MoveThroughLayer<ConcreteOp>::matchAndRewrite(ConcreteOp ori
     const auto modifiedAxes = getModifiedAxis(origOp);
     const auto dimMapping = parseIntArrayOfArrayAttr<int64_t>(maybeAffineReshape.getDimMapping());
 
-    if (areModifiedAxesSplitOrMerged(dimMapping, affineInShape, affineOutShape, modifiedAxes, false, _log)) {
+    if (IE::areModifiedAxesSplitOrMerged(dimMapping, affineInShape, affineOutShape, modifiedAxes, false, _log)) {
         return mlir::failure();
     }
 
@@ -169,7 +131,8 @@ SmallVector<mlir::Attribute> MoveThroughTranspose::getNewAttrs(IE::TransposeOp o
     const auto affineInShape = getShape(affineReshape.getInput());
     const auto affineOutShape = getShape(affineReshape.getOutput());
     const auto dimMapping = parseIntArrayOfArrayAttr<int64_t>(affineReshape.getDimMapping());
-    const auto invertedDimMapping = invertDimMappingWithAxesNotSplitOrMerged(dimMapping, affineInShape, affineOutShape);
+    const auto invertedDimMapping =
+            IE::invertDimMappingWithAxesNotSplitOrMerged(dimMapping, affineInShape, affineOutShape);
 
     SmallVector<unsigned> newPerm(affineInShape.size(), 0);
     const auto originPerm = DimsOrder::fromAffineMap(origOp.getOrderValue().value());
@@ -430,8 +393,8 @@ mlir::LogicalResult MoveThroughConcat::matchAndRewrite(IE::ConcatOp origConcatOp
         const auto affineOutputShape = getShape(parentOp.getOutput());
 
         const auto dimMappingList = parseIntArrayOfArrayAttr<int64_t>(dimsMapping);
-        if (areModifiedAxesSplitOrMerged(dimMappingList, affineInputShape, affineOutputShape, modifiedAxises, false,
-                                         _log.nest())) {
+        if (IE::areModifiedAxesSplitOrMerged(dimMappingList, affineInputShape, affineOutputShape, modifiedAxises, false,
+                                             _log.nest())) {
             return mlir::failure();
         }
 
@@ -478,37 +441,15 @@ mlir::LogicalResult MoveThroughSoftmax::matchAndRewrite(IE::SoftMaxOp origOp, ml
     _log.trace("Got '{0}' at '{1}'", origOp->getName(), origOp->getLoc());
 
     auto affineReshapeOp = origOp.getInput().getDefiningOp<IE::AffineReshapeOp>();
-    if (affineReshapeOp == nullptr || !affineReshapeOp->hasOneUse()) {
-        return matchFailed(_log, rewriter, origOp, "AffineReshapeOp not found or has multiple uses");
+    auto newSoftmaxAxis = getNewSoftmaxAxisAfterSwappingWithAffineReshape(origOp, affineReshapeOp, _log);
+    if (!newSoftmaxAxis.has_value()) {
+        return mlir::failure();
     }
 
-    const auto softmaxInputRank = origOp.getInput().getType().dyn_cast<NDTypeInterface>().getRank();
-    const auto reshapeInputRank = affineReshapeOp.getInput().getType().dyn_cast<NDTypeInterface>().getRank();
-    if (softmaxInputRank != reshapeInputRank) {
-        return matchFailed(_log, rewriter, origOp, "AffineReshapeOp should not change tensor rank in this case");
-    }
-
-    const auto affineInShape = getShape(affineReshapeOp.getInput());
-    const auto affineOutShape = getShape(affineReshapeOp.getOutput());
-    const auto dimMapping = parseIntArrayOfArrayAttr<int64_t>(affineReshapeOp.getDimMapping());
-
-    const auto softmaxAxis = getPositiveAxisInd(origOp.getAxisIndAttr(), softmaxInputRank);
-    const mlir::DenseSet<int64_t> modifiedAxes{softmaxAxis};
-    if (areModifiedAxesSplitOrMerged(dimMapping, affineInShape, affineOutShape, modifiedAxes, false, _log)) {
-        return matchFailed(_log, rewriter, origOp,
-                           "Pattern failed due to Softmax axis is split or merged after AffineReshapeOp");
-    }
-
-    const auto invertedDimMapping = invertDimMappingWithAxesNotSplitOrMerged(dimMapping, affineInShape, affineOutShape);
-    const auto newSoftmaxAxis = invertedDimMapping[softmaxAxis];
-
-    if (origOp.getPadSize().has_value() && newSoftmaxAxis != softmaxAxis) {
-        return matchFailed(_log, rewriter, origOp, "Softmax axis is changed");
-    }
-
+    auto newSoftmaxAxisValue = newSoftmaxAxis.value();
     auto newSoftmaxOp = rewriter.create<IE::SoftMaxOp>(
             origOp.getLoc(), affineReshapeOp.getInput().getType(), affineReshapeOp.getInput(),
-            getIntAttr(getContext(), newSoftmaxAxis), origOp.getPadSizeAttr());
+            getIntAttr(getContext(), newSoftmaxAxisValue), origOp.getPadSizeAttr());
     auto newAffineReshapeOp =
             rewriter.create<IE::AffineReshapeOp>(affineReshapeOp.getLoc(), newSoftmaxOp.getOutput(),
                                                  affineReshapeOp.getDimMapping(), affineReshapeOp.getShapeValue());
@@ -521,10 +462,13 @@ mlir::LogicalResult MoveThroughSoftmax::matchAndRewrite(IE::SoftMaxOp origOp, ml
 // MoveThroughEltwiseGeneric
 //
 
+using VerifyCb = FuncRef<bool(mlir::Operation*)>;
+
 template <class ConcreteOp>
 class MoveThroughEltwiseGeneric final : public mlir::OpRewritePattern<ConcreteOp> {
 public:
-    MoveThroughEltwiseGeneric(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<ConcreteOp>(ctx), _log(log) {
+    MoveThroughEltwiseGeneric(mlir::MLIRContext* ctx, Logger log, VerifyCb verifyFunc = nullptr)
+            : mlir::OpRewritePattern<ConcreteOp>(ctx), _log(log), _verifyFunc(verifyFunc) {
         this->setDebugName("MoveThroughEltwiseGeneric");
     }
 
@@ -533,6 +477,7 @@ public:
 
 private:
     Logger _log;
+    VerifyCb _verifyFunc;
 };
 
 template <class ConcreteOp>
@@ -551,6 +496,10 @@ mlir::LogicalResult MoveThroughEltwiseGeneric<ConcreteOp>::matchAndRewrite(Concr
     const auto reshapeInputRank = getShape(inputAffineReshape.getInput()).size();
     const auto geluInputRank = getShape(origOp.getInput()).size();
     if (geluInputRank != reshapeInputRank) {
+        return mlir::failure();
+    }
+
+    if ((_verifyFunc) && !_verifyFunc(origOp.getOperation())) {
         return mlir::failure();
     }
 
@@ -579,6 +528,11 @@ public:
 private:
     mlir::LogicalResult matchAndRewrite(IE::MultiplyOp origOp, mlir::PatternRewriter& rewriter) const final;
 
+    mlir::LogicalResult processMultiplyOpWithBroadCastConstInput(IE::MultiplyOp origOp,
+                                                                 mlir::PatternRewriter& rewriter) const;
+
+    bool isConstInput(mlir::Value value) const;
+
 private:
     Logger _log;
 };
@@ -586,22 +540,22 @@ private:
 mlir::LogicalResult MoveThroughMultiply::matchAndRewrite(IE::MultiplyOp origOp, mlir::PatternRewriter& rewriter) const {
     _log.trace("Got '{0}' at '{1}'", origOp->getName(), origOp->getLoc());
 
-    auto doesAffineReshapeChangeRank = [](IE::AffineReshapeOp reshape) {
-        auto inputType = reshape.getInput().getType().cast<NDTypeInterface>();
-        auto outputType = reshape.getOutput().getType().cast<NDTypeInterface>();
-
-        return inputType.getRank() != outputType.getRank();
-    };
+    auto hasConstInput = llvm::any_of(origOp.getInputs(), [&](auto input) {
+        return isConstInput(input);
+    });
+    if (hasConstInput) {
+        return processMultiplyOpWithBroadCastConstInput(origOp, rewriter);
+    }
 
     auto inputAffineReshape1 = origOp.getInput1().getDefiningOp<IE::AffineReshapeOp>();
     if (inputAffineReshape1 == nullptr || !inputAffineReshape1->hasOneUse() ||
-        doesAffineReshapeChangeRank(inputAffineReshape1)) {
+        IE::doesAffineReshapeChangeRank(inputAffineReshape1)) {
         return mlir::failure();
     }
 
     auto inputAffineReshape2 = origOp.getInput2().getDefiningOp<IE::AffineReshapeOp>();
     if (inputAffineReshape2 == nullptr || !inputAffineReshape2->hasOneUse() ||
-        doesAffineReshapeChangeRank(inputAffineReshape2)) {
+        IE::doesAffineReshapeChangeRank(inputAffineReshape2)) {
         return mlir::failure();
     }
 
@@ -624,6 +578,198 @@ mlir::LogicalResult MoveThroughMultiply::matchAndRewrite(IE::MultiplyOp origOp, 
                                                      inputAffineReshape1.getShapeValueAttr());
 
     _log.trace("Successfully move MultiplyOp through AffineReshape");
+
+    return mlir::success();
+}
+
+mlir::LogicalResult MoveThroughMultiply::processMultiplyOpWithBroadCastConstInput(
+        IE::MultiplyOp origOp, mlir::PatternRewriter& rewriter) const {
+    /* Convert pattern
+                      Input
+                       |
+          Const      AffineReshape           New Const   Input
+             \        /                          \        /
+              Multiply                     ->     Multiply
+                 |                                    |
+               Output                             AffineReshape
+                                                      |
+                                                    Output
+
+    */
+    auto nonConstInputIter = llvm::find_if(origOp.getInputs(), [&](auto input) {
+        auto parentOp = mlir::dyn_cast_or_null<IE::AffineReshapeOp>(input.getDefiningOp());
+        return parentOp != nullptr && parentOp->hasOneUse() && !doesAffineReshapeChangeRank(parentOp);
+    });
+    if (nonConstInputIter == origOp.getInputs().end()) {
+        return mlir::failure();
+    }
+    auto input = *nonConstInputIter;
+    auto affineReshapeOp = input.getDefiningOp<IE::AffineReshapeOp>();
+    auto affineReshapeInShape = getShape(affineReshapeOp.getInput());
+    auto affineReshapeOutShape = getShape(affineReshapeOp.getOutput());
+    auto origOpOutShape = getShape(origOp.getOutput());
+    if (affineReshapeOutShape != origOpOutShape) {
+        return mlir::failure();
+    }
+
+    auto constInputIter = llvm::find_if(origOp.getInputs(), [&](auto input) {
+        return isConstInput(input);
+    });
+
+    VPUX_THROW_WHEN(constInputIter == origOp.getInputs().end(), "Const input not found");
+    auto constInput = *constInputIter;
+    auto constInShape = getShape(constInput);
+
+    const auto isScalar = llvm::all_of(constInShape, [](auto dim) {
+        return dim == 1;
+    });
+    const auto isVector = llvm::count(constInShape, 1) == static_cast<int64_t>(constInShape.size() - 1);
+    if (!isVector && !isScalar) {
+        return mlir::failure();
+    }
+
+    if (isVector) {
+        // Get the nonbroadcast dim
+        const auto dimOrder = DimsOrder::fromValue(constInput);
+        const auto constInMemShape = dimOrder.toMemoryOrder(constInShape);
+        const auto nonBroadCastDimIdx =
+                std::distance(constInShape.begin(), llvm::find_if(constInShape, [](const auto& dim) {
+                                  return dim != 1;
+                              }));
+
+        const auto nonBroadCastDimSize = constInShape[Dim(nonBroadCastDimIdx)];
+        VPUX_THROW_UNLESS(affineReshapeOutShape[Dim(nonBroadCastDimIdx)] == nonBroadCastDimSize,
+                          "Unsupported broadcast at '{0}'", origOp->getLoc());
+
+        // Need to check the dim keeps unchanged after affine reshape.
+        auto nonConstInMemShape = dimOrder.toMemoryOrder(affineReshapeOutShape);
+        auto nonBroadCastMemDim = dimOrder.toMemDim(Dim(nonBroadCastDimIdx));
+        const auto sizeBeforeNonBroadCastDim = accumulateSizeBeforeDim(nonConstInMemShape, nonBroadCastMemDim);
+        const auto memShapeBeforeReshape = dimOrder.toMemoryOrder(affineReshapeInShape);
+
+        auto dimRange = irange(memShapeBeforeReshape.size()) | reversed;
+        auto iter = llvm::find_if(dimRange, [&](const auto& dim) {
+            return accumulateSizeBeforeDim(memShapeBeforeReshape, MemDim(dim)) == sizeBeforeNonBroadCastDim;
+        });
+
+        if (iter == dimRange.end()) {
+            return mlir::failure();
+        }
+
+        const auto nonBroadCastDimBeforeReshape = dimOrder.toDim(MemDim(*iter));
+        if (affineReshapeInShape[nonBroadCastDimBeforeReshape] != nonBroadCastDimSize) {
+            // the broadcast dim size is changed after affine reshape
+            return mlir::failure();
+        }
+        auto newConstInputShape = Shape(affineReshapeOutShape.size(), 1);
+        newConstInputShape[nonBroadCastDimBeforeReshape] = nonBroadCastDimSize;
+        constInput = rewriter.createOrFold<IE::ReshapeOp>(constInput.getLoc(), constInput, nullptr, false,
+                                                          getIntArrayAttr(origOp->getContext(), newConstInputShape));
+    }
+    auto newMultiply = rewriter.create<IE::MultiplyOp>(origOp.getLoc(), affineReshapeOp.getInput(), constInput,
+                                                       origOp.getAutoBroadcastAttr(), origOp.getPostOpAttr(),
+                                                       origOp.getClampAttr());
+    rewriter.replaceOpWithNewOp<IE::AffineReshapeOp>(
+            origOp, newMultiply.getOutput(), affineReshapeOp.getDimMappingAttr(), affineReshapeOp.getShapeValueAttr());
+    return mlir::success();
+}
+
+bool MoveThroughMultiply::isConstInput(mlir::Value value) const {
+    return mlir::isa_and_nonnull<Const::DeclareOp>(value.getDefiningOp());
+}
+
+//
+// MoveThroughAdd
+//
+// We may get AffineReshape between Convolution and Add after input shape adjustment for Convolution.
+// Convert below pattern:
+//
+//      Input          Conv
+//         |            |
+//  [ViewLikeOps]   AffineReshape
+//          \          /
+//              Add
+//               |
+//
+// to:
+//
+//      Input          Conv
+//         |            |
+//  [ViewLikeOps]       |
+//         |            |
+//      ShapeCast       |
+//          \          /
+//              Add
+//               |
+//          AffineReshape
+//               |
+//
+class MoveThroughAdd final : public mlir::OpRewritePattern<IE::AddOp> {
+public:
+    MoveThroughAdd(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<IE::AddOp>(ctx), _log(log) {
+        this->setDebugName("MoveThroughAdd");
+    }
+
+private:
+    mlir::LogicalResult matchAndRewrite(IE::AddOp origOp, mlir::PatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+mlir::LogicalResult MoveThroughAdd::matchAndRewrite(IE::AddOp origOp, mlir::PatternRewriter& rewriter) const {
+    _log.trace("Got '{0}' at '{1}'", origOp->getName(), origOp->getLoc());
+
+    if (origOp.getInput1().getType() != origOp.getInput2().getType()) {
+        _log.nest().trace("Add inputs have different input types");
+        return mlir::failure();
+    }
+
+    auto affineReshapeInput = origOp.getInput1();
+    auto anotherInput = origOp.getInput2();
+    auto inputAffineReshapeOp = affineReshapeInput.getDefiningOp<IE::AffineReshapeOp>();
+    if (inputAffineReshapeOp == nullptr) {
+        affineReshapeInput = origOp.getInput2();
+        anotherInput = origOp.getInput1();
+        inputAffineReshapeOp = affineReshapeInput.getDefiningOp<IE::AffineReshapeOp>();
+    }
+
+    if (inputAffineReshapeOp == nullptr || !inputAffineReshapeOp->hasOneUse()) {
+        return mlir::failure();
+    }
+
+    // Current only support Convolution input for MatMul - Add - Softmax -MatMul VF in LLM.
+    auto affineReshapeParentOp = inputAffineReshapeOp.getInput().getDefiningOp();
+    if (!mlir::isa_and_nonnull<IE::ConvolutionOp>(affineReshapeParentOp)) {
+        return mlir::failure();
+    }
+
+    auto affineReshapeInType = inputAffineReshapeOp.getInput().getType().cast<NDTypeInterface>();
+    if (affineReshapeInType.getRank() != 4) {
+        return mlir::failure();
+    }
+    const auto alignment = VPU::NCEInvariant::getAlignment(affineReshapeInType.getElementType());
+    const auto affineReshapeInShape = affineReshapeInType.getShape();
+    if (affineReshapeInShape[Dims4D::Act::C] % alignment != 0 || affineReshapeInShape[Dims4D::Act::N] > 1) {
+        return mlir::failure();
+    }
+
+    auto ctx = rewriter.getContext();
+
+    auto inputShape = getShape(inputAffineReshapeOp.getInput());
+    auto newInputShapeCast =
+            rewriter.create<IE::ShapeCastOp>(anotherInput.getLoc(), anotherInput, getIntArrayAttr(ctx, inputShape));
+
+    auto newAddOp =
+            rewriter.create<IE::AddOp>(origOp.getLoc(), inputAffineReshapeOp.getInput().getType(),
+                                       newInputShapeCast.getResult(), inputAffineReshapeOp.getInput(),
+                                       origOp.getAutoBroadcastAttr(), origOp.getPostOpAttr(), origOp.getClampAttr());
+
+    rewriter.replaceOpWithNewOp<IE::AffineReshapeOp>(origOp, newAddOp.getOutput(),
+                                                     inputAffineReshapeOp.getDimMappingAttr(),
+                                                     inputAffineReshapeOp.getShapeValueAttr());
+
+    _log.trace("Successfully move AddOp through AffineReshape");
 
     return mlir::success();
 }
@@ -693,7 +839,7 @@ mlir::LogicalResult ConcatReshapeConcat::matchAndRewrite(IE::ConcatOp origOp, ml
     const auto modifiedAxes = IE::getConcatModifiedAxis(origOp);
     const auto dimMapping = parseIntArrayOfArrayAttr<int64_t>(reshapeOp.getDimMapping());
 
-    if (areModifiedAxesSplitOrMerged(dimMapping, affineInShape, affineOutShape, modifiedAxes, true, _log)) {
+    if (IE::areModifiedAxesSplitOrMerged(dimMapping, affineInShape, affineOutShape, modifiedAxes, true, _log)) {
         return matchFailed(rewriter, origOp, "Modified Axes split or merged");
     }
 
@@ -776,14 +922,15 @@ mlir::LogicalResult MoveThroughSlice::matchAndRewrite(IE::SliceOp origSliceOp, m
     }
 
     const auto dimMappingList = parseIntArrayOfArrayAttr<int64_t>(dimsMapping);
-    if (areModifiedAxesSplitOrMerged(dimMappingList, affineInputShape, affineOutputShape, modifiedAxises, false,
-                                     _log.nest())) {
-        _log.trace("[{0}]: slice operation areModifiedAxesSplitOrMerged", getDebugName(), origSliceOp.getLoc());
+    if (IE::areModifiedAxesSplitOrMerged(dimMappingList, affineInputShape, affineOutputShape, modifiedAxises, false,
+                                         _log.nest())) {
+        _log.trace("[{0}]: slice operation {1} areModifiedAxesSplitOrMerged in affineReshape op {2}", getDebugName(),
+                   origSliceOp.getLoc(), affineReshapeOp.getLoc());
         return mlir::failure();
     }
 
     const auto invertedDimMapping =
-            invertDimMappingWithAxesNotSplitOrMerged(dimMappingList, affineInputShape, affineOutputShape);
+            IE::invertDimMappingWithAxesNotSplitOrMerged(dimMappingList, affineInputShape, affineOutputShape);
 
     const auto newSliceAxis = invertedDimMapping[*modifiedAxises.begin()];
     SmallVector<int64_t> newStaticOffset(affineInputShape.size(), 0);
@@ -834,6 +981,11 @@ void PropagateAffineReshape::safeRunOnFunc() {
     auto& ctx = getContext();
     auto func = getOperation();
 
+    const auto verifyAvgPool = [](mlir::Operation* op) {
+        auto avgPoolOp = mlir::dyn_cast<IE::AvgPoolOp>(op);
+        return (avgPoolOp != nullptr) && (IE::isEltwisePooling<IE::AvgPoolOp>(avgPoolOp));
+    };
+
     mlir::RewritePatternSet patterns(&ctx);
     patterns.add<MoveThroughTranspose>(&ctx, _log);
     patterns.add<MoveThroughExpand>(&ctx, _log);
@@ -841,9 +993,13 @@ void PropagateAffineReshape::safeRunOnFunc() {
     patterns.add<MoveThroughSoftmax>(&ctx, _log);
     patterns.add<MoveThroughEltwiseGeneric<IE::GeluOp>>(&ctx, _log);
     patterns.add<MoveThroughEltwiseGeneric<IE::SwishOp>>(&ctx, _log);
+    patterns.add<MoveThroughEltwiseGeneric<IE::AvgPoolOp>>(&ctx, _log, verifyAvgPool);
     patterns.add<MoveThroughMultiply>(&ctx, _log);
     patterns.add<MoveThroughSlice>(&ctx, _log);
+    patterns.add<IE::MoveTransposeAffineReshapeThroughAdd>(&ctx, vpux::benefitHigh, _log);
+    patterns.add<MoveThroughAdd>(&ctx, _log);
     IE::ReshapeOp::getCanonicalizationPatterns(patterns, &ctx);
+    IE::AffineReshapeOp::getCanonicalizationPatterns(patterns, &ctx);
 
     if (mlir::failed(mlir::applyPatternsAndFoldGreedily(func, std::move(patterns), getDefaultGreedyRewriteConfig()))) {
         signalPassFailure();

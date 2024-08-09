@@ -26,37 +26,29 @@ class ActivationLayerTest_FP32 : public ActivationLayerTestCommon {
     }
 };
 
-class ActivationLayerTest_NPU3700 : public ActivationLayerTestCommon {};
-
 class ActivationLayerTest_SW_FP16 : public ActivationLayerTestCommon {};
 class ActivationLayerTest_HW_FP16 : public ActivationLayerTestCommon {};
 
 class ActivationLayerTest_SW_FP32 : public ActivationLayerTest_FP32 {};
 class ActivationLayerTest_HW_FP32 : public ActivationLayerTest_FP32 {};
 
-// 3700
-TEST_P(ActivationLayerTest_NPU3700, HW) {
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
-
 // 3720
 // SW
 TEST_P(ActivationLayerTest_SW_FP16, NPU3720) {
-    abs_threshold = 0.006;
+    abs_threshold = 0.0056;
     setReferenceSoftwareMode();
     run(Platform::NPU3720);
 }
 
 TEST_P(ActivationLayerTest_SW_FP32, NPU3720) {
-    abs_threshold = 0.006;
+    abs_threshold = 0.0056;
     setReferenceSoftwareMode();
     run(Platform::NPU3720);
 }
 
 // HW
 TEST_P(ActivationLayerTest_HW_FP16, NPU3720) {
-    abs_threshold = 0.006;
+    abs_threshold = 0.0056;
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
@@ -69,13 +61,13 @@ TEST_P(ActivationLayerTest_HW_FP32, NPU3720) {
 // 4000
 // SW
 TEST_P(ActivationLayerTest_SW_FP16, NPU4000) {
-    abs_threshold = 0.006;
+    abs_threshold = 0.0056;
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
 
 TEST_P(ActivationLayerTest_SW_FP32, NPU4000) {
-    abs_threshold = 0.006;
+    abs_threshold = 0.0056;
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
@@ -138,6 +130,7 @@ const std::map<ActivationTypes, std::vector<std::vector<float>>> activationTypes
 const std::map<ActivationTypes, std::vector<std::vector<float>>> activationTypesSWFP32 = {
         {Log, {{1.0f}}},
         {Relu, {{1.0f}}},
+        {Exp, {{1.0f}}},
 };
 
 std::map<std::vector<ov::Shape>, std::vector<ov::Shape>> basic = {{{{1, 50, 1, 1}}, {}}, {{{1, 128, 1, 1}}, {}}};
@@ -206,17 +199,6 @@ const auto basicTilingCases = ::testing::Combine(
         ::testing::ValuesIn(::combineParams(activationTypesTiling)), ::testing::Values(ov::element::f16),
         ::testing::ValuesIn(static_shapes_param_transform(ov::test::utils::combineParams(basicTiling))),
         ::testing::Values(DEVICE_NPU));
-
-// ------ NPU3700 ------
-
-INSTANTIATE_TEST_SUITE_P(smoke_Activation_Test, ActivationLayerTest_NPU3700, basicCases,
-                         ActivationLayerTest::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_Activation_Test_PRelu, ActivationLayerTest_NPU3700, basicPReluCases,
-                         ActivationLayerTest::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_Activation_Test_ND, ActivationLayerTest_NPU3700, basicCasesND,
-                         ActivationLayerTest::getTestCaseName);
 
 // ------ NPU3720/4000 SW FP16 ------
 

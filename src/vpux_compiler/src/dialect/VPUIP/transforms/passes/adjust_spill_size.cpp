@@ -148,10 +148,14 @@ void AdjustSpillSizePass::safeRunOnFunc() {
         const auto outType = dmaOp.getOutput().getType().cast<vpux::NDTypeInterface>();
 
         if (inType.getMemoryKind() == VPU::MemoryKind::CMX_NN && outType.getMemoryKind() == VPU::MemoryKind::DDR) {
-            updateSpillWrite(dmaOp);
+            if (isSupportedBufferSizeForCompression(inType)) {
+                updateSpillWrite(dmaOp);
+            }
         } else if (inType.getMemoryKind() == VPU::MemoryKind::DDR &&
                    outType.getMemoryKind() == VPU::MemoryKind::CMX_NN) {
-            updateSpillRead(dmaOp);
+            if (isSupportedBufferSizeForCompression(outType)) {
+                updateSpillRead(dmaOp);
+            }
         }
     });
 }

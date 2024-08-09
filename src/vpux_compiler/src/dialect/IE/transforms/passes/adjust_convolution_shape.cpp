@@ -3,19 +3,29 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#include <mlir/Support/LogicalResult.h>
+#include "vpux/compiler/core/attributes/shape.hpp"
+#include "vpux/compiler/core/layers.hpp"
+#include "vpux/compiler/core/type_interfaces.hpp"
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/utils/concat_utils.hpp"
+#include "vpux/compiler/dialect/IE/utils/pooling_utils.hpp"
+#include "vpux/compiler/dialect/IE/utils/reshape_utils.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/adjust_layout_utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
-#include "vpux/compiler/utils/factors.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
-#include "vpux/utils/core/numeric.hpp"
 
 using namespace vpux;
 
 namespace {
+
+// To explicitly control the patterns exec order to assure dependency
+// benefitLevels[0] is highest benefit level and represent the relative pattern is the first one to run
+const uint32_t levelCount = 2;
+SmallVector<mlir::PatternBenefit> benefitLevels = getBenefitLevels(levelCount);
 
 //
 // FoldConvStrideKernel
@@ -23,8 +33,8 @@ namespace {
 
 class FoldConvStrideKernel final : public mlir::OpRewritePattern<IE::ConvolutionOp> {
 public:
-    FoldConvStrideKernel(mlir::MLIRContext* ctx, Logger log)
-            : mlir::OpRewritePattern<IE::ConvolutionOp>(ctx), _log(log) {
+    FoldConvStrideKernel(mlir::MLIRContext* ctx, mlir::PatternBenefit benefit, Logger log)
+            : mlir::OpRewritePattern<IE::ConvolutionOp>(ctx, benefit), _log(log) {
     }
 
 public:
@@ -46,43 +56,38 @@ private:
 //    Stride   1 2                    1 1
 //  In the ExpandActivation pass, it doesn't need expand the input channel
 //
+
 mlir::LogicalResult FoldConvStrideKernel::matchAndRewrite(IE::ConvolutionOp convOp,
                                                           mlir::PatternRewriter& rewriter) const {
-    const auto strides = Shape(parseIntArrayAttr<int64_t>(convOp.getStrides()));
     auto filter = convOp.getFilter();
-    // Don't need to consider bias, the function not change the output shape.
-
-    auto inNDInterface = convOp.getInput().getType().dyn_cast<vpux::NDTypeInterface>();
-    auto inDimOrder = inNDInterface.getDimsOrder();
-    if (DimsOrder::NHWC != inDimOrder) {
-        return mlir::failure();
-    }
-
     auto filterConst = filter.getDefiningOp<Const::DeclareOp>();
     if (filterConst == nullptr) {
         return mlir::failure();
     }
+    // Don't need to consider bias, the function not change the output shape.
+
+    const auto strides = Shape(parseIntArrayAttr<int64_t>(convOp.getStrides()));
+    const auto strideX = strides[Dims4D::Strides::X];
 
     auto filterShape = vpux::getShape(filter);
-    if ((1 == strides[Dims4D::Strides::X]) || (filterShape[Dims4D::Filter::KX] > strides[Dims4D::Strides::X])) {
-        return mlir::failure();
-    }
-    auto inputShape = inNDInterface.getShape();
-    if (inputShape[Dims4D::Act::W] % strides[Dims4D::Strides::X]) {
+    const auto kernelX = filterShape[Dims4D::Filter::KX];
+
+    auto inputType = convOp.getInput().getType().dyn_cast<vpux::NDTypeInterface>();
+    auto outputType = convOp.getOutput().getType().dyn_cast<vpux::NDTypeInterface>();
+    auto inputShape = inputType.getShape();
+
+    auto iface = mlir::cast<IE::AlignedChannelsOpInterface>(convOp.getOperation());
+    const int64_t alignedInputChannel = iface.getInputChannelAlignment();
+    const int64_t alignedOutputChannel = iface.getOutputChannelAlignment();
+
+    if (!IE::isEligibleToFoldStrideKernel(inputType, outputType, kernelX, strideX, alignedInputChannel,
+                                          alignedOutputChannel, _log)) {
         return mlir::failure();
     }
 
-    auto iface = mlir::cast<IE::AlignedChannelsOpInterface>(convOp.getOperation());
-    const int64_t alignedChannel = iface.getInputChannelAlignment();
-    if ((filterShape[Dims4D::Filter::IC] % alignedChannel) == 0) {
-        // Already aligned
-        return mlir::failure();
-    }
-    Shape newShape(inputShape.raw());
-    newShape[Dims4D::Act::W] /= strides[Dims4D::Strides::X];
-    newShape[Dims4D::Act::C] *= strides[Dims4D::Strides::X];
+    const auto newShape = IE::getNewShapeAfterStrideFolding(inputShape, strideX);
     const auto ctx = rewriter.getContext();
-    const auto dstType = inNDInterface.changeShape(newShape);
+    const auto dstType = inputType.changeShape(newShape);
     const auto targetShapeAttr = getIntArrayAttr(ctx, newShape.raw());
     auto inputShapeCastOp =
             rewriter.create<IE::ShapeCastOp>(convOp.getLoc(), dstType, convOp.getInput(), targetShapeAttr);
@@ -114,7 +119,8 @@ mlir::LogicalResult FoldConvStrideKernel::matchAndRewrite(IE::ConvolutionOp conv
 
 class AdjustConvShape final : public mlir::OpRewritePattern<IE::ConvolutionOp> {
 public:
-    AdjustConvShape(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<IE::ConvolutionOp>(ctx), _log(log) {
+    AdjustConvShape(mlir::MLIRContext* ctx, mlir::PatternBenefit benefit, Logger log)
+            : mlir::OpRewritePattern<IE::ConvolutionOp>(ctx, benefit), _log(log) {
     }
 
 public:
@@ -303,8 +309,8 @@ void AdjustConvolutionShapePass::safeRunOnFunc() {
     auto func = getOperation();
 
     mlir::RewritePatternSet patterns(&ctx);
-    patterns.add<FoldConvStrideKernel>(&ctx, _log);
-    patterns.add<AdjustConvShape>(&ctx, _log);
+    patterns.add<FoldConvStrideKernel>(&ctx, benefitLevels[0], _log);
+    patterns.add<AdjustConvShape>(&ctx, benefitLevels[1], _log);
 
     if (mlir::failed(mlir::applyPatternsAndFoldGreedily(func, std::move(patterns), getDefaultGreedyRewriteConfig()))) {
         signalPassFailure();

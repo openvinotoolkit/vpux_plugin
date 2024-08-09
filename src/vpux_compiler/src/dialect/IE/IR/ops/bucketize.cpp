@@ -25,11 +25,11 @@ mlir::LogicalResult vpux::IE::BucketizeOp::verify() {
 
 mlir::LogicalResult vpux::IE::BucketizeOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::BucketizeOpAdaptor bucketize(operands, attrs);
+    IE::BucketizeOpAdaptor bucketize(operands, attrs, prop);
     if (mlir::failed(bucketize.verify(loc))) {
         return mlir::failure();
     }

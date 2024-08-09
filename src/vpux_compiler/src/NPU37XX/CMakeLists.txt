@@ -22,10 +22,10 @@ add_mlir_library(${TARGET_NAME}
         npu_compiler_dialect_ie_transforms
         npu_compiler_dialect_vpu_interfaces
         npu_compiler_dialect_vpu_transforms
+        npu_compiler_dialect_vpu_utils
         npu_compiler_dialect_vpuip_interfaces
         npu_compiler_dialect_vpuip_transforms
         npu_compiler_dialect_vpuip_utils
-        npu_compiler_vpu30xx
         npu_compiler_dialect_elfnpu37xx
         npu_llvm_utils
         npu_ov_utils

@@ -30,7 +30,7 @@ Byte getDmaSize(VPUIP::CopyOp copyOp) {
 bool isLegalCopyOp(VPUIP::CopyOp copyOp) {
     // Distributed type is currently not needed as large DMAs to CMX are already handled by previous tiling pass and
     // size of CMX is nevertheless smaller then DMA limit
-    if (mlir::dyn_cast<VPUIP::NCEClusterTilingOp>(copyOp->getParentOp()) != nullptr) {
+    if (vpux::VPUIP::hasDistributedOperand(copyOp)) {
         return true;
     }
 
@@ -43,7 +43,7 @@ bool isLegalCopyOp(VPUIP::CopyOp copyOp) {
 };
 
 bool isLegalCopyOpWithConcatOp(VPUIP::CopyOp copyOp) {
-    if (mlir::dyn_cast<VPUIP::NCEClusterTilingOp>(copyOp->getParentOp()) != nullptr) {
+    if (vpux::VPUIP::hasDistributedOperand(copyOp)) {
         return true;
     }
 
@@ -86,7 +86,7 @@ bool isLegalCopyOpWithConcatOp(VPUIP::CopyOp copyOp) {
     // Handle the single one copyOp case
     for (auto concatInput : childConcatOp.getInputs()) {
         auto op = mlir::dyn_cast_or_null<VPUIP::CopyOp>(concatInput.getDefiningOp());
-        if (op != nullptr && mlir::dyn_cast<VPUIP::NCEClusterTilingOp>(op->getParentOp()) == nullptr && op != copyOp) {
+        if (op != nullptr && !vpux::VPUIP::hasDistributedOperand(op) && op != copyOp) {
             return true;
         }
     }

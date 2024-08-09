@@ -63,7 +63,7 @@ static cv::gapi::GNetPackage getNetPackage(const std::string& tag, const OpenVIN
 
 static void cfgExecutionProvider(cv::gapi::onnx::Params<cv::gapi::Generic>& network,
                                  const ONNXRTParams::OpenVINO& ovep) {
-    network.cfgAddExecutionProvider(cv::gapi::onnx::ep::OpenVINO{ovep.device_type});
+    network.cfgAddExecutionProvider(cv::gapi::onnx::ep::OpenVINO{ovep.params_map});
 }
 
 static void cfgExecutionProvider(cv::gapi::onnx::Params<cv::gapi::Generic>& network, const ONNXRTParams::EP& ep) {
@@ -78,6 +78,7 @@ static void cfgExecutionProvider(cv::gapi::onnx::Params<cv::gapi::Generic>& netw
 
 static cv::gapi::GNetPackage getNetPackage(const std::string& tag, const ONNXRTParams& params) {
     cv::gapi::onnx::Params<cv::gapi::Generic> network{tag, params.model_path};
+    network.cfgSessionOptions(params.session_options);
     cfgExecutionProvider(network, params.ep);
     return cv::gapi::networks(network);
 }

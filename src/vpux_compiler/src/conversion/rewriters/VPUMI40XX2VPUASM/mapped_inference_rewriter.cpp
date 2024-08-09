@@ -9,8 +9,9 @@
 namespace vpux {
 namespace vpumi40xx2vpuasm {
 
-mlir::FlatSymbolRefAttr MappedInferenceRewriter::getSymbolicName(VPUMI40XX::MappedInferenceOp, size_t) {
-    return mlir::FlatSymbolRefAttr::get(getContext(), "MappedInference");
+llvm::SmallVector<mlir::FlatSymbolRefAttr> MappedInferenceRewriter::getSymbolicNames(VPUMI40XX::MappedInferenceOp,
+                                                                                     size_t) {
+    return {mlir::FlatSymbolRefAttr::get(getContext(), "MappedInference")};
 }
 
 mlir::LogicalResult MappedInferenceRewriter::symbolize(VPUMI40XX::MappedInferenceOp op, SymbolMapper&,

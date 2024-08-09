@@ -42,4 +42,6 @@ std::unique_ptr<VPUNN::SWOperation> getVPUNNSWKernelOp(VPU::SWOpInterface operat
 size_t getDPUTaskOpCost(VPUIP::DPUTaskOp dpuTaskOp, const std::shared_ptr<VPUNN::VPUCostModel>& costModel,
                         VPU::ArchKind arch, vpux::Logger log);
 
+VPUNN::MemoryLocation getMemoryLocation(mlir::Type type);
+
 }  // namespace vpux

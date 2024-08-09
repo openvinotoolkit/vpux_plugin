@@ -11,6 +11,7 @@ include "vpux/compiler/dialect/const/attr_interfaces.td"
 
 include "mlir/IR/AttrTypeBase.td"
 include "mlir/IR/BuiltinAttributeInterfaces.td"
+include "mlir/IR/CommonAttrConstraints.td"
 
 //
 // Base classes
@@ -29,6 +30,36 @@ def Const_TransformAttrInterfaceArrayAttr :
     ArrayOfAttr<Const_Dialect, "TransformAttrInterfaceArray", "TransformAttrInterfaceArray", "vpux::Const::TransformAttrInterface">;
 
 //
+// SymElementsAttr
+//
+
+def Const_SymElementsAttr : Const_Attr<"SymElements", [
+    DeclareAttrInterfaceMethods<ElementsAttrInterface>
+]> {
+    let summary = "Can reference Rodata containing the elements";
+    let description = [{
+        This attribute implements mlir::ElementsAttr "interface". It can be used
+        instead of mlir::DenseElementsAttr or mlir::DenseResourceElementsAttr to
+        reference a const.Rodata op.
+
+        Because of some quirks of MLIR, proper verification is done by Const.DeclareOp.
+        Using this attribute on its own should be done with caution.
+    }];
+
+    let parameters = (ins
+        "::mlir::SymbolRefAttr":$sym_name,
+        // We need an additional user-informed type attribute because we cannot lookup
+        // the underlying elements to which the symbol points to in all situations.
+        // Verifying if this type matches the type of the underlying elements is
+        // done by Const.DeclareOp using the 'SymbolOpUserInterface' and the function
+        // verifySymbolUses().
+        "::mlir::ShapedType":$type
+    );
+
+    let hasCustomAssemblyFormat = 1;
+}
+
+//
 // ContentAttr
 //
 
@@ -43,22 +74,25 @@ def Const_ContentAttr : Const_Attr<"Content", [Const_RequestQueueAttrInterface]>
     let parameters = (ins
         "mlir::ElementsAttr":$baseContent,
         "vpux::Const::TransformAttrInterfaceArrayAttr":$transformations,
-        "vpux::NDTypeInterface":$finalType
+        "vpux::NDTypeInterface":$finalType,
+        "mlir::UnitAttr":$isSplat
     );
 
     let builders = [
         AttrBuilderWithInferredContext<
             (ins "mlir::ElementsAttr":$baseContent), [{
-                auto finalType = vpux::Const::ContentAttr::inferFinalType(baseContent, {});
-                return $_get(baseContent.getContext(), baseContent, vpux::Const::TransformAttrInterfaceArrayAttr(), finalType);
+                const auto [finalType, isSplat] = vpux::Const::ContentAttr::inferFinalTypeAndSplat(baseContent, {});
+                return $_get(baseContent.getContext(), baseContent,
+                    vpux::Const::TransformAttrInterfaceArrayAttr(), finalType, isSplat);
             }]
         >,
 
         AttrBuilderWithInferredContext<
             (ins "mlir::ElementsAttr":$baseContent, "mlir::ArrayRef<vpux::Const::TransformAttrInterface>":$transformations), [{
                 auto transformationsAttr = vpux::Const::TransformAttrInterfaceArrayAttr::get(baseContent.getContext(), transformations);
-                auto finalType = vpux::Const::ContentAttr::inferFinalType(baseContent, transformations);
-                return $_get(baseContent.getContext(), baseContent, transformationsAttr, finalType);
+                const auto [finalType, isSplat] = vpux::Const::ContentAttr::inferFinalTypeAndSplat(
+                    baseContent, transformations);
+                return $_get(baseContent.getContext(), baseContent, transformationsAttr, finalType, isSplat);
             }]
         >
     ];
@@ -77,14 +111,17 @@ def Const_ContentAttr : Const_Attr<"Content", [Const_RequestQueueAttrInterface]>
         mlir::ElementsAttr getBaseContent() const;
         mlir::ArrayRef<vpux::Const::TransformAttrInterface> getTransformations() const;
         vpux::NDTypeInterface getType() const;
+        bool isSplat() const;
 
         vpux::Const::ContentAttr broadcast(Dim axis, int64_t value) const;
         vpux::Const::ContentAttr convertElemType(mlir::Type newElemType) const;
         vpux::Const::ContentAttr quantCast(mlir::quant::QuantizedType newElemType = nullptr) const;
         vpux::Const::ContentAttr dequantize() const;
+        vpux::Const::ContentAttr quantize(mlir::quant::QuantizedType targetType) const;
         vpux::Const::ContentAttr rescale(double scale) const;
         vpux::Const::ContentAttr relocateWeightsTablePointers(ArrayRef<uint32_t> weightsPtr, uint64_t sparsityPtr, vpux::ShapeRef offsets,
-                                                              uint64_t weightsTableSize, uint64_t weightsElemBitSize, VPUIP::SparsityCompressionAttr weightsCompression) const;
+                                                              uint64_t weightsTableSize, uint64_t weightsElemBitSize, VPUIP::SparsityCompressionAttr weightsCompression,
+                                                              uint64_t channelOffset) const;
         vpux::Const::ContentAttr swizzleConstant(uint64_t swizzleKey, uint64_t arch) const;
         vpux::Const::ContentAttr add(double bias) const;
         vpux::Const::ContentAttr reshape(vpux::ShapeRef newShape) const;
@@ -104,7 +141,8 @@ def Const_ContentAttr : Const_Attr<"Content", [Const_RequestQueueAttrInterface]>
         vpux::Const::ContentAttr scalarMultInverse() const;
 
         static vpux::Const::ContentAttr addTransformation(vpux::Const::ContentAttr input, vpux::Const::TransformAttrInterface transformation);
-        static vpux::NDTypeInterface inferFinalType(mlir::ElementsAttr content, mlir::ArrayRef<vpux::Const::TransformAttrInterface> transformations);
+        static std::pair<vpux::NDTypeInterface, mlir::UnitAttr> inferFinalTypeAndSplat(
+            mlir::ElementsAttr content, mlir::ArrayRef<vpux::Const::TransformAttrInterface> transformations);
 
         vpux::Const::ContentAttr stripTransformationsFrom(Const::TransformAttrInterface transformation);
         SmallVector<vpux::Const::TransformAttrInterface> getLastTransformationsFrom(Const::TransformAttrInterface transformation);
@@ -216,6 +254,33 @@ def Const_QuantCastAttr : Const_Attr<"QuantCast",
 def Const_DequantizeAttr : Const_Attr<"Dequantize",
         [DeclareAttrInterfaceMethods<Const_TransformAttrInterface>]> {
     let summary = "Dequantize constant content";
+}
+
+//
+// QuantizeAttr
+//
+
+def Const_QuantizeAttr : Const_Attr<"Quantize",
+        [DeclareAttrInterfaceMethods<Const_TransformAttrInterface>]> {
+    let summary = "Converts const values to quantized type";
+
+    let parameters = (ins
+        "mlir::quant::QuantizedType":$targetType
+    );
+
+    let builders = [
+
+        AttrBuilder<
+            (ins "mlir::quant::QuantizedType":$targetType), [{
+                return $_get($_ctxt, targetType);
+            }]
+        >
+    ];
+
+    let storageNamespace = "details";
+    let genVerifyDecl = 1;
+    let hasCustomAssemblyFormat = 1;
+    let skipDefaultBuilders = 1;
 }
 
 //
@@ -546,20 +611,53 @@ def Const_RelocateWeightsTableAttr : Const_Attr<"RelocateWeightsTable",
         [DeclareAttrInterfaceMethods<Const_TransformAttrInterface>]> {
     let summary = "Patches offsets in the weights table";
 
+    let description = [{
+        The weights table is used by the DPU to describe the constants associated with the operation.
+        It has OCx4 elements, where each element is a 32-bit integer:
+          0  [weights_ptr0, sparsity_ptr0, mult_shift0, bias0]
+          1  [weights_ptr1, sparsity_ptr1, mult_shift1, bias1]
+          ...
+         OC  [weights_ptrC, sparsity_ptrC, mult_shiftC, biasC]
+        Each row corresponds to an output channel of the DPU operation, where:
+          - `weights_ptr` corresponds to the offset in the cluster where the channel's weights are found
+          - `sparsity_ptr` corresponds to the offset in the cluster where the channel's weights sparsity map is found
+          - `mult_shift` corresponds to the multiply and shift values applied to the output
+          - `bias` corresponds to the bias added to the output
+
+        This transformation relocates the pointers from the weights table based on the parameters below:
+        - weightsPtr - the base address of the weights associated with the weights table,
+                       which will be added to all weights_ptr entries from the table
+        - sparsityPtr - the base address of the weights sparsity map associated with the weights table,
+                        which will be added to all sparsity_ptr entries from the table
+        - offsets - an array of channel offsets, which describes what clusters each channel belongs to
+                  - for example, if the associated weights are segmented equally over OC across two clusters,
+                    the `offsets` parameter could contain [0, OC/2]; this will cause the second half of the
+                    channels to have their pointers reset since this subset of values will be used by the second cluster only
+        - weightsTableSize - the size of the weights table, in bytes
+        - weightsElemBitSize - the elements size of the weights, in bits
+        - weightsCompression - in case the weights are sparse, this parameter indicates how many elements are found
+                               in the weights per output channel; it is used internally to correctly determine the new pointers
+        - channelOffset - the starting offset of the channels that are being relocated; this is used in case the transformation
+                          works on a slice of the channels to ensure the correct pointers are computed
+                        - for example, if the transformation receives channels [16-31] for the table, the `channelOffset` would
+                          be set to 16, so that the first relocated pointer corresponds to channel 16 instead of channel 0
+    }];
+
     let parameters = (ins
         "mlir::ArrayAttr":$weightsPtr,
         "mlir::IntegerAttr":$sparsityPtr,
         "mlir::ArrayAttr":$offsets,
         "mlir::IntegerAttr":$weightsTableSize,
         "mlir::IntegerAttr":$weightsElemBitSize,
-        "VPUIP::SparsityCompressionAttr":$weightsCompression
+        "VPUIP::SparsityCompressionAttr":$weightsCompression,
+        "mlir::IntegerAttr":$channelOffset
     );
 
     let builders = [
         AttrBuilderWithInferredContext<
             (ins "mlir::ArrayAttr":$weightsPtr, "mlir::IntegerAttr":$sparsityPtr, "mlir::ArrayAttr":$offsets, "mlir::IntegerAttr":$weightsTableSize,
-                 "mlir::IntegerAttr":$weightsElemBitSize, "VPUIP::SparsityCompressionAttr":$weightsCompression), [{
-                return $_get(weightsPtr.getContext(), weightsPtr, sparsityPtr, offsets, weightsTableSize, weightsElemBitSize, weightsCompression);
+                 "mlir::IntegerAttr":$weightsElemBitSize, "VPUIP::SparsityCompressionAttr":$weightsCompression, "mlir::IntegerAttr":$channelOffset), [{
+                return $_get(weightsPtr.getContext(), weightsPtr, sparsityPtr, offsets, weightsTableSize, weightsElemBitSize, weightsCompression, channelOffset);
             }]
         >
     ];

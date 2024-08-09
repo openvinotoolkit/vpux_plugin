@@ -46,11 +46,11 @@ StridedSliceInputData extractData(VPU::StridedSliceOpAdaptor stridedSlice) {
 // TODO: E-90249 Extend the infer type logic for StridedSlice to support different input / output ranks
 mlir::LogicalResult vpux::VPU::StridedSliceOp::inferReturnTypes(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange /*regions*/,
         mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::StridedSliceOpAdaptor slice(operands, attrs);
+    VPU::StridedSliceOpAdaptor slice(operands, attrs, prop);
     if (mlir::failed(slice.verify(loc))) {
         return mlir::failure();
     }

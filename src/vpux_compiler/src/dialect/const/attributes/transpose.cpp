@@ -85,6 +85,10 @@ vpux::NDTypeInterface vpux::Const::TransposeAttr::inferOutputType(vpux::NDTypeIn
     return input.changeShapeElemType(newShape, elemType);
 }
 
+bool vpux::Const::TransposeAttr::inferOutputSplat(bool inputIsSplat, vpux::NDTypeInterface) {
+    return inputIsSplat;
+}
+
 //
 // TransposeAttr::transform
 //

@@ -68,9 +68,6 @@ class ReduceLayerTestCommon : public ReduceOpsLayerTest, virtual public VpuOv2La
     }
 };  // namespace test
 
-// FP16 for 3700 platform
-class ReduceOpsLayerTest_NPU3700 : public ReduceLayerTestCommon {};
-
 // FP16/FP32 for 3720/4000 platforms
 class ReduceLayerTest_HW_FP16 : public ReduceLayerTestCommon {};
 class ReduceLayerTest_SW_FP16 : public ReduceLayerTestCommon {};
@@ -80,17 +77,6 @@ class ReduceLayerTest_FP32 : public ReduceLayerTestCommon {
                 "convert-precision-to-fp16=false";
     }
 };
-
-// NPU3700 SW/HW
-TEST_P(ReduceOpsLayerTest_NPU3700, SW) {
-    VpuOv2LayerTest::setReferenceSoftwareMode();
-    VpuOv2LayerTest::run(Platform::NPU3700);
-}
-
-TEST_P(ReduceOpsLayerTest_NPU3700, HW) {
-    VpuOv2LayerTest::setDefaultHardwareMode();
-    VpuOv2LayerTest::run(Platform::NPU3700);
-}
 
 /// FP16 SW/HW
 // NPU3720
@@ -144,11 +130,6 @@ class ReduceOpsLayerWithSpecificInputTestCommon :
     }
 };
 
-TEST_P(ReduceOpsLayerWithSpecificInputTestCommon, HW) {
-    VpuOv2LayerTest::setDefaultHardwareMode();
-    VpuOv2LayerTest::run(Platform::NPU3700);
-}
-
 }  // namespace test
 
 }  // namespace ov
@@ -168,80 +149,7 @@ const std::vector<std::vector<size_t>> inputShapes = {
         std::vector<size_t>{3, 5, 7, 9},
 };
 
-const std::vector<std::vector<size_t>> inputShapesOneAxis = {
-        std::vector<size_t>{10, 20, 30, 40},
-        std::vector<size_t>{3, 5, 7, 9},
-        std::vector<size_t>{10},
-};
-
 const std::vector<std::vector<int>> axes = {{1}, {2}, {1, 3}, {2, 3}, {1, -1}};
-
-std::vector<OpType> opTypes = {
-        OpType::SCALAR,
-        OpType::VECTOR,
-};
-
-const std::vector<ReductionType> reductionTypes = {
-        ReductionType::Mean, ReductionType::Min,       ReductionType::Max,        ReductionType::Sum,
-        ReductionType::Prod, ReductionType::LogicalOr, ReductionType::LogicalAnd,
-};
-
-//
-// NPU3700 Instantiation
-//
-
-// Tracking number [E#85137]
-INSTANTIATE_TEST_SUITE_P(DISABLED_smoke_ReduceOneAxis, ReduceOpsLayerTest_NPU3700,
-                         testing::Combine(testing::ValuesIn(decltype(axes){{0}}), testing::ValuesIn(opTypes),
-                                          testing::Values(true, false), testing::ValuesIn(reductionTypes),
-                                          testing::ValuesIn(modelTypes), testing::ValuesIn(inputShapesOneAxis),
-                                          testing::Values(DEVICE_NPU)),
-                         ReduceOpsLayerTest_NPU3700::getTestCaseName);
-
-// Tracking number [E#85137]
-INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_Reduce, ReduceOpsLayerWithSpecificInputTestCommon,
-                         testing::Combine(testing::ValuesIn(decltype(axes){{0}}), testing::Values(OpType::VECTOR),
-                                          testing::Values(true, false),
-                                          testing::Values(ReductionType::Max, ReductionType::Sum, ReductionType::Min,
-                                                          ReductionType::L1, ReductionType::LogicalOr,
-                                                          ReductionType::LogicalAnd, ReductionType::Prod,
-                                                          ReductionType::L2),
-                                          testing::ValuesIn(modelTypes),
-                                          testing::Values(std::vector<size_t>{1, 512, 7, 7}),
-                                          testing::Values(DEVICE_NPU)),
-                         ReduceOpsLayerWithSpecificInputTestCommon::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_Reduce3D, ReduceOpsLayerWithSpecificInputTestCommon,
-                         testing::Combine(testing::ValuesIn(decltype(axes){{0}}), testing::Values(OpType::VECTOR),
-                                          testing::Values(true),
-                                          testing::Values(ReductionType::Mean, ReductionType::Min, ReductionType::L1,
-                                                          ReductionType::LogicalOr, ReductionType::LogicalAnd,
-                                                          ReductionType::Prod, ReductionType::L2),
-                                          testing::ValuesIn(modelTypes),
-                                          testing::Values(std::vector<size_t>{512, 7, 7}), testing::Values(DEVICE_NPU)),
-                         ReduceOpsLayerWithSpecificInputTestCommon::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(
-        DISABLED_TMP_smoke_Reduce4D, ReduceOpsLayerWithSpecificInputTestCommon,
-        testing::Combine(testing::ValuesIn(decltype(axes){{0}}), testing::Values(OpType::VECTOR), testing::Values(true),
-                         testing::Values(ReductionType::Mean, ReductionType::Min, ReductionType::L1,
-                                         ReductionType::LogicalOr, ReductionType::LogicalAnd, ReductionType::L2),
-                         testing::ValuesIn(modelTypes), testing::Values(std::vector<size_t>{1, 512, 7, 7}),
-                         testing::Values(DEVICE_NPU)),
-        ReduceOpsLayerWithSpecificInputTestCommon::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_Reduce_from_networks, ReduceOpsLayerTest_NPU3700,
-                         testing::Combine(testing::ValuesIn(decltype(axes){{2, 3}}), testing::Values(OpType::VECTOR),
-                                          testing::Values(true, false),
-                                          testing::Values(ReductionType::Mean, ReductionType::Max),
-                                          testing::ValuesIn(modelTypes),
-                                          testing::Values(std::vector<size_t>{1, 512, 7, 7},   // resnet_18
-                                                          std::vector<size_t>{1, 2048, 7, 7},  // resnet_50
-                                                          std::vector<size_t>{1, 1280, 7, 7},  // mobilenet_v2
-                                                          std::vector<size_t>{1, 1664, 7, 7}   // densenet
-                                                          ),
-                                          testing::Values(DEVICE_NPU)),
-                         ReduceOpsLayerTest_NPU3700::getTestCaseName);
 
 //
 // NPU3720/4000 Instantiation

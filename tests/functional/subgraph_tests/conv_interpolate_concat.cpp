@@ -103,13 +103,6 @@ public:
     }
 };
 
-class ConvInterpolateConcatTest_NPU3700 : public ConvInterpolateConcatTestCommon {};
-
-TEST_P(ConvInterpolateConcatTest_NPU3700, HW) {
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
-
 class ConvInterpolateConcatTest_NPU3720 : public ConvInterpolateConcatTestCommon {};
 
 TEST_P(ConvInterpolateConcatTest_NPU3720, HW) {
@@ -135,10 +128,6 @@ const std::vector<std::vector<size_t>> inputShapes = {
 };
 
 const std::vector<int64_t> concatAxis = {1, 2, 3};
-
-INSTANTIATE_TEST_SUITE_P(smoke_ConvInterpolateConcatTest, ConvInterpolateConcatTest_NPU3700,
-                         ::testing::Combine(::testing::ValuesIn(inputShapes), ::testing::ValuesIn(concatAxis)),
-                         ConvInterpolateConcatTestCommon::getTestCaseName);
 
 INSTANTIATE_TEST_SUITE_P(smoke_ConvInterpolateConcatTest, ConvInterpolateConcatTest_NPU3720,
                          ::testing::Combine(::testing::ValuesIn(inputShapes), ::testing::ValuesIn(concatAxis)),

@@ -6,6 +6,7 @@
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 
 #include <mlir/Transforms/DialectConversion.h>
 
@@ -56,11 +57,9 @@ mlir::LogicalResult ConvertSquaredDiffToSubAndPowerPass::SquaredDifferenceRewrit
     auto subtract = rewriter.create<IE::SubtractOp>(sqdOp.getLoc(), sqdOp.getInput1(), sqdOp.getInput2(),
                                                     sqdOp.getAutoBroadcast(), nullptr, nullptr);
 
-    const SmallVector<vpux::type::float16> vals = {2.f};
     const SmallVector<int64_t> shape(subtract.getType().getRank(), 1);
     const auto baseType = mlir::RankedTensorType::get(ArrayRef(shape), mlir::Float16Type::get(getContext()));
-    const auto baseAttr = mlir::DenseElementsAttr::get(baseType, ArrayRef(vals));
-    auto exponent = rewriter.create<Const::DeclareOp>(sqdOp.getLoc(), baseType, Const::ContentAttr::get(baseAttr));
+    auto exponent = Const::createFloatConst(rewriter, sqdOp.getLoc(), baseType, 2.f);
 
     rewriter.replaceOpWithNewOp<IE::PowerOp>(sqdOp, subtract, exponent, sqdOp.getAutoBroadcast());
 

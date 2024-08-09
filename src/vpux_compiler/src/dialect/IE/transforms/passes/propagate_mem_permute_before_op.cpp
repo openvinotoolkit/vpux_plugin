@@ -517,7 +517,10 @@ mlir::LogicalResult MoveThroughOp<ConcreteOp>::matchAndRewrite(IE::MemPermuteOp 
     mapper.map(concreteOp->getOperand(0), newMemPermute.getOutput());
     mlir::Operation* newOp = rewriter.clone(*concreteOp, mapper);
     auto newOutput = newOp->getResult(0);
-    newOutput.setType(newMemPermute.getOutput().getType());
+    const auto outputElementType =
+            newOp->getResult(0).getType().template cast<vpux::NDTypeInterface>().getElementType();
+    newOutput.setType(newMemPermute.getOutput().getType().template cast<vpux::NDTypeInterface>().changeElemType(
+            outputElementType));
 
     auto rank = getShape(newMemPermute.getOutput()).size();
     auto newPermuteCast = rewriter.createOrFold<IE::PermuteCastOp>(
@@ -535,7 +538,33 @@ bool MoveThroughOp<ConcreteOp>::checkMemPermutePattern(IE::MemPermuteOp memPermu
     if (!mlir::isa_and_nonnull<ConcreteOp>(op)) {
         return false;
     }
-    return op->hasOneUse();
+
+    if (!op->hasOneUse()) {
+        return false;
+    }
+
+    // ConcreteOp should not receive input from a BlockArgument
+    auto inputBlock = mlir::dyn_cast_or_null<mlir::BlockArgument>(op->getOperand(0));
+    if (inputBlock != nullptr) {
+        return false;
+    }
+
+    // The ConcreteOp must not have input or output quantized per axis
+    auto inElemType = op->getOperand(0).getType().dyn_cast<vpux::NDTypeInterface>().getElementType();
+    auto outElemType = op->getResult(0).getType().dyn_cast<vpux::NDTypeInterface>().getElementType();
+    if (inElemType.isa<mlir::quant::UniformQuantizedPerAxisType>() ||
+        outElemType.isa<mlir::quant::UniformQuantizedPerAxisType>()) {
+        return false;
+    }
+
+    // E#127631: If MemPermute input is QuantizedType the storage type should not by sub byte quantization because this
+    // would result in compilation error later
+    const auto quantType = inElemType.dyn_cast<mlir::quant::QuantizedType>();
+    if (quantType != nullptr) {
+        return !vpux::isSubByteType(quantType.getStorageType());
+    }
+
+    return true;
 }
 
 //
@@ -844,6 +873,7 @@ void PropagateMemPermuteBeforeOpPass::safeRunOnFunc() {
     patterns.add<PropagatePermuteQuantize>(&ctx, _log);
     patterns.add<MoveThroughOp<IE::MVNOp>>(&ctx, _log);
     patterns.add<MoveThroughOp<IE::GeluOp>>(&ctx, _log);
+    patterns.add<MoveThroughOp<IE::QuantizeCastOp>>(&ctx, _log);
     patterns.add<MoveThroughConcat>(&ctx, _log);
     patterns.add<MoveThroughSlice>(&ctx, _log);
     patterns.add<MoveThroughShapeCast>(&ctx, _log);

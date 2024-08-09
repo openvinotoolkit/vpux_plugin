@@ -41,14 +41,14 @@ mlir::LogicalResult DeclareTaskAddrBuffRewriter::symbolize(VPURegMapped::Declare
     return mlir::success();
 }
 
-mlir::FlatSymbolRefAttr DeclareTaskAddrBuffRewriter::getSymbolicName(VPURegMapped::DeclareTaskAddrBufferOp op,
-                                                                     size_t counter) {
+llvm::SmallVector<mlir::FlatSymbolRefAttr> DeclareTaskAddrBuffRewriter::getSymbolicNames(
+        VPURegMapped::DeclareTaskAddrBufferOp op, size_t counter) {
     auto fullName = VPURegMapped::DeclareTaskAddrBufferOp::getOperationName();
     auto opName = fullName.drop_front(VPURegMapped::VPURegMappedDialect::getDialectNamespace().size() + 1);
 
     auto index = std::to_string(counter);
     auto symName = mlir::StringAttr::get(op.getContext(), opName + index);
-    return mlir::FlatSymbolRefAttr::get(symName);
+    return {mlir::FlatSymbolRefAttr::get(symName)};
 }
 
 }  // namespace vpumi40xx2vpuasm

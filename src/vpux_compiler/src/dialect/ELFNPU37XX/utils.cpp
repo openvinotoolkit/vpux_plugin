@@ -249,20 +249,6 @@ ELFNPU37XX::SymbolOp vpux::ELFNPU37XX::RelocationManager::getSymbol(ELFNPU37XX::
     return nullptr;
 }
 
-mlir::MemRefType vpux::getLinearMemrefType(mlir::MLIRContext* ctx, int64_t memrefSize, mlir::Type dataType,
-                                           VPU::MemoryKind memKind) {
-    VPUX_THROW_UNLESS(dataType.isIntOrFloat(), "Data Type of the MemRef must be an Integer or Float Type");
-
-    const auto memrefShape = SmallVector<int64_t>{memrefSize};
-    auto memKindAttr = mlir::FlatSymbolRefAttr::get(ctx, stringifyEnum(memKind));
-    const auto memKindSymbolAttr = vpux::IndexedSymbolAttr::get(ctx, memKindAttr);
-    unsigned int perm[1] = {0};
-    auto map = mlir::AffineMap::getPermutationMap(to_small_vector(perm), ctx);
-
-    auto memrefType = mlir::MemRefType::get(memrefShape, dataType, map, memKindSymbolAttr);
-    return memrefType;
-}
-
 size_t vpux::ELFNPU37XX::math::gcd(size_t a, size_t b) {
     if (b == 0) {
         return a;
@@ -281,7 +267,6 @@ size_t vpux::ELFNPU37XX::math::lcm(size_t a, size_t b) {
 namespace {
 const std::unordered_map<VPU::ArchKind, elf::platform::ArchKind> vpuToElfArchEnumMap = {
         {VPU::ArchKind::UNKNOWN, elf::platform::ArchKind::UNKNOWN},
-        {VPU::ArchKind::NPU30XX, elf::platform::ArchKind::VPUX30XX},
         {VPU::ArchKind::NPU37XX, elf::platform::ArchKind::VPUX37XX},
         {VPU::ArchKind::NPU40XX, elf::platform::ArchKind::VPUX40XX}};
 }  // namespace

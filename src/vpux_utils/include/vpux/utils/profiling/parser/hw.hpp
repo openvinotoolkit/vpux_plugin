@@ -26,12 +26,6 @@ struct UpaData_t {
     uint32_t activeCycles;
 };
 
-// SW DPU profiling data payload
-struct SwDpuData_t {
-    uint64_t begin;
-    uint64_t end;
-};
-
 // HWP DPU profiling data payload
 struct HwpDpu27Mode0Data_t {
     uint64_t idu_wl_duration : 28;
@@ -68,11 +62,6 @@ struct HwpDpuIduOduData_t {
     uint64_t odu_wl_id : 16;
     uint64_t odu_dpu_id : 16;
     uint64_t odu_tstamp;
-};
-
-struct DMA20Data_t {
-    uint32_t startCycle;
-    uint32_t endCycle;
 };
 
 struct DMA27Data_t {

@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --vpu-arch=%arch% --workload-management %s | FileCheck %s
-// REQUIRES: arch-VPUX40XX
+// REQUIRES: arch-NPU40XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 #NWCH = affine_map<(d0, d1, d2, d3) -> (d0, d3, d1, d2)>
@@ -84,5 +84,5 @@ module @Convolution attributes {VPU.arch = #VPU.arch_kind<NPU40XX>, VPU.compilat
 // CHECK: [[VAL24:%.*]] = VPUMI40XX.DPUInvariant
 // CHECK: [[VAL25:%.*]] = VPUMI40XX.DPUVariant
 // CHECK: [[VAL26:%.*]] = VPUMI40XX.DPUVariant
-// CHECK: "VPURegMapped.GroupYield"([[VAL23]], [[VAL25]], [[VAL24]], [[VAL26]]) {operandSegmentSizes = array<i32: 2, 2>} : (!VPURegMapped.Index<0:0:0>, !VPURegMapped.Index<0:0:0>, !VPURegMapped.Index<0:0:1>, !VPURegMapped.Index<0:0:1>) -> ()
+// CHECK: "VPURegMapped.GroupYield"([[VAL23]], [[VAL25]], [[VAL24]], [[VAL26]]) <{operandSegmentSizes = array<i32: 2, 2>}> : (!VPURegMapped.Index<0:0:0>, !VPURegMapped.Index<0:0:0>, !VPURegMapped.Index<0:0:1>, !VPURegMapped.Index<0:0:1>) -> ()
 // CHECK: VPURegMapped.FetchTask primary(%startIndexes#0 -> %endIndexes#0) secondary(%startIndexes#1 -> %endIndexes#1)

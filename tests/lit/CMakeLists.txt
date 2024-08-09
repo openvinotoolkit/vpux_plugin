@@ -45,7 +45,7 @@ vpux_setup_lit_tests(NPU
     EXTRA_SOURCES "lit.local.cfg" "*.bin" "*.txt" "*.xml"
     VARS "vpuip_schema_file" "data_path_npu"
     PARAMS "arch"
-    PARAMS_DEFAULT_VALUES "VPUX30XX"
+    PARAMS_DEFAULT_VALUES "NPU37XX"
     SUBSTITUTIONS "vpuip_schema_file" "data_path_npu"
 )
 

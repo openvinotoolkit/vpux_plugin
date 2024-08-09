@@ -26,18 +26,14 @@ vpux::NDTypeInterface vpux::Const::DequantizeAttr::inferOutputType(vpux::NDTypeI
     return input.changeElemType(qElemType.getExpressedType());
 }
 
-namespace {
-Const::Content allocateTempBuffer(mlir::MLIRContext* ctx, mlir::quant::QuantizedType qElemType,
-                                  vpux::NDTypeInterface outputType, const bool isSplat) {
+bool vpux::Const::DequantizeAttr::inferOutputSplat(bool inputIsSplat, vpux::NDTypeInterface input) {
     // Splat value cannot be used to store weights for per-axis quantization.
     // Applying different scales to the same splat input value yields non-splat results.
-    if (qElemType.isa<mlir::quant::UniformQuantizedPerAxisType>()) {
-        return Const::Content::allocTempBuffer(outputType, mlir::Float32Type::get(ctx), false);
+    if (mlir::isa<mlir::quant::UniformQuantizedPerAxisType>(input.getElementType())) {
+        return false;
     }
-
-    return Const::Content::allocTempBuffer(outputType, mlir::Float32Type::get(ctx), isSplat);
+    return inputIsSplat;
 }
-}  // namespace
 
 //
 // DequantizeAttr::transform
@@ -47,7 +43,9 @@ Const::Content vpux::Const::DequantizeAttr::transform(vpux::Const::Content& inpu
     const auto qElemType = input.getType().getElementType().dyn_cast<mlir::quant::QuantizedType>();
     VPUX_THROW_UNLESS(qElemType != nullptr, "Got non quantized type '{0}' in 'DequantizeAttr'");
 
-    auto output = allocateTempBuffer(getContext(), qElemType, inferOutputType(input.getType()), input.isSplat());
+    auto output =
+            Const::Content::allocTempBuffer(inferOutputType(input.getType()), mlir::Float32Type::get(getContext()),
+                                            inferOutputSplat(input.isSplat(), input.getType()));
     const auto qVals = input.getValues<int64_t>();
     auto realVals = output.getTempBuf<float>();
 

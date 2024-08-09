@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --vpu-arch=%arch% --convert-VPUMI40XX-to-VPUASM %s | FileCheck %s
-// REQUIRES: arch-VPUX40XX
+// REQUIRES: arch-NPU40XX
 
 module attributes {VPU.arch = #VPU.arch_kind<NPU40XX>} {
   IE.ExecutorResource 1 of @DMA_NN
@@ -310,3 +310,81 @@ module attributes {VPU.arch = #VPU.arch_kind<NPU40XX>} {
 // CHECK-SAME: @[[SYMDMA0]], @[[SYMDMA1]]]]) actKernelRanges([@[[SYMACTRANGE0]]]) actKernelInvocations([@[[SYMACTINVO0]]]) barriers(@[[SYMBARR0]])
 // CHECK-SAME{LITERAL}: dmaCount([[1, 1], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0]])
 // CHECK-SAME: invariantCount([0, 0, 0, 0, 0, 0]) variantCount([0, 0, 0, 0, 0, 0]) actKernelRangesCount([1, 0, 0, 0, 0, 0]) actKernelInvocationsCount([1, 0, 0, 0, 0, 0]) mediaCount(0) barrierCount(2)
+
+// -----
+
+module @mainModule attributes {VPU.arch = #VPU.arch_kind<NPU40XX>} {
+  IE.ExecutorResource 1 of @DMA_NN
+  IE.TileResource 1 of @NCE at 6.000000e+02 MHz
+  IE.CNNNetwork entryPoint : @continued_conv_f16_f16_f16 inputsInfo : {
+    DataInfo "input_0" : tensor<1x16384x1x1xf16, {order = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>}>
+  } outputsInfo : {
+    DataInfo "output_0" : tensor<1x16x1x1xf16, {order = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>}>
+  }
+  func.func @continued_conv_f16_f16_f16() {
+    %0 = VPURegMapped.DeclareTaskBuffer {offset = 0 : ui64} <DPUInvariant> -> !VPURegMapped.Index<0:0:0>
+    %1 = VPURegMapped.DeclareTaskBuffer {offset = 352 : ui64} <DPUInvariant> -> !VPURegMapped.Index<0:0:1>
+    %2 = VPURegMapped.DeclareTaskBuffer {offset = 22528 : ui64} <DPUVariant> -> !VPURegMapped.Index<0:0:0>
+    %3 = VPURegMapped.DeclareTaskBuffer {offset = 22752 : ui64} <DPUVariant> -> !VPURegMapped.Index<0:0:1>
+    %14 = VPURT.DeclareBuffer <CMX_NN> [0] <96> -> memref<1x8192x1x1xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>
+    %15 = VPURT.DeclareBuffer <CMX_NN> [0] <33376> -> memref<16x8192x1x1xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>
+    %16 = VPURT.DeclareBuffer <CMX_NN> [0] <16480> -> memref<1x8192x1x1xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>
+    %17 = VPURT.DeclareBuffer <CMX_NN> [0] <295520> -> memref<16x8192x1x1xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>
+    %18 = VPURT.DeclareBuffer <CMX_NN> [0] <64> -> memref<1x16x1x1xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>
+    %19 = VPURT.DeclareBuffer <CMX_NN> [0] <32864> -> memref<16x1x1x4xsi32, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>
+    %20 = VPURT.DeclareBuffer <CMX_NN> [0] <33120> -> memref<16x1x1x4xsi32, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>
+    %21 = VPURT.DeclareBuffer <MAC_Accumulators> [0] <32> -> memref<1x16x1x1xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, @Register>
+    %23 = VPUMI40XX.ConfigureBarrier {consumer_count = 1 : ui8, producer_count = 1 : ui8} <0, -1> -> !VPURegMapped.Index<0:0:0>
+    %26 = VPUMI40XX.DPUInvariant {clean_after = 1 : ui64, is_continued, kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, kernel_size = [1, 1], kernel_strides = [1, 1], mpe_frequent_mode = #VPU.mpe_mode<CUBOID_16x16>, nce_task_type = #VPUIP.nce_task_type<CONV>, start_after = 2 : ui64} taskLocation(%0 : !VPURegMapped.Index<0:0:0>) input(%14 : memref<1x8192x1x1xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>) weights(%15 : memref<16x8192x1x1xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>) weight_table(%19 : memref<16x1x1x4xsi32, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>) outputs(%21 : memref<1x16x1x1xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, @Register>) updates(%23 : !VPURegMapped.Index<0:0:0>) -> <0:0:0> PPE : {
+    }
+    %27 = VPUMI40XX.DPUInvariant {clean_after = 2 : ui64, kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, kernel_size = [1, 1], kernel_strides = [1, 1], mpe_frequent_mode = #VPU.mpe_mode<CUBOID_16x16>, nce_task_type = #VPUIP.nce_task_type<CONV>, start_after = 3 : ui64} taskLocation(%1 : !VPURegMapped.Index<0:0:1>) previousTask(%26 : !VPURegMapped.Index<0:0:0>) input(%16 : memref<1x8192x1x1xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>) weights(%17 : memref<16x8192x1x1xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>) weight_table(%20 : memref<16x1x1x4xsi32, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>) outputs(%18 : memref<1x16x1x1xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>) waits(%23 : !VPURegMapped.Index<0:0:0>) -> <0:0:1> PPE : {
+    }
+    %28 = VPUMI40XX.DPUVariant taskLocation(%2 : !VPURegMapped.Index<0:0:0>) calls(%26 : <0:0:0>) weights(%15 : memref<16x8192x1x1xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>) weight_table(%19 : memref<16x1x1x4xsi32, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>) {end = [0, 0, 15], inEnd = [0, 0, 8191], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, nce_task_type = #VPUIP.nce_task_type<CONV>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, start = [0, 0, 0]} -> <0:0:0>
+    %29 = VPUMI40XX.DPUVariant taskLocation(%3 : !VPURegMapped.Index<0:0:1>) previousTask(%28 : !VPURegMapped.Index<0:0:0>) calls(%27 : <0:0:1>) weights(%17 : memref<16x8192x1x1xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>) weight_table(%20 : memref<16x1x1x4xsi32, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>) {HardLinkedAttrName, end = [0, 0, 15], inEnd = [0, 0, 8191], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, nce_task_type = #VPUIP.nce_task_type<CONV>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, start = [0, 0, 0]} -> <0:0:1>
+    VPURegMapped.TaskBufferLayout {ActKernelInvocation = [[#VPURegMapped.TaskGroup<dynamicTaskListSize(0 : ui64), staticTaskListSize(64 : ui64), startOffset(53760 : ui64), binaryTaskSize(96 : ui64)>]], ActKernelRange = [[#VPURegMapped.TaskGroup<dynamicTaskListSize(0 : ui64), staticTaskListSize(64 : ui64), startOffset(51200 : ui64), binaryTaskSize(40 : ui64)>]], DMA = [[#VPURegMapped.TaskGroup<dynamicTaskListSize(0 : ui64), staticTaskListSize(64 : ui64), startOffset(59904 : ui64), binaryTaskSize(224 : ui64)>, #VPURegMapped.TaskGroup<dynamicTaskListSize(0 : ui64), staticTaskListSize(16 : ui64), startOffset(74240 : ui64), binaryTaskSize(224 : ui64)>]], DPUInvariant = [[#VPURegMapped.TaskGroup<dynamicTaskListSize(2 : ui64), staticTaskListSize(64 : ui64), startOffset(0 : ui64), binaryTaskSize(352 : ui64)>]], DPUVariant = [[#VPURegMapped.TaskGroup<dynamicTaskListSize(2 : ui64), staticTaskListSize(128 : ui64), startOffset(22528 : ui64), binaryTaskSize(224 : ui64)>]], M2I = [[#VPURegMapped.TaskGroup<dynamicTaskListSize(0 : ui64), staticTaskListSize(4 : ui64), startOffset(77824 : ui64), binaryTaskSize(240 : ui64)>]]}
+    %36 = VPUMI40XX.MappedInference invariants(%26 : !VPURegMapped.Index<0:0:0>) variants(%28 : !VPURegMapped.Index<0:0:0>) barriers(%23 : !VPURegMapped.Index<0:0:0>) dmaCount([[0, 0]]) invariantCount([2]) variantCount([2]) actKernelRangesCount([0]) actKernelInvocationsCount([0]) mediaCount(0) barrierCount(4) -> !VPURegMapped.Index<0:0:0>
+    VPUMI40XX.OpRanges types([#VPURegMapped.task_type<DPUInvariant>, #VPURegMapped.task_type<DPUVariant>]) begins(%26, %28 : !VPURegMapped.Index<0:0:0>, !VPURegMapped.Index<0:0:0>) ends(%27, %29 : !VPURegMapped.Index<0:0:1>, !VPURegMapped.Index<0:0:1>)
+  }
+}
+
+
+//CHECK: func.func @continued_conv_f16_f16_f16
+
+//CHECK: VPUASM.DeclareTaskBuffer @[[TBIVAR000:.*]] idx(!VPURegMapped.Index<0:0:0>) <DPUInvariant>
+//CHECK: VPUASM.DeclareTaskBuffer @[[TBIVAR001:.*]] idx(!VPURegMapped.Index<0:0:1>) <DPUInvariant>
+
+//CHECK: VPUASM.DeclareTaskBuffer @[[TBVAR000:.*]] idx(!VPURegMapped.Index<0:0:0>) <DPUVariant>
+//CHECK: VPUASM.DeclareTaskBuffer @[[TBVAR001:.*]] idx(!VPURegMapped.Index<0:0:1>) <DPUVariant>
+
+//CHECK: VPUASM.DeclareBuffer @[[SYMBUFF0:.*]] !VPUASM.Buffer< "CMX_NN"[0] <96>
+//CHECK: VPUASM.DeclareBuffer @[[SYMBUFF1:.*]] !VPUASM.Buffer< "CMX_NN"[0] <33376>
+//CHECK: VPUASM.DeclareBuffer @[[SYMBUFF2:.*]] !VPUASM.Buffer< "CMX_NN"[0] <16480>
+//CHECK: VPUASM.DeclareBuffer @[[SYMBUFF3:.*]] !VPUASM.Buffer< "CMX_NN"[0] <295520>
+//CHECK: VPUASM.DeclareBuffer @[[SYMBUFF4:.*]] !VPUASM.Buffer< "CMX_NN"[0] <64>
+//CHECK: VPUASM.DeclareBuffer @[[SYMBUFF5:.*]] !VPUASM.Buffer< "CMX_NN"[0] <32864>
+//CHECK: VPUASM.DeclareBuffer @[[SYMBUFF6:.*]] !VPUASM.Buffer< "CMX_NN"[0] <33120>
+
+//CHECK-NOT: VPUASM.DeclareBuffer @[[SYMBUFF7:.*]] !VPUASM.Buffer< "MAC_Accumulators"[0] <32>
+
+//CHECK: VPUASM.ConfigureBarrier @[[SYMBARR0:.*]] idx(!VPURegMapped.Index<0:0:0>) (0) => (-1) counts(1 : 1)
+
+//CHECK: VPUASM.DPUInvariant @[[SYMINV0:.*]] idx(!VPURegMapped.Index<0:0:0>) taskLocation(@[[TBIVAR000]])
+    // CHECK-SAME: input(@[[SYMBUFF0]]) weights(@[[SYMBUFF1]]) weight_table(@[[SYMBUFF5]])
+    // CHECK-NOT: output(
+    // CHECK-SAME: updates([0 : ui8])
+    // CHECK-SAME: is_continued
+    // CHECK-SAME: output_type_continued = !VPUASM.Buffer< "MAC_Accumulators"[0] <32>
+
+//CHECK: VPUASM.DPUInvariant @[[SYMINV1:.*]] idx(!VPURegMapped.Index<0:0:1>) taskLocation(@[[TBIVAR001]])
+    // CHECK-SAME: input(@[[SYMBUFF2]]) weights(@[[SYMBUFF3]]) weight_table(@[[SYMBUFF6]])
+    // CHECK-SAME: output(@[[SYMBUFF4]]) waits([0 : ui8])
+
+//CHECK: VPUASM.DPUVariant @[[SYMVAR0:.*]] idx(!VPURegMapped.Index<0:0:0>) taskLocation(@[[TBVAR000]])
+    // CHECK-SAME: calls @[[TBIVAR000]]
+    // CHECK-SAME: weights(@[[SYMBUFF1]])
+    // CHECK-SAME: weight_table(@[[SYMBUFF5]])
+
+//CHECK: VPUASM.DPUVariant @[[SYMVAR1:.*]] idx(!VPURegMapped.Index<0:0:1>) taskLocation(@[[TBVAR001]])
+    // CHECK-SAME: calls @[[TBIVAR001]]
+    // CHECK-SAME: weights(@[[SYMBUFF3]])
+    // CHECK-SAME: weight_table(@[[SYMBUFF6]])

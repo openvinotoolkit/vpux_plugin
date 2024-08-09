@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: env IE_NPU_LOG_FILTER=dump-statistics-of-task-ops vpux-opt  --init-compiler="vpu-arch=%arch% allow-custom-values=true" --compress-weights-btc --dump-statistics-of-task-ops -o /dev/null %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX
+// REQUIRES: arch-NPU37XX
 
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
@@ -391,15 +391,15 @@ module @age_gender attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilati
 // CHECK:  Input size - 45.04 KB Output size - 169.04 KB
 // CHECK:  VPUIP tasks statistics:
 // CHECK:  VPUIP Tasks - 44 ops
-// CHECK:    VPUIP.NNDMA - 36 ops : Size - 627.78 KB
-// CHECK:      CMX2CMX - 2 ops : Size - 168.75 KB
-// CHECK:      CMX2DDR - 7 ops : Size - 289.17 KB
+// CHECK:    VPUIP.NNDMA - 36 ops : Size - 422.81 KB
+// CHECK:      CMX2CMX - 2 ops : Size - 84.37 KB
+// CHECK:      CMX2DDR - 7 ops : Size - 191.57 KB
 // CHECK:        Profiling buffer management - 5 ops
 // CHECK:          DMA - 2 ops
 // CHECK:          DPU - 2 ops
 // CHECK:          ActShave - 1 ops
-// CHECK:      DDR2CMX - 4 ops : Size - 49.56 KB
-// CHECK:      DDR2DDR - 1 ops : Size - 120.12 KB
+// CHECK:      DDR2CMX - 4 ops : Size - 49.09 KB
+// CHECK:      DDR2DDR - 1 ops : Size - 97.60 KB
 // CHECK:      REG2CMX - 22 ops : Size - 176 bytes
 // CHECK:        Profiling Timestamp DMA - 22 ops
 // CHECK:    VPUIP.PermuteDMA - 2 ops

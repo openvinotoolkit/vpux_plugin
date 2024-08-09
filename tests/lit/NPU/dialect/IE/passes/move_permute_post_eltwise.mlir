@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --move-permute-post-eltwise --canonicalize %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
@@ -650,4 +650,216 @@ func.func @SkipAvgPoolNonEltwise(%arg0: tensor<1x64x64x192xf16>) -> tensor<1x64x
   // CHECK:       [[MEM_PERM:%.*]] = IE.MemPermute(%arg0) {dst_order = #NHWC, mem_perm = #NHWC} : tensor<1x64x64x192xf16> -> tensor<1x64x64x192xf16, {order = #NHWC}>
   // CHECK:       [[AVG_POOL:%.*]] = IE.AvgPool([[MEM_PERM]]) {exclude_pads, kernel_size = [3, 3], pads_begin = [1, 1], pads_end = [1, 1], post_op = #IE.PostOp<name = "IE.LeakyRelu", attrs = {negative_slope = 0.01000213623046875 : f64}>, rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]} : tensor<1x64x64x192xf16, {order = #NHWC}> -> tensor<1x64x64x192xf16, {order = #NHWC}>
   // CHECK:       return [[AVG_POOL]] : tensor<1x64x64x192xf16, {order = #NHWC}>
+}
+
+// -----
+
+!qElemType = !quant.uniform<u8:f16, 1.000000e+00>
+!qElemType1 = !quant.uniform<u8:f16:1, {0.010182879952823415:128,0.0086226547465604892:128,0.0071560340769150676:128,0.0071187512547362082:128}>
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+#NWCH = affine_map<(d0, d1, d2, d3) -> (d0, d3, d1, d2)>
+
+// CHECK-LABEL: @PropagatePermuteThrough2EltwiseGroupConvs
+// CHECK-SAME:      [[INPUT:%.*]]: tensor<1x4x8x1x1xf16>
+func.func @PropagatePermuteThrough2EltwiseGroupConvs(%input: tensor<1x4x8x1x1xf16>) -> tensor<1x4x8x1x1xf16> {
+  %cst = const.Declare tensor<4x1x1x1x!qElemType, {order = #NHWC}> = dense<1.000000e+00> : tensor<4x1x1x1xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>, #const.Reorder<#NHWC>]
+  %cst_0 = const.Declare tensor<4x1x1x1xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<4x1x1x1xf16>, [#const.Reorder<#NHWC>]
+  %0 = IE.AffineReshape(%input) {dim_mapping = [[0], [1], [2], [3], [3]], shape_value = [1, 4, 8, 1]} : tensor<1x4x8x1x1xf16> -> tensor<1x4x8x1xf16>
+  %1 = IE.AffineReshape(%0) {dim_mapping = [[0], [1], [2, 3], [3]], shape_value = [1, 4, 2, 4]} : tensor<1x4x8x1xf16> -> tensor<1x4x2x4xf16>
+  %2 = IE.MemPermute(%1) {dst_order = #NHWC, mem_perm = #NHWC} : tensor<1x4x2x4xf16> -> tensor<1x4x2x4xf16, {order = #NHWC}>
+  %3 = IE.GroupConvolution(%2, %cst_0) {dilations = [1, 1], groups = 4 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x4x2x4xf16, {order = #NHWC}>, tensor<4x1x1x1xf16, {order = #NHWC}> -> tensor<1x4x2x4x!qElemType1, {order = #NHWC}>
+  %4 = IE.GroupConvolution(%3, %cst) {dilations = [1, 1], groups = 4 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x4x2x4x!qElemType1, {order = #NHWC}>, tensor<4x1x1x1x!qElemType, {order = #NHWC}> -> tensor<1x4x2x4xf16, {order = #NHWC}>
+  %5 = IE.AffineReshape(%4) {dim_mapping = [[0], [1], [2], [2, 3]], shape_value = [1, 4, 8, 1]} : tensor<1x4x2x4xf16, {order = #NHWC}> -> tensor<1x4x8x1xf16, {order = #NHWC}>
+  %6 = IE.MemPermute(%5) {dst_order = #NCHW, mem_perm = #NWCH} : tensor<1x4x8x1xf16, {order = #NHWC}> -> tensor<1x4x8x1xf16>
+  %7 = IE.AffineReshape(%6) {dim_mapping = [[0], [1], [2], [3, 4]], shape_value = [1, 4, 8, 1, 1]} : tensor<1x4x8x1xf16> -> tensor<1x4x8x1x1xf16>
+  return %7 : tensor<1x4x8x1x1xf16>
+
+  // CHECK:       [[CONST:%.*]] = const.Declare tensor<4x1x1x1x!qElemType, {order = #NHWC}> = dense<1.000000e+00> : tensor<4x1x1x1xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>, #const.Reorder<#NHWC>]
+
+  // CHECK:       [[CONST_0:%.*]] = const.Declare tensor<4x1x1x1xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<4x1x1x1xf16>, [#const.Reorder<#NHWC>]
+
+  // CHECK:       [[PERMUTECAST_INPUT_1:%.+]] = IE.Reshape([[INPUT]]) {shape_value = [1, 4, 2, 4]} : tensor<1x4x8x1x1xf16> -> tensor<1x4x2x4xf16>
+
+  // CHECK:       [[SHAPECAST_INPUT_1:%.+]] = IE.PermuteCast([[PERMUTECAST_INPUT_1]]) {dst_order = #NHWC, mem_perm = #NCHW} : tensor<1x4x2x4xf16> -> tensor<1x4x4x2xf16, {order = #NHWC}>
+
+  // CHECK:       [[GROUPCONV_INPUT_1:%.+]] = IE.ShapeCast {shape = [1, 4, 2, 4]} inputs([[SHAPECAST_INPUT_1]] : tensor<1x4x4x2xf16, {order = #NHWC}>) -> tensor<1x4x2x4xf16, {order = #NHWC}>
+
+  // CHECK:       [[GROUPCONV_INPUT_2:%.+]] = IE.GroupConvolution([[GROUPCONV_INPUT_1]], [[CONST_0]]) {dilations = [1, 1], groups = 4 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x4x2x4xf16, {order = #NHWC}>, tensor<4x1x1x1xf16, {order = #NHWC}> -> tensor<1x4x2x4x!qElemType1, {order = #NHWC}>
+
+  // CHECK:       [[SHAPECAST_INPUT_2:%.+]] = IE.GroupConvolution([[GROUPCONV_INPUT_2]], [[CONST]]) {dilations = [1, 1], groups = 4 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x4x2x4x!qElemType1, {order = #NHWC}>, tensor<4x1x1x1x!qElemType, {order = #NHWC}> -> tensor<1x4x2x4xf16, {order = #NHWC}>
+
+  // CHECK:       [[MEMPERMUTE_INPUT_1:%.+]] = IE.ShapeCast {shape = [1, 4, 4, 2]} inputs([[SHAPECAST_INPUT_2]] : tensor<1x4x2x4xf16, {order = #NHWC}>) -> tensor<1x4x4x2xf16, {order = #NHWC}>
+
+  // CHECK:       [[AFFINERESHAPE_INPUT_1:%.+]] = IE.MemPermute([[MEMPERMUTE_INPUT_1]]) {dst_order = #NHWC, mem_perm = #NHWC} : tensor<1x4x4x2xf16, {order = #NHWC}> -> tensor<1x4x2x4xf16, {order = #NHWC}>
+
+  // CHECK:       [[MEMPERMUTE_INPUT_2:%.+]] = IE.AffineReshape([[AFFINERESHAPE_INPUT_1]]) {
+  // CHECK-SAME:         shape_value = [1, 4, 8, 1]
+  // CHECK-SAME:     } : tensor<1x4x2x4xf16, {order = #NHWC}> -> tensor<1x4x8x1xf16, {order = #NHWC}>
+
+  // CHECK:       [[AFFINERESHAPE_INPUT_2:%.+]] = IE.MemPermute([[MEMPERMUTE_INPUT_2]]) {dst_order = #NCHW, mem_perm = #NWCH} : tensor<1x4x8x1xf16, {order = #NHWC}> -> tensor<1x4x8x1xf16>
+
+  // CHECK:       [[RET:%.+]] = IE.AffineReshape([[AFFINERESHAPE_INPUT_2]]) {
+  // CHECK-SAME:         shape_value = [1, 4, 8, 1, 1]
+  // CHECK-SAME:     } : tensor<1x4x8x1xf16> -> tensor<1x4x8x1x1xf16>
+
+  // CHECK:       return [[RET:%.+]] : tensor<1x4x8x1x1xf16>
+}
+
+// -----
+
+!qElemType = !quant.uniform<u8:f16, 1.000000e+00>
+!qElemType1 = !quant.uniform<u8:f16:1, {0.010182879952823415:128,0.0086226547465604892:128,0.0071560340769150676:128,0.0071187512547362082:128}>
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+#NWCH = affine_map<(d0, d1, d2, d3) -> (d0, d3, d1, d2)>
+
+// CHECK-LABEL: @PropagatePermuteThrough3EltwiseGroupConvs
+// CHECK-SAME:      [[INPUT:%.*]]: tensor<1x4x8x1x1xf16>
+func.func @PropagatePermuteThrough3EltwiseGroupConvs(%input: tensor<1x4x8x1x1xf16>) -> tensor<1x4x8x1x1xf16> {
+  %cst = const.Declare tensor<4x1x1x1x!qElemType, {order = #NHWC}> = dense<1.000000e+00> : tensor<4x1x1x1xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>, #const.Reorder<#NHWC>]
+  %cst_0 = const.Declare tensor<4x1x1x1xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<4x1x1x1xf16>, [#const.Reorder<#NHWC>]
+  %0 = IE.AffineReshape(%input) {dim_mapping = [[0], [1], [2], [3], [3]], shape_value = [1, 4, 8, 1]} : tensor<1x4x8x1x1xf16> -> tensor<1x4x8x1xf16>
+  %1 = IE.AffineReshape(%0) {dim_mapping = [[0], [1], [2, 3], [3]], shape_value = [1, 4, 2, 4]} : tensor<1x4x8x1xf16> -> tensor<1x4x2x4xf16>
+  %2 = IE.MemPermute(%1) {dst_order = #NHWC, mem_perm = #NHWC} : tensor<1x4x2x4xf16> -> tensor<1x4x2x4xf16, {order = #NHWC}>
+  %3 = IE.GroupConvolution(%2, %cst_0) {dilations = [1, 1], groups = 4 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x4x2x4xf16, {order = #NHWC}>, tensor<4x1x1x1xf16, {order = #NHWC}> -> tensor<1x4x2x4x!qElemType1, {order = #NHWC}>
+  %4 = IE.GroupConvolution(%3, %cst) {dilations = [1, 1], groups = 4 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x4x2x4x!qElemType1, {order = #NHWC}>, tensor<4x1x1x1x!qElemType, {order = #NHWC}> -> tensor<1x4x2x4xf16, {order = #NHWC}>
+  %5 = IE.GroupConvolution(%4, %cst_0) {dilations = [1, 1], groups = 4 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x4x2x4xf16, {order = #NHWC}>, tensor<4x1x1x1xf16, {order = #NHWC}> -> tensor<1x4x2x4xf16, {order = #NHWC}>
+  %6 = IE.AffineReshape(%5) {dim_mapping = [[0], [1], [2], [2, 3]], shape_value = [1, 4, 8, 1]} : tensor<1x4x2x4xf16, {order = #NHWC}> -> tensor<1x4x8x1xf16, {order = #NHWC}>
+  %7 = IE.MemPermute(%6) {dst_order = #NCHW, mem_perm = #NWCH} : tensor<1x4x8x1xf16, {order = #NHWC}> -> tensor<1x4x8x1xf16>
+  %8 = IE.AffineReshape(%7) {dim_mapping = [[0], [1], [2], [3, 4]], shape_value = [1, 4, 8, 1, 1]} : tensor<1x4x8x1xf16> -> tensor<1x4x8x1x1xf16>
+  return %8 : tensor<1x4x8x1x1xf16>
+
+  // CHECK:       [[CONST:%.*]] = const.Declare tensor<4x1x1x1x!qElemType, {order = #NHWC}> = dense<1.000000e+00> : tensor<4x1x1x1xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>, #const.Reorder<#NHWC>]
+
+  // CHECK:       [[CONST_0:%.*]] = const.Declare tensor<4x1x1x1xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<4x1x1x1xf16>, [#const.Reorder<#NHWC>]
+
+  // CHECK:       [[PERMUTECAST_INPUT_1:%.+]] = IE.Reshape([[INPUT]]) {shape_value = [1, 4, 2, 4]} : tensor<1x4x8x1x1xf16> -> tensor<1x4x2x4xf16>
+
+  // CHECK:       [[SHAPECAST_INPUT_1:%.+]] = IE.PermuteCast([[PERMUTECAST_INPUT_1]]) {dst_order = #NHWC, mem_perm = #NCHW} : tensor<1x4x2x4xf16> -> tensor<1x4x4x2xf16, {order = #NHWC}>
+
+  // CHECK:       [[GROUPCONV_INPUT_1:%.+]] = IE.ShapeCast {shape = [1, 4, 2, 4]} inputs([[SHAPECAST_INPUT_1]] : tensor<1x4x4x2xf16, {order = #NHWC}>) -> tensor<1x4x2x4xf16, {order = #NHWC}>
+
+  // CHECK:       [[GROUPCONV_INPUT_2:%.+]] = IE.GroupConvolution([[GROUPCONV_INPUT_1]], [[CONST_0]]) {dilations = [1, 1], groups = 4 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x4x2x4xf16, {order = #NHWC}>, tensor<4x1x1x1xf16, {order = #NHWC}> -> tensor<1x4x2x4x!qElemType1, {order = #NHWC}>
+
+  // CHECK:       [[GROUPCONV_INPUT_3:%.+]] = IE.GroupConvolution([[GROUPCONV_INPUT_2]], [[CONST]]) {dilations = [1, 1], groups = 4 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x4x2x4x!qElemType1, {order = #NHWC}>, tensor<4x1x1x1x!qElemType, {order = #NHWC}> -> tensor<1x4x2x4xf16, {order = #NHWC}>
+
+  // CHECK:       [[SHAPECAST_INPUT_2:%.+]] = IE.GroupConvolution([[GROUPCONV_INPUT_3]], [[CONST_0]]) {dilations = [1, 1], groups = 4 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x4x2x4xf16, {order = #NHWC}>, tensor<4x1x1x1xf16, {order = #NHWC}> -> tensor<1x4x2x4xf16, {order = #NHWC}>
+
+  // CHECK:       [[MEMPERMUTE_INPUT_1:%.+]] = IE.ShapeCast {shape = [1, 4, 4, 2]} inputs([[SHAPECAST_INPUT_2]] : tensor<1x4x2x4xf16, {order = #NHWC}>) -> tensor<1x4x4x2xf16, {order = #NHWC}>
+
+  // CHECK:       [[AFFINERESHAPE_INPUT_1:%.+]] = IE.MemPermute([[MEMPERMUTE_INPUT_1]]) {dst_order = #NHWC, mem_perm = #NHWC} : tensor<1x4x4x2xf16, {order = #NHWC}> -> tensor<1x4x2x4xf16, {order = #NHWC}>
+
+  // CHECK:       [[MEMPERMUTE_INPUT_2:%.+]] = IE.AffineReshape([[AFFINERESHAPE_INPUT_1]]) {
+  // CHECK-SAME:         shape_value = [1, 4, 8, 1]
+  // CHECK-SAME:     } : tensor<1x4x2x4xf16, {order = #NHWC}> -> tensor<1x4x8x1xf16, {order = #NHWC}>
+
+  // CHECK:       [[AFFINERESHAPE_INPUT_2:%.+]] = IE.MemPermute([[MEMPERMUTE_INPUT_2]]) {dst_order = #NCHW, mem_perm = #NWCH} : tensor<1x4x8x1xf16, {order = #NHWC}> -> tensor<1x4x8x1xf16>
+
+  // CHECK:       [[RET:%.+]] = IE.AffineReshape([[AFFINERESHAPE_INPUT_2]]) {
+  // CHECK-SAME:         shape_value = [1, 4, 8, 1, 1]
+  // CHECK-SAME:     } : tensor<1x4x8x1xf16> -> tensor<1x4x8x1x1xf16>
+
+  // CHECK:       return [[RET:%.+]] : tensor<1x4x8x1x1xf16>
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @Skip2ndNonEltwiseGroupConv
+// CHECK-SAME:      [[INPUT:%.*]]: tensor<1x128x51x64xf16>
+func.func @Skip2ndNonEltwiseGroupConv(%input: tensor<1x128x51x64xf16>) -> tensor<1x128x51x64xf16, {order = #NHWC}> {
+  %cst = const.Declare tensor<128x1x3x3xf16, {order = #NHWC}> = dense<1.838680e-03> : tensor<128x1x3x3xf16>, [#const.Reorder<#NHWC>]
+  %cst_0 = const.Declare tensor<128x1x1x1xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<128x1x1x1xf16>, [#const.Reorder<#NHWC>]
+  %0 = IE.MemPermute(%input) {dst_order = #NHWC, mem_perm = #NHWC} : tensor<1x128x51x64xf16> -> tensor<1x128x51x64xf16, {order = #NHWC}>
+  %1 = IE.GroupConvolution(%0, %cst_0) {dilations = [1, 1], groups = 128 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x128x51x64xf16, {order = #NHWC}>, tensor<128x1x1x1xf16, {order = #NHWC}> -> tensor<1x128x51x64xf16, {order = #NHWC}>
+  %2 = IE.GroupConvolution(%1, %cst) {dilations = [1, 1], groups = 128 : i64, pads_begin = [1, 1], pads_end = [1, 1], strides = [1, 1]} : tensor<1x128x51x64xf16, {order = #NHWC}>, tensor<128x1x3x3xf16, {order = #NHWC}> -> tensor<1x128x51x64xf16, {order = #NHWC}>
+  return  %2 : tensor<1x128x51x64xf16, {order = #NHWC}>
+
+    // CHECK:       [[CONST:%.+]] = const.Declare tensor<128x1x3x3xf16,
+    // CHECK-SAME:      {order = #NHWC}> = dense<1.838680e-03>
+    // CHECK-SAME:      : tensor<128x1x3x3xf16>, [#const.Reorder<#NHWC>]
+
+    // CHECK:       [[CONST_0:%.+]] = const.Declare tensor<128x1x1x1xf16,
+    // CHECK-SAME:      {order = #NHWC}> = dense<1.000000e+00>
+    // CHECK-SAME:      : tensor<128x1x1x1xf16>, [#const.Reorder<#NHWC>]
+
+    // CHECK:       [[SHAPECAST_INPUT_1:%.+]] = IE.PermuteCast([[INPUT]]) {dst_order = #NHWC, mem_perm = #NCHW} : tensor<1x128x51x64xf16> -> tensor<1x64x128x51xf16, {order = #NHWC}> 
+
+    // CHECK:       [[GROUPCONV_INPUT_1:%.+]] = IE.ShapeCast {shape = [1, 128, 51, 64]} inputs([[SHAPECAST_INPUT_1]] : tensor<1x64x128x51xf16, {order = #NHWC}>) -> tensor<1x128x51x64xf16, {order = #NHWC}>
+        
+    // CHECK:       [[SHAPECAST_INPUT_2:%.+]] = IE.GroupConvolution([[GROUPCONV_INPUT_1]], [[CONST_0]])
+    // CHECK-SAME:      {dilations = [1, 1], groups = 128 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]}
+    // CHECK-SAME:      : tensor<1x128x51x64xf16, {order = #NHWC}>, tensor<128x1x1x1xf16, {order = #NHWC}> -> tensor<1x128x51x64xf16, {order = #NHWC}>
+
+    // CHECK:       [[MEMPERMUTE_INPUT_1:%.+]] = IE.ShapeCast {shape = [1, 64, 128, 51]} inputs([[SHAPECAST_INPUT_2]] : tensor<1x128x51x64xf16, {order = #NHWC}>) -> tensor<1x64x128x51xf16, {order = #NHWC}> 
+
+    // CHECK:       [[GROUPCONV_INPUT_2:%.+]] = IE.MemPermute([[MEMPERMUTE_INPUT_1]]) {dst_order = #NHWC, mem_perm = #NHWC} : tensor<1x64x128x51xf16, {order = #NHWC}> -> tensor<1x128x51x64xf16, {order = #NHWC}> 
+
+    // CHECK:       [[RET:%.+]] = IE.GroupConvolution([[GROUPCONV_INPUT_2]], [[CONST]])
+    // CHECK-SAME:      {dilations = [1, 1], groups = 128 : i64, pads_begin = [1, 1], pads_end = [1, 1], strides = [1, 1]}
+    // CHECK-SAME:      : tensor<1x128x51x64xf16, {order = #NHWC}>, tensor<128x1x3x3xf16, {order = #NHWC}> -> tensor<1x128x51x64xf16, {order = #NHWC}>
+
+    // CHECK:       return [[RET]] : tensor<1x128x51x64xf16, {order = #NHWC}>
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @SkipGroupConvIfNotEligible
+// CHECK-SAME:        [[INPUT1:%arg[0-9]]]: tensor<1x880x1x960xf16>,
+// CHECK-SAME:        [[INPUT2:%arg[0-9]]]: tensor<1x880x1x1xf16, {order = #NHWC}>
+func.func @SkipGroupConvIfNotEligible(%arg0: tensor<1x880x1x960xf16>, %arg1: tensor<1x880x1x1xf16, {order = #NHWC}>) -> tensor<1x880x1x960xf16, {order = #NHWC}> {
+    %CONST_ADD = const.Declare tensor<1x880x1x960xf16, {order = #NHWC}> = dense<1.250000e-01> : tensor<1x880x1x960xf16, {order = #NHWC}>
+
+    %IN_SHAPE_CAST = IE.ShapeCast {
+        shape = [880, 1, 1, 1]
+    } inputs(%arg1 : tensor<1x880x1x1xf16, {order = #NHWC}>) -> tensor<880x1x1x1xf16, {order = #NHWC}>
+
+
+    %IN_MEM_PERM = IE.MemPermute(%arg0) {
+        dst_order = #NHWC,
+        mem_perm = #NHWC
+    } : tensor<1x880x1x960xf16> -> tensor<1x880x1x960xf16, {order = #NHWC}>
+
+    %ADD = IE.Add(%IN_MEM_PERM, %CONST_ADD) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x880x1x960xf16, {order = #NHWC}>, tensor<1x880x1x960xf16, {order = #NHWC}>
+            -> tensor<1x880x1x960xf16, {order = #NHWC}>
+
+    %SCALE_SHIFT = IE.GroupConvolution(%ADD, %IN_SHAPE_CAST) {
+        dilations = [1, 1],
+        groups = 880 : i64,
+        pads_begin = [0, 0],
+        pads_end = [0, 0],
+        strides = [1, 1]
+    } : tensor<1x880x1x960xf16, {order = #NHWC}>,
+        tensor<880x1x1x1xf16, {order = #NHWC}>
+            -> tensor<1x880x1x960xf16, {order = #NHWC}>
+
+    return  %SCALE_SHIFT : tensor<1x880x1x960xf16, {order = #NHWC}>
+
+    // CHECK:       [[CONST:%.+]] = const.Declare tensor<1x880x1x960xf16,
+    // CHECK-SAME:      {order = #NHWC}> = dense<1.250000e-01>
+    // CHECK-SAME:      : tensor<1x880x1x960xf16, {order = #NHWC}>
+
+    // CHECK:       [[SHAPECAST_INPUT:%.+]] = IE.ShapeCast {shape = [880, 1, 1, 1]} inputs([[INPUT2]] : tensor<1x880x1x1xf16, {order = #NHWC}>)
+    // CHECK-SAME:      -> tensor<880x1x1x1xf16, {order = #NHWC}>
+
+    // CHECK:       [[MEM_PERMUTE:%.+]] = IE.MemPermute([[INPUT1]]) {dst_order = #NHWC, mem_perm = #NHWC}
+    // CHECK-SAME:      : tensor<1x880x1x960xf16> -> tensor<1x880x1x960xf16, {order = #NHWC}>
+
+    // CHECK:       [[IN_ADD:%.+]] = IE.Add([[MEM_PERMUTE]], [[CONST]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>}
+    // CHECK-SAME:      : tensor<1x880x1x960xf16, {order = #NHWC}>, tensor<1x880x1x960xf16, {order = #NHWC}> -> tensor<1x880x1x960xf16, {order = #NHWC}>
+
+    // CHECK:       [[GROUP_CONV:%.+]] = IE.GroupConvolution([[IN_ADD]], [[SHAPECAST_INPUT]]) {
+    // CHECK-SAME:      dilations = [1, 1],
+    // CHECK-SAME:      groups = 880 : i64,
+    // CHECK-SAME:      pads_begin = [0, 0],
+    // CHECK-SAME:      pads_end = [0, 0],
+    // CHECK-SAME:      strides = [1, 1]}
+    // CHECK-SAME:      : tensor<1x880x1x960xf16, {order = #NHWC}>, tensor<880x1x1x1xf16, {order = #NHWC}>
+    // CHECK-SAME:      -> tensor<1x880x1x960xf16, {order = #NHWC}>
+
+    // CHECK:       return [[GROUP_CONV]] : tensor<1x880x1x960xf16, {order = #NHWC}>
 }

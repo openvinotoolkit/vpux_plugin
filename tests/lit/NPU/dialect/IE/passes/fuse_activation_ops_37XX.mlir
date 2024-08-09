@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW" --fuse-activation-ops="enable-fuse-clamp=false" %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX
+// REQUIRES: arch-NPU37XX
 
 func.func @FakeQuantConv2dWithLeakyRelu1Test(%arg0: tensor<1x16x4x4xf16>) -> tensor<1x16x3x3xf16> {
     %filters = const.Declare tensor<16x16x2x2xf16> = dense<1.0> : tensor<16x16x2x2xf16>
@@ -328,4 +328,38 @@ func.func @Conv2dWithTanhNotFusedTest(%arg0: tensor<1x16x4x4xf16>) -> tensor<1x1
     // CHECK-NOT:     post_op = #IE.PostOp<name = "IE.Tanh", attrs = {}>
     // CHECK-SAME:     strides = [1, 1]
     // CHECK-NEXT:   IE.Tanh
+}
+
+// -----
+
+!qElemType = !quant.uniform<u8:f16, 5.000000e-01>
+// CHECK: func.func @MixedAvgPoolWithLeakyReluNoFuseTest([[ARG0:%.+]]: tensor<1x16x4x4x!qElemType>) -> tensor<1x16x4x4xf16> {
+func.func @MixedAvgPoolWithLeakyReluNoFuseTest(%arg0: tensor<1x16x4x4x!qElemType>) -> tensor<1x16x4x4xf16> {
+    %0 = IE.AvgPool(%arg0)
+         {
+             kernel_size = [1, 1],
+             pads_begin = [0, 0],
+             pads_end = [0, 0],
+             strides = [1, 1],
+             rounding_type = #IE.rounding_type<FLOOR>
+         } :
+         tensor<1x16x4x4x!qElemType> -> tensor<1x16x4x4xf16>
+
+    %1 = IE.LeakyRelu(%0) {
+            negative_slope = 1.000000e-01 : f64
+        } : tensor<1x16x4x4xf16> -> tensor<1x16x4x4xf16>
+
+    return %1 : tensor<1x16x4x4xf16>
+
+    // CHECK:       [[AVG_POOL:%.*]] = IE.AvgPool([[ARG0]]) {
+    // CHECK-SAME:      kernel_size = [1, 1],
+    // CHECK-SAME:      pads_begin = [0, 0],
+    // CHECK-SAME:      pads_end = [0, 0],
+    // CHECK-SAME:      rounding_type = #IE.rounding_type<FLOOR>,
+    // CHECK-SAME:      strides = [1, 1]
+    // CHECK-SAME:  } : tensor<1x16x4x4x!qElemType> -> tensor<1x16x4x4xf16>
+    // CHECK:       [[LEAKY_RELU:%.*]] = IE.LeakyRelu([[AVG_POOL]]) {
+    // CHECK-SAME:  } : tensor<1x16x4x4xf16> -> tensor<1x16x4x4xf16>
+
+    // CHECK:       return [[LEAKY_RELU]] : tensor<1x16x4x4xf16>
 }

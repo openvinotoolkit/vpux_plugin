@@ -43,7 +43,7 @@ void ConstantFoldingPass::runOnOperation() {
     auto rankedTensorType = contentType.cast<mlir::RankedTensorType>();
 
     const auto elemTypeBitSize = contentType.getElemTypeSize().count();
-    // As of now sub byte types are not supported as DenseElementsAttr storage, I1 is exception
+    // As of now sub byte types are not supported as DenseElementsAttr storage, I1 is an exception
     const auto isUnsupportedSubByteStorageType = elemTypeBitSize < CHAR_BIT && elemTypeBitSize > 1;
     if (isUnsupportedSubByteStorageType) {
         rankedTensorType = contentType
@@ -56,7 +56,6 @@ void ConstantFoldingPass::runOnOperation() {
 
     const auto denseAttr = mlir::DenseElementsAttr::getFromRawBuffer(rankedTensorType, tempBuf);
     auto origType = origOp.getType().cast<NDTypeInterface>();
-
     if (isUnsupportedSubByteStorageType) {
         // Temporary fix to enable compilation.
         // Final design to also include a mechanism to FREEZE constants

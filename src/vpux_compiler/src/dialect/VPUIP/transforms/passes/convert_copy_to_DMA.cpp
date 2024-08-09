@@ -42,11 +42,6 @@ mlir::LogicalResult TimestampRewrite::matchAndRewrite(VPUIP::TimestampOp origOp,
     uint32_t hwAddress = 0;
 
     switch (_arch) {
-    case VPU::ArchKind::NPU30XX:
-        hwAddress = VPUIP::HW_TIMER_ABSOLUTE_ADDR_30XX;
-        VPUX_THROW_UNLESS(origType.getElementType() == getUInt32Type(getContext()),
-                          "Got wrong element type for TimestampOp");
-        break;
     case VPU::ArchKind::NPU37XX:
         hwAddress = VPUIP::HW_TIMER_ABSOLUTE_ADDR_37XX;
         VPUX_THROW_UNLESS(origType.getElementType() == getUInt64Type(getContext()),

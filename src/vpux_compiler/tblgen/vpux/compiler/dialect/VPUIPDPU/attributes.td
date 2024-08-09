@@ -159,7 +159,7 @@ def VPUIPDPU_PPEsprLUTMode :
 def VPUIPDPU_ODUDataTypes :
         I32EnumAttr<
             "ODUDataTypes",
-            "ODU output data types - VPU2.7",
+            "ODU output data types - NPU37XX",
             [
                 I32EnumAttrCase<"ODU_DTYPE_FP16", 0>,
                 I32EnumAttrCase<"ODU_DTYPE_U8F",  1>,
@@ -183,7 +183,7 @@ def VPUIPDPU_ODUDataTypes :
 def VPUIPDPU_ODUDataBitWidth :
         I32EnumAttr<
             "ODUDataBitWidth",
-            "ODU output data bit width - VPU4",
+            "ODU output data bit width - NPU40XX",
             [
                 I32EnumAttrCase<"ODU_DTYPE_1BIT",  0>,
                 I32EnumAttrCase<"ODU_DTYPE_2BIT",  1>,

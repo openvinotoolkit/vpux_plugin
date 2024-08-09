@@ -38,6 +38,14 @@ def DMATaskProfilingHwDdr : PassBase<"dma-task-profiling-hw-ddr", "vpux::ModuleP
         This pass enables hardware DMA profiling directly to DDR.
     }];
 
+    let options = [
+        Option<
+            "enableDMAProfiling", "dma-profiling",
+            "std::string", [{"false"}],
+            "Enable DMA task profiling (true|static|false)"
+        >
+    ];
+
     let constructor = "vpux::VPUIP::arch40xx::createDMATaskProfilingHwDdrPass()";
 }
 
@@ -165,6 +173,20 @@ def AddStartBarrier: PassBase<"add-start-barrier", "vpux::FunctionPass"> {
     }];
 
     let constructor = "vpux::VPUIP::arch40xx::createAddStartBarrierPass()";
+}
+
+//
+// DetectDMASplitCandidate
+//
+
+def DetectDMASplitCandidate : PassBase<"detect-dma-split-candidate", "vpux::FunctionPass"> {
+    let summary = "Detect DMA split candidate";
+
+    let description = [{
+        This pass looks for DMAs need to be split and assign splitCandidate attribute
+    }];
+
+    let constructor = "vpux::VPUIP::arch40xx::createDetectDMASplitCandidatePass()";
 }
 
 //

@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --convert-batched-layer-to-1n %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 #map = affine_map<(d0, d1, d2, d3) -> (d2, d1, d0, d3)>
 
@@ -98,13 +98,38 @@ func.func @ConvertAdd(%arg0: tensor<5x16x1x1xf16>, %arg1: tensor<5x16x1x1xf16>) 
 
 // -----
 
-#map = affine_map<(d0, d1, d2, d3) -> (d2, d1, d0, d3)>
 func.func @NoChangesAddOp(%arg0: tensor<5x16x1x1xf16>, %arg1: tensor<1x16x1x1xf16>) -> tensor<5x16x1x1xf16> {
     %0 = IE.Add(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<5x16x1x1xf16>, tensor<1x16x1x1xf16> -> tensor<5x16x1x1xf16>
     return %0 : tensor<5x16x1x1xf16>
 
     // CHECK: [[ADD:%.*]] = IE.Add(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<5x16x1x1xf16>, tensor<1x16x1x1xf16> -> tensor<5x16x1x1xf16>
     // CHECK: return [[ADD]] : tensor<5x16x1x1xf16>
+}
+
+// -----
+
+func.func @ConvertAddWithHW(%arg0: tensor<50x16x10x10xf16>, %arg1: tensor<50x16x10x10xf16>) -> tensor<50x16x10x10xf16> {
+    %0 = IE.Add(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NONE_OR_EXPLICIT>} : tensor<50x16x10x10xf16>, tensor<50x16x10x10xf16> -> tensor<50x16x10x10xf16>
+    return %0 : tensor<50x16x10x10xf16>
+
+    // CHECK: [[SHAPE_CAST_IN1:%.*]]  = IE.ShapeCast {shape = [1, 800, 10, 10]} inputs({{[^:]+}} : tensor<50x16x10x10xf16>) -> tensor<1x800x10x10xf16>
+    // CHECK: [[SHAPE_CAST_IN2:%.*]] = IE.ShapeCast {shape = [1, 800, 10, 10]} inputs({{[^:]+}} : tensor<50x16x10x10xf16>) -> tensor<1x800x10x10xf16>
+    // CHECK: [[ADD:%.*]] = IE.Add([[SHAPE_CAST_IN1]], [[SHAPE_CAST_IN2]]) {auto_broadcast = #IE.auto_broadcast_type<NONE_OR_EXPLICIT>} : tensor<1x800x10x10xf16>, tensor<1x800x10x10xf16> -> tensor<1x800x10x10xf16>
+    // CHECK: [[SHAPE_CAST_OUT:%.*]] = IE.ShapeCast {shape = [50, 16, 10, 10]} inputs([[ADD]] : tensor<1x800x10x10xf16>) -> tensor<50x16x10x10xf16>
+    // CHECK: return [[SHAPE_CAST_OUT]] : tensor<50x16x10x10xf16>
+}
+
+// -----
+
+func.func @ConvertAddWithHWWithDiffInputShape(%arg0: tensor<50x16x10x10xf16>, %arg1: tensor<50x16x1x1xf16>) -> tensor<50x16x10x10xf16> {
+    %0 = IE.Add(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<50x16x10x10xf16>, tensor<50x16x1x1xf16> -> tensor<50x16x10x10xf16>
+    return %0 : tensor<50x16x10x10xf16>
+
+    // CHECK: [[SHAPE_CAST_IN1:%.*]] = IE.ShapeCast {shape = [1, 800, 10, 10]} inputs({{[^:]+}} : tensor<50x16x10x10xf16>) -> tensor<1x800x10x10xf16>
+    // CHECK: [[SHAPE_CAST_IN2:%.*]] = IE.ShapeCast {shape = [1, 800, 1, 1]} inputs({{[^:]+}} : tensor<50x16x1x1xf16>) -> tensor<1x800x1x1xf16>
+    // CHECK: [[ADD:%.*]] = IE.Add([[SHAPE_CAST_IN1]], [[SHAPE_CAST_IN2]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x800x10x10xf16>, tensor<1x800x1x1xf16> -> tensor<1x800x10x10xf16>
+    // CHECK: [[SHAPE_CAST_OUT:%.*]] = IE.ShapeCast {shape = [50, 16, 10, 10]} inputs([[ADD]] : tensor<1x800x10x10xf16>) -> tensor<50x16x10x10xf16>
+    // CHECK: return [[SHAPE_CAST_OUT]] : tensor<50x16x10x10xf16>
 }
 
 // -----
@@ -178,4 +203,22 @@ func.func @NoChangesMaxPool(%arg0: tensor<16x16x3x3xf16>) -> tensor<16x16x3x3xf1
     // CHECK-NOT: IE.Transpose
     // CHECK: [[MAXPOOL:%.*]] = IE.MaxPool(%arg0) {kernel_size = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]} : tensor<16x16x3x3xf16> -> tensor<16x16x3x3xf16>
     // CHECK: return [[MAXPOOL]]  : tensor<16x16x3x3xf16>
+}
+
+// -----
+
+// CHECK-LABEL: @ConvertSigmoid
+// CHECK-SAME: [[INPUT:%.+]]: tensor<9376x3x1x1xf16>
+func.func @ConvertSigmoid(%arg0: tensor<9376x3x1x1xf16>) -> tensor<9376x3x1x1xf16> {
+    %0 = IE.Sigmoid(%arg0) : tensor<9376x3x1x1xf16> -> tensor<9376x3x1x1xf16>
+
+    return %0 : tensor<9376x3x1x1xf16>
+
+    // CHECK: [[IN_AFFINERESHAPE:%.+]] = IE.AffineReshape([[INPUT]])
+    // CHECK-LITERAL: {dim_mapping = [[0, 1], [1], [2], [3]], shape_value = [1, 28128, 1, 1]} : tensor<9376x3x1x1xf16> -> tensor<1x28128x1x1xf16>
+    // CHECK: [[SIGMOID:%.+]] = IE.Sigmoid([[IN_AFFINERESHAPE]]) : tensor<1x28128x1x1xf16> -> tensor<1x28128x1x1xf16>
+    // CHECK: [[OUT_AFFINERESHAPE:%.+]] = IE.AffineReshape([[SIGMOID]])
+    // CHECK-LITERAL: {dim_mapping = [[0], [0, 1], [2], [3]], shape_value = [9376, 3, 1, 1]} : tensor<1x28128x1x1xf16> -> tensor<9376x3x1x1xf16>
+
+    // CHECK: return [[OUT_AFFINERESHAPE]] : tensor<9376x3x1x1xf16>
 }

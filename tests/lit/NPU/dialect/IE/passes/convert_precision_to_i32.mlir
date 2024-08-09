@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --convert-precision-to-i32 --canonicalize %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 // CHECK-LABEL: @GatherConvertIndices
 func.func @GatherConvertIndices(%arg0: tensor<100xf16>) -> tensor<10xf16> {
@@ -69,4 +69,40 @@ func.func @AddOp(%arg0: tensor<1x5x16x32xui64>, %arg1: tensor<1x5x16x32xui64>) -
 
     // CHECK: [[ADD:%.*]] = IE.Add(%arg0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x5x16x32xui32>, tensor<1x5x16x32xui32> -> tensor<1x5x16x32xui32>
     // CHECK: return [[ADD]] : tensor<1x5x16x32xui32>
+}
+
+// -----
+
+// CHECK-LABEL: @TwoFunctions
+module @TwoFunctions {
+    IE.CNNNetwork entryPoint : @main inputsInfo : {
+        // CHECK: DataInfo "input" : tensor<1x48x60x60xsi64>
+        DataInfo "input" : tensor<1x48x60x60xsi64>
+    } outputsInfo : {
+        // CHECK: DataInfo "output" : tensor<1x48x60x60xsi64>
+        DataInfo "output" : tensor<1x48x60x60xsi64>
+    }
+
+    // CHECK: func.func @foo1({{[^:]+}}: tensor<1x48x60x60xsi32>) -> tensor<1x48x60x60xsi32>
+    func.func @foo1(%arg0: tensor<1x48x60x60xsi64>) -> tensor<1x48x60x60xsi64> {
+        %0 = IE.Add(%arg0, %arg0) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x48x60x60xsi64>, tensor<1x48x60x60xsi64> -> tensor<1x48x60x60xsi64>
+        return %0 : tensor<1x48x60x60xsi64>
+    }
+
+    // CHECK: func.func @foo2({{[^:]+}}: tensor<1x48x60x60xsi32>) -> tensor<1x48x60x60xsi32>
+    func.func @foo2(%arg0: tensor<1x48x60x60xsi64>) -> tensor<1x48x60x60xsi64> {
+        %0 = IE.Negative(%arg0) : tensor<1x48x60x60xsi64> -> tensor<1x48x60x60xsi64>
+        return %0 : tensor<1x48x60x60xsi64>
+    }
+
+    // CHECK: func.func @main([[ARG0:[^:]+]]: tensor<1x48x60x60xsi32>) -> tensor<1x48x60x60xsi32>
+    func.func @main(%arg0: tensor<1x48x60x60xsi64>) -> tensor<1x48x60x60xsi64> {
+        %0 = call @foo1(%arg0) : (tensor<1x48x60x60xsi64>) -> tensor<1x48x60x60xsi64>
+        %1 = call @foo2(%0) : (tensor<1x48x60x60xsi64>) -> tensor<1x48x60x60xsi64>
+        return %1 : tensor<1x48x60x60xsi64>
+
+        // CHECK: [[OUT1:%.+]] = call @foo1([[ARG0]]) : (tensor<1x48x60x60xsi32>) -> tensor<1x48x60x60xsi32>
+        // CHECK: [[OUT2:%.+]] = call @foo2([[OUT1]]) : (tensor<1x48x60x60xsi32>) -> tensor<1x48x60x60xsi32>
+        // CHECK: return [[OUT2]] : tensor<1x48x60x60xsi32>
+    }
 }

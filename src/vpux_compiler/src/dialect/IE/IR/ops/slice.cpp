@@ -33,11 +33,11 @@ void vpux::IE::SliceOp::build(mlir::OpBuilder& builder, mlir::OperationState& st
 
 mlir::LogicalResult vpux::IE::SliceOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::SliceOpAdaptor sliceOp(operands, attrs);
+    IE::SliceOpAdaptor sliceOp(operands, attrs, prop);
     if (mlir::failed(sliceOp.verify(loc))) {
         return mlir::failure();
     }

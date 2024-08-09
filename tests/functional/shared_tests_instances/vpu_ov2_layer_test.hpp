@@ -11,8 +11,8 @@
 #include <shared_test_classes/base/ov_subgraph.hpp>
 #include <sstream>
 #include <vpux/utils/core/logger.hpp>
+#include "common/npu_test_env_cfg.hpp"
 #include "common/utils.hpp"
-#include "common/vpu_test_env_cfg.hpp"
 #include "vpu_test_tool.hpp"
 
 namespace ov::test::utils {

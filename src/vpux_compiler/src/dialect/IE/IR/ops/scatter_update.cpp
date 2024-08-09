@@ -12,11 +12,11 @@ using namespace vpux;
 
 mlir::LogicalResult vpux::IE::ScatterUpdateOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::ScatterUpdateOpAdaptor scatterUpdate(operands, attrs);
+    IE::ScatterUpdateOpAdaptor scatterUpdate(operands, attrs, prop);
     if (mlir::failed(scatterUpdate.verify(loc))) {
         return mlir::failure();
     }
@@ -53,11 +53,11 @@ mlir::LogicalResult ConvertConstToAttr::matchAndRewrite(IE::ScatterUpdateOp scat
     auto axisConst = scatterUpdateOp.getAxis().getDefiningOp<Const::DeclareOp>();
     VPUX_THROW_UNLESS(axis != nullptr, "Only support constant axis");
 
-    const auto axisContent = axisConst.getContent();
-    if (!axisContent.isSplat()) {
+    if (const auto attr = axisConst.getContentAttr(); !attr.isSplat()) {
         return mlir::failure();
     }
 
+    const auto axisContent = axisConst.getContent();
     rewriter.replaceOpWithNewOp<IE::ScatterUpdateOp>(
             scatterUpdateOp, scatterUpdateOp.getType(), scatterUpdateOp.getInput(), scatterUpdateOp.getIndices(),
             scatterUpdateOp.getUpdates(), nullptr, rewriter.getI64IntegerAttr(axisContent.getSplatValue<int64_t>()));

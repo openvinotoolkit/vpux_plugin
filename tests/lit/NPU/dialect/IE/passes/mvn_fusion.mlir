@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --mvn-fusion --canonicalize %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 func.func @FuseMVNInsideSqrt(%arg0: tensor<1x1500x512xf32>) -> tensor<1500x512xf32> {
     %1 = IE.Reshape(%arg0) {shape_value = [1500, 512]} : tensor<1x1500x512xf32> -> tensor<1500x512xf32>

@@ -4,7 +4,7 @@
 //
 
 // RUN: vpux-opt --init-compiler="vpu-arch=%arch%" --convert-VPUMI37XX-to-VPUASM %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX
+// REQUIRES: arch-NPU37XX
 
 IE.CNNNetwork entryPoint : @oneDma inputsInfo : {
     DataInfo "input" : tensor<1x2x3x4xf16>

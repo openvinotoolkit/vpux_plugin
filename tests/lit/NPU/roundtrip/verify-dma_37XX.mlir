@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -7,7 +7,7 @@
 // RUN: vpux-translate --vpu-arch=%arch% --export-ELF stride_dma_vpumi.mlir -o stride_dma.elf
 // RUN: vpux-translate --vpu-arch=%arch% --import-ELF stride_dma.elf | FileCheck %s
 // RUN: rm stride_dma.elf stride_dma_vpumi.mlir
-// REQUIRES: arch-VPUX37XX
+// REQUIRES: arch-NPU37XX
 //
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>

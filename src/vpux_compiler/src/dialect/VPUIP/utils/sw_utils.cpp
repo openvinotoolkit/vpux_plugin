@@ -5,15 +5,19 @@
 
 #include "vpux/compiler/dialect/VPUIP/utils/sw_utils.hpp"
 #include <llvm/ADT/StringRef.h>
+#include <optional>
 
 #include "vpux/compiler/dialect/IE/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/IR/tiling_info.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/logging.hpp"
+#include "vpux/utils/core/range.hpp"
 
 namespace vpux {
 namespace VPUIP {
+
+constexpr int64_t NPU40XX_SW_KERNEL_ADDRESS_ALIGNMENT = 32;
 
 SmallVector<mlir::Attribute> kernelArgsRange(VPUIP::SwKernelOp swKernelOp) {
     SmallVector<mlir::Attribute> attrStorage;
@@ -307,22 +311,33 @@ InputTiling backInferInterpolateSwKernelInputTile(VPUIP::SwKernelOp swKernelOp, 
     auto swKernelRun = *swKernelRuns.begin();
     VPUX_THROW_UNLESS(swKernelRun.getAttrs().has_value(), "SwKernelOp has no attr '{0}'", swKernelOp);
     const auto attrs = swKernelRun.getAttrs().value();
-    auto inOrder = swKernelOp.getInputs()[0].getType().dyn_cast<vpux::NDTypeInterface>().getDimsOrder();
+    const auto inputs = swKernelOp.getInputs();
+    auto inOrder = inputs[0].getType().dyn_cast<vpux::NDTypeInterface>().getDimsOrder();
 
-    const auto interpolateMode = static_cast<IE::InterpolateMode>(attrs[0].dyn_cast<mlir::IntegerAttr>().getInt());
-    const auto coordMode = static_cast<IE::InterpolateCoordMode>(attrs[1].dyn_cast<mlir::IntegerAttr>().getInt());
-    const auto nearestMode = static_cast<IE::InterpolateNearestMode>(attrs[2].dyn_cast<mlir::IntegerAttr>().getInt());
-    const auto initialInputDims = reverseIntArrayAttr(inOrder, attrs[5].dyn_cast<mlir::ArrayAttr>());
-    const auto initialOutputDims = reverseIntArrayAttr(inOrder, attrs[6].dyn_cast<mlir::ArrayAttr>());
-    const auto initialInputOffset = reverseIntArrayAttr(inOrder, attrs[9].dyn_cast<mlir::ArrayAttr>());
-    const auto initialOutputOffset = reverseIntArrayAttr(inOrder, attrs[10].dyn_cast<mlir::ArrayAttr>());
+    std::optional<SmallVector<int64_t>> coordinatesShape = std::nullopt;
+    std::optional<SmallVector<int64_t>> lambdasShape = std::nullopt;
+    if (inputs.size() >= 2) {
+        const auto coordinates = inputs[1];
+        coordinatesShape = to_small_vector(coordinates.getType().dyn_cast<vpux::NDTypeInterface>().getShape());
+    }
+    if (inputs.size() >= 3) {
+        const auto lambdas = inputs[2];
+        lambdasShape = to_small_vector(lambdas.getType().dyn_cast<vpux::NDTypeInterface>().getShape());
+    }
 
-    const auto currentInputDims =
-            to_small_vector(swKernelOp.getInputs()[0].getType().dyn_cast<vpux::NDTypeInterface>().getShape());
+    const auto interpolateMode = static_cast<IE::InterpolateMode>(attrs[1].dyn_cast<mlir::IntegerAttr>().getInt());
+    const auto coordMode = static_cast<IE::InterpolateCoordMode>(attrs[2].dyn_cast<mlir::IntegerAttr>().getInt());
+    const auto nearestMode = static_cast<IE::InterpolateNearestMode>(attrs[3].dyn_cast<mlir::IntegerAttr>().getInt());
+    const auto initialInputDims = reverseIntArrayAttr(inOrder, attrs[6].dyn_cast<mlir::ArrayAttr>());
+    const auto initialOutputDims = reverseIntArrayAttr(inOrder, attrs[7].dyn_cast<mlir::ArrayAttr>());
+    const auto initialInputOffset = reverseIntArrayAttr(inOrder, attrs[10].dyn_cast<mlir::ArrayAttr>());
+    const auto initialOutputOffset = reverseIntArrayAttr(inOrder, attrs[11].dyn_cast<mlir::ArrayAttr>());
+
+    const auto currentInputDims = to_small_vector(inputs[0].getType().dyn_cast<vpux::NDTypeInterface>().getShape());
 
     return vpux::backInferInterpolateTile(outputTile, initialInputDims, initialOutputDims, initialInputOffset,
-                                          initialOutputOffset, currentInputDims, interpolateMode, coordMode,
-                                          nearestMode, log);
+                                          initialOutputOffset, currentInputDims, coordinatesShape, lambdasShape,
+                                          interpolateMode, coordMode, nearestMode, log);
 }
 
 int64_t convertKernelAxisToOrigAxis(mlir::Value tensorArg, int64_t kernelAxis) {
@@ -479,10 +494,10 @@ SmallVector<mlir::Attribute> getInterpolateSwkernelNewAttrsAfterTiling(VPUIP::Sw
     SmallVector<mlir::Attribute> newAttrs(attrs.begin(), attrs.end());
     auto dim = swKernelOp.getInputs()[0].getType().dyn_cast<vpux::NDTypeInterface>().getDimsOrder();
     TileInfo inputTile = inputTiling.tiles[0];
-    const auto initialInputDims = reverseIntArrayAttr(dim, attrs[5].dyn_cast<mlir::ArrayAttr>());
-    const auto initialOutputDims = reverseIntArrayAttr(dim, attrs[6].dyn_cast<mlir::ArrayAttr>());
-    const auto initialInputOffset = reverseIntArrayAttr(dim, attrs[9].dyn_cast<mlir::ArrayAttr>());
-    const auto initialOutputOffset = reverseIntArrayAttr(dim, attrs[10].dyn_cast<mlir::ArrayAttr>());
+    const auto initialInputDims = reverseIntArrayAttr(dim, attrs[6].dyn_cast<mlir::ArrayAttr>());
+    const auto initialOutputDims = reverseIntArrayAttr(dim, attrs[7].dyn_cast<mlir::ArrayAttr>());
+    const auto initialInputOffset = reverseIntArrayAttr(dim, attrs[10].dyn_cast<mlir::ArrayAttr>());
+    const auto initialOutputOffset = reverseIntArrayAttr(dim, attrs[11].dyn_cast<mlir::ArrayAttr>());
     const auto localInputOffset = to_small_vector(inputTile.offsets);
     const auto localOutputOffset = to_small_vector(outTile.offsets);
     SmallVector<int64_t> inputTileOffset;
@@ -495,8 +510,8 @@ SmallVector<mlir::Attribute> getInterpolateSwkernelNewAttrsAfterTiling(VPUIP::Sw
     newInputTiling.tiles[0].offsets = Shape(inputTileOffset);
     auto newOutputTile = outTile;
     newOutputTile.offsets = Shape(outputTileOffset);
-    newAttrs[9] = getIntArrayAttr(swKernelOp->getContext(), permuteIntArrayAttr(dim, inputTileOffset));
-    newAttrs[10] = getIntArrayAttr(swKernelOp->getContext(), permuteIntArrayAttr(dim, outputTileOffset));
+    newAttrs[10] = getIntArrayAttr(swKernelOp->getContext(), permuteIntArrayAttr(dim, inputTileOffset));
+    newAttrs[11] = getIntArrayAttr(swKernelOp->getContext(), permuteIntArrayAttr(dim, outputTileOffset));
     return newAttrs;
 }
 
@@ -621,6 +636,78 @@ InputTiling backInferGRUSequenceLastPartSwKernelInputTile(VPUIP::SwKernelOp swKe
     return InputTiling{{std::move(inputTile), std::move(initialHiddenStateTile), std::move(rTile), std::move(bTile)}};
 }
 
+InputTiling backInferLSTMGatesSwKernelInputTile(VPUIP::SwKernelOp swKernelOp, const vpux::TileInfo& outputTile,
+                                                Logger) {
+    auto swKernelRuns = swKernelOp.getBody().getOps<VPUIP::SwKernelRun>();
+    VPUX_THROW_UNLESS(std::distance(swKernelRuns.begin(), swKernelRuns.end()) == 1,
+                      "SwKernelOp has already been tiled at '{0}'", swKernelOp);
+
+    SmallVector<TileInfo> inputTiles;
+    for (const auto& origInput : swKernelOp.getInputs()) {
+        const auto curShape = getShape(origInput);
+        VPUX_THROW_UNLESS(curShape.size() == outputTile.shape.size(),
+                          "Can't tile SwKernel operation '{0}' at '{1}', which has operands with different rank",
+                          swKernelOp->getName(), swKernelOp->getLoc());
+
+        auto curTile = outputTile;
+        curTile.shape[Dim(curShape.size() - 1)] = curShape[Dim(curShape.size() - 1)];
+
+        inputTiles.push_back(curTile);
+    }
+
+    return TilingInfo{inputTiles};
+}
+
+InputTiling backInferMvn1SumSwKernelInputTile(VPUIP::SwKernelOp swKernelOp, const vpux::TileInfo& outputTile, Logger) {
+    auto swKernelRuns = swKernelOp.getBody().getOps<VPUIP::SwKernelRun>();
+    VPUX_THROW_UNLESS(std::distance(swKernelRuns.begin(), swKernelRuns.end()) == 1,
+                      "SwKernelOp has already been tiled at '{0}'", swKernelOp);
+    auto swKernelRun = *swKernelRuns.begin();
+    VPUX_THROW_UNLESS(swKernelRun.getAttrs().has_value(), "SwKernelOp has no attr '{0}'", swKernelOp);
+    const auto attrs = swKernelRun.getAttrs().value();
+
+    const auto inputType = swKernelOp.getInputs()[0].getType().cast<vpux::NDTypeInterface>();
+    const auto inputShape = inputType.getShape();
+
+    TileInfo inDataTile(inputShape);
+    const auto acrossChannels = attrs[0].cast<mlir::BoolAttr>().getValue();
+    // When acrossChannels==true, keep initial C value
+    if (!acrossChannels) {
+        // Per-channel sums, thus input-tile must match output-tile on Dim[C]
+        inDataTile.shape[Dims4D::Act::C] = outputTile.shape[Dims4D::Act::C];
+        inDataTile.offsets[Dims4D::Act::C] = outputTile.offsets[Dims4D::Act::C];
+    }
+    inDataTile.shape[Dims4D::Act::N] = outputTile.shape[Dims4D::Act::N];
+    inDataTile.offsets[Dims4D::Act::N] = outputTile.offsets[Dims4D::Act::N];
+
+    return TilingInfo{std::move(inDataTile)};
+}
+
+InputTiling backInferMvn1NormSwKernelInputTile(VPUIP::SwKernelOp swKernelOp, const vpux::TileInfo& outputTile, Logger) {
+    auto swKernelRuns = swKernelOp.getBody().getOps<VPUIP::SwKernelRun>();
+    VPUX_THROW_UNLESS(std::distance(swKernelRuns.begin(), swKernelRuns.end()) == 1,
+                      "SwKernelOp has already been tiled at '{0}'", swKernelOp);
+    auto swKernelRun = *swKernelRuns.begin();
+    VPUX_THROW_UNLESS(swKernelRun.getAttrs().has_value(), "SwKernelOp has no attr '{0}'", swKernelOp);
+    const auto attrs = swKernelRun.getAttrs().value();
+
+    const auto origMeanVarType = swKernelOp.getInputs()[1].getType().cast<vpux::NDTypeInterface>();
+    const auto origMeanVarShape = origMeanVarType.getShape();
+
+    TileInfo inDataTile(outputTile);
+    TileInfo inMeanVarTile(origMeanVarShape);
+
+    const auto acrossChannels = attrs[0].cast<mlir::BoolAttr>().getValue();
+    if (!acrossChannels) {
+        inMeanVarTile.shape[Dims4D::Act::C] = inDataTile.shape[Dims4D::Act::C];
+        inMeanVarTile.offsets[Dims4D::Act::C] = inDataTile.offsets[Dims4D::Act::C];
+    }
+    inMeanVarTile.shape[Dims4D::Act::N] = inDataTile.shape[Dims4D::Act::N];
+    inMeanVarTile.offsets[Dims4D::Act::N] = inDataTile.offsets[Dims4D::Act::N];
+
+    return TilingInfo{{std::move(inDataTile), std::move(inMeanVarTile)}};
+}
+
 }  // namespace
 
 InputTiling backInferSwKernelInputTile(VPUIP::SwKernelOp swKernelOp, const SmallVector<vpux::TileInfo>& outputTiles,
@@ -635,6 +722,10 @@ InputTiling backInferSwKernelInputTile(VPUIP::SwKernelOp swKernelOp, const Small
         return backInferGatherSwKernelInputTile(swKernelOp, outputTile, log);
     } else if (kernelEntryName == "pad") {
         return backInferPadSwKernelInputTile(swKernelOp, outputTile, log);
+    } else if (kernelEntryName == "mvn1_sum") {
+        return backInferMvn1SumSwKernelInputTile(swKernelOp, outputTile, log);
+    } else if (kernelEntryName == "mvn1_norm") {
+        return backInferMvn1NormSwKernelInputTile(swKernelOp, outputTile, log);
     } else if (kernelEntryName == "depth_to_space") {
         return backInferDepthToSpaceSwKernelInputTile(swKernelOp, outputTile, log);
     } else if (kernelEntryName == "gru_sequence") {
@@ -645,6 +736,8 @@ InputTiling backInferSwKernelInputTile(VPUIP::SwKernelOp swKernelOp, const Small
         return backInferReduceSwKernelInputTile(swKernelOp, outputTile, kernelEntryName, log);
     } else if (kernelEntryName == "matmul") {
         return backInferMatMulSwKernelInputTile(swKernelOp, outputTile, log);
+    } else if (kernelEntryName == "lstm_gates") {
+        return backInferLSTMGatesSwKernelInputTile(swKernelOp, outputTile, log);
     } else if (kernelEntryName == "detection_output_sort") {
         return vpux::VPU::DetectionOutputSortOpInputTilingOnShave(swKernelOp, outputTile, tileId, outputTiles.size(),
                                                                   log);
@@ -804,6 +897,18 @@ bool hasInputsInDDR(VPUIP::SwKernelOp swKernelTask) {
         }
         return false;
     });
+}
+
+int64_t getSwKernelTilingAddressAlignment(VPUIP::SwKernelOp swkernelOp, VPU::ArchKind arch) {
+    if (arch == VPU::ArchKind::NPU37XX) {
+        return 1;
+    }
+
+    auto name = getSwKernelEntryName(swkernelOp);
+    if (llvm::find(SW_KERNELS_NEED_TILING_ALIGNMENT, name) == SW_KERNELS_NEED_TILING_ALIGNMENT.end()) {
+        return 1;
+    }
+    return NPU40XX_SW_KERNEL_ADDRESS_ALIGNMENT;
 }
 }  // namespace VPUIP
 }  // namespace vpux

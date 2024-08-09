@@ -31,7 +31,7 @@ public:
     float16(float value);
 
     template <typename I>
-    explicit float16(I value): m_value{float16{static_cast<float>(value)}.m_value} {
+    explicit float16(I value): float16(static_cast<float>(value)) {
     }
 
     std::string to_string() const;
@@ -80,16 +80,8 @@ public:
 private:
     constexpr float16(uint16_t x, bool): m_value{x} {
     }
-    union F32 {
-        F32(float val): f{val} {
-        }
-        F32(uint32_t val): i{val} {
-        }
-        float f;
-        uint32_t i;
-    };
 
-    uint16_t m_value;
+    uint16_t m_value = 0;
 };
 
 #if defined(_MSC_VER)
@@ -175,6 +167,7 @@ float16 float16::operator/=(const T& other) {
 
 namespace std {
 bool isnan(vpux::type::float16 x);
+bool isinf(vpux::type::float16 x);
 
 template <>
 class numeric_limits<vpux::type::float16> {
@@ -222,6 +215,19 @@ public:
     static constexpr vpux::type::float16 denorm_min() noexcept {
         return vpux::type::float16::from_bits(0);
     }
+    static vpux::type::float16 clamp(vpux::type::float16 old_value, vpux::type::float16 low = lowest(),
+                                     vpux::type::float16 high = max()) noexcept {
+        if (old_value < low) {
+            return low;
+        }
+
+        if (high < old_value) {
+            return high;
+        }
+
+        return old_value;
+    }
+
     static constexpr bool is_iec559 = false;
     static constexpr bool is_bounded = false;
     static constexpr bool is_modulo = false;

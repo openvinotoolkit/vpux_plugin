@@ -190,9 +190,11 @@ mlir::LogicalResult NNDMAOpConverter::matchAndRewrite(VPUIP::NNDMAOp origOp, mli
                                                            Const::ContentAttr::get(newSrcContentAttr));
 
     rewriter.setInsertionPoint(origOp);
-    rewriter.create<VPUIP::DecompressDMAOp>(loc, newSrcConstOp.getOutput(), nullptr, newDstBufferOp.getBuffer(),
+    rewriter.create<VPUIP::DecompressDMAOp>(loc, newSrcConstOp.getOutput(), /*act_compression_size_entry*/ nullptr,
+                                            /*act_compression_sparsity_map*/ nullptr, newDstBufferOp.getBuffer(),
                                             origOp.getPortAttr(), origOp.getIsOutOfOrderAttr(),
-                                            origOp.getIsCriticalAttr(), /*dmaHwpId=*/nullptr,
+                                            origOp.getIsCriticalAttr(),
+                                            /*dmaHwpId=*/nullptr,
                                             /*profilingMetadata=*/nullptr);
     rewriter.replaceOp(origOp, {outBufferOp.getBuffer()});
 

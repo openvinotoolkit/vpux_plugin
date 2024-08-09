@@ -60,14 +60,8 @@ class PriorBoxLayerTestCommon : public PriorBoxLayerTest, virtual public VpuOv2L
     }
 };
 
-class PriorBoxLayerTest_NPU3700 : public PriorBoxLayerTestCommon {};
 class PriorBoxLayerTest_NPU3720 : public PriorBoxLayerTestCommon {};
 class PriorBoxLayerTest_NPU4000 : public PriorBoxLayerTestCommon {};
-
-TEST_P(PriorBoxLayerTest_NPU3700, HW) {
-    VpuOv2LayerTest::setDefaultHardwareMode();
-    VpuOv2LayerTest::run(Platform::NPU3700);
-}
 
 TEST_P(PriorBoxLayerTest_NPU3720, SW) {
     VpuOv2LayerTest::setReferenceSoftwareMode();
@@ -157,24 +151,6 @@ const std::vector<ov::Shape> inputShape1 = {{24, 42}, {348, 672}};  // inputShap
 const std::vector<ov::Shape> inputShape2 = {{2, 2}, {10, 10}};
 const std::vector<ov::Shape> inputShape3 = {{1, 1}, {300, 300}};
 const std::vector<ov::Shape> inputShape4 = {{1, 1}, {5, 5}};
-
-INSTANTIATE_TEST_CASE_P(smoke_PriorBox_1, PriorBoxLayerTest_NPU3700,
-                        testing::Combine(testing::Values(param1), testing::Values(ov::element::f16),
-                                         testing::Values(static_shapes_to_test_representation(inputShape1)),
-                                         testing::Values(DEVICE_NPU)),
-                        PriorBoxLayerTest_NPU3700::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_PriorBox_2, PriorBoxLayerTest_NPU3700,
-                        testing::Combine(testing::Values(param2), testing::Values(ov::element::f16),
-                                         testing::Values(static_shapes_to_test_representation(inputShape2)),
-                                         testing::Values(DEVICE_NPU)),
-                        PriorBoxLayerTest_NPU3700::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_PriorBox_3, PriorBoxLayerTest_NPU3700,
-                        testing::Combine(testing::Values(param3), testing::Values(ov::element::f16),
-                                         testing::Values(static_shapes_to_test_representation(inputShape3)),
-                                         testing::Values(DEVICE_NPU)),
-                        PriorBoxLayerTest_NPU3700::getTestCaseName);
 
 const auto paramsConfig1 = testing::Combine(testing::Values(param1), testing::Values(ov::element::f16),
                                             testing::Values(static_shapes_to_test_representation(inputShape1)),

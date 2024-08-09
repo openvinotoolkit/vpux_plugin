@@ -37,21 +37,22 @@ mlir::LogicalResult DeclareBufferRewriter::symbolize(VPURT::DeclareBufferOp op, 
         return mlir::success();
     } else {
         mlir::OpBuilder::InsertionGuard guard(rewriter);
-        rewriter.startRootUpdate(op);
+        rewriter.startOpModification(op);
         rewriter.setInsertionPointAfter(op);
         rewriter.create<VPUASM::SymbolizeValueOp>(op.getLoc(), result, symName);
-        rewriter.finalizeRootUpdate(op);
+        rewriter.finalizeOpModification(op);
         return mlir::success();
     }
 }
 
-mlir::FlatSymbolRefAttr DeclareBufferRewriter::getSymbolicName(VPURT::DeclareBufferOp op, size_t counter) {
+llvm::SmallVector<mlir::FlatSymbolRefAttr> DeclareBufferRewriter::getSymbolicNames(VPURT::DeclareBufferOp op,
+                                                                                   size_t counter) {
     auto fullName = VPURT::DeclareBufferOp::getOperationName();
     auto opName = fullName.drop_front(VPURT::VPURTDialect::getDialectNamespace().size() + 1);
 
     auto index = std::to_string(counter);
     auto symName = mlir::StringAttr::get(op.getContext(), opName + index);
-    return mlir::FlatSymbolRefAttr::get(symName);
+    return {mlir::FlatSymbolRefAttr::get(symName)};
 }
 
 }  // namespace vpumi37xx2vpuasm

@@ -81,18 +81,10 @@ public:
 
 class QuantizedEltwiseReluGraphTest_NPU3720 : public QuantizedEltwiseReluGraphTestCommon {};
 
-class QuantizedEltwiseReluGraphTest_NPU3700 : public QuantizedEltwiseReluGraphTestCommon {};
-
 TEST_P(QuantizedEltwiseReluGraphTest_NPU3720, HW) {
     abs_threshold = 0.2;
     setDefaultHardwareMode();
     run(Platform::NPU3720);
-}
-
-TEST_P(QuantizedEltwiseReluGraphTest_NPU3700, HW) {
-    abs_threshold = 0.1;
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
 }
 
 std::vector<std::vector<float>> input0FqRanges = {{0.0f, 7.0f, 0.0f, 7.0f}};
@@ -102,9 +94,6 @@ const auto basicCases = ::testing::Combine(::testing::ValuesIn(input0FqRanges), 
                                            ::testing::ValuesIn(outputFqRanges));
 
 INSTANTIATE_TEST_SUITE_P(precommit_QuantizedEltwiseRelu, QuantizedEltwiseReluGraphTest_NPU3720, basicCases,
-                         QuantizedEltwiseReluGraphTestCommon::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(precommit_QuantizedEltwiseRelu, QuantizedEltwiseReluGraphTest_NPU3700, basicCases,
                          QuantizedEltwiseReluGraphTestCommon::getTestCaseName);
 
 }  // namespace ov::test

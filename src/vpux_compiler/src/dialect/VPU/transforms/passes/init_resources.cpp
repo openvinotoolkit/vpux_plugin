@@ -3,8 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#include "vpux/compiler/dialect/IE/utils/resources.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
-
 using namespace vpux;
 
 namespace {
@@ -30,7 +30,7 @@ private:
     VPU::ArchKind _arch = VPU::ArchKind::UNKNOWN;
     VPU::CompilationMode _compilationMode = VPU::CompilationMode::DefaultHW;
     std::optional<int> _revisionID;
-    std::optional<int> _numOfDPUGroups;
+    int _numOfDPUGroups = 1;
     std::optional<int> _numOfDMAPorts;
     std::optional<vpux::Byte> _availableCMXMemory;
     bool _allowCustomValues = false;
@@ -55,15 +55,8 @@ mlir::LogicalResult InitResourcesPass::initializeOptions(StringRef options) {
 
 void InitResourcesPass::initializeFromOptions() {
     auto archStr = VPU::symbolizeEnum<VPU::ArchKind>(archOpt.getValue());
-    if (!archStr.has_value()) {
-        // TODO: Remove after #84053
-        auto deprecatedArchKind = vpux::VPU::symbolizeDeprecatedArchKind(archOpt.getValue());
-        VPUX_THROW_UNLESS(deprecatedArchKind.has_value(), "Unknown VPU architecture : '{0}'", archOpt.getValue());
-
-        _arch = mapDeprecatedArchKind(deprecatedArchKind.value());
-    } else {
-        _arch = archStr.value();
-    }
+    VPUX_THROW_UNLESS(archStr.has_value(), "Unknown VPU architecture : '{0}'", archOpt.getValue());
+    _arch = archStr.value();
 
     auto compilationModeStr = VPU::symbolizeEnum<VPU::CompilationMode>(compilationModeOpt.getValue());
     VPUX_THROW_UNLESS(compilationModeStr.has_value(), "Unknown compilation mode: '{0}'", compilationModeOpt.getValue());
@@ -73,6 +66,7 @@ void InitResourcesPass::initializeFromOptions() {
         _revisionID = revisionIDOpt.getValue();
     }
 
+    _numOfDPUGroups = getMaxArchDPUClusterNum(_arch);
     if (numberOfDPUGroupsOpt.hasValue()) {
         _numOfDPUGroups = numberOfDPUGroupsOpt.getValue();
     }
@@ -120,6 +114,14 @@ void InitResourcesPass::safeRunOnModule() {
             _log.trace("Set RevisionID to REVISION_NONE");
             VPU::setRevisionID(module, VPU::RevisionID::REVISION_NONE);
         }
+    }
+
+    auto nceCluster = IE::getTileExecutor(module);
+    if (!nceCluster.hasProcessorFrequency()) {
+        auto revisionID = VPU::getRevisionID(module);
+        auto freqMHz = getDpuFrequency(_arch, revisionID);
+        _log.trace("Set DpuFrequency to {0}", freqMHz);
+        nceCluster.setProcessorFrequency(getFPAttr(module.getContext(), freqMHz));
     }
 }
 

@@ -17,8 +17,8 @@
 
 #include <openvino/openvino.hpp>
 
+#include "npu_driver_compiler.h"
 #include "vcl_logger.hpp"
-#include "vpux_driver_compiler.h"
 
 #include "intel_npu/al/icompiler.hpp"
 #include "vpux/utils/IE/config.hpp"
@@ -126,7 +126,7 @@ struct BuildInfo {
     /** @} */
 
     /// The runtime compilation config from user
-    vpux::Config parsedConfig;
+    intel_npu::Config parsedConfig;
 
     /// Calc time cost on VCL level
     bool enableProfiling = false;

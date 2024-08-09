@@ -7,6 +7,7 @@
 #include "vpux/compiler/core/layers.hpp"
 #include "vpux/compiler/dialect/IE/utils/shape_infer.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPU/IR/ops_interfaces.hpp"
 #include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/explicit_distribution_utils.hpp"
@@ -162,6 +163,10 @@ mlir::LogicalResult vpux::VPU::NCEPermuteOp::verify() {
         return mlir::success();
     }
 
+    if (mlir::failed(vpux::VPU::verifyNCEOp(op))) {
+        return mlir::failure();
+    }
+
     const std::set<VPU::ArchKind> compatibleTargets = {
             VPU::ArchKind::NPU37XX,
             VPU::ArchKind::NPU40XX,
@@ -206,30 +211,6 @@ mlir::LogicalResult vpux::VPU::NCEPermuteOp::verify() {
     return mlir::success();
 }
 
-mlir::LogicalResult vpux::VPU::NCEPermuteOp::verifyChannels() {
-    const auto op = getOperation();
-
-    // We check width here because in following passes a Reorder layer will be added that will generate NWCH order
-    const auto outType = getResult().getType().cast<NDTypeInterface>();
-    const auto inType = getOperand().getType().cast<NDTypeInterface>();
-    if (outType.getRank() != 4 || inType.getRank() != 4) {
-        return errorAt(op, "Output activation has unsupported rank: input '{0}' , output '{1}' ", inType.getRank(),
-                       outType.getRank());
-    }
-    const auto outAlignment = getOutputChannelAlignment();
-    const auto OW = outType.getShape()[Dims4D::Act::W];
-    if (OW % outAlignment != 0) {
-        return errorAt(op, "Output width '{0}' is not aligned to '{1}'", OW, outAlignment);
-    }
-    const auto inAlignment = getInputChannelAlignment();
-    const auto IW = inType.getShape()[Dims4D::Act::W];
-    if (IW % inAlignment != 0) {
-        return errorAt(op, "Input width '{0}' is not aligned to '{1}'", IW, inAlignment);
-    }
-
-    return mlir::success();
-}
-
 //
 // InferTypeOpInterface
 //
@@ -237,16 +218,15 @@ mlir::LogicalResult vpux::VPU::NCEPermuteOp::verifyChannels() {
 mlir::LogicalResult vpux::VPU::NCEPermuteOp::inferReturnTypes(mlir::MLIRContext* ctx,
                                                               std::optional<mlir::Location> optLoc,
                                                               mlir::ValueRange operands, mlir::DictionaryAttr attrs,
-                                                              mlir::OpaqueProperties, mlir::RegionRange regions,
+                                                              mlir::OpaqueProperties prop, mlir::RegionRange regions,
                                                               mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    NCEPermuteOpAdaptor op(operands, attrs);
+    NCEPermuteOpAdaptor op(operands, attrs, prop);
     if (mlir::failed(op.verify(loc))) {
         return mlir::failure();
     }
 
-    auto inputType = op.getInput().getType();
     const auto shape = getShape(op.getInput());
     const auto targetShape = expandShape(shape, op.getExpandedChannels());
     const auto order = DimsOrder::fromAffineMap(op.getDstOrder());
@@ -254,18 +234,16 @@ mlir::LogicalResult vpux::VPU::NCEPermuteOp::inferReturnTypes(mlir::MLIRContext*
     VPUX_THROW_WHEN(regions.empty(), "NCEPermuteOp::inferReturnTypes got empty list of regions");
     const auto moduleOp = regions[0]->getParentOfType<mlir::ModuleOp>();
     VPUX_THROW_WHEN(moduleOp == nullptr, "NCEPermuteOp::inferReturnTypes region parent is not a ModuleOp");
-    const auto arch = VPU::getArch(moduleOp);
-    const auto superdense = VPU::NCESparsity::isSuperdenseRequired(arch, order, ShapeRef(targetShape), elemType);
-    auto sparseInputType = inputType.dyn_cast<VPU::SparseTensorType>();
-    if (sparseInputType != nullptr && superdense) {
-        // Even when input is sparse, output must remain dense because of super-dense mode in ODU.
-        inputType = sparseInputType.getData().cast<vpux::NDTypeInterface>();
-    }
-    const auto typeComponents =
-            TypeComponents().setShape(ShapeRef(targetShape)).setDimsOrder(order).setElementType(elemType);
-    const auto returnType = inputType.cast<vpux::NDTypeInterface>().changeTypeComponents(typeComponents);
 
-    inferredReturnTypes.push_back(returnType);
+    auto inputType = mlir::cast<vpux::NDTypeInterface>(op.getInput().getType());
+    const auto bounds = mlir::isa<BoundedTypeInterface>(inputType)
+                                ? mlir::cast<BoundedTypeInterface>(inputType).getBounds()
+                                : nullptr;
+    // Create tensor attr manually to be able to set dims order
+    auto outTensorAttr = vpux::getTensorAttr(order.toAffineMap(ctx), inputType.getMemSpace(), bounds);
+    auto outputType = mlir::RankedTensorType::get(targetShape, elemType, outTensorAttr);
+
+    inferredReturnTypes.push_back(outputType);
     return mlir::success();
 }
 
@@ -274,10 +252,11 @@ mlir::LogicalResult vpux::VPU::NCEPermuteOp::inferReturnTypes(mlir::MLIRContext*
 //
 
 vpux::InputTiling vpux::VPU::NCEPermuteOp::backInferTileInfo(const vpux::TileInfo& outputTile, vpux::Logger log) {
+    auto nceOp = mlir::cast<VPU::NCEOpInterface>(getOperation());
     const auto origInputShape = getShape(getInput());
     const auto origPadding = toPadInfo(VPU::getPaddingAttr(getContext(), 0, 0, 0, 0));
-    const auto kernelSize = getIntArrayAttr(getContext(), getKernelSizeVal());
-    const auto strides = getIntArrayAttr(getContext(), getStridesVal());
+    const auto kernelSize = getIntArrayAttr(getContext(), nceOp.getKernelSizeVal());
+    const auto strides = getIntArrayAttr(getContext(), nceOp.getStridesVal());
 
     // backInferPoolTile satisfies NCEPermuteOp demands, let's use it instead of some dedicated tiling.
     auto inputTiling = vpux::backInferPoolTile(outputTile, origInputShape, kernelSize, strides, origPadding);
@@ -310,22 +289,6 @@ mlir::FailureOr<OutputTiling> vpux::VPU::NCEPermuteOp::getTilingStrategy(TilingM
 }
 
 //
-// NCEOpInterface
-//
-
-SmallVector<int64_t> vpux::VPU::NCEPermuteOp::getKernelSizeVal() {
-    return {1, 1};
-}
-
-SmallVector<int64_t> vpux::VPU::NCEPermuteOp::getStridesVal() {
-    return {1, 1};
-}
-
-vpux::VPU::PaddingAttr vpux::VPU::NCEPermuteOp::getPad() {
-    return VPU::getPaddingAttr(getContext(), 0, 0, 0, 0);
-}
-
-//
 // ClusteredOpInterface
 //
 
@@ -334,16 +297,16 @@ bool vpux::VPU::NCEPermuteOp::checkStrategyCompatibility(VPU::MultiClusterStrate
     // SOK is only enabled on 40XX+, but 37XX also supports it, need to enable and refactor.
     // Tracked by: E116491
     return strategy == VPU::MultiClusterStrategy::SplitOverHeightOverlapped ||
-           (arch == VPU::ArchKind::NPU40XX && strategy == VPU::MultiClusterStrategy::SplitOverKernel);
+           ((arch == VPU::ArchKind::NPU40XX) && strategy == VPU::MultiClusterStrategy::SplitOverKernel);
 }
 
-vpux::VPU::DistributedTensorAttr vpux::VPU::NCEPermuteOp::getExplicitDistributedTensorAttr(
-        vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, mlir::ArrayAttr numTiles,
-        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::UnitAttr uniformDistributedSegments,
+vpux::VPU::DistributedTensorNative vpux::VPU::NCEPermuteOp::getExplicitDistributedTensorAttr(
+        vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, ArrayRef<int64_t> numTiles,
+        const int64_t numClusters, ArrayRef<int64_t> alignment, const bool uniformDistributedSegments,
         const vpux::VPU::OverlapDistributionParams& overlapParams) {
-    return VPU::getNCEExplicitDistributedTensorAttr(mlir::dyn_cast<VPU::NCEOpInterface>(getOperation()), shape,
-                                                    distributionMode, numTiles, numClusters, alignment,
-                                                    uniformDistributedSegments, overlapParams);
+    return VPU::getNCEExplicitDistributedTensorNative(mlir::dyn_cast<VPU::NCEOpInterface>(getOperation()), shape,
+                                                      distributionMode, numTiles, numClusters, alignment,
+                                                      uniformDistributedSegments, overlapParams);
 }
 
 bool VPU::NCEPermuteOp::isOperationSplitOverHeightCompatible(const vpux::TileInfo& outputTile) {
@@ -361,15 +324,22 @@ bool VPU::NCEPermuteOp::isOperationSplitOverKernelCompatible(ShapeRef outputShap
 bool VPU::NCEPermuteOp::doesLayerFitIntoCMX(VPU::MultiClusterStrategy strategy, Byte reservedMem) {
     auto nceOp = mlir::cast<VPU::NCEPermuteOp>(getOperation());
     const auto outputType = nceOp->getResult(0).getType().cast<vpux::NDTypeInterface>();
-    auto numClusters = VPU::getOptimalNumClusters(nceOp, outputType.getShape()[Dims4D::Act::C], strategy);
-    return fitIntoCMX(getDistributedActivationTypeFromOp(nceOp, nceOp.getInput().getType(), numClusters, strategy),
-                      getDistributedOutputTypeFromOp(nceOp, nceOp.getOutput().getType(), numClusters, strategy),
-                      reservedMem);
-}
+    auto numClusters = VPU::getOptimalNumClusters(nceOp, outputType.getShape(), strategy);
 
-mlir::LogicalResult vpux::VPU::NCEPermuteOp::verifyInputType(vpux::NDTypeInterface inputType) {
-    return mlir::success(vpux::VPU::NCEInvariant::isInputActTypeSupported(VPU::getArch(*this), inputType,
-                                                                          getInputChannelAlignment(), false));
+    SmallVector<Byte> buffers = {
+            VPU::getTotalAllocSizeWithDistribution(
+                    getInput().getType(),
+                    getActivationDistributionAttrFromOp(nceOp, getInput().getType(), numClusters.getInt(), strategy)),
+            VPU::getTotalAllocSizeWithDistribution(
+                    getOutput().getType(),
+                    getOutputDistributionAttrFromOp(nceOp, getOutput().getType(), numClusters.getInt(), strategy))};
+
+    auto totalAvailableCMXSize = reservedMem.count() == 0 ? getTotalCMXSize(getOperation()).count()
+                                                          : getTotalCMXFragmentationAwareSize(getOperation()).count();
+
+    return vpux::VPU::calculateAlignedBuffersMemoryRequirement(getArch(getOperation()), buffers).count() +
+                   reservedMem.count() <=
+           totalAvailableCMXSize;
 }
 
 //
@@ -387,8 +357,6 @@ vpux::VPU::SparsitySupport vpux::VPU::NCEPermuteOp::sparsitySupport() {
     }
 
     switch (arch) {
-    case VPU::ArchKind::NPU30XX:
-        VPUX_THROW("NCEPermuteOp is not supported for {0}", arch);
     case VPU::ArchKind::NPU37XX:
     case VPU::ArchKind::NPU40XX:
         return VPU::SparsitySupport::SPARSE_OUTPUTS & excludeMode;

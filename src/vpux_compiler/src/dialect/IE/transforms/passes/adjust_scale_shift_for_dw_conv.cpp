@@ -8,6 +8,7 @@
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 #include "vpux/compiler/dialect/IE/utils/broadcast_utils.hpp"
 #include "vpux/compiler/dialect/IE/utils/scale_shift_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
@@ -109,25 +110,12 @@ mlir::LogicalResult AdjustScaleShiftForDWConvPass::ScaleShiftOpConverter::matchA
     // BroadCast weight can be finished at compile stage. No additional time overhead.
     // Otherwise, It will introduce a Tile Op.
     // The experiment show there is no benefits when batch size < MAX_SCALE_SHIFT_N
-    auto isNullOrConstWithSingleValue = [](mlir::Value value) {
-        if (value == nullptr) {
-            return true;
-        }
-
-        auto declareOp = mlir::dyn_cast_or_null<Const::DeclareOp>(value.getDefiningOp());
-        if (declareOp == nullptr) {
-            return false;
-        }
-
-        return declareOp.getContent().isSplat();
-    };
-
-    if (!isNullOrConstWithSingleValue(origOp.getWeights()) && inputShape[Dims4D::Act::N] < MAX_SCALE_SHIFT_N) {
+    if (!VPU::isNullOrConstWithSingleValue(origOp.getWeights()) && inputShape[Dims4D::Act::N] < MAX_SCALE_SHIFT_N) {
         _log.trace("No benefit due to Weights is not splat constant and N smaller than '{0}'", MAX_SCALE_SHIFT_N);
         return mlir::failure();
     }
 
-    if (!isNullOrConstWithSingleValue(origOp.getBiases()) && inputShape[Dims4D::Act::N] < MAX_SCALE_SHIFT_N) {
+    if (!VPU::isNullOrConstWithSingleValue(origOp.getBiases()) && inputShape[Dims4D::Act::N] < MAX_SCALE_SHIFT_N) {
         _log.trace("No benefit due to Biases is not splat constant and N smaller than '{0}'", MAX_SCALE_SHIFT_N);
         return mlir::failure();
     }

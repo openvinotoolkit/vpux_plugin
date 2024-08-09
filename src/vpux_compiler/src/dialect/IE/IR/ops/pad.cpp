@@ -14,11 +14,11 @@ using namespace vpux;
 
 mlir::LogicalResult vpux::IE::PadOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::PadOpAdaptor pad(operands, attrs);
+    IE::PadOpAdaptor pad(operands, attrs, prop);
     if (mlir::failed(pad.verify(loc))) {
         return mlir::failure();
     }
@@ -98,11 +98,11 @@ mlir::LogicalResult ConvertConstToAttr::matchAndRewrite(IE::PadOp padOp, mlir::P
             return errorAt(padOp.getLoc(), "Only constant input is supported for 'pad_value'");
         }
 
-        const auto padValueContent = padValueConst.getContent();
-        if (!padValueContent.isSplat()) {
+        if (const auto attr = padValueConst.getContentAttr(); !attr.isSplat()) {
             return errorAt(padOp.getLoc(), "Only splat input is supported for 'pad_value'");
         }
 
+        const auto padValueContent = padValueConst.getContent();
         const auto padValue = padValueContent.getSplatValue<float>();
         const auto padValueAttr = getFPAttr(padOp.getContext(), padValue);
 

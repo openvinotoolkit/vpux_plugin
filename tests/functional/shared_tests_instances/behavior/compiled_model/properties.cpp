@@ -1,11 +1,12 @@
-// Copyright (C) 2018-2024 Intel Corporation
+//
+// Copyright (C) 2022 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
 #include "behavior/compiled_model/properties.hpp"
 #include "common/functions.h"
+#include "common/npu_test_env_cfg.hpp"
 #include "common/utils.hpp"
-#include "common/vpu_test_env_cfg.hpp"
 #include "npu_private_properties.hpp"
 
 using namespace ov::test::behavior;
@@ -50,28 +51,36 @@ const std::vector<std::pair<std::string, ov::Any>> compiledModelProperties = {
         {ov::intel_npu::use_elf_compiler_backend.name(), ov::Any(ov::intel_npu::ElfCompilerBackend::NO)},
         {ov::intel_npu::create_executor.name(), ov::Any(2)}};
 
+const std::string& expectedModelName = []() -> std::string {
+    return ov::test::behavior::getDefaultNGraphFunctionForTheDevice()->get_friendly_name();
+}();
+
 const std::vector<ov::AnyMap> publicCompiledModelConfigs = {
         {{ov::device::id.name(), ov::Any("")}},
         {{ov::hint::enable_cpu_pinning.name(), ov::Any(false)}},
         {{ov::hint::model_priority.name(), ov::Any(ov::hint::Priority::MEDIUM)}},
         {{ov::execution_devices.name(), ov::Any(ov::test::utils::DEVICE_NPU)}},
+        {{ov::hint::execution_mode.name(), ov::Any(ov::hint::ExecutionMode::PERFORMANCE)}},
         {{ov::hint::inference_precision.name(), ov::Any(ov::element::f16)}},
         {{ov::loaded_from_cache.name(), ov::Any(false)}},
-        {{ov::model_name.name(), ov::Any("")}},
+        {{ov::model_name.name(), ov::Any(expectedModelName)}},
         {{ov::optimal_number_of_infer_requests.name(), ov::Any(1u)}},
         {{ov::hint::performance_mode.name(), ov::Any(ov::hint::PerformanceMode::LATENCY)}},
         {{ov::hint::num_requests.name(), ov::Any(1u)}},
-        {{ov::enable_profiling.name(), ov::Any(false)}},
-        {{ov::supported_properties.name(),  // needed for HETERO
-          ov::Any(std::vector<ov::PropertyName>{
-                  ov::PropertyName(ov::device::id.name()), ov::PropertyName(ov::hint::enable_cpu_pinning.name()),
-                  ov::PropertyName(ov::execution_devices.name()),
-                  ov::PropertyName(ov::hint::inference_precision.name()),
-                  ov::PropertyName(ov::loaded_from_cache.name()), ov::PropertyName(ov::hint::model_priority.name()),
-                  ov::PropertyName(ov::model_name.name()),
-                  ov::PropertyName(ov::optimal_number_of_infer_requests.name()),
-                  ov::PropertyName(ov::hint::performance_mode.name()), ov::PropertyName(ov::hint::num_requests.name()),
-                  ov::PropertyName(ov::enable_profiling.name()), ov::PropertyName(ov::supported_properties.name())})}}};
+        {{ov::enable_profiling.name(), ov::Any(false)}}};
+// [Tracking number: E#132531], intel_npu::turbo appears dynamically based on backend
+/*{{ov::supported_properties.name(),  // needed for HETERO
+  ov::Any(std::vector<ov::PropertyName>{
+          ov::PropertyName(ov::device::id.name()), ov::PropertyName(ov::hint::enable_cpu_pinning.name()),
+          ov::PropertyName(ov::execution_devices.name()), ov::PropertyName(ov::hint::execution_mode.name()),
+          ov::PropertyName(ov::hint::inference_precision.name()),
+          ov::PropertyName(ov::loaded_from_cache.name()), ov::PropertyName(ov::hint::model_priority.name()),
+          ov::PropertyName(ov::model_name.name()),
+          ov::PropertyName(ov::intel_npu::compilation_mode_params.name()),
+          ov::PropertyName(ov::intel_npu::turbo.name()),
+          ov::PropertyName(ov::optimal_number_of_infer_requests.name()),
+          ov::PropertyName(ov::hint::performance_mode.name()), ov::PropertyName(ov::hint::num_requests.name()),
+          ov::PropertyName(ov::enable_profiling.name()), ov::PropertyName(ov::supported_properties.name())})}}};*/
 
 const std::vector<ov::AnyMap> compiledModelIncorrectConfigs = {
         {{"NPU_INEXISTENT_PROPERTY", "NPU_INEXISTENT_PROPERTY_VALUE"}}};
@@ -108,20 +117,6 @@ auto heteroCompiledModelConfigs = []() -> std::vector<ov::AnyMap> {
                 {ov::device::properties.name(), ov::Any(ov::AnyMap{{ov::test::utils::DEVICE_NPU, ov::Any(*it)}})}};
     }
     return heteroConfigs;
-}();
-
-auto heteroCompiledModelPublicConfigs = []() -> ov::AnyMap {
-    ov::AnyMap heteroPublicConfigs = {
-            ov::device::priorities(ov::test::utils::DEVICE_NPU),
-            {ov::device::properties.name(), ov::Any(ov::AnyMap{{ov::test::utils::DEVICE_NPU, ov::Any(ov::AnyMap{})}})}};
-    auto& devicePropertiesAnyMap = heteroPublicConfigs.find(ov::device::properties.name())
-                                           ->second.as<ov::AnyMap>()
-                                           .begin()
-                                           ->second.as<ov::AnyMap>();
-    for (auto&& publicCompiledModelProp : publicCompiledModelConfigs) {
-        devicePropertiesAnyMap.emplace(*publicCompiledModelProp.begin());
-    }
-    return heteroPublicConfigs;
 }();
 
 auto combineParamsExecDevices = []() -> std::vector<std::pair<ov::AnyMap, std::string>> {
@@ -202,12 +197,6 @@ INSTANTIATE_TEST_SUITE_P(smoke_BehaviorTests, OVCompiledModelPropertiesDefaultSu
 INSTANTIATE_TEST_SUITE_P(smoke_BehaviorTests, OVClassCompiledModelPropertiesDefaultTests,
                          ::testing::Combine(::testing::Values(ov::test::utils::DEVICE_NPU),
                                             ::testing::ValuesIn(publicCompiledModelConfigs)),
-                         ov::test::utils::appendPlatformTypeTestName<OVClassCompiledModelPropertiesDefaultTests>);
-
-INSTANTIATE_TEST_SUITE_P(smoke_Hetero_BehaviorTests, OVClassCompiledModelPropertiesDefaultTests,
-                         ::testing::Combine(::testing::Values(std::string(ov::test::utils::DEVICE_HETERO) + ":" +
-                                                              ov::test::utils::DEVICE_NPU),
-                                            ::testing::Values(heteroCompiledModelPublicConfigs)),
                          ov::test::utils::appendPlatformTypeTestName<OVClassCompiledModelPropertiesDefaultTests>);
 
 INSTANTIATE_TEST_SUITE_P(smoke_BehaviorTests, OVClassCompiledModelSetCorrectConfigTest,

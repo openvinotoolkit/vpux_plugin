@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --add-sw-kernel-cache-handling-ops %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 VPURT.SW.Runtime
     entryPoint: @VPU.SW::@runtime
@@ -206,7 +206,7 @@ func.func private @runtime()
     }
 }
 
-// CHECK-LABEL: @AddCacheHandlingSwOpTwoKernels 
+// CHECK-LABEL: @AddCacheHandlingSwOpTwoKernels
 func.func @AddCacheHandlingSwOpTwoKernels(%arg0: memref<1x1x1x1000xf16, @DDR>, %arg1: memref<1x1x1x1000xf16, @DDR>) -> (memref<1x1x1x1000xf16, [@CMX_NN, 0]>, memref<1x1x1x1000xf16, [@CMX_NN, 0]>) {
     %in_ddr_0  = VPURT.DeclareBuffer <DDR> <0> -> memref<1x1x1x1000xf16, @DDR>
     %in_ddr_1  = VPURT.DeclareBuffer <DDR> <2000> -> memref<1x1x1x1000xf16, @DDR>
@@ -331,7 +331,7 @@ func.func @DontAddCacheHandlingSwKernel(%arg0: memref<1x1x1x1000xf16, @DDR>, %ar
         VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 0, 0, 0>} @VPU.SW::@cache_flush inputs() outputs() on tile 0{
             VPUIP.SW.Kernel.run
         }
-        async.yield 
+        async.yield
     }
 
     return %in_ddr_0 : memref<1x1x1x1000xf16, @DDR>
@@ -564,11 +564,11 @@ func.func @DontAddCacheOpsInOutInCMX(%arg0: memref<1x1x1x1000xf16, @DDR>, %arg1:
     // CHECK:     [[SW_KERNEL:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_relu inputs([[SW_KERNEL_INPUT]] as [[INPUT:%.*]]: memref<1x1x1x1000xf16, [@CMX_NN, 0]>) outputs([[OUTPUT_CMX]] as [[OUTPUT:%.*]]: memref<1x1x1x1000xf16, [@CMX_NN, 0]>) on tile 0 -> memref<1x1x1x1000xf16, [@CMX_NN, 0]>
     // CHECK:       VPUIP.SW.Kernel.run {attrs = [false, true, 6.0892105102539063E-4]}([[INPUT]], [[OUTPUT]]) : memref<1x1x1x1000xf16, [@CMX_NN, 0]>, memref<1x1x1x1000xf16, [@CMX_NN, 0]>
     // CHECK:     async.yield [[SW_KERNEL]] : memref<1x1x1x1000xf16, [@CMX_NN, 0]>
-    
+
     // CHECK:   [[T_2:%.*]], [[R_2:%.*]] = async.execute [[[T_1]]] ([[R_1]] as [[INPUT:%.*]]: !async.value<memref<1x1x1x1000xf16, [@CMX_NN, 0]>>) -> !async.value<memref<1x1x1x1000xf16, [@CMX_NN, 0]>> attributes {VPUIP.executor = @DMA_NN, "async-deps-index" = 3 : i64} {
     // CHECK:     [[NNDMA_1:%.*]] = VPUIP.NNDMA inputs([[INPUT]] : memref<1x1x1x1000xf16, [@CMX_NN, 0]>) outputs(%arg1 : memref<1x1x1x1000xf16, [@CMX_NN, 0]>) -> memref<1x1x1x1000xf16, [@CMX_NN, 0]>
     // CHECK:     async.yield %3 : memref<1x1x1x1000xf16, [@CMX_NN, 0]>
-    
+
     // CHECK:   [[AWAIT:%.*]] = async.await [[R_2]] : !async.value<memref<1x1x1x1000xf16, [@CMX_NN, 0]>>
     // CHECK:   return [[AWAIT]] : memref<1x1x1x1000xf16, [@CMX_NN, 0]>
 }
@@ -704,13 +704,13 @@ func.func @AddCacheInvalidateSwOpForDDRInputCMXOutput(%arg0: memref<1x1x1x1000xf
     // CHECK:   [[INDICES_FP16_CMX:%.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <1457216> -> memref<1x1x1x1xf16, [@CMX_NN, 0]>
     // CHECK:   [[INDICES_SI32_CMX:%.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <1457152> -> memref<1x1x1x1xsi32, [@CMX_NN, 0]>
     // CHECK:   [[INDICES_INPUT_CMX:%.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <1457152> -> memref<1x1xsi32, [@CMX_NN, 0]>
-    
+
     // CHECK:   [[OUTPUT_CMX:%.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <1473024> -> memref<1x1x512xf16, [@CMX_NN, 0]>
 
     // CHECK:   [[T_0:%.*]], [[R_0:%.*]] = async.execute -> !async.value<memref<1x1x1x1xf16, [@CMX_NN, 0]>> attributes {VPUIP.executor = @DMA_NN, "async-deps-index" = 0 : i64} {
     // CHECK:    [[NNDMA_1:%.*]] = VPUIP.NNDMA inputs(%arg1 : memref<1x1x1x1xf16, @DDR>) outputs([[INDICES_FP16_CMX]] : memref<1x1x1x1xf16, [@CMX_NN, 0]>) -> memref<1x1x1x1xf16, [@CMX_NN, 0]>
     // CHECK:    async.yield [[NNDMA_1]] : memref<1x1x1x1xf16, [@CMX_NN, 0]>
-    
+
     // CHECK:   [[T_1:%.*]], [[R_1:%.*]] = async.execute [[[T_0]]] ([[R_0]] as [[SW_KERNEL_INPUT:%.*]]: !async.value<memref<1x1x1x1xf16, [@CMX_NN, 0]>>) -> !async.value<memref<1x1x1x1xsi32, [@CMX_NN, 0]>> attributes {VPUIP.executor = @SHAVE_ACT, "async-deps-index" = 1 : i64} {
     // CHECK:    [[SW_KERNEL_1:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Convert inputs([[SW_KERNEL_INPUT]] as [[INPUT:%.*]]: memref<1x1x1x1xf16, [@CMX_NN, 0]>) outputs([[INDICES_SI32_CMX]] as [[OUTPUT:%.*]]: memref<1x1x1x1xsi32, [@CMX_NN, 0]>) on tile 0 -> memref<1x1x1x1xsi32, [@CMX_NN, 0]>{
     // CHECK:      VPUIP.SW.Kernel.run {attrs = [false, true, 6.0892105102539063E-4]}([[INPUT]], [[OUTPUT]]) : memref<1x1x1x1xf16, [@CMX_NN, 0]>, memref<1x1x1x1xsi32, [@CMX_NN, 0]>
@@ -720,7 +720,7 @@ func.func @AddCacheInvalidateSwOpForDDRInputCMXOutput(%arg0: memref<1x1x1x1000xf
     // CHECK:     VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 0, 0, 0>} @VPU.SW::@cache_invalidate inputs() outputs() on tile 0{
     // CHECK:       VPUIP.SW.Kernel.run
     // CHECK:     async.yield
-    
+
     // CHECK:    [[T_3:%.*]], [[R_3:%.*]] = async.execute [[[T_2]]] -> !async.value<memref<1x1x512xf16, [@CMX_NN, 0]>> attributes {VPUIP.executor = @SHAVE_ACT, "async-deps-index" = 3 : i64} {
     // CHECK:       [[SW_KERNEL_2:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Gather inputs([[CST]] as [[INPUT_1:%.*]]: memref<51865x512xf16>, [[INDICES_INPUT_CMX]] as [[INPUT_2:%.*]]: memref<1x1xsi32, [@CMX_NN, 0]>) outputs([[OUTPUT_CMX]] as [[OUTPUT:%.*]]: memref<1x1x512xf16, [@CMX_NN, 0]>) on tile 0 -> memref<1x1x512xf16, [@CMX_NN, 0]>{
     // CHECK:         VPUIP.SW.Kernel.run {attrs = [1, 0]}([[INPUT_1]], [[INPUT_2]], [[OUTPUT]]) : memref<51865x512xf16>, memref<1x1xsi32, [@CMX_NN, 0]>, memref<1x1x512xf16, [@CMX_NN, 0]>
@@ -909,10 +909,10 @@ VPURT.SW.Runtime
     stack_configuration: [4096, 4096, 4096, 4096]
 
 module @VPU.SW {
-func.func private @builtin_Minimum(memref<*xf16>, memref<*xf16>, memref<*xf16>) 
+func.func private @builtin_Minimum(memref<*xf16>, memref<*xf16>, memref<*xf16>)
     attributes {
-        VPU.kernel_code = "eltwise_min.cpp", 
-        VPU.kernel_entry = "eltwise_min", 
+        VPU.kernel_code = "eltwise_min.cpp",
+        VPU.kernel_entry = "eltwise_min",
         VPU.task_type = @COMPUTE
     }
  func.func private @builtin_relu(%input : memref<*xf16>, %output : memref<*xf16>)
@@ -994,7 +994,7 @@ func.func @AddCacheHandlingSwOpOneSwKernelMultipleDependencies(%arg0: memref<1x1
     // CHECK:    [[CONCAT_VIEW:%.*]] = VPUIP.ConcatView inputs([[INPUT_0]], [[INPUT_1]] : memref<1x1x1x1000xf16, @DDR>, memref<1x1x1x1000xf16, @DDR>) outputs([[OUT_DDR_1]] : memref<1x1x1x2000xf16, @DDR>) -> memref<1x1x1x2000xf16, @DDR>
     // CHECK:    [[NN_DMA_2:%.*]] = VPUIP.NNDMA inputs([[CONCAT_VIEW]] : memref<1x1x1x2000xf16, @DDR>) outputs(%arg2 : memref<1x1x1x2000xf16, [@CMX_NN, 0]>) -> memref<1x1x1x2000xf16, [@CMX_NN, 0]>
     // CHECK:    async.yield [[NN_DMA_2]] : memref<1x1x1x2000xf16, [@CMX_NN, 0]>
-    
+
     // CHECK:   [[AWAIT:%.*]] = async.await [[R_4]] : !async.value<memref<1x1x1x2000xf16, [@CMX_NN, 0]>>
     // CHECK:   return [[AWAIT]] : memref<1x1x1x2000xf16, [@CMX_NN, 0]>
 }

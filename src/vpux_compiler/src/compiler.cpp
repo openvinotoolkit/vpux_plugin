@@ -14,8 +14,6 @@
 #include "vpux/compiler/NPU40XX/dialect/ELF/export.hpp"
 #include "vpux/compiler/NPU40XX/pipeline_strategy.hpp"
 #include "vpux/compiler/NPU40XX/pipelines.hpp"
-#include "vpux/compiler/VPU30XX/pipeline_strategy.hpp"
-#include "vpux/compiler/VPU30XX/pipelines.hpp"
 #include "vpux/compiler/dialect/ELFNPU37XX/export.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPUIP/graph-schema/export.hpp"
@@ -33,6 +31,7 @@
 #include "vpux/utils/IE/itt.hpp"
 #include "vpux/utils/IE/private_properties.hpp"
 #include "vpux/utils/core/error.hpp"
+#include "vpux/utils/core/memory_usage.hpp"
 #include "vpux/utils/core/optional.hpp"
 #include "vpux/utils/profiling/reports/api.hpp"
 
@@ -91,8 +90,6 @@ constexpr uint32_t SUPPORTED_OPSET = 11;
 
 std::unique_ptr<IPipelineStrategy> createPipelineStrategy(VPU::ArchKind arch) {
     switch (arch) {
-    case VPU::ArchKind::NPU30XX:
-        return std::make_unique<PipelineStrategy30XX>();
     case VPU::ArchKind::NPU37XX:
         return std::make_unique<PipelineStrategy37XX>();
     case VPU::ArchKind::NPU40XX:
@@ -301,7 +298,7 @@ void DeveloperConfig::dump(mlir::PassManager& pm) const {
 //
 
 ov::SupportedOpsMap vpux::CompilerImpl::query(const std::shared_ptr<const ov::Model>& model,
-                                              const Config& config) const {
+                                              const intel_npu::Config& config) const {
     Logger log("vpux-compiler", getLogLevel(config));
     log.setName("vpux::CompilerImpl::query");
 
@@ -426,7 +423,8 @@ std::vector<std::shared_ptr<const ov::Node>> buildOVResults(const std::shared_pt
 }
 
 NetworkDescription exportNetwork(mlir::ModuleOp module, mlir::TimingScope& rootTiming, Logger log,
-                                 const std::shared_ptr<const ov::Model>& model, const Config& configuration) {
+                                 const std::shared_ptr<const ov::Model>& model,
+                                 const intel_npu::Config& configuration) {
     const auto parameters = buildOVParams(model);
     const auto results = buildOVResults(model);
 
@@ -447,14 +445,14 @@ NetworkDescription exportNetwork(mlir::ModuleOp module, mlir::TimingScope& rootT
 }
 
 template <typename Options>
-bool getDummyOpReplacement(const Config& config) {
+bool getDummyOpReplacement(const intel_npu::Config& config) {
     const auto options = Options::createFromString(config.get<intel_npu::COMPILATION_MODE_PARAMS>());
     VPUX_THROW_UNLESS(options != nullptr, "failed to parse COMPILATION_MODE_PARAMS");
     return options->enableDummyOpReplacement;
 }
 
 template <typename ReferenceSWOptions, typename ReferenceHWOptions, typename DefaultHWOptions>
-bool getDummyOpReplacement(const Config& config) {
+bool getDummyOpReplacement(const intel_npu::Config& config) {
     const auto compilationMode = getCompilationMode(config);
     if (compilationMode == VPU::CompilationMode::ReferenceSW) {
         return getDummyOpReplacement<ReferenceSWOptions>(config);
@@ -467,11 +465,9 @@ bool getDummyOpReplacement(const Config& config) {
     }
 }
 
-bool getDummyOpReplacement(const Config& config) {
+bool getDummyOpReplacement(const intel_npu::Config& config) {
     const auto arch = getArchKind(config);
-    if (arch == VPU::ArchKind::NPU30XX) {
-        return getDummyOpReplacement<ReferenceSWOptions30XX, ReferenceHWOptions30XX, DefaultHWOptions30XX>(config);
-    } else if (arch == VPU::ArchKind::NPU37XX) {
+    if (arch == VPU::ArchKind::NPU37XX) {
         return getDummyOpReplacement<ReferenceSWOptions37XX, ReferenceHWOptions37XX, DefaultHWOptions37XX>(config);
     } else if (arch == VPU::ArchKind::NPU40XX) {
         return getDummyOpReplacement<ReferenceSWOptions40XX, ReferenceHWOptions40XX, DefaultHWOptions40XX>(config);
@@ -480,11 +476,10 @@ bool getDummyOpReplacement(const Config& config) {
     }
 }
 
-std::optional<size_t> getBatchSize(const std::shared_ptr<ov::Model>& model, const Config& config) {
+std::optional<size_t> getBatchSize(const std::shared_ptr<ov::Model>& model, const intel_npu::Config& config) {
     std::set<ov::Output<const ov::Node>> batchedInputs;
     std::set<ov::Output<const ov::Node>> batchedOutputs;
     std::set<size_t> sBatchSize;
-    const auto arch = getArchKind(config);
 
     vpux::Logger logger("getBatchSize", getLogLevel(config));
 
@@ -492,7 +487,7 @@ std::optional<size_t> getBatchSize(const std::shared_ptr<ov::Model>& model, cons
         return 1;
     }
 
-    if (arch == VPU::ArchKind::NPU30XX || config.get<intel_npu::BATCH_MODE>() == ov::intel_npu::BatchMode::COMPILER) {
+    if (config.get<intel_npu::BATCH_MODE>() == ov::intel_npu::BatchMode::COMPILER) {
         return 1;
     }
 
@@ -554,18 +549,26 @@ std::optional<size_t> getBatchSize(const std::shared_ptr<ov::Model>& model, cons
 }
 
 #ifdef BACKGROUND_FOLDING_ENABLED
+struct ConstantFoldingConfig {
+    bool foldingInBackgroundEnabled;
+    int64_t maxConcurrentTasks;
+    bool collectStatistics;
+    int64_t memoryUsageLimit;
+    double cacheCleanThreshold;
+};
 
 template <typename Options>
-std::tuple<bool, int64_t, bool> getConstantFoldingInBackground(const Config& config) {
+ConstantFoldingConfig getConstantFoldingInBackground(const intel_npu::Config& config) {
     const auto options = Options::createFromString(config.get<intel_npu::COMPILATION_MODE_PARAMS>());
     VPUX_THROW_UNLESS(options != nullptr, "failed to parse COMPILATION_MODE_PARAMS");
-    return std::make_tuple<bool, int64_t, bool>(options->constantFoldingInBackground,
-                                                options->constantFoldingInBackgroundNumThreads,
-                                                options->constantFoldingInBackgroundCollectStatistics);
+    return ConstantFoldingConfig{options->constantFoldingInBackground, options->constantFoldingInBackgroundNumThreads,
+                                 options->constantFoldingInBackgroundCollectStatistics,
+                                 options->constantFoldingInBackgroundMemoryUsageLimit,
+                                 options->constantFoldingInBackgroundCacheCleanThreshold};
 }
 
 template <typename ReferenceSWOptions, typename ReferenceHWOptions, typename DefaultHWOptions>
-std::tuple<bool, int64_t, bool> getConstantFoldingInBackground(const Config& config) {
+ConstantFoldingConfig getConstantFoldingInBackground(const intel_npu::Config& config) {
     const auto compilationMode = getCompilationMode(config);
     if (compilationMode == VPU::CompilationMode::ReferenceSW) {
         return getConstantFoldingInBackground<ReferenceSWOptions>(config);
@@ -578,12 +581,9 @@ std::tuple<bool, int64_t, bool> getConstantFoldingInBackground(const Config& con
     }
 }
 
-std::tuple<bool, int64_t, bool> getConstantFoldingInBackground(const Config& config) {
+ConstantFoldingConfig getConstantFoldingInBackground(const intel_npu::Config& config) {
     const auto arch = getArchKind(config);
-    if (arch == VPU::ArchKind::NPU30XX) {
-        return getConstantFoldingInBackground<ReferenceSWOptions30XX, ReferenceHWOptions30XX, DefaultHWOptions30XX>(
-                config);
-    } else if (arch == VPU::ArchKind::NPU37XX) {
+    if (arch == VPU::ArchKind::NPU37XX) {
         return getConstantFoldingInBackground<ReferenceSWOptions37XX, ReferenceHWOptions37XX, DefaultHWOptions37XX>(
                 config);
     } else if (arch == VPU::ArchKind::NPU40XX) {
@@ -596,16 +596,19 @@ std::tuple<bool, int64_t, bool> getConstantFoldingInBackground(const Config& con
 
 #endif
 
-void setSafeOptions(Config& config) {
+void setSafeOptions(intel_npu::Config& config) {
     auto backendConfig = config.get<intel_npu::BACKEND_COMPILATION_PARAMS>();
     std::regex reg("enable-partial-workload-management=true");
     backendConfig = std::regex_replace(backendConfig, reg, "");
+    // In case WLM is enabled by default explicitly disable it.
+    backendConfig.append(" ").append("enable-partial-workload-management=false");
     config.update({{intel_npu::BACKEND_COMPILATION_PARAMS::key().data(), backendConfig}});
 }
 
 mlir::OwningOpRef<mlir::ModuleOp> compileModel(mlir::MLIRContext& ctx, const std::shared_ptr<ov::Model>& model,
                                                DeveloperConfig& devConf, mlir::TimingScope& rootTiming,
-                                               bool enableDummyOpReplacement, const Config& config, vpux::Logger& log) {
+                                               bool enableDummyOpReplacement, const intel_npu::Config& config,
+                                               vpux::Logger& log) {
     OV_ITT_TASK_CHAIN(COMPILER_IMPLEMENTATION, itt::domains::VPUXPlugin, "CompilerImpl::compile", "compileModel");
     const auto arch = getArchKind(config);
 
@@ -628,13 +631,13 @@ mlir::OwningOpRef<mlir::ModuleOp> compileModel(mlir::MLIRContext& ctx, const std
     pipelineFactory->buildPipeline(pm, config, rootTiming, log);
 
 #ifdef BACKGROUND_FOLDING_ENABLED
-    const auto [foldingInBackgroundEnabled, maxConcurrentTasks, collectStatistics] =
-            getConstantFoldingInBackground(config);
+    const auto foldingConfig = getConstantFoldingInBackground(config);
 
     std::unique_ptr<vpux::Const::BackgroundConstantFolding> foldingManager;
-    if (foldingInBackgroundEnabled) {
-        foldingManager = std::make_unique<vpux::Const::BackgroundConstantFolding>(&ctx, maxConcurrentTasks,
-                                                                                  collectStatistics, log);
+    if (foldingConfig.foldingInBackgroundEnabled) {
+        foldingManager = std::make_unique<vpux::Const::BackgroundConstantFolding>(
+                &ctx, foldingConfig.maxConcurrentTasks, foldingConfig.collectStatistics, foldingConfig.memoryUsageLimit,
+                foldingConfig.cacheCleanThreshold, log);
     }
 #endif
 
@@ -651,7 +654,7 @@ mlir::OwningOpRef<mlir::ModuleOp> compileModel(mlir::MLIRContext& ctx, const std
             auto backup_module = mlir::OwningOpRef<mlir::ModuleOp>(module.get().clone());
             try {
                 compileNetwork(module.get(), elfPm, rootTiming);
-            } catch (...) {
+            } catch (WlmRollbackException&) {
                 log.warning("Failed to export to ELF with current config, reverting to simple ELF pipeline");
                 module = std::move(backup_module);
                 auto safeConfig = config;
@@ -678,10 +681,14 @@ uint32_t CompilerImpl::getSupportedOpsetVersion() const {
     return SUPPORTED_OPSET;
 }
 
-NetworkDescription CompilerImpl::compile(const std::shared_ptr<ov::Model>& model, const Config& config) const {
+NetworkDescription CompilerImpl::compile(const std::shared_ptr<ov::Model>& model,
+                                         const intel_npu::Config& config) const {
     OV_ITT_SCOPED_TASK(itt::domains::VPUXPlugin, "CompilerImpl::compile");
-    Logger log("vpux-compiler", getLogLevel(config));
     checkPlaformSupportedForCompilation(config.get<intel_npu::PLATFORM>());
+
+    Logger log("vpux-compiler", getLogLevel(config));
+
+    auto peakMemStart = getPeakMemoryUsage();
 
     DeveloperConfig devConf(log);
 
@@ -731,7 +738,7 @@ NetworkDescription CompilerImpl::compile(const std::shared_ptr<ov::Model>& model
         if (batchSize.has_value()) {
             if (*batchSize > 1) {
                 // When batching is handled by the plugin we need to modify performance_mode property to Throughput mode
-                Config config_performance_mode = config;
+                intel_npu::Config config_performance_mode = config;
                 if (config_performance_mode.get<intel_npu::PERFORMANCE_HINT>() == ov::hint::PerformanceMode::LATENCY) {
                     std::stringstream strStream;
                     strStream << ov::hint::PerformanceMode::THROUGHPUT;
@@ -750,7 +757,7 @@ NetworkDescription CompilerImpl::compile(const std::shared_ptr<ov::Model>& model
         } else {
             const auto& batchType = config.get<intel_npu::BATCH_MODE>();
             if (batchType == ov::intel_npu::BatchMode::AUTO) {
-                log.warning("An error occurred during network compilation so fallback on compiler batch mode");
+                log.info("Batching is handled by the compiler");
             } else if (batchType == ov::intel_npu::BatchMode::PLUGIN) {
                 VPUX_THROW("This model is not supported when handling batching on the plugin.");
             }
@@ -772,11 +779,17 @@ NetworkDescription CompilerImpl::compile(const std::shared_ptr<ov::Model>& model
     auto networkDescription = exportNetwork(module.get(), rootTiming, log, model, config);
     OV_ITT_TASK_SKIP(COMPILER_IMPLEMENTATION);
 
+    auto peakMemEnd = getPeakMemoryUsage();
+
+    log.debug("Start of compilation memory usage: Peak {0} KB", peakMemStart.count());
+    // Note: Following log is parsed by CI. Take care when modifying it.
+    log.info("End of compilation memory usage: Peak {0} KB", peakMemEnd.count());
+
     return networkDescription;
 }
 
 NetworkDescription CompilerImpl::compile(const std::shared_ptr<const ov::Model>& origModel,
-                                         const Config& config) const {
+                                         const intel_npu::Config& config) const {
     OV_ITT_SCOPED_TASK(itt::domains::VPUXPlugin, "CompilerImpl::compile");
     OV_ITT_TASK_CHAIN(COMPILER_IMPLEMENTATION, itt::domains::VPUXPlugin, "CompilerImpl::compile", "clone_model");
 
@@ -792,7 +805,8 @@ NetworkDescription CompilerImpl::compile(const std::shared_ptr<const ov::Model>&
 // CompilerImpl::parse
 //
 
-NetworkMetadata CompilerImpl::parse(const std::vector<uint8_t>& compiledNetwork, const Config& config) const {
+NetworkMetadata CompilerImpl::parse(const std::vector<uint8_t>& compiledNetwork,
+                                    const intel_npu::Config& config) const {
     if (isELFEnabled(config)) {
         return VPUMI37XX::getNetworkMetadata(compiledNetwork);
     } else {
@@ -806,7 +820,7 @@ NetworkMetadata CompilerImpl::parse(const std::vector<uint8_t>& compiledNetwork,
 
 std::vector<ov::ProfilingInfo> CompilerImpl::process_profiling_output(const std::vector<uint8_t>& profData,
                                                                       const std::vector<uint8_t>& network,
-                                                                      const Config&) const {
+                                                                      const intel_npu::Config&) const {
     auto layerInfo = profiling::getLayerProfilingInfoHook(profData, network);
     return intel_npu::profiling::convertLayersToIeProfilingInfo(layerInfo);
 }
@@ -821,7 +835,7 @@ OPENVINO_PLUGIN_API void CreateNPUCompiler(std::shared_ptr<ICompiler>& obj) {
 }
 #endif
 
-bool vpux::isELFEnabled(const Config& configuration) {
+bool vpux::isELFEnabled(const intel_npu::Config& configuration) {
     const auto isVPUX37XX = getArchKind(configuration) == vpux::VPU::ArchKind::NPU37XX;
     const auto isVPUX40XX = getArchKind(configuration) == vpux::VPU::ArchKind::NPU40XX;
 

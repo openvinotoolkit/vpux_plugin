@@ -76,6 +76,7 @@
             "hidden": true,
             "cacheVariables": {
                 "ENABLE_TESTS": true,
+                "ENABLE_PRIVATE_TESTS": true,
                 "ENABLE_FUNCTIONAL_TESTS": true
             }
         },
@@ -110,9 +111,34 @@
                 "CMAKE_EXPORT_COMPILE_COMMANDS" : true,
 
                 "ENABLE_DEVELOPER_BUILD": true,
+                "ENABLE_IMD_BACKEND": false,
+
+                "ENABLE_VPUX_DOCS": false
+            }
+        },
+        {
+            "name": "vpuxRelWithDebInfoDeveloper",
+            "description": "Release with debug info configuration preset for VPUX Compiler development. Enables VPUX compiler and generic OV tests, and disables plugin specific builds. Also, enables IMD backend",
+            "inherits": ["BuildOptimization", "EnableTests", "Disabler"],
+            "binaryDir": "${sourceDir}/build-x86_64/RelWithDebInfo",
+            "displayName": "vpuxRelWithDebInfoDeveloper",
+
+            "cacheVariables": {
+                "OpenVINODeveloperPackage_DIR": {
+                    "type": "FILEPATH",
+                    "value": "$env{OPENVINO_HOME}/build-x86_64/RelWithDebInfo"
+                },
+
+                "CMAKE_BUILD_TYPE": {
+                    "type": "STRING",
+                    "value": "RelWithDebInfo"
+                },
+
+                "CMAKE_EXPORT_COMPILE_COMMANDS" : true,
+
+                "ENABLE_DEVELOPER_BUILD": true,
                 "ENABLE_IMD_BACKEND": true,
 
-                "ENABLE_ZEROAPI_BACKEND": true,
                 "ENABLE_VPUX_DOCS": false
             }
         },
@@ -163,6 +189,7 @@
                 "ENABLE_OPENCV": true,
 
                 "ENABLE_TESTS": true,
+                "ENABLE_PRIVATE_TESTS": true,
                 "ENABLE_FUNCTIONAL_TESTS": true,
 
                 "OPENVINO_EXTRA_MODULES": {
@@ -185,6 +212,120 @@
             "binaryDir": "${sourceDir}/build-x86_64/Release",
             "displayName": "ovVpuxRelease",
             "inherits": ["OpenVINOWithVPUX", "vpuxRelease"]
+        },
+
+        {
+            "name": "Cid",
+            "hidden": true,
+            "description": "Cid build necessary options. Please note the path of NPU plugin when use.",
+            "cacheVariables": {
+                "BUILD_SHARED_LIBS": false,
+                "ENABLE_OV_IR_FRONTEND": true,
+                "THREADING": {
+                    "type": "STRING",
+                    "value": "TBB"
+                },
+                "ENABLE_TBBBIND_2_5": false,
+                "BUILD_COMPILER_FOR_DRIVER": true,
+
+                "OPENVINO_EXTRA_MODULES": {
+                    "type": "FILEPATH",
+                    "value": "$env{NPU_PLUGIN_HOME}"
+                }
+           }
+        },
+        {
+            "name": "NpuCidRelease",
+            "description": "Default configuration for NPU Driver Compiler target build. Please note: 1) Please make sure that NPU_PLUGIN_HOME environment variable is set to NPU plugin path. 2) build Cid is a static build which only build related targets and not include other unrelated options and targets to avoid getting big generated files.",
+            "binaryDir": "${sourceDir}/build-x86_64/Release",
+            "displayName": "NpuCidRelease",
+            "inherits": ["Cid", "BuildOptimization", "Disabler"],
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": {
+                    "type": "STRING",
+                    "value": "Release"
+                },
+
+                "ENABLE_MULTI": false,
+                "ENABLE_AUTO": false,
+                "ENABLE_AUTO_BATCH": false,
+                "ENABLE_PROXY": false,
+                "ENABLE_HETERO": false,
+                "ENABLE_INTEL_CPU": false,
+                "ENABLE_INTEL_GPU": false,
+                "ENABLE_TEMPLATE": false,
+
+                "ENABLE_OV_ONNX_FRONTEND": false,
+                "ENABLE_OV_PADDLE_FRONTEND": false,
+                "ENABLE_OV_PYTORCH_FRONTEND": false,
+                "ENABLE_OV_TF_FRONTEND": false,
+                "ENABLE_OV_TF_LITE_FRONTEND": false,
+
+                "ENABLE_OPENCV": false,
+
+                "ENABLE_BLOB_DUMP": false,
+                "ENABLE_TESTS": false,
+                "ENABLE_FUNCTIONAL_TESTS": false,
+
+                "ENABLE_SYSTEM_TBB": false,
+                "ENABLE_TBB_RELEASE_ONLY": false,
+                "ENABLE_JS": false,
+                "ENABLE_NPU_PROTOPIPE": false
+            }
+        },
+        {
+            "name": "ovNpuCidRelease",
+            "description": "Default configuration for NPU Driver Compiler target build. Please note: 1) it builds NPU plugin in OpenVINO project tree. Please make sure that NPU plugin is located inside OpenVINO repo in modules/vpux folder. 2) build Cid is a static build which only build related targets and not include other unrelated options and targets to avoid getting big generated files.",
+            "binaryDir": "${sourceDir}/build-x86_64/Release",
+            "displayName": "ovNpuCidRelease",
+            "inherits": ["Cid", "BuildOptimization", "Disabler"],
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": {
+                    "type": "STRING",
+                    "value": "Release"
+                },
+
+                "ENABLE_MULTI": false,
+                "ENABLE_AUTO": false,
+                "ENABLE_AUTO_BATCH": false,
+                "ENABLE_PROXY": false,
+                "ENABLE_HETERO": false,
+                "ENABLE_INTEL_CPU": false,
+                "ENABLE_INTEL_GPU": false,
+                "ENABLE_TEMPLATE": false,
+
+                "ENABLE_OV_ONNX_FRONTEND": false,
+                "ENABLE_OV_PADDLE_FRONTEND": false,
+                "ENABLE_OV_PYTORCH_FRONTEND": false,
+                "ENABLE_OV_TF_FRONTEND": false,
+                "ENABLE_OV_TF_LITE_FRONTEND": false,
+
+                "ENABLE_OPENCV": false,
+
+                "ENABLE_BLOB_DUMP": false,
+                "ENABLE_TESTS": false,
+                "ENABLE_FUNCTIONAL_TESTS": false,
+
+                "ENABLE_SYSTEM_TBB": false,
+                "ENABLE_TBB_RELEASE_ONLY": false,
+                "ENABLE_JS": false,
+                "ENABLE_NPU_PROTOPIPE": false,
+
+                "OPENVINO_EXTRA_MODULES": {
+                    "type": "FILEPATH",
+                    "value": "./modules/vpux"
+                }
+            }
+        },
+        {
+            "name": "npuFuzzingBuild",
+            "displayName": "npuFuzzingBuild",
+            "inherits": ["vpuxDeveloper", "EnableClang", "NinjaClangColors", "LinkerLLD"],
+            "cacheVariables": {
+                "ENABLE_SANITIZER": true,
+                "ENABLE_FUZZING": true,
+                "ENABLE_NPU_FUZZ_TESTS": true
+            }
         }
     ],
     "testPresets": [

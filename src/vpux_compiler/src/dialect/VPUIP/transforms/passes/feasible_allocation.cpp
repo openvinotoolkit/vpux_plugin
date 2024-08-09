@@ -200,6 +200,8 @@ private:
     void assignCyclesToExecOps(AsyncDepsInfo& depsInfo, FeasibleMemoryScheduler::ScheduledOpInfoVec& scheduledOps);
     void linearizeComputeOps(bool linearizeSchedule, bool enablePipelining, mlir::func::FuncOp& netFunc,
                              AsyncDepsInfo& depsInfo);
+    void updateAfterAllScheduleOptimizations(AsyncDepsInfo& depsInfo,
+                                             FeasibleMemoryScheduler::ScheduledOpInfoVec& scheduledOps);
 
 private:
     VPUIP::MemKindCreateFunc _memKindCb;
@@ -393,30 +395,16 @@ void FeasibleAllocationPass::updateAsyncExecuteOpPositionOfSpillOps(
     }
 }
 
-// This method will check cycles after spilling and remove stall regions which
-// might have been introduced by spilling optimizations and assign the cycle start
-// and cycle end attribute to the async.execute operation
+// This method will assign cycle intervals to 'async.execute' ops based on ScheduledOpInfoVec, and assign
+// instance mask (port) to DMA operations.
 void FeasibleAllocationPass::assignCyclesToExecOps(AsyncDepsInfo& depsInfo,
                                                    FeasibleMemoryScheduler::ScheduledOpInfoVec& scheduledOps) {
-    // find stalls on all pipelines
-    auto stallsToRemove = getStallsOnAllExecutorPipelines(scheduledOps);
-
-    // remove stalls from operations
     for (auto& schedOp : scheduledOps) {
-        // sum stalls to current cycle
-        size_t stallSize = 0;
-        auto stalls = stallsToRemove.begin();
-        while (stalls != stallsToRemove.end() && stalls->first < schedOp.cycleBegin_) {
-            stallSize += checked_cast<size_t>(stalls->second - stalls->first);
-            ++stalls;
-        }
-        // update cycles
-        schedOp.cycleBegin_ -= stallSize;
-        schedOp.cycleEnd_ -= stallSize;
-        // store cycles for barrier scheduler
+        // transfer cycle attributes to IR
         auto execOp = depsInfo.getExecuteOpAtIndex(schedOp.op_);
         execOp->setAttr(cycleBegin, getIntAttr(execOp->getContext(), schedOp.cycleBegin_));
         execOp->setAttr(cycleEnd, getIntAttr(execOp->getContext(), schedOp.cycleEnd_));
+        // update instance mask for DMAs
         if (schedOp.queueType.execKind == VPU::ExecutorKind::DMA_NN) {
             SmallVector<uint64_t> executorInstanceMaskVec;
             for (auto portIdx : schedOp.executorInstanceMask.set_bits()) {
@@ -426,6 +414,169 @@ void FeasibleAllocationPass::assignCyclesToExecOps(AsyncDepsInfo& depsInfo,
                     execOp, getIntArrayAttr(execOp->getContext(), executorInstanceMaskVec));
         }
     }
+}
+
+// This method will re-create execution flow - schedule, after scheduling optimizations which can
+// modify order of operations and impact cycles of operations. New cycles will be assigned to
+// 'async.execute' operations and ScheduledOpInfoVec will be updated with new execution order.
+void FeasibleAllocationPass::updateAfterAllScheduleOptimizations(
+        AsyncDepsInfo& depsInfo, FeasibleMemoryScheduler::ScheduledOpInfoVec& scheduledOps) {
+    // distribute ops into their execution queues
+    std::map<std::pair<FeasibleMemoryScheduler::QueueType, size_t>,
+             std::queue<FeasibleMemoryScheduler::ScheduledOpInfo*>>
+            perQueueOps;
+    for (auto opIt = scheduledOps.begin(); opIt != scheduledOps.end(); opIt++) {
+        for (auto instIndex : opIt->executorInstanceMask.set_bits()) {
+            auto queueKey = std::make_pair(opIt->queueType, instIndex);
+            perQueueOps[queueKey].push(opIt);
+        }
+    }
+
+    // check if given queue has operations left
+    auto opsOnQueue = [&](const std::pair<FeasibleMemoryScheduler::QueueType, size_t> queueKey) {
+        return !perQueueOps[queueKey].empty();
+    };
+
+    // check if all queues are empty
+    auto allQueuesFinished = [&]() {
+        for (const auto& entry : perQueueOps) {
+            if (opsOnQueue(entry.first)) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    // check if given operation is next on all instances used by the operation
+    auto nextOnAllUsedInstances = [&](FeasibleMemoryScheduler::ScheduledOpInfo* opInfo) {
+        for (auto instIndex : opInfo->executorInstanceMask.set_bits()) {
+            auto queueKey = std::make_pair(opInfo->queueType, instIndex);
+            if (perQueueOps[queueKey].front()->op_ != opInfo->op_) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    // store cycle end of operations used for dependency tracking and schedule cycle
+    std::unordered_map<size_t, size_t> opCycleEndMap;
+
+    // check if all dependencies were scheduled
+    auto isOperationReady = [&](size_t opIndex, size_t& depCycleEnd) {
+        mlir::async::ExecuteOp execOp = depsInfo.getExecuteOpAtIndex(opIndex);
+        VPUX_THROW_UNLESS(execOp != nullptr, "Async ExecuteOp not located based on index");
+        for (const auto& dep : execOp.getDependencies()) {
+            const auto execDep = dep.getDefiningOp<mlir::async::ExecuteOp>();
+            const auto indexDep = depsInfo.getIndex(execDep);
+
+            // could dependencies be not scheduled ?
+            auto cycleEndDep = opCycleEndMap.find(indexDep);
+            if (cycleEndDep == opCycleEndMap.end()) {
+                return false;
+            }
+
+            depCycleEnd = std::max(depCycleEnd, cycleEndDep->second);
+        }
+        return true;
+    };
+
+    // store cycle state per queue to find next free cycles on given queue
+    std::map<std::pair<FeasibleMemoryScheduler::QueueType, size_t>, size_t> queueCycleState;
+
+    // find next ready operations from parallel queues, and update their execution cycles
+    auto getNextReadyOps = [&]() {
+        FeasibleMemoryScheduler::ScheduledOpInfoVec nextReadyOps;
+        for (const auto& entry : perQueueOps) {
+            const auto queueKey = entry.first;
+            if (!opsOnQueue(queueKey)) {
+                continue;
+            }
+
+            // ensure op next on all instances
+            auto currOp = entry.second.front();
+            if (!nextOnAllUsedInstances(currOp)) {
+                continue;
+            }
+
+            // ensure dependencies scheduled
+            size_t depCycleEnd = 0;
+            if (!isOperationReady(currOp->op_, depCycleEnd)) {
+                continue;
+            }
+
+            auto scheduleCycle = depCycleEnd;
+            for (auto instIndex : currOp->executorInstanceMask.set_bits()) {
+                auto queueKey = std::make_pair(currOp->queueType, instIndex);
+                const auto queueFreeCycle = queueCycleState[queueKey];
+                scheduleCycle = std::max(scheduleCycle, queueFreeCycle);
+            }
+
+            // update cycle info and store
+            const auto opCycleCost = currOp->cycleEnd_ - currOp->cycleBegin_;
+            currOp->cycleBegin_ = scheduleCycle;
+            currOp->cycleEnd_ = scheduleCycle + opCycleCost;
+            nextReadyOps.push_back(*currOp);
+        }
+
+        VPUX_THROW_WHEN(nextReadyOps.empty(), "No ready operations found");
+        return nextReadyOps;
+    };
+
+    // find next operation with earliest scheduling cycle
+    auto chooseNextOpToSchedule = [](FeasibleMemoryScheduler::ScheduledOpInfoVec& readyOps) {
+        return std::min_element(readyOps.begin(), readyOps.end(), [](const auto& op1, const auto& op2) {
+            // first cycle begin
+            if (op1.cycleBegin_ != op2.cycleBegin_) {
+                return op1.cycleBegin_ < op2.cycleBegin_;
+            }
+            // second smaller tasks first
+            if (op1.cycleEnd_ != op2.cycleEnd_) {
+                return op1.cycleEnd_ < op2.cycleEnd_;
+            }
+            // operation index
+            if (op1.op_ != op2.op_) {
+                return op1.op_ < op2.op_;
+            }
+            // allow self comparison
+            return false;
+        });
+    };
+
+    // define new order for execution
+    FeasibleMemoryScheduler::ScheduledOpInfoVec newOrder;
+    while (!allQueuesFinished()) {
+        // find next operations from parallel queues which are ready
+        auto nextReadyOps = getNextReadyOps();
+
+        // find operation with earliest scheduling cycle
+        auto scheduleOp = chooseNextOpToSchedule(nextReadyOps);
+
+        // update IR cycle information
+        mlir::async::ExecuteOp targetExecOp = depsInfo.getExecuteOpAtIndex(scheduleOp->op_);
+        targetExecOp->setAttr(cycleBegin, getIntAttr(targetExecOp->getContext(), scheduleOp->cycleBegin_));
+        targetExecOp->setAttr(cycleEnd, getIntAttr(targetExecOp->getContext(), scheduleOp->cycleEnd_));
+
+        // candidate operation scheduled, update structures
+        newOrder.push_back(*scheduleOp);
+        if (opCycleEndMap.find(scheduleOp->op_) != opCycleEndMap.end()) {
+            // for ops on multiple queues
+            opCycleEndMap[scheduleOp->op_] = std::max(opCycleEndMap[scheduleOp->op_], scheduleOp->cycleEnd_);
+        } else {
+            opCycleEndMap[scheduleOp->op_] = scheduleOp->cycleEnd_;
+        }
+        for (auto instIndex : scheduleOp->executorInstanceMask.set_bits()) {
+            auto queueKey = std::make_pair(scheduleOp->queueType, instIndex);
+            queueCycleState[queueKey] = scheduleOp->cycleEnd_;
+            VPUX_THROW_UNLESS(perQueueOps[queueKey].front()->op_ == scheduleOp->op_,
+                              "Attempt to remove invalid front operation '{0}', should be '{1}'",
+                              perQueueOps[queueKey].front()->op_, scheduleOp->op_);
+            perQueueOps[queueKey].pop();
+        }
+    }
+
+    VPUX_THROW_WHEN(scheduledOps.size() != newOrder.size(),
+                    "Failed to update IR with optimized schedule, state can be invalid");
+    scheduledOps = std::move(newOrder);
 }
 
 // This method will inject dependencies between operations based on linearization option
@@ -532,7 +683,6 @@ void FeasibleAllocationPass::safeRunOnFunc() {
         scan = std::move(prefetchScan);
     }
 
-    scheduler.cleanUpAndLogSchedule(scheduledOps);
     // TODO: recurse to strategy with useful info
 
     if (_enableScheduleStatistics) {
@@ -551,7 +701,7 @@ void FeasibleAllocationPass::safeRunOnFunc() {
         dynamicSpillingAfterSpillOptimizations = vpux::getDynamicSpillingStats(scheduledOps);
     }
 
-    // 3. re-order the IR
+    // 3. re-order IR for spill insertion
     updateAsyncExecuteOpPosition(func, depsInfo, scheduledOps);
 
     // 4. insert spill dmas
@@ -578,6 +728,14 @@ void FeasibleAllocationPass::safeRunOnFunc() {
     // After dependencies are determined, location of spill operations should be updated
     // to be close to their dependencies
     updateAsyncExecuteOpPositionOfSpillOps(depsInfo, scheduledOps);
+
+    // After all scheduling optimization, as a final step:
+    // 1. Recreate schedule order and operation cycles after above optimizations
+    updateAfterAllScheduleOptimizations(depsInfo, scheduledOps);
+    // 2. Clean temporary attributes and log schedule
+    scheduler.cleanUpAndLogSchedule(scheduledOps);
+    // 3. Use final order
+    updateAsyncExecuteOpPosition(func, depsInfo, scheduledOps);
 
     if (_enableScheduleStatistics) {
         // verify all dependencies preserved for correct analysis

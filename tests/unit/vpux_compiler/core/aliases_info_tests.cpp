@@ -89,6 +89,52 @@ public:
 
 }  // namespace AlisesInfoTest
 
+TEST(MLIR_AliasesInfo, OpWithNoUsers) {
+    mlir::DialectRegistry registry;
+    registry.insert<mlir::memref::MemRefDialect>();
+    registry.insert<mlir::func::FuncDialect>();
+    registry.insert<AlisesInfoTest::TestDialect>();
+
+    mlir::MLIRContext ctx(registry);
+
+    constexpr StringLiteral inputIR = R"(
+        module @test {
+            func.func @main(%arg: memref<100xf32>) -> memref<100xf32> {
+                %nouse = memref.alloc(): memref<512xf32>
+                return %arg : memref<100xf32>
+            }
+        }
+    )";
+
+    auto module = mlir::parseSourceString<mlir::ModuleOp>(inputIR, &ctx);
+    ASSERT_TRUE(module.get() != nullptr);
+
+    auto func = module.get().lookupSymbol<mlir::func::FuncOp>("main");
+    ASSERT_TRUE(func != nullptr);
+
+    vpux::AliasesInfo info(func);
+
+    func.walk([&](mlir::memref::AllocOp allocOp) {
+        const auto allocRes = allocOp.getResult();
+
+        const auto allocSource = info.getSource(allocRes);
+        EXPECT_TRUE(allocSource == nullptr);
+
+        const auto allocRoots = info.getRoots(allocRes);
+        EXPECT_EQ(allocRoots.size(), 1) << "allocRes roots: %0";
+        EXPECT_TRUE(*allocRoots.begin() == allocRes);
+
+        const auto& allocAliases = info.getAllAliases(allocRes);
+        EXPECT_EQ(allocAliases.size(), 1);
+        for (const auto alias : allocAliases) {
+            auto* producerOp = alias.getDefiningOp();
+            ASSERT_TRUE(producerOp != nullptr);
+            EXPECT_TRUE(mlir::isa<mlir::memref::AllocOp>(producerOp));
+            EXPECT_TRUE(producerOp == allocOp);
+        }
+    });
+}
+
 TEST(MLIR_AliasesInfo, TestMultiViewOp) {
     mlir::DialectRegistry registry;
     registry.insert<mlir::memref::MemRefDialect>();
@@ -530,11 +576,25 @@ TEST(MLIR_AliasesInfo, CallOp) {
                 return %arg1 : memref<1x4x60x60xf16>
             }
 
-            func.func @main(%arg0: memref<1x8x60x60xf16>, %arg1: memref<1x4x60x60xf16>, %arg2: memref<1x2x60x60xf16>) -> (memref<1x4x60x60xf16>, memref<1x2x60x60xf16>) {
+            func.func @main(%arg0: memref<1x8x60x60xf16>, %arg1: memref<1x4x60x60xf16>, %arg2: memref<1x2x60x60xf16>,
+                            %argExtra: memref<1x4x60x60xf16>)
+                    -> (memref<1x4x60x60xf16>, memref<1x2x60x60xf16>, memref<1x4x60x60xf16>, memref<1x2x60x60xf16>) {
                 %alloc = memref.alloc() : memref<1x4x60x60xf16>
-                %0:2 = call @foo1(%arg0, %alloc, %arg2) : (memref<1x8x60x60xf16>, memref<1x4x60x60xf16>, memref<1x2x60x60xf16>) -> (memref<1x4x60x60xf16>, memref<1x2x60x60xf16>)
+                %0:2 = call @foo1(%arg0, %alloc, %arg2)
+                    : (memref<1x8x60x60xf16>, memref<1x4x60x60xf16>, memref<1x2x60x60xf16>)
+                    -> (memref<1x4x60x60xf16>, memref<1x2x60x60xf16>)
                 %1 = call @foo2(%0#0, %arg1) : (memref<1x4x60x60xf16>, memref<1x4x60x60xf16>) -> memref<1x4x60x60xf16>
-                return %1, %0#1 : memref<1x4x60x60xf16>, memref<1x2x60x60xf16>
+
+                // repeat again with diff. arguments
+                %alloc2 = memref.alloc() : memref<1x4x60x60xf16>
+                %2:2 = call @foo1(%arg0, %alloc2, %arg2)
+                    : (memref<1x8x60x60xf16>, memref<1x4x60x60xf16>, memref<1x2x60x60xf16>)
+                    -> (memref<1x4x60x60xf16>, memref<1x2x60x60xf16>)
+                %3 = call @foo2(%2#0, %argExtra) : (memref<1x4x60x60xf16>, memref<1x4x60x60xf16>)
+                    -> memref<1x4x60x60xf16>
+
+                return %1, %0#1, %3, %2#1 :
+                    memref<1x4x60x60xf16>, memref<1x2x60x60xf16>, memref<1x4x60x60xf16>, memref<1x2x60x60xf16>
             }
         }
     )";

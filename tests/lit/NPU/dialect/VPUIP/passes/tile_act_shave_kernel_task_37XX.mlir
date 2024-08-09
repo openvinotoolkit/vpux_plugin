@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW" --tile-act-shave-kernel-task %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX
+// REQUIRES: arch-NPU37XX
 
 // -----
 
@@ -86,7 +86,7 @@ func.func @TileStridedMVNWithDifferentTileSize(%arg0: memref<1x129x64x32xf16, #N
 // -----
 
 module @VPU.SW {
-    func.func private @builtin_Interpolate(memref<*xf16, @CMX_NN>, memref<*xf16, @CMX_NN>, i64, i64, i64, i64, none, none, none, none, none) attributes {VPU.kernel_code = "interpolate.cpp", VPU.kernel_entry = "interpolate"}
+    func.func private @builtin_Interpolate(memref<*xf16, @CMX_NN>, memref<*xf16, @CMX_NN>, i64, i64, i64, i64, i64, none, none, none, none, none) attributes {VPU.kernel_code = "interpolate.cpp", VPU.kernel_entry = "interpolate"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
 }
 
@@ -96,7 +96,7 @@ func.func @TileHalfPixelInterpolate(%arg0: memref<1x1x96x160xf16>) -> memref<1x1
     %2 = memref.alloc() : memref<1x1x192x320xf16, [@CMX_NN, 0]>
     // LINEAR_ONNX = 2, HALF_PIXEL = 0
     %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Interpolate inputs(%1 as %arg2: memref<1x1x96x160xf16, [@CMX_NN, 0]>) outputs(%2 as %arg3: memref<1x1x192x320xf16, [@CMX_NN, 0]>) on tile 0 -> memref<1x1x192x320xf16, [@CMX_NN, 0]>{
-      VPUIP.SW.Kernel.run {attrs = [2, 0, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [160, 96, 1, 1], [320, 192, 1, 1], [2, 3], -7.500000e-01, [0, 0, 0, 0], [0, 0, 0, 0]]}(%arg2, %arg3) : memref<1x1x96x160xf16, [@CMX_NN, 0]>, memref<1x1x192x320xf16, [@CMX_NN, 0]>
+      VPUIP.SW.Kernel.run {attrs = [-9223372036854775808, 2, 0, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [160, 96, 1, 1], [320, 192, 1, 1], [2, 3], -7.500000e-01, [0, 0, 0, 0], [0, 0, 0, 0]]}(%arg2, %arg3) : memref<1x1x96x160xf16, [@CMX_NN, 0]>, memref<1x1x192x320xf16, [@CMX_NN, 0]>
     }
     %3 = memref.alloc() : memref<1x1x192x320xf16>
     %4 = VPUIP.Copy inputs(%results : memref<1x1x192x320xf16, [@CMX_NN, 0]>) outputs(%3 : memref<1x1x192x320xf16>) -> memref<1x1x192x320xf16>
@@ -110,8 +110,8 @@ func.func @TileHalfPixelInterpolate(%arg0: memref<1x1x96x160xf16>) -> memref<1x1
     // CHECK:    [[IN_SUBVIEW1:%.*]] = VPUIP.SubView [[COPY0]] [0, 0, 47, 0] [1, 1, 49, 160] : memref<1x1x96x160xf16, [@CMX_NN, 0]> to memref<1x1x49x160xf16, {order = #NCHW, strides = [15360, 15360, 160, 1]}, [@CMX_NN, 0]>
     // CHECK:    [[OUT_SUBVIEW1:%.*]] = VPUIP.SubView [[OUTBUF]] [0, 0, 96, 0] [1, 1, 96, 320] : memref<1x1x192x320xf16, [@CMX_NN, 0]> to memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>
     // CHECK:    [[INTERP:%.*]]:2 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 2, 0, 0>} @VPU.SW::@builtin_Interpolate inputs([[IN_SUBVIEW0]] as %arg1: memref<1x1x49x160xf16, {order = #NCHW, strides = [15360, 15360, 160, 1]}, [@CMX_NN, 0]>, [[IN_SUBVIEW1]] as %arg2: memref<1x1x49x160xf16, {order = #NCHW, strides = [15360, 15360, 160, 1]}, [@CMX_NN, 0]>) outputs([[OUT_SUBVIEW0]] as %arg3: memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>, [[OUT_SUBVIEW1]] as %arg4: memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>) on tile 0 -> (memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>, memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>){
-    // CHECK:                           VPUIP.SW.Kernel.run {attrs = [2, 0, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [160, 96, 1, 1], [320, 192, 1, 1], [2, 3], -7.500000e-01, [0, 0, 0, 0], [0, 0, 0, 0]]}(%arg1, %arg3) : memref<1x1x49x160xf16, {order = #NCHW, strides = [15360, 15360, 160, 1]}, [@CMX_NN, 0]>, memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>
-    // CHECK:                           VPUIP.SW.Kernel.run {attrs = [2, 0, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [160, 96, 1, 1], [320, 192, 1, 1], [2, 3], -7.500000e-01, [0, 47, 0, 0], [0, 96, 0, 0]]}(%arg2, %arg4) : memref<1x1x49x160xf16, {order = #NCHW, strides = [15360, 15360, 160, 1]}, [@CMX_NN, 0]>, memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>
+    // CHECK:                           VPUIP.SW.Kernel.run {attrs = [-9223372036854775808, 2, 0, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [160, 96, 1, 1], [320, 192, 1, 1], [2, 3], -7.500000e-01, [0, 0, 0, 0], [0, 0, 0, 0]]}(%arg1, %arg3) : memref<1x1x49x160xf16, {order = #NCHW, strides = [15360, 15360, 160, 1]}, [@CMX_NN, 0]>, memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>
+    // CHECK:                           VPUIP.SW.Kernel.run {attrs = [-9223372036854775808, 2, 0, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [160, 96, 1, 1], [320, 192, 1, 1], [2, 3], -7.500000e-01, [0, 47, 0, 0], [0, 96, 0, 0]]}(%arg2, %arg4) : memref<1x1x49x160xf16, {order = #NCHW, strides = [15360, 15360, 160, 1]}, [@CMX_NN, 0]>, memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>
     // CHECK:    }
     // CHECK:    [[CONCAT:%.*]] = VPUIP.ConcatView inputs([[INTERP]]#0, [[INTERP]]#1 : memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>, memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>) outputs([[OUTBUF]] : memref<1x1x192x320xf16, [@CMX_NN, 0]>) -> memref<1x1x192x320xf16, [@CMX_NN, 0]>
     // CHECK:    [[OUTBUF_DDR:%.*]] = memref.alloc() : memref<1x1x192x320xf16>
@@ -122,7 +122,7 @@ func.func @TileHalfPixelInterpolate(%arg0: memref<1x1x96x160xf16>) -> memref<1x1
 // -----
 
 module @VPU.SW {
-    func.func private @builtin_Interpolate(memref<*xf16, @CMX_NN>, memref<*xf16, @CMX_NN>, i64, i64, i64, i64, none, none, none, none, none) attributes {VPU.kernel_code = "interpolate.cpp", VPU.kernel_entry = "interpolate"}
+    func.func private @builtin_Interpolate(memref<*xf16, @CMX_NN>, memref<*xf16, @CMX_NN>, i64, i64, i64, i64, i64, none, none, none, none, none) attributes {VPU.kernel_code = "interpolate.cpp", VPU.kernel_entry = "interpolate"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
 }
 
@@ -130,7 +130,7 @@ func.func @TileHalfPixelInterpolateNotOnOuterMostDim(%arg0: memref<1x3x96x160xf1
     %0 = memref.alloc() : memref<1x3x192x320xf16, [@CMX_NN, 0]>
     // LINEAR_ONNX = 2, HALF_PIXEL = 0
     %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Interpolate inputs(%arg0 as %arg2: memref<1x3x96x160xf16, [@CMX_NN, 0]>) outputs(%0 as %arg3: memref<1x3x192x320xf16, [@CMX_NN, 0]>) on tile 0 -> memref<1x3x192x320xf16, [@CMX_NN, 0]>{
-      VPUIP.SW.Kernel.run {attrs = [2, 0, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [160, 96, 3, 1], [320, 192, 3, 1], [2, 3], -7.500000e-01, [0, 0, 0, 0], [0, 0, 0, 0]]}(%arg2, %arg3) : memref<1x3x96x160xf16, [@CMX_NN, 0]>, memref<1x3x192x320xf16, [@CMX_NN, 0]>
+      VPUIP.SW.Kernel.run {attrs = [-9223372036854775808, 2, 0, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [160, 96, 3, 1], [320, 192, 3, 1], [2, 3], -7.500000e-01, [0, 0, 0, 0], [0, 0, 0, 0]]}(%arg2, %arg3) : memref<1x3x96x160xf16, [@CMX_NN, 0]>, memref<1x3x192x320xf16, [@CMX_NN, 0]>
     }
     return %results : memref<1x3x192x320xf16, [@CMX_NN, 0]>
 
@@ -143,8 +143,8 @@ func.func @TileHalfPixelInterpolateNotOnOuterMostDim(%arg0: memref<1x3x96x160xf1
     // CHECK:    [[COPY_1:%.*]] = VPUIP.Copy inputs([[SUBVIEW_1]] : memref<1x3x49x160xf16, {order = #NCHW, strides = [46080, 15360, 160, 1]}, [@CMX_NN, 0]>) outputs([[INPUT_BUF_1]] : memref<1x3x49x160xf16, [@CMX_NN, 0]>) -> memref<1x3x49x160xf16, [@CMX_NN, 0]>
     // CHECK:    [[OUTPUT_BUFF_1:%.*]] = memref.alloc() : memref<1x3x96x320xf16, [@CMX_NN, 0]>
     // CHECK:    [[INTERP:%.*]]:2 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 2, 0, 0>} @VPU.SW::@builtin_Interpolate inputs([[COPY_0]] as %arg1: memref<1x3x49x160xf16, [@CMX_NN, 0]>, [[COPY_1]] as %arg2: memref<1x3x49x160xf16, [@CMX_NN, 0]>) outputs([[OUTPUT_BUFF_0]] as %arg3: memref<1x3x96x320xf16, [@CMX_NN, 0]>, [[OUTPUT_BUFF_1]] as %arg4: memref<1x3x96x320xf16, [@CMX_NN, 0]>) on tile 0 -> (memref<1x3x96x320xf16, [@CMX_NN, 0]>, memref<1x3x96x320xf16, [@CMX_NN, 0]>){
-    // CHECK:                        VPUIP.SW.Kernel.run {attrs = [2, 0, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [160, 96, 3, 1], [320, 192, 3, 1], [2, 3], -7.500000e-01, [0, 0, 0, 0], [0, 0, 0, 0]]}(%arg1, %arg3) : memref<1x3x49x160xf16, [@CMX_NN, 0]>, memref<1x3x96x320xf16, [@CMX_NN, 0]>
-    // CHECK:                        VPUIP.SW.Kernel.run {attrs = [2, 0, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [160, 96, 3, 1], [320, 192, 3, 1], [2, 3], -7.500000e-01, [0, 47, 0, 0], [0, 96, 0, 0]]}(%arg2, %arg4) : memref<1x3x49x160xf16, [@CMX_NN, 0]>, memref<1x3x96x320xf16, [@CMX_NN, 0]>
+    // CHECK:                        VPUIP.SW.Kernel.run {attrs = [-9223372036854775808, 2, 0, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [160, 96, 3, 1], [320, 192, 3, 1], [2, 3], -7.500000e-01, [0, 0, 0, 0], [0, 0, 0, 0]]}(%arg1, %arg3) : memref<1x3x49x160xf16, [@CMX_NN, 0]>, memref<1x3x96x320xf16, [@CMX_NN, 0]>
+    // CHECK:                        VPUIP.SW.Kernel.run {attrs = [-9223372036854775808, 2, 0, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [160, 96, 3, 1], [320, 192, 3, 1], [2, 3], -7.500000e-01, [0, 47, 0, 0], [0, 96, 0, 0]]}(%arg2, %arg4) : memref<1x3x49x160xf16, [@CMX_NN, 0]>, memref<1x3x96x320xf16, [@CMX_NN, 0]>
     // CHECK:    }
     // CHECK:    [[OUTPUT_BUFF:%.*]] = memref.alloc() : memref<1x3x192x320xf16, [@CMX_NN, 0]>
     // CHECK:    [[SUBVIEW_2:%.*]] = VPUIP.SubView [[OUTPUT_BUFF]] [0, 0, 0, 0] [1, 3, 96, 320] : memref<1x3x192x320xf16, [@CMX_NN, 0]> to memref<1x3x96x320xf16, {order = #NCHW, strides = [184320, 61440, 320, 1]}, [@CMX_NN, 0]>
@@ -189,7 +189,7 @@ func.func @TileMaximum(%arg0: memref<1x4x96x160xf16, [@CMX_NN, 0]>, %arg1: memre
 // -----
 
 module @VPU.SW {
-    func.func private @builtin_Interpolate(memref<*xf16, @CMX_NN>, memref<*xf16, @CMX_NN>, i64, i64, i64, i64, none, none, none, none, none) attributes {VPU.kernel_code = "interpolate.cpp", VPU.kernel_entry = "interpolate"}
+    func.func private @builtin_Interpolate(memref<*xf16, @CMX_NN>, memref<*xf16, @CMX_NN>, i64, i64, i64, i64, i64, none, none, none, none, none) attributes {VPU.kernel_code = "interpolate.cpp", VPU.kernel_entry = "interpolate"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
 }
 
@@ -199,7 +199,7 @@ func.func @TileAlignCornersInterpolate(%arg0: memref<1x1x96x160xf16>) -> memref<
     %2 = memref.alloc() : memref<1x1x192x320xf16, [@CMX_NN, 0]>
     // LINEAR_ONNX = 2, ALIGN_CORNERS = 4
     %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Interpolate inputs(%1 as %arg2: memref<1x1x96x160xf16, [@CMX_NN, 0]>) outputs(%2 as %arg3: memref<1x1x192x320xf16, [@CMX_NN, 0]>) on tile 0 -> memref<1x1x192x320xf16, [@CMX_NN, 0]>{
-      VPUIP.SW.Kernel.run {attrs = [2, 4, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [160, 96, 1, 1], [320, 192, 1, 1], [2, 3], -7.500000e-01, [0, 0, 0, 0], [0, 0, 0, 0]]}(%arg2, %arg3) : memref<1x1x96x160xf16, [@CMX_NN, 0]>, memref<1x1x192x320xf16, [@CMX_NN, 0]>
+      VPUIP.SW.Kernel.run {attrs = [-9223372036854775808, 2, 4, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [160, 96, 1, 1], [320, 192, 1, 1], [2, 3], -7.500000e-01, [0, 0, 0, 0], [0, 0, 0, 0]]}(%arg2, %arg3) : memref<1x1x96x160xf16, [@CMX_NN, 0]>, memref<1x1x192x320xf16, [@CMX_NN, 0]>
     }
     %3 = memref.alloc() : memref<1x1x192x320xf16>
     %4 = VPUIP.Copy inputs(%results : memref<1x1x192x320xf16, [@CMX_NN, 0]>) outputs(%3 : memref<1x1x192x320xf16>) -> memref<1x1x192x320xf16>
@@ -213,8 +213,8 @@ func.func @TileAlignCornersInterpolate(%arg0: memref<1x1x96x160xf16>) -> memref<
     // CHECK:    [[IN_SUBVIEW1:%.*]] = VPUIP.SubView [[COPY0]] [0, 0, 47, 0] [1, 1, 49, 160] : memref<1x1x96x160xf16, [@CMX_NN, 0]> to memref<1x1x49x160xf16, {order = #NCHW, strides = [15360, 15360, 160, 1]}, [@CMX_NN, 0]>
     // CHECK:    [[OUT_SUBVIEW1:%.*]] = VPUIP.SubView [[OUTBUF]] [0, 0, 96, 0] [1, 1, 96, 320] : memref<1x1x192x320xf16, [@CMX_NN, 0]> to memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>
     // CHECK:    [[INTERP:%.*]]:2 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 2, 0, 0>} @VPU.SW::@builtin_Interpolate inputs([[IN_SUBVIEW0]] as %arg1: memref<1x1x49x160xf16, {order = #NCHW, strides = [15360, 15360, 160, 1]}, [@CMX_NN, 0]>, [[IN_SUBVIEW1]] as %arg2: memref<1x1x49x160xf16, {order = #NCHW, strides = [15360, 15360, 160, 1]}, [@CMX_NN, 0]>) outputs([[OUT_SUBVIEW0]] as %arg3: memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>, [[OUT_SUBVIEW1]] as %arg4: memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>) on tile 0 -> (memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>, memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>){
-    // CHECK:                               VPUIP.SW.Kernel.run {attrs = [2, 4, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [160, 96, 1, 1], [320, 192, 1, 1], [2, 3], -7.500000e-01, [0, 0, 0, 0], [0, 0, 0, 0]]}(%arg1, %arg3) : memref<1x1x49x160xf16, {order = #NCHW, strides = [15360, 15360, 160, 1]}, [@CMX_NN, 0]>, memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>
-    // CHECK:                               VPUIP.SW.Kernel.run {attrs = [2, 4, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [160, 96, 1, 1], [320, 192, 1, 1], [2, 3], -7.500000e-01, [0, 47, 0, 0], [0, 96, 0, 0]]}(%arg2, %arg4) : memref<1x1x49x160xf16, {order = #NCHW, strides = [15360, 15360, 160, 1]}, [@CMX_NN, 0]>, memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>
+    // CHECK:                               VPUIP.SW.Kernel.run {attrs = [-9223372036854775808, 2, 4, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [160, 96, 1, 1], [320, 192, 1, 1], [2, 3], -7.500000e-01, [0, 0, 0, 0], [0, 0, 0, 0]]}(%arg1, %arg3) : memref<1x1x49x160xf16, {order = #NCHW, strides = [15360, 15360, 160, 1]}, [@CMX_NN, 0]>, memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>
+    // CHECK:                               VPUIP.SW.Kernel.run {attrs = [-9223372036854775808, 2, 4, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [160, 96, 1, 1], [320, 192, 1, 1], [2, 3], -7.500000e-01, [0, 47, 0, 0], [0, 96, 0, 0]]}(%arg2, %arg4) : memref<1x1x49x160xf16, {order = #NCHW, strides = [15360, 15360, 160, 1]}, [@CMX_NN, 0]>, memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>
     // CHECK:    }
     // CHECK:    [[CONCAT:%.*]] = VPUIP.ConcatView inputs([[INTERP]]#0, [[INTERP]]#1 : memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>, memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>) outputs([[OUTBUF]] : memref<1x1x192x320xf16, [@CMX_NN, 0]>) -> memref<1x1x192x320xf16, [@CMX_NN, 0]>
     // CHECK:    [[OUTBUF_DDR:%.*]] = memref.alloc() : memref<1x1x192x320xf16>
@@ -228,7 +228,7 @@ func.func @TilePytorchHalfPixelInterpolate(%arg0: memref<1x1x96x160xf16>) -> mem
     %2 = memref.alloc() : memref<1x1x192x320xf16, [@CMX_NN, 0]>
     // LINEAR_ONNX = 2, PYTORCH_HALF_PIXEL = 1
     %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Interpolate inputs(%1 as %arg2: memref<1x1x96x160xf16, [@CMX_NN, 0]>) outputs(%2 as %arg3: memref<1x1x192x320xf16, [@CMX_NN, 0]>) on tile 0 -> memref<1x1x192x320xf16, [@CMX_NN, 0]>{
-      VPUIP.SW.Kernel.run {attrs = [2, 1, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [160, 96, 1, 1], [320, 192, 1, 1], [2, 3], -7.500000e-01, [0, 0, 0, 0], [0, 0, 0, 0]]}(%arg2, %arg3) : memref<1x1x96x160xf16, [@CMX_NN, 0]>, memref<1x1x192x320xf16, [@CMX_NN, 0]>
+      VPUIP.SW.Kernel.run {attrs = [-9223372036854775808, 2, 1, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [160, 96, 1, 1], [320, 192, 1, 1], [2, 3], -7.500000e-01, [0, 0, 0, 0], [0, 0, 0, 0]]}(%arg2, %arg3) : memref<1x1x96x160xf16, [@CMX_NN, 0]>, memref<1x1x192x320xf16, [@CMX_NN, 0]>
     }
     %3 = memref.alloc() : memref<1x1x192x320xf16>
     %4 = VPUIP.Copy inputs(%results : memref<1x1x192x320xf16, [@CMX_NN, 0]>) outputs(%3 : memref<1x1x192x320xf16>) -> memref<1x1x192x320xf16>
@@ -242,8 +242,8 @@ func.func @TilePytorchHalfPixelInterpolate(%arg0: memref<1x1x96x160xf16>) -> mem
     // CHECK:  [[IN_SUBVIEW1:%.*]] = VPUIP.SubView [[COPY0]] [0, 0, 47, 0] [1, 1, 49, 160] : memref<1x1x96x160xf16, [@CMX_NN, 0]> to memref<1x1x49x160xf16, {order = #NCHW, strides = [15360, 15360, 160, 1]}, [@CMX_NN, 0]>
     // CHECK:  [[OUT_SUBVIEW1:%.*]] = VPUIP.SubView [[OUT_BUFF]] [0, 0, 96, 0] [1, 1, 96, 320] : memref<1x1x192x320xf16, [@CMX_NN, 0]> to memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>
     // CHECK:  [[INTERP:%.*]]:2 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 2, 0, 0>} @VPU.SW::@builtin_Interpolate inputs([[IN_SUBVIEW0]] as %arg1: memref<1x1x49x160xf16, {order = #NCHW, strides = [15360, 15360, 160, 1]}, [@CMX_NN, 0]>, [[IN_SUBVIEW1]] as %arg2: memref<1x1x49x160xf16, {order = #NCHW, strides = [15360, 15360, 160, 1]}, [@CMX_NN, 0]>) outputs([[OUT_SUBVIEW0]] as %arg3: memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>, [[OUT_SUBVIEW1]] as %arg4: memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>) on tile 0 -> (memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>, memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>){
-    // CHECK:                    VPUIP.SW.Kernel.run {attrs = [2, 1, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [160, 96, 1, 1], [320, 192, 1, 1], [2, 3], -7.500000e-01, [0, 0, 0, 0], [0, 0, 0, 0]]}(%arg1, %arg3) : memref<1x1x49x160xf16, {order = #NCHW, strides = [15360, 15360, 160, 1]}, [@CMX_NN, 0]>, memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>
-    // CHECK:                    VPUIP.SW.Kernel.run {attrs = [2, 1, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [160, 96, 1, 1], [320, 192, 1, 1], [2, 3], -7.500000e-01, [0, 47, 0, 0], [0, 96, 0, 0]]}(%arg2, %arg4) : memref<1x1x49x160xf16, {order = #NCHW, strides = [15360, 15360, 160, 1]}, [@CMX_NN, 0]>, memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>
+    // CHECK:                    VPUIP.SW.Kernel.run {attrs = [-9223372036854775808, 2, 1, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [160, 96, 1, 1], [320, 192, 1, 1], [2, 3], -7.500000e-01, [0, 0, 0, 0], [0, 0, 0, 0]]}(%arg1, %arg3) : memref<1x1x49x160xf16, {order = #NCHW, strides = [15360, 15360, 160, 1]}, [@CMX_NN, 0]>, memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>
+    // CHECK:                    VPUIP.SW.Kernel.run {attrs = [-9223372036854775808, 2, 1, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [160, 96, 1, 1], [320, 192, 1, 1], [2, 3], -7.500000e-01, [0, 47, 0, 0], [0, 96, 0, 0]]}(%arg2, %arg4) : memref<1x1x49x160xf16, {order = #NCHW, strides = [15360, 15360, 160, 1]}, [@CMX_NN, 0]>, memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>
     // CHECK:  }
     // CHECK:  [[CONCAT:%.*]] = VPUIP.ConcatView inputs([[INTERP]]#0, [[INTERP]]#1 : memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>, memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>) outputs([[OUTBUF]] : memref<1x1x192x320xf16, [@CMX_NN, 0]>) -> memref<1x1x192x320xf16, [@CMX_NN, 0]>
     // CHECK:  [[OUT_BUF:%.*]] = memref.alloc() : memref<1x1x192x320xf16>
@@ -257,7 +257,7 @@ func.func @TilePytorchHalfPixelInterpolate(%arg0: memref<1x1x96x160xf16>) -> mem
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 
 module @VPU.SW {
-    func.func private @builtin_Interpolate(memref<*xf16, @CMX_NN>, memref<*xf16, @CMX_NN>, i64, i64, i64, i64, none, none, none, none, none) attributes {VPU.kernel_code = "interpolate.cpp", VPU.kernel_entry = "interpolate"}
+    func.func private @builtin_Interpolate(memref<*xf16, @CMX_NN>, memref<*xf16, @CMX_NN>, i64, i64, i64, i64, i64, none, none, none, none, none) attributes {VPU.kernel_code = "interpolate.cpp", VPU.kernel_entry = "interpolate"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
 }
 
@@ -267,7 +267,7 @@ func.func @TilePytorchHalfPixelInterpolateWithInitialTileOffsetOnNonScalingDim(%
     %2 = memref.alloc() : memref<1x1x192x320xf16, [@CMX_NN, 0]>
     // LINEAR_ONNX = 2, PYTORCH_HALF_PIXEL = 1
     %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Interpolate inputs(%1 as %arg2: memref<1x1x96x160xf16, [@CMX_NN, 0]>) outputs(%2 as %arg3: memref<1x1x192x320xf16, [@CMX_NN, 0]>) on tile 0 -> memref<1x1x192x320xf16, [@CMX_NN, 0]>{
-      VPUIP.SW.Kernel.run {attrs = [2, 1, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [160, 96, 1, 1], [320, 192, 1, 1], [2, 3], -7.500000e-01, [0, 0, 16, 0], [0, 0, 16, 0]]}(%arg2, %arg3) : memref<1x1x96x160xf16, [@CMX_NN, 0]>, memref<1x1x192x320xf16, [@CMX_NN, 0]>
+      VPUIP.SW.Kernel.run {attrs = [-9223372036854775808, 2, 1, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [160, 96, 1, 1], [320, 192, 1, 1], [2, 3], -7.500000e-01, [0, 0, 16, 0], [0, 0, 16, 0]]}(%arg2, %arg3) : memref<1x1x96x160xf16, [@CMX_NN, 0]>, memref<1x1x192x320xf16, [@CMX_NN, 0]>
     }
     %3 = memref.alloc() : memref<1x1x192x320xf16>
     %4 = VPUIP.Copy inputs(%results : memref<1x1x192x320xf16, [@CMX_NN, 0]>) outputs(%3 : memref<1x1x192x320xf16>) -> memref<1x1x192x320xf16>
@@ -282,8 +282,8 @@ func.func @TilePytorchHalfPixelInterpolateWithInitialTileOffsetOnNonScalingDim(%
     // CHECK:  [[OUT_SUBVIEW1:%.*]] = VPUIP.SubView [[OUT_BUFF]] [0, 0, 96, 0] [1, 1, 96, 320] : memref<1x1x192x320xf16, [@CMX_NN, 0]> to memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>
     // CHECK:  [[INTERP:%.*]]:2 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 2, 0, 0>} @VPU.SW::@builtin_Interpolate inputs([[IN_SUBVIEW0]] as %arg1: memref<1x1x49x160xf16, {order = #NCHW, strides = [15360, 15360, 160, 1]}, [@CMX_NN, 0]>, [[IN_SUBVIEW1]] as %arg2: memref<1x1x49x160xf16, {order = #NCHW, strides = [15360, 15360, 160, 1]}, [@CMX_NN, 0]>) outputs([[OUT_SUBVIEW0]] as %arg3: memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>, [[OUT_SUBVIEW1]] as %arg4: memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>) on tile 0 -> (memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>, memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>){
     // initial offset c(16) keep value unchanged after tiling
-    // CHECK:                    VPUIP.SW.Kernel.run {attrs = [2, 1, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [160, 96, 1, 1], [320, 192, 1, 1], [2, 3], -7.500000e-01, [0, 0, 16, 0], [0, 0, 16, 0]]}(%arg1, %arg3) : memref<1x1x49x160xf16, {order = #NCHW, strides = [15360, 15360, 160, 1]}, [@CMX_NN, 0]>, memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>
-    // CHECK:                    VPUIP.SW.Kernel.run {attrs = [2, 1, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [160, 96, 1, 1], [320, 192, 1, 1], [2, 3], -7.500000e-01, [0, 47, 16, 0], [0, 96, 16, 0]]}(%arg2, %arg4) : memref<1x1x49x160xf16, {order = #NCHW, strides = [15360, 15360, 160, 1]}, [@CMX_NN, 0]>, memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>
+    // CHECK:                    VPUIP.SW.Kernel.run {attrs = [-9223372036854775808, 2, 1, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [160, 96, 1, 1], [320, 192, 1, 1], [2, 3], -7.500000e-01, [0, 0, 16, 0], [0, 0, 16, 0]]}(%arg1, %arg3) : memref<1x1x49x160xf16, {order = #NCHW, strides = [15360, 15360, 160, 1]}, [@CMX_NN, 0]>, memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>
+    // CHECK:                    VPUIP.SW.Kernel.run {attrs = [-9223372036854775808, 2, 1, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [160, 96, 1, 1], [320, 192, 1, 1], [2, 3], -7.500000e-01, [0, 47, 16, 0], [0, 96, 16, 0]]}(%arg2, %arg4) : memref<1x1x49x160xf16, {order = #NCHW, strides = [15360, 15360, 160, 1]}, [@CMX_NN, 0]>, memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>
     // CHECK:  }
     // CHECK:  [[CONCAT:%.*]] = VPUIP.ConcatView inputs([[INTERP]]#0, [[INTERP]]#1 : memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>, memref<1x1x96x320xf16, {order = #NCHW, strides = [61440, 61440, 320, 1]}, [@CMX_NN, 0]>) outputs([[OUT_BUFF]] : memref<1x1x192x320xf16, [@CMX_NN, 0]>) -> memref<1x1x192x320xf16, [@CMX_NN, 0]>
     // CHECK:  [[OUT_BUF:%.*]] = memref.alloc() : memref<1x1x192x320xf16>
@@ -473,14 +473,14 @@ func.func @NotTileSoftmaxForUnsupportedAxis(%arg0: memref<1x128x1x1xf16>)
 // -----
 
 module @VPU.SW {
-    func.func private @builtin_Interpolate(memref<*xf16, @CMX_NN>, memref<*xf16, @CMX_NN>, i64, i64, i64, i64, none, none, none, none, none) attributes {VPU.kernel_code = "interpolate.cpp", VPU.kernel_entry = "interpolate"}
+    func.func private @builtin_Interpolate(memref<*xf16, @CMX_NN>, memref<*xf16, @CMX_NN>, i64, i64, i64, i64, i64, none, none, none, none, none) attributes {VPU.kernel_code = "interpolate.cpp", VPU.kernel_entry = "interpolate"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
 }
 
 func.func @NotTileHalfPixelInterpolateForCMXSizeRequirement(%arg0: memref<1x16x6x2048xf16, [@CMX_NN, 0]>) -> memref<1x16x12x4096xf16, [@CMX_NN, 0]> {
     %0 = memref.alloc() : memref<1x16x12x4096xf16, [@CMX_NN, 0]>
     %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Interpolate inputs(%arg0 as %arg2: memref<1x16x6x2048xf16, [@CMX_NN, 0]>) outputs(%0 as %arg3: memref<1x16x12x4096xf16, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x12x4096xf16, [@CMX_NN, 0]>{
-      VPUIP.SW.Kernel.run {attrs = [2, 0, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [2048, 6, 16, 1], [4096, 12, 16, 1], [2, 3], -7.500000e-01, [0, 0, 0, 0], [0, 0, 0, 0]]}(%arg2, %arg3) : memref<1x16x6x2048xf16, [@CMX_NN, 0]>, memref<1x16x12x4096xf16, [@CMX_NN, 0]>
+      VPUIP.SW.Kernel.run {attrs = [-9223372036854775808, 2, 0, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [2048, 6, 16, 1], [4096, 12, 16, 1], [2, 3], -7.500000e-01, [0, 0, 0, 0], [0, 0, 0, 0]]}(%arg2, %arg3) : memref<1x16x6x2048xf16, [@CMX_NN, 0]>, memref<1x16x12x4096xf16, [@CMX_NN, 0]>
     }
     return %results : memref<1x16x12x4096xf16, [@CMX_NN, 0]>
 

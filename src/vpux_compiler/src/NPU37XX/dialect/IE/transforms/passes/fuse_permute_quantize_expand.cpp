@@ -89,12 +89,8 @@ mlir::LogicalResult FusePermuteQuantizeExpandBase::matchAndRewrite(IE::ReorderOp
         return mlir::failure();
     }
 
-    // experiments show that shave is far more performant when C == 1, C == 3 or C == 4 than DMA-MemPermute
-    if ((iExpType.getShape()[Dims4D::Act::C] != 3) && (iExpType.getShape()[Dims4D::Act::C] != 1) &&
-        (iExpType.getShape()[Dims4D::Act::C] != 4)) {
-        return mlir::failure();
-    }
-    if (iExpType.getShape()[Dims4D::Act::N] != 1) {
+    const ShapeRef inShape = iExpType.getShape();
+    if (!IE::isBeneficialConvertToPermuteQuantize(inShape)) {
         return mlir::failure();
     }
 

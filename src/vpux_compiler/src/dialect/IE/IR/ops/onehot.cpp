@@ -46,10 +46,11 @@ mlir::FailureOr<int64_t> extractDepth(mlir::Location loc, const mlir::Value& dep
         if (depthConst == nullptr) {
             return errorAt(loc, "Only constant input is supported");
         }
-        const auto depthContent = depthConst.getContent();
-        if (!depthContent.isSplat()) {
+
+        if (const auto attr = depthConst.getContentAttr(); !attr.isSplat()) {
             return errorAt(loc, "OneHot depth must be a scalar");
         }
+        const auto depthContent = depthConst.getContent();
         return depthContent.getSplatValue<int64_t>();
     }
 
@@ -58,10 +59,10 @@ mlir::FailureOr<int64_t> extractDepth(mlir::Location loc, const mlir::Value& dep
 
 mlir::LogicalResult vpux::IE::OneHotOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
-    IE::OneHotOpAdaptor oneHot(operands, attrs);
+    IE::OneHotOpAdaptor oneHot(operands, attrs, prop);
 
     if (mlir::failed(oneHot.verify(loc))) {
         return mlir::failure();
@@ -115,17 +116,17 @@ mlir::LogicalResult ConvertConstToAttr::matchAndRewrite(IE::OneHotOp oneHotOp, m
     auto onValueConst = onValue.getDefiningOp<Const::DeclareOp>();
     auto offValueConst = offValue.getDefiningOp<Const::DeclareOp>();
 
-    if ((depthConst == nullptr) || (onValueConst == nullptr) || (offValueConst == nullptr)) {
+    const auto isSplat = [](Const::DeclareOp op) {
+        return (op != nullptr) && op.getContentAttr().isSplat();
+    };
+
+    if (!isSplat(depthConst) || !isSplat(onValueConst) || !isSplat(offValueConst)) {
         return mlir::failure();
     }
 
     const auto depthContent = depthConst.getContent();
     const auto onValueContent = onValueConst.getContent();
     const auto offValueContent = offValueConst.getContent();
-
-    if ((!depthContent.isSplat()) || (!onValueContent.isSplat()) || (!offValueContent.isSplat())) {
-        return mlir::failure();
-    }
 
     const auto depthAttrValue = depthContent.getSplatValue<int64_t>();
     const auto onValueAttrValue = onValueContent.getSplatValue<float>();

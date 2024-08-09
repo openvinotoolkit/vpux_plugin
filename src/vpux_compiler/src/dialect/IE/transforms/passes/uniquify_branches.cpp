@@ -16,18 +16,6 @@ using namespace vpux;
 
 namespace {
 
-Dim getHighestDim(ShapeRef shape, const DimsOrder& dimOrder) {
-    auto highestDim = Dim(0);
-    for (auto idx : irange(dimOrder.numDims())) {
-        auto curDim = dimOrder.dimAt(idx);
-        if (shape[curDim] != 1) {
-            highestDim = curDim;
-            break;
-        }
-    }
-    return highestDim;
-}
-
 bool doesSliceAndPermutationModifySameAxis(DimsOrder perm, ArrayRef<uint64_t> sliceAxes, Logger log) {
     auto order = to_small_vector(irange(perm.numDims()) | transformed([&](uint64_t idx) {
                                      return checked_cast<uint64_t>(perm.dimAt(idx).ind());

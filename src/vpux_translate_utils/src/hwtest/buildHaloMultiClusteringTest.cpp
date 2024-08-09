@@ -121,11 +121,12 @@ public:
     }
 
     void handleConstants(Const::ContentAttr weightsContent, VPU::ArchKind arch, mlir::Type inputType,
-                         mlir::Type outputType, std::size_t& offset, VPURT::ConfigureBarrierOp updateBarrier) {
+                         mlir::Type outputType, std::size_t& offset, VPURT::ConfigureBarrierOp updateBarrier,
+                         mlir::ValueRange waitBarrier) {
         const auto alignment = Byte(16);
 
         // Create Weights Const.DeclareOp, segment it if necessary, create CMX buffers and DMAs bringing data from DDR
-        handleWeights(weightsContent, offset, updateBarrier);
+        handleWeights(weightsContent, offset, updateBarrier, waitBarrier);
         offset += opBuffers_.front().weights.getType().cast<NDTypeInterface>().getTotalAllocSize().count();
         offset = vpux::alignValUp(offset, static_cast<std::size_t>(alignment.count()));
 
@@ -167,7 +168,7 @@ public:
 
 protected:
     void dmaDuplicatedWeightsBuffers(Const::ContentAttr weightsContent, const std::size_t& offset,
-                                     VPURT::ConfigureBarrierOp updateBarrier) {
+                                     VPURT::ConfigureBarrierOp updateBarrier, mlir::ValueRange waitBarrier) {
         auto* ctx = builder_.getContext();
         const auto numClusters = clusters_.size();
         auto loc = builder_.getUnknownLoc();
@@ -185,9 +186,8 @@ protected:
                                                   weightsElementType, weightsTypeIf.getDimsOrder());
         auto weightsDDRBuffer = builder_.create<vpux::Const::DeclareOp>(loc, weightsDDRType, weightsContent);
 
-        VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(builder_, mlir::ValueRange(),
-                                              mlir::ValueRange(updateBarrier.getBarrier()), loc, weightsDDRBuffer,
-                                              weightsBuffer, 0);
+        VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(builder_, waitBarrier, mlir::ValueRange(updateBarrier.getBarrier()), loc,
+                                              weightsDDRBuffer, weightsBuffer, 0);
 
         // Each cluster will get the same broadcasted CMX buffer
         for (size_t cluster = 0; cluster < numClusters; cluster++) {
@@ -315,7 +315,7 @@ protected:
     }
 
     virtual void handleWeights(Const::ContentAttr weightsContent, std::size_t& offset,
-                               VPURT::ConfigureBarrierOp updateBarrier) = 0;
+                               VPURT::ConfigureBarrierOp updateBarrier, mlir::ValueRange waitBarrier) = 0;
     virtual void handleWeightsTable(VPU::ArchKind arch, mlir::Type inputType, mlir::Type outputType,
                                     std::size_t& offset, VPURT::ConfigureBarrierOp updateBarrier) = 0;
 
@@ -433,9 +433,9 @@ public:
     }
 
 private:
-    void handleWeights(Const::ContentAttr weightsContent, std::size_t& offset,
-                       VPURT::ConfigureBarrierOp updateBarrier) override {
-        dmaDuplicatedWeightsBuffers(weightsContent, offset, updateBarrier);
+    void handleWeights(Const::ContentAttr weightsContent, std::size_t& offset, VPURT::ConfigureBarrierOp updateBarrier,
+                       mlir::ValueRange waitBarrier) override {
+        dmaDuplicatedWeightsBuffers(weightsContent, offset, updateBarrier, waitBarrier);
     }
 
     void handleWeightsTable(VPU::ArchKind arch, mlir::Type inputType, mlir::Type outputType, std::size_t& offset,
@@ -563,8 +563,8 @@ public:
 
 private:
     // Weights are split over Output Channels (K) dim, with a slice in each tile
-    void handleWeights(Const::ContentAttr weightsContent, std::size_t& offset,
-                       VPURT::ConfigureBarrierOp updateBarrier) override {
+    void handleWeights(Const::ContentAttr weightsContent, std::size_t& offset, VPURT::ConfigureBarrierOp updateBarrier,
+                       mlir::ValueRange waitBarrier) override {
         auto* ctx = builder_.getContext();
         const auto numClusters = clusters_.size();
         auto loc = builder_.getUnknownLoc();
@@ -598,9 +598,8 @@ private:
             auto weightsDDRBuffer = builder_.create<vpux::Const::DeclareOp>(
                     loc, weightsDDRMemRefType, weightsContent.subview(weightsOffset, perClusterShape));
 
-            VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(builder_, mlir::ValueRange(),
-                                                  mlir::ValueRange(updateBarrier.getBarrier()), loc, weightsDDRBuffer,
-                                                  weightsBuffer, 0);
+            VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(builder_, waitBarrier, mlir::ValueRange(updateBarrier.getBarrier()),
+                                                  loc, weightsDDRBuffer, weightsBuffer, 0);
 
             opBuffers_[idx].weights = weightsBuffer;
         }
@@ -1075,9 +1074,9 @@ public:
     }
 
 private:
-    void handleWeights(Const::ContentAttr weightsContent, std::size_t& offset,
-                       VPURT::ConfigureBarrierOp updateBarrier) override {
-        dmaDuplicatedWeightsBuffers(weightsContent, offset, updateBarrier);
+    void handleWeights(Const::ContentAttr weightsContent, std::size_t& offset, VPURT::ConfigureBarrierOp updateBarrier,
+                       mlir::ValueRange waitBarrier) override {
+        dmaDuplicatedWeightsBuffers(weightsContent, offset, updateBarrier, waitBarrier);
     }
 
     void handleWeightsTable(VPU::ArchKind arch, mlir::Type inputType, mlir::Type outputType, std::size_t& offset,
@@ -1407,8 +1406,8 @@ private:
     // clusters e.g. SOHK over 4 tiles (heightNumClusters = 2 and channelsNumClusters = 2)
     // Weights splitted over: Tile0 & Tile1
     // Weights replicated: Tile0 - Tile2 and Tile1 - Tile3
-    void handleWeights(Const::ContentAttr weightsContent, std::size_t& offset,
-                       VPURT::ConfigureBarrierOp updateBarrier) override {
+    void handleWeights(Const::ContentAttr weightsContent, std::size_t& offset, VPURT::ConfigureBarrierOp updateBarrier,
+                       mlir::ValueRange waitBarrier) override {
         auto* ctx = builder_.getContext();
         const auto heightNumClusters = clustersPerDim_[0];
         const auto channelsNumClusters = clustersPerDim_[1];
@@ -1450,9 +1449,8 @@ private:
             auto weightsDDRBuffer = builder_.create<vpux::Const::DeclareOp>(
                     loc, weightsDDRMemRefType, weightsContent.subview(weightsOffset, perClusterShape));
 
-            VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(builder_, mlir::ValueRange(),
-                                                  mlir::ValueRange(updateBarrier.getBarrier()), loc, weightsDDRBuffer,
-                                                  weightsBuffer, 0);
+            VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(builder_, waitBarrier, mlir::ValueRange(updateBarrier.getBarrier()),
+                                                  loc, weightsDDRBuffer, weightsBuffer, 0);
 
             opBuffers_[idxK].weights = weightsBuffer;
             // Replicated weights over height number of clusters
@@ -1833,7 +1831,7 @@ void buildHaloMultiClusteringTest(const nb::TestCaseJsonDescriptor& testDesc, ml
     auto functionBuilder = mlir::OpBuilder::atBlockBegin(function.addEntryBlock(), builder.getListener());
     auto functionInput = function.getArgument(0);
 
-    const auto weightsValues = generateWeights(weightsShape, weightsType, ctx, weightsFileName);
+    const auto weightsValues = generateWeights(builder, weightsShape, weightsType, ctx, weightsFileName);
     auto weightsAttribute = Const::ContentAttr::get(weightsValues);
     weightsAttribute = weightsAttribute.reorder(DimsOrder::OYXI);
 
@@ -1878,11 +1876,15 @@ void buildHaloMultiClusteringTest(const nb::TestCaseJsonDescriptor& testDesc, ml
 
     std::size_t offsetCMX = 0;
     const auto alignment = Byte(16);
-    auto updateBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, 0);
+
+    auto [waitWLMBarrier, freeBarrierId] =
+            insertWLMStartSequence(functionBuilder, testDesc.getWLMParams().isWLMPartialEnabled);
+
+    auto updateBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, freeBarrierId++);
 
     // Weights & Weights table segmentation & DMAs
     multiClusterStrategy->handleConstants(weightsAttribute, testDesc.getArchitecture(), inputType, outputType,
-                                          offsetCMX, updateBarrier);
+                                          offsetCMX, updateBarrier, waitWLMBarrier);
 
     // Create output and output_iti buffs for each Conv
     multiClusterStrategy->createOutputItiBuffers(returnTypesVec, offsetCMX);
@@ -1900,7 +1902,7 @@ void buildHaloMultiClusteringTest(const nb::TestCaseJsonDescriptor& testDesc, ml
     auto waitBarrier = updateBarrier;
 
     // Create NCEClusterTaskOp
-    updateBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, 1);
+    updateBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, freeBarrierId++);
 
     constexpr int64_t WORKLOAD_CHANNEL_IDX = 2;
     auto itiBuffs = multiClusterStrategy->getBuffers();
@@ -1961,7 +1963,8 @@ void buildHaloMultiClusteringTest(const nb::TestCaseJsonDescriptor& testDesc, ml
     waitBarrier = updateBarrier;
 
     // finalBarrier passed as production barrier to last DMA task
-    auto finalBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, 2);
+    auto finalBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(
+            loc, freeBarrierId++, testDesc.getWLMParams().isWLMPartialEnabled);
     // Create CMX2DDR DMAs to move outputs from each cluster to DDR
     SmallVector<mlir::Value> functionOutputs;
     for (unsigned int idx = 0; idx < static_cast<unsigned int>(numClusters); idx++) {

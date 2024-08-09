@@ -97,9 +97,10 @@ struct OpenVINOParams {
 
 struct ONNXRTParams {
     std::string model_path;
+    std::map<std::string, std::string> session_options;
     // TODO: Extend for other available ONNXRT EP (e.g CoreML, TensorRT, etc)
     struct OpenVINO {
-        std::string device_type;
+        std::map<std::string, std::string> params_map;
     };
     // NB: std::monostate stands for the default MLAS Execution provider
     using EP = std::variant<std::monostate, OpenVINO>;

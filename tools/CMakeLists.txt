@@ -3,7 +3,6 @@
 # SPDX-License-Identifier: Apache 2.0
 #
 
-add_subdirectory(single-image-test)
 add_subdirectory(sol-generator)
 add_subdirectory(query_model)
 
@@ -21,8 +20,6 @@ add_subdirectory(vpux-binutils)
 if(ENABLE_NPU_PROTOPIPE)
     add_subdirectory(protopipe)
 endif()
-
-add_subdirectory(compile_tool)
 
 #
 # install python tools

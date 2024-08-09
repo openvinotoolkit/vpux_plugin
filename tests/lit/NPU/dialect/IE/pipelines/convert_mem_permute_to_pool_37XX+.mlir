@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --convert-mem-permute-to-pool %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 
 // CHECK-LABEL: @MemPermuteNHCWInNCHWOutNHCWPerm
@@ -558,4 +558,96 @@ func.func @MemPermuteDimWandDimHCAligned(%arg0: tensor<1x4x20x48xf16, {order = #
     // CHECK:       [[OUT_LAYOUT_CAST:%.*]] = IE.LayoutCast([[LAYOUT_CAST_2]]) {dst_order = #NCWH} : tensor<1x48x4x20xf16, {order = #NHWC}> -> tensor<1x48x4x20xf16, {order = #NCWH}>
     // CHECK:       [[RET:%.*]] = IE.ShapeCast {shape = [1, 4, 20, 48]} inputs([[OUT_LAYOUT_CAST]] : tensor<1x48x4x20xf16, {order = #NCWH}>) -> tensor<1x4x20x48xf16, {order = #NCWH}>
     // CHECK:       return [[RET]] : tensor<1x4x20x48xf16, {order = #NCWH}>
+}
+
+// -----
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+#NCWH = affine_map<(d0, d1, d2, d3) -> (d0, d1, d3, d2)>
+
+// CHECK-LABEL: @UnsupportedMemPermuteForIntegerInputType
+// CHECK-SAME:      [[INPUT0:%.+]]: tensor<1x1x10x100xsi32>
+func.func @UnsupportedMemPermuteForIntegerInputType(%arg0: tensor<1x1x10x100xsi32>) -> tensor<1x1x100x10xsi32> {
+    %MEM_PERMUTE = IE.MemPermute(%arg0) {dst_order = #NCHW, mem_perm = #NCWH} : tensor<1x1x10x100xsi32> -> tensor<1x1x100x10xsi32>
+    return %MEM_PERMUTE : tensor<1x1x100x10xsi32>
+
+    // CHECK-NOT:   IE.LayoutCast
+    // CHECK-NOT:   IE.ShapeCast
+    // CHECK-NOT:   IE.MaxPool
+    // CHECK:       [[MEM_PERMUTE:%.+]] = IE.MemPermute([[INPUT0]]) {dst_order = #NCHW, mem_perm = #NCWH} :
+    // CHECK-SAME:      -> tensor<1x1x100x10xsi32>
+    // CHECK:       return [[MEM_PERMUTE]] : tensor<1x1x100x10xsi32>
+}
+
+// -----
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+#NCWH = affine_map<(d0, d1, d2, d3) -> (d0, d1, d3, d2)>
+
+// CHECK-LABEL: @UnsupportedMemPermuteForFP32InputType
+// CHECK-SAME:      [[INPUT0:%.+]]: tensor<1x1x1024x768xf32>
+func.func @UnsupportedMemPermuteForFP32InputType(%arg0: tensor<1x1x1024x768xf32>) -> tensor<1x1x768x1024xf32> {
+    %MEM_PERMUTE = IE.MemPermute(%arg0) {dst_order = #NCHW, mem_perm = #NCWH} : tensor<1x1x1024x768xf32> -> tensor<1x1x768x1024xf32>
+    return %MEM_PERMUTE : tensor<1x1x768x1024xf32>
+
+    // CHECK-NOT:   IE.LayoutCast
+    // CHECK-NOT:   IE.ShapeCast
+    // CHECK-NOT:   IE.MaxPool
+    // CHECK:       [[MEM_PERMUTE:%.+]] = IE.MemPermute([[INPUT0]]) {dst_order = #NCHW, mem_perm = #NCWH} :
+    // CHECK-SAME:      -> tensor<1x1x768x1024xf32>
+    // CHECK:       return [[MEM_PERMUTE]] : tensor<1x1x768x1024xf32>
+}
+
+// -----
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+#NHCW = affine_map<(d0, d1, d2, d3) -> (d0, d2, d1, d3)>
+
+// CHECK-LABEL: @MemPermuteWithPermNHCW
+// CHECK-SAME:      [[INPUT0:%.+]]: tensor<1x4x640x640xf16, {order = #NHWC}>
+func.func @MemPermuteWithPermNHCW(%arg0: tensor<1x4x640x640xf16, {order = #NHWC}>) -> tensor<1x4x640x640xf16, {order = #NHWC}> {
+    %MEM_PERMUTE = IE.MemPermute(%arg0) {dst_order = #NHWC, mem_perm = #NHCW} : tensor<1x4x640x640xf16, {order = #NHWC}> -> tensor<1x4x640x640xf16, {order = #NHWC}>
+
+    return %MEM_PERMUTE : tensor<1x4x640x640xf16, {order = #NHWC}>
+
+    // CHECK:       [[IN_SHAPE_CAST:%.*]] = IE.ShapeCast {shape = [1, 16, 640, 160]} inputs(%arg0 : tensor<1x4x640x640xf16, {order = #NHWC}>) -> tensor<1x16x640x160xf16, {order = #NHWC}>
+    // CHECK:       [[MAXPOOL_0:%.*]] = IE.MaxPool([[IN_SHAPE_CAST]]) {
+    // CHECK-SAME:      kernel_size = [1, 1],
+    // CHECK-SAME:      pads_begin = [0, 0],
+    // CHECK-SAME:      pads_end = [0, 0],
+    // CHECK-SAME:      rounding_type = #IE.rounding_type<FLOOR>,
+    // CHECK-SAME:      strides = [1, 1]} : tensor<1x16x640x160xf16, {order = #NHWC}> -> tensor<1x16x640x160xf16, {order = #NWCH}>
+    // CHECK:       [[LAYOUT_CAST_0:%.*]] = IE.LayoutCast([[MAXPOOL_0]]) {dst_order = #NHWC} : tensor<1x16x640x160xf16, {order = #NWCH}> -> tensor<1x16x640x160xf16, {order = #NHWC}>
+    // CHECK:       [[SHAPE_CAST_0:%.*]] = IE.ShapeCast {shape = [1, 640, 640, 4]} inputs([[LAYOUT_CAST_0]] : tensor<1x16x640x160xf16, {order = #NHWC}>) -> tensor<1x640x640x4xf16, {order = #NHWC}>
+    // CHECK:       [[MAXPOOL_1:%.*]] = IE.MaxPool([[SHAPE_CAST_0]]) {
+    // CHECK-SAME:      kernel_size = [1, 1],
+    // CHECK-SAME:      pads_begin = [0, 0],
+    // CHECK-SAME:      pads_end = [0, 0],
+    // CHECK-SAME:      rounding_type = #IE.rounding_type<FLOOR>,
+    // CHECK-SAME:      strides = [1, 1]} : tensor<1x640x640x4xf16, {order = #NHWC}> -> tensor<1x640x640x4xf16, {order = #NHCW}>
+    // CHECK:       [[LAYOUT_CAST_1:%.*]] = IE.LayoutCast([[MAXPOOL_1]]) {dst_order = #NHWC} : tensor<1x640x640x4xf16, {order = #NHCW}> -> tensor<1x640x640x4xf16, {order = #NHWC}>
+    // CHECK:       [[OUT_SHAPE_CAST:%.*]] = IE.ShapeCast {shape = [1, 4, 640, 640]} inputs([[LAYOUT_CAST_1]] : tensor<1x640x640x4xf16, {order = #NHWC}>) -> tensor<1x4x640x640xf16, {order = #NHWC}>
+
+    // CHECK:       return [[OUT_SHAPE_CAST]] : tensor<1x4x640x640xf16, {order = #NHWC}>
+}
+
+// -----
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+#NHCW = affine_map<(d0, d1, d2, d3) -> (d0, d2, d1, d3)>
+
+// CHECK-LABEL: @SkipConversionForSmallHeightNum
+// CHECK-SAME:      [[INPUT:%.+]]: tensor<1x4096x4x40xf16>
+func.func @SkipConversionForSmallHeightNum(%arg0: tensor<1x4096x4x40xf16>) -> tensor<1x4x4096x40xf16> {
+    %MEM_PERMUTE = IE.MemPermute(%arg0) {dst_order = #NCHW, mem_perm = #NHCW} : tensor<1x4096x4x40xf16> -> tensor<1x4x4096x40xf16>
+
+    return %MEM_PERMUTE : tensor<1x4x4096x40xf16>
+
+    // CHECK-NOT:   IE.LayoutCast
+    // CHECK-NOT:   IE.ShapeCast
+    // CHECK-NOT:   IE.MaxPool
+    // CHECK:       [[MEM_PERMUTE:%.+]] = IE.MemPermute([[INPUT]]) {dst_order = #NCHW, mem_perm = #NHCW} : tensor<1x4096x4x40xf16> -> tensor<1x4x4096x40xf16>
+
+    // CHECK:       return [[MEM_PERMUTE]] : tensor<1x4x4096x40xf16>
 }

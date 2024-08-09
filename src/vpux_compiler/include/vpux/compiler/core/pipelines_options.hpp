@@ -52,10 +52,31 @@ struct ReferenceSWOptions : mlir::PassPipelineOptions<T> {
                            "`constant-folding-in-background` is disabled."),
             llvm::cl::init(false)};
 
+    IntOption constantFoldingInBackgroundMemoryUsageLimit{
+            *this, "constant-folding-in-background-memory-usage-limit",
+            llvm::cl::desc("Fold constants in background memory usage limit (in MB)"), llvm::cl::init(3 * 1024)};
+
+    DoubleOption constantFoldingInBackgroundCacheCleanThreshold{
+            *this, "constant-folding-in-background-cache-clean-threshold",
+            llvm::cl::desc("Cache will be cleaned to this threshold when reach the memory usage limit"),
+            llvm::cl::init(0.8)};
+
     BoolOption wlmRollback{
             *this, "wlm-rollback",
             llvm::cl::desc("When compilation with WLM fails, automatically switches to WLM-disabled pipeline"),
             llvm::cl::init(true)};
+
+    IntOption optimizationLevel{*this, "optimization-level",
+                                llvm::cl::desc("Set compilation optimization level, enabled starting from NPU40XX."
+                                               "Possible values: 0 - optimization for compilation time,"
+                                               "1 - optimization for execution time (default),"
+                                               "2 - high optimization for execution time"),
+                                llvm::cl::init(1)};
+
+    StrOption performanceHintOverride{*this, "performance-hint-override",
+                                      llvm::cl::desc("Set performance hint for compiler to set up number of tiles."
+                                                     "Possible values: latency, efficiency (default)"),
+                                      llvm::cl::init("efficiency")};
 
     BoolOption enableProfiling{*this, "profiling", llvm::cl::desc("Enable profiling"), llvm::cl::init(false)};
     BoolOption enableSWProfiling{*this, "sw-profiling", llvm::cl::desc("Enable SW task profiling"),
@@ -112,6 +133,15 @@ struct ReferenceSWOptions : mlir::PassPipelineOptions<T> {
             *this, "enable-sw-kernel-prefetching-reserve-mem",
             ::llvm::cl::desc("Reserve memory at the end of CMX for SW Kernel data prefetching"),
             ::llvm::cl::init(true)};
+
+    BoolOption enableWDBlockArgumentInput{
+            *this, "enable-wd-blockarg-input",
+            llvm::cl::desc("Enable WeightsDequantizeToFakeQuantizePass on structures with BlockArgument input"),
+            llvm::cl::init(false)};
+
+    BoolOption enableGroupedMatMul{*this, "enable-grouped-matmul",
+                                   llvm::cl::desc("Enable execution of grouped MatMul as a single operation."),
+                                   llvm::cl::init(false)};
 
     bool enableForceZMajorConcat = false;
     bool enableSwapTransposeWithFQ = false;
@@ -224,8 +254,9 @@ struct ReferenceHWOptions : mlir::PassPipelineOptions<T> {
     BoolOption enableProfiling{*this, "profiling", llvm::cl::desc("Enable profiling"), llvm::cl::init(false)};
 
     // Enable for 40XX once RT will be ready, follow up #E95864
-    BoolOption enableDMAProfiling{*this, "dma-profiling", llvm::cl::desc("Enable DMA task profiling"),
-                                  llvm::cl::init(!std::is_same<T, ReferenceHWOptions40XX>::value)};
+    StrOption enableDMAProfiling{*this, "dma-profiling",
+                                 llvm::cl::desc("Enable DMA task profiling: (true, false, static)"),
+                                 llvm::cl::init(std::is_same<T, ReferenceHWOptions40XX>::value ? "false" : "true")};
 
     BoolOption enableDPUProfiling{*this, "dpu-profiling", llvm::cl::desc("Enable DPU task profiling"),
                                   llvm::cl::init(true)};
@@ -263,10 +294,31 @@ struct ReferenceHWOptions : mlir::PassPipelineOptions<T> {
                            "`constant-folding-in-background` is disabled."),
             llvm::cl::init(false)};
 
+    IntOption constantFoldingInBackgroundMemoryUsageLimit{
+            *this, "constant-folding-in-background-memory-usage-limit",
+            llvm::cl::desc("Fold constants in background memory usage limit (in MB)"), llvm::cl::init(3 * 1024)};
+
+    DoubleOption constantFoldingInBackgroundCacheCleanThreshold{
+            *this, "constant-folding-in-background-cache-clean-threshold",
+            llvm::cl::desc("Cache will be cleaned to this threshold when reach the memory usage limit"),
+            llvm::cl::init(0.8)};
+
     BoolOption wlmRollback{
             *this, "wlm-rollback",
             llvm::cl::desc("When compilation with WLM fails, automatically switches to WLM-disabled pipeline"),
             llvm::cl::init(true)};
+
+    IntOption optimizationLevel{*this, "optimization-level",
+                                llvm::cl::desc("Set compilation optimization level, enabled starting from NPU40XX0XX."
+                                               "Possible values: 0 - optimization for compilation time,"
+                                               "1 - optimization for execution time (default),"
+                                               "2 - high optimization for execution time"),
+                                llvm::cl::init(1)};
+
+    StrOption performanceHintOverride{*this, "performance-hint-override",
+                                      llvm::cl::desc("Set performance hint for compiler to set up number of tiles."
+                                                     "Possible values: latency, efficiency (default)"),
+                                      llvm::cl::init("efficiency")};
 
     BoolOption enableOptimizeReorders{*this, "optimize-reorders", llvm::cl::desc("Enable optimize-reorders pass"),
                                       llvm::cl::init(true)};
@@ -282,6 +334,10 @@ struct ReferenceHWOptions : mlir::PassPipelineOptions<T> {
     BoolOption enableQuantDequantRemoval{*this, "quant-dequant-removal",
                                          llvm::cl::desc("Enable quantize->dequantize sequence removal"),
                                          llvm::cl::init(false)};
+
+    BoolOption enableFuseOutstandingDequant{*this, "fuse-outstanding-dequant",
+                                            llvm::cl::desc("Fuse outstanding dequantize after NCE task"),
+                                            llvm::cl::init(false)};
 
     BoolOption enableForceZMajorConcat{*this, "force-z-major-concat",
                                        llvm::cl::desc("Enable transpose-reorder-concat pass"), llvm::cl::init(true)};
@@ -388,6 +444,17 @@ struct ReferenceHWOptions : mlir::PassPipelineOptions<T> {
             *this, "enable-sw-kernel-prefetching-reserve-mem",
             ::llvm::cl::desc("Reserve memory at the end of CMX for SW Kernel data prefetching"),
             ::llvm::cl::init(true)};
+
+    BoolOption enableWDBlockArgumentInput{
+            *this, "enable-wd-blockarg-input",
+            llvm::cl::desc("Enable WeightsDequantizeToFakeQuantizePass on structures with BlockArgument input"),
+            llvm::cl::init(false)};
+
+    BoolOption enableDmaOutOfOrder{*this, "dma-ooo", llvm::cl::desc("Enable out-of-order DMA"), llvm::cl::init(true)};
+
+    BoolOption enableConvolutionMixedPrecisionDecomposition{
+            *this, "enable-convolution-mixed-precision-decomposition",
+            llvm::cl::desc("Enable mixed precision decomposition for convolution"), llvm::cl::init(false)};
 };
 
 //
@@ -400,6 +467,18 @@ struct DefaultHWOptionsBase : mlir::PassPipelineOptions<DefaultHWOptionsBase> {
     BoolOption enableFunctionOutlining{*this, "function-outlining",
                                        llvm::cl::desc("Divide the IR into multiple parts to compile them in parallel"),
                                        llvm::cl::init(false)};
+
+    StrOption functionOutliningMode{*this, "function-outlining-mode",
+                                    llvm::cl::desc("Selects the outlining mode: `naive` or `repeating-blocks`"),
+                                    llvm::cl::init("naive")};
+
+    BoolOption enableDebatcher{*this, "debatching",
+                               llvm::cl::desc("Apply debatching operation for batched tensors, which are arguments of "
+                                              "'main', facilitating further function-outlining enabling"),
+                               llvm::cl::init(false)};
+
+    StrOption debatcherExtraArgs{*this, "debatching-extra-args", llvm::cl::desc("Extra arguments for debatching "),
+                                 llvm::cl::init("")};
 
     BoolOption enableDummyOpReplacement{*this, "dummy-op-replacement",
                                         llvm::cl::desc("Replace unsupported SW Kernel ops with Dummy ones"),
@@ -421,10 +500,31 @@ struct DefaultHWOptionsBase : mlir::PassPipelineOptions<DefaultHWOptionsBase> {
                            "`constant-folding-in-background` is disabled."),
             llvm::cl::init(false)};
 
+    IntOption constantFoldingInBackgroundMemoryUsageLimit{
+            *this, "constant-folding-in-background-memory-usage-limit",
+            llvm::cl::desc("Fold constants in background memory usage limit (in MB)"), llvm::cl::init(3 * 1024)};
+
+    DoubleOption constantFoldingInBackgroundCacheCleanThreshold{
+            *this, "constant-folding-in-background-cache-clean-threshold",
+            llvm::cl::desc("Cache will be cleaned to this threshold when reach the memory usage limit"),
+            llvm::cl::init(0.8)};
+
     BoolOption wlmRollback{
             *this, "wlm-rollback",
             llvm::cl::desc("When compilation with WLM fails, automatically switches to WLM-disabled pipeline"),
             llvm::cl::init(true)};
+
+    IntOption optimizationLevel{*this, "optimization-level",
+                                llvm::cl::desc("Set compilation optimization level, enabled starting from NPU40XX."
+                                               "Possible values: 0 - optimization for compilation time,"
+                                               "1 - optimization for execution time (default),"
+                                               "2 - high optimization for execution time"),
+                                llvm::cl::init(1)};
+
+    StrOption performanceHintOverride{*this, "performance-hint-override",
+                                      llvm::cl::desc("Set performance hint for compiler to set up number of tiles."
+                                                     "Possible values: latency, efficiency (default)"),
+                                      llvm::cl::init("efficiency")};
 
     BoolOption enableScheduleTrace{*this, "enable-schedule-trace",
                                    llvm::cl::desc("Enable compile time schedule analysis and trace"),
@@ -493,6 +593,8 @@ struct DefaultHWOptionsBase : mlir::PassPipelineOptions<DefaultHWOptionsBase> {
             *this, "verify-locations",
             llvm::cl::desc("Selects location verification mode. Possible options are off/fast/full/thorough"),
             llvm::cl::init(vpux::isDeveloperBuild() ? "fast" : "off")};
+
+    BoolOption enableDmaOutOfOrder{*this, "dma-ooo", llvm::cl::desc("Enable out-of-order DMA"), llvm::cl::init(true)};
 };
 
 //

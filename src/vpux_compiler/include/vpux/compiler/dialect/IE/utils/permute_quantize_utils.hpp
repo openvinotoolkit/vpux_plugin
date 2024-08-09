@@ -13,6 +13,7 @@ namespace IE {
 
 bool isLegalReorderAddPattern(IE::ReorderOp origOp);
 bool isLegalReorderAvgPoolPattern(IE::ReorderOp origOp);
+bool isBeneficialConvertToPermuteQuantize(ShapeRef shape);
 
 }  // namespace IE
 }  // namespace vpux

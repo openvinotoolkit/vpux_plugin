@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --init-compiler="vpu-arch=%arch%" --move-wait-result-to-async-block-args %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 // CHECK-LABEL: @LinearCase
 func.func @LinearCase(%arg0: memref<1x1x1x10xf16>, %arg1: memref<1x1x1x10xf16>) -> memref<1x1x1x10xf16> {

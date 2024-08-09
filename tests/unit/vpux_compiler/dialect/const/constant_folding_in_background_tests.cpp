@@ -64,9 +64,12 @@ class ConstantFoldingInBackground : public testing::TestWithParam<size_t> {};
 void compile(mlir::MLIRContext* ctx, size_t numFoldingThreads, std::chrono::milliseconds sleepDuration,
              ContentAttrFunction contentAttrFn) {
     const auto collectStatistics = true;
+    const auto memoryUsageLimit = 3 * 1024;
+    const auto cacheCleanThreshold = 0.8;
+    Logger log = Logger::global();
 
-    auto foldingListener =
-            std::make_unique<Const::BackgroundConstantFolding>(ctx, numFoldingThreads, collectStatistics);
+    auto foldingListener = std::make_unique<Const::BackgroundConstantFolding>(
+            ctx, numFoldingThreads, collectStatistics, memoryUsageLimit, cacheCleanThreshold, log);
 
     const auto [contentAttr, expectedValues] = contentAttrFn(ctx);
 
@@ -164,7 +167,12 @@ TEST_F(ConstantFoldingInBackgroundUnit, EquivalenceRequest) {
 
     const auto numFoldingThreads = 2;
     const auto collectStatistics = true;
-    auto foldingListener = Const::BackgroundConstantFolding(&ctx, numFoldingThreads, collectStatistics);
+    const auto memoryUsageLimit = 3 * 1024;
+    const auto cacheCleanThreshold = 0.8;
+    Logger log = Logger::global();
+
+    auto foldingListener = Const::BackgroundConstantFolding(&ctx, numFoldingThreads, collectStatistics,
+                                                            memoryUsageLimit, cacheCleanThreshold, log);
 
     const size_t numElements = 100;
     const float baseValue = 1.0f;

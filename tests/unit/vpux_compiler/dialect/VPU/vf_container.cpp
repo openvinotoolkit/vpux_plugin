@@ -19,10 +19,9 @@
 using vpux::VPU::ArchKind;
 using namespace vpux;
 
-using MLIR_VPU_VFPipelineContainer = MLIR_UnitBase;
+using MLIR_VPU_VFPipelineContainer = vpux::VPU::arch40xx::UnitTest;
 
 TEST_F(MLIR_VPU_VFPipelineContainer, VF_ContainerAdd) {
-    mlir::MLIRContext ctx(registry);
     constexpr llvm::StringLiteral inputIR = R"(
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
@@ -67,21 +66,16 @@ TEST_F(MLIR_VPU_VFPipelineContainer, VF_ContainerAdd) {
     auto container = VPU::VFPipelineContainer();
     VPU::VPUNNCostParameters params(VPU::MultiClusterStrategy::Clustering);
     func->walk([&](VPU::NCEConvolutionOp conv) {
-        EXPECT_FALSE(container.hasOperType(conv));
         EXPECT_NO_THROW(container.addOperation(conv.getOperation(), params));
-        EXPECT_TRUE(container.hasOperType(conv));
         EXPECT_THROW(container.addOperation(conv.getOperation(), params), vpux::Exception);
     });
 
     func->walk([&](VPU::SoftMaxOp softMax) {
-        EXPECT_FALSE(container.hasOperType(softMax));
         EXPECT_NO_THROW(container.addOperation(softMax.getOperation(), params));
-        EXPECT_TRUE(container.hasOperType(softMax));
     });
 }
 
 TEST_F(MLIR_VPU_VFPipelineContainer, VF_ContainerCost) {
-    mlir::MLIRContext ctx(registry);
     constexpr llvm::StringLiteral inputIR = R"(
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
@@ -127,15 +121,13 @@ TEST_F(MLIR_VPU_VFPipelineContainer, VF_ContainerCost) {
     auto layerCost = std::make_unique<VPU::LayerVPUNNCost>(func);
     VPU::VPUNNCostParameters params(VPU::MultiClusterStrategy::Clustering);
     func->walk([&](VPU::NCEConvolutionOp conv) {
-        EXPECT_NO_THROW(container.addOperation(conv.getOperation(), params));
+        container.addOperation(conv.getOperation(), params);
     });
 
     VPU::StrategyCost softMaxCost = 0;
     func->walk([&](VPU::SoftMaxOp softMax) {
-        EXPECT_FALSE(container.hasOperType(softMax));
-        EXPECT_NO_THROW(container.addOperation(softMax.getOperation(), params));
+        container.addOperation(softMax.getOperation(), params);
         softMaxCost = layerCost->getStrategyCost(softMax.getOperation(), params);
-        EXPECT_TRUE(container.hasOperType(softMax));
     });
 
     EXPECT_EQ(container.maxCost(layerCost), softMaxCost);

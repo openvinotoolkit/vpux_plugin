@@ -5,7 +5,6 @@
 
 #include "vpux/compiler/dialect/VPUIPDPU/rewriters/dpu_variant_rewriter.hpp"
 #include "vpux/compiler/dialect/VPUIPDPU/ops.hpp"
-#include "vpux/compiler/dialect/VPUIPDPU/rewriters/dpu_variant_block_rewriters.hpp"
 
 namespace vpux {
 namespace VPUIPDPU {
@@ -25,11 +24,22 @@ mlir::LogicalResult DPUVariantRewriter::matchAndRewrite(VPUASM::DPUVariantOp op,
     auto& variantRegion = variant.getRegion();
     rewriter.createBlock(&variantRegion);
 
-    if (DPUVariantIDURewriter(op, rewriter, _log).rewrite(_symRefMap).failed()) {
+    auto dpuVariantExpandIface = mlir::dyn_cast<VPUASM::DPUVariantExpandOpInterface>(op.getOperation());
+    if (dpuVariantExpandIface == nullptr) {
+        _log.error("Missing expand DPU variant configuration interface for arch {0}",
+                   stringifyArchKind(VPU::getArch(op)).str());
         return mlir::failure();
     }
 
-    if (DPUVariantODURewriter(op, rewriter, _log).rewrite(_symRefMap).failed()) {
+    if (dpuVariantExpandIface.expandIDUConfig(rewriter, _log, _symRefMap).failed()) {
+        return mlir::failure();
+    }
+
+    if (dpuVariantExpandIface.expandPPEConfig(rewriter, _log, _symRefMap).failed()) {
+        return mlir::failure();
+    }
+
+    if (dpuVariantExpandIface.expandODUConfig(rewriter, _log, _symRefMap).failed()) {
         return mlir::failure();
     }
 

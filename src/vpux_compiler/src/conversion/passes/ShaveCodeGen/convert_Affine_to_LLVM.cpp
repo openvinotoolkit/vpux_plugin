@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -211,8 +211,8 @@ void ConvertAffine2LLVMPass::safeRunOnModule() {
         mlir::cf::populateControlFlowToLLVMConversionPatterns(typeConverter, patterns);
         mlir::populateFuncToLLVMConversionPatterns(typeConverter, patterns);
 
-        patterns.add<MaxMinFOpConverter<mlir::arith::MaxFOp, mlir::arith::CmpFPredicate::UGT>,
-                     MaxMinFOpConverter<mlir::arith::MinFOp, mlir::arith::CmpFPredicate::ULT>>(&ctx);
+        patterns.add<MaxMinFOpConverter<mlir::arith::MaximumFOp, mlir::arith::CmpFPredicate::UGT>,
+                     MaxMinFOpConverter<mlir::arith::MinimumFOp, mlir::arith::CmpFPredicate::ULT>>(&ctx);
 
         if (failed(applyFullConversion(funcOp, target, std::move(patterns))))
             signalPassFailure();

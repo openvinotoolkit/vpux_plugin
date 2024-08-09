@@ -6,6 +6,12 @@
 #include "vpux/compiler/core/control_edge_generator.hpp"
 #include "vpux/compiler/core/feasible_scheduler_utils.hpp"
 
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/types.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
+#include "vpux/compiler/init.hpp"
+#include "vpux/compiler/utils/types.hpp"
+
 #include "common/utils.hpp"
 
 #include <gtest/gtest.h>
@@ -14,7 +20,7 @@ using namespace vpux;
 
 using MLIR_ControlEdgeGenerator = MLIR_UnitBase;
 
-TEST(MLIR_ControlEdgeGenerator, TestMemOverlapEdges) {
+TEST_F(MLIR_ControlEdgeGenerator, TestMemOverlapEdges) {
     // Create example schedule where operations execute in sequence and either produce
     // or consume certain range of memory
     std::vector<ScheduledOpOneResource> scheduledOpsResources = {
@@ -48,9 +54,11 @@ TEST(MLIR_ControlEdgeGenerator, TestMemOverlapEdges) {
     }
 }
 
-TEST(MLIR_ControlEdgeGenerator, TestMemOverlapEdgesWithSubViewTest1) {
-    ScheduledOpOneResource::ResourceView resView0({{0}, {1}, {1}});
-    ScheduledOpOneResource::ResourceView resView1({{1}, {1}, {1}});
+TEST_F(MLIR_ControlEdgeGenerator, TestMemOverlapEdgesWithSubViewTest1) {
+    mlir::Value dummyBuffer = nullptr;
+
+    ScheduledOpOneResource::ResourceView resView0({{dummyBuffer}, {0}, {1}, {1}});
+    ScheduledOpOneResource::ResourceView resView1({{dummyBuffer}, {1}, {1}, {1}});
 
     // Create example schedule where operations execute in sequence and either produce
     // or consume certain range of memory
@@ -78,9 +86,11 @@ TEST(MLIR_ControlEdgeGenerator, TestMemOverlapEdgesWithSubViewTest1) {
     }
 }
 
-TEST(MLIR_ControlEdgeGenerator, TestMemOverlapEdgesWithSubViewTest2) {
-    ScheduledOpOneResource::ResourceView resView0({{0}, {1}, {1}});
-    ScheduledOpOneResource::ResourceView resView1({{1}, {1}, {1}});
+TEST_F(MLIR_ControlEdgeGenerator, TestMemOverlapEdgesWithSubViewTest2) {
+    mlir::Value dummyBuffer = nullptr;
+
+    ScheduledOpOneResource::ResourceView resView0({{dummyBuffer}, {0}, {1}, {1}});
+    ScheduledOpOneResource::ResourceView resView1({{dummyBuffer}, {1}, {1}, {1}});
 
     // Create example schedule where operations execute in sequence and either produce
     // or consume certain range of memory
@@ -112,9 +122,11 @@ TEST(MLIR_ControlEdgeGenerator, TestMemOverlapEdgesWithSubViewTest2) {
     }
 }
 
-TEST(MLIR_ControlEdgeGenerator, TestMemOverlapEdgesWithSubViewTest3) {
-    ScheduledOpOneResource::ResourceView resView0({{0}, {1}, {1}});
-    ScheduledOpOneResource::ResourceView resView1({{1}, {1}, {1}});
+TEST_F(MLIR_ControlEdgeGenerator, TestMemOverlapEdgesWithSubViewTest3) {
+    mlir::Value dummyBuffer = nullptr;
+
+    ScheduledOpOneResource::ResourceView resView0({{dummyBuffer}, {0}, {1}, {1}});
+    ScheduledOpOneResource::ResourceView resView1({{dummyBuffer}, {1}, {1}, {1}});
 
     // Create example schedule where operations execute in sequence and either produce
     // or consume certain range of memory
@@ -142,9 +154,11 @@ TEST(MLIR_ControlEdgeGenerator, TestMemOverlapEdgesWithSubViewTest3) {
     }
 }
 
-TEST(MLIR_ControlEdgeGenerator, TestMemOverlapEdgesWithSubViewTest4) {
-    ScheduledOpOneResource::ResourceView resView0({{0}, {1}, {1}});
-    ScheduledOpOneResource::ResourceView resView1({{1}, {1}, {1}});
+TEST_F(MLIR_ControlEdgeGenerator, TestMemOverlapEdgesWithSubViewTest4) {
+    mlir::Value dummyBuffer = nullptr;
+
+    ScheduledOpOneResource::ResourceView resView0({{dummyBuffer}, {0}, {1}, {1}});
+    ScheduledOpOneResource::ResourceView resView1({{dummyBuffer}, {1}, {1}, {1}});
 
     // Create example schedule where operations execute in sequence and either produce
     // or consume certain range of memory
@@ -161,6 +175,64 @@ TEST(MLIR_ControlEdgeGenerator, TestMemOverlapEdgesWithSubViewTest4) {
     // 1,2 -> 3
     // 1,2 -> 4
     SmallVector<ControlEdge> expectedControlEdges = {{0, 2}, {2, 3}, {1, 3}, {1, 4}, {2, 4}};
+
+    ControlEdgeSet controlEdges;
+    ControlEdgeGenerator controlEdgeGenerator;
+    // Generate control edges for overlapping memory regions
+    controlEdgeGenerator.generateControlEdges(scheduledOpsResources.begin(), scheduledOpsResources.end(), controlEdges);
+
+    ASSERT_EQ(controlEdges.size(), expectedControlEdges.size());
+
+    for (size_t i = 0; i < controlEdges.size(); i++) {
+        EXPECT_EQ(controlEdges[i]._source, expectedControlEdges[i]._source);
+        EXPECT_EQ(controlEdges[i]._sink, expectedControlEdges[i]._sink);
+    }
+}
+
+TEST_F(MLIR_ControlEdgeGenerator, TestMemOverlapEdgesWithSubViewTest5) {
+    // mlir::DialectRegistry registry;
+    // vpux::registerDialects(registry);
+    // vpux::registerCommonInterfaces(registry);
+    // mlir::MLIRContext ctx(registry);
+    // ctx.loadDialect<mlir::quant::QuantizationDialect>();
+    // ctx.loadDialect<Const::ConstDialect>();
+
+    // mlir::OpBuilder builder(&ctx);
+    // auto declareOp = builder.create<Const::DeclareOp>(mlir::UnknownLoc::get(&ctx), quantDataType, contentAttr);
+
+    mlir::MLIRContext ctx(registry);
+    ctx.loadDialect<VPUIP::VPUIPDialect>();
+    ctx.loadDialect<VPURT::VPURTDialect>();
+
+    const Shape shape{100};
+    const DimsOrder order = DimsOrder::C;
+    const mlir::AffineMapAttr layout = mlir::AffineMapAttr::get(order.toAffineMap(&ctx));
+    const IndexedSymbolAttr memSpace = IndexedSymbolAttr::get(&ctx, "CMX_NN");
+    const auto memrefType = mlir::MemRefType::get(shape.raw(), mlir::Float16Type::get(&ctx), layout, memSpace);
+
+    mlir::OpBuilder builder(&ctx);
+    auto dummyBuffer0 = builder.create<VPURT::DeclareBufferOp>(mlir::UnknownLoc::get(&ctx), memrefType,
+                                                               VPURT::BufferSection::CMX_NN, /*byte_offset=*/0)
+                                .getBuffer();
+
+    auto dummyBuffer1 = builder.create<VPURT::DeclareBufferOp>(mlir::UnknownLoc::get(&ctx), memrefType,
+                                                               VPURT::BufferSection::CMX_NN, /*byte_offset=*/0)
+                                .getBuffer();
+
+    ScheduledOpOneResource::ResourceView resView0({{dummyBuffer0}, {0}, {50}, {100}});
+    ScheduledOpOneResource::ResourceView resView1({{dummyBuffer1}, {50}, {50}, {100}});
+
+    // Create example schedule where operations execute in sequence and either produce
+    // or consume certain range of memory
+    std::vector<ScheduledOpOneResource> scheduledOpsResources = {
+            ScheduledOpOneResource(0, 0, 100, ScheduledOpOneResource::EResRelation::PRODUCER, resView0),
+            ScheduledOpOneResource(1, 0, 100, ScheduledOpOneResource::EResRelation::PRODUCER, resView1)};
+
+    // For above configuration expected inserted memory control edges are:
+    // 0 -> 1
+    // Even though subview themselves define non overlapping ranges, buffers themselves are different thus edge is
+    // needed
+    SmallVector<ControlEdge> expectedControlEdges = {{0, 1}};
 
     ControlEdgeSet controlEdges;
     ControlEdgeGenerator controlEdgeGenerator;

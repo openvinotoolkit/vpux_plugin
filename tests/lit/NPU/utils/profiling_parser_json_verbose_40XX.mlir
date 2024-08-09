@@ -1,11 +1,11 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --mlir-print-debuginfo --init-compiler="vpu-arch=%arch% allow-custom-values=true" --lower-VPUIP-to-ELF %data_path_npu%/profiling-40XX.mlir.txt | vpux-translate --vpu-arch=%arch% --export-ELF -o %t
 // RUN: prof_parser -b %t -p %data_path_npu%/profiling-0-40XX.bin -f json -vv | FileCheck %s
-// REQUIRES: arch-VPUX40XX
+// REQUIRES: arch-NPU40XX
 
 // CHECK: {"traceEvents":[
 // CHECK-NEXT: {"name": "process_name", "ph": "M", "pid":0, "args": {"name" : "Cluster (0)"}},
@@ -63,8 +63,8 @@
 // CHECK-NEXT: {"name":"conv2/WithoutBiases?t_Convolution/cluster_0/variant_0", "cat":"DPU", "ph":"X", "ts":10.936, "dur":3.643, "pid":0, "tid":1},
 // CHECK-NEXT: {"name":"relu2?t_Relu/cluster_0", "cat":"DPU", "ph":"X", "ts":14.630, "dur":0.939, "pid":0, "tid":0},
 // CHECK-NEXT: {"name":"relu2?t_Relu/cluster_0/variant_0", "cat":"DPU", "ph":"X", "ts":14.630, "dur":0.939, "pid":0, "tid":1},
-// CHECK-NEXT: {"name":"relu2?t_Relu/converted_to_f32/tile_1/cluster_0", "cat":"SW", "ph":"X", "ts":36.976, "dur":9.583, "pid":0, "tid":3},
-// CHECK-NEXT: {"name":"relu2?t_Relu/converted_to_f32/tile_0/cluster_0", "cat":"SW", "ph":"X", "ts":37.184, "dur":9.947, "pid":0, "tid":4},
+// CHECK-NEXT: {"name":"relu2?t_Relu/converted_to_f32/tile_1/cluster_0", "cat":"SW", "ph":"X", "ts":36.976, "dur":9.583, "pid":0, "tid":3, "args":{"Active cycles:": "10067", "Stall cycles:": "2400"}},
+// CHECK-NEXT: {"name":"relu2?t_Relu/converted_to_f32/tile_0/cluster_0", "cat":"SW", "ph":"X", "ts":37.184, "dur":9.947, "pid":0, "tid":4, "args":{"Active cycles:": "10589", "Stall cycles:": "2938"}},
 // CHECK-NEXT: {"name":"conv1/WithoutBiases?t_Convolution/cluster_1", "cat":"DPU", "ph":"X", "ts":0.000, "dur":0.204, "pid":1, "tid":0},
 // CHECK-NEXT: {"name":"conv1/WithoutBiases?t_Convolution/cluster_1/variant_0", "cat":"DPU", "ph":"X", "ts":0.000, "dur":0.204, "pid":1, "tid":1},
 // CHECK-NEXT: {"name":"conv1/WithoutBiases?t_Convolution/Duplicated_2/cluster_1", "cat":"DPU", "ph":"X", "ts":7.321, "dur":1.894, "pid":1, "tid":0},
@@ -76,8 +76,8 @@
 // CHECK-NEXT: {"name":"conv2/WithoutBiases?t_Convolution/cluster_1/variant_0", "cat":"DPU", "ph":"X", "ts":10.936, "dur":3.643, "pid":1, "tid":1},
 // CHECK-NEXT: {"name":"relu2?t_Relu/cluster_1", "cat":"DPU", "ph":"X", "ts":14.588, "dur":0.981, "pid":1, "tid":0},
 // CHECK-NEXT: {"name":"relu2?t_Relu/cluster_1/variant_0", "cat":"DPU", "ph":"X", "ts":14.588, "dur":0.981, "pid":1, "tid":1},
-// CHECK-NEXT: {"name":"relu2?t_Relu/converted_to_f32/tile_0/cluster_1", "cat":"SW", "ph":"X", "ts":37.184, "dur":9.375, "pid":1, "tid":3},
-// CHECK-NEXT: {"name":"relu2?t_Relu/converted_to_f32/tile_1/cluster_1", "cat":"SW", "ph":"X", "ts":37.184, "dur":9.375, "pid":1, "tid":4},
+// CHECK-NEXT: {"name":"relu2?t_Relu/converted_to_f32/tile_0/cluster_1", "cat":"SW", "ph":"X", "ts":37.184, "dur":9.375, "pid":1, "tid":3, "args":{"Active cycles:": "9826", "Stall cycles:": "2430"}},
+// CHECK-NEXT: {"name":"relu2?t_Relu/converted_to_f32/tile_1/cluster_1", "cat":"SW", "ph":"X", "ts":37.184, "dur":9.375, "pid":1, "tid":4, "args":{"Active cycles:": "9829", "Stall cycles:": "2929"}},
 // CHECK-NEXT: {"name":"conv1/WithoutBiases?t_Convolution/cluster_2", "cat":"DPU", "ph":"X", "ts":0.001, "dur":0.152, "pid":2, "tid":0},
 // CHECK-NEXT: {"name":"conv1/WithoutBiases?t_Convolution/cluster_2/variant_0", "cat":"DPU", "ph":"X", "ts":0.001, "dur":0.152, "pid":2, "tid":1},
 // CHECK-NEXT: {"name":"conv1/WithoutBiases?t_Convolution/Duplicated_2/cluster_2", "cat":"DPU", "ph":"X", "ts":7.321, "dur":1.894, "pid":2, "tid":0},
@@ -89,8 +89,8 @@
 // CHECK-NEXT: {"name":"conv2/WithoutBiases?t_Convolution/cluster_2/variant_0", "cat":"DPU", "ph":"X", "ts":10.935, "dur":3.644, "pid":2, "tid":1},
 // CHECK-NEXT: {"name":"relu2?t_Relu/cluster_2", "cat":"DPU", "ph":"X", "ts":14.589, "dur":0.979, "pid":2, "tid":0},
 // CHECK-NEXT: {"name":"relu2?t_Relu/cluster_2/variant_0", "cat":"DPU", "ph":"X", "ts":14.589, "dur":0.979, "pid":2, "tid":1},
-// CHECK-NEXT: {"name":"relu2?t_Relu/converted_to_f32/tile_1/cluster_2", "cat":"SW", "ph":"X", "ts":36.715, "dur":9.843, "pid":2, "tid":3},
-// CHECK-NEXT: {"name":"relu2?t_Relu/converted_to_f32/tile_0/cluster_2", "cat":"SW", "ph":"X", "ts":36.976, "dur":10.156, "pid":2, "tid":4},
+// CHECK-NEXT: {"name":"relu2?t_Relu/converted_to_f32/tile_1/cluster_2", "cat":"SW", "ph":"X", "ts":36.715, "dur":9.843, "pid":2, "tid":3, "args":{"Active cycles:": "10338", "Stall cycles:": "2149"}},
+// CHECK-NEXT: {"name":"relu2?t_Relu/converted_to_f32/tile_0/cluster_2", "cat":"SW", "ph":"X", "ts":36.976, "dur":10.156, "pid":2, "tid":4, "args":{"Active cycles:": "10666", "Stall cycles:": "2715"}},
 // CHECK-NEXT: {"name":"conv1/WithoutBiases?t_Convolution/cluster_3", "cat":"DPU", "ph":"X", "ts":0.001, "dur":0.152, "pid":3, "tid":0},
 // CHECK-NEXT: {"name":"conv1/WithoutBiases?t_Convolution/cluster_3/variant_0", "cat":"DPU", "ph":"X", "ts":0.001, "dur":0.152, "pid":3, "tid":1},
 // CHECK-NEXT: {"name":"conv1/WithoutBiases?t_Convolution/Duplicated_2/cluster_3", "cat":"DPU", "ph":"X", "ts":7.321, "dur":1.894, "pid":3, "tid":0},
@@ -102,8 +102,8 @@
 // CHECK-NEXT: {"name":"conv2/WithoutBiases?t_Convolution/cluster_3/variant_0", "cat":"DPU", "ph":"X", "ts":10.935, "dur":3.644, "pid":3, "tid":1},
 // CHECK-NEXT: {"name":"relu2?t_Relu/cluster_3", "cat":"DPU", "ph":"X", "ts":14.592, "dur":0.977, "pid":3, "tid":0},
 // CHECK-NEXT: {"name":"relu2?t_Relu/cluster_3/variant_0", "cat":"DPU", "ph":"X", "ts":14.592, "dur":0.977, "pid":3, "tid":1},
-// CHECK-NEXT: {"name":"relu2?t_Relu/converted_to_f32/tile_1/cluster_3", "cat":"SW", "ph":"X", "ts":36.715, "dur":9.895, "pid":3, "tid":3},
-// CHECK-NEXT: {"name":"relu2?t_Relu/converted_to_f32/tile_0/cluster_3", "cat":"SW", "ph":"X", "ts":37.184, "dur":9.427, "pid":3, "tid":4},
+// CHECK-NEXT: {"name":"relu2?t_Relu/converted_to_f32/tile_1/cluster_3", "cat":"SW", "ph":"X", "ts":36.715, "dur":9.895, "pid":3, "tid":3, "args":{"Active cycles:": "10342", "Stall cycles:": "2595"}},
+// CHECK-NEXT: {"name":"relu2?t_Relu/converted_to_f32/tile_0/cluster_3", "cat":"SW", "ph":"X", "ts":37.184, "dur":9.427, "pid":3, "tid":4, "args":{"Active cycles:": "9844", "Stall cycles:": "2940"}},
 // CHECK-NEXT: {"name":"conv1/WithoutBiases?t_Convolution/cluster_4", "cat":"DPU", "ph":"X", "ts":0.001, "dur":0.152, "pid":4, "tid":0},
 // CHECK-NEXT: {"name":"conv1/WithoutBiases?t_Convolution/cluster_4/variant_0", "cat":"DPU", "ph":"X", "ts":0.001, "dur":0.152, "pid":4, "tid":1},
 // CHECK-NEXT: {"name":"conv1/WithoutBiases?t_Convolution/Duplicated_2/cluster_4", "cat":"DPU", "ph":"X", "ts":7.321, "dur":1.893, "pid":4, "tid":0},
@@ -115,8 +115,8 @@
 // CHECK-NEXT: {"name":"conv2/WithoutBiases?t_Convolution/cluster_4/variant_0", "cat":"DPU", "ph":"X", "ts":10.972, "dur":1.837, "pid":4, "tid":1},
 // CHECK-NEXT: {"name":"relu2?t_Relu/cluster_4", "cat":"DPU", "ph":"X", "ts":14.588, "dur":0.981, "pid":4, "tid":0},
 // CHECK-NEXT: {"name":"relu2?t_Relu/cluster_4/variant_0", "cat":"DPU", "ph":"X", "ts":14.588, "dur":0.981, "pid":4, "tid":1},
-// CHECK-NEXT: {"name":"relu2?t_Relu/converted_to_f32/tile_1/cluster_4", "cat":"SW", "ph":"X", "ts":36.715, "dur":9.843, "pid":4, "tid":3},
-// CHECK-NEXT: {"name":"relu2?t_Relu/converted_to_f32/tile_0/cluster_4", "cat":"SW", "ph":"X", "ts":36.976, "dur":9.583, "pid":4, "tid":4},
+// CHECK-NEXT: {"name":"relu2?t_Relu/converted_to_f32/tile_1/cluster_4", "cat":"SW", "ph":"X", "ts":36.715, "dur":9.843, "pid":4, "tid":3, "args":{"Active cycles:": "10342", "Stall cycles:": "2757"}},
+// CHECK-NEXT: {"name":"relu2?t_Relu/converted_to_f32/tile_0/cluster_4", "cat":"SW", "ph":"X", "ts":36.976, "dur":9.583, "pid":4, "tid":4, "args":{"Active cycles:": "10077", "Stall cycles:": "2772"}},
 // CHECK-NEXT: {"name":"conv1/WithoutBiases?t_Convolution/cluster_5", "cat":"DPU", "ph":"X", "ts":0.001, "dur":0.152, "pid":5, "tid":0},
 // CHECK-NEXT: {"name":"conv1/WithoutBiases?t_Convolution/cluster_5/variant_0", "cat":"DPU", "ph":"X", "ts":0.001, "dur":0.152, "pid":5, "tid":1},
 // CHECK-NEXT: {"name":"conv1/WithoutBiases?t_Convolution/Duplicated_2/cluster_5", "cat":"DPU", "ph":"X", "ts":7.322, "dur":1.893, "pid":5, "tid":0},
@@ -128,12 +128,12 @@
 // CHECK-NEXT: {"name":"conv2/WithoutBiases?t_Convolution/cluster_5/variant_0", "cat":"DPU", "ph":"X", "ts":10.969, "dur":1.839, "pid":5, "tid":1},
 // CHECK-NEXT: {"name":"relu2?t_Relu/cluster_5", "cat":"DPU", "ph":"X", "ts":14.592, "dur":0.977, "pid":5, "tid":0},
 // CHECK-NEXT: {"name":"relu2?t_Relu/cluster_5/variant_0", "cat":"DPU", "ph":"X", "ts":14.592, "dur":0.977, "pid":5, "tid":1},
-// CHECK-NEXT: {"name":"relu2?t_Relu/converted_to_f32/tile_0/cluster_5", "cat":"SW", "ph":"X", "ts":36.715, "dur":9.843, "pid":5, "tid":2},
-// CHECK-NEXT: {"name":"relu2?t_Relu/converted_to_f32/tile_1/cluster_5", "cat":"SW", "ph":"X", "ts":37.184, "dur":9.375, "pid":5, "tid":3},
-// CHECK-NEXT: {"name":"conv1/WithoutBiases", "cat":"Layer", "ph":"X", "ts":0.000, "dur":9.215, "pid":6, "tid":0, "args":{"Layer type": "Convolution"}},
-// CHECK-NEXT: {"name":"relu1", "cat":"Layer", "ph":"X", "ts":9.253, "dur":1.681, "pid":6, "tid":0, "args":{"Layer type": "Relu"}},
-// CHECK-NEXT: {"name":"conv2/WithoutBiases", "cat":"Layer", "ph":"X", "ts":10.935, "dur":3.644, "pid":6, "tid":0, "args":{"Layer type": "Convolution"}},
-// CHECK-NEXT: {"name":"relu2", "cat":"Layer", "ph":"X", "ts":14.588, "dur":32.544, "pid":6, "tid":0, "args":{"Layer type": "Relu"}}
+// CHECK-NEXT: {"name":"relu2?t_Relu/converted_to_f32/tile_0/cluster_5", "cat":"SW", "ph":"X", "ts":36.715, "dur":9.843, "pid":5, "tid":2, "args":{"Active cycles:": "10344", "Stall cycles:": "2394"}},
+// CHECK-NEXT: {"name":"relu2?t_Relu/converted_to_f32/tile_1/cluster_5", "cat":"SW", "ph":"X", "ts":37.184, "dur":9.375, "pid":5, "tid":3, "args":{"Active cycles:": "9853", "Stall cycles:": "2567"}},
+// CHECK-NEXT: {"name":"conv1/WithoutBiases", "cat":"Layer", "ph":"X", "ts":0.000, "dur":9.215, "pid":6, "tid":0, "args":{"Layer type": "Convolution", "DPU time:": "12us 379ns"}},
+// CHECK-NEXT: {"name":"relu1", "cat":"Layer", "ph":"X", "ts":9.253, "dur":1.681, "pid":6, "tid":0, "args":{"Layer type": "Relu", "DPU time:": "9us 756ns"}},
+// CHECK-NEXT: {"name":"conv2/WithoutBiases", "cat":"Layer", "ph":"X", "ts":10.935, "dur":3.644, "pid":6, "tid":0, "args":{"Layer type": "Convolution", "DPU time:": "18us 250ns"}},
+// CHECK-NEXT: {"name":"relu2", "cat":"Layer", "ph":"X", "ts":14.588, "dur":32.544, "pid":6, "tid":0, "args":{"Layer type": "Relu", "DPU time:": "5us 834ns", "Shave time:": "116us 245ns"}}
 // CHECK-NEXT: ],
 // CHECK-NEXT: "taskStatistics": {
 // CHECK-NEXT: "total duration":47.132,
@@ -153,6 +153,6 @@
 // CHECK-NEXT: "Sum of SW task durations":116.245,
 // CHECK-NEXT: "Sum of M2I task durations":0.000
 // CHECK-NEXT: },
+// CHECK-NEXT: "workpoint": { "freq": 1850.0, "status": "OK" },
 // CHECK-NEXT: "displayTimeUnit": "ns"
 // CHECK-NEXT: }
- 

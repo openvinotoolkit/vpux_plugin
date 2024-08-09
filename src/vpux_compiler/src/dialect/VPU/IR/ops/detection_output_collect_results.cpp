@@ -13,11 +13,11 @@ using namespace vpux;
 
 mlir::LogicalResult VPU::DetectionOutputCollectResultsOp::inferReturnTypes(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange /*regions*/,
         mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::DetectionOutputCollectResultsOpAdaptor collectResults(operands, attrs);
+    VPU::DetectionOutputCollectResultsOpAdaptor collectResults(operands, attrs, prop);
     if (mlir::failed(collectResults.verify(loc))) {
         return mlir::failure();
     }

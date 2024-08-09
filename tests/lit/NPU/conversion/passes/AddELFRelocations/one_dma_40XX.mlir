@@ -1,12 +1,12 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // convert-VPUASM-to-NPUReg40XX-relocs pass must also be run because of ease of representing VPUASM level DMA Op
 
 // RUN: vpux-opt --vpu-arch=%arch% --split-input-file --convert-VPUASM-to-NPUReg40XX-relocs --create-elf-relocations %s | FileCheck %s
-// REQUIRES: arch-VPUX40XX
+// REQUIRES: arch-NPU40XX
 
 module @OneDMAWithoutAttributes attributes {VPU.arch = #VPU.arch_kind<NPU40XX>} {
   IE.TileResource 6 of @NCE at 1.700000e+03 MHz {

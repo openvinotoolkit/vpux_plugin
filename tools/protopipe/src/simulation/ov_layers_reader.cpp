@@ -63,6 +63,8 @@ static int toPrecision(ov::element::Type prec) {
         return CV_32F;
     case ov::element::f16:
         return CV_16F;
+    case ov::element::i64:
+        return CV_32S;
     }
     throw std::logic_error("Unsupported OV precision");
 }

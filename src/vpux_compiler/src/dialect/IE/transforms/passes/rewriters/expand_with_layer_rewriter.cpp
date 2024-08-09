@@ -74,7 +74,8 @@ mlir::LogicalResult ExpandWithLayer::matchAndRewrite(IE::ExpandOp origExpandOp, 
     auto memPerm = getPermutationFromOrders(newOrderInType.getDimsOrder(), newOrderOutType.getDimsOrder(), ctx);
     auto unsupportPermuteDMA = [&]() -> bool {
         const auto inShape = newOrderInType.getShape();
-        return newOrderInType.getRank() == 4 && memPerm == mlir::AffineMap::getPermutationMap({0, 3, 2, 1}, ctx) &&
+        return newOrderInType.getRank() == 4 &&
+               memPerm == mlir::AffineMap::getPermutationMap(ArrayRef<unsigned>{0, 3, 2, 1}, ctx) &&
                inShape[Dims4D::Act::C] > 1 && inShape[Dims4D::Act::H] > 1 && inShape[Dims4D::Act::W] > 1;
     };
 

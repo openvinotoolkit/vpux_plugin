@@ -8,7 +8,8 @@
 #include "vpux/compiler/NPU40XX/dialect/NPUReg40XX/types.hpp"
 #include "vpux/compiler/dialect/VPUMI40XX/utils.hpp"
 #include "vpux/compiler/dialect/VPURegMapped/utils.hpp"
-#include "vpux/compiler/utils/elf_utils.hpp"
+#include "vpux/compiler/utils/ELF/utils.hpp"
+#include "vpux/compiler/utils/traits_utils.hpp"
 
 #include <npu_40xx_nnrt.hpp>
 
@@ -306,13 +307,14 @@ void DPUInvariantRewriter::fillIDUCfg(mlir::Region& DPURegion,
         }
     }
 }
+
 void DPUInvariantRewriter::fillMPECfg(mlir::Region& DPURegion,
                                       std::map<std::string, std::map<std::string, uint64_t>>& initValues) const {
-    auto MPECgfOps = DPURegion.getOps<VPUIPDPU::MPECfgOp>();
-    if (!MPECgfOps.empty()) {
-        auto MPECgfOp = *MPECgfOps.begin();
+    auto MPECfgOps = DPURegion.getOps<VPUIPDPU::MPECfgOp>();
+    if (!MPECfgOps.empty()) {
+        auto MPECfgOp = *MPECfgOps.begin();
 
-        for (auto& MPEOp : MPECgfOp.getRegion().getOps()) {
+        for (auto& MPEOp : MPECfgOp.getRegion().getOps()) {
             if (auto op = mlir::dyn_cast_or_null<VPUIPDPU::MPEDenormalOperandsFTZOp>(&MPEOp)) {
                 VPURegMapped::updateRegMappedInitializationValues(initValues, {{"mpe_cfg", {{"mpe_daz", 1}}}});
             } else if (auto op = mlir::dyn_cast_or_null<VPUIPDPU::MPEActivationBiasOp>(&MPEOp)) {
@@ -328,6 +330,7 @@ void DPUInvariantRewriter::fillMPECfg(mlir::Region& DPURegion,
         }
     }
 }
+
 void DPUInvariantRewriter::fillPPECfg(mlir::Region& DPURegion,
                                       std::map<std::string, std::map<std::string, uint64_t>>& initValues) const {
     auto PPECgfOps = DPURegion.getOps<VPUIPDPU::PPECfgOp>();
@@ -510,11 +513,12 @@ void DPUInvariantRewriter::fillPPECfg(mlir::Region& DPURegion,
         }
     }
 }
+
 void DPUInvariantRewriter::fillODUCfg(mlir::Region& DPURegion,
                                       std::map<std::string, std::map<std::string, uint64_t>>& initValues) const {
-    auto ODUCgfOps = DPURegion.getOps<VPUIPDPU::ODUCfgOp>();
-    if (!ODUCgfOps.empty()) {
-        auto ODUCgfOp = *ODUCgfOps.begin();
+    auto ODUCfgOps = DPURegion.getOps<VPUIPDPU::ODUCfgOp>();
+    if (!ODUCfgOps.empty()) {
+        auto ODUCfgOp = *ODUCfgOps.begin();
 
         // TODO: E#80766 select optimal write combine mode and serialize based on VPUIPDU instruction
         VPURegMapped::updateRegMappedInitializationValues(initValues, {{"odu_cfg", {{"wcb_bypass", 0}}}});
@@ -529,7 +533,7 @@ void DPUInvariantRewriter::fillODUCfg(mlir::Region& DPURegion,
         // TODO: E#82814 should it be a  defailt value? this is hardcoded and directly copied from POC runtime...
         VPURegMapped::updateRegMappedInitializationValues(initValues, {{"base_offset_a", {{"base_offset_a", 0x200}}}});
 
-        for (auto& ODUOp : ODUCgfOp.getRegion().getOps()) {
+        for (auto& ODUOp : ODUCfgOp.getRegion().getOps()) {
             if (auto op = mlir::dyn_cast_or_null<VPUIPDPU::ODUOutTensorSizeOp>(&ODUOp)) {
                 auto xDim = checked_cast_reg<NPUReg40XX::RegField_te_dim_xType>(op.getDimX() - 1);
                 auto yDim = checked_cast_reg<NPUReg40XX::RegField_te_dim_yType>(op.getDimY() - 1);
@@ -626,7 +630,7 @@ void DPUInvariantRewriter::fillBarrierCfg(VPUIPDPU::DPUInvariantOp origOp,
 
         uint8_t barrierGroup = 0;
         uint8_t barrierMask = 0;
-        std::tie(barrierGroup, barrierMask) = reduceWaitMaskTo8bit(consMaskLo);
+        std::tie(barrierGroup, barrierMask) = ELF::reduceWaitMaskTo8bit(consMaskLo);
 
         VPURegMapped::updateRegMappedInitializationValues(
                 initValues, {{"barriers_group_mask_", {{"group_", barrierGroup}, {"mask_", barrierMask}}},
@@ -662,6 +666,7 @@ void DPUInvariantRewriter::fillStubCfg(std::map<std::string, std::map<std::strin
                                 {"elops_wload", {{"elop_wload", 0x1}, {"elop_wload_type", 0x1}}},
                                 {"te_dim0", {{"te_dim_y", 0x0}, {"te_dim_z", 0xF}}},
                                 {"te_dim1", {{"te_dim_x", 0x0}}},
+                                {"odu_cfg", {{"nthw", 0x1}}},
                         });
 }
 

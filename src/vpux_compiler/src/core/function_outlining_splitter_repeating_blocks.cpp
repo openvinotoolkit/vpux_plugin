@@ -6,24 +6,12 @@
 #include "vpux/compiler/core/function_outlining_splitter.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 
+#include "vpux/compiler/utils/hash.hpp"
 #include "vpux/utils/core/dense_map.hpp"
 
 using namespace vpux;
 
 namespace {
-
-// Hash operation based upon their operation name, attributes, operand types and result types.
-llvm::hash_code hashOperation(mlir::Operation* op) {
-    auto hash = llvm::hash_combine(op->getName(), op->getDiscardableAttrDictionary(), op->getResultTypes(),
-                                   op->hashProperties());
-    for (auto operand : op->getOperands()) {
-        hash = llvm::hash_combine(hash, mlir::hash_value(operand.getType()));
-    }
-    for (auto result : op->getResults()) {
-        hash = llvm::hash_combine(hash, mlir::hash_value(result.getType()));
-    }
-    return hash;
-}
 
 //
 // RepeatingBlocksIdentifier
@@ -458,6 +446,8 @@ void RepeatingBlocksIdentifier::removeLeftoverBlocks() {
  */
 SmallVector<OutliningInstance> RepeatingBlocksIdentifier::prepareOutliningInstances(mlir::func::FuncOp mainFunction) {
     SmallVector<OutliningInstance> outliningInstances(_blocks.size());
+    SmallVector<SmallVector<std::pair<llvm::hash_code, size_t>>> outliningInstancesInputs(_blocks.size());
+    SmallVector<SmallVector<std::pair<llvm::hash_code, size_t>>> outliningInstancesOutputs(_blocks.size());
 
     std::unordered_map<BlockId, size_t> blockOutliningIdx;
     size_t lastBlock = 0;
@@ -507,16 +497,23 @@ SmallVector<OutliningInstance> RepeatingBlocksIdentifier::prepareOutliningInstan
         auto& instance = instances[idx];
 
         // Add the dependencies of the operation to the current instance or mark them input values
-        for (auto operand : op->getOperands()) {
+        // All instances of a repeating block must have the same input values, even if not all of them are connected to
+        // the operations inside an instance. This is required since all instances will be represented as calls to the
+        // same function. For this reason, as an initial step, all the outside input connections to the instances are
+        // collected and only later the input values deduced
+        auto& instanceInputs = outliningInstancesInputs[outliningInstanceIdx];
+        for (auto& operand : op->getOpOperands()) {
             // The operand is already in the list of input values
-            if (llvm::find(instance.inputs, operand) != instance.inputs.end()) {
+            if (llvm::find_if(instanceInputs, [&](auto& input) {
+                    return input.first == _opHash[op] && input.second == operand.getOperandNumber();
+                }) != instanceInputs.end()) {
                 continue;
             }
 
-            auto parentOp = operand.getDefiningOp();
+            auto parentOp = operand.get().getDefiningOp();
             // Operand is a block argument in the original function
             if (parentOp == nullptr) {
-                instance.inputs.push_back(operand);
+                instanceInputs.emplace_back(_opHash[op], operand.getOperandNumber());
                 continue;
             }
 
@@ -532,31 +529,72 @@ SmallVector<OutliningInstance> RepeatingBlocksIdentifier::prepareOutliningInstan
                     }
                     continue;
                 }
-                instance.inputs.push_back(operand);
+                instanceInputs.emplace_back(_opHash[op], operand.getOperandNumber());
             }
         }
 
-        // Mark the results of the operation as outputs if they have users outside the current instance
+        // Similar to the inputs, collect all the output connection types across all instances, since each instance must
+        // have the same number of output values. After all connections are collected, the output values will be deduced
+        // for every instance
+        auto& instanceOutputs = outliningInstancesOutputs[outliningInstanceIdx];
         for (auto result : op->getResults()) {
             // The result is already in the list of output values
-            if (llvm::find(instance.outputs, result) != instance.outputs.end()) {
+            if (llvm::find_if(instanceOutputs, [&](auto& output) {
+                    return output.first == _opHash[op] && output.second == result.getResultNumber();
+                }) != instanceOutputs.end()) {
                 continue;
             }
 
             auto anyUserOutside = llvm::any_of(result.getUsers(), [&](mlir::Operation* userOp) {
                 const auto maybeUserInstanceId = getInstanceId(userOp);
-                if (!maybeUserInstanceId.has_value() || maybeUserInstanceId.value() != instanceId) {
-                    return true;
-                }
-                return false;
+                return !maybeUserInstanceId.has_value() || maybeUserInstanceId.value() != instanceId;
             });
             if (anyUserOutside) {
-                instance.outputs.push_back(result);
+                instanceOutputs.emplace_back(_opHash[op], result.getResultNumber());
             }
         }
 
         instance.operations.push_back(op);
     });
+
+    // Extract the inputs and outputs of all instances for each block type. If a block has N instances, it is possible
+    // that some of the instances (e.g. the last one) do not have the same number of users as the other instances.
+    // However, since all instances call the same function, they must return all values even if some are unused.
+    // Similarly, some instances could use one value multiple times, in which case the value has to be passed multiple
+    // times for that instance's call to cover the other instances that receive different values instead
+    for (const auto& [instances, inputs, outputs] :
+         zip(outliningInstances, outliningInstancesInputs, outliningInstancesOutputs)) {
+        for (const auto& [instanceIdx, instance] : instances | indexed) {
+            for (const auto& input : inputs) {
+                const auto inputHash = input.first;
+                const auto operandNumber = input.second;
+                auto opIt = llvm::find_if(instance.operations, [&](mlir::Operation* op) {
+                    return inputHash == _opHash[op];
+                });
+                VPUX_THROW_WHEN(opIt == instance.operations.end(), "Missing operation with hash {0} in instance {1}",
+                                input.first, instanceIdx);
+                instance.inputs.push_back((*opIt)->getOperand(operandNumber));
+
+                // The first instance is expected to be used for outlining the function. Each argument is used only
+                // once, therefore we explicitly map each argument to its user, so that the outliner can correctly
+                // connect the arguments to the operations. The first instance might pass the same value multiple times,
+                // in which case the outliner is not aware to which user the value should be connected (other instances
+                // may pass different values, after all)
+                if (instanceIdx == 0) {
+                    instance.inputUserMapping.emplace_back(*opIt, operandNumber);
+                }
+            }
+
+            for (auto& output : outputs) {
+                auto opIt = llvm::find_if(instance.operations, [&](mlir::Operation* op) {
+                    return output.first == _opHash[op];
+                });
+                VPUX_THROW_WHEN(opIt == instance.operations.end(), "Missing operation with hash {0} in instance {1}",
+                                output.first, instanceIdx);
+                instance.outputs.push_back((*opIt)->getResult(output.second));
+            }
+        }
+    }
 
     return outliningInstances;
 }
@@ -571,7 +609,7 @@ void RepeatingBlocksIdentifier::printBlocks(StringLiteral note) {
         for (auto& instance : block.second) {
             _log.nest(2).trace("- instance id {0}", instance.id);
             for (auto& op : instance.operations) {
-                _log.nest(3).trace("- {0} at {1}:", op->getName(), op->getLoc());
+                _log.nest(3).trace("- {0} at {1} ({2}):", op->getName(), op->getLoc(), _opHash[op]);
             }
         }
     }
@@ -638,18 +676,27 @@ SmallVector<OutliningInstance> FunctionOutlinerRepeatingBlocks::getOutliningTarg
         _log.debug("Functions to outline: {0}", outliningInstances.size());
         for (auto& outliningInstance : outliningInstances) {
             _log.nest().debug("Number of instances in IR: {0}", outliningInstance.size());
-            for (auto& slice : outliningInstance) {
-                _log.nest().debug("Input values: {0}", slice.inputs.size());
+            for (const auto& p : outliningInstance | indexed) {
+                const auto& slice = p.value();
+                _log.nest().debug("Instance {0}", p.index());
+                _log.nest(2).debug("Input values: {0}", slice.inputs.size());
                 for (auto input : slice.inputs) {
-                    _log.nest(2).debug("{0}", input);
+                    _log.nest(3).debug("{0}", input);
                 }
-                _log.nest().debug("Output values: {0}", slice.outputs.size());
+                _log.nest(2).debug("Output values: {0}", slice.outputs.size());
                 for (auto output : slice.outputs) {
-                    _log.nest(2).debug("{0}", output);
+                    _log.nest(3).debug("{0}", output);
                 }
-                _log.nest().debug("Number of operations in slice: {0}", slice.operations.size());
+                _log.nest(2).debug("Number of operations in slice: {0}", slice.operations.size());
                 for (auto op : slice.operations) {
-                    _log.nest(2).debug("Operation {0} at {1}", op->getName(), op->getLoc());
+                    _log.nest(3).debug("Operation {0} at {1}", op->getName(), op->getLoc());
+                }
+                if (!slice.inputUserMapping.empty()) {
+                    _log.nest(2).debug("Input user mapping");
+                    for (const auto& [argIdx, user] : slice.inputUserMapping | indexed) {
+                        _log.nest(3).debug("Argument {0}, user operation {1}, operand {2}", argIdx,
+                                           user.first->getName(), user.second);
+                    }
                 }
             }
         }

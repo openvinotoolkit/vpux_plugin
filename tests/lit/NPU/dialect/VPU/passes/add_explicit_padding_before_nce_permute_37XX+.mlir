@@ -4,7 +4,7 @@
 //
 
 // RUN: vpux-opt --split-input-file  --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW" --add-explicit-padding-before-nce-permute %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
@@ -39,18 +39,15 @@ func.func @InsertExplicitPadding(%arg0:  tensor<1x166x1x16xf16>) -> tensor<1x160
 
     return %conv : tensor<1x160x1x1xf16, {order = #NHWC}>
 
-    // CHECK:       [[WEIGHTS:%.+]] = const.Declare tensor<160x176x1x3xf16, {order = #NHWC}>
-    // CHECK:       [[WEIGHTS_TABLE:%.+]] = const.Declare tensor<160x1x1x4xsi32>
+    // CHECK-DAG:       [[WEIGHTS:%.+]] = const.Declare tensor<160x176x1x3xf16, {order = #NHWC}>
+    // CHECK-DAG:       [[WEIGHTS_TABLE:%.+]] = const.Declare tensor<160x1x1x4xsi32>
+    // CHECK-DAG:       [[ZERO_CONST:%.+]] = const.Declare tensor<1x10x1x16xf16> = dense<0.000000e+00> : tensor<1x10x1x16xf16>
 
-    // CHECK:       [[PAD:%.+]] = VPU.Pad([[INPUT]])
-    // CHECK-SAME:      mode = #IE.pad_mode<CONSTANT>,
-    // CHECK-SAME:      pad_value_attr = 0.000000e+00 : f64,
-    // CHECK-SAME:      pads_begin_attr = [0, 0, 0, 0],
-    // CHECK-SAME:      pads_end_attr = [0, 10, 0, 0]}
-    // CHECK-SAME:      : tensor<1x166x1x16xf16>
-    // CHECK-SAME:  -> tensor<1x176x1x16xf16>
+    // CHECK:       [[CONCAT:%.+]] = VPU.Concat([[INPUT]], [[ZERO_CONST]])
+    // CHECK-SAME:      {per_axis = #IE.Concat<axis = 1 : i64>} :
+    // CHECK-SAME:      tensor<1x166x1x16xf16>, tensor<1x10x1x16xf16> -> tensor<1x176x1x16xf16>
 
-    // CHECK:       [[NCE_PERMUTE:%.+]]  = VPU.NCE.Permute([[PAD]])
+    // CHECK:       [[NCE_PERMUTE:%.+]]  = VPU.NCE.Permute([[CONCAT]])
     // CHECK-SAME:      dstElemType = f16, dstOrder = #NHWC,
     // CHECK-SAME:      expandedChannels = 176 : i64}
     // CHECK-SAME:  -> tensor<1x176x1x16xf16, {order = #NHWC}>

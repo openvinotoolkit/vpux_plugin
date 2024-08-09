@@ -257,13 +257,13 @@ AddressType vpux::Partitioner::useGap(size_t pos, AddressType alignedBegin, Addr
     const auto newGapLeft = alignedBegin - g.begin;
     const auto newGapRight = g.end - (alignedBegin + size);
 
-    if (newGapLeft == 0 && newGapRight == 0) {
+    if (bool allocFitsExactlyIntoThisGap = (newGapLeft == 0 && newGapRight == 0); allocFitsExactlyIntoThisGap) {
         _gaps.erase(_gaps.begin() + static_cast<ptrdiff_t>(pos));
-    } else if (newGapLeft > 0 && newGapRight == 0) {
+    } else if (bool allocIsAdjacentToRightBorder = (newGapLeft > 0 && newGapRight == 0); allocIsAdjacentToRightBorder) {
         g.end = alignedBegin;
-    } else if (newGapLeft == 0 && newGapRight > 0) {
+    } else if (bool allocIsAdjacentToLeftBorder = (newGapLeft == 0 && newGapRight > 0); allocIsAdjacentToLeftBorder) {
         g.begin = alignedBegin + size;
-    } else {
+    } else {  // add new gap
         const auto origBegin = g.begin;
         g.begin = alignedBegin + size;
         _gaps.insert(_gaps.begin() + static_cast<ptrdiff_t>(pos), Gap{origBegin, alignedBegin});

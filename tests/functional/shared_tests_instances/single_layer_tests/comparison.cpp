@@ -48,17 +48,10 @@ class ComparisonLayerTestCommon : public ComparisonLayerTest, virtual public Vpu
     }
 };
 
-class ComparisonLayerTest_NPU3700 : public ComparisonLayerTestCommon {};
-
 class ComparisonLayerTest_NPU3720 : public ComparisonLayerTestCommon {};
 class ComparisonLayerTest_Tiling_NPU3720 : public ComparisonLayerTestCommon {};
 
 class ComparisonLayerTest_NPU4000 : public ComparisonLayerTestCommon {};
-
-TEST_P(ComparisonLayerTest_NPU3700, HW) {
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
 
 TEST_P(ComparisonLayerTest_NPU3720, SW) {
     setReferenceSoftwareMode();
@@ -100,36 +93,6 @@ auto input_shape_converter = [](const std::vector<std::pair<ov::Shape, ov::Shape
     }
     return result;
 };
-
-//
-// NPU3700 Instantiation
-//
-
-// Shapes with more than 4 dimensions are not supported
-std::map<ov::Shape, std::vector<ov::Shape>> iShapes = {
-        {{5}, {{1}}},
-        {{5}, {{1}, {1, 1}, {2, 5}, {1, 1, 1}, {2, 2, 5}}},
-        {{2, 200}, {{1}, {200}, {1, 200}, {2, 200}, {2, 2, 200}}},
-        {{1, 3, 20}, {{20}, {2, 1, 1}}},
-        {{2, 17, 3, 4}, {{2, 1, 3, 4}}},
-};
-
-std::vector<ov::element::Type> modelType = {
-        ov::element::f32,
-};
-
-auto inputShapesStatic = input_shape_converter(combineParams(iShapes));
-const auto ComparisonTestParams_MLIR = ::testing::Combine(
-        ::testing::ValuesIn(static_shapes_to_test_representation(inputShapesStatic)),  // Input shapes tuple
-        ::testing::ValuesIn(comparisonOpTypes_MLIR),                                   // Comparison op type
-        ::testing::ValuesIn(secondInputTypes),                                         // Second input type
-        ::testing::ValuesIn(modelType),                                                // Model type
-        ::testing::Values(DEVICE_NPU),                                                 // Device name
-        ::testing::Values(additionalConfig)  // Additional network configuration
-);
-
-INSTANTIATE_TEST_CASE_P(smoke_CompareWithRefs, ComparisonLayerTest_NPU3700, ComparisonTestParams_MLIR,
-                        ComparisonLayerTest_NPU3700::getTestCaseName);
 
 //
 // NPU3720/4000 Instantiation

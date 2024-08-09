@@ -5,7 +5,6 @@
 
 #include "vpux/compiler/dialect/VPUASM/utils.hpp"
 #include "vpux/compiler/utils/ELF/utils.hpp"
-#include "vpux/compiler/utils/elf_utils.hpp"
 
 vpux::VPURT::BufferSection vpux::VPUASM::getBufferLocation(mlir::Operation* symTableOp, mlir::SymbolRefAttr symRef,
                                                            Logger log) {
@@ -24,7 +23,7 @@ vpux::VPURT::BufferSection vpux::VPUASM::getBufferLocation(mlir::Operation* symT
     } else {
         // TODO: E#98637
         // Until SymRef lookup & interpretation is fixed
-        log.warning("Potentially wrong buffer location for {0}", symRef);
+        log.trace("Potentially wrong buffer location for {0}", symRef);
         return VPURT::BufferSection::DDR;
     }
 }
@@ -42,7 +41,7 @@ vpux::VPURT::BufferSection vpux::VPUASM::getBufferLocation(ELF::SymbolReferenceM
     } else {
         // TODO: E#98637
         // Until SymRef lookup & interpretation is fixed
-        log.warning("Potentially wrong buffer location for {0}", symRef);
+        log.trace("Potentially wrong buffer location for {0}", symRef);
         return VPURT::BufferSection::DDR;
     }
 }

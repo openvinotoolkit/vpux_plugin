@@ -80,12 +80,17 @@ vpux::NDTypeInterface vpux::Const::ExpandDilatedAttr::inferOutputType(vpux::NDTy
     return getDilatedType(tensor, ShapeRef(dilations));
 }
 
+bool vpux::Const::ExpandDilatedAttr::inferOutputSplat(bool, vpux::NDTypeInterface) {
+    return false;
+}
+
 //
 // ExpandDilatedAttr::transform
 //
 
 Const::Content vpux::Const::ExpandDilatedAttr::transform(vpux::Const::Content& input) const {
-    auto output = Const::Content::allocTempBuffer(inferOutputType(input.getType()), input.getStorageElemType(), false);
+    auto output = Const::Content::allocTempBuffer(inferOutputType(input.getType()), input.getStorageElemType(),
+                                                  inferOutputSplat(input.isSplat(), input.getType()));
 
     output.fillWithZero();
 

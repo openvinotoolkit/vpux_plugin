@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW allow-custom-values=true" --strategy-manager %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX
+// REQUIRES: arch-NPU37XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
@@ -195,8 +195,8 @@ func.func @MaxPoolAssignedSOH(%arg0: tensor<1x32x112x112xf16, {order = #NHWC}>)-
 
 #NHWC = affine_map < (d0, d1, d2, d3)->(d0, d2, d3, d1)>
 
-// CHECK-LABEL: @MaxPoolAssignedClustering
-func.func @MaxPoolAssignedClustering(%arg0: tensor<1x32x1x1xf16, {order = #NHWC}>)->tensor<1x32x1x1xf16, {order = #NHWC}> {
+// CHECK-LABEL: @MaxPoolAssignedSOK
+func.func @MaxPoolAssignedSOK(%arg0: tensor<1x32x1x1xf16, {order = #NHWC}>)->tensor<1x32x1x1xf16, {order = #NHWC}> {
     %0 = VPU.NCE.MaxPool(%arg0) {
         pad = #VPU.Padding< left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64 >,
         strides = [ 1, 1 ], kernel_size = [ 1, 1 ]
@@ -205,7 +205,7 @@ func.func @MaxPoolAssignedClustering(%arg0: tensor<1x32x1x1xf16, {order = #NHWC}
    return %0 : tensor<1x32x1x1xf16, {order = #NHWC}>
 
     // CHECK:        [[VAL0:%.*]] = VPU.NCE.MaxPool(%arg0)
-    // CHECK-SAME:   multiClusterStrategy = #VPU.multi_cluster_strategy<Clustering>
+    // CHECK-SAME:   multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverKernel>
 
     // CHECK:        return [[VAL0]] : tensor<1x32x1x1xf16, {order = #NHWC}>
 }
@@ -277,7 +277,7 @@ func.func @SoftMaxAssignedClustering(%arg0 : tensor<1x4x1x512xf16, {order = #NCH
 
 // CHECK-LABEL: @InterpolateHalfPixelAssignedSOHOverlapped
 func.func @InterpolateHalfPixelAssignedSOHOverlapped(%arg0: tensor<1x1x96x160xf16>) -> tensor<1x1x192x320xf16> {
-    %0 = VPU.Interpolate(%arg0) {attr = #IE.Interpolate<antialias = false, coord_mode = <HALF_PIXEL>, cube_coeff = -7.500000e-01 : f64, mode = <LINEAR_ONNX>, nearest_mode = <ROUND_PREFER_FLOOR>, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], shape_calc_mode = <SIZES>>, axes_attr = [2, 3], operandSegmentSizes = array<i32: 1, 0, 0, 0>, scales_attr = [2.000000e+00, 2.000000e+00], sizes_attr = [192, 320]} : tensor<1x1x96x160xf16> -> tensor<1x1x192x320xf16>
+    %0 = VPU.Interpolate(%arg0) {attr = #IE.Interpolate<antialias = false, coord_mode = <HALF_PIXEL>, cube_coeff = -7.500000e-01 : f64, mode = <LINEAR_ONNX>, nearest_mode = <ROUND_PREFER_FLOOR>, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], shape_calc_mode = <SIZES>>, axes_attr = [2, 3], operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0>, scales_attr = [2.000000e+00, 2.000000e+00], sizes_attr = [192, 320]} : tensor<1x1x96x160xf16> -> tensor<1x1x192x320xf16>
     return %0 : tensor<1x1x192x320xf16>
     // CHECK:   [[INTERPOLATE:%.*]] = VPU.Interpolate(%arg0)
     // CHECK-SAME: multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeightOverlapped>
@@ -288,7 +288,7 @@ func.func @InterpolateHalfPixelAssignedSOHOverlapped(%arg0: tensor<1x1x96x160xf1
 
 // CHECK-LABEL: @InterpolateAlignCornersAssignedSOHOverlapped
 func.func @InterpolateAlignCornersAssignedSOHOverlapped(%arg0: tensor<1x1x96x160xf16>) -> tensor<1x1x192x320xf16> {
-    %0 = VPU.Interpolate(%arg0) {attr = #IE.Interpolate<antialias = false, coord_mode = <ALIGN_CORNERS>, cube_coeff = -7.500000e-01 : f64, mode = <LINEAR_ONNX>, nearest_mode = <ROUND_PREFER_FLOOR>, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], shape_calc_mode = <SIZES>>, axes_attr = [2, 3], operandSegmentSizes = array<i32: 1, 0, 0, 0>, scales_attr = [2.000000e+00, 2.000000e+00], sizes_attr = [192, 320]} : tensor<1x1x96x160xf16> -> tensor<1x1x192x320xf16>
+    %0 = VPU.Interpolate(%arg0) {attr = #IE.Interpolate<antialias = false, coord_mode = <ALIGN_CORNERS>, cube_coeff = -7.500000e-01 : f64, mode = <LINEAR_ONNX>, nearest_mode = <ROUND_PREFER_FLOOR>, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], shape_calc_mode = <SIZES>>, axes_attr = [2, 3], operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0>, scales_attr = [2.000000e+00, 2.000000e+00], sizes_attr = [192, 320]} : tensor<1x1x96x160xf16> -> tensor<1x1x192x320xf16>
     return %0 : tensor<1x1x192x320xf16>
     // CHECK:   [[INTERPOLATE:%.*]] = VPU.Interpolate(%arg0)
     // CHECK-SAME: multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeightOverlapped>
@@ -299,7 +299,7 @@ func.func @InterpolateAlignCornersAssignedSOHOverlapped(%arg0: tensor<1x1x96x160
 
 // CHECK-LABEL: @InterpolateAlignCornersAssignedClustering
 func.func @InterpolateAlignCornersAssignedClustering(%arg0: tensor<1x1x1x160xf16>) -> tensor<1x1x1x320xf16> {
-    %0 = VPU.Interpolate(%arg0) {attr = #IE.Interpolate<antialias = false, coord_mode = <ALIGN_CORNERS>, cube_coeff = -7.500000e-01 : f64, mode = <LINEAR_ONNX>, nearest_mode = <ROUND_PREFER_FLOOR>, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], shape_calc_mode = <SIZES>>, axes_attr = [2, 3], operandSegmentSizes = array<i32: 1, 0, 0, 0>, scales_attr = [1.000000e+00, 2.000000e+00], sizes_attr = [1, 320]} : tensor<1x1x1x160xf16> -> tensor<1x1x1x320xf16>
+    %0 = VPU.Interpolate(%arg0) {attr = #IE.Interpolate<antialias = false, coord_mode = <ALIGN_CORNERS>, cube_coeff = -7.500000e-01 : f64, mode = <LINEAR_ONNX>, nearest_mode = <ROUND_PREFER_FLOOR>, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], shape_calc_mode = <SIZES>>, axes_attr = [2, 3], operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0>, scales_attr = [1.000000e+00, 2.000000e+00], sizes_attr = [1, 320]} : tensor<1x1x1x160xf16> -> tensor<1x1x1x320xf16>
     return %0 : tensor<1x1x1x320xf16>
     // CHECK:   [[INTERPOLATE:%.*]] = VPU.Interpolate(%arg0)
     // CHECK-SAME: multiClusterStrategy = #VPU.multi_cluster_strategy<Clustering>
@@ -310,7 +310,7 @@ func.func @InterpolateAlignCornersAssignedClustering(%arg0: tensor<1x1x1x160xf16
 
 // CHECK-LABEL: @InterpolatePytorchHalfPixelAssignedSOHOverlapped
 func.func @InterpolatePytorchHalfPixelAssignedSOHOverlapped(%arg0: tensor<1x1x96x160xf16>) -> tensor<1x1x192x320xf16> {
-    %0 = VPU.Interpolate(%arg0) {attr = #IE.Interpolate<antialias = false, coord_mode = <PYTORCH_HALF_PIXEL>, cube_coeff = -7.500000e-01 : f64, mode = <LINEAR_ONNX>, nearest_mode = <ROUND_PREFER_FLOOR>, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], shape_calc_mode = <SIZES>>, axes_attr = [2, 3], operandSegmentSizes = array<i32: 1, 0, 0, 0>, scales_attr = [2.000000e+00, 2.000000e+00], sizes_attr = [192, 320]} : tensor<1x1x96x160xf16> -> tensor<1x1x192x320xf16>
+    %0 = VPU.Interpolate(%arg0) {attr = #IE.Interpolate<antialias = false, coord_mode = <PYTORCH_HALF_PIXEL>, cube_coeff = -7.500000e-01 : f64, mode = <LINEAR_ONNX>, nearest_mode = <ROUND_PREFER_FLOOR>, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], shape_calc_mode = <SIZES>>, axes_attr = [2, 3], operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0>, scales_attr = [2.000000e+00, 2.000000e+00], sizes_attr = [192, 320]} : tensor<1x1x96x160xf16> -> tensor<1x1x192x320xf16>
     return %0 : tensor<1x1x192x320xf16>
     // CHECK:   [[INTERPOLATE:%.*]] = VPU.Interpolate(%arg0)
     // CHECK-SAME: multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeightOverlapped>

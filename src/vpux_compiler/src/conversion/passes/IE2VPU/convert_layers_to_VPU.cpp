@@ -289,8 +289,9 @@ mlir::LogicalResult InterpolateRewrite::matchAndRewrite(IE::InterpolateOp origOp
                                                         mlir::PatternRewriter& rewriter) const {
     rewriter.replaceOpWithNewOp<VPU::InterpolateOp>(
             origOp, origOp.getType(), origOp.getInput(), origOp.getSizes(), origOp.getScales(), origOp.getAxes(),
-            origOp.getSizesAttrAttr(), origOp.getScalesAttrAttr(), origOp.getAxesAttrAttr(),
-            origOp.getTileOffsetAttrAttr(), origOp.getInitialInputDimsAttrAttr(), origOp.getInitialOutputDimsAttrAttr(),
+            /*coordinates*/ nullptr, /* lambdas */ nullptr, origOp.getSizesAttrAttr(), origOp.getScalesAttrAttr(),
+            origOp.getAxesAttrAttr(), origOp.getTileOffsetAttrAttr(), origOp.getInitialInputDimsAttrAttr(),
+            origOp.getInitialOutputDimsAttrAttr(),
             /*initial_input_offset_attr=*/nullptr, /*initial_output_offset_attr=*/nullptr,
             /*multiClusterStrategy=*/nullptr, origOp.getAttrAttr());
     return mlir::success();
@@ -343,6 +344,19 @@ mlir::LogicalResult NormalizeL2Rewrite::matchAndRewrite(IE::NormalizeL2Op origOp
     return mlir::success();
 }
 
+//
+// LSTMGatesRewrite
+//
+
+mlir::LogicalResult LSTMGatesRewrite::matchAndRewrite(IE::LSTMGatesOp origOp, mlir::PatternRewriter& rewriter) const {
+    _log.trace("Found LSTMGates Operation '{0}'", origOp->getLoc());
+
+    rewriter.replaceOpWithNewOp<VPU::LSTMGatesOp>(origOp, origOp.getGatesInput(), origOp.getInitialCellState(),
+                                                  /*multiClusterStrategy=*/nullptr);
+
+    return mlir::success();
+}
+
 namespace {
 
 //
@@ -388,6 +402,7 @@ void ConvertLayers2VPUPass::safeRunOnFunc() {
     patterns.add<TopKRewrite>(&ctx, _log);
     patterns.add<TransposedConvRewrite>(&ctx, _log);
     patterns.add<NormalizeL2Rewrite>(&ctx, _log);
+    patterns.add<LSTMGatesRewrite>(&ctx, _log);
     populateWithGenerated(patterns);
 
     if (mlir::failed(mlir::applyFullConversion(func, target, std::move(patterns)))) {

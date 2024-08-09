@@ -40,6 +40,7 @@ def VPURegMapped_RegFieldDataType :
             I64EnumAttrCase<"UINT", 0>,
             I64EnumAttrCase<"SINT", 1>,
             I64EnumAttrCase<"FP",   2>,
+            I64EnumAttrCase<"BF",   3>,
         ]
     > {
 }
@@ -126,5 +127,39 @@ def VPURegMapped_TaskType :
 }
 
 def VPURegMapped_TaskTypeAttr : VPURegMapped_EnumAttr<VPURegMapped_TaskType, "task_type">;
+
+//
+// TaskGroupAttr
+//
+
+def VPURegMapped_TaskGroupAttr : VPURegMapped_Attr<"TaskGroup"> {
+    let description = [{
+        This object represents a task group (tasks of the same type) mapped to the memory layout.
+        The task group is described using the following parameters:
+            * realSize - the actual (total) count of tasks of a specific type for a specific tile & list
+            * declaredSize - the expected count of tasks (=capacity of list of tasks in memory), either default-valued or computed by compiler
+            * offset - numeric offset with respect to the start of CMX area that stores the tasks for that specific tile
+            * binaryElementSize - size in bytes of a specific task
+
+        Having all this info, the offset of any task (with any index) can be computed statically.
+
+        Example IR representation:
+
+        ```mlir
+        #VPURegMapped.TaskGroup<dynamicTaskListSize(512 : ui64), staticTaskListSize(64 : ui64), startOffset(53760 : ui64), binaryTaskSize(96 : ui64)>
+        ```
+    }];
+
+    let cppNamespace = "vpux::VPURegMapped";
+
+    let parameters = (ins
+        "mlir::IntegerAttr":$dynamicSize,
+        "mlir::IntegerAttr":$staticSize,
+        "mlir::IntegerAttr":$offset,
+        "mlir::IntegerAttr":$binaryElementSize
+    );
+
+    let assemblyFormat = "`<` `dynamicTaskListSize` `(` $dynamicSize `)` `,` `staticTaskListSize` `(` $staticSize `)` `,` `startOffset` `(` $offset `)` `,` `binaryTaskSize` `(` $binaryElementSize `)` `>`";
+}
 
 #endif

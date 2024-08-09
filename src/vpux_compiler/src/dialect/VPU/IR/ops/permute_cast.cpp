@@ -17,11 +17,12 @@ using namespace vpux;
 mlir::LogicalResult vpux::VPU::PermuteCastOp::inferReturnTypes(mlir::MLIRContext* ctx,
                                                                std::optional<mlir::Location> optLoc,
                                                                mlir::ValueRange operands, mlir::DictionaryAttr attrs,
-                                                               mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+                                                               mlir::OpaqueProperties prop,
+                                                               mlir::RegionRange /*regions*/,
                                                                mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::PermuteCastOpAdaptor permuteCast(operands, attrs);
+    VPU::PermuteCastOpAdaptor permuteCast(operands, attrs, prop);
     if (mlir::failed(permuteCast.verify(loc))) {
         return mlir::failure();
     }
@@ -49,25 +50,19 @@ mlir::FailureOr<VPU::DistributedTypeInterface> vpux::VPU::PermuteCastOp::inferCa
         return mlir::failure();
     }
     const auto ctx = getContext();
-    const auto origDistribution = inDistributedType.getDistribution();
     const auto srcType = getInput().getType().cast<NDTypeInterface>();
     const auto dstType = getOutput().getType().cast<NDTypeInterface>();
 
     auto castedOutputDistribution =
-            applyPermutationOnDistributedTensorAttr(origDistribution, getMemPerm(), srcType.getDimsOrder(),
+            applyPermutationOnDistributedTensorAttr(inDistributedType, getMemPerm(), srcType.getDimsOrder(),
                                                     dstType.getDimsOrder(), srcType.getShape(), dstType.getShape());
-    if (isSegmentedLikeMode(inDistributedType)) {
-        auto legalizeDistribution = legalizeCastedDistribution(castedOutputDistribution, ctx);
-        if (mlir::failed(legalizeDistribution)) {
-            return mlir::failure();
-        }
-
-        castedOutputDistribution = legalizeDistribution.value();
+    if (mlir::failed(castedOutputDistribution)) {
+        return mlir::failure();
     }
 
     const auto dstDimsOrderAttr = mlir::AffineMapAttr::get(dstType.getDimsOrder().toAffineMap(ctx));
     const auto newDistributionType =
             DistributedTensorType::get(ctx, dstType.getShape().raw(), dstType.getElementType(), dstDimsOrderAttr,
-                                       inDistributedType.getMemSpace(), castedOutputDistribution);
+                                       inDistributedType.getMemSpace(), castedOutputDistribution.value());
     return newDistributionType.cast<VPU::DistributedTypeInterface>();
 }

@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --vpu-arch=%arch% --barrier-computation-VPUMI40XX %s | FileCheck %s
-// REQUIRES: arch-VPUX40XX
+// REQUIRES: arch-NPU40XX
 
 module @Test attributes {VPU.arch = #VPU.arch_kind<NPU40XX>} {
 IE.ExecutorResource 1 of @DMA_NN

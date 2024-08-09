@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --uniquify-branches %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 func.func @MoveExpandBeforeMultipleSlices(%arg0: tensor<2x70x4x4xf16>, %arg1: tensor<16x80x1x1xf16>) -> tensor<2x16x4x4xf16> {
     %0 = IE.Slice %arg0 [0, 0, 0, 0] [1, 70, 4, 4] : tensor<2x70x4x4xf16> to tensor<1x70x4x4xf16>

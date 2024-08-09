@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --remove-quantdequant-seq %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 !qElemType = !quant.uniform<u8<1:255>:f16:0, {0.010680671751968504:128,0.0081200787401574797:128,0.010596087598425197:128}>
 !qElemType1 = !quant.uniform<u8:f16, 1.1534313725490195:128>
@@ -67,3 +67,25 @@ func.func @RemoveQuantReshapeDequantMaxPool(%arg0: tensor<1x64x40x112x112xf16>) 
     //CHECK: return [[MAXPOOL]] : tensor<1x64x40x112x112xf16>
 }
 
+// CHECK-LABEL: @DontRemoveQuantDequantSeqForConcat
+// CHECK-SAME: ([[INPUT0:%.+]]: tensor<1x12800x2x1xf16>, [[INPUT1:%.+]]: tensor<1x3200x2x1xf16>, [[INPUT2:%.+]]: tensor<1x800x2x1xf16>)
+func.func @DontRemoveQuantDequantSeqForConcat(%arg0: tensor<1x12800x2x1xf16>, %arg1: tensor<1x3200x2x1xf16>, %arg2: tensor<1x800x2x1xf16>) -> tensor<1x16800x2x1xf16> {
+  %0 = IE.Quantize(%arg0) {dstElemType = !quant.uniform<u8:f16, 0.0039215686274509803>} : tensor<1x12800x2x1xf16> -> tensor<1x12800x2x1x!quant.uniform<u8:f16, 0.0039215686274509803>>
+  %1 = IE.Quantize(%arg1) {dstElemType = !quant.uniform<u8:f16, 0.0039215686274509803>} : tensor<1x3200x2x1xf16> -> tensor<1x3200x2x1x!quant.uniform<u8:f16, 0.0039215686274509803>>
+  %2 = IE.Quantize(%arg2) {dstElemType = !quant.uniform<u8:f16, 0.0039215686274509803>} : tensor<1x800x2x1xf16> -> tensor<1x800x2x1x!quant.uniform<u8:f16, 0.0039215686274509803>>
+  %3 = IE.Concat(%0, %1, %2) {static_offsets = [[0, 0, 0, 0], [0, 12800, 0, 0], [0, 16000, 0, 0]]} : tensor<1x12800x2x1x!quant.uniform<u8:f16, 0.0039215686274509803>>, tensor<1x3200x2x1x!quant.uniform<u8:f16, 0.0039215686274509803>>, tensor<1x800x2x1x!quant.uniform<u8:f16, 0.0039215686274509803>> -> tensor<1x16800x2x1x!quant.uniform<u8:f16, 0.0039215686274509803>>
+  %4 = IE.Dequantize(%3) {dstElemType = f16} : tensor<1x16800x2x1x!quant.uniform<u8:f16, 0.0039215686274509803>> -> tensor<1x16800x2x1xf16>
+  return %4 : tensor<1x16800x2x1xf16>
+
+  //CHECK: [[VAL0:%.+]] = IE.Quantize([[INPUT0]])
+  //CHECK: {dstElemType = !qElemType3} : tensor<1x12800x2x1xf16> -> tensor<1x12800x2x1x!qElemType3>
+  //CHECK: [[VAL1:%.+]] = IE.Quantize([[INPUT1]])
+  //CHECK: {dstElemType = !qElemType3} : tensor<1x3200x2x1xf16> -> tensor<1x3200x2x1x!qElemType3>
+  //CHECK: [[VAL2:%.+]] = IE.Quantize([[INPUT2]])
+  //CHECK: {dstElemType = !qElemType3} : tensor<1x800x2x1xf16> -> tensor<1x800x2x1x!qElemType3>
+  //CHECK: [[VAL3:%.+]] = IE.Concat([[VAL0]], [[VAL1]], [[VAL2]])
+  //CHECK-SAME{LITERAL}: {static_offsets = [[0, 0, 0, 0], [0, 12800, 0, 0], [0, 16000, 0, 0]]} : tensor<1x12800x2x1x!qElemType3>, tensor<1x3200x2x1x!qElemType3>, tensor<1x800x2x1x!qElemType3> -> tensor<1x16800x2x1x!qElemType3>
+  //CHECK: [[VAL4:%.+]] = IE.Dequantize([[VAL3]])
+  //CHECK: {dstElemType = f16} : tensor<1x16800x2x1x!qElemType3> -> tensor<1x16800x2x1xf16>
+  //CHECK: return [[VAL4]]
+}

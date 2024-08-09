@@ -14,11 +14,11 @@ using namespace VPU;
 mlir::LogicalResult vpux::VPU::ShapeCastOp::inferReturnTypes(mlir::MLIRContext* ctx,
                                                              std::optional<mlir::Location> optLoc,
                                                              mlir::ValueRange operands, mlir::DictionaryAttr attrs,
-                                                             mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+                                                             mlir::OpaqueProperties prop, mlir::RegionRange /*regions*/,
                                                              mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::ShapeCastOpAdaptor shapeCast(operands, attrs);
+    VPU::ShapeCastOpAdaptor shapeCast(operands, attrs, prop);
     if (mlir::failed(shapeCast.verify(loc))) {
         return mlir::failure();
     }

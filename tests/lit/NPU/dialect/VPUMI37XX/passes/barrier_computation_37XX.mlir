@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --barrier-computation-VPUMI37XX %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX
+// REQUIRES: arch-NPU37XX
 
 module @Test {
 
@@ -15,7 +15,6 @@ IE.CNNNetwork entryPoint : @main inputsInfo :  {
 }
 
 func.func @main(%arg0: memref<1x1x2x1000xf16>, %arg1: memref<1x1x2x1000xf16>) -> memref<1x1x2x1000xf16> {
-    // this is the most simple lit test that could be constructed (VPUX30XX arch to be used in order to only have 32 barriers)
 
     %buffer = VPURT.DeclareBuffer <DDR> <0> -> memref<1x1x2x1000xf16, @DDR>
     %buffer1 = VPURT.DeclareBuffer <DDR> <4000> -> memref<1x1x2x1000xf16, @DDR>

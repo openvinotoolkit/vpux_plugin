@@ -251,9 +251,10 @@ mlir::LogicalResult LayerRewriterBase::matchAndRewrite(mlir::ViewLikeOpInterface
             auto inPermuteType = permuteCast->getOperand(0).getType().cast<vpux::NDTypeInterface>();
             auto outPermuteType = permuteCast->getResult(0).getType().cast<vpux::NDTypeInterface>();
 
-            return applyPermutationOnDistributedTensorAttr(origDistribution, permuteCast.getMemPerm(),
+            return applyPermutationOnDistributedTensorAttr(distributedType, permuteCast.getMemPerm(),
                                                            inPermuteType.getDimsOrder(), outPermuteType.getDimsOrder(),
-                                                           inPermuteType.getShape(), outPermuteType.getShape());
+                                                           inPermuteType.getShape(), outPermuteType.getShape())
+                    .value();
         }
 
         const bool isShapeChangeOp = mlir::isa<VPUIP::ShapeCastOp, VPUIP::GenericReshapeOp>(origOp);

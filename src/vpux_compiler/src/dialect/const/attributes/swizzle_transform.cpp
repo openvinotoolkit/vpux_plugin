@@ -148,6 +148,10 @@ vpux::NDTypeInterface vpux::Const::SwizzleConstantAttr::inferOutputType(vpux::ND
     }
 }
 
+bool vpux::Const::SwizzleConstantAttr::inferOutputSplat(bool, vpux::NDTypeInterface) {
+    return false;
+}
+
 //
 // SwizzleConstantAttr::transform
 //
@@ -163,7 +167,8 @@ Const::Content vpux::Const::SwizzleConstantAttr::transform(vpux::Const::Content&
     auto inputTotalSize = checked_cast<size_t>(input.getType().getTotalAllocSize().count());
     auto newSize = checked_cast<size_t>(
             alignSizeForSwizzling(input.getType().getTotalAllocSize().count(), getSizeAlignmentForSwizzling(archKind)));
-    auto output = Const::Content::allocTempBuffer(outputType, outputType.getElementType(), false, newSize);
+    auto output = Const::Content::allocTempBuffer(outputType, outputType.getElementType(),
+                                                  inferOutputSplat(input.isSplat(), input.getType()), newSize);
 
     auto swizzledBuffer = output.getRawTempBuf();
 

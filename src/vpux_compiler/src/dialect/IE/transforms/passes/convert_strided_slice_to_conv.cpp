@@ -8,7 +8,7 @@
 #include "vpux/compiler/core/layers.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/utils/slice_utils.hpp"
-#include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/attributes_utils.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
@@ -45,18 +45,24 @@ IE::ConvolutionOp createStridedSliceConv(mlir::Value input, mlir::ArrayRef<int64
         weightsVals[index] = 1.0f;
     }
 
+    const auto origOutType = input.getType().cast<vpux::NDTypeInterface>();
     const DimsOrder weightOrder = DimsOrder::OIYX;
-    auto weights = VPU::buildWeightsConst(ShapeRef(weightShape), weightOrder, ArrayRef(weightsVals), input, rewriter);
+    const auto weightType =
+            mlir::RankedTensorType::get(weightShape.raw(), origOutType.getElementType(),
+                                        getTensorAttr(rewriter.getContext(), weightOrder, nullptr, nullptr));
+    auto weights = Const::buildWeightsConst(rewriter, input.getLoc(), weightType, ArrayRef(weightsVals));
     const auto dataStorageType = mlir::RankedTensorType::get(to_small_vector(weightShape), elemType);
     // Insert a fake quantize operation after the kernel when necessary.
     if (inputFQ != nullptr) {
         const auto fqArgType = mlir::RankedTensorType::get({}, elemType);
-        auto fqLevelsVal =
-                getIntAttr(rewriter, 255);  // the created FQ is artificial, levels are set to 255 in correlation
-                                            // with FQ range from 0.0f to 254.0f (255 integer values)
-        auto fqLowVal = VPU::declareFloatConst(rewriter, loc, 0.0f, fqArgType);
-        auto fqInHighVal = VPU::declareFloatConst(rewriter, loc, 254.0f, fqArgType);
-        auto fqOutHighVal = VPU::declareFloatConst(rewriter, loc, 254.0f, fqArgType);
+
+        // the created FQ is artificial, levels are set to 255 in correlation with FQ range from 0.0f to 254.0f (255
+        // integer values)
+        auto fqLevelsVal = inputFQ.getLowFpType().has_value() ? nullptr : getIntAttr(rewriter, 255);
+
+        auto fqLowVal = Const::createFloatConst(rewriter, loc, fqArgType, 0.0f);
+        auto fqInHighVal = Const::createFloatConst(rewriter, loc, fqArgType, 254.0f);
+        auto fqOutHighVal = Const::createFloatConst(rewriter, loc, fqArgType, 254.0f);
 
         auto quantizationForWeights = rewriter.create<IE::FakeQuantizeOp>(
                 loc, dataStorageType, weights, fqLowVal, fqInHighVal, fqLowVal, fqOutHighVal, fqLevelsVal,
@@ -67,7 +73,6 @@ IE::ConvolutionOp createStridedSliceConv(mlir::Value input, mlir::ArrayRef<int64
     // IE::ConvolutionOp output type inference sets NCHW output order.
     // Specify convolution output type explicitly.
 
-    const auto origOutType = input.getType().cast<vpux::NDTypeInterface>();
     const auto grpConvOutType = origOutType.changeShape(outShape);
 
     auto newLoc = appendLoc(loc, "_strided_slice_Conv_1_1");
@@ -97,20 +102,24 @@ IE::ConvolutionOp createParallelStridedSliceToConv(mlir::Value input, mlir::Arra
 
     const auto weightShape = Shape{outputChannel, inShape[Dims4D::Act::C], strides[2], strides[3]};
 
-    const DimsOrder weightOrder = DimsOrder::OIYX;
-    auto weights = VPU::buildWeightsConst(ShapeRef(weightShape), weightOrder, ArrayRef(weightsVal), input, rewriter);
     const auto elemType = input.getType().cast<vpux::NDTypeInterface>().getElementType();
+    const DimsOrder weightOrder = DimsOrder::OIYX;
+    const auto weightType = mlir::RankedTensorType::get(
+            weightShape.raw(), elemType, getTensorAttr(rewriter.getContext(), weightOrder, nullptr, nullptr));
+    auto weights = Const::buildWeightsConst(rewriter, input.getLoc(), weightType, ArrayRef(weightsVal));
 
     const auto dataStorageType = mlir::RankedTensorType::get(to_small_vector(weightShape), elemType);
 
     if (inputFQ != nullptr) {
         const auto fqArgType = mlir::RankedTensorType::get({}, elemType);
-        auto fqLevelsVal =
-                getIntAttr(rewriter, 255);  // the created FQ is artificial, levels are set to 255 in correlation
-                                            // with FQ range from 0.0f to 254.0f (255 integer values)
-        auto fqLowVal = VPU::declareFloatConst(rewriter, loc, 0.0f, fqArgType);
-        auto fqInHighVal = VPU::declareFloatConst(rewriter, loc, 254.0f, fqArgType);
-        auto fqOutHighVal = VPU::declareFloatConst(rewriter, loc, 254.0f, fqArgType);
+
+        // the created FQ is artificial, levels are set to 255 in correlation with FQ range from 0.0f to 254.0f (255
+        // integer values)
+        auto fqLevelsVal = inputFQ.getLowFpType().has_value() ? nullptr : getIntAttr(rewriter, 255);
+
+        auto fqLowVal = Const::createFloatConst(rewriter, loc, fqArgType, 0.0f);
+        auto fqInHighVal = Const::createFloatConst(rewriter, loc, fqArgType, 254.0f);
+        auto fqOutHighVal = Const::createFloatConst(rewriter, loc, fqArgType, 254.0f);
 
         auto quantizationForWeights = rewriter.create<IE::FakeQuantizeOp>(
                 loc, dataStorageType, weights, fqLowVal, fqInHighVal, fqLowVal, fqOutHighVal, fqLevelsVal,

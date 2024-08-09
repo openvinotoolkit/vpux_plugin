@@ -62,12 +62,12 @@ bool vpux::VPU::isNCEEltwiseSupported(VPU::ArchKind arch, vpux::NDTypeInterface 
     }
 
     if (checkChannelAlignment) {
-        if (!NCEInvariant::isInputActTypeSupported(arch, input1Type,
-                                                   NCEEltwiseOp::getInputChannelAlignmentImpl(input1Type), false) ||
-            !NCEInvariant::isInputActTypeSupported(arch, input2Type,
-                                                   NCEEltwiseOp::getInputChannelAlignmentImpl(input2Type), false) ||
-            !NCEInvariant::isOutputActTypeSupported(outputType,
-                                                    NCEEltwiseOp::getOutputChannelAlignmentImpl(outputType))) {
+        if (!NCEInvariant::isInputActTypeSupported(
+                    arch, input1Type, vpux::VPU::NCEInvariant::getAlignment(input1Type.getElementType()), false) ||
+            !NCEInvariant::isInputActTypeSupported(
+                    arch, input2Type, vpux::VPU::NCEInvariant::getAlignment(input2Type.getElementType()), false) ||
+            !NCEInvariant::isOutputActTypeSupported(
+                    outputType, vpux::VPU::NCEInvariant::getAlignment(outputType.getElementType()))) {
             logCb(formatv("Misaligned tensor shape"));
             return false;
         }

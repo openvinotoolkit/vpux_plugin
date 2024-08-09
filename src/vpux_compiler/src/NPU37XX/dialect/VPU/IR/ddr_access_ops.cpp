@@ -14,10 +14,10 @@ using namespace vpux;
 namespace {
 
 //
-// DDRAccessOpModel
+// DDRAccessGatherOpModel
 //
 
-class DDRAccessOpModel final : public VPU::DDRAccessOpInterface::FallbackModel<DDRAccessOpModel> {
+class DDRAccessGatherOpModel final : public VPU::DDRAccessOpInterface::FallbackModel<DDRAccessGatherOpModel> {
 public:
     bool isDDRAccessNecessaryOrBeneficial(mlir::Operation* op, Logger log) const {
         auto gatherOp = mlir::dyn_cast<VPU::GatherOp>(op);
@@ -36,7 +36,10 @@ public:
             return true;
         }
 
-        // DDR access is preferred for Gather layer with large input but small output
+        // "DDR Access" is preferred for scenarios with large inputs and small outputs
+        // If the Output buffer exceeds CMX memory size, memory allocation follows:
+        // Input (DDR) + Indices (CMX) -> Output (DDR)
+        // Experiments indicate significant performance degradation (E#123794 for details)
         int64_t batchDims = 0;
         const auto batchDimAttr = gatherOp.getBatchDimsAttr();
         if (batchDimAttr != nullptr) {
@@ -44,17 +47,63 @@ public:
         }
 
         const auto indicesType = gatherOp.getIndices().getType().cast<vpux::NDTypeInterface>();
-        const auto indicesShape = indicesType.getShape().raw();
-        const auto indicesRank = indicesShape.size();
+        const auto indicesRank = indicesType.getShape().size();
         if (batchDims == 0 && axisValue == 0 && indicesRank == 2) {
-            if (inputShape[axisValue] / (indicesShape[indicesRank - 1]) >= DDR_ACCESS_GATHER_IO_RATIO) {
-                log.nest(1).trace("Gather layer {0} has large input size but small output size, DDR access "
-                                  "is preferred for better performance.",
+            const auto outputType = gatherOp.getOutput().getType().cast<vpux::NDTypeInterface>();
+            const auto outputByteSize = outputType.getElemTypeSize().to<Byte>().count();
+            const auto isBeneficialScenario = (inputType.getShape().totalSize() * inputByteSize) > cmxAvailableBytes &&
+                                              (outputType.getShape().totalSize() * outputByteSize) < cmxAvailableBytes;
+            if (isBeneficialScenario) {
+                log.nest(1).trace("Gather layer {0} has large input and output buffer in CMX, DDR Access is preferred "
+                                  "for better performance.",
                                   gatherOp);
                 return true;
             }
         }
 
+        return false;
+    }
+};
+
+//
+// DDRAccessGRUSequenceOpModel
+//
+
+class DDRAccessGRUSequenceOpModel final : public VPU::DDRAccessOpInterface::FallbackModel<DDRAccessGRUSequenceOpModel> {
+public:
+    bool isDDRAccessNecessaryOrBeneficial(mlir::Operation* op, Logger log) const {
+        auto gruSequenceOp = mlir::dyn_cast<VPU::GRUSequenceOp>(op);
+        auto outputShape = gruSequenceOp.getMiddleHiddenState().getType().cast<vpux::NDTypeInterface>().getShape();
+        Shape minShapeAfterTiling(outputShape.size(), 1);
+        minShapeAfterTiling[Dim(3)] = outputShape[Dim(3)];
+        auto iface = mlir::dyn_cast<VPU::TilingInfoOpInterface>(op);
+        if (!iface.isSupportedTiling({TileInfo(minShapeAfterTiling)}, TilingMode::ISOLATED, log.nest())) {
+            log.nest(1).trace("Can't still fit into CMX after tiling.DDR access will be used for GRUSequenceOp.");
+            return true;
+        }
+        return false;
+    }
+};
+
+//
+// DDRAccessGRUSequenceLastPartOpModel
+//
+
+class DDRAccessGRUSequenceLastPartOpModel final :
+        public VPU::DDRAccessOpInterface::FallbackModel<DDRAccessGRUSequenceLastPartOpModel> {
+public:
+    bool isDDRAccessNecessaryOrBeneficial(mlir::Operation* op, Logger log) const {
+        auto gruSequenceLastPartOp = mlir::dyn_cast<VPU::GRUSequenceLastPartOp>(op);
+        auto outputShape =
+                gruSequenceLastPartOp.getMiddleHiddenState().getType().cast<vpux::NDTypeInterface>().getShape();
+        Shape minShapeAfterTiling(outputShape.size(), 1);
+        minShapeAfterTiling[Dim(3)] = outputShape[Dim(3)];
+        auto iface = mlir::dyn_cast<VPU::TilingInfoOpInterface>(op);
+        if (!iface.isSupportedTiling({TileInfo(minShapeAfterTiling)}, TilingMode::ISOLATED, log.nest())) {
+            log.nest(1).trace(
+                    "Can't still fit into CMX after tiling.DDR access will be used for GRUSequenceLastPartOp.");
+            return true;
+        }
         return false;
     }
 };
@@ -67,6 +116,8 @@ public:
 
 void vpux::VPU::arch37xx::registerDDRAccessOpModelInterface(mlir::DialectRegistry& registry) {
     registry.addExtension(+[](mlir::MLIRContext* ctx, VPU::VPUDialect*) {
-        VPU::GatherOp::attachInterface<DDRAccessOpModel>(*ctx);
+        VPU::GatherOp::attachInterface<DDRAccessGatherOpModel>(*ctx);
+        VPU::GRUSequenceOp::attachInterface<DDRAccessGRUSequenceOpModel>(*ctx);
+        VPU::GRUSequenceLastPartOp::attachInterface<DDRAccessGRUSequenceLastPartOpModel>(*ctx);
     });
 }

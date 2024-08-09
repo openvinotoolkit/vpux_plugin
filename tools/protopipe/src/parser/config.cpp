@@ -222,6 +222,19 @@ struct convert<Cosine::Ptr> {
 };
 
 template <>
+struct convert<NRMSE::Ptr> {
+    static bool decode(const Node& node, NRMSE::Ptr& metric) {
+        // NB: If bigger than tolerance - fail.
+        if (!node["tolerance"]) {
+            THROW_ERROR("Metric \"nrmse\" must have \"tolerance\" attribute!");
+        }
+        const auto tolerance = node["tolerance"].as<double>();
+        metric = std::make_shared<NRMSE>(tolerance);
+        return true;
+    }
+};
+
+template <>
 struct convert<IAccuracyMetric::Ptr> {
     static bool decode(const Node& node, IAccuracyMetric::Ptr& metric) {
         const auto type = node["name"].as<std::string>();
@@ -229,6 +242,8 @@ struct convert<IAccuracyMetric::Ptr> {
             metric = node.as<Norm::Ptr>();
         } else if (type == "cosine") {
             metric = node.as<Cosine::Ptr>();
+        } else if (type == "nrmse") {
+            metric = node.as<NRMSE::Ptr>();
         } else {
             THROW_ERROR("Unsupported metric type: " << type);
         }
@@ -339,7 +354,18 @@ struct convert<OpenVINOParams> {
 template <>
 struct convert<ONNXRTParams::OpenVINO> {
     static bool decode(const Node& node, ONNXRTParams::OpenVINO& ov_ep) {
-        ov_ep.device_type = node["device_type"].as<std::string>();
+        if (node["params"]) {
+            ov_ep.params_map = node["params"].as<std::map<std::string, std::string>>();
+        }
+        if (node["device_type"]) {
+            std::string device_type = node["device_type"].as<std::string>();
+            // Check if device_type already exists in params_map (collision check)
+            if (ov_ep.params_map.count("device_type") > 0) {
+                THROW_ERROR("Configuration error: 'device_type' has already been specified in the params.");
+            } else {
+                ov_ep.params_map["device_type"] = device_type;
+            }
+        }
         return true;
     }
 };
@@ -362,6 +388,9 @@ struct convert<ONNXRTParams> {
     static bool decode(const Node& node, ONNXRTParams& params) {
         // FIXME: Worth to separate these two
         params.model_path = node["name"] ? node["name"].as<std::string>() : node["path"].as<std::string>();
+        if (node["session_options"]) {
+            params.session_options = node["session_options"].as<std::map<std::string, std::string>>();
+        }
         if (node["ep"]) {
             params.ep = node["ep"].as<ONNXRTParams::EP>();
         }

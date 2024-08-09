@@ -62,25 +62,27 @@ mlir::Value reduceWeightsConstant(VPUIP::NCEClusterTaskOp nceOp, VPUIP::CopyOp w
 
         auto distributedAttr = oldDistrType.getDistribution();
         if (VPU::isDistributedAttrWithExplicitShapesAndOffsets(distributedAttr)) {
-            auto perClusterMemoryShapes = vpux::getIntArrayOfArray(
-                    oldDistrType.getContext(),
-                    VPU::getPerClusterMemoryShapes(weightsCopyOutputType.getShape(), distributedAttr).value());
-            auto perClusterMemoryOffsets = vpux::getIntArrayOfArray(
-                    oldDistrType.getContext(),
-                    VPU::getPerClusterMemoryShapeOffsets(weightsCopyOutputType.getShape(), distributedAttr));
-            auto perClusterComputeShapes = vpux::getIntArrayOfArray(
-                    oldDistrType.getContext(),
-                    VPU::getPerClusterComputeShapes(weightsCopyOutputType.getShape(), distributedAttr));
-            auto perClusterComputeOffsets = vpux::getIntArrayOfArray(
-                    oldDistrType.getContext(),
-                    VPU::getPerClusterComputeShapeOffsets(weightsCopyOutputType.getShape(), distributedAttr));
+            // Small optimization:
+            // convert to native type so when getPerCluster... to avoid
+            // multiple parsing for same values
+            auto distribution = vpux::VPU::DistributedTensorNative::getClassFromAttr(distributedAttr);
 
-            distributedAttr = VPU::DistributedTensorAttr::get(
-                    oldDistrType.getContext(), distributedAttr.getMode(), distributedAttr.getNumTiles(),
-                    distributedAttr.getKernel(), distributedAttr.getPads(), distributedAttr.getStrides(),
-                    distributedAttr.getNumClusters(), distributedAttr.getAlignment(),
-                    distributedAttr.getUniformDistributedSegments(), perClusterComputeShapes, perClusterComputeOffsets,
-                    perClusterMemoryShapes, perClusterMemoryOffsets, distributedAttr.getEqualMemoryAndComputeView());
+            auto perClusterMemoryShapes =
+                    VPU::getPerClusterMemoryShapes(weightsCopyOutputType.getShape(), distribution).value();
+            auto perClusterMemoryOffsets =
+                    VPU::getPerClusterMemoryShapeOffsets(weightsCopyOutputType.getShape(), distribution);
+            auto perClusterComputeShapes =
+                    VPU::getPerClusterComputeShapes(weightsCopyOutputType.getShape(), distribution);
+            auto perClusterComputeOffsets =
+                    VPU::getPerClusterComputeShapeOffsets(weightsCopyOutputType.getShape(), distribution);
+
+            distribution.setMemoryShapes(VPU::arrayOfArrayFromShape(perClusterMemoryShapes));
+            distribution.setMemoryOffsets(VPU::arrayOfArrayFromShape(perClusterMemoryOffsets));
+            distribution.setComputeShapes(VPU::arrayOfArrayFromShape(perClusterComputeShapes));
+            distribution.setComputeOffsets(VPU::arrayOfArrayFromShape(perClusterComputeOffsets));
+
+            distributedAttr =
+                    vpux::VPU::DistributedTensorNative::getAttrFromClass(oldDistrType.getContext(), distribution);
         }
 
         auto distrib = VPUIP::DistributedBufferType::get(

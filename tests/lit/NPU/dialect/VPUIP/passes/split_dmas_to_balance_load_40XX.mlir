@@ -4,7 +4,7 @@
 //
 
 // RUN: vpux-opt  --split-input-file --init-compiler="vpu-arch=%arch%" --split-dma-to-balance-load  %s | FileCheck %s
-// REQUIRES: arch-VPUX40XX 
+// REQUIRES: arch-NPU40XX
 
 !DummyT = memref<1x3x224x224xf16, @DDR>
 
@@ -23,11 +23,11 @@ func.func @SplitBuffer2BufferDma(%arg0: !DummyT) -> !DummyT {
     // CHECK:       [[BUFFER_CMX_0:%.+]] = VPURT.DeclareBuffer <CMX_NN> [2] <100000> -> memref<1x24x18x56xf16, {order = #NCHW, strides = [48384, 1008, 56, 1]}, [@CMX_NN, 2]>
     // CHECK:       [[BUFFER_CMX_1:%.+]] = VPURT.DeclareBuffer <CMX_NN> [2] <148384> -> memref<1x24x18x56xf16, {order = #NCHW, strides = [48384, 1008, 56, 1]}, [@CMX_NN, 2]>
 
-    // CHECK:       [[NNDMA_0:%.+]] = VPUIP.NNDMA {port = 0 : i64} inputs([[BUFFER_DDR_0]] : memref<1x24x18x56xf16, {order = #NCHW, strides = [48384, 1008, 56, 1]}, @DDR>) 
+    // CHECK:       [[NNDMA_0:%.+]] = VPUIP.NNDMA {port = 0 : i64} inputs([[BUFFER_DDR_0]] : memref<1x24x18x56xf16, {order = #NCHW, strides = [48384, 1008, 56, 1]}, @DDR>)
     // CHECK-SAME:         outputs([[BUFFER_CMX_0]] : memref<1x24x18x56xf16, {order = #NCHW, strides = [48384, 1008, 56, 1]}, [@CMX_NN, 2]>)
     // CHECK-SAME:          -> memref<1x24x18x56xf16, {order = #NCHW, strides = [48384, 1008, 56, 1]}, [@CMX_NN, 2]>
 
-    // CHECK:       [[NNDMA_1:%.+]] = VPUIP.NNDMA {port = 1 : i64} inputs([[BUFFER_DDR_1]] : memref<1x24x18x56xf16, {order = #NCHW, strides = [48384, 1008, 56, 1]}, @DDR>) 
+    // CHECK:       [[NNDMA_1:%.+]] = VPUIP.NNDMA {port = 1 : i64} inputs([[BUFFER_DDR_1]] : memref<1x24x18x56xf16, {order = #NCHW, strides = [48384, 1008, 56, 1]}, @DDR>)
     // CHECK-SAME:         outputs([[BUFFER_CMX_1]] : memref<1x24x18x56xf16, {order = #NCHW, strides = [48384, 1008, 56, 1]}, [@CMX_NN, 2]>)
     // CHECK-SAME:          -> memref<1x24x18x56xf16, {order = #NCHW, strides = [48384, 1008, 56, 1]}, [@CMX_NN, 2]>
 
@@ -56,11 +56,11 @@ func.func @SplitStridedBuffer2BufferDma(%arg0: !DummyT) -> !DummyT {
     VPURT.Task waits(%0 : !VPURT.Barrier) updates(%1 : !VPURT.Barrier) {
       %4 = VPUIP.NNDMA {port = 0 : i64, split_candidate} inputs(%2 : memref<1x512x5x80xf16, {order = #NHWC, strides = [29491200, 1, 40960, 512]}, @DDR>) outputs(%3 : memref<1x512x5x80xf16, #NHWC, [@CMX_NN, 2]>) -> memref<1x512x5x80xf16, #NHWC, [@CMX_NN, 2]>
     }
-    // CHECK:       [[NNDMA_0:%.+]] = VPUIP.NNDMA {port = 0 : i64} inputs([[BUFFER_DDR_0]] : memref<1x512x2x80xf16, {order = #NHWC, strides = [29491200, 1, 40960, 512]}, @DDR>) 
+    // CHECK:       [[NNDMA_0:%.+]] = VPUIP.NNDMA {port = 0 : i64} inputs([[BUFFER_DDR_0]] : memref<1x512x2x80xf16, {order = #NHWC, strides = [29491200, 1, 40960, 512]}, @DDR>)
     // CHECK-SAME:         outputs([[BUFFER_CMX_0]] : memref<1x512x2x80xf16, {order = #NHWC, strides = [204800, 1, 40960, 512]}, [@CMX_NN, 2]>)
     // CHECK-SAME:          -> memref<1x512x2x80xf16, {order = #NHWC, strides = [204800, 1, 40960, 512]}, [@CMX_NN, 2]>
 
-    // CHECK:       [[NNDMA_1:%.+]] = VPUIP.NNDMA {port = 1 : i64} inputs([[BUFFER_DDR_1]] : memref<1x512x3x80xf16, {order = #NHWC, strides = [29491200, 1, 40960, 512]}, @DDR>) 
+    // CHECK:       [[NNDMA_1:%.+]] = VPUIP.NNDMA {port = 1 : i64} inputs([[BUFFER_DDR_1]] : memref<1x512x3x80xf16, {order = #NHWC, strides = [29491200, 1, 40960, 512]}, @DDR>)
     // CHECK-SAME:         outputs([[BUFFER_CMX_1]] : memref<1x512x3x80xf16, {order = #NHWC, strides = [204800, 1, 40960, 512]}, [@CMX_NN, 2]>)
     // CHECK-SAME:          -> memref<1x512x3x80xf16, {order = #NHWC, strides = [204800, 1, 40960, 512]}, [@CMX_NN, 2]>
 
@@ -88,11 +88,11 @@ func.func @SplitSimpleConstant(%arg0: !DummyT) -> !DummyT {
     VPURT.Task waits(%0 : !VPURT.Barrier) updates(%1 : !VPURT.Barrier) {
       %3 = VPUIP.NNDMA {port = 0 : i64, split_candidate} inputs(%cst : memref<320x1x1x4xsi32>) outputs(%2 : memref<320x1x1x4xsi32, [@CMX_NN, 2]>) -> memref<320x1x1x4xsi32, [@CMX_NN, 2]>
     }
-    // CHECK:       [[NNDMA_0:%.+]] = VPUIP.NNDMA {port = 0 : i64} inputs([[CST_0]] : memref<160x1x1x4xsi32>) 
+    // CHECK:       [[NNDMA_0:%.+]] = VPUIP.NNDMA {port = 0 : i64} inputs([[CST_0]] : memref<160x1x1x4xsi32>)
     // CHECK-SAME:         outputs([[BUFFER_CMX_0]] : memref<160x1x1x4xsi32, [@CMX_NN, 2]>)
     // CHECK-SAME:          -> memref<160x1x1x4xsi32, [@CMX_NN, 2]>
 
-    // CHECK:       [[NNDMA_1:%.+]] = VPUIP.NNDMA {port = 1 : i64} inputs([[CST_1]] : memref<160x1x1x4xsi32>) 
+    // CHECK:       [[NNDMA_1:%.+]] = VPUIP.NNDMA {port = 1 : i64} inputs([[CST_1]] : memref<160x1x1x4xsi32>)
     // CHECK-SAME:         outputs([[BUFFER_CMX_1]] : memref<160x1x1x4xsi32, [@CMX_NN, 2]>)
     // CHECK-SAME:          -> memref<160x1x1x4xsi32, [@CMX_NN, 2]>
 
@@ -110,16 +110,16 @@ func.func @SplitSimpleConstant(%arg0: !DummyT) -> !DummyT {
 !WeightsCmx = memref<320x960x1x1x!qElemType, [@CMX_NN, 2]>
 !DummyT = memref<1x3x224x224xf16, @DDR>
 
-// Verify that quant type was splitted properly. 
+// Verify that quant type was splitted properly.
 // CHECK: !qElemType = !quant.uniform<u8<0:254>:f16:0, {1.000000e+00:127,2.000000e+00:127,3.000000e+00:127
 // CHECK: !qElemType2 = !quant.uniform<u8<0:254>:f16:0, {1.610000e+02:127,1.620000e+02:127,1.630000e+02:127,1.640000e+02:127
 
 // CHECK-LABEL: @SplitPerAxisQuantized
 func.func @SplitPerAxisQuantized(%arg0: !DummyT) -> !DummyT {
     %cst = const.Declare !Weights = dense<1> : tensor<320x960x1x1xui8>, [#const.QuantCast<!qElemType>]
-    // CHECK:       [[CST_0:%.+]] = const.Declare memref<160x960x1x1x!qElemType> = 
+    // CHECK:       [[CST_0:%.+]] = const.Declare memref<160x960x1x1x!qElemType> =
     // CHECK-SAME:      dense<1> : tensor<320x960x1x1xui8>, [#const.QuantCast<!qElemType1>, #const.SubView<[0, 0, 0, 0], [160, 960, 1, 1]>]
-    // CHECK:       [[CST_1:%.+]] = const.Declare memref<160x960x1x1x!qElemType2> = 
+    // CHECK:       [[CST_1:%.+]] = const.Declare memref<160x960x1x1x!qElemType2> =
     // CHECK-SAME:      dense<1> : tensor<320x960x1x1xui8>, [#const.QuantCast<!qElemType1>, #const.SubView<[160, 0, 0, 0], [160, 960, 1, 1]>]
 
     %0 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
@@ -127,15 +127,15 @@ func.func @SplitPerAxisQuantized(%arg0: !DummyT) -> !DummyT {
     %2 = VPURT.DeclareBuffer <CMX_NN> [2] <0> -> !WeightsCmx
     // CHECK:       [[BUFFER_CMX_0:%.+]] = VPURT.DeclareBuffer <CMX_NN> [2] <0> -> memref<160x960x1x1x!qElemType, [@CMX_NN, 2]>
     // CHECK:       [[BUFFER_CMX_1:%.+]] = VPURT.DeclareBuffer <CMX_NN> [2] <153600> -> memref<160x960x1x1x!qElemType2, [@CMX_NN, 2]>
-    
+
     VPURT.Task waits(%0 : !VPURT.Barrier) updates(%1 : !VPURT.Barrier) {
       %3 = VPUIP.NNDMA {port = 0 : i64, split_candidate} inputs(%cst : !Weights) outputs(%2 : !WeightsCmx) -> !WeightsCmx
     }
-    // CHECK:       [[NNDMA_0:%.+]] = VPUIP.NNDMA {port = 0 : i64} inputs([[CST_0]] : memref<160x960x1x1x!qElemType>) 
+    // CHECK:       [[NNDMA_0:%.+]] = VPUIP.NNDMA {port = 0 : i64} inputs([[CST_0]] : memref<160x960x1x1x!qElemType>)
     // CHECK-SAME:         outputs([[BUFFER_CMX_0]] : memref<160x960x1x1x!qElemType, [@CMX_NN, 2]>)
     // CHECK-SAME:          -> memref<160x960x1x1x!qElemType, [@CMX_NN, 2]>
 
-    // CHECK:       [[NNDMA_1:%.+]] = VPUIP.NNDMA {port = 1 : i64} inputs([[CST_1]] : memref<160x960x1x1x!qElemType2>) 
+    // CHECK:       [[NNDMA_1:%.+]] = VPUIP.NNDMA {port = 1 : i64} inputs([[CST_1]] : memref<160x960x1x1x!qElemType2>)
     // CHECK-SAME:         outputs([[BUFFER_CMX_1]] : memref<160x960x1x1x!qElemType2, [@CMX_NN, 2]>)
     // CHECK-SAME:          -> memref<160x960x1x1x!qElemType2, [@CMX_NN, 2]>
 
@@ -154,7 +154,7 @@ func.func @SplitPerAxisQuantized(%arg0: !DummyT) -> !DummyT {
 
 // CHECK-LABEL: @SplitSwizzledConstant
 func.func @SplitSwizzledConstant(%arg0: !DummyT) -> !DummyT {
-    %cst = const.Declare !Weights = dense<1.0> : tensor<384x64x1x1xf32>, [#const.ConvertElemType<f16>, #const.Reorder<#NHWC>, #const.SubView<[256, 0, 0, 0], [128, 64, 1, 1]>, #const.SwizzleConstant<5 : i64, 4 : i64>] 
+    %cst = const.Declare !Weights = dense<1.0> : tensor<384x64x1x1xf32>, [#const.ConvertElemType<f16>, #const.Reorder<#NHWC>, #const.SubView<[256, 0, 0, 0], [128, 64, 1, 1]>, #const.SwizzleConstant<5 : i64, 4 : i64>]
     // CHECK:       [[CST_0:%.+]] = const.Declare memref<64x64x1x1xf16, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}>
     // CHECK-SAME:      dense<1.000000e+00> : tensor<4096x1x1x1xf16, {order = #NHWC}>
     // CHECK:       [[CST_1:%.+]] = const.Declare memref<64x64x1x1xf16, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}>
@@ -169,11 +169,11 @@ func.func @SplitSwizzledConstant(%arg0: !DummyT) -> !DummyT {
     VPURT.Task waits(%0 : !VPURT.Barrier) updates(%1 : !VPURT.Barrier) {
       %3 = VPUIP.NNDMA {port = 0 : i64, split_candidate} inputs(%cst : !Weights) outputs(%2 : !WeightsCmx) -> !WeightsCmx
     }
-    // CHECK:       [[NNDMA_0:%.+]] = VPUIP.NNDMA {port = 0 : i64} inputs([[CST_0]] : memref<64x64x1x1xf16, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}>) 
+    // CHECK:       [[NNDMA_0:%.+]] = VPUIP.NNDMA {port = 0 : i64} inputs([[CST_0]] : memref<64x64x1x1xf16, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}>)
     // CHECK-SAME:         outputs([[BUFFER_CMX_0]] : memref<64x64x1x1xf16, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}, [@CMX_NN, 2]>)
     // CHECK-SAME:          -> memref<64x64x1x1xf16, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}, [@CMX_NN, 2]>
-      
-    // CHECK:       [[NNDMA_1:%.+]] = VPUIP.NNDMA {port = 1 : i64} inputs([[CST_1]] : memref<64x64x1x1xf16, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}>) 
+
+    // CHECK:       [[NNDMA_1:%.+]] = VPUIP.NNDMA {port = 1 : i64} inputs([[CST_1]] : memref<64x64x1x1xf16, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}>)
     // CHECK-SAME:         outputs([[BUFFER_CMX_1]] : memref<64x64x1x1xf16, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}, [@CMX_NN, 2]>)
     // CHECK-SAME:          -> memref<64x64x1x1xf16, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}, [@CMX_NN, 2]>
 
@@ -194,24 +194,24 @@ func.func @SplitSwizzledConstant(%arg0: !DummyT) -> !DummyT {
 // CHECK-LABEL: @SplitThirdAxis
 func.func @SplitThirdAxis(%arg0: !DummyT) -> !DummyT {
     %cst = const.Declare !Weights = dense<1> : tensor<1x1x12x1280xi32, {order = #NHWC}>
-    // CHECK:       [[CST_0:%.+]] = const.Declare memref<1x1x6x1280xi32, #NHWC, @DDR> = dense<1> : tensor<1x1x12x1280xi32, {order = #NHWC}>, [#const.SubView<[0, 0, 0, 0], [1, 1, 6, 1280]>]
-    // CHECK:       [[CST_1:%.+]] = const.Declare memref<1x1x6x1280xi32, #NHWC, @DDR> = dense<1> : tensor<1x1x12x1280xi32, {order = #NHWC}>, [#const.SubView<[0, 0, 6, 0], [1, 1, 6, 1280]>]
+    // CHECK:       [[CST_0:%.+]] = const.Declare memref<1x1x6x1280xi32, {order = #NHWC, strides = [15360, 1, 1280, 1]}, @DDR> = dense<1> : tensor<1x1x12x1280xi32, {order = #NHWC}>, [#const.SubView<[0, 0, 0, 0], [1, 1, 6, 1280]>]
+    // CHECK:       [[CST_1:%.+]] = const.Declare memref<1x1x6x1280xi32, {order = #NHWC, strides = [15360, 1, 1280, 1]}, @DDR> = dense<1> : tensor<1x1x12x1280xi32, {order = #NHWC}>, [#const.SubView<[0, 0, 6, 0], [1, 1, 6, 1280]>]
 
     %0 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     %1 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     %2 = VPURT.DeclareBuffer <CMX_NN> [2] <0> -> !WeightsCmx
     // CHECK:       [[BUFFER_CMX_0:%.+]] = VPURT.DeclareBuffer <CMX_NN> [2] <0> -> memref<1x1x6x1280xi32, {order = #NHWC, strides = [15360, 1, 1280, 1]}, [@CMX_NN, 2]>
     // CHECK:       [[BUFFER_CMX_1:%.+]] = VPURT.DeclareBuffer <CMX_NN> [2] <30720> -> memref<1x1x6x1280xi32, {order = #NHWC, strides = [15360, 1, 1280, 1]}, [@CMX_NN, 2]>
-    
+
 
     VPURT.Task waits(%0 : !VPURT.Barrier) updates(%1 : !VPURT.Barrier) {
       %3 = VPUIP.NNDMA {port = 0 : i64, split_candidate} inputs(%cst : !Weights) outputs(%2 : !WeightsCmx) -> !WeightsCmx
     }
-    // CHECK:       [[NNDMA_0:%.+]] = VPUIP.NNDMA {port = 0 : i64} inputs([[CST_0]] : memref<1x1x6x1280xi32, #NHWC, @DDR>) 
+    // CHECK:       [[NNDMA_0:%.+]] = VPUIP.NNDMA {port = 0 : i64} inputs([[CST_0]] : memref<1x1x6x1280xi32, {order = #NHWC, strides = [15360, 1, 1280, 1]}, @DDR>)
     // CHECK-SAME:         outputs([[BUFFER_CMX_0]] : memref<1x1x6x1280xi32, {order = #NHWC, strides = [15360, 1, 1280, 1]}, [@CMX_NN, 2]>)
     // CHECK-SAME:          -> memref<1x1x6x1280xi32, {order = #NHWC, strides = [15360, 1, 1280, 1]}, [@CMX_NN, 2]>
 
-    // CHECK:       [[NNDMA_1:%.+]] = VPUIP.NNDMA {port = 1 : i64} inputs([[CST_1]] : memref<1x1x6x1280xi32, #NHWC, @DDR>) 
+    // CHECK:       [[NNDMA_1:%.+]] = VPUIP.NNDMA {port = 1 : i64} inputs([[CST_1]] : memref<1x1x6x1280xi32, {order = #NHWC, strides = [15360, 1, 1280, 1]}, @DDR>)
     // CHECK-SAME:         outputs([[BUFFER_CMX_1]] : memref<1x1x6x1280xi32, {order = #NHWC, strides = [15360, 1, 1280, 1]}, [@CMX_NN, 2]>)
     // CHECK-SAME:          -> memref<1x1x6x1280xi32, {order = #NHWC, strides = [15360, 1, 1280, 1]}, [@CMX_NN, 2]>
 
@@ -230,7 +230,7 @@ func.func @SplitThirdAxis(%arg0: !DummyT) -> !DummyT {
 
 // CHECK-LABEL: @SplitSwizzledSubbyteConstant
 func.func @SplitSwizzledSubbyteConstant(%arg0: !DummyT) -> !DummyT {
-    %cst = const.Declare !SparsityMap = dense<1> : tensor<512x512x1x1xui8>, [#const.ConvertElemType<i1>, #const.Reorder<#NHWC>, #const.SwizzleConstant<5 : i64, 4 : i64>] 
+    %cst = const.Declare !SparsityMap = dense<1> : tensor<512x512x1x1xui8>, [#const.ConvertElemType<i1>, #const.Reorder<#NHWC>, #const.SwizzleConstant<5 : i64, 4 : i64>]
     // CHECK:       [[CST_0:%.+]] = const.Declare memref<256x512x1x1xi1, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}> = dense<true> : tensor<131072x1x1x1xi1, {order = #NHWC}>
     // CHECK:       [[CST_1:%.+]] = const.Declare memref<256x512x1x1xi1, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}> = dense<true> : tensor<131072x1x1x1xi1, {order = #NHWC}>
 
@@ -244,13 +244,177 @@ func.func @SplitSwizzledSubbyteConstant(%arg0: !DummyT) -> !DummyT {
       %3 = VPUIP.NNDMA {port = 0 : i64, split_candidate} inputs(%cst : !SparsityMap) outputs(%2 : !SparsityMapCmx) -> !SparsityMapCmx
     }
 
-    // CHECK:       [[NNDMA_0:%.+]] = VPUIP.NNDMA {port = 0 : i64} inputs([[CST_0]] : memref<256x512x1x1xi1, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}>) 
+    // CHECK:       [[NNDMA_0:%.+]] = VPUIP.NNDMA {port = 0 : i64} inputs([[CST_0]] : memref<256x512x1x1xi1, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}>)
     // CHECK-SAME:         outputs([[BUFFER_CMX_0]] : memref<256x512x1x1xi1, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}, [@CMX_NN, 2]>)
     // CHECK-SAME:          -> memref<256x512x1x1xi1, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}, [@CMX_NN, 2]>
-  
-    // CHECK:       [[NNDMA_1:%.+]] = VPUIP.NNDMA {port = 1 : i64} inputs([[CST_1]] : memref<256x512x1x1xi1, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}>) 
+
+    // CHECK:       [[NNDMA_1:%.+]] = VPUIP.NNDMA {port = 1 : i64} inputs([[CST_1]] : memref<256x512x1x1xi1, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}>)
     // CHECK-SAME:         outputs([[BUFFER_CMX_1]] : memref<256x512x1x1xi1, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}, [@CMX_NN, 2]>)
     // CHECK-SAME:          -> memref<256x512x1x1xi1, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}, [@CMX_NN, 2]>
+
+    return %arg0 : !DummyT
+}
+
+//
+// -----
+//
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+!DistributedType = !VPUIP.DistributedBuffer<1x1x1x368768xf16, {order = #NCHW, strides = [368768, 368768, 368768, 1]}, @CMX_NN, {
+    mode = "DUPLICATED",
+    num_clusters = 6 : i64,
+    uniform_distributed_segments,
+    compute_shapes = [[1, 1, 1, 368768], [1, 1, 1, 368768], [1, 1, 1, 368768], [1, 1, 1, 368768], [1, 1, 1, 368768], [1, 1, 1, 368768]],
+    compute_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+    memory_shapes = [[1, 1, 1, 368768], [1, 1, 1, 368768], [1, 1, 1, 368768], [1, 1, 1, 368768], [1, 1, 1, 368768], [1, 1, 1, 368768]],
+    memory_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]
+}>
+
+!DummyT = memref<1x3x224x224xf16, @DDR>
+
+// CHECK-LABEL: @SplitConstantSourceDuplicatedNNDMA
+func.func @SplitConstantSourceDuplicatedNNDMA(%arg0: !DummyT) -> !DummyT {
+    %0 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+    %1 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+    %2 = const.Declare memref<1x1x1x368768xf16> = dense<1.0> : tensor<1x1x1x368768xf16>
+    %3 = VPURT.DeclareBuffer <CMX_NN> [0, 1, 2, 3, 4, 5] <164352> -> !DistributedType
+    VPURT.Task waits(%0 : !VPURT.Barrier) updates(%1 : !VPURT.Barrier) {
+      %4 = VPUIP.NNDMA {port = 0 : i64, split_candidate}
+          inputs(%2 : memref<1x1x1x368768xf16>)
+          outputs(%3 : !DistributedType) -> !DistributedType
+    }
+    // CHECK:       [[CST_0:%.+]] = const.Declare memref<1x1x1x184384xf16, {order = #NCHW, strides = [368768, 368768, 368768, 1]}> = dense<1.000000e+00> : tensor<1x1x1x368768xf16>, [#const.SubView<[0, 0, 0, 0], [1, 1, 1, 184384]>]
+    // CHECK:       [[CST_1:%.+]] = const.Declare memref<1x1x1x184384xf16, {order = #NCHW, strides = [368768, 368768, 368768, 1]}> = dense<1.000000e+00> : tensor<1x1x1x368768xf16>, [#const.SubView<[0, 0, 0, 184384], [1, 1, 1, 184384]>]
+
+    // CHECK:       [[BUFFER_CMX_0:%.+]] = VPURT.DeclareBuffer <CMX_NN> [0, 1, 2, 3, 4, 5] <164352>
+    // CHECK-SAME:        -> !VPUIP.DistributedBuffer<1x1x1x184384xf16, {order = #NCHW, strides = [368768, 368768, 368768, 1]}, @CMX_NN,
+    // CHECK-SAME:            {mode = "DUPLICATED", num_clusters = 6 : i64, uniform_distributed_segments,
+    // CHECK-SAME{LITERAL}:    compute_shapes = [[1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384]],
+    // CHECK-SAME{LITERAL}:    compute_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+    // CHECK-SAME{LITERAL}:    memory_shapes = [[1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384]],
+    // CHECK-SAME{LITERAL}:    memory_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]}>
+
+    // CHECK:       [[BUFFER_CMX_1:%.+]] = VPURT.DeclareBuffer <CMX_NN> [0, 1, 2, 3, 4, 5] <533120>
+    // CHECK-SAME:        -> !VPUIP.DistributedBuffer<1x1x1x184384xf16, {order = #NCHW, strides = [368768, 368768, 368768, 1]}, @CMX_NN,
+    // CHECK-SAME{LITERAL}:   {mode = "DUPLICATED", num_clusters = 6 : i64, uniform_distributed_segments,
+    // CHECK-SAME{LITERAL}:    compute_shapes = [[1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384]],
+    // CHECK-SAME{LITERAL}:    compute_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+    // CHECK-SAME{LITERAL}:    memory_shapes = [[1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384]],
+    // CHECK-SAME{LITERAL}:    memory_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]}>
+
+    // CHECK:       [[NNDMA_0:%.+]] = VPUIP.NNDMA {port = 0 : i64}
+    // CHECK-SAME:        inputs([[CST_0]] : memref<1x1x1x184384xf16, {order = #NCHW, strides = [368768, 368768, 368768, 1]}>)
+    // CHECK-SAME:        outputs([[BUFFER_CMX_0]] : !VPUIP.DistributedBuffer<1x1x1x184384xf16, {order = #NCHW, strides = [368768, 368768, 368768, 1]}, @CMX_NN,
+    // CHECK-SAME:            {mode = "DUPLICATED", num_clusters = 6 : i64, uniform_distributed_segments,
+    // CHECK-SAME{LITERAL}:    compute_shapes = [[1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384]],
+    // CHECK-SAME{LITERAL}:    compute_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+    // CHECK-SAME{LITERAL}:    memory_shapes = [[1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384]],
+    // CHECK-SAME{LITERAL}:    memory_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]}>)
+    // CHECK-SAME:        -> !VPUIP.DistributedBuffer<1x1x1x184384xf16, {order = #NCHW, strides = [368768, 368768, 368768, 1]}, @CMX_NN,
+    // CHECK-SAME:            {mode = "DUPLICATED", num_clusters = 6 : i64, uniform_distributed_segments,
+    // CHECK-SAME{LITERAL}:    compute_shapes = [[1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384]],
+    // CHECK-SAME{LITERAL}:    compute_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+    // CHECK-SAME{LITERAL}:    memory_shapes = [[1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384]],
+    // CHECK-SAME{LITERAL}:    memory_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]}>
+
+    // CHECK:       [[NNDMA_1:%.+]] = VPUIP.NNDMA {port = 1 : i64}
+    // CHECK-SAME:        inputs([[CST_1]] : memref<1x1x1x184384xf16, {order = #NCHW, strides = [368768, 368768, 368768, 1]}>)
+    // CHECK-SAME:        outputs([[BUFFER_CMX_1]] : !VPUIP.DistributedBuffer<1x1x1x184384xf16, {order = #NCHW, strides = [368768, 368768, 368768, 1]}, @CMX_NN,
+    // CHECK-SAME:            {mode = "DUPLICATED", num_clusters = 6 : i64, uniform_distributed_segments,
+    // CHECK-SAME{LITERAL}:    compute_shapes = [[1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384]],
+    // CHECK-SAME{LITERAL}:    compute_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+    // CHECK-SAME{LITERAL}:    memory_shapes = [[1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384]],
+    // CHECK-SAME{LITERAL}:    memory_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]}>)
+    // CHECK-SAME:        -> !VPUIP.DistributedBuffer<1x1x1x184384xf16, {order = #NCHW, strides = [368768, 368768, 368768, 1]}, @CMX_NN,
+    // CHECK-SAME:            {mode = "DUPLICATED", num_clusters = 6 : i64, uniform_distributed_segments,
+    // CHECK-SAME{LITERAL}:    compute_shapes = [[1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384]],
+    // CHECK-SAME{LITERAL}:    compute_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+    // CHECK-SAME{LITERAL}:    memory_shapes = [[1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384]],
+    // CHECK-SAME{LITERAL}:    memory_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]}>
+
+    return %arg0 : !DummyT
+}
+
+//
+// -----
+//
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+!DistributedType = !VPUIP.DistributedBuffer<1x1x1x368768xf16, {order = #NCHW, strides = [368768, 368768, 368768, 1]}, @CMX_NN, {
+    mode = "DUPLICATED",
+    num_clusters = 6 : i64,
+    uniform_distributed_segments,
+    compute_shapes = [[1, 1, 1, 368768], [1, 1, 1, 368768], [1, 1, 1, 368768], [1, 1, 1, 368768], [1, 1, 1, 368768], [1, 1, 1, 368768]],
+    compute_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+    memory_shapes = [[1, 1, 1, 368768], [1, 1, 1, 368768], [1, 1, 1, 368768], [1, 1, 1, 368768], [1, 1, 1, 368768], [1, 1, 1, 368768]],
+    memory_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]
+}>
+
+!DummyT = memref<1x3x224x224xf16, @DDR>
+
+// CHECK-LABEL: @SplitBufferSourceDuplicatedNNDMA
+func.func @SplitBufferSourceDuplicatedNNDMA(%arg0: !DummyT) -> !DummyT {
+    %0 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+    %1 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+    %2 = VPURT.DeclareBuffer <DDR> <0> -> memref<1x1x1x368768xf16, @DDR>
+    %3 = VPURT.DeclareBuffer <CMX_NN> [0, 1, 2, 3, 4, 5] <164352> -> !DistributedType
+    VPURT.Task waits(%0 : !VPURT.Barrier) updates(%1 : !VPURT.Barrier) {
+      %4 = VPUIP.NNDMA {port = 0 : i64, split_candidate}
+          inputs(%2 : memref<1x1x1x368768xf16, @DDR>)
+          outputs(%3 : !DistributedType) -> !DistributedType
+    }
+    // CHECK:       [[BUFFER_DDR_0:%.+]] = VPURT.DeclareBuffer <DDR> <0> -> memref<1x1x1x184384xf16, {order = #NCHW, strides = [368768, 368768, 368768, 1]}, @DDR>
+    // CHECK:       [[BUFFER_DDR_1:%.+]] = VPURT.DeclareBuffer <DDR> <368768> -> memref<1x1x1x184384xf16, {order = #NCHW, strides = [368768, 368768, 368768, 1]}, @DDR>
+
+    // CHECK:       [[BUFFER_CMX_0:%.+]] = VPURT.DeclareBuffer <CMX_NN> [0, 1, 2, 3, 4, 5] <164352>
+    // CHECK-SAME:        -> !VPUIP.DistributedBuffer<1x1x1x184384xf16, {order = #NCHW, strides = [368768, 368768, 368768, 1]}, @CMX_NN,
+    // CHECK-SAME:            {mode = "DUPLICATED", num_clusters = 6 : i64, uniform_distributed_segments,
+    // CHECK-SAME{LITERAL}:    compute_shapes = [[1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384]],
+    // CHECK-SAME{LITERAL}:    compute_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+    // CHECK-SAME{LITERAL}:    memory_shapes = [[1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384]],
+    // CHECK-SAME{LITERAL}:    memory_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]}>
+
+    // CHECK:       [[BUFFER_CMX_1:%.+]] = VPURT.DeclareBuffer <CMX_NN> [0, 1, 2, 3, 4, 5] <533120>
+    // CHECK-SAME:        -> !VPUIP.DistributedBuffer<1x1x1x184384xf16, {order = #NCHW, strides = [368768, 368768, 368768, 1]}, @CMX_NN,
+    // CHECK-SAME{LITERAL}:   {mode = "DUPLICATED", num_clusters = 6 : i64, uniform_distributed_segments,
+    // CHECK-SAME{LITERAL}:    compute_shapes = [[1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384]],
+    // CHECK-SAME{LITERAL}:    compute_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+    // CHECK-SAME{LITERAL}:    memory_shapes = [[1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384]],
+    // CHECK-SAME{LITERAL}:    memory_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]}>
+
+    // CHECK:       [[NNDMA_0:%.+]] = VPUIP.NNDMA {port = 0 : i64}
+    // CHECK-SAME:        inputs([[BUFFER_DDR_0]] : memref<1x1x1x184384xf16, {order = #NCHW, strides = [368768, 368768, 368768, 1]}, @DDR>)
+    // CHECK-SAME:        outputs([[BUFFER_CMX_0]] : !VPUIP.DistributedBuffer<1x1x1x184384xf16, {order = #NCHW, strides = [368768, 368768, 368768, 1]}, @CMX_NN,
+    // CHECK-SAME:            {mode = "DUPLICATED", num_clusters = 6 : i64, uniform_distributed_segments,
+    // CHECK-SAME{LITERAL}:    compute_shapes = [[1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384]],
+    // CHECK-SAME{LITERAL}:    compute_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+    // CHECK-SAME{LITERAL}:    memory_shapes = [[1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384]],
+    // CHECK-SAME{LITERAL}:    memory_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]}>)
+    // CHECK-SAME:        -> !VPUIP.DistributedBuffer<1x1x1x184384xf16, {order = #NCHW, strides = [368768, 368768, 368768, 1]}, @CMX_NN,
+    // CHECK-SAME:            {mode = "DUPLICATED", num_clusters = 6 : i64, uniform_distributed_segments,
+    // CHECK-SAME{LITERAL}:    compute_shapes = [[1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384]],
+    // CHECK-SAME{LITERAL}:    compute_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+    // CHECK-SAME{LITERAL}:    memory_shapes = [[1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384]],
+    // CHECK-SAME{LITERAL}:    memory_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]}>
+
+    // CHECK:       [[NNDMA_1:%.+]] = VPUIP.NNDMA {port = 1 : i64}
+    // CHECK-SAME:        inputs([[BUFFER_DDR_1]] : memref<1x1x1x184384xf16, {order = #NCHW, strides = [368768, 368768, 368768, 1]}, @DDR>)
+    // CHECK-SAME:        outputs([[BUFFER_CMX_1]] : !VPUIP.DistributedBuffer<1x1x1x184384xf16, {order = #NCHW, strides = [368768, 368768, 368768, 1]}, @CMX_NN,
+    // CHECK-SAME:            {mode = "DUPLICATED", num_clusters = 6 : i64, uniform_distributed_segments,
+    // CHECK-SAME{LITERAL}:    compute_shapes = [[1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384]],
+    // CHECK-SAME{LITERAL}:    compute_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+    // CHECK-SAME{LITERAL}:    memory_shapes = [[1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384]],
+    // CHECK-SAME{LITERAL}:    memory_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]}>)
+    // CHECK-SAME:        -> !VPUIP.DistributedBuffer<1x1x1x184384xf16, {order = #NCHW, strides = [368768, 368768, 368768, 1]}, @CMX_NN,
+    // CHECK-SAME:            {mode = "DUPLICATED", num_clusters = 6 : i64, uniform_distributed_segments,
+    // CHECK-SAME{LITERAL}:    compute_shapes = [[1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384]],
+    // CHECK-SAME{LITERAL}:    compute_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+    // CHECK-SAME{LITERAL}:    memory_shapes = [[1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384], [1, 1, 1, 184384]],
+    // CHECK-SAME{LITERAL}:    memory_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]}>
 
     return %arg0 : !DummyT
 }

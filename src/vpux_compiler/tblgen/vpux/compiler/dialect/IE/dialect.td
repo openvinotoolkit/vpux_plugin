@@ -101,6 +101,8 @@ The `IE.ExecutorResource` and `IE.MemoryResource` are added by underlying low-le
 
     let hasConstantMaterializer = 1;
     let useDefaultAttributePrinterParser = 1;
+
+    let usePropertiesForAttributes = 1;
 }
 
 #endif

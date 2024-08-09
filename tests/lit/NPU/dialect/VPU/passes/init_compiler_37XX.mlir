@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --init-compiler="vpu-arch=%arch% compilation-mode=ReferenceSW" %s | FileCheck %s --strict-whitespace
-// REQUIRES: arch-VPUX37XX
+// REQUIRES: arch-NPU37XX
 
 // CHECK: module @test attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilationMode = #VPU.compilation_mode<ReferenceSW>, VPU.revisionID = #VPU.revision_id<REVISION_NONE>}
 module @test {
@@ -12,6 +12,7 @@ module @test {
 // CHECK-DAG:    {{  }}IE.PipelineOptions @Options {
 // CHECK-DAG:    {{    }}IE.Option @VPU.BarrierMaxVariantSum : 256
 // CHECK-DAG:    {{    }}IE.Option @VPU.BarrierMaxVariantCount : 256
+// CHECK-DAG:    {{    }}IE.Option @VPU.AutoPaddingODU : false
 // CHECK-DAG:    {{  }}}
 
 // CHECK-DAG:    {{  }}IE.ExecutorResource 2 of @DMA_NN

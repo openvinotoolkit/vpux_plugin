@@ -1,69 +1,23 @@
-# VPUX Driver Compiler
-VPUX driver compiler package contains the driver compiler library, header of library, elf files and test tools.
+# What is Driver Compiler
 
-## Folder Structure
+This guide introduces Driver Compiler for Intel® Neural Processing Unit (NPU) devices. Driver Compiler is a set of C++ libraries providing a common API that allows the User Mode Driver to access compiler functions through vcl* interface methods. The action here is essentially compiling the IR format to the blob format.
 
-```bash
-── CiD_XXXX
-   ├── CHANGES.txt
-   ├── compilerTest.exe
-   ├── data
-   ├── lib
-   ├── loaderTest.exe
-   ├── pdb
-   ├── profilingTest.exe
-   ├── README.md
-   ├── vpuxCompilerL0Test.exe
-   ├── vpuxCompilerL0Test.exe
-   ├── vpux_driver_compiler.h
-   └── npu_elf
-```
-- `data` contains an xml and bin for test.
-- `lib` contains compiler module with all dependent dlls.
-- `pdb` contains pdb files for each dll.
-- `vpu_elf` contains elf related files.
-- `vpux_driver_compiler.h`  is the header file for exported functions.
-- `compilerTest.exe`, `vpuxCompilerL0Test.exe`, `profilingTest.exe` and `loaderTest.exe`  are executables for test.
+To learn more about Driver Compiler, please see [intel_npu/README.md](https://github.com/openvinotoolkit/openvino/blob/master/src/plugins/intel_npu/README.md) in [OpenVINO Project].
 
-The Linux version does not include pdb folder.
 
-## Running tests
+## Components
 
-### Basic tools
-```bash
-compilerTest googlenet-v1.xml googlenet-v1.bin output.net
-compilerTest xxx.xml xxx.bin output.net config.file
-profilingTest xxx.blob profiling-0.bin
-loaderTest -v=1 (or -v=0)
-```
+The main components for Driver Compiler are :
+* [CHANGES.txt](CHANGES.txt) contains the Driver Compiler history of changes.
+* [docs](./docs/) - documents that describe building and testing the Driver Compiler.
+* [loader](./src/loader/) - contains cmakefile to build and pack the elf from thirdparty used for some testing purposes.
+* [vpux_compiler_l0](./src/vpux_compiler_l0/) - contains source files of Driver Compiler.
+* [test](./test/) - contains test tools.
 
-### Unit test tools
-vpuxCompilerL0Test is the test suit of the driver compiler:
 
-To run vpuxCompilerL0Test, you need to export POR_PATH manually. E.g.
-```
-export POR_PATH=/path/to/om-vpu-models-por-ww46
-```
-You also need to export CID_TOOL manually to load the config for testing. E.g.
-```
-export CID_TOOL=/path/to/FLEX-CiD-Tools/release-tools
-```
-Currently, the test cases are defined in the config file under CID_TOOL path
-```
-vpuxCompilerL0Test
-```
+## Basic workflow
 
-# Develop Info
-
-### applications.ai.vpu-accelerators.vpux-plugin
-The package is built from the repo
-
-**Note: This package provides a thin wrapper/API of compiler to generate blob.**
-
-The main entrance is `vclCompilerCreate`. Check full API demo - compilerTest.
-
-- Basic work flow:
-
+The main entrypoint for Driver Compiler is `vclCompilerCreate`. The basic work flow is as follow:
 ```C
 ...
 vclCompilerCreate
@@ -100,5 +54,26 @@ vclLogHandleGetString
 vclExecutableDestroy
 vclCompilerDestroy
 ...
-
 ```
+
+
+## How to build related targets locally
+
+Driver Compiler provides npu_driver_compiler, compilerTest, profilingTest and loaderTest to compile network and test. To build Driver Compiler related targets locally, refer to [How to build driver compiler](./docs/how_to_build_driver_compiler.md).
+
+
+## How to release Driver Compiler package
+
+Unlike local build of Driver Compiler related targets, we need to apply some patches to [OpenVINO Project] and [NPU-Plugin Project] and also pack the elf, pdb and tbb files together to meet driver requirements. 
+
+
+## How to test
+
+Please refer to [How to test](./docs/how_to_test.md).
+
+
+## How to debug
+
+Please refer to [How to debug](./docs/how_to_debug.md).
+
+[OpenVINO Project]: https://github.com/openvinotoolkit/openvino

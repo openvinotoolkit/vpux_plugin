@@ -14,7 +14,7 @@
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/utils/const_attributes.hpp"
 #include "vpux/compiler/dialect/IE/utils/shape_infer.hpp"
-#include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/empty_node.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
@@ -407,9 +407,11 @@ mlir::Value DepthToSpaceSliceRewriter::createConvFilter(mlir::PatternRewriter& r
         }
     }
 
-    const DimsOrder weighOrder = DimsOrder::OYXI;
-
-    return VPU::buildWeightsConst(ShapeRef(weightShape), weighOrder, ArrayRef(weights), inputTensor, rewriter);
+    const DimsOrder weightOrder = DimsOrder::OYXI;
+    const auto weightType = mlir::RankedTensorType::get(
+            weightShape.raw(), mlir::cast<NDTypeInterface>(inputTensor.getType()).getElementType(),
+            getTensorAttr(rewriter.getContext(), weightOrder, nullptr, nullptr));
+    return Const::buildWeightsConst(rewriter, inputTensor.getLoc(), weightType, ArrayRef(weights));
 }
 
 mlir::Value DepthToSpaceSliceRewriter::createConvforD2S(mlir::PatternRewriter& rewriter, mlir::Value input,
@@ -486,9 +488,11 @@ mlir::Value SpaceToDepthSliceRewriter::createConvFilter(mlir::PatternRewriter& r
         weights[index] = 1.0f;
     }
 
-    const DimsOrder weighOrder = DimsOrder::OYXI;
-
-    return VPU::buildWeightsConst(ShapeRef(weightShape), weighOrder, ArrayRef(weights), activation, rewriter);
+    const DimsOrder weightOrder = DimsOrder::OYXI;
+    const auto weightType = mlir::RankedTensorType::get(
+            weightShape.raw(), mlir::cast<NDTypeInterface>(activation.getType()).getElementType(),
+            getTensorAttr(rewriter.getContext(), weightOrder, nullptr, nullptr));
+    return Const::buildWeightsConst(rewriter, activation.getLoc(), weightType, ArrayRef(weights));
 }
 
 mlir::Value SpaceToDepthSliceRewriter::createDPUOperation(mlir::PatternRewriter& rewriter, mlir::Value input,

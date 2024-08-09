@@ -10,9 +10,11 @@
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/overlap_distribution_utils.hpp"
 #include "vpux/compiler/init.hpp"
+#include "vpux/compiler/interfaces_registry.hpp"
 
 #include "common/utils.hpp"
 
+#include <llvm/ADT/SmallVector.h>
 #include <mlir/IR/MLIRContext.h>
 #include <mlir/Parser/Parser.h>
 #include <mlir/Pass/PassManager.h>
@@ -40,6 +42,8 @@ TEST_P(GetOverlapDistributionParamsTests, GetMemoryViewFromProducerConsumers) {
     mlir::DialectRegistry registry;
     vpux::registerDialects(registry);
     vpux::registerCommonInterfaces(registry);
+    auto interfacesRegistry = vpux::createInterfacesRegistry(vpux::VPU::ArchKind::NPU37XX);
+    interfacesRegistry->registerInterfaces(registry);
 
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<VPU::VPUDialect>();
@@ -64,12 +68,11 @@ TEST_P(GetOverlapDistributionParamsTests, GetMemoryViewFromProducerConsumers) {
         consumers.push_back(op);
     });
 
-    const auto resOverlapParams =
-            VPU::getOverlappedDistributionParameters(&ctx, producer->getResult(0).getType().cast<NDTypeInterface>(),
-                                                     consumers, numClusters, numTiles, mlir::UnitAttr::get(&ctx));
+    const auto resOverlapParams = VPU::getOverlappedDistributionParameters(
+            producer->getResult(0).getType().cast<NDTypeInterface>(), consumers, numClusters, numTiles, true);
 
-    EXPECT_EQ(resOverlapParams.memoryShapes, getIntArrayOfArray(&ctx, expectedMemoryShapes));
-    EXPECT_EQ(resOverlapParams.memoryOffsets, getIntArrayOfArray(&ctx, expectedMemoryOffsets));
+    EXPECT_EQ(SmallVector<SmallVector<int64_t>>(resOverlapParams.getMemoryShapes()), expectedMemoryShapes);
+    EXPECT_EQ(SmallVector<SmallVector<int64_t>>(resOverlapParams.getMemoryOffsets()), expectedMemoryOffsets);
 }
 
 // clang-format off
@@ -652,7 +655,7 @@ llvm::StringLiteral mixedConsumers = R"(
                     cube_coeff = -7.500000e-01 : f64>, axes_attr = [2, 3],
                     initial_input_dims_attr = [1, 16, 96, 160],
                     initial_output_dims_attr = [1, 16, 192, 320],
-                    operandSegmentSizes = array<i32: 1, 0, 0, 0>,
+                    operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0>,
                     scales_attr = [2.000000e+00, 2.000000e+00],
                     sizes_attr = [192, 320],
                     tile_offset_attr = [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00]}

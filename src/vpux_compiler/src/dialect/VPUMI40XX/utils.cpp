@@ -110,5 +110,35 @@ bool checkBarrierProductionRelationship(mlir::Operation* barr, VPUMI40XX::Execut
     return false;
 }
 
+size_t reindexEnqueueList(VPURegMapped::EnqueueOp head) {
+    if (!head)
+        return 0;
+
+    auto ctx = head.getOperation()->getContext();
+    const uint32_t listIdx = head.getType().getListIdx();
+    const uint32_t tileIdx = head.getType().getTileIdx();
+    uint32_t taskIdx = 0;
+
+    do {
+        head.getOperation()->getResult(0).setType(VPURegMapped::IndexType::get(ctx, tileIdx, listIdx, taskIdx));
+        taskIdx++;
+
+        auto headId = llvm::find_if(head.getOperation()->getResult(0).getUsers(), [&head](mlir::Operation* op) {
+            if (auto next = mlir::dyn_cast<VPURegMapped::EnqueueOp>(op)) {
+                if (next.getPreviousTaskIdx() == head)
+                    return true;
+            }
+            return false;
+        });
+
+        head = headId != head.getOperation()->getResult(0).getUsers().end()
+                       ? mlir::cast<VPURegMapped::EnqueueOp>((*headId))
+                       : nullptr;
+
+    } while (head);
+
+    return taskIdx;
+}
+
 }  // namespace VPUMI40XX
 }  // namespace vpux

@@ -4,6 +4,7 @@
 //
 
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPU/IR/ops_interfaces.hpp"
 #include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/explicit_distribution_utils.hpp"
@@ -78,11 +79,12 @@ bool vpux::VPU::NCEEltwiseOp::isSupported(mlir::Operation* op, bool allowDiffere
 mlir::LogicalResult vpux::VPU::NCEEltwiseOp::inferReturnTypes(mlir::MLIRContext* ctx,
                                                               std::optional<mlir::Location> optLoc,
                                                               mlir::ValueRange operands, mlir::DictionaryAttr attrs,
-                                                              mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+                                                              mlir::OpaqueProperties prop,
+                                                              mlir::RegionRange /*regions*/,
                                                               mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    NCEEltwiseOpAdaptor op(operands, attrs);
+    NCEEltwiseOpAdaptor op(operands, attrs, prop);
     if (mlir::failed(op.verify(loc))) {
         return mlir::failure();
     }
@@ -94,29 +96,12 @@ mlir::LogicalResult vpux::VPU::NCEEltwiseOp::inferReturnTypes(mlir::MLIRContext*
         return errorAt(loc, "Broadcasting is not supported for {0} operation", NCEEltwiseOp::getOperationName());
     }
 
-    auto inputType = op.getInput1().getType();
-    if (auto sparseInputType = inputType.dyn_cast<VPU::SparseTensorType>()) {
-        inputType = sparseInputType.getData().cast<vpux::NDTypeInterface>();
-    }
+    auto inputType = mlir::cast<vpux::NDTypeInterface>(op.getInput1().getType());
+    auto outputType =
+            mlir::RankedTensorType::get(shape1, inputType.getElementType(), createTensorAttrFromType(inputType));
 
-    inferredReturnTypes.push_back(inputType);
+    inferredReturnTypes.push_back(outputType);
     return mlir::success();
-}
-
-//
-// NCEOpInterface
-//
-
-SmallVector<int64_t> vpux::VPU::NCEEltwiseOp::getKernelSizeVal() {
-    return {1, 1};
-}
-
-SmallVector<int64_t> vpux::VPU::NCEEltwiseOp::getStridesVal() {
-    return {1, 1};
-}
-
-vpux::VPU::PaddingAttr vpux::VPU::NCEEltwiseOp::getPad() {
-    return VPU::getPaddingAttr(getContext(), PadInfo(0, 0, 0, 0));
 }
 
 //
@@ -142,13 +127,13 @@ bool vpux::VPU::NCEEltwiseOp::checkStrategyCompatibility(VPU::MultiClusterStrate
            strategy == VPU::MultiClusterStrategy::SplitOverHeight || strategy == VPU::MultiClusterStrategy::HKSwitch;
 }
 
-vpux::VPU::DistributedTensorAttr vpux::VPU::NCEEltwiseOp::getExplicitDistributedTensorAttr(
-        vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, mlir::ArrayAttr numTiles,
-        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::UnitAttr uniformDistributedSegments,
+vpux::VPU::DistributedTensorNative vpux::VPU::NCEEltwiseOp::getExplicitDistributedTensorAttr(
+        vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, ArrayRef<int64_t> numTiles,
+        const int64_t numClusters, ArrayRef<int64_t> alignment, const bool uniformDistributedSegments,
         const vpux::VPU::OverlapDistributionParams& overlapParams) {
-    return VPU::getNCEExplicitDistributedTensorAttr(mlir::dyn_cast<VPU::NCEOpInterface>(getOperation()), shape,
-                                                    distributionMode, numTiles, numClusters, alignment,
-                                                    uniformDistributedSegments, overlapParams);
+    return VPU::getNCEExplicitDistributedTensorNative(mlir::dyn_cast<VPU::NCEOpInterface>(getOperation()), shape,
+                                                      distributionMode, numTiles, numClusters, alignment,
+                                                      uniformDistributedSegments, overlapParams);
 }
 
 bool VPU::NCEEltwiseOp::isOperationSplitOverHeightCompatible(const vpux::TileInfo& outputTile) {
@@ -166,20 +151,32 @@ bool VPU::NCEEltwiseOp::isOperationSplitOverKernelCompatible(ShapeRef outputShap
 bool VPU::NCEEltwiseOp::doesLayerFitIntoCMX(VPU::MultiClusterStrategy strategy, Byte reservedMem) {
     auto nceOp = mlir::cast<VPU::NCEEltwiseOp>(getOperation());
     const auto outputType = nceOp->getResult(0).getType().cast<vpux::NDTypeInterface>();
-    auto numClusters = VPU::getOptimalNumClusters(nceOp, outputType.getShape()[Dims4D::Act::C], strategy);
-    return fitIntoCMX(getDistributedActivationTypeFromOp(nceOp, nceOp.getInput1().getType(), numClusters, strategy),
-                      getDistributedActivationTypeFromOp(nceOp, nceOp.getInput2().getType(), numClusters, strategy),
-                      getDistributedOutputTypeFromOp(nceOp, nceOp.getOutput().getType(), numClusters, strategy),
-                      reservedMem);
-}
+    auto numClusters = VPU::getOptimalNumClusters(nceOp, outputType.getShape(), strategy);
 
-mlir::LogicalResult vpux::VPU::NCEEltwiseOp::verifyInputType(vpux::NDTypeInterface inputType) {
-    return mlir::success(vpux::VPU::NCEInvariant::isInputActTypeSupported(VPU::getArch(*this), inputType,
-                                                                          getInputChannelAlignment(), false));
+    auto totalAvailableCMXSize = reservedMem.count() == 0 ? getTotalCMXSize(getOperation()).count()
+                                                          : getTotalCMXFragmentationAwareSize(getOperation()).count();
+
+    SmallVector<Byte> buffers = {
+            VPU::getTotalAllocSizeWithDistribution(
+                    getInput1().getType(),
+                    getActivationDistributionAttrFromOp(nceOp, getInput1().getType(), numClusters.getInt(), strategy)),
+            VPU::getTotalAllocSizeWithDistribution(
+                    getInput2().getType(),
+                    getActivationDistributionAttrFromOp(nceOp, getInput2().getType(), numClusters.getInt(), strategy))};
+
+    if (!this->getIsInplace().value_or(false)) {
+        buffers.push_back(VPU::getTotalAllocSizeWithDistribution(
+                getOutput().getType(),
+                getOutputDistributionAttrFromOp(nceOp, getOutput().getType(), numClusters.getInt(), strategy)));
+    }
+
+    return vpux::VPU::calculateAlignedBuffersMemoryRequirement(getArch(getOperation()), buffers).count() +
+                   reservedMem.count() <=
+           totalAvailableCMXSize;
 }
 
 bool vpux::VPU::NCEEltwiseOp::isVFSupported() {
-    return vpux::VPU::isVFNCESupported(*this);
+    return vpux::VPU::isVFNCESupported(mlir::cast<NCEOpInterface>(getOperation()));
 }
 
 //
@@ -189,8 +186,6 @@ bool vpux::VPU::NCEEltwiseOp::isVFSupported() {
 vpux::VPU::SparsitySupport vpux::VPU::NCEEltwiseOp::sparsitySupport() {
     const auto arch = getArch(getOperation());
     switch (arch) {
-    case VPU::ArchKind::NPU30XX:
-        return VPU::SparsitySupport::NONE;
     case VPU::ArchKind::NPU37XX:
     case VPU::ArchKind::NPU40XX:
         // TODO E#66913: enable input sparsity support once inputs are aligned with respect to storage element size
@@ -213,6 +208,19 @@ void vpux::VPU::NCEEltwiseOp::adjustAttrs(const TilingInfo&, const TileInfo&) {
 
 mlir::FailureOr<OutputTiling> vpux::VPU::NCEEltwiseOp::getTilingStrategy(TilingMode tilingMode, Logger log) {
     return vpux::getHWLayerTilingStrategy(this->getOperation(), tilingMode, log);
+}
+
+//
+// verify
+//
+
+mlir::LogicalResult vpux::VPU::NCEEltwiseOp::verify() {
+    const auto op = getOperation();
+    if (mlir::failed(vpux::VPU::verifyNCEOp(op))) {
+        return mlir::failure();
+    }
+
+    return mlir::success();
 }
 
 //

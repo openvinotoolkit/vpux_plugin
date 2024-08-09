@@ -4,9 +4,7 @@
 //
 
 // RUN: vpux-opt --split-input-file --verify-diagnostics --init-compiler="vpu-arch=%arch%" --one-shot-bufferize-VPU-to-VPUIP %s | FileCheck %s
-// REQUIRES: arch-VPUX37XX || arch-VPUX40XX
-
-// Note: VPU.NCE.AveragePool "does not exist" on arch-VPUX30XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
@@ -50,8 +48,6 @@ func.func @NceAvgPool(%arg0: tensor<1x16x15x15xf16, {order = #NHWC, mem_space = 
 }
 
 // -----
-
-// Note: VPU.NCE.Permute is NOT supported on arch-VPUX30XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 #NWCH = affine_map<(d0, d1, d2, d3) -> (d0, d3, d1, d2)>
@@ -97,8 +93,6 @@ func.func @NcePermute(%arg0: tensor<1x3x224x224xf16, {mem_space = @CMX_NN}>)
 }
 
 // -----
-
-// Note: VPU.NCE.Permute is NOT supported on arch-VPUX30XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 #NWCH = affine_map<(d0, d1, d2, d3) -> (d0, d3, d1, d2)>

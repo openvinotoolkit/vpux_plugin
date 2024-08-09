@@ -8,8 +8,6 @@
 #include "vpux/compiler/conversion.hpp"
 #include "vpux/compiler/core/profiling.hpp"
 #include "vpux/compiler/core/profiling_metadata.hpp"
-#include "vpux/compiler/dialect/ELFNPU37XX/ops.hpp"
-#include "vpux/compiler/dialect/ELFNPU37XX/utils.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPUIP/graph-schema/blob_writer.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/convert_to_dma_utils.hpp"
@@ -18,7 +16,10 @@
 #include "vpux/compiler/dialect/VPUMI40XX/kernel_params_utils.hpp"
 #include "vpux/compiler/dialect/VPUMI40XX/ops.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
+#include "vpux/compiler/utils/ELF/utils.hpp"
 
+#include "vpux/compiler/core/bounded_buffer.hpp"
+#include "vpux/utils/core/disable_warning.hpp"
 #include "vpux/utils/profiling/metadata.hpp"
 
 #include <mlir/IR/Builders.h>
@@ -292,7 +293,7 @@ private:
         return _enableMemorySideCacheOption && isDDR2CMX;
     }
 
-    void replaceVPURTTaskOpWithNNDMAOp(mlir::MLIRContext*, mlir::ModuleOp& moduleOp, mlir::func::FuncOp& funcOp,
+    void replaceVPURTTaskOpWithNNDMAOp(mlir::MLIRContext* ctx, mlir::ModuleOp& moduleOp, mlir::func::FuncOp& funcOp,
                                        Logger& _log) {
         _log.info("VPUIP_VPUMI40XX pass: replaceVPURTTaskOpWithNNDMAOp()");
 
@@ -309,18 +310,23 @@ private:
             mlir::OpBuilder builderBlk(taskOp);
 
             lowerDMA<VPUIP::NNDMAOp>(
-                    [&builderBlk, this](VPUIP::NNDMAOp dmaOp, mlir::Value previousDMA,
-                                        VPURegMapped::IndexType indexType, mlir::ValueRange waitBarriers,
-                                        mlir::ValueRange updateBarriers) {
+                    [&builderBlk, ctx, this](VPUIP::NNDMAOp dmaOp, mlir::Value previousDMA,
+                                             VPURegMapped::IndexType indexType, mlir::ValueRange waitBarriers,
+                                             mlir::ValueRange updateBarriers) {
                         llvm::SmallVector<mlir::Value> dmaResults =
                                 unrollDistributedBuff(builderBlk, dmaOp.getOutputBuff());
+
                         return builderBlk.create<VPUMI40XX::NNDMAOp>(
                                 builderBlk.getUnknownLoc(), indexType, nullptr,
                                 convertITIBuffer(builderBlk, dmaOp.getInput()), dmaResults, previousDMA,
                                 mlir::ValueRange(waitBarriers), mlir::ValueRange(updateBarriers), 0, 0,
                                 dmaOp.getIsOutOfOrder(), dmaOp.getIsCritical(), enableMemorySideCache(dmaOp),
-                                dmaOp.getPort().value(), VPUIP::DMAAccMode::DISABLE, nullptr, nullptr,
-                                dmaOp.getDmaHwpIdAttr(), dmaOp.getProfilingMetadataAttr(),
+                                dmaOp.getPort().value(), VPUIP::DMAAccMode::DISABLE, nullptr,
+                                /*act_compression_sparsity_map*/ nullptr,
+                                VPUMI40XX::NNDMATransactionAttr::get(
+                                        ctx, dmaOp.getInput().getType().cast<NDTypeInterface>(),
+                                        dmaOp.getOutput().getType().cast<NDTypeInterface>()),
+                                nullptr, dmaOp.getDmaHwpIdAttr(), dmaOp.getProfilingMetadataAttr(),
                                 /*allow_different_in_out_shapes*/ false, nullptr);
                     },
                     taskOp, previousDMA, dmaCount, found);
@@ -355,7 +361,8 @@ private:
                                 previousDMA, mlir::ValueRange(waitBarriers), mlir::ValueRange(updateBarriers), 0, 0,
                                 permuteDMAOp.getIsOutOfOrder(), permuteDMAOp.getIsCritical(),
                                 enableMemorySideCache(permuteDMAOp), permuteDMAOp.getPort().value(),
-                                VPUIP::DMAAccMode::DISABLE, nullptr, dmaDescriptorValue, permuteDMAOp.getDmaHwpIdAttr(),
+                                VPUIP::DMAAccMode::DISABLE, nullptr, /*act_compression_sparsity_map*/ nullptr, nullptr,
+                                dmaDescriptorValue, permuteDMAOp.getDmaHwpIdAttr(),
                                 permuteDMAOp.getProfilingMetadataAttr(),
                                 /*allow_different_in_out_shapes*/ true, nullptr);
                     },
@@ -377,7 +384,8 @@ private:
                                 previousDMA, mlir::ValueRange(waitBarriers), mlir::ValueRange(updateBarriers), 0, 0,
                                 expandDMAOp.getIsOutOfOrder(), expandDMAOp.getIsCritical(),
                                 enableMemorySideCache(expandDMAOp), expandDMAOp.getPort().value(),
-                                VPUIP::DMAAccMode::DISABLE, nullptr, expandDMAOp.getDmaDescriptor().value(),
+                                VPUIP::DMAAccMode::DISABLE, nullptr, /*act_compression_sparsity_map*/ nullptr,
+                                /* dma_transaction */ nullptr, expandDMAOp.getDmaDescriptor().value(),
                                 expandDMAOp.getDmaHwpIdAttr(), expandDMAOp.getProfilingMetadataAttr(),
                                 /*allow_different_in_out_shapes*/ true, nullptr);
                     },
@@ -399,7 +407,8 @@ private:
                                 previousDMA, mlir::ValueRange(waitBarriers), mlir::ValueRange(updateBarriers), 0, 0,
                                 convertDMAOp.getIsOutOfOrder(), convertDMAOp.getIsCritical(),
                                 enableMemorySideCache(convertDMAOp), convertDMAOp.getPort().value(),
-                                VPUIP::DMAAccMode::DISABLE, nullptr, nullptr, convertDMAOp.getDmaHwpIdAttr(),
+                                VPUIP::DMAAccMode::DISABLE, nullptr, /*act_compression_sparsity_map*/ nullptr,
+                                /* dma_transaction */ nullptr, nullptr, convertDMAOp.getDmaHwpIdAttr(),
                                 convertDMAOp.getProfilingMetadataAttr(),
                                 /*allow_different_in_out_shapes*/ false, nullptr);
                     },
@@ -422,6 +431,7 @@ private:
                                 mlir::ValueRange(updateBarriers), 0, 0, spaceToDepthDMAOp.getIsOutOfOrder(),
                                 spaceToDepthDMAOp.getIsCritical(), enableMemorySideCache(spaceToDepthDMAOp),
                                 spaceToDepthDMAOp.getPort().value(), VPUIP::DMAAccMode::DISABLE, nullptr,
+                                /*act_compression_sparsity_map*/ nullptr, /* dma_transaction */ nullptr,
                                 spaceToDepthDMAOp.getDmaDescriptor().value(), spaceToDepthDMAOp.getDmaHwpIdAttr(),
                                 spaceToDepthDMAOp.getProfilingMetadataAttr(),
                                 /*allow_different_in_out_shapes*/ false, nullptr);
@@ -461,6 +471,7 @@ private:
                                 mlir::ValueRange(updateBarriers), 0, 0, depthToSpaceDMAOp.getIsOutOfOrder(),
                                 depthToSpaceDMAOp.getIsCritical(), enableMemorySideCache(depthToSpaceDMAOp),
                                 depthToSpaceDMAOp.getPort().value(), VPUIP::DMAAccMode::DISABLE, nullptr,
+                                /*act_compression_sparsity_map*/ nullptr, /* dma_transaction */ nullptr,
                                 dmaDescriptorValue, depthToSpaceDMAOp.getDmaHwpIdAttr(),
                                 depthToSpaceDMAOp.getProfilingMetadataAttr(),
                                 /*allow_different_in_out_shapes*/ false, nullptr);
@@ -493,8 +504,9 @@ private:
                                 previousDMA, mlir::ValueRange(waitBarriers), mlir::ValueRange(updateBarriers), 0, 0,
                                 upsamplingDMAOp.getIsOutOfOrder(), upsamplingDMAOp.getIsCritical(),
                                 enableMemorySideCache(upsamplingDMAOp), upsamplingDMAOp.getPort().value(),
-                                VPUIP::DMAAccMode::DISABLE, nullptr, dmaDescriptorValue,
-                                upsamplingDMAOp.getDmaHwpIdAttr(), upsamplingDMAOp.getProfilingMetadataAttr(),
+                                VPUIP::DMAAccMode::DISABLE, nullptr, /*act_compression_sparsity_map*/ nullptr,
+                                /* dma_transaction */ nullptr, dmaDescriptorValue, upsamplingDMAOp.getDmaHwpIdAttr(),
+                                upsamplingDMAOp.getProfilingMetadataAttr(),
                                 /*allow_different_in_out_shapes*/ true, nullptr);
                     },
                     taskOp, previousDMA, dmaCount, found);
@@ -525,8 +537,9 @@ private:
                                 previousDMA, mlir::ValueRange(waitBarriers), mlir::ValueRange(updateBarriers), 0, 0,
                                 perAxisTileDMAOp.getIsOutOfOrder(), perAxisTileDMAOp.getIsCritical(),
                                 enableMemorySideCache(perAxisTileDMAOp), perAxisTileDMAOp.getPort().value(),
-                                VPUIP::DMAAccMode::DISABLE, nullptr, dmaDescriptorValue,
-                                perAxisTileDMAOp.getDmaHwpIdAttr(), perAxisTileDMAOp.getProfilingMetadataAttr(),
+                                VPUIP::DMAAccMode::DISABLE, nullptr, /*act_compression_sparsity_map*/ nullptr,
+                                /* dma_transaction */ nullptr, dmaDescriptorValue, perAxisTileDMAOp.getDmaHwpIdAttr(),
+                                perAxisTileDMAOp.getProfilingMetadataAttr(),
                                 /*allow_different_in_out_shapes*/ true, nullptr);
                     },
                     taskOp, previousDMA, dmaCount, found);
@@ -547,7 +560,8 @@ private:
                                 previousDMA, mlir::ValueRange(waitBarriers), mlir::ValueRange(updateBarriers), 0, 0,
                                 decompressDMAOp.getIsOutOfOrder(), decompressDMAOp.getIsCritical(),
                                 enableMemorySideCache(decompressDMAOp), decompressDMAOp.getPort().value(),
-                                VPUIP::DMAAccMode::DECOMPRESSION, decompressDMAOp.getActCompressionSizeEntry(), nullptr,
+                                VPUIP::DMAAccMode::DECOMPRESSION, decompressDMAOp.getActCompressionSizeEntry(),
+                                decompressDMAOp.getActCompressionSparsityMap(), /* dma_transaction */ nullptr, nullptr,
                                 decompressDMAOp.getDmaHwpIdAttr(), decompressDMAOp.getProfilingMetadataAttr(),
                                 /*allow_different_in_out_shapes*/ true, nullptr);
                     },
@@ -569,7 +583,8 @@ private:
                                 previousDMA, mlir::ValueRange(waitBarriers), mlir::ValueRange(updateBarriers), 0, 0,
                                 compressDMAOp.getIsOutOfOrder(), compressDMAOp.getIsCritical(),
                                 enableMemorySideCache(compressDMAOp), compressDMAOp.getPort().value(),
-                                VPUIP::DMAAccMode::COMPRESSION, compressDMAOp.getActCompressionSizeEntry(), nullptr,
+                                VPUIP::DMAAccMode::COMPRESSION, compressDMAOp.getActCompressionSizeEntry(),
+                                compressDMAOp.getActCompressionSparsityMap(), /* dma_transaction */ nullptr, nullptr,
                                 compressDMAOp.getDmaHwpIdAttr(), compressDMAOp.getProfilingMetadataAttr(),
                                 /*allow_different_in_out_shapes*/ true, nullptr);
                     },
@@ -591,7 +606,8 @@ private:
                                 previousDMA, mlir::ValueRange(waitBarriers), mlir::ValueRange(updateBarriers), 0, 0,
                                 gatherDMAOp.getIsOutOfOrder(), gatherDMAOp.getIsCritical(),
                                 enableMemorySideCache(gatherDMAOp), gatherDMAOp.getPort().value(),
-                                VPUIP::DMAAccMode::DISABLE, nullptr, nullptr, gatherDMAOp.getDmaHwpIdAttr(),
+                                VPUIP::DMAAccMode::DISABLE, nullptr, /*act_compression_sparsity_map*/ nullptr,
+                                /* dma_transaction */ nullptr, nullptr, gatherDMAOp.getDmaHwpIdAttr(),
                                 gatherDMAOp.getProfilingMetadataAttr(),
                                 /*allow_different_in_out_shapes*/ true, gatherDMAOp.getIndices());
                     },
@@ -622,7 +638,8 @@ private:
                                 previousDMA, mlir::ValueRange(waitBarriers), mlir::ValueRange(updateBarriers), 0, 0,
                                 syncDMAOp.getIsOutOfOrder(), syncDMAOp.getIsCritical(),
                                 enableMemorySideCache(syncDMAOp), syncDMAOp.getPort().value(),
-                                VPUIP::DMAAccMode::DISABLE, nullptr, dmaDescriptorAttr, syncDMAOp.getDmaHwpIdAttr(),
+                                VPUIP::DMAAccMode::DISABLE, nullptr, /*act_compression_sparsity_map*/ nullptr,
+                                /* dma_transaction */ nullptr, dmaDescriptorAttr, syncDMAOp.getDmaHwpIdAttr(),
                                 syncDMAOp.getProfilingMetadataAttr(),
                                 /*allow_different_in_out_shapes*/ false, nullptr);
                     },
@@ -644,6 +661,10 @@ private:
                                                                 VPURegMapped::IndexType indexType,
                                                                 FindKernelTextEntryFuncType getKernelTextEntryMapFunc,
                                                                 mlir::Value previousInvo, mlir::Value previousRanges) {
+        VPUX_THROW_UNLESS((op.getDynamicInputShapes().size() <= 1 && op.getDynamicOutputShapeBuffs().size() <= 1),
+                          "Currently, support is limited to single input and output dynamic shapes. For "
+                          "dynamicInputShapeSize, the value obtained is'{0}', for dynamicOutputShapeSize, got '{1}'",
+                          op.getDynamicInputShapes().size(), op.getDynamicOutputShapeBuffs().size());
         auto kernel_elf =
                 std::string(kernel_info_funcOp->getAttrOfType<mlir::StringAttr>("VPU.kernel_entry").getValue());
 
@@ -665,8 +686,43 @@ private:
 
         auto tileIndex = op.getTileIndex().value_or(0);
 
+        const auto extractDynShapes = [](mlir::OperandRange dynShapes, ArrayRef<int32_t> dynShapesMap) {
+            if (dynShapesMap.empty()) {
+                return SmallVector<SmallVector<mlir::Value>>();
+            }
+            auto dynShapesBuffers = SmallVector<SmallVector<mlir::Value>>(dynShapesMap.size());
+
+            const auto getDynShapeValueByIndex = [&](const auto index) {
+                return (index == ABSENT_DIMS_FLAG) ? SmallVector<mlir::Value>{}
+                                                   : SmallVector<mlir::Value>{dynShapes[index]};
+            };
+            llvm::transform(dynShapesMap, dynShapesBuffers.begin(), getDynShapeValueByIndex);
+
+            return dynShapesBuffers;
+        };
+
+        // mlir::ValueRange does not own data.
+        // Therefore, the array to store dynamic shapes must be allocated first.
+        // Then SmallVector<mlir::Value> must be casted to mlir::ValueRange.
+        const auto toValueRange = [](ArrayRef<mlir::Value> range) -> mlir::ValueRange {
+            return range;
+        };
+
+        auto dynInputShapesMapOpt = op.getDynamicInputShapesMap();
+        auto dynInputShapesMap = dynInputShapesMapOpt.value_or(ArrayRef<int32_t>{});
+        auto dynInputShapes = extractDynShapes(op.getDynamicInputShapes(), dynInputShapesMap);
+        auto dynInputShapesRange = SmallVector<mlir::ValueRange>();
+        llvm::transform(dynInputShapes, std::back_inserter(dynInputShapesRange), toValueRange);
+
+        auto dynOutputShapesMapOpt = op.getDynamicOutputShapesMap();
+        auto dynOutputShapesMap = dynOutputShapesMapOpt.value_or(ArrayRef<int32_t>{});
+        auto dynOutputShapes = extractDynShapes(op.getDynamicOutputShapeBuffs(), dynOutputShapesMap);
+        auto dynOutputShapesRange = SmallVector<mlir::ValueRange>();
+        llvm::transform(dynOutputShapes, std::back_inserter(dynOutputShapesRange), toValueRange);
+
         auto kernelParamsOp = builderBlk.create<VPUMI40XX::KernelParamsOp>(
-                op->getLoc(), indexType, op.getInputs(), op.getOutputBuffs(), mlir::StringAttr::get(ctx, kernel_elf),
+                op->getLoc(), indexType, op.getInputs(), op.getOutputBuffs(), dynInputShapesRange, dynOutputShapesRange,
+                mlir::StringAttr::get(ctx, kernel_elf),
                 mlir::DenseIntElementsAttr::get(mlir::VectorType::get({paramsSize}, uint8Type), paramsVector));
 
         auto kernelInvocationOp = builderBlk.create<VPUMI40XX::ActKernelInvocationOp>(
@@ -731,8 +787,11 @@ private:
         SmallVector<uint8_t> paramsVectorDummy = {0xFF};
         auto paramsSize = static_cast<long int>(paramsVectorDummy.size());
 
+        SmallVector<mlir::ValueRange> dynInputShapes(0);
+        SmallVector<mlir::ValueRange> dynOutputShapes(0);
+
         auto kernelParamsOp = builderBlk.create<VPUMI40XX::KernelParamsOp>(
-                op->getLoc(), indexType, mlir::ValueRange(), mlir::ValueRange(),
+                op->getLoc(), indexType, mlir::ValueRange(), mlir::ValueRange(), dynInputShapes, dynOutputShapes,
                 mlir::StringAttr::get(ctx, kernel_type),
                 mlir::DenseIntElementsAttr::get(mlir::VectorType::get({paramsSize}, uint8Type), paramsVectorDummy));
 
@@ -746,10 +805,7 @@ private:
         return std::pair<mlir::Value, mlir::Value>(kernelRangeOp.getResult(), kernelInvocationOp.getResult());
     }
 
-#if defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
-#endif
+    NPU_DISABLE_MAYBE_UNINITIALIZED(129510)
     void replaceVPURTTaskOpWithKernelOps(mlir::MLIRContext* ctx, mlir::ModuleOp& moduleOp, mlir::func::FuncOp& funcOp,
                                          Logger& _log) {
         _log.info("VPUIP_VPUMI40XX pass: replaceVPURTTaskOpWithKernelOps()");
@@ -1039,9 +1095,7 @@ private:
             }
         }
     }
-#if defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif
+    NPU_DISABLE_WARNING_END
 
     void setBarrierIndexValues(mlir::MLIRContext* ctx, mlir::func::FuncOp& funcOp, Logger _log) {
         auto barrierCount = 0;
@@ -1113,7 +1167,7 @@ private:
                 }
 
                 auto actShaveStackMemrefType =
-                        vpux::getLinearMemrefType(ctx, stackSize, vpux::getInt8Type(ctx), VPU::MemoryKind::DDR);
+                        vpux::ELF::getLinearMemrefType(ctx, stackSize, vpux::getInt8Type(ctx), VPU::MemoryKind::DDR);
 
                 auto declareBufferOp =
                         builderFunc.create<VPURT::DeclareBufferOp>(builderFunc.getUnknownLoc(),
@@ -1136,8 +1190,8 @@ private:
 
             actShvRt = actShvRtOp.getResult();
         } else {
-            auto actRtCodeBufferMemrefType = vpux::getLinearMemrefType(ctx, ACT_RT_CODE_BUFFER_SIZE,
-                                                                       vpux::getInt8Type(ctx), VPU::MemoryKind::DDR);
+            auto actRtCodeBufferMemrefType = vpux::ELF::getLinearMemrefType(
+                    ctx, ACT_RT_CODE_BUFFER_SIZE, vpux::getInt8Type(ctx), VPU::MemoryKind::DDR);
 
             auto declareBufferOp = builderFunc.create<VPURT::DeclareBufferOp>(builderFunc.getUnknownLoc(),
                                                                               actRtCodeBufferMemrefType,  // Type

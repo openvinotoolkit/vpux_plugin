@@ -8,6 +8,10 @@
 
 #include "vpux/utils/core/error.hpp"
 
+#include <llvm/ADT/DenseSet.h>
+
+#include <tuple>
+
 using namespace vpux;
 
 ReservedMemInfo::ReservedMemInfo(mlir::ModuleOp moduleOp, mlir::AnalysisManager& am) {
@@ -37,11 +41,26 @@ void ReservedMemInfo::init(mlir::func::FuncOp netFunc, AllocationInfo& allocatio
     auto& allReservedMemInfo = scanResult.linearScanHandler;
     auto& moduleReservedMemVec = scanResult.moduleReservedMemVec;
 
+    // E#122828: current work model is that repeating calls to the same function
+    // use *the same* input/output buffers. thus, it may well be that the callee
+    // map is going to be populated with the same data multiple times: avoid
+    // this by caching the added buffers.
+    using BufferPerCalleeAndMemory = std::tuple<mlir::StringRef, VPU::MemoryKind, mlir::Value>;
+    auto insertThisBuffer = [cache = mlir::DenseSet<BufferPerCalleeAndMemory>()](
+                                    mlir::StringRef calleeName, VPU::MemoryKind memKind, mlir::Value buffer) mutable {
+        const bool firstInsertion = cache.insert(std::make_tuple(calleeName, memKind, buffer)).second;
+        return firstInsertion;
+    };
+
     auto updateReservedMemInfo = [&](StringRef calleeName, const ValueOrderedSet& buffers) {
+        auto log = Logger::global().nest("reserved-memory-info");
         for (const auto& buffer : buffers) {
-            if (!mlir::isa<mlir::BlockArgument>(buffer)) {
-                _allReservedMemInfo[calleeName][VPU::MemoryKind::DDR].push_back(
-                        {allReservedMemInfo.getAddress(buffer), allReservedMemInfo.getSize(buffer)});
+            if (!mlir::isa<mlir::BlockArgument>(buffer) && insertThisBuffer(calleeName, VPU::MemoryKind::DDR, buffer)) {
+                auto addrAndSize =
+                        std::make_pair(allReservedMemInfo.getAddress(buffer), allReservedMemInfo.getSize(buffer));
+                log.trace("New reserved buffer {0} for {1} with memKind {2}: {3}", buffer, calleeName,
+                          VPU::MemoryKind::DDR, addrAndSize);
+                _allReservedMemInfo[calleeName][VPU::MemoryKind::DDR].push_back(std::move(addrAndSize));
             }
         }
     };
@@ -51,16 +70,17 @@ void ReservedMemInfo::init(mlir::func::FuncOp netFunc, AllocationInfo& allocatio
         VPUX_THROW_UNLESS(parentExecOp != nullptr, "func::CallOp must have async::ExecuteOp parent");
 
         auto calleeName = callOp.getCallee();
-
-        // Add also reserved ranges on module level. Those reserved resource might be related
-        // to handling of additional special features (e.g. DMA HW profiling)
-        _allReservedMemInfo[calleeName][VPU::MemoryKind::DDR].insert(
-                _allReservedMemInfo[calleeName][VPU::MemoryKind::DDR].end(), moduleReservedMemVec.begin(),
-                moduleReservedMemVec.end());
-
         updateReservedMemInfo(calleeName, liveRangeInfo.getInputBuffers(parentExecOp));
         updateReservedMemInfo(calleeName, liveRangeInfo.getOutputBuffers(parentExecOp));
     });
+
+    // Add also reserved ranges on module level. Those reserved resource might be related
+    // to handling of additional special features (e.g. DMA HW profiling)
+    for (auto& calleeAndMemKindMap : _allReservedMemInfo) {
+        auto& reservedAddressAndSizeVec = calleeAndMemKindMap.second[VPU::MemoryKind::DDR];
+        reservedAddressAndSizeVec.insert(reservedAddressAndSizeVec.end(), moduleReservedMemVec.begin(),
+                                         moduleReservedMemVec.end());
+    }
 }
 
 // returns reserved addresses and sizes for func

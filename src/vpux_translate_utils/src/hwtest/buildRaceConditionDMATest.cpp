@@ -70,21 +70,25 @@ void buildRaceConditionDMATest(const nb::TestCaseJsonDescriptor& testDesc, mlir:
                 loc, outputCMXTypes[idx], VPURT::BufferSection::CMX_NN, idx, /*byteOffset=*/0));
     }
 
-    VPURT::ConfigureBarrierOp lastBarrier;
-    for (std::size_t i = 0; i < iterationCount - 1; ++i) {
-        auto updateBarrier = funcBuilder.create<VPURT::ConfigureBarrierOp>(loc, i);
+    auto [waitWLMBarrier, freeBarrierId] =
+            insertWLMStartSequence(funcBuilder, testDesc.getWLMParams().isWLMPartialEnabled);
+
+    mlir::Value lastBarrier;
+
+    auto startIter = freeBarrierId++;
+    for (std::size_t i = startIter; i < iterationCount - 1; ++i) {
+        auto updateBarrier = funcBuilder.create<VPURT::ConfigureBarrierOp>(loc, i).getBarrier();
 
         for (std::size_t clusterIdx = 0; clusterIdx < numClusters; clusterIdx += 2) {
-            vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(
-                    funcBuilder, i == 0 ? mlir::ValueRange() : mlir::ValueRange(lastBarrier.getBarrier()),
-                    mlir::ValueRange(updateBarrier.getBarrier()), loc, funcInput,
-                    outputs[clusterIdx].getOperation()->getResult(0), 0);
+            vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcBuilder,
+                                                        i == startIter ? mlir::ValueRange(waitWLMBarrier) : lastBarrier,
+                                                        mlir::ValueRange(updateBarrier), loc, funcInput,
+                                                        outputs[clusterIdx].getOperation()->getResult(0), 0);
 
             if (clusterIdx + 1 < numClusters) {
                 vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(
-                        funcBuilder, i == 0 ? mlir::ValueRange() : mlir::ValueRange(lastBarrier.getBarrier()),
-                        mlir::ValueRange(updateBarrier.getBarrier()), loc, funcInput,
-                        outputs[clusterIdx + 1].getOperation()->getResult(0),
+                        funcBuilder, i == startIter ? mlir::ValueRange(waitWLMBarrier) : lastBarrier, updateBarrier,
+                        loc, funcInput, outputs[clusterIdx + 1].getOperation()->getResult(0),
                         testDesc.getArchitecture() == vpux::VPU::ArchKind::NPU40XX ? 0 : 1);
             }
         }
@@ -93,17 +97,19 @@ void buildRaceConditionDMATest(const nb::TestCaseJsonDescriptor& testDesc, mlir:
     }
 
     // finalBarrier passed as production barrier to last DMA task
-    auto finalBarrier = funcBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, iterationCount - 1);
+    auto finalBarrier = funcBuilder
+                                .create<vpux::VPURT::ConfigureBarrierOp>(loc, iterationCount - 1,
+                                                                         testDesc.getWLMParams().isWLMPartialEnabled)
+                                .getBarrier();
 
     for (std::size_t clusterIdx = 0; clusterIdx < numClusters; clusterIdx += 2) {
-        vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(
-                funcBuilder, mlir::ValueRange(lastBarrier.getBarrier()), mlir::ValueRange(finalBarrier.getBarrier()),
-                loc, outputs[clusterIdx].getOperation()->getResult(0), funcOutputs[clusterIdx], 0);
+        vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(funcBuilder, lastBarrier, finalBarrier, loc,
+                                                    outputs[clusterIdx].getOperation()->getResult(0),
+                                                    funcOutputs[clusterIdx], 0);
 
         if (clusterIdx + 1 < numClusters) {
             vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(
-                    funcBuilder, mlir::ValueRange(lastBarrier.getBarrier()),
-                    mlir::ValueRange(finalBarrier.getBarrier()), loc, outputs[clusterIdx].getOperation()->getResult(0),
+                    funcBuilder, lastBarrier, finalBarrier, loc, outputs[clusterIdx].getOperation()->getResult(0),
                     funcOutputs[clusterIdx + 1], testDesc.getArchitecture() == vpux::VPU::ArchKind::NPU40XX ? 0 : 1);
         }
     }

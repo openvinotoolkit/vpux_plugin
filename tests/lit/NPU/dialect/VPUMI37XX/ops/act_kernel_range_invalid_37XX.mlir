@@ -4,7 +4,7 @@
 //
 
 // RUN: vpux-opt --split-input-file --verify-diagnostics --init-compiler="vpu-arch=%arch%" %s
-// REQUIRES: arch-VPUX37XX
+// REQUIRES: arch-NPU37XX
 
 module @Test {
 IE.CNNNetwork entryPoint : @AssignFullKernelPath inputsInfo :  {

@@ -25,9 +25,12 @@ void vpux::VPU::arch40xx::buildIncrementalPipeline(mlir::OpPassManager& pm, cons
 
     VPU::buildTilingPipeline(pm, VPU::TilingOptions(options), log);
 
+    pm.addPass(VPU::createComputeInterpolateCoordinatesPass(log));
     pm.addPass(VPU::createRemoveOutputSparseToAvoidSuboptimalDPUWorkloadsPass(log));
 
-    pm.addPass(VPU::createWrapVPUOpsInNCEClusterTilingPass(options.enableExplicitDistributedTensorAttr, log));
+    pm.addPass(VPU::createMakeOpsWithDistributedTensorPass(options.enableExplicitDistributedTensorAttr, log));
+    pm.addPass(VPU::createAdjustDistributedTensorAroundOpsPass(log));
+    pm.addPass(VPU::createWrapDistributedOpsInNCEClusterTiling(log));
 }
 
 //
@@ -38,6 +41,7 @@ void vpux::VPU::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
                                                  const VPU::arch40xx::DefaultHWOptions& options, Logger log) {
     const auto grc = getDefaultGreedyRewriteConfig();
 
+    pm.addPass(VPU::createTileGatherPass(log));
     pm.addPass(VPU::createConvertOpToDMAForPerformantExecutionPass(log));
     pm.addPass(VPU::arch40xx::createMoveConvertAroundViewLikeOpsPass(log));
     pm.addPass(VPU::arch37xx::createAdjustForOptimizedSwKernelPass(log));
@@ -53,10 +57,6 @@ void vpux::VPU::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
         pm.addPass(VPU::createLowerOpsToSENCEPass(
                 /*seOpsEnabled=*/isOptionEnabled(options.enableSEPtrsOperations),
                 /*seExperimentalOpsEnabled=*/isOptionEnabled(options.enableExperimentalSEPtrsOperations), log));
-
-        // This CanonicalizerPass is to fold the same weights shared by the NCE ops just created,
-        // so that the shared weights condition check of the following passes can be done correctly
-        pm.addPass(mlir::createCanonicalizerPass(grc));
     }
 
     pm.addPass(VPU::createSetupPPEPass(log));
@@ -92,9 +92,7 @@ void vpux::VPU::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
     pm.addPass(VPU::createOptimizeConcatPass(log));
     pm.addPass(VPU::createAdjustMemorySpacePass(log));
     pm.addPass(mlir::createCanonicalizerPass(grc));
-    pm.addPass(VPU::createCMXConcatPass(log));
-    pm.addPass(mlir::createCanonicalizerPass(grc));
-    pm.addPass(VPU::createSplitDDRConcatIntoCMXPass(log));
+    pm.addPass(VPU::createCMXConcatPass(log, options.supportNCEOpInsertion));
     pm.addPass(mlir::createCanonicalizerPass(grc));
 
     pm.addPass(VPU::createSplitNCEOpsOntoWorkloadsPass(log));

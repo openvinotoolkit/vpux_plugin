@@ -32,25 +32,24 @@ mlir::LogicalResult DeclareBufferRewriter::symbolize(VPURT::DeclareBufferOp op, 
         auto traits = VPUASM::BufferTraitsType::get(ctx, op.getSwizzlingKey().value_or(0));
 
         auto buffType = VPUASM::BufferType::get(ctx, memLocation, memref, traits);
-
         rewriter.create<VPUASM::DeclareBufferOp>(op.getLoc(), symName, buffType);
-
         rewriter.eraseOp(op);
 
         return mlir::success();
     } else {
         mlir::OpBuilder::InsertionGuard guard(rewriter);
-        rewriter.startRootUpdate(op);
+        rewriter.startOpModification(op);
         rewriter.setInsertionPointAfter(op);
         rewriter.create<VPUASM::SymbolizeValueOp>(op.getLoc(), result, symName);
-        rewriter.finalizeRootUpdate(op);
+        rewriter.finalizeOpModification(op);
         return mlir::success();
     }
 }
 
-mlir::FlatSymbolRefAttr DeclareBufferRewriter::getSymbolicName(VPURT::DeclareBufferOp op, size_t counter) {
+llvm::SmallVector<mlir::FlatSymbolRefAttr> DeclareBufferRewriter::getSymbolicNames(VPURT::DeclareBufferOp op,
+                                                                                   size_t counter) {
     if (op.getSection() == VPURT::BufferSection::MAC_Accumulators) {
-        return mlir::FlatSymbolRefAttr();
+        return {mlir::FlatSymbolRefAttr()};
     }
 
     auto fullName = VPURT::DeclareBufferOp::getOperationName();
@@ -58,7 +57,7 @@ mlir::FlatSymbolRefAttr DeclareBufferRewriter::getSymbolicName(VPURT::DeclareBuf
 
     auto index = std::to_string(counter);
     auto symName = mlir::StringAttr::get(op.getContext(), opName + index);
-    return mlir::FlatSymbolRefAttr::get(symName);
+    return {mlir::FlatSymbolRefAttr::get(symName)};
 }
 
 }  // namespace vpumi40xx2vpuasm

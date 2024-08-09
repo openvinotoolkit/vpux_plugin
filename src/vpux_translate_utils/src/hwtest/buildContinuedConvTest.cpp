@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+//
+
 #include <numeric>
 
 #include <mlir/Dialect/Quant/QuantTypes.h>
@@ -13,6 +15,7 @@
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
+#include "vpux/compiler/utils/platform_resources.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
 #include "vpux/hwtest/test_case_json_parser.hpp"
 #include "vpux/utils/core/error.hpp"
@@ -107,7 +110,7 @@ void buildContinuedConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Module
     auto functionOutput = function.getArgument(1);
 
     // weights data
-    const auto weightsValues = generateWeights(weightsShape, weightsType, ctx, weightsFileName);
+    const auto weightsValues = generateWeights(builder, weightsShape, weightsType, ctx, weightsFileName);
 
     // Weights partial 0
     const auto weightsPartialParamType = getMemRef(weightsPartialShape, weightsType, vpux::VPU::MemoryKind::DDR);
@@ -176,16 +179,24 @@ void buildContinuedConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Module
             vpux::Const::ContentAttr::get(weightsTable1Values).reorder(vpux::DimsOrder::NHWC));
     auto weightsTable1CMX = getCMXTensor(weightsTableShape, int32, WEIGHTSTABLE_1_CMX_OFFSET);
 
+    auto [waitWLMBarrier, freeBarrierId] =
+            insertWLMStartSequence(functionBuilder, testDesc.getWLMParams().isWLMPartialEnabled);
+
     // Barriers
     std::vector<mlir::Value> barriers;
-    auto num_barriers = 3;
-    for (auto i = 0; i <= num_barriers; ++i) {
-        auto barrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), i);
+    auto isFinalBarrier = false;
+    auto startIter = freeBarrierId++;
+    auto num_barriers = testDesc.getWLMParams().isWLMPartialEnabled == true ? 5 : 3;
+    for (auto i = static_cast<int>(startIter); i <= num_barriers; ++i) {
+        if (i == num_barriers)
+            isFinalBarrier = testDesc.getWLMParams().isWLMPartialEnabled;
+        auto barrier =
+                functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(builder.getUnknownLoc(), i, isFinalBarrier);
         barriers.push_back(barrier.getBarrier());
     }
 
     // Input DMAs
-    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(), barriers[0], builder.getUnknownLoc(),
+    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, waitWLMBarrier, barriers[0], builder.getUnknownLoc(),
                                           functionInput, inputCMX.getOperation()->getResult(0), 0);
     VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(), barriers[0], builder.getUnknownLoc(),
                                           weightsPartial0DDR.getOperation()->getResult(0),

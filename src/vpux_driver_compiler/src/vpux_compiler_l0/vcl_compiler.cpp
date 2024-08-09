@@ -117,14 +117,14 @@ namespace VPUXDriverCompiler {
 
 VPUXCompilerL0::VPUXCompilerL0(vcl_compiler_desc_t desc, const std::map<std::string, std::string>& config,
                                VCLLogger* vclLogger)
-        : _options(std::make_shared<OptionsDesc>()), _compilerDesc(desc), _logger(vclLogger) {
+        : _options(std::make_shared<intel_npu::OptionsDesc>()), _compilerDesc(desc), _logger(vclLogger) {
     // Prepare default compilation configs
     registerCommonOptions(*_options);
     registerCompilerOptions(*_options);
     registerRunTimeOptions(*_options);
 
-    Config parsedConfig(_options);
-    parsedConfig.update(config, OptionMode::CompileTime);
+    intel_npu::Config parsedConfig(_options);
+    parsedConfig.update(config, intel_npu::OptionMode::CompileTime);
 
     // Create compiler instance with the default config
     // COMPILER_TYPE DRIVER is assumed

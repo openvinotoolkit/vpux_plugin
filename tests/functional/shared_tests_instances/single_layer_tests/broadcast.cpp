@@ -15,14 +15,8 @@ namespace test {
 
 class BroadcastLayerTestCommon : public BroadcastLayerTest, virtual public VpuOv2LayerTest {};
 
-class BroadcastLayerTest_NPU3700 : public BroadcastLayerTestCommon {};
 class BroadcastLayerTest_NPU3720 : public BroadcastLayerTestCommon {};
 class BroadcastLayerTest_NPU4000 : public BroadcastLayerTestCommon {};
-
-TEST_P(BroadcastLayerTest_NPU3700, HW) {
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
 
 TEST_P(BroadcastLayerTest_NPU3720, SW) {
     setReferenceSoftwareMode();
@@ -108,25 +102,6 @@ const auto explicitBroadcastParams2 =
                            ::testing::Values(ov::op::BroadcastType::EXPLICIT),
                            ::testing::Values(static_shapes_to_test_representation(inShapesExplicit[1])),
                            ::testing::ValuesIn(inputPrecision), ::testing::Values(DEVICE_NPU));
-
-// ------ NPU3700 ------
-
-INSTANTIATE_TEST_CASE_P(smoke_NumpyBroadcastCheck1, BroadcastLayerTest_NPU3700, numpyBroadcastParams1,
-                        BroadcastLayerTest_NPU3700::getTestCaseName);
-INSTANTIATE_TEST_CASE_P(smoke_NumpyBroadcastCheck2, BroadcastLayerTest_NPU3700, numpyBroadcastParams2,
-                        BroadcastLayerTest_NPU3700::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_BidirectionalBroadcastCheck1, BroadcastLayerTest_NPU3700, bidirectionalBroadcastParams1,
-                        BroadcastLayerTest_NPU3700::getTestCaseName);
-INSTANTIATE_TEST_CASE_P(smoke_BidirectionalBroadcastCheck2, BroadcastLayerTest_NPU3700, bidirectionalBroadcastParams2,
-                        BroadcastLayerTest_NPU3700::getTestCaseName);
-INSTANTIATE_TEST_CASE_P(smoke_BidirectionalBroadcastCheck3, BroadcastLayerTest_NPU3700, bidirectionalBroadcastParams3,
-                        BroadcastLayerTest_NPU3700::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_ExplicitBroadcastCheck1, BroadcastLayerTest_NPU3700, explicitBroadcastParams1,
-                        BroadcastLayerTest_NPU3700::getTestCaseName);
-INSTANTIATE_TEST_CASE_P(smoke_ExplicitBroadcastCheck2, BroadcastLayerTest_NPU3700, explicitBroadcastParams2,
-                        BroadcastLayerTest_NPU3700::getTestCaseName);
 
 // ------ NPU3720 ------
 

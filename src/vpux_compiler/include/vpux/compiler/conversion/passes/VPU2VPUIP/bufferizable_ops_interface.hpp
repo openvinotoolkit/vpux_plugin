@@ -31,9 +31,9 @@ public:
                                  const mlir::bufferization::AnalysisState& state) const {
         return static_cast<const ConcreteModel*>(this)->bufferizesToMemoryWriteImpl(downcast(op), opOperand, state);
     }
-    mlir::bufferization::AliasingOpResultList getAliasingOpResults(
-            mlir::Operation* op, mlir::OpOperand& opOperand, const mlir::bufferization::AnalysisState& state) const {
-        return static_cast<const ConcreteModel*>(this)->getAliasingOpResultsImpl(downcast(op), opOperand, state);
+    mlir::bufferization::AliasingValueList getAliasingValues(mlir::Operation* op, mlir::OpOperand& opOperand,
+                                                             const mlir::bufferization::AnalysisState& state) const {
+        return static_cast<const ConcreteModel*>(this)->getAliasingValuesImpl(downcast(op), opOperand, state);
     }
 
     // Default BufferizableOpInterface::bufferize() implementation used to set
@@ -55,8 +55,8 @@ protected:
     bool bufferizesToMemoryWriteImpl(ConcreteOp, mlir::OpOperand&, const mlir::bufferization::AnalysisState&) const {
         return true;
     }
-    mlir::bufferization::AliasingOpResultList getAliasingOpResultsImpl(
-            ConcreteOp, mlir::OpOperand&, const mlir::bufferization::AnalysisState&) const {
+    mlir::bufferization::AliasingValueList getAliasingValuesImpl(ConcreteOp, mlir::OpOperand&,
+                                                                 const mlir::bufferization::AnalysisState&) const {
         return {};
     }
 
@@ -144,6 +144,8 @@ mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::NCEEltwiseOp origOp
 mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::NCECompressConvolutionOp origOp,
                                 VPU::NCECompressConvolutionOp::Adaptor newArgs, mlir::RewriterBase& rewriter);
 mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::NCEPermuteOp origOp, VPU::NCEPermuteOp::Adaptor newArgs,
+                                mlir::RewriterBase& rewriter);
+mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::NCEMatMulOp origOp, VPU::NCEMatMulOp::Adaptor newArgs,
                                 mlir::RewriterBase& rewriter);
 
 //

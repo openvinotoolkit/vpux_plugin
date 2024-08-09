@@ -4,29 +4,28 @@
 //
 
 #include "single_op_tests/split.hpp"
-
+#include <common_test_utils/ov_tensor_utils.hpp>
 #include <vector>
-
 #include "common_test_utils/test_constants.hpp"
 #include "vpu_ov2_layer_test.hpp"
 
+using namespace ov::test::utils;
 namespace ov {
 
 namespace test {
 
-class SplitLayerTestCommon : public SplitLayerTest, virtual public VpuOv2LayerTest {};
-class SplitLayerTest_NPU3700 : public SplitLayerTestCommon {};
+class SplitLayerTestCommon : public SplitLayerTest, virtual public VpuOv2LayerTest {
+    void generate_inputs(const std::vector<ov::Shape>& targetInputStaticShapes) override {
+        VpuOv2LayerTest::inputs.clear();
+        const auto& funcInputs = VpuOv2LayerTest::function->inputs();
+        ov::Tensor tensorData =
+                create_and_fill_tensor(funcInputs[0].get_element_type(), targetInputStaticShapes[0], 8, 0, 32);
+        VpuOv2LayerTest::inputs.insert({funcInputs[0].get_node_shared_ptr(), tensorData});
+    }
+};
 
 class SplitLayerTest_NPU3720 : public SplitLayerTestCommon {};
 class SplitLayerTest_NPU4000 : public SplitLayerTestCommon {};
-
-TEST_P(SplitLayerTest_NPU3700, HW) {
-    setSkipInferenceCallback([](std::stringstream& str) {
-        str << "Issues with Runtime. Outputs is empty because runtime doesn't wait while dma is finished";
-    });
-    setDefaultHardwareMode();
-    run(Platform::NPU3700);
-}
 
 TEST_P(SplitLayerTest_NPU3720, HW) {
     setDefaultHardwareMode();
@@ -42,7 +41,6 @@ TEST_P(SplitLayerTest_NPU4000, HW) {
 
 }  // namespace ov
 
-using ov::test::SplitLayerTest_NPU3700;
 using ov::test::SplitLayerTest_NPU3720;
 using ov::test::SplitLayerTest_NPU4000;
 
@@ -67,10 +65,6 @@ const auto paramsPrecommit =
                          ::testing::ValuesIn(ov::test::static_shapes_to_test_representation(
                                  std::vector<std::vector<ov::Shape>>({{{6, 6, 12, 24}}}))),
                          ::testing::Values(std::vector<size_t>({})), ::testing::Values(ov::test::utils::DEVICE_NPU));
-
-// --------- NPU3700 ---------
-
-INSTANTIATE_TEST_SUITE_P(smoke_Split, SplitLayerTest_NPU3700, paramsConfig1, SplitLayerTest_NPU3700::getTestCaseName);
 
 // --------- NPU3720 ---------
 

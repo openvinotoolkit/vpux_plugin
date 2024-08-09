@@ -47,26 +47,12 @@ mlir::Block* getSectionBlock(ConcreteOp op) {
 
 class SectionSignature {
 public:
-    SectionSignature(std::string name, SectionFlagsAttr flags, SectionTypeAttr type = SectionTypeAttr::SHT_PROGBITS)
-            : _name(std::move(name)), _flags(flags), _type(type) {
-    }
-    SectionSignature() = delete;
+    SectionSignature(std::string name, SectionFlagsAttr flags, SectionTypeAttr type = SectionTypeAttr::SHT_PROGBITS);
 
-    const std::string& getName() const {
-        return _name;
-    }
-
-    StringRef getNameRef() const {
-        return _name;
-    }
-
-    SectionFlagsAttr getFlags() const {
-        return _flags;
-    }
-
-    SectionTypeAttr getType() const {
-        return _type;
-    }
+    std::string_view getName() const;
+    StringRef getNameRef() const;
+    SectionFlagsAttr getFlags() const;
+    SectionTypeAttr getType() const;
 
 private:
     std::string _name;
@@ -74,12 +60,46 @@ private:
     SectionTypeAttr _type;
 };
 
+bool operator==(const SectionSignature& lhs, const SectionSignature& rhs);
+
+//
+// SymbolSignature
+//
+
+struct SymbolSignature {
+    SymbolSignature(mlir::SymbolRefAttr reference, std::string name, ELF::SymbolType type = ELF::SymbolType::STT_OBJECT,
+                    size_t size = 0, size_t value = 0);
+
+    mlir::SymbolRefAttr reference;
+    std::string name;
+    ELF::SymbolType type;
+    size_t size;
+    size_t value;
+};
+
+bool operator==(const SymbolSignature& lhs, const SymbolSignature& rhs);
+
 struct RelocationInfo;
 
 class SymbolReferenceMap;
 
 }  // namespace ELF
 }  // namespace vpux
+
+//
+// Hash
+//
+
+namespace std {
+template <>
+struct hash<vpux::ELF::SectionSignature> final {
+    std::size_t operator()(const vpux::ELF::SectionSignature& signature) const {
+        return llvm::hash_combine(llvm::hash_value(signature.getName()),
+                                  llvm::hash_value(static_cast<uint64_t>(signature.getFlags())),
+                                  llvm::hash_value(static_cast<uint64_t>(signature.getType())));
+    }
+};
+}  // namespace std
 
 //
 // Generated

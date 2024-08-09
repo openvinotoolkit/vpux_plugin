@@ -18,10 +18,9 @@
 using vpux::VPU::ArchKind;
 using namespace vpux;
 
-using MLIR_VPU_VFConfig = MLIR_UnitBase;
+using MLIR_VPU_VFConfig = vpux::VPU::arch37xx::UnitTest;
 
 TEST_F(MLIR_VPU_VFConfig, VF_ConfigSimple) {
-    mlir::MLIRContext ctx(registry);
     constexpr llvm::StringLiteral inputIR = R"(
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
@@ -79,7 +78,6 @@ TEST_F(MLIR_VPU_VFConfig, VF_ConfigSimple) {
 }
 
 TEST_F(MLIR_VPU_VFConfig, VF_ConfigPipelined) {
-    mlir::MLIRContext ctx(registry);
     constexpr llvm::StringLiteral inputIR = R"(
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 

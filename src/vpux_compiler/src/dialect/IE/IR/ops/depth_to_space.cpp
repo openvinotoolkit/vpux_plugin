@@ -27,11 +27,11 @@ void vpux::IE::DepthToSpaceOp::build(mlir::OpBuilder& builder, mlir::OperationSt
 
 mlir::LogicalResult vpux::IE::DepthToSpaceOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::DepthToSpaceOpAdaptor depthToSpace(operands, attrs);
+    IE::DepthToSpaceOpAdaptor depthToSpace(operands, attrs, prop);
     if (mlir::failed(depthToSpace.verify(loc))) {
         return mlir::failure();
     }

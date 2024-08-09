@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW" --convert-extract-image-patches %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 // CHECK-LABEL: @ConvertExtractImagePatchesTransposeAffineReshapeToSliceConcat
 func.func @ConvertExtractImagePatchesTransposeAffineReshapeToSliceConcat(%arg0: tensor<1x1x6x5xf16>) -> tensor<1x4x3x5xf16> {

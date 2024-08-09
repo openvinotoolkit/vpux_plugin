@@ -19,6 +19,9 @@ namespace VPU {
 // which we may increase in order to fit in CMX
 constexpr int64_t MINIMUM_LENGTH_TILING = 4;
 
+// The specific back-infer strategy type
+enum class BackInferStrategy { TILING_DIM, TILING_STRATEGY };
+
 // information about input and output tiles for operands and result
 using VFOperationTiling = std::pair<InputTiling, TileInfo>;
 
@@ -94,6 +97,20 @@ StrategyCost getVFCost(const std::unique_ptr<VPU::LayerVPUNNCost>& costFunction,
 // validate if subgraph doesn't have spills
 bool validateCMXSize(VFConfig& config, const TilingOperationStorage::UPtr& opStorage, Logger log,
                      Byte reservedMemory = Byte(0));
+
+SmallVector<SmallVector<int64_t>> backInferVFTilingStrategy(
+        VPU::VerticalFusionOp vfOp, ArrayRef<int64_t> tilingStrategy,
+        std::unordered_map<mlir::Operation*, SmallVector<int64_t>>& opStrategyMap);
+
+SmallVector<vpux::Dim> backInferVFTilingDim(VPU::VerticalFusionOp vfOp, vpux::Dim outputDim,
+                                            std::unordered_map<mlir::Operation*, vpux::Dim>& opDimMap);
+
+template <typename ArgType, typename ResultType>
+ResultType backInfer(VPU::TilingViewLikeOpInterface opIf, ArgType tiling, VPU::BackInferStrategy strategy);
+
+template <typename ArgType, typename ResultType>
+SmallVector<ResultType> backInferVFTiling(VPU::VerticalFusionOp vfOp, ArgType outputTiling, BackInferStrategy strategy,
+                                          std::unordered_map<mlir::Operation*, ResultType>& opTilingMap);
 
 }  // namespace VPU
 }  // namespace vpux

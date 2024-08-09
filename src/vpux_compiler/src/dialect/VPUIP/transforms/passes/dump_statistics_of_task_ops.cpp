@@ -4,6 +4,7 @@
 //
 
 #include "vpux/compiler/core/feasible_memory_scheduler_spilling.hpp"
+#include "vpux/compiler/core/type_interfaces.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPUIP/transforms/passes.hpp"
 #include "vpux/compiler/utils/swizzling_utils.hpp"
@@ -18,7 +19,6 @@ namespace {
 
 using IsSpecificOpFunc = std::function<bool(mlir::Operation*)>;
 using RemainderHandlerFunc = std::function<std::string(mlir::Operation*)>;
-const std::string DMA_PROFILING_SPILL_CATEGORY = "CMX2DDR profiling spill";
 
 //
 // Declare utility functions
@@ -51,7 +51,7 @@ public:
         ++_count;
         if (mlir::isa_and_nonnull<VPUIP::DMATypeOpInterface>(op)) {
             auto opType = op->getResult(0).getType().cast<vpux::NDTypeInterface>();
-            _size += opType.getTotalAllocSize().count();
+            _size += opType.getCompactAllocSize().count();
         }
         bool counted = false;
         for (auto& nestedCounter : _nestedCounters) {
@@ -211,8 +211,12 @@ void addProfilingCounters(CountersVec& counters, const std::string& category) {
                  [](auto op) {
                      return isLocContainsStr(op->getLoc(), getProfSuffix("dpu"));
                  }},
-                {"ActShave", [](auto op) {
+                {"ActShave",
+                 [](auto op) {
                      return isLocContainsStr(op->getLoc(), getProfSuffix("actshave"));
+                 }},
+                {"M2I", [](auto op) {
+                     return isLocContainsStr(op->getLoc(), getProfSuffix("m2i"));
                  }}};
         for (const auto& p : profCounterCfgs) {
             nestedProfCounters.push_back(std::make_shared<SpecificCategoryCounter>(p.first, p.second));
@@ -221,6 +225,22 @@ void addProfilingCounters(CountersVec& counters, const std::string& category) {
                 "Profiling buffer management",
                 [](auto op) {
                     return isLocContainsStr(op->getLoc(), profiling::PROFILING_CMX_2_DDR_OP_NAME);
+                },
+                nestedProfCounters));
+    }
+    if (category == "DDR2DDR") {
+        CountersVec nestedProfCounters;
+        const static std::vector<std::pair<std::string, IsSpecificOpFunc>> profCounterCfgs = {
+                {"DMA", [](auto op) {
+                     return isLocContainsStr(op->getLoc(), std::string("dma") + profiling::PROFILING_DDR_2_DDR_OP_NAME);
+                 }}};
+        for (const auto& p : profCounterCfgs) {
+            nestedProfCounters.push_back(std::make_shared<SpecificCategoryCounter>(p.first, p.second));
+        }
+        counters.push_back(std::make_shared<SpecificCategoryCounter>(
+                "Profiling buffer management",
+                [](auto op) {
+                    return isLocContainsStr(op->getLoc(), profiling::PROFILING_DDR_2_DDR_OP_NAME);
                 },
                 nestedProfCounters));
     }

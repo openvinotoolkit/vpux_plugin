@@ -24,12 +24,14 @@ namespace {
 
 class UnrollBatchPass final : public IE::arch37xx::UnrollBatchBase<UnrollBatchPass> {
 public:
-    explicit UnrollBatchPass(Logger log) {
+    explicit UnrollBatchPass(const bool skipUnrollBatch, Logger log): _skipUnrollBatch(skipUnrollBatch) {
         Base::initLogger(log, Base::getArgumentName());
     }
 
 private:
     void safeRunOnFunc() final;
+
+    bool _skipUnrollBatch;
 };
 
 template <class ConcreteOp>
@@ -45,10 +47,7 @@ void UnrollBatchPass::safeRunOnFunc() {
     auto& ctx = getContext();
 
     mlir::ConversionTarget target(ctx);
-    target.addDynamicallyLegalOp<IE::MaxPoolOp>(&isLegalOp<IE::MaxPoolOp>);
-    target.addDynamicallyLegalOp<IE::AvgPoolOp>(&isLegalOp<IE::AvgPoolOp>);
     target.addDynamicallyLegalOp<IE::FullyConnectedOp>(&isLegalOp<IE::FullyConnectedOp>);
-    target.addDynamicallyLegalOp<IE::ConvolutionOp>(&isLegalOp<IE::ConvolutionOp>);
     target.addDynamicallyLegalOp<IE::GroupConvolutionOp>(&isLegalOp<IE::GroupConvolutionOp>);
     target.addDynamicallyLegalOp<IE::ExpOp>(&isLegalOp<IE::ExpOp>);
     target.addDynamicallyLegalOp<IE::SigmoidOp>(&isLegalOp<IE::SigmoidOp>);
@@ -68,15 +67,21 @@ void UnrollBatchPass::safeRunOnFunc() {
     target.addLegalOp<Const::DeclareOp>();
 
     mlir::RewritePatternSet patterns(&ctx);
-    patterns.add<vpux::IE::BatchUnrollConverter<IE::ConvolutionOp>>(&ctx, _log, 1);
     patterns.add<vpux::IE::BatchUnrollConverter<IE::FullyConnectedOp>>(&ctx, _log, 1);
     patterns.add<vpux::IE::BatchUnrollConverter<IE::GroupConvolutionOp>>(&ctx, _log, 1);
     patterns.add<vpux::IE::BatchUnrollConverter<IE::ExpOp>>(&ctx, _log, 1);
     patterns.add<vpux::IE::BatchUnrollConverter<IE::SigmoidOp>>(&ctx, _log, 1);
     patterns.add<vpux::IE::BatchUnrollConverter<IE::AndOp>>(&ctx, _log, 2);
     patterns.add<vpux::IE::BatchUnrollConverter<IE::AddOp>>(&ctx, _log, 2);
-    patterns.add<vpux::IE::BatchUnrollConverter<IE::AvgPoolOp>>(&ctx, _log, 1);
-    patterns.add<vpux::IE::BatchUnrollConverter<IE::MaxPoolOp>>(&ctx, _log, 1);
+
+    if (!_skipUnrollBatch) {
+        target.addDynamicallyLegalOp<IE::ConvolutionOp>(&isLegalOp<IE::ConvolutionOp>);
+        target.addDynamicallyLegalOp<IE::MaxPoolOp>(&isLegalOp<IE::MaxPoolOp>);
+        target.addDynamicallyLegalOp<IE::AvgPoolOp>(&isLegalOp<IE::AvgPoolOp>);
+        patterns.add<vpux::IE::BatchUnrollConverter<IE::ConvolutionOp>>(&ctx, _log, 1);
+        patterns.add<vpux::IE::BatchUnrollConverter<IE::MaxPoolOp>>(&ctx, _log, 1);
+        patterns.add<vpux::IE::BatchUnrollConverter<IE::AvgPoolOp>>(&ctx, _log, 1);
+    }
 
     auto func = getOperation();
     if (mlir::failed(mlir::applyPartialConversion(func, target, std::move(patterns)))) {
@@ -90,6 +95,6 @@ void UnrollBatchPass::safeRunOnFunc() {
 // createUnrollBatchPass
 //
 
-std::unique_ptr<mlir::Pass> vpux::IE::arch37xx::createUnrollBatchPass(Logger log) {
-    return std::make_unique<UnrollBatchPass>(log);
+std::unique_ptr<mlir::Pass> vpux::IE::arch37xx::createUnrollBatchPass(Logger log, const bool skipUnrollBatch) {
+    return std::make_unique<UnrollBatchPass>(skipUnrollBatch, log);
 }

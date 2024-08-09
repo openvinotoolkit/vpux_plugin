@@ -39,11 +39,19 @@ mlir::LogicalResult verifyInOutElementType(mlir::Location loc, mlir::Value inTen
 }
 
 mlir::LogicalResult verifyCompressedBufferAllocSize(mlir::Location loc, mlir::Value origTensor,
-                                                    mlir::Value compressedTensor) {
+                                                    mlir::Value compressedTensor, mlir::Value sparsityMapBuffer) {
     const auto origType = origTensor.getType().cast<vpux::NDTypeInterface>();
     const auto compressedType = compressedTensor.getType().cast<vpux::NDTypeInterface>();
+    const auto origShape = origType.getShape();
+    int64_t bitmapsize = 0;
 
-    const auto origSizeWithUpdateForCompression = updateSizeForCompression(origType.getTotalAllocSize().count());
+    if (sparsityMapBuffer != nullptr) {
+        const auto bitmapType = sparsityMapBuffer.getType().cast<vpux::NDTypeInterface>();
+        bitmapsize = bitmapType.getTotalAllocSize().count();
+    }
+
+    const auto origSizeWithUpdateForCompression =
+            updateSizeForCompression(origType.getTotalAllocSize().count(), origShape, bitmapsize);
     const auto compressedSize = compressedType.getTotalAllocSize().count();
 
     if (compressedSize < origSizeWithUpdateForCompression) {
@@ -383,27 +391,26 @@ size_t vpux::VPUIP::ConvertDMAOp::getOperationCycleCost(std::shared_ptr<VPUNN::V
 void vpux::VPUIP::DecompressDMAOp::build(mlir::OpBuilder& builder, mlir::OperationState& state, mlir::Value input,
                                          mlir::Value output_buff, int64_t port, bool is_out_of_order,
                                          bool is_critical) {
-    build(builder, state, input, /*act_compression_size_entry=*/nullptr, output_buff,
-          /*port=*/vpux::getIntAttr(builder, port),
-
-          /*is_out_of_order=*/is_out_of_order, /*is_critical=*/is_critical, /* dma_hwp_id= */ nullptr,
-          /* profilingMetadata */ nullptr);
+    build(builder, state, input, /*act_compression_size_entry=*/nullptr, /*act_compression_sparsity_map*/ nullptr,
+          output_buff,
+          /*port=*/vpux::getIntAttr(builder, port), /*is_out_of_order=*/is_out_of_order, /*is_critical=*/is_critical,
+          /* dma_hwp_id= */ nullptr, /* profilingMetadata */ nullptr);
 }
 
 void vpux::VPUIP::DecompressDMAOp::build(mlir::OpBuilder& builder, mlir::OperationState& state, mlir::Value input,
                                          mlir::Value output_buff, mlir::IntegerAttr port,
                                          mlir::UnitAttr is_out_of_order, mlir::UnitAttr is_critical) {
-    build(builder, state, input, /*act_compression_size_entry=*/nullptr, output_buff, /*port=*/port,
-
-          /*is_out_of_order=*/is_out_of_order, /*is_critical=*/is_critical,
+    build(builder, state, input, /*act_compression_size_entry=*/nullptr, /*act_compression_sparsity_map*/ nullptr,
+          output_buff,
+          /*port=*/port, /*is_out_of_order=*/is_out_of_order, /*is_critical=*/is_critical,
           /*dma_hwp_id=*/nullptr, /* profilingMetadata */ nullptr);
 }
 
 void vpux::VPUIP::DecompressDMAOp::build(mlir::OpBuilder& builder, mlir::OperationState& state, mlir::Value input,
                                          mlir::Value output_buff) {
-    build(builder, state, input, /*act_compression_size_entry=*/nullptr, output_buff, /*port=*/nullptr,
-
-          /*is_out_of_order=*/false, /*is_critical=*/false,
+    build(builder, state, input, /*act_compression_size_entry=*/nullptr, /*act_compression_sparsity_map*/ nullptr,
+          output_buff,
+          /*port=*/nullptr, /*is_out_of_order=*/false, /*is_critical=*/false,
           /*dma_hwp_id=*/nullptr, /* profilingMetadata */ nullptr);
 }
 
@@ -416,18 +423,26 @@ void vpux::VPUIP::DecompressDMAOp::build(mlir::OpBuilder& builder, mlir::Operati
 void vpux::VPUIP::DecompressDMAOp::build(mlir::OpBuilder& builder, mlir::OperationState& state, mlir::Value input,
                                          mlir::Value actCompressionSizeEntryBuff, mlir::Value output_buff,
                                          int64_t port) {
-    build(builder, state, input, actCompressionSizeEntryBuff, output_buff, /*port=*/vpux::getIntAttr(builder, port),
-
+    build(builder, state, input, actCompressionSizeEntryBuff, /*act_compression_sparsity_map*/ nullptr, output_buff,
+          /*port=*/vpux::getIntAttr(builder, port),
           /*is_out_of_order=*/false, /*is_critical=*/false,
+          /* dma_hwp_id= */ nullptr, /* profilingMetadata */ nullptr);
+}
+
+void vpux::VPUIP::DecompressDMAOp::build(mlir::OpBuilder& builder, mlir::OperationState& state, mlir::Value input,
+                                         mlir::Value actCompressionSizeEntryBuff,
+                                         mlir::Value act_compression_sparsity_map, mlir::Value output_buff,
+                                         int64_t port) {
+    build(builder, state, input, actCompressionSizeEntryBuff, act_compression_sparsity_map, output_buff,
+          /*port=*/vpux::getIntAttr(builder, port), /*is_out_of_order=*/false, /*is_critical=*/false,
           /* dma_hwp_id= */ nullptr, /* profilingMetadata */ nullptr);
 }
 
 void vpux::VPUIP::DecompressDMAOp::build(mlir::OpBuilder& builder, mlir::OperationState& state, mlir::Value input,
                                          mlir::Value actCompressionSizeEntryBuff, mlir::Value output_buff, int64_t port,
                                          bool is_out_of_order, bool is_critical) {
-    build(builder, state, input, actCompressionSizeEntryBuff, output_buff, /*port=*/vpux::getIntAttr(builder, port),
-
-          /*is_out_of_order=*/is_out_of_order, /*is_critical=*/is_critical,
+    build(builder, state, input, actCompressionSizeEntryBuff, /*act_compression_sparsity_map*/ nullptr, output_buff,
+          /*port=*/vpux::getIntAttr(builder, port), /*is_out_of_order=*/is_out_of_order, /*is_critical=*/is_critical,
           /* dma_hwp_id= */ nullptr, /* profilingMetadata */ nullptr);
 }
 
@@ -435,7 +450,8 @@ void vpux::VPUIP::DecompressDMAOp::build(mlir::OpBuilder& builder, mlir::Operati
                                          mlir::Value actCompressionSizeEntryBuff, mlir::Value output_buff,
                                          mlir::IntegerAttr port, mlir::UnitAttr is_out_of_order,
                                          mlir::UnitAttr is_critical) {
-    build(builder, state, input, actCompressionSizeEntryBuff, output_buff, /*port=*/port,
+    build(builder, state, input, actCompressionSizeEntryBuff, /*act_compression_sparsity_map*/ nullptr, output_buff,
+          /*port=*/port,
           /*is_out_of_order=*/is_out_of_order, /*is_critical=*/is_critical,
           /* dma_hwp_id= */ nullptr, /* profilingMetadata */ nullptr);
 }
@@ -485,7 +501,7 @@ mlir::LogicalResult vpux::VPUIP::DecompressDMAOp::verify() {
     }
 
     if (getActCompressionSizeEntry() != nullptr &&
-        mlir::failed(verifyCompressedBufferAllocSize(loc, getOutput(), getInput()))) {
+        mlir::failed(verifyCompressedBufferAllocSize(loc, getOutput(), getInput(), getActCompressionSparsityMap()))) {
         return mlir::failure();
     }
 
@@ -507,19 +523,26 @@ size_t vpux::VPUIP::DecompressDMAOp::getOperationCycleCost(std::shared_ptr<VPUNN
 //
 
 void vpux::VPUIP::CompressDMAOp::build(mlir::OpBuilder& builder, mlir::OperationState& state, mlir::Value input,
-                                       mlir::Value actCompressionSizeEntryBuff, mlir::Value output_buff, int64_t port) {
-    build(builder, state, input, actCompressionSizeEntryBuff, output_buff, /*port=*/vpux::getIntAttr(builder, port),
+                                       mlir::Value actCompressionSizeEntryBuff,
+                                       mlir::Value act_compression_sparsity_map, mlir::Value output_buff,
+                                       int64_t port) {
+    build(builder, state, input, actCompressionSizeEntryBuff, act_compression_sparsity_map, output_buff,
+          /*port=*/vpux::getIntAttr(builder, port), /*is_out_of_order=*/false, /*is_critical=*/false,
+          /* dma_hwp_id= */ nullptr, /* profilingMetadata */ nullptr);
+}
 
-          /*is_out_of_order=*/false, /*is_critical=*/false,
+void vpux::VPUIP::CompressDMAOp::build(mlir::OpBuilder& builder, mlir::OperationState& state, mlir::Value input,
+                                       mlir::Value actCompressionSizeEntryBuff, mlir::Value output_buff, int64_t port) {
+    build(builder, state, input, actCompressionSizeEntryBuff, /*act_compression_sparsity_map*/ nullptr, output_buff,
+          /*port=*/vpux::getIntAttr(builder, port), /*is_out_of_order=*/false, /*is_critical=*/false,
           /* dma_hwp_id= */ nullptr, /* profilingMetadata */ nullptr);
 }
 
 void vpux::VPUIP::CompressDMAOp::build(mlir::OpBuilder& builder, mlir::OperationState& state, mlir::Value input,
                                        mlir::Value actCompressionSizeEntryBuff, mlir::Value output_buff, int64_t port,
                                        bool is_out_of_order, bool is_critical) {
-    build(builder, state, input, actCompressionSizeEntryBuff, output_buff, /*port=*/vpux::getIntAttr(builder, port),
-
-          /*is_out_of_order=*/is_out_of_order, /*is_critical=*/is_critical,
+    build(builder, state, input, actCompressionSizeEntryBuff, /*act_compression_sparsity_map*/ nullptr, output_buff,
+          /*port=*/vpux::getIntAttr(builder, port), /*is_out_of_order=*/is_out_of_order, /*is_critical=*/is_critical,
           /* dma_hwp_id= */ nullptr, /* profilingMetadata */ nullptr);
 }
 
@@ -527,7 +550,8 @@ void vpux::VPUIP::CompressDMAOp::build(mlir::OpBuilder& builder, mlir::Operation
                                        mlir::Value actCompressionSizeEntryBuff, mlir::Value output_buff,
                                        mlir::IntegerAttr port, /*optional*/ mlir::UnitAttr is_out_of_order,
                                        /*optional*/ mlir::UnitAttr is_critical) {
-    build(builder, state, input, actCompressionSizeEntryBuff, output_buff, /*port=*/port,
+    build(builder, state, input, actCompressionSizeEntryBuff, /*act_compression_sparsity_map*/ nullptr, output_buff,
+          /*port=*/port,
           /*is_out_of_order=*/is_out_of_order, /*is_critical=*/is_critical,
           /* dma_hwp_id= */ nullptr, /* profilingMetadata */ nullptr);
 }
@@ -563,8 +587,12 @@ mlir::LogicalResult vpux::VPUIP::CompressDMAOp::verify() {
     }
 
     if (mlir::failed(verifyInOutElementType(loc, getInput(), getOutput())) ||
-        mlir::failed(verifyTensorSize(loc, getInput())) ||
-        mlir::failed(verifyCompressedBufferAllocSize(loc, getInput(), getOutput()))) {
+        mlir::failed(verifyTensorSize(loc, getInput()))) {
+        return mlir::failure();
+    }
+
+    if (getActCompressionSizeEntry() != nullptr &&
+        mlir::failed(verifyCompressedBufferAllocSize(loc, getInput(), getOutput(), getActCompressionSparsityMap()))) {
         return mlir::failure();
     }
 

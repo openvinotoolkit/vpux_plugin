@@ -10,11 +10,11 @@ using namespace vpux;
 
 mlir::LogicalResult vpux::VPU::PermuteQuantizeOp::inferReturnTypes(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange /*regions*/,
         mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::PermuteQuantizeOpAdaptor permute_quantize(operands, attrs);
+    VPU::PermuteQuantizeOpAdaptor permute_quantize(operands, attrs, prop);
     if (mlir::failed(permute_quantize.verify(loc))) {
         return mlir::failure();
     }

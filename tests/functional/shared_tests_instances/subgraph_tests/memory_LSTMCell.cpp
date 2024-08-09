@@ -5,8 +5,8 @@
 #include "subgraph_tests/memory_LSTMCell.hpp"
 #include <common_test_utils/test_constants.hpp>
 #include <shared_test_classes/subgraph/memory_LSTMCell.hpp>
+#include "common/npu_test_env_cfg.hpp"
 #include "common/utils.hpp"
-#include "common/vpu_test_env_cfg.hpp"
 #include "vpu_test_tool.hpp"
 
 using namespace ov::test::utils;

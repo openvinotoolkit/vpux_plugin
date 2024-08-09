@@ -213,28 +213,6 @@ struct RtDialectProvider {
     }
 };
 
-struct RtDialectProvider30XX : public RtDialectProvider {
-    template <class... Args>
-    static auto extractComputeSwOp(mlir::func::FuncOp funcOp) {
-        SmallVector<mlir::Operation*> ops;
-        funcOp->walk([&](VPURT::TaskOp taskOp) {
-            if (taskOp.getExecutorKind() == vpux::VPU::ExecutorKind::SHAVE_UPA) {
-                if (!isCacheHandlingOp(taskOp.getInnerTaskOp())) {
-                    ops.push_back(taskOp.getInnerTaskOp());
-                }
-            }
-        });
-        return ops;
-    }
-
-    static std::optional<VPUIP::SwProfilingMetadataAttr> getSwProfilingMetadata(mlir::Operation* op) {
-        if (auto attr = vpux::getSwProfilingMetadataFromUpa(op)) {
-            return attr;
-        }
-        return {};
-    }
-};
-
 using RtDialectProvider37XX = RtDialectProvider;
 struct RtDialectProvider40XX : public RtDialectProvider {
     static inline bool IS_DMA_HWP_SUPPORTED = true;
@@ -424,7 +402,10 @@ flatbuffers::Offset<ProfilingFB::ProfilingBuffer> createProfilingBufferOffset(Pr
         const auto offset = section.getOffset();
         const auto size = section.getSize();
 
-        const auto sectionOffset = ProfilingFB::CreateProfilingSection(builder, secType, offset, size);
+        const auto secTypeLabel =
+                builder.CreateString(profiling::convertExecTypeToName(static_cast<profiling::ExecutorType>(secType)));
+
+        const auto sectionOffset = ProfilingFB::CreateProfilingSection(builder, secType, offset, size, secTypeLabel);
         profilingSectionsOffsets.push_back(sectionOffset);
     }
 
@@ -470,12 +451,6 @@ flatbuffers::DetachedBuffer buildProfilingMetaGeneric(IE::CNNNetworkOp netOp, ml
     return builder.Release();
 }
 
-flatbuffers::DetachedBuffer buildProfilingMetaVPURT30XX(IE::CNNNetworkOp netOp, mlir::func::FuncOp funcOp, Logger log) {
-    return buildProfilingMetaGeneric<RtDialectProvider30XX, VPURT::ConfigureBarrierOp, VPUIP::DMATypeOpInterface,
-                                     VPUIP::NCEClusterTaskOp, VPUIP::DPUTaskOp, DummyUpaOp, VPUIP::M2ITaskOp>(
-            netOp, funcOp, log);
-}
-
 template <typename VPURTDialectProvider>
 flatbuffers::DetachedBuffer buildProfilingMetaVPURTGeneral(IE::CNNNetworkOp netOp, mlir::func::FuncOp funcOp,
                                                            Logger log) {
@@ -487,8 +462,6 @@ flatbuffers::DetachedBuffer buildProfilingMetaVPURTGeneral(IE::CNNNetworkOp netO
 flatbuffers::DetachedBuffer buildProfilingMeta(IE::CNNNetworkOp netOp, mlir::func::FuncOp funcOp, Logger log) {
     const auto arch = VPU::getArch(funcOp);
     switch (arch) {
-    case VPU::ArchKind::NPU30XX:
-        return ::buildProfilingMetaVPURT30XX(netOp, funcOp, log);
     case VPU::ArchKind::NPU37XX:
         return ::buildProfilingMetaVPURTGeneral<RtDialectProvider37XX>(netOp, funcOp, log);
     case VPU::ArchKind::NPU40XX:

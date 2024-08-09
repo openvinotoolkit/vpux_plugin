@@ -35,7 +35,7 @@ elf::DType ELFNPU37XX::createDType(mlir::Type type) {
     } else if (type.isFloat8E5M2()) {
         return elf::DType::DType_FP8;
     } else if (type.isFloat8E4M3FN()) {
-        return elf::DType::DType_FP8;
+        return elf::DType::DType_HF8;
     } else if (type.isSignedInteger(CHAR_BIT * sizeof(int64_t))) {
         return elf::DType::DType_I64;
     } else if (type.isSignedInteger(CHAR_BIT * sizeof(int32_t))) {
@@ -126,7 +126,9 @@ elf::TensorRef ELFNPU37XX::createTensorRef(mlir::Value val, StringRef name) {
 std::unique_ptr<elf::NetworkMetadata> ELFNPU37XX::constructMetadata(
         mlir::ModuleOp module, IE::CNNNetworkOp netOp, mlir::func::FuncOp netFunc,
         const std::vector<std::shared_ptr<const ov::Node>>& parameters,
-        const std::vector<std::shared_ptr<const ov::Node>>& results) {
+        const std::vector<std::shared_ptr<const ov::Node>>& results, vpux::Logger log) {
+    log.setName("ELF - Construct Metadata");
+
     auto inputsInfo = netOp.getInputsDataInfo();
     auto outputsInfo = netOp.getOutputsDataInfo();
     auto profilingOutputsInfo = netOp.getProfilingOutputsDataInfo();
@@ -248,8 +250,18 @@ std::unique_ptr<elf::NetworkMetadata> ELFNPU37XX::constructMetadata(
         copy_str(tmp_node.input_name, tmpInputName);
 
         const auto tmpTensorNames = node_val->get_output_tensor(0).get_names();
-        tmp_node.tensor_names_count = checked_cast<uint32_t>(tmpTensorNames.size());
+        auto tensorNamesSize = tmpTensorNames.size();
+        if (tensorNamesSize > elf::MAX_METADATA_IO) {
+            log.warning("OV Parameter {0} has {1} tensor names. Trimming to the maximum limit of {2}", index,
+                        tensorNamesSize, elf::MAX_METADATA_IO);
+            tensorNamesSize = elf::MAX_METADATA_IO;
+        }
+
+        tmp_node.tensor_names_count = tensorNamesSize;
         for (auto tensor_name : tmpTensorNames | indexed) {
+            if (tensor_name.index() >= tensorNamesSize) {
+                break;
+            }
             copy_str(tmp_node.tensor_names[tensor_name.index()], tensor_name.value());
         }
 
@@ -283,8 +295,18 @@ std::unique_ptr<elf::NetworkMetadata> ELFNPU37XX::constructMetadata(
         copy_str(tmp_node.input_name, tmpInputName);
 
         const auto tmpTensorNames = node_val->get_output_tensor(0).get_names();
-        tmp_node.tensor_names_count = checked_cast<uint32_t>(tmpTensorNames.size());
+        auto tensorNamesSize = tmpTensorNames.size();
+        if (tensorNamesSize > elf::MAX_METADATA_IO) {
+            log.warning("OV Result {0} has {1} tensor names. Trimming to the maximum limit of {2}", index,
+                        tensorNamesSize, elf::MAX_METADATA_IO);
+            tensorNamesSize = elf::MAX_METADATA_IO;
+        }
+
+        tmp_node.tensor_names_count = tensorNamesSize;
         for (auto tensor_name : tmpTensorNames | indexed) {
+            if (tensor_name.index() >= tensorNamesSize) {
+                break;
+            }
             copy_str(tmp_node.tensor_names[tensor_name.index()], tensor_name.value());
         }
 

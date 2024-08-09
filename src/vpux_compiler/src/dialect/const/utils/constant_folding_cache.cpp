@@ -6,6 +6,7 @@
 #ifdef BACKGROUND_FOLDING_ENABLED
 
 #include "vpux/compiler/dialect/const/utils/constant_folding_cache.hpp"
+#include "vpux/utils/core/disable_warning.hpp"
 
 using namespace vpux;
 
@@ -23,35 +24,72 @@ void Const::ConstantFoldingCache::enqueueRequest(const Const::FoldingRequest& fo
 
 Const::FoldingRequest Const::ConstantFoldingCache::getRequest() {
     Const::FoldingRequest result;
-#if defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wstringop-overflow"
-#endif
+    NPU_DISABLE_STRINGOP_OVERFLOW(129510)
     _requestQueue.pop(result);
-#if defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif
+    NPU_DISABLE_WARNING_END
     return result;
 }
 
 bool Const::ConstantFoldingCache::hasContent(Const::ContentAttr attr) {
-    Const::details::ContentMap::const_accessor accessor;
-    return _cache.find(accessor, attr) && !accessor.empty();
+    Const::details::ContentMap::accessor accessor;
+    if (_cache.find(accessor, attr) && !accessor.empty()) {
+        accessor->second.refCount++;
+        return true;
+    }
+    return false;
+}
+
+void Const::ConstantFoldingCache::setMemoryUsageLimit(vpux::Byte memoryUsageLimit) {
+    _memoryUsageLimit = memoryUsageLimit.count();
+}
+
+void Const::ConstantFoldingCache::setCacheCleanThreshold(double cacheCleanThreshold) {
+    _cacheCleanThreshold = cacheCleanThreshold;
+}
+
+bool Const::ConstantFoldingCache::isMemoryLimitReached() const {
+    return _memoryUsedCache >= _memoryUsageLimit;
+}
+
+void Const::ConstantFoldingCache::cleanUpCache() {
+    std::vector<std::pair<Const::ContentAttr, int>> contents;
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        contents.reserve(_cache.size());
+        for (const auto& [attr, cachedContent] : _cache) {
+            contents.emplace_back(attr, cachedContent.refCount);
+        }
+    }
+    std::sort(contents.begin(), contents.end(), [](const auto& a, const auto& b) {
+        return a.second < b.second;
+    });
+
+    for (const auto& entry : contents) {
+        removeContent(entry.first);
+        if (_memoryUsedCache <= _memoryUsageLimit * _cacheCleanThreshold) {
+            break;
+        }
+    }
 }
 
 void Const::ConstantFoldingCache::addContent(Const::ContentAttr attr, const Const::Content& content) {
     Const::details::ContentMap::accessor accessor;
     _cache.insert(accessor, attr);
     VPUX_THROW_WHEN(accessor.empty(), "Failed to add folding request to cache");
-    accessor->second = content;
+    accessor->second.content = content;
     accessor.release();
+
+    auto size = attr.getType().cast<vpux::NDTypeInterface>().getTotalAllocSize();
+    _memoryUsedCache += size.count();
+
+    if (isMemoryLimitReached()) {
+        cleanUpCache();
+    }
 
     if (_collectStatistics) {
         _statistics.numElementsAddedToCache++;
-        auto size = attr.getType().cast<vpux::NDTypeInterface>().getTotalAllocSize();
-        _statistics.memoryUsedCache += size.count();
 
-        _statistics.updateMaxMemoryUsedCache(_statistics.memoryUsedCache.load());
+        _statistics.updateMaxMemoryUsedCache(_memoryUsedCache.load());
         _statistics.updateMaxCacheSize(_cache.size());
     }
 }
@@ -62,23 +100,24 @@ void Const::ConstantFoldingCache::removeContent(Const::ContentAttr attr) {
         _cache.erase(accessor);
         accessor.release();
 
+        auto size = attr.getType().cast<vpux::NDTypeInterface>().getTotalAllocSize();
+        _memoryUsedCache -= size.count();
+
         if (_collectStatistics) {
             _statistics.numElementsErasedFromCache++;
-
-            auto size = attr.getType().cast<vpux::NDTypeInterface>().getTotalAllocSize();
-            _statistics.memoryUsedCache -= size.count();
         }
     }
 }
 
 std::optional<Const::Content> Const::ConstantFoldingCache::getContent(Const::ContentAttr attr) {
     // Return the value from the cache if it contains it
-    Const::details::ContentMap::const_accessor accessor;
+    Const::details::ContentMap::accessor accessor;
     if (_cache.find(accessor, attr) && !accessor.empty()) {
         if (_collectStatistics) {
             _statistics.numCacheHits++;
         }
-        return accessor->second;
+        accessor->second.refCount--;
+        return accessor->second.content;
     }
 
     if (_collectStatistics) {
@@ -93,7 +132,7 @@ bool Const::ConstantFoldingCache::replaceContentAttr(Const::ContentAttr original
         Const::details::ContentMap::accessor newAttrAccessor;
         _cache.insert(newAttrAccessor, newAttr);
         VPUX_THROW_WHEN(newAttrAccessor.empty(), "Failed to add folding request to cache");
-        newAttrAccessor->second = std::move(originalAttrAccessor->second);
+        newAttrAccessor->second.content = std::move(originalAttrAccessor->second.content);
         _cache.erase(originalAttrAccessor);
         return true;
     }
@@ -110,6 +149,10 @@ void Const::ConstantFoldingCache::disableStatisticsCollection() {
 
 bool Const::ConstantFoldingCache::isStatisticsCollectionEnabled() {
     return _collectStatistics;
+}
+
+size_t Const::ConstantFoldingCache::getMemoryUsedCache() const {
+    return _memoryUsedCache;
 }
 
 Const::details::CacheStatistics& Const::ConstantFoldingCache::getStatistics() {

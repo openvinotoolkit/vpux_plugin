@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -171,7 +171,7 @@ struct UnaryOpLoweringHSwish : public mlir::ConversionPattern {
                         valOp2 = builder.create<mlir::arith::ConstantFloatOp>(loc, value, mlir::FloatType::getF16(ctx));
                     }
 
-                    auto maxFOp = builder.create<mlir::arith::MaxFOp>(loc, addFOp, valOp2->getResult(0));
+                    auto maxFOp = builder.create<mlir::arith::MaximumFOp>(loc, addFOp, valOp2->getResult(0));
 
                     mlir::arith::ConstantFloatOp valOp3;
                     if (typeIsF32) {
@@ -184,7 +184,7 @@ struct UnaryOpLoweringHSwish : public mlir::ConversionPattern {
                         valOp3 = builder.create<mlir::arith::ConstantFloatOp>(loc, value, mlir::FloatType::getF16(ctx));
                     }
 
-                    auto minFOp = builder.create<mlir::arith::MinFOp>(loc, maxFOp, valOp3->getResult(0));
+                    auto minFOp = builder.create<mlir::arith::MinimumFOp>(loc, maxFOp, valOp3->getResult(0));
 
                     auto divFOp = builder.create<mlir::arith::DivFOp>(loc, minFOp, valOp3->getResult(0));
 

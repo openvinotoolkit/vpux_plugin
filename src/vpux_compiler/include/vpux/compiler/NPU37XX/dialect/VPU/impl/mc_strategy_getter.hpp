@@ -5,10 +5,13 @@
 
 #pragma once
 
-#include "vpux/compiler/VPU30XX/dialect/VPU/impl/mc_strategy_getter.hpp"
+#include "vpux/compiler/dialect/VPU/interfaces/mc_strategy_getter.hpp"
 
 namespace vpux::VPU::arch37xx {
 
-using StrategyGetter = arch30xx::StrategyGetter;
+class StrategyGetter : public StrategyGetterBase {
+public:
+    void getMCStrategies(SmallVector<MultiClusterStrategy>& strategies) const override;
+};
 
 }  // namespace vpux::VPU::arch37xx

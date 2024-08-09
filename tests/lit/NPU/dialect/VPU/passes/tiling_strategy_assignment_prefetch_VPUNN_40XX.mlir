@@ -3,8 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --tiling-strategy-assignment="vpunn-cost=true" %s | FileCheck %s
-// REQUIRES: arch-VPUX40XX
+// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% allow-custom-values=true" --tiling-strategy-assignment="vpunn-cost=true" %s | FileCheck %s
+// REQUIRES: arch-NPU40XX
 
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
@@ -107,4 +107,41 @@ func.func @DontPrefetchToNonComputeParentOp(%arg: tensor<2x1x1024xf16>) -> tenso
     // CHECK:       [[CONV:%.+]] = VPU.NCE.Convolution([[SLICE]], [[WEIGHTS]], [[WT]])
     // CHECK-SAME:       tilingStrategy = [1, 4, 1, 1]
     // CHECK:       return [[CONV]]
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+!qElemType = !quant.uniform<u8:f16, 1.000000e+00>
+!qElemType1 = !quant.uniform<u8:f16, 0.023529411764705882>
+
+module @executors {
+    IE.TileResource 4 of @NCE at 1.700000e+03 MHz
+    // CHECK-LABEL: @DWConvTileOverCPipelining
+    func.func @DWConvTileOverCPipelining(%arg0: tensor<1x160x65x65x!qElemType1, {order = #NHWC}>) -> tensor<1x960x65x65x!qElemType1, {order = #NHWC}> {
+        %weights = const.Declare tensor<960x96x1x1x!qElemType, {order = #NHWC}> = dense<1.000000e+00> : tensor<960x96x1x1xf16>,
+                    [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>, #const.Reorder<#NHWC>]
+        %wt = const.Declare tensor<960x1x1x4xsi32> = dense<1> : tensor<960x1x1x4xsi32>
+        %cst_30 = const.Declare tensor<960x160x1x1x!qElemType, {order = #NHWC}> = dense<1.000000e+00> : tensor<960x160x1x1xf16>,
+                    [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>, #const.Reorder<#NHWC>]
+        %cst_50 = const.Declare tensor<960x1x1x4xsi32> = dense<1> : tensor<960x1x1x4xsi32>
+        %conv = VPU.NCE.Convolution(%arg0, %cst_30, %cst_50) {
+            multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverKernel>,
+            pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
+            ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = 0 : i64, clamp_high = 255 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
+            rawFilterShape = [960, 160, 1, 1], strides = [1, 1]} -> tensor<1x960x65x65x!qElemType1, {order = #NHWC}>
+        %dwconv = VPU.NCE.DepthConvolution(%conv, %weights, %wt) {
+            multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
+            pad = #VPU.Padding<left = 4 : i64, right = 4 : i64, top = 4 : i64, bottom = 4 : i64>,
+            ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = 0 : i64, clamp_high = 255 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
+            rawFilterShape = [960, 1, 9, 9],
+            strides = [1, 1]} -> tensor<1x960x65x65x!qElemType1, {order = #NHWC}>
+
+        return %dwconv : tensor<1x960x65x65x!qElemType1, {order = #NHWC}>
+        // Tiling strategy for DWConv is increased from 4 to 5 to avoid memory fragmentation
+        // CHECK:       [[CONV:%.+]] = VPU.NCE.Convolution
+        // CHECK-SAME:          tilingStrategy = [1, 1, 5, 1]
+        // CHECK:       [[DWCONV:%.+]] = VPU.NCE.DepthConvolution
+        // CHECK-SAME:          tilingStrategy = [1, 5, 1, 1]
+    }
 }

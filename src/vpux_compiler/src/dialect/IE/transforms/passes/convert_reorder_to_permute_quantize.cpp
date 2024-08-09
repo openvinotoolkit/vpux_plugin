@@ -4,6 +4,7 @@
 //
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
+#include "vpux/compiler/dialect/IE/utils/pooling_utils.hpp"
 #include "vpux/compiler/dialect/IE/utils/shape_infer.hpp"
 #include "vpux/compiler/utils/permute_utils.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
@@ -111,6 +112,40 @@ bool ConvertReorderToPermuteQuantizePass::isSupportedReorder(IE::ReorderOp reord
     const auto outAlignment = VPU::NCEInvariant::getAlignment(outElemType);
     if (!IE::isODUPermuteEffectiveForShape(outShape, outAlignment)) {
         log.trace("ODU permute is not effective for output shape {0}", outShape);
+        return false;
+    }
+
+    // For pattern Reorder -> Avgpool(quantize-dequantize or just quantize) -> Eltwise
+    // if the Avgpool is quantized, the reorder can't be propagated through eltwise
+    // after converting to PermuteQuantize because of the quantized type
+    // Don't convert to PermuteQuantize to enable the propagation and fusion
+    // Reorder -> Avgpool -> Eltwise will eventually become
+    // PermuteCast -> Avgpool -> Eltwise -> PermuteCast with propagation and fusion
+    // But if converted to PermuteQuantize
+    // PermuteQuantize (f16 to f16) -> Avgpool (f16 to quant)
+    // cannot be transformed into
+    // Avgpool (f16 to quant) -> PermuteQuantize (quant to quant)
+    // because PermuteQuantize expects f16 input
+    auto hasQuantizedAvgPoolUserToPropagate = [](IE::ReorderOp reorder) -> bool {
+        if (!reorder->hasOneUse()) {
+            return false;
+        }
+        // condition 1, quantize avgpool user
+        auto avgpoolOp = mlir::dyn_cast_or_null<IE::AvgPoolOp>(*reorder.getOutput().getUsers().begin());
+        if (avgpoolOp == nullptr || !avgpoolOp->hasOneUse() || !isQuantizedPurposeAvgPool(avgpoolOp)) {
+            return false;
+        }
+        // condition 2, optional dequantize avgpool and eltwise after the avgpool(s)
+        if (auto nextOp = mlir::dyn_cast_or_null<IE::AvgPoolOp>(*avgpoolOp.getOutput().getUsers().begin())) {
+            if (!avgpoolOp->hasOneUse() || !isQuantizedPurposeAvgPool(avgpoolOp)) {
+                return false;
+            }
+            avgpoolOp = nextOp;
+        }
+        return (*avgpoolOp.getOutput().getUsers().begin())->hasTrait<IE::EltwiseOp>();
+    };
+    if (hasQuantizedAvgPoolUserToPropagate(reorder)) {
+        log.trace("PermuteQuantize can not be propagated through avgpool");
         return false;
     }
 

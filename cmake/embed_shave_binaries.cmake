@@ -32,7 +32,7 @@ function(create_resources dir output)
             string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," filedata ${filedata})
             # Append data to output file
             file(APPEND ${output} "static const uint8_t ${filename}[] = {${filedata}};\n")
-            string(APPEND map_sym "{\"${filename}\", {${filename}, ${hex_string_length}}},\n")
+            string(APPEND map_sym "{\"${filename}\", {${filename}, sizeof(${filename})}},\n")
         endif()
     endforeach()
 

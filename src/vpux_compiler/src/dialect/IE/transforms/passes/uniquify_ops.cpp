@@ -237,7 +237,7 @@ void RemoveDuplicatingPermute::eliminateDuplicatedOperation(IE::MemPermuteOp fir
                                                             mlir::PatternRewriter& rewriter) const {
     auto ctx = rewriter.getContext();
 
-    rewriter.startRootUpdate(firstOp);
+    rewriter.startOpModification(firstOp);
     rewriter.setInsertionPointAfter(firstOp);
 
     // Set destination order
@@ -256,7 +256,7 @@ void RemoveDuplicatingPermute::eliminateDuplicatedOperation(IE::MemPermuteOp fir
             rewriter.create<IE::ShapeCastOp>(outShapeCastLoc, outputType, outLayoutCastOp.getOutput(), targetShapeAttr);
     rewriter.replaceOp(secondOp, outShapeCastOp->getResults());
 
-    rewriter.finalizeRootUpdate(firstOp);
+    rewriter.finalizeOpModification(firstOp);
 }
 
 //
@@ -318,6 +318,7 @@ void UniquifyOpsPass::safeRunOnFunc() {
     patterns.add<RemoveDuplicatingGeneric<IE::AffineReshapeOp>>(&ctx, _log);
     patterns.add<RemoveDuplicatingGeneric<IE::PermuteQuantizeOp>>(&ctx, _log);
     patterns.add<RemoveDuplicatingGeneric<IE::TileOp>>(&ctx, _log);
+    patterns.add<RemoveDuplicatingGeneric<IE::FloorOp>>(&ctx, _log);
     patterns.add<RemoveDuplicatingPooling<IE::AvgPoolOp>>(&ctx, _log);
     patterns.add<RemoveDuplicatingPooling<IE::MaxPoolOp>>(&ctx, _log);
     patterns.add<RemoveDuplicatingConcat>(&ctx, _log);

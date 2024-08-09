@@ -67,7 +67,7 @@ public:
     }
 
     void SetUp() override {
-        const ov::Shape inputShape = {2, 4, 8, 16};
+        const ov::Shape inputShape = {1, 4, 8, 16};
         const auto& params = GetParam();
         const auto& order = std::get<1>(params);
         const auto transposedShape = transposeShape(inputShape, order);

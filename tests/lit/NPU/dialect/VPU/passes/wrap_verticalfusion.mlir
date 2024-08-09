@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW" --wrap-in-vertical-fusion %s | FileCheck %s
-// REQUIRES: arch-VPUX30XX || arch-VPUX37XX || arch-VPUX40XX
+// REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
@@ -163,4 +163,37 @@ func.func @DontWrapMultiDimTiledNCETask(%arg0: tensor<1x32x256x256xf16, {order =
     //CHECK-SAME:  {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
     //CHECK-SAME:  ppe = #VPU.PPETask<mode = <LPRELU>, clamp_low = 0 : i64, clamp_high = 255 : i64, lrelu_mult = 1228 : i64, lrelu_shift = 12 : i64, fp_prelu_alpha = 0.2998046875 : f64>,
     //CHECK-SAME:  rawFilterShape = [32, 32, 3, 3], strides = [1, 1], tilingStrategy = [1, 1, 2, 4]} -> tensor<1x32x256x256xf16, {order = #NHWC}>
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+//CHECK-LABEL: @WrapAbs
+//CHECK-SAME: [[INPUT:%.+]]: tensor<1x16x448x392xf16, {order = #NHWC}>
+func.func @WrapAbs(%arg0: tensor<1x16x448x392xf16, {order = #NHWC}>) -> tensor<1x16x448x392xf16, {order = #NHWC}> {
+    %0 = VPU.Abs(%arg0) {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, tilingStrategy = [1, 1, 2, 1]} : tensor<1x16x448x392xf16, {order = #NHWC}> -> tensor<1x16x448x392xf16, {order = #NHWC}>
+    return %0 : tensor<1x16x448x392xf16, {order = #NHWC}>
+
+    //CHECK:  VPU.VerticalFusion ([[INPUT]] as [[INNER_ARG1:[^:]+]]: tensor<1x16x448x392xf16, {order = #NHWC}>) attributes {tilingStrategy = [1, 1, 2, 1]} -> tensor<1x16x448x392xf16, {order = #NHWC}> {
+    //CHECK:  VPU.Abs([[INNER_ARG1]]) {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>} : tensor<1x16x448x392xf16, {order = #NHWC}> -> tensor<1x16x448x392xf16, {order = #NHWC}>
+    //CHECK:    VPU.Yield
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+//CHECK-LABEL: @WrapPRelu
+//CHECK-SAME: [[INPUT:%.+]]: tensor<1x16x448x392xf16, {order = #NHWC}>
+func.func @WrapPRelu(%arg0: tensor<1x16x448x392xf16, {order = #NHWC}>) -> tensor<1x16x448x392xf16, {order = #NHWC}> {
+    %cst = const.Declare tensor<1x16x1x1xf16, {order = #NHWC}> = dense<[1.0, 2.0, 3.0, 4.0, 5.0]> : tensor<5xf16>, [#const.Reshape<[1, 5, 1, 1]>, #const.Reorder<#NHWC>, #const.PadWithZero<[0, 0, 0, 0], [0, 11, 0, 0]>]
+    %0 = VPU.PRelu(%arg0, %cst) {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, tilingStrategy = [1, 1, 2, 1]} : tensor<1x16x448x392xf16, {order = #NHWC}>, tensor<1x16x1x1xf16, {order = #NHWC}> -> tensor<1x16x448x392xf16, {order = #NHWC}>
+    return %0 : tensor<1x16x448x392xf16, {order = #NHWC}>
+
+    // CHECK-DAG:    [[CST:%.+]] = const.Declare
+    // CHECK-SAME:       tensor<1x16x1x1xf16, {order = #NHWC}> = dense<[1.000000e+00, 2.000000e+00, 3.000000e+00, 4.000000e+00, 5.000000e+00]> : tensor<5xf16>, [#const.Reshape<[1, 5, 1, 1]>, #const.Reorder<#NHWC>, #const.PadWithZero<[0, 0, 0, 0], [0, 11, 0, 0]>]
+    // CHECK:        VPU.VerticalFusion ([[INPUT]] as [[INNER_ARG1:[^:]+]]: tensor<1x16x448x392xf16, {order = #NHWC}>, [[CST]] as [[INNER_ARG2:[^:]+]]: tensor<1x16x1x1xf16, {order = #NHWC}>) attributes {tilingStrategy = [1, 1, 2, 1]} -> tensor<1x16x448x392xf16, {order = #NHWC}> {
+    // CHECK:            VPU.PRelu([[INNER_ARG1]], [[INNER_ARG2]]) {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>} : tensor<1x16x448x392xf16, {order = #NHWC}>, tensor<1x16x1x1xf16, {order = #NHWC}> -> tensor<1x16x448x392xf16, {order = #NHWC}>
+    // CHECK:            VPU.Yield
 }

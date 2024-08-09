@@ -13,6 +13,10 @@ NDTypeInterface Const::FuseAttr::inferOutputType(NDTypeInterface input) const {
     return getFusedType();
 }
 
+bool vpux::Const::FuseAttr::inferOutputSplat(bool, vpux::NDTypeInterface) {
+    return false;
+}
+
 void appendContentToVector(Const::Content& content, MutableArrayRef<char> buffer, size_t& start) {
     const auto bufSizeBytes = checked_cast<size_t>(content.getType().getTotalAllocSize().count());
     auto* oldEnd = buffer.data() + start;
@@ -26,7 +30,8 @@ void appendContentToVector(Const::Content& content, MutableArrayRef<char> buffer
 
 Const::Content Const::FuseAttr::transform(Const::Content& input) const {
     auto outputType = inferOutputType(input.getType());
-    auto output = Const::Content::allocTempBuffer(outputType, outputType.getElementType(), false);
+    auto output = Const::Content::allocTempBuffer(outputType, outputType.getElementType(),
+                                                  inferOutputSplat(input.isSplat(), input.getType()));
 
     auto fusedBuffer = output.getRawTempBuf();
 

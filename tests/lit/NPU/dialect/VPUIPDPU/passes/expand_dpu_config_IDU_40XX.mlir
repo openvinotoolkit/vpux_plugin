@@ -1,10 +1,10 @@
 //
-// Copyright (C) 2024 Intel Corporation.
+// Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --expand-dpu-config %s | FileCheck %s
-// REQUIRES: arch-VPUX40XX
+// REQUIRES: arch-NPU40XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 module {
@@ -218,7 +218,7 @@ module {
     // CHECK-NEXT:  VPUIPDPU.IDUWeightSet weight_start(0) weight_num(64) weight_size(64){{$}}
     // CHECK-NEXT:  VPUIPDPU.IDUPadding pad_count(<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>){{$}}
     // CHECK-NOT:  VPUIPDPU.IDUActSwizzle swizzle_key
-    // CHECK-NOT:  VPUIPDPU.IDUWeightSwizzle wt_swizzle_key    
+    // CHECK-NOT:  VPUIPDPU.IDUWeightSwizzle wt_swizzle_key
     // CHECK-NEXT:  VPUIPDPU.IDUNthwNtk nthw_ntk(NTHW_NTK_16_4){{$}}
     }
     return
@@ -273,7 +273,7 @@ module {
     // CHECK-NEXT:  VPUIPDPU.IDUWeightSet weight_start(0) weight_num(64) weight_size(256){{$}}
     // CHECK-NEXT:  VPUIPDPU.IDUPadding pad_count(<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>){{$}}
     // CHECK-NEXT:  VPUIPDPU.IDUActSwizzle swizzle_key(SWIZZLE_KEY_1)
-    // CHECK-NEXT:  VPUIPDPU.IDUWeightSwizzle wt_swizzle_key(SWIZZLE_KEY_1)    
+    // CHECK-NEXT:  VPUIPDPU.IDUWeightSwizzle wt_swizzle_key(SWIZZLE_KEY_1)
     // CHECK-NEXT:  VPUIPDPU.IDUNthwNtk nthw_ntk(NTHW_NTK_16_4){{$}}
     }
     return
@@ -491,7 +491,7 @@ module {
 }
 
 // -----
- 
+
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 !wqElemType = !quant.uniform<i8:f32, 1.600000e+01:16>
 module {

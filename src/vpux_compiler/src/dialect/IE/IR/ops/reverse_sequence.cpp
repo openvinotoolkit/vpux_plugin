@@ -11,11 +11,11 @@ using namespace vpux;
 
 mlir::LogicalResult vpux::IE::ReverseSequenceOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::ReverseSequenceOpAdaptor rev(operands, attrs);
+    IE::ReverseSequenceOpAdaptor rev(operands, attrs, prop);
     if (mlir::failed(rev.verify(loc))) {
         return mlir::failure();
     }
@@ -68,14 +68,13 @@ mlir::OpFoldResult vpux::IE::ReverseSequenceOp::fold(FoldAdaptor adaptor) {
     auto operands = adaptor.getOperands();
     VPUX_THROW_UNLESS(operands.size() == 2, "Wrong number of operands : {0}", operands.size());
 
-    if (const auto attr = operands[1].dyn_cast_or_null<Const::ContentAttr>()) {
-        const auto content = attr.fold();
-        if (content.isSplat() && content.getSplatValue<int32_t>() == 1) {
-            return getData();
-        }
+    const auto attr = mlir::dyn_cast_or_null<Const::ContentAttr>(operands[1]);
+    if (attr == nullptr || !attr.isSplat()) {
+        return nullptr;
     }
 
-    return nullptr;
+    const auto content = attr.fold();
+    return (content.getSplatValue<int32_t>() == 1) ? getData() : nullptr;
 }
 
 namespace {

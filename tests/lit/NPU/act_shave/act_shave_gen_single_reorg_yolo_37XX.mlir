@@ -2,7 +2,7 @@
 // RUN: flatc --raw-binary --json %vpuip_schema_file% -- %t
 // RUN: FileCheck %s --input-file %basename_t.json
 // RUN: rm %basename_t.json
-// REQUIRES: arch-VPUX37XX
+// REQUIRES: arch-NPU37XX
 //
 // This file generates a blob with reorgYolo activation shave
 // demonstrate that the runtime cannot handle this.  It's also a lit test to help

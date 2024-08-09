@@ -41,13 +41,13 @@ bool vpux::VPU::DepthToSpaceOp::checkStrategyCompatibility(VPU::MultiClusterStra
     return false;
 }
 
-vpux::VPU::DistributedTensorAttr vpux::VPU::DepthToSpaceOp::getExplicitDistributedTensorAttr(
-        vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, mlir::ArrayAttr numTiles,
-        mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::UnitAttr uniformDistributedSegments,
-        const vpux::VPU::OverlapDistributionParams& /*overlapParams*/) {
-    return VPU::getSWExplicitDistributedTensorAttr(mlir::dyn_cast<VPU::SWOpInterface>(getOperation()), shape,
-                                                   distributionMode, numTiles, numClusters, alignment,
-                                                   uniformDistributedSegments);
+vpux::VPU::DistributedTensorNative vpux::VPU::DepthToSpaceOp::getExplicitDistributedTensorAttr(
+        vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, ArrayRef<int64_t> numTiles,
+        const int64_t numClusters, ArrayRef<int64_t> alignment, const bool uniformDistributedSegments,
+        const vpux::VPU::OverlapDistributionParams& overlapParams) {
+    return VPU::getSWExplicitDistributedTensorNative(mlir::cast<VPU::SWOpInterface>(getOperation()), shape,
+                                                     distributionMode, numTiles, numClusters, alignment,
+                                                     uniformDistributedSegments, overlapParams);
 }
 
 void vpux::VPU::DepthToSpaceOp::build(::mlir::OpBuilder& odsBuilder, ::mlir::OperationState& odsState,
@@ -88,11 +88,11 @@ bool vpux::VPU::DepthToSpaceOp::supportCycleCostCalculation() {
 
 mlir::LogicalResult vpux::VPU::DepthToSpaceOp::inferReturnTypes(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange /*regions*/,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange /*regions*/,
         mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::DepthToSpaceOpAdaptor depthToSpace(operands, attrs);
+    VPU::DepthToSpaceOpAdaptor depthToSpace(operands, attrs, prop);
     if (mlir::failed(depthToSpace.verify(loc))) {
         return mlir::failure();
     }
@@ -128,7 +128,8 @@ mlir::LogicalResult vpux::VPU::DepthToSpaceOp::inferReturnTypes(
     SmallVector<int64_t> outShape{checked_cast<int64_t>(N_out), checked_cast<int64_t>(C_out),
                                   checked_cast<int64_t>(H_out), checked_cast<int64_t>(W_out)};
 
-    const auto outType = inType.changeShape(Shape(outShape));
+    auto outType = mlir::RankedTensorType::get(outShape, inType.getElementType(), createTensorAttrFromType(inType));
+
     inferredReturnTypes.push_back(outType);
 
     return mlir::success();

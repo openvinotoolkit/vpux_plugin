@@ -7,6 +7,7 @@
 
 #include "vpux/compiler/core/interfaces/rewriter_pattern_strategies.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPU/utils/gather_dma_utils.hpp"
 
 #include "vpux/compiler/utils/rewriter.hpp"
 #include "vpux/utils/core/logger.hpp"

@@ -12,11 +12,11 @@ using namespace vpux;
 
 mlir::LogicalResult vpux::IE::PReluOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::PReluOpAdaptor prelu(operands, attrs);
+    IE::PReluOpAdaptor prelu(operands, attrs, prop);
     if (mlir::failed(prelu.verify(loc))) {
         return mlir::failure();
     }
@@ -29,11 +29,11 @@ mlir::LogicalResult vpux::IE::PReluOp::inferReturnTypeComponents(
 
 mlir::LogicalResult vpux::IE::LeakyReluOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::LeakyReluOpAdaptor leaky_relu(operands, attrs);
+    IE::LeakyReluOpAdaptor leaky_relu(operands, attrs, prop);
     if (mlir::failed(leaky_relu.verify(loc))) {
         return mlir::failure();
     }
@@ -56,15 +56,11 @@ public:
 
 mlir::LogicalResult UseLeakyRelu::matchAndRewrite(IE::PReluOp origOp, mlir::PatternRewriter& rewriter) const {
     auto negativeSlopeOp = origOp.getNegativeSlope().getDefiningOp<Const::DeclareOp>();
-    if (negativeSlopeOp == nullptr) {
+    if (negativeSlopeOp == nullptr || !negativeSlopeOp.getContentAttr().isSplat()) {
         return mlir::failure();
     }
 
     const auto negativeSlopeContent = negativeSlopeOp.getContent();
-    if (!negativeSlopeContent.isSplat()) {
-        return mlir::failure();
-    }
-
     rewriter.replaceOpWithNewOp<IE::LeakyReluOp>(origOp, origOp.getType(), origOp.getInput(),
                                                  rewriter.getF64FloatAttr(negativeSlopeContent.getSplatValue<float>()));
 

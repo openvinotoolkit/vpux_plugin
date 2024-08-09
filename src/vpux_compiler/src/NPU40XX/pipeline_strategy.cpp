@@ -18,14 +18,51 @@
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/dry_run_utils.hpp"
 
+#include "vpux/utils/core/logger.hpp"
+#include "vpux/utils/profiling/common.hpp"
+
 using namespace vpux;
 
 //
 // PipelineStrategy40XX::buildPipeline
 //
 
-void PipelineStrategy40XX::buildPipeline(mlir::PassManager& pm, const Config& config, mlir::TimingScope& rootTiming,
-                                         Logger log) {
+namespace {
+
+void setupPWLMCompilationParams(int optimizationLevel, BackendCompilationOptions40XX& backendCompilationOptions) {
+    bool isEnablePartialWorkloadManagementSet =
+            backendCompilationOptions.enablePartialWorkloadManagement.getNumOccurrences() > 0;
+    if (!isEnablePartialWorkloadManagementSet) {
+        switch (optimizationLevel) {
+        case 0:
+            backendCompilationOptions.enablePartialWorkloadManagement = false;
+            break;
+        case 1:
+            backendCompilationOptions.enablePartialWorkloadManagement = true;
+            break;
+        case 2: {
+            backendCompilationOptions.enablePartialWorkloadManagement = true;
+            bool isWlmOptimizationThresholdSet =
+                    backendCompilationOptions.wlmOptimizationThreshold.getNumOccurrences() > 0;
+            if (!isWlmOptimizationThresholdSet) {
+                backendCompilationOptions.wlmOptimizationThreshold = std::numeric_limits<int>::max();
+            }
+            break;
+        }
+        default:
+            VPUX_THROW("Unexpected optimization-level. Actual value = {0}\n"
+                       "Possible values: 0 - optimization for compilation time, "
+                       "1 - optimization for execution time (default), 2 - high optimization for execution time",
+                       optimizationLevel);
+            break;
+        }
+    }
+}
+
+}  // namespace
+
+void PipelineStrategy40XX::buildPipeline(mlir::PassManager& pm, const intel_npu::Config& config,
+                                         mlir::TimingScope& rootTiming, Logger log) {
     auto buildTiming = rootTiming.nest("Build compilation pipeline");
 
     const auto initCompilerOptions = getInitCompilerOptions(config);
@@ -48,7 +85,7 @@ void PipelineStrategy40XX::buildPipeline(mlir::PassManager& pm, const Config& co
     VPUX_THROW_WHEN(!isElf && numOfDMAPorts.hasValue() && numOfDMAPorts.getValue() > 1,
                     "With Graphfile backend only single DMA is supported");
 
-    const auto backendCompilationOptions =
+    auto backendCompilationOptions =
             BackendCompilationOptions40XX::createFromString(config.get<intel_npu::BACKEND_COMPILATION_PARAMS>());
     if (compilationMode == VPU::CompilationMode::ReferenceSW) {
         const auto options = ReferenceSWOptions40XX::createFromString(config.get<intel_npu::COMPILATION_MODE_PARAMS>());
@@ -80,19 +117,25 @@ void PipelineStrategy40XX::buildPipeline(mlir::PassManager& pm, const Config& co
     }
 }
 
-void PipelineStrategy40XX::buildELFPipeline(mlir::PassManager& pm, const Config& config, mlir::TimingScope& rootTiming,
-                                            Logger log) {
+void PipelineStrategy40XX::buildELFPipeline(mlir::PassManager& pm, const intel_npu::Config& config,
+                                            mlir::TimingScope& rootTiming, Logger log) {
     auto buildTiming = rootTiming.nest("Build compilation pipeline");
 
     auto dpuDryRunMode = VPU::DPUDryRunMode::NONE;
     const auto compilationMode = getCompilationMode(config);
-    const auto backendCompilationOptions =
+    auto backendCompilationOptions =
             BackendCompilationOptions40XX::createFromString(config.get<intel_npu::BACKEND_COMPILATION_PARAMS>());
+    VPUX_THROW_UNLESS(backendCompilationOptions != nullptr,
+                      "build ELF pipeline failed to parse BACKEND_COMPILATION_PARAMS: {0}",
+                      config.get<intel_npu::BACKEND_COMPILATION_PARAMS>());
 
     if (compilationMode == VPU::CompilationMode::DefaultHW) {
         const auto options = DefaultHWOptions40XX::createFromString(config.get<intel_npu::COMPILATION_MODE_PARAMS>());
-        VPUX_THROW_UNLESS(options != nullptr, "build ELF pipeline failed to parse COMPILATION_MODE_PARAMS");
+        VPUX_THROW_UNLESS(options != nullptr, "build ELF pipeline failed to parse COMPILATION_MODE_PARAMS: {0}",
+                          config.get<intel_npu::COMPILATION_MODE_PARAMS>());
+        setupPWLMCompilationParams(options->optimizationLevel, *backendCompilationOptions);
         dpuDryRunMode = VPU::getDPUDryRunMode(options->dpuDryRun);
+        backendCompilationOptions->enableDMAProfiling = options->enableDMAProfiling.getValue();
     }
     arch40xx::buildLowerVPUIP2ELFPipeline(pm, *backendCompilationOptions, log.nest(), dpuDryRunMode);
 }

@@ -11,11 +11,11 @@ using namespace vpux;
 
 mlir::LogicalResult vpux::IE::LSTMGatesOp::inferReturnTypeComponents(
         mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties, mlir::RegionRange,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
         SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::LSTMGatesOpAdaptor lstm(operands, attrs);
+    IE::LSTMGatesOpAdaptor lstm(operands, attrs, prop);
     if (mlir::failed(lstm.verify(loc))) {
         return mlir::failure();
     }
@@ -35,10 +35,15 @@ mlir::LogicalResult vpux::IE::LSTMGatesOp::inferReturnTypeComponents(
 mlir::LogicalResult vpux::IE::LSTMGatesOp::verify() {
     const auto gatesInputShape = getShape(getGatesInput()).raw();
     const auto initialCellStateShape = getShape(getInitialCellState()).raw();
-    const auto batchSize = initialCellStateShape[0];
-    const auto hiddenSize = initialCellStateShape[1];
+    VPUX_THROW_UNLESS(initialCellStateShape.size() == 2 || initialCellStateShape.size() == 4,
+                      "LSTMGatesOp requires the input shape size is 2 or 4, but here is {0}",
+                      initialCellStateShape.size());
 
-    if (gatesInputShape != ArrayRef<int64_t>({batchSize, 4 * hiddenSize})) {
+    const auto batchSize = gatesInputShape.size() == 2 ? initialCellStateShape[0] : initialCellStateShape[2];
+    const auto hiddenSize = gatesInputShape.size() == 2 ? initialCellStateShape[1] : initialCellStateShape[3];
+
+    if (gatesInputShape != ArrayRef<int64_t>({batchSize, 4 * hiddenSize}) &&
+        gatesInputShape != ArrayRef<int64_t>({1, 1, batchSize, 4 * hiddenSize})) {
         return errorAt(*this,
                        "Incompatible input shapes. Expected gatesInput shape: [batch_size, 4*hidden_size], "
                        "initialCellState shape: [batch_size, hidden_size]. Got gatesInput shape: {0}, initialCellState "
