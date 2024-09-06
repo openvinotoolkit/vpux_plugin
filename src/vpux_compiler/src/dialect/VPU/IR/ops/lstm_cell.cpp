@@ -26,3 +26,36 @@ mlir::LogicalResult vpux::VPU::LSTMCellOp::inferReturnTypes(mlir::MLIRContext* c
 
     return mlir::success();
 }
+
+namespace {
+
+bool isSupported(VPU::ArchKind arch, ShapeRef inputDataShape, ShapeRef initialHiddenStateShape) {
+    if (arch != VPU::ArchKind::NPU40XX) {
+        return false;
+    }
+    // shave implementation allow reduced size. Bigger size can be map on DPU.
+    // Cost model can be interrogate.
+    constexpr int64_t maxInputSize(256);
+    constexpr int64_t maxHiddenSize(128);
+    constexpr int64_t maxBatchSize(1);
+    // shave asm implement just 16 element alignment input and hidden size. Except that speed is low.
+    constexpr int64_t alignmentRequired(16);
+    if ((inputDataShape.back() > maxInputSize) || (initialHiddenStateShape.back() > maxHiddenSize) ||
+        (inputDataShape[Dim(inputDataShape.size() - 2)] > maxBatchSize)) {
+        return false;
+    }
+    if ((inputDataShape.back() % alignmentRequired != 0) || (initialHiddenStateShape.back() % alignmentRequired != 0)) {
+        return false;
+    }
+    return true;
+}
+
+}  // namespace
+
+//
+// isSupported
+//
+
+bool vpux::VPU::LSTMCellOp::isSupported(vpux::IE::LSTMCellOp op) {
+    return ::isSupported(VPU::getArch(op), getShape(op.getInputData()), getShape(op.getInitialHiddenState()));
+}

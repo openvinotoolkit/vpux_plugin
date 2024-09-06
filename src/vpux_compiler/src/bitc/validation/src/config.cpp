@@ -37,7 +37,7 @@ void verify_labels(std::set<std::string>& labels, config_map& config) {
 
     // Value validity
     std::string arch_type = std::get<std::string>(config["arch_type"]);
-    if (arch_type != "NPU27"s && arch_type != "NPU40XX"s) {
+    if (arch_type != "NPU27"s && arch_type != "NPU4"s) {
         throw std::logic_error{"Expected NPU37XX/40XX for arch type, got: " + arch_type};
     }
 

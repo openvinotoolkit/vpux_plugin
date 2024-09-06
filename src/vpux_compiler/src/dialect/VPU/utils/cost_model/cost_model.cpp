@@ -277,6 +277,10 @@ VPUNN::VPULayerStrategy vpux::VPU::getVPULayerStrategy(VPU::MultiClusterStrategy
     case VPU::MultiClusterStrategy::SplitOverHeightWidth:
         VPUNNStrategy.tiling_strategy = VPUNN::VPUTilingStrategy::SOHW;
         return VPUNNStrategy;
+    // TODO: [E-126102] Cost model for Grouped MatMul
+    case VPU::MultiClusterStrategy::SplitOverGroup:
+        VPUNNStrategy.tiling_strategy = VPUNN::VPUTilingStrategy::NONE;
+        return VPUNNStrategy;
     default:
         VPUX_THROW("Unsupported cluster-tiling strategy: '{0}' in VPUNN", strategy);
     }
@@ -501,7 +505,7 @@ VPUIP::WorkloadCostParams vpux::VPU::getWorkloadCostParam(VPU::NCEOpInterface nc
                 (numTilesIn[Dims4D::Act::H.ind()] > 1)) {
                 params.layerStrategy = VPU::MultiClusterStrategy::SplitOverHeight;
             } else if (modeIn == VPU::DistributionMode::OVERLAPPED) {
-                // Set SplitOverHeightOverlapped to be different from SplitOverHeight for VPUNN even on VPUX40XX
+                // Set SplitOverHeightOverlapped to be different from SplitOverHeight for VPUNN even on NPU40XX
                 params.layerStrategy = VPU::MultiClusterStrategy::SplitOverHeightOverlapped;
             } else if (modeOut == (VPU::DistributionMode::SEGMENTED | VPU::DistributionMode::MULTICASTED)) {
                 params.layerStrategy = VPU::MultiClusterStrategy::HKSwitch;

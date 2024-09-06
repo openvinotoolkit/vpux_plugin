@@ -51,3 +51,27 @@ struct DummyCall {
     bool disable_copy = false;
     cv::GProtoArgs operator()(const cv::GProtoArgs& inputs);
 };
+
+using F = std::function<void()>;
+
+G_TYPED_KERNEL(GCompound, <cv::GMat(cv::GMat, F)>, "custom.compound")
+{
+    static cv::GMatDesc outMeta(cv::GMatDesc in, F){
+        return in;
+    }
+};
+
+GAPI_OCV_KERNEL(GCPUCompound, GCompound)
+{
+    static void run(const cv::Mat& in,
+                    F function,
+                    cv::Mat& out)
+    {
+        function();
+    }
+};
+
+struct CompoundCall {
+    cv::GProtoArgs operator()(const cv::GProtoArgs& inputs);
+    F function;
+};

@@ -72,10 +72,24 @@ SmallVector<TaskCycles> findOverlappingTaskCycles(const VPURT::TaskConfigVec& so
 
     TaskCycles currTaskCycles(current.cycleStart, current.cycleStart + current.cycleCost);
 
-    for (const auto& taskConfig : sortedTaskConfigs) {
+    auto startIt = std::lower_bound(sortedTaskConfigs.begin(), sortedTaskConfigs.end(), current,
+                                    [](const VPURT::TaskConfig& task1, const VPURT::TaskConfig& task2) {
+                                        return task1.cycleStart + task1.cycleCost < task2.cycleStart;
+                                    });
+
+    if (startIt == sortedTaskConfigs.end()) {
+        return result;
+    }
+
+    for (auto it = startIt; it != sortedTaskConfigs.end(); ++it) {
+        auto taskConfig = *it;
         TaskCycles taskCycles(taskConfig.cycleStart, taskConfig.cycleStart + taskConfig.cycleCost);
         if (taskCycles.isOverlapping(currTaskCycles)) {
             result.push_back(taskCycles);
+        }
+
+        if (taskConfig.cycleStart > currTaskCycles.cycleEnd) {
+            break;
         }
     }
 

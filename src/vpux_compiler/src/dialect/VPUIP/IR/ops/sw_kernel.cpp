@@ -1620,17 +1620,8 @@ VPUIP::KernelInfo SwKernelOp::getKernelInfo(mlir::Operation* origOp) {
                                                      shouldLinearBeforeResetAttr, gru.getClipAttr()},
                         {"gru_sequence_last_part"}};
             })
-            .Case<VPU::LSTMCellOp>([&](VPU::LSTMCellOp LSTMCell) {
-                const auto inputDataShape = LSTMCell.getInputData().getType().cast<mlir::ShapedType>().getShape();
-                const auto batchSize = inputDataShape[0];
-                const auto RNNForward = getIntAttr(ctx, 1);
-                const auto nCells = getIntAttr(ctx, 1);
-                const auto nBatch = getIntAttr(ctx, static_cast<int32_t>(batchSize));
-                const auto useCellState = getIntAttr(ctx, 1);
-                const auto outputsNumber = getIntAttr(ctx, 2);
-                return VPUIP::KernelInfo{
-                        SmallVector<mlir::Attribute>{RNNForward, nCells, nBatch, useCellState, outputsNumber},
-                        {"lstm_cell"}};
+            .Case<VPU::LSTMCellOp>([&](VPU::LSTMCellOp) {
+                return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{}, {"lstm_cell"}};
             })
             .Case<VPU::LSTMGatesOp>([&](VPU::LSTMGatesOp) {
                 return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{}, {"lstm_gates"}};

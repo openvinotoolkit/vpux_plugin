@@ -716,6 +716,48 @@ func.func @TransposedConvolutionPadding(%input: tensor<1x32x23x30xf16, {order = 
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
+// CHECK-LABEL: func.func @TransposedConvolutionPaddingLargerThanStride
+// CHECK-SAME:        [[INPUT:%arg[0-9]]]: tensor<1x16x128x128xf16, {order = #NHWC}>
+func.func @TransposedConvolutionPaddingLargerThanStride(%arg0: tensor<1x16x128x128xf16, {order = #NHWC}>) -> tensor<1x16x382x382xf16, {order = #NHWC}> {
+    %0 = const.Declare tensor<16x16x5x5xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<16x16x5x5xf16, {order = #NHWC}>
+    %1 = VPU.TransposedConvolution(%arg0, %0) {
+            dilations = [1, 1], operandSegmentSizes = array<i32: 1, 1, 0, 0>, output_padding = [0, 0], pads_begin = [3, 1], pads_end = [1, 3], strides = [3, 3]
+        } : tensor<1x16x128x128xf16, {order = #NHWC}>, tensor<16x16x5x5xf16, {order = #NHWC}> -> tensor<1x16x382x382xf16, {order = #NHWC}>
+    return %1 : tensor<1x16x382x382xf16, {order = #NHWC}>
+
+    // CHECK-DAG:   [[WEIGHTS:%.+]] = const.Declare tensor<16x16x5x5xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<16x16x5x5xf16, {order = #NHWC}>
+
+    // CHECK:       [[INPUT_SE:%.+]] = VPU.StorageElementTable {dataElemType = f16, dataShape = [1, 16, 128, 128],
+    // CHECK-SAME:          seAttr = #VPU.SEUpsampling<factors = [2, 2], padding = [3, 1, 1, 3]>,
+    // CHECK-SAME:          seDepth = 1 : i64, seSize = 16 : i64
+    // CHECK-SAME:      } -> tensor<1x1x386x386xi32, {order = #NHWC}>
+    // CHECK-DAG:   [[INPUT_SM:%.+]] = const.Declare tensor<1x16x386x386xi1, {order = #NHWC}> =
+    // CHECK-SAME:          : tensor<1x16x386x386xi8>, [#const.Reorder<#NHWC>, #const.ConvertElemType<i1>]
+    // CHECK:       [[INPUT_SPARSE:%.+]] = VPU.GroupSparseTensor([[INPUT]], [[INPUT_SM]], [[INPUT_SE]])
+    // CHECK-SAME:          seAttr = #VPU.SEUpsampling<factors = [2, 2], padding = [3, 1, 1, 3]>
+    // CHECK-SAME:      } -> !VPU.SparseTensor<data=tensor<1x16x128x128xf16, {order = #NHWC}>,
+    // CHECK-SAME:                         sparsity_map=tensor<1x16x386x386xi1, {order = #NHWC}>,
+    // CHECK-SAME:                         storage_element_table=tensor<1x1x386x386xi32, {order = #NHWC}>,
+    // CHECK-SAME:                         #VPU.SEUpsampling<factors = [2, 2], padding = [3, 1, 1, 3]>>
+
+    // CHECK-DAG:   [[WEIGHTS_TABLE:%.+]] = const.Declare tensor<16x1x1x4xsi32>
+    // CHECK-SAME{LITERAL}: = dense<[[[[0, 0, 1065353216, 0]]], [[[800, 0, 1065353216, 0]]], [[[1600, 0, 1065353216, 0]]], [[[2400, 0, 1065353216, 0]]],
+    // CHECK-SAME{LITERAL}:         [[[3200, 0, 1065353216, 0]]], [[[4000, 0, 1065353216, 0]]], [[[4800, 0, 1065353216, 0]]], [[[5600, 0, 1065353216, 0]]],
+    // CHECK-SAME{LITERAL}:         [[[6400, 0, 1065353216, 0]]], [[[7200, 0, 1065353216, 0]]], [[[8000, 0, 1065353216, 0]]], [[[8800, 0, 1065353216, 0]]],
+    // CHECK-SAME{LITERAL}:         [[[9600, 0, 1065353216, 0]]], [[[10400, 0, 1065353216, 0]]], [[[11200, 0, 1065353216, 0]]], [[[12000, 0, 1065353216, 0]]]]>
+    // CHECK-SAME:      : tensor<16x1x1x4xsi32>
+
+    // CHECK:       [[OUTPUT:%.+]] = VPU.NCE.Convolution([[INPUT_SPARSE]], [[WEIGHTS]], [[WEIGHTS_TABLE]]) {
+    // CHECK-SAME:          pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
+    // CHECK-SAME:          rawFilterShape = [16, 16, 5, 5], strides = [1, 1]
+    // CHECK-SAME:      } -> tensor<1x16x382x382xf16, {order = #NHWC}>
+    // CHECK:       return [[OUTPUT]]
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
 // CHECK: func.func @TransposedConvolutionOutputPadding([[INPUT_DATA:%.+]]: tensor<1x32x23x30xf16, {order = #NHWC}>) -> tensor<1x16x47x61xf16, {order = #NHWC}> {
 func.func @TransposedConvolutionOutputPadding(%input: tensor<1x32x23x30xf16, {order = #NHWC}>) -> tensor<1x16x47x61xf16, {order = #NHWC}> {
     %weights = const.Declare tensor<16x32x2x2xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<16x32x2x2xf16, {order = #NHWC}>

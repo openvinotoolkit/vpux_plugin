@@ -105,7 +105,7 @@ public:
     int64_t shift() const;
 
 private:
-    // VPUX37XX mult is uint16_t - using int32_t as common storage
+    // NPU37XX mult is uint16_t - using int32_t as common storage
     int32_t _mult;
     uint8_t _shift;
 };

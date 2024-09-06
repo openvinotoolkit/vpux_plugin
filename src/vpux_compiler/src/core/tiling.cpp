@@ -1269,6 +1269,20 @@ DimArr vpux::getTileDimOrder(mlir::Operation* op, TilingMode tilingMode, Logger 
                         VPUX_THROW_UNLESS(dims.size(), "Could not find non-norm axes");
                         return dims;
                     })
+                    .Case<VPU::MVN1NormalizeOp>([&](mlir::Operation* op) {
+                        const auto outType = op->getResult(0).getType().cast<vpux::NDTypeInterface>();
+                        const auto order = outType.getDimsOrder();
+                        auto retDims = getTileDimOrderND(outType.getMemShape(), order);
+
+                        if (order.toMemDim(Dims4D::Act::C).ind() == (outType.getRank() - 1)) {
+                            // Avoid C-tiling in C-minor layout as may lead to Shave suboptimal configs (e.g. C=21)
+                            auto dimIt = std::find(retDims.begin(), retDims.end(), Dims4D::Act::C);
+                            if (dimIt != retDims.end()) {
+                                retDims.erase(dimIt);
+                            }
+                        }
+                        return retDims;
+                    })
                     .Case<VPU::QuantizeOp>([&](mlir::Operation*) {
                         // Not splitting over C, to keep aligned with number of Scales in qType
                         // and so avoid 'validateQuantElemType' fail

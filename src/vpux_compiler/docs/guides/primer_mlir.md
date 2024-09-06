@@ -203,7 +203,7 @@ Running the IR with `vpux-opt` will validate the parsing and printing logic of t
 
 ```sh
 # The `vpu-arch` argument is necessary for the tool to work, but it will have no effect for this small sample execution
-./vpux-opt --vpu-arch=VPUX37XX getting_started.mlir
+./vpux-opt --vpu-arch=NPU37XX getting_started.mlir
 ```
 
 The tool will print the same IR, showing that the printer and parser of the operation are aligned. Every concept in MLIR, including operations, have a printing and parsing logic which describe the concept's presence into an IR. By default, the generic form will be used, unless a custom printer / parser is provided. The printing / parsing format is also called an assembly format. One way a custom assembly format is in by setting the `assemblyFormat` value in TableGen:
@@ -1196,7 +1196,7 @@ module {
 As can be seen, `myInt` has value 5. Now let's run the pass using `vpux-opt` by passing the `--handle-getting-started` option (the argument name set in TableGen for the pass):
 
 ```sh
-./vpux-opt --vpu-arch=VPUX37XX --handle-getting-started debug/getting_started.mlir
+./vpux-opt --vpu-arch=NPU37XX --handle-getting-started debug/getting_started.mlir
 ```
 
 The following content will be printed:
@@ -1486,7 +1486,7 @@ void vpux::IE::GettingStartedOp::getCanonicalizationPatterns(mlir::RewritePatter
 After building the project, the canonicalizer can be run by running the `canonicalize` pass:
 
 ```sh
-./vpux-opt --vpu-arch=VPUX37XX --canonicalize debug/getting_started.mlir
+./vpux-opt --vpu-arch=NPU37XX --canonicalize debug/getting_started.mlir
 ```
 
 When using the same input IR as the other examples (with `myInt = 5`), the following IR will be generated which has `myInt = 0`.

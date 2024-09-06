@@ -1,0 +1,84 @@
+Checks: >
+        -*,
+        bugprone-argument-comment,
+        bugprone-assert-side-effect,
+        bugprone-branch-clone,
+        bugprone-copy-constructor-init,
+        bugprone-dangling-handle,
+        bugprone-dynamic-static-initializers,
+        bugprone-macro-parentheses,
+        bugprone-macro-repeated-side-effects,
+        bugprone-misplaced-widening-cast,
+        bugprone-move-forwarding-reference,
+        bugprone-multiple-statement-macro,
+        bugprone-suspicious-semicolon,
+        bugprone-swapped-arguments,
+        bugprone-terminating-continue,
+        bugprone-unused-raii,
+        bugprone-unused-return-value,
+        clang-analyzer-*,
+        clang-diagnostic-*,
+        cppcoreguidelines-*,
+        -cppcoreguidelines-slicing,
+        misc-*,
+        -misc-const-correctness,
+        -misc-no-recursion,
+        -misc-non-private-member-variables-in-classes,
+        modernize-loop-convert,
+        modernize-make-shared,
+        modernize-make-unique,
+        modernize-raw-string-literal,
+        modernize-use-auto,
+        modernize-use-bool-literals,
+        modernize-use-default-member-init,
+        modernize-use-emplace,
+        modernize-use-equals-default,
+        modernize-use-nullptr,
+        modernize-use-override,
+        modernize-use-using,
+        performance-for-range-copy,
+        performance-implicit-conversion-in-loop,
+        performance-inefficient-algorithm,
+        performance-inefficient-vector-operation,
+        performance-move-const-arg,
+        performance-no-automatic-move,
+        performance-trivially-destructible,
+        performance-unnecessary-copy-initialization,
+        performance-unnecessary-value-param,
+        readability-avoid-const-params-in-decls,
+        readability-braces-around-statements,
+        readability-const-return-type,
+        readability-container-size-empty,
+        readability-identifier-naming,
+        readability-inconsistent-declaration-parameter-name,
+        readability-misleading-indentation,
+        readability-redundant-control-flow,
+        readability-redundant-smartptr-get,
+        readability-simplify-boolean-expr,
+        readability-simplify-subscript-expr
+
+CheckOptions:
+  - key:             readability-identifier-naming.ClassCase
+    value:           CamelCase
+  - key:             readability-identifier-naming.EnumCase
+    value:           CamelCase
+  - key:             readability-identifier-naming.FunctionCase
+    value:           camelBack
+  # Exclude from scanning as this is an exported symbol used for fuzzing
+  # throughout the code base.
+  - key:             readability-identifier-naming.FunctionIgnoredRegexp
+    value:           "LLVMFuzzerTestOneInput"
+  - key:             readability-identifier-naming.MemberCase
+    value:           camelBack
+  - key:             readability-identifier-naming.ParameterCase
+    value:           camelBack
+  - key:             readability-identifier-naming.UnionCase
+    value:           CamelCase
+  - key:             readability-identifier-naming.VariableCase
+    value:           camelBack
+  - key:             readability-identifier-naming.IgnoreMainLikeFunctions
+    value:           1
+  - key:             readability-identifier-naming.PrivateMemberPrefix
+    value:           _
+  - key:             modernize-use-default-member-init.UseAssignment
+    value:           1

@@ -33,3 +33,8 @@ OpNode ScenarioGraph::makeInfer(const std::string& tag) {
 OpNode ScenarioGraph::makeDelay(uint64_t time_in_us) {
     return makeOp(Delay{time_in_us});
 }
+
+OpNode ScenarioGraph::makeCompound(uint64_t repeat_count, ScenarioGraph subgraph, InferenceParamsMap infer_params,
+                                   const std::string& tag) {
+    return makeOp(Compound{repeat_count, subgraph, infer_params, tag});
+}

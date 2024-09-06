@@ -456,7 +456,7 @@ int64_t vpux::VPU::getNumberOfClustersForSOKToAvoidAlignment(int64_t outputChann
                                                              bool uniformDistributedSegments) {
     for (int64_t clusters = numClustersToUseForLayer; clusters >= 1; clusters--) {
         if (uniformDistributedSegments) {
-            // For VPUX40XX there's no limitation on how the segments need to be equal to eachother.
+            // For NPU40XX there's no limitation on how the segments need to be equal to eachother.
             // A balanced segmentation is prefered for performance.
             // A depth of 96 is best split across 4 clusters as [32, 32, 16, 16]
 
@@ -485,7 +485,7 @@ int64_t vpux::VPU::getNumberOfClustersForSpatialDim(int64_t outputSpatialDim, in
                                                     bool uniformDistributedSegments) {
     for (int64_t clusters = numClustersForCompilation; clusters >= 1; clusters--) {
         if (uniformDistributedSegments) {
-            // For VPUX40XX there's no limitation on how the segments need to be equal to eachother.
+            // For NPU40XX there's no limitation on how the segments need to be equal to eachother.
             // A balanced segmentation is prefered for performance.
             // A height of 6 is best split across 4 clusters as [2, 2, 1, 1]
             auto baselineHeight = outputSpatialDim / clusters;
@@ -1348,7 +1348,7 @@ bool vpux::VPU::isSOHSupportedByDPU(vpux::NDTypeInterface inputType, ShapeRef in
         }
     }
 
-    // On VPUX40XX, SOH doesn't have the rules above
+    // On NPU40XX, SOH doesn't have the rules above
     // Actually the input tile shapes are completely back-inferred by output tile shapes which are following
     // uniformDistributedSegments method
     const std::set<VPU::ArchKind> compatibleTargets = {
@@ -1383,7 +1383,7 @@ mlir::IntegerAttr vpux::VPU::getOptimalNumClusters(mlir::Operation* operation, S
     auto module = operation->getParentOfType<mlir::ModuleOp>();
 
     // Both ACT Shaves and DPUs are grouped together in NCE clusters, in a symmetric manner.
-    // For VPUX37XX and subsequent, each NCE cluster 1 DPU and 2 ACT shaves.
+    // For NPU37XX and subsequent, each NCE cluster 1 DPU and 2 ACT shaves.
     // Thus shaves have the availability for distributing across clusters similar to DPUs.
     auto numClustersAvailableForCompilation = getIntAttr(ctx, IE::getTileExecutor(module).getCount());
     auto optimalNumberOfClusters = numClustersAvailableForCompilation;

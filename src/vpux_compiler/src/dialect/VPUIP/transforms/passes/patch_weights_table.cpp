@@ -175,8 +175,14 @@ SmallVector<int64_t> PatchWeightsTablePass::getOffsets(vpux::VPUIP::NCEClusterTa
                           "Number of shape offsets '{0}' and clusters '{1}' are mismatch",
                           perClusterShapeOffsets.size(), numClusters);
 
-        for (auto clusterOffsets : perClusterShapeOffsets) {
-            offsets.push_back(clusterOffsets[Dims4D::Filter::OC]);
+        for (auto clusterOffsets : perClusterShapeOffsets | indexed) {
+            if (clusterOffsets.value().size() == 4) {
+                offsets.push_back(clusterOffsets.value()[Dims4D::Filter::OC]);
+            } else if (clusterOffsets.value().size() == DimsGroups5D::Filter::numDims) {
+                const auto groupOffset = clusterOffsets.value()[DimsGroups5D::Filter::G];
+                const auto clusterShape = distributedType.getPerClusterMemoryShapes()[clusterOffsets.index()];
+                offsets.push_back(groupOffset * clusterShape[DimsGroups5D::Filter::OC]);
+            }
         }
     } else {
         offsets.push_back(0);

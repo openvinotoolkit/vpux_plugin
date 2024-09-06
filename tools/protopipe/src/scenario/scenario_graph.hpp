@@ -9,20 +9,8 @@
 
 #include "graph.hpp"
 #include "scenario/accuracy_metrics.hpp"
+#include "scenario/inference.hpp"
 #include "utils/data_providers.hpp"
-
-struct Infer {
-    std::string tag;
-};
-
-struct Delay {
-    uint64_t time_in_us;
-};
-
-struct Op {
-    using Kind = std::variant<Infer, Delay>;
-    Kind kind;
-};
 
 struct Source {};
 struct Data {};
@@ -66,6 +54,8 @@ public:
     DataNode makeSource();
     OpNode makeInfer(const std::string& tag);
     OpNode makeDelay(uint64_t time_in_us);
+    OpNode makeCompound(uint64_t repeat_count, ScenarioGraph subgraph, InferenceParamsMap infer_params,
+                        const std::string& tag);
 
     void link(DataNode data, OpNode op);
 
@@ -76,14 +66,37 @@ public:
 
 private:
     template <typename Kind>
-    OpNode makeOp(Kind&& kind) {
-        auto op_nh = m_graph.create();
-        auto out_nh = m_graph.create();
-        m_graph.meta(op_nh).set(Op{Op::Kind{std::move(kind)}});
-        m_graph.link(op_nh, out_nh);
-        return OpNode(op_nh, DataNode(&m_graph, out_nh));
-    }
+    OpNode makeOp(Kind&& kind);
 
 private:
     Graph m_graph;
 };
+
+struct Infer {
+    std::string tag;
+};
+
+struct Delay {
+    uint64_t time_in_us;
+};
+
+struct Compound {
+    uint64_t repeat_count;
+    ScenarioGraph subgraph;
+    InferenceParamsMap infer_params;
+    std::string tag;
+};
+
+struct Op {
+    using Kind = std::variant<Infer, Delay, Compound>;
+    Kind kind;
+};
+
+template <typename Kind>
+OpNode ScenarioGraph::makeOp(Kind&& kind) {
+    auto op_nh = m_graph.create();
+    auto out_nh = m_graph.create();
+    m_graph.meta(op_nh).set(Op{std::forward<Kind>(kind)});
+    m_graph.link(op_nh, out_nh);
+    return OpNode(op_nh, DataNode(&m_graph, out_nh));
+}

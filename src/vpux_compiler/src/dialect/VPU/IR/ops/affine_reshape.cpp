@@ -136,6 +136,10 @@ mlir::FailureOr<VPU::DistributedTypeInterface> vpux::VPU::AffineReshapeOp::infer
     const auto outShape = dstType.getShape();
     const auto dstElemType = dstType.getElementType();
 
+    if (inDistributedType.getShape().size() != outShape.size()) {
+        return mlir::failure();
+    }
+
     if (!VPU::isDistributedAttrWithExplicitShapesAndOffsets(origDistribution)) {
         const auto typeComponents =
                 TypeComponents().setShape(outShape).setDimsOrder(dstType.getDimsOrder()).setElementType(dstElemType);

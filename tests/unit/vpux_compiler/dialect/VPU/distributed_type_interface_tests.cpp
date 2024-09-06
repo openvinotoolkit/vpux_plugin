@@ -383,7 +383,7 @@ TEST_F(MLIR_DistributedTypesIfMethodsForExplicitDistribution, DistributedTensorT
     const auto dimsSpace = vpux::IndexedSymbolAttr::get(&ctx, CMX_NAME);
 
     const auto distributionMode = VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::SEGMENTED);
-    const auto numTiles = getIntArrayAttr(&ctx, SmallVector<int64_t>({3, 1, 1, 1, 1}));
+    const auto numTiles = getIntArrayAttr(&ctx, SmallVector<int64_t>({2, 1, 1, 1, 1}));
     const auto numClusters = getIntAttr(&ctx, 2);
 
     const PerClusterShapesOffsetsVec perClusterShapes(

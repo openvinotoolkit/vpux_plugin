@@ -19,7 +19,7 @@ class DummySource final : public cv::gapi::wip::IStreamSource {
 public:
     using Ptr = std::shared_ptr<DummySource>;
 
-    explicit DummySource(const uint32_t frames_interval_in_ms, const bool drop_frames,
+    explicit DummySource(const uint64_t frames_interval_in_us, const bool drop_frames,
                          const bool disable_high_resolution_timer);
 
     bool pull(cv::gapi::wip::Data& data) override;

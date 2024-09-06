@@ -53,7 +53,7 @@ Hardware specific passes are designed to work on a particular platform. And from
 You are allowed to reuse passes from an older HW version for a newer one if the required feature is a strict superset:
 
 ```C++
-// 37XX
+// 37XX 
 void vpux::buildDefaultHWModePipeline(mlir::OpPassManager& pm, const DefaultHWOptions37XX& options, Logger log) {
     // ...
     // Use pass from previous version here
@@ -147,7 +147,7 @@ void UnrollClusterTilingStrategy::addPatterns(mlir::RewritePatternSet& patterns)
     patterns.add<VPUIP::arch37xx::ClusterNCERewriter>(&ctx, _log);
 }
 
-// 40XX
+// 40XX 
 void UnrollClusterTilingStrategy::addPatterns(mlir::RewritePatternSet& patterns) {
     auto module = _func->getParentOfType<mlir::ModuleOp>();
     auto dmaOp = IE::getAvailableExecutor(module, VPU::ExecutorKind::DMA_NN);
@@ -167,13 +167,13 @@ Rewriters can also depend on interfaces to write them in the most general form â
 This approach also helps reducing code duplication since it doesn't require passes to be registered for each device. Then we can use the same name in `vpux-opt` and manage behavior of pass using only `vpu-arch`:
 
 ```MLIR
-// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=VPUX40XX allow-custom-values=true" --unroll-cluster-tiling  %s | FileCheck %s
+// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=NPU40XX allow-custom-values=true" --unroll-cluster-tiling  %s | FileCheck %s
 ```
 
 instead of, for example, duplicating the device version in the pass name:
 
 ```MLIR
-// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=VPUX40XX allow-custom-values=true" --unroll-cluster-tiling-VPUX40XX  %s | FileCheck %s
+// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=NPU40XX allow-custom-values=true" --unroll-cluster-tiling-NPU40XX  %s | FileCheck %s
 ```
 
 More detailed information about vpux-opt can be found in the [how-to-test](../../../../guides/how-to-test.md) document.
@@ -184,7 +184,7 @@ TODO: #-86282
 
 ## Pipelines
 
-Compiler has different pipeline for different HW generation. These pipelines are stored in appropriate HW folders: [NPU37XX](../include/vpux/compiler/NPU37XX/pipelines.cpp), etc. To build a pipeline, it is also necessary to implement `IPipelineStrategy` interface for each device:
+Compiler has different pipeline for different HW generation. These pipelines are stored in appropriate HW folders: [NPU37XX](../include/vpux/compiler/NPU37XX/pipelines.cpp), etc. To build a pipeline, it is also necessary to implement `IPipelineStrategy` interface for each device: 
 
 ![Pipeline strategy class diagram](images/pipeline.png)
 

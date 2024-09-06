@@ -15,7 +15,7 @@ struct InOutLayers {
 class OpenVINOLayersReader {
 public:
     OpenVINOLayersReader();
-    InOutLayers readLayers(const OpenVINOParams& params);
+    InOutLayers readLayers(const OpenVINOParams& params, const bool use_results_names = false);
 
 private:
     struct Impl;

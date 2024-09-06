@@ -46,9 +46,15 @@ struct CPUOp {
     uint64_t time_in_us;
 };
 
+struct CompoundOp {
+    uint64_t repeat_count;
+    InferenceParamsMap params;
+    ScenarioGraph subgraph;
+};
+
 struct OpDesc {
     std::string tag;
-    using OpType = std::variant<InferOp, CPUOp>;
+    using OpType = std::variant<InferOp, CPUOp, CompoundOp>;
     OpType op;
 };
 
@@ -123,6 +129,9 @@ static std::string toPriority(const std::string& priority) {
     }
     throw std::logic_error("Unsupported model priority: " + priority);
 }
+
+static ScenarioGraph buildGraph(const std::vector<OpDesc>& op_descs,
+                                const std::vector<std::vector<std::string>>& connections);
 
 namespace YAML {
 
@@ -484,6 +493,15 @@ struct convert<OpDesc> {
         } else {
             THROW_ERROR("Unsupported operation type: \"" << type << "\"!");
         }
+        if (node["repeat_count"]) {
+            uint64_t repeat_count = node["repeat_count"].as<uint64_t>();
+            InferenceParamsMap inference_params;
+            if (std::holds_alternative<InferOp>(opdesc.op)) {
+                auto infer_op = std::get<InferOp>(opdesc.op);
+                inference_params.emplace(opdesc.tag, infer_op.params);
+            }
+            opdesc.op = CompoundOp{repeat_count, std::move(inference_params), buildGraph({opdesc}, {})};
+        }
         return true;
     }
 };
@@ -594,16 +612,16 @@ static StreamDesc parseStream(const YAML::Node& node, const GlobalOptions& opts,
 
     // FIXME: Create a function for the duplicate code below
     stream.name = node["name"] ? node["name"].as<std::string>() : default_name;
-    stream.frames_interval_in_ms = 0;
+    stream.frames_interval_in_us = 0u;
     if (node["frames_interval_in_ms"]) {
-        stream.frames_interval_in_ms = node["frames_interval_in_ms"].as<uint32_t>();
+        stream.frames_interval_in_us = node["frames_interval_in_ms"].as<uint32_t>() * 1000u;
         if (node["target_fps"]) {
             THROW_ERROR("Both \"target_fps\" and \"frames_interval_in_ms\" are defined for the stream: \""
                         << stream.name << "\"! Please specify only one of them as they are mutually exclusive.");
         }
     } else if (node["target_fps"]) {
         uint32_t target_fps = node["target_fps"].as<uint32_t>();
-        stream.frames_interval_in_ms = (target_fps != 0) ? (1000 / target_fps) : 0;
+        stream.frames_interval_in_us = (target_fps != 0) ? (1000u * 1000u / target_fps) : 0;
     }
 
     if (node["target_latency_in_ms"]) {
@@ -662,6 +680,10 @@ static ScenarioGraph buildGraph(const std::vector<OpDesc>& op_descs,
         // FIXME: Implement visitor
         if (std::holds_alternative<InferOp>(desc.op)) {
             op_node_map.emplace(desc.tag, graph.makeInfer(desc.tag));
+        } else if (std::holds_alternative<CompoundOp>(desc.op)) {
+            const auto& compound = std::get<CompoundOp>(desc.op);
+            op_node_map.emplace(
+                    desc.tag, graph.makeCompound(compound.repeat_count, compound.subgraph, compound.params, desc.tag));
         } else {
             ASSERT(std::holds_alternative<CPUOp>(desc.op));
             const auto& cpu = std::get<CPUOp>(desc.op);
@@ -716,16 +738,16 @@ static StreamDesc parseAdvancedStream(const YAML::Node& node, const GlobalOption
 
     // FIXME: Create a function for the duplicate code below
     stream.name = node["name"] ? node["name"].as<std::string>() : default_name;
-    stream.frames_interval_in_ms = 0;
+    stream.frames_interval_in_us = 0u;
     if (node["frames_interval_in_ms"]) {
-        stream.frames_interval_in_ms = node["frames_interval_in_ms"].as<uint32_t>();
+        stream.frames_interval_in_us = node["frames_interval_in_ms"].as<uint32_t>() * 1000u;
         if (node["target_fps"]) {
             THROW_ERROR("Both \"target_fps\" and \"frames_interval_in_ms\" are defined for the stream: \""
                         << stream.name << "\"! Please specify only one of them as they are mutually exclusive.");
         }
     } else if (node["target_fps"]) {
         uint32_t target_fps = node["target_fps"].as<uint32_t>();
-        stream.frames_interval_in_ms = (target_fps != 0) ? (1000 / target_fps) : 0;
+        stream.frames_interval_in_us = (target_fps != 0) ? (1000u * 1000u / target_fps) : 0;
     }
 
     if (node["target_latency_in_ms"]) {
@@ -748,7 +770,6 @@ static StreamDesc parseAdvancedStream(const YAML::Node& node, const GlobalOption
     if (node["connections"]) {
         connections = node["connections"].as<std::vector<std::vector<std::string>>>();
     }
-    stream.graph = buildGraph(op_descs, connections);
 
     for (auto& desc : op_descs) {
         if (std::holds_alternative<InferOp>(desc.op)) {
@@ -759,7 +780,16 @@ static StreamDesc parseAdvancedStream(const YAML::Node& node, const GlobalOption
             stream.output_data_map.emplace(desc.tag, std::move(infer.output_data));
             stream.infer_params_map.emplace(desc.tag, adjustParams(std::move(infer.params), opts));
         }
+        if (std::holds_alternative<CompoundOp>(desc.op)) {
+            auto& compound = std::get<CompoundOp>(desc.op);
+            InferenceParamsMap& params_map = compound.params;
+            for (auto& pair : params_map) {
+                pair.second = adjustParams(std::move(pair.second), opts);
+            }
+        }
     }
+
+    stream.graph = buildGraph(op_descs, connections);
     return stream;
 }
 

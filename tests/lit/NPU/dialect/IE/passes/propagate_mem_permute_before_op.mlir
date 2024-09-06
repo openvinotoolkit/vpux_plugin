@@ -620,6 +620,35 @@ func.func @MoveThroughSlice(%arg0: tensor<1x64x48x32xf16>) -> tensor<1x48x16x32x
 
 // -----
 
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+#NWCH = affine_map<(d0, d1, d2, d3) -> (d0, d3, d1, d2)>
+
+// CHECK-LABEL: @MoveThroughSliceWithConv
+// CHECK-SAME:      [[INPUT:%arg[0-9]]]:  tensor<1x64x4x4xf16, {order = #NHWC}>
+func.func @MoveThroughSliceWithConv(%arg0: tensor<1x64x4x4xf16, {order = #NHWC}>) -> tensor<1x56x4x4xf16> {
+    %cst = const.Declare tensor<64x64x1x1xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<64x64x1x1xf16, {order = #NHWC}>
+    %0 = IE.Convolution(%arg0, %cst) {
+            dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]
+        } : tensor<1x64x4x4xf16, {order = #NHWC}>, tensor<64x64x1x1xf16, {order = #NHWC}> -> tensor<1x64x4x4xf16, {order = #NHWC}>
+    %1 = IE.Slice %0 [0, 0, 0, 0] [1, 56, 4, 4] : tensor<1x64x4x4xf16, {order = #NHWC}> to tensor<1x56x4x4xf16, {order = #NHWC}>
+    %2 = IE.MemPermute(%1) {dst_order = #NCHW, mem_perm = #NWCH} : tensor<1x56x4x4xf16, {order = #NHWC}> -> tensor<1x56x4x4xf16>
+
+    return %2 : tensor<1x56x4x4xf16>
+
+    // CHECK-DAG:   [[CST:%.+]] = const.Declare tensor<64x64x1x1xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<64x64x1x1xf16, {order = #NHWC}>
+    // CHECK:       [[CONV:%.+]] = IE.Convolution([[INPUT]], [[CST]]) {
+    // CHECK-SAME:          dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]
+    // CHECK-SAME:      } : tensor<1x64x4x4xf16, {order = #NHWC}>, tensor<64x64x1x1xf16, {order = #NHWC}> -> tensor<1x64x4x4xf16, {order = #NHWC}>
+    // CHECK:       [[PERMUTE:%.+]] = IE.MemPermute([[CONV]]) {
+    // CHECK-SAME:          dst_order = #NCHW, mem_perm = #NWCH} : tensor<1x64x4x4xf16, {order = #NHWC}> -> tensor<1x64x4x4xf16>
+    // CHECK:       [[SLICE:%.+]] = IE.Slice [[PERMUTE]] [0, 0, 0, 0] [1, 56, 4, 4] : tensor<1x64x4x4xf16> to tensor<1x56x4x4xf16>
+
+    // CHECK:       return [[SLICE]] : tensor<1x56x4x4xf16>
+}
+
+// -----
+
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 #NCWH = affine_map<(d0, d1, d2, d3) -> (d0, d1, d3, d2)>
@@ -635,7 +664,6 @@ func.func @NotMoveThroughSliceOpWithOutNCE(%arg0: tensor<1x64x48x32xf16>) -> ten
     // CHECK:       return  [[PERMUTE]]
 }
 
-
 // -----
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
@@ -643,12 +671,12 @@ func.func @NotMoveThroughSliceOpWithOutNCE(%arg0: tensor<1x64x48x32xf16>) -> ten
 #NCWH = affine_map<(d0, d1, d2, d3) -> (d0, d1, d3, d2)>
 // CHECK-LABEL: @NotMoveThroughSliceForMakingSliceDimLower
 // CHECK-SAME:    [[INPUT:%.*]]: tensor<1x64x48x32xf16>
-func.func @NotMoveThroughSliceForMakingSliceDimLower(%arg0: tensor<1x64x48x32xf16>) -> tensor<1x16x64x32xf16, {order = #NHWC}> {
+func.func @NotMoveThroughSliceForMakingSliceDimLower(%arg0: tensor<1x64x48x32xf16>) -> tensor<1x6x64x32xf16, {order = #NHWC}> {
     %0 = IE.AvgPool(%arg0) { kernel_size = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], post_op = #IE.PostOp<name = "IE.ReLU", attrs = {}>, rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1] }
             : tensor<1x64x48x32xf16> -> tensor<1x64x48x32xf16>
-    %1 = IE.Slice %0 [0, 0, 0, 0] [1, 64, 16, 32] : tensor<1x64x48x32xf16> to tensor<1x64x16x32xf16>
-    %2 = IE.MemPermute(%1) {dst_order = #NHWC, mem_perm = #NCWH} : tensor<1x64x16x32xf16> -> tensor<1x16x64x32xf16, {order = #NHWC}>
-    return %2 : tensor<1x16x64x32xf16, {order = #NHWC}>
+    %1 = IE.Slice %0 [0, 0, 0, 0] [1, 64, 6, 32] : tensor<1x64x48x32xf16> to tensor<1x64x6x32xf16>
+    %2 = IE.MemPermute(%1) {dst_order = #NHWC, mem_perm = #NCWH} : tensor<1x64x6x32xf16> -> tensor<1x6x64x32xf16, {order = #NHWC}>
+    return %2 : tensor<1x6x64x32xf16, {order = #NHWC}>
 
     // CHECK:       [[POOL:%.*]] = IE.AvgPool([[INPUT]])
     // CHECK:       [[SLICE:%.*]] = IE.Slice [[POOL]]

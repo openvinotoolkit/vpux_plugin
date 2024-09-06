@@ -42,7 +42,8 @@ std::unique_ptr<mlir::Pass> createFuseOutstandingDequant(Logger log = Logger::gl
 void buildOptimizeActivationsPipeline(mlir::OpPassManager& pm, const OptimizeActivationsOptions& options,
                                       Logger log = Logger::global());
 
-void buildMemPermutePositioningPipeline(mlir::OpPassManager& pm, Logger log = Logger::global());
+void buildMemPermutePositioningPipeline(mlir::OpPassManager& pm, const MemPermutePositioningOptions& options,
+                                        Logger log = Logger::global());
 
 void buildExpandAndOptimizeActivationChannelsPipeline(mlir::OpPassManager& pm,
                                                       const ExpandActivationChannelsOptions& options,

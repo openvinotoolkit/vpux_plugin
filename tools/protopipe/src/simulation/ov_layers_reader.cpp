@@ -14,13 +14,14 @@
 
 class OpenVINOLayersReader::Impl {
 public:
-    InOutLayers readLayers(const OpenVINOParams& params);
+    InOutLayers readLayers(const OpenVINOParams& params, const bool use_results_names);
 
 private:
     InOutLayers readFromBlob(const std::string& blob, const std::string& device,
                              const std::map<std::string, std::string>& config);
 
-    InOutLayers readFromModel(const std::string& xml, const std::string& bin, const OpenVINOParams& params);
+    InOutLayers readFromModel(const std::string& xml, const std::string& bin, const OpenVINOParams& params,
+                              const bool use_results_names);
 
 private:
     ov::Core m_core;
@@ -136,7 +137,7 @@ static std::vector<std::string> extractLayerNames(const std::vector<ov::Output<o
 }
 
 InOutLayers OpenVINOLayersReader::Impl::readFromModel(const std::string& model_path, const std::string& bin_path,
-                                                      const OpenVINOParams& params) {
+                                                      const OpenVINOParams& params, const bool use_results_names) {
     auto model = m_core.read_model(model_path, bin_path);
     {
         ov::preprocess::PrePostProcessor ppp(model);
@@ -155,8 +156,29 @@ InOutLayers OpenVINOLayersReader::Impl::readFromModel(const std::string& model_p
 
         model = ppp.build();
     }
+
     auto input_layers = ovToLayersInfo(model->inputs());
     auto output_layers = ovToLayersInfo(model->outputs());
+
+    // FIXME: UGLY WA in order to use layer names obtained by OV reader in ONNXRT.
+    // Ideally there should be corresponding ONNXRT reader instead!!!
+    // Result nodes friendly names preserve the names from original model,
+    // so the could be used in different framework (not only OpenVINO)
+    if (use_results_names) {
+        const auto& results = model->get_results();
+        for (int i = 0; i < results.size(); ++i) {
+            auto result_name = results[i]->get_friendly_name();
+            // This suffix is hardcoded at the OpenVINO side
+            const std::string suffix = "/sink_port_0";
+            const auto kSuffixStartPos = result_name.length() - suffix.length();
+            // Check that suffix is still presented at the OpenVINO side
+            ASSERT(result_name.substr(kSuffixStartPos) == suffix);
+            // Drop the suffix as it's not needed and update the name
+            result_name = result_name.substr(0, kSuffixStartPos);
+            output_layers[i].name = result_name;
+        }
+    }
+
     return {std::move(input_layers), std::move(output_layers)};
 }
 
@@ -175,16 +197,19 @@ InOutLayers OpenVINOLayersReader::Impl::readFromBlob(const std::string& blob, co
     return {std::move(input_layers), std::move(output_layers)};
 }
 
-InOutLayers OpenVINOLayersReader::Impl::readLayers(const OpenVINOParams& params) {
+InOutLayers OpenVINOLayersReader::Impl::readLayers(const OpenVINOParams& params, const bool use_results_names) {
     if (std::holds_alternative<OpenVINOParams::ModelPath>(params.path)) {
         const auto& path = std::get<OpenVINOParams::ModelPath>(params.path);
-        return readFromModel(path.model, path.bin, params);
+        return readFromModel(path.model, path.bin, params, use_results_names);
     }
     ASSERT(std::holds_alternative<OpenVINOParams::BlobPath>(params.path));
+    // NB: use_results_names is WA for reading layer names for the further usage in ONNXRT
+    // since ONNXRT is always ModelPath case (*.onnx format), no need to handle this for *.blob's
+    ASSERT(!use_results_names);
     const auto& path = std::get<OpenVINOParams::BlobPath>(params.path);
     return readFromBlob(path.blob, params.device, params.config);
 }
 
-InOutLayers OpenVINOLayersReader::readLayers(const OpenVINOParams& params) {
-    return m_impl->readLayers(params);
+InOutLayers OpenVINOLayersReader::readLayers(const OpenVINOParams& params, const bool use_results_names) {
+    return m_impl->readLayers(params, use_results_names);
 }

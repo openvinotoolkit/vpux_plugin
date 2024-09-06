@@ -47,6 +47,10 @@ struct DefaultHWOptionsDeviceBase : public virtual vpux::DefaultHWOptionsBase {
             llvm::cl::desc("Insert a new NCE operation with single user for CMX-Concat to handle the"
                            "complex case when parent NCE has an extra non-Copy user."),
             llvm::cl::init(true)};
+
+    BoolOption enableGroupedMatMul{*this, "enable-grouped-matmul",
+                                   llvm::cl::desc("Enable execution of grouped MatMul as a single operation."),
+                                   llvm::cl::init(false)};
 };
 
 //

@@ -136,7 +136,6 @@ VPUXCompilerL0 1.1.2136:
   - Workaround for fixing heap leaking issue.
   - Remove unnecessary fucSharedTests dependency.
   - Remove tbb library dependency.
-  - Scroll VPUX-plugin back to releases/2021/4_vpux_ww34 as WW36 dKMB Release indicates.
 
 VPUXCompilerL0 1.1.2135:
   - Update VPUX-plugin to releases/2021/4_vpux_ww35

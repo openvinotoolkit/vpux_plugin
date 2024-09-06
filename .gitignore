@@ -326,6 +326,7 @@ output/
 # VS Code
 .vscode
 CMakeSettings.json
+.cache
 
 # CMake user presets
 CMakeUserPresets.json

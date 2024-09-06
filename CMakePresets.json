@@ -137,7 +137,7 @@
                 "CMAKE_EXPORT_COMPILE_COMMANDS" : true,
 
                 "ENABLE_DEVELOPER_BUILD": true,
-                "ENABLE_IMD_BACKEND": true,
+                "ENABLE_IMD_BACKEND": false,
 
                 "ENABLE_VPUX_DOCS": false
             }

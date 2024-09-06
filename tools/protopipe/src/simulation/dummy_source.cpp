@@ -9,10 +9,10 @@
 
 #include "utils/utils.hpp"
 
-DummySource::DummySource(const uint32_t frames_interval_in_ms, const bool drop_frames,
+DummySource::DummySource(const uint64_t frames_interval_in_us, const bool drop_frames,
                          const bool disable_high_resolution_timer)
         // NB: 0 is special value means no limit fps for source.
-        : m_latency_in_us(static_cast<uint64_t>(frames_interval_in_ms) * 1000),
+        : m_latency_in_us(frames_interval_in_us),
           m_drop_frames(drop_frames),
           m_timer(SleepTimer::create(disable_high_resolution_timer)),
           // NB: Used for simulation, just return 1 byte.

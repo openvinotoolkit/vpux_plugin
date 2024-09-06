@@ -1,15 +1,11 @@
 ## Summary
 > Please add a short but exhaustive summary why you think your pull request is useful
 
-(Please add a short summary why your pull request is useful)
+## Target Platform For Release Notes
+> Aids the generation of release notes
 
-## Target Platform For Release Notes (Mandatory)
-
-Aids the generation of release notes
-
-- [ ] VPUX30XX
-- [ ] VPUX31XX
-- [ ] VPUX37XX
+- [ ] NPU37XX
+- [ ] NPU40XX
 - [ ] NONE (Not included in release notes)
 
 ## Classification of this Pull Request
@@ -17,6 +13,10 @@ Aids the generation of release notes
 - [ ] Maintenance
 - [ ] BUG
 - [ ] Feature
+
+## Related PRs
+
+* [PR-xxx](https://github.com/intel-innersource/applications.ai.vpu-accelerators.vpux-plugin/pull/xxx) description
 
 ## Code Review Survey (Copy and Complete in your code review)
 

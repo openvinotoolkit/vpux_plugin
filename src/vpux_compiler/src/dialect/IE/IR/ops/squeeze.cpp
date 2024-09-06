@@ -5,10 +5,10 @@
 
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/utils/layout_utils.hpp"
-
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/error.hpp"
+#include "vpux/compiler/utils/permute_utils.hpp"
 
 #include "vpux/utils/core/checked_cast.hpp"
 
@@ -166,11 +166,26 @@ mlir::LogicalResult FuseWithReshape::matchAndRewrite(IE::SqueezeOp origOp, mlir:
     if (!mlir::isa<IE::SqueezeOp, IE::UnsqueezeOp, IE::ReshapeOp, IE::AffineReshapeOp>(prevOp)) {
         return mlir::failure();
     }
-
     const auto outputShape = origOp.getType().getShape();
     const auto outputShapeAttr = getIntArrayAttr(getContext(), outputShape);
+    auto reshapeOp =
+            rewriter.create<IE::ReshapeOp>(origOp->getLoc(), prevOp->getOperand(0), nullptr, false, outputShapeAttr);
+    auto outLink = reshapeOp.getOutput();
+    auto currentOutType = origOp.getOutput().getType().dyn_cast<vpux::NDTypeInterface>();
+    auto newOutType = reshapeOp.getOutput().getType().dyn_cast<vpux::NDTypeInterface>();
+    auto currentOutDimOrder = currentOutType.getDimsOrder();
+    auto newOutDimOrder = newOutType.getDimsOrder();
+    // Reshape op is not aware of Layout. Add layout if necessary.
+    if (currentOutDimOrder != newOutDimOrder) {
+        auto permutation = getPermutationFromOrders(newOutDimOrder, currentOutDimOrder, origOp.getContext());
+        auto permuteCast = rewriter.create<IE::PermuteCastOp>(
+                origOp->getLoc(), reshapeOp.getOutput(),
+                mlir::AffineMapAttr::get(DimsOrder::fromValue(origOp.getOutput()).toAffineMap(origOp.getContext())),
+                mlir::AffineMapAttr::get(permutation));
+        outLink = permuteCast.getOutput();
+    }
+    rewriter.replaceOp(origOp, outLink);
 
-    rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, prevOp->getOperand(0), nullptr, false, outputShapeAttr);
     return mlir::success();
 }
 

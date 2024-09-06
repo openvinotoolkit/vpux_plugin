@@ -38,11 +38,6 @@ mlir::LogicalResult FuseReshapeMvn::matchAndRewrite(IE::MVNOp origOp, mlir::Patt
         return mlir::failure();
     }
 
-    if (origOp.channelsFitIntoCMX()) {
-        _log.trace("Only targeting large MVN decomposition cases.");
-        return mlir::failure();
-    }
-
     if (origOp.getInternalReshape().has_value()) {
         _log.trace("Op has already an internal reshape attr.");
         return mlir::failure();

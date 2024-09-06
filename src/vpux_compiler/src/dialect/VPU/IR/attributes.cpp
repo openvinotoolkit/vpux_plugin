@@ -114,7 +114,7 @@ unsigned int vpux::VPU::getDpuFrequency(vpux::VPU::ArchKind arch, vpux::VPU::Rev
     switch (arch) {
     case VPU::ArchKind::NPU37XX:
         return VPUNN::get_dpu_fclk(VPUNN::VPUDevice::VPU_2_7); /*!< The value 1300 corresponds to Highvcc of dpuclk.
-                (See VPUX37XX HAS #voltage-and-frequency-targets section).
+                (See NPU37XX HAS #voltage-and-frequency-targets section).
                  */
     case VPU::ArchKind::NPU40XX:
         if (rev >= VPU::RevisionID::REVISION_B) {

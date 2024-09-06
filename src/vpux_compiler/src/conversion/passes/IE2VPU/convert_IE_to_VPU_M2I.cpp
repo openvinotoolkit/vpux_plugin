@@ -153,7 +153,7 @@ void ConvertIEToVPUM2IPass::safeRunOnFunc() {
             VPU::ArchKind::NPU40XX,
     };
     if (compatibleTargets.count(arch) <= 0) {
-        _log.trace("Convert to VPU-M2I Pass enabled only for VPUX40XX device. Got: {0}", arch);
+        _log.trace("Convert to VPU-M2I Pass enabled only for NPU40XX device. Got: {0}", arch);
         return;
     }
 

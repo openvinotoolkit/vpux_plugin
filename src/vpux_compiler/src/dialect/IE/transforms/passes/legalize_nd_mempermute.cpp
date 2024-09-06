@@ -128,7 +128,7 @@ private:
 
 mlir::LogicalResult LegalizeNDMemPermute::matchAndRewrite(IE::MemPermuteOp origOp,
                                                           mlir::PatternRewriter& rewriter) const {
-    // Only enabled for VPUX37XX, VPUX40XX where Tiling for SW kernels is limited to 4D ops.
+    // Only enabled for NPU37XX, NPU40XX where Tiling for SW kernels is limited to 4D ops.
     // ToDo: Remove pass after limitation.
 
     auto inputType = origOp.getInput().getType().cast<NDTypeInterface>();

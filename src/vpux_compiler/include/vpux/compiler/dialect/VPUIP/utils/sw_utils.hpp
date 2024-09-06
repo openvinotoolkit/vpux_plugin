@@ -67,9 +67,10 @@ const SmallVector<StringLiteral> SW_KERNELS_SUPPORTING_TILING = {"mvn1",
                                                                  "fake_quantize",
                                                                  "detection_output_sort",
                                                                  "lstm_gates",
+                                                                 "lstm_cell",
                                                                  "round_fp16"};
 
-const SmallVector<StringLiteral> SW_KERNELS_SUPPORTING_STRIDE = {"mvn1"};
+const SmallVector<StringLiteral> SW_KERNELS_SUPPORTING_STRIDE = {"mvn1", "lstm_cell"};
 
 const SmallVector<std::string_view> SW_KERNELS_SUPPORTING_SHAVE_BALANCING = {"softmax", "eltwise_mul", "activation_sin",
                                                                              "activation_cos"};
@@ -119,7 +120,8 @@ const SmallVector<StringLiteral> SW_KERNELS_NEED_TILING_ALIGNMENT = {"mvn1",
                                                                      "fake_quantize",
                                                                      "eltwise_select",
                                                                      "activation_sin",
-                                                                     "activation_cos"};
+                                                                     "activation_cos",
+                                                                     "lstm_cell"};
 
 SmallVector<mlir::Attribute> kernelArgsRange(VPUIP::SwKernelOp swKernelOp);
 

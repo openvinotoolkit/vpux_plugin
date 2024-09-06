@@ -97,6 +97,7 @@ The dependency graph in Protopipe is specified by:
 - `op_desc` - The list of operations, every operation has the following parameters:
   - `tag` - **Required**. The unique name of operation.
   - `type` - **Optional**. The operation type: _Infer_, _CPU_ (**Default**: _Infer_)
+  - `repeat_count` - **Optional**. Runs operation over specified number of iterations.
 - `connections` - The list of connections between operations.
 
 Supported operation types
@@ -166,6 +167,23 @@ In this case the section `connections` **can be omitted**.
 #4: Invalid - Double edge [B->C] is prohibited
 - [A, B, C]
 - [B, C]
+```
+**Example of repeat_count usage**
+```
+- op_desc:
+  - { tag: A, path: Model_A.xml, ... }
+  - { tag: B, path: Model_B.xml, repeat_count: 20 }
+  - { tag: C, path: Model_C.xml, ... }
+  connections:
+    - [A, B, C]
+```
+This defines the following pipeline:
+```mermaid
+graph LR;
+    A-->B
+    B-->C
+    B--->|20 iterations|B
+
 ```
 
 #### Network Sequence
@@ -464,7 +482,7 @@ Iteration <number>:
 1. Clone OpenCV repo:
     ```
     git clone https://github.com/opencv/opencv
-    cd opencv && git checkout dcce2b8b24
+    cd opencv && git checkout 78195bc3df
     ```
 2. Build OpenCV G-API:
 	```

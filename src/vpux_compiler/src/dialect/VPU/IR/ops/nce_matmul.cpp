@@ -5,6 +5,7 @@
 
 #include <mlir/Support/LogicalResult.h>
 
+#include "vpux/compiler/dialect/IE/utils/matmul.hpp"
 #include "vpux/compiler/dialect/VPU/IR/native_attributes/distributed_tensor_native.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops_interfaces.hpp"
@@ -78,8 +79,13 @@ bool doesNCEMatMulFitIntoCMX(vpux::NDTypeInterface inputType, vpux::NDTypeInterf
                              vpux::NDTypeInterface outputType, mlir::ModuleOp moduleOp, Byte reservedMem) {
     auto arch = VPU::getArch(moduleOp);
 
+    auto largestGroupsNumPerCluster = filterType.getShape()[DimsGroups5D::Act::G];
+    if (auto distType = mlir::dyn_cast<VPU::DistributedTensorType>(filterType)) {
+        largestGroupsNumPerCluster = distType.getLargestCompactShape()[DimsGroups5D::Act::G];
+    }
+
     const auto weightsTableSize = vpux::VPU::NCEInvariant::getWeightsTableSize(
-            outputType.getShape()[DimsGroups5D::Act::C] * outputType.getShape()[DimsGroups5D::Act::G]);
+            outputType.getShape()[DimsGroups5D::Act::C] * largestGroupsNumPerCluster);
 
     SmallVector<Byte> buffers = {
             inputType.getTotalAllocSize(),
@@ -139,7 +145,22 @@ bool VPU::NCEMatMulOp::isSupported(IE::MatMulOp op, vpux::LogCb logCb, bool chec
     const auto filterType = op.getInput2().getType().cast<vpux::NDTypeInterface>();
     const auto outputType = op.getOutput().getType().cast<vpux::NDTypeInterface>();
 
-    return isNCEMatMulSupported(inputType, filterType, outputType, mod, logCb, checkLayout, checkChannelAlignment);
+    const auto inputShape = inputType.getShape();
+    const auto filterShape = filterType.getShape();
+    const auto outputShape = outputType.getShape();
+
+    bool isSupported = isNCEMatMulSupported(
+            inputType.changeShape(Shape({inputShape[Dims4D::Act::C] * inputShape[Dims4D::Act::N], 1,
+                                         inputShape[Dims4D::Act::W], inputShape[Dims4D::Act::H], 1})),
+            // Filter shape 2nd and 3rd can be incorrect depending on transposeB option, however filter is not used in
+            // checks
+            filterType.changeShape(Shape({filterShape[Dims4D::Act::C] * filterShape[Dims4D::Act::N],
+                                          filterShape[Dims4D::Act::H], filterShape[Dims4D::Act::W], 1, 1})),
+            outputType.changeShape(Shape({outputShape[Dims4D::Act::C] * outputShape[Dims4D::Act::N], 1,
+                                          outputShape[Dims4D::Act::W], outputShape[Dims4D::Act::H], 1})),
+            mod, logCb, checkLayout, checkChannelAlignment);
+    isSupported = isSupported && IE::doesIEMatMulFitIntoCMX(op, inputShape, filterShape);
+    return isSupported;
 }
 
 bool VPU::NCEMatMulOp::isSupported(VPU::NCEMatMulOp op, vpux::LogCb logCb, bool checkLayout,

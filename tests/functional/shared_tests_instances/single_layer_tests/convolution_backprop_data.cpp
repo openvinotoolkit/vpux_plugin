@@ -18,6 +18,26 @@ class ConvolutionBackpropDataLayerTestCommon :
         virtual public VpuOv2LayerTest {};
 class ConvolutionBackpropDataLayerTest_NPU3720 : public ConvolutionBackpropDataLayerTestCommon {};
 
+class ConvolutionBackpropDataSEPLayerTest_NPU3720 : public ConvolutionBackpropDataLayerTestCommon {
+    void configure_model() override {
+        configuration[ov::intel_npu::compilation_mode_params.name()] = "enable-se-ptrs-operations=true";
+    }
+};
+
+class ConvolutionBackpropDataSEPLayerTest_NPU4000 : public ConvolutionBackpropDataLayerTestCommon {};
+
+TEST_P(ConvolutionBackpropDataSEPLayerTest_NPU3720, HW) {
+    rel_threshold = 0.01;
+    setDefaultHardwareMode();
+    run(Platform::NPU3720);
+}
+
+TEST_P(ConvolutionBackpropDataSEPLayerTest_NPU4000, HW) {
+    rel_threshold = 0.01;
+    setDefaultHardwareMode();
+    run(Platform::NPU4000);
+}
+
 TEST_P(ConvolutionBackpropDataLayerTest_NPU3720, HW) {
     rel_threshold = 0.002;
     setDefaultHardwareMode();
@@ -106,23 +126,53 @@ INSTANTIATE_TEST_SUITE_P(smoke_precommit_ConvolutionBackpropData2D_OutputPadding
                                             ::testing::ValuesIn(emptyOutputShape), ::testing::Values(DEVICE_NPU)),
                          ConvolutionBackpropDataLayerTest_NPU3720::getTestCaseName);
 
-/* ============= 3D ConvolutionBackpropData ============= */
-const std::vector<std::vector<ov::Shape>> inputShapes3D = {
-        {{1, 3, 10, 10, 10}}, {{1, 16, 5, 5, 5}}, {{1, 32, 5, 5, 5}}};
-const std::vector<std::vector<size_t>> kernels3D = {{1, 1, 1}, {3, 3, 3}};
-const std::vector<std::vector<size_t>> strides3D = {{1, 1, 1}};
-const std::vector<std::vector<ptrdiff_t>> padBegins3D = {{0, 0, 0}};
-const std::vector<std::vector<ptrdiff_t>> padEnds3D = {{0, 0, 0}, {1, 1, 1}};
-const std::vector<std::vector<size_t>> dilations3D = {{1, 1, 1}, {2, 2, 2}};
+/* ============= 2D ConvolutionBackpropData Convert to SEP Op ============= */
+const std::vector<std::vector<ov::Shape>> seInputShapes = {{{1, 16, 128, 128}}};
 
-const auto conv3DParams_ExplicitPadding = ::testing::Combine(
-        ::testing::ValuesIn(kernels3D), ::testing::ValuesIn(strides3D), ::testing::ValuesIn(padBegins3D),
-        ::testing::ValuesIn(padEnds3D), ::testing::ValuesIn(dilations3D), ::testing::ValuesIn(numOutChannels),
+const std::vector<std::vector<size_t>> seKernels = {{5, 5}};
+const std::vector<std::vector<size_t>> seStrides = {{2, 3}};
+const std::vector<std::vector<ptrdiff_t>> sePadBegins = {{3, 1}, {2, 4}};
+const std::vector<std::vector<ptrdiff_t>> sePadEnds = {{1, 3}, {4, 2}};
+const std::vector<std::vector<ptrdiff_t>> seOutputPadding = {{2, 1}};
+const std::vector<std::vector<size_t>> seDilations = {{1, 1}};
+
+const auto se_conv2DParams_ExplicitPadding = ::testing::Combine(
+        ::testing::ValuesIn(seKernels), ::testing::ValuesIn(seStrides), ::testing::ValuesIn(sePadBegins),
+        ::testing::ValuesIn(sePadEnds), ::testing::ValuesIn(seDilations), ::testing::ValuesIn(numOutChannels),
         ::testing::Values(ov::op::PadType::EXPLICIT), ::testing::ValuesIn(emptyOutputPadding));
-const auto conv3DParams_AutoPadValid = ::testing::Combine(
-        ::testing::ValuesIn(kernels3D), ::testing::ValuesIn(strides3D),
-        ::testing::Values(std::vector<ptrdiff_t>({0, 0, 0})), ::testing::Values(std::vector<ptrdiff_t>({0, 0, 0})),
-        ::testing::ValuesIn(dilations3D), ::testing::ValuesIn(numOutChannels),
-        ::testing::Values(ov::op::PadType::VALID), ::testing::ValuesIn(emptyOutputPadding));
+const auto se_conv2DParams_OutputPadding = ::testing::Combine(
+        ::testing::ValuesIn(seKernels), ::testing::ValuesIn(seStrides), ::testing::ValuesIn(sePadBegins),
+        ::testing::ValuesIn(sePadEnds), ::testing::ValuesIn(seDilations), ::testing::ValuesIn(numOutChannels),
+        ::testing::Values(ov::op::PadType::EXPLICIT), ::testing::ValuesIn(seOutputPadding));
+
+// ------ NPU3720 ------
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_SEP_ConvolutionBackpropData2D_ExplicitPadding,
+                         ConvolutionBackpropDataSEPLayerTest_NPU3720,
+                         ::testing::Combine(se_conv2DParams_ExplicitPadding, ::testing::ValuesIn(netPrecisions),
+                                            ::testing::ValuesIn(static_shapes_to_test_representation(seInputShapes)),
+                                            ::testing::ValuesIn(emptyOutputShape), ::testing::Values(DEVICE_NPU)),
+                         ConvolutionBackpropDataSEPLayerTest_NPU3720::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_SEP_ConvolutionBackpropData2D_OutputPadding,
+                         ConvolutionBackpropDataSEPLayerTest_NPU3720,
+                         ::testing::Combine(se_conv2DParams_OutputPadding, ::testing::ValuesIn(netPrecisions),
+                                            ::testing::ValuesIn(static_shapes_to_test_representation(seInputShapes)),
+                                            ::testing::ValuesIn(emptyOutputShape), ::testing::Values(DEVICE_NPU)),
+                         ConvolutionBackpropDataSEPLayerTest_NPU3720::getTestCaseName);
+
+// ------ NPU4000 ------
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_SEP_ConvolutionBackpropData2D_ExplicitPadding,
+                         ConvolutionBackpropDataSEPLayerTest_NPU4000,
+                         ::testing::Combine(se_conv2DParams_ExplicitPadding, ::testing::ValuesIn(netPrecisions),
+                                            ::testing::ValuesIn(static_shapes_to_test_representation(seInputShapes)),
+                                            ::testing::ValuesIn(emptyOutputShape), ::testing::Values(DEVICE_NPU)),
+                         ConvolutionBackpropDataSEPLayerTest_NPU4000::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_SEP_ConvolutionBackpropData2D_OutputPadding,
+                         ConvolutionBackpropDataSEPLayerTest_NPU4000,
+                         ::testing::Combine(se_conv2DParams_OutputPadding, ::testing::ValuesIn(netPrecisions),
+                                            ::testing::ValuesIn(static_shapes_to_test_representation(seInputShapes)),
+                                            ::testing::ValuesIn(emptyOutputShape), ::testing::Values(DEVICE_NPU)),
+                         ConvolutionBackpropDataSEPLayerTest_NPU4000::getTestCaseName);
 
 }  // namespace

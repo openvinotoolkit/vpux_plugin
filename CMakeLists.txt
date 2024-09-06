@@ -156,6 +156,7 @@ if(ENABLE_MLIR_COMPILER)
 endif()
 
 add_subdirectory(src)
+add_subdirectory(scripts)
 
 if(ENABLE_PRIVATE_TESTS)
     include(cmake/lit_tests.cmake)

@@ -147,6 +147,7 @@ void vpux::IE::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm, const I
     // Note: apply FuseMultiplyToConv after ConvertDivideToMultiply to increase
     // the applicability
     pm.addPass(IE::arch37xx::createFuseMultiplyToConvPass(log));
+    pm.addPass(IE::createOptimizeTileOpPass(log));
 
     if (options.enableSEPtrsOperations && options.enableSplitBilinerIntoHAndW) {
         pm.addPass(IE::createSplitBilinerIntoHAndWPass(log));
@@ -250,13 +251,13 @@ void vpux::IE::arch40xx::registerIEPipelines() {
                 IE::arch37xx::buildOptimizeActivationsPipeline(pm, options);
             });
 
-    mlir::PassPipelineRegistration<mlir::EmptyPipelineOptions>(
+    mlir::PassPipelineRegistration<MemPermutePositioningOptions>(
             "mempermute-positioning",
             "[OPTIMIZATION] MemPermute positioning is responsible for handling data transfromations ops (Transpose, "
             "Reshape etc), transform it to MemPermute and reorder the op to optimize final subgraph to avoid "
             "unnecessary data permutations",
-            [](mlir::OpPassManager& pm) {
-                IE::arch37xx::buildMemPermutePositioningPipeline(pm);
+            [](mlir::OpPassManager& pm, const MemPermutePositioningOptions& options) {
+                IE::arch37xx::buildMemPermutePositioningPipeline(pm, options);
             });
 
     mlir::PassPipelineRegistration<ExpandActivationChannelsOptions>(

@@ -71,14 +71,14 @@ func.func @TileGroupSparseTensor(%arg0: tensor<1x32x24x30xf16, {order = #NHWC}>)
     // CHECK: [[SLICE_CST_0:%.+]] = VPU.Slice %cst_0 [0, 0, 0, 0] [1, 32, 25, 61]
     // CHECK: [[SLICE_SET_0:%.+]] = VPU.Slice [[SET]] [0, 0, 0, 0] [1, 1, 25, 61]
     // CHECK: [[GST0:%.+]] = VPU.GroupSparseTensor([[SLICE_ARG_0]], [[SLICE_CST_0]], [[SLICE_SET_0]])
-    // CHECK-SAME: {seAttr = #VPU.SEUpsampling<factors = [1, 1], padding = [1, 1, 1, 1], offsets = [0, 0, 0, 0], sizes = [1, 32, 25, 61]>
+    // CHECK-SAME: {seAttr = #VPU.SEUpsampling<factors = [1, 1], padding = [1, 1, 2, 2], offsets = [0, 0, 0, 0], sizes = [1, 32, 25, 61]>
     // CHECK: [[CONV0:%.+]] = VPU.NCE.Convolution([[GST0]], %cst_1, %cst)
     // CHECK-SAME: tensor<1x16x24x60xf16, {order = #NHWC}>
     // CHECK: [[SLICE_ARG_1:%.+]] = VPU.Slice %arg0 [0, 0, 11, 0] [1, 32, 13, 30]
     // CHECK: [[SLICE_CST_1:%.+]] = VPU.Slice %cst_0 [0, 0, 24, 0] [1, 32, 25, 61]
     // CHECK: [[SLICE_SET_1:%.+]] = VPU.Slice [[SET]] [0, 0, 24, 0] [1, 1, 25, 61]
     // CHECK: [[GST1:%.+]] = VPU.GroupSparseTensor([[SLICE_ARG_1]], [[SLICE_CST_1]], [[SLICE_SET_1]])
-    // CHECK-SAME: {seAttr = #VPU.SEUpsampling<factors = [1, 1], padding = [1, 1, 1, 1], offsets = [0, 0, 2, 0], sizes = [1, 32, 25, 61]>
+    // CHECK-SAME: {seAttr = #VPU.SEUpsampling<factors = [1, 1], padding = [1, 1, 2, 2], offsets = [0, 0, 2, 0], sizes = [1, 32, 25, 61]>
     // CHECK: [[CONV1:%.+]] = VPU.NCE.Convolution([[GST1]], %cst_1, %cst)
     // CHECK-SAME: tensor<1x16x24x60xf16, {order = #NHWC}>
     // CHECK: [[CONCAT:%.+]] = VPU.Concat([[CONV0]], [[CONV1]]) {static_offsets = {{\[\[}}0, 0, 0, 0], [0, 0, 24, 0]]}

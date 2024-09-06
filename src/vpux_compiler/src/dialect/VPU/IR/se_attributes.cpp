@@ -893,7 +893,12 @@ VPU::SEAttr VPU::SEUpsamplingAttr::extractTile(ShapeRef outputTileOffset, ShapeR
         relativeOffsets[Dims4D::Act::W] += padLeft;
     }
 
-    return VPU::SEUpsamplingAttr::get(getContext(), getFactors(), getPadding(),
+    const auto [factorH, factorW] = extractFactors(getFactors());
+    auto newPadding = parseIntArrayAttr<int64_t>(getPadding());
+    newPadding[VPU::SE_PAD_RIGHT] += factorW;
+    newPadding[VPU::SE_PAD_BOTTOM] += factorH;
+
+    return VPU::SEUpsamplingAttr::get(getContext(), getFactors(), getIntArrayAttr(getContext(), newPadding),
                                       getIntArrayAttr(getContext(), relativeOffsets),
                                       getIntArrayAttr(getContext(), Shape(outputTileShape.raw())))
             .cast<VPU::SEAttr>();

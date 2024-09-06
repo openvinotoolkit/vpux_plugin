@@ -42,7 +42,7 @@ void AddressTransform::setStaggerBits(uint32_t bits) {
     _shift = LOG2_RAM_CUT_BYTES - _staggerAddressBits;
 
     switch (_archKind) {
-    case VPU::ArchKind::NPU40XX:  // VPUX40XX - NN CMX ram cut data width = 32B
+    case VPU::ArchKind::NPU40XX:  // NPU40XX - NN CMX ram cut data width = 32B
         _shift++;
         _log2RamCutDataWidth++;
         _ramCutAddressMask = (1u << (LOG2_RAM_CUT_BYTES + 1)) - 1u;
@@ -132,18 +132,22 @@ vpux::NDTypeInterface vpux::Const::SwizzleConstantAttr::inferOutputType(vpux::ND
     const auto newSize =
             alignSizeForSwizzling(inputType.getTotalAllocSize().count(), getSizeAlignmentForSwizzling(archKind));
     // Create a flat type with aligned size based on HW requirements
+    SmallVector<int64_t> newShapeVec(inputType.getShape().size(), 1);
     if (inputType.getElemTypeSize().count() == 1) {
         // For sub-byte type (i1) use same type on output
         // to align with swizzle transform
-        auto newShape = Shape({newSize * CHAR_BIT, 1, 1, 1});
+        newShapeVec[0] = newSize * CHAR_BIT;
+        auto newShape = Shape(newShapeVec);
         return inputType.changeShape(newShape);
     } else if (inputType.getElementType().isF16()) {
         // For FP16 maintain same type
-        auto newShape = Shape({newSize / static_cast<int64_t>(sizeof(vpux::type::float16)), 1, 1, 1});
+        newShapeVec[0] = newSize / static_cast<int64_t>(sizeof(vpux::type::float16));
+        auto newShape = Shape(newShapeVec);
         return inputType.changeShape(newShape);
     } else {
         // For any other type use U8
-        auto newShape = Shape({newSize, 1, 1, 1});
+        newShapeVec[0] = newSize;
+        auto newShape = Shape(newShapeVec);
         return inputType.changeShapeElemType(newShape, getUInt8Type(inputType.getContext()));
     }
 }

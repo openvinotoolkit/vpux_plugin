@@ -6,6 +6,8 @@
 #include "simulation/computation_builder.hpp"
 #include "simulation/layers_reader.hpp"
 #include "simulation/operations.hpp"
+#include "simulation/performance_mode.hpp"
+#include "simulation/simulation.hpp"
 
 #include "utils/error.hpp"
 
@@ -14,11 +16,77 @@
 struct OpBuilder {
     void build(NodeHandle nh, const Infer& infer);
     void build(NodeHandle nh, const Delay& delay);
+    void build(NodeHandle nh, const Compound& compound);
 
     Graph& graph;
     IBuildStrategy::Ptr strategy;
     const InferenceParamsMap& params_map;
 };
+
+void OpBuilder::build(NodeHandle nh, const Compound& compound) {
+    // Retrieving destination nodes of the current node nh
+    auto out_nhs = nh->dstNodes();
+
+    // NB: The Dummy node ensures proper handling of multiple inputs
+    auto dummy_nh = graph.create();
+    auto provider = std::make_shared<CircleBuffer>(utils::createRandom({1}, CV_8U));
+    DummyCall dummy_call{{provider}, 0};
+    graph.meta(dummy_nh).set(GOperation{std::move(dummy_call)});
+    auto in_nhs = nh->srcNodes();
+
+    // removing input edges to go through dummy node and not to compound node
+    auto src_edges = nh->srcEdges();
+    for (size_t i = 0; i < src_edges.size(); ++i) {
+        graph.remove(src_edges[i]);
+    }
+
+    for (uint32_t i = 0; i < in_nhs.size(); ++i) {
+        graph.meta(graph.link(in_nhs[i], dummy_nh)).set(InputIdx{i});  // Linking in_nhs with dummy_nh
+    }
+
+    auto dummy_out_nh = graph.create();  // Creating output dunmmy node
+    graph.meta(graph.link(dummy_nh, dummy_out_nh))
+            .set(OutputIdx{0u});  // linking dummy node handle and output dummy node handle
+    graph.meta(dummy_out_nh).set(GData{});
+    graph.meta(graph.link(dummy_out_nh, nh)).set(InputIdx{0u});
+
+    ASSERT(nh->dstEdges().size() == 1u);
+    auto dst_edge = nh->dstEdges().front();
+    graph.meta(dst_edge).set(OutputIdx{0u});
+
+    graph.meta(graph.link(nh, out_nhs.front())).set(OutputIdx{0u});
+
+    ModelsAttrMap<std::string> input_data_map;
+    ModelsAttrMap<IRandomGenerator::Ptr> initializers_map;
+
+    for (const auto& [tag, params] : compound.infer_params) {
+        input_data_map[compound.tag];
+        initializers_map[compound.tag];
+    }
+
+    PerformanceSimulation::Options opts{
+            nullptr,  // global_initializer
+            initializers_map,
+            input_data_map,
+            true,  // inference_only
+            {}     // target latency
+    };
+
+    Simulation::Config cfg{compound.tag,
+                           0u,     // frames_interval_in_ms
+                           false,  // disable_high_resolution_timer
+                           compound.subgraph, compound.infer_params};
+
+    auto compiled = std::make_shared<PerformanceSimulation>(std::move(cfg), std::move(opts))
+                            ->compileSync(false /*drop_frames*/);
+    auto term_criterion = std::make_shared<Iterations>(compound.repeat_count);
+    auto f = [compiled, term_criterion]() {
+        compiled->run(term_criterion);
+    };
+
+    CompoundCall compound_call{f};
+    graph.meta(nh).set(GOperation{std::move(compound_call)});
+}
 
 void OpBuilder::build(NodeHandle nh, const Delay& delay) {
     auto in_nhs = nh->srcNodes();
@@ -366,7 +434,7 @@ ComputationBuilder::ComputationBuilder(IBuildStrategy::Ptr strategy): m_strategy
 Computation ComputationBuilder::build(ScenarioGraph& graph, const InferenceParamsMap& infer_params,
                                       const ComputationBuilder::Options& opts) {
     uint32_t max_parallel_branches = 1u;
-    auto compile_args = cv::compile_args(cv::gapi::kernels<GCPUDummyM>());
+    auto compile_args = cv::compile_args(cv::gapi::kernels<GCPUDummyM, GCPUCompound>());
     std::vector<Meta> outputs_meta;
     Protocol proto;
 

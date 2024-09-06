@@ -409,7 +409,7 @@ flatbuffers::Offset<MVCNN::SummaryHeader> createSummaryHeader(
     if (isDmaHwpUsed) {
         serializedDmaHwpBase = createDmaHwpBase(writer, module);
     } else if (VPU::getArch(module) == VPU::ArchKind::NPU40XX) {
-        // Scratch DMA HWP buffer is required in VPUX40xx series
+        // Scratch DMA HWP buffer is required in NPU40XX series
         serializedDmaHwpBase = createDmaHwpScratchBuffer(writer, module);
     }
     VPUIP::BlobWriter::TensorReference serializedWorkpointSectionOutput = createWorkpointSectionOutput(writer, module);

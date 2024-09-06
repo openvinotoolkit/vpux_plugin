@@ -1026,6 +1026,27 @@ def DetectionOutputDecomposition : PassBase<"detection-output-decomposition", "v
     ];
 }
 
+def AdjustLSTMCellInputsOrder : PassBase<"adjust-lstmcell-inputs-order", "vpux::FunctionPass"> {
+    let summary = "Reorder the weights for LSTMCell";
+
+    let description = [{
+        To satisfy the software kernel constraints necessary for performance,
+        this pass reorders the weights of LSTMCell as follows:
+
+        weights - 4D tensor of shape [1, 4, hidden_size, input_size] and layout
+        NWHC.
+        recurrenceWeights - 4D tensor of shape [1, 4, hidden_size, hidden_size]
+        and layout NWHC.
+        biases - 4D tensor of shape [1, 1, 4, hidden_size] and layout NCWH.
+    }];
+
+    let constructor = "vpux::VPU::createAdjustLSTMCellInputsOrderPass()";
+
+    let dependentDialects = [
+        "vpux::VPU::VPUDialect"
+    ];
+}
+
 //
 // ComputeInterpolateCoordinates
 //
@@ -1066,7 +1087,7 @@ def ComputeInterpolateCoordinates : PassBase<"compute-interpolate-coordinates", 
 //
 
 def SetupPPEPass : PassBase<"setup-ppe", "vpux::FunctionPass"> {
-    let summary = "Sets activation function for NPU37XX and VPUX40XX PPE based on clamp range";
+    let summary = "Sets activation function for NPU37XX and NPU40XX PPE based on clamp range";
 
     let description = [{
         Ensures the correct activation function and clamping is used for PPE.
@@ -1299,7 +1320,7 @@ def TileGather : PassBase<"tile-gather", "vpux::FunctionPass"> {
     let summary = "Tile Gather Op";
 
     let description = [{
-        GatherOp will convert to Gather DMA in VPUX40XX+ pipelines.
+        GatherOp will convert to Gather DMA in NPU40XX+ pipelines.
         But Gather DMA has some limitation, the input size after axis shold less than 4096.
         The pass will tile gather from the dimention after axis
     }];

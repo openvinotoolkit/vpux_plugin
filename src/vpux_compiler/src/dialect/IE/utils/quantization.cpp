@@ -204,7 +204,7 @@ bool IE::arch37xx::isMixPrecisionSupported(mlir::Operation* origOp, const bool i
         return true;
     }
 
-    // HW limitations below do not apply to VPUX37XX
+    // HW limitations below do not apply to NPU37XX
     // However, leaky ReLU does not work accurately in quant in / float out mode.
     // In quant in / float out flow, PReLU alpha coefficient can only be represented as prelu_mult.
     // prelu_shift is not available in such configuration.

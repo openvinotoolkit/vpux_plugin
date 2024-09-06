@@ -365,7 +365,7 @@ mlir::LogicalResult vpux::VPUIP::ConvertDMAOp::verify() {
     if ((arch != VPU::ArchKind::NPU40XX) || !inputElementType.isF32() ||
         (!outputElementType.isF16() && !outputElementType.isBF16())) {
         return errorAt(loc,
-                       "Operation {0} is only supported for VPUX40XX arch for F32 to F16/BF16 conversion. "
+                       "Operation {0} is only supported for NPU40XX arch for F32 to F16/BF16 conversion. "
                        "Got arch {1} "
                        "and conversion from {2} to {3}",
                        getOperationName(), arch, inputElementType, outputElementType);

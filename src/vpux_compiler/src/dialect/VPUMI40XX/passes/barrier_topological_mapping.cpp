@@ -93,23 +93,20 @@ llvm::SmallPtrSet<mlir::Operation*, defaultPtrSetSize> getBarrierConsumers(VPUMI
     return gerBarrierUsers(barrier, false);
 }
 
-llvm::DenseSet<size_t> getIndicesOfWaitBarriersForOps(
-        const llvm::SmallPtrSet<mlir::Operation*, defaultPtrSetSize>& ops) {
-    llvm::DenseSet<size_t> waitBarrierIndicies;
+void setIndicesOfWaitBarriersForOps(const llvm::SmallPtrSet<mlir::Operation*, defaultPtrSetSize>& ops,
+                                    llvm::BitVector& waitBarrierIndicies) {
     for (const auto user : ops) {
         auto dep = mlir::dyn_cast<VPUMI40XX::ExecutableTaskOpInterface>(user);
         for (const auto b : dep.waitBarriers()) {
             auto bar = b.getDefiningOp<VPUMI40XX::ConfigureBarrierOp>();
             auto position = mlir::cast<VPURegMapped::IndexType>(bar.getType()).getValue();
-            waitBarrierIndicies.insert(position);
+            waitBarrierIndicies.set(position);
         }
     }
-
-    return waitBarrierIndicies;
 }
 
-// Build op-to-op and bar-to-op depencies and dependets maps
-// tails - represent the tails of lists with barrierrd tasks ops (DPUInvariant, DMA, ActKernelInvocation)
+// Build op-to-op and bar-to-op dependencies and dependents maps
+// tails - represent the tails of lists with barrier tasks ops (DPUInvariant, DMA, ActKernelInvocation)
 // for each op we add:
 //     waitBarriers and previous task into opDependencies
 //     updateBarriers and next task into opDependents
@@ -179,44 +176,83 @@ void topologicalSort(VPUMI40XX::ConfigureBarrierOp lastOp,
     }
 }
 
-SmallVector<llvm::DenseSet<size_t>> convertFromOpGraphToIndicesGraph(
+SmallVector<llvm::BitVector> convertFromOpGraphToIndicesGraph(
         const llvm::DenseMap<mlir::Operation*, llvm::SmallPtrSet<mlir::Operation*, 16>>& dependencyMap) {
-    SmallVector<llvm::DenseSet<size_t>> adjList(dependencyMap.size());
+    llvm::BitVector initDeps(dependencyMap.size(), false);
+    SmallVector<llvm::BitVector> adjList(dependencyMap.size(), initDeps);
+
     for (auto& [op, dependencies] : dependencyMap) {
         auto barrier = mlir::dyn_cast<VPUMI40XX::ConfigureBarrierOp>(op);
         auto pos = mlir::cast<VPURegMapped::IndexType>(barrier.getType()).getValue();
         for (auto dep : dependencies) {
             auto deps = mlir::dyn_cast<VPUMI40XX::ConfigureBarrierOp>(dep);
             auto indexDeps = mlir::cast<VPURegMapped::IndexType>(deps.getType()).getValue();
-            adjList[pos].insert(indexDeps);
+            adjList[pos].set(indexDeps);
         }
     }
     return adjList;
 }
 
-void dfs(std::vector<bool>& visited, SmallVector<llvm::DenseSet<size_t>>& graph,
-         llvm::DenseSet<std::pair<size_t, size_t>>& toRemove, size_t parent, size_t child) {
-    if (visited[child]) {
-        return;
-    }
-    for (size_t grandChild : graph[child]) {
-        toRemove.insert(std::make_pair(parent, grandChild));
-        dfs(visited, graph, toRemove, parent, grandChild);
-    }
-    visited[child] = true;
-}
+void optimizeDepsMap(SmallVector<llvm::BitVector>& graph) {
+    // A -> B -> C
+    //
+    // If B depends on A and C depends on [A, B] ==> we can remove A from C deps list,
+    // since it will be implicit dependency taken from B.
+    //
+    // Graph transitive closure has memory demand that scales with square of number of graph nodes,
+    // but is substantially faster than recursive algorithms. Currently, the pass operates for graphs with number of
+    // barriers below _barrierThreshold hence the amount of required memory is modest. If the optimization is enabled
+    // for LLM scale models, the graph optimizations should be done within tasks blocks defined by tasks graph split
+    // introduced in SplitControlGraph pass (#E134113)
+    //
+    auto depsMapClosure = graph;
 
-void transitiveReduction(SmallVector<llvm::DenseSet<size_t>>& graph) {
-    llvm::DenseSet<std::pair<size_t, size_t>> toRemove;
-    for (size_t parent = 0; parent < graph.size(); ++parent) {
-        std::vector<bool> visited(graph.size(), false);
-        for (auto& child : graph[parent]) {
-            dfs(visited, graph, toRemove, parent, child);
+    // For each graph node create transitive closure with the dependent nodes with indexes smaller than the index of the
+    // current node.
+    for (size_t idx = 0; idx < depsMapClosure.size(); idx++) {
+        for (auto curDepInd : graph[idx].set_bits()) {
+            depsMapClosure[idx] |= depsMapClosure[curDepInd];
         }
     }
 
-    for (auto& pairIt : toRemove) {
-        graph[pairIt.first].erase(pairIt.second);
+    // The graph nodes can contain dependencies on other nodes with indexes larger than the current index.
+    // For example, for a graph
+    //
+    // node: dependencies
+    // 0: 5
+    // 1:
+    // 2: 1
+    // 3: 0
+    // 4: 2
+    // 5: 4
+    // 6: 1, 3
+    //
+    // nodes from 1 to 6 depend on other nodes with indexes smaller their own index, but node 0 depends on node  with
+    // larger index (5) for which graph closure have not been set at the first graph traversal. For such a graph, node 6
+    // does not need to depend on 1 because it already depends on node 3 which depends on 0 which depends on 5 which
+    // depends on 4 which depends on 2 which depends on 1
+
+    // Update the transitive closure for node dependencies with indexes larger than the current node.
+    for (size_t idx = depsMapClosure.size(); idx-- > 0;) {
+        const auto curDeps = depsMapClosure[idx];  // use a copy to iterate over original set of bits
+        for (auto curDepInd : curDeps.set_bits()) {
+            depsMapClosure[idx] |= depsMapClosure[curDepInd];
+        }
+    }
+
+    // Remove all unnecessary edges.
+    for (size_t idx = graph.size(); idx-- > 0;) {
+        auto curDeps = graph[idx];  // use a copy to iterate over original set of bits
+
+        // If node does not have any dependency or it has only one dependency then skip
+        if (curDeps.count() <= 1) {
+            continue;
+        }
+
+        for (auto curDepInd : curDeps.set_bits()) {
+            const auto& depOfDeps = depsMapClosure[curDepInd];
+            graph[idx].reset(depOfDeps);
+        }
     }
 }
 
@@ -227,7 +263,7 @@ void transitiveReduction(SmallVector<llvm::DenseSet<size_t>>& graph) {
 void removeNonBarrierTasksFromGraphWithTransitiveClosure(
         llvm::DenseMap<mlir::Operation*, llvm::SmallPtrSet<mlir::Operation*, defaultPtrSetSize>>& opDependencies,
         llvm::DenseMap<mlir::Operation*, llvm::SmallPtrSet<mlir::Operation*, defaultPtrSetSize>>& opDependents,
-        SmallVector<llvm::DenseSet<size_t>>& transitiveClosure) {
+        SmallVector<llvm::BitVector>& transitiveClosure) {
     for (auto& [op, dependents] : llvm::make_early_inc_range(opDependents)) {
         if (mlir::isa<VPUMI40XX::ConfigureBarrierOp>(op)) {
             continue;
@@ -248,7 +284,7 @@ void removeNonBarrierTasksFromGraphWithTransitiveClosure(
                     auto posDependencyBarrier =
                             mlir::cast<VPURegMapped::IndexType>(dependencyBarrier.getType()).getValue();
 
-                    if (!transitiveClosure[posDependentBarrier].contains(posDependencyBarrier)) {
+                    if (!transitiveClosure[posDependentBarrier].test(posDependencyBarrier)) {
                         dependantDependencies.insert(dependency);
                     }
                 } else {
@@ -273,7 +309,7 @@ void removeNonBarrierTasksFromGraphWithTransitiveClosure(
 
 llvm::DenseMap<VPUMI40XX::ConfigureBarrierOp, int64_t> updateBarrierDependencies(
         const llvm::DenseMap<mlir::Operation*, llvm::SmallPtrSet<mlir::Operation*, defaultPtrSetSize>>& opDependencies,
-        SmallVector<llvm::DenseSet<size_t>>& graphOfIndicies,
+        SmallVector<llvm::BitVector>& graphOfIndicies,
         llvm::SmallVector<vpux::VPUMI40XX::ConfigureBarrierOp>& barriers) {
     auto valueCompare = [](const mlir::Value& lhs, const mlir::Value& rhs) {
         auto lhsVal = mlir::cast<VPURegMapped::IndexType>(lhs.getType());
@@ -297,7 +333,7 @@ llvm::DenseMap<VPUMI40XX::ConfigureBarrierOp, int64_t> updateBarrierDependencies
 
         std::set<mlir::Value, decltype(valueCompare)> sortedDependencies(valueCompare);
 
-        for (auto depIndex : indexesOfDependencies) {
+        for (auto depIndex : indexesOfDependencies.set_bits()) {
             auto barrierDep = barriers[depIndex];
             inDegrees[barrierDep]++;
             sortedDependencies.insert(barrierDep.getResult());
@@ -335,12 +371,13 @@ private:
 //    * The list of dependencies in each ConfigureBarrierOp that matches this order
 
 void BarrierTopologicalMappingPass::safeRunOnFunc() {
-    _log.info("BarrierTopologicalMapping pass: start()");
     auto netFunc = getOperation();
     auto mpi = VPUMI40XX::getMPI(netFunc);
 
     auto barriers = vpux::to_small_vector(netFunc.getOps<VPUMI40XX::ConfigureBarrierOp>());
 
+    _log.trace("barriers count: {0}, mpi barriers count: {1}, barriers count threshold: {2}", barriers.size(),
+               mpi.getBarrierCount(), _barrierThreshold);
     VPUX_THROW_WHEN(barriers.size() != mpi.getBarrierCount(), "Number of barriers is not equal to barrier count");
     VPUX_THROW_TYPED_WHEN(WlmRollbackException, barriers.size() > _barrierThreshold,
                           "Number of barriers {0} is above threshold {1} which suitable for WLM optimization",
@@ -369,52 +406,55 @@ void BarrierTopologicalMappingPass::safeRunOnFunc() {
     llvm::DenseMap<mlir::Operation*, llvm::SmallPtrSet<mlir::Operation*, defaultPtrSetSize>> opDependents;
 
     // adjacency list for bar-to-bar dependencies (keep only barrier index)
-    SmallVector<llvm::DenseSet<size_t>> barrierDependenciesInIndexRepresentation(barriers.size());
+    llvm::BitVector initDeps(barriers.size(), false);
+    SmallVector<llvm::BitVector> barrierDependenciesInIndexRepresentation(barriers.size(), initDeps);
 
     for (auto barrier : barriers) {
         auto opsProducers = getBarrierProducers(barrier);
         opDependencies[barrier.getOperation()] = opsProducers;
         auto barrierIndex = mlir::cast<VPURegMapped::IndexType>(barrier.getType()).getValue();
-        barrierDependenciesInIndexRepresentation[barrierIndex] = getIndicesOfWaitBarriersForOps(opsProducers);
+        VPUX_THROW_UNLESS(barrierIndex < barriers.size(), "Incorrect barrier index ({0})", barrierIndex);
+        setIndicesOfWaitBarriersForOps(opsProducers, barrierDependenciesInIndexRepresentation[barrierIndex]);
         opDependents[barrier.getOperation()] = getBarrierConsumers(barrier);
     }
 
     // build transitive closure for bar-to-bar dependencies
     auto barDepTransClosure = barrierDependenciesInIndexRepresentation;
-    for (auto& curDeps : barDepTransClosure) {
-        for (auto curDepInd : llvm::DenseSet<size_t>(curDeps)) {
-            const auto& depOfDeps = barDepTransClosure[curDepInd];
-            curDeps.insert(depOfDeps.begin(), depOfDeps.end());
+    for (size_t idx = 0; idx < barDepTransClosure.size(); idx++) {
+        for (auto curDepInd : barrierDependenciesInIndexRepresentation[idx].set_bits()) {
+            barDepTransClosure[idx] |= barDepTransClosure[curDepInd];
         }
     }
-
-    _log.info("BarrierTopologicalMapping pass: transitiveClosure was built()");
+    _log.trace("Transitive closure for bar-to-bar dependencies was built");
 
     auto tails = getBarrieredTaskTails(mpi);
     buildOpDepsAdjacentLists(opDependencies, opDependents, tails);
-    _log.info("BarrierTopologicalMapping pass: buildOpDepsAdjacentLists");
+    _log.trace("OpDepsAdjacentLists was built");
 
     // Remove non-barrier ops and introduce only new edges
     removeNonBarrierTasksFromGraphWithTransitiveClosure(opDependencies, opDependents, barDepTransClosure);
+    _log.trace("Removed non-barrier tasks from graph");
 
     // in extendedBarrierDependencies we have bar-to-bar dependencies
     // which take into account not only explicit barrier dependencies
     // but also the dependencies that we receive from the FIFO order of execution of operations
     auto extendedBarToBarDependencies = convertFromOpGraphToIndicesGraph(opDependencies);
+    _log.trace("Converted from Op graph to indices graph");
 
     // TODO E127869. Explicitly copy barrier-to-barrier dependencies to the final graph. It's needed because after
     // removeNonBarrierTasksFromGraphWithTransitiveClosure() we have only new dependencies which are coming from
-    // FIFO op ordering in list. In that case after this step extendedBarToBarDependencies will contain all neccesary
+    // FIFO op ordering in list. In that case after this step extendedBarToBarDependencies will contain all necessary
     // barrier dependencies
     for (size_t i = 0; i < barrierDependenciesInIndexRepresentation.size(); ++i) {
-        extendedBarToBarDependencies[i].insert(barrierDependenciesInIndexRepresentation[i].begin(),
-                                               barrierDependenciesInIndexRepresentation[i].end());
+        extendedBarToBarDependencies[i] |= barrierDependenciesInIndexRepresentation[i];
     }
+    _log.trace("Extended barrier-to-barrier dependencies created");
 
-    transitiveReduction(extendedBarToBarDependencies);
-    _log.info("BarrierTopologicalMapping pass: transitiveReduction was built()");
+    optimizeDepsMap(extendedBarToBarDependencies);
+    _log.trace("Optimized barrier map");
 
     auto inDegrees = updateBarrierDependencies(opDependencies, extendedBarToBarDependencies, barriers);
+    _log.trace("Updated barrier dependencies");
 
     // Final barrier is the actual last one inside our list (by definition of final barrier)
     // Final barrier the only barrier that not other barrier has a dependency upon
@@ -422,8 +462,10 @@ void BarrierTopologicalMappingPass::safeRunOnFunc() {
     VPUX_THROW_WHEN(!finalBarrier.getIsFinalBarrier(), "Last barrier in list not a final barrier");
     VPUX_THROW_WHEN(barriers.size() != opDependencies.size(), "One of the barriers has been missed");
     topologicalSort(finalBarrier, inDegrees, barriers.size());
+    _log.trace("Topological sort done");
 
     auto newCount = reindexBarrList(netFunc);
+    _log.trace("Reindex barrier list done");
 
     // Set the initial barrier again as we change the barrier order
     if (auto barrierTaskOps = to_small_vector(netFunc.getOps<VPUMI40XX::ConfigureBarrierOp>());

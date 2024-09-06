@@ -48,6 +48,7 @@ void vpux::VPU::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
     pm.addPass(VPU::createDetectionOutputDecompositionPass(log));
     pm.addPass(VPU::arch37xx::createSplitRealDFTOpsPass(log));
     pm.addPass(VPU::arch37xx::createAddProposalAuxiliaryBufferPass(log));
+    pm.addPass(VPU::createAdjustLSTMCellInputsOrderPass(log));
     pm.addPass(mlir::createCanonicalizerPass(grc));
 
     if (options.enableSEPtrsOperations || options.enableExperimentalSEPtrsOperations) {

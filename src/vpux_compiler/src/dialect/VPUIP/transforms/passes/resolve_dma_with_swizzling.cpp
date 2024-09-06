@@ -118,14 +118,14 @@ void ResolveDMAWithSwizzlingPass::safeRunOnFunc() {
 
         // Create new shape in the form of flat tensor that will represent total swizzled buffer
         // of size that is explicitly aligned to 512 as required by HW
-        SmallVector<int64_t> newShape;
+        SmallVector<int64_t> newShape(memShape.size(), 1);
 
         if (inputBuffType.getElemTypeSize().count() == 1) {
-            newShape = {buffAllocSize * CHAR_BIT, 1, 1, 1};
+            newShape[0] = buffAllocSize * CHAR_BIT;
         } else if (inputBuffType.getElementType().isF16()) {
-            newShape = {buffAllocSize / static_cast<int64_t>(sizeof(vpux::type::float16)), 1, 1, 1};
+            newShape[0] = buffAllocSize / static_cast<int64_t>(sizeof(vpux::type::float16));
         } else {
-            newShape = {buffAllocSize, 1, 1, 1};
+            newShape[0] = buffAllocSize;
             auto newElementType = getUInt8Type(taskOp->getContext());
             newInputBuffType = newInputBuffType.changeElemType(newElementType);
             newOutputBuffType = newOutputBuffType.changeElemType(newElementType);

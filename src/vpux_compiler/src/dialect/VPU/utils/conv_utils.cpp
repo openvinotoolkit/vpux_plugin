@@ -122,22 +122,11 @@ bool isFilterConst(mlir::Value filter) {
 
 bool isSupportedSEPTransposedConvImpl(VPU::ArchKind arch, NDTypeInterface inputType, NDTypeInterface filterType,
                                       NDTypeInterface outputType, mlir::ArrayAttr kernelStridesAttr,
-                                      mlir::ArrayAttr dilationsAttr, mlir::ArrayAttr padsBeginAttr,
-                                      mlir::ArrayAttr padsEndAttr, mlir::ArrayAttr outputPaddingAttr, LogCb logCb,
+                                      mlir::ArrayAttr dilationsAttr, mlir::ArrayAttr outputPaddingAttr, LogCb logCb,
                                       bool checkLayout, bool checkChannelAlignment, bool supportsInputActCompression) {
     const auto dilations = parseIntArrayAttr<int64_t>(dilationsAttr);
     if (dilations[Dims4D::Dilation::X.ind()] > 1 || dilations[Dims4D::Dilation::Y.ind()] > 1) {
         logCb(formatv("Dilated transposed convolution is not supported"));
-        return false;
-    }
-
-    const auto origKernelStrides = Shape(parseIntArrayAttr<int64_t>(kernelStridesAttr));
-    const auto stridesY = origKernelStrides[Dims4D::Strides::Y];
-    const auto stridesX = origKernelStrides[Dims4D::Strides::X];
-    const auto origPads = PadInfo(padsBeginAttr, padsEndAttr);
-    if (origPads.left > (stridesX - 1) || origPads.top > (stridesY - 1) || origPads.right > (stridesX - 1) ||
-        origPads.bottom > (stridesY - 1)) {
-        logCb(formatv("Padding larger than strides are not supported"));
         return false;
     }
 
@@ -148,6 +137,7 @@ bool isSupportedSEPTransposedConvImpl(VPU::ArchKind arch, NDTypeInterface inputT
     const auto outputPadding = Shape(parseIntArrayAttr<int64_t>(outputPaddingAttr));
 
     const auto inputShape = inputType.getShape();
+    const auto origKernelStrides = Shape(parseIntArrayAttr<int64_t>(kernelStridesAttr));
     const auto zerosY = origKernelStrides[Dims4D::Strides::Y] - 1;
     const auto zerosX = origKernelStrides[Dims4D::Strides::X] - 1;
     const auto newPadTop = KY - 1;
@@ -192,9 +182,8 @@ bool VPU::isSupportedSEPTransposedConv(IE::TransposedConvolutionOp op, LogCb log
         return false;
     }
     return isSupportedSEPTransposedConvImpl(getArch(op), inputType, filterType, outputType, op.getStrides(),
-                                            op.getDilations(), op.getPadsBegin(), op.getPadsEnd(),
-                                            op.getOutputPadding(), logCb, checkLayout, checkChannelAlignment,
-                                            supportsInputActCompression);
+                                            op.getDilations(), op.getOutputPadding(), logCb, checkLayout,
+                                            checkChannelAlignment, supportsInputActCompression);
 }
 
 bool VPU::isSupportedSEPTransposedConv(IE::GroupTransposedConvolutionOp op, LogCb logCb, bool checkLayout,
@@ -218,9 +207,8 @@ bool VPU::isSupportedSEPTransposedConv(IE::GroupTransposedConvolutionOp op, LogC
         return false;
     }
     return isSupportedSEPTransposedConvImpl(getArch(op), inputType, filterType, outputType, op.getStrides(),
-                                            op.getDilations(), op.getPadsBegin(), op.getPadsEnd(),
-                                            op.getOutputPadding(), logCb, checkLayout, checkChannelAlignment,
-                                            supportsInputActCompression);
+                                            op.getDilations(), op.getOutputPadding(), logCb, checkLayout,
+                                            checkChannelAlignment, supportsInputActCompression);
 }
 
 bool VPU::isSupportedSEPTransposedConv(VPU::TransposedConvolutionOp op, LogCb logCb, bool checkLayout,
@@ -244,9 +232,8 @@ bool VPU::isSupportedSEPTransposedConv(VPU::TransposedConvolutionOp op, LogCb lo
         return false;
     }
     return isSupportedSEPTransposedConvImpl(getArch(op), inputType, filterType, outputType, op.getStrides(),
-                                            op.getDilations(), op.getPadsBegin(), op.getPadsEnd(),
-                                            op.getOutputPadding(), logCb, checkLayout, checkChannelAlignment,
-                                            supportsInputActCompression);
+                                            op.getDilations(), op.getOutputPadding(), logCb, checkLayout,
+                                            checkChannelAlignment, supportsInputActCompression);
 }
 
 std::optional<bool> VPU::isSEPConvCompatibleWithClusterStrategy(VPU::NCEConvolutionOp nceConv,

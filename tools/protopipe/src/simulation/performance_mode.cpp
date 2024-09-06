@@ -107,13 +107,6 @@ void InputDataVisitor::operator()(const LayerVariantAttr<std::string>&) {
 
 }  // anonymous namespace
 
-struct PerformanceStrategy : public IBuildStrategy {
-    explicit PerformanceStrategy(const PerformanceSimulation::Options& opts);
-    IBuildStrategy::InferBuildInfo build(const InferDesc& infer) override;
-
-    const PerformanceSimulation::Options& opts;
-};
-
 PerformanceStrategy::PerformanceStrategy(const PerformanceSimulation::Options& _opts): opts(_opts){};
 
 IBuildStrategy::InferBuildInfo PerformanceStrategy::build(const InferDesc& infer) {
@@ -331,7 +324,7 @@ std::shared_ptr<SyncCompiled> PerformanceSimulation::compileSync(const bool drop
         // NB: There is no way to specify more than one source currently so assert if it happened.
         ASSERT(sources.size() == 1u);
         const double target_latency_in_ms = m_opts.target_latency.value();
-        const uint32_t source_latency_in_ms = m_cfg.frames_interval_in_ms;
+        const uint64_t source_latency_in_ms = m_cfg.frames_interval_in_us / 1000u;
         if (target_latency_in_ms > source_latency_in_ms) {
             THROW_ERROR("Target latency must be less or equal than source latency!");
         }

@@ -11,17 +11,13 @@ using namespace vpux;
 
 namespace {
 
-const uint32_t levelCount = 2;
-SmallVector<mlir::PatternBenefit> benefitLevels = getBenefitLevels(levelCount);
-
 //
 // MemPermuteRewriter
 //
 
 class MemPermuteRewriter final : public mlir::OpRewritePattern<IE::MemPermuteOp> {
 public:
-    MemPermuteRewriter(mlir::MLIRContext* ctx, mlir::PatternBenefit benefit, Logger log)
-            : mlir::OpRewritePattern<IE::MemPermuteOp>(ctx, benefit), _log(log) {
+    MemPermuteRewriter(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<IE::MemPermuteOp>(ctx), _log(log) {
         this->setDebugName("MemPermuteRewriter");
     }
 
@@ -91,67 +87,6 @@ mlir::LogicalResult MemPermuteRewriter::matchAndRewrite(IE::MemPermuteOp origOp,
 }
 
 //
-// SwapSliceMemPermuteRewriter
-//
-
-class SwapSliceMemPermuteRewriter final : public mlir::OpRewritePattern<IE::MemPermuteOp> {
-public:
-    SwapSliceMemPermuteRewriter(mlir::MLIRContext* ctx, mlir::PatternBenefit benefit, Logger log)
-            : mlir::OpRewritePattern<IE::MemPermuteOp>(ctx, benefit), _log(log) {
-        this->setDebugName("SwapSliceMemPermuteRewriter");
-    }
-
-private:
-    mlir::LogicalResult matchAndRewrite(IE::MemPermuteOp origOp, mlir::PatternRewriter& rewriter) const final;
-
-private:
-    Logger _log;
-};
-
-mlir::LogicalResult SwapSliceMemPermuteRewriter::matchAndRewrite(IE::MemPermuteOp origOp,
-                                                                 mlir::PatternRewriter& rewriter) const {
-    _log.trace("[{0}] Got '{1}' at '{2}'", getDebugName(), origOp->getName(), origOp->getLoc());
-
-    const auto inOrder = DimsOrder::fromValue(origOp.getInput());
-    const auto inMemShape = inOrder.toMemoryOrder(getShape(origOp.getInput()));
-    if (isTrivialPermute(inMemShape, origOp.getMemPerm())) {
-        return matchFailed(_log.nest(), rewriter, origOp, "MemPermuteOp is actually a permute cast");
-    }
-
-    if (getShape(origOp.getInput()) != getShape(origOp.getOutput())) {
-        return mlir::failure();
-    }
-
-    auto preSliceOp = origOp.getInput().getDefiningOp<IE::SliceOp>();
-    if (preSliceOp == nullptr || !preSliceOp->hasOneUse()) {
-        return mlir::failure();
-    }
-
-    auto preConvOp = preSliceOp.getOperand().getDefiningOp<IE::ConvolutionOp>();
-    if (preConvOp == nullptr || !preConvOp->hasOneUse()) {
-        return mlir::failure();
-    }
-
-    auto newMemPermuteOp = rewriter.create<IE::MemPermuteOp>(origOp->getLoc(), preConvOp.getOutput(),
-                                                             origOp.getDstOrderAttr(), origOp.getMemPermAttr());
-
-    auto layerWithPermute = getFusableLayerWithPermuteInterface(newMemPermuteOp.getOperation());
-    if (layerWithPermute == nullptr) {
-        return mlir::failure();
-    }
-
-    if (!layerWithPermute.isSupportedPermutation(newMemPermuteOp)) {
-        return mlir::failure();
-    }
-
-    auto newSliceOp = rewriter.create<IE::SliceOp>(origOp->getLoc(), newMemPermuteOp.getOutput(),
-                                                   preSliceOp.getStaticOffsetsAttr(), preSliceOp.getStaticSizesAttr());
-    rewriter.replaceOp(origOp, newSliceOp.getOutputs());
-
-    return mlir::success();
-}
-
-//
 // FuseMemPermutePass
 //
 
@@ -171,8 +106,7 @@ private:
 void FuseMemPermutePass::safeRunOnFunc() {
     auto& ctx = getContext();
     mlir::RewritePatternSet patterns(&ctx);
-    patterns.add<SwapSliceMemPermuteRewriter>(&ctx, benefitLevels[0], _log);
-    patterns.add<MemPermuteRewriter>(&ctx, benefitLevels[1], _log);
+    patterns.add<MemPermuteRewriter>(&ctx, _log);
 
     auto func = getOperation();
     if (mlir::failed(applyPatternsAndFoldGreedily(func, std::move(patterns), getDefaultGreedyRewriteConfig()))) {

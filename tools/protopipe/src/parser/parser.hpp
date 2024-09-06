@@ -16,7 +16,7 @@
 struct StreamDesc {
     // NB: Commons parameters for all modes
     std::string name;
-    uint32_t frames_interval_in_ms;
+    uint64_t frames_interval_in_us;
     ScenarioGraph graph;
     InferenceParamsMap infer_params_map;
     ITermCriterion::Ptr criterion;

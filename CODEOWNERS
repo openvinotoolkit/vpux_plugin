@@ -4,7 +4,6 @@
 # 1. Each directory should have a minimum of 2 code owners.
 # 2. Order is important as the last matching pattern takes the most precedence.
 # Keep folders below sorted in folder hierarchy order (alphabetically).
-
 #
 # Repo default owners
 #

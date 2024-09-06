@@ -996,7 +996,7 @@ private:
                     VPUIP::DPUTaskOp rhs = *std::next(differentClusterIds);
                     VPUX_THROW("Found dpu tasks {} and {} inside of {} which has different cluster IDs {} and {} "
                                "accordingly, but only uniform cluster IDs in all DPUTaskOp under a NCEClusterTaskOp "
-                               "are supported in VPUX40XX",
+                               "are supported in NPU40XX",
                                lhs, rhs, op, lhs.getClusterId().value_or(0), rhs.getClusterId().value_or(0));
                 }
 
