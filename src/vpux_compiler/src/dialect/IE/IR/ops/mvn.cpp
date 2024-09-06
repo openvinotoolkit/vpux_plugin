@@ -32,31 +32,6 @@ mlir::LogicalResult vpux::IE::MVNOp::inferReturnTypeComponents(
 }
 
 //
-// Returns 'true' if minimum required channels to run without MVN-decomposition fit CMX
-// minimum channels :  1 if across_channels = false
-//                   all if across_channels = true
-//
-bool vpux::IE::MVNOp::channelsFitIntoCMX() {
-    const auto inType = getInput().getType().cast<NDTypeInterface>();
-    const auto inShape = inType.getShape();
-    const auto bpp = vpux::getElemTypeSize(inType.getElementType()).to<Byte>().count();
-
-    if (getInternalReshape().has_value()) {
-        // attr present only for big-MVN instances that don't fit CMX thus require decomposition
-        return false;
-    }
-
-    auto moduleOp = getOperation()->getParentOfType<mlir::ModuleOp>();
-
-    const auto heightWidthSize = inShape[Dims4D::Act::H] * inShape[Dims4D::Act::W] * bpp;
-    auto layerSize = getAcrossChannels() ? heightWidthSize * inShape[Dims4D::Act::C] : heightWidthSize;
-    layerSize += vpux::DEFAULT_CMX_ALIGNMENT;  // alignment tolerance per buffer
-    layerSize *= 2;                            // also consider output size
-
-    return layerSize < vpux::VPU::getTotalCMXSize(moduleOp).count();
-}
-
-//
 // build
 //
 

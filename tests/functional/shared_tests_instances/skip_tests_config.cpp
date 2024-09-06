@@ -304,6 +304,12 @@ std::vector<std::string> disabledTestPatterns() {
                 R"(.*(smoke_Behavior|smoke_Multi_Behavior).*OVInferRequestIOTensorTest.*InferStaticNetworkSetChangedInputTensorThrow.*targetDevice=(NPU_|MULTI_configItem=MULTI_DEVICE_PRIORITIES_NPU).*)"
         });
 
+        // [Track number: E#138166]
+        _skipRegistry.addPatterns(
+                "device hung, reset, was removed, or driver update occurred", {
+                R"(.*(smoke_Auto_Behavior).*OVInferRequestIOTensorTest.*canInferAfterIOBlobReallocation.*)"
+        });
+
         // [Track number: E#67749]
         _skipRegistry.addPatterns(
                 "Can't loadNetwork without cache for ReadConcatSplitAssign with precision f32", {

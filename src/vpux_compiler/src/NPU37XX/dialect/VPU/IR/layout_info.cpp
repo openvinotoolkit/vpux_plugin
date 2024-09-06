@@ -66,10 +66,10 @@ public:
         info.setInput(0, DimsOrder::NHWC);
         info.setInput(1, DimsOrder::OYXI);
 
-        // FIXME [E#87197]: VPUX37XX ODU supports reordering of the output tensor, so we could use any layout here.
+        // FIXME [E#87197]: NPU37XX ODU supports reordering of the output tensor, so we could use any layout here.
         // But right now current behavior of AdjustLayouts and OptimizeReorder passes might introduce extra Reorders in
         // that case. We need to update the passes to properly handle various Reorder propagation and fusing cases prior
-        // enabling ODU permutation feature in VPUX37XX.
+        // enabling ODU permutation feature in NPU37XX.
         info.setOutput(0, DimsOrder::NHWC);
     }
 
@@ -200,6 +200,62 @@ public:
 //
 
 class MVNLayoutInfoOpModelForSW final : public IE::LayoutInfoOpInterface::FallbackModel<MVNLayoutInfoOpModelForSW> {
+private:
+    // Helps setting #NHWC layout for fuse-reshape-mvn pass
+    static bool isReshapeFusePattern(mlir::Operation* op) {
+        auto mvnOp = mlir::dyn_cast<IE::MVNOp>(op);
+        auto mvnShape = mvnOp.getInput().getType().cast<NDTypeInterface>().getShape();
+        if (!mvnOp) {
+            return false;
+        }
+        auto W = mvnShape[Dims4D::Act::W];
+        auto H = mvnShape[Dims4D::Act::H];
+        auto C = mvnShape[Dims4D::Act::C];
+        auto minSize = 256 * 1024;  // ad hoc threshold
+        if ((W * H < minSize) || (C % 32)) {
+            // running small instances through MVN-decomposition degrades perf
+            return false;
+        }
+
+        auto reshapeBefore = mvnOp.getInput().getDefiningOp<IE::ReshapeOp>();
+        if (!reshapeBefore) {
+            return false;
+        }
+        mlir::Operation* reshapeAfter = *mvnOp.getOutput().getUsers().begin();
+        if (!mlir::isa<IE::ReshapeOp, IE::AffineReshapeOp>(reshapeAfter)) {
+            return false;
+        }
+
+        // To be removed after E#123528 gets implemented
+        if (mlir::isa<IE::AffineReshapeOp>(reshapeAfter)) {
+            mlir::Operation* groupConv = *reshapeAfter->getResult(0).getUsers().begin();
+            if (!mlir::isa<IE::GroupConvolutionOp>(groupConv)) {
+                return false;
+            }
+            mlir::Operation* finReshape = *groupConv->getResult(0).getUsers().begin();
+            if (!mlir::isa<IE::ReshapeOp>(finReshape)) {
+                return false;
+            }
+            reshapeAfter = finReshape;
+        }
+
+        // Check Reshapes are symmetrical
+        const auto inType = reshapeBefore->getOperand(0).getType().cast<NDTypeInterface>();
+        const auto outType = reshapeAfter->getResult(0).getType().cast<NDTypeInterface>();
+        const auto inC = inType.getShape()[Dims4D::Act::C];
+        const auto outC = outType.getShape()[Dims4D::Act::C];
+        if (inC != outC) {
+            return false;
+        }
+
+        // Check channel constraints
+        if ((inC <= C) || (inC % C)) {
+            return false;
+        }
+
+        return true;
+    }
+
 public:
     static void inferLayoutInfo(mlir::Operation* op, IE::LayerLayoutInfo& info, const bool /*seOpsEnabled*/,
                                 const bool /*seExperimentalOpsEnabled*/) {
@@ -215,15 +271,10 @@ public:
         const auto inputType = op->getOperand(0).getType().cast<NDTypeInterface>();
         const auto inputShape = inputType.getShape();
 
-        auto mvnOp = mlir::dyn_cast<IE::MVNOp>(op);
-        if (mvnOp) {
-            if (!mvnOp.channelsFitIntoCMX() && (inputShape[Dims4D::Act::C] % 32 == 0)) {
-                // Large-MVN instance that requires decomposition is not necessary faster in NHWC mode,
-                // we're only trying to remove some Reorders in nets of interest (to-be-refactored)
-                info.setInput(0, DimsOrder::NHWC);
-                info.setOutput(0, DimsOrder::NHWC);
-                return;
-            }
+        if (isReshapeFusePattern(op)) {
+            info.setInput(0, DimsOrder::NHWC);
+            info.setOutput(0, DimsOrder::NHWC);
+            return;
         }
 
         if (isAcrossChannels(op)) {
@@ -358,7 +409,7 @@ void redirectLayoutOpInterfacesForVPU(mlir::DialectRegistry& registry) {
         VPU::GridSampleOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         VPU::BucketizeOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         VPU::PerAxisTileOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
-        VPU::LSTMCellOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
+        VPU::LSTMCellOp::attachInterface<vpux::VPU::AnyDimsOrderOpModelForSW>(*ctx);
         VPU::NormalizeL2Op::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         VPU::NormalizeIEOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         VPU::DynamicQuantizeOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);

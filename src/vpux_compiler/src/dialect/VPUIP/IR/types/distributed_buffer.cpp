@@ -391,7 +391,7 @@ mlir::MemRefType VPUIP::DistributedBufferType::getCompactType() const {
         // buffer, will aligned to 4096 bytes.
         // When spilling to DDR, need static allocation on DDR is 8192 bytes. However, static allocation thinks DDR
         // buffer just needs 6144 bytes(1x48x8x8xf16). If we use sizeAlignment * numClusters as new alignment (for
-        // example on VPUX40XX is 2048), the original size 6144 bytes is 2048 aligned. It's will casuse buffer overflow.
+        // example on NPU40XX is 2048), the original size 6144 bytes is 2048 aligned. It's will casuse buffer overflow.
         // Here we increase the alignment until the memory meet the real requirements. For this case, the new alignment
         // will increase to 4096.
         size_t expectedAlignedByteSize = 0;

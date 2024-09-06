@@ -27,7 +27,7 @@ bool vpux::VPU::NCEInvariant::isPrecisionSupported(ArchKind arch, mlir::ValueRan
         const auto elemType = val.getType().cast<vpux::NDTypeInterface>().getElementType();
 
         if (elemType.isBF16() && arch != VPU::ArchKind::NPU37XX && arch != VPU::ArchKind::NPU40XX) {
-            logCb(formatv("BF16 is only supported by VPUX37XX, VPUX40XX"));
+            logCb(formatv("BF16 is only supported by NPU37XX, NPU40XX"));
             return false;
         }
     }

@@ -3,6 +3,7 @@
 //
 
 #include "simulation/operations.hpp"
+#include "utils/error.hpp"
 
 cv::GProtoArgs InferCall::operator()(const cv::GProtoArgs& inputs) {
     cv::GInferInputs infer_inputs;
@@ -116,5 +117,14 @@ cv::GProtoArgs DummyCall::operator()(const cv::GProtoArgs& inputs) {
     for (auto& out : outputs) {
         proto_outputs.emplace_back(cv::GProtoArg{out});
     }
+    return proto_outputs;
+}
+
+cv::GProtoArgs CompoundCall::operator()(const cv::GProtoArgs& inputs) {
+    ASSERT(inputs.size() == 1)
+    cv::GMat in = cv::util::get<cv::GMat>(inputs[0]);
+
+    cv::GProtoArgs proto_outputs;
+    proto_outputs.emplace_back(GCompound::on(in, function));
     return proto_outputs;
 }

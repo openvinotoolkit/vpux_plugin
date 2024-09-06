@@ -42,5 +42,5 @@ InOutLayers LayersReader::readLayers(const InferenceParams& params) {
     // NB: Using OpenVINO to read the i/o layers information for *.onnx model
     OpenVINOParams ov;
     ov.path = OpenVINOParams::ModelPath{ort.model_path, ""};
-    return getOVReader().readLayers(ov);
+    return getOVReader().readLayers(ov, true /* use_results_names */);
 }

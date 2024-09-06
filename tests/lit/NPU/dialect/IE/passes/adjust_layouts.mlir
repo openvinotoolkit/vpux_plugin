@@ -350,3 +350,27 @@ func.func  @NonZeroMemoryLayout(%arg0: tensor<1x3x3xsi32, {order = #HWC}>) -> te
     // CHECK:       [[NON_ZERO:%.*]] = IE.NonZero([[CHW_INPUT]])
     // CHECK:       return [[NON_ZERO]]
 }
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @MvnLayoutForReshapeFuse
+func.func @MvnLayoutForReshapeFuse(%arg0: tensor<1x512x128x128xf16>) -> tensor<1x512x128x128xf16> {
+
+    %cst_0 = const.Declare tensor<512x512x3x3xf16> = dense<1.0> : tensor<512x512x3x3xf16>
+    %cst_1 = const.Declare tensor<1x512x1x1xf16> = dense<1.5> : tensor<1x512x1x1xf16>
+    %cst_2 = const.Declare tensor<512x1x1x1xf16> = dense<2.0> : tensor<1x512x1x1xf16>, [#const.Reshape<[512, 1, 1, 1]>]
+    %cst_3 = const.Declare tensor<1x512x1x1xf16> = dense<2.5> : tensor<1x512x1x1xf16>
+
+    %103 = IE.Convolution(%arg0, %cst_0, %cst_1) {dilations = [1, 1], pads_begin = [1, 1], pads_end = [1, 1], strides = [1, 1]} : tensor<1x512x128x128xf16>, tensor<512x512x3x3xf16>, tensor<1x512x1x1xf16> -> tensor<1x512x128x128xf16>
+    %104 = IE.Reshape(%103) {shape_value = [1, 32, 262144, 1]} : tensor<1x512x128x128xf16> -> tensor<1x32x262144x1xf16>
+    %105 = IE.MVN(%104) {across_channels = false, eps = 9.9999999747524271E-7 : f64, normalize_variance = true} : tensor<1x32x262144x1xf16> -> tensor<1x32x262144x1xf16>
+    %106 = IE.Reshape(%105) {shape_value = [1, 512, 128, 128]} : tensor<1x32x262144x1xf16> -> tensor<1x512x128x128xf16>
+    %107 = IE.GroupConvolution(%106, %cst_2, %cst_3) {dilations = [1, 1], groups = 512 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x512x128x128xf16>, tensor<512x1x1x1xf16>, tensor<1x512x1x1xf16> -> tensor<1x512x128x128xf16>
+
+    return %107 : tensor<1x512x128x128xf16>
+
+    // CHECK:  [[MVN_OUT:%.+]] = IE.MVN
+    // CHECK-SAME: -> tensor<1x32x262144x1xf16, {order = #NHWC}>
+}

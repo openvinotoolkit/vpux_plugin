@@ -102,7 +102,7 @@ cv::gapi::GNetPackage Simulation::getNetworksPackage() const {
 Simulation::Simulation(Config&& cfg): m_cfg(std::move(cfg)){};
 
 std::vector<DummySource::Ptr> Simulation::createSources(const bool drop_frames) {
-    auto src = std::make_shared<DummySource>(m_cfg.frames_interval_in_ms, drop_frames,
+    auto src = std::make_shared<DummySource>(m_cfg.frames_interval_in_us, drop_frames,
                                              m_cfg.disable_high_resolution_timer);
     return {src};
 };

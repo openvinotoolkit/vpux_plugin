@@ -212,6 +212,9 @@ Dim getSwKernelTileDim(VPUIP::SwKernelOp swKernelOp) {
         return Dims4D::Act::N;
     } else if (kernelEntryName == "lstm_gates") {
         return Dims4D::Act::H;
+    } else if (kernelEntryName == "lstm_cell") {
+        const auto tileDim = (swKernelOp->getResult(0).getType().cast<vpux::NDTypeInterface>()).getShape().size() - 1;
+        return Dim(tileDim);
     }
 
     auto isHighestDimTilingPerformant = [&]() {
@@ -283,7 +286,7 @@ bool doesSwKernelSupportTiling(VPUIP::SwKernelOp swKernelOp, vpux::Logger log) {
     }
 
     if (hasNon4DOutputShape(swKernelOp) && kernelEntryName != "gather" && kernelEntryName != "gru_sequence" &&
-        kernelEntryName != "gru_sequence_last_part") {
+        kernelEntryName != "gru_sequence_last_part" && kernelEntryName != "lstm_cell") {
         // GatherOp/GRUSequenceOp/GRUSequenceLastPartOp supports non4D input output shapes with tiling.
         log.trace("SW kernel '{0}' op has non-4d output at '{1}'", kernelEntryName, swKernelOp->getLoc());
         return false;
@@ -395,7 +398,7 @@ mlir::FailureOr<OutputTiling> getSwKernelOutputTiling(VPUIP::SwKernelOp swKernel
                                                       int64_t maxNumTiles, bool insertSubview, vpux::Logger log) {
     auto kernelEntryName = getSwKernelEntryName(swKernelOp);
     // Gather op's output always is non-4D and Gather's backInfer has it's own logic later, skip the check here.
-    if (kernelEntryName != "gather") {
+    if (kernelEntryName != "gather" && kernelEntryName != "lstm_cell") {
         VPUX_THROW_UNLESS(outputShape.size() == 4, "Unsupported operation '{0}' at '{1}', it has non 4D result",
                           swKernelOp->getName(), swKernelOp->getLoc());
     }
@@ -501,7 +504,7 @@ bool checkSwKernelTilingAlignment(VPUIP::SwKernelOp swKernelOp, const vpux::NDTy
         return true;
     }
 
-    // todo: enable unaligned shave on VPUX37XX too
+    // todo: enable unaligned shave on NPU37XX too
     // ticket E#114487
     if (!isArchVPUX3XXX(VPU::getArch(swKernelOp))) {
         return true;
@@ -555,7 +558,7 @@ static OutputTiling computeOutputTiling(const SmallString& kernelEntryName, cons
         return {firstOutputTile, firstOutputTile};
     } else if (kernelEntryName == "gru_sequence" || kernelEntryName == "gru_sequence_last_part") {
         return vpux::VPU::GRUSequenceOutputTiling(firstOutputTile);
-    } else if (kernelEntryName == "lstm_gates") {
+    } else if ((kernelEntryName == "lstm_gates") || (kernelEntryName == "lstm_cell")) {
         return {firstOutputTile, firstOutputTile};
     }
     return OutputTiling{firstOutputTile};

@@ -179,7 +179,7 @@ VPU::MultiClusterStrategy SubgraphOptimizer::getBestInSOHLikeStrategies(VPU::Clu
         SOHCost += spillingCost;
         _log.trace("SplitOverHeight has spilling cost {0}", spillingCost);
     }
-    // Currently only compressedConv op has SplitOverHeightOverlapped strategy on VPUX37XX
+    // Currently only compressedConv op has SplitOverHeightOverlapped strategy on NPU37XX
     // For general implementation, we consider both SOH & SOHO.
     if (isValidStrategy(clusteredOp, VPU::MultiClusterStrategy::SplitOverHeightOverlapped)) {
         SOHOverlappedCost = _layerCostModel.getLayerCost(clusteredOp.getOperation(),
@@ -927,7 +927,8 @@ bool SubgraphOptimizer::hasOutputSpillingToMultiClusterLayer(VPU::ClusteredOpInt
 /// For example, {SOK -> SOK -> SOH} maybe better converting to {SOK -> SOK -> SOK}
 void SubgraphOptimizer::optimizeStrategyAvoidSpillingOnSubgraph(VPU::ClusteredOpInterface clusteredOp) {
     // #E112083 performance regression to be investigated in order to remove this filter
-    if (mlir::isa<VPU::NCEPermuteOp>(clusteredOp.getOperation())) {
+    // TODO: [E-126102] Cost model for Grouped MatMul
+    if (mlir::isa<VPU::NCEPermuteOp, VPU::NCEMatMulOp>(clusteredOp.getOperation())) {
         return;
     }
     if (!_layerCostModel.hasMultiClusterStrategy(clusteredOp) ||
@@ -1041,7 +1042,8 @@ void SubgraphOptimizer::optimizeStrategyAvoidSpillingOnSubgraph(VPU::ClusteredOp
                 continue;
             }
             // #E112083 performance regression to be investigated in order to remove this filter
-            if (mlir::isa_and_nonnull<VPU::NCEPermuteOp>(executeChild)) {
+            // TODO: [E-126102] Cost model for Grouped MatMul
+            if (mlir::isa_and_nonnull<VPU::NCEPermuteOp, VPU::NCEMatMulOp>(executeChild)) {
                 continue;
             }
 
@@ -1099,7 +1101,8 @@ void SubgraphOptimizer::optimizeStrategyAvoidSpillingOnSubgraph(VPU::ClusteredOp
                 continue;
             }
             // #E112083 performance regression to be investigated in order to remove this filter
-            if (mlir::isa_and_nonnull<VPU::NCEPermuteOp>(parent)) {
+            // TODO: [E-126102] Cost model for Grouped MatMul
+            if (mlir::isa_and_nonnull<VPU::NCEPermuteOp, VPU::NCEMatMulOp>(parent)) {
                 continue;
             }
 

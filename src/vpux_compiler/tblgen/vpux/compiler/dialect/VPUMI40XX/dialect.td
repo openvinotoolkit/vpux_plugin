@@ -9,7 +9,7 @@
 include "mlir/IR/OpBase.td"
 
 def VPUMI40XX_Dialect : Dialect {
-    let summary = "VPU NN Mapped Inference RunTime Dialect for arch VPUX40XX";
+    let summary = "VPU NN Mapped Inference RunTime Dialect for arch NPU40XX";
 
     let description = [{
 The **VPUMI40XX Dialect** represents NN RunTime IR together with MappedInference

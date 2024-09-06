@@ -154,6 +154,7 @@ std::unique_ptr<mlir::Pass> createLegalizeDilatedConvolutionPass(Logger log = Lo
 std::unique_ptr<mlir::Pass> createResolveStridedSlicePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createConvertStridedSlice2ConvPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createOptimizeSliceWithStridePass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createOptimizeTileOpPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createFuseActivationOpsPass(const bool enableFuseClamp = false,
                                                         Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createFusePadOpsPass(Logger log = Logger::global());
@@ -189,11 +190,25 @@ std::unique_ptr<mlir::Pass> createConvertGRNToNormalizeL2Pass(Logger log = Logge
 std::unique_ptr<mlir::Pass> createUniquifyBranchesPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createSwapMVNWithTransposePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createAdjustMemPermuteAroundOpPass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createExpandMatMulSoftMaxMatMulPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createExpandMatMulSoftMaxMatMulPass(const bool enableGroupedMatmul = false,
+                                                                Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createPropagateMemPermuteThroughAddPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createPropagateMemPermuteBeforeOpPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createPropagateMemPermuteThroughSoftMaxPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createPropagateOpThroughBatchConcatPass(Logger log = Logger::global());
+
+struct MemPermutePositioningOptions : mlir::PassPipelineOptions<MemPermutePositioningOptions> {
+    BoolOption enableGroupedMatMul{*this, "enable-grouped-matmul",
+                                   llvm::cl::desc("Enable execution of grouped MatMul as a single operation."),
+                                   llvm::cl::init(false)};
+
+    MemPermutePositioningOptions() = default;
+
+    template <class OtherOptions>
+    explicit MemPermutePositioningOptions(const OtherOptions& options) {
+        enableGroupedMatMul = options.enableGroupedMatMul;
+    }
+};
 
 //
 // OptimizeActivations
@@ -357,6 +372,10 @@ struct ExpandActivationChannelsOptions : mlir::PassPipelineOptions<ExpandActivat
                                                   llvm::cl::desc("Enable the experimental operation of SEP"),
                                                   llvm::cl::init(false)};
 
+    BoolOption enableGroupedMatMul{*this, "enable-grouped-matmul",
+                                   llvm::cl::desc("Enable execution of grouped MatMul as a single operation."),
+                                   llvm::cl::init(false)};
+
     template <class OtherOptions>
     explicit ExpandActivationChannelsOptions(const OtherOptions& options) {
         enableExpandActivationChannels = options.enableExpandActivationChannels;
@@ -365,6 +384,7 @@ struct ExpandActivationChannelsOptions : mlir::PassPipelineOptions<ExpandActivat
         enableFusePermuteQuantizeExpand = options.enableFusePermuteQuantizeExpand;
         enableSEPtrsOperations = options.enableSEPtrsOperations;
         enableExperimentalSEPtrsOperations = options.enableExperimentalSEPtrsOperations;
+        enableGroupedMatMul = options.enableGroupedMatMul;
     }
 };
 
@@ -610,9 +630,8 @@ struct DefaultHWOptionsDialectBase : public virtual vpux::DefaultHWOptionsBase {
     BoolOption enableFuseClampOperations{*this, "enable-fuse-clamp-op", llvm::cl::desc("Enable fuse clamp operations"),
                                          llvm::cl::init(false)};
 
-    BoolOption enableGroupedMatMul{*this, "enable-grouped-matmul",
-                                   llvm::cl::desc("Enable execution of grouped MatMul as a single operation."),
-                                   llvm::cl::init(false)};
+    BoolOption enableDynamicQuant{*this, "enable-dynamic-quant",
+                                  llvm::cl::desc("Enable dynamic quant weights signal pass."), llvm::cl::init(false)};
 };
 
 //

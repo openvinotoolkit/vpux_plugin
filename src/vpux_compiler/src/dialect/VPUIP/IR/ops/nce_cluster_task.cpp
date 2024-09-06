@@ -4,6 +4,7 @@
 //
 
 #include "vpux/compiler/core/attributes/dim.hpp"
+#include "vpux/compiler/core/attributes/dims_order.hpp"
 #include "vpux/compiler/core/attributes/shape.hpp"
 #include "vpux/compiler/core/attributes/stride_reqs.hpp"
 #include "vpux/compiler/core/cost_model_utils.hpp"
@@ -388,8 +389,9 @@ mlir::LogicalResult verifyNCEConv(VPUIP::NCEClusterTaskOp op, VPU::ArchKind arch
     if (weightsOrder != DimsOrder::OYXI && weightsOrder != DimsOrder::GOYXI) {
         return errorAt(op, "For NCE convolution weights must have OYXI layout, got '{0}'", weightsOrder);
     }
-    if (arch != VPU::ArchKind::NPU37XX && arch != VPU::ArchKind::NPU40XX && outOrder != DimsOrder::NHWC) {
-        return errorAt(op, "For NCE convolution output must have NHWC layout, got '{0}'", outOrder);
+    if (arch != VPU::ArchKind::NPU37XX && arch != VPU::ArchKind::NPU40XX && outOrder != DimsOrder::NHWC &&
+        outOrder != DimsOrder::GNHWC) {
+        return errorAt(op, "For NCE convolution output must have NHWC or GNHWC layout, got '{0}'", outOrder);
     }
 
     const auto outputShape = getShape(op.getOutput());
@@ -577,7 +579,7 @@ mlir::LogicalResult vpux::VPUIP::NCEClusterTaskOp::verify() {
         const auto type = val.getType().cast<vpux::NDTypeInterface>().getElementType();
 
         if (arch != VPU::ArchKind::NPU37XX && arch != VPU::ArchKind::NPU40XX && type.isBF16()) {
-            return errorAt(op, "BF16 is only supported by VPUX37XX, VPUX40XX");
+            return errorAt(op, "BF16 is only supported by NPU37XX, NPU40XX");
         }
     }
 
@@ -955,10 +957,10 @@ VPUIP::BlobWriter::SpecificTask vpux::VPUIP::NCEClusterTaskOp::serialize(VPUIP::
         auto inStart = SmallVector<int64_t>{0, 0, 0};
         auto inSize = SmallVector<int64_t>{0, 0, 0};
 
-        // Currently, input start/size attributes are computed only for VPUX40XX.
-        // For VPUX37XX, input workload start/size are back-inferred by runtime from
+        // Currently, input start/size attributes are computed only for NPU40XX.
+        // For NPU37XX, input workload start/size are back-inferred by runtime from
         // output workload start/end.
-        // TODO: Add input workload computation for VPUX37XX - E#63055
+        // TODO: Add input workload computation for NPU37XX - E#63055
         if (arch == VPU::ArchKind::NPU40XX) {
             VPUX_THROW_UNLESS(dpuTaskOp.getInStart().has_value() && dpuTaskOp.getInEnd().has_value(),
                               "DPUTask does not have input workload start/end for arch 40XX");
@@ -1020,7 +1022,7 @@ VPUIP::BlobWriter::SpecificTask vpux::VPUIP::NCEClusterTaskOp::serialize(VPUIP::
 
         // workload_start_X/Y/Z and workload_end_X/Y/Z are used to serialize the values for the te_beg_x/y/z and
         // te_end_x/y/z registers, which are defining the start and end of the output workload.
-        // For VPUX40XX, idu_workload_start_x/y/z and idu_workload_size_x/y/z are used to serialize the values for the
+        // For NPU40XX, idu_workload_start_x/y/z and idu_workload_size_x/y/z are used to serialize the values for the
         // workload_start_x/y/z and workload_size_x/y/z registers, which are defining the start and size of the
         // input workload. For all other architectures, idu_workloads* fields are ignored in runtime.
         const auto variant = MVCNN::CreateNCEVariantFields(
@@ -1198,7 +1200,7 @@ VPUIP::BlobWriter::SpecificTask vpux::VPUIP::NCEClusterTaskOp::serialize(VPUIP::
                 getOutputSparsityMapBuff(), /*operandSETable=*/nullptr, getOutputSeSize());
     }
     if (isInputQuantizationProvided) {
-        // Shifts must be set 0 for VPUX37XX and VPUX40XX runtime to be considered, otherwise runtime will ignore inputs
+        // Shifts must be set 0 for NPU37XX and NPU40XX runtime to be considered, otherwise runtime will ignore inputs
         // MULT.
         inputData = getTensorReferenceWithUpdatedQuantParams(writer, in1QuantMult.value(), {0}, 0, getInput(),
                                                              getInputSparsityMap(), getInputStorageElementTable(),

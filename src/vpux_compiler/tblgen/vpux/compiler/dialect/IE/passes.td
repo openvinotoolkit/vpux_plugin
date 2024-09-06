@@ -250,6 +250,24 @@ def OptimizeReorders : PassBase<"optimize-reorders", "vpux::FunctionPass"> {
 }
 
 //
+// OptimizeTileOp
+//
+
+def OptimizeTileOp : PassBase<"optimize-tile-op", "vpux::FunctionPass"> {
+    let summary = "Optimize tile ops";
+
+    let description = [{
+        The pass removes the useless tile op if the user is sw which supports broadcast
+    }];
+
+    let constructor = "vpux::IE::createOptimizeTileOpPass()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+}
+
+//
 // OptimizeReordersAcrossFunctionCalls
 //
 
@@ -2834,7 +2852,7 @@ def ExpandActivationWidth : PassBase<"expand-activation-width", "vpux::FunctionP
         Supported operations:
         * IE.PermuteQuantize
             To avoid blocking optimization of permuteQuantize, place the pass after buildMemPermuteProcessingPipeline()
-            for VPUX37XX, VPUX40XX.
+            for NPU37XX, NPU40XX.
     }];
 
     let constructor = "vpux::IE::createExpandActivationWidthPass()";
@@ -2901,7 +2919,7 @@ def AdjustInputShape: PassBase<"adjust-input-shape", "vpux::FunctionPass"> {
            Insert ShapeCast ops to the outputs before the next non-eltwise op.
         2. Insert ShapeCast op and Expand op to the input of pooling ops when the pooling has KY=1, SY=1.
            Insert ShapeCast op, Slice Op and Expand op to the outputs.
-        Platforms VPUX37XX, VPUX40XX all benefit.
+        Platforms NPU37XX, NPU40XX all benefit.
     }];
 
     let constructor = "vpux::IE::createAdjustInputShapePass()";
@@ -3287,6 +3305,14 @@ def ExpandMatMulSoftMaxMatMul : PassBase<"expand-matmul-softmax-matmul", "vpux::
 
     let dependentDialects = [
         "vpux::IE::IEDialect"
+    ];
+
+    let options = [
+        Option<
+            "enableGroupedMatMul", "enable-grouped-matmul",
+            "bool", "false",
+            "Flag to enable or disable grouped MatMul execution"
+        >
     ];
 }
 

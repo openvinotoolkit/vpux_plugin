@@ -658,6 +658,64 @@ InputTiling backInferLSTMGatesSwKernelInputTile(VPUIP::SwKernelOp swKernelOp, co
     return TilingInfo{inputTiles};
 }
 
+InputTiling backInferLSTMCellSwKernelInputTile(VPUIP::SwKernelOp swKernelOp, const vpux::TileInfo& outputTile,
+                                               Logger log) {
+    auto swKernelRuns = swKernelOp.getBody().getOps<VPUIP::SwKernelRun>();
+    VPUX_THROW_UNLESS(std::distance(swKernelRuns.begin(), swKernelRuns.end()) == 1,
+                      "SwKernelOp has already been tiled at '{0}'", swKernelOp);
+
+    SmallVector<TileInfo> inputTiles;
+
+    // inputs
+    const auto inputData = swKernelOp.getInputs()[0];
+    const auto initialHiddenState = swKernelOp.getInputs()[1];
+    // const auto initialCellState = swKernelOp.getInputs()[2];
+    //  weight
+    const auto weights = swKernelOp.getInputs()[3];
+    const auto weightsHidden = swKernelOp.getInputs()[4];
+    const auto biases = swKernelOp.getInputs()[5];
+
+    const auto inputDataShape = getShape(inputData);
+    const auto initialHiddenStateShape = getShape(initialHiddenState);
+    // const auto initialCellStateShape = getShape(initialCellState);
+
+    const auto weightsShape = getShape(weights);
+    const auto weightsHiddenShape = getShape(weightsHidden);
+    const auto biasesShape = getShape(biases);
+
+    TileInfo inputDataTile(inputDataShape);
+    TileInfo initialHiddenStateTile(initialHiddenStateShape);
+    TileInfo initialCellStateTile = outputTile;
+
+    TileInfo weightsTile(weightsShape);
+    weightsTile.shape[Dim(weightsShape.size() - 2)] = outputTile.shape.back();
+    weightsTile.offsets[Dim(weightsShape.size() - 2)] = outputTile.offsets.back();
+    weightsTile.axis[Dim(weightsShape.size() - 2)] = outputTile.axis.back();
+
+    TileInfo weightsHiddenTile(weightsHiddenShape);
+    weightsHiddenTile.shape[Dim(weightsHiddenShape.size() - 2)] = outputTile.shape.back();
+    weightsHiddenTile.offsets[Dim(weightsHiddenShape.size() - 2)] = outputTile.offsets.back();
+    weightsHiddenTile.axis[Dim(weightsHiddenShape.size() - 2)] = outputTile.axis.back();
+
+    TileInfo biasesTile(biasesShape);
+    // biasesTile.shape[Dim(biasesShape.size() - 1)] = outputTile.shape[Dim(outputTile.shape.size() - 1)];
+    biasesTile.shape[Dim(biasesShape.size() - 1)] = outputTile.shape.back();
+    biasesTile.offsets[Dim(biasesShape.size() - 1)] = outputTile.offsets.back();
+    biasesTile.axis[Dim(biasesShape.size() - 1)] = outputTile.axis.back();
+
+    inputTiles.push_back(inputDataTile);
+    inputTiles.push_back(initialHiddenStateTile);
+    inputTiles.push_back(initialCellStateTile);
+    inputTiles.push_back(weightsTile);
+    inputTiles.push_back(weightsHiddenTile);
+    inputTiles.push_back(biasesTile);
+
+    log.trace("backInferLSTMCellSwKernelInputTile  outputTile '{0}'", outputTile);
+    log.trace("backInferLSTMCellSwKernelInputTile  inputTiles '{0}'", inputTiles);
+
+    return TilingInfo{inputTiles};
+}
+
 InputTiling backInferMvn1SumSwKernelInputTile(VPUIP::SwKernelOp swKernelOp, const vpux::TileInfo& outputTile, Logger) {
     auto swKernelRuns = swKernelOp.getBody().getOps<VPUIP::SwKernelRun>();
     VPUX_THROW_UNLESS(std::distance(swKernelRuns.begin(), swKernelRuns.end()) == 1,
@@ -738,6 +796,8 @@ InputTiling backInferSwKernelInputTile(VPUIP::SwKernelOp swKernelOp, const Small
         return backInferMatMulSwKernelInputTile(swKernelOp, outputTile, log);
     } else if (kernelEntryName == "lstm_gates") {
         return backInferLSTMGatesSwKernelInputTile(swKernelOp, outputTile, log);
+    } else if (kernelEntryName == "lstm_cell") {
+        return backInferLSTMCellSwKernelInputTile(swKernelOp, outputTile, log);
     } else if (kernelEntryName == "detection_output_sort") {
         return vpux::VPU::DetectionOutputSortOpInputTilingOnShave(swKernelOp, outputTile, tileId, outputTiles.size(),
                                                                   log);

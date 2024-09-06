@@ -12,7 +12,7 @@ namespace {
 mlir::Type typeTo4D(const mlir::Type type) {
     auto origType = type.cast<NDTypeInterface>();
     const ShapeRef origShape = origType.getShape();
-    VPUX_THROW_WHEN(origShape.size() != 5, "typeTo4D expects only 5-d shapes as inputs.");
+    VPUX_THROW_WHEN(origShape.size() != DimsGroups5D::Act::numDims, "typeTo4D expects only 5-d shapes as inputs.");
 
     const Shape newShape(origShape.begin() + 1, origShape.end());
     const Strides origStrides = origType.getStrides();
@@ -22,7 +22,7 @@ mlir::Type typeTo4D(const mlir::Type type) {
     // [d0, d1, d2, d3, d4] -> erase -> [d1, d2, d3, d4] -> shift -> [d0, d1, d2, d3]
     // [d0, d1, d3, d4, d2] -> erase -> [d1, d3, d4, d2] -> shift -> [d0, d2, d3, d1]
     auto permutation = origType.getDimsOrder().toPermutation();
-    VPUX_THROW_WHEN(permutation.front() != Dim(0), "Groups must be the outermost dimension.");
+    VPUX_THROW_WHEN(permutation.front() != DimsGroups5D::Act::G, "Groups must be the outermost dimension.");
     permutation.erase(permutation.begin());
     for (auto& dim : permutation) {
         dim = Dim(dim.ind() - 1);
@@ -66,7 +66,7 @@ VPURT::DeclareBufferOp createNewValue(const mlir::Value val, const int64_t step,
 
 int64_t getStep(const mlir::Type type) {
     auto origType = type.cast<NDTypeInterface>();
-    auto batchSize = origType.getShape()[Dim(0)];
+    auto batchSize = origType.getShape()[DimsGroups5D::Act::G];
     return origType.getTotalAllocSize().count() / batchSize;
 }
 
@@ -90,11 +90,11 @@ mlir::LogicalResult MatMulRewriter::matchAndRewrite(VPURT::TaskOp vpurtTask, mli
 
     auto origType = nceOp.getOutput().getType().cast<NDTypeInterface>();
     const ShapeRef origShape = origType.getShape();
-    if (origShape.size() != 5) {
+    if (origShape.size() != DimsGroups5D::Act::numDims) {
         return mlir::failure();
     }
 
-    const auto batchSize = origShape[Dim(0)];
+    const auto batchSize = origShape[DimsGroups5D::Act::G];
 
     const auto inputStep = getStep(nceOp.getInput().getType());
     const auto weightsStep = getStep(nceOp.getWeights().getType());

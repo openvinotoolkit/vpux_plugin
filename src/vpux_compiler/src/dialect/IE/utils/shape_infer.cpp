@@ -396,7 +396,7 @@ bool vpux::IE::isODUPermuteEffectiveForShape(const ShapeRef shape, const int64_t
         return false;
     }
 
-    // E116504: NCEPermute's multi-cluster strategy is manually set as SOK on VPUX40XX which
+    // E116504: NCEPermute's multi-cluster strategy is manually set as SOK on NPU40XX which
     // introduces performance issue when dim of H/W is greater than VPU_DIMENSION_LIMIT(8192).
     // Add checking to avoid converting to PermuteQuantize if dims are out of limits.
     bool isOutOfDimLimits = std::any_of(shape.begin(), shape.end(), [](const auto& dim) {

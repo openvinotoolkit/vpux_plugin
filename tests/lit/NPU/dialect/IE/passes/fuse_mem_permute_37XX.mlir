@@ -766,25 +766,3 @@ func.func @MemPermuteAcrossQuantizeCast(%arg0: tensor<1x16x64x64xf16, {order = #
     // CHECK:       [[QUANTIZE_CAST:%.*]] = IE.QuantizeCast([[PERMUTE_CAST]]) {dstElemType = !qElemType} : tensor<1x64x64x16x!qElemType1, {order = #NHWC}> -> tensor<1x64x64x16x!qElemType, {order = #NHWC}>
     // CHECK:       return [[QUANTIZE_CAST]] : tensor<1x64x64x16x!qElemType, {order = #NHWC}>
 }
-
-// -----
-
-#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
-#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
-#NWCH = affine_map<(d0, d1, d2, d3) -> (d0, d3, d1, d2)>
-
-// CHECK-LABEL: @SwapSliceMemPermuteForODU
-// CHECK-SAME:      [[INPUT:%arg[0-9]]]:  tensor<1x64x4x4xf16, {order = #NHWC}>
-func.func @SwapSliceMemPermuteForODU(%arg0: tensor<1x64x4x4xf16, {order = #NHWC}>) -> tensor<1x56x4x4xf16> {
-    %cst = const.Declare tensor<64x64x1x1xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<64x64x1x1xf16, {order = #NHWC}>
-    %0 = IE.Convolution(%arg0, %cst) {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x64x4x4xf16, {order = #NHWC}>, tensor<64x64x1x1xf16, {order = #NHWC}> -> tensor<1x64x4x4xf16, {order = #NHWC}>
-    %1 = IE.Slice %0 [0, 0, 0, 0] [1, 56, 4, 4] : tensor<1x64x4x4xf16, {order = #NHWC}> to tensor<1x56x4x4xf16, {order = #NHWC}>
-    %2 = IE.MemPermute(%1) {dst_order = #NCHW, mem_perm = #NWCH} : tensor<1x56x4x4xf16, {order = #NHWC}> -> tensor<1x56x4x4xf16>
-
-    return %2 : tensor<1x56x4x4xf16>
-
-    // CHECK-DAG:   [[CST:%.+]] = const.Declare tensor<64x64x1x1xf16, {order = #NHWC}>
-    // CHECK:       [[CONV:%.*]] = IE.Convolution([[INPUT]], [[CST]]) {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x64x4x4xf16, {order = #NHWC}>, tensor<64x64x1x1xf16, {order = #NHWC}> -> tensor<1x64x4x4xf16>
-    // CHECK:       [[SLICE:%.*]] = IE.Slice [[CONV]] [0, 0, 0, 0] [1, 56, 4, 4] : tensor<1x64x4x4xf16> to tensor<1x56x4x4xf16>
-    // CHECK:       return [[SLICE]] : tensor<1x56x4x4xf16>
-}

@@ -362,7 +362,7 @@ double LayerCostModel::calculateMPEVolume(VPU::MPEMode mpeMode, Shape shape) con
         break;
     }
     case VPU::MPEMode::MATRIX:
-    // These different mpe modes on VPUX37XX have impact on the reuse of activation and weights. We can't estimate reuse
+    // These different mpe modes on NPU37XX have impact on the reuse of activation and weights. We can't estimate reuse
     // cost with current cost equation. In the future we will integrate VPUNN to estimate the cost.
     case VPU::MPEMode::CUBOID_4x16:
     case VPU::MPEMode::CUBOID_8x16:
@@ -402,7 +402,7 @@ double LayerCostModel::computeSplitEfficiency(VPU::NCEOpInterface nceOp, VPU::Mu
 
     const auto arch = VPU::getArch(nceOp);
 
-    // VPUX37XX has different kinds of MPE mode
+    // NPU37XX has different kinds of MPE mode
     if (arch == VPU::ArchKind::NPU37XX) {
         return std::max(std::max(static_cast<double>(perClusterOutputTensorVolume) /
                                          calculateMPEVolume(VPU::MPEMode::CUBOID_4x16, perClusterShape),
@@ -830,7 +830,7 @@ double LayerCostModel::getDPUandDMATimeCostWithCustomTiling(VPU::NCEOpInterface 
         if (parentOp == nullptr || !mlir::isa<VPU::ClusteredOpInterface>(parentOp)) {
             return 0;
         }
-        if (mlir::isa<VPU::NCEPermuteOp>(parentOp)) {
+        if (mlir::isa<VPU::NCEPermuteOp, VPU::NCEMatMulOp>(parentOp)) {
             // Skip NCEPermute parent because of inaccurate VPUNN cost: ticket E#89715
             return MAX_VAL;
         }

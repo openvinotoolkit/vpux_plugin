@@ -150,7 +150,7 @@ static Simulation::Ptr createSimulation(const std::string& mode, StreamDesc&& st
                                         const Config& config) {
     Simulation::Ptr simulation;
     // NB: Common parameters for all simulations
-    Simulation::Config cfg{stream.name, stream.frames_interval_in_ms, config.disable_high_resolution_timer,
+    Simulation::Config cfg{stream.name, stream.frames_interval_in_us, config.disable_high_resolution_timer,
                            std::move(stream.graph), std::move(stream.infer_params_map)};
     if (mode == "performance") {
         PerformanceSimulation::Options opts{config.initializer, std::move(stream.initializers_map),

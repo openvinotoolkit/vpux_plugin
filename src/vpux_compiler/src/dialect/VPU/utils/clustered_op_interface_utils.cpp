@@ -130,7 +130,7 @@ bool VPU::isOperationSplitOverWidthCompatible(mlir::Operation* op, ShapeRef outp
             VPU::ArchKind::NPU40XX,
     };
     if (compatibleTargets.count(arch) > 0) {
-        // For VPUX40XX, W segmented output needs to have explicit halo regions defined.
+        // For NPU40XX, W segmented output needs to have explicit halo regions defined.
         // Thus the applicability of SOW on the current operation is tightly dependent
         // if the consumer operations can be SOW themselves.
         // If that's not the case and not all consumers are SOW compatible, we can't represent

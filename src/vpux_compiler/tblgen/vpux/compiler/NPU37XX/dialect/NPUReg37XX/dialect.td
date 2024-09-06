@@ -12,7 +12,7 @@ def NPUReg37XX_Dialect : Dialect {
     let summary = "NPU 37XX HW specifics";
 
     let description = [{
-        The **37XX** encapsulates NPU37XX/37XX specific information.
+        The **37XX** encapsulates NPU37XX specific information.
 
     }];
 

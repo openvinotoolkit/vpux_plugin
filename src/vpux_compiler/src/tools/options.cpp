@@ -23,16 +23,16 @@ vpux::VPU::ArchKind vpux::parseArchKind(int argc, char* argv[], StringRef helpHe
 
     // Please use this option to test pipelines only (DefaultHW, ReferenceSW, etc.)
     // This option allows us to avoid ambiguity here when the parameters contradict each other:
-    // "vpux-opt --init-compiler="vpu-arch=VPUX37XX compilation-mode=ReferenceSW" --default-hw-mode"
+    // "vpux-opt --init-compiler="vpu-arch=NPU37XX compilation-mode=ReferenceSW" --default-hw-mode"
     // Instead you should only pass arch version:
-    // "vpux-opt --vpu-arch=VPUX37XX --default-hw-mode"
+    // "vpux-opt --vpu-arch=NPU37XX --default-hw-mode"
     static llvm::cl::opt<std::string> archOpt("vpu-arch", llvm::cl::desc("VPU architecture to compile for"),
                                               llvm::cl::init(""), llvm::cl::cat(vpuxOptOptions));
 
     // To test the appropriate passes and pipelines depending on the type of device, we need to get a value for arch
-    // kind. Most of lit-tests use command line that contains following option: --init-compiler="vpu-arch=VPUX37XX" To
-    // avoid duplicating command line options like this: "vpux-opt --vpu-arch=VPUX37XX
-    // --init-compiler="vpu-arch=VPUX37XX".." let's parse init-compiler option to get arch kind. There is still code
+    // kind. Most of lit-tests use command line that contains following option: --init-compiler="vpu-arch=NPU37XX" To
+    // avoid duplicating command line options like this: "vpux-opt --vpu-arch=NPU37XX
+    // --init-compiler="vpu-arch=NPU37XX".." let's parse init-compiler option to get arch kind. There is still code
     // duplication, but in one place that does not affect developers:
 
     static llvm::cl::opt<std::string> initCompiler("init-compiler",

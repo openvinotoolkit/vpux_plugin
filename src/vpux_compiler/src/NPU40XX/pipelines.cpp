@@ -274,7 +274,7 @@ void vpux::buildReferenceHWModePipeline(mlir::OpPassManager& pm, const Reference
     if (options.enableExpandActivationChannels) {
         pm.addPass(IE::createAdjustGroupConvShapePass(log));
     }
-    IE::arch37xx::buildMemPermutePositioningPipeline(pm, log);
+    IE::arch37xx::buildMemPermutePositioningPipeline(pm, IE::MemPermutePositioningOptions(options), log);
 
     if (options.enableExpandActivationChannels) {
         if (options.enableAdjustConvShapePass) {

@@ -46,3 +46,17 @@ func.func @ConvertConstToAttr(%arg0: tensor<1x1x4x4xf32>) -> tensor<4x4xf32> {
     // CHECK: [[VAL0:%.+]] = IE.Squeeze(%arg0) {axes_value = [0, 1]} : tensor<1x1x4x4xf32> -> tensor<4x4xf32>
     // CHECK: return [[VAL0]] : tensor<4x4xf32>
 }
+
+
+#CN = affine_map<(d0, d1) -> (d1, d0)>
+#map = affine_map<(d0, d1, d2, d3) -> (d1, d2, d3, d0)>
+// CHECK-LABEL: @FuseWithAffineReshapeAndAddPermuteCast
+func.func @FuseWithAffineReshapeAndAddPermuteCast(%arg0: tensor<1x1x16x4xf16, {order = affine_map<(d0, d1, d2, d3) -> (d1, d2, d3, d0)>}>) -> tensor<1x64xf16, {order = affine_map<(d0, d1) -> (d1, d0)>}> {
+    %0 = IE.AffineReshape(%arg0) {dim_mapping = [[0, 1], [2], [2], [2]], shape_value = [1, 1, 64]} : tensor<1x1x16x4xf16, {order = affine_map<(d0, d1, d2, d3) -> (d1, d2, d3, d0)>}> -> tensor<1x1x64xf16, {order = affine_map<(d0, d1, d2) -> (d2, d0, d1)>}>
+    %1 = IE.Squeeze(%0) {axes_value = [1]} : tensor<1x1x64xf16, {order = affine_map<(d0, d1, d2) -> (d2, d0, d1)>}> -> tensor<1x64xf16, {order = affine_map<(d0, d1) -> (d1, d0)>}>
+    return %1 : tensor<1x64xf16, {order = affine_map<(d0, d1) -> (d1, d0)>}>
+
+    // CHECK: [[VAL0:%.*]] = IE.Reshape(%arg0) {shape_value = [1, 64]} : tensor<1x1x16x4xf16, {order = #map}> -> tensor<1x64xf16>
+    // CHECK: [[VAL1:%.*]] = IE.PermuteCast([[VAL0]]) {dst_order = #CN, mem_perm = #CN} : tensor<1x64xf16> -> tensor<1x64xf16, {order = #CN}>
+    // CHECK: return [[VAL1]] : tensor<1x64xf16, {order = #CN}>
+}

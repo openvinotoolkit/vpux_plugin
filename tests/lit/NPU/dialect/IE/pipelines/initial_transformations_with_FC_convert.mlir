@@ -170,3 +170,21 @@ func.func @MatMulWithGroupQuant(%arg0: tensor<16x96xf32>) -> tensor<16x64xf32> {
 
     return %GEMM : tensor<16x64xf32>
 }
+
+// -----
+
+// CHECK-LABEL: @UnrollMatMulAndPropagate
+func.func @UnrollMatMulAndPropagate(%arg0: tensor<1x8x4096x40xf32>, %arg1: tensor<1x8x4096x40xf32>) -> tensor<8x4096x4096xf32> {
+    %0 = IE.MatMul(%arg0, %arg1) {transpose_b} : tensor<1x8x4096x40xf32>, tensor<1x8x4096x40xf32> -> tensor<1x8x4096x4096xf32>
+    %1 = IE.Reshape(%0) {shape_value = [8, 4096, 4096]} : tensor<1x8x4096x4096xf32> -> tensor<8x4096x4096xf32>
+    %2 = IE.SoftMax(%1) {axisInd = 2 : i64} : tensor<8x4096x4096xf32> -> tensor<8x4096x4096xf32>
+    return %2 : tensor<8x4096x4096xf32>
+
+    // CHECK:       %[[CONV:.+]] = IE.Convolution
+    // CHECK-NEXT:  %[[RESHAPE:.+]] = IE.Reshape(%[[CONV]]) {shape_value = [4096, 4096]} : tensor<4096x4096x1x1xf32> -> tensor<4096x4096xf32>
+    // CHECK:       %[[AFFINE:.+]] = IE.AffineReshape(%[[RESHAPE]])
+    // CHECK-SAME{LITERAL}  {dim_mapping = [[0, 1], [2]], shape_value = [1, 4096, 4096]} : tensor<4096x4096xf32> -> tensor<1x4096x4096xf32>
+    // CHECK:       %[[SOFTMAX:.+]] = IE.SoftMax(%[[AFFINE]])
+    // CHECK:       %[[CONCAT:.+]] = IE.Concat(%[[SOFTMAX]],
+    // CHECK:       return %[[CONCAT]] : tensor<8x4096x4096xf32>
+}

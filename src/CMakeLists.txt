@@ -17,10 +17,6 @@ if(BUILD_COMPILER_FOR_DRIVER)
     add_subdirectory(vpux_driver_compiler)
 endif()
 
-if(ENABLE_IMD_BACKEND)
-    add_subdirectory(vpux_imd_backend)
-endif()
-
 add_subdirectory(vpux_utils)
 
 add_subdirectory(vpux_compiler)

@@ -242,3 +242,31 @@ module @MatMulWithGroupQuant {
         // CHECK:   return [[RESHAPE_OUT]] : tensor<16x64xf32>
     }
 }
+
+// -----
+
+// CHECK-LABEL: @DoNotUnrollMatMul
+module @DoNotUnrollMatMul {
+    IE.CNNNetwork entryPoint : @main
+    inputsInfo : {
+        DataInfo "input" : tensor<1x6x64x24xf16>
+        DataInfo "input" : tensor<1x6x64x24xf16>
+    } outputsInfo : {
+        DataInfo "output" : tensor<1x6x64x64xf16>
+    }
+
+    // CHECK-LABEL: func.func @main
+    // CHECK-SAME: [[ARG0:%.+]]: tensor<1x6x64x24xf16>, [[ARG1:%.+]]: tensor<1x6x64x24xf16>
+    func.func @main(%arg0: tensor<1x6x64x24xf16>, %arg1: tensor<1x6x64x24xf16>) -> tensor<1x6x64x64xf16> {
+        %0 = IE.MatMul(%arg0, %arg1) {transpose_b}
+            : tensor<1x6x64x24xf16>, tensor<1x6x64x24xf16> -> tensor<1x6x64x64xf16>
+
+        return %0 : tensor<1x6x64x64xf16>
+
+        // CHECK:       [[EXPAND_0:%.+]] = IE.Expand(%arg0) {pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 8]} : tensor<1x6x64x24xf16> -> tensor<1x6x64x32xf16>
+        // CHECK:       [[EXPAND_1:%.+]] = IE.Expand(%arg1) {pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 8]} : tensor<1x6x64x24xf16> -> tensor<1x6x64x32xf16>
+        // CHECK:       [[MATMUL:%.+]] = IE.MatMul([[EXPAND_0]], [[EXPAND_1]]) {transpose_b} : tensor<1x6x64x32xf16>, tensor<1x6x64x32xf16>
+        // CHECK-SAME:  -> tensor<1x6x64x64xf16>
+        // CHECK:       return [[MATMUL]]
+    }
+}

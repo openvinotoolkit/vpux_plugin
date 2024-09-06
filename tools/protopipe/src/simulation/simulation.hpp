@@ -31,7 +31,7 @@ public:
 
     struct Config {
         std::string stream_name;
-        uint32_t frames_interval_in_ms;
+        uint64_t frames_interval_in_us;
         bool disable_high_resolution_timer;
         ScenarioGraph graph;
         InferenceParamsMap params;

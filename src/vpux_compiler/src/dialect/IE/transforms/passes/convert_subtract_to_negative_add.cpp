@@ -95,22 +95,6 @@ mlir::LogicalResult ConvertSubtractToDWConvAdd::matchAndRewrite(IE::SubtractOp s
 
     mlir::Value firstInput = input1;
     const auto outputType = subOp.getOutput().getType().cast<vpux::NDTypeInterface>();
-    if (auto constInput1Op = getInputConstantOp(input1)) {
-        auto constInput1Type = constInput1Op.getType().cast<NDTypeInterface>();
-        auto broadcastContent = constInput1Op.getContentAttr();
-        auto newInput1Shape = to_small_vector(input1Shape);
-
-        for (const auto& [index, inOutSizes] : enumerate(zip(constInput1Type.getShape(), outputType.getShape()))) {
-            auto [inSize, outSize] = inOutSizes;
-            if (inSize != outSize) {
-                broadcastContent = broadcastContent.broadcast(Dim(index), outSize);
-                newInput1Shape[index] = outSize;
-            }
-        }
-
-        auto newInput1Type = constInput1Type.changeShape(Shape(newInput1Shape));
-        firstInput = rewriter.create<Const::DeclareOp>(subOpLoc, newInput1Type, broadcastContent);
-    }
 
     auto fqInput2 = input2.getDefiningOp<IE::FakeQuantizeOp>();
 

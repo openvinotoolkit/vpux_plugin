@@ -734,7 +734,7 @@ void SetupInvariant_Grid(vpux::VPUMI37XX::DPUInvariantOp fb_invariant, nn_public
         invariant.kernel_pad_cfg.kernel_pad_cfg_bf.mpe_assign = nn_public::VpuMPEGrid::MPE_GRID_4x4;
         break;
     case VPU::MPEMode::CUBOID_8x16:  // NTH = 2, NTW=4, NTK = 8 (8, 8)
-    case VPU::MPEMode::VECTOR:       // nn_public::VpuMPE_GRID_16x1 not valid for VPUX37XX
+    case VPU::MPEMode::VECTOR:       // nn_public::VpuMPE_GRID_16x1 not valid for NPU37XX
         invariant.odu_cfg.odu_cfg_bf.grid = static_cast<unsigned int>(nn_public::VpuODUGrid::ODU_GRID_4x4);
         invariant.odu_cfg.odu_cfg_bf.nthw = static_cast<unsigned int>(nn_public::VpuODUNthw::ODU_NTHW_8);
         invariant.kernel_pad_cfg.kernel_pad_cfg_bf.mpe_assign = nn_public::VpuMPEGrid::MPE_GRID_4x4;
@@ -873,7 +873,7 @@ void SetupInput(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariantOp
                 (inputRef->quant_zero() && inputRef->quant_zero()->size()) ? inputRef->quant_zero()->Get(0) : 0;
     }
 
-    // pad_value is not set for VPUX37XX
+    // pad_value is not set for NPU37XX
     // registers.tensor_mode.tensor_mode_bf.pad_value =
     //         (inputRef->quant_zero() && inputRef->quant_zero()->size()) ? inputRef->quant_zero()->Get(0) : 0;
 
@@ -946,7 +946,7 @@ void SetupWeights(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariant
 
 void SetupKernel(vpux::VPUMI37XX::DPUInvariantOp op, nn_public::VpuDPUInvariantRegisters& registers) {
     registers.kernel_pad_cfg.kernel_pad_cfg_bf.rst_ctxt = 1;
-    // MPE_GRID_16x1 is deprecated for DPU 2.7 (VPUX37XX). Will always be MPE_GRID_4x4
+    // MPE_GRID_16x1 is deprecated for DPU 2.7 (NPU37XX). Will always be MPE_GRID_4x4
     registers.kernel_pad_cfg.kernel_pad_cfg_bf.mpe_assign = MPE_GRID_4x4;
 
     int64_t kernelSizeH = 1, kernelSizeW = 1;
@@ -1246,7 +1246,7 @@ void SetupInvariant_SOH(FlatBufferAccessor<MVCNN::TensorReference> in_tensor,
             }
         }
 
-        // Assuming symmetric SOH layer split across both VPUX37XX tiles
+        // Assuming symmetric SOH layer split across both NPU37XX tiles
         invariantRegisters.se_sp_size[1] = invariantRegisters.se_sp_size[0];
         invariantRegisters.kernel_pad_cfg.kernel_pad_cfg_bf.sp_se_tbl_segment = 1;
     }
@@ -1518,7 +1518,7 @@ bool SetupInvariant_Eltwise(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI37XX::DP
     const auto isInputQuantizationProvided = in1QuantMult.has_value() && in2QuantMult.has_value();
 
     if (isInputQuantizationProvided) {
-        // Shifts must be set 0 for VPUX37XX and VPUX40XX runtime to be considered, otherwise runtime will ignore inputs
+        // Shifts must be set 0 for NPU37XX and NPU40XX runtime to be considered, otherwise runtime will ignore inputs
         // MULT.
         const auto inputSparsityMapOffset =
                 inputSparsityMap
@@ -1540,7 +1540,7 @@ bool SetupInvariant_Eltwise(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI37XX::DP
 
     uint32_t elop_scale_a = 1;
     uint32_t elop_scale_b = 1;
-    // For VPUX37XX, original code computing eltwise scales on the VPU disabled (E#5671)
+    // For NPU37XX, original code computing eltwise scales on the VPU disabled (E#5671)
     // If blob contains scales, it is the final values (E#33155)
     if (inputRef->quant_mult()->size() && weightsRef->quant_mult()->size() && inputRef->quant_shift()->size() &&
         weightsRef->quant_shift()->size()) {

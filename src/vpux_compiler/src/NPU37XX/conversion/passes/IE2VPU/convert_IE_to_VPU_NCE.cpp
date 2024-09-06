@@ -370,8 +370,10 @@ void ConvertIEToVPUNCEPass::safeRunOnFunc() {
     target.addLegalDialect<vpux::VPU::VPUDialect>();
 
     target.addDynamicallyLegalOp<IE::MatMulOp>([&](IE::MatMulOp op) {
-        return !VPU::NCEMatMulOp::isSupported(op, logCb, /* checkLayout = */ true,
-                                              /* checkChannelAlignment = */ true) &&
+        // Layout correction and transformation to 5D is done during lowering so layout check is disabled.
+        // Expected layout is intentionally NCHW, ensured by AdjustLayouts Pass.
+        return !VPU::NCEMatMulOp::isSupported(op, logCb, /* checkLayout = */ false,
+                                              /* checkChannelAlignment = */ true) ||
                VPU::MatMulOp::isSupported(op);
     });
 

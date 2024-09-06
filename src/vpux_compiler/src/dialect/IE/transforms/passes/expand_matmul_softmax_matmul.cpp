@@ -7,6 +7,7 @@
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 #include "vpux/compiler/dialect/IE/utils/fft_ops_utils.hpp"
+#include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 #include "vpux/compiler/utils/types.hpp"
@@ -68,13 +69,18 @@ bool isValidPattern(IE::MatMulOp op) {
 
 class MatMulOpConverter final : public mlir::OpRewritePattern<IE::MatMulOp> {
 public:
-    MatMulOpConverter(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<IE::MatMulOp>(ctx), _log(log) {
+    MatMulOpConverter(mlir::MLIRContext* ctx, bool enableGroupedMatMul, Logger log)
+            : mlir::OpRewritePattern<IE::MatMulOp>(ctx), _enableGroupedMatMul(enableGroupedMatMul), _log(log) {
         setDebugName("MatMulOpConverter");
     }
 
 public:
     mlir::LogicalResult matchAndRewrite(IE::MatMulOp op, mlir::PatternRewriter& rewriter) const final {
         _log.trace("[{0}] Got Operation: '{1}'", getDebugName(), op);
+
+        if (_enableGroupedMatMul) {
+            return mlir::failure();
+        }
 
         if (!isValidPattern(op)) {
             return mlir::failure();
@@ -145,6 +151,7 @@ public:
     }
 
 private:
+    bool _enableGroupedMatMul;
     Logger _log;
 };
 
@@ -154,20 +161,36 @@ private:
 
 class ExpandMatMulSoftMaxMatMulPass final : public IE::ExpandMatMulSoftMaxMatMulBase<ExpandMatMulSoftMaxMatMulPass> {
 public:
-    explicit ExpandMatMulSoftMaxMatMulPass(Logger log) {
+    explicit ExpandMatMulSoftMaxMatMulPass(const bool enableGroupedMatMul, Logger log)
+            : _enableGroupedMatMul(enableGroupedMatMul) {
         Base::initLogger(log, Base::getArgumentName());
     }
 
+    mlir::LogicalResult initialize(mlir::MLIRContext* ctx) final;
+
 private:
     void safeRunOnFunc() final;
+    bool _enableGroupedMatMul;
 };
+
+mlir::LogicalResult ExpandMatMulSoftMaxMatMulPass::initialize(mlir::MLIRContext* ctx) {
+    if (mlir::failed(Base::initialize(ctx))) {
+        return mlir::failure();
+    }
+    if (!enableGroupedMatMul.hasValue()) {
+        return mlir::success();
+    }
+
+    _enableGroupedMatMul = enableGroupedMatMul;
+    return mlir::success();
+}
 
 void ExpandMatMulSoftMaxMatMulPass::safeRunOnFunc() {
     auto& ctx = getContext();
     auto func = getOperation();
 
     mlir::RewritePatternSet patterns(&ctx);
-    patterns.add<MatMulOpConverter>(&ctx, _log);
+    patterns.add<MatMulOpConverter>(&ctx, _enableGroupedMatMul, _log);
     if (mlir::failed(mlir::applyPatternsAndFoldGreedily(func, std::move(patterns), getDefaultGreedyRewriteConfig()))) {
         signalPassFailure();
     }
@@ -179,6 +202,6 @@ void ExpandMatMulSoftMaxMatMulPass::safeRunOnFunc() {
 // createExpandMatMulSoftMaxMatMulPass
 //
 
-std::unique_ptr<mlir::Pass> vpux::IE::createExpandMatMulSoftMaxMatMulPass(Logger log) {
-    return std::make_unique<ExpandMatMulSoftMaxMatMulPass>(log);
+std::unique_ptr<mlir::Pass> vpux::IE::createExpandMatMulSoftMaxMatMulPass(const bool enableGroupedMatMul, Logger log) {
+    return std::make_unique<ExpandMatMulSoftMaxMatMulPass>(enableGroupedMatMul, log);
 }

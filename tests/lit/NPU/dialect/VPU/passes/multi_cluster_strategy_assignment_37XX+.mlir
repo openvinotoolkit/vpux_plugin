@@ -150,6 +150,22 @@ func.func @PadAssignedSplitOverKernel(%arg0: tensor<1x16x20x50xf16>) -> tensor<1
 
 // -----
 
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @Mvn1NormAssignedSOH
+// CHECK-SAME:     ([[INPUT:%.+]]: tensor<1x256x256x256xf16, {order = #NHWC}>, [[MEAN_VAR:%.+]]: tensor<1x256x1x2xf16, {order = #NHWC}>)
+func.func @Mvn1NormAssignedSOH(%arg0: tensor<1x256x256x256xf16, {order = #NHWC}>, %arg1: tensor<1x256x1x2xf16, {order = #NHWC}>) -> tensor<1x256x256x256xf16, {order = #NHWC}> {
+   %0 = VPU.MVN1Normalize(%arg0, %arg1) {across_channels = false, normalize_variance = true} : tensor<1x256x256x256xf16, {order = #NHWC}>, tensor<1x256x1x2xf16, {order = #NHWC}> -> tensor<1x256x256x256xf16, {order = #NHWC}>
+   return %0 : tensor<1x256x256x256xf16, {order = #NHWC}>
+
+   // CHECK:       [[OUT:%.*]] = VPU.MVN1Normalize([[INPUT]], [[MEAN_VAR]])
+   // CHECK-SAME :     {across_channels = false, multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, normalize_variance = true} :
+   // CHECK-SAME :     tensor<1x256x256x256xf16, {order = #NHWC}>, tensor<1x256x1x2xf16, {order = #NHWC}> -> tensor<1x256x256x256xf16, {order = #NHWC}>
+   // CHECK:       return [[OUT]] : tensor<1x256x256x256xf16, {order = #NHWC}>
+}
+
+// -----
+
 // CHECK-LABEL: @SelectAssignedSplitOverHeight
 // CHECK-SAME:     ([[INPUT:%.+]]: tensor<1x1x40x40xf16>, [[INPUT0:%.+]]: tensor<1x1x40x40xf16>)
 func.func @SelectAssignedSplitOverHeight(%arg0: tensor<1x1x40x40xf16>, %arg1: tensor<1x1x40x40xf16>) -> tensor<1x1x40x40xf16> {

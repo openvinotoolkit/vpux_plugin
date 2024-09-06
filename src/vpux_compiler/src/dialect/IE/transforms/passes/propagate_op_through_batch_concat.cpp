@@ -168,27 +168,30 @@ mlir::LogicalResult PropagateSoftmax::matchAndRewrite(IE::SoftMaxOp origOp, mlir
 //
 // PropagateReshape
 //
-class PropagateReshape final : public mlir::OpRewritePattern<IE::ReshapeOp> {
+template <class ReshapeT>
+class PropagateReshape final : public mlir::OpRewritePattern<ReshapeT> {
 public:
-    PropagateReshape(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<IE::ReshapeOp>(ctx), _log(log) {
+    PropagateReshape(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<ReshapeT>(ctx), _log(log) {
         this->setDebugName("PropagateOpThroughBatchConcat::PropagateReshape");
     }
 
 private:
-    mlir::LogicalResult matchAndRewrite(IE::ReshapeOp origOp, mlir::PatternRewriter& rewriter) const final;
+    mlir::LogicalResult matchAndRewrite(ReshapeT origOp, mlir::PatternRewriter& rewriter) const final;
 
 private:
     Logger _log;
 };
 
-mlir::LogicalResult PropagateReshape::matchAndRewrite(IE::ReshapeOp origOp, mlir::PatternRewriter& rewriter) const {
+template <class ReshapeT>
+mlir::LogicalResult PropagateReshape<ReshapeT>::matchAndRewrite(ReshapeT origOp,
+                                                                mlir::PatternRewriter& rewriter) const {
     _log.trace("Got '{0}' at '{1}'", origOp->getName(), origOp->getLoc());
 
-    if (origOp.getInput().isa<mlir::BlockArgument>()) {
+    if (origOp.getInput().template isa<mlir::BlockArgument>()) {
         return matchFailed(_log, rewriter, origOp, "Input of ReshapeOp is block argument");
     }
 
-    auto concatOp = origOp.getInput().getDefiningOp<IE::ConcatOp>();
+    auto concatOp = origOp.getInput().template getDefiningOp<IE::ConcatOp>();
     if (concatOp == nullptr || !concatOp->hasOneUse() || !isBatchConcat(concatOp)) {
         return matchFailed(_log, rewriter, origOp, "ConcatOp not found or invalid");
     }
@@ -210,9 +213,11 @@ mlir::LogicalResult PropagateReshape::matchAndRewrite(IE::ReshapeOp origOp, mlir
     const auto concatInputs = concatOp.getInputs();
     const auto concatInputShape = getShape(concatInputs.front());
 
-    VPUX_THROW_WHEN(concatInputShape.totalSize() != sliceOutShape4D.totalSize(),
-                    "Size of inferred 4D shape of concat input ({0}) not match with original shape ({1})",
-                    sliceOutShape4D, concatInputShape);
+    if (concatInputShape.totalSize() != sliceOutShape4D.totalSize()) {
+        return matchFailed(_log, rewriter, origOp,
+                           "Size of inferred 4D shape of concat input ({0}) does not match with original shape ({1})",
+                           concatInputShape, sliceOutShape4D);
+    }
 
     _log.nest().trace("Propagating ReshapeOp before batch ConcatOp");
 
@@ -323,7 +328,8 @@ void PropagateOpThroughBatchConcat::safeRunOnFunc() {
     auto func = getOperation();
 
     mlir::RewritePatternSet patterns(&ctx);
-    patterns.add<PropagateReshape>(&ctx, _log);
+    patterns.add<PropagateReshape<IE::ReshapeOp>>(&ctx, _log);
+    patterns.add<PropagateReshape<IE::AffineReshapeOp>>(&ctx, _log);
     patterns.add<PropagateSoftmax>(&ctx, _log);
     patterns.add<PropagateFakeQuantize>(&ctx, _log);
 

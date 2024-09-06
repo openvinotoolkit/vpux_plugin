@@ -6,6 +6,7 @@
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
 using namespace vpux;
@@ -29,6 +30,9 @@ private:
 };
 
 mlir::LogicalResult LSTMCellRewriter::matchAndRewrite(IE::LSTMCellOp lstmCell, mlir::PatternRewriter& rewriter) const {
+    if (VPU::LSTMCellOp::isSupported(lstmCell)) {
+        return mlir::failure();
+    }
     _log.trace("Got op {0} at {1}", lstmCell->getName(), lstmCell->getLoc());
 
     auto matMulInputOp = rewriter.create<IE::MatMulOp>(takeOpLoc(lstmCell, "in_mul"), lstmCell.getInputData(),

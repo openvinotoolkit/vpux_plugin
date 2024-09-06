@@ -230,7 +230,6 @@ def VPU_NCEMatMulOp :
                 NoTerminator,
                 SingleBlock,
                 SameVariadicOperandSize,
-
                 DeclareOpInterfaceMethods<VPU_TilingBuilderOpInterface>,
                 DeclareOpInterfaceMethods<VPU_ClusteredOpInterface, ["isOperationSplitOverHeightCompatible",
                                                                      "isOperationSplitOverWidthCompatible",
@@ -4242,24 +4241,30 @@ def VPU_LSTMCellOp :
     let summary = "LSTMCell VPU layer";
 
     let arguments = (ins
-        2DTensorOf<[F16, F32]>:$inputData,
-        2DTensorOf<[F16, F32]>:$initialHiddenState,
-        2DTensorOf<[F16, F32]>:$initialCellState,
-        2DTensorOf<[F16, F32]>:$weights,
-        2DTensorOf<[F16, F32]>:$recurrenceWeights,
-        1DTensorOf<[F16, F32]>:$biases,
+        RankedTensorOf<[F16, F32]>:$inputData,
+        RankedTensorOf<[F16, F32]>:$initialHiddenState,
+        RankedTensorOf<[F16, F32]>:$initialCellState,
+        RankedTensorOf<[F16, F32]>:$weights,
+        RankedTensorOf<[F16, F32]>:$recurrenceWeights,
+        RankedTensorOf<[F16, F32]>:$biases,
 
         IntAttr:$hiddenSize
     );
 
     let results = (outs
-        2DTensorOf<[F16, F32]>:$outputHiddenState,
-        2DTensorOf<[F16, F32]>:$outputCellState
+        RankedTensorOf<[F16, F32]>:$outputHiddenState,
+        RankedTensorOf<[F16, F32]>:$outputCellState
     );
+
+    let extraClassDeclaration = [{
+        static bool isSupported(vpux::IE::LSTMCellOp op);
+    }] # baseExtraClassDeclaration;
+
+
 }
 
 //
-// LSTMCellOp
+// LSTMGatesOp
 //
 
 def VPU_LSTMGatesOp :

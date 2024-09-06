@@ -309,7 +309,7 @@ struct ReferenceHWOptions : mlir::PassPipelineOptions<T> {
             llvm::cl::init(true)};
 
     IntOption optimizationLevel{*this, "optimization-level",
-                                llvm::cl::desc("Set compilation optimization level, enabled starting from NPU40XX0XX."
+                                llvm::cl::desc("Set compilation optimization level, enabled starting from NPU40XX."
                                                "Possible values: 0 - optimization for compilation time,"
                                                "1 - optimization for execution time (default),"
                                                "2 - high optimization for execution time"),

@@ -20,7 +20,7 @@ std::unique_ptr<vpux::IConversionPassStrategy> vpux::VPU::CreateConvertOpToDMAFo
     case ArchKind::UNKNOWN:
     default: {
         // TODO : E-118296 Other ops and architectures will be enabled.
-        VPUX_THROW("Currently ConvertOpToDMAForPerformantExecutionStrategy is available for VPUX40XX", arch);
+        VPUX_THROW("Currently ConvertOpToDMAForPerformantExecutionStrategy is available for NPU40XX", arch);
     }
     }
 }

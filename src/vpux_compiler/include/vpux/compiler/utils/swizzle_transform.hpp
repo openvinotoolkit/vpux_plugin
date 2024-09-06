@@ -60,7 +60,7 @@ public:
 
         auto inSize{in.size() * sizeof(char)};
         auto rawData = in.data();
-        // Make sure in buffer size is a multiple of the NN CMX data width (VPUX37XX: 16B, VPUX40XX: 32B)
+        // Make sure in buffer size is a multiple of the NN CMX data width (NPU37XX: 16B, NPU40XX: 32B)
         inSize = ((inSize + dataWidthM1) >> logToRamCutDataWidth) << logToRamCutDataWidth;
         const auto iterations{inSize >> logToRamCutDataWidth};
 
@@ -84,7 +84,7 @@ public:
         const auto dataWidthM1{copyDataWidth - 1u};
 
         auto inSize{in.size() * sizeof(OutT)};
-        // Make sure in buffer size is a multiple of the NN CMX data width (VPUX37XX: 16B, VPUX40XX: 32B)
+        // Make sure in buffer size is a multiple of the NN CMX data width (NPU37XX: 16B, NPU40XX: 32B)
         inSize = ((inSize + dataWidthM1) >> logToRamCutDataWidth) << logToRamCutDataWidth;
         const auto iterations{inSize >> logToRamCutDataWidth};
 

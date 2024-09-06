@@ -1171,6 +1171,65 @@ mlir::LogicalResult LSTMGatesConverter::matchAndRewrite(IE::LSTMGatesOp origOp, 
 }
 
 //
+// LSTMCellConverter
+//
+
+class LSTMCellConverter final : public mlir::OpConversionPattern<IE::LSTMCellOp> {
+public:
+    LSTMCellConverter(mlir::TypeConverter& typeConverter, mlir::MLIRContext* ctx, Logger log)
+            : mlir::OpConversionPattern<IE::LSTMCellOp>(typeConverter, ctx), _log(log) {
+    }
+
+public:
+    mlir::LogicalResult matchAndRewrite(IE::LSTMCellOp origOp, OpAdaptor newArgs,
+                                        mlir::ConversionPatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+mlir::LogicalResult LSTMCellConverter::matchAndRewrite(IE::LSTMCellOp origOp, OpAdaptor,
+                                                       mlir::ConversionPatternRewriter& rewriter) const {
+    _log.trace("[{0}] Found IE::LSTMCellOp Operation '{1}'", getDebugName(), origOp->getLoc());
+
+    // Build input ReshapeOp
+    SmallVector<mlir::Value> newInputs;
+    for (const auto& origInput : origOp.getInputs()) {
+        const auto origInputType = origInput.getType().cast<vpux::NDTypeInterface>();
+        SmallVector<int64_t> origInputShape = to_small_vector(origInputType.getShape());
+        const auto newInputShape = alignTileShapeRepeatsTo4D(std::move(origInputShape));
+        const auto newInputShapeAttr = getIntArrayAttr(rewriter.getContext(), newInputShape);
+
+        auto inputReshape =
+                rewriter.createOrFold<IE::ReshapeOp>(origOp.getLoc(), origInput, nullptr, false, newInputShapeAttr);
+
+        newInputs.emplace_back(inputReshape);
+    }
+
+    // Update the LSTMCellOp
+    auto newLSTMCellOp =
+            rewriter.create<IE::LSTMCellOp>(origOp.getLoc(), newInputs[0], newInputs[1], newInputs[2], newInputs[3],
+                                            newInputs[4], newInputs[5], origOp.getHiddenSizeAttr());
+
+    // Reshape to original output shape
+    for (const auto& output : origOp.getOutputs() | indexed) {
+        const auto idx = checked_cast<unsigned>(output.index());
+        auto origOutput = output.value();
+        const auto outputShapeAttr = getIntArrayAttr(rewriter.getContext(), getShape(origOutput));
+
+        auto newOutputReshape = rewriter.createOrFold<IE::ReshapeOp>(origOp.getLoc(), newLSTMCellOp.getOutputs()[idx],
+                                                                     nullptr, false, outputShapeAttr);
+        origOutput.replaceAllUsesWith(newOutputReshape);
+    }
+
+    rewriter.eraseOp(origOp);
+
+    _log.trace("[{0}] Replaced with 'IE::LSTMCellOp'", getDebugName());
+
+    return mlir::success();
+}
+
+//
 // ConcatConverter
 //
 
@@ -1897,6 +1956,7 @@ void ConvertShapeTo4DPass::safeRunOnFunc() {
     target.addDynamicallyLegalOp<IE::ReduceSumOp>(isLegalReduceOp<IE::ReduceSumOp>);
     target.addDynamicallyLegalOp<IE::TileOp>(is4DLegalOp);
     target.addDynamicallyLegalOp<IE::LSTMGatesOp>(is4DLegalOp);
+    target.addDynamicallyLegalOp<IE::LSTMCellOp>(is4DLegalOp);
 
     mlir::RewritePatternSet patterns(&ctx);
     patterns.add<GenericConverter<IE::ClampOp>>(typeConverter, &ctx, _log);
@@ -1976,6 +2036,7 @@ void ConvertShapeTo4DPass::safeRunOnFunc() {
     patterns.add<BroadcastConverter>(typeConverter, &ctx, _log);
     patterns.add<TileConverter>(typeConverter, &ctx, _log);
     patterns.add<LSTMGatesConverter>(typeConverter, &ctx, _log);
+    patterns.add<LSTMCellConverter>(typeConverter, &ctx, _log);
 
     if (mlir::failed(mlir::applyPartialConversion(func, target, std::move(patterns)))) {
         signalPassFailure();

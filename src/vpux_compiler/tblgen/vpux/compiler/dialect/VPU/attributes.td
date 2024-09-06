@@ -424,11 +424,11 @@ def VPU_DistributionModeAttr : VPU_EnumAttr<VPU_DistributionMode, "tensor_distri
 //      not taking into account the overlap lines. This is possible for
 //      input tensors in VPUX3XXX since HW can read the overlap lines from
 //      neighboring clusters.
-//          * for VPUX40XX we continue to use SEGMENTED yet we take into account the overlap
+//          * for NPU40XX we continue to use SEGMENTED yet we take into account the overlap
 //          lines, this is intended to be improve in the future, for easier understanding
 //      * OVERLAPPED - data is split taking into account the overlap lines in
 //      memory, compute does not differ from SEGMENTED. This is done for VPUX3XXX for the
-//      layers which can't perform intercluster read accesses, and for all case in VPUX40XX
+//      layers which can't perform intercluster read accesses, and for all case in NPU40XX
 //      and following.
 //      * DUPLICATED - both data and compute are duplicated on the specified clusters.
 //      * SEGMENTED | DUPLICATED - such a combination means compute is segmented across clusters

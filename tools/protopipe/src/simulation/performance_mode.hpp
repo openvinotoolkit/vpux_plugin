@@ -8,6 +8,7 @@
 #include <memory>
 
 #include "simulation/computation.hpp"
+#include "simulation/computation_builder.hpp"
 #include "simulation/simulation.hpp"
 
 class PerformanceStrategy;
@@ -30,4 +31,11 @@ private:
     Options m_opts;
     std::shared_ptr<PerformanceStrategy> m_strategy;
     Computation m_comp;
+};
+
+struct PerformanceStrategy : public IBuildStrategy {
+    explicit PerformanceStrategy(const PerformanceSimulation::Options& opts);
+    IBuildStrategy::InferBuildInfo build(const InferDesc& infer) override;
+
+    const PerformanceSimulation::Options& opts;
 };

@@ -94,7 +94,7 @@ mlir::LogicalResult FuseWithConvBase<ConcreteOp>::matchAndRewrite(IE::QuantizeOp
         return mlir::failure();
     }
 
-    // On VPUX37XX, VPUX40XX the prelu alpha multiplier used for integer input is unsigned, on floating
+    // On NPU37XX, NPU40XX the prelu alpha multiplier used for integer input is unsigned, on floating
     // input it is signed. If input is floating, output is integer, quantize output need to be per tensor, this will
     // check in mix-precision pass
     const auto arch = VPU::getArch(quantizeOp->getParentOfType<mlir::ModuleOp>());
@@ -922,7 +922,7 @@ void FuseQuantizedOpsPass::safeRunOnFunc() {
     patterns.add<FuseWithReduce<IE::ReduceMeanOp>>(&ctx, _log);
     patterns.add<FuseWithAveragePool>(&ctx, _log);
     patterns.add<FuseWithConcat>(&ctx, _log);
-    // VPUX37XX and VPUX40XX NCE does not support element-wise multiplication, skip the fusion
+    // NPU37XX and NPU40XX NCE does not support element-wise multiplication, skip the fusion
     const std::set<VPU::ArchKind> incompatibleTargets = {
             VPU::ArchKind::NPU37XX,
             VPU::ArchKind::NPU40XX,

@@ -251,6 +251,7 @@ std::unique_ptr<mlir::Pass> createManualStrategyUtilsPass(bool writeStrategyToJS
 std::unique_ptr<mlir::Pass> createResolvePWLPostOpsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createDetectionOutputDecompositionPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createSplitGRUSequencePass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createAdjustLSTMCellInputsOrderPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createComputeInterpolateCoordinatesPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createDetectInPlaceEltwisePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createFuseNCEInterpolateConsumersPass(Logger log = Logger::global());

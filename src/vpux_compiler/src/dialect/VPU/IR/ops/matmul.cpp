@@ -119,12 +119,10 @@ bool isSupported(VPU::ArchKind arch, ShapeRef input1Shape, ShapeRef input2Shape,
     }
 
     // The list of specialized configurations implemented in ASM.
-    static const std::unordered_set<std::pair<SmallVector<int64_t>, SmallVector<int64_t>>> supportedHeightWidthConfigs{
-            {{{49, 32}, {32, 49}},
-             {{49, 49}, {49, 32}},
-             {{49, 64}, {64, 49}},
-             {{49, 32}, {32, 64}},
-             {{49, 64}, {49, 64}}}};
+    // The list is empty for now, as the operation has efficient DPU support.
+    // If any patterns of more efficient Shave operations are identified then they have to be added here.
+    static const std::unordered_set<std::pair<SmallVector<int64_t>, SmallVector<int64_t>>>
+            supportedHeightWidthConfigs{};
 
     return supportedHeightWidthConfigs.find({input1HeightWidth, input2HeightWidth}) !=
            supportedHeightWidthConfigs.end();

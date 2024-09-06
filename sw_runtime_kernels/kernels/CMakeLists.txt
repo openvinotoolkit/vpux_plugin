@@ -208,7 +208,7 @@ foreach(kernel_descrip ${kernel_descrip_list})
 
   set(kernel_src_file "${kernel_src_dir}/${kernel_src}")
 
-  if(lsu0_wo STREQUAL "ON") # MTL DDR split access workaround
+  if(lsu0_wo STREQUAL "ON") # NPU37XX DDR split access workaround
     set(blob_text_data_target "${target_prefix}${kernel_name}${kernel_cpu_suffix}_lsu0_wo")
     set(blob_text_file "${target_prefix}${kernel_name}${kernel_cpu_suffix}_lsu0_wo${blob_text_suffix}")
     set(blob_data_file "${target_prefix}${kernel_name}${kernel_cpu_suffix}_lsu0_wo${blob_data_suffix}")
@@ -371,7 +371,7 @@ foreach(kernel_descrip ${kernel_descrip_list})
 
   add_dependencies(act_shave_kernels_build "${blob_text_data_target}")
 
-  # LNL B0 workaround removal binaries
+  # NPU40XX B0 workaround removal binaries
   # E-116865: We also need to support duplicating the same binary for B0 and A0 when workaround disabeled due to compiler limitation
   if(kernel_cpunum STREQUAL "4000")
     set(link_libraries_list ${link_libraries_list_VPU4000_B0})

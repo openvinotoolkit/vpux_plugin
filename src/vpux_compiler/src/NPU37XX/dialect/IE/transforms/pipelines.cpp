@@ -27,7 +27,8 @@ void vpux::IE::arch37xx::buildOptimizeActivationsPipeline(mlir::OpPassManager& p
     pm.addPass(mlir::createCanonicalizerPass(grc));
 }
 
-void vpux::IE::arch37xx::buildMemPermutePositioningPipeline(mlir::OpPassManager& pm, Logger log) {
+void vpux::IE::arch37xx::buildMemPermutePositioningPipeline(mlir::OpPassManager& pm,
+                                                            const MemPermutePositioningOptions& options, Logger log) {
     const auto grc = getDefaultGreedyRewriteConfig();
     pm.addPass(IE::createConvertToMemPermutePass(log));
     pm.addPass(mlir::createCanonicalizerPass(grc));
@@ -40,7 +41,7 @@ void vpux::IE::arch37xx::buildMemPermutePositioningPipeline(mlir::OpPassManager&
     pm.addPass(IE::createPropagateMemPermuteThroughAddPass(log));
     pm.addPass(IE::createUniquifyOpsPass(log));
     pm.addPass(IE::createAdjustMemPermuteAroundOpPass(log));
-    pm.addPass(IE::createExpandMatMulSoftMaxMatMulPass(log));
+    pm.addPass(IE::createExpandMatMulSoftMaxMatMulPass(options.enableGroupedMatMul, log));
 }
 
 void vpux::IE::arch37xx::buildMemPermuteProcessingPipeline(mlir::OpPassManager& pm, Logger log) {
@@ -101,7 +102,7 @@ void vpux::IE::arch37xx::buildExpandAndOptimizeActivationChannelsPipeline(
 
 void vpux::IE::arch37xx::buildOptimizeMemPermuteAndActivationChannelsExpandPipeline(
         mlir::OpPassManager& pm, const ExpandActivationChannelsOptions& options, Logger log) {
-    IE::arch37xx::buildMemPermutePositioningPipeline(pm, log);
+    IE::arch37xx::buildMemPermutePositioningPipeline(pm, IE::MemPermutePositioningOptions(options), log);
     IE::arch37xx::buildExpandAndOptimizeActivationChannelsPipeline(pm, options, log);
     IE::arch37xx::buildMemPermuteProcessingPipeline(pm, log);
 }
@@ -479,13 +480,13 @@ void vpux::IE::arch37xx::registerIEPipelines() {
                 IE::arch37xx::buildOptimizeActivationsPipeline(pm, options);
             });
 
-    mlir::PassPipelineRegistration<mlir::EmptyPipelineOptions>(
+    mlir::PassPipelineRegistration<MemPermutePositioningOptions>(
             "mempermute-positioning",
             "[OPTIMIZATION] MemPermute positioning is responsible for handling data transfromations ops (Transpose, "
             "Reshape etc), transform it to MemPermute and reorder the op to optimize final subgraph to avoid "
             "unnecessary data permutations",
-            [](mlir::OpPassManager& pm) {
-                IE::arch37xx::buildMemPermutePositioningPipeline(pm);
+            [](mlir::OpPassManager& pm, const MemPermutePositioningOptions& options) {
+                IE::arch37xx::buildMemPermutePositioningPipeline(pm, options);
             });
 
     mlir::PassPipelineRegistration<ExpandActivationChannelsOptions>(

@@ -3497,10 +3497,6 @@ def IE_MVNOp :
             "::mlir::FloatAttr":$eps
         )>
     ];
-
-    let extraClassDeclaration = [{
-        bool channelsFitIntoCMX();
-    }] # baseExtraClassDeclaration;
 }
 
 //
@@ -4296,19 +4292,19 @@ def IE_LSTMCellOp :
     let summary = "InferenceEngine LSTMCell layer";
 
     let arguments = (ins
-        2DTensorOf<[F16, F32]>:$inputData,
-        2DTensorOf<[F16, F32]>:$initialHiddenState,
-        2DTensorOf<[F16, F32]>:$initialCellState,
-        2DTensorOf<[F16, F32]>:$weights,
-        2DTensorOf<[F16, F32]>:$recurrenceWeights,
-        1DTensorOf<[F16, F32]>:$biases,
+        RankedTensorOf<[F16, F32]>:$inputData,
+        RankedTensorOf<[F16, F32]>:$initialHiddenState,
+        RankedTensorOf<[F16, F32]>:$initialCellState,
+        RankedTensorOf<[F16, F32]>:$weights,
+        RankedTensorOf<[F16, F32]>:$recurrenceWeights,
+        RankedTensorOf<[F16, F32]>:$biases,
 
         IntAttr:$hiddenSize
     );
 
     let results = (outs
-        2DTensorOf<[F16, F32]>:$outputHiddenState,
-        2DTensorOf<[F16, F32]>:$outputCellState
+        RankedTensorOf<[F16, F32]>:$outputHiddenState,
+        RankedTensorOf<[F16, F32]>:$outputCellState
     );
 }
 

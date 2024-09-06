@@ -690,18 +690,17 @@ module @HandleGroupConvWithLargeKernels {
         // CHECK-SAME:      dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x64x1x101xf16, {order = #NHWC}>, tensor<64x64x1x11xf16, {order = #NHWC}> -> tensor<1x64x1x91xf16, {order = #NHWC}>
         // CHECK:   [[CONV_1:%.+]] = IE.Convolution([[SLICE_IN_1]], [[SLICE_WEIGHT_1]]) {
         // CHECK-SAME:      dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x64x1x101xf16, {order = #NHWC}>, tensor<64x64x1x11xf16, {order = #NHWC}> -> tensor<1x64x1x91xf16, {order = #NHWC}>
-        // CHECK:   [[GROUP_0:%.+]] = IE.Add([[CONV_0]], [[CONV_1]]) {auto_broadcast = #IE.auto_broadcast_type<NONE_OR_EXPLICIT>} : tensor<1x64x1x91xf16, {order = #NHWC}>, tensor<1x64x1x91xf16, {order = #NHWC}> -> tensor<1x64x1x91xf16, {order = #NHWC}>
+        // CHECK:   [[GROUP_0:%.+]] = IE.Add([[CONV_0]], [[CONV_1]]) {auto_broadcast = #IE.auto_broadcast_type<NONE_OR_EXPLICIT>} : tensor<1x64x1x91xf16, {order = #NHWC}>, tensor<1x64x1x91xf16, {order = #NHWC}> -> tensor<1x64x1x91xf16>
 
         // CHECK:   [[CONV_2:%.+]] = IE.Convolution([[SLICE_IN_2]], [[SLICE_WEIGHT_2]]) {
         // CHECK-SAME:      dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x64x1x101xf16, {order = #NHWC}>, tensor<64x64x1x11xf16, {order = #NHWC}> -> tensor<1x64x1x91xf16, {order = #NHWC}>
         // CHECK:   [[CONV_3:%.+]] = IE.Convolution([[SLICE_IN_3]], [[SLICE_WEIGHT_3]]) {
         // CHECK-SAME:      dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x64x1x101xf16, {order = #NHWC}>, tensor<64x64x1x11xf16, {order = #NHWC}> -> tensor<1x64x1x91xf16, {order = #NHWC}>
-        // CHECK:   [[GROUP_1:%.+]] = IE.Add([[CONV_2]], [[CONV_3]]) {auto_broadcast = #IE.auto_broadcast_type<NONE_OR_EXPLICIT>} : tensor<1x64x1x91xf16, {order = #NHWC}>, tensor<1x64x1x91xf16, {order = #NHWC}> -> tensor<1x64x1x91xf16, {order = #NHWC}>
+        // CHECK:   [[GROUP_1:%.+]] = IE.Add([[CONV_2]], [[CONV_3]]) {auto_broadcast = #IE.auto_broadcast_type<NONE_OR_EXPLICIT>} : tensor<1x64x1x91xf16, {order = #NHWC}>, tensor<1x64x1x91xf16, {order = #NHWC}> -> tensor<1x64x1x91xf16>
 
         // CHECK:   [[CONCAT:%.+]] = IE.Concat([[GROUP_0]], [[GROUP_1]]) {
-        // CHECK-SAME{LITERAL}:      static_offsets = [[0, 0, 0, 0], [0, 64, 0, 0]]} : tensor<1x64x1x91xf16, {order = #NHWC}>, tensor<1x64x1x91xf16, {order = #NHWC}> -> tensor<1x128x1x91xf16, {order = #NHWC}>
-        // CHECK:   [[PERMUTE_OUT:%.+]] = IE.MaxPool([[CONCAT]]) {kernel_size = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]} : tensor<1x128x1x91xf16, {order = #NHWC}> -> tensor<1x128x1x91xf16>
-        // CHECK:   return [[PERMUTE_OUT]] : tensor<1x128x1x91xf16>
+        // CHECK-SAME{LITERAL}:      static_offsets = [[0, 0, 0, 0], [0, 64, 0, 0]]} : tensor<1x64x1x91xf16>, tensor<1x64x1x91xf16> -> tensor<1x128x1x91xf16>
+        // CHECK:   return [[CONCAT]] : tensor<1x128x1x91xf16>
     }
 }
 
@@ -787,5 +786,65 @@ module @HandleFirstPermuteOnNCE {
         // CHECK-SAME:          tensor<1x16x384x384xf16, {order = #NHWC}>, tensor<16x1x1x1xf16, {order = #NHWC}>, tensor<1x16x1x1xf16> -> tensor<1x16x384x384xf16>
         // CHECK:       [[SLICE:%.+]] = IE.Slice [[GROUP_CONV]] [0, 0, 0, 0] [1, 3, 384, 384] : tensor<1x16x384x384xf16> to tensor<1x3x384x384xf16>
         // CHECK:       return [[SLICE]] : tensor<1x3x384x384xf16>
+    }
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @FuseConstDivideToMatMul
+module @FuseConstDivideToMatMul {
+    IE.CNNNetwork entryPoint : @main
+    inputsInfo : {
+        DataInfo "input" : tensor<1x64x3x24xf16>
+        DataInfo "input" : tensor<1x64x3x24xf16>
+    } outputsInfo : {
+        DataInfo "output" : tensor<1x3x64x64xf16>
+    }
+
+    // CHECK-LABEL: @main
+    func.func @main(%arg0: tensor<1x3x64x24xf16>, %arg1: tensor<1x3x64x24xf16>) -> tensor<1x3x64x64xf16> {
+        %cst_0 = const.Declare tensor<1xf16> = dense<0.000000e+00> : tensor<1xf16>
+        %cst_1 = const.Declare tensor<1xf16> = dense<2.550000e+02> : tensor<1xf16>
+        %cst_16 = const.Declare tensor<1xf16> = dense<-8.01463317> : tensor<1xf16>
+        %cst_17 = const.Declare tensor<1xf16> = dense<7.95201873> : tensor<1xf16>
+        %cst_18 = const.Declare tensor<1xf16> = dense<2.460000e+02> : tensor<1xf16>
+        %cst_fq = IE.FakeQuantize(%cst_18, %cst_0, %cst_1, %cst_16, %cst_17) {
+            auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64
+        } : tensor<1xf16>, tensor<1xf16>, tensor<1xf16>, tensor<1xf16>, tensor<1xf16> -> tensor<1xf16>
+
+        %28 = IE.MatMul(%arg0, %arg1) {transpose_b}
+            : tensor<1x3x64x24xf16>, tensor<1x3x64x24xf16> -> tensor<1x3x64x64xf16>
+
+        %29 = IE.Divide(%28, %cst_fq) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>}
+            : tensor<1x3x64x64xf16>, tensor<1xf16> -> tensor<1x3x64x64xf16>
+
+        return %29 : tensor<1x3x64x64xf16>
+
+        // CHECK: [[CONV0:%.+]] = IE.Convolution
+        // CHECK-SAME:  static_scale = 0.135327876 : f32
+        // CHECK: [[CONV0_RESHAPE:%.+]] = IE.AffineReshape([[CONV0]])
+        // CHECK-SAME: -> tensor<1x64x64x1xf16, {order = #NHWC}>
+        // CHECK: [[CONV0_PERMUTE:%.+]] = IE.PermuteCast([[CONV0_RESHAPE]])
+
+        // CHECK: [[CONV1:%.+]] = IE.Convolution
+        // CHECK-SAME:  static_scale = 0.135327876 : f32
+        // CHECK: [[CONV1_RESHAPE:%.+]] = IE.AffineReshape([[CONV1]])
+        // CHECK-SAME: -> tensor<1x64x64x1xf16, {order = #NHWC}>
+        // CHECK: [[CONV1_PERMUTE:%.+]] = IE.PermuteCast([[CONV1_RESHAPE]])
+
+        // CHECK: [[CONV2:%.+]] = IE.Convolution
+        // CHECK-SAME:  static_scale = 0.135327876 : f32
+        // CHECK: [[CONV2_RESHAPE:%.+]] = IE.AffineReshape([[CONV2]])
+        // CHECK-SAME: -> tensor<1x64x64x1xf16, {order = #NHWC}>
+        // CHECK: [[CONV2_PERMUTE:%.+]] = IE.PermuteCast([[CONV2_RESHAPE]])
+
+
+        // CHECK: [[CONV0_RES:%.+]] = IE.AffineReshape([[CONV0_PERMUTE]])
+        // CHECK: [[CONV1_RES:%.+]] = IE.AffineReshape([[CONV1_PERMUTE]])
+        // CHECK: [[CONV2_RES:%.+]] = IE.AffineReshape([[CONV2_PERMUTE]])
+        // CHECK: [[CONCAT:%.+]] = IE.Concat([[CONV0_RES]], [[CONV1_RES]], [[CONV2_RES]])
+        // CHECK-NEXT: return [[CONCAT]]
     }
 }

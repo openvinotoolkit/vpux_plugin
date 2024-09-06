@@ -138,9 +138,9 @@ mlir::OwningOpRef<mlir::ModuleOp> importIE(llvm::SourceMgr& sourceMgr, mlir::MLI
         // constants in MLIR protects the code from use-after-free errors.
         constexpr bool useSharedConstants = false;
 
-        // For VPUX37XX and VPUX40XX the graph transformations are different compared to the rest of the platforms
+        // For NPU37XX and NPU40XX the graph transformations are different compared to the rest of the platforms
         // because scales do not need to be aligned. Running with VPU::ArchKind::UNKNOWN will align scales, which
-        // can result in an accuracy drop for VPUX37XX and VPUX40XX.
+        // can result in an accuracy drop for NPU37XX and NPU40XX.
         module = IE::importNetwork(ctx, model, useSharedConstants, rootTiming, vpuxProfiling, enableDummyOpReplacement,
                                    dynamicShapeToStatic, VPU::ArchKind::UNKNOWN);
     } catch (const std::exception& ex) {

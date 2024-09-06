@@ -50,8 +50,11 @@ mlir::FailureOr<OutputTiling> vpux::VPU::MVN1NormalizeOp::getTilingStrategy(Tili
 //
 
 bool vpux::VPU::MVN1NormalizeOp::checkStrategyCompatibility(VPU::MultiClusterStrategy strategy, size_t) {
+    const auto order = DimsOrder::fromValue(getOutput());
+    // Note: disable SOK for NHWC as may lead to suboptimal Shave configuration (i.e. C not multiple of 32)
+    //       meaning slow SCALAR Shave operation
     return strategy == VPU::MultiClusterStrategy::Clustering ||
-           strategy == VPU::MultiClusterStrategy::SplitOverKernel ||
+           ((strategy == VPU::MultiClusterStrategy::SplitOverKernel) && (order == DimsOrder::NCHW)) ||
            strategy == VPU::MultiClusterStrategy::SplitOverHeight ||
            strategy == VPU::MultiClusterStrategy::SplitOverWidth;
 }

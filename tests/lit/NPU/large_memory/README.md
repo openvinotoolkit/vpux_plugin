@@ -11,4 +11,4 @@ The resulting ELF binaries are not intended to be executed by the NPU. In the ev
 
 ## Usage
 
-> ./vpux-translate --vpu-arch=VPUX37XX --export-ELF <input_mlir_file> > <output_elf_file>
+> ./vpux-translate --vpu-arch=NPU37XX --export-ELF <input_mlir_file> > <output_elf_file>

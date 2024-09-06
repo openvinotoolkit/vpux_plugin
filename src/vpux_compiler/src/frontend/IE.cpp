@@ -4042,7 +4042,7 @@ void NGraphPasses::runNGraphPasses(const std::shared_ptr<ov::Model>& netGraph, m
     addCommonOptimizationsPasses(manager);
 
     manager.register_pass<vpux::passes::PropagateFQ>();
-    // Disables for VPUX37XX and VPUX40XX
+    // Disables for NPU37XX and NPU40XX
     if (!supportsPerInputEltwiseScale(arch)) {
         manager.register_pass<vpux::passes::AlignScales>();
     }

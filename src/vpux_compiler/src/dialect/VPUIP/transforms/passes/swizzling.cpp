@@ -263,6 +263,12 @@ bool Swizzling::canSwizzleWeights(VPUIP::NCEClusterTaskOp nceOp, DeviceInfo& dev
         return false;
     }
 
+    // Swizzling of 5-d weights breaks accuracy.
+    if (getShape(weights).size() >= DimsGroups5D::Filter::numDims) {
+        _log.nest().trace("Cannot swizzle weights because they have rank 5 or higher.");
+        return false;
+    }
+
     if (isFused) {
         if (!_enableSwizzlingOfFusedConsts) {
             // Even though support is in place enabling this caused schedule change
@@ -548,6 +554,11 @@ bool Swizzling::canSwizzleActivation(VPUIP::NCEClusterTaskOp nceOp, DeviceInfo& 
     mlir::Value maybeNceSMResult = nullptr;
 
     _log.trace("Check if output swizzling can be enabled for NCEOp '{0}'", nceOp->getLoc());
+
+    if (getShape(nceDataResult).size() >= DimsGroups5D::Filter::numDims) {
+        _log.nest().trace("Cannot swizzle activation buffers because they have rank 5 or higher.");
+        return false;
+    }
 
     ValuesSet nceResults = {nceOp.getOutput()};
     ValuesSet outputBuffs = {nceOp.getOutputBuff()};

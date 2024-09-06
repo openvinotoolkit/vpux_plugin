@@ -23,26 +23,6 @@ func.func @SubtractWithConstAtSecondInputDiffShapes(%arg0: tensor<1x16x32x1xf32>
 
 // -----
 
-// CHECK-LABEL: @SubtractWithConstAtFirstInputDiffShapes
-func.func @SubtractWithConstAtFirstInputDiffShapes(%arg0: tensor<1x16x32x32xf32>) -> tensor<1x16x32x32xf32> {
-    %cst = const.Declare tensor<1x1x1x1xf32> = dense<2.0> : tensor<1x1x1x1xf32>
-    %0 = IE.Subtract(%cst, %arg0)
-        { auto_broadcast = #IE.auto_broadcast_type<NUMPY> } :
-        tensor<1x1x1x1xf32>, tensor<1x16x32x32xf32> -> tensor<1x16x32x32xf32>
-
-    return %0 : tensor<1x16x32x32xf32>
-
-    // CHECK-DAG:   [[CST:%.*]] = const.Declare tensor<1x16x32x32xf32> = dense<2.000000e+00> : tensor<1x1x1x1xf32>
-    // CHECK-SAME:      #const.Broadcast<1 : i64, 16 : i64>, #const.Broadcast<2 : i64, 32 : i64>, #const.Broadcast<3 : i64, 32 : i64>
-    // CHECK-DAG:   [[CST_0:%.*]] = const.Declare tensor<16x1x1x1xf32> = dense<-1.000000e+00> : tensor<16x1x1x1xf32>
-    // CHECK:       [[CONV:%.*]] = IE.GroupConvolution(%arg0, [[CST_0]]) {
-    // CHECK-SAME:      dilations = [1, 1], groups = 16 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x16x32x32xf32>, tensor<16x1x1x1xf32> -> tensor<1x16x32x32xf32>
-    // CHECK:       [[ADD:%.*]] = IE.Add([[CONV]], [[CST]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x16x32x32xf32>, tensor<1x16x32x32xf32> -> tensor<1x16x32x32xf32>
-    // CHECK:       return [[ADD]]
-}
-
-// -----
-
 // CHECK-LABEL: @SubtractWithConstInputsSameShapes
 func.func @SubtractWithConstInputsSameShapes(%arg0: tensor<1x16x32x1xf32>) -> tensor<1x16x32x1xf32> {
     %cst = const.Declare tensor<1x16x32x1xf32> = dense<2.0> : tensor<1x16x32x1xf32>

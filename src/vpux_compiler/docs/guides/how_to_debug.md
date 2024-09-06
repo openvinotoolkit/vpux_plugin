@@ -77,8 +77,8 @@ These tools can be used to call specific parts of the compiler (frontend, backen
 
 `vpux-translate` allows calling the frontend and backend of the compiler. For example:
 
-- importing OpenVINO IR into IE dialect IR: `vpux-translate --vpu-arch=VPUX37XX --import-IE <path to xml> -o <MLIR file name>`
-- exporting VPUIP dialect IR into GraphFile blob: `vpux-translate --vpu-arch=VPUX37XX --export-VPUIP <path to MLIR file> -o <graph blob file name>`
+- importing OpenVINO IR into IE dialect IR: `vpux-translate --vpu-arch=NPU37XX --import-IE <path to xml> -o <MLIR file name>`
+- exporting VPUIP dialect IR into GraphFile blob: `vpux-translate --vpu-arch=NPU37XX --export-VPUIP <path to MLIR file> -o <graph blob file name>`
 
 The full list of supported frontends and backends can be found in [vpux-translate.cpp](../../../../tools/vpux-translate/vpux-translate.cpp).
 
@@ -90,13 +90,13 @@ The rest of the options can be found by calling `vpux-translate --help`.
 
 ```sh
 # Call the ConvertLayersToVPU pass over the input IR found in the file
-vpux-opt --vpu-arch=VPUX37XX --convert-layers-to-VPU <MLIR file name>
+vpux-opt --vpu-arch=NPU37XX --convert-layers-to-VPU <MLIR file name>
 
 # Call the ExpandActivationChannels and Canonicalizer passes over the IR
-vpux-opt --vpu-arch=VPUX37XX --expand-activation-channels --canonicalizer <MLIR file name>
+vpux-opt --vpu-arch=NPU37XX --expand-activation-channels --canonicalizer <MLIR file name>
 
 # Call the LowPrecision pipeline over the IR
-vpux-opt --vpu-arch=VPUX37XX --low-precision <MLIR file name>
+vpux-opt --vpu-arch=NPU37XX --low-precision <MLIR file name>
 ```
 
 The tool offers some features which can help in debugging the target code:
@@ -118,13 +118,13 @@ The tools can be used to perform a full compilation of a model:
 
 ```sh
 # Import an OpenVINO IR into IE dialect
-./vpux-translate --vpu-arch=VPUX37XX --import-IE <path to OV IR> -o net.mlir
+./vpux-translate --vpu-arch=NPU37XX--import-IE <path to OV IR> -o net.mlir
 
 # Call the DefaultHWMode pipeline over the imported IR
-./vpux-opt --vpu-arch=VPUX37XX --default-hw-mode net.mlir -o net_out.mlir
+./vpux-opt --vpu-arch=NPU37XX --default-hw-mode net.mlir -o net_out.mlir
 
 # Export the final IR into a GraphFile blob
-./vpux-translate --vpu-arch=VPUX37XX --export-VPUIP net_out.mlir > net.blob
+./vpux-translate --vpu-arch=NPU37XX --export-VPUIP net_out.mlir > net.blob
 ```
 
 Since each pass or pipeline can be specified individually, the user can have full control over the calling order of the passes if that is necessary. Options such as `--mlir-print-debuginfo` can also be included for both tools to also track the changes done to the original layers.
@@ -166,17 +166,17 @@ An example of how to generate and run a reproducer using `compile_tool`, by maki
 IE_NPU_CRASH_REPRODUCER_FILE=reproducer.mlir compile_tool -d VPUX.3720 -ip FP16 -op FP16 -il NCHW -iml NCHW -ol NC -oml NC -m net.xml
 
 # Execute the reproducer
-vpux-opt --vpu-arch=VPUX37XX reproducer.mlir
+vpux-opt --vpu-arch=NPU37XX reproducer.mlir
 ```
 
 It is also possible to generate reproducers with `vpux-opt` directly, by using the `--mlir-pass-pipeline-crash-reproducer` argument. For example:
 
 ```sh
 # Generate the reproducer
-vpux-opt --vpu-arch=VPUX37XX --convert-layers-to-VPU --mlir-pass-pipeline-crash-reproducer=reproducer.mlir net.mlir
+vpux-opt --vpu-arch=NPU37XX --convert-layers-to-VPU --mlir-pass-pipeline-crash-reproducer=reproducer.mlir net.mlir
 
 # Execute the reproducer
-vpux-opt --vpu-arch=VPUX37XX reproducer.mlir
+vpux-opt --vpu-arch=NPU37XX reproducer.mlir
 ```
 
 ### Local reproducers
@@ -192,7 +192,7 @@ When compiling a network, the reproducer scope can be controlled using the `IE_N
 When using `vpux-opt`, the local reproducer can also be used. For example:
 
 ```sh
-vpux-opt --vpu-arch=VPUX37XX --low-precision --mlir-pass-pipeline-crash-reproducer=reproducer.mlir --mlir-pass-pipeline-local-reproducer --mlir-disable-threading net.mlir
+vpux-opt --vpu-arch=NPU37XX --low-precision --mlir-pass-pipeline-crash-reproducer=reproducer.mlir --mlir-pass-pipeline-local-reproducer --mlir-disable-threading net.mlir
 ```
 
 MLIR multi-threading has to be disabled when running the local reproducer. Internally, when using `IE_NPU_GEN_LOCAL_REPRODUCER` this is already handled, but using this option with `vpux-opt` requires it to be explicitly disabled.
@@ -251,15 +251,15 @@ As described in [this section](#compiling-a-model-using-vpux-translate--vpux-opt
 
 ```sh
 # Import an OpenVINO IR into IE dialect
-./vpux-translate --vpu-arch=VPUX37XX --import-IE <path to OV IR> -o net.mlir
+./vpux-translate --vpu-arch=NPU37XX --import-IE <path to OV IR> -o net.mlir
 
 # Use the GraphFile backend
-./vpux-opt --vpu-arch=VPUX37XX --default-hw-mode net.mlir -o net_out.mlir
-./vpux-translate --vpu-arch=VPUX37XX --export-VPUIP net_out.mlir > net.blob
+./vpux-opt --vpu-arch=NPU37XX --default-hw-mode net.mlir -o net_out.mlir
+./vpux-translate --vpu-arch=NPU37XX --export-VPUIP net_out.mlir > net.blob
 
 # Use the ELF backend
-./vpux-opt --vpu-arch=VPUX37XX --default-hw-mode --lower-VPUIP-to-ELF net.mlir -o net_out.mlir
-./vpux-translate --vpu-arch=VPUX37XX --export-ELF net_out.mlir > net.blob
+./vpux-opt --vpu-arch=NPU37XX --default-hw-mode --lower-VPUIP-to-ELF net.mlir -o net_out.mlir
+./vpux-translate --vpu-arch=NPU37XX --export-ELF net_out.mlir > net.blob
 ```
 
 ### Deserializing a GraphFile blob
