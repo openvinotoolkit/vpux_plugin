@@ -68,6 +68,7 @@ mlir::LogicalResult FoldConvStrideKernel::matchAndRewrite(IE::ConvolutionOp conv
 
     const auto strides = Shape(parseIntArrayAttr<int64_t>(convOp.getStrides()));
     const auto strideX = strides[Dims4D::Strides::X];
+    const auto strideY = strides[Dims4D::Strides::Y];
 
     auto filterShape = vpux::getShape(filter);
     const auto kernelX = filterShape[Dims4D::Filter::KX];
@@ -80,7 +81,7 @@ mlir::LogicalResult FoldConvStrideKernel::matchAndRewrite(IE::ConvolutionOp conv
     const int64_t alignedInputChannel = iface.getInputChannelAlignment();
     const int64_t alignedOutputChannel = iface.getOutputChannelAlignment();
 
-    if (!IE::isEligibleToFoldStrideKernel(inputType, outputType, kernelX, strideX, alignedInputChannel,
+    if (!IE::isEligibleToFoldStrideKernel(inputType, outputType, kernelX, strideX, strideY, alignedInputChannel,
                                           alignedOutputChannel, _log)) {
         return mlir::failure();
     }
@@ -95,21 +96,23 @@ mlir::LogicalResult FoldConvStrideKernel::matchAndRewrite(IE::ConvolutionOp conv
     Shape newFilterShape(filterShape.raw());
     newFilterShape[Dims4D::Filter::IC] *= newFilterShape[Dims4D::Filter::KX];
     newFilterShape[Dims4D::Filter::KX] = 1;
-    auto cstContentAttrFilter = filterConst.getContentAttr();
-    cstContentAttrFilter = cstContentAttrFilter.reshape(newFilterShape);
+    auto cstContentAttrFilterSetup = filterConst.transformContentAttr();
+    cstContentAttrFilterSetup = cstContentAttrFilterSetup.reshape(newFilterShape);
     if (newShape[Dims4D::Act::C] != newFilterShape[Dims4D::Filter::IC]) {
         int64_t padding = newShape[Dims4D::Act::C] - newFilterShape[Dims4D::Filter::IC];
-        cstContentAttrFilter = cstContentAttrFilter.padWithZero({0, 0, 0, 0}, {0, padding, 0, 0});
+        cstContentAttrFilterSetup = cstContentAttrFilterSetup.padWithZero({0, 0, 0, 0}, {0, padding, 0, 0});
     }
-    auto newFilter =
-            rewriter.create<Const::DeclareOp>(convOp.getLoc(), cstContentAttrFilter.getType(), cstContentAttrFilter);
+    auto cstContentAttrFilter = cstContentAttrFilterSetup.get();
+    auto newFilter = rewriter.create<Const::DeclareOp>(convOp.getLoc(), cstContentAttrFilter.getType(),
+                                                       std::move(cstContentAttrFilter));
 
     auto newStride = strides;
     newStride[Dims4D::Strides::X] = 1;
     rewriter.replaceOpWithNewOp<IE::ConvolutionOp>(
             convOp, convOp.getType(), inputShapeCastOp, newFilter, convOp.getBias(),
             getIntArrayAttr(ctx, newStride.raw()), convOp.getPadsBeginAttr(), convOp.getPadsEndAttr(),
-            convOp.getDilationsAttr(), convOp.getPostOpAttr(), convOp.getClampAttr(), convOp.getStaticScaleAttr());
+            convOp.getDilationsAttr(), convOp.getPostOpAttr(), convOp.getClampAttr(), convOp.getStaticScaleAttr(),
+            convOp.getOutputChannelsAttr(), convOp.getInputChannelsAttr());
     return mlir::success();
 }
 
@@ -141,7 +144,7 @@ mlir::Value reshapeBias(mlir::PatternRewriter& rewriter, mlir::Value bias, Shape
     if (biasCxW == 1) {
         return bias;
     }
-    auto contentAttr = cst.getContentAttr();
+    auto contentAttrSetup = cst.transformContentAttr();
     Shape newOutSahpe(biasShape.raw());
     newOutSahpe[Dims4D::Act::C] = outShape[Dims4D::Act::C];
     newOutSahpe[Dims4D::Act::W] = outShape[Dims4D::Act::W];
@@ -154,10 +157,120 @@ mlir::Value reshapeBias(mlir::PatternRewriter& rewriter, mlir::Value bias, Shape
         } else {
             newOutSahpe[Dims4D::Act::W] = biasShape[Dims4D::Act::W];
         }
-        contentAttr = contentAttr.broadcast(broadCastDim, dimValue);
+        contentAttrSetup = contentAttrSetup.broadcast(broadCastDim, dimValue);
     }
-    contentAttr = contentAttr.reshape(newOutSahpe);
-    return rewriter.create<Const::DeclareOp>(bias.getLoc(), contentAttr.getType(), contentAttr);
+    auto contentAttr = contentAttrSetup.reshape(newOutSahpe).get();
+    return rewriter.create<Const::DeclareOp>(bias.getLoc(), contentAttr.getType(), std::move(contentAttr));
+}
+
+//
+// For below case:
+//
+//  1x128x80x80     88x128x1x1
+//      \               /
+//            Conv1
+//              |
+//          1x88x80x80      88x88x3x3
+//               \              /
+//                    Conv2
+//                      |
+//
+// It doesn't support shape adjustment for Conv2, so there will be an Expand on the input of Conv2 after channel
+// expansion.
+// In order to eliminate the Expand, we should skip shape adjustment for Conv1 then Slice will be inserted on
+// the output of Conv1.
+// Finally, Slice-Expand can cancel each other and get below subgraph:
+//
+//  1x128x80x80     96x128x1x1
+//      \               /
+//            Conv1
+//              |
+//          1x96x80x80      96x96x3x3
+//               \              /
+//                    Conv2
+//                      |
+//
+bool isExpandBetweenAdjacentConvLayers(IE::ConvolutionOp convOp, Logger log) {
+    if (!convOp->hasOneUse()) {
+        return false;
+    }
+    auto iface = mlir::cast<IE::AlignedChannelsOpInterface>(convOp.getOperation());
+    const int64_t alignedOutputChannel = iface.getOutputChannelAlignment();
+
+    auto childConv = mlir::dyn_cast<IE::ConvolutionOp>(*convOp.getOutput().getUsers().begin());
+    if (childConv == nullptr) {
+        return false;
+    }
+    iface = mlir::cast<IE::AlignedChannelsOpInterface>(childConv.getOperation());
+    const int64_t alignedInputChannel = iface.getInputChannelAlignment();
+
+    if (alignedOutputChannel != alignedInputChannel) {
+        return false;
+    }
+
+    auto isChildConvICAligned = getShape(childConv.getInput())[Dims4D::Act::C] % alignedInputChannel == 0;
+    auto isExpandBetween = !isChildConvICAligned && mlir::failed(getAdjustConvShapeParameters(
+                                                            childConv, childConv.getFilter(),
+                                                            Shape(getShape(childConv.getOutput())), std::move(log)));
+    return isExpandBetween;
+}
+
+//
+// For below case:
+//
+//  1x88x80x80      88x88x3x3
+//      \              /
+//            Conv2
+//              |
+//          1x88x80x80      128x80x1x1
+//               \              /
+//                    Conv3
+//                      |
+//
+// It doesn't support shape adjustment for Conv2, so there will be a Slice on the output of Conv2 after channel
+// expansion.
+// In order to eliminate the Slice, we should skip shape adjustment for Conv3 then Expand will be inserted on
+// the input of Conv3.
+// Finally, Slice-Expand can cancel each other and get below subgraph:
+//
+//  1x96x80x80      96x96x3x3
+//      \              /
+//            Conv2
+//              |
+//          1x96x80x80      128x96x1x1
+//               \              /
+//                    Conv3
+//                      |
+//
+bool isSliceBetweenAdjacentConvLayers(IE::ConvolutionOp convOp, Logger log) {
+    auto iface = mlir::cast<IE::AlignedChannelsOpInterface>(convOp.getOperation());
+    const int64_t alignedInputChannel = iface.getInputChannelAlignment();
+
+    auto parentConv = convOp.getInput().getDefiningOp<IE::ConvolutionOp>();
+    if (parentConv == nullptr) {
+        return false;
+    }
+    iface = mlir::cast<IE::AlignedChannelsOpInterface>(parentConv.getOperation());
+    const int64_t alignedOutputChannel = iface.getOutputChannelAlignment();
+
+    if (alignedOutputChannel != alignedInputChannel) {
+        return false;
+    }
+
+    auto isParentConvOCAligned = getShape(parentConv.getOutput())[Dims4D::Act::C] % alignedOutputChannel == 0;
+    auto isSliceBetween = !isParentConvOCAligned && mlir::failed(getAdjustConvShapeParameters(
+                                                            parentConv, parentConv.getFilter(),
+                                                            Shape(getShape(parentConv.getOutput())), std::move(log)));
+    return isSliceBetween;
+}
+
+bool isNotBeneficialForAdjacentConvLayers(IE::ConvolutionOp convOp, Logger log) {
+    if (isExpandBetweenAdjacentConvLayers(convOp, log) || isSliceBetweenAdjacentConvLayers(convOp, log)) {
+        log.trace("Skip shape adjustment for {0} due to Expand/Slice between adjacent Conv layers", convOp.getLoc());
+        return true;
+    }
+
+    return false;
 }
 
 //
@@ -191,6 +304,10 @@ mlir::LogicalResult AdjustConvShape::matchAndRewrite(IE::ConvolutionOp convOp, m
     const auto adjustConvShapeParameters =
             getAdjustConvShapeParameters(convOp, convOp.getFilter(), Shape(outNDInterface.getShape()), _log);
     if (mlir::failed(adjustConvShapeParameters)) {
+        return mlir::failure();
+    }
+
+    if (isNotBeneficialForAdjacentConvLayers(convOp, _log)) {
         return mlir::failure();
     }
 
@@ -228,19 +345,21 @@ mlir::LogicalResult AdjustConvShape::matchAndRewrite(IE::ConvolutionOp convOp, m
     //   Concat in output channel to (48x1x1x48)
     //
     for (int64_t i = 0; i < borrowFactor; i++) {
-        auto newCstContent = cstContentAttrFilter.reshape(middleFilterShape);
+        auto newCstContentSetup = cstContentAttrFilter.transform().reshape(middleFilterShape);
         auto newLeftPading = (leftPading > 0) ? leftPading : 0;
         auto newRightPading = (totalPading > leftPading) ? (totalPading - leftPading) : 0;
         Shape cstPadBegin = {0, newLeftPading, 0, 0};
         Shape cstPadEnd = {0, newRightPading, 0, 0};
-        newCstContent = newCstContent.padWithZero(cstPadBegin, cstPadEnd);
+        newCstContentSetup = newCstContentSetup.padWithZero(cstPadBegin, cstPadEnd);
         if (newLeftPading + newRightPading > totalPading) {
             Shape offset = {0, (leftPading > 0) ? 0 : -leftPading, 0, 0};
             Shape viewShape(middleFilterShape.raw());
             viewShape[Dims4D::Filter::IC] += totalPading;
-            newCstContent = newCstContent.subview(offset, viewShape);
+            newCstContentSetup = newCstContentSetup.subview(offset, viewShape);
         }
-        auto temp = rewriter.create<Const::DeclareOp>(convOp.getLoc(), newCstContent.getType(), newCstContent);
+        auto newCstContent = newCstContentSetup.get();
+        auto temp =
+                rewriter.create<Const::DeclareOp>(convOp.getLoc(), newCstContent.getType(), std::move(newCstContent));
         filterConst.push_back(temp);
         leftPading += filterShape[Dims4D::Filter::IC] * strides[Dims4D::Strides::X];
     }
@@ -282,7 +401,8 @@ mlir::LogicalResult AdjustConvShape::matchAndRewrite(IE::ConvolutionOp convOp, m
     auto newConvOp = rewriter.create<IE::ConvolutionOp>(
             convOp.getLoc(), inputShapeCastOp, newFilter, newBias, getIntArrayAttr(ctx, newStride),
             getIntArrayAttr(ctx, padBVect), getIntArrayAttr(ctx, padEVect), convOp.getDilationsAttr(),
-            convOp.getPostOpAttr(), convOp.getClampAttr(), convOp.getStaticScaleAttr());
+            convOp.getPostOpAttr(), convOp.getClampAttr(), convOp.getStaticScaleAttr(), convOp.getOutputChannelsAttr(),
+            convOp.getInputChannelsAttr());
     changeDimsOrder(newConvOp, outDimOrder, _log.nest());
     const auto outShapeAttr = getIntArrayAttr(ctx, outNDInterface.getShape().raw());
     rewriter.replaceOpWithNewOp<IE::ShapeCastOp>(convOp, outNDInterface, newConvOp.getOutput(), outShapeAttr);

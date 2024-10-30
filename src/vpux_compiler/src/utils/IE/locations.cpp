@@ -9,6 +9,7 @@
 #include "vpux/utils/core/format.hpp"
 #include "vpux/utils/core/small_vector.hpp"
 
+#include "vpux/compiler/core/developer_build_utils.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/utils/analysis.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
@@ -32,15 +33,36 @@ mlir::Location vpux::IE::createLayerLocation(mlir::MLIRContext* ctx, const std::
 mlir::Location vpux::IE::getValueLocation(mlir::Value val) {
     // value is produced by real operation, so use it
     if (auto producerOp = val.getDefiningOp()) {
-        return producerOp->getLoc();
+        if (producerOp->getNumResults() < 2) {
+            return producerOp->getLoc();
+        }
+        for (auto p : producerOp->getResults() | indexed) {
+            if (p.value() == val) {
+                return takeOpLoc(producerOp, StringLiteral("res_{0}"), p.index());
+            }
+        }
+        VPUX_THROW("Unsupported number of results");
     }
     // value is a block argument, so a function argument
     if (auto arg = val.dyn_cast<mlir::BlockArgument>()) {
+        const size_t inputNum = arg.getArgNumber();
+
         const auto ownerOp = mlir::dyn_cast<mlir::func::FuncOp>(arg.getOwner()->getParentOp());
         VPUX_THROW_WHEN(ownerOp == nullptr,
                         "Invalid type of parent operation, expected to get mlir::func::FuncOp, but got {0}",
                         arg.getOwner()->getParentOp());
         auto moduleOp = getModuleOp(ownerOp);
+        auto netOps = to_small_vector(moduleOp.getOps<IE::CNNNetworkOp>());
+        if (netOps.size() != 1) {
+            if constexpr (vpux::isDeveloperBuild()) {
+                vpux::Logger::global().warning("Can't get location for input. If it isn't a test, please, debug this.");
+                const std::string inputName = "generated_input_" + std::to_string(inputNum);
+                return createLayerLocation(moduleOp->getContext(), inputName, "Parameter");
+            } else {
+                VPUX_THROW("Can't get location for input.");
+            }
+        }
+
         IE::CNNNetworkOp cnnNetworkOp;
         mlir::func::FuncOp netFunc;
         IE::CNNNetworkOp::getFromModule(moduleOp, cnnNetworkOp, netFunc);
@@ -54,7 +76,6 @@ mlir::Location vpux::IE::getValueLocation(mlir::Value val) {
 
         auto inputsInfo = to_small_vector(cnnNetworkOp.getInputsInfo().getOps<IE::DataInfoOp>());
 
-        const size_t inputNum = arg.getArgNumber();
         return inputsInfo[inputNum]->getLoc();
     }
     VPUX_THROW("Can't get location of '{0}'", val);

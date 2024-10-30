@@ -1,5 +1,18 @@
 Change Log:
 -----------
+VPUXCompilerL0 6.1.0:
+  - Add vclAllocatedExecutableCreate to compile a network allocating blob storage via given allocator
+
+VPUXCompilerL0 6.0.0:
+  - Add new data structure vcl_query_desc_t
+  - Change vclQueryNetworkCreate to use a vcl_query_desc_t instead of uint8_t* modelIR and uint64_t modelIRSize
+
+VPUXCompilerL0 5.10.0:
+  - Model hash is now automatically passed to the compiler to bypass multi-cluster assignment pass.
+
+VPUXCompilerL0 5.9.0:
+  - The I/O metadata will be identified using indices instead of names when the plugin version is new enough.
+
 VPUXCompilerL0 5.8.0:
   - Remove vpux_driver_compiler target and vpux_driver_compiler.h
 
@@ -24,6 +37,9 @@ VPUXCompilerL0 5.4.1:
 VPUXCompilerL0 5.4.0:
   - Add support for INFERENCE_PRECISION_HINT compiler options.
 
+VPUXCompilerL0 5.3.1:
+  - Add 5010, 5020 and 6010 to platform
+
 VPUXCompilerL0 5.3.0:
   - Add support for NPU_MAX_TILES and NPU_STEPPING compiler options.
 
@@ -42,6 +58,9 @@ VPUXCompilerL0 4.2.0:
   - Change folder name from VPUXCompilerL0 to vpux_driver_compiler
   - Rename VPUXCompilerL0.h to vpux_driver_compiler.h
   - Code refactor
+
+VPUXCompilerL0 4.1.0
+  - Add 5000 to platform
 
 VPUXCompilerL0 4.0.0
   - Support config key with VPU_ prefix instead of VPUX_ prefix
@@ -136,6 +155,7 @@ VPUXCompilerL0 1.1.2136:
   - Workaround for fixing heap leaking issue.
   - Remove unnecessary fucSharedTests dependency.
   - Remove tbb library dependency.
+  - Scroll VPUX-plugin back to releases/2021/4_vpux_ww34 as WW36 dKMB Release indicates.
 
 VPUXCompilerL0 1.1.2135:
   - Update VPUX-plugin to releases/2021/4_vpux_ww35

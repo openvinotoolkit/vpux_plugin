@@ -72,8 +72,8 @@ void shapeReorder(VPUIP::UpsamplingDMAOp upsamplingDMAOp, mlir::PatternRewriter&
     auto cst = upsamplingDMAOp.getInput().getDefiningOp<Const::DeclareOp>();
     const auto origConstType = cst.getType().cast<vpux::NDTypeInterface>();
     const auto newConstType = origConstType.changeShape(finalShape);
-    const auto newConstAttr = cst.getContentAttr().reshape(finalShape);
-    auto newCst = rewriter.create<Const::DeclareOp>(upsamplingDMAOp.getLoc(), newConstType, newConstAttr);
+    auto newConstAttr = cst.transformContentAttr().reshape(finalShape).get();
+    auto newCst = rewriter.create<Const::DeclareOp>(upsamplingDMAOp.getLoc(), newConstType, std::move(newConstAttr));
     rewriter.replaceOp(upsamplingDMAOp.getInput().getDefiningOp(), newCst.getOutput());
 }
 
@@ -114,6 +114,11 @@ mlir::LogicalResult UpsamplingDMARewriter::matchAndRewrite(VPUIP::UpsamplingDMAO
     auto subShape = Shape(inType.getShape().raw());
     int64_t totalNumPlane = inType.getShape()[Dims4D::Act::N] * inType.getShape()[Dims4D::Act::H];
 
+    auto hasExpandAttr = upsamplingDMAOp.getExpand().has_value();
+    SmallVector<int64_t, 4> expand = {0, 0, 0, 0};
+    if (hasExpandAttr) {
+        expand = mlir::extractFromIntegerArrayAttr<int64_t>(upsamplingDMAOp.getExpandAttr());
+    }
     if (inOrder == DimsOrder::NCHW) {
         totalNumPlane *= inType.getShape()[Dims4D::Act::C];
         subShape[Dims4D::Act::C] = 1;
@@ -137,21 +142,14 @@ mlir::LogicalResult UpsamplingDMARewriter::matchAndRewrite(VPUIP::UpsamplingDMAO
     subShape[Dims4D::Act::H] = totalNumPlane - (numberPlanesPerDMA * (numberDMAs - 1));
     subInputShapes.push_back(subShape);
     auto dstOffset = dstDeclBuff.getByteOffset();
-
     auto context = upsamplingDMAOp.getContext();
     auto upsamplingFactor = parseIntArrayAttr<int64_t>(upsamplingDMAOp.getUpsamplingFactor());
-    auto hasExpandAttr = upsamplingDMAOp.getExpand().has_value();
-    SmallVector<int64_t, 4> expand;
-    if (hasExpandAttr) {
-        expand = mlir::extractFromIntegerArrayAttr<int64_t>(upsamplingDMAOp.getExpandAttr());
-    }
-    auto getOutShape = [&upsamplingFactor, &hasExpandAttr, &expand](ShapeRef inShape) {
+
+    auto getOutShape = [&upsamplingFactor, &expand](ShapeRef inShape) {
         auto outShape = Shape(inShape.raw());
         for (size_t i = 0; i < outShape.size(); i++) {
             outShape[Dim(i)] *= upsamplingFactor[i];
-            if (hasExpandAttr) {
-                outShape[Dim(i)] += expand[i];
-            }
+            outShape[Dim(i)] += expand[i];
         }
         return outShape;
     };
@@ -171,15 +169,19 @@ mlir::LogicalResult UpsamplingDMARewriter::matchAndRewrite(VPUIP::UpsamplingDMAO
             newSrcBuff = getNewSrcBuffer(upsamplingDMAOp, rewriter, inputShape, currentOffset);
         }
 
-        auto outShape = getOutShape(inputShape);
+        // if input layout is NCHW and hasExpandAttr, we need the original inputShape
+        // to calculate the outShape
+        auto inShape = Shape(inputShape.raw());
+        if (inOrder == DimsOrder::NCHW && hasExpandAttr) {
+            inShape[Dims4D::Act::C] = inType.getShape()[Dims4D::Act::C];
+            inShape[Dims4D::Act::H] = inShape[Dims4D::Act::H] / inShape[Dims4D::Act::C];
+        }
+        auto outShape = getOutShape(inShape);
         auto newDstMemRef = vpux::getMemRefType(outShape, dstType.getElementType(), inOrder, dstType.getMemSpace());
         auto newDstBuff = VPUIP::createNewDeclareBuffer(rewriter, dstDeclBuff, dstDeclBuff, newDstMemRef, dstOffset);
         auto descriptorAttr =
-                hasExpandAttr
-                        ? generateUpsamplingDmaDescriptor(context, inputShape, upsamplingDMAOp.getUpsamplingFactor(),
-                                                          inType.getElemTypeSize(), expand[1])
-                        : generateUpsamplingDmaDescriptor(context, inputShape, upsamplingDMAOp.getUpsamplingFactor(),
-                                                          inType.getElemTypeSize(), 0);
+                generateUpsamplingDmaDescriptor(context, inputShape, upsamplingDMAOp.getUpsamplingFactor(),
+                                                inType.getElemTypeSize(), inOrder == DimsOrder::NHWC ? expand[1] : 0);
 
         auto nextOffset = srcOffset + inputShape.totalSize() * elemTypeSize.count();
         const auto newLoc =

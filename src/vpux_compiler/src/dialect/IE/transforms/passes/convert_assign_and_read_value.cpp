@@ -55,6 +55,10 @@ mlir::LogicalResult AssignRewriter::matchAndRewrite(IE::AssignOp origOp, mlir::P
     const auto outputNameAttr = mlir::StringAttr::get(ctx, ASSIGN_PREFIX + origOp.getName());
     outputsInfoBuilder.create<IE::DataInfoOp>(takeOpLoc(origOp, llvm::StringLiteral("assign_{0}"), origOp.getName()),
                                               outputNameAttr, outputTypeAttr,
+                                              /*OptionalAttr originalShape*/ nullptr,
+                                              /*OptionalAttr friendlyName*/ nullptr,
+                                              /*OptionalAttr inputName*/ nullptr,
+                                              /*OptionalAttr tensorNames*/ nullptr,
                                               /*profilingSectionsCount=*/0);
 
     rewriter.replaceOp(origOp, origOp.getInput());
@@ -112,6 +116,10 @@ mlir::LogicalResult ReadValueRewriter::matchAndRewrite(IE::ReadValueOp origOp, m
     const auto inputNameAttr = mlir::StringAttr::get(ctx, READVALUE_PREFIX + origOp.getName());
     inputsInfoBuilder.create<IE::DataInfoOp>(takeOpLoc(origOp, llvm::StringLiteral("read_{0}"), origOp.getName()),
                                              inputNameAttr, inputTypeAttr,
+                                             /*OptionalAttr originalShape*/ nullptr,
+                                             /*OptionalAttr friendlyName*/ nullptr,
+                                             /*OptionalAttr inputName*/ nullptr,
+                                             /*OptionalAttr tensorNames*/ nullptr,
                                              /*profilingSectionsCount=*/0);
 
     rewriter.replaceOp(origOp, mainFunc.getArgument(newInputIndex));

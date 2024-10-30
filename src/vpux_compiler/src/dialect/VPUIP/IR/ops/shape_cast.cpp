@@ -163,7 +163,7 @@ mlir::LogicalResult VPUIP::ShapeCastOp::inferReturnTypes(mlir::MLIRContext* ctx,
     const auto hasExplicitOutputShapesAndOffsets =
             shapeCast.getExplicitOutputShapes().has_value() && shapeCast.getExplicitOutputOffsets().has_value();
 
-    auto inferExplicitDistributedAttr = [&](VPU::DistributedTensorAttr origDistribution) -> VPU::DistributedTensorAttr {
+    auto inferExplicitDistributedAttr = [&](VPU::DistributionInfoAttr origDistribution) -> VPU::DistributionInfoAttr {
         auto mode = origDistribution.getMode().getValue();
         VPUX_THROW_UNLESS(hasExplicitOutputShapesAndOffsets, "ExplicitOutputShapes or ExplicitOutputOffsets not set");
         // Track #E125638
@@ -171,7 +171,7 @@ mlir::LogicalResult VPUIP::ShapeCastOp::inferReturnTypes(mlir::MLIRContext* ctx,
         VPUX_THROW_UNLESS(mode == VPU::DistributionMode::SEGMENTED, "Can not set explicit shapes with mode {0}",
                           VPU::stringifyDistributionMode(mode));
 
-        return VPU::DistributedTensorAttr::get(
+        return VPU::DistributionInfoAttr::get(
                 ctx, origDistribution.getMode(), origDistribution.getNumTiles(), origDistribution.getKernel(),
                 origDistribution.getPads(), origDistribution.getStrides(), origDistribution.getNumClusters(),
                 origDistribution.getAlignment(), origDistribution.getUniformDistributedSegments(),

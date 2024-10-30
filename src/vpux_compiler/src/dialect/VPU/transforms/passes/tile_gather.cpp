@@ -113,7 +113,7 @@ mlir::LogicalResult TileGatherIndices::matchAndRewrite(VPU::GatherOp origOp, mli
     const auto outputShape = getShape(origOp.getOutput());
     const auto indicesType = origOp.getIndices().getType().cast<vpux::NDTypeInterface>();
     const auto indicesShape = indicesType.getShape();
-    const auto indicesRank = static_cast<int64_t>(indicesShape.size());
+    const auto indicesRank = origOp.getIndicesRank().value_or(indicesShape.size());
 
     Shape nTilesOnDim(outputShape.size(), 1);
 

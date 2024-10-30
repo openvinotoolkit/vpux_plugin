@@ -500,3 +500,80 @@ module @TwoFunctionsEachWithSingleExecutionQueue {
 
         // CHECK: return {{[^:]+}} : memref<1x3x64x64xf16, @DDR>
 }
+
+//
+// -----
+//
+
+// CHECK-LABEL: @MultiShaveFunction
+module @MultiShaveFunction {
+    IE.CNNNetwork entryPoint : @main
+    inputsInfo : {
+      DataInfo "input" : tensor<1x1x2x64xf16>
+    } outputsInfo : {
+      DataInfo "output" : tensor<1x1x2x64xf16>
+    }
+
+    module @VPU.SW {
+        func.func private @builtin_SoftMax(memref<*xf16>, memref<*xf16>, i64, i64)
+            attributes {VPU.kernel_code = "softmax.cpp", VPU.kernel_entry = "softmax", VPU.task_type = @COMPUTE}
+        func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
+    }
+
+    // CHECK-NOT: func.func private @foo1
+    func.func private @foo(%arg0: memref<1x1x2x64xf16, @DDR>, %arg1: memref<1x1x2x64xf16, @DDR>) -> memref<1x1x2x64xf16, @DDR> {
+        %0 = VPURT.DeclareBuffer <DDR> <4096> -> memref<1x1x1x64xf16, {order = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>, strides = [128, 128, 64, 1]}, @DDR>
+        %1 = VPURT.DeclareBuffer <DDR> <4352> -> memref<1x1x1x64xf16, {order = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>, strides = [128, 128, 64, 1]}, @DDR>
+        %2 = VPURT.DeclareBuffer <DDR> <4224> -> memref<1x1x1x64xf16, {order = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>, strides = [128, 128, 64, 1]}, @DDR>
+        %3 = VPURT.DeclareBuffer <DDR> <4480> -> memref<1x1x1x64xf16, {order = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>, strides = [128, 128, 64, 1]}, @DDR>
+        VPURT.Task {
+            %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_SoftMax inputs(%0 as %arg2: memref<1x1x1x64xf16, {order = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>, strides = [128, 128, 64, 1]}, @DDR>) outputs(%1 as %arg3: memref<1x1x1x64xf16, {order = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>, strides = [128, 128, 64, 1]}, @DDR>) on tile 0 -> memref<1x1x1x64xf16, {order = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>, strides = [128, 128, 64, 1]}, @DDR>{
+            VPUIP.SW.Kernel.run {attrs = [0, 0]}(%arg2, %arg3) : memref<1x1x1x64xf16, {order = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>, strides = [128, 128, 64, 1]}, @DDR>, memref<1x1x1x64xf16, {order = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>, strides = [128, 128, 64, 1]}, @DDR>
+            }
+        }
+        VPURT.Task {
+            %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_SoftMax inputs(%2 as %arg2: memref<1x1x1x64xf16, {order = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>, strides = [128, 128, 64, 1]}, @DDR>) outputs(%3 as %arg3: memref<1x1x1x64xf16, {order = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>, strides = [128, 128, 64, 1]}, @DDR>) on tile 0 -> memref<1x1x1x64xf16, {order = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>, strides = [128, 128, 64, 1]}, @DDR>{
+            VPUIP.SW.Kernel.run {attrs = [0, 0]}(%arg2, %arg3) : memref<1x1x1x64xf16, {order = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>, strides = [128, 128, 64, 1]}, @DDR>, memref<1x1x1x64xf16, {order = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>, strides = [128, 128, 64, 1]}, @DDR>
+            }
+        }
+        return %arg1 : memref<1x1x2x64xf16, @DDR>
+    }
+
+    // CHECK-LABEL: @main
+    func.func @main(%arg0: memref<1x1x2x64xf16, @DDR>, %arg1: memref<1x1x2x64xf16, @DDR>) -> memref<1x1x2x64xf16, @DDR> {
+        %0 = VPURT.DeclareBuffer <NetworkInput> [0] <0> -> memref<1x1x2x64xf16, @DDR>
+        %1 = VPURT.DeclareBuffer <NetworkOutput> [0] <0> -> memref<1x1x2x64xf16, @DDR>
+        %2 = VPURT.DeclareBuffer <DDR> <4096> -> memref<1x1x2x64xf16, @DDR>
+        %3 = VPURT.DeclareBuffer <DDR> <4352> -> memref<1x1x2x64xf16, @DDR>
+        %4 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+        %5 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+        %6 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+        VPURT.Task updates(%4 : !VPURT.Barrier) {
+            %8 = VPUIP.NNDMA {port = 0 : i64} inputs(%0 : memref<1x1x2x64xf16, @DDR>) outputs(%2 : memref<1x1x2x64xf16, @DDR>) -> memref<1x1x2x64xf16, @DDR>
+        }
+        VPURT.Task waits(%4 : !VPURT.Barrier) updates(%5 : !VPURT.Barrier) {
+            %8 = func.call @foo(%2, %3) : (memref<1x1x2x64xf16, @DDR>, memref<1x1x2x64xf16, @DDR>) -> memref<1x1x2x64xf16, @DDR>
+        }
+        VPURT.Task waits(%5 : !VPURT.Barrier) updates(%6 : !VPURT.Barrier) {
+            %8 = VPUIP.NNDMA {port = 1 : i64} inputs(%3 : memref<1x1x2x64xf16, @DDR>) outputs(%2 : memref<1x1x2x64xf16, @DDR>) -> memref<1x1x2x64xf16, @DDR>
+        }
+        return %arg1 : memref<1x1x2x64xf16, @DDR>
+
+        // CHECK-DAG: [[FOO1_WAIT:%.+]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+        // CHECK-DAG: [[FOO1_UPDATE:%.+]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+        // CHECK-DAG: [[POST_DMA2_BARRIER:%.+]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+
+        // CHECK: VPURT.Task updates([[FOO1_WAIT]] : !VPURT.Barrier)
+        // CHECK-NEXT:  VPUIP.NNDMA {port = 0 : i64} 
+
+        // CHECK: VPURT.Task waits([[FOO1_WAIT]] : !VPURT.Barrier) updates([[FOO1_UPDATE]] : !VPURT.Barrier)
+        // CHECK-NEXT:  VPUIP.SW.Kernel 
+
+        // CHECK: VPURT.Task waits([[FOO1_WAIT]] : !VPURT.Barrier) updates([[FOO1_UPDATE]] : !VPURT.Barrier)
+        // CHECK-NEXT:  VPUIP.SW.Kernel 
+
+        // CHECK: VPURT.Task waits([[FOO1_UPDATE]] : !VPURT.Barrier) updates([[POST_DMA2_BARRIER]] : !VPURT.Barrier)
+        // CHECK-NEXT:  VPUIP.NNDMA {port = 1 : i64} 
+
+    }
+}

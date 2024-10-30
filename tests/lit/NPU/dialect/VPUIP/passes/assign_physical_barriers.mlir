@@ -8,6 +8,9 @@
 
 // CHECK-LABEL: @LinearDMA
 func.func @LinearDMA(%arg0: memref<10xf16>, %arg1: memref<10xf16>) -> memref<10xf16> {
+    // CHECK: attributes
+    // CHECK-SAME: numberOfVirtualBarriers = 3
+
     // CHECK-NOT: VPURT.DeclareVirtualBarrier
     // CHECK: VPURT.ConfigureBarrier<0>
     %bar0 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
@@ -53,6 +56,9 @@ func.func @LinearDMA(%arg0: memref<10xf16>, %arg1: memref<10xf16>) -> memref<10x
 
 // CHECK-LABEL: @MultipleExecutors
 func.func @MultipleExecutors(%arg0: memref<1x16x32x32xf16>, %arg1: memref<1x16x32x32xf16>) -> memref<1x16x32x32xf16> {
+    // CHECK: attributes
+    // CHECK-SAME: numberOfVirtualBarriers = 10
+
     %cst0 = const.Declare memref<16x16x1x1xf16, #NHWC> =
         dense<1.0> : tensor<16x16x1x1xf16>, [#const.Reorder<#NHWC>]
     %cst1 = const.Declare memref<16x1x1x4xsi32> = dense<1> : tensor<16x1x1x4xsi32>
@@ -89,7 +95,6 @@ func.func @MultipleExecutors(%arg0: memref<1x16x32x32xf16>, %arg1: memref<1x16x3
     %bar7 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     %bar8 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     %bar9 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
-
     // CHECK: VPURT.ConfigureBarrier<0>
     // CHECK: VPURT.ConfigureBarrier<1>
     // CHECK: VPURT.ConfigureBarrier<2>
@@ -120,7 +125,7 @@ func.func @MultipleExecutors(%arg0: memref<1x16x32x32xf16>, %arg1: memref<1x16x3
     // Reorder input
 
     VPURT.Task updates(%bar0: !VPURT.Barrier) {
-        VPUIP.PermuteUPA {order_value = #NHWC}
+        VPUIP.PermuteDMA {mem_perm = #NHWC}
             inputs(%arg0: memref<1x16x32x32xf16>)
             outputs(%buf0: memref<1x16x32x32xf16, #NHWC, @DDR>)
             -> memref<1x16x32x32xf16, #NHWC, @DDR>
@@ -309,7 +314,7 @@ func.func @MultipleExecutors(%arg0: memref<1x16x32x32xf16>, %arg1: memref<1x16x3
     // Reorder output
 
     VPURT.Task waits(%bar4: !VPURT.Barrier) {
-        VPUIP.PermuteUPA {order_value = #NCHW}
+        VPUIP.PermuteDMA {mem_perm = #NCHW}
             inputs(%buf5: memref<1x16x32x32xf16, #NHWC, @DDR>)
             outputs(%arg1: memref<1x16x32x32xf16>)
             -> memref<1x16x32x32xf16>

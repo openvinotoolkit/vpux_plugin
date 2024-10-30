@@ -15,6 +15,8 @@
 namespace vpux {
 namespace VPU {
 
+constexpr float INPUT_OVERLAP_THRESHOLD = 2.0;
+
 TilingMode getTilingSupportedMode(VPU::TilingBuilderOpInterface origOp, bool enablePrefetchTiling, Logger log);
 
 mlir::FailureOr<OutputTiling> getLayerTilingStrategy(VPU::TilingBuilderOpInterface origOp, bool enablePrefetchTiling,
@@ -32,14 +34,14 @@ mlir::Operation* getParentComputeOp(mlir::Operation* op);
 bool prefetchTilingConditionSatisfied(mlir::Operation* op, Logger log);
 bool largeConstPipelineConditionSatisfied(mlir::Operation* op, Logger log);
 bool hasMultiBranches(mlir::Operation* op);
+Dim getHighestDimFromType(vpux::NDTypeInterface type);
 
 bool archSupportsSwLayerTiling(VPU::ArchKind arch);
 bool opNeedsTiling(mlir::Operation* op, bool enablePrefetchTiling, Logger log);
 bool doesNCEOpChannelSatisfyWorkload(mlir::Operation* nceOp, const TileInfo& outputTile);
 std::optional<DimArr> getSEPConvTilingOrder(mlir::Operation* op);
-std::optional<size_t> getMaxWorkLoadNumberPerClusterForNCEWithSparseOutput(VPU::ArchKind arch,
-                                                                           ArrayRef<Shape> perClusterShapes,
-                                                                           ArrayRef<int64_t> supportedChannels);
+std::optional<std::pair<size_t, size_t>> getWorkLoadInformationForNCEWithSparseOutput(
+        VPU::ArchKind arch, ArrayRef<Shape> perClusterShapes, ArrayRef<int64_t> supportedChannels);
 
 /**
  * @brief Get the best tiling strategy based on the VPUNN cost model

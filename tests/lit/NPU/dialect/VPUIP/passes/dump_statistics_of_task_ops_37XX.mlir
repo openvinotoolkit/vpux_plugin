@@ -19,6 +19,7 @@ module @DumpOpsStatisticsTest {
 }
 
 // CHECK:   Input size - 4.50 KB Output size - 4.50 KB
+// CHECK:   DDR heap size - 0 bytes
 // CHECK:   VPUIP tasks statistics:
 // CHECK:   VPUIP Tasks - 0 ops
 // CHECK:   Weights statistics
@@ -54,6 +55,7 @@ module @DumpOpsStatisticsTest {
 }
 
 // CHECK:   Input size - 4.50 KB Output size - 4.50 KB
+// CHECK:   DDR heap size - 0 bytes
 // CHECK:   VPUIP tasks statistics:
 // CHECK:   VPUIP Tasks - 2 ops
 // CHECK:     VPUIP.DecompressDMAOp - 2 ops
@@ -88,19 +90,20 @@ module @DumpOpsStatisticsTest {
         VPURT.Task attributes {isTrailingSWLayer = false} {
             %4 = VPUIP.DecompressDMAOp inputs(%cst_2 : memref<1408x1x1x1xui8, {compression = #VPUIP.Compression<CompiletimeCompressed>, order = #NCHW}>) outputs(%3 : memref<4608x1x1x1xui8, [@CMX_NN, 0]>) -> memref<4608x1x1x1xui8, [@CMX_NN, 0]>
         }
-        %cst_3 = const.Declare memref<1x512x3x3x!qElemType> = dense<1> : tensor<1x512x3x3xui8>, [#const.QuantCast<!qElemType>]
+        %cst_3 = const.Declare memref<1x512x3x3x!qElemType> = dense<1> : tensor<1x512x3x3xui8>, [#const.CastElemType<!qElemType>]
         VPURT.Task attributes {isTrailingSWLayer = false} {
             %1 = VPUIP.NNDMA {set_crit = false, set_ord = true}
                 inputs(%cst_3 : memref<1x512x3x3x!qElemType>)
                 outputs(%0 : memref<1x512x3x3x!qElemType, [@CMX_NN, 0]>)
                 -> memref<1x512x3x3x!qElemType, [@CMX_NN, 0]>
         }
-        %cst_4 = const.Declare memref<1x256x3x3x!qElemType> = dense<1> : tensor<1x256x3x3xui8>, [#const.QuantCast<!qElemType>]
+        %cst_4 = const.Declare memref<1x256x3x3x!qElemType> = dense<1> : tensor<1x256x3x3xui8>, [#const.CastElemType<!qElemType>]
         return %0 : memref<1x512x3x3x!qElemType, [@CMX_NN, 0]>
     } // func
 }
 
 // CHECK:  Input size - 4.50 KB Output size - 4.50 KB
+// CHECK:  DDR heap size - 0 bytes
 // CHECK:  VPUIP tasks statistics:
 // CHECK:  VPUIP Tasks - 3 ops
 // CHECK:    VPUIP.NNDMA - 1 ops : Size - 4.50 KB
@@ -127,19 +130,20 @@ module @DumpOpsStatisticsTest {
 
     func.func @NoCompressedWeightsAndUncompressedWeights(%arg0: memref<1x512x3x3x!qElemType>, %arg1: memref<1x512x3x3x!qElemType>) -> memref<1x512x3x3x!qElemType, [@CMX_NN, 0]> {
         %0 = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x512x3x3x!qElemType, [@CMX_NN, 0]>
-        %cst_0 = const.Declare memref<1x512x3x3x!qElemType> = dense<1> : tensor<1x512x3x3xui8>, [#const.QuantCast<!qElemType>]
+        %cst_0 = const.Declare memref<1x512x3x3x!qElemType> = dense<1> : tensor<1x512x3x3xui8>, [#const.CastElemType<!qElemType>]
         VPURT.Task attributes {isTrailingSWLayer = false} {
             %1 = VPUIP.NNDMA {set_crit = false, set_ord = true}
                 inputs(%cst_0 : memref<1x512x3x3x!qElemType>)
                 outputs(%0 : memref<1x512x3x3x!qElemType, [@CMX_NN, 0]>)
                 -> memref<1x512x3x3x!qElemType, [@CMX_NN, 0]>
         }
-        %cst_1 = const.Declare memref<1x256x3x3x!qElemType> = dense<1> : tensor<1x256x3x3xui8>, [#const.QuantCast<!qElemType>]
+        %cst_1 = const.Declare memref<1x256x3x3x!qElemType> = dense<1> : tensor<1x256x3x3xui8>, [#const.CastElemType<!qElemType>]
         return %0 : memref<1x512x3x3x!qElemType, [@CMX_NN, 0]>
     } // func
 }
 
 // CHECK:   Input size - 4.50 KB Output size - 4.50 KB
+// CHECK:   DDR heap size - 0 bytes
 // CHECK:   VPUIP tasks statistics:
 // CHECK:   VPUIP Tasks - 1 ops
 // CHECK:     VPUIP.NNDMA - 1 ops : Size - 4.50 KB
@@ -168,6 +172,7 @@ module @DumpOpsStatisticsTest {
 }
 
 // CHECK:   Input size - 634.10 KB Output size - 1.88 MB
+// CHECK:   DDR heap size - 0 bytes
 // CHECK:   VPUIP tasks statistics:
 // CHECK:   VPUIP Tasks - 1 ops
 // CHECK:     VPUIP.NNDMA - 1 ops : Size - 634.10 KB
@@ -314,6 +319,7 @@ func.func @main(%1: memref<1x4x512x1xf16, {order = #NCWH}>,
 }
 
 // CHECK:  Input size - 4.00 KB Output size - 4.00 KB
+// CHECK:  DDR heap size - 0 bytes
 // CHECK:  VPUIP tasks statistics:
 // CHECK:  VPUIP Tasks - 5 ops
 // CHECK:    VPUIP.NNDMA - 2 ops : Size - 8.00 KB
@@ -327,3 +333,25 @@ func.func @main(%1: memref<1x4x512x1xf16, {order = #NCWH}>,
 // CHECK:  Const swizzling statistics:
 // CHECK:    Swizzled constants     - count: 0, size: 0 bytes
 // CHECK:    Not swizzled constants - count: 0, size: 0 bytes
+
+// -----
+
+module @DumpOpsStatisticsTest {
+
+    func.func @DDRDeclareBuffers(%arg0: memref<1x512x3x3xf16>, %arg1: memref<1x512x3x3xf16>) -> memref<1x512x3x3xf16, @DDR> {
+        %0 = VPURT.DeclareBuffer <DDR> <0> -> memref<1x512x3x3xf16, @DDR>
+        %1 = VPURT.DeclareBuffer <DDR> <4608> -> memref<1x512x3x3xf16, @DDR>
+
+        return %0 : memref<1x512x3x3xf16, @DDR>
+    } // func
+}
+
+// CHECK:   Input size - 9.00 KB Output size - 9.00 KB
+// CHECK:   DDR heap size - 13.50 KB
+// CHECK:   VPUIP tasks statistics:
+// CHECK:   VPUIP Tasks - 0 ops
+// CHECK:   Weights statistics
+// CHECK:     Total weights - count: 0, size: 0 bytes (no compression)
+// CHECK:   Const swizzling statistics:
+// CHECK:     Swizzled constants     - count: 0, size: 0 bytes
+// CHECK:     Not swizzled constants - count: 0, size: 0 bytes

@@ -4,6 +4,7 @@
 //
 
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
+#include "vpux/compiler/dialect/VPU/utils/manual_strategy_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/strategy_manager/strategy_manager.hpp"
 
 using namespace vpux;
@@ -18,8 +19,12 @@ namespace {
 class MultiClusterStrategyAssignmentPass final :
         public MultiClusterStrategyAssignmentBase<MultiClusterStrategyAssignmentPass> {
 public:
-    explicit MultiClusterStrategyAssignmentPass(bool enablePrefetchTiling, Logger log)
-            : _enablePrefetchTiling(enablePrefetchTiling) {
+    explicit MultiClusterStrategyAssignmentPass(bool enablePrefetchTiling, bool enableMcSideLoadingDump,
+                                                StringRef modelHash, Logger log)
+            : _enablePrefetchTiling(enablePrefetchTiling),
+
+              _enableMcSideLoadingDump(enableMcSideLoadingDump),
+              _modelHash(modelHash) {
         Base::initLogger(log, Base::getArgumentName());
     }
 
@@ -29,6 +34,8 @@ private:
 
 private:
     bool _enablePrefetchTiling = true;
+    bool _enableMcSideLoadingDump;
+    std::string _modelHash;
 };
 
 mlir::LogicalResult MultiClusterStrategyAssignmentPass::initializeOptions(StringRef options) {
@@ -48,24 +55,35 @@ mlir::LogicalResult MultiClusterStrategyAssignmentPass::initializeOptions(String
 
 void MultiClusterStrategyAssignmentPass::safeRunOnFunc() {
     auto func = getOperation();
-
     auto module = func->getParentOfType<mlir::ModuleOp>();
 
     auto tileOp = IE::getTileExecutor(module);
     VPUX_THROW_UNLESS(tileOp != nullptr, "Failed to get NCE_Cluster information");
 
-    if (tileOp.getCount() > 1) {
-        StrategyManager strategyManager(func, tileOp.getCount(), _enablePrefetchTiling, _log.nest());
-        _log.trace("Greedy Strategy Assignment");
-        auto module = func->getParentOfType<mlir::ModuleOp>();
-        auto enableMultiClusterForSWLayer = IE::getAvailableExecutor(module, VPU::ExecutorKind::SHAVE_ACT) != nullptr;
-        strategyManager.assignMultiClusterStrategy(enableMultiClusterForSWLayer);
-
-        _log.trace("Execute Subgraph Optimization");
-        strategyManager.optimizeMulticlusterStrategy();
-        _log.trace("Remove Temporary Strategy");
-        strategyManager.removeTemporaryMulticlusterStrategy();
+    if (tileOp.getCount() < 2) {
+        return;
     }
+
+    bool mcSideLoadSucceeded = false;
+    if (!_enableMcSideLoadingDump && isStrategyPreConfigured(_modelHash)) {
+        _log.trace("Found pre-defined strategy for model hash '{0}'", _modelHash);
+        mcSideLoadSucceeded = loadPreConfiguredStrategy(_log, func, _modelHash);
+    }
+    _log.warning("Compiler strategy match: {0}", mcSideLoadSucceeded);
+    if (mcSideLoadSucceeded) {
+        return;
+    }
+
+    auto& siblingAnalysis = getAnalysis<SiblingOpsAnalysis>();
+    StrategyManager strategyManager(func, tileOp.getCount(), _enablePrefetchTiling, _log.nest(), siblingAnalysis);
+    _log.trace("Greedy Strategy Assignment");
+    auto enableMultiClusterForSWLayer = IE::getAvailableExecutor(module, VPU::ExecutorKind::SHAVE_ACT) != nullptr;
+    strategyManager.assignMultiClusterStrategy(enableMultiClusterForSWLayer);
+
+    _log.trace("Execute Subgraph Optimization");
+    strategyManager.optimizeMulticlusterStrategy();
+    _log.trace("Remove Temporary Strategy");
+    strategyManager.removeTemporaryMulticlusterStrategy();
 }
 
 }  // namespace
@@ -74,6 +92,9 @@ void MultiClusterStrategyAssignmentPass::safeRunOnFunc() {
 // createMultiClusterStrategyAssignmentPass
 //
 
-std::unique_ptr<mlir::Pass> VPU::createMultiClusterStrategyAssignmentPass(bool enablePrefetchTiling, Logger log) {
-    return std::make_unique<MultiClusterStrategyAssignmentPass>(enablePrefetchTiling, log);
+std::unique_ptr<mlir::Pass> VPU::createMultiClusterStrategyAssignmentPass(bool enablePrefetchTiling,
+                                                                          bool enableMcSideLoadingDump,
+                                                                          StringRef modelHash, Logger log) {
+    return std::make_unique<MultiClusterStrategyAssignmentPass>(enablePrefetchTiling, enableMcSideLoadingDump,
+                                                                modelHash, log);
 }

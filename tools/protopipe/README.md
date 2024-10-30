@@ -96,13 +96,14 @@ There are two ways to describe the execution graph structure in Protopipe:
 The dependency graph in Protopipe is specified by:
 - `op_desc` - The list of operations, every operation has the following parameters:
   - `tag` - **Required**. The unique name of operation.
-  - `type` - **Optional**. The operation type: _Infer_, _CPU_ (**Default**: _Infer_)
+  - `type` - **Optional**. The operation type: _Infer_, _CPU_, _Compound_ (**Default**: _Infer_)
   - `repeat_count` - **Optional**. Runs operation over specified number of iterations.
 - `connections` - The list of connections between operations.
 
 Supported operation types
 1. `Infer` - Performs model inference. Follow [Model parameters](#model-parameters) for the details.
 2. `CPU` - Simulates CPU load by performing the busy wait during `time_in_us` amount of time in microseconds
+3. `Compound` - Defines a subgraphs that consists of `Infer` and `CPU` node types
 
 ```
 op_desc:
@@ -184,6 +185,46 @@ graph LR;
     B-->C
     B--->|20 iterations|B
 
+```
+**Example of "Compound" type operation**.
+```
+op_desc:
+  - { tag: A, path: Model-A.xml }
+  - {
+       tag: B,
+       type: Compound,
+       repeat_count: 10,
+       op_desc:
+         - { tag: D, path: Model-D.xml }
+         - { tag: E, path: Model-E.xml }
+         - { tag: F, path: Model-F.xml }
+       connections:
+         - [D, E]
+         - [D, F]
+    }
+  - { tag: C, path: Model-C.xml }
+connections:
+  - [A, B, C]
+```
+This defines the following pipeline:
+```mermaid
+graph LR;
+  A[Model-A.xml]
+  C[Model-C.xml]
+
+  subgraph B[Repeats 10 iterations]
+    direction LR
+    D[Model-D.xml]
+    E[Model-E.xml]
+    F[Model-F.xml]
+    
+    D --> E
+    D --> F
+
+  end
+  
+  A --> B
+  B --> C
 ```
 
 #### Network Sequence

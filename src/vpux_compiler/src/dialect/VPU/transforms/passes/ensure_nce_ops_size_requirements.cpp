@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -9,6 +9,7 @@
 #include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/generate_tiling.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
+#include "vpux/compiler/dialect/VPU/utils/ppe_version_config.hpp"
 #include "vpux/compiler/utils/VPU/ppe_utils.hpp"
 #include "vpux/compiler/utils/sparsity.hpp"
 
@@ -16,15 +17,29 @@ using namespace vpux;
 
 namespace {
 
-SmallVector<Dim> getDimsOverKHWLimit(ShapeRef shape) {
+SmallVector<Dim> getDimsOverKHWLimit(ShapeRef shape, ArrayRef<int64_t> dimThresholds) {
     SmallVector<Dim> wrongDims = {};
     for (size_t i = 0; i < shape.size(); i++) {
         const auto dim = Dim(i);
-        if (shape[dim] > VPU::NCEInvariant::VPU_DIMENSION_LIMIT) {
+        if (shape[dim] > dimThresholds[i]) {
             wrongDims.push_back(dim);
         }
     }
     return wrongDims;
+}
+
+bool hasSplitOverKernelStrategy(mlir::Operation* op) {
+    if (mlir::isa<VPU::ClusteredOpInterface>(op)) {
+        auto clusteredOp = mlir::cast<VPU::ClusteredOpInterface>(op);
+        const auto strategy = clusteredOp.getMultiClusterStrategy();
+        if (!strategy.has_value()) {
+            return false;
+        }
+
+        return strategy.value() == VPU::MultiClusterStrategy::SplitOverKernel;
+    }
+
+    return false;
 }
 
 class EnsureNCEOpSizeRequirements final : public mlir::OpInterfaceRewritePattern<VPU::TilingBuilderOpInterface> {
@@ -56,29 +71,40 @@ mlir::LogicalResult EnsureNCEOpSizeRequirements::matchAndRewrite(VPU::TilingBuil
     const auto tilingMode = TilingMode::ISOLATED;
     const auto tileDimOrder = getTileDimOrder(op, tilingMode, log);
     _log.nest(4).trace("Tile Dim order is {0}", tileDimOrder);
+    const auto moduleOp = op->getParentOfType<mlir::ModuleOp>();
+    const auto numClusters = IE::getTileExecutor(moduleOp).getCount();
 
-    const auto isSupportedTileSize = [&](ShapeRef nTilesOnDim, int32_t dimToTile) -> bool {
+    const auto isSupportedTileSize = [&](ShapeRef nTilesOnDim, Dim dimToTile, ArrayRef<int64_t> dimThresholds) -> bool {
         const auto tiles = fillDividedTiles(op, nTilesOnDim, outputShape);
         if (mlir::failed(tiles)) {
             return false;
         }
         for (auto tile : tiles.value()) {
-            if (tile.shape.raw()[dimToTile] > VPU::NCEInvariant::VPU_DIMENSION_LIMIT) {
+            if (tile.shape[dimToTile] > dimThresholds[dimToTile.ind()]) {
                 return false;
             }
             auto inputTiling = origOp.backInferTileInfo(tile, log);
             auto& inTiles = inputTiling.tiles;
-            if ((dimToTile != Dims4D::Act::C.ind()) &&
-                (inTiles.begin()->shape.raw()[dimToTile] > VPU::NCEInvariant::VPU_DIMENSION_LIMIT)) {
+            if ((dimToTile != Dims4D::Act::C) &&
+                (inTiles.begin()->shape[dimToTile] > VPU::NCEInvariant::VPU_DIMENSION_LIMIT)) {
                 return false;
             }
         }
         return true;
     };
 
+    // Construct dim-specific thresholds for input and output shapes
+    // In our test, extending the threshold on Dim C can improve performance by reducing workloads for SOK NCE
+    // operations when the number of clusters is greater than 2
+    SmallVector<int64_t> outputDimThresholds(outputShape.size(), VPU::NCEInvariant::VPU_DIMENSION_LIMIT);
+    if (hasSplitOverKernelStrategy(op) && numClusters > 2) {
+        outputDimThresholds[(Dims4D::Act::C).ind()] = VPU::NCEInvariant::VPU_DIMENSION_LIMIT * numClusters;
+    }
+
     for (auto tileDimIter = tileDimOrder.begin(); tileDimIter < tileDimOrder.end(); ++tileDimIter) {
         auto dimToTile = *tileDimIter;
-        while (!isSupportedTileSize(nTilesOnDim, dimToTile.ind())) {
+        while (!isSupportedTileSize(nTilesOnDim, dimToTile, outputDimThresholds)) {
+            _log.nest(1).trace("Failed to tile {0} at {1} with {2}", op->getName(), dimToTile, nTilesOnDim);
             ++nTilesOnDim[dimToTile];
         }
     }
@@ -95,6 +121,7 @@ mlir::LogicalResult EnsureNCEOpSizeRequirements::matchAndRewrite(VPU::TilingBuil
         return mlir::failure();
     }
 
+    _log.nest(1).trace("Apply Tiling Strategy for {0} with {1}", op->getName(), nTilesOnDim);
     return VPU::applyTileStrategy(origOp, tilesNew.value(), rewriter, log.nest());
 }
 
@@ -104,14 +131,13 @@ mlir::LogicalResult EnsureNCEOpSizeRequirements::matchAndRewrite(VPU::TilingBuil
 
 class EnsureConvICRequirements final : public mlir::OpRewritePattern<VPU::NCEConvolutionOp> {
 public:
-    EnsureConvICRequirements(mlir::MLIRContext* ctx, VPU::ArchKind arch, Logger log)
-            : mlir::OpRewritePattern<VPU::NCEConvolutionOp>(ctx), _arch(arch), _log(log) {
+    EnsureConvICRequirements(mlir::MLIRContext* ctx, Logger log)
+            : mlir::OpRewritePattern<VPU::NCEConvolutionOp>(ctx), _log(log) {
         this->setDebugName("EnsureConvICRequirements");
     }
     mlir::LogicalResult matchAndRewrite(VPU::NCEConvolutionOp origOp, mlir::PatternRewriter& rewriter) const final;
 
 private:
-    VPU::ArchKind _arch;
     Logger _log;
 };
 
@@ -147,7 +173,23 @@ mlir::LogicalResult EnsureConvICRequirements::matchAndRewrite(VPU::NCEConvolutio
 
     Shape nTilesOnDim(inputShape.size(), 1);
     nTilesOnDim[Dims4D::Act::C] = maxTiles;
-    const auto tiles = fillDividedTiles(origOp, nTilesOnDim, inputShape);
+    SmallVector<int64_t> alignment(inputShape.size(), 1);
+    auto inType = origOp.getInput().getType().cast<vpux::NDTypeInterface>();
+    auto weightsType = origOp.getFilter().getType().cast<vpux::NDTypeInterface>();
+    auto inAlignment = VPU::NCEInvariant::getAlignment(inType.getElementType());
+    auto weightsAlignment = VPU::NCEInvariant::getAlignment(weightsType.getElementType());
+    // Weights alignment requirement is IC * KH * KW aligned with weightsAlignment. For
+    // int4 case, weightsAlignment = 32, if KH = 2, then IC = 16 can meet the requirement.
+    // So here we fist check if inAlignment can meet the requirement or not.
+    if ((inAlignment * kernelW * kernelH) % weightsAlignment == 0) {
+        alignment[Dims4D::Act::C.ind()] = inAlignment;
+    } else {
+        alignment[Dims4D::Act::C.ind()] = weightsAlignment;
+    }
+
+    auto optionalAlignment = std::optional<ArrayRef<int64_t>>(alignment);
+    const auto tiles = fillDividedTiles(nTilesOnDim, inputShape, optionalAlignment);
+
     if (mlir::failed(tiles)) {
         return mlir::failure();
     }
@@ -166,6 +208,10 @@ mlir::LogicalResult EnsureConvICRequirements::matchAndRewrite(VPU::NCEConvolutio
 
     auto filterType = origOp.getFilter().getType().cast<vpux::NDTypeInterface>();
     auto filterElemType = filterType.getElementType();
+
+    // Note: A new PPE is generated, ignoring post-op's, since NCEConvolutionOp is not a LayerWithPostOp.
+    // The old PPE attribute, with post-op's, ends up in the final AddOp
+    const auto ppeOpaqueAttr = VPU::PpeVersionConfig::retrievePPEAttribute(origOp);
 
     // TODO: E#70371 - Remaining opens for InputChannels 8K size
     for (auto tile = 0; tile < maxTiles; tile++) {
@@ -221,9 +267,8 @@ mlir::LogicalResult EnsureConvICRequirements::matchAndRewrite(VPU::NCEConvolutio
         auto weightsTable = VPU::createWeightsTableTensor(rewriter, origOp->getLoc(), weightsTableVec);
         auto convOp = rewriter.create<VPU::NCEConvolutionOp>(
                 origOp.getLoc(), origOp.getType(), convInput.getResult(), convFilter.getResult(), weightsTable,
-                origOp.getActivationWindow(), origOp.getInstructionListTable(), origOp.getStrides(), origOp.getPad(),
-                nullptr, rawKernelSliceShape, origOp.getActivationWindowChannelLengthAttr(),
-                origOp.getMultiClusterStrategyAttr());
+                origOp.getInstructionListTable(), origOp.getStrides(), origOp.getPad(), ppeOpaqueAttr,
+                rawKernelSliceShape, origOp.getMultiClusterStrategyAttr());
 
         convOps.push_back(convOp);
     }
@@ -240,16 +285,10 @@ mlir::LogicalResult EnsureConvICRequirements::matchAndRewrite(VPU::NCEConvolutio
     for (size_t index = 0; index < convOps.size() - 1; index++) {
         auto addOperand = index == 0 ? convOps[index].getOutput() : addResult.getOutput();
 
-        // Construct ppeTaskAttr for NCEEltwise (the last NCEEltwiseAdd will get the PPE from the original Conv)
-        auto ppeTaskAttr = VPU::getNCEEltwisePPETaskAttr(addOperand.getType(), convOps[index + 1].getOutput().getType(),
-                                                         addOperand.getType(), nullptr, addOperand.getLoc(), opType,
-                                                         addOperand.getContext(), _arch);
-
         // NCEEltwise inType and outType are always same with ConvOp outType
         addResult = rewriter.create<VPU::NCEEltwiseOp>(
                 origOp->getLoc(), targetEltwiseOutputType, addOperand, convOps[index + 1].getOutput(), opType,
-                ((index == (convOps.size() - 2) && origOp.getPpe().has_value()) ? origOp.getPpeAttr() : ppeTaskAttr),
-                nullptr, nullptr);
+                (index == convOps.size() - 2 ? origOp.getOpaquePpeAttr() : ppeOpaqueAttr), nullptr, nullptr);
 
         // change NCEConv's output layout to supported NCEEltwise input layout
         // Eg: if NCEConv (inL=NHWC,outL=NCHW) splits into 3 small NCEConv:
@@ -313,8 +352,7 @@ private:
 void EnsureNCEOpsSizeRequirementsPass::safeRunOnFunc() {
     auto& ctx = getContext();
     auto func = getOperation();
-    auto module = func->getParentOfType<mlir::ModuleOp>();
-    const auto arch = VPU::getArch(module);
+    auto moduleOp = func->getParentOfType<mlir::ModuleOp>();
 
     mlir::ConversionTarget target(ctx);
     mlir::RewritePatternSet patterns(&ctx);
@@ -329,7 +367,7 @@ void EnsureNCEOpsSizeRequirementsPass::safeRunOnFunc() {
         return inputShape[Dims4D::Act::C] <= VPU::NCEInvariant::VPU_DIMENSION_LIMIT;
     });
 
-    patterns.add<EnsureConvICRequirements>(&ctx, arch, _log);
+    patterns.add<EnsureConvICRequirements>(&ctx, _log);
 
     if (mlir::failed(mlir::applyPartialConversion(getOperation(), target, std::move(patterns)))) {
         signalPassFailure();
@@ -343,14 +381,25 @@ void EnsureNCEOpsSizeRequirementsPass::safeRunOnFunc() {
         if (mlir::isa<VPU::TilingInfoOpInterface>(op)) {
             const auto inputShape = getShape(op->getOperand(0));
             const auto outputShape = getShape(op->getResult(0));
+            const auto numClusters = IE::getTileExecutor(moduleOp).getCount();
 
-            auto inSizeWrongDims = getDimsOverKHWLimit(inputShape);
-            if (!inSizeWrongDims.empty()) {
-                _log.nest(2).info("Input size has dims greater than HW requirements: {0}", inSizeWrongDims);
+            // Construct dim-specific thresholds for input and output shapes
+            // In our test, extending the threshold on Dim C can improve performance by reducing workloads for SOK NCE
+            // operations when the number of clusters is greater than 2
+            SmallVector<int64_t> inputDimThresholds(inputShape.size(), VPU::NCEInvariant::VPU_DIMENSION_LIMIT);
+            SmallVector<int64_t> outputDimThresholds(outputShape.size(), VPU::NCEInvariant::VPU_DIMENSION_LIMIT);
+            if (hasSplitOverKernelStrategy(op) && numClusters > 2) {
+                inputDimThresholds[(Dims4D::Act::C).ind()] = VPU::NCEInvariant::VPU_DIMENSION_LIMIT * numClusters;
+                outputDimThresholds[(Dims4D::Act::C).ind()] = VPU::NCEInvariant::VPU_DIMENSION_LIMIT * numClusters;
             }
-            const auto outSizeWrongDims = getDimsOverKHWLimit(outputShape);
+
+            auto inSizeWrongDims = getDimsOverKHWLimit(inputShape, inputDimThresholds);
+            if (!inSizeWrongDims.empty()) {
+                _log.nest(2).debug("Input size has dims greater than HW requirements: {0}", inSizeWrongDims);
+            }
+            const auto outSizeWrongDims = getDimsOverKHWLimit(outputShape, outputDimThresholds);
             if (!outSizeWrongDims.empty()) {
-                _log.nest(2).info("Output size has dims greater than HW requirements: {0}", outSizeWrongDims);
+                _log.nest(2).debug("Output size has dims greater than HW requirements: {0}", outSizeWrongDims);
             }
             return inSizeWrongDims.empty() && outSizeWrongDims.empty();
         }

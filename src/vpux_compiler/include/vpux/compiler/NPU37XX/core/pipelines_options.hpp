@@ -31,15 +31,9 @@ struct DefaultHWOptionsDeviceBase : public virtual vpux::DefaultHWOptionsBase {
                                                   llvm::cl::desc("Enable the experimental operation of SEP"),
                                                   llvm::cl::init(false)};
 
-    BoolOption enableStartBarrier{*this, "enable-start-barrier", llvm::cl::desc("Enable start barrier"),
-                                  llvm::cl::init(true)};
-
-    BoolOption enableFinalBarrier{*this, "enable-final-barrier", llvm::cl::desc("Enable final barrier"),
-                                  llvm::cl::init(true)};
-
-    BoolOption enableExplicitDistributedTensorAttr{
+    BoolOption enableExplicitDistributionInfoAttr{
             *this, "enable-explicit-distributed-attr",
-            llvm::cl::desc("Enable DistributedTensorAttr with explicit per cluster memory/compute shapes & offsets"),
+            llvm::cl::desc("Enable DistributionInfoAttr with explicit per cluster memory/compute shapes & offsets"),
             llvm::cl::init(false)};
 
     BoolOption supportNCEOpInsertion{

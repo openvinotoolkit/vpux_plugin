@@ -53,8 +53,8 @@ module @mainModule attributes {VPU.arch = #VPU.arch_kind<NPU40XX>} {
         // CHECK:  UINT dma_width_dst at 32 size 32 = 0x2000
         // CHECK:  UINT dma_src at 0 size 48 = 0
         // CHECK:  UINT dma_dst at 0 size 48 = 0
-        // CHECK:  dma_barrier_prod_mask_lower offset 64 size 64 = UINT 1,
-        // CHECK:  dma_barrier_cons_mask_lower offset 72 size 64 = UINT 0,
+        // CHECK:  dma_barrier_prod_mask_lower offset 64 size 64 = UINT 1
+        // CHECK:  dma_barrier_cons_mask_lower offset 72 size 64 = UINT 0
         // CHECK:  UINT dma_barrier_prod_mask_upper at 0 size 32 = 0
         // CHECK:  UINT dma_barrier_cons_mask_upper at 0 size 32 = 0
         VPUASM.NNDMA @NNDMA_0_0_1 idx(!VPURegMapped.Index<0:0:1>) taskLocation(@builtin.tasks.DMA0::@DeclareTaskBuffer_DMA_1) links(@text.nndma0::@NNDMA_0_0_2) input(@DeclareBuffer0) outputs([@builtin.data.nncmx0::@DeclareBuffer3]) waits([0 : ui8]) updates([1 : ui8]) start_after(0) clean_after(0) descriptor(#VPUIP.DMADescriptorAttr<numPlanes = 0 : i32, len = 0x2000 : i32, srcWidth = 0x2000 : i32, srcStride = 0x2000 : i32, srcPlaneStride = 0 : i32, dstWidth = 0x2000 : i32, dstStride = 0x2000 : i32, dstPlaneStride = 0 : i32>) acceleration_mode(<DISABLE>)
@@ -66,8 +66,8 @@ module @mainModule attributes {VPU.arch = #VPU.arch_kind<NPU40XX>} {
         // CHECK:  UINT dma_width_dst at 32 size 32 = 0x2000
         // CHECK:  UINT dma_src at 0 size 48 = 0
         // CHECK:  UINT dma_dst at 0 size 48 = 0
-        // CHECK:  dma_barrier_prod_mask_lower offset 64 size 64 = UINT 2,
-        // CHECK:  dma_barrier_cons_mask_lower offset 72 size 64 = UINT 1,
+        // CHECK:  dma_barrier_prod_mask_lower offset 64 size 64 = UINT 2
+        // CHECK:  dma_barrier_cons_mask_lower offset 72 size 64 = UINT 1
         // CHECK:  UINT dma_barrier_prod_mask_upper at 0 size 32 = 0
         // CHECK:  UINT dma_barrier_cons_mask_upper at 0 size 32 = 0
         VPUASM.NNDMA @NNDMA_0_0_2 idx(!VPURegMapped.Index<0:0:2>) taskLocation(@builtin.tasks.DMA0::@DeclareTaskBuffer_DMA_2) input(@builtin.data.nncmx0::@DeclareBuffer3) outputs([@DeclareBuffer1]) waits([1 : ui8]) updates([]) start_after(0) clean_after(0) descriptor(#VPUIP.DMADescriptorAttr<numPlanes = 0 : i32, len = 0x2000 : i32, srcWidth = 0x2000 : i32, srcStride = 0x2000 : i32, srcPlaneStride = 0 : i32, dstWidth = 0x2000 : i32, dstStride = 0x2000 : i32, dstPlaneStride = 0 : i32>) acceleration_mode(<DISABLE>)
@@ -79,8 +79,8 @@ module @mainModule attributes {VPU.arch = #VPU.arch_kind<NPU40XX>} {
         // CHECK:  UINT dma_width_dst at 32 size 32 = 0x2000
         // CHECK:  UINT dma_src at 0 size 48 = 0x200000
         // CHECK:  UINT dma_dst at 0 size 48 = 0
-        // CHECK:  dma_barrier_prod_mask_lower offset 64 size 64 = UINT 0,
-        // CHECK:  dma_barrier_cons_mask_lower offset 72 size 64 = UINT 2,
+        // CHECK:  dma_barrier_prod_mask_lower offset 64 size 64 = UINT 0
+        // CHECK:  dma_barrier_cons_mask_lower offset 72 size 64 = UINT 2
         // CHECK:  UINT dma_barrier_prod_mask_upper at 0 size 32 = 0
         // CHECK:  UINT dma_barrier_cons_mask_upper at 0 size 32 = 0
       }

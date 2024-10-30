@@ -26,10 +26,11 @@ void vpux::VPUIP::arch37xx::buildOptimizeCopiesPipeline(mlir::OpPassManager& pm,
                                                         Logger log) {
     if (options.enableOptimizeCopies) {
         pm.addPass(VPUIP::createOptimizeCopiesPass(log));
+        pm.addPass(VPUIP::createUnwrapClusterTilingPass(log));
         pm.addPass(VPUIP::createOptimizeConcatViewCopiesPass(log));
         pm.addPass(VPUIP::createFuseDDRCopiesIntoConcats(log));
-        pm.addPass(VPUIP::createUnwrapClusterTilingPass(log));
         pm.addPass(VPUIP::createOptimizeParallelCopiesPass(options.enableOptimizeConstCopies, log));
+        pm.addPass(VPUIP::createOptimizeSubviewCopiesPass(log));
         pm.addPass(VPUIP::createFuseLastCopyPass(log));
         if (options.enableOpsAsDMA) {
             pm.addPass(VPUIP::createOptimizeTileOpAsNNDMAPass(log));
@@ -59,7 +60,6 @@ void vpux::VPUIP::arch37xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
     const auto grc = getDefaultGreedyRewriteConfig();
 
     pm.addPass(VPUIP::createTileActShaveKernelTaskPass(log));
-    pm.addPass(mlir::createCanonicalizerPass(grc));
     if (options.enableOptimizeCopies || options.enableOpsAsDMA) {
         // This pass is a part of "copy optimization pipeline", but need to be done before because
         // WrapWithPermuteAsNNDMA depends on it.
@@ -72,12 +72,10 @@ void vpux::VPUIP::arch37xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
     pm.addPass(mlir::createCanonicalizerPass(grc));
 
     pm.addPass(VPUIP::createConvertEltwiseToInPlacePass(log));
-    pm.addPass(mlir::createCanonicalizerPass(grc));
 
     // Level 2 : Abstract RunTime
 
     pm.addPass(VPUIP::createSetMemorySpacePass(vpux::VPU::getMemKind<VPU::MemoryKind::DDR>, log));
-    pm.addPass(mlir::createCanonicalizerPass(grc));
 
     if (options.enableSEPtrsOperations || options.enableExperimentalSEPtrsOperations) {
         pm.addPass(VPUIP::createMoveSubViewBeforeSparseBufferPass(log));
@@ -89,7 +87,6 @@ void vpux::VPUIP::arch37xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
     }
     if (options.enableWeightsSparsity || VPU::isActSparsityEnabled(options.enableActivationSparsity)) {
         pm.addPass(VPUIP::createUngroupSparseBuffersPass(log));
-        pm.addPass(mlir::createCanonicalizerPass(grc));
     }
 
     pm.addPass(VPUIP::createUngroupBoundedBuffersPass(log));
@@ -144,11 +141,17 @@ void vpux::VPUIP::arch37xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
         pm.addPass(VPUIP::createSWKernelPrefetchingReserveMemPass(log));
     }
 
+    pm.addPass(VPUIP::createAddCopyBetweenSWKernelsAndNetworkIOPass(log));
+
     pm.addPass(VPUIP::createCalculateAsyncRegionCycleCostPass(log));
 
     VPUIP::arch37xx::buildMemoryAllocationPipeline(pm, VPUIP::arch37xx::MemoryAllocationOptions(options), log);
 
     pm.addPass(VPUIP::createOptimizeAsyncDepsPass(log));
+
+    if (options.enablePopulateWeightTableWithShave) {
+        pm.addPass(VPUIP::createPatchPopulateWeightTableWithShavePass(log));
+    }
 
     // Handle WeightsTable, which requires statically allocated memory
     pm.addPass(VPUIP::createPatchWeightsTablePass(log));
@@ -181,15 +184,16 @@ void vpux::VPUIP::arch37xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
     pm.addPass(VPUIP::createUnrollExpandDMAPass(log));
     pm.addPass(VPUIP::createUnrollPerAxisTileDMAPass(log));
 
+    bool isOutliningEnabled = options.functionOutlining.hasValue();
+
     // TODO: E#118869 For now put the pass before barrier scheduling
-    if (options.enableFunctionOutlining) {
+    if (isOutliningEnabled) {
         pm.addPass(mlir::createInlinerPass());
     }
 
     if (options.enableControlGraphSplit) {
         pm.addPass(VPURT::createSplitControlGraphPass(options.controlGraphSplitBlockSize, log));
     }
-    pm.addPass(VPUIP::createReduceBarrierDependenciesPass(log));
 
     if (!options.linearizeSchedule) {
         pm.addPass(VPUIP::createDMABarrierOptimizationPass(log));
@@ -200,11 +204,10 @@ void vpux::VPUIP::arch37xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
                                                      options.reduceParallelControlFlows, log));
     }
 
-    VPURT::buildBarrierLegalizationPipeline(pm, false, false, log);
+    VPURT::buildBarrierLegalizationPipeline(pm, /* wlmFlag */ false, std::nullopt,
+                                            /* unevenVariantSplitFlag */ false, log);
 
-    if (options.enableFinalBarrier) {
-        pm.addPass(VPURT::arch37xx::createAddFinalBarrierPass(log));
-    }
+    pm.addPass(VPURT::arch37xx::createAddFinalBarrierPass(log));
 
     pm.addPass(VPURT::arch37xx::createAddUpdateBarrierForSwKernelsPass(log));
 
@@ -224,7 +227,8 @@ void vpux::VPUIP::arch37xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
         pm.addPass(createMoveDeclarationsToTopPass(log));
     }
 
-    pm.addPass(VPURT::createAssignPhysicalBarriersPass(false, log));
+    pm.addPass(VPURT::createAssignPhysicalBarriersPass(false, options.enableColorBinPhysicalBarrierAssignment,
+                                                       std::nullopt, log));
     pm.addPass(VPURT::createBarrierSimulationPass(log));
     pm.addPass(mlir::createCanonicalizerPass(grc));
     pm.nest<mlir::func::FuncOp>().addNestedPass<Const::DeclareOp>(Const::createConstantFoldingPass());
@@ -233,6 +237,10 @@ void vpux::VPUIP::arch37xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
     // this would be done by a custom canonicalizer by matching the different dialect's subview operations
     // and their constant inputs. Strides in constants should have never reached this point in the first place!
     pm.addPass(mlir::createCanonicalizerPass(grc));
+
+    if (options.enableIntermediateBufferOutput) {
+        pm.addPass(VPURT::createIntermediateBufferOutputPass(log));
+    }
 
     if (options.enableActivityFactor || options.enableScheduleTrace) {
         pm.addPass(VPURT::createInferenceExecutionAnalysisPass(options.scheduleTraceFile, options.enableScheduleTrace,

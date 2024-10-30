@@ -4,167 +4,139 @@
 //
 
 #include "vpux/compiler/dialect/IE/utils/fake_quantize_utils.hpp"
+#include <llvm/Support/raw_ostream.h>
+#include <mlir/IR/Value.h>
 
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
+#include "vpux/compiler/dialect/IE/utils/broadcast_utils.hpp"
+#include "vpux/compiler/dialect/const/ops.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/loop.hpp"
-#include "vpux/utils/core/numeric.hpp"
+#include "vpux/utils/core/range.hpp"
+
+#include <cstdint>
 
 namespace vpux {
 namespace IE {
 
-mlir::LogicalResult broadcastContentAttrs(Const::ContentAttr& inLowContentAttr, Const::ContentAttr& inHighContentAttr,
-                                          Const::ContentAttr& transformContentAttr, const Logger& log) {
-    auto transformShape = transformContentAttr.getType().getShape();
-    auto inLowShape = inLowContentAttr.getType().getShape();
+namespace {
+template <typename Transform>
+mlir::LogicalResult applyTransformationInplace(mlir::MLIRContext* ctx, FqData& data, Const::Content&& transform,
+                                               Transform transformCb, const Logger& log) {
+    auto& [inLow, inHigh] = data;
 
-    // Align ranks
-    if (transformShape.size() != inLowShape.size()) {
-        if (transformShape.size() == 1 && transformShape[Dim(0)] == 1) {
-            transformContentAttr.reshape(Shape(SmallVector<int64_t>(inLowShape.size(), 1)));
-            transformShape = transformContentAttr.getType().getShape();
-        } else if (inLowShape.size() == 1 && inLowShape[Dim(0)] == 1) {
-            inLowContentAttr.reshape(Shape(SmallVector<int64_t>(inLowShape.size(), 1)));
-            inLowShape = transformContentAttr.getType().getShape();
-            inHighContentAttr.reshape(inLowShape);
-        } else {
-            log.trace("The transform rank {0} is not equal with inLow rank {1}", transformShape.size(),
-                      inLowShape.size());
-            return mlir::failure();
-        }
+    // must hold by definition and uniformity of transformations
+    VPUX_THROW_UNLESS(inLow.getType() == inHigh.getType(), "FQ's input low and input high types differ: {0} vs {1}",
+                      inLow.getType(), inHigh.getType());
+    if (mlir::failed(vpux::IE::broadcastAlignShapes(ctx, inLow, transform, log))) {
+        log.trace("Didn't manage to broadcast const content attributes");
+        return mlir::failure();
     }
-
-    log.trace("broadcastContentAttrs: Aligned the transformation and input shapes");
-
-    // Align inLowCst/inHighCst and tranformCst shapes
-    for (size_t i = 0; i < transformShape.size(); i++) {
-        if (transformShape[Dim(i)] == 1 && inLowShape[Dim(i)] > 1) {
-            transformContentAttr = transformContentAttr.broadcast(Dim(i), inLowShape[Dim(i)]);
-        } else if (inLowShape[Dim(i)] == 1 && transformShape[Dim(i)] > 1) {
-            inLowContentAttr = inLowContentAttr.broadcast(Dim(i), transformShape[Dim(i)]);
-            inHighContentAttr = inHighContentAttr.broadcast(Dim(i), transformShape[Dim(i)]);
-        } else if (transformShape[Dim(i)] > 1 && inLowShape[Dim(i)] > 1 &&
-                   transformShape[Dim(i)] != inLowShape[Dim(i)]) {
-            log.trace("Cannot broadcast sizes inLow/inHigh dim = {0} and transform dim = {1}", inLowShape[Dim(i)],
-                      transformShape[Dim(i)]);
-            return mlir::failure();
-        }
-    }
-    log.trace("broadcastContentAttrs: Broadcasted the transformation and input shapes");
-
-    return mlir::success();
-}
-
-mlir::FailureOr<std::tuple<Const::ContentAttr, Const::ContentAttr, mlir::RankedTensorType>> applyTransformation(
-        Const::ContentAttr inLowContentAttr, Const::ContentAttr inHighContentAttr,
-        Const::ContentAttr transformContentAttr, const std::function<float(float, float)>& transformCb,
-        const Logger& log) {
-    if (mlir::failed(broadcastContentAttrs(inLowContentAttr, inHighContentAttr, transformContentAttr, log))) {
+    // Note: technically, if first succeeded, the second must also succeed.
+    if (mlir::failed(vpux::IE::broadcastAlignShapes(ctx, inHigh, transform, log))) {
         log.trace("Didn't manage to broadcast const content attributes");
         return mlir::failure();
     }
 
-    // Get content of broadcasted input low, input high and scale/shift constants
-    const auto broadcastedTransformContent = transformContentAttr.fold();
-    const auto broadcastedInLowContent = inLowContentAttr.fold();
-    const auto broadcastedInHighContent = inHighContentAttr.fold();
-    const auto broadcastedTransformBaseElemType = broadcastedTransformContent.getType().getElementType();
-    const auto broadcastedInLowValues = to_small_vector(broadcastedInLowContent.getValues<float>());
-    const auto broadcastedInHighValues = to_small_vector(broadcastedInHighContent.getValues<float>());
-    const auto broadcastedTransformValues = to_small_vector(broadcastedTransformContent.getValues<float>());
+    // must hold by construction and type-preserving transformations
+    VPUX_THROW_UNLESS(inLow.getStorageElemType().isF32() && inLow.getStorageElemType() == inHigh.getStorageElemType(),
+                      "Unexpected storage element type: {0}", inLow.getStorageElemType());
+
+    const auto inLowValues = to_small_vector(inLow.getValues<float>());
+    const auto inHighValues = to_small_vector(inHigh.getValues<float>());
+    const auto transformValues = to_small_vector(transform.getValues<float>());
+
+    const auto commonType = inLow.getType();
+    const bool commonSplat = inLow.isSplat() && transform.isSplat();
+    auto outLowContent = Const::Content::allocTempBuffer(commonType, inLow.getStorageElemType(), commonSplat);
+    auto outHighContent = Const::Content::allocTempBuffer(commonType, inLow.getStorageElemType(), commonSplat);
 
     // Apply transformation
-    auto outLowValues = SmallVector<float>(broadcastedTransformValues.size(), 0);
-    auto outHighValues = SmallVector<float>(broadcastedTransformValues.size(), 0);
-    loop_1d(LoopExecPolicy::Parallel, transformContentAttr.getType().getElementType().getContext(),
-            broadcastedTransformValues.size(), [&](size_t i) {
-                outLowValues[i] = transformCb(broadcastedInLowValues[i], broadcastedTransformValues[i]);
-                outHighValues[i] = transformCb(broadcastedInHighValues[i], broadcastedTransformValues[i]);
-            });
+    auto outLowValues = outLowContent.getTempBuf<float>();
+    auto outHighValues = outHighContent.getTempBuf<float>();
+    // E#131318: it is not clear whether this has to be run in parallel or if
+    // sequential computation is enough.
+    loop_1d(LoopExecPolicy::Parallel, ctx, outLowValues.size(), [&](size_t i) {
+        outLowValues[i] = transformCb(inLowValues[i], transformValues[i]);
+        outHighValues[i] = transformCb(inHighValues[i], transformValues[i]);
+    });
 
-    auto outConstShape = inLowContentAttr.getType().dyn_cast<vpux::NDTypeInterface>().getShape();
-    auto outStorageType = mlir::RankedTensorType::get(outConstShape.raw(), broadcastedTransformBaseElemType);
-    const auto outLowDenseElementVal = wrapData(outStorageType, outLowValues);
-    const auto outHighDenseElementVal = wrapData(outStorageType, outHighValues);
-    auto outLowContentAttr = Const::ContentAttr::get(outLowDenseElementVal);
-    auto outHighContentAttr = Const::ContentAttr::get(outHighDenseElementVal);
-    return std::make_tuple(outLowContentAttr, outHighContentAttr, outStorageType);
+    data.low = Const::Content::moveBuffer(commonType, std::move(outLowContent));
+    data.high = Const::Content::moveBuffer(commonType, std::move(outHighContent));
+    return mlir::success();
 }
 
-mlir::LogicalResult applyScaleShift(const Const::ContentAttr& scale, const Const::ContentAttr& shift,
-                                    Const::ContentAttr& low, Const::ContentAttr& high,
-                                    vpux::NDTypeInterface& storageType, const Logger& log) {
-    // Applies X * (1/scale) + shift to the given low and high tensors
+Const::Content splatToContent(mlir::MLIRContext* ctx, vpux::NDTypeInterface inType, float splat) {
+    // Note: unfortunately, allocTempBuffer() would always allocate here even
+    // for 1 element! ideally, it would be able to store a single splat value
+    // without any allocation whatsoever.
+    auto content = Const::Content::allocTempBuffer(mlir::cast<mlir::RankedTensorType>(inType),
+                                                   mlir::Float32Type::get(ctx), true);
+    content.getTempBuf<float>()[0] = splat;
+    return content;
+}
+}  // namespace
+
+mlir::FailureOr<FqData> applyScaleShift(mlir::MLIRContext* ctx, const Const::ContentAttr& scale,
+                                        const Const::ContentAttr& shift, float low, float high,
+                                        vpux::NDTypeInterface storageType, const Logger& log) {
+    // Applies X * (1/scale) + shift to the given low and high values
+    FqData data{splatToContent(ctx, storageType, low), splatToContent(ctx, storageType, high)};
 
     // Apply scale (if given)
     if (scale != nullptr) {
-        auto applyScaleResult = IE::applyTransformation(low, high, scale, std::divides<float>(), log);
-        if (mlir::failed(applyScaleResult)) {
+        if (mlir::failed(applyTransformationInplace(ctx, data, scale.fold(), std::divides<float>(), log))) {
             return mlir::failure();
         }
-        std::tie(low, high, storageType) = applyScaleResult.value();
     }
 
     // Apply shift (if given)
     if (shift != nullptr) {
-        auto applyShiftResult = IE::applyTransformation(low, high, shift, std::plus<float>(), log);
-        if (mlir::failed(applyShiftResult)) {
+        if (mlir::failed(applyTransformationInplace(ctx, data, shift.fold(), std::plus<float>(), log))) {
             return mlir::failure();
         }
-        std::tie(low, high, storageType) = applyShiftResult.value();
     }
 
-    return mlir::success();
+    return data;
 }
 
-mlir::LogicalResult revertScaleShift(const Const::ContentAttr& scale, const Const::ContentAttr& shift,
-                                     Const::ContentAttr& low, Const::ContentAttr& high,
-                                     vpux::NDTypeInterface& storageType, const Logger& log) {
+mlir::FailureOr<FqData> revertScaleShift(mlir::MLIRContext* ctx, const Const::ContentAttr& scale,
+                                         const Const::ContentAttr& shift, float low, float high,
+                                         vpux::NDTypeInterface storageType, const Logger& log) {
     // Applies (X - shift) * scale to the given low and high tensors
+    FqData data{splatToContent(ctx, storageType, low), splatToContent(ctx, storageType, high)};
 
     // Apply shift (if given)
     if (shift != nullptr) {
-        auto applyShiftResult = IE::applyTransformation(low, high, shift, std::minus<float>(), log);
-        if (mlir::failed(applyShiftResult)) {
+        if (mlir::failed(applyTransformationInplace(ctx, data, shift.fold(), std::minus<float>(), log))) {
             return mlir::failure();
         }
-        std::tie(low, high, storageType) = applyShiftResult.value();
     }
 
     // Apply scale (if given)
     if (scale != nullptr) {
-        auto applyScaleResult = IE::applyTransformation(low, high, scale, std::multiplies<float>(), log);
-        if (mlir::failed(applyScaleResult)) {
+        if (mlir::failed(applyTransformationInplace(ctx, data, scale.fold(), std::multiplies<float>(), log))) {
             return mlir::failure();
         }
-        std::tie(low, high, storageType) = applyScaleResult.value();
     }
 
-    return mlir::success();
-}
-
-template <typename NewT>
-Const::ContentAttr castStorageType(const Const::Content& content) {
-    const auto contentType = content.getType();
-    const auto tensorType = contentType.cast<mlir::RankedTensorType>();
-    const auto size = checked_cast<size_t>(contentType.getNumElements());
-    const auto byteSize = checked_cast<size_t>(contentType.getTotalAllocSize().count());
-
-    std::vector<NewT> tempBuffer(size);
-    content.copyTo(MutableArrayRef(reinterpret_cast<char*>(tempBuffer.data()), byteSize));
-
-    auto denseAttr = mlir::DenseElementsAttr::getFromRawBuffer(
-            tensorType, ArrayRef(reinterpret_cast<char*>(tempBuffer.data()), byteSize));
-
-    return Const::ContentAttr::get(denseAttr);
+    return data;
 }
 
 mlir::LogicalResult WeightsDequantizeStructureInfo::initializeStructure(IE::MultiplyOp& multiplyOp) {
-    lastOp = multiplyOp.getOperation();
+    opChain.push_back(multiplyOp.getOperation());
 
     // Retrieve scale
     auto scaleCst = multiplyOp.getInput2().getDefiningOp<Const::DeclareOp>();
     if (scaleCst == nullptr) {
-        log.trace("Match failed: Got non-const scale");
-        return mlir::failure();
+        auto scaleBlockArg = multiplyOp.getInput2();
+        if (!mlir::isa<mlir::BlockArgument>(scaleBlockArg)) {
+            log.trace("Match failed: Got non-const and non-blockArgument scale");
+            return mlir::failure();
+        }
+        log.trace("Got blockArgument scale");
+        dynamicScale = scaleBlockArg;
+        return mlir::success();
     }
     scale = scaleCst.getContentAttr();
 
@@ -172,14 +144,22 @@ mlir::LogicalResult WeightsDequantizeStructureInfo::initializeStructure(IE::Mult
 }
 
 mlir::LogicalResult WeightsDequantizeStructureInfo::initializeStructure(IE::SubtractOp& subtractOp) {
-    lastOp = subtractOp.getOperation();
+    opChain.push_back(subtractOp.getOperation());
 
     // Retrieve shift
     auto shiftCst = subtractOp.getInput2().getDefiningOp<Const::DeclareOp>();
     if (shiftCst == nullptr) {
-        log.trace("Match failed: Got non-const shift");
-        return mlir::failure();
+        auto zpBlockArg = subtractOp.getInput2();
+        if (!mlir::isa<mlir::BlockArgument>(zpBlockArg)) {
+            log.trace("Match failed: Got non-const and non-blockArgument zp");
+            return mlir::failure();
+        }
+        log.trace("Got blockArgument zp");
+        dynamicShift = zpBlockArg;
+        return mlir::success();
     }
+
+    log.trace("Got Const zp");
     shift = shiftCst.getContentAttr();
 
     // Check following ops
@@ -196,23 +176,18 @@ mlir::LogicalResult WeightsDequantizeStructureInfo::initializeStructure(IE::Subt
 }
 
 mlir::LogicalResult WeightsDequantizeStructureInfo::initializeStructure(IE::ConvertOp& convertOp) {
-    lastOp = convertOp.getOperation();
+    opChain.push_back(convertOp.getOperation());
 
     // Retrieve non-const input properties
-    inputBlock = mlir::dyn_cast_or_null<mlir::BlockArgument>(convertOp.getInput());
+    const auto inputBlock = mlir::dyn_cast_or_null<mlir::BlockArgument>(convertOp.getInput());
     if (inputBlock != nullptr) {
-        inputElemBaseType = llvm::dyn_cast<mlir::ShapedType>(inputBlock.getType()).getElementType();
-        if (inputElemBaseType.isInteger(4)) {
-            inputVirtualI4ElemType = inputElemBaseType;
-        }
-        log.trace("Got block argument input: {0}", inputElemBaseType);
-
+        trueElemTypeOfWeights = mlir::cast<mlir::ShapedType>(inputBlock.getType()).getElementType();
+        log.trace("Got block argument input: {0}", trueElemTypeOfWeights);
     } else {
         log.trace("Match failed: Got ConvertOp without Const or BlockArgument input");
         return mlir::failure();
     }
 
-    inputElemConvertType = convertOp.getDstElemType();
     inputValue = convertOp.getOutput();
 
     // Check following ops
@@ -222,6 +197,13 @@ mlir::LogicalResult WeightsDequantizeStructureInfo::initializeStructure(IE::Conv
         return mlir::failure();
     }
     auto opUser = convertOp->user_begin();
+    if (auto transposeOp = mlir::dyn_cast<IE::TransposeOp>(*opUser)) {
+        if (!transposeOp->hasOneUse()) {
+            return mlir::failure();
+        }
+        inputValue = transposeOp.getOutput();
+        opUser = transposeOp->user_begin();
+    }
 
     // Prevent rematching already processed ConvertOps (they aren't deleted by the WDtoFQ pass)
     if (auto fakeQuantOp = mlir::dyn_cast<IE::FakeQuantizeOp>(*opUser)) {
@@ -243,46 +225,59 @@ mlir::LogicalResult WeightsDequantizeStructureInfo::initializeStructure(IE::Conv
 }
 
 mlir::LogicalResult WeightsDequantizeStructureInfo::initializeStructure(Const::DeclareOp& declareOp) {
-    lastOp = declareOp.getOperation();
+    opChain.push_back(declareOp.getOperation());
 
-    inputAttr = declareOp.getContentAttr();
-    inputContent = declareOp.getContent();
+    const auto inputAttr = declareOp.getContentAttr();
+    inputValue = declareOp.getOutput();
 
-    inputElemBaseType = initialInputElemStorageType = inputElemConvertType =
-            inputAttr.getBaseContent().getShapedType().getElementType();
+    const auto baseContentElemType = inputAttr.getBaseContent().getShapedType().getElementType();
+    trueElemTypeOfWeights = baseContentElemType;
 
-    // since U4 and I4 aren't aren't fully supported, they are represented through ConvertElemType transforms
+    // since U4 and I4 aren't fully supported, they are represented through
+    // CastElemType transforms
     for (const auto& attr : inputAttr.getTransformations()) {
-        if (auto convert = attr.dyn_cast_or_null<Const::ConvertElemTypeAttr>()) {
-            if (convert.getElemType().isInteger(4)) {
-                inputVirtualI4ElemType = convert.getElemType();
-            } else {
-                inputElemConvertType = convert.getElemType();
+        if (auto convert = attr.dyn_cast_or_null<Const::CastElemTypeAttr>()) {
+            if (const auto elemType = convert.getElemType(); elemType.isInteger(4)) {
+                trueElemTypeOfWeights = elemType;
+                break;
             }
         }
     }
 
-    // Check following ops
-    const auto opUser = declareOp->user_begin();
-    if (opUser == declareOp->user_end()) {
+    // Note: reject non-floating-point inputs as the semantics of the
+    // transformation expects weights of FP type. in case of explicit Convert,
+    // expect it to be fused into the constant first, afterwards the output type
+    // of the declare op would be floating-point.
+    if (!mlir::isa<mlir::FloatType>(inputAttr.getType().getElementType())) {
+        log.trace("Match failed: non-float DeclareOp is not suitable for FQ");
         return mlir::failure();
     }
 
-    // Prevent matching DeclareOps which were already quantized in pre-compilation (by OV)
-    if (auto fakeQuantOp = mlir::dyn_cast<IE::FakeQuantizeOp>(*opUser)) {
+    // Check following ops
+    const auto users = declareOp->getUsers();
+    if (users.empty()) {
+        return mlir::failure();
+    }
+
+    const auto nonFqOp = llvm::find_if_not(users, [](const mlir::OpOperand& use) {
+        return mlir::isa<IE::FakeQuantizeOp>(use.getOwner());
+    });
+    // Prevent matching ops that were already quantized
+    if (nonFqOp == users.end()) {
         log.trace("Match failed: FakeQuantizeOp already present at end of structure");
         return mlir::failure();
     }
-    if (auto subtractOp = mlir::dyn_cast<IE::SubtractOp>(*opUser)) {
+
+    if (auto subtractOp = mlir::dyn_cast<IE::SubtractOp>(*nonFqOp)) {
         return this->initializeStructure(subtractOp);
     }
-    if (auto multiplyOp = mlir::dyn_cast<IE::MultiplyOp>(*opUser)) {
+    if (auto multiplyOp = mlir::dyn_cast<IE::MultiplyOp>(*nonFqOp)) {
         return this->initializeStructure(multiplyOp);
     }
 
-    if (inputElemBaseType == inputElemConvertType) {
-        // A DeclareOp is still considered a WD if it has at least one ConvertElemType transformation
-        // The WDtoFQ pass must remove ConvertElemType from processed constants, otherwise this case results in an
+    if (baseContentElemType == inputAttr.getType().getElementType()) {
+        // A DeclareOp is still considered a WD if it has at least one CastElemType transformation
+        // The WDtoFQ pass must remove CastElemType from processed constants, otherwise this case results in an
         // infinite loop
         log.trace("Match failed: DeclareOp without conversions, shifting or scaling");
         return mlir::failure();
@@ -291,90 +286,55 @@ mlir::LogicalResult WeightsDequantizeStructureInfo::initializeStructure(Const::D
     return mlir::success();
 }
 
-WeightsDequantizeStructureInfo::WeightsDequantizeStructureInfo(Const::DeclareOp& origOp, const Logger& log) noexcept
-        : firstOp(origOp.getOperation()), log(log) {
-    isValid = mlir::succeeded(this->initializeStructure(origOp));
+WeightsDequantizeStructureInfo::WeightsDequantizeStructureInfo(const Logger& log): log(log) {
 }
 
-WeightsDequantizeStructureInfo::WeightsDequantizeStructureInfo(IE::ConvertOp& origOp, const Logger& log) noexcept
-        : firstOp(origOp.getOperation()), log(log) {
-    isValid = mlir::succeeded(this->initializeStructure(origOp));
+mlir::FailureOr<WeightsDequantizeStructureInfo> WeightsDequantizeStructureInfo::create(Const::DeclareOp origOp,
+                                                                                       const Logger& log) {
+    WeightsDequantizeStructureInfo info(log);
+    const auto status = info.initializeStructure(origOp);
+    if (mlir::succeeded(status)) {
+        return info;
+    }
+    return mlir::failure();
 }
 
-mlir::MLIRContext* WeightsDequantizeStructureInfo::getContext() const {
-    return firstOp->getContext();
-}
-
-const mlir::Location WeightsDequantizeStructureInfo::getLocation() const {
-    return firstOp->getLoc();
-}
-
-mlir::Operation* WeightsDequantizeStructureInfo::getFirstOp() const {
-    return firstOp;
+mlir::FailureOr<WeightsDequantizeStructureInfo> WeightsDequantizeStructureInfo::create(IE::ConvertOp origOp,
+                                                                                       const Logger& log) {
+    WeightsDequantizeStructureInfo info(log);
+    const auto status = info.initializeStructure(origOp);
+    if (mlir::succeeded(status)) {
+        return info;
+    }
+    return mlir::failure();
 }
 
 mlir::Operation* WeightsDequantizeStructureInfo::getLastOp() const {
-    return lastOp;
+    VPUX_THROW_UNLESS(opChain.size() >= 1, "WD info is not initialized");
+    return opChain.back();
 }
 
-bool WeightsDequantizeStructureInfo::isSuccessfulMatch() const {
-    return isValid;
+mlir::Value WeightsDequantizeStructureInfo::getInput() const {
+    return inputValue;
 }
 
-bool WeightsDequantizeStructureInfo::hasConstInput() const {
-    return inputAttr != nullptr;
+mlir::Type WeightsDequantizeStructureInfo::getTrueElemTypeOfWeights() const {
+    return trueElemTypeOfWeights;
 }
 
-bool WeightsDequantizeStructureInfo::has8BitIntegerInput() const {
-    return inputVirtualI4ElemType == nullptr && inputElemBaseType.isInteger(8);
-}
-
-bool WeightsDequantizeStructureInfo::has4BitIntegerInput() const {
-    return inputVirtualI4ElemType != nullptr;
-}
-
-bool WeightsDequantizeStructureInfo::has8BitFloatInput() const {
-    return inputElemBaseType.isFloat8E4M3FN() || inputElemBaseType.isFloat8E5M2();
-}
-
-bool WeightsDequantizeStructureInfo::hasSignedInput() const {
-    return inputVirtualI4ElemType != nullptr ? inputVirtualI4ElemType.isSignedInteger()
-                                             : inputElemBaseType.isSignedInteger();
-}
-
-mlir::ShapedType WeightsDequantizeStructureInfo::getInputShapedType() const {
-    if (this->hasConstInput()) {
-        return llvm::dyn_cast<mlir::ShapedType>(inputAttr.getType());
+void WeightsDequantizeStructureInfo::cleanUpCurrentWdChain(mlir::PatternRewriter& rewriter) const {
+    // traverse bottom-up to remove as many operations as possible
+    for (auto first = opChain.rbegin(), last = opChain.rend(); first != last; ++first) {
+        auto op = *first;
+        if (bool operationIsStillUsed = !op->getUsers().empty(); operationIsStillUsed) {
+            break;
+        }
+        rewriter.eraseOp(op);
     }
-
-    return llvm::dyn_cast<mlir::ShapedType>(inputBlock.getType());
 }
 
-mlir::Type WeightsDequantizeStructureInfo::getInputElemBaseType() const {
-    return inputElemBaseType;
-}
-
-mlir::Type WeightsDequantizeStructureInfo::getInputElemConvertType() const {
-    return inputVirtualI4ElemType != nullptr ? inputVirtualI4ElemType : inputElemConvertType;
-}
-
-mlir::Type WeightsDequantizeStructureInfo::getInputFinalElemConvertType() const {
-    // Return the final convert type (likely f16 or f32), even if an i4 conversion is present
-    return inputElemConvertType;
-}
-
-mlir::Type WeightsDequantizeStructureInfo::getInputElemStorageType() const {
-    if (this->hasConstInput()) {
-        // Base type is not used because high precision casting might have occurred
-        return inputContent->getStorageElemType();
-    }
-
-    // For block arg. input, ConvertOps determine the type of the tensor
-    return inputElemConvertType;
-}
-
-int64_t WeightsDequantizeStructureInfo::getInputShapeRank() const {
-    return this->getInputShapedType().getRank();
+NDTypeInterface WeightsDequantizeStructureInfo::getInputType() const {
+    return mlir::cast<NDTypeInterface>(inputValue.getType());
 }
 
 int64_t WeightsDequantizeStructureInfo::getQuantizationLevels() const {
@@ -382,93 +342,43 @@ int64_t WeightsDequantizeStructureInfo::getQuantizationLevels() const {
     // cannot know real values, so it's impossible to adjust this anyhow. For
     // weights, we do not need to know real values, because it does not affect
     // accuracy (or, should not, at least).
-    if (this->has4BitIntegerInput()) {
+    const auto inputElemType = this->getTrueElemTypeOfWeights();
+    if (inputElemType.isInteger(4)) {
         return 16;
     }
-    if (this->has8BitIntegerInput()) {
+    if (inputElemType.isInteger(8)) {
         return 256;
     }
 
-    VPUX_THROW("Got unsupported type when trying to compute levels: {0}", inputElemBaseType);
+    VPUX_THROW("Got unsupported type when trying to compute levels: {0}", inputElemType);
 }
 
-Const::DeclareOp WeightsDequantizeStructureInfo::getInputDeclareOp() const {
-    VPUX_THROW_UNLESS(this->hasConstInput(), "WeightsDequantizeStructureInfo: Illegal method call for non-const input");
-    return llvm::dyn_cast<Const::DeclareOp>(*firstOp);
-}
-
-const Const::Content& WeightsDequantizeStructureInfo::getInputContent() const {
-    VPUX_THROW_UNLESS(this->hasConstInput(),
-                      "WeightsDequantizeStructureInfo: Tried to retrieve content from non-const input");
-    return *inputContent;
-}
-
-const Const::ContentAttr& WeightsDequantizeStructureInfo::getInputContentAttr() const {
-    VPUX_THROW_UNLESS(this->hasConstInput(),
-                      "WeightsDequantizeStructureInfo: Tried to retrieve content from non-const input");
-    return inputAttr;
-}
-
-const mlir::Value WeightsDequantizeStructureInfo::getInputValue() const {
-    VPUX_THROW_WHEN(this->hasConstInput(),
-                    "WeightsDequantizeStructureInfo: Tried to retrieve block argument from const input");
-    return inputValue;
-}
-
-mlir::LogicalResult WeightsDequantizeStructureInfo::ensureHighPrecisionStorage() {
-    // Converts weights values from lower precision to float
-    // Ensures good precision for later passes (some expecting f16/f32)
-    // This results in a considerable performance loss (see E#115057) and efforts are made to remove it TODO: E#107322
-
-    if (!hasConstInput()) {
-        return mlir::failure();
-    }
-
-    const auto convertType = this->getInputFinalElemConvertType();
-    const auto storageType = this->getInputElemStorageType();
-
-    // Skip casting if weights storage type is already F16 or F32
-    if (convertType == storageType && (storageType.isF16() || storageType.isF32())) {
-        return mlir::success();
-    }
-
-    const auto castAttr = convertType.isF16() ? castStorageType<vpux::type::float16>(*inputContent)
-                                              : convertType.isF32() ? castStorageType<float>(*inputContent) : nullptr;
-    if (castAttr == nullptr) {
-        log.trace("Weights element type must be f16 or f32 but got {0}", convertType);
-        return mlir::failure();
-    }
-
-    inputAttr = castAttr;
-    inputContent = castAttr.fold();
-
-    log.trace("Weights were casted to high precision {0}", convertType);
-    return mlir::success();
-}
-
-std::pair<Const::ContentAttr, Const::ContentAttr> WeightsDequantizeStructureInfo::getInputQuantizationInterval(
-        const float low, const float high) {
-    const auto inputRank = this->getInputShapeRank();
-    const auto inElementType = this->getInputElemConvertType();
+std::pair<mlir::Value, mlir::Value> WeightsDequantizeStructureInfo::getInputQuantizationInterval(
+        mlir::OpBuilder& builder, mlir::Location loc, float low, float high) const {
+    const auto inType = getInputType();
     const auto inStorageType =
-            mlir::RankedTensorType::get(SmallVector<int64_t>(inputRank, 1),
-                                        inElementType.isInteger(4) ? this->getInputElemStorageType() : inElementType);
-
-    const auto inLowDenseElementVal = wrapData(inStorageType, low);
-    const auto inHighDenseElementVal = wrapData(inStorageType, high);
-
-    return std::make_pair(Const::ContentAttr::get(inLowDenseElementVal),
-                          Const::ContentAttr::get(inHighDenseElementVal));
+            mlir::RankedTensorType::get(SmallVector<int64_t>(inType.getRank(), 1), inType.getElementType());
+    // Note: it might be better to do optional CastElemType<f16> instead of
+    // using createFloatConst.
+    return {Const::createFloatConst(builder, loc, inStorageType, ArrayRef(low)),
+            Const::createFloatConst(builder, loc, inStorageType, ArrayRef(high))};
 }
 
-std::pair<Const::ContentAttr, Const::ContentAttr> WeightsDequantizeStructureInfo::getOutputQuantizationInterval(
-        std::pair<Const::ContentAttr, Const::ContentAttr> inputInterval) {
-    auto outType = inputInterval.first.getType();
-    if (mlir::failed(IE::revertScaleShift(scale, shift, inputInterval.first, inputInterval.second, outType, log))) {
-        VPUX_THROW("Failed to revert scale-shift");
-    }
+std::pair<mlir::Value, mlir::Value> WeightsDequantizeStructureInfo::getOutputQuantizationInterval(
+        mlir::OpBuilder& builder, mlir::Location loc, float low, float high) const {
+    const auto inType = getInputType();
+    const auto inStorageType =
+            mlir::RankedTensorType::get(SmallVector<int64_t>(inType.getRank(), 1), inType.getElementType());
+    const auto reverted = IE::revertScaleShift(builder.getContext(), scale, shift, low, high, inStorageType, log);
+    VPUX_THROW_WHEN(mlir::failed(reverted), "Failed to revert scale-shift");
+    const auto& [outLow, outHigh] = reverted.value();
 
-    return inputInterval;
+    // Note: shape could've changed due to scale / shift and broadcasting.
+    const auto outStorageType = mlir::cast<mlir::RankedTensorType>(outLow.getType());
+    const auto outLowValues = to_small_vector(outLow.getValues<float>());
+    const auto outHighValues = to_small_vector(outHigh.getValues<float>());
+    return {Const::createFloatConst(builder, loc, outStorageType, ArrayRef(outLowValues)),
+            Const::createFloatConst(builder, loc, outStorageType, ArrayRef(outHighValues))};
 }
 
 // findAxes returns the positions of quantization axes
@@ -492,6 +402,34 @@ std::set<int64_t> findAxes(IE::FakeQuantizeOp origOp) {
         }
     }
     return axes;
+}
+
+std::set<int64_t> findAxes(IE::DynamicDequantizeOp origOp) {
+    auto operandShapes = SmallVector<ShapeRef>{getShape(origOp.getScale())};
+    if (origOp.getZp() != nullptr) {
+        operandShapes.push_back(getShape(origOp.getZp()));
+    }
+    std::set<int64_t> axes;
+    for (const auto& shape : operandShapes) {
+        for (const auto& axis : irange(shape.size())) {
+            if (shape[Dim(axis)] != 1) {
+                axes.insert(axis);
+            }
+        }
+    }
+    return axes;
+}
+
+mlir::Value WeightsDequantizeStructureInfo::getDynamicScale() const {
+    return dynamicScale;
+}
+
+mlir::Value WeightsDequantizeStructureInfo::getDynamicShift() const {
+    return dynamicShift;
+}
+
+Const::ContentAttr WeightsDequantizeStructureInfo::getShift() const {
+    return shift;
 }
 
 }  // namespace IE

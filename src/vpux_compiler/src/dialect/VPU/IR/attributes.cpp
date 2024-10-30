@@ -1,17 +1,17 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
-#include "vpux/utils/IE/private_properties.hpp"
 
 #include "vpux/compiler/core/attributes/stride_reqs.hpp"
 #include "vpux/compiler/core/tiling.hpp"
 #include "vpux/compiler/dialect/IE/IR/attributes.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
-#include "vpux/compiler/dialect/VPU/IR/native_attributes/distributed_tensor_native.hpp"
+#include "vpux/compiler/dialect/VPU/IR/dialect.hpp"
+#include "vpux/compiler/dialect/VPU/IR/native_attributes/distribution_info.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
 #include "vpux/compiler/utils/analysis.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
@@ -261,8 +261,6 @@ void setArch(mlir::ModuleOp module, VPU::ArchKind kind, const Resources& res, co
 
     const auto getNumOfDMAPortsVal = [&](int maxDmaPorts) {
         int numOfDMAPortsVal = numOfDMAPorts.has_value() ? numOfDMAPorts.value() : maxDmaPorts;
-        VPUX_THROW_UNLESS(1 <= numOfDMAPortsVal && numOfDMAPortsVal <= maxDmaPorts,
-                          "Invalid number of DMA ports: '{0}'", numOfDMAPortsVal);
         return numOfDMAPortsVal;
     };
 
@@ -520,50 +518,8 @@ PadInfo vpux::VPU::toPadInfo(PaddingAttr attr) {
 }
 
 //
-// PPETaskAttr
+// OpaquePPEAttr
 //
-
-VPU::PPETaskAttr vpux::VPU::getPPETaskAttr(mlir::MLIRContext* ctx, VPU::PPEMode mode) {
-    return VPU::PPETaskAttr::get(ctx, VPU::PPEModeAttr::get(ctx, mode), nullptr, nullptr, nullptr, nullptr, nullptr,
-                                 nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
-}
-
-VPU::PPETaskAttr vpux::VPU::getPPETaskAttr(mlir::MLIRContext* ctx, VPU::PPEMode mode, int64_t clampLow,
-                                           int64_t clampHigh, int64_t lreluMult, int64_t lreluShift) {
-    return VPU::PPETaskAttr::get(ctx, VPU::PPEModeAttr::get(ctx, mode), getIntAttr(ctx, clampLow),
-                                 getIntAttr(ctx, clampHigh), getIntAttr(ctx, lreluMult), getIntAttr(ctx, lreluShift),
-                                 nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
-}
-
-VPU::PPETaskAttr vpux::VPU::getPPETaskAttr(mlir::MLIRContext* ctx, VPU::PPEMode mode, int64_t clampLow,
-                                           int64_t clampHigh, int64_t lreluMult, int64_t lreluShift,
-                                           ArrayRef<int64_t> quantMult, ArrayRef<int64_t> quantShift,
-                                           int64_t quantPostShift) {
-    return VPU::PPETaskAttr::get(ctx, VPU::PPEModeAttr::get(ctx, mode), getIntAttr(ctx, clampLow),
-                                 getIntAttr(ctx, clampHigh), getIntAttr(ctx, lreluMult), getIntAttr(ctx, lreluShift),
-                                 nullptr, getIntArrayAttr(ctx, quantMult), getIntArrayAttr(ctx, quantShift),
-                                 getIntAttr(ctx, quantPostShift), nullptr, nullptr, nullptr);
-}
-
-VPU::PPETaskAttr vpux::VPU::getPPETaskAttr(mlir::MLIRContext* ctx, VPU::PPEMode mode, int64_t clampLow,
-                                           int64_t clampHigh, int64_t lreluMult, int64_t lreluShift,
-                                           ArrayRef<double> quantScale) {
-    return VPU::PPETaskAttr::get(ctx, VPU::PPEModeAttr::get(ctx, mode), getIntAttr(ctx, clampLow),
-                                 getIntAttr(ctx, clampHigh), getIntAttr(ctx, lreluMult), getIntAttr(ctx, lreluShift),
-                                 getFPArrayAttr(ctx, quantScale), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
-}
-
-VPU::PPETaskAttr vpux::VPU::getPPETaskAttr(mlir::MLIRContext* ctx, VPU::PPEMode mode, int64_t clampLow,
-                                           int64_t clampHigh, int64_t lreluMult, int64_t lreluShift,
-                                           ArrayRef<int64_t> quantMult, ArrayRef<int64_t> quantShift,
-                                           int64_t quantPostShift, ArrayRef<int64_t> in1QuantMult,
-                                           ArrayRef<int64_t> in2QuantMult, double fpPReluAlpha) {
-    return VPU::PPETaskAttr::get(ctx, VPU::PPEModeAttr::get(ctx, mode), getIntAttr(ctx, clampLow),
-                                 getIntAttr(ctx, clampHigh), getIntAttr(ctx, lreluMult), getIntAttr(ctx, lreluShift),
-                                 nullptr, getIntArrayAttr(ctx, quantMult), getIntArrayAttr(ctx, quantShift),
-                                 getIntAttr(ctx, quantPostShift), getIntArrayAttr(ctx, in1QuantMult),
-                                 getIntArrayAttr(ctx, in2QuantMult), getFPAttr(ctx, fpPReluAlpha));
-}
 
 VPU::PPEMode vpux::VPU::getPPEMode(VPU::EltwiseType type) {
     switch (type) {
@@ -585,11 +541,11 @@ VPU::PPEMode vpux::VPU::getPPEMode(VPU::EltwiseType type) {
 }
 
 //
-// DistributedTensorAttr
+// DistributionInfoAttr
 //
 
 mlir::LogicalResult vpux::VPU::verify(FuncRef<mlir::InFlightDiagnostic()> emitError,
-                                      DistributedTensorAttr distributedAttr, ArrayRef<int64_t> shape) {
+                                      DistributionInfoAttr distributedAttr, ArrayRef<int64_t> shape) {
     if (distributedAttr.getComputeShapes() != nullptr && distributedAttr.getComputeOffsets() == nullptr) {
         return printTo(emitError(), "Missing compute_offsets.");
     }
@@ -832,9 +788,14 @@ mlir::LogicalResult vpux::VPU::canTheDistributionModesBeCompatible(DistributionM
     return mlir::failure();
 }
 
+mlir::LogicalResult vpux::VPU::areDistributionNumClustersCompatible(int64_t sourceNumClusters,
+                                                                    int64_t targetNumClusters) {
+    return mlir::success(sourceNumClusters >= targetNumClusters);
+}
+
 mlir::LogicalResult vpux::VPU::areDistributionNumClustersCompatible(mlir::IntegerAttr sourceNumClusters,
                                                                     mlir::IntegerAttr targetNumClusters) {
-    return mlir::success(sourceNumClusters.getInt() >= targetNumClusters.getInt());
+    return areDistributionNumClustersCompatible(sourceNumClusters.getInt(), targetNumClusters.getInt());
 }
 
 mlir::LogicalResult vpux::VPU::areDistributionElementTypesCompatible(mlir::Type inType, mlir::Type outType) {
@@ -859,11 +820,20 @@ int64_t vpux::VPU::getDistributedTilingAxis(ArrayRef<int64_t> tilingScheme) {
     return std::distance(tilingScheme.begin(), llvm::find_if(tilingScheme, isValidTile));
 }
 
-bool vpux::VPU::isDistributedAttrWithExplicitShapesAndOffsets(VPU::DistributedTensorAttr distributionAttr) {
+bool vpux::VPU::isDistributedAttrWithExplicitShapesAndOffsets(VPU::DistributionInfoAttr distributionAttr) {
     const bool hasComputeShapesOffsets =
             distributionAttr.getComputeShapes() != nullptr && distributionAttr.getComputeOffsets() != nullptr;
     const bool hasMemoryShapesOffsets =
             distributionAttr.getMemoryShapes() != nullptr && distributionAttr.getMemoryOffsets() != nullptr;
+
+    return hasComputeShapesOffsets && hasMemoryShapesOffsets;
+}
+
+bool vpux::VPU::isDistributionWithExplicitShapesAndOffsets(const VPU::DistributionInfo& distribution) {
+    const bool hasComputeShapesOffsets =
+            !distribution.getComputeShapes().empty() && !distribution.getComputeOffsets().empty();
+    const bool hasMemoryShapesOffsets =
+            !distribution.getMemoryShapes().empty() && !distribution.getMemoryOffsets().empty();
 
     return hasComputeShapesOffsets && hasMemoryShapesOffsets;
 }
@@ -1006,12 +976,11 @@ std::optional<SmallVector<DimRange>> getOverlappedInputTileDimRanges(
     return inputTileDimRanges;
 }
 
-SmallVector<Shape> vpux::VPU::getPerClusterComputeShapes(ShapeRef shapeRef, DistributedTensorAttr distributionAttr) {
-    return getPerClusterComputeShapes(shapeRef, VPU::DistributedTensorNative::getClassFromAttr(distributionAttr));
+SmallVector<Shape> vpux::VPU::getPerClusterComputeShapes(ShapeRef shapeRef, DistributionInfoAttr distributionAttr) {
+    return getPerClusterComputeShapes(shapeRef, VPU::DistributionInfo::getClassFromAttr(distributionAttr));
 }
 
-SmallVector<Shape> vpux::VPU::getPerClusterComputeShapes(ShapeRef shapeRef,
-                                                         const VPU::DistributedTensorNative& distribution) {
+SmallVector<Shape> vpux::VPU::getPerClusterComputeShapes(ShapeRef shapeRef, const VPU::DistributionInfo& distribution) {
     auto shape = to_small_vector(shapeRef.raw());
     const auto distributionMode = distribution.getDistributionMode();
 
@@ -1063,12 +1032,12 @@ SmallVector<Shape> vpux::VPU::getPerClusterComputeShapes(ShapeRef shapeRef,
 }
 
 SmallVector<Shape> vpux::VPU::getPerClusterComputeShapeOffsets(ShapeRef shapeRef,
-                                                               DistributedTensorAttr distributionAttr) {
-    return getPerClusterComputeShapeOffsets(shapeRef, VPU::DistributedTensorNative::getClassFromAttr(distributionAttr));
+                                                               DistributionInfoAttr distributionAttr) {
+    return getPerClusterComputeShapeOffsets(shapeRef, VPU::DistributionInfo::getClassFromAttr(distributionAttr));
 }
 
 SmallVector<Shape> vpux::VPU::getPerClusterComputeShapeOffsets(ShapeRef shapeRef,
-                                                               const VPU::DistributedTensorNative& distribution) {
+                                                               const VPU::DistributionInfo& distribution) {
     const auto shape = to_small_vector(shapeRef.raw());
     const auto distributionMode = distribution.getDistributionMode();
 
@@ -1110,14 +1079,14 @@ SmallVector<Shape> vpux::VPU::getPerClusterComputeShapeOffsets(ShapeRef shapeRef
 }
 
 std::optional<SmallVector<Shape>> vpux::VPU::getPerClusterMemoryShapes(ShapeRef shapeRef,
-                                                                       DistributedTensorAttr distributionAttr)
+                                                                       DistributionInfoAttr distributionAttr)
 
 {
-    return getPerClusterMemoryShapes(shapeRef, VPU::DistributedTensorNative::getClassFromAttr(distributionAttr));
+    return getPerClusterMemoryShapes(shapeRef, VPU::DistributionInfo::getClassFromAttr(distributionAttr));
 }
 
-std::optional<SmallVector<Shape>> vpux::VPU::getPerClusterMemoryShapes(
-        ShapeRef shapeRef, const VPU::DistributedTensorNative& distribution) {
+std::optional<SmallVector<Shape>> vpux::VPU::getPerClusterMemoryShapes(ShapeRef shapeRef,
+                                                                       const VPU::DistributionInfo& distribution) {
     auto shape = to_small_vector(shapeRef.raw());
     const auto distributionMode = distribution.getDistributionMode();
 
@@ -1175,12 +1144,12 @@ std::optional<SmallVector<Shape>> vpux::VPU::getPerClusterMemoryShapes(
 }
 
 SmallVector<Shape> vpux::VPU::getPerClusterMemoryShapeOffsets(ShapeRef shapeRef,
-                                                              DistributedTensorAttr distributionAttr) {
-    return getPerClusterMemoryShapeOffsets(shapeRef, VPU::DistributedTensorNative::getClassFromAttr(distributionAttr));
+                                                              DistributionInfoAttr distributionAttr) {
+    return getPerClusterMemoryShapeOffsets(shapeRef, VPU::DistributionInfo::getClassFromAttr(distributionAttr));
 }
 
 SmallVector<Shape> vpux::VPU::getPerClusterMemoryShapeOffsets(ShapeRef shapeRef,
-                                                              const VPU::DistributedTensorNative& distribution) {
+                                                              const VPU::DistributionInfo& distribution) {
     const auto shape = to_small_vector(shapeRef.raw());
     const auto distributionMode = distribution.getDistributionMode();
 
@@ -1239,7 +1208,7 @@ SmallVector<Shape> vpux::VPU::getPerClusterMemoryShapeOffsets(ShapeRef shapeRef,
 }
 
 SmallVector<Shape> vpux::VPU::getOverlappedPerClusterNewMemoryShapes(ShapeRef newShape, ShapeRef origShape,
-                                                                     DistributedTensorAttr distributionAttr) {
+                                                                     DistributionInfoAttr distributionAttr) {
     auto shape = to_small_vector(newShape.raw());
     auto originalShape = to_small_vector(origShape.raw());
     const auto distributionMode = distributionAttr.getMode().getValue();
@@ -1273,7 +1242,7 @@ SmallVector<Shape> vpux::VPU::getOverlappedPerClusterNewMemoryShapes(ShapeRef ne
 }
 
 SmallVector<Shape> vpux::VPU::getOverlappedPerClusterNewMemoryShapeOffsets(ShapeRef shapeRef,
-                                                                           DistributedTensorAttr distributionAttr) {
+                                                                           DistributionInfoAttr distributionAttr) {
     const auto distributionMode = distributionAttr.getMode().getValue();
     const auto numClusters = distributionAttr.getNumClusters().getInt();
     auto tiledMemoryOffsets = SmallVector<Shape>(numClusters, Shape(shapeRef.size(), 0));
@@ -1293,7 +1262,7 @@ SmallVector<Shape> vpux::VPU::getOverlappedPerClusterNewMemoryShapeOffsets(Shape
     return tiledMemoryOffsets;
 }
 
-SmallVector<PadInfo> vpux::VPU::getPerClusterPadding(DistributedTensorAttr distributionAttr, PadInfo kernelPadding) {
+SmallVector<PadInfo> vpux::VPU::getPerClusterPadding(DistributionInfoAttr distributionAttr, PadInfo kernelPadding) {
     const auto mode = distributionAttr.getMode().getValue();
     VPUX_THROW_UNLESS(mode == VPU::DistributionMode::OVERLAPPED,
                       "Currently getting per cluster padding is supported only for OVERLAPPED, mode - {0}",
@@ -1362,7 +1331,7 @@ SmallVector<Shape> vpux::VPU::arrayAttrToVecOfShapes(mlir::ArrayAttr arr) {
     return shapesVec;
 }
 
-bool vpux::VPU::isSegmentedOverH(VPU::DistributedTensorAttr distAttr) {
+bool vpux::VPU::isSegmentedOverH(VPU::DistributionInfoAttr distAttr) {
     if (distAttr.getMode().getValue() != VPU::DistributionMode::SEGMENTED) {
         return false;
     }
@@ -1374,7 +1343,7 @@ bool vpux::VPU::isSegmentedOverH(VPU::DistributedTensorAttr distAttr) {
     return true;
 }
 
-bool vpux::VPU::isSegmentedOverC(VPU::DistributedTensorAttr distAttr) {
+bool vpux::VPU::isSegmentedOverC(VPU::DistributionInfoAttr distAttr) {
     if (distAttr.getMode().getValue() != VPU::DistributionMode::SEGMENTED) {
         return false;
     }
@@ -1386,7 +1355,7 @@ bool vpux::VPU::isSegmentedOverC(VPU::DistributedTensorAttr distAttr) {
     return true;
 }
 
-bool vpux::VPU::isSegmentedDuplicatedOverC(VPU::DistributedTensorAttr distAttr) {
+bool vpux::VPU::isSegmentedDuplicatedOverC(VPU::DistributionInfoAttr distAttr) {
     if (distAttr.getMode().getValue() != (VPU::DistributionMode::SEGMENTED | VPU::DistributionMode::DUPLICATED)) {
         return false;
     }
@@ -1398,7 +1367,7 @@ bool vpux::VPU::isSegmentedDuplicatedOverC(VPU::DistributedTensorAttr distAttr) 
     return true;
 }
 
-bool vpux::VPU::isSegmentedOverN(VPU::DistributedTensorAttr distAttr) {
+bool vpux::VPU::isSegmentedOverN(VPU::DistributionInfoAttr distAttr) {
     if (distAttr.getMode().getValue() != VPU::DistributionMode::SEGMENTED) {
         return false;
     }
@@ -1410,7 +1379,7 @@ bool vpux::VPU::isSegmentedOverN(VPU::DistributedTensorAttr distAttr) {
     return true;
 }
 
-bool vpux::VPU::isOverlappedOverH(VPU::DistributedTensorAttr distAttr) {
+bool vpux::VPU::isOverlappedOverH(VPU::DistributionInfoAttr distAttr) {
     if (distAttr.getMode().getValue() != VPU::DistributionMode::OVERLAPPED) {
         return false;
     }
@@ -1422,7 +1391,19 @@ bool vpux::VPU::isOverlappedOverH(VPU::DistributedTensorAttr distAttr) {
     return true;
 }
 
-bool vpux::VPU::isOverlappedOverW(VPU::DistributedTensorAttr distAttr) {
+bool vpux::VPU::isOverlappedOverH(VPU::DistributionInfo& distribution) {
+    if (distribution.getDistributionMode() != VPU::DistributionMode::OVERLAPPED) {
+        return false;
+    }
+    const auto numTiles = distribution.getNumTiles();
+    if (numTiles.size() != 4 || numTiles[Dims4D::Act::N.ind()] > 1 || numTiles[Dims4D::Act::C.ind()] > 1 ||
+        numTiles[Dims4D::Act::W.ind()] > 1) {
+        return false;
+    }
+    return true;
+}
+
+bool vpux::VPU::isOverlappedOverW(VPU::DistributionInfoAttr distAttr) {
     if (distAttr.getMode().getValue() != VPU::DistributionMode::OVERLAPPED) {
         return false;
     }
@@ -1434,7 +1415,19 @@ bool vpux::VPU::isOverlappedOverW(VPU::DistributedTensorAttr distAttr) {
     return true;
 }
 
-bool vpux::VPU::isDuplicated(VPU::DistributedTensorAttr distAttr) {
+bool vpux::VPU::isOverlappedOverW(VPU::DistributionInfo& distribution) {
+    if (distribution.getDistributionMode() != VPU::DistributionMode::OVERLAPPED) {
+        return false;
+    }
+    const auto numTiles = distribution.getNumTiles();
+    if (numTiles.size() != 4 || numTiles[Dims4D::Act::N.ind()] > 1 || numTiles[Dims4D::Act::C.ind()] > 1 ||
+        numTiles[Dims4D::Act::H.ind()] > 1) {
+        return false;
+    }
+    return true;
+}
+
+bool vpux::VPU::isDuplicated(VPU::DistributionInfoAttr distAttr) {
     const auto mode = distAttr.getMode().getValue();
 
     return VPU::bitEnumContainsAny(mode, VPU::DistributionMode::DUPLICATED) ||

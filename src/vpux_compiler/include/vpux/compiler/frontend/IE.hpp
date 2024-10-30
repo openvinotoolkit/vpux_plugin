@@ -6,6 +6,7 @@
 #pragma once
 
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
+#include "vpux/compiler/init.hpp"
 #include "vpux/utils/core/logger.hpp"
 
 #include <mlir/IR/BuiltinOps.h>
@@ -15,6 +16,7 @@
 // Opset versions supported
 #include <openvino/opsets/opset1.hpp>
 #include <openvino/opsets/opset12.hpp>
+#include <openvino/opsets/opset14.hpp>
 #include <openvino/opsets/opset2.hpp>
 #include <openvino/opsets/opset3.hpp>
 #include <openvino/opsets/opset4.hpp>
@@ -25,6 +27,7 @@
 #include <openvino/opsets/opset9.hpp>
 
 #include <ov_ops/nms_ie_internal.hpp>
+#include <ov_ops/rms.hpp>
 
 // Utils
 #include "vpux/utils/IE/hash.hpp"
@@ -34,9 +37,14 @@ namespace IE {
 
 // TODO Get rid of this function (importNetwork), move logic to compiler.cpp
 mlir::OwningOpRef<mlir::ModuleOp> importNetwork(mlir::MLIRContext* ctx, const std::shared_ptr<ov::Model>& model,
+                                                const std::vector<std::shared_ptr<const ov::Node>>& originalParameters,
+                                                const std::vector<std::shared_ptr<const ov::Node>>& originalResults,
                                                 bool sharedConstants, mlir::TimingScope& rootTiming,
-                                                bool enableProfiling, bool stubLayers, bool dynamicShapeToStatic,
+                                                bool enableProfiling, DummyOpMode stubLayers, bool dynamicShapeToStatic,
                                                 vpux::VPU::ArchKind arch, Logger log = Logger::global());
+
+std::vector<std::shared_ptr<const ov::Node>> buildOVParams(const std::shared_ptr<const ov::Model>& model);
+std::vector<std::shared_ptr<const ov::Node>> buildOVResults(const std::shared_ptr<const ov::Model>& model);
 
 // TODO Move to separate file NGraphPasses
 class NGraphPasses final {
@@ -47,23 +55,25 @@ public:
 
 class NGraphImporter final {
 public:
+    using OrigNode = ov::Node;
+    using OrigNodePtr = std::shared_ptr<OrigNode>;
+
     NGraphImporter(mlir::MLIRContext* ctx, std::shared_ptr<const ov::Model> netGraph, bool sharedConstants, Logger log)
             : _ctx(ctx), _netGraph(std::move(netGraph)), _sharedConstants(sharedConstants), _log(log) {
     }
 
     mlir::func::FuncOp buildMainFunc(mlir::OpBuilder& moduleBuilder, StringRef funcName, mlir::TimingScope& rootTiming,
-                                     bool stubLayers, bool dynamicShapeToStatic);
+                                     DummyOpMode stubLayers, bool dynamicShapeToStatic);
     void buildBlockFromRegion(mlir::Location loc, mlir::OpBuilder& builder, mlir::Block* block);
     void buildBlockFromBody(mlir::Location loc, mlir::OpBuilder& builder, mlir::Block* block);
     SmallVector<mlir::Type> getRegionResults();
-    SmallVector<mlir::Type> getTensorIteratorRegionResults(int64_t numIter,
-                                                           ArrayRef<mlir::Attribute> concatOutputVector,
-                                                           ArrayRef<mlir::Attribute> invariantOutputVector);
+    SmallVector<mlir::Type> getLoopLikeRegionResults(int64_t numIter, int32_t numResults,
+                                                     ArrayRef<mlir::Attribute> concatOutputVector,
+                                                     ArrayRef<mlir::Attribute> invariantOutputVector);
     static bool isOpSupported(const std::shared_ptr<ov::Node>& op);
+    void saveInfoAboutBounds(mlir::OpBuilder& builder, const OrigNodePtr& origNode);
 
 private:
-    using OrigNode = ov::Node;
-    using OrigNodePtr = std::shared_ptr<OrigNode>;
     using NodeOutputMap = std::unordered_map<ov::Output<OrigNode>, mlir::Value>;
     using Callback = void (NGraphImporter::*)(mlir::OpBuilder& builder, const OrigNodePtr& origNode);
 
@@ -89,10 +99,12 @@ private:
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Multiply>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Convolution>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::GroupConvolution>& origNode);
+    void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset12::GroupNormalization>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::ConvolutionBackpropData>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::GroupConvolutionBackpropData>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::AvgPool>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::MaxPool>& origNode);
+    void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset8::MaxPool>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset8::AdaptiveAvgPool>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset8::AdaptiveMaxPool>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::ShuffleChannels>& origNode);
@@ -109,6 +121,7 @@ private:
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset6::GatherElements>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset4::ScatterNDUpdate>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset3::ScatterUpdate>& origNode);
+    void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset12::ScatterElementsUpdate>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset3::ScatterElementsUpdate>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Clamp>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Elu>& origNode);
@@ -183,10 +196,11 @@ private:
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::CTCGreedyDecoder>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset6::CTCGreedyDecoderSeqLen>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Pad>& origNode);
+    void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::LSTMCell>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset4::LSTMCell>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Subtract>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::LogicalAnd>& origNode);
-    void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::LSTMSequence>& origNode);
+    void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset5::LSTMSequence>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Ceiling>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Equal>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Select>& origNode);
@@ -231,6 +245,7 @@ private:
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset5::GRUSequence>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::DeformablePSROIPooling>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::TensorIterator>& origNode);
+    void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset5::Loop>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::DFT>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset9::RDFT>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::IDFT>& origNode);
@@ -238,6 +253,9 @@ private:
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset8::If>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::ShapeOf>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset3::NonZero>& origNode);
+    void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::op::internal::RMS>& origNode);
+    void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset14::Inverse>& origNode);
+    void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset8::DeformableConvolution>& origNode);
 
     SmallVector<mlir::Value> getInputs(const OrigNodePtr& node);
     void addOutputs(const OrigNodePtr& node, mlir::Operation* op);
@@ -245,7 +263,6 @@ private:
 
     static SmallVector<int64_t> importShape(const ov::PartialShape& shape);
     mlir::RankedTensorType importTensor(const ov::PartialShape& shape, const ov::element::Type& elemType);
-    mlir::RankedTensorType importConstantTensor(const ov::PartialShape& shape, const ov::element::Type& elemType);
     IE::AutoBroadcastTypeAttr importBroadcastType(ov::op::AutoBroadcastType bType);
     IE::BroadcastTypeAttr importBroadcastMode(ov::op::BroadcastType bType);
     IE::RoundingTypeAttr importRoundingType(ov::op::RoundingType roundingType);
@@ -270,6 +287,8 @@ private:
     IE::SpaceToDepthModeAttr importSpaceToDepthMode(const ov::op::v0::SpaceToDepth::SpaceToDepthMode val);
     IE::PadTypeAttr importPadType(ov::op::PadType autoPads);
     IE::DeformablePSROIPoolingModeAttr importDeformablePSROIPoolingMode(const std::string& mode);
+    IE::ScatterElementsUpdateReductionTypeAttr importScatterElementsUpdateReductionType(
+            ov::op::v12::ScatterElementsUpdate::Reduction val);
     IE::DetectionOutputCodeTypeAttr importDetectionOutputCodeType(const std::string& codeType);
     IE::SliceInputPortMapAttr importSliceInputPortMapAttr(
             mlir::MLIRContext* ctx, const std::shared_ptr<ov::op::util::MultiSubGraphOp::SliceInputDescription>& desc,

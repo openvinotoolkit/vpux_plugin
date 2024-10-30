@@ -40,8 +40,12 @@ mlir::LogicalResult vpux::IE::GroupTransposedConvolutionOp::inferReturnTypeCompo
     const auto windowDilations = parseIntArrayAttr<int64_t>(groupTransposedConv.getDilations());
     const auto outputPadding = parseIntArrayAttr<int64_t>(groupTransposedConv.getOutputPadding());
 
-    const auto mlirOutputShape = inferTransposedGroupConvBackpropOutputShape(
+    auto mlirOutputShape = inferTransposedGroupConvBackpropOutputShape(
             inputShape, filterShape, windowStrides, dataPaddingBelow, dataPaddingAbove, windowDilations, outputPadding);
+
+    if (groupTransposedConv.getOutputChannels().has_value()) {
+        mlirOutputShape[Dims4D::Act::C.ind()] = groupTransposedConv.getOutputChannels().value();
+    }
 
     inferredReturnShapes.emplace_back(mlirOutputShape, inputElemType);
 

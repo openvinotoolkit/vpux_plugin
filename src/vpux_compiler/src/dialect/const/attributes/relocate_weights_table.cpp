@@ -202,8 +202,15 @@ bool vpux::Const::RelocateWeightsTableAttr::inferOutputSplat(bool inputIsSplat, 
 
 Const::Content vpux::Const::RelocateWeightsTableAttr::transform(vpux::Const::Content& input) const {
     constexpr auto numElemPerOC = static_cast<size_t>(VPU::NCEInvariant::WEIGHT_TABLE_NUM_ELEMENTS_PER_OC);
-    auto output = Const::Content::moveBuffer(inferOutputType(input.getType()), input.copyUnownedBuffer());
-
+    auto inputSplat = input.isSplat();
+    auto output = inputSplat ? Const::Content::allocTempBuffer(inferOutputType(input.getType()),
+                                                               input.getType().getElementType(), false)
+                             : Const::Content::copyUnownedBuffer(std::move(input));
+    // in case input was splat code above allocated new temporary buffer which now has to be filled with
+    // splat value.
+    if (inputSplat) {
+        input.copyTo(output.getTempBuf<char>());
+    }
     auto values = output.getTempBuf<int32_t>();
 
     const auto weightsPtr = parseIntArrayAttr<int32_t>(getWeightsPtr());
@@ -274,14 +281,11 @@ Const::Content vpux::Const::RelocateWeightsTableAttr::transform(vpux::Const::Con
     return output;
 }
 
-Const::ContentAttr vpux::Const::ContentAttr::relocateWeightsTablePointers(
+Const::ContentSetup vpux::Const::ContentSetup::relocateWeightsTablePointers(
         ArrayRef<uint32_t> weightsPtr, uint64_t sparsityPtr, ShapeRef offsets, uint64_t weightsTableSize,
-        uint64_t weightsElemBitSize, VPUIP::SparsityCompressionAttr weightsCompression, uint64_t channelOffset) const {
-    return ContentAttr::addTransformation(
-            *this, Const::RelocateWeightsTableAttr::get(
-                           getIntArrayAttr(getContext(), weightsPtr), getIntAttr(getContext(), sparsityPtr),
-                           getIntArrayAttr(getContext(), offsets), getIntAttr(getContext(), weightsTableSize),
-                           getIntAttr(getContext(), weightsElemBitSize), weightsCompression,
-                           getIntAttr(getContext(), channelOffset))
-                           .cast<Const::TransformAttrInterface>());
+        uint64_t weightsElemBitSize, VPUIP::SparsityCompressionAttr weightsCompression, uint64_t channelOffset) {
+    return addTransformation(Const::RelocateWeightsTableAttr::get(
+            getIntArrayAttr(getContext(), weightsPtr), getIntAttr(getContext(), sparsityPtr),
+            getIntArrayAttr(getContext(), offsets), getIntAttr(getContext(), weightsTableSize),
+            getIntAttr(getContext(), weightsElemBitSize), weightsCompression, getIntAttr(getContext(), channelOffset)));
 }

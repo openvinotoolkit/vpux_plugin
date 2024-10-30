@@ -94,25 +94,25 @@ TEST_P(MatMulMixedPrecisionTestCommon, NPU4000_HW) {
     run(Platform::NPU4000);
 }
 
-INSTANTIATE_TEST_CASE_P(smoke_MatMulMixedPrecisionOneICSplit, MatMulMixedPrecisionTestCommon,
-                        ::testing::Values(MatMulMixedPrecisionTestParams{
-                                {1, 1, 11008},  // input shape
-                                {4096, 11008}   // weights shape
-                        }),
-                        MatMulMixedPrecisionTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_MatMulMixedPrecisionOneICSplit, MatMulMixedPrecisionTestCommon,
+                         ::testing::Values(MatMulMixedPrecisionTestParams{
+                                 {1, 1, 11008},  // input shape
+                                 {4096, 11008}   // weights shape
+                         }),
+                         MatMulMixedPrecisionTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(smoke_MatMulMixedPrecisionTwoICSplit, MatMulMixedPrecisionTestCommon,
-                        ::testing::Values(MatMulMixedPrecisionTestParams{
-                                {1, 1, 20000},  // input shape
-                                {4096, 20000}   // weights shape
-                        }),
-                        MatMulMixedPrecisionTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_MatMulMixedPrecisionTwoICSplit, MatMulMixedPrecisionTestCommon,
+                         ::testing::Values(MatMulMixedPrecisionTestParams{
+                                 {1, 1, 20000},  // input shape
+                                 {4096, 20000}   // weights shape
+                         }),
+                         MatMulMixedPrecisionTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(smoke_MatMulMixedPrecisionOneICSplitOneOCSplit, MatMulMixedPrecisionTestCommon,
-                        ::testing::Values(MatMulMixedPrecisionTestParams{
-                                {1, 1, 11008},  // input shape
-                                {11008, 11008}  // weights shape
-                        }),
-                        MatMulMixedPrecisionTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_MatMulMixedPrecisionOneICSplitOneOCSplit, MatMulMixedPrecisionTestCommon,
+                         ::testing::Values(MatMulMixedPrecisionTestParams{
+                                 {1, 1, 11008},  // input shape
+                                 {11008, 11008}  // weights shape
+                         }),
+                         MatMulMixedPrecisionTestCommon::getTestCaseName);
 
 }  // namespace ov::test::subgraph

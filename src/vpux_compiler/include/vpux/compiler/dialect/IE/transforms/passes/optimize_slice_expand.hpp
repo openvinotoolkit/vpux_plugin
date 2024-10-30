@@ -174,8 +174,8 @@ public:
         auto newOp = rewriter.clone(*implicitOp, mapper);
         vpux::inferReturnTypes(newOp, vpux::InferShapedTypeMode::SHAPE);
 
-        rewriter.replaceOp(expandOp, newOp->getResults());
         _log.trace("Optimization completed successfully at '{0}'", expandOp->getLoc());
+        rewriter.replaceOp(expandOp, newOp->getResults());
 
         return mlir::success();
     }
@@ -240,6 +240,58 @@ public:
 
 public:
     mlir::LogicalResult matchAndRewrite(IE::ExpandOp origOp, mlir::PatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+//
+// OptimizeSliceEltwiseExpand
+//
+
+template <class EltwiseLikeOp>
+class OptimizeSliceEltwiseExpand final : public mlir::OpRewritePattern<IE::ExpandOp> {
+public:
+    OptimizeSliceEltwiseExpand(mlir::MLIRContext* ctx, Logger log)
+            : mlir::OpRewritePattern<IE::ExpandOp>(ctx), _log(log) {
+        setDebugName("OptimizeSliceEltwiseExpand");
+    }
+
+public:
+    mlir::LogicalResult matchAndRewrite(IE::ExpandOp origOp, mlir::PatternRewriter& rewriter) const final {
+        _log.trace("[{0}] Got '{1}' at '{2}'", getDebugName(), origOp->getName(), origOp->getLoc());
+
+        auto eltwiseOp = origOp.getInput().getDefiningOp<EltwiseLikeOp>();
+        if (eltwiseOp == nullptr || !eltwiseOp->hasOneUse()) {
+            _log.trace("Cannot get 'Eltwise' before '{0}' or Eltwise has multi uses", origOp->getName());
+            return mlir::failure();
+        }
+
+        SmallVector<mlir::Value> inputs;
+        auto outputType = origOp.getOutput().getType();
+        for (auto input : eltwiseOp->getOperands()) {
+            auto sliceOp = input.getDefiningOp();
+            if (!mlir::isa<IE::SliceOp>(sliceOp) || !sliceOp->hasOneUse()) {
+                _log.trace("Cannot get 'Slice' before '{0} or Slice has multi uses'", eltwiseOp->getName());
+                return mlir::failure();
+            }
+            auto sliceInput = sliceOp->getOperand(0);
+            if (sliceInput.getType() != outputType) {
+                return mlir::failure();
+            }
+            inputs.push_back(sliceInput);
+        }
+
+        mlir::IRMapping mapper;
+        mapper.map(eltwiseOp.getOperands(), inputs);
+        auto newOp = rewriter.clone(*eltwiseOp, mapper);
+        vpux::inferReturnTypes(newOp, vpux::InferShapedTypeMode::SHAPE);
+
+        _log.trace("Optimization completed successfully at '{0}'", origOp->getLoc());
+        rewriter.replaceOp(origOp, newOp->getResults());
+
+        return mlir::success();
+    }
 
 private:
     Logger _log;

@@ -35,8 +35,8 @@ void ConvertDivideToMultiplyPass::safeRunOnFunc() {
     // converts const 'value' to (1 / 'value') in IR
     const auto applyScalarMultInverse = [](mlir::OpBuilder& builder, mlir::Location loc, mlir::Value value) {
         auto cstOp = value.getDefiningOp<Const::DeclareOp>();
-        const auto newCstAttr = cstOp.getContentAttr().scalarMultInverse();
-        auto newCstOp = builder.create<Const::DeclareOp>(loc, newCstAttr.getType(), newCstAttr);
+        auto newCstAttr = cstOp.transformContentAttr().scalarMultInverse().get();
+        auto newCstOp = builder.create<Const::DeclareOp>(loc, newCstAttr.getType(), std::move(newCstAttr));
         return newCstOp.getOutput();
     };
 
@@ -62,9 +62,9 @@ void ConvertDivideToMultiplyPass::safeRunOnFunc() {
         mlir::OpBuilder builder(constOp);
         const auto newInput2 = applyScalarMultInverse(builder, constOp->getLoc(), divideOp.getInput2());
         builder.setInsertionPoint(divideOp);
-        const auto multiplyOp = builder.create<IE::MultiplyOp>(appendLoc(divideOp->getLoc(), "convert_to_multiply"),
-                                                               divideOp.getInput1(), newInput2,
-                                                               divideOp.getAutoBroadcastAttr(), nullptr, nullptr);
+        const auto multiplyOp = builder.create<IE::MultiplyOp>(
+                appendLoc(divideOp->getLoc(), "convert_to_multiply"), divideOp.getInput1(), newInput2,
+                divideOp.getAutoBroadcastAttr(), nullptr, nullptr, nullptr, nullptr);
 
         divideOp->replaceAllUsesWith(multiplyOp);
     });

@@ -59,18 +59,19 @@ public:
     };
 };
 
-TEST_P(ConvSoftmaxConvTestCommon, VPU3720_HW) {
+TEST_P(ConvSoftmaxConvTestCommon, NPU3720_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(ConvSoftmaxConvTestCommon, VPU4000_HW) {
+TEST_P(ConvSoftmaxConvTestCommon, NPU4000_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
 
 INSTANTIATE_TEST_SUITE_P(smoke_ConvSoftmaxConv, ConvSoftmaxConvTestCommon,
-                         ::testing::Values(ConvSoftmaxConvTestParams{{1, 48, 8, 16}, 1, 77}),
+                         ::testing::Values(ConvSoftmaxConvTestParams{{1, 48, 8, 16}, 1, 77},
+                                           ConvSoftmaxConvTestParams{{1, 48, 8, 16}, 1, 21}),
                          ConvSoftmaxConvTestCommon::getTestCaseName);
 
 }  // namespace ov::test

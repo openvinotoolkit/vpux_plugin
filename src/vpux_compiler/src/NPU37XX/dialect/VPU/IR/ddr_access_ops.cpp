@@ -4,6 +4,7 @@
 //
 
 #include "vpux/compiler/NPU37XX/dialect/VPU/IR/ops_interfaces.hpp"
+#include "vpux/compiler/dialect/VPU/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops_interfaces.hpp"
 
@@ -40,15 +41,11 @@ public:
         // If the Output buffer exceeds CMX memory size, memory allocation follows:
         // Input (DDR) + Indices (CMX) -> Output (DDR)
         // Experiments indicate significant performance degradation (E#123794 for details)
-        int64_t batchDims = 0;
-        const auto batchDimAttr = gatherOp.getBatchDimsAttr();
-        if (batchDimAttr != nullptr) {
-            batchDims = batchDimAttr.dyn_cast_or_null<mlir::IntegerAttr>().getValue().getSExtValue();
-        }
+        const auto isStrideSrcData = std::any_of(inputShape.begin(), inputShape.begin() + axisValue, [](auto dimSize) {
+            return dimSize != 1;
+        });
 
-        const auto indicesType = gatherOp.getIndices().getType().cast<vpux::NDTypeInterface>();
-        const auto indicesRank = indicesType.getShape().size();
-        if (batchDims == 0 && axisValue == 0 && indicesRank == 2) {
+        if (!isStrideSrcData) {
             const auto outputType = gatherOp.getOutput().getType().cast<vpux::NDTypeInterface>();
             const auto outputByteSize = outputType.getElemTypeSize().to<Byte>().count();
             const auto isBeneficialScenario = (inputType.getShape().totalSize() * inputByteSize) > cmxAvailableBytes &&

@@ -150,57 +150,6 @@ mlir::FailureOr<OutputTiling> vpux::VPU::GRUSequenceOp::getTilingStrategy(Tiling
     return origTilesY;
 }
 
-//
-// reifyTileGRUSequence
-//
-
-// There are some reasons for custom applyTileStrategy and reifyTile :
-// 1, There are two outputs of GRUSequence, names Y and Ho from OpenVINO doc, it's a little
-// different from TopK because the shapes of two TopK outputs are same. The shape of Y is
-// [batch_size, num_directions, seq_len, hidden_size], and the shape of Ho is [batch_size,
-// num_directions, hidden_size]. And Ho-tiles can be inferred by Y-tiles. Besides, a
-// inferoutputHoTile logic is needed.
-// 2, These tiles GRUSequence aren't independent of each other when seq_length dimension is tiled.
-// So, output of previous tile GRUSequence is needed to create current tile GRUSequence.
-// And the logic is different according to direction attribute.
-// 3, The function to reverse tiles order for REVERSE mode is also necessary.
-OutputTiling inferOutputHoTile(const OutputTiling& tilesY) {
-    // The rank of outputHo equals 3.
-    OutputTiling tilesHo;
-    for (const auto& outputYTile : tilesY) {
-        TileInfo outputHoTile(3);
-        outputHoTile.shape[Dim(0)] = outputYTile.shape[Dim(0)];
-        outputHoTile.shape[Dim(1)] = outputYTile.shape[Dim(1)];
-        outputHoTile.shape[Dim(2)] = outputYTile.shape[Dim(3)];
-        outputHoTile.offsets[Dim(0)] = outputYTile.offsets[Dim(0)];
-        outputHoTile.offsets[Dim(1)] = outputYTile.offsets[Dim(1)];
-        outputHoTile.offsets[Dim(2)] = outputYTile.offsets[Dim(3)];
-        tilesHo.push_back(outputHoTile);
-    }
-    return tilesHo;
-}
-
-void reverseTilesOrderForReverseMode(OutputTiling& tilesY, int64_t seqLengthTile,
-                                     IE::RNNSequenceDirection origDirection) {
-    const auto reverse = [seqLengthTile, &tilesY](size_t i) {
-        for (size_t j = 0; j < size_t(seqLengthTile / 2); ++j) {
-            std::swap(tilesY[i + j], tilesY[i + seqLengthTile - 1 - j]);
-        }
-    };
-    if (origDirection == IE::RNNSequenceDirection::BIDIRECTIONAL) {
-        for (size_t i = 0; i < tilesY.size(); i += seqLengthTile) {
-            if (tilesY[i].offsets[Dim(1)] == 1) {
-                reverse(i);
-            }
-        }
-    }
-    if (origDirection == IE::RNNSequenceDirection::REVERSE) {
-        for (size_t i = 0; i < tilesY.size(); i += seqLengthTile) {
-            reverse(i);
-        }
-    }
-}
-
 OutputTiling vpux::VPU::GRUSequenceOp::getOutputTiling(const vpux::TileInfo& firstOutputTile, vpux::Logger /*log*/) {
     return GRUSequenceOutputTiling(firstOutputTile);
 }

@@ -71,7 +71,7 @@ mlir::Value alignConstant(mlir::PatternRewriter& rewriter, mlir::Operation* pare
                 constShape[Dims4D::Act::C.ind()] = parentInputDimC;
 
                 const auto constReshape = rewriter.createOrFold<IE::ReshapeOp>(
-                        origOp->getLoc(), constInput, nullptr, false,
+                        takeOpLoc(origOp, "reshape_cst"), constInput, nullptr, false,
                         getIntArrayAttr(origOp->getContext(), ArrayRef(constShape)));
 
                 const auto outOrder = DimsOrder::fromValue(constReshape);
@@ -80,7 +80,8 @@ mlir::Value alignConstant(mlir::PatternRewriter& rewriter, mlir::Operation* pare
                     return constReshape;
                 } else {
                     const auto newOrderMap = inOrder.toAffineMap(rewriter.getContext());
-                    return rewriter.createOrFold<IE::ReorderOp>(origOp->getLoc(), constReshape, newOrderMap);
+                    return rewriter.createOrFold<IE::ReorderOp>(takeOpLoc(origOp, "reorder_cst"), constReshape,
+                                                                newOrderMap);
                 }
             })
             .Case<IE::TransposeOp>([&](auto origOp) {
@@ -88,7 +89,8 @@ mlir::Value alignConstant(mlir::PatternRewriter& rewriter, mlir::Operation* pare
                 const auto dstPerm = dstOrder.toAffineMap(origOp->getContext());
                 const auto dstOrderAttr = mlir::AffineMapAttr::get(dstPerm);
 
-                return rewriter.createOrFold<IE::TransposeOp>(origOp->getLoc(), constInput, nullptr, dstOrderAttr);
+                return rewriter.createOrFold<IE::TransposeOp>(takeOpLoc(origOp, "transpose_cst"), constInput, nullptr,
+                                                              dstOrderAttr);
             })
             .Default([](mlir::Operation* op) -> mlir::Value {
                 VPUX_THROW("Unsupported operation '{0}' at '{1}'", op->getName(), op->getLoc());
@@ -200,15 +202,17 @@ mlir::LogicalResult SwapWithBias::matchAndRewrite(IE::AddOp origOp, mlir::Patter
         }
     }
 
-    rewriter.startOpModification(parentOp);
-    rewriter.setInsertionPoint(parentOp);
-
+    rewriter.setInsertionPointAfter(origOp);
+    SmallVector<mlir::Value> newParentOpOperands;
     // Create new Add ops for each input of parent operation.
     for (auto& operand : parentOp->getOpOperands()) {
         mlir::Value newConstant;
+        const size_t operandId = operand.getOperandNumber();
         if (singleValueBias) {
             auto oprandShape = getShape(operand.get()).raw();
-            newConstant = reshapeSingleValueConstant(rewriter, origOp->getLoc(), oprandShape.size(), biasInput);
+            newConstant =
+                    reshapeSingleValueConstant(rewriter, takeOpLoc(origOp, StringLiteral("reshape_in_{0}"), operandId),
+                                               oprandShape.size(), biasInput);
         } else {
             // TODO: E#68168 check the layout info as we did for Sigmod/Relu/Tanh
             newConstant = alignConstant(rewriter, parentOp, biasInput);
@@ -218,8 +222,9 @@ mlir::LogicalResult SwapWithBias::matchAndRewrite(IE::AddOp origOp, mlir::Patter
             return mlir::failure();
         }
 
-        auto newAddOp = rewriter.create<IE::AddOp>(origOp->getLoc(), operand.get(), newConstant,
-                                                   origOp.getAutoBroadcast(), nullptr, nullptr);
+        auto newAddOp =
+                rewriter.create<IE::AddOp>(takeOpLoc(origOp, StringLiteral("add_{0}"), operandId), operand.get(),
+                                           newConstant, origOp.getAutoBroadcast(), nullptr, nullptr, nullptr, nullptr);
 
         // The new add must have the same output element type as the original one
         const auto origAddOutputType = origOp->getResult(0).getType().dyn_cast<vpux::NDTypeInterface>();
@@ -227,23 +232,23 @@ mlir::LogicalResult SwapWithBias::matchAndRewrite(IE::AddOp origOp, mlir::Patter
         newAddOutputType = newAddOutputType.changeElemType(origAddOutputType.getElementType());
         newAddOp->getResult(0).setType(newAddOutputType);
 
-        // Update input of Operation. NewAddOp -> parent Op.
-        operand.set(newAddOp.getOutput());
-
         updateOutputOrder(newAddOp->getResult(0), origOrder, parentOrder);
+        newParentOpOperands.push_back(newAddOp->getResult(0));
     }
 
+    // Update input of Operation. NewAddOp -> parent Op.
+    mlir::IRMapping mapper;
+    mapper.map(parentOp->getOperands(), newParentOpOperands);
+    auto newParentOp = rewriter.clone(*parentOp, mapper);
+
     // The input and output element type must be the same for AffineReshape/Transpose/Reshape after swap
-    const auto parentInputType = parentOp->getOpOperand(0).get().getType().dyn_cast<vpux::NDTypeInterface>();
-    const auto oldParentOpOutType = parentOp->getResult(0).getType().dyn_cast<vpux::NDTypeInterface>();
+    const auto parentInputType = newParentOp->getOpOperand(0).get().getType().dyn_cast<vpux::NDTypeInterface>();
+    const auto oldParentOpOutType = newParentOp->getResult(0).getType().dyn_cast<vpux::NDTypeInterface>();
     const auto newParentOpOutType = oldParentOpOutType.changeElemType(parentInputType.getElementType());
-    parentOp->getResult(0).setType(newParentOpOutType);
+    newParentOp->getResult(0).setType(newParentOpOutType);
 
     // Remove old Add ops.
-    rewriter.replaceOp(origOp, parentOp->getResults());
-
-    // Rewrite done.
-    rewriter.finalizeOpModification(parentOp);
+    rewriter.replaceOp(origOp, newParentOp);
 
     return mlir::success();
 }
@@ -319,14 +324,25 @@ mlir::LogicalResult SwapWithActivation<Activation>::matchAndRewrite(Activation o
     rewriter.startOpModification(parentOp);
     rewriter.setInsertionPoint(parentOp);
 
+    auto origElemType = origOp->getResult(0).getType().template cast<NDTypeInterface>().getElementType();
+    if (mlir::template dyn_cast<mlir::quant::UniformQuantizedPerAxisType>(origElemType)) {
+        return mlir::failure();
+    }
+
     const auto parentOpInputs = parentOp->getOperands();
     for (auto i : irange<size_t>(0, parentOpInputs.size())) {
         auto newActivation = rewriter.clone(*origOp);
+        extendOpLoc(newActivation, StringLiteral("act_{0}"), i);
         newActivation->setOperand(0, parentOpInputs[i]);
         newActivation->getOpResult(0).setType(parentOpInputs[i].getType());
+        if (mlir::isa<IE::LeakyReluOp>(origOp)) {
+            auto origElemType = origOp->getResult(0).getType().template cast<NDTypeInterface>().getElementType();
+            auto newType = newActivation->getOpResult(0).getType().template cast<NDTypeInterface>();
+            newActivation->getOpResult(0).setType(newType.changeElemType(origElemType));
+        }
         parentOp->getOpOperand(static_cast<uint32_t>(i)).set(newActivation->getResult(0));
     }
-
+    inferReturnTypes(parentOp, InferShapedTypeMode::ELEM_TYPE);
     rewriter.replaceOp(origOp, parentOp->getResults());
 
     rewriter.finalizeOpModification(parentOp);
@@ -376,7 +392,7 @@ mlir::LogicalResult SwapTanhSlice::matchAndRewrite(IE::TanhOp originOp, mlir::Pa
     auto newOp = rewriter.create<IE::TanhOp>(originOp.getLoc(), newType, sliceOp.getSource());
     auto newSlice = rewriter.replaceOpWithNewOp<IE::SliceOp>(
             originOp, newOp->getResult(0), sliceOp.getStaticOffsetsAttr(), sliceOp.getStaticSizesAttr());
-
+    extendOpLoc(newSlice, "swap");
     newSlice->getResult(0).setType(oldSliceType);
 
     return mlir::success();
@@ -467,9 +483,9 @@ mlir::LogicalResult SwapTanhShapeCast::matchAndRewrite(IE::TanhOp origOp, mlir::
     auto newTanhOp =
             rewriter.create<IE::TanhOp>(origOp.getLoc(), shapeCastOp.getSource().getType(), shapeCastOp.getSource());
     auto outputType = origOp.getResult().getType().cast<NDTypeInterface>();
-    rewriter.replaceOpWithNewOp<IE::ShapeCastOp>(origOp, outputType, newTanhOp.getResult(),
-                                                 getIntArrayAttr(origOp.getContext(), outputType.getShape()));
-
+    auto castOp = rewriter.replaceOpWithNewOp<IE::ShapeCastOp>(
+            origOp, outputType, newTanhOp.getResult(), getIntArrayAttr(origOp.getContext(), outputType.getShape()));
+    extendOpLoc(castOp, "swap");
     return mlir::success();
 }
 

@@ -17,14 +17,14 @@ bool hasIoSectionFlags(ELF::SectionFlagsAttr flags) {
 }
 }  // namespace
 
-size_t ELF::LogicalSectionOp::getTotalSize() {
+size_t ELF::LogicalSectionOp::getTotalSize(vpux::ELF::SymbolReferenceMap& symRefMap) {
     size_t totalSize = 0;
     auto calcSpan = [&](mlir::Operation& op) {
         auto binaryOp = mlir::dyn_cast<ELF::BinaryOpInterface>(&op);
         auto wrappableOp = mlir::dyn_cast<ELF::WrappableOpInterface>(&op);
 
         if (binaryOp && wrappableOp) {
-            auto span = binaryOp.getBinarySize() + wrappableOp.getMemoryOffset();
+            auto span = binaryOp.getBinarySizeCached(symRefMap) + wrappableOp.getMemoryOffset();
             totalSize = std::max(totalSize, span);
         }
     };
@@ -34,13 +34,19 @@ size_t ELF::LogicalSectionOp::getTotalSize() {
 
 void ELF::LogicalSectionOp::serialize(elf::Writer& writer, ELF::SectionMapType& sectionMap,
                                       ELF::SymbolMapType& symbolMap, ELF::SymbolReferenceMap&) {
+    VPUX_UNUSED(writer);
+    VPUX_UNUSED(sectionMap);
     VPUX_UNUSED(symbolMap);
+}
+
+void vpux::ELF::LogicalSectionOp::preserialize(elf::Writer& writer, vpux::ELF::SectionMapType& sectionMap,
+                                               vpux::ELF::SymbolReferenceMap& symRefMap) {
     const auto name = getSymName().str();
     auto section = writer.addEmptySection(name);
     section->maskFlags(static_cast<elf::Elf_Xword>(getSecFlags()));
     section->setAddrAlign(getSecAddrAlign());
     section->setType(static_cast<elf::Elf_Word>(getSecType()));
-    section->setSize(getTotalSize());
+    section->setSize(getTotalSize(symRefMap));
 
     sectionMap[getOperation()] = section;
 }

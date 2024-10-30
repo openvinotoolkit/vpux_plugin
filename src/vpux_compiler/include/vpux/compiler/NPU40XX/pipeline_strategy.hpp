@@ -6,6 +6,7 @@
 #pragma once
 
 #include "vpux/compiler/pipeline_strategy.hpp"
+#include "vpux/compiler/utils/options.hpp"
 
 namespace vpux {
 

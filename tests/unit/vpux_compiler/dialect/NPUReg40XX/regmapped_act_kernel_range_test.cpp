@@ -45,14 +45,10 @@ std::vector<std::pair<MappedRegValues, nn_public::VpuActKernelRange>> actKernelR
          },
          CREATE_HW_DMA_DESC(code_size, 0xFFFFFFFF)},
         {{
-                 {"data_sec_size", {{"data_sec_size", 0xFFFFFFFF}}},
-         },
-         CREATE_HW_DMA_DESC(data_sec_size, 0xFFFFFFFF)},
-        {{
                  {"kernel_invo_count", {{"kernel_invo_count", 0xFFFFFFFF}}},
          },
          CREATE_HW_DMA_DESC(kernel_invo_count, 0xFFFFFFFF)},
 };
 
-INSTANTIATE_TEST_CASE_P(NPUReg40XX_MappedRegs, NPUReg40XX_NpuActKernelRangeTest,
-                        testing::ValuesIn(actKernelRangeFieldSet));
+INSTANTIATE_TEST_SUITE_P(NPUReg40XX_MappedRegs, NPUReg40XX_NpuActKernelRangeTest,
+                         testing::ValuesIn(actKernelRangeFieldSet));

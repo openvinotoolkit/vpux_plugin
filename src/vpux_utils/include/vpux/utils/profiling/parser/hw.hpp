@@ -19,13 +19,6 @@ struct ActShaveData_t {
     uint32_t reserved32;
 };
 
-struct UpaData_t {
-    uint64_t begin;
-    uint64_t end;
-    uint32_t stallCycles;
-    uint32_t activeCycles;
-};
-
 // HWP DPU profiling data payload
 struct HwpDpu27Mode0Data_t {
     uint64_t idu_wl_duration : 28;

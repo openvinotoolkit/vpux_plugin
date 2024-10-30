@@ -24,8 +24,8 @@ func.func @AlignConcatScalesInterpolate(%arg0: tensor<1x16x4x4xf16>, %arg1: tens
 
   return %5 : tensor<1x16x5x8xf16>
 
-  // CHECK-DAG: [[CST:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<0.000000e+00> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
-  // CHECK-DAG: [[CST_0:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<0.755859375> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
+  // CHECK-DAG: [[CST:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<0.000000e+00> : tensor<1x1x1x1xf32>, [#const.CastElemType<f16>]
+  // CHECK-DAG: [[CST_0:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<0.755859375> : tensor<1x1x1x1xf32>, [#const.CastElemType<f16>]
   // CHECK-DAG: [[CST_1:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<7.558590e-01> : tensor<1x1x1x1xf16>
   // CHECK-DAG: [[CST_2:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<0.000000e+00> : tensor<1x1x1x1xf16>
   // CHECK-DAG: [[CST_3:%.*]] = const.Declare tensor<16x16x5x3xf16> = dense<1.000000e+00> : tensor<16x16x5x3xf16>

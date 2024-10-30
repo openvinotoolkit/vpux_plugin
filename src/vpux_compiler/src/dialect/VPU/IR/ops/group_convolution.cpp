@@ -5,6 +5,7 @@
 
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPU/utils/auto_padding_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
 
 #include "vpux/compiler/core/attributes/shape.hpp"

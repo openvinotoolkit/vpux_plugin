@@ -47,6 +47,7 @@ class VPUASM_Instruction<string mnemonic, list<Trait> traits = []> :
                 traits,
                 [
                     DeclareOpInterfaceMethods<ELF_WrappableOpInterface>,
+                    DeclareOpInterfaceMethods<ELF_PredefinedPurposeMemoryOpInterface>,
                     Symbol,
                     IsolatedFromAbove
                 ]
@@ -96,8 +97,17 @@ def VPUASM_ConstBufferOp :
     let assemblyFormat = [{
         $sym_name
         attr-dict
-        $buffer_type `=` $content
+        $buffer_type `=` custom<ContentAttr>($content)
     }];
+
+    let skipDefaultBuilders = 1;
+    let builders = [
+        OpBuilder<(ins
+            "::mlir::StringAttr":$sym_name, "::vpux::VPUASM::BufferType":$buffer_type,
+            "::vpux::Const::ContentAttr&&":$content
+        )>
+    ];
+
 }
 
 //
@@ -164,6 +174,7 @@ def VPUASM_DeclareTaskAddrBufOp :
         [
             DeclareOpInterfaceMethods<ELF_BinaryOpInterface, ["serialize", "getBinarySize"]>,
             DeclareOpInterfaceMethods<ELF_WrappableOpInterface,  ["getMemoryOffset", "setMemoryOffset"]>,
+            DeclareOpInterfaceMethods<ELF_PredefinedPurposeMemoryOpInterface>
         ]> {
 
     let summary = "Symbolic representation of DeclareTaskAddrBuffOp";
@@ -190,6 +201,7 @@ def VPUASM_TaskSinkOp :
         [
             DeclareOpInterfaceMethods<ELF_BinaryOpInterface, ["serialize", "getBinarySize"]>,
             DeclareOpInterfaceMethods<ELF_WrappableOpInterface,  ["getMemoryOffset", "setMemoryOffset"]>,
+            DeclareOpInterfaceMethods<ELF_PredefinedPurposeMemoryOpInterface>
         ]> {
 
     let summary = "Symbolic representation of DeclareTaskAddrBuffOp";
@@ -400,7 +412,12 @@ def VPUASM_ManagedMappedInferenceOp :
         I64Attr:$barrierCount,
         IntAttr:$final_barrier_id,
         I64Attr:$bootstrapTasksCount,
-        I64Attr:$bootsrapWorkItemsCount
+        I64Attr:$bootsrapWorkItemsCount,
+        UI8Attr:$actshv_used,
+        UI8Attr:$dpu_used,
+        UI8Attr:$media_used,
+        UI8Attr:$dma_from_ddr_used,
+        UI8Attr:$dma_from_cmx_used
         );
 
     let assemblyFormat = [{
@@ -559,6 +576,7 @@ def VPUASM_NNDMAOp :
         VPUASM_Instruction<"NNDMA",
             [
                 DeclareOpInterfaceMethods<ELF_BinaryOpInterface, ["serialize", "getBinarySize"]>,
+                DeclareOpInterfaceMethods<ELF_DDRMemoryAccessingOpInterface>,
                 VPUASM_IndexedTaskInterface
             ]
         > {
@@ -638,6 +656,7 @@ def VPUASM_ActShaveRtOp :
             [
                 DeclareOpInterfaceMethods<ELF_BinaryOpInterface, ["serialize", "getBinarySize"]>,
                 DeclareOpInterfaceMethods<ELF_WrappableOpInterface>,
+                DeclareOpInterfaceMethods<ELF_PredefinedPurposeMemoryOpInterface>,
                 Symbol,
                 IsolatedFromAbove
             ]
@@ -735,7 +754,8 @@ def VPUASM_KernelParamsOp :
         VPUASM_Instruction<"KernelParams",
             [
                 DeclareOpInterfaceMethods<ELF_RelocatableOpInterface>,
-                DeclareOpInterfaceMethods<ELF_BinaryOpInterface, ["serializeCached", "getBinarySizeCached"]>
+                DeclareOpInterfaceMethods<ELF_BinaryOpInterface, ["serializeCached", "getBinarySizeCached"]>,
+                DeclareOpInterfaceMethods<ELF_DDRMemoryAccessingOpInterface>
             ]
         > {
     let summary = "Kernel Params";
@@ -745,7 +765,8 @@ def VPUASM_KernelParamsOp :
         SymbolRefArrayAttr:$inputs,
         SymbolRefArrayAttr:$outputs,
         StrAttr:$kernel_type,
-        ElementsAttr:$kernel_params
+        ElementsAttr:$kernel_params,
+        UnitAttr:$is_output_broadcasted
     );
 
     let extraClassDeclaration = [{
@@ -946,12 +967,12 @@ def VPUASM_DPUInvariantOp :
         UI8ArrayAttr:$updateBarriers,
 
         VPUIP_NCETaskTypeAttr:$nce_task_type,
+        OptionalAttr<VPU_EltwiseTypeAttr>:$eltwise_type,
         VPU_MPEModeAttr:$mpe_frequent_mode,
 
         OptionalAttr<I64ArrayAttr>:$kernel_size,
         OptionalAttr<I64ArrayAttr>:$kernel_strides,
         OptionalAttr<VPU_PaddingAttr>:$kernel_padding,
-        OptionalAttr<IntAttr>:$activation_window_channel_length,
         UnitAttr:$is_continued,
         OptionalAttr<IntAttr>:$cm_sp_pattern,
         UnitAttr:$input_channels_compression,
@@ -1081,12 +1102,12 @@ def VPUASM_DPUInvariantOp_37XX :
         UI8ArrayAttr:$updateBarriers,
 
         VPUIP_NCETaskTypeAttr:$nce_task_type,
+        OptionalAttr<VPU_EltwiseTypeAttr>:$eltwise_type,
         VPU_MPEModeAttr:$mpe_frequent_mode,
 
         OptionalAttr<I64ArrayAttr>:$kernel_size,
         OptionalAttr<I64ArrayAttr>:$kernel_strides,
         OptionalAttr<VPU_PaddingAttr>:$kernel_padding,
-        OptionalAttr<IntAttr>:$activation_window_channel_length,
         UnitAttr:$is_continued,
         OptionalAttr<IntAttr>:$cm_sp_pattern,
         UnitAttr:$input_channels_compression,
@@ -1165,10 +1186,13 @@ def VPUASM_SymbolizeValueOp :
 //
 
 def VPUASM_NetworkMetadataOp :
-        VPUASM_Instruction<"NetworkMetadata",
+        VPUASM_Op<"NetworkMetadata",
             [
                 DeclareOpInterfaceMethods<ELF_BinaryOpInterface, ["serialize", "getBinarySize"]>,
-                VPUASM_IndexedTaskInterface
+                DeclareOpInterfaceMethods<ELF_WrappableOpInterface>,
+                VPUASM_IndexedTaskInterface,
+                IsolatedFromAbove,
+                Symbol
             ]
         > {
     let summary = "Network Metadata Op";
@@ -1192,9 +1216,12 @@ def VPUASM_NetworkMetadataOp :
 //
 
 def VPUASM_ProfilingMetadataOp :
-        VPUASM_Instruction<"ProfilingMetadata",
+        VPUASM_Op<"ProfilingMetadata",
             [
-                DeclareOpInterfaceMethods<ELF_BinaryOpInterface, ["serialize", "getBinarySize"]>
+                DeclareOpInterfaceMethods<ELF_BinaryOpInterface, ["serialize", "getBinarySize"]>,
+                DeclareOpInterfaceMethods<ELF_WrappableOpInterface>,
+                IsolatedFromAbove,
+                Symbol
             ]
         > {
     let summary = "Profiling Metadata Op";

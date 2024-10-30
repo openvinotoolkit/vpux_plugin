@@ -34,6 +34,32 @@ func.func @main(%arg0: tensor<1x3x32x32xf16>) -> tensor<1x16x32x32xf16> {
 
 // -----
 
+#NHCW = affine_map<(d0, d1, d2, d3) -> (d0, d2, d1, d3)>
+
+// CHECK-LABEL: @DilatedGroupConv
+module @DilatedGroupConv {
+
+// CHECK: func.func @main([[ARG0:%.+]]: tensor<1x16x30x30xf16>) -> tensor<1x16x15x15xf16> {
+func.func @main(%arg0: tensor<1x16x30x30xf16>) -> tensor<1x16x15x15xf16> {
+    %cst = const.Declare  tensor<16x1x3x3xf16> = dense<1.0> : tensor<16x1x3x3xf16>
+    %2 = IE.GroupConvolution(%arg0, %cst) {dilations = [2, 2], groups = 16 : i64, pads_begin = [2, 2],
+     pads_end = [2, 2], strides = [2, 2]} : tensor<1x16x30x30xf16>, tensor<16x1x3x3xf16> -> tensor<1x16x15x15xf16>
+
+    return %2 : tensor<1x16x15x15xf16>
+
+    // CHECK-DAG:       [[CST:%.+]] = const.Declare tensor<16x1x3x3xf16, {order = #NHWC}>
+    // CHECK:       [[VAR0:%.+]] = IE.Reorder([[ARG0]]) {dstOrder = #NHWC}
+    // CHECK-SAME:       -> tensor<1x16x30x30xf16, {order = #NHWC}>
+    // CHECK:       [[VAR1:%.+]] = IE.GroupConvolution([[VAR0]], [[CST]])
+    // CHECK-SAME:       -> tensor<1x16x15x15xf16, {order = #NHWC}>
+    // CHECK:       [[VAR2:%.+]] = IE.Reorder([[VAR1]]) {dstOrder = #NCHW}
+    // CHECK:       return [[VAR2]] : tensor<1x16x15x15xf16>
+}
+
+}
+
+// -----
+
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 

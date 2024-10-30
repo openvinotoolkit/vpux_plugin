@@ -13,8 +13,17 @@ namespace vpux {
 namespace VPU {
 
 constexpr StringRef AUTO_PADDING_ODU = "VPU.AutoPaddingODU";
+constexpr StringRef AUTO_PADDING_IDU = "VPU.AutoPaddingIDU";
 
-bool hasAutoPaddingODU(mlir::Operation* op);
+// Hardware limitation
+constexpr int64_t WIDTH16_CHANNEL_LIMIT = 10;
+constexpr int64_t FP16_WIDTH = 16;
+
+bool hasAutoPaddingODU(mlir::ModuleOp module);
+bool hasAutoPaddingIDU(mlir::ModuleOp module);
+bool inputCompatibleWithAutoPad(vpux::NDTypeInterface type);
+bool hasOnlyOutPadding(mlir::ModuleOp module);
+bool hasOnlyInPadding(mlir::ModuleOp module);
 
 }  // namespace VPU
 }  // namespace vpux

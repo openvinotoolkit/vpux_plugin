@@ -67,12 +67,8 @@ func.func @main() -> () {
                 >
             }
         } PPE : {
-            PPETask <NOOP> {
-                clamp_high = 2147483647 : i64,
-                clamp_low = -2147483648 : i64,
-                fp_prelu_alpha = 1.000000e+00 : f64,
-                lrelu_mult = 1 : i64,
-                lrelu_shift = 0 : i64
+            PPETask {
+                opaque_ppe = #VPU.PPEStub<>
             }
         }
     }
@@ -171,12 +167,8 @@ func.func @main() -> () {
                 >
             }
         } PPE : {
-            PPETask <NOOP> {
-                clamp_high = 2147483647 : i64,
-                clamp_low = -2147483648 : i64,
-                fp_prelu_alpha = 1.000000e+00 : f64,
-                lrelu_mult = 1 : i64,
-                lrelu_shift = 0 : i64
+            PPETask {
+                opaque_ppe = #VPU.PPEStub<>
             }
         }
     }
@@ -263,12 +255,8 @@ func.func @main() -> () {
                 >
             }
         } PPE : {
-            PPETask <NOOP> {
-                clamp_high = 2147483647 : i64,
-                clamp_low = -2147483648 : i64,
-                fp_prelu_alpha = 1.000000e+00 : f64,
-                lrelu_mult = 1 : i64,
-                lrelu_shift = 0 : i64
+            PPETask {
+                opaque_ppe = #VPU.PPEStub<>
             }
         }
     }

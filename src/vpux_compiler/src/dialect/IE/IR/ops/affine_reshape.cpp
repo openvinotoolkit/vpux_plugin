@@ -89,16 +89,17 @@ mlir::OpFoldResult vpux::IE::AffineReshapeOp::fold(FoldAdaptor adaptor) {
 
     VPUX_THROW_UNLESS(!operands.empty(), "Wrong number of operands : {0}", operands.size());
 
-    if (const auto attr = operands[0].dyn_cast_or_null<Const::ContentAttr>()) {
+    if (const auto ephemeral = operands[0].dyn_cast_or_null<Const::EphemeralContentAttr>()) {
+        const auto attr = static_cast<Const::ContentAttr>(ephemeral);
         const auto inputElemType =
                 inputType.getElementType().dyn_cast_or_null<mlir::quant::UniformQuantizedPerAxisType>();
         const auto outputElemType =
                 outputType.getElementType().dyn_cast_or_null<mlir::quant::UniformQuantizedPerAxisType>();
         if (inputElemType && outputElemType && isQuantizedDimensionPermutation(inputElemType, outputElemType)) {
             const auto newShape = outputType.getShape();
-            return attr.changeShapeAndElemType(newShape, outputElemType);
+            return attr.transform().changeShapeAndElemType(newShape, outputElemType).get();
         }
-        return attr.reshape(getShape(getOutput()));
+        return attr.transform().reshape(getShape(getOutput())).get();
     }
 
     return nullptr;

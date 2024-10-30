@@ -10,7 +10,6 @@
 #include "npu.hpp"
 #include "npu/utils/logger/logger.hpp"
 #include "npu_private_properties.hpp"
-#include "vpux/utils/IE/private_properties.hpp"
 
 #include "no_devices_test_backend.hpp"
 #include "npu3720_test_backend.hpp"

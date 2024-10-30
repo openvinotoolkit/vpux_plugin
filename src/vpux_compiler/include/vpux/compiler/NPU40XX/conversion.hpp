@@ -28,8 +28,7 @@ void buildLowerVPUIP2ELFPipeline(mlir::OpPassManager& pm,
                                  Logger log = Logger::global(),
                                  VPU::DPUDryRunMode dpuDryRunMode = VPU::DPUDryRunMode::NONE);
 
-void elfSubsetPipeline(mlir::OpPassManager& pm, const BackendCompilationOptions40XX& backendCompilationOptions,
-                       Logger log = Logger::global());
+void elfSubsetPipeline(mlir::OpPassManager& pm, bool enablePartialWorkloadManagement, const Logger& log);
 
 //
 // registerConversionPipeline

@@ -113,7 +113,7 @@ module @ThreeFunctions {
         // CHECK: [[ALLOC0:%.+]] = VPUIP.StaticAlloc<0> -> memref<1x4x60x60xf16, @DDR>
 
         // Offset is not equal to 28800, since this place is reserved for %arg0
-        // CHECK: [[ALLOC1:%.+]] = VPUIP.StaticAlloc<50432> -> memref<1x1x60x60xf16, @DDR>
+        // CHECK: [[ALLOC1:%.+]] = VPUIP.StaticAlloc<52864> -> memref<1x1x60x60xf16, @DDR>
 
         %alloc = memref.alloc() : memref<1x4x60x60xf16, @DDR>
         %alloc_0 = memref.alloc() : memref<1x1x60x60xf16, @DDR>
@@ -270,7 +270,7 @@ module @ThreeFunctionsTemporaryBuffer {
     // CHECK-LABEL: @foo2
     func.func @foo2(%arg0: memref<1x6x10x10xf16, @DDR>, %arg1: memref<1x6x10x10xf16, @DDR>) -> memref<1x6x10x10xf16, @DDR> {
         // FIXME:#-108966 the offset should be the same as for @foo1: 1664; input for @foo3 will be corrupted
-        // CHECK: [[ALLOC:%.+]] = VPUIP.StaticAlloc<1216> -> memref<1x6x10x10xf16, @DDR>
+        // CHECK: [[ALLOC:%.+]] = VPUIP.StaticAlloc<1664> -> memref<1x6x10x10xf16, @DDR>
         %alloc = memref.alloc() : memref<1x6x10x10xf16, @DDR>
 
         %token, %bodyResults = async.execute -> !async.value<memref<1x6x10x10xf16, @DDR>>
@@ -468,7 +468,7 @@ module @ThreeFunctionsReservedMem {
         // CHECK: [[ALLOC0:%.+]] = VPUIP.StaticAlloc<512> -> memref<1x4x60x60xf16, @DDR>
 
         // Offset is not equal to 28800, since this place is reserved for %arg0
-        // CHECK: [[ALLOC1:%.+]] = VPUIP.StaticAlloc<50944> -> memref<1x1x60x60xf16, @DDR>
+        // CHECK: [[ALLOC1:%.+]] = VPUIP.StaticAlloc<53376> -> memref<1x1x60x60xf16, @DDR>
 
         %alloc = memref.alloc() : memref<1x4x60x60xf16, @DDR>
         %alloc_0 = memref.alloc() : memref<1x1x60x60xf16, @DDR>

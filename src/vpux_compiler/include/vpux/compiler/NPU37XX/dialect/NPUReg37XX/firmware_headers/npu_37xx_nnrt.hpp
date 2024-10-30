@@ -33,6 +33,7 @@ namespace npu37xx {
 #include <details/api/vpu_dma_hw_37xx.h>
 #include <details/api/vpu_nce_hw_37xx.h>
 #include <details/api/vpu_nnrt_api_37xx.h>
+#include <details/api/vpu_pwrmgr_api.h>
 
 // clang-format on
 

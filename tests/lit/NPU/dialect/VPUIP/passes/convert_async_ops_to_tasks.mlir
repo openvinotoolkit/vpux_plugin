@@ -239,53 +239,6 @@ func.func @TwoOutputs(%arg0: memref<2xf16>, %arg1: memref<2xf16>, %arg2: memref<
 
 // -----
 
-// CHECK: func.func @WithReshape([[ARG0:%.+]]: memref<1x512xf16>, [[ARG1:%.+]]: memref<1x512xf16>)
-func.func @WithReshape(%arg0: memref<1x512xf16>, %arg1: memref<1x512xf16>) -> memref<1x512xf16> {
-    %0 = VPURT.DeclareBuffer <DDR> <0> -> memref<1x512x1x1xf16, @DDR>
-
-    %t2, %f2 = async.execute -> !async.value<memref<1x512x1x1xf16, @DDR>>
-        attributes { VPUIP.executor = @DMA_NN, VPUIP.num_units = 1 } {
-        %1 = VPUIP.GenericReshape inputs(%arg0 : memref<1x512xf16>) -> memref<1x512x1x1xf16>
-        %2 = VPUIP.SoftMaxUPA {axisInd = 1}
-            inputs(%1 : memref<1x512x1x1xf16>)
-            outputs(%0 : memref<1x512x1x1xf16, @DDR>)
-            -> memref<1x512x1x1xf16, @DDR>
-        async.yield %0 : memref<1x512x1x1xf16, @DDR>
-    }
-
-    %t4, %f4 = async.execute [%t2] (%f2 as %2: !async.value<memref<1x512x1x1xf16, @DDR>>) -> !async.value<memref<1x512xf16>>
-        attributes { VPUIP.executor = @DMA_NN, VPUIP.num_units = 1 } {
-        %3 = VPUIP.GenericReshape inputs(%0 : memref<1x512x1x1xf16, @DDR>) -> memref<1x512xf16, @DDR>
-        %4 = VPUIP.NNDMA inputs(%3 : memref<1x512xf16, @DDR>) outputs(%arg1 : memref<1x512xf16>) -> memref<1x512xf16>
-        async.yield %arg1 : memref<1x512xf16>
-    }
-
-    %4 = async.await %f4 : !async.value<memref<1x512xf16>>
-    return %4 : memref<1x512xf16>
-
-    // CHECK-DAG:   [[BUF0:%.+]] = VPURT.DeclareBuffer <DDR> <0> -> memref<1x512x1x1xf16, @DDR>
-
-    // CHECK-DAG:   [[B0:%.+]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
-
-    // CHECK:       [[RESHAPE0:%.+]] = VPUIP.GenericReshape inputs([[ARG0]] : memref<1x512xf16>) -> memref<1x512x1x1xf16>
-    // CHECK:       VPURT.Task
-    // CHECK-SAME:      updates([[B0]] : !VPURT.Barrier)
-    // CHECK-NEXT:  [[VAR1:%.*]] = VPUIP.SoftMaxUPA
-    // CHECK-SAME:      inputs([[RESHAPE0]] : memref<1x512x1x1xf16>)
-    // CHECK-SAME:      outputs([[BUF0]] : memref<1x512x1x1xf16, @DDR>)
-
-    // CHECK:       [[RESHAPE1:%.+]] = VPUIP.GenericReshape inputs([[BUF0]] : memref<1x512x1x1xf16, @DDR>) -> memref<1x512xf16, @DDR>
-    // CHECK:       VPURT.Task
-    // CHECK-SAME:      waits([[B0]] : !VPURT.Barrier)
-    // CHECK-NEXT:  [[VAR3:%.*]] = VPUIP.NNDMA
-    // CHECK-SAME:      inputs([[RESHAPE1]] : memref<1x512xf16, @DDR>)
-    // CHECK-SAME:      outputs([[ARG1]] : memref<1x512xf16>)
-
-    // CHECK:  return [[ARG1]] : memref<1x512xf16>
-}
-
-// -----
-
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
 // CHECK: func.func @AwaitWithoutUsers([[ARG0:%.+]]: memref<1x16x112x112xf16, #NHWC>, [[ARG1:%.+]]: memref<1x16x112x112xf16, #NHWC>, [[ARG2:%.+]]: memref<1x32x112x112xf16, #NHWC>)

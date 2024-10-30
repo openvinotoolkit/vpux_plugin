@@ -31,12 +31,8 @@ size_t vpux::VPUASM::ActKernelInvocationOp::getAlignmentRequirements() {
     return alignof(nn_public::VpuActKernelInvocation);
 }
 
-vpux::ELF::SectionFlagsAttr vpux::VPUASM::ActKernelInvocationOp::getAccessingProcs(mlir::SymbolUserMap&) {
-    return ELF::SectionFlagsAttr::VPU_SHF_PROC_DMA;
-}
-
-vpux::ELF::SectionFlagsAttr vpux::VPUASM::ActKernelInvocationOp::getUserProcs() {
-    return ELF::SectionFlagsAttr::VPU_SHF_PROC_SHAVE;
+vpux::ELF::SectionFlagsAttr vpux::VPUASM::ActKernelInvocationOp::getPredefinedMemoryAccessors() {
+    return ELF::SectionFlagsAttr::SHF_EXECINSTR | ELF::SectionFlagsAttr::VPU_SHF_PROC_DMA;
 }
 
 std::optional<ELF::SectionSignature> vpux::VPUASM::ActKernelInvocationOp::getSectionSignature() {

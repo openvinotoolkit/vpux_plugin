@@ -45,7 +45,7 @@ mlir::LogicalResult VPUIP::ExtractFlatSliceOp::inferReturnTypes(mlir::MLIRContex
         return errorAt(loc, "ExtractFlatSliceOp must operate on Distributed buffers");
     }
     if (distributedType.getElementType().isa<mlir::quant::UniformQuantizedPerAxisType>()) {
-        return errorAt(loc, "ExtractFlatSliceOp doesnot support UniformQuantizedPerAxisType");
+        return errorAt(loc, "ExtractFlatSliceOp does not support UniformQuantizedPerAxisType");
     }
 
     auto inputShape = distributedType.getShape();
@@ -70,7 +70,7 @@ mlir::LogicalResult VPUIP::ExtractFlatSliceOp::inferReturnTypes(mlir::MLIRContex
         // Compiler expects to feed this operation to GenericReshape, which can operate on compact buffer. If
         // tiling dim if not leading we'll get strided memref, which is not supported yet
         if (inputShape[Dim(i)] != 1) {
-            return errorAt(loc, "Tiling dim must be first not one dim");
+            return errorAt(loc, "Tiling dim must be first dimension greater than 1");
         }
     }
     auto tileDim = Dim(tileIndex);
@@ -80,27 +80,21 @@ mlir::LogicalResult VPUIP::ExtractFlatSliceOp::inferReturnTypes(mlir::MLIRContex
     if (tilingDimOffset < 0 || tilingDimOffset >= shape[tileDim]) {
         return errorAt(loc, "Offset is exceeding original shape");
     }
-    auto perClusterShapes = distributedType.getPerClusterMemoryShapes();
-    std::optional<size_t> clusterId;
-    int64_t currentClusterOffset = 0;
-    for (size_t idx = 0; idx < perClusterShapes.size(); ++idx) {
-        auto clusterShape = perClusterShapes[idx];
-        auto nextClusterOffset = currentClusterOffset + clusterShape[tileDim];
+    auto perClusterOffsets = distributedType.getPerClusterMemoryShapeOffsets();
+    size_t clusterId = perClusterOffsets.size() - 1;
+    for (size_t idx = 0; idx < perClusterOffsets.size() - 1; ++idx) {
+        auto nextClusterOffset = perClusterOffsets[idx + 1][tileDim];
         if (tilingDimOffset < nextClusterOffset) {
             clusterId = idx;
             break;
         }
-        currentClusterOffset = nextClusterOffset;
-    }
-    if (!clusterId.has_value()) {
-        return errorAt(loc, "Cannot infer cluster id");
     }
 
     auto newShape = shape.toValues();
     newShape[tileDim] = 1;
 
     const auto memSpaceCMX =
-            vpux::IndexedSymbolAttr::get(loc.getContext(), stringifyEnum(VPU::MemoryKind::CMX_NN), clusterId.value());
+            vpux::IndexedSymbolAttr::get(loc.getContext(), stringifyEnum(VPU::MemoryKind::CMX_NN), clusterId);
 
     auto newType = vpux::getMemRefType(newShape, distributedType.getElementType(), distributedType.getDimsOrder(),
                                        memSpaceCMX);

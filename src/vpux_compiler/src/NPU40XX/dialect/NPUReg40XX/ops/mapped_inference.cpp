@@ -116,7 +116,7 @@ void vpux::NPUReg40XX::MappedInferenceOp::serialize(elf::writer::BinaryDataSecti
     if (getActKernelInvocationsCount()) {
         mi.shv_rt_configs.use_schedule_embedded_rt = false;
         mi.shv_rt_configs.code_window_buffer_size = NPUReg40XX::defaultActRtCodeSectionSize;
-        // TODO: E-74314 nnActEntry.40xx.elf has a .versiondata section that contains a single uint32_t
+        // TODO: E#74314 nnActEntry.40xx.elf has a .versiondata section that contains a single uint32_t
         // This should be read and set in mi.shvRtConfigs_.runtimeVersion_
         mi.shv_rt_configs.runtime_version = 0;
         mi.shv_rt_configs.runtime_entry = NPUReg40XX::defaultActRtEntry;

@@ -9,6 +9,7 @@
 #include "vpux/compiler/dialect/VPUASM/ops.hpp"
 #include "vpux/compiler/dialect/VPUASM/ops_interfaces.hpp"
 #include "vpux/compiler/dialect/VPUIPDPU/dialect.hpp"
+#include "vpux/compiler/dialect/VPURegMapped/types.hpp"
 
 using namespace vpux::VPUIPDPU;
 
@@ -66,8 +67,9 @@ public:
     }
 
     mlir::LogicalResult expandODUConfig(mlir::Operation* dpuVariantOp, mlir::OpBuilder& builder, const Logger& log,
-                                        ELF::SymbolReferenceMap& symRefMap) const {
-        return arch40xx::buildDPUVariantODU(mlir::cast<VPUASM::DPUVariantOp>(dpuVariantOp), builder, log, symRefMap);
+                                        mlir::Block* varBlock, ELF::SymbolReferenceMap& symRefMap) const {
+        return arch40xx::buildDPUVariantODU(mlir::cast<VPUASM::DPUVariantOp>(dpuVariantOp), builder, log, varBlock,
+                                            symRefMap);
     }
 };
 

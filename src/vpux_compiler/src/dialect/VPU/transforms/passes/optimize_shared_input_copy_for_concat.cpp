@@ -23,20 +23,8 @@ bool checkMemoryKind(mlir::Value value, VPU::MemoryKind kind) {
     return value.getType().cast<vpux::NDTypeInterface>().getMemoryKind() == kind;
 }
 
-bool isCopyOp(mlir::Operation* op) {
-    if (mlir::isa_and_nonnull<VPU::CopyOp>(op)) {
-        return true;
-    }
-
-    auto clusterTilingOp = mlir::dyn_cast_or_null<VPU::NCEClusterTilingOp>(op);
-    if (clusterTilingOp == nullptr) {
-        return false;
-    }
-    return mlir::isa_and_nonnull<VPU::CopyOp>(clusterTilingOp.getInnerTaskOp());
-}
-
 bool isCopyCMX2DDR(mlir::Operation* op) {
-    if (!isCopyOp(op)) {
+    if (!mlir::isa_and_nonnull<VPU::CopyOp>(op)) {
         return false;
     }
     return checkMemoryKind(op->getOperand(0), VPU::MemoryKind::CMX_NN) &&
@@ -44,7 +32,7 @@ bool isCopyCMX2DDR(mlir::Operation* op) {
 }
 
 bool isCopyDDR2CMX(mlir::Operation* op) {
-    if (!isCopyOp(op)) {
+    if (!mlir::isa_and_nonnull<VPU::CopyOp>(op)) {
         return false;
     }
     return checkMemoryKind(op->getOperand(0), VPU::MemoryKind::DDR) &&
@@ -235,10 +223,9 @@ bool SharedCopyInputRewriter::meetConcatPattern(VPU::ConcatOp concatOp) const {
         if (!isCopyDDR2CMX(userOp)) {
             return false;
         }
-
-        if (auto clusterTilingOp = mlir::dyn_cast<VPU::NCEClusterTilingOp>(userOp)) {
-            auto outDistributedType = clusterTilingOp.getResult(0).getType().cast<VPU::DistributedTensorType>();
-            const auto distAttr = outDistributedType.getDistribution();
+        auto distributedOutput = userOp->getResult(0).getType().dyn_cast_or_null<VPU::DistributedTensorType>();
+        if (distributedOutput != nullptr) {
+            const auto distAttr = distributedOutput.getDistribution();
             const auto distMode = distAttr.getMode().getValue();
             if (distMode == VPU::DistributionMode::SEGMENTED || distMode == VPU::DistributionMode::OVERLAPPED) {
                 const auto numTiles = distAttr.getNumTiles();
@@ -291,28 +278,21 @@ std::optional<mlir::Value> SharedCopyInputRewriter::createNewBranchInput(mlir::V
         newConcatOffset[i] = std::max(static_cast<int64_t>(0), concatOffset[i] - sliceOffset[i]);
     }
 
-    rewriter.setInsertionPointAfter(concatInput.getDefiningOp());
+    rewriter.setInsertionPointAfter(concat);
     auto newSlice = rewriter.create<VPU::SliceOp>(sliceUser.getLoc(), concatInput, newSliceOffset, newSliceSize);
 
     auto userCopyOp = *sliceUser->getUsers().begin();
     auto copyOutType = userCopyOp->getResult(0).getType().cast<vpux::NDTypeInterface>();
 
-    if (auto copyOp = mlir::dyn_cast<VPU::CopyOp>(userCopyOp)) {
+    if (!mlir::isa<VPU::DistributedTensorType>(copyOutType)) {
         return rewriter.create<VPU::CopyOp>(userCopyOp->getLoc(), newSlice, copyOutType.getMemSpace());
     }
 
-    auto tilingCopyOp = mlir::dyn_cast<VPU::NCEClusterTilingOp>(userCopyOp);
-    VPUX_THROW_WHEN(tilingCopyOp == nullptr, "Unexpected user op type at '{0}'", userCopyOp->getLoc());
-
-    const auto bodyBuilder = [&](mlir::OpBuilder& builder, mlir::Location loc, mlir::ValueRange newOperands) {
-        auto newCopyOp = builder.create<VPU::CopyOp>(loc, newOperands[0], copyOutType.getMemSpace());
-        builder.create<VPU::YieldOp>(loc, newCopyOp.getOutput());
-    };
-
     auto newShape = getShape(newSlice.getResult());
     auto newOutType = getConcatDistributedType(copyOutType.cast<VPU::DistributedTensorType>(), newShape);
-    auto newCopyOp = rewriter.create<VPU::NCEClusterTilingOp>(userCopyOp->getLoc(), newOutType,
-                                                              mlir::ValueRange{newSlice}, bodyBuilder);
+    auto newCopyOp =
+            rewriter.create<VPU::CopyOp>(userCopyOp->getLoc(), newOutType, newSlice, copyOutType.getMemSpace());
+
     return newCopyOp->getResult(0);
 }
 

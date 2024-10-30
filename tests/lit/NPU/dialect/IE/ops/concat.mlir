@@ -310,8 +310,8 @@ func.func @NonConstInputsNotFold(%arg0 : tensor<1x3x8x1xf16>) -> tensor<1x6x8x1x
 
 // CHECK-LABEL: @ConstInputFoldWithDifferentInputAndOutputType
 func.func @ConstInputFoldWithDifferentInputAndOutputType() -> tensor<1x6x8x1xf16> {
-    %cst_0 = const.Declare tensor<1x3x8x1xf16> = dense<[1.0, 2.0, 3.0]> : tensor<3xf32>, [#const.Reshape<[1, 3, 1, 1]>, #const.Broadcast<2 : i64, 8 : i64>, #const.ConvertElemType<f16>]
-    %cst_1 = const.Declare tensor<1x3x8x1xf16> = dense<[4.0, 5.0, 6.0]> : tensor<3xf32>, [#const.Reshape<[1, 3, 1, 1]>, #const.Broadcast<2 : i64, 8 : i64>, #const.ConvertElemType<f16>]
+    %cst_0 = const.Declare tensor<1x3x8x1xf16> = dense<[1.0, 2.0, 3.0]> : tensor<3xf32>, [#const.Reshape<[1, 3, 1, 1]>, #const.Broadcast<2 : i64, 8 : i64>, #const.CastElemType<f16>]
+    %cst_1 = const.Declare tensor<1x3x8x1xf16> = dense<[4.0, 5.0, 6.0]> : tensor<3xf32>, [#const.Reshape<[1, 3, 1, 1]>, #const.Broadcast<2 : i64, 8 : i64>, #const.CastElemType<f16>]
     %0 = IE.Concat(%cst_0, %cst_1) {static_offsets = [[0, 0, 0, 0], [0, 3, 0, 0]]} : tensor<1x3x8x1xf16>, tensor<1x3x8x1xf16> -> tensor<1x6x8x1xf16>
     return %0 : tensor<1x6x8x1xf16>
 
@@ -333,8 +333,8 @@ func.func @ConstInputFoldWithDifferentInputAndOutputType() -> tensor<1x6x8x1xf16
 !qElemType = !quant.uniform<u8<0:254>:f16, 0.0078740157480314959:127>
 // CHECK-LABEL: @ConcatWithConstInputsFoldForQuantize
 func.func @ConcatWithConstInputsFoldForQuantize() -> tensor<16x12x2x1x!qElemType, {order = #NHWC}> {
-    %cst_0 = const.Declare tensor<16x6x2x1x!qElemType, {order = #NHWC}> = dense<1.0> : tensor<16x3x2x1xf16>, [#const.Add<1.270000e+02 : f64>, #const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>, #const.Reorder<#NHWC>, #const.Reshape<[16, 3, 2, 1]>, #const.PadWithZero<[0, 0, 0, 0], [0, 3, 0, 0]>]
-    %cst_1 = const.Declare tensor<16x6x2x1x!qElemType, {order = #NHWC}> = dense<-1.0> : tensor<16x3x2x1xf16>, [#const.Add<1.270000e+02 : f64>, #const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>, #const.Reorder<#NHWC>, #const.Reshape<[16, 3, 2, 1]>, #const.PadWithZero<[0, 3, 0, 0], [0, 0, 0, 0]>]
+    %cst_0 = const.Declare tensor<16x6x2x1x!qElemType, {order = #NHWC}> = dense<1.0> : tensor<16x3x2x1xf16>, [#const.Add<1.270000e+02 : f64>, #const.CastElemType<ui8>, #const.CastElemType<!qElemType>, #const.Reorder<#NHWC>, #const.Reshape<[16, 3, 2, 1]>, #const.PadWithZero<[0, 0, 0, 0], [0, 3, 0, 0]>]
+    %cst_1 = const.Declare tensor<16x6x2x1x!qElemType, {order = #NHWC}> = dense<-1.0> : tensor<16x3x2x1xf16>, [#const.Add<1.270000e+02 : f64>, #const.CastElemType<ui8>, #const.CastElemType<!qElemType>, #const.Reorder<#NHWC>, #const.Reshape<[16, 3, 2, 1]>, #const.PadWithZero<[0, 3, 0, 0], [0, 0, 0, 0]>]
 
     %0 = IE.Concat(%cst_0, %cst_1) {per_axis = #IE.Concat<axis = 1>} : tensor<16x6x2x1x!qElemType, {order = #NHWC}>, tensor<16x6x2x1x!qElemType, {order = #NHWC}> -> tensor<16x12x2x1x!qElemType, {order = #NHWC}>
     return %0 : tensor<16x12x2x1x!qElemType, {order = #NHWC}>
@@ -372,7 +372,7 @@ func.func @ConcatWithConstInputsFoldForQuantize() -> tensor<16x12x2x1x!qElemType
     // CHECK-SAME                         8080807F7F7F7F7F7F7E7E7E
     // CHECK-SAME                         8080807F7F7F7F7F7F7E7E7E
     // CHECK-SAME                         8080807F7F7F7F7F7F7E7E7E
-    // CHECK-SAME                         8080807F7F7F7F7F7F7E7E7E"> : tensor<16x12x2x1xui8, {order = #NHWC}>, [#const.QuantCast<!qElemType>]
+    // CHECK-SAME                         8080807F7F7F7F7F7F7E7E7E"> : tensor<16x12x2x1xui8, {order = #NHWC}>, [#const.CastElemType<!qElemType>]
     // CHECK:     return [[cst]]
 }
 

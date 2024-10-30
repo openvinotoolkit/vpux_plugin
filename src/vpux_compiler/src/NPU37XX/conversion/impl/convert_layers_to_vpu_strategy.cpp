@@ -30,28 +30,8 @@ private:
 
 mlir::LogicalResult EmbeddingSegmentsSumRewriter::matchAndRewrite(IE::EmbeddingSegmentsSumOp origOp,
                                                                   mlir::PatternRewriter& rewriter) const {
-    const auto ctx = origOp->getContext();
-    const auto weights = origOp.getPerSampleWeights();
-    if (weights != nullptr) {
-        rewriter.replaceOpWithNewOp<VPU::EmbeddingSegmentsSumOp>(
-                origOp, origOp.getEmbTable(), origOp.getIndices(), origOp.getSegmentIds(), origOp.getPerSampleWeights(),
-                /*indices_value=*/nullptr, /*segment_ids_value=*/nullptr, origOp.getNumSegmentsValueAttr(),
-                origOp.getDefaultIndexValueAttr(), /*per_sample_weights_value=*/nullptr);
-        return mlir::success();
-    }
-
-    mlir::RankedTensorType weightsTensorType;
-    mlir::DenseElementsAttr baseAttr;
-    const auto weightsShape = getShape(origOp.getIndices()).raw();
-    const auto inType = origOp.getEmbTable().getType().cast<NDTypeInterface>();
-
-    computeWeightForEmbeddingOp(ctx, weightsTensorType, baseAttr, weightsShape, inType);
-
-    auto cstDeclOp =
-            rewriter.create<Const::DeclareOp>(origOp.getLoc(), weightsTensorType, Const::ContentAttr::get(baseAttr));
-
     rewriter.replaceOpWithNewOp<VPU::EmbeddingSegmentsSumOp>(
-            origOp, origOp.getEmbTable(), origOp.getIndices(), origOp.getSegmentIds(), cstDeclOp.getOutput(),
+            origOp, origOp.getEmbTable(), origOp.getIndices(), origOp.getSegmentIds(), origOp.getPerSampleWeights(),
             /*indices_value=*/nullptr, /*segment_ids_value=*/nullptr, origOp.getNumSegmentsValueAttr(),
             origOp.getDefaultIndexValueAttr(), /*per_sample_weights_value=*/nullptr);
     return mlir::success();
@@ -78,32 +58,10 @@ private:
 mlir::LogicalResult EmbeddingBagOffsetsSumRewriter::matchAndRewrite(IE::EmbeddingBagOffsetsSumOp origOp,
                                                                     mlir::PatternRewriter& rewriter) const {
     _log.trace("Found EmbeddingBagOffsetsSumOp Operation '{0}'", origOp->getLoc());
-
-    const auto ctx = origOp->getContext();
-    const auto weights = origOp.getPerSampleWeights();
-    if (weights != nullptr) {
-        rewriter.replaceOpWithNewOp<VPU::EmbeddingBagOffsetsSumOp>(
-                origOp, origOp.getEmbTable(), origOp.getIndices(), origOp.getOffsets(), origOp.getPerSampleWeights(),
-                /*indices_value=*/nullptr,
-                /*offsets_value=*/nullptr, origOp.getDefaultIndexValueAttr(), /*per_sample_weights_value=*/nullptr);
-        return mlir::success();
-    }
-
-    mlir::RankedTensorType weightsTensorType;
-    mlir::DenseElementsAttr baseAttr;
-    const auto weightsShape = getShape(origOp.getIndices()).raw();
-    const auto inType = origOp.getEmbTable().getType().cast<NDTypeInterface>();
-
-    computeWeightForEmbeddingOp(ctx, weightsTensorType, baseAttr, weightsShape, inType);
-
-    auto cstDeclOp =
-            rewriter.create<Const::DeclareOp>(origOp.getLoc(), weightsTensorType, Const::ContentAttr::get(baseAttr));
-
     rewriter.replaceOpWithNewOp<VPU::EmbeddingBagOffsetsSumOp>(
-            origOp, origOp.getEmbTable(), origOp.getIndices(), origOp.getOffsets(), cstDeclOp.getOutput(),
-            /*indices_value=*/nullptr, /*offsets_value=*/nullptr, origOp.getDefaultIndexValueAttr(),
-            /*per_sample_weights_value=*/nullptr);
-
+            origOp, origOp.getEmbTable(), origOp.getIndices(), origOp.getOffsets(), origOp.getPerSampleWeights(),
+            /*indices_value=*/nullptr,
+            /*offsets_value=*/nullptr, origOp.getDefaultIndexValueAttr(), /*per_sample_weights_value=*/nullptr);
     return mlir::success();
 }
 

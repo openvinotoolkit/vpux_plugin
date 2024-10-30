@@ -24,7 +24,7 @@ static mlir::MLIRContext ctx;
 static mlir::DialectRegistry registry;
 
 extern "C" int LLVMFuzzerInitialize(int* argc, char*** argv) {
-    vpux::registerDialects(registry);
+    registry = createDialectRegistry();
     ctx.appendDialectRegistry(registry);
 
     // Disable multithreading to ensure all exceptions are caught

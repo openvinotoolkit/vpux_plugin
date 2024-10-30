@@ -13,10 +13,10 @@
 !qElemType3 = !quant.uniform<u8:f16, 0.015686274509803921>
 !qElemType4 = !quant.uniform<u8:f16, 0.031372549019607843>
 func.func @UpstreamSlice(%arg0: tensor<1x16x64x4xf16>, %arg1: tensor<1x16x17x2xf16>) -> tensor<1x32x16x4xf16> {
-    %cst = const.Declare tensor<1x32x1x1xf16> = dense<1.0> : tensor<1x32x1x1xf32>, [#const.ConvertElemType<f16>]
-    %cst_0 = const.Declare tensor<1x64x1x1xf16> = dense<1.0> : tensor<1x64x1x1xf32>, [#const.ConvertElemType<f16>]
-    %cst_1 = const.Declare tensor<32x16x3x1x!qElemType> = dense<1.0> : tensor<32x16x3x1xf32>, [#const.ConvertElemType<f16>, #const.ConvertElemType<si8>, #const.QuantCast<!qElemType1>, #const.QuantCast<>, #const.ConvertElemType<i32>, #const.Add<1.280000e+02 : f64>, #const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>]
-    %cst_2 = const.Declare tensor<64x16x3x1x!qElemType> = dense<1.0> : tensor<64x16x3x1xf32>, [#const.ConvertElemType<f16>, #const.ConvertElemType<si8>, #const.QuantCast<!qElemType1>, #const.QuantCast<>, #const.ConvertElemType<i32>, #const.Add<1.280000e+02 : f64>, #const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>]
+    %cst = const.Declare tensor<1x32x1x1xf16> = dense<1.0> : tensor<1x32x1x1xf32>, [#const.CastElemType<f16>]
+    %cst_0 = const.Declare tensor<1x64x1x1xf16> = dense<1.0> : tensor<1x64x1x1xf32>, [#const.CastElemType<f16>]
+    %cst_1 = const.Declare tensor<32x16x3x1x!qElemType> = dense<1.0> : tensor<32x16x3x1xf32>, [#const.CastElemType<f16>, #const.CastElemType<si8>, #const.CastElemType<!qElemType1>, #const.CastElemType<si8>, #const.CastElemType<i32>, #const.Add<1.280000e+02 : f64>, #const.CastElemType<ui8>, #const.CastElemType<!qElemType>]
+    %cst_2 = const.Declare tensor<64x16x3x1x!qElemType> = dense<1.0> : tensor<64x16x3x1xf32>, [#const.CastElemType<f16>, #const.CastElemType<si8>, #const.CastElemType<!qElemType1>, #const.CastElemType<si8>, #const.CastElemType<i32>, #const.Add<1.280000e+02 : f64>, #const.CastElemType<ui8>, #const.CastElemType<!qElemType>]
     %0 = IE.Quantize(%arg0) {dstElemType = !qElemType2} : tensor<1x16x64x4xf16> -> tensor<1x16x64x4x!qElemType2>
     %1 = IE.Convolution(%0, %cst_1, %cst) {dilations = [1, 1], pads_begin = [1, 0], pads_end = [1, 0], strides = [1, 1]} : tensor<1x16x64x4x!qElemType2>, tensor<32x16x3x1x!qElemType>, tensor<1x32x1x1xf16> -> tensor<1x32x64x4x!qElemType3>
     %2 = IE.Slice %1 [0, 0, 47, 0] [1, 32, 17, 4] : tensor<1x32x64x4x!qElemType3> to tensor<1x32x17x4x!qElemType3>
@@ -62,10 +62,10 @@ func.func @UpstreamSlice(%arg0: tensor<1x16x64x4xf16>, %arg1: tensor<1x16x17x2xf
 !qElemType3 = !quant.uniform<u8:f16, 0.015686274509803921>
 !qElemType4 = !quant.uniform<u8:f16, 0.031372549019607843>
 func.func @UpstreamStridedSlice(%arg0: tensor<1x16x64x4xf16>, %arg1: tensor<1x16x17x2xf16>) -> tensor<1x32x16x4xf16> {
-    %cst = const.Declare tensor<1x32x1x1xf16> = dense<1.0> : tensor<1x32x1x1xf32>, [#const.ConvertElemType<f16>]
-    %cst_0 = const.Declare tensor<1x64x1x1xf16> = dense<1.0> : tensor<1x64x1x1xf32>, [#const.ConvertElemType<f16>]
-    %cst_1 = const.Declare tensor<32x16x3x1x!qElemType> = dense<1.0> : tensor<32x16x3x1xf32>, [#const.ConvertElemType<f16>, #const.ConvertElemType<si8>, #const.QuantCast<!qElemType1>, #const.QuantCast<>, #const.ConvertElemType<i32>, #const.Add<1.280000e+02 : f64>, #const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>]
-    %cst_2 = const.Declare tensor<64x16x3x1x!qElemType> = dense<1.0> : tensor<64x16x3x1xf32>, [#const.ConvertElemType<f16>, #const.ConvertElemType<si8>, #const.QuantCast<!qElemType1>, #const.QuantCast<>, #const.ConvertElemType<i32>, #const.Add<1.280000e+02 : f64>, #const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>]
+    %cst = const.Declare tensor<1x32x1x1xf16> = dense<1.0> : tensor<1x32x1x1xf32>, [#const.CastElemType<f16>]
+    %cst_0 = const.Declare tensor<1x64x1x1xf16> = dense<1.0> : tensor<1x64x1x1xf32>, [#const.CastElemType<f16>]
+    %cst_1 = const.Declare tensor<32x16x3x1x!qElemType> = dense<1.0> : tensor<32x16x3x1xf32>, [#const.CastElemType<f16>, #const.CastElemType<si8>, #const.CastElemType<!qElemType1>, #const.CastElemType<si8>, #const.CastElemType<i32>, #const.Add<1.280000e+02 : f64>, #const.CastElemType<ui8>, #const.CastElemType<!qElemType>]
+    %cst_2 = const.Declare tensor<64x16x3x1x!qElemType> = dense<1.0> : tensor<64x16x3x1xf32>, [#const.CastElemType<f16>, #const.CastElemType<si8>, #const.CastElemType<!qElemType1>, #const.CastElemType<si8>, #const.CastElemType<i32>, #const.Add<1.280000e+02 : f64>, #const.CastElemType<ui8>, #const.CastElemType<!qElemType>]
     %0 = IE.Quantize(%arg0) {dstElemType = !qElemType2} : tensor<1x16x64x4xf16> -> tensor<1x16x64x4x!qElemType2>
     %1 = IE.Convolution(%0, %cst_1, %cst) {dilations = [1, 1], pads_begin = [1, 0], pads_end = [1, 0], strides = [1, 1]} : tensor<1x16x64x4x!qElemType2>, tensor<32x16x3x1x!qElemType>, tensor<1x32x1x1xf16> -> tensor<1x32x64x4x!qElemType3>
     %2 = IE.Dequantize(%1) {dstElemType = f16} : tensor<1x32x64x4x!qElemType3> -> tensor<1x32x64x4xf16>
@@ -108,17 +108,17 @@ func.func @UpstreamStridedSlice(%arg0: tensor<1x16x64x4xf16>, %arg1: tensor<1x16
 
 // CHECK-LABEL: @UpstreamSliceFakeQuantizeDifferentAxis
 func.func @UpstreamSliceFakeQuantizeDifferentAxis(%arg0: tensor<4x4x5x5xf16>) -> tensor<4x4x3x3xf16> {
-    %cst = const.Declare tensor<4x4x1x1xf16> = dense<[[[[0.227172852]], [[0.158569336]], [[0.136474609]], [[0.226318359]]], [[[0.198608398]], [[0.166625977]], [[0.126342773]], [[0.18359375]]], [[[0.154541016]], [[0.25390625]], [[0.42578125]], [[0.231689453]]], [[[0.130615234]], [[0.235107422]], [[0.141723633]], [[0.139892578]]]]> : tensor<4x4x1x1xf32>, [#const.ConvertElemType<f16>]
-    %cst_0 = const.Declare tensor<4x4x1x1xf16> = dense<[[[[-0.145141602]], [[-0.189819336]], [[-0.168823242]], [[-0.149536133]]], [[[-0.128173828]], [[-0.174438477]], [[-0.159912109]], [[-0.163330078]]], [[[-0.850585938]], [[-0.151855469]], [[-0.0876464843]], [[-0.23059082]]], [[[-0.225708008]], [[-0.207641602]], [[-0.211303711]], [[-0.249389648]]]]> : tensor<4x4x1x1xf32>, [#const.ConvertElemType<f16>]
+    %cst = const.Declare tensor<4x4x1x1xf16> = dense<[[[[0.227172852]], [[0.158569336]], [[0.136474609]], [[0.226318359]]], [[[0.198608398]], [[0.166625977]], [[0.126342773]], [[0.18359375]]], [[[0.154541016]], [[0.25390625]], [[0.42578125]], [[0.231689453]]], [[[0.130615234]], [[0.235107422]], [[0.141723633]], [[0.139892578]]]]> : tensor<4x4x1x1xf32>, [#const.CastElemType<f16>]
+    %cst_0 = const.Declare tensor<4x4x1x1xf16> = dense<[[[[-0.145141602]], [[-0.189819336]], [[-0.168823242]], [[-0.149536133]]], [[[-0.128173828]], [[-0.174438477]], [[-0.159912109]], [[-0.163330078]]], [[[-0.850585938]], [[-0.151855469]], [[-0.0876464843]], [[-0.23059082]]], [[[-0.225708008]], [[-0.207641602]], [[-0.211303711]], [[-0.249389648]]]]> : tensor<4x4x1x1xf32>, [#const.CastElemType<f16>]
     %0 = IE.FakeQuantize(%arg0, %cst_0, %cst, %cst_0, %cst) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 255 : i64} : tensor<4x4x5x5xf16>, tensor<4x4x1x1xf16>, tensor<4x4x1x1xf16>, tensor<4x4x1x1xf16>, tensor<4x4x1x1xf16> -> tensor<4x4x5x5xf16>
     %1 = IE.Slice %0 [0, 0, 0, 0] [4, 4, 3, 3] : tensor<4x4x5x5xf16> to tensor<4x4x3x3xf16>
 
     return %1 : tensor<4x4x3x3xf16>
 
     // CHECK-DAG:       [[CST:%.*]] = const.Declare tensor<4x4x1x1xf16> =
-    // CHECK-SAME{LITERAL}:      dense<[[[[0.227172852]], [[0.158569336]], [[0.136474609]], [[0.226318359]]], [[[0.198608398]], [[0.166625977]], [[0.126342773]], [[0.18359375]]], [[[0.154541016]], [[0.25390625]], [[0.42578125]], [[0.231689453]]], [[[0.130615234]], [[0.235107422]], [[0.141723633]], [[0.139892578]]]]> : tensor<4x4x1x1xf32>, [#const.ConvertElemType<f16>]
+    // CHECK-SAME{LITERAL}:      dense<[[[[0.227172852]], [[0.158569336]], [[0.136474609]], [[0.226318359]]], [[[0.198608398]], [[0.166625977]], [[0.126342773]], [[0.18359375]]], [[[0.154541016]], [[0.25390625]], [[0.42578125]], [[0.231689453]]], [[[0.130615234]], [[0.235107422]], [[0.141723633]], [[0.139892578]]]]> : tensor<4x4x1x1xf32>, [#const.CastElemType<f16>]
     // CHECK-DAG:   [[CST0:%.*]] = const.Declare tensor<4x4x1x1xf16> =
-    // CHECK-SAME{LITERAL}:      dense<[[[[-0.145141602]], [[-0.189819336]], [[-0.168823242]], [[-0.149536133]]], [[[-0.128173828]], [[-0.174438477]], [[-0.159912109]], [[-0.163330078]]], [[[-0.850585938]], [[-0.151855469]], [[-0.0876464843]], [[-0.23059082]]], [[[-0.225708008]], [[-0.207641602]], [[-0.211303711]], [[-0.249389648]]]]> : tensor<4x4x1x1xf32>, [#const.ConvertElemType<f16>]
+    // CHECK-SAME{LITERAL}:      dense<[[[[-0.145141602]], [[-0.189819336]], [[-0.168823242]], [[-0.149536133]]], [[[-0.128173828]], [[-0.174438477]], [[-0.159912109]], [[-0.163330078]]], [[[-0.850585938]], [[-0.151855469]], [[-0.0876464843]], [[-0.23059082]]], [[[-0.225708008]], [[-0.207641602]], [[-0.211303711]], [[-0.249389648]]]]> : tensor<4x4x1x1xf32>, [#const.CastElemType<f16>]
     // CHECK:       [[SLICE:%.*]] = IE.Slice %arg0 [0, 0, 0, 0] [4, 4, 3, 3] : tensor<4x4x5x5xf16> to tensor<4x4x3x3xf16>
     // CHECK:       [[FQ:%.*]] = IE.FakeQuantize([[SLICE]], [[CST0]], [[CST]], [[CST0]], [[CST]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 255 : i64} : tensor<4x4x3x3xf16>, tensor<4x4x1x1xf16>, tensor<4x4x1x1xf16>, tensor<4x4x1x1xf16>, tensor<4x4x1x1xf16> -> tensor<4x4x3x3xf16>
 
@@ -129,17 +129,17 @@ func.func @UpstreamSliceFakeQuantizeDifferentAxis(%arg0: tensor<4x4x5x5xf16>) ->
 
 // CHECK-LABEL: @DoNotUpstreamSliceFakeQuantizeSameAxis
 func.func @DoNotUpstreamSliceFakeQuantizeSameAxis(%arg0: tensor<1x16x5x5xf16>) -> tensor<1x8x5x5xf16> {
-    %cst = const.Declare tensor<1x16x1x1xf16> = dense<[[[[0.227172852]], [[0.158569336]], [[0.136474609]], [[0.226318359]], [[0.198608398]], [[0.166625977]], [[0.126342773]], [[0.18359375]], [[0.154541016]], [[0.25390625]], [[0.42578125]], [[0.231689453]], [[0.130615234]], [[0.235107422]], [[0.141723633]], [[0.139892578]]]]> : tensor<1x16x1x1xf32>, [#const.ConvertElemType<f16>]
-    %cst_0 = const.Declare tensor<1x16x1x1xf16> = dense<[[[[-0.145141602]], [[-0.189819336]], [[-0.168823242]], [[-0.149536133]], [[-0.128173828]], [[-0.174438477]], [[-0.159912109]], [[-0.163330078]], [[-0.850585938]], [[-0.151855469]], [[-0.0876464843]], [[-0.23059082]], [[-0.225708008]], [[-0.207641602]], [[-0.211303711]], [[-0.249389648]]]]> : tensor<1x16x1x1xf32>, [#const.ConvertElemType<f16>]
+    %cst = const.Declare tensor<1x16x1x1xf16> = dense<[[[[0.227172852]], [[0.158569336]], [[0.136474609]], [[0.226318359]], [[0.198608398]], [[0.166625977]], [[0.126342773]], [[0.18359375]], [[0.154541016]], [[0.25390625]], [[0.42578125]], [[0.231689453]], [[0.130615234]], [[0.235107422]], [[0.141723633]], [[0.139892578]]]]> : tensor<1x16x1x1xf32>, [#const.CastElemType<f16>]
+    %cst_0 = const.Declare tensor<1x16x1x1xf16> = dense<[[[[-0.145141602]], [[-0.189819336]], [[-0.168823242]], [[-0.149536133]], [[-0.128173828]], [[-0.174438477]], [[-0.159912109]], [[-0.163330078]], [[-0.850585938]], [[-0.151855469]], [[-0.0876464843]], [[-0.23059082]], [[-0.225708008]], [[-0.207641602]], [[-0.211303711]], [[-0.249389648]]]]> : tensor<1x16x1x1xf32>, [#const.CastElemType<f16>]
     %0 = IE.FakeQuantize(%arg0, %cst_0, %cst, %cst_0, %cst) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 255 : i64} : tensor<1x16x5x5xf16>, tensor<1x16x1x1xf16>, tensor<1x16x1x1xf16>, tensor<1x16x1x1xf16>, tensor<1x16x1x1xf16> -> tensor<1x16x5x5xf16>
     %1 = IE.Slice %0 [0, 0, 0, 0] [1, 8, 5, 5] : tensor<1x16x5x5xf16> to tensor<1x8x5x5xf16>
 
     return %1 : tensor<1x8x5x5xf16>
 
     // CHECK-DAG:       [[CST:%.*]] = const.Declare tensor<1x16x1x1xf16> =
-    // CHECK-SAME{LITERAL}:      dense<[[[[0.227172852]], [[0.158569336]], [[0.136474609]], [[0.226318359]], [[0.198608398]], [[0.166625977]], [[0.126342773]], [[0.18359375]], [[0.154541016]], [[0.25390625]], [[0.42578125]], [[0.231689453]], [[0.130615234]], [[0.235107422]], [[0.141723633]], [[0.139892578]]]]> : tensor<1x16x1x1xf32>, [#const.ConvertElemType<f16>]
+    // CHECK-SAME{LITERAL}:      dense<[[[[0.227172852]], [[0.158569336]], [[0.136474609]], [[0.226318359]], [[0.198608398]], [[0.166625977]], [[0.126342773]], [[0.18359375]], [[0.154541016]], [[0.25390625]], [[0.42578125]], [[0.231689453]], [[0.130615234]], [[0.235107422]], [[0.141723633]], [[0.139892578]]]]> : tensor<1x16x1x1xf32>, [#const.CastElemType<f16>]
     // CHECK-DAG:   [[CST0:%.*]] = const.Declare tensor<1x16x1x1xf16> =
-    // CHECK-SAME{LITERAL}:      dense<[[[[-0.145141602]], [[-0.189819336]], [[-0.168823242]], [[-0.149536133]], [[-0.128173828]], [[-0.174438477]], [[-0.159912109]], [[-0.163330078]], [[-0.850585938]], [[-0.151855469]], [[-0.0876464843]], [[-0.23059082]], [[-0.225708008]], [[-0.207641602]], [[-0.211303711]], [[-0.249389648]]]]> : tensor<1x16x1x1xf32>, [#const.ConvertElemType<f16>]
+    // CHECK-SAME{LITERAL}:      dense<[[[[-0.145141602]], [[-0.189819336]], [[-0.168823242]], [[-0.149536133]], [[-0.128173828]], [[-0.174438477]], [[-0.159912109]], [[-0.163330078]], [[-0.850585938]], [[-0.151855469]], [[-0.0876464843]], [[-0.23059082]], [[-0.225708008]], [[-0.207641602]], [[-0.211303711]], [[-0.249389648]]]]> : tensor<1x16x1x1xf32>, [#const.CastElemType<f16>]
     // CHECK:       [[FQ:%.*]] = IE.FakeQuantize(%arg0, [[CST0]], [[CST]], [[CST0]], [[CST]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 255 : i64} : tensor<1x16x5x5xf16>, tensor<1x16x1x1xf16>, tensor<1x16x1x1xf16>, tensor<1x16x1x1xf16>, tensor<1x16x1x1xf16> -> tensor<1x16x5x5xf16>
     // CHECK:       [[SLICE:%.*]] = IE.Slice %0 [0, 0, 0, 0] [1, 8, 5, 5] : tensor<1x16x5x5xf16> to tensor<1x8x5x5xf16>
 

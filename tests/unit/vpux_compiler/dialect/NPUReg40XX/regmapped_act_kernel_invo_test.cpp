@@ -61,14 +61,6 @@ std::vector<std::pair<MappedRegValues, nn_public::VpuActKernelInvocation>> actKe
          },
          CREATE_HW_DMA_DESC(barriers.post_mask_lo_, 0xFFFFFFFFFFFFFFFF)},
         {{
-                 {"barriers_group_mask_act", {{"group_act", 0xFF}}},
-         },
-         CREATE_HW_DMA_DESC(barriers.group_, 0xFF)},
-        {{
-                 {"barriers_group_mask_act", {{"mask_act", 0xFF}}},
-         },
-         CREATE_HW_DMA_DESC(barriers.mask_, 0xFF)},
-        {{
                  {"act_invo_barriers_sched", {{"start_after_", 0xFFFFFFFF}}},
          },
          CREATE_HW_DMA_DESC(barriers_sched.start_after_, 0xFFFFFFFF)},
@@ -76,10 +68,6 @@ std::vector<std::pair<MappedRegValues, nn_public::VpuActKernelInvocation>> actKe
                  {"act_invo_barriers_sched", {{"clean_after_", 0xFFFFFFFF}}},
          },
          CREATE_HW_DMA_DESC(barriers_sched.clean_after_, 0xFFFFFFFF)},
-        {{
-                 {"invo_index", {{"invo_index", 0xFFFFFFFF}}},
-         },
-         CREATE_HW_DMA_DESC(invo_index, 0xFFFFFFFF)},
         {{
                  {"invo_tile", {{"invo_tile", 0xFFFFFFFF}}},
          },
@@ -90,5 +78,5 @@ std::vector<std::pair<MappedRegValues, nn_public::VpuActKernelInvocation>> actKe
          CREATE_HW_DMA_DESC(kernel_range_index, 0xFFFFFFFF)},
 };
 
-INSTANTIATE_TEST_CASE_P(NPUReg40XX_MappedRegs, NPUReg40XX_NpuActKernelInvocationTest,
-                        testing::ValuesIn(actKernelInvoFieldSet));
+INSTANTIATE_TEST_SUITE_P(NPUReg40XX_MappedRegs, NPUReg40XX_NpuActKernelInvocationTest,
+                         testing::ValuesIn(actKernelInvoFieldSet));

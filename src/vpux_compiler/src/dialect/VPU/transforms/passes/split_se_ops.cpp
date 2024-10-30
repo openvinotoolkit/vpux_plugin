@@ -139,10 +139,9 @@ mlir::LogicalResult SplitInterpolate::matchAndRewrite(VPU::InterpolateOp origOp,
         auto newLoc = appendLoc(origOp.getLoc(), "_interpolate_on_Dim_{0}", dim.ind());
         return rewriter
                 .create<VPU::InterpolateOp>(newLoc, inputVal, origOp.getSizes(), origOp.getScales(), origOp.getAxes(),
-                                            origOp.getCoordinates(), origOp.getLambdas(), newSizesAttr, newScalesAttr,
-                                            origOp.getAxesAttrAttr(), origOp.getTileOffsetAttrAttr(),
-                                            origOp.getInitialInputDimsAttrAttr(), origOp.getInitialOutputDimsAttrAttr(),
-                                            origOp.getAttr())
+                                            newSizesAttr, newScalesAttr, origOp.getAxesAttrAttr(),
+                                            origOp.getTileOffsetAttrAttr(), origOp.getInitialInputDimsAttrAttr(),
+                                            origOp.getInitialOutputDimsAttrAttr(), origOp.getAttr())
                 .getOutput();
     };
 

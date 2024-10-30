@@ -98,14 +98,14 @@ func.func @NotChangeSwapBiasWithReorder(%arg0: tensor<1x16x16x16xf16>) -> tensor
 
 // CHECK-LABEL: @SwapWithSingleValueBias
 func.func @SwapWithSingleValueBias(%arg0: tensor<4x512x1x1xf16>) -> tensor<1x512x4x1xf16> {
-   %cst = const.Declare tensor<1x1x1x1xf16> = dense<-9.21613597> : tensor<1x1x1xf32>, [#const.ConvertElemType<f16>, #const.Reshape<[1, 1, 1, 1]>]
+   %cst = const.Declare tensor<1x1x1x1xf16> = dense<-9.21613597> : tensor<1x1x1xf32>, [#const.CastElemType<f16>, #const.Reshape<[1, 1, 1, 1]>]
    %1 = IE.AffineReshape(%arg0) {dim_mapping = [[0, 1], [2], [3], [3]], shape_value = [1, 4, 512, 1]} : tensor<4x512x1x1xf16> -> tensor<1x4x512x1xf16>
    %2 = IE.Transpose(%1) {order_value = #NHCW} : tensor<1x4x512x1xf16> -> tensor<1x512x4x1xf16>
    %3 = IE.Add(%2, %cst) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x512x4x1xf16>, tensor<1x1x1x1xf16> -> tensor<1x512x4x1xf16>
 
    return %3 : tensor<1x512x4x1xf16>
 
-   // CHECK: [[CST:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<-9.21613597> : tensor<1x1x1xf32>, [#const.ConvertElemType<f16>, #const.Reshape<[1, 1, 1, 1]>]
+   // CHECK: [[CST:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<-9.21613597> : tensor<1x1x1xf32>, [#const.CastElemType<f16>, #const.Reshape<[1, 1, 1, 1]>]
    // CHECK: [[ADD:%.*]] = IE.Add(%arg0, [[CST]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<4x512x1x1xf16>, tensor<1x1x1x1xf16> -> tensor<4x512x1x1xf16>
    // CHECK: [[RESHAPE:%.*]] = IE.AffineReshape([[ADD]])
    // CHECK-SAME{LITERAL}:     {dim_mapping = [[0, 1], [2], [3], [3]], shape_value = [1, 4, 512, 1]} : tensor<4x512x1x1xf16> -> tensor<1x4x512x1xf16>
@@ -117,7 +117,7 @@ func.func @SwapWithSingleValueBias(%arg0: tensor<4x512x1x1xf16>) -> tensor<1x512
 
 // CHECK-LABEL: @SwapWithSingleValueBiasThroughConcat
 func.func @SwapWithSingleValueBiasThroughConcat(%arg0: tensor<4096x4096x1x1xf16>, %arg1: tensor<4096x4096x1x1xf16>) -> tensor<1x2x4096x4096xf16> {
-   %cst = const.Declare tensor<1x1x1x1xf16> = dense<-9.21613597> : tensor<1x1x1xf32>, [#const.ConvertElemType<f16>, #const.Reshape<[1, 1, 1, 1]>]
+   %cst = const.Declare tensor<1x1x1x1xf16> = dense<-9.21613597> : tensor<1x1x1xf32>, [#const.CastElemType<f16>, #const.Reshape<[1, 1, 1, 1]>]
    %0 = IE.AffineReshape(%arg0) {dim_mapping = [[0], [1], [1], [1]], shape_value = [4096, 4096]} : tensor<4096x4096x1x1xf16> -> tensor<4096x4096xf16>
    %1 = IE.AffineReshape(%arg1) {dim_mapping = [[0], [1], [1], [1]], shape_value = [4096, 4096]} : tensor<4096x4096x1x1xf16> -> tensor<4096x4096xf16>
    %2 = IE.Concat(%0, %1) {static_offsets = [[0, 0], [4096, 0]]} : tensor<4096x4096xf16>, tensor<4096x4096xf16> -> tensor<8192x4096xf16>
@@ -127,7 +127,7 @@ func.func @SwapWithSingleValueBiasThroughConcat(%arg0: tensor<4096x4096x1x1xf16>
 
    return %5 : tensor<1x2x4096x4096xf16>
 
-   // CHECK: [[CST:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<-9.21613597> : tensor<1x1x1xf32>, [#const.ConvertElemType<f16>, #const.Reshape<[1, 1, 1, 1]>, #const.Reshape<[1, 1, 1]>, #const.Reshape<[1, 1]>, #const.Reshape<[1, 1, 1, 1]>]
+   // CHECK: [[CST:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<-9.21613597> : tensor<1x1x1xf32>, [#const.Reshape<[1, 1, 1, 1]>, #const.CastElemType<f16>]
    // CHECK: [[ADD0:%.*]] = IE.Add(%arg0, [[CST]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<4096x4096x1x1xf16>, tensor<1x1x1x1xf16> -> tensor<4096x4096x1x1xf16>
    // CHECK: [[RESHAPE0:%.*]] = IE.AffineReshape([[ADD0]])
    // CHECK-SAME{LITERAL}:     {dim_mapping = [[0], [1], [1], [1]], shape_value = [4096, 4096]} : tensor<4096x4096x1x1xf16> -> tensor<4096x4096xf16>
@@ -304,8 +304,8 @@ func.func @SwapWithTwoClamps(%arg0: tensor<4x512x1x1xf16>) -> tensor<4x1x2048x1x
 
 // CHECK-LABEL: @SwapReshapeWithBiasHasSingleNonTrivialDim
 func.func @SwapReshapeWithBiasHasSingleNonTrivialDim(%arg0: tensor<1x512x1x1xf16>) -> tensor<1x1x1x512xf16> {
-   %filter = const.Declare tensor<512x512x1x1xf16> = dense<1.000000e+00> : tensor<512x512xf32>, [#const.Reshape<[512, 512, 1, 1]>, #const.ConvertElemType<f16>]
-   %cst = const.Declare tensor<1x1x1x512xf16> = dense<1.000000e+00> : tensor<1x1x512xf32>, [#const.ConvertElemType<f16>, #const.Reshape<[1, 1, 1, 512]>]
+   %filter = const.Declare tensor<512x512x1x1xf16> = dense<1.000000e+00> : tensor<512x512xf32>, [#const.Reshape<[512, 512, 1, 1]>, #const.CastElemType<f16>]
+   %cst = const.Declare tensor<1x1x1x512xf16> = dense<1.000000e+00> : tensor<1x1x512xf32>, [#const.CastElemType<f16>, #const.Reshape<[1, 1, 1, 512]>]
 
 
    %0 = IE.Convolution(%arg0, %filter) {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x512x1x1xf16>, tensor<512x512x1x1xf16> -> tensor<1x512x1x1xf16>
@@ -627,4 +627,91 @@ func.func @SwapWithTransposeAndExp(%arg0: tensor<1x4x40x23xf16>) -> tensor<1x40x
   //CHECK-SAME{LITERAL}: {order_value = #NHWC} : tensor<1x4x40x23xf16> -> tensor<1x40x23x4xf16>
 
   //CHECK: return [[VAL1]] :  tensor<1x40x23x4xf16>
+}
+
+// -----
+
+// CHECK-LABEL: @SwapWithBiasCostDefinedAfterActivation
+// CHECK-SAME:     ([[ARG0:%.+]]: tensor<768x1152x3xf16>)
+func.func @SwapWithBiasCostDefinedAfterActivation(%arg0: tensor<768x1152x3xf16>) -> tensor<1x3x768x1152xf16> {
+  %fq_out_low = const.Declare tensor<1x1x1x1xf16> = dense<-1.221250e+02> : tensor<1x1x1x1xf16>
+  %fq_in_out_high = const.Declare tensor<1x1x1x1xf16> = dense<0.000000e+00> : tensor<1x1x1x1xf16>
+  %fq_in_low = const.Declare tensor<1x1x1x1xf16> = dense<-2.550000e+02> : tensor<1x1x1x1xf16>
+  %bias = const.Declare tensor<1x3x1x1xf16> = dense<[[[223]], [[15]], [[181]]]> : tensor<3x1x1xui8>, [#const.Reshape<[1, 3, 1, 1]>, #const.CastElemType<f32>, #const.CastElemType<f16>, #const.Rescale<-1.000000e+00 : f64>]
+  %affine_reshape = IE.AffineReshape(%arg0) {dim_mapping = [[0, 1], [2], [3]], shape_value = [1, 768, 1152, 3]} : tensor<768x1152x3xf16> -> tensor<1x768x1152x3xf16>
+  %transpose = IE.Transpose(%affine_reshape) {order_value = affine_map<(d0, d1, d2, d3) -> (d0, d3, d1, d2)>} : tensor<1x768x1152x3xf16> -> tensor<1x3x768x1152xf16>
+  %fq = IE.FakeQuantize(%bias, %fq_in_low, %fq_in_out_high, %fq_out_low, %fq_in_out_high) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64} : tensor<1x3x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16> -> tensor<1x3x1x1xf16>
+  %add = IE.Add(%transpose, %fq) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x3x768x1152xf16>, tensor<1x3x1x1xf16> -> tensor<1x3x768x1152xf16>
+
+  return %add : tensor<1x3x768x1152xf16>
+
+   // CHECK: [[FQ_OUT_LOW:%.+]] = const.Declare tensor<1x1x1x1xf16> = dense<-1.221250e+02> : tensor<1x1x1x1xf16>
+   // CHECK: [[FQ_IN_OUT_HIGH:%.+]] = const.Declare tensor<1x1x1x1xf16> = dense<0.000000e+00> : tensor<1x1x1x1xf16>
+   // CHECK: [[FQ_IN_LOW:%.+]] = const.Declare tensor<1x1x1x1xf16> = dense<-2.550000e+02> : tensor<1x1x1x1xf16>
+   // CHECK: [[BIAS:%.+]] = const.Declare tensor<1x3x1x1xf16>
+
+   // CHECK-SAME{LITERAL}: dense<[[[223]], [[15]], [[181]]]> : tensor<3x1x1xui8>, [#const.Reshape<[1, 3, 1, 1]>, #const.CastElemType<f32>, #const.CastElemType<f16>, #const.Rescale<-1.000000e+00 : f64>]
+   // CHECK: [[AFFINE_RESHAPE:%.+]] = IE.AffineReshape([[ARG0]])
+   // CHECK-SAME{LITERAL}: {dim_mapping = [[0, 1], [2], [3]], shape_value = [1, 768, 1152, 3]} : tensor<768x1152x3xf16> -> tensor<1x768x1152x3xf16>
+   // CHECK: [[FQ:%.+]] = IE.FakeQuantize([[BIAS]], [[FQ_IN_LOW]], [[FQ_IN_OUT_HIGH]], [[FQ_OUT_LOW]], [[FQ_IN_OUT_HIGH]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64} : tensor<1x3x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16> -> tensor<1x3x1x1xf16>
+   // CHECK: [[TRANSPOSE_0:%.+]] = IE.Transpose([[FQ]]) {order_value = #NHWC} : tensor<1x3x1x1xf16> -> tensor<1x1x1x3xf16>
+   // CHECK: [[ADD:%.+]] = IE.Add([[AFFINE_RESHAPE]], [[TRANSPOSE_0]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x768x1152x3xf16>, tensor<1x1x1x3xf16> -> tensor<1x768x1152x3xf16>
+   // CHECK: [[TRANSPOSE_1:%.+]] = IE.Transpose([[ADD]]) {order_value = #NWCH} : tensor<1x768x1152x3xf16> -> tensor<1x3x768x1152xf16>
+
+   // CHECK: return [[TRANSPOSE_1]] : tensor<1x3x768x1152xf16>
+}
+
+// -----
+!qElemType = !quant.uniform<u8:f16, 0.034064797794117647:55>
+// CHECK-LABEL: @SwapWithAffineReshapeAndLReluQ
+// CHECK-SAME:     ([[INPUT:%.+]]: tensor<4x2048x1x1x!qElemType>)
+func.func @SwapWithAffineReshapeAndLReluQ(%arg0: tensor<4x2048x1x1x!qElemType>) -> tensor<1x4x2048x1x!qElemType> {
+   %0 = IE.AffineReshape(%arg0) {dim_mapping = [[0, 1], [2], [3], [3]], shape_value = [1, 4, 2048, 1]} : tensor<4x2048x1x1x!qElemType> -> tensor<1x4x2048x1x!qElemType>
+   %1 = IE.LeakyRelu(%0) {negative_slope = 2.500000e-01 : f64} : tensor<1x4x2048x1x!qElemType> -> tensor<1x4x2048x1x!qElemType>
+   return %1 : tensor<1x4x2048x1x!qElemType>
+ 
+   //CHECK: [[LEAKY_RELU:%.+]] =   IE.LeakyRelu([[INPUT]]) {negative_slope = 2.500000e-01 : f64} : tensor<4x2048x1x1x!qElemType> -> tensor<4x2048x1x1x!qElemType>
+   //CHECK: [[AFFINE_RESHAPE:%.+]] =  IE.AffineReshape([[LEAKY_RELU]])
+   //CHECK-SAME{LITERAL}: {dim_mapping = [[0, 1], [2], [3], [3]], shape_value = [1, 4, 2048, 1]} : tensor<4x2048x1x1x!qElemType> -> tensor<1x4x2048x1x!qElemType>
+   //CHECK: return [[AFFINE_RESHAPE]] :  tensor<1x4x2048x1x!qElemType>
+ 
+}
+
+// -----
+!qElemType = !quant.uniform<u8:f16:0, {1.000000e-01:128,2.000000e-01:128,3.000000e-01:128,4.000000e-01:128}>
+!qElemType1 = !quant.uniform<u8:f16:1, {2.000000e-01:128,3.000000e-01:128,4.000000e-01:128,5.000000e-01:128}>
+!qElemType2 = !quant.uniform<u8:f16:1, {1.000000e-01:128,2.000000e-01:128,3.000000e-01:128,4.000000e-01:128}>
+
+// CHECK-LABEL: @DoNotSwapWithAffineReshapeAndLReluPerAxis
+// CHECK-SAME:     ([[INPUT:%.+]]: tensor<4x2048x1x1x!qElemType>)
+func.func @DoNotSwapWithAffineReshapeAndLReluPerAxis(%arg0: tensor<4x2048x1x1x!qElemType>) -> tensor<1x4x2048x1x!qElemType1> {
+   %0 = IE.AffineReshape(%arg0) {dim_mapping = [[0, 1], [2], [3], [3]], shape_value = [1, 4, 2048, 1]} : tensor<4x2048x1x1x!qElemType> -> tensor<1x4x2048x1x!qElemType2>
+   %1 = IE.LeakyRelu(%0) {negative_slope = 2.500000e-01 : f64} : tensor<1x4x2048x1x!qElemType2> -> tensor<1x4x2048x1x!qElemType1>
+   return %1 : tensor<1x4x2048x1x!qElemType1>
+
+   //CHECK:               [[AFFINE_RESHAPE:%.+]] =   IE.AffineReshape([[INPUT]])
+   //CHECK-SAME{LITERAL}:    {dim_mapping = [[0, 1], [2], [3], [3]], shape_value = [1, 4, 2048, 1]} 
+   //CHECK-SAME:             tensor<4x2048x1x1x!qElemType> -> tensor<1x4x2048x1x!qElemType2>
+   //CHECK:                [[LEAKY_RELU:%.+]] =  IE.LeakyRelu([[AFFINE_RESHAPE]])
+   //CHECK-SAME:              {negative_slope = 2.500000e-01 : f64} 
+   //CHECK-SAME:              tensor<1x4x2048x1x!qElemType2> -> tensor<1x4x2048x1x!qElemType1>
+   //CHECK: return [[LEAKY_RELU]] :  tensor<1x4x2048x1x!qElemType1>
+ 
+}
+
+// -----
+!qElemType = !quant.uniform<u8:f16, 1.0:124>
+!qElemType1 = !quant.uniform<u8:f16, 2.0:124>
+// CHECK-LABEL: @SwapWithAffineReshapeAndLReluDiffTypes
+// CHECK-SAME:     ([[INPUT:%.+]]: tensor<4x2048x1x1x!qElemType>)
+func.func @SwapWithAffineReshapeAndLReluDiffTypes(%arg0: tensor<4x2048x1x1x!qElemType>) -> tensor<1x4x2048x1x!qElemType1> {
+   %0 = IE.AffineReshape(%arg0) {dim_mapping = [[0, 1], [2], [3], [3]], shape_value = [1, 4, 2048, 1]} : tensor<4x2048x1x1x!qElemType> -> tensor<1x4x2048x1x!qElemType>
+   %1 = IE.LeakyRelu(%0) {negative_slope = 2.500000e-01 : f64} : tensor<1x4x2048x1x!qElemType> -> tensor<1x4x2048x1x!qElemType1>
+   return %1 : tensor<1x4x2048x1x!qElemType1>
+ 
+   //CHECK: [[LEAKY_RELU:%.+]] =   IE.LeakyRelu([[INPUT]]) {negative_slope = 2.500000e-01 : f64} : tensor<4x2048x1x1x!qElemType> -> tensor<4x2048x1x1x!qElemType1>
+   //CHECK: [[AFFINE_RESHAPE:%.+]] =  IE.AffineReshape([[LEAKY_RELU]])
+   //CHECK-SAME{LITERAL}: {dim_mapping = [[0, 1], [2], [3], [3]], shape_value = [1, 4, 2048, 1]} : tensor<4x2048x1x1x!qElemType1> -> tensor<1x4x2048x1x!qElemType1>
+   //CHECK: return [[AFFINE_RESHAPE]] :  tensor<1x4x2048x1x!qElemType1>
+ 
 }

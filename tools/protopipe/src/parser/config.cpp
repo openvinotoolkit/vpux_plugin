@@ -486,21 +486,31 @@ struct convert<OpDesc> {
     static bool decode(const Node& node, OpDesc& opdesc) {
         opdesc.tag = node["tag"].as<std::string>();
         auto type = node["type"] ? node["type"].as<std::string>() : "Infer";
+        auto repeat_count = node["repeat_count"] ? node["repeat_count"].as<uint64_t>() : 1u;
+        ASSERT(repeat_count > 0)
+        if (repeat_count > 1u) {
+            // NB: repeat_count > 1u assume that "Compound" operation will be used
+            type = "Compound";
+        }
         if (type == "Infer") {
             opdesc.op = node.as<InferOp>();
         } else if (type == "CPU") {
             opdesc.op = node.as<CPUOp>();
+        } else if (type == "Compound") {
+            std::vector<std::vector<std::string>> connections;
+            if (node["connections"]) {
+                connections = node["connections"].as<std::vector<std::vector<std::string>>>();
+            }
+            auto op_descs = node["op_desc"].as<std::vector<OpDesc>>();
+            InferenceParamsMap inference_params;
+            for (const auto& op_desc : op_descs) {
+                if (std::holds_alternative<InferOp>(op_desc.op)) {
+                    inference_params.emplace(op_desc.tag, std::get<InferOp>(op_desc.op).params);
+                }
+            }
+            opdesc.op = CompoundOp{repeat_count, std::move(inference_params), buildGraph(op_descs, connections)};
         } else {
             THROW_ERROR("Unsupported operation type: \"" << type << "\"!");
-        }
-        if (node["repeat_count"]) {
-            uint64_t repeat_count = node["repeat_count"].as<uint64_t>();
-            InferenceParamsMap inference_params;
-            if (std::holds_alternative<InferOp>(opdesc.op)) {
-                auto infer_op = std::get<InferOp>(opdesc.op);
-                inference_params.emplace(opdesc.tag, infer_op.params);
-            }
-            opdesc.op = CompoundOp{repeat_count, std::move(inference_params), buildGraph({opdesc}, {})};
         }
         return true;
     }

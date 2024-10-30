@@ -31,12 +31,8 @@ size_t vpux::VPUASM::MappedInferenceOp::getAlignmentRequirements() {
     return alignof(nn_public::VpuMappedInference);
 }
 
-vpux::ELF::SectionFlagsAttr vpux::VPUASM::MappedInferenceOp::getAccessingProcs(mlir::SymbolUserMap&) {
+vpux::ELF::SectionFlagsAttr vpux::VPUASM::MappedInferenceOp::getPredefinedMemoryAccessors() {
     return ELF::SectionFlagsAttr::SHF_EXECINSTR;
-}
-
-vpux::ELF::SectionFlagsAttr vpux::VPUASM::MappedInferenceOp::getUserProcs() {
-    return ELF::SectionFlagsAttr::SHF_NONE;
 }
 
 std::optional<ELF::SectionSignature> vpux::VPUASM::MappedInferenceOp::getSectionSignature() {
@@ -208,7 +204,8 @@ std::vector<ELF::RelocationInfo> vpux::VPUASM::MappedInferenceOp::getRelocationI
                         if (auto symRef = attr.dyn_cast<mlir::SymbolRefAttr>()) {
                             relocs.push_back(ELF::RelocationInfo(
                                     symRef, targetSection, getSymRefOffsetForReloc(thisMI, symRef),
-                                    ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, symRef)));
+                                    ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, symRef),
+                                    "Dma list in mapped inference reloc"));
                         }
                     },
                     [](mlir::Type) {});
@@ -222,7 +219,8 @@ std::vector<ELF::RelocationInfo> vpux::VPUASM::MappedInferenceOp::getRelocationI
                     if (auto symRef = attr.dyn_cast<mlir::SymbolRefAttr>()) {
                         relocs.push_back(ELF::RelocationInfo(
                                 symRef, targetSection, getSymRefOffsetForReloc(thisMI, symRef),
-                                ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, symRef)));
+                                ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, symRef),
+                                "Invariant task in mapped inference reloc"));
                     }
                 },
                 [](mlir::Type) {});
@@ -235,7 +233,8 @@ std::vector<ELF::RelocationInfo> vpux::VPUASM::MappedInferenceOp::getRelocationI
                     if (auto symRef = attr.dyn_cast<mlir::SymbolRefAttr>()) {
                         relocs.push_back(ELF::RelocationInfo(
                                 symRef, targetSection, getSymRefOffsetForReloc(thisMI, symRef),
-                                ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, symRef)));
+                                ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, symRef),
+                                "Variant task in mapped inference reloc"));
                     }
                 },
                 [](mlir::Type) {});
@@ -248,7 +247,8 @@ std::vector<ELF::RelocationInfo> vpux::VPUASM::MappedInferenceOp::getRelocationI
                     if (auto symRef = attr.dyn_cast<mlir::SymbolRefAttr>()) {
                         relocs.push_back(ELF::RelocationInfo(
                                 symRef, targetSection, getSymRefOffsetForReloc(thisMI, symRef),
-                                ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, symRef)));
+                                ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, symRef),
+                                "Act kernel range in mapped inference reloc"));
                     }
                 },
                 [](mlir::Type) {});
@@ -261,28 +261,30 @@ std::vector<ELF::RelocationInfo> vpux::VPUASM::MappedInferenceOp::getRelocationI
                     if (auto symRef = attr.dyn_cast<mlir::SymbolRefAttr>()) {
                         relocs.push_back(ELF::RelocationInfo(
                                 symRef, targetSection, getSymRefOffsetForReloc(thisMI, symRef),
-                                ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, symRef)));
+                                ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, symRef),
+                                "Act kernel invocation in mapped inference reloc"));
                     }
                 },
                 [](mlir::Type) {});
     }
 
     if (auto mediaTasks = getMediaTasks().value_or(nullptr)) {
-        relocs.push_back(ELF::RelocationInfo(mediaTasks, targetSection, getSymRefOffsetForReloc(thisMI, mediaTasks),
-                                             ELF::RelocationType::R_VPU_64,
-                                             ELF::getOffsetOfSymRef(symRefMap, mediaTasks)));
+        relocs.push_back(ELF::RelocationInfo(
+                mediaTasks, targetSection, getSymRefOffsetForReloc(thisMI, mediaTasks), ELF::RelocationType::R_VPU_64,
+                ELF::getOffsetOfSymRef(symRefMap, mediaTasks), "mediaTasks in mapped inference reloc"));
     }
 
     if (auto barrierTasks = getBarrierTasks().value_or(nullptr)) {
         relocs.push_back(ELF::RelocationInfo(barrierTasks, targetSection, getSymRefOffsetForReloc(thisMI, barrierTasks),
                                              ELF::RelocationType::R_VPU_64,
-                                             ELF::getOffsetOfSymRef(symRefMap, barrierTasks)));
+                                             ELF::getOffsetOfSymRef(symRefMap, barrierTasks),
+                                             "barrierTasks in mapped inference reloc"));
     }
 
     if (auto actShaveRt = getActShaveRt().value_or(nullptr)) {
-        relocs.push_back(ELF::RelocationInfo(actShaveRt, targetSection, getSymRefOffsetForReloc(thisMI, actShaveRt),
-                                             ELF::RelocationType::R_VPU_64,
-                                             ELF::getOffsetOfSymRef(symRefMap, actShaveRt)));
+        relocs.push_back(ELF::RelocationInfo(
+                actShaveRt, targetSection, getSymRefOffsetForReloc(thisMI, actShaveRt), ELF::RelocationType::R_VPU_64,
+                ELF::getOffsetOfSymRef(symRefMap, actShaveRt), "actShaveRt in mapped inference reloc"));
     }
 
     if (auto actShaveStacks = getActShaveStacks().value_or(nullptr)) {
@@ -292,28 +294,30 @@ std::vector<ELF::RelocationInfo> vpux::VPUASM::MappedInferenceOp::getRelocationI
                     if (auto symRef = attr.dyn_cast<mlir::SymbolRefAttr>()) {
                         relocs.push_back(ELF::RelocationInfo(
                                 symRef, targetSection, getSymRefOffsetForReloc(thisMI, symRef),
-                                ELF::RelocationType::R_VPU_32, ELF::getOffsetOfSymRef(symRefMap, symRef)));
+                                ELF::RelocationType::R_VPU_32, ELF::getOffsetOfSymRef(symRefMap, symRef),
+                                "Act shave stack in mapped inference reloc"));
                     }
                 },
                 [](mlir::Type) {});
     }
 
     if (auto dmaHwpBase = getDmaHwpBase().value_or(nullptr)) {
-        relocs.push_back(ELF::RelocationInfo(dmaHwpBase, targetSection, getSymRefOffsetForReloc(thisMI, dmaHwpBase),
-                                             ELF::RelocationType::R_VPU_64,
-                                             ELF::getOffsetOfSymRef(symRefMap, dmaHwpBase)));
+        relocs.push_back(ELF::RelocationInfo(
+                dmaHwpBase, targetSection, getSymRefOffsetForReloc(thisMI, dmaHwpBase), ELF::RelocationType::R_VPU_64,
+                ELF::getOffsetOfSymRef(symRefMap, dmaHwpBase), "dmaHwpBase in mapped inference reloc"));
     }
 
     if (auto hwpWorkpointCfg = getHwpWorkpointCfg().value_or(nullptr)) {
         relocs.push_back(
                 ELF::RelocationInfo(hwpWorkpointCfg, targetSection, getSymRefOffsetForReloc(thisMI, hwpWorkpointCfg),
-                                    ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, hwpWorkpointCfg)));
+                                    ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, hwpWorkpointCfg),
+                                    "hwpWorkpointCfg in mapped inference reloc"));
     }
 
     if (auto managedMPI = getManagedMappedInference().value_or(nullptr)) {
-        relocs.push_back(ELF::RelocationInfo(managedMPI, targetSection, getSymRefOffsetForReloc(thisMI, managedMPI),
-                                             ELF::RelocationType::R_VPU_64,
-                                             ELF::getOffsetOfSymRef(symRefMap, managedMPI)));
+        relocs.push_back(ELF::RelocationInfo(
+                managedMPI, targetSection, getSymRefOffsetForReloc(thisMI, managedMPI), ELF::RelocationType::R_VPU_64,
+                ELF::getOffsetOfSymRef(symRefMap, managedMPI), "managedMPI in mapped inference reloc"));
     }
 
     return relocs;
@@ -339,12 +343,8 @@ size_t vpux::VPUASM::MappedInferenceOp_37XX::getAlignmentRequirements() {
     return alignof(nn_public::VpuMappedInference);
 }
 
-vpux::ELF::SectionFlagsAttr vpux::VPUASM::MappedInferenceOp_37XX::getAccessingProcs(mlir::SymbolUserMap&) {
+vpux::ELF::SectionFlagsAttr vpux::VPUASM::MappedInferenceOp_37XX::getPredefinedMemoryAccessors() {
     return ELF::SectionFlagsAttr::SHF_EXECINSTR;
-}
-
-vpux::ELF::SectionFlagsAttr vpux::VPUASM::MappedInferenceOp_37XX::getUserProcs() {
-    return ELF::SectionFlagsAttr::SHF_NONE;
 }
 
 std::optional<ELF::SectionSignature> vpux::VPUASM::MappedInferenceOp_37XX::getSectionSignature() {

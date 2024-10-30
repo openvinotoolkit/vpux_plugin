@@ -7,6 +7,7 @@
 
 #include "vpux/compiler/dialect/VPU/utils/cost_model/cost_model.hpp"
 #include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/sibling_ops_analysis.hpp"
 #include "vpux/compiler/utils/logging.hpp"
 #include "vpux/utils/core/checked_cast.hpp"
 #include "vpux/utils/core/dense_map.hpp"
@@ -26,17 +27,17 @@ public:
         double readCost;
     };
 
-    explicit LayerCostModel(mlir::func::FuncOp func, bool enablePrefetchTiling, Logger log);
+    explicit LayerCostModel(mlir::func::FuncOp func, bool enablePrefetchTiling, Logger log,
+                            SiblingOpsAnalysis& siblingsOpsAnalysis);
     ~LayerCostModel() = default;
 
-    double getLayerCost(mlir::Operation* clusteredOp, VPU::MultiClusterStrategy strategy, bool useTimeBasedCost = true,
-                        bool onlyLastComputeCost = false);
-    double getTheLastTileComputeCost(VPU::NCEOpInterface nceOp, VPU::MultiClusterStrategy opStrategy);
+    double getLayerCost(VPU::ClusteredOpInterface clusteredOp, VPU::MultiClusterStrategy strategy,
+                        bool useTimeBasedCost = true);
     double getNCELayerCost(VPU::NCEOpInterface nceOp, VPU::MultiClusterStrategy strategy, bool useTimeBasedCost = true);
     double getSWLayerCost(VPU::SWOpInterface swOp, VPU::MultiClusterStrategy strategy) const;
-    double getDPUandDMATimeCost(VPU::NCEOpInterface nceOp, VPU::MultiClusterStrategy strategy);
+    double getDPUandDMATimeCost(VPU::NCEOpInterface nceOp, VPU::MultiClusterStrategy strategy) const;
     double getDPUandDMATimeCostWithCustomTiling(VPU::NCEOpInterface nceOp, VPU::MultiClusterStrategy strategy,
-                                                const OutputTiling& outTiles);
+                                                const OutputTiling& outTiles) const;
     double getEfficiencyCost(VPU::NCEOpInterface nceOp, VPU::MultiClusterStrategy strategy) const;
 
     bool hasMultiClusterStrategy(mlir::Operation* op) const;
@@ -44,6 +45,9 @@ public:
     std::pair<vpux::NDTypeInterface, vpux::NDTypeInterface> getDistributionTypesWithStrategy(
             VPU::ClusteredOpInterface parentOp, VPU::MultiClusterStrategy parentStrategy,
             VPU::ClusteredOpInterface userOp, VPU::MultiClusterStrategy userStrategy) const;
+    std::pair<std::pair<mlir::Type, TensorDistributionMap>, std::pair<mlir::Type, TensorDistributionMap>>
+    getDistributionsWithStrategy(VPU::ClusteredOpInterface parentOp, VPU::MultiClusterStrategy parentStrategy,
+                                 VPU::ClusteredOpInterface userOp, VPU::MultiClusterStrategy userStrategy) const;
     bool hasSpilling(VPU::ClusteredOpInterface origOp, vpux::NDTypeInterface srcTensorType,
                      vpux::NDTypeInterface dstTensorType) const;
     bool hasSpilling(VPU::ClusteredOpInterface origOp, VPU::ClusteredOpInterface userOp) const;
@@ -53,12 +57,21 @@ public:
                      VPU::MultiClusterStrategy userOpStrategy) const;
     bool hasSpilling(VPU::ClusteredOpInterface origOp, VPU::MultiClusterStrategy origOpStrategy,
                      VPU::ClusteredOpInterface userOp, VPU::MultiClusterStrategy userOpStrategy) const;
+    bool hasSpilling(VPU::ClusteredOpInterface /*clusteredOp*/,
+                     std::pair<mlir::Type, TensorDistributionMap>& srcTensorType,
+                     std::pair<mlir::Type, TensorDistributionMap>& dstTensorType) const;
 
     bool doesLayerRequireTiling(VPU::ClusteredOpInterface clusteredOp, VPU::MultiClusterStrategy strategy) const;
     bool doesLayerHaveVPUNNSupportedTypes(VPU::ClusteredOpInterface clusteredOp) const;
     double getSpillingReadCost(vpux::NDTypeInterface srcTensorType) const;
     double getSpillingWriteCost(vpux::NDTypeInterface srcTensorType) const;
+    double getSpillingReadCost(vpux::NDTypeInterface srcTensorType, const TensorDistributionMap& distributions) const;
+
+    double getSpillingWriteCost(vpux::NDTypeInterface srcTensorType, const TensorDistributionMap& distributions) const;
     SpillingCost getSpillingCost(vpux::NDTypeInterface srcTensorType, vpux::NDTypeInterface dstTensorType,
+                                 VPU::ClusteredOpInterface parentOp, VPU::ClusteredOpInterface userOp) const;
+    SpillingCost getSpillingCost(vpux::NDTypeInterface srcTensorType, const TensorDistributionMap& srcDistribution,
+                                 vpux::NDTypeInterface dstTensorType, const TensorDistributionMap& dstDistribution,
                                  VPU::ClusteredOpInterface parentOp, VPU::ClusteredOpInterface userOp) const;
     SpillingCost calculateSpillingCost(VPU::ClusteredOpInterface parentOp, VPU::ClusteredOpInterface userOp,
                                        VPU::MultiClusterStrategy parentStrategy,
@@ -70,8 +83,16 @@ public:
     VPU::DistributedTypeInterface getDistributedInputType(VPU::ClusteredOpInterface origOp, mlir::Operation* parentOp,
                                                           VPU::MultiClusterStrategy specifiedStrategy,
                                                           mlir::ArrayAttr customAlignment) const;
+    std::pair<mlir::Type, TensorDistributionMap> getInputWithDistribution(
+            VPU::ClusteredOpInterface origOp, mlir::Operation* parentOp,
+            VPU::MultiClusterStrategy specifiedStrategy) const;
+    std::pair<mlir::Type, TensorDistributionMap> getInputWithDistribution(
+            VPU::ClusteredOpInterface origOp, mlir::Operation* parentOp, VPU::MultiClusterStrategy specifiedStrategy,
+            mlir::ArrayRef<int64_t> customAlignment) const;
     VPU::DistributedTypeInterface getDistributedOutputType(VPU::ClusteredOpInterface origOp,
                                                            VPU::MultiClusterStrategy specifiedStrategy) const;
+    std::pair<mlir::Type, TensorDistributionMap> getOutputWithDistribution(
+            VPU::ClusteredOpInterface origOp, VPU::MultiClusterStrategy specifiedStrategy) const;
 
     VPU::MultiClusterStrategy getOptimalLayerStrategy(VPU::ClusteredOpInterface clusteredOp);
     double static constexpr COST_MAX = std::numeric_limits<double>::infinity();
@@ -90,6 +111,10 @@ private:
     double totalDMATime(VPU::NCEOpInterface nceOp, VPU::MultiClusterStrategy strategy) const;
     double getDMACostOfType(vpux::NDTypeInterface srcTensorType, SpillingType spillingType) const;
     double getSpillingDMACost(vpux::NDTypeInterface srcTensorType, SpillingType spillingType) const;
+    double getDMACostOfType(vpux::NDTypeInterface srcType, const DistributionInfo& distribution,
+                            SpillingType spillingType) const;
+    double getSpillingDMACost(vpux::NDTypeInterface srcTensorType, const TensorDistributionMap& distributions,
+                              SpillingType spillingType) const;
 
     // Note that the cost model will be integrated with VPUNN as part of  E#37379
     // after that these platform specific variables will be removed
@@ -111,6 +136,7 @@ private:
     mlir::func::FuncOp _func;
     bool _enablePrefetchTiling;
     Logger _log;
+    SiblingOpsAnalysis& _siblingsOpsAnalysis;
 };
 
 std::optional<VPU::MultiClusterStrategy> getDefaultLayerStrategy(VPU::ClusteredOpInterface clusteredOp);
@@ -122,27 +148,26 @@ bool isStrategySOXCompatible(VPU::ClusteredOpInterface clusteredOp, VPU::MultiCl
                              size_t numTiles);
 
 SmallVector<uint32_t> getDPUCostForNCEOp(VPU::NCEOpInterface nceOp, VPU::MultiClusterStrategy mcStrategy,
-                                         const OutputTiling& outTiles,
-                                         SmallVector<SmallVector<NDTypeInterface>>& tilesTypes,
-                                         const VPUIP::WorkloadCostParams& costParams,
+                                         const OutputTiling& outTiles, const VPUIP::WorkloadCostParams& costParams,
                                          VPUNN::VPULayerStrategy vpunnStrategy,
                                          const std::shared_ptr<VPUNN::VPULayerCostModel>& vpunnCostModel, Logger log);
 
-SmallVector<uint32_t> getPerTileWeightsDMACosts(VPU::NCEOpInterface nceOp,
-                                                ArrayRef<SmallVector<NDTypeInterface>> tilesTypes,
-                                                std::function<uint32_t(NDTypeInterface)> getSpillingReadCostFunc);
+SmallVector<uint32_t> getPerTileWeightsDMACosts(
+        VPU::NCEOpInterface nceOp, SiblingOpsAnalysis& siblingsAnalysis,
+        ArrayRef<std::vector<std::pair<NDTypeInterface, TensorDistributionMap>>> tilesTypes,
+        std::function<uint32_t(NDTypeInterface, const TensorDistributionMap& distributions)> getSpillingReadCostFunc);
 
-SmallVector<uint32_t> getPerTileActivationDMACosts(VPU::NCEOpInterface nceOp,
-                                                   ArrayRef<SmallVector<NDTypeInterface>> tilesTypes,
-                                                   std::function<uint32_t(NDTypeInterface)> getSpillingReadCostFunc);
+SmallVector<uint32_t> getPerTileActivationDMACosts(
+        VPU::NCEOpInterface nceOp, ArrayRef<std::vector<std::pair<NDTypeInterface, TensorDistributionMap>>> tilesTypes,
+        std::function<uint32_t(NDTypeInterface, const TensorDistributionMap& distributions)> getSpillingReadCostFunc);
 
-SmallVector<uint32_t> getPerTileOutputDMACosts(VPU::NCEOpInterface nceOp,
-                                               ArrayRef<SmallVector<NDTypeInterface>> tilesTypes,
-                                               std::function<uint32_t(NDTypeInterface)> getSpillingReadCostFunc);
+SmallVector<uint32_t> getPerTileOutputDMACosts(
+        VPU::NCEOpInterface nceOp, ArrayRef<std::vector<std::pair<NDTypeInterface, TensorDistributionMap>>> tilesTypes,
+        std::function<uint32_t(NDTypeInterface, const TensorDistributionMap& distributions)> getSpillingReadCostFunc);
 
 uint32_t getWeightsDMACostForNCEOp(VPU::NCEOpInterface nceOp, const OutputTiling& outTiles,
                                    SmallVector<uint32_t>& layerDPUCosts, ArrayRef<uint32_t> layerDMACosts,
-                                   uint32_t parentLastDPUCostToOverlap, bool enablePrefetchTiling, vpux::Logger log);
+                                   bool enablePrefetchTiling, vpux::Logger log);
 
 uint32_t getActivationDMACostForNCEOp(VPU::NCEOpInterface nceOp, const OutputTiling& outTiles,
                                       SmallVector<uint32_t>& layerDPUCosts, ArrayRef<uint32_t> layerDMACosts,

@@ -5,7 +5,6 @@
 
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 #include "vpux/compiler/dialect/IE/utils/reshape_utils.hpp"
-#include "vpux/compiler/dialect/VPUIP/interfaces/nce_invariant.hpp"
 #include "vpux/compiler/utils/permute_utils.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
@@ -350,25 +349,51 @@ public:
     }
 
 private:
-    bool isBeneficialPropagation(IE::MemPermuteOp memPermuteOp, mlir::AffineMap nextPerm) const;
-    mlir::LogicalResult matchAndRewrite(IE::PermuteQuantizeOp permuteQuantizeOp,
-                                        mlir::PatternRewriter& rewriter) const final;
+    mlir::LogicalResult matchAndRewrite(IE::PermuteQuantizeOp origOp, mlir::PatternRewriter& rewriter) const final;
+    mlir::LogicalResult movePermuteQuantize(mlir::Value affineReshape, mlir::Value permuteQuantize,
+                                            mlir::PatternRewriter& rewriter) const;
 
 private:
     Logger _log;
 };
 
-// Propagation is beneficial in case permutes can be folded or converted into PermuteCast.
+mlir::LogicalResult PropagatePermuteQuantize::movePermuteQuantize(mlir::Value affineReshape,
+                                                                  mlir::Value permuteQuantize,
+                                                                  mlir::PatternRewriter& rewriter) const {
+    const auto ctx = rewriter.getContext();
+    auto affineReshapeOp = affineReshape.getDefiningOp<IE::AffineReshapeOp>();
+    VPUX_THROW_WHEN(affineReshapeOp == nullptr, "Not an AffineReshape operation");
+    auto permuteQuantizeOp = permuteQuantize.getDefiningOp();
+    VPUX_THROW_WHEN(!mlir::isa<IE::PermuteQuantizeOp>(permuteQuantizeOp), "Not a PermuteQuantize operation");
 
-bool PropagatePermuteQuantize::isBeneficialPropagation(IE::MemPermuteOp memPermuteOp, mlir::AffineMap nextPerm) const {
-    const auto inOrder = DimsOrder::fromValue(memPermuteOp.getInput());
-    const auto inShape = getShape(memPermuteOp.getInput());
-    const auto inMemShape = inOrder.toMemoryOrder(inShape);
+    // Create new PermuteQuantizeOp
+    auto origPermuteQuantize = mlir::dyn_cast<IE::PermuteQuantizeOp>(permuteQuantizeOp);
+    mlir::IRMapping mapper;
+    mapper.map(origPermuteQuantize.getInput(), affineReshapeOp.getInput());
+    auto newOp = rewriter.clone(*origPermuteQuantize, mapper);
+    inferReturnTypes(newOp, InferShapedTypeMode::ALL);
 
-    auto prevMemPerm = memPermuteOp.getMemPerm();
-    auto newMemPerm = nextPerm.compose(prevMemPerm);
+    const auto logCb = [&](const formatv_object_base& msg) {
+        _log.nest().trace("{0}", msg.str());
+    };
+    if (!VPU::NCEPermuteOp::isSupported(mlir::cast<IE::PermuteQuantizeOp>(newOp), logCb, /*checkLayout=*/true,
+                                        /*checkChannelAlignment=*/true)) {
+        _log.nest().trace("Not supported by NCEPermute");
+        rewriter.eraseOp(newOp);
+        return mlir::failure();
+    }
 
-    return newMemPerm.isIdentity() || isTrivialPermute(inMemShape, newMemPerm);
+    // Reshape to original output shape
+    auto outputType = permuteQuantizeOp->getResult(0).getType().cast<NDTypeInterface>();
+    auto outputShape = outputType.getShape();
+    auto outputShapeAttr = getIntArrayAttr(ctx, outputShape);
+    auto outputReshape = rewriter.create<IE::ShapeCastOp>(
+            affineReshapeOp.getLoc(), newOp->getResult(0).getType().cast<NDTypeInterface>().changeShape(outputShape),
+            newOp->getResult(0), outputShapeAttr);
+    permuteQuantize.replaceAllUsesWith(outputReshape.getResult());
+    rewriter.eraseOp(permuteQuantizeOp);
+    rewriter.eraseOp(affineReshapeOp);
+    return mlir::success();
 }
 
 mlir::LogicalResult PropagatePermuteQuantize::matchAndRewrite(IE::PermuteQuantizeOp origOp,
@@ -400,17 +425,13 @@ mlir::LogicalResult PropagatePermuteQuantize::matchAndRewrite(IE::PermuteQuantiz
         return mlir::failure();
     }
 
-    auto memPermute = affineReshape.getInput().getDefiningOp<IE::MemPermuteOp>();
-    if (memPermute == nullptr || !memPermute->hasOneUse()) {
-        return mlir::failure();
-    }
-
     // Check that tensor rank is 4, otherwise compilation fails in later passes
+    const int64_t SUPPORTED_RANK = 4;
     auto inType = affineReshape.getInput().getType().cast<vpux::NDTypeInterface>();
     auto outType = affineReshape.getOutput().getType().cast<vpux::NDTypeInterface>();
     auto inRank = inType.getRank();
     auto outRank = outType.getRank();
-    if (inRank != 4 || outRank != 4) {
+    if (inRank != SUPPORTED_RANK || outRank != SUPPORTED_RANK) {
         return mlir::failure();
     }
 
@@ -431,115 +452,64 @@ mlir::LogicalResult PropagatePermuteQuantize::matchAndRewrite(IE::PermuteQuantiz
     auto newPerm = calculateNewPermutation(dimMapping, origPermRef, inType.getDimsOrder(), outType.getDimsOrder(),
                                            inMemShape, outMemShape, _log, ctx);
 
-    if (!isBeneficialPropagation(memPermute, newPerm)) {
-        _log.nest().trace("[{0}]: Propagation is not beneficial at {1}", getDebugName(), origOp->getLoc());
-        return mlir::failure();
-    }
-
     _log.trace("[{0}]: Rewriting {1}", getDebugName(), origOp->getLoc());
 
-    const mlir::OperationName affineReshapeName = affineReshape->getName();
-    const mlir::Location affineReshapeLoc = affineReshape->getLoc();
-    auto result = replaceWithNewSubGraph(affineReshape.getOutput(), origOp.getOutput(), newPerm, rewriter, _log);
-    if (result.succeeded()) {
-        _log.nest().trace("[{0}]: Replaced {1} at {2} with new sub graph: newPerm '{3}'", getDebugName(),
-                          affineReshapeName, affineReshapeLoc, newPerm);
-        return mlir::success();
-    } else {
-        _log.nest().trace("[{0}]: Failed to replace {1} at {2}", getDebugName(), affineReshapeName, affineReshapeLoc);
+    auto memPermute = affineReshape.getInput().getDefiningOp<IE::MemPermuteOp>();
+    if (memPermute != nullptr && memPermute->hasOneUse()) {
+        // Create subgraph with MemPermute to fuse or even eliminate permutation
+        return replaceWithNewSubGraph(affineReshape.getOutput(), origOp.getOutput(), newPerm, rewriter, _log);
+    }
+
+    // We can move PermuteQuantize through AffineReshape when newPerm and origPerm have the same merged
+    // permutation.
+    // Otherwise there would a failure when lowering IE.PermuteQuantize to VPU.NCEPermute with newPerm, because newPerm
+    // might be not a valid permutation for VPU.NCEPermute
+    auto newMergedPermAndShape = vpux::getMergedPermutationAndShape(inType, newPerm, SUPPORTED_RANK);
+    auto origMergedPermAndShape = vpux::getMergedPermutationAndShape(inType, origOp.getMemPerm(), SUPPORTED_RANK);
+    if (newMergedPermAndShape.first != origMergedPermAndShape.first) {
+        _log.nest().trace("Can't move PermuteQuantize because merged permutation needs to be changed");
         return mlir::failure();
     }
+
+    return movePermuteQuantize(affineReshape.getOutput(), origOp.getOutput(), rewriter);
 }
 
 //
-// MoveThroughOp
+// MoveThroughOpBase
 //
 // Catch the pattern in below:
-//           Op
-//            |
-//      MemPermute
+//              Op
+//              |
+//  MemPermute / PermuteQuantize
 //
-// Move the MemPermute before Op
+// Move the MemPermute / PermuteQuantize before Op
 
 template <class ConcreteOp>
-class MoveThroughOp final : public mlir::OpRewritePattern<IE::MemPermuteOp> {
+class MoveThroughOpBase : public mlir::OpRewritePattern<ConcreteOp> {
 public:
-    MoveThroughOp(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<IE::MemPermuteOp>(ctx), _log(log) {
-        this->setDebugName("MoveThroughOp");
+    MoveThroughOpBase(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<ConcreteOp>(ctx), _log(log) {
     }
 
-private:
-    mlir::LogicalResult matchAndRewrite(IE::MemPermuteOp memPermuteOp, mlir::PatternRewriter& rewriter) const final;
+    bool genericCheck(mlir::Operation* permuteOp) const;
 
-    bool checkMemPermutePattern(IE::MemPermuteOp memPermuteOp, Logger log, mlir::PatternRewriter& rewriter) const;
-    bool isPropagationBeneficialForConcatAndSlice(IE::MemPermuteOp memPermuteOp, Logger log,
-                                                  mlir::PatternRewriter& rewriter) const;
+private:
+    mlir::LogicalResult matchAndRewrite(ConcreteOp concreteOp, mlir::PatternRewriter& rewriter) const final;
+
+    virtual bool checkMemPermutePattern(mlir::Operation* permuteOp, mlir::PatternRewriter& rewriter) const = 0;
+
+    virtual mlir::AffineMap getPermutationMap(mlir::Operation* permuteOp) const = 0;
+
+    virtual mlir::Operation* createNewPermuteOp(mlir::Operation* permuteOp, mlir::Value newInput,
+                                                mlir::AffineMap dstOrder, mlir::PatternRewriter& rewriter) const = 0;
 
 private:
     Logger _log;
 };
 
 template <class ConcreteOp>
-mlir::LogicalResult MoveThroughOp<ConcreteOp>::matchAndRewrite(IE::MemPermuteOp origOp,
-                                                               mlir::PatternRewriter& rewriter) const {
-    auto concreteOp = origOp.getInput().getDefiningOp<ConcreteOp>();
-    if (concreteOp == nullptr) {
-        return mlir::failure();
-    }
-
-    if (!checkMemPermutePattern(origOp, _log, rewriter)) {
-        return mlir::failure();
-    }
-
-    auto ctx = origOp->getContext();
-    auto inOrder = DimsOrder::fromValue(origOp.getInput()).toAffineMap(ctx);
-    auto memPerm = origOp.getMemPerm();
-    auto perm = memPerm.compose(inOrder);
-    auto outOrder = DimsOrder::fromAffineMap(perm);
-
-    auto operation = concreteOp->getResult(0).getDefiningOp();
-    if (auto iface = mlir::dyn_cast<IE::LayoutInfoOpInterface>(operation)) {
-        auto orderInfo = iface.getLayoutInfo();
-        orderInfo.setInput(0, outOrder);
-        iface.inferLayoutInfo(orderInfo, /*seOpsEnabled=*/false, /*seExperimentalOpsEnabled=*/false);
-        if (orderInfo.getInput(0) != outOrder || orderInfo.getOutput(0) != outOrder) {
-            return mlir::failure();
-        }
-    }
-
-    _log.trace("[{0}] Got '{1}' at '{2}'", getDebugName(), concreteOp->getName(), concreteOp->getLoc());
-
-    // create new MemPermute which keeps the shape unchanged and adjust the dst order only
-    SmallVector<mlir::Value> newInputs;
-    for (const auto& input : concreteOp->getOperands()) {
-        auto newMemPermute = rewriter.create<IE::MemPermuteOp>(origOp->getLoc(), input, perm, origOp.getMemPerm());
-        newInputs.push_back(newMemPermute.getOutput());
-    }
-
-    mlir::IRMapping mapper;
-    mapper.map(concreteOp->getOperands(), newInputs);
-    mlir::Operation* newOp = rewriter.clone(*concreteOp, mapper);
-    auto newOutput = newOp->getResult(0);
-    newOutput.setType(
-            concreteOp->getResult(0).getType().template cast<vpux::NDTypeInterface>().changeDimsOrder(outOrder));
-
-    auto newPermuteCast =
-            rewriter.createOrFold<IE::PermuteCastOp>(origOp->getLoc(), newOp->getResult(0), origOp.getDstOrder(),
-                                                     mlir::AffineMap::getMultiDimIdentityMap(outOrder.numDims(), ctx));
-
-    _log.nest().trace("Propagate MemPermute {0} before {1} at {2}", origOp->getLoc(), concreteOp->getName(),
-                      concreteOp->getLoc());
-
-    rewriter.replaceOp(origOp, newPermuteCast);
-    rewriter.eraseOp(concreteOp);
-    return mlir::success();
-}
-
-template <class ConcreteOp>
-bool MoveThroughOp<ConcreteOp>::checkMemPermutePattern(IE::MemPermuteOp memPermuteOp, Logger log,
-                                                       mlir::PatternRewriter& rewriter) const {
-    // Check pattern Op -> MemPermuteOp
-    auto op = memPermuteOp.getInput().getDefiningOp();
+bool MoveThroughOpBase<ConcreteOp>::genericCheck(mlir::Operation* permuteOp) const {
+    // Check pattern Op -> MemPermuteOp / PermuteQuantizeOp.
+    auto op = permuteOp->getOperand(0).getDefiningOp();
     if (!mlir::isa_and_nonnull<ConcreteOp>(op)) {
         return false;
     }
@@ -557,10 +527,6 @@ bool MoveThroughOp<ConcreteOp>::checkMemPermutePattern(IE::MemPermuteOp memPermu
         return false;
     }
 
-    if (mlir::isa<IE::ConcatOp, IE::SliceOp>(op)) {
-        return isPropagationBeneficialForConcatAndSlice(memPermuteOp, log, rewriter);
-    }
-
     // The ConcreteOp must not have input or output quantized per axis
     auto inElemType = op->getOperand(0).getType().dyn_cast<vpux::NDTypeInterface>().getElementType();
     auto outElemType = op->getResult(0).getType().dyn_cast<vpux::NDTypeInterface>().getElementType();
@@ -569,7 +535,7 @@ bool MoveThroughOp<ConcreteOp>::checkMemPermutePattern(IE::MemPermuteOp memPermu
         return false;
     }
 
-    // E#127631: If MemPermute input is QuantizedType the storage type should not by sub byte quantization because this
+    // E#127631: If MemPermute input is QuantizedType the storage type should not be sub byte quantization because this
     // would result in compilation error later
     const auto quantType = inElemType.dyn_cast<mlir::quant::QuantizedType>();
     if (quantType != nullptr) {
@@ -580,8 +546,95 @@ bool MoveThroughOp<ConcreteOp>::checkMemPermutePattern(IE::MemPermuteOp memPermu
 }
 
 template <class ConcreteOp>
-bool MoveThroughOp<ConcreteOp>::isPropagationBeneficialForConcatAndSlice(IE::MemPermuteOp permuteOp, Logger log,
-                                                                         mlir::PatternRewriter& rewriter) const {
+mlir::LogicalResult MoveThroughOpBase<ConcreteOp>::matchAndRewrite(ConcreteOp concreteOp,
+                                                                   mlir::PatternRewriter& rewriter) const {
+    auto permuteOp = *concreteOp->getUsers().begin();
+    if (!checkMemPermutePattern(permuteOp, rewriter)) {
+        return mlir::failure();
+    }
+
+    auto memPerm = getPermutationMap(permuteOp);
+    const auto originPerm = DimsOrder::fromAffineMap(memPerm);
+    const auto originPermVec = to_small_vector(originPerm.toPermutation() | transformed([](Dim dim) {
+                                                   return checked_cast<int64_t>(dim.ind());
+                                               }));
+
+    auto ctx = permuteOp->getContext();
+    auto inOrder = DimsOrder::fromValue(permuteOp->getOperand(0)).toAffineMap(ctx);
+    auto perm = memPerm.compose(inOrder);
+    auto outOrder = DimsOrder::fromAffineMap(perm);
+
+    auto operation = concreteOp->getResult(0).getDefiningOp();
+    if (auto iface = mlir::dyn_cast<IE::LayoutInfoOpInterface>(operation)) {
+        auto orderInfo = iface.getLayoutInfo();
+        orderInfo.setInput(0, outOrder);
+        iface.inferLayoutInfo(orderInfo, /*seOpsEnabled=*/false, /*seExperimentalOpsEnabled=*/false);
+        if (orderInfo.getInput(0) != outOrder || orderInfo.getOutput(0) != outOrder) {
+            return mlir::failure();
+        }
+    }
+
+    _log.trace("Got '{0}' at '{1}'", concreteOp->getName(), concreteOp->getLoc());
+
+    // create new permute operation which keeps the shape unchanged and adjust the dst order only.
+    SmallVector<mlir::Value> newInputs;
+    DenseMap<mlir::Value, mlir::Operation*> operandsMap;
+    for (const auto& input : concreteOp->getOperands()) {
+        mlir::Operation* newPermuteOp = nullptr;
+        auto it = operandsMap.find(input);
+        if (it == operandsMap.end()) {
+            newPermuteOp = createNewPermuteOp(permuteOp, input, perm, rewriter);
+            operandsMap.insert({input, newPermuteOp});
+        } else {
+            // Some operands may have the same input, re-use the Permute operation that has been created already
+            newPermuteOp = it->second;
+        }
+        newInputs.push_back(newPermuteOp->getResult(0));
+    }
+
+    mlir::IRMapping mapper;
+    mapper.map(concreteOp->getOperands(), newInputs);
+    mlir::Operation* newOp = rewriter.clone(*concreteOp, mapper);
+    auto newOutput = newOp->getResult(0);
+    newOutput.setType(
+            concreteOp->getResult(0).getType().template cast<vpux::NDTypeInterface>().changeDimsOrder(outOrder));
+
+    auto origOrder = permuteOp->getResult(0).getType().template cast<NDTypeInterface>().getDimsOrder();
+    auto newPermuteCast = rewriter.createOrFold<IE::PermuteCastOp>(
+            permuteOp->getLoc(), newOp->getResult(0), origOrder.toAffineMap(ctx),
+            mlir::AffineMap::getMultiDimIdentityMap(outOrder.numDims(), ctx));
+
+    _log.nest().trace("Propagate Permute operation {0} before {1} at {2}", permuteOp->getLoc(), concreteOp->getName(),
+                      concreteOp->getLoc());
+
+    rewriter.replaceOp(permuteOp, newPermuteCast);
+    rewriter.eraseOp(concreteOp);
+    return mlir::success();
+}
+
+//
+// MoveMemPermuteThroughOp
+//
+
+template <class ConcreteOp>
+class MoveMemPermuteThroughOp final : public MoveThroughOpBase<ConcreteOp> {
+public:
+    MoveMemPermuteThroughOp(mlir::MLIRContext* ctx, Logger log): MoveThroughOpBase<ConcreteOp>(ctx, log) {
+    }
+
+    bool checkMemPermutePattern(mlir::Operation* permuteOp, mlir::PatternRewriter& rewriter) const override;
+
+    mlir::AffineMap getPermutationMap(mlir::Operation* permuteOp) const override;
+
+    mlir::Operation* createNewPermuteOp(mlir::Operation* permuteOp, mlir::Value newInput, mlir::AffineMap dstOrder,
+                                        mlir::PatternRewriter& rewriter) const override;
+
+    bool isPropagationBeneficialForConcatAndSlice(IE::MemPermuteOp memPermuteOp, mlir::PatternRewriter& rewriter) const;
+};
+
+template <class ConcreteOp>
+bool MoveMemPermuteThroughOp<ConcreteOp>::isPropagationBeneficialForConcatAndSlice(
+        IE::MemPermuteOp permuteOp, mlir::PatternRewriter& rewriter) const {
     auto parentOp = permuteOp.getInput().getDefiningOp();
     if (!mlir::isa_and_nonnull<IE::ConcatOp, IE::SliceOp>(parentOp)) {
         return false;
@@ -591,14 +644,13 @@ bool MoveThroughOp<ConcreteOp>::isPropagationBeneficialForConcatAndSlice(IE::Mem
     const auto permuteInMemShape = permuteInType.getMemShape();
     auto memPerm = permuteOp.getMemPerm();
     if (isTrivialPermute(permuteInMemShape, memPerm)) {
-        log.nest().trace("MemPermute operation is a trivial permutation");
         return false;
     }
 
     // Benefit from stride DMA due to axis transition from lower to higher dimension
     // Example: Concat operation (NHWC, connected at C) -> Mempermute (NHWC to NCHW)
     // Propagating Permute does not change the total permutation data size but eliminates the need for stride DMAs
-    const auto ctx = rewriter.getContext();
+    const auto ctx = permuteOp.getContext();
     const auto inOrder = DimsOrder::fromValue(permuteOp.getInput());
     auto dstPerm = memPerm.compose(inOrder.toAffineMap(ctx));
     auto dstOrder = DimsOrder::fromAffineMap(dstPerm);
@@ -658,6 +710,125 @@ bool MoveThroughOp<ConcreteOp>::isPropagationBeneficialForConcatAndSlice(IE::Mem
     const auto benificialPermutation = llvm::all_of(parentOp->getOperands(), isBeneficialPermutation);
 
     return benificialStrideDMA && benificialPermutation;
+}
+
+template <class ConcreteOp>
+bool MoveMemPermuteThroughOp<ConcreteOp>::checkMemPermutePattern(mlir::Operation* permuteOp,
+                                                                 mlir::PatternRewriter& rewriter) const {
+    auto memPermuteOp = mlir::dyn_cast_or_null<IE::MemPermuteOp>(permuteOp);
+    if (memPermuteOp == nullptr) {
+        return false;
+    }
+    if (!MoveThroughOpBase<ConcreteOp>::genericCheck(permuteOp)) {
+        return false;
+    }
+
+    auto concreteOp = permuteOp->getOperand(0).getDefiningOp();
+    if (mlir::isa<IE::ConcatOp, IE::SliceOp>(concreteOp) &&
+        !isPropagationBeneficialForConcatAndSlice(memPermuteOp, rewriter)) {
+        return false;
+    }
+
+    return true;
+}
+
+template <class ConcreteOp>
+mlir::AffineMap MoveMemPermuteThroughOp<ConcreteOp>::getPermutationMap(mlir::Operation* permuteOp) const {
+    auto memPermuteOp = mlir::dyn_cast<IE::MemPermuteOp>(permuteOp);
+    VPUX_THROW_WHEN(memPermuteOp == nullptr, "Not a MemPermuteOp");
+
+    return memPermuteOp.getMemPerm();
+}
+
+template <class ConcreteOp>
+mlir::Operation* MoveMemPermuteThroughOp<ConcreteOp>::createNewPermuteOp(mlir::Operation* permuteOp,
+                                                                         mlir::Value newInput, mlir::AffineMap dstOrder,
+                                                                         mlir::PatternRewriter& rewriter) const {
+    auto memPermuteOp = mlir::dyn_cast<IE::MemPermuteOp>(permuteOp);
+    VPUX_THROW_WHEN(memPermuteOp == nullptr, "Not a MemPermuteOp");
+
+    return rewriter.create<IE::MemPermuteOp>(memPermuteOp->getLoc(), newInput, dstOrder, memPermuteOp.getMemPerm());
+}
+
+//
+// MovePermuteQuantizeThroughOp
+//
+
+template <class ConcreteOp>
+class MovePermuteQuantizeThroughOp final : public MoveThroughOpBase<ConcreteOp> {
+public:
+    MovePermuteQuantizeThroughOp(mlir::MLIRContext* ctx, Logger log): MoveThroughOpBase<ConcreteOp>(ctx, log) {
+    }
+
+    bool checkMemPermutePattern(mlir::Operation* permuteOp, mlir::PatternRewriter& rewriter) const override;
+
+    mlir::AffineMap getPermutationMap(mlir::Operation* permuteOp) const override;
+
+    mlir::Operation* createNewPermuteOp(mlir::Operation* permuteOp, mlir::Value newInput, mlir::AffineMap dstOrder,
+                                        mlir::PatternRewriter& rewriter) const override;
+};
+
+template <class ConcreteOp>
+bool MovePermuteQuantizeThroughOp<ConcreteOp>::checkMemPermutePattern(mlir::Operation* permuteOp,
+                                                                      mlir::PatternRewriter&) const {
+    auto permuteQuantizeOp = mlir::dyn_cast_or_null<IE::PermuteQuantizeOp>(permuteOp);
+    if (permuteQuantizeOp == nullptr) {
+        return false;
+    }
+
+    // Check PermuteQuantize pads attributes.
+    const auto padStart = parseIntArrayAttr<int64_t>(permuteQuantizeOp.getPadsBegin());
+    const auto padEnd = parseIntArrayAttr<int64_t>(permuteQuantizeOp.getPadsEnd());
+
+    const auto nonZeroPadStart = llvm::any_of(padStart, [](auto pad) {
+        return pad > 0;
+    });
+    const auto nonZeroPadEnd = llvm::any_of(padEnd, [](auto pad) {
+        return pad > 0;
+    });
+    if (nonZeroPadStart || nonZeroPadEnd) {
+        return false;
+    }
+
+    // Check PermuteQuantize output element type.
+    const auto permuteQuantizeOutElemType =
+            permuteQuantizeOp.getOutput().getType().cast<vpux::NDTypeInterface>().getElementType();
+    if (permuteQuantizeOutElemType.isa<mlir::quant::QuantizedType>()) {
+        return false;
+    }
+
+    // ConcreteOp should have single input or all inputs are from the same parent
+    auto concreteOp = permuteOp->getOperand(0).getDefiningOp();
+    auto operands = concreteOp->getOperands();
+    auto hasTheSameOperands = llvm::all_of(operands, [&](const mlir::Value operand) {
+        return operand == operands.front();
+    });
+    if (!hasTheSameOperands) {
+        return false;
+    }
+
+    return MoveThroughOpBase<ConcreteOp>::genericCheck(permuteOp);
+}
+
+template <class ConcreteOp>
+mlir::AffineMap MovePermuteQuantizeThroughOp<ConcreteOp>::getPermutationMap(mlir::Operation* permuteOp) const {
+    auto permuteQuantizeOp = mlir::dyn_cast<IE::PermuteQuantizeOp>(permuteOp);
+    VPUX_THROW_WHEN(permuteQuantizeOp == nullptr, "Not a PermuteQuantizeOp");
+
+    return permuteQuantizeOp.getMemPerm();
+}
+
+template <class ConcreteOp>
+mlir::Operation* MovePermuteQuantizeThroughOp<ConcreteOp>::createNewPermuteOp(mlir::Operation* permuteOp,
+                                                                              mlir::Value newInput, mlir::AffineMap,
+                                                                              mlir::PatternRewriter& rewriter) const {
+    auto permuteQuantizeOp = mlir::dyn_cast<IE::PermuteQuantizeOp>(permuteOp);
+    VPUX_THROW_WHEN(permuteQuantizeOp == nullptr, "Not a PermuteQuantizeOp");
+
+    return rewriter.create<IE::PermuteQuantizeOp>(
+            permuteQuantizeOp->getLoc(), newInput, permuteQuantizeOp.getDstOrderAttr(),
+            permuteQuantizeOp.getMemPermAttr(), permuteQuantizeOp.getDstElemTypeAttr(),
+            permuteQuantizeOp.getPadsBeginAttr(), permuteQuantizeOp.getPadsEndAttr());
 }
 
 //
@@ -789,11 +960,12 @@ void PropagateMemPermuteBeforeOpPass::safeRunOnFunc() {
     mlir::RewritePatternSet patterns(&ctx);
     patterns.add<OptimizeMemPermute>(&ctx, _log);
     patterns.add<PropagatePermuteQuantize>(&ctx, _log);
-    patterns.add<MoveThroughOp<IE::MVNOp>>(&ctx, _log);
-    patterns.add<MoveThroughOp<IE::GeluOp>>(&ctx, _log);
-    patterns.add<MoveThroughOp<IE::QuantizeCastOp>>(&ctx, _log);
-    patterns.add<MoveThroughOp<IE::ConcatOp>>(&ctx, _log);
-    patterns.add<MoveThroughOp<IE::SliceOp>>(&ctx, _log);
+    patterns.add<MoveMemPermuteThroughOp<IE::MVNOp>>(&ctx, _log);
+    patterns.add<MoveMemPermuteThroughOp<IE::GeluOp>>(&ctx, _log);
+    patterns.add<MoveMemPermuteThroughOp<IE::QuantizeCastOp>>(&ctx, _log);
+    patterns.add<MoveMemPermuteThroughOp<IE::ConcatOp>>(&ctx, _log);
+    patterns.add<MoveMemPermuteThroughOp<IE::SliceOp>>(&ctx, _log);
+    patterns.add<MovePermuteQuantizeThroughOp<IE::MultiplyOp>>(&ctx, _log);
     patterns.add<MoveThroughShapeCast>(&ctx, _log);
     IE::ReshapeOp::getCanonicalizationPatterns(patterns, &ctx);
     IE::MemPermuteOp::getCanonicalizationPatterns(patterns, &ctx);

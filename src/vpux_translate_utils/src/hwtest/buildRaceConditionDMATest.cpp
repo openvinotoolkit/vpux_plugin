@@ -31,6 +31,13 @@ void buildRaceConditionDMATest(const nb::TestCaseJsonDescriptor& testDesc, mlir:
     auto iterationCount = testDesc.getIterationCount();
     const auto numClusters = testDesc.getNumClusters();
 
+    // set runtime resources
+    mlir::PassManager pmBuilderInit(module->getName(), mlir::OpPassManager::Nesting::Implicit);
+    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.numberOfDPUGroups = numClusters;
+    VPU::buildInitCompilerPipeline(pmBuilderInit, initCompilerOptions, log);
+    VPUX_THROW_UNLESS(mlir::succeeded(pmBuilderInit.run(module)), "Init compilation failed");
+
     SmallVector<int64_t> inShape(input.shape.begin(), input.shape.end());
     SmallVector<int64_t> outShape(output.shape.begin(), output.shape.end());
 
@@ -116,15 +123,6 @@ void buildRaceConditionDMATest(const nb::TestCaseJsonDescriptor& testDesc, mlir:
 
     auto outputsRef = ArrayRef(funcOutputs);
     funcBuilder.create<mlir::func::ReturnOp>(loc, mlir::ValueRange(outputsRef));
-
-    // set runtime resources
-    mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-
-    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
-    initCompilerOptions.numberOfDPUGroups = numClusters;
-    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
-
-    VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");
 
     SmallVector<mlir::Type> userOutputs(numClusters,
                                         getTensorType(ShapeRef(outShape), outputType, DimsOrder::NHWC, nullptr));

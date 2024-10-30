@@ -15,6 +15,7 @@
 #include <mlir/Support/LogicalResult.h>
 #include <mlir/Transforms/DialectConversion.h>
 
+#include <utility>
 #include <vpux/utils/core/error.hpp>
 
 using namespace vpux;
@@ -25,10 +26,10 @@ namespace {
 // Helper functions
 //
 
-auto getNumPriors(VPU::DetectionOutputOp origOp) {
+int64_t getNumPriors(VPU::DetectionOutputOp origOp) {
     const auto priorBoxSize = origOp.getAttr().getNormalized().getValue() ? 4 : 5;
     const auto numPriors = getShape(origOp.getInProposals())[Dim(2)] / priorBoxSize;
-    return numPriors;
+    return static_cast<int64_t>(numPriors);
 }
 
 mlir::Value createReshape(mlir::PatternRewriter& rewriter, mlir::Value tensor, ArrayRef<int64_t> newShape) {
@@ -37,7 +38,7 @@ mlir::Value createReshape(mlir::PatternRewriter& rewriter, mlir::Value tensor, A
     return reshape.getOutput();
 }
 
-mlir::Value reshapeLogitsTo4D(mlir::PatternRewriter& rewriter, mlir::Value input, int numPriors) {
+mlir::Value reshapeLogitsTo4D(mlir::PatternRewriter& rewriter, mlir::Value input, int64_t numPriors) {
     const auto shape = getShape(input);
     VPUX_THROW_UNLESS(shape.size() == 2, "BoxLogits shape must be 2D");
 
@@ -53,7 +54,7 @@ mlir::Value reshapeLogitsTo4D(mlir::PatternRewriter& rewriter, mlir::Value input
     return createReshape(rewriter, input, newShape);
 }
 
-mlir::Value reshapeClassPredictionsTo4D(mlir::PatternRewriter& rewriter, mlir::Value input, int numPriors) {
+mlir::Value reshapeClassPredictionsTo4D(mlir::PatternRewriter& rewriter, mlir::Value input, int64_t numPriors) {
     const auto shape = getShape(input);
     VPUX_THROW_UNLESS(shape.size() == 2, "ClassPredictions shape must be 2D");
 
@@ -67,7 +68,7 @@ mlir::Value reshapeClassPredictionsTo4D(mlir::PatternRewriter& rewriter, mlir::V
     return createReshape(rewriter, input, newShape);
 }
 
-mlir::Value reshapePriorBoxesTo4D(mlir::PatternRewriter& rewriter, mlir::Value input, int numPriors) {
+mlir::Value reshapePriorBoxesTo4D(mlir::PatternRewriter& rewriter, mlir::Value input, int64_t numPriors) {
     const auto shape = getShape(input);
     VPUX_THROW_UNLESS(shape.size() == 3, "PriorBoxes shape must be 3D");
 
@@ -138,7 +139,7 @@ mlir::Value transposeBoxes(mlir::PatternRewriter& rewriter, mlir::Value boxes4D)
     return rewriter.create<VPU::MemPermuteOp>(boxes4D.getLoc(), boxes4D, defaultOrder, permutationMap);
 }
 
-mlir::Value cutOnWidth(mlir::PatternRewriter& rewriter, mlir::Value tensor, int width) {
+mlir::Value cutOnWidth(mlir::PatternRewriter& rewriter, mlir::Value tensor, int64_t width) {
     const auto origShape = Shape(getShape(tensor));
     const auto offsets = Shape(origShape.size());
     auto slicedShape = Shape(origShape);
@@ -155,7 +156,7 @@ mlir::Value cutOnWidth(mlir::PatternRewriter& rewriter, mlir::Value tensor, int 
 class DetectionOutputDecomposition final : public mlir::OpRewritePattern<VPU::DetectionOutputOp> {
 public:
     DetectionOutputDecomposition(mlir::MLIRContext* ctx, Logger log)
-            : mlir::OpRewritePattern<VPU::DetectionOutputOp>(ctx), _log(log) {
+            : mlir::OpRewritePattern<VPU::DetectionOutputOp>(ctx), _log(std::move(log)) {
         setDebugName("DetectionOutputDecomposition");
     }
 
@@ -196,12 +197,21 @@ mlir::LogicalResult DetectionOutputDecomposition::matchAndRewrite(VPU::Detection
     const auto classPredictions = reshapeClassPredictionsTo4D(rewriter, origOp.getInClassPreds(), numPriors);
     const auto transposedClassPredictions = transposeClassPredictions(rewriter, classPredictions);
     const auto confidenceThreshold = origOp.getAttr().getConfidenceThreshold();
-    const auto topK = origOp.getAttr().getTopK();
-    auto sort = rewriter.create<VPU::DetectionOutputSortOp>(appendLoc(loc, "sort"), transposedClassPredictions,
-                                                            confidenceThreshold, topK);
 
-    auto confidenceSlice = cutOnWidth(rewriter, sort.getOutConfidence(), topK.getInt());
-    auto indicesSlice = cutOnWidth(rewriter, sort.getOutIndices(), topK.getInt());
+    // In rare cases the number of available detections per class is smaller than TopK attribute
+    // Choose the smallest value between TopK and NumPriors
+    const auto detectionsPerClass = [&]() -> int64_t {
+        const auto topK = origOp.getAttr().getTopK();
+        const auto topKValue = checked_cast<int64_t>(topK.getValue().getSExtValue());
+        return std::min(topKValue, numPriors);
+    }();
+    const auto detectionsPerClassAttr = getIntAttr(rewriter, detectionsPerClass);
+
+    auto sort = rewriter.create<VPU::DetectionOutputSortOp>(appendLoc(loc, "sort"), transposedClassPredictions,
+                                                            confidenceThreshold, detectionsPerClassAttr);
+
+    auto confidenceSlice = cutOnWidth(rewriter, sort.getOutConfidence(), detectionsPerClass);
+    auto indicesSlice = cutOnWidth(rewriter, sort.getOutIndices(), detectionsPerClass);
 
     const auto sizesShape = getShape(sort.getOutSizes());
     const auto newSizesShape = SmallVector<int64_t>{sizesShape[Dims4D::Act::N], sizesShape[Dims4D::Act::C],
@@ -210,9 +220,9 @@ mlir::LogicalResult DetectionOutputDecomposition::matchAndRewrite(VPU::Detection
 
     const auto nmsThreshold = origOp.getAttr().getNmsThreshold();
     const auto backgroundId = origOp.getAttr().getBackgroundLabelId();
-    auto nmsCaffe = rewriter.create<VPU::DetectionOutputNmsCaffeOp>(appendLoc(loc, "nmsCaffe"), confidenceSlice,
-                                                                    decodeBoxes.getOutDecodedBoxes(), indicesSlice,
-                                                                    reshapedSizes, topK, nmsThreshold, backgroundId);
+    auto nmsCaffe = rewriter.create<VPU::DetectionOutputNmsCaffeOp>(
+            appendLoc(loc, "nmsCaffe"), confidenceSlice, decodeBoxes.getOutDecodedBoxes(), indicesSlice, reshapedSizes,
+            detectionsPerClassAttr, nmsThreshold, backgroundId);
 
     const auto keepTopKValue = origOp.getAttr().getKeepTopK()[0].cast<mlir::IntegerAttr>().getInt();
     const auto keepTopK = getIntAttr(rewriter.getContext(), keepTopKValue);
@@ -228,7 +238,7 @@ class DetectionOutputDecompositionPass final :
         public VPU::DetectionOutputDecompositionBase<DetectionOutputDecompositionPass> {
 public:
     explicit DetectionOutputDecompositionPass(Logger log) {
-        Base::initLogger(log, Base::getArgumentName());
+        Base::initLogger(std::move(log), Base::getArgumentName());
     }
 
 private:

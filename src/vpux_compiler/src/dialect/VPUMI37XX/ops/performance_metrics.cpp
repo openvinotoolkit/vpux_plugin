@@ -19,7 +19,7 @@ using namespace npu37xx;
 //
 
 void vpux::VPUMI37XX::PerformanceMetricsOp::serialize(elf::writer::BinaryDataSection<uint8_t>& binDataSection) {
-    nn_public::VpuPerformanceMetrics perf{};
+    VpuPerformanceMetrics perf{};
 
     auto freqTable = VPU::arch37xx::getFrequencyTable();
     perf.freq_base = freqTable.base;
@@ -54,11 +54,11 @@ void vpux::VPUMI37XX::PerformanceMetricsOp::serialize(elf::writer::BinaryDataSec
 }
 
 size_t vpux::VPUMI37XX::PerformanceMetricsOp::getBinarySize() {
-    return sizeof(nn_public::VpuPerformanceMetrics);
+    return sizeof(VpuPerformanceMetrics);
 }
 
 size_t vpux::VPUMI37XX::PerformanceMetricsOp::getAlignmentRequirements() {
-    return alignof(nn_public::VpuPerformanceMetrics);
+    return alignof(VpuPerformanceMetrics);
 }
 
 vpux::ELFNPU37XX::SectionFlagsAttr vpux::VPUMI37XX::PerformanceMetricsOp::getAccessingProcs() {

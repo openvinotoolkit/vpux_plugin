@@ -28,15 +28,12 @@ namespace {
 
 // Returns the number of operands that are the result of other layers
 // For this ops:
-// %6 = VPUIP.SomeTaskUPA inputs(%1 : memref, %2 : memref) outputs(%3 : memref) waits(%4 : !VPUIP.Barrier) updates(%5 :
-// !VPUIP.Barrier)) numOperands() == 5 <==> %1, %2, %3, %4, %5 getLastMemRefPosition() == 3  <==> %1, %2 and %3
+// %6 = VPUIP.SWKernel inputs(%1 : memref, %2 : memref) outputs(%3 : memref) waits(%4 : !VPUIP.Barrier) updates(%5 :
+// !VPUIP.Barrier)) numOperands() == 5 <==> %1, %2, %3, %4, %5 getLastMemRefPosition() == 3 <==> %1, %2 and %3
 ptrdiff_t getLastMemRefPosition(mlir::ValueRange vals) {
     return std::find_if(vals.begin(), vals.end(),
                         [](mlir::Value val) {
-                            return !val.getType()
-                                            .isa<mlir::MemRefType, VPUIP::SparseBufferType, VPUIP::BufferType,
-                                                 VPUIP::DistributedBufferType, VPUIP::ITIBufferType,
-                                                 VPUIP::BoundedBufferType>();
+                            return !val.getType().isa<mlir::BaseMemRefType, VPUIP::ITIBufferType>();
                         }) -
            vals.begin();
 }
@@ -183,44 +180,6 @@ IndexedSymbolAttr vpux::VPUIP::getTaskOpExecutor(mlir::Operation* op) {
     auto task = mlir::dyn_cast<VPUIP::TaskOpInterface>(op);
     VPUX_THROW_WHEN(task == nullptr, "Operation '{0}' is not a VPUIP Task", op->getName());
     return VPUIP::getExecutorAttr(op, task.getExecutorKind());
-}
-
-//
-// UPATaskOpInterface
-//
-
-mlir::LogicalResult vpux::VPUIP::verifyUPATask(mlir::Operation* op) {
-    auto task = mlir::dyn_cast<TaskOpInterface>(op);
-    if (task == nullptr) {
-        return errorAt(op, "Operation '{0}' doesn't implement VPUIP Task interface", op->getName());
-    }
-
-    auto layer = mlir::dyn_cast<VPUIP::LayerOpInterface>(op);
-    if (layer == nullptr) {
-        return errorAt(op, "Operation '{0}' doesn't implement RT Layer interface", op->getName());
-    }
-
-    for (auto& operand : layer.getOpOperands()) {
-        const auto opVal = operand.get();
-        const auto type = opVal.getType().cast<vpux::NDTypeInterface>();
-        const auto mem = type.getMemoryKind();
-
-        if (type.getRank() == 0) {
-            return errorAt(op, "SCALARS are not supported");
-        }
-
-        if (mem == VPU::MemoryKind::CMX_NN) {
-            return errorAt(op, "Can't operate with '{0}' memory", mem);
-        }
-
-        const auto strideReqs = StrideReqs::simple(type.getRank());
-
-        if (!strideReqs.checkStrides(opVal)) {
-            return errorAt(op, "Value '{0}' strides do not match requirements '{1}'", opVal, strideReqs);
-        }
-    }
-
-    return mlir::success();
 }
 
 //

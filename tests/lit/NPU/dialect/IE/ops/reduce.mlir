@@ -107,7 +107,7 @@ func.func @FoldReduceSum(%arg0: tensor<1x1x4x2xf16>) -> tensor<1x1x4x2xf16> {
 
 // CHECK-LABEL: @ConvertToAttrReduceL1
 func.func @ConvertToAttrReduceL1(%arg0: tensor<1x3x4x2xf16>) -> tensor<1x1x4x2xf16> {
-    %cst = const.Declare tensor<1xsi32> = dense<1> : tensor<1xsi64>, [#const.ConvertElemType<si32>]
+    %cst = const.Declare tensor<1xsi32> = dense<1> : tensor<1xsi64>, [#const.CastElemType<si32>]
     %0 = IE.ReduceL1(%arg0, %cst) {keep_dims} : tensor<1x3x4x2xf16>, tensor<1xsi32> -> tensor<1x1x4x2xf16>
     return %0 : tensor<1x1x4x2xf16>
 
@@ -120,7 +120,7 @@ func.func @ConvertToAttrReduceL1(%arg0: tensor<1x3x4x2xf16>) -> tensor<1x1x4x2xf
 
 // CHECK-LABEL: @ConvertToAttrReduceL2
 func.func @ConvertToAttrReduceL2(%arg0: tensor<1x3x4x2xf16>) -> tensor<1x1x4x2xf16> {
-    %cst = const.Declare tensor<1xsi32> = dense<1> : tensor<1xsi64>, [#const.ConvertElemType<si32>]
+    %cst = const.Declare tensor<1xsi32> = dense<1> : tensor<1xsi64>, [#const.CastElemType<si32>]
     %0 = IE.ReduceL2(%arg0, %cst) {keep_dims} : tensor<1x3x4x2xf16>, tensor<1xsi32> -> tensor<1x1x4x2xf16>
     return %0 : tensor<1x1x4x2xf16>
 
@@ -133,7 +133,7 @@ func.func @ConvertToAttrReduceL2(%arg0: tensor<1x3x4x2xf16>) -> tensor<1x1x4x2xf
 
 // CHECK-LABEL: @ConvertToAttrReduceLogicalAnd
 func.func @ConvertToAttrReduceLogicalAnd(%arg0: tensor<1x3x4x2xf16>) -> tensor<1x1x4x2xf16> {
-    %cst = const.Declare tensor<1xsi32> = dense<1> : tensor<1xsi64>, [#const.ConvertElemType<si32>]
+    %cst = const.Declare tensor<1xsi32> = dense<1> : tensor<1xsi64>, [#const.CastElemType<si32>]
     %0 = IE.ReduceLogicalAnd(%arg0, %cst) {keep_dims} : tensor<1x3x4x2xf16>, tensor<1xsi32> -> tensor<1x1x4x2xf16>
     return %0 : tensor<1x1x4x2xf16>
 
@@ -146,7 +146,7 @@ func.func @ConvertToAttrReduceLogicalAnd(%arg0: tensor<1x3x4x2xf16>) -> tensor<1
 
 // CHECK-LABEL: @ConvertToAttrReduceLogicalOr
 func.func @ConvertToAttrReduceLogicalOr(%arg0: tensor<1x3x4x2xf16>) -> tensor<1x1x4x2xf16> {
-    %cst = const.Declare tensor<1xsi32> = dense<1> : tensor<1xsi64>, [#const.ConvertElemType<si32>]
+    %cst = const.Declare tensor<1xsi32> = dense<1> : tensor<1xsi64>, [#const.CastElemType<si32>]
     %0 = IE.ReduceLogicalOr(%arg0, %cst) {keep_dims} : tensor<1x3x4x2xf16>, tensor<1xsi32> -> tensor<1x1x4x2xf16>
     return %0 : tensor<1x1x4x2xf16>
 
@@ -159,7 +159,7 @@ func.func @ConvertToAttrReduceLogicalOr(%arg0: tensor<1x3x4x2xf16>) -> tensor<1x
 
 // CHECK-LABEL: @ConvertToAttrReduceMax
 func.func @ConvertToAttrReduceMax(%arg0: tensor<1x3x4x2xf16>) -> tensor<1x1x4x2xf16> {
-    %cst = const.Declare tensor<1xsi32> = dense<1> : tensor<1xsi64>, [#const.ConvertElemType<si32>]
+    %cst = const.Declare tensor<1xsi32> = dense<1> : tensor<1xsi64>, [#const.CastElemType<si32>]
     %0 = IE.ReduceMax(%arg0, %cst) {keep_dims} : tensor<1x3x4x2xf16>, tensor<1xsi32> -> tensor<1x1x4x2xf16>
     return %0 : tensor<1x1x4x2xf16>
 
@@ -172,7 +172,7 @@ func.func @ConvertToAttrReduceMax(%arg0: tensor<1x3x4x2xf16>) -> tensor<1x1x4x2x
 
 // CHECK-LABEL: @ConvertToAttrReduceMean
 func.func @ConvertToAttrReduceMean(%arg0: tensor<1x3x4x2xf16>) -> tensor<1x1x4x2xf16> {
-    %cst = const.Declare tensor<1xsi32> = dense<1> : tensor<1xsi64>, [#const.ConvertElemType<si32>]
+    %cst = const.Declare tensor<1xsi32> = dense<1> : tensor<1xsi64>, [#const.CastElemType<si32>]
     %0 = IE.ReduceMean(%arg0, %cst) {keep_dims} : tensor<1x3x4x2xf16>, tensor<1xsi32> -> tensor<1x1x4x2xf16>
     return %0 : tensor<1x1x4x2xf16>
 
@@ -185,7 +185,7 @@ func.func @ConvertToAttrReduceMean(%arg0: tensor<1x3x4x2xf16>) -> tensor<1x1x4x2
 
 // CHECK-LABEL: @ConvertToAttrReduceMin
 func.func @ConvertToAttrReduceMin(%arg0: tensor<1x3x4x2xf16>) -> tensor<1x1x4x2xf16> {
-    %cst = const.Declare tensor<1xsi32> = dense<1> : tensor<1xsi64>, [#const.ConvertElemType<si32>]
+    %cst = const.Declare tensor<1xsi32> = dense<1> : tensor<1xsi64>, [#const.CastElemType<si32>]
     %0 = IE.ReduceMin(%arg0, %cst) {keep_dims} : tensor<1x3x4x2xf16>, tensor<1xsi32> -> tensor<1x1x4x2xf16>
     return %0 : tensor<1x1x4x2xf16>
 
@@ -198,7 +198,7 @@ func.func @ConvertToAttrReduceMin(%arg0: tensor<1x3x4x2xf16>) -> tensor<1x1x4x2x
 
 // CHECK-LABEL: @ConvertToAttrReduceProd
 func.func @ConvertToAttrReduceProd(%arg0: tensor<1x3x4x2xf16>) -> tensor<1x1x4x2xf16> {
-    %cst = const.Declare tensor<1xsi32> = dense<1> : tensor<1xsi64>, [#const.ConvertElemType<si32>]
+    %cst = const.Declare tensor<1xsi32> = dense<1> : tensor<1xsi64>, [#const.CastElemType<si32>]
     %0 = IE.ReduceProd(%arg0, %cst) {keep_dims} : tensor<1x3x4x2xf16>, tensor<1xsi32> -> tensor<1x1x4x2xf16>
     return %0 : tensor<1x1x4x2xf16>
 
@@ -211,7 +211,7 @@ func.func @ConvertToAttrReduceProd(%arg0: tensor<1x3x4x2xf16>) -> tensor<1x1x4x2
 
 // CHECK-LABEL: @ConvertToAttrReduceSum
 func.func @ConvertToAttrReduceSum(%arg0: tensor<1x3x4x2xf16>) -> tensor<1x1x4x2xf16> {
-    %cst = const.Declare tensor<1xsi32> = dense<1> : tensor<1xsi64>, [#const.ConvertElemType<si32>]
+    %cst = const.Declare tensor<1xsi32> = dense<1> : tensor<1xsi64>, [#const.CastElemType<si32>]
     %0 = IE.ReduceSum(%arg0, %cst) {keep_dims} : tensor<1x3x4x2xf16>, tensor<1xsi32> -> tensor<1x1x4x2xf16>
     return %0 : tensor<1x1x4x2xf16>
 

@@ -12,6 +12,20 @@
 using namespace vpux;
 using namespace VPU;
 
+namespace {
+
+// Stride DMA cost is inaccurate by cost model, so use this variable to help correct the cost value
+// TODO: Ticket E#135490, remove this variable when stride DMA cost is accurate by VPUNN cost model
+constexpr auto strideDMACorrectionThresholdInBits = 512;
+
+bool isTiledOnLowestDim(ShapeRef tileAxis, DimsOrder dimOrder) {
+    const auto lowestDim = dimOrder.dimAt(dimOrder.numDims() - 1);
+    const auto axis = tileAxis[lowestDim];
+    return axis > 1;
+}
+
+}  // namespace
+
 MultiClusterStrategySetter::MultiClusterStrategySetter(mlir::Operation* operation, VPU::MultiClusterStrategy strategy)
         : _operation(operation) {
     setTemporaryStrategy(strategy);
@@ -62,6 +76,9 @@ StrategyCost LayerVPUNNCost::getSpillingWriteCost(mlir::Operation* operation,
 
         const auto parentTiling =
                 parameters._tiling.empty() ? OutputTiling({TileInfo(origParentType.getShape())}) : parameters._tiling;
+
+        const auto dimOrder = origParentType.getDimsOrder();
+        const auto needCorrectDMACost = isTiledOnLowestDim(parentTiling[0].axis, dimOrder);
         writeCost = std::accumulate(
                 std::begin(parentTiling), std::end(parentTiling), writeCost, [&](StrategyCost cost, auto& tileInfo) {
                     auto tiledType = origParentType.extractDenseTile(tileInfo.offsets, tileInfo.shape);
@@ -72,7 +89,12 @@ StrategyCost LayerVPUNNCost::getSpillingWriteCost(mlir::Operation* operation,
                         tiledType = VPU::getDistributedOutputTypeFromOp(parentClusterOp, tiledType, numClusters,
                                                                         parameters._strategy);
                     }
-                    return cost + getDMACost(tiledType, _vpuDevice, _vpunnCostModel, _numDMAPorts);
+                    auto currentTiledCost = getDMACost(tiledType, _vpuDevice, _vpunnCostModel, _numDMAPorts);
+                    if (needCorrectDMACost) {
+                        currentTiledCost = correctStrideDMACost(tiledType, currentTiledCost);
+                    }
+                    cost += currentTiledCost;
+                    return cost;
                 });
     }
 
@@ -112,6 +134,9 @@ StrategyCost LayerVPUNNCost::getSpillingReadCost(mlir::Operation* operation, con
                                          ? OutputTiling({TileInfo(getShape(operation->getResult(0)))})
                                          : parameters._tiling;
 
+        const auto dimOrder = operation->getOperand(operandInd).getType().cast<vpux::NDTypeInterface>().getDimsOrder();
+        const auto needCorrectDMACost = isTiledOnLowestDim(childTiling[0].axis, dimOrder);
+
         MultiClusterStrategySetter mcSetter(operation, parameters._strategy);
 
         readCost = std::accumulate(
@@ -120,9 +145,13 @@ StrategyCost LayerVPUNNCost::getSpillingReadCost(mlir::Operation* operation, con
                     VPUX_THROW_WHEN(childOperandsTiling.size() <= operandInd,
                                     "Incorrect number of types {0} for operands of operation {1}",
                                     childOperandsTiling.size(), operation->getLoc());
-
-                    return cost +
-                           getDMACost(childOperandsTiling[operandInd], _vpuDevice, _vpunnCostModel, _numDMAPorts);
+                    auto currentTiledCost =
+                            getDMACost(childOperandsTiling[operandInd], _vpuDevice, _vpunnCostModel, _numDMAPorts);
+                    if (needCorrectDMACost) {
+                        currentTiledCost = correctStrideDMACost(childOperandsTiling[operandInd], currentTiledCost);
+                    }
+                    cost += currentTiledCost;
+                    return cost;
                 });
     }
 
@@ -153,7 +182,7 @@ StrategyCost LayerVPUNNCost::getSimpleLayerCost(vpux::NDTypeInterface outputType
 
 StrategyCost LayerVPUNNCost::getNCELayerCost(VPU::NCEOpInterface nceOp, const VPUNNCostParameters& parameters) const {
     // Types for each tile
-    SmallVector<SmallVector<NDTypeInterface>> tilesTypes;
+    std::vector<std::vector<std::pair<NDTypeInterface, TensorDistributionMap>>> tilesTypes;
 
     auto isPrefetchTilingEnabled = (parameters._mode != TilingMode::ISOLATED);
 
@@ -166,9 +195,15 @@ StrategyCost LayerVPUNNCost::getNCELayerCost(VPU::NCEOpInterface nceOp, const VP
     //      when prefetching is false, the returned cost is the sum of DPU + weights DMA
     //      when prefetching is true, the returned cost is just DPU because it considers the weights are prefetched
     const auto vpunnStrategy = VPU::getVPULayerStrategy(parameters._strategy, _numDPUs, _numTiles, _numShaveActs, true);
-    auto vpunnLayerDPUCosts = getDPUCostForNCEOp(nceOp, parameters._strategy, parameters._tiling, tilesTypes,
-                                                 costParams, vpunnStrategy, _vpunnCostModel, _log);
+    auto vpunnLayerDPUCosts = getDPUCostForNCEOp(nceOp, parameters._strategy, parameters._tiling, costParams,
+                                                 vpunnStrategy, _vpunnCostModel, _log);
     _log.trace("VPUNN DPU layer costs {0}", vpunnLayerDPUCosts);
+    auto tilingBuilderOp = mlir::dyn_cast<VPU::TilingBuilderOpInterface>(nceOp.getOperation());
+    auto siblingsAnalysis = SiblingOpsAnalysis(nceOp.getOperation());
+    for (auto& outTile : parameters._tiling) {
+        auto inTiles = tilingBuilderOp.backInferTileInfo(outTile, _log);
+        tilesTypes.push_back(getTileDistributions(nceOp.getOperation(), siblingsAnalysis, outTile, inTiles));
+    }
 
     if (vpunnLayerDPUCosts.empty()) {
         _log.trace("DPU cost is empty, return COST_MAX");
@@ -179,12 +214,14 @@ StrategyCost LayerVPUNNCost::getNCELayerCost(VPU::NCEOpInterface nceOp, const VP
     auto vpunnCost = std::accumulate(vpunnLayerDPUCosts.begin(), vpunnLayerDPUCosts.end(), 0);
 
     // Add extra weights DMA costs
-    const auto getSpillingReadCost = [&](NDTypeInterface srcType) -> uint32_t {
-        return checked_cast<uint32_t>(getDMACost(srcType, _vpuDevice, _vpunnCostModel, _numDMAPorts));
+    const auto getSpillingReadCost = [&](NDTypeInterface srcType,
+                                         const TensorDistributionMap& distributions) -> uint32_t {
+        auto distributedType = getDistributedTypeFromDistributionMap(srcType, distributions);
+        return checked_cast<uint32_t>(getDMACost(distributedType, _vpuDevice, _vpunnCostModel, _numDMAPorts));
     };
-    auto vpunnLayerWeightsCosts = getPerTileWeightsDMACosts(nceOp, tilesTypes, getSpillingReadCost);
+    auto vpunnLayerWeightsCosts = getPerTileWeightsDMACosts(nceOp, siblingsAnalysis, tilesTypes, getSpillingReadCost);
     _log.trace("VPUNN weights DMA costs {0}", vpunnLayerWeightsCosts);
-    vpunnCost += getWeightsDMACostForNCEOp(nceOp, parameters._tiling, vpunnLayerDPUCosts, vpunnLayerWeightsCosts, 0,
+    vpunnCost += getWeightsDMACostForNCEOp(nceOp, parameters._tiling, vpunnLayerDPUCosts, vpunnLayerWeightsCosts,
                                            isPrefetchTilingEnabled, _log);
     _log.trace("VPUNN total layer cost {0}", vpunnCost);
     return vpunnCost;
@@ -229,4 +266,27 @@ StrategyCost LayerVPUNNCost::getSWLayerCost(VPU::SWOpInterface swOp, const VPUNN
     }
 
     return fullCost;
+}
+
+// Correct the DMA cost for a given type by considering the stride of the tensor.
+// It calculates the number of continuous bytes on the lowest dimension and compares it with a predefined
+// threshold. If the continuous bytes are less than the threshold, the cost is adjusted accordingly.
+StrategyCost LayerVPUNNCost::correctStrideDMACost(vpux::NDTypeInterface type, StrategyCost cost) const {
+    const auto dimOrder = type.getDimsOrder();
+    const auto lowestDim = dimOrder.dimAt(dimOrder.numDims() - 1);
+    const Bit elemSize = type.getElemTypeSize();
+    if (auto sparseTensorType = mlir::dyn_cast<VPU::SparseTensorType>(type)) {
+        type = sparseTensorType.getData().cast<NDTypeInterface>();
+    }
+    Bit continuousBytesOnLowestDim;
+    if (auto distributedType = mlir::dyn_cast<VPU::DistributedTensorType>(type)) {
+        continuousBytesOnLowestDim = distributedType.getLargestCompactShape()[lowestDim] * elemSize;
+    } else {
+        continuousBytesOnLowestDim = type.getShape()[lowestDim] * elemSize;
+    }
+    if (continuousBytesOnLowestDim.count() < strideDMACorrectionThresholdInBits) {
+        auto factor = checked_cast<double>(strideDMACorrectionThresholdInBits) / continuousBytesOnLowestDim.count();
+        return checked_cast<uint32_t>(std::floor(factor * cost));
+    }
+    return cost;
 }

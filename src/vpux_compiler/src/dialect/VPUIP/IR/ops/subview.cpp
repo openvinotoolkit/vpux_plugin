@@ -97,8 +97,8 @@ mlir::LogicalResult VPUIP::SubViewOp::inferReturnTypes(mlir::MLIRContext* ctx, s
 
     const auto hasExplcitOutputShapes = subViewOp.getExplicitOutputShapes().has_value();
 
-    auto inferExplicitDistributedAttr = [&](VPU::DistributedTensorAttr origDistribution,
-                                            ArrayRef<int64_t> inShape) -> VPU::DistributedTensorAttr {
+    auto inferExplicitDistributedAttr = [&](VPU::DistributionInfoAttr origDistribution,
+                                            ArrayRef<int64_t> inShape) -> VPU::DistributionInfoAttr {
         auto mode = origDistribution.getMode().getValue();
         if (hasExplcitOutputShapes) {
             // Track #E125638
@@ -131,7 +131,7 @@ mlir::LogicalResult VPUIP::SubViewOp::inferReturnTypes(mlir::MLIRContext* ctx, s
                 SmallVector<SmallVector<int64_t>>(memoryShapes.size(), SmallVector<int64_t>(inShape.size(), 0));
         const auto perClusterOffsetsAttr = vpux::getIntArrayOfArray(ctx, zeroOffsets);
 
-        return VPU::DistributedTensorAttr::get(
+        return VPU::DistributionInfoAttr::get(
                 ctx, origDistribution.getMode(), origDistribution.getNumTiles(), origDistribution.getKernel(),
                 origDistribution.getPads(), origDistribution.getStrides(), origDistribution.getNumClusters(),
                 origDistribution.getAlignment(), origDistribution.getUniformDistributedSegments(), perClusterShapesAttr,
@@ -140,7 +140,7 @@ mlir::LogicalResult VPUIP::SubViewOp::inferReturnTypes(mlir::MLIRContext* ctx, s
     };
 
     const auto distributedIn = origType.dyn_cast<VPU::DistributedTypeInterface>();
-    VPU::DistributedTensorAttr possibleDistribution =
+    VPU::DistributionInfoAttr possibleDistribution =
             distributedIn != nullptr && distributedIn.containsDistributedTypes()
                     ? distributedIn.getDistributedTypes().front().cast<VPUIP::DistributedBufferType>().getDistribution()
                     : nullptr;
@@ -255,11 +255,11 @@ mlir::OpFoldResult VPUIP::SubViewOp::fold(FoldAdaptor adaptor) {
         return getSource();
     }
 
-    if (const auto origContent = operands[0].dyn_cast_or_null<Const::ContentAttr>()) {
+    if (const auto origContent = operands[0].dyn_cast_or_null<Const::EphemeralContentAttr>()) {
         auto offset = Shape(parseIntArrayAttr<int64_t>(getStaticOffsets()));
         auto shape = Shape(parseIntArrayAttr<int64_t>(getStaticSizes()));
         adaptSparsityMapConstant(getSource(), offset, shape);
-        return origContent.subview(offset, shape);
+        return static_cast<Const::ContentAttr>(origContent).transform().subview(offset, shape).get();
     }
 
     return nullptr;

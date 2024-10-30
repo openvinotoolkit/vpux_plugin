@@ -52,7 +52,7 @@ bool Const::ConstantFoldingCache::isMemoryLimitReached() const {
 }
 
 void Const::ConstantFoldingCache::cleanUpCache() {
-    std::vector<std::pair<Const::ContentAttr, int>> contents;
+    std::vector<std::pair<Const::details::ContentAttrHashCode, int>> contents;
     {
         std::lock_guard<std::mutex> lock(_mutex);
         contents.reserve(_cache.size());
@@ -72,14 +72,14 @@ void Const::ConstantFoldingCache::cleanUpCache() {
     }
 }
 
-void Const::ConstantFoldingCache::addContent(Const::ContentAttr attr, const Const::Content& content) {
+void Const::ConstantFoldingCache::addContent(Const::details::ContentAttrHashCode attr, Const::Content&& content) {
     Const::details::ContentMap::accessor accessor;
     _cache.insert(accessor, attr);
     VPUX_THROW_WHEN(accessor.empty(), "Failed to add folding request to cache");
-    accessor->second.content = content;
+    accessor->second.content = std::move(content);
     accessor.release();
 
-    auto size = attr.getType().cast<vpux::NDTypeInterface>().getTotalAllocSize();
+    const auto size = attr.totalAllocSize;
     _memoryUsedCache += size.count();
 
     if (isMemoryLimitReached()) {
@@ -94,13 +94,13 @@ void Const::ConstantFoldingCache::addContent(Const::ContentAttr attr, const Cons
     }
 }
 
-void Const::ConstantFoldingCache::removeContent(Const::ContentAttr attr) {
+void Const::ConstantFoldingCache::removeContent(Const::details::ContentAttrHashCode attr) {
     Const::details::ContentMap::accessor accessor;
     if (_cache.find(accessor, attr) && !accessor.empty()) {
         _cache.erase(accessor);
         accessor.release();
 
-        auto size = attr.getType().cast<vpux::NDTypeInterface>().getTotalAllocSize();
+        const auto size = attr.totalAllocSize;
         _memoryUsedCache -= size.count();
 
         if (_collectStatistics) {
@@ -108,6 +108,15 @@ void Const::ConstantFoldingCache::removeContent(Const::ContentAttr attr) {
         }
     }
 }
+
+namespace {
+// Note: workaround an issue with background folding keeping the real Content
+// object internally and still be able to provide a "copy" to the user outside.
+Const::Content referenceAnotherContent(const Const::Content& origin) {
+    return Const::Content::fromRawBuffer(origin.getType(), origin.getRawStorageBuf(), origin.getStorageElemType(),
+                                         origin.isSplat());
+}
+}  // namespace
 
 std::optional<Const::Content> Const::ConstantFoldingCache::getContent(Const::ContentAttr attr) {
     // Return the value from the cache if it contains it
@@ -117,7 +126,7 @@ std::optional<Const::Content> Const::ConstantFoldingCache::getContent(Const::Con
             _statistics.numCacheHits++;
         }
         accessor->second.refCount--;
-        return accessor->second.content;
+        return referenceAnotherContent(accessor->second.content);
     }
 
     if (_collectStatistics) {

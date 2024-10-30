@@ -11,13 +11,13 @@
 // CHECK-LABEL: @PerAxis
 func.func @PerAxis() -> tensor<4x1x1x1xf32> {
     %0 = const.Declare tensor<4x1x1x1x!qElemType> =
-        dense<129> : tensor<4x1x1x1xui8>, [#const.QuantCast<!qElemType>]
+        dense<129> : tensor<4x1x1x1xui8>, [#const.CastElemType<!qElemType>]
     %1 = IE.Dequantize(%0) {dstElemType = f32} : tensor<4x1x1x1x!qElemType> -> tensor<4x1x1x1xf32>
     return %1 : tensor<4x1x1x1xf32>
 
     // CHECK-DAG:       [[CST:%.*]] = const.Declare
     // CHECK-SAME:      dense<129> : tensor<4x1x1x1xui8
-    // CHECK-SAME:      #const.QuantCast<!qElemType>
+    // CHECK-SAME:      #const.CastElemType<!qElemType>
     // CHECK-SAME:      #const.Dequantize
 
     // CHECK:       return [[CST]]

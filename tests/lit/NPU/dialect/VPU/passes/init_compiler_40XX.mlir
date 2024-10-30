@@ -13,6 +13,8 @@ module @test {
 // CHECK-DAG:    {{    }}IE.Option @VPU.BarrierMaxVariantSum : 64
 // CHECK-DAG:    {{    }}IE.Option @VPU.BarrierMaxVariantCount : 128
 // CHECK-DAG:    {{    }}IE.Option @VPU.AutoPaddingODU : false
+// CHECK-DAG:    {{    }}IE.Option @VPU.AutoPaddingIDU : false
+// CHECK-DAG:    {{    }}IE.Option @VPU.MaxKernelSize : 11
 // CHECK-DAG:    {{  }}}
 
 // CHECK-DAG:    {{  }}IE.ExecutorResource 2 of @DMA_NN

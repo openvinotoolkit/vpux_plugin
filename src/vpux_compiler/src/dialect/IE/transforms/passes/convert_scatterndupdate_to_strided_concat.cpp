@@ -249,7 +249,9 @@ mlir::LogicalResult ConvertScatterNDUpdateToStridedConcatPass::ConvertToStridedC
         }
 
         const auto upsamplingFactorAttr = getIntArrayAttr(ctx, upsamplingFactor);
-        return rewriter.create<IE::UpsamplingOp>(origOp->getLoc(), origOp.getUpdates(), upsamplingFactorAttr, padAttr)
+        return rewriter
+                .create<IE::UpsamplingOp>(takeOpLoc(origOp, "upsample"), origOp.getUpdates(), upsamplingFactorAttr,
+                                          padAttr)
                 .getOutput();
     };
 
@@ -265,10 +267,11 @@ mlir::LogicalResult ConvertScatterNDUpdateToStridedConcatPass::ConvertToStridedC
         const auto endsAttr = getIntArrayAttr(ctx, inputShape);
         const auto zeroMask = getIntArrayAttr(ctx, ArrayRef(zeros));
 
-        return rewriter.create<IE::StridedSliceOp>(
-                origOp->getLoc(), input, nullptr, nullptr, nullptr, beginsAttr, endsAttr, stridesAttr,
-                /*beginMask =*/zeroMask, /*endMask =*/zeroMask, /*newAxisMask =*/zeroMask,
-                /*shrinkAxisMask =*/zeroMask, /*ellipsisMask = */ zeroMask);
+        return rewriter.create<IE::StridedSliceOp>(takeOpLoc(origOp, StringLiteral("slice_{0}_{1}"), offset, dim),
+                                                   input, nullptr, nullptr, nullptr, beginsAttr, endsAttr, stridesAttr,
+                                                   /*beginMask =*/zeroMask, /*endMask =*/zeroMask,
+                                                   /*newAxisMask =*/zeroMask,
+                                                   /*shrinkAxisMask =*/zeroMask, /*ellipsisMask = */ zeroMask);
     };
 
     mlir::Value inputValue = origOp.getUpdates();
@@ -305,7 +308,8 @@ mlir::LogicalResult ConvertScatterNDUpdateToStridedConcatPass::ConvertToStridedC
                 subSlices.push_back(stridedSliceOp);
             }
         }
-        inputValue = rewriter.create<IE::ConcatOp>(origOp->getLoc(), subSlices, axisIndex, 1, scaleFactors[axisIndex])
+        inputValue = rewriter.create<IE::ConcatOp>(takeOpLoc(origOp, StringLiteral("concat_over_{0}"), axisIndex),
+                                                   subSlices, axisIndex, 1, scaleFactors[axisIndex])
                              .getOutput();
     }
 
@@ -445,9 +449,9 @@ mlir::LogicalResult ConvertScatterNDUpdateToStridedConcatPass::ConvertToSliceCon
     leftSliceShape[updateDim] = beginOffset;
 
     if (beginOffset != 0) {
-        concatInputs.push_back(
-                rewriter.create<IE::SliceOp>(origOp->getLoc(), origOp.getInput(), leftSliceOffset, leftSliceShape)
-                        .getResult());
+        concatInputs.push_back(rewriter.create<IE::SliceOp>(takeOpLoc(origOp, "slice_left"), origOp.getInput(),
+                                                            leftSliceOffset, leftSliceShape)
+                                       .getResult());
     }
 
     // Update data value
@@ -461,9 +465,9 @@ mlir::LogicalResult ConvertScatterNDUpdateToStridedConcatPass::ConvertToSliceCon
     rightSliceShape[updateDim] = rightSliceShape[updateDim] - endOffset;
 
     if (rightSliceShape[updateDim] != 0) {
-        concatInputs.push_back(
-                rewriter.create<IE::SliceOp>(origOp->getLoc(), origOp.getInput(), rightSliceOffset, rightSliceShape)
-                        .getResult());
+        concatInputs.push_back(rewriter.create<IE::SliceOp>(takeOpLoc(origOp, "slice_right"), origOp.getInput(),
+                                                            rightSliceOffset, rightSliceShape)
+                                       .getResult());
     }
 
     _log.trace("Replace '{0}' at '{1}' with Slice and Concat Op", origOp->getName(), origOp->getLoc());
@@ -568,7 +572,7 @@ mlir::LogicalResult ConvertScatterNDUpdateToStridedConcatPass::ConvertNDUpdateDa
         auto beginSliceShape = to_small_vector(updatesShape.raw());
         beginSliceShape[dimIdx] = minRange[Dim(dimIdx)];
         if (beginSliceShape[dimIdx] > 0) {
-            auto beginSliceLoc = appendLoc(origOp->getLoc(), "_Slice_Begin_at_Dim{0}", dimIdx);
+            auto beginSliceLoc = takeOpLoc(origOp, StringLiteral("slice_begin_at_Dim{0}"), dimIdx);
             concatInputs.push_back(
                     rewriter.create<IE::SliceOp>(beginSliceLoc, origOp.getInput(), beginSliceOffset, beginSliceShape)
                             .getResult());
@@ -581,13 +585,13 @@ mlir::LogicalResult ConvertScatterNDUpdateToStridedConcatPass::ConvertNDUpdateDa
         auto endSliceShape = to_small_vector(updatesShape.raw());
         endSliceShape[dimIdx] = inputShape[Dim(dimIdx)] - endSliceOffset[dimIdx];
         if (endSliceShape[dimIdx] > 0) {
-            auto endSliceLoc = appendLoc(origOp->getLoc(), "_Slice_End_at_Dim{0}", dimIdx);
+            auto endSliceLoc = takeOpLoc(origOp, StringLiteral("slice_end_at_Dim{0}"), dimIdx);
             concatInputs.push_back(
                     rewriter.create<IE::SliceOp>(endSliceLoc, origOp.getInput(), endSliceOffset, endSliceShape)
                             .getResult());
         }
         // Create Concat Op
-        auto concatLoc = appendLoc(origOp->getLoc(), "_Concat_at_Dim{0}", dimIdx);
+        auto concatLoc = takeOpLoc(origOp, StringLiteral("concat_at_Dim{0}"), dimIdx);
         updateIn = rewriter.create<IE::ConcatOp>(concatLoc, concatInputs, dimIdx).getResult();
     }
 

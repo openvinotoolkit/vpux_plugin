@@ -10,6 +10,7 @@
 #include "vpux/compiler/NPU40XX/dialect/NPUReg40XX/ops.hpp"
 #include "vpux/compiler/conversion/passes/VPU2VPUIP/bufferizable_ops_interface.hpp"
 #include "vpux/compiler/dialect/ELFNPU37XX/ops.hpp"
+#include "vpux/compiler/dialect/IE/IR/dialect.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IERT/ops.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
@@ -59,9 +60,7 @@ struct CustomBuiltinBufferizerInterface : mlir::DialectBufferizerInterface {
     }
 };
 
-}  // namespace
-
-void vpux::registerDialects(mlir::DialectRegistry& registry) {
+void registerDialects(mlir::DialectRegistry& registry) {
     registry.insert<vpux::Const::ConstDialect,                //
                     vpux::IE::IEDialect,                      //
                     vpux::VPU::VPUDialect,                    //
@@ -91,7 +90,12 @@ void vpux::registerDialects(mlir::DialectRegistry& registry) {
                     mlir::LLVM::LLVMDialect>();
 }
 
-void vpux::registerCommonInterfaces(mlir::DialectRegistry& registry, bool enableDummyOp) {
+}  // namespace
+
+mlir::DialectRegistry vpux::createDialectRegistry(DummyOpMode dummyOpMode) {
+    mlir::DialectRegistry registry;
+    registerDialects(registry);
+
     registry.addExtension(+[](mlir::MLIRContext* ctx, mlir::quant::QuantizationDialect*) {
         mlir::quant::AnyQuantizedType::attachInterface<MemRefElementTypeModel>(*ctx);
         mlir::quant::UniformQuantizedType::attachInterface<MemRefElementTypeModel>(*ctx);
@@ -103,11 +107,13 @@ void vpux::registerCommonInterfaces(mlir::DialectRegistry& registry, bool enable
     VPUIP::VPUIPDialect::setupExtraInterfaces(registry);
     VPU::registerAlignedChannelsOpInterfacesVPU(registry);
 
-    if (enableDummyOp) {
+    if (dummyOpMode == DummyOpMode::ENABLED) {
         VPUIP::VPUIPDialect::setupExtraInterfacesAdditional(registry);
     }
 
     registry.addExtension(+[](mlir::MLIRContext*, mlir::BuiltinDialect* dialect) {
         dialect->addInterfaces<CustomBuiltinBufferizerInterface>();
     });
+
+    return registry;
 }

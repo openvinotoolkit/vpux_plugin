@@ -14,7 +14,7 @@ func.func @GatherConvertIndices(%arg0: tensor<100xf16>) -> tensor<10xf16> {
 
   return %prob : tensor<10xf16>
 
-  //CHECK: [[VAL0:%.*]] = const.Declare tensor<10xsi32> = dense<1> : tensor<10xsi64>, [#const.ConvertElemType<si32>]
+  //CHECK: [[VAL0:%.*]] = const.Declare tensor<10xsi32> = dense<1> : tensor<10xsi64>, [#const.CastElemType<si32>]
   //CHECK: [[VAL1:%.*]] = IE.Gather(%arg0, [[VAL0]]) {axis_value = 0 : i64, batch_dims = 0 : i64} : tensor<100xf16>, tensor<10xsi32> -> tensor<10xf16>
   //CHECK: return [[VAL1]]
 }
@@ -25,7 +25,7 @@ func.func @EqualConvert(%arg0: tensor<1x10x1xsi64>) -> tensor<1x10x1xi8> {
   %1 = IE.Equal(%arg0, %0) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x1xsi64>, tensor<1x1x1xsi64> -> tensor<1x10x1xi8>
   return %1 : tensor<1x10x1xi8>
 
-  //CHECK: [[CST:%.*]] = const.Declare tensor<1x1x1xsi32> = dense<0> : tensor<1x1x1xsi64>, [#const.ConvertElemType<si32>]
+  //CHECK: [[CST:%.*]] = const.Declare tensor<1x1x1xsi32> = dense<0> : tensor<1x1x1xsi64>, [#const.CastElemType<si32>]
   //CHECK: [[VAL0:%.*]] = IE.Equal({{[^:]+}}, [[CST]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x10x1xsi32>, tensor<1x1x1xsi32> -> tensor<1x10x1xi8>
   //CHECK: return [[VAL0]]
 }

@@ -28,7 +28,7 @@ if(WIN32)
                     ../core/win32/memory_usage.cpp)
 else()
   list (APPEND SOURCES
-                    ../core/unix/env.cpp 
+                    ../core/unix/env.cpp
                     ../core/unix/memory_usage.cpp)
 endif()
 

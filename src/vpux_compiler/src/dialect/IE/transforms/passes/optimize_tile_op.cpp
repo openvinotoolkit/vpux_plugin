@@ -61,6 +61,13 @@ mlir::LogicalResult FoldTileOpWithSingleValueInput::matchAndRewrite(IE::TileOp o
         return mlir::failure();
     }
 
+    // Can't fold TileOp if the layer has post operation
+    if (auto layerWithPostOp = mlir::dyn_cast<IE::LayerWithPostOpInterface>(outputUserOp)) {
+        if (layerWithPostOp.getPostOp().has_value()) {
+            return mlir::failure();
+        }
+    }
+
     _log.trace("Folding TileOp at '{0}'", origOp.getLoc());
 
     auto newShape = SmallVector<int64_t>(outputValue.getType().cast<NDTypeInterface>().getRank(), 1);

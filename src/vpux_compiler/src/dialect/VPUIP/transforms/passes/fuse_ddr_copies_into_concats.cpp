@@ -3,19 +3,22 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPUIP/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
 
 #include "vpux/compiler/utils/rewriter.hpp"
 
 #include <mlir/IR/PatternMatch.h>
+#include <mlir/IR/ValueRange.h>
 #include <mlir/Transforms/GreedyPatternRewriteDriver.h>
 
 using namespace vpux;
 
 namespace {
 
-bool isInputEligibleForConversion(const mlir::Value input, Logger log) {
+bool isInputEligibleForConversion(const mlir::Value input, const Logger& log) {
+    log.trace("Processing input: {0}", input.getLoc());
     if (input.isa<mlir::BlockArgument>()) {
         log.trace("Input is a block argument.");
         return false;
@@ -33,44 +36,28 @@ bool isInputEligibleForConversion(const mlir::Value input, Logger log) {
         log.trace("Input copy producer is a block argument.");
         return false;
     }
-    auto clusterOp = copyOp.getInput().getDefiningOp<VPUIP::NCEClusterTilingOp>();
-    if (clusterOp == nullptr) {
-        log.trace("Input copy producer is not a VPUIP.NCEClusterTilingOp.");
+    auto inputCopyProducer = copyOp.getInput().getDefiningOp<VPUIP::CopyOp>();
+    if (inputCopyProducer == nullptr) {
+        log.trace("Input copy producer is not a VPUIP.Copy.");
         return false;
     }
-    auto innerCopy = clusterOp.getInnerTaskOpOfType<VPUIP::CopyOp>();
-    if (innerCopy == nullptr) {
-        log.trace("VPUIP.NCEClusterTilingOp does not wrap copy.");
+    if (vpux::VPUIP::hasDistributedOperand(inputCopyProducer)) {
+        log.trace("Input copy producer is not a distributed VPUIP.Copy.");
         return false;
     }
-    auto clusterOpBuffs = clusterOp.getOutputBuffs();
-    if (clusterOpBuffs.size() != 1) {
-        log.trace("VPUIP.NCEClusterTilingOp is expected to have one and only one output buffer.");
+    auto output = inputCopyProducer.getOutputBuff();
+    if (output.isa<mlir::BlockArgument>()) {
+        log.trace("CopyOp buffer is a block argument.");
         return false;
     }
-    if (clusterOpBuffs[0].isa<mlir::BlockArgument>()) {
-        log.trace("VPUIP.NCEClusterTilingOp buffer is a block argument.");
-        return false;
-    }
-    auto clusterOpAlloc = clusterOpBuffs[0].getDefiningOp<mlir::memref::AllocOp>();
-    if (clusterOpAlloc == nullptr) {
-        log.trace("VPUIP.NCEClusterTilingOp buffer is not allocated via memref.alloc");
+    auto distributedOpAlloc = output.getDefiningOp<mlir::memref::AllocOp>();
+    if (distributedOpAlloc == nullptr) {
+        log.trace("CopyOp output buffer is not allocated via memref.alloc");
         return false;
     }
 
     log.trace("Input is eligible for conversion");
     return true;
-}
-
-VPUIP::NCEClusterTilingOp createTillingCopy(mlir::PatternRewriter& rewriter, mlir::Location loc, mlir::Value input,
-                                            mlir::Value outputBuff) {
-    const auto copyOutBodyBuilder = [&](mlir::OpBuilder& builder, mlir::Location loc, mlir::ValueRange newOperands) {
-        builder.create<VPUIP::CopyOp>(loc, newOperands[0], newOperands[1]);
-    };
-
-    SmallVector<mlir::Value> inputsOutputOperands = {input, outputBuff};
-    return rewriter.create<VPUIP::NCEClusterTilingOp>(loc, outputBuff.getType(), inputsOutputOperands,
-                                                      copyOutBodyBuilder);
 }
 
 //
@@ -90,18 +77,18 @@ private:
 };
 
 // The original subgraph looks like that
-// NCE       clusterOpAlloc
+// NCE    memrefAlloc
 //    \      /
-//    clusterOp (CMX2DDR)   copyOpAlloc
+//  distributedOp (CMX2DDR)   copyOpAlloc
 //        |                /
 //        +---------> copyOp (DDR2DDR)   anotherBranch
 //                             \            /
 //                              origConcatOp
 //
-// This transformation fuses clusterOp and copyOp into newTilingCopy:
-// NCE      copyOpAlloc
-//  |      /
-// newTilingCopy (CMX2DDR)  anotherBranch
+// This transformation fuses distributedCopy and copyOp into newTilingCopy:
+// distributedCopy   copyOpAlloc
+//  |                /
+// newDistributedCopy (CMX2DDR)  anotherBranch
 //             \            /
 //              origConcatOp
 //
@@ -109,7 +96,7 @@ mlir::LogicalResult FuseCopies::matchAndRewrite(VPUIP::ConcatViewOp origConcatOp
                                                 mlir::PatternRewriter& rewriter) const {
     const auto concatInputs = origConcatOp.getInputs();
     const auto isEligible = [&](const mlir::Value in) -> bool {
-        return isInputEligibleForConversion(in, _log);
+        return in != nullptr && isInputEligibleForConversion(in, _log);
     };
     SmallVector<mlir::Value> eligibleInputs;
     std::copy_if(concatInputs.begin(), concatInputs.end(), std::back_inserter(eligibleInputs), isEligible);
@@ -119,25 +106,23 @@ mlir::LogicalResult FuseCopies::matchAndRewrite(VPUIP::ConcatViewOp origConcatOp
     rewriter.setInsertionPoint(origConcatOp);
     for (const auto& input : eligibleInputs) {
         auto copyOp = input.getDefiningOp<VPUIP::CopyOp>();
-        auto clusterOp = copyOp.getInput().getDefiningOp<VPUIP::NCEClusterTilingOp>();
-        auto clusterOpBuffs = clusterOp.getOutputBuffs();
-        auto clusterOpAlloc = clusterOpBuffs[0].getDefiningOp<mlir::memref::AllocOp>();
+        auto distributedOp = copyOp.getInput().getDefiningOp<VPUIP::CopyOp>();
+        if (distributedOp == nullptr) {
+            _log.debug("Received a non-Copy operation");
+            continue;
+        }
+        auto distributedOpBuffs = distributedOp.getOutputBuff();
+        auto distributedOpAlloc = distributedOpBuffs.getDefiningOp<mlir::memref::AllocOp>();
         auto copyOpAlloc = copyOp.getOutputBuff();
-        auto newTilingCopy = createTillingCopy(rewriter, copyOp->getLoc(), clusterOp->getOperand(0), copyOpAlloc);
-        VPUX_THROW_UNLESS(newTilingCopy.getResults().size() == 1,
-                          "VPUIP::NCEClusterTilingOp must have one and only one result");
-        copyOp.replaceAllUsesWith(newTilingCopy.getResults()[0]);
+        auto newCopy = rewriter.create<VPUIP::CopyOp>(copyOp->getLoc(), distributedOp.getInput(), copyOpAlloc);
+        copyOp.replaceAllUsesWith(newCopy.getOperation());
         rewriter.eraseOp(copyOp);
 
-        const auto clusterOpResults = clusterOp.getResults();
-        const auto hasNoUsers = [](const mlir::Value clusterOpResult) -> bool {
-            return clusterOpResult.use_empty();
-        };
-        if (std::all_of(clusterOpResults.begin(), clusterOpResults.end(), hasNoUsers)) {
-            rewriter.eraseOp(clusterOp);
+        if (distributedOp.getOutput().use_empty()) {
+            rewriter.eraseOp(distributedOp);
         }
-        if (clusterOpAlloc.getMemref().use_empty()) {
-            rewriter.eraseOp(clusterOpAlloc);
+        if (distributedOpAlloc.getMemref().use_empty()) {
+            rewriter.eraseOp(distributedOpAlloc);
         }
     }
 

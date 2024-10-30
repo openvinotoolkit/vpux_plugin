@@ -4,14 +4,11 @@
 //
 
 #include "vpux/compiler/dialect/ELFNPU37XX/metadata.hpp"
-#include "vpux/compiler/dialect/VPUMI37XX/ops.hpp"
-
-#include "vpux/compiler/utils/strings.hpp"
-
-#include "vpux/compiler/core/profiling_metadata.hpp"
 #include "vpux/compiler/dialect/VPUASM/ops.hpp"
 
-#include "schema/profiling_generated.h"
+#include "vpux/utils/IE/prefix.hpp"
+
+#include <llvm/Support/Format.h>
 
 using namespace vpux;
 
@@ -123,11 +120,216 @@ elf::TensorRef ELFNPU37XX::createTensorRef(mlir::Value val, StringRef name) {
     return createTensorRef(val.getType().cast<vpux::NDTypeInterface>(), name);
 }
 
-std::unique_ptr<elf::NetworkMetadata> ELFNPU37XX::constructMetadata(
-        mlir::ModuleOp module, IE::CNNNetworkOp netOp, mlir::func::FuncOp netFunc,
-        const std::vector<std::shared_ptr<const ov::Node>>& parameters,
-        const std::vector<std::shared_ptr<const ov::Node>>& results, vpux::Logger log) {
-    log.setName("ELF - Construct Metadata");
+elf::OVNodeType ELFNPU37XX::createOVNodeType(mlir::Type type) {
+    // The order of the if else statements is important, first the float types are checked, then signed integers of
+    // specified length, and then all the integers, both unsigned and signless, with special cases for BOOL and 1-bit
+    // integers
+    if (type.isF64()) {
+        return elf::OVNodeType::OVNodeType_F64;
+    } else if (type.isF32()) {
+        return elf::OVNodeType::OVNodeType_F32;
+    } else if (type.isF16()) {
+        return elf::OVNodeType::OVNodeType_F16;
+    } else if (type.isBF16()) {
+        return elf::OVNodeType::OVNodeType_BF16;
+    } else if (type.isFloat8E5M2()) {
+        return elf::OVNodeType::OVNodeType_F8E5M2;
+    } else if (type.isFloat8E4M3FN()) {
+        return elf::OVNodeType::OVNodeType_F8E4M3;
+    } else if (type.isSignedInteger(64)) {
+        return elf::OVNodeType::OVNodeType_I64;
+    } else if (type.isSignedInteger(32)) {
+        return elf::OVNodeType::OVNodeType_I32;
+    } else if (type.isSignedInteger(16)) {
+        return elf::OVNodeType::OVNodeType_I16;
+    } else if (type.isSignedInteger(8)) {
+        return elf::OVNodeType::OVNodeType_I8;
+    } else if (type.isSignedInteger(4)) {
+        return elf::OVNodeType::OVNodeType_I4;
+    } else if (type.isSignlessInteger(8)) {
+        // In frontend signless 8-bit integer is used for BOOL, to distinguish it from U8
+        // This if else statement should come before the check for U8 to distinguish between these two types
+        return elf::OVNodeType::OVNodeType_BOOLEAN;
+    } else if (type.isInteger(64)) {
+        return elf::OVNodeType::OVNodeType_U64;
+    } else if (type.isInteger(32)) {
+        return elf::OVNodeType::OVNodeType_U32;
+    } else if (type.isInteger(16)) {
+        return elf::OVNodeType::OVNodeType_U16;
+    } else if (type.isInteger(8)) {
+        return elf::OVNodeType::OVNodeType_U8;
+    } else if (type.isInteger(4)) {
+        return elf::OVNodeType::OVNodeType_U4;
+    } else if (type.isInteger(1)) {
+        // Both signed and unsigned 1-bit integers are converted to U1
+        return elf::OVNodeType::OVNodeType_U1;
+    } else {
+        VPUX_THROW("Unsupported type : '{0}'", type);
+    }
+}
+
+void setOVNodeType(elf::OVNode& node, IE::DataInfoOp dataInfo) {
+    auto userType = dataInfo.getUserType().cast<vpux::NDTypeInterface>();
+    node.type = ELFNPU37XX::createOVNodeType(userType.getElementType());
+}
+
+void setOVNodeNames(elf::OVNode& node, IE::DataInfoOp dataInfo) {
+    // If the friendlyName is not set in DataInfoOp, friendlyName is equal to primary name.
+    auto friendlyName = dataInfo.getFriendlyName().has_value() ? dataInfo.getFriendlyName().value().str()
+                                                               : dataInfo.getName().str();
+    copy_str(node.friendly_name, friendlyName);
+
+    // If the inputName is not set in DataInfoOp, inputName is equal to primary name.
+    auto inputName =
+            dataInfo.getInputName().has_value() ? dataInfo.getInputName().value().str() : dataInfo.getName().str();
+    copy_str(node.input_name, inputName);
+
+    node.tensor_names_count = 0;
+    if (dataInfo.getTensorNames().has_value()) {
+        const auto tmpTensorNames = dataInfo.getTensorNames().value();
+        node.tensor_names_count = checked_cast<uint32_t>(tmpTensorNames.size());
+        for (auto tensor_name : tmpTensorNames | indexed) {
+            copy_str(node.tensor_names[tensor_name.index()], mlir::cast<mlir::StringAttr>(tensor_name.value()).str());
+        }
+    }
+}
+
+void setOVNodeShape(elf::OVNode& node, IE::DataInfoOp dataInfo) {
+    // If the originalShape is not set in DataInfo, originalShape is the same as shape of userType
+    auto shape = dataInfo.getOriginalShape().has_value()
+                         ? dataInfo.getOriginalShape().value().cast<vpux::NDTypeInterface>().getShape()
+                         : dataInfo.getUserType().cast<vpux::NDTypeInterface>().getShape();
+    node.shape_size = checked_cast<uint32_t>(shape.size());
+    for (const auto& sh_iterator : shape | indexed) {
+        auto dim = sh_iterator.value();
+        auto ind = sh_iterator.index();
+
+        if (dim > 0) {
+            node.shape[ind] = checked_cast<uint64_t>(dim);
+        } else if (dim == -1) {
+            node.shape[ind] = std::numeric_limits<uint64_t>::max();
+        } else {
+            VPUX_THROW_WHEN(shape.empty(),
+                            "Unexpected dim value. It must be a positive number or -1 to represent a dynamic dim");
+        }
+    }
+}
+
+void createOVNodes(std::vector<elf::OVNode>& nodes, ArrayRef<IE::DataInfoOp> dataInfoVector) {
+    for (auto dataInfo : dataInfoVector) {
+        // Serialize metadata only for model primary parameters and results, skip state and shape nodes
+        const auto name = dataInfo.getName().str();
+        if (isStateInputName(name) || isStateOutputName(name) || isShapeTensorName(name)) {
+            continue;
+        }
+
+        elf::OVNode tmpNode{};
+
+        setOVNodeType(tmpNode, dataInfo);
+        setOVNodeNames(tmpNode, dataInfo);
+        setOVNodeShape(tmpNode, dataInfo);
+
+        nodes.push_back(tmpNode);
+    }
+};
+
+std::string stringifyOVNodeType(elf::OVNodeType val) {
+    switch (val) {
+    case elf::OVNodeType::OVNodeType_F64:
+        return "F64";
+    case elf::OVNodeType::OVNodeType_F32:
+        return "F32";
+    case elf::OVNodeType::OVNodeType_F16:
+        return "F16";
+    case elf::OVNodeType::OVNodeType_BF16:
+        return "BF16";
+    case elf::OVNodeType::OVNodeType_F8E5M2:
+        return "F8E5M2";
+    case elf::OVNodeType::OVNodeType_F8E4M3:
+        return "F8E4M3";
+    case elf::OVNodeType::OVNodeType_I64:
+        return "I64";
+    case elf::OVNodeType::OVNodeType_I32:
+        return "I32";
+    case elf::OVNodeType::OVNodeType_I16:
+        return "I16";
+    case elf::OVNodeType::OVNodeType_I8:
+        return "I8";
+    case elf::OVNodeType::OVNodeType_I4:
+        return "I4";
+    case elf::OVNodeType::OVNodeType_U64:
+        return "U64";
+    case elf::OVNodeType::OVNodeType_U32:
+        return "U32";
+    case elf::OVNodeType::OVNodeType_U16:
+        return "U16";
+    case elf::OVNodeType::OVNodeType_U8:
+        return "U8";
+    case elf::OVNodeType::OVNodeType_U4:
+        return "U4";
+    case elf::OVNodeType::OVNodeType_U1:
+        return "U1";
+    case elf::OVNodeType::OVNodeType_BOOLEAN:
+        return "BOOLEAN";
+    default:
+        return "";
+    }
+}
+
+std::string namesToString(elf::TensorName* names, uint32_t size) {
+    std::stringstream names_str_stream;
+    bool first = true;
+    for (uint32_t i = 0; i < size; i++) {
+        if (!first) {
+            names_str_stream << ", ";
+        }
+        names_str_stream << i << ":\"" << names[i] << "\"";
+        first = false;
+    }
+    return names_str_stream.str();
+}
+
+std::string shapeToString(uint64_t* shape, uint32_t size) {
+    std::stringstream shape_str_stream;
+    shape_str_stream << "[";
+    bool first = true;
+    for (uint32_t i = 0; i < size; i++) {
+        if (!first) {
+            shape_str_stream << ",";
+        }
+        shape_str_stream << shape[i];
+        first = false;
+    }
+    shape_str_stream << "]";
+    return shape_str_stream.str();
+}
+
+void printOVNodes(const std::vector<elf::OVNode>& nodes, Logger log) {
+    for (const auto& p : nodes | indexed) {
+        auto node = p.value();
+        log.debug("{0}:friendly_name: \"{1}\"", llvm::format_decimal(p.index(), 3), node.friendly_name);
+        log.nest(2).debug("input_name: \"{0}\"", node.input_name);
+        log.nest(2).debug("tensor_names: {0}", namesToString(node.tensor_names, node.tensor_names_count));
+        log.nest(2).debug("shape: {0}", shapeToString(node.shape, node.shape_size));
+        log.nest(2).debug("type: {0}", stringifyOVNodeType(node.type));
+    }
+}
+
+// Metadata parameter passed as pointer due to large size of `elf::NetworkMetadata` structure
+void printMetadata(elf::NetworkMetadata* metadata, Logger log) {
+    log.debug("mOVParameters:");
+    printOVNodes(metadata->mOVParameters, log);
+
+    log.debug("mOVResults:");
+    printOVNodes(metadata->mOVResults, log);
+}
+
+std::unique_ptr<elf::NetworkMetadata> ELFNPU37XX::constructMetadata(mlir::ModuleOp module, Logger log) {
+    log.setName("constructMetadata");
+
+    IE::CNNNetworkOp netOp;
+    mlir::func::FuncOp netFunc;
+    IE::CNNNetworkOp::getFromModule(module, netOp, netFunc);
 
     auto inputsInfo = netOp.getInputsDataInfo();
     auto outputsInfo = netOp.getOutputsDataInfo();
@@ -154,7 +356,12 @@ std::unique_ptr<elf::NetworkMetadata> ELFNPU37XX::constructMetadata(
     metadata.mProfilingOutputs.resize(profilingOutputsInfo.size());
 
     const auto architecture = VPU::getArch(module);
-    if (architecture == VPU::ArchKind::NPU40XX) {
+
+    const std::set<VPU::ArchKind> compatibleTargets = {
+            VPU::ArchKind::NPU40XX,
+    };
+
+    if (compatibleTargets.count(architecture) > 0) {
         auto ioBindings = VPUASM::IOBindingsOp::getFromModule(module);
         auto inputDeclarations =
                 to_small_vector(ioBindings.getInputDeclarations().front().getOps<VPUASM::DeclareBufferOp>());
@@ -235,124 +442,12 @@ std::unique_ptr<elf::NetworkMetadata> ELFNPU37XX::constructMetadata(
     }
 
     // ov parameters
-    metadata.mOVParameters.resize(parameters.size());
-    for (const auto& node : parameters | indexed) {
-        VPUX_THROW_WHEN(node.value() == nullptr, "Null OV node");
-        auto node_val = node.value();
-        auto index = node.index();
-
-        elf::OVNode tmp_node{};
-        tmp_node.type = ELFNPU37XX::mapElementType.at(node_val->get_element_type());
-
-        // name strings
-        copy_str(tmp_node.friendly_name, node_val->get_friendly_name());
-        const auto tmpInputName = ov::op::util::create_ie_output_name(node_val->output(0));
-        copy_str(tmp_node.input_name, tmpInputName);
-
-        const auto tmpTensorNames = node_val->get_output_tensor(0).get_names();
-        auto tensorNamesSize = tmpTensorNames.size();
-        if (tensorNamesSize > elf::MAX_METADATA_IO) {
-            log.warning("OV Parameter {0} has {1} tensor names. Trimming to the maximum limit of {2}", index,
-                        tensorNamesSize, elf::MAX_METADATA_IO);
-            tensorNamesSize = elf::MAX_METADATA_IO;
-        }
-
-        tmp_node.tensor_names_count = tensorNamesSize;
-        for (auto tensor_name : tmpTensorNames | indexed) {
-            if (tensor_name.index() >= tensorNamesSize) {
-                break;
-            }
-            copy_str(tmp_node.tensor_names[tensor_name.index()], tensor_name.value());
-        }
-
-        // shape
-        auto shape = node_val->get_output_partial_shape(0);
-        tmp_node.shape_size = checked_cast<uint32_t>(shape.size());
-
-        for (const auto& sh_iterator : shape | indexed) {
-            auto value = sh_iterator.value();
-            tmp_node.shape[sh_iterator.index()] =
-                    value.is_static() ? value.get_length() : std::numeric_limits<uint64_t>::max();
-        }
-
-        metadata.mOVParameters[index] = tmp_node;
-    }
+    createOVNodes(metadata.mOVParameters, inputsInfo);
 
     // ov results
-    metadata.mOVResults.resize(results.size());
-    for (const auto& node : results | indexed) {
-        VPUX_THROW_WHEN(node.value() == nullptr, "Null OV node");
-        auto node_val = node.value();
-        auto index = node.index();
+    createOVNodes(metadata.mOVResults, outputsInfo);
 
-        elf::OVNode tmp_node{};
-        tmp_node.type = ELFNPU37XX::mapElementType.at(node_val->get_element_type());
-
-        // name strings
-        copy_str(tmp_node.friendly_name, node_val->get_friendly_name());
-
-        const auto tmpInputName = ov::op::util::create_ie_output_name(node_val->input_value(0));
-        copy_str(tmp_node.input_name, tmpInputName);
-
-        const auto tmpTensorNames = node_val->get_output_tensor(0).get_names();
-        auto tensorNamesSize = tmpTensorNames.size();
-        if (tensorNamesSize > elf::MAX_METADATA_IO) {
-            log.warning("OV Result {0} has {1} tensor names. Trimming to the maximum limit of {2}", index,
-                        tensorNamesSize, elf::MAX_METADATA_IO);
-            tensorNamesSize = elf::MAX_METADATA_IO;
-        }
-
-        tmp_node.tensor_names_count = tensorNamesSize;
-        for (auto tensor_name : tmpTensorNames | indexed) {
-            if (tensor_name.index() >= tensorNamesSize) {
-                break;
-            }
-            copy_str(tmp_node.tensor_names[tensor_name.index()], tensor_name.value());
-        }
-
-        auto shape = node_val->get_output_partial_shape(0);
-        tmp_node.shape_size = checked_cast<uint32_t>(shape.size());
-
-        for (const auto& sh_iterator : shape | indexed) {
-            auto value = sh_iterator.value();
-            tmp_node.shape[sh_iterator.index()] =
-                    value.is_static() ? value.get_length() : std::numeric_limits<uint64_t>::max();
-        }
-
-        metadata.mOVResults[index] = tmp_node;
-    }
+    printMetadata(&metadata, log);
 
     return metadataPtr;
-}
-
-using BarrierMap = DenseMap<mlir::Value, uint32_t>;
-
-BarrierMap getBarriers(mlir::func::FuncOp funcOp) {
-    BarrierMap barriersIds;
-    for (VPUMI37XX::ConfigureBarrierOp barrierOp : funcOp.getOps<VPUMI37XX::ConfigureBarrierOp>()) {
-        auto val = barrierOp.getBarrier();
-        VPUX_THROW_UNLESS(barriersIds.count(val) == 0, "Value {0} was already serialized", val);
-        barriersIds.insert({val, checked_cast<uint32_t>(barriersIds.size())});
-    }
-    return barriersIds;
-}
-
-std::pair<std::vector<uint32_t>, std::vector<uint32_t>> getOpBarriers(const BarrierMap& virtBarriers,
-                                                                      mlir::ValueRange waitBarriers,
-                                                                      mlir::ValueRange updateBarriers) {
-    const auto extractBarriersIDs = [&virtBarriers](mlir::ValueRange barriers) -> std::vector<uint32_t> {
-        std::vector<uint32_t> ids;
-        ids.reserve(barriers.size());
-        for (const auto bar : barriers) {
-            const auto it = virtBarriers.find(bar);
-            VPUX_THROW_UNLESS(it != virtBarriers.end(), "Value {0} wasn't serialized yet", bar);
-            ids.push_back(it->second);
-        }
-        return ids;
-    };
-
-    std::vector<uint32_t> waitIds = extractBarriersIDs(waitBarriers);
-    std::vector<uint32_t> updateIds = extractBarriersIDs(updateBarriers);
-
-    return std::make_pair(waitIds, updateIds);
 }

@@ -61,7 +61,8 @@ bool FuseScalesToAccumulate::checkReshape(IE::ReshapeOp reshape) const {
     }
     const auto inShape = getShape(reshape.getInput());
     const auto outShape = getShape(reshape.getOutput());
-    return inShape.size() == 3 && outShape.size() == 2 && inShape == Shape{1, outShape[Dim(0)], outShape[Dim(1)]};
+    return inShape.size() == 3 && outShape.size() == 2 &&
+           outShape == Shape{inShape[Dim(0)] * inShape[Dim(1)], inShape[Dim(2)]};
 }
 
 bool FuseScalesToAccumulate::checkFakeQuantize(IE::FakeQuantizeOp fqOp) const {
@@ -87,10 +88,11 @@ bool FuseScalesToAccumulate::checkFakeQuantize(IE::FakeQuantizeOp fqOp) const {
     }
 
     const auto inShape = getShape(fqOp.getInput());
-    const auto expectedShape = Shape{1, 1, inShape[Dim(2)]};
     const auto outLowShape = getShape(fqOp.getOutputLow());
     const auto outHighShape = getShape(fqOp.getOutputHigh());
-    return outLowShape == expectedShape && outHighShape == expectedShape;
+    const auto expectedShape1x1xC = Shape{1, 1, inShape[Dim(2)]};
+    const auto expectedShapeCx1x1 = Shape{inShape[Dim(0)], 1, 1};
+    return (outLowShape == expectedShape1x1xC || outLowShape == expectedShapeCx1x1) && outHighShape == outLowShape;
 }
 
 IE::FakeQuantizeOp FuseScalesToAccumulate::findFakeQuantize(mlir::Value input) const {
@@ -108,16 +110,19 @@ IE::FakeQuantizeOp FuseScalesToAccumulate::findFakeQuantize(mlir::Value input) c
     }
     // IE.FakeQuantize -> IE.Reshape -> [IE.Transpose] -> IE.FullyConnected -> IE.Accumulate
     auto transposeOp = rhsFCInput.getDefiningOp<IE::TransposeOp>();
+    IE::ReshapeOp reshapeOp{nullptr};
     if (!checkTranspose(transposeOp)) {
-        return nullptr;
+        reshapeOp = rhsFCInput.getDefiningOp<IE::ReshapeOp>();
+    } else {
+        auto transposeInput = transposeOp.getInput();
+        if (transposeInput == nullptr) {
+            return nullptr;
+        }
+        reshapeOp = transposeInput.getDefiningOp<IE::ReshapeOp>();
     }
-    auto transposeInput = transposeOp.getInput();
-    if (transposeInput == nullptr) {
-        return nullptr;
-    }
-
     // IE.FakeQuantize -> [IE.Reshape] -> IE.Transpose -> IE.FullyConnected -> IE.Accumulate
-    auto reshapeOp = transposeInput.getDefiningOp<IE::ReshapeOp>();
+    // IE.Transpose may be optional:
+    // IE.FakeQuantize -> [IE.Reshape] -> IE.FullyConnected -> IE.Accumulate
     if (!checkReshape(reshapeOp)) {
         return nullptr;
     }
@@ -145,8 +150,14 @@ std::optional<SmallVector<float>> FuseScalesToAccumulate::fetchScales(IE::FakeQu
     const auto realType = fqOp.getInput().getType().cast<vpux::NDTypeInterface>();
     const auto realElemType = realType.getElementType().cast<mlir::FloatType>();
 
+    const auto levels = fqOp.getLevels();
+    if (!levels.has_value()) {
+        // Currently there is no need for this pass to treat non-integer quantization cases.
+        return std::nullopt;
+    }
+
     const auto outQuantizeElemType =
-            getQuantizedType(outLowConst.getContentAttr(), outHighConst.getContentAttr(), fqOp.getLevels(),
+            getQuantizedType(outLowConst.getContentAttr(), outHighConst.getContentAttr(), levels,
                              /*lowFpType=*/std::nullopt, realElemType,
                              /*isSigned=*/false, fqOp.getLoc(), fqOp.getAutoBroadcast());
 
@@ -165,9 +176,9 @@ std::optional<SmallVector<float>> FuseScalesToAccumulate::fetchScales(IE::FakeQu
     };
     std::transform(f64Scales.begin(), f64Scales.end(), std::back_inserter(f32Scales), toF32);
 
-    const auto lowAttr = outLowConst.getContentAttr().cast<Const::ContentAttr>().fold();
+    const auto lowAttr = outLowConst.getContentAttr().fold();
     SmallVector<float> lowVals = lowAttr.getValues<float>();
-    const auto highAttr = outHighConst.getContentAttr().cast<Const::ContentAttr>().fold();
+    const auto highAttr = outHighConst.getContentAttr().fold();
     SmallVector<float> highVals = highAttr.getValues<float>();
     VPUX_THROW_UNLESS(lowVals.size() == highVals.size(), "Sizes of low values and high values must match.");
     for (const auto& idx : irange(f32Scales.size())) {
@@ -176,10 +187,19 @@ std::optional<SmallVector<float>> FuseScalesToAccumulate::fetchScales(IE::FakeQu
         highVals[idx] = highVals[idx] / scale;
     }
 
+    const bool usesFP16 = mlir::isa<mlir::Float16Type>(mlir::cast<NDTypeInterface>(realType).getElementType());
+    auto adjustDType = [&](Const::ContentSetup& setup) -> Const::ContentSetup {
+        if (usesFP16) {
+            return setup.castElemType(mlir::Float16Type::get(rewriter.getContext()));
+        }
+
+        return std::move(setup);
+    };
+
     const auto scaleShape =
             mlir::RankedTensorType::get(getShape(fqOp.getOutputLow()), mlir::Float32Type::get(rewriter.getContext()));
-    auto newLowVal = Const::createConst(rewriter, outLowConst.getLoc(), scaleShape, ArrayRef(lowVals));
-    auto newHighVal = Const::createConst(rewriter, outHighConst.getLoc(), scaleShape, ArrayRef(highVals));
+    auto newLowVal = Const::createConst(rewriter, outLowConst.getLoc(), scaleShape, ArrayRef(lowVals), adjustDType);
+    auto newHighVal = Const::createConst(rewriter, outHighConst.getLoc(), scaleShape, ArrayRef(highVals), adjustDType);
 
     outLowConst.getOutput().replaceAllUsesWith(newLowVal);
     outHighConst.getOutput().replaceAllUsesWith(newHighVal);
@@ -206,9 +226,22 @@ mlir::LogicalResult FuseScalesToAccumulate::matchAndRewrite(IE::AccumulateOp ori
     if (!rhsScales.has_value()) {
         return matchFailed(rewriter, origOp, "Failed to fetch scales for the second input.", origOp->getLoc());
     }
-    const auto scaleShape = mlir::RankedTensorType::get({shape.back()}, mlir::Float32Type::get(rewriter.getContext()));
-    const auto lhsScaleVal = Const::createConst(rewriter, origOp.getLoc(), scaleShape, ArrayRef(lhsScales.value()));
-    const auto rhsScaleVal = Const::createConst(rewriter, origOp.getLoc(), scaleShape, ArrayRef(rhsScales.value()));
+
+    const bool usesFP16 =
+            mlir::isa<mlir::Float16Type>(mlir::cast<NDTypeInterface>(origOp.getLhs().getType()).getElementType());
+    auto adjustDType = [&](Const::ContentSetup& setup) -> Const::ContentSetup {
+        if (usesFP16) {
+            return setup.castElemType(mlir::Float16Type::get(rewriter.getContext()));
+        }
+
+        return std::move(setup);
+    };
+
+    const auto scaleType = mlir::RankedTensorType::get({shape.back()}, mlir::Float32Type::get(rewriter.getContext()));
+    const auto lhsScaleVal =
+            Const::createConst(rewriter, origOp.getLoc(), scaleType, ArrayRef(lhsScales.value()), adjustDType);
+    const auto rhsScaleVal =
+            Const::createConst(rewriter, origOp.getLoc(), scaleType, ArrayRef(rhsScales.value()), adjustDType);
 
     rewriter.replaceOpWithNewOp<IE::AccumulateOp>(origOp, origOp.getLhs(), origOp.getRhs(), lhsScaleVal, rhsScaleVal);
 

@@ -177,3 +177,33 @@ func.func @DoNotMapBilinearInterpolateOnDPUBecauseFitInCMX(%arg0: tensor<1x32x45
     // CHECK-SAME:      sizes_attr = [23, 30]} : tensor<1x32x45x60xf16> -> tensor<1x32x23x30xf16>
     // CHECK:           return [[INTERP]] : tensor<1x32x23x30xf16>
 }
+
+// -----
+
+// CHECK-LABEL: @DoNotMapBilinearInterpolateAlignCornersFloatScaleOnDPU
+// CHECK-SAME:    [[INPUT:%.+]]: tensor<1x21x48x48xf16>
+func.func @DoNotMapBilinearInterpolateAlignCornersFloatScaleOnDPU(%arg0: tensor<1x21x48x48xf16>) -> tensor<1x21x384x384xf16> {
+    %0 = IE.Interpolate(%arg0) {
+        attr = #IE.Interpolate<mode = <LINEAR_ONNX>, shape_calc_mode = <SIZES>, coord_mode = <ALIGN_CORNERS>, nearest_mode = <ROUND_PREFER_CEIL>,
+        antialias = false,
+        pads_begin = [0, 0, 0, 0],
+        pads_end = [0, 0, 0, 0],
+        cube_coeff = -7.500000e-01 : f64>,
+        axes_attr = [0, 1, 2, 3],
+        operandSegmentSizes = array<i32: 1, 0, 0, 0>,
+        scales_attr = [1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00],
+        sizes_attr = [1, 21, 384, 384]} : tensor<1x21x48x48xf16> -> tensor<1x21x384x384xf16>
+    return %0 : tensor<1x21x384x384xf16>
+
+    // CHECK: [[INTERP:%.+]] = IE.Interpolate([[INPUT]]) {
+    // CHECK-SAME:      attr = #IE.Interpolate<mode = <LINEAR_ONNX>, shape_calc_mode = <SIZES>, coord_mode = <ALIGN_CORNERS>, nearest_mode = <ROUND_PREFER_CEIL>,
+    // CHECK-SAME:      antialias = false,
+    // CHECK-SAME:      pads_begin = [0, 0, 0, 0],
+    // CHECK-SAME:      pads_end = [0, 0, 0, 0],
+    // CHECK-SAME:      cube_coeff = -7.500000e-01 : f64>,
+    // CHECK-SAME:      axes_attr = [0, 1, 2, 3],
+    // CHECK-SAME:      operandSegmentSizes = array<i32: 1, 0, 0, 0>,
+    // CHECK-SAME:      scales_attr = [1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00],
+    // CHECK-SAME:      sizes_attr = [1, 21, 384, 384]} : tensor<1x21x48x48xf16> -> tensor<1x21x384x384xf16>
+    // CHECK:           return [[INTERP]] : tensor<1x21x384x384xf16>
+}

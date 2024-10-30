@@ -125,11 +125,15 @@ template <typename T>
 BinaryDataSection<T>* generateDataSection(Writer& writer, const std::string& name, const Elf_Word type = SHT_PROGBITS) {
     auto binDataSection = writer.addBinaryDataSection<T>(name, type);
     auto iterCount = generateRandom(1, 128);
-    for (uint32_t i = 0; i < iterCount; i++) {
-        binDataSection->appendData(DummyBinObject{});
-    }
-
+    binDataSection->setSize(iterCount * sizeof(DummyBinObject));
     return binDataSection;
+}
+
+template <typename T>
+void populateDataSection(BinaryDataSection<T>* section) {
+    for (uint32_t i = 0; i < section->getSize() / sizeof(DummyBinObject); i++) {
+        section->appendData(DummyBinObject{});
+    }
 }
 
 SymbolSection* generateSymbolSection(Writer& writer, const std::string& name) {
@@ -173,23 +177,36 @@ std::vector<uint8_t> generateBadUserIOElf() {
     reloc->setOffset(sizeof(DummyBinObject::a));
     reloc->setAddend(0);
 
-    return writer.generateELF();
+    writer.prepareWriter();
+    std::vector<uint8_t> elf(writer.getTotalSize());
+    writer.generateELF(elf.data());
+    writer.setSectionsStartAddr(elf.data());
+    populateDataSection(binDataSection);
+    return elf;
 }
 
 std::vector<uint8_t> generateBadSectionTypeElf() {
     Writer writer;
 
-    (void)generateDataSection<DummyBinObject>(writer, ".binData", SHT_LOUSER - 2);
-
-    return writer.generateELF();
+    auto binDataSection = generateDataSection<DummyBinObject>(writer, ".binData", SHT_LOUSER - 2);
+    writer.prepareWriter();
+    std::vector<uint8_t> elf(writer.getTotalSize());
+    writer.generateELF(elf.data());
+    writer.setSectionsStartAddr(elf.data());
+    populateDataSection(binDataSection);
+    return elf;
 }
 
 std::vector<uint8_t> generateUnrecognizedUserSectionTypeElf() {
     Writer writer;
 
-    (void)generateDataSection<DummyBinObject>(writer, ".binData", SHT_HIUSER - 1);
-
-    return writer.generateELF();
+    auto binDataSection = generateDataSection<DummyBinObject>(writer, ".binData", SHT_HIUSER - 1);
+    writer.prepareWriter();
+    std::vector<uint8_t> elf(writer.getTotalSize());
+    writer.generateELF(elf.data());
+    writer.setSectionsStartAddr(elf.data());
+    populateDataSection(binDataSection);
+    return elf;
 }
 
 std::vector<uint8_t> generateValidTestElf() {
@@ -204,7 +221,12 @@ std::vector<uint8_t> generateValidTestElf() {
     reloc->setOffset(sizeof(DummyBinObject::a));
     reloc->setAddend(0);
 
-    return writer.generateELF();
+    writer.prepareWriter();
+    std::vector<uint8_t> elf(writer.getTotalSize());
+    writer.generateELF(elf.data());
+    writer.setSectionsStartAddr(elf.data());
+    populateDataSection(binDataSection);
+    return elf;
 }
 
 const HardCodedSymtabToCluster0 gSymTab;
@@ -223,7 +245,7 @@ TEST(ELFLoader, ThrowWhenElfHeaderIsInvalid) {
     elf.e_ident[3] = 'X';
     DummyBufferManager bufMgr;
 
-    ElfDDRAccessManager accessor(reinterpret_cast<const uint8_t*>(&elf), sizeof(ELFHeader));
+    DDRAccessManager<elf::DDRAlwaysEmplace> accessor(reinterpret_cast<const uint8_t*>(&elf), sizeof(ELFHeader));
 
     ASSERT_THROW(VPUXLoader(&accessor, &bufMgr), HeaderError);
 }
@@ -233,7 +255,7 @@ TEST(ELFLoader, ThrowWhenBufferManagerIsNull) {
 
     OV_ASSERT_NO_THROW(elf = generateValidTestElf());
 
-    ElfDDRAccessManager accessor(reinterpret_cast<const uint8_t*>(elf.data()), elf.size());
+    DDRAccessManager<elf::DDRAlwaysEmplace> accessor(reinterpret_cast<const uint8_t*>(elf.data()), elf.size());
     ASSERT_THROW(VPUXLoader(&accessor, nullptr), ArgsError);
 }
 
@@ -250,9 +272,8 @@ TEST(ELFLoader, ThrowWhenBadUserIO) {
 
     OV_ASSERT_NO_THROW(elf = generateBadUserIOElf());
 
-    ElfDDRAccessManager accessor(reinterpret_cast<const uint8_t*>(elf.data()), elf.size());
-    VPUXLoader loader(&accessor, &bufMgr);
-    ASSERT_THROW(loader.load(gSymTab.symTab(), false, {}), SequenceError);
+    DDRAccessManager<elf::DDRAlwaysEmplace> accessor(reinterpret_cast<const uint8_t*>(elf.data()), elf.size());
+    ASSERT_THROW(VPUXLoader loader(&accessor, &bufMgr), SequenceError);
 }
 
 TEST(ELFLoader, ThrowWhenBadSectionType) {
@@ -261,7 +282,7 @@ TEST(ELFLoader, ThrowWhenBadSectionType) {
 
     OV_ASSERT_NO_THROW(elf = generateBadSectionTypeElf());
 
-    ElfDDRAccessManager accessor(reinterpret_cast<const uint8_t*>(elf.data()), elf.size());
+    DDRAccessManager<elf::DDRAlwaysEmplace> accessor(reinterpret_cast<const uint8_t*>(elf.data()), elf.size());
     VPUXLoader loader(&accessor, &bufMgr);
     ASSERT_THROW(loader.load(gSymTab.symTab(), false, {}), ImplausibleState);
 }
@@ -272,7 +293,7 @@ TEST(ELFLoader, NoThrowWhenUnrecognizedUserSectionType) {
 
     OV_ASSERT_NO_THROW(elf = generateUnrecognizedUserSectionTypeElf());
 
-    ElfDDRAccessManager accessor(reinterpret_cast<const uint8_t*>(elf.data()), elf.size());
+    DDRAccessManager<elf::DDRAlwaysEmplace> accessor(reinterpret_cast<const uint8_t*>(elf.data()), elf.size());
     VPUXLoader loader(&accessor, &bufMgr);
     OV_ASSERT_NO_THROW(loader.load(gSymTab.symTab()));
 }
@@ -283,7 +304,7 @@ TEST(ELFLoader, NoThrowWhenValidElf) {
 
     OV_ASSERT_NO_THROW(elf = generateValidTestElf());
 
-    ElfDDRAccessManager accessor(reinterpret_cast<const uint8_t*>(elf.data()), elf.size());
+    DDRAccessManager<elf::DDRAlwaysEmplace> accessor(reinterpret_cast<const uint8_t*>(elf.data()), elf.size());
     OV_ASSERT_NO_THROW(VPUXLoader(&accessor, &bufMgr));
     VPUXLoader loader(&accessor, &bufMgr);
     OV_ASSERT_NO_THROW(loader.load(gSymTab.symTab(), false, {}));

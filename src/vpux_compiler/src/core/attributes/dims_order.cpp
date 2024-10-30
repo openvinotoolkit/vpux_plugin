@@ -287,7 +287,7 @@ DimsOrder vpux::DimsOrder::fromAffineMap(mlir::AffineMap map) {
     VPUX_THROW_UNLESS(map.isPermutation(), "Can't get DimsOrder from non-permutation AffineMap '{0}'", map);
 
     const auto perm = to_container<DimArr>(map.getResults() | transformed([](mlir::AffineExpr expr) {
-                                               const auto dim = expr.cast<mlir::AffineDimExpr>();
+                                               const auto dim = mlir::cast<mlir::AffineDimExpr>(expr);
                                                const auto dimPos = dim.getPosition();
                                                return Dim(dimPos);
                                            }));

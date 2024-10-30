@@ -5,6 +5,7 @@
 
 #include "vpux/compiler/NPU40XX/dialect/VPUIPDPU/ops.hpp"
 #include "vpux/compiler/dialect/VPUIPDPU/dialect.hpp"
+#include "vpux/compiler/utils/traits_utils.hpp"
 
 #include <mlir/IR/BuiltinAttributes.h>
 #include <mlir/IR/BuiltinDialect.h>
@@ -50,6 +51,14 @@ mlir::LogicalResult ODUWriteCombineBufferOp::verify() {
                    "Operation {0}: sparsity_mode should only exist in case a sibbling ODUSparsityOp exists with "
                    "sparsity_map param set",
                    getOperationName());
+}
+
+mlir::LogicalResult ODUHaloCfgOp::verify() {
+    if (getEntryBlockSize<VPUIPDPU::ODUHaloRegionOp>(getOperation()) > 5) {
+        return errorAt(getLoc(), "Operation {0}: too many halo regions defined", getOperationName());
+    }
+
+    return ::mlir::success();
 }
 
 }  // namespace VPUIPDPU

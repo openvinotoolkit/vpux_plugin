@@ -6,6 +6,20 @@
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --move-view-ops-into-async-regions %s | FileCheck %s
 // REQUIRES: arch-NPU37XX || arch-NPU40XX
 
+module @VPU.SW {
+func.func private @builtin_relu(%input : memref<*xf16>, %output : memref<*xf16>)
+    attributes {
+        VPU.kernel_code = "activation_relu.cpp",
+        VPU.kernel_entry = "activation_relu",
+        VPU.task_type = @COMPUTE
+    }
+
+func.func private @runtime()
+    attributes {
+        VPU.kernel_code = "nnActEntry"
+    }
+}
+
 // CHECK:   func.func @TiledGraph([[in:%.*]]: memref<10x10x1xf16>, [[out_buf:%.*]]: memref<10x10x1xf16>)
 func.func @TiledGraph(%in : memref<10x10x1xf16>, %out_buf : memref<10x10x1xf16>) -> memref<10x10x1xf16> {
     %in_flat = VPUIP.GenericReshape inputs(%in : memref<10x10x1xf16>) -> memref<100x1x1xf16>
@@ -21,12 +35,14 @@ func.func @TiledGraph(%in : memref<10x10x1xf16>, %out_buf : memref<10x10x1xf16>)
     %temp_buf_0 = memref.alloc() : memref<50x1x1xf16>
 
     %temp_token_0, %temp_future_0 = async.execute -> !async.value<memref<50x1x1xf16>> {
-        %temp_0 = VPUIP.ReLUUPA
-            inputs(
-                %in_tile_0 : memref<50x1x1xf16>
-            ) outputs(
-                %temp_buf_0 : memref<50x1x1xf16>
-            ) -> memref<50x1x1xf16>
+        %temp_0 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_relu
+                    inputs(%in_tile_0 as %input_0: memref<50x1x1xf16>)
+                    outputs(%temp_buf_0 as %output_0: memref<50x1x1xf16>)
+                    on tile 0 -> memref<50x1x1xf16> {
+                VPUIP.SW.Kernel.run (%input_0, %output_0)
+                    : memref<50x1x1xf16>
+                    , memref<50x1x1xf16>
+        }
         async.yield %temp_0 : memref<50x1x1xf16>
     }
     %temp_0 = async.await %temp_future_0 : !async.value<memref<50x1x1xf16>>
@@ -49,12 +65,14 @@ func.func @TiledGraph(%in : memref<10x10x1xf16>, %out_buf : memref<10x10x1xf16>)
     %temp_buf_1 = memref.alloc() : memref<50x1x1xf16>
 
     %temp_token_1, %temp_future_1 = async.execute -> !async.value<memref<50x1x1xf16>> {
-        %temp_1 = VPUIP.ReLUUPA
-            inputs(
-                %in_tile_1 : memref<50x1x1xf16>
-            ) outputs(
-                %temp_buf_1 : memref<50x1x1xf16>
-            ) -> memref<50x1x1xf16>
+        %temp_1 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_relu
+                    inputs(%in_tile_1 as %input_0: memref<50x1x1xf16>)
+                    outputs(%temp_buf_1 as %output_0: memref<50x1x1xf16>)
+                    on tile 0 -> memref<50x1x1xf16> {
+                VPUIP.SW.Kernel.run (%input_0, %output_0)
+                    : memref<50x1x1xf16>
+                    , memref<50x1x1xf16>
+        }
         async.yield %temp_1 : memref<50x1x1xf16>
     }
     %temp_1 = async.await %temp_future_1 : !async.value<memref<50x1x1xf16>>
@@ -88,11 +106,11 @@ func.func @TiledGraph(%in : memref<10x10x1xf16>, %out_buf : memref<10x10x1xf16>)
 // CHECK:       [[temp_token_0:%.*]], [[temp_future_0:%.*]] = async.execute
 // CHECK:           [[in_flat_0:%.*]] = VPUIP.GenericReshape inputs([[in]] : memref<10x10x1xf16>)
 // CHECK:           [[in_tile_0:%.*]] = VPUIP.SubView [[in_flat_0]] [0, 0, 0] [50, 1, 1]
-// CHECK:           [[inner_temp_0:%.*]] = VPUIP.ReLUUPA
+// CHECK:           [[inner_temp_0:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_relu
 // CHECK-SAME:          inputs(
-// CHECK-SAME:              [[in_tile_0]]
+// CHECK-SAME:              [[in_tile_0]] as {{[^:]+}}: memref<50x1x1xf16>
 // CHECK-SAME:          ) outputs(
-// CHECK-SAME:              [[temp_buf_0]]
+// CHECK-SAME:              [[temp_buf_0]] as {{[^:]+}}: memref<50x1x1xf16>
 // CHECK-SAME:          )
 // CHECK:           async.yield [[inner_temp_0]]
 // CHECK:       [[temp_0:%.*]] = async.await [[temp_future_0]]
@@ -112,11 +130,11 @@ func.func @TiledGraph(%in : memref<10x10x1xf16>, %out_buf : memref<10x10x1xf16>)
 // CHECK:       [[temp_token_1:%.*]], [[temp_future_1:%.*]] = async.execute
 // CHECK:           [[in_flat_1:%.*]] = VPUIP.GenericReshape inputs([[in]] : memref<10x10x1xf16>)
 // CHECK:           [[in_tile_1:%.*]] = VPUIP.SubView [[in_flat_1]] [50, 0, 0] [50, 1, 1]
-// CHECK:           [[inner_temp_1:%.*]] = VPUIP.ReLUUPA
+// CHECK:           [[inner_temp_1:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_relu
 // CHECK-SAME:          inputs(
-// CHECK-SAME:              [[in_tile_1]]
+// CHECK-SAME:              [[in_tile_1]] as {{[^:]+}}: memref<50x1x1xf16>
 // CHECK-SAME:          ) outputs(
-// CHECK-SAME:              [[temp_buf_1]]
+// CHECK-SAME:              [[temp_buf_1]] as {{[^:]+}}: memref<50x1x1xf16>
 // CHECK-SAME:          )
 // CHECK:           async.yield [[inner_temp_1]]
 // CHECK:       [[temp_1:%.*]] = async.await [[temp_future_1]]
@@ -154,16 +172,10 @@ func.func @WeightsTableOp(%arg0: memref<1x1x16x64xf32>, %arg1: memref<16x1x1x4xs
     %buf2 = memref.alloc() : memref<16x16x1x1xf16, #NHWC, @CMX_NN>
     %buf3 = memref.alloc() : memref<1x16x1x64xf16, #NHWC, @CMX_NN>
 
-    %t0, %f0 = async.execute -> !async.value<memref<1x1x16x64xf16>> {
-        %0 = VPUIP.ConvertUPA inputs(%arg0 : memref<1x1x16x64xf32>) outputs(%buf0 : memref<1x1x16x64xf16>) -> memref<1x1x16x64xf16>
-        async.yield %0 : memref<1x1x16x64xf16>
-    }
-    %0 = async.await %f0 : !async.value<memref<1x1x16x64xf16>>
-
-    %1 = VPUIP.GenericReshape inputs(%0 : memref<1x1x16x64xf16>) -> memref<1x16x1x64xf16>
+    %1 = VPUIP.GenericReshape inputs(%buf0 : memref<1x1x16x64xf16>) -> memref<1x16x1x64xf16>
 
     %t2, %f2 = async.execute -> !async.value<memref<1x16x1x64xf16, #NHWC>> {
-        %2 = VPUIP.PermuteUPA {order_value = #NHWC} inputs(%1 : memref<1x16x1x64xf16>) outputs(%buf1 : memref<1x16x1x64xf16, #NHWC>)
+        %2 = VPUIP.PermuteDMA {mem_perm = #NHWC} inputs(%1 : memref<1x16x1x64xf16>) outputs(%buf1 : memref<1x16x1x64xf16, #NHWC>)
             -> memref<1x16x1x64xf16, #NHWC>
         async.yield %2 : memref<1x16x1x64xf16, #NHWC>
     }
@@ -192,17 +204,10 @@ func.func @WeightsTableOp(%arg0: memref<1x1x16x64xf32>, %arg1: memref<16x1x1x4xs
     // CHECK:       [[BUF1:%.+]] = memref.alloc() : memref<1x16x1x64xf16, #NHWC>
     // CHECK:       [[BUF2:%.+]] = memref.alloc() : memref<16x16x1x1xf16, #NHWC, @CMX_NN>
 
-    // CHECK:       [[T0:%.+]], [[F0:%.+]] = async.execute -> !async.value<memref<1x1x16x64xf16>>
-    // CHECK:           [[VAR0:%.+]] = VPUIP.ConvertUPA
-    // CHECK-SAME:          inputs(%arg0 : memref<1x1x16x64xf32>)
-    // CHECK-SAME:          outputs([[BUF0]] : memref<1x1x16x64xf16>)
-    // CHECK:           async.yield [[VAR0:%.+]] : memref<1x1x16x64xf16>
-    // CHECK:       [[VAR0:%.+]] = async.await [[F0]] : !async.value<memref<1x1x16x64xf16>>
-
     // CHECK:       [[T2:%.+]], [[F2:%.+]] = async.execute -> !async.value<memref<1x16x1x64xf16, #NHWC>>
-    // CHECK:           [[VAR1:%.+]] = VPUIP.GenericReshape inputs([[VAR0]] : memref<1x1x16x64xf16>)
-    // CHECK:           [[VAR2:%.+]] = VPUIP.PermuteUPA
-    // CHECK-SAME:          {order_value = #NHWC}
+    // CHECK:           [[VAR1:%.+]] = VPUIP.GenericReshape inputs([[BUF0]] : memref<1x1x16x64xf16>)
+    // CHECK:           [[VAR2:%.+]] = VPUIP.PermuteDMA
+    // CHECK-SAME:          {mem_perm = #NHWC}
     // CHECK-SAME:          inputs([[VAR1]] : memref<1x16x1x64xf16>)
     // CHECK-SAME:          outputs([[BUF1]] : memref<1x16x1x64xf16, #NHWC>)
     // CHECK:           async.yield [[VAR2]] : memref<1x16x1x64xf16, #NHWC>

@@ -71,26 +71,28 @@ Const::DeclareOp ReshapeGroupConvInput::broadcastConst(mlir::Value activation, i
     Const::ContentAttr newContentAttr;
     if (cst.getContentAttr().isSplat()) {
         auto contentAttr = cst.getContentAttr();
-        newContentAttr = Const::ContentAttr::get(contentAttr.getBaseContent());  // content-only copy
-        auto newConstantShape = Shape(origInShape.size(), int64_t(1));
-        newContentAttr = newContentAttr.reshape(newConstantShape);
+        auto setup = Const::ContentAttr::transform(contentAttr.getBaseContent());  // content-only copy
+        setup = setup.reshape(Shape(origInShape.size(), int64_t(1)));
+
         for (auto attr : contentAttr.getTransformations()) {
-            if (attr.isa<Const::PadWithZeroAttr>() || attr.isa<Const::BroadcastAttr>() ||
-                attr.isa<Const::ReshapeAttr>()) {
+            if (llvm::isa<Const::PadWithZeroAttr, Const::BroadcastAttr, Const::ReshapeAttr, Const::SubViewAttr>(attr)) {
                 // The const's shape will fully handled by this pass, the broadcast will be added,
                 //   so ignore the origin broadcast, reshape and pad transformation
                 continue;
             }
-            newContentAttr = Const::ContentAttr::addTransformation(newContentAttr, attr);
+            setup = setup.addTransformation(attr);
         }
-        newContentAttr = newContentAttr.broadcast(onDim, weightShape[onDim]);
+
+        newContentAttr = setup.broadcast(onDim, weightShape[onDim]).get();
     } else {
         auto broadcastDim = (OC > 1 ? Dims4D::Filter::OC : Dims4D::Filter::IC);
-        newContentAttr = cst.getContentAttr();  // Note: a *complete* attribute copy (with transformations)
-        newContentAttr = newContentAttr.broadcast(broadcastDim, weightShape[broadcastDim]);
-        newContentAttr = newContentAttr.reshape(weightShape);
+        newContentAttr = cst.getContentAttr()
+                                 .transform()  // Note: a *complete* attribute copy (with transformations)
+                                 .broadcast(broadcastDim, weightShape[broadcastDim])
+                                 .reshape(weightShape)
+                                 .get();
     }
-    return rewriter.create<Const::DeclareOp>(activation.getLoc(), newContentAttr.getType(), newContentAttr);
+    return rewriter.create<Const::DeclareOp>(activation.getLoc(), newContentAttr.getType(), std::move(newContentAttr));
 }
 
 IE::ShapeCastOp ReshapeGroupConvInput::reshapeOutput(IE::GroupConvolutionOp origOp, mlir::Value convOutput,
@@ -205,7 +207,8 @@ mlir::LogicalResult ReshapeGroupConvInput::matchAndRewrite(IE::GroupConvolutionO
     auto newGroupConv = rewriter.create<IE::GroupConvolutionOp>(
             convOp.getLoc(), input, weights, bias, convOp.getStrides(), convOp.getPadsBegin(), convOp.getPadsEnd(),
             convOp.getDilations(), getIntAttr(rewriter.getContext(), newInputShape[Dims4D::Act::C.ind()]),
-            convOp.getPostOpAttr(), convOp.getClampAttr());
+            convOp.getPostOpAttr(), convOp.getClampAttr(), convOp.getOutputChannelsAttr(),
+            convOp.getInputChannelsAttr());
     auto newInShape = getShape(input);
     auto origOutputType = convOp.getType().cast<vpux::NDTypeInterface>();
     newGroupConv.getOutput().setType(mlir::cast<mlir::RankedTensorType>(origOutputType.changeShape(newInShape)));
@@ -357,7 +360,8 @@ mlir::LogicalResult SliceGroupConvInput::matchAndRewrite(IE::GroupConvolutionOp 
         auto newGroupConv = rewriter.create<IE::GroupConvolutionOp>(
                 origOp->getLoc(), permuteCast.getOutput(), sliceWeight.getResult(), biasValue, origOp.getStrides(),
                 origOp.getPadsBegin(), origOp.getPadsEnd(), origOp.getDilations(), getIntAttr(ctx, 1),
-                origOp.getPostOpAttr(), origOp.getClampAttr());
+                origOp.getPostOpAttr(), origOp.getClampAttr(), origOp.getOutputChannelsAttr(),
+                origOp.getInputChannelsAttr());
         auto groupOutputType = newGroupConv.getOutput().getType().cast<NDTypeInterface>();
         newGroupConv.getOutput().setType(mlir::cast<mlir::RankedTensorType>(
                 groupOutputType.changeDimsOrder(DimsOrder::fromValue(origOp.getOutput()))));

@@ -1041,3 +1041,89 @@ func.func @main(%arg0: tensor<1x16x482x642xf16, {order = #NHWC}>) -> tensor<1x16
    // CHECK:       return [[CONCAT_1]] : tensor<1x16x484x644xf16, {order = #NHWC}>
 }
 }
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @OptimizeSliceMultiplyExpand
+module @OptimizeSliceMultiplyExpand {
+// CHECK-LABEL: @main
+// CHECK-SAME: ([[INPUT_0:%.+]]: tensor<1x96x128x128xf16, {order = #NHWC}>, [[INPUT_1:%.+]]: tensor<1x96x128x128xf16, {order = #NHWC}>)
+func.func @main(%arg0: tensor<1x96x128x128xf16, {order = #NHWC}>, %arg1: tensor<1x96x128x128xf16, {order = #NHWC}>) -> tensor<1x96x128x128xf16, {order = #NHWC}> {
+   %0 = IE.Slice %arg0 [0, 0, 0, 0] [1, 91, 128, 128] : tensor<1x96x128x128xf16, {order = #NHWC}> to tensor<1x91x128x128xf16, {order = #NHWC}>
+   %1 = IE.Slice %arg1 [0, 0, 0, 0] [1, 91, 128, 128] : tensor<1x96x128x128xf16, {order = #NHWC}> to tensor<1x91x128x128xf16, {order = #NHWC}>
+   %2 = IE.Multiply(%0, %1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x91x128x128xf16, {order = #NHWC}>, tensor<1x91x128x128xf16, {order = #NHWC}> -> tensor<1x91x128x128xf16, {order = #NHWC}>
+   %3 = IE.Expand(%2) {pads_begin = [0, 0, 0, 0], pads_end = [0, 5, 0, 0]} : tensor<1x91x128x128xf16, {order = #NHWC}> -> tensor<1x96x128x128xf16, {order = #NHWC}>
+
+   return %3 : tensor<1x96x128x128xf16, {order = #NHWC}>
+
+   // CHECK:       [[MULTIPLY:%.+]] = IE.Multiply([[INPUT_0]], [[INPUT_1]])
+   // CHECK-SAME:      {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x96x128x128xf16, {order = #NHWC}>, tensor<1x96x128x128xf16, {order = #NHWC}> -> tensor<1x96x128x128xf16, {order = #NHWC}>
+   // CHECK:       return [[MULTIPLY]] : tensor<1x96x128x128xf16, {order = #NHWC}>
+}
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @OptimizeSliceAddExpand
+module @OptimizeSliceAddExpand {
+// CHECK-LABEL: @main
+// CHECK-SAME: ([[INPUT_0:%.+]]: tensor<1x96x128x128xf16, {order = #NHWC}>, [[INPUT_1:%.+]]: tensor<1x96x128x128xf16, {order = #NHWC}>)
+func.func @main(%arg0: tensor<1x96x128x128xf16, {order = #NHWC}>, %arg1: tensor<1x96x128x128xf16, {order = #NHWC}>) -> tensor<1x96x128x128xf16, {order = #NHWC}> {
+   %0 = IE.Slice %arg0 [0, 0, 0, 0] [1, 91, 128, 128] : tensor<1x96x128x128xf16, {order = #NHWC}> to tensor<1x91x128x128xf16, {order = #NHWC}>
+   %1 = IE.Slice %arg1 [0, 0, 0, 0] [1, 91, 128, 128] : tensor<1x96x128x128xf16, {order = #NHWC}> to tensor<1x91x128x128xf16, {order = #NHWC}>
+   %2 = IE.Add(%0, %1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x91x128x128xf16, {order = #NHWC}>, tensor<1x91x128x128xf16, {order = #NHWC}> -> tensor<1x91x128x128xf16, {order = #NHWC}>
+   %3 = IE.Expand(%2) {pads_begin = [0, 0, 0, 0], pads_end = [0, 5, 0, 0]} : tensor<1x91x128x128xf16, {order = #NHWC}> -> tensor<1x96x128x128xf16, {order = #NHWC}>
+
+   return %3 : tensor<1x96x128x128xf16, {order = #NHWC}>
+
+   // CHECK:       [[ADD:%.+]] = IE.Add([[INPUT_0]], [[INPUT_1]])
+   // CHECK-SAME:      {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x96x128x128xf16, {order = #NHWC}>, tensor<1x96x128x128xf16, {order = #NHWC}> -> tensor<1x96x128x128xf16, {order = #NHWC}>
+   // CHECK:       return [[ADD]] : tensor<1x96x128x128xf16, {order = #NHWC}>
+}
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @OptimizeSliceSubtractExpand
+module @OptimizeSliceSubtractExpand {
+// CHECK-LABEL: @main
+// CHECK-SAME: ([[INPUT_0:%.+]]: tensor<1x96x128x128xf16, {order = #NHWC}>, [[INPUT_1:%.+]]: tensor<1x96x128x128xf16, {order = #NHWC}>)
+func.func @main(%arg0: tensor<1x96x128x128xf16, {order = #NHWC}>, %arg1: tensor<1x96x128x128xf16, {order = #NHWC}>) -> tensor<1x96x128x128xf16, {order = #NHWC}> {
+   %0 = IE.Slice %arg0 [0, 0, 0, 0] [1, 91, 128, 128] : tensor<1x96x128x128xf16, {order = #NHWC}> to tensor<1x91x128x128xf16, {order = #NHWC}>
+   %1 = IE.Slice %arg1 [0, 0, 0, 0] [1, 91, 128, 128] : tensor<1x96x128x128xf16, {order = #NHWC}> to tensor<1x91x128x128xf16, {order = #NHWC}>
+   %2 = IE.Subtract(%0, %1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x91x128x128xf16, {order = #NHWC}>, tensor<1x91x128x128xf16, {order = #NHWC}> -> tensor<1x91x128x128xf16, {order = #NHWC}>
+   %3 = IE.Expand(%2) {pads_begin = [0, 0, 0, 0], pads_end = [0, 5, 0, 0]} : tensor<1x91x128x128xf16, {order = #NHWC}> -> tensor<1x96x128x128xf16, {order = #NHWC}>
+
+   return %3 : tensor<1x96x128x128xf16, {order = #NHWC}>
+
+   // CHECK:       [[SUBTRACT:%.+]] = IE.Subtract([[INPUT_0]], [[INPUT_1]])
+   // CHECK-SAME:      {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x96x128x128xf16, {order = #NHWC}>, tensor<1x96x128x128xf16, {order = #NHWC}> -> tensor<1x96x128x128xf16, {order = #NHWC}>
+   // CHECK:       return [[SUBTRACT]] : tensor<1x96x128x128xf16, {order = #NHWC}>
+}
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @OptimizeSliceClampExpand
+module @OptimizeSliceClampExpand {
+// CHECK-LABEL: @main
+// CHECK-SAME: [[INPUT:%.+]]: tensor<1x16x1x1xf16, {order = #NHWC}>
+func.func @main(%arg0: tensor<1x16x1x1xf16, {order = #NHWC}>) -> tensor<1x16x1x1xf16, {order = #NHWC}> {
+   %0 = IE.Slice %arg0 [0, 0, 0, 0] [1, 1, 1, 1] : tensor<1x16x1x1xf16, {order = #NHWC}> to tensor<1x1x1x1xf16, {order = #NHWC}>
+   %1 = IE.Clamp(%0) {min = 1.0, max = 3.0} : tensor<1x1x1x1xf16, {order = #NHWC}> -> tensor<1x1x1x1xf16, {order = #NHWC}>
+   %2 = IE.Expand(%1) {pads_begin = [0, 0, 0, 0], pads_end = [0, 15, 0, 0]} : tensor<1x1x1x1xf16, {order = #NHWC}> -> tensor<1x16x1x1xf16, {order = #NHWC}>
+   return %2 : tensor<1x16x1x1xf16, {order = #NHWC}>
+
+   // CHECK:       [[CLAMP:%.+]] = IE.Clamp([[INPUT]])
+   // CHECK-SAME:      {max = 3.000000e+00 : f64, min = 1.000000e+00 : f64} : tensor<1x16x1x1xf16, {order = #NHWC}> -> tensor<1x16x1x1xf16, {order = #NHWC}>
+   // CHECK:       return [[CLAMP]]  : tensor<1x16x1x1xf16, {order = #NHWC}>
+}
+}

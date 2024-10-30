@@ -22,25 +22,30 @@ namespace VPURT {
 //
 
 void buildBarrierLegalizationPipeline(mlir::OpPassManager& pm, const bool wlmFlag = false,
+                                      std::optional<int> virtualBarrierThresholdforWlm = std::nullopt,
                                       const bool unevenVariantSplitFlag = false, Logger log = Logger::global());
 
 //
 // Passes
 //
 
-std::unique_ptr<mlir::Pass> createSplitControlGraphPass(const int controlGraphSplitBlockSize = 100000,
-                                                        Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createSplitControlGraphPass(
+        const int controlGraphSplitBlockSize = CONTROL_GRAPH_SPLIT_BLOCK_SIZE, Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createSimplifySchedulePass(const bool shareWaitAndUpdateBarriersFlag = true,
                                                        const bool reduceParallelControlFlowsFlag = true,
                                                        Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createSplitExceedingVariantCountBarriersPass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createSatisfyOneWaitBarrierPerTaskPass(const bool unevenVariantSplitFlag = false,
-                                                                   Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createReduceExceedingActiveCountBarriersPass(const bool wlmFlag = false,
-                                                                         const bool UnevenVariantSplitFlag = false,
-                                                                         Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createAssignPhysicalBarriersPass(const bool wlmFlag = false, Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createSatisfyOneWaitBarrierPerTaskPass(
+        const bool wlmFlag = false, std::optional<int> virtualBarrierThresholdforWlm = std::nullopt,
+        const bool unevenVariantSplitFlag = false, Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createReduceExceedingActiveCountBarriersPass(
+        const bool wlmFlag = false, std::optional<int> virtualBarrierThresholdforWlm = std::nullopt,
+        const bool UnevenVariantSplitFlag = false, Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createAssignPhysicalBarriersPass(
+        const bool wlmFlag = false, const bool barrierColorBinFlag = false,
+        std::optional<int> virtualBarrierThresholdforWlm = std::nullopt, Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createBarrierSimulationPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createIntermediateBufferOutputPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createInferenceExecutionAnalysisPass(
         std::string compileSchedTraceFileName = "compileTimeScheduleTrace.json", bool dumpToJson = false,
         bool enableActivityFactor = true, Logger log = Logger::global());

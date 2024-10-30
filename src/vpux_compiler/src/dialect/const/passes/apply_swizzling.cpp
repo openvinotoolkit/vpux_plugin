@@ -38,10 +38,14 @@ void ApplySwizzlingPass::safeRunOnFunc() {
         }
 
         auto module = constOp->getParentOfType<mlir::ModuleOp>();
-        auto newContentAttr = constOp.getContentAttr().swizzleConstant(getSwizzlingKey(constType),
-                                                                       static_cast<uint64_t>(VPU::getArch(module)));
+        auto newContentAttr =
+                constOp.getContentAttr()
+                        .transform()
+                        .swizzleConstant(getSwizzlingKey(constType), static_cast<uint64_t>(VPU::getArch(module)))
+                        .get();
         mlir::OpBuilder builder(constOp);
-        auto newConstOp = builder.create<vpux::Const::DeclareOp>(constOp.getLoc(), constType, newContentAttr);
+        auto newConstOp =
+                builder.create<vpux::Const::DeclareOp>(constOp.getLoc(), constType, std::move(newContentAttr));
         constOp.replaceAllUsesWith(newConstOp.getOutput());
         constOp.erase();
     });

@@ -3,16 +3,13 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW allow-custom-values=true" --mlir-elide-elementsattrs-if-larger 8 --default-hw-mode-vpuip="function-outlining=true" %s | FileCheck %s --strict-whitespace
+// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW allow-custom-values=true" --mlir-elide-elementsattrs-if-larger 8 --default-hw-mode-vpuip="function-outlining=\"naive='num-parts=2'\"" %s | FileCheck %s --strict-whitespace
 // REQUIRES: arch-NPU37XX
 
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 
 // CHECK-LABEL: @SoftMax
 module @SoftMax attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilationMode = #VPU.compilation_mode<DefaultHW>} {
-    // CHECK-DAG: {{  }}module @UsedMemory
-    // CHECK-DAG: {{    }}IE.MemoryResource {{[0-9]+}} bytes of @DDR
-
     // CHECK-DAG: {{  }}IE.TileResource
     // CHECK-DAG: {{    }}builtin.module @UsedMemory
     // CHECK-DAG: {{      }}IE.MemoryResource {{[0-9]+}} bytes of @CMX_NN
@@ -31,7 +28,7 @@ module @SoftMax attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilationM
 
     // CHECK:       func.func @main(
     // CHECK-SAME:      [[ARG0:%.+]]: memref<1x1000xf16, @DDR>,
-    // CHECK-SAME:      [[ARG1:%.+]]: memref<1x1000xf16, @DDR>) -> memref<1x1000xf16, @DDR> {
+    // CHECK-SAME:      [[ARG1:%.+]]: memref<1x1000xf16, @DDR>) -> memref<1x1000xf16, @DDR>
     func.func @main(%arg0: memref<1x1000xf16>, %arg1: memref<1x1000xf16>) -> memref<1x1000xf16> {
         %0 = VPUIP.GenericReshape inputs(%arg0 : memref<1x1000xf16>) -> memref<1x1x1x1000xf16>
         %1 = VPURT.AllocDistributed -> !VPUIP.DistributedBuffer<1x1x1x1000xf16, #NCHW, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>
@@ -93,9 +90,6 @@ module @SoftMax attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilationM
 
 // CHECK-LABEL: @TwoFunctions
 module @TwoFunctions attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilationMode = #VPU.compilation_mode<DefaultHW>} {
-    // CHECK-DAG: {{  }}module @UsedMemory
-    // CHECK-DAG: {{    }}IE.MemoryResource {{[0-9]+}} bytes of @DDR
-
     // CHECK-DAG: {{  }}IE.TileResource
     // CHECK-DAG: {{    }}builtin.module @UsedMemory
     // CHECK-DAG: {{      }}IE.MemoryResource {{[0-9]+}} bytes of @CMX_NN
@@ -115,7 +109,7 @@ module @TwoFunctions attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compila
     // CHECK-NOT: func.func private @foo1
     func.func private @foo1(%arg0: memref<1x16x6x6xf16>, %arg1: memref<1x32x4x4xf16>) -> memref<1x32x4x4xf16> {
         %cst = const.Declare memref<32x16x3x3xf16, #NHWC>
-                        = dense<1.000000e+00> : tensor<32x16x3x3xf32>, [#const.ConvertElemType<f16>, #const.Reorder<#NHWC>]
+                        = dense<1.000000e+00> : tensor<32x16x3x3xf32>, [#const.CastElemType<f16>, #const.Reorder<#NHWC>]
         %cst_0 = const.Declare memref<32x1x1x4xsi32> = dense<1> : tensor<32x1x1x4xsi32>
 
         %alloc = memref.alloc() : memref<1x16x6x16xf16>
@@ -135,7 +129,7 @@ module @TwoFunctions attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compila
         %5 = VPUIP.NCEClusterTiling inputs(%3 as %arg2: memref<1x16x16x6xf16, #NHWC, @CMX_NN>)
                 outputs(%4 as %arg3: memref<1x16x16x6xf16, #NWCH, @CMX_NN>)
                     -> !VPUIP.DistributedBuffer<1x16x16x6xf16, #NWCH, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 1, 2], num_clusters = 2 : i64}> {
-            %20 = VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, is_permute_quantize, minimumHardwareExecutionCost = 189 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
+            %20 = VPUIP.NCEClusterTask {is_permute_quantize, minimumHardwareExecutionCost = 189 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
                             input(%arg2 : memref<1x16x16x6xf16, #NHWC, @CMX_NN>)
                             weights(%arg2 : memref<1x16x16x6xf16, #NHWC, @CMX_NN>)
                             parent_input(%arg2 : memref<1x16x16x6xf16, #NHWC, @CMX_NN>)
@@ -147,7 +141,7 @@ module @TwoFunctions attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compila
               DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [2, 15, 15], outStart = [0, 0, 0],
                         pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
             } PPE : {
-              PPETask <ADD> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [5.000000e-01]}
+              PPETask {opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>}
             }
         }
 
@@ -203,7 +197,7 @@ module @TwoFunctions attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compila
               DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [3, 1, 31], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
               DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [3, 3, 31], outStart = [0, 2, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
             } PPE : {
-              PPETask <NOOP> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, fp_prelu_alpha = 1.000000e+00 : f64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64}
+              PPETask {opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>}
             }
         }
 

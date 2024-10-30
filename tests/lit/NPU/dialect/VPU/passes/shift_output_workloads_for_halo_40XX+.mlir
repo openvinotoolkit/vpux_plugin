@@ -80,6 +80,7 @@ func.func @ConvSOHOverlapped(%arg0: !Input_DDR) -> !Output_DDR {
               %wt_cmx as %arg3: !WeightsTableStub_CMX)
               -> !OutputDistributed {
         %0 = VPU.NCE.Convolution(%arg1, %arg2, %arg3) {
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 rawFilterShape = [16, 16, 1, 1],
                 strides = [1, 1]
@@ -218,6 +219,7 @@ func.func @SparseConvSOHOverlapped(%arg0: !InputDataDistributed, %arg1: !InputSM
               %wt_cmx as %arg4: !WeightsTableStub_CMX)
               -> !Output_CMX {
         %0 = VPU.NCE.Convolution(%arg2, %arg3, %arg4) {
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 rawFilterShape = [16, 16, 1, 1],
                 strides = [1, 1]
@@ -322,6 +324,7 @@ func.func @ConvSOHOverlappedMultipleWorkloads(%arg0: !Input_DDR) -> !Output_DDR 
               %wt_cmx as %arg3: !WeightsTableStub_CMX)
               -> !OutputDistributed {
         %0 = VPU.NCE.Convolution(%arg1, %arg2, %arg3) {
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 rawFilterShape = [16, 16, 1, 1],
                 strides = [1, 1]
@@ -429,6 +432,7 @@ func.func @ConvSOHOverlappedNoOverlapAtStart(%arg0: !Input_DDR) -> !Output_DDR {
               %wt_cmx as %arg3: !WeightsTableStub_CMX)
               -> !OutputDistributed {
         %0 = VPU.NCE.Convolution(%arg1, %arg2, %arg3) {
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
                 rawFilterShape = [16, 16, 3, 3],
                 strides = [1, 1]
@@ -528,6 +532,7 @@ func.func @ConvSOKNoChange(%arg0: !Input_DDR) -> !Output_DDR {
               %wt_cmx as %arg3: !WeightsTableStub_CMX)
               -> !OutputDistributed {
         %0 = VPU.NCE.Convolution(%arg1, %arg2, %arg3) {
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 rawFilterShape = [32, 16, 1, 1],
                 strides = [1, 1]
@@ -604,7 +609,7 @@ func.func @NCEPermuteSOK(%arg0: !Input_DDR) -> !Output_DDR {
                 dstOrder = #NHWC,
                 expandedChannels = 128 : i64,
                 minimumHardwareExecutionCost = 5442 : i64,
-                ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>
+                opaque_ppe = #VPU.PPEStub<>
             } -> !OutputStub_CMX {
                 VPU.DPU.Workload outOffsets [0, 0, 0, 0] outSizes [1, 32, 32, 64] <left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64> <CUBOID_16x16> attributes {cluster_id = 0 : i64}
                 VPU.DPU.Workload outOffsets [0, 32, 0, 0] outSizes [1, 32, 32, 64] <left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64> <CUBOID_16x16> attributes {cluster_id = 1 : i64}

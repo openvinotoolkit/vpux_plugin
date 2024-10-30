@@ -16,7 +16,6 @@ namespace vpux {
 namespace VPU {
 
 constexpr StringRef PIPELINE_OPTIONS = "Options";
-constexpr StringRef REDUCE_SUPPORTED = "VPU.ReduceSupported";
 
 vpux::IE::PipelineOptionsOp getPipelineOptionsOp(mlir::MLIRContext& ctx, mlir::ModuleOp moduleOp);
 

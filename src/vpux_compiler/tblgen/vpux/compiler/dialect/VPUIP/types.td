@@ -21,52 +21,6 @@ class VPUIP_Type<string name, list<Trait> traits = []>
 }
 
 //
-// Buffer
-//
-
-def VPUIP_Buffer :
-        VPUIP_Type<
-            "Buffer",
-            [
-                DeclareTypeInterfaceMethods<NDTypeInterface>
-            ]
-        > {
-    let summary = "VPUIP Buffer Type";
-
-    let description = "This type represents a simple buffer similar to memref";
-
-    let genAccessors = 0;
-
-    let parameters = (ins
-        ArrayRefParameter<"int64_t">:$shape,
-        "mlir::Type":$elementType,
-        "mlir::MemRefLayoutAttrInterface":$layout,
-        "vpux::IndexedSymbolAttr":$memSpace,
-        "mlir::IntegerAttr":$swizzlingKey
-    );
-
-    let extraClassDeclaration = [{
-        mlir::MemRefLayoutAttrInterface getLayout() const;
-        mlir::IntegerAttr getSwizzlingKey() const;
-    }];
-
-    let builders = [
-        TypeBuilderWithInferredContext<
-            (ins
-                "::mlir::MLIRContext* ":$context,
-                "::llvm::ArrayRef<int64_t>":$shape,
-                "mlir::Type":$elementType,
-                "mlir::MemRefLayoutAttrInterface":$layout,
-                "vpux::IndexedSymbolAttr":$memSpace
-            ), [{
-            return $_get(context, shape, elementType, layout, memSpace, nullptr);
-        }]>
-    ];
-
-    let hasCustomAssemblyFormat = 1;
-}
-
-//
 // DistributedBuffer
 //
 
@@ -90,7 +44,7 @@ def VPUIP_DistributedBuffer :
         "mlir::Type":$elementType,
         "mlir::MemRefLayoutAttrInterface":$layout,
         "vpux::IndexedSymbolAttr":$memSpace,
-        "VPU::DistributedTensorAttr":$distribution,
+        "VPU::DistributionInfoAttr":$distribution,
         "VPUIP::SparsityCompressionAttr":$sparsityCompression
     );
 
@@ -102,7 +56,7 @@ def VPUIP_DistributedBuffer :
                 "mlir::Type":$elementType,
                 "mlir::MemRefLayoutAttrInterface":$layout,
                 "vpux::IndexedSymbolAttr":$memSpace,
-                "VPU::DistributedTensorAttr":$distribution,
+                "VPU::DistributionInfoAttr":$distribution,
                 CArg<"VPUIP::SparsityCompressionAttr", "{}">:$sparsityCompression
             ), [{
             return $_get(context, shape, elementType, layout, memSpace, distribution, sparsityCompression);
@@ -113,7 +67,7 @@ def VPUIP_DistributedBuffer :
         mlir::MemRefType getCompactType() const;
 
         mlir::MemRefLayoutAttrInterface getLayout() const;
-        VPU::DistributedTensorAttr getDistribution() const;
+        VPU::DistributionInfoAttr getDistribution() const;
         VPUIP::SparsityCompressionAttr getSparsityCompression() const;
         DistributedBufferType cloneWith(std::optional<mlir::ArrayRef<int64_t>> shape,
                                         mlir::Type elementType) const;

@@ -9,7 +9,7 @@
 // CHECK-LABEL: @IrdftConvertConstToAttrAndNormalize
 // CHECK-SAME:   ([[INPUT:%arg[0-9]]]: tensor<10x4x2xf32>) -> tensor<10x6xf32>
 func.func @IrdftConvertConstToAttrAndNormalize(%arg0: tensor<10x4x2xf32>) -> tensor<10x6xf32> {
-    %cst = const.Declare tensor<2xsi32> = dense<[0, 1]> : tensor<2xsi64>, [#const.ConvertElemType<si32>]
+    %cst = const.Declare tensor<2xsi32> = dense<[0, 1]> : tensor<2xsi64>, [#const.CastElemType<si32>]
     %0 = IE.IRDFT(%arg0, %cst) {operandSegmentSizes = array<i32: 1, 1, 0>} : tensor<10x4x2xf32>, tensor<2xsi32> -> tensor<10x6xf32>
     return %0 : tensor<10x6xf32>
 

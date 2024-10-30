@@ -22,14 +22,13 @@ mlir::Operation* vpux::VPURT::TaskOp::getInnerTaskOp() {
 
 void vpux::VPURT::TaskOp::build(::mlir::OpBuilder& odsBuilder, ::mlir::OperationState& odsState,
                                 mlir::ValueRange waitBarriers, mlir::ValueRange updateBarriers) {
-    build(odsBuilder, odsState, nullptr, waitBarriers, updateBarriers);
+    build(odsBuilder, odsState, nullptr, waitBarriers, updateBarriers, nullptr);
 }
 
-VPUIP::BlobWriter::SpecificTask vpux::VPURT::TaskOp::serialize(VPUIP::BlobWriter& writer) {
-    auto task = mlir::dyn_cast<VPUIP::TaskOpInterface>(getInnerTaskOp());
-    VPUX_THROW_UNLESS(task != nullptr, "Inner task  does not implement TaskOpInterface");
-    writer.setAliasForSerializedTensors(task);
-    return task.serialize(writer);
+void vpux::VPURT::TaskOp::build(::mlir::OpBuilder& odsBuilder, ::mlir::OperationState& odsState,
+                                mlir::ValueRange waitBarriers, mlir::ValueRange updateBarriers,
+                                mlir::Value enqueueBarrier) {
+    build(odsBuilder, odsState, nullptr, waitBarriers, updateBarriers, enqueueBarrier);
 }
 
 VPU::ExecutorKind vpux::VPURT::TaskOp::getExecutorKind() {
@@ -59,21 +58,6 @@ mlir::LogicalResult vpux::VPURT::TaskOp::verify() {
         return errorAt(task, "The task body should contain operation with memory effects");
     }
 
-    if (getIsTrailingSWLayer()) {
-        for (auto updateBarrier : getUpdateBarriers()) {
-            for (auto* depOp : updateBarrier.getUsers()) {
-                auto depTask = mlir::dyn_cast<VPURT::TaskOp>(depOp);
-
-                if (depTask == nullptr) {
-                    return errorAt(task, "Trailing UPA Task has non-SW dependency : '{0}'", depOp->getLoc());
-                }
-
-                if (depTask.getExecutorKind() != VPU::ExecutorKind::SHAVE_UPA) {
-                    return errorAt(task, "Trailing UPA Task has non-SW dependency : '{0}'", depOp->getLoc());
-                }
-            }
-        }
-    }
     return mlir::success();
 }
 

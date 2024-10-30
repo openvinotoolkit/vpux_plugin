@@ -9,6 +9,7 @@
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 #include "vpux/compiler/init.hpp"
 
@@ -130,7 +131,6 @@ TEST_F(MLIR_IndexedSymbolAttr, CheckExecutorResourceAttr) {
         #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
         module @test {
-            IE.ExecutorResource 16 of @SHAVE_UPA
             IE.TileResource 4 of @NCE at 700.0MHz {
                 IE.ExecutorResource 5 of @DPU
             }
@@ -138,7 +138,7 @@ TEST_F(MLIR_IndexedSymbolAttr, CheckExecutorResourceAttr) {
 
             func.func @main(%arg0: memref<1x16x62x62xf16, #NHWC>,
                         %arg1: memref<1x48x60x60xf16, #NHWC>) -> memref<1x48x60x60xf16, #NHWC> {
-                %cst = const.Declare memref<48x16x3x3xf16, #NHWC> = dense<1.000000e+00> : tensor<48x16x3x3xf32>, [#const.ConvertElemType<f16>, #const.Reorder<#NHWC>]
+                %cst = const.Declare memref<48x16x3x3xf16, #NHWC> = dense<1.000000e+00> : tensor<48x16x3x3xf32>, [#const.CastElemType<f16>, #const.Reorder<#NHWC>]
                 %0 = VPUIP.StaticAlloc<0> -> memref<1x16x62x62xf16, #NHWC, @CMX_NN>
                 %1 = VPUIP.StaticAlloc<468608> -> memref<48x16x3x3xf16, #NHWC, @CMX_NN>
                 %2 = VPUIP.StaticAlloc<123008> -> memref<1x48x60x60xf16, #NHWC, @CMX_NN>

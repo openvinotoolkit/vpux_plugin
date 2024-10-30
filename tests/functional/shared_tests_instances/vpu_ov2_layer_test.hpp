@@ -59,10 +59,10 @@ private:
 public:
     void setReferenceSoftwareMode();
     void setDefaultHardwareMode();
+    void setMLIRCompilerType();
 
     void setSingleClusterMode();
     void setPerformanceHintLatency();
-    void useELFCompilerBackend();
 
     bool isReferenceSoftwareMode() const;
     bool isDefaultHardwareMode() const;
@@ -80,6 +80,9 @@ private:
     SkipCallback skipInferenceCallback = nullptr;
     vpux::Logger _log = vpux::Logger::global();
 };
+
+std::vector<std::vector<ov::Shape>> combineStaticShapes(const std::vector<ov::test::InputShape>& inputs);
+ov::PartialShape getBoundedShape(const ov::test::InputShape& shape);
 
 }  // namespace ov::test::utils
 

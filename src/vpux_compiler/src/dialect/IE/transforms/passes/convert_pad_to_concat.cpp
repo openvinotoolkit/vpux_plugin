@@ -79,8 +79,9 @@ mlir::LogicalResult ReplacePadWithConstAndConcat::matchAndRewrite(IE::PadOp orig
         _log.nest().trace("Insert ConstOp convert from padsBegin index: {0}", reversedAxis);
         if (padsBeginValue[reversedAxis] != 0) {
             constShape[reversedAxis] = padsBeginValue[reversedAxis];
-            valueRange.push_back(vpux::IE::createPaddingConstForConcat(constShape, origPadOp->getLoc(), inputType,
-                                                                       padValue, rewriter));
+            valueRange.push_back(vpux::IE::createPaddingConstForConcat(
+                    constShape, takeOpLoc(origPadOp, StringLiteral("pad_begin_{0}"), reversedAxis), inputType, padValue,
+                    rewriter));
         }
 
         valueRange.push_back(midInput);
@@ -88,11 +89,13 @@ mlir::LogicalResult ReplacePadWithConstAndConcat::matchAndRewrite(IE::PadOp orig
         _log.nest().trace("Insert ConstOp convert from padsEnd index: {0}", reversedAxis);
         if (padsEndValue[reversedAxis] != 0) {
             constShape[reversedAxis] = padsEndValue[reversedAxis];
-            valueRange.push_back(vpux::IE::createPaddingConstForConcat(constShape, origPadOp->getLoc(), inputType,
-                                                                       padValue, rewriter));
+            valueRange.push_back(vpux::IE::createPaddingConstForConcat(
+                    constShape, takeOpLoc(origPadOp, StringLiteral("pad_end_{0}"), reversedAxis), inputType, padValue,
+                    rewriter));
         }
 
-        auto concat = rewriter.create<IE::ConcatOp>(midInput.getLoc(), valueRange, reversedAxis);
+        auto concat = rewriter.create<IE::ConcatOp>(takeOpLoc(origPadOp, StringLiteral("concat_{0}"), reversedAxis),
+                                                    valueRange, reversedAxis);
         _log.nest().trace("Insert ConcatOp {0}", concat.getLoc());
         midInput = concat.getOutput();
     }

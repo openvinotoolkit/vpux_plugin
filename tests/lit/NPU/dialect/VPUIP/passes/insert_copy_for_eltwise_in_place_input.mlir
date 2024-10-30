@@ -44,7 +44,7 @@ func.func @InsertSpillingCopiesOnSecondInputWithCopyParent(
     %eltwiseIn2CMX = VPUIP.Copy inputs(%in2 : !qTypeDDR) outputs(%eltwiseIn2CMXBuff : !DistributedType1) -> !DistributedType1
 
     %eltwise = VPUIP.NCEClusterTask {
-      activation_window_channel_length = 0 :i64, is_inplace = true,
+      is_inplace = true,
       minimumHardwareExecutionCost = 21125 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
         input(%eltwiseIn1CMX : !DistributedType1)
         weights(%eltwiseIn2CMX : !DistributedType1)
@@ -61,10 +61,9 @@ func.func @InsertSpillingCopiesOnSecondInputWithCopyParent(
         outEnd = [511, 51, 31], outStart = [0, 0, 0],
         pad = #VPU.Padding<bottom = 0 : i64, left = 0 : i64, right = 0 : i64, top = 0 : i64>}
     } PPE : {
-      PPETask <NOOP> {
-        clamp_high = 255 : i64, clamp_low = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64,
-        in1_quant_mult = [19919], in2_quant_mult = [7511], lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-        quant_mult = [27275], quant_post_shift = 0 : i64, quant_shift = [29]}
+      PPETask {
+        opaque_ppe = #VPU.PPEStub<>
+        }
     }
 
     %conv0InCMXBuff = VPURT.AllocDistributed -> !DistributedType2
@@ -98,10 +97,8 @@ func.func @InsertSpillingCopiesOnSecondInputWithCopyParent(
           pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>
         }
       } PPE : {
-        PPETask <NOOP> {
-          clamp_high = 255 : i64, clamp_low = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64,
-          in1_quant_mult = [19919], in2_quant_mult = [7511], lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-          quant_mult = [27275], quant_post_shift = 0 : i64, quant_shift = [29]
+        PPETask {
+          opaque_ppe = #VPU.PPEStub<>
         }
       }
 
@@ -133,10 +130,8 @@ func.func @InsertSpillingCopiesOnSecondInputWithCopyParent(
           pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>
         }
       } PPE : {
-        PPETask <NOOP> {
-          clamp_high = 255 : i64, clamp_low = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64,
-          in1_quant_mult = [19919], in2_quant_mult = [7511], lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-          quant_mult = [27275], quant_post_shift = 0 : i64, quant_shift = [29]
+        PPETask {
+          opaque_ppe = #VPU.PPEStub<>
         }
       }
 
@@ -223,7 +218,7 @@ func.func @InsertSpillingCopiesOnFirstInputWithViewParent(
     %eltwiseInput1Subview = VPUIP.SubView %eltwiseIn1CMX [0, 0, 0, 0] [1, 32, 52, 512] : !DistributedType1 to !DistributedTypeSubview
 
     %eltwise = VPUIP.NCEClusterTask {
-      activation_window_channel_length = 0 :i64, is_inplace = true,
+      is_inplace = true,
       minimumHardwareExecutionCost = 21125 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
         input(%eltwiseInput1Subview : !DistributedTypeSubview)
         weights(%eltwiseIn2CMX : !DistributedType2)
@@ -240,10 +235,9 @@ func.func @InsertSpillingCopiesOnFirstInputWithViewParent(
         outEnd = [255, 51, 32], outStart = [0, 0, 0],
         pad = #VPU.Padding<bottom = 0 : i64, left = 0 : i64, right = 0 : i64, top = 0 : i64>}
     } PPE : {
-      PPETask <NOOP> {
-        clamp_high = 255 : i64, clamp_low = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64,
-        in1_quant_mult = [19919], in2_quant_mult = [7511], lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-        quant_mult = [27275], quant_post_shift = 0 : i64, quant_shift = [29]}
+      PPETask {
+        opaque_ppe = #VPU.PPEStub<>
+        }
     }
 
     %convOutBuff0 = VPURT.AllocDistributed -> !DistributedType1
@@ -273,10 +267,8 @@ func.func @InsertSpillingCopiesOnFirstInputWithViewParent(
         pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>
       }
     } PPE : {
-      PPETask <NOOP> {
-        clamp_high = 255 : i64, clamp_low = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64,
-        in1_quant_mult = [19919], in2_quant_mult = [7511], lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-        quant_mult = [27275], quant_post_shift = 0 : i64, quant_shift = [29]
+      PPETask {
+        opaque_ppe = #VPU.PPEStub<>
       }
     }
 
@@ -344,7 +336,7 @@ func.func @InsertSpillingCopiesOnFirstInputWithViewParentSingleCluster(
     %eltwiseInput1Subview = VPUIP.SubView %eltwiseIn1CMX [0, 0, 0, 0] [1, 32, 52, 512] : !qTypeCMX to !qTypeEltCMX
 
     %eltwise = VPUIP.NCEClusterTask {
-        activation_window_channel_length = 0 :i64, is_inplace = true,
+        is_inplace = true,
         minimumHardwareExecutionCost = 21125 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
         input(%eltwiseInput1Subview : !qTypeEltCMX)
         weights(%eltwiseIn2CMX : !qTypeEltCMX)
@@ -361,10 +353,9 @@ func.func @InsertSpillingCopiesOnFirstInputWithViewParentSingleCluster(
         outEnd = [255, 51, 32], outStart = [0, 0, 0],
         pad = #VPU.Padding<bottom = 0 : i64, left = 0 : i64, right = 0 : i64, top = 0 : i64>}
     } PPE : {
-        PPETask <NOOP> {
-        clamp_high = 255 : i64, clamp_low = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64,
-        in1_quant_mult = [19919], in2_quant_mult = [7511], lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-        quant_mult = [27275], quant_post_shift = 0 : i64, quant_shift = [29]}
+        PPETask {
+        opaque_ppe = #VPU.PPEStub<>
+        }
     }
 
 
@@ -395,10 +386,8 @@ func.func @InsertSpillingCopiesOnFirstInputWithViewParentSingleCluster(
           pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>
         }
       } PPE : {
-        PPETask <NOOP> {
-          clamp_high = 255 : i64, clamp_low = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64,
-          in1_quant_mult = [19919], in2_quant_mult = [7511], lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-          quant_mult = [27275], quant_post_shift = 0 : i64, quant_shift = [29]
+        PPETask {
+          opaque_ppe = #VPU.PPEStub<>
         }
     }
 
@@ -470,7 +459,7 @@ func.func @DontInsertSpill(
     %eltwiseIn2CMX = VPUIP.Copy inputs(%subview : !qTypeDDR) outputs(%eltwiseIn2CMXBuff : !DistributedType1) -> !DistributedType1
 
     %eltwise = VPUIP.NCEClusterTask {
-      activation_window_channel_length = 0 :i64, is_inplace = true,
+      is_inplace = true,
       minimumHardwareExecutionCost = 21125 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
         input(%eltwiseIn1CMX : !DistributedType1)
         weights(%eltwiseIn2CMX : !DistributedType1)
@@ -487,10 +476,9 @@ func.func @DontInsertSpill(
         outEnd = [511, 50, 31], outStart = [0, 0, 0],
         pad = #VPU.Padding<bottom = 0 : i64, left = 0 : i64, right = 0 : i64, top = 0 : i64>}
     } PPE : {
-      PPETask <NOOP> {
-        clamp_high = 255 : i64, clamp_low = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64,
-        in1_quant_mult = [19919], in2_quant_mult = [7511], lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-        quant_mult = [27275], quant_post_shift = 0 : i64, quant_shift = [29]}
+      PPETask {
+        opaque_ppe = #VPU.PPEStub<>
+        }
     }
 
     %convOutBuff0 = VPURT.AllocDistributed -> !DistributedType1
@@ -520,10 +508,8 @@ func.func @DontInsertSpill(
         pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>
       }
     } PPE : {
-      PPETask <NOOP> {
-        clamp_high = 255 : i64, clamp_low = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64,
-        in1_quant_mult = [19919], in2_quant_mult = [7511], lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-        quant_mult = [27275], quant_post_shift = 0 : i64, quant_shift = [29]
+      PPETask {
+        opaque_ppe = #VPU.PPEStub<>
       }
     }
 

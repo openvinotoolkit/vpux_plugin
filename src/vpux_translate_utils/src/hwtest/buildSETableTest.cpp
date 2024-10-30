@@ -1,11 +1,12 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 
 #include <numeric>
 
 #include <mlir/Dialect/Quant/QuantTypes.h>
 
+#include "vpux/compiler/dialect/VPU/transforms/factories/nce_sparsity_converters.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
@@ -74,6 +75,17 @@ std::vector<int32_t> computeSeTable(const nb::SETablePattern& seTablePattern, Ar
 
 void buildSETableTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module, mlir::OpBuilder builder,
                       Logger& log, mlir::Type inputType, mlir::Type weightsType, mlir::Type outputType) {
+    // set runtime resources
+    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
+
+    mlir::PassManager pmBuilderInit(module->getName(), mlir::OpPassManager::Nesting::Implicit);
+    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.numberOfDPUGroups = 1;
+    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
+
+    VPU::buildInitCompilerPipeline(pmBuilderInit, initCompilerOptions, log);
+    VPUX_THROW_UNLESS(mlir::succeeded(pmBuilderInit.run(module)), "Init compilation failed");
+
     constexpr int64_t CLUSTER_NUM = 0;
     auto* ctx = builder.getContext();
     auto loc = builder.getUnknownLoc();
@@ -156,16 +168,16 @@ void buildSETableTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp
     auto functionInput = function.getArgument(0);
 
     const auto weightsValues = generateWeights(builder, weightsShape, weightsType, ctx, weightsFileName);
-    auto weightsAttribute = vpux::Const::ContentAttr::get(weightsValues);
-    weightsAttribute = weightsAttribute.reorder(vpux::DimsOrder::OYXI);
+    auto weightsAttributeSetup = vpux::Const::ContentAttr::transform(weightsValues);
+    weightsAttributeSetup = weightsAttributeSetup.reorder(vpux::DimsOrder::OYXI);
 
     auto qty = weightsType.dyn_cast<mlir::quant::QuantizedType>();
 
     if (qty != nullptr) {
         if (qty.getStorageType().isInteger(4)) {
-            weightsAttribute = weightsAttribute.bitPack(4);
+            weightsAttributeSetup = weightsAttributeSetup.bitPack(4);
         }
-        weightsAttribute = weightsAttribute.quantCast(qty);
+        weightsAttributeSetup = weightsAttributeSetup.quantCast(qty);
     }
 
     const auto weightsDDRType =
@@ -174,7 +186,7 @@ void buildSETableTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp
     auto weightsStrides = weightsDDRType.cast<vpux::NDTypeInterface>().getStrides();
     auto inputStrides = functionInput.getType().cast<vpux::NDTypeInterface>().getStrides();
 
-    auto weightsDDR = fcnBuilder.create<vpux::Const::DeclareOp>(loc, weightsDDRType, weightsAttribute);
+    auto weightsDDR = fcnBuilder.create<vpux::Const::DeclareOp>(loc, weightsDDRType, weightsAttributeSetup.get());
 
     auto weightsCMX = createDeclareTensorOp(fcnBuilder, VPURT::BufferSection::CMX_NN, weightsShape, weightsType,
                                             DimsOrder::OYXI, weightsStrides, CLUSTER_NUM, WEIGHTS_CMX_OFFSET);
@@ -186,12 +198,12 @@ void buildSETableTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp
     const auto sparseMapContent = std::vector<char>(numElems / CHAR_BIT, static_cast<char>(0xFF));
     auto sparseMapValues = mlir::DenseElementsAttr::getFromRawBuffer(mlir::RankedTensorType::get(inputShape, int1),
                                                                      llvm::ArrayRef<char>(sparseMapContent));
-    auto sparseMapConstAttr = vpux::Const::ContentAttr::get(sparseMapValues);
 
     auto sparsityMapDDRType = getMemRefType(VPURT::BufferSection::Constant, inputShape, int1, DimsOrder::OIYX);
     auto sparsityMapTypeIf = sparsityMapDDRType.cast<vpux::NDTypeInterface>();
 
-    auto sparsityMapDDR = fcnBuilder.create<vpux::Const::DeclareOp>(loc, sparsityMapDDRType, sparseMapConstAttr);
+    auto sparsityMapDDR = fcnBuilder.create<vpux::Const::DeclareOp>(loc, sparsityMapDDRType,
+                                                                    vpux::Const::ContentAttr::get(sparseMapValues));
 
     auto sparsityMapCMX =
             createDeclareTensorOp(fcnBuilder, VPURT::BufferSection::CMX_NN, sparsityMapTypeIf.getShape().raw(),
@@ -207,10 +219,9 @@ void buildSETableTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp
             getMemRefType(VPURT::BufferSection::Constant, seTableShape, seTableElementType, DimsOrder::NHWC);
     auto seTableStrides = seTableDDRType.cast<vpux::NDTypeInterface>().getStrides();
 
-    auto seTableConstAttr = vpux::Const::ContentAttr::get(seTableValues);
-    seTableConstAttr = seTableConstAttr.reorder(vpux::DimsOrder::OYXI);
+    auto seTableConstAttr = vpux::Const::ContentAttr::transform(seTableValues).reorder(vpux::DimsOrder::OYXI).get();
 
-    auto seTableDDR = fcnBuilder.create<vpux::Const::DeclareOp>(loc, seTableDDRType, seTableConstAttr);
+    auto seTableDDR = fcnBuilder.create<vpux::Const::DeclareOp>(loc, seTableDDRType, std::move(seTableConstAttr));
 
     auto seTableCMX = createDeclareTensorOp(fcnBuilder, VPURT::BufferSection::CMX_NN, seTableShape, seTableElementType,
                                             DimsOrder::NHWC, seTableStrides, CLUSTER_NUM, SE_TABLE_CMX_OFFSET);
@@ -226,10 +237,12 @@ void buildSETableTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp
 
     const auto weightsTableDDRType = mlir::RankedTensorType::get(weightsTableShape, int32);
     const auto sparsityPtrStep = 0;
+    const auto ppeConverter = VPU::NCESparsity::getPPEConverterCb(testDesc.getArchitecture());
+    const auto biasConverter = VPU::NCESparsity::getBiasConverterCb(testDesc.getArchitecture());
     const auto weightsTable = VPU::NCESparsity::getWeightsTable(
             inputType, outputType, static_cast<std::int32_t>(WEIGHTS_CMX_OFFSET),
             static_cast<std::int32_t>(weightsOutputChannelsStrideInBits.count() / CHAR_BIT),
-            VPU::NCESparsity::SPARSITY_PTR_WHEN_NO_SPARSITY, sparsityPtrStep, testDesc.getArchitecture(),
+            VPU::NCESparsity::SPARSITY_PTR_WHEN_NO_SPARSITY, sparsityPtrStep, ppeConverter, biasConverter,
             output.shape[1], weightsType);
 
     const auto weightsTableDDRMemRef =
@@ -238,7 +251,7 @@ void buildSETableTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp
             mlir::DenseElementsAttr::get(weightsTableDDRType, llvm::ArrayRef<std::int32_t>(weightsTable));
     auto weightsTableDDR = fcnBuilder.create<vpux::Const::DeclareOp>(
             loc, weightsTableDDRMemRef,
-            vpux::Const::ContentAttr::get(weightsTableValues).reorder(vpux::DimsOrder::NHWC));
+            vpux::Const::ContentAttr::transform(weightsTableValues).reorder(vpux::DimsOrder::NHWC).get());
 
     auto weightsTableCMX = createDeclareTensorOp(fcnBuilder, VPURT::BufferSection::CMX_NN, weightsTableShape, int32,
                                                  DimsOrder::NHWC, CLUSTER_NUM, WEIGHTSTABLE_CMX_OFFSET);
@@ -283,12 +296,10 @@ void buildSETableTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp
             fcnBuilder, mlir::ValueRange(waitBarrier.getBarrier()), mlir::ValueRange(updateBarrier.getBarrier()), loc,
             inputCMX.getBuffer(), sparsityMap, seTableCMX.getBuffer(), weightsCMX,
             /*weights_sparsity_map=*/nullptr, weightsTableCMX, /*instruction_list_table=*/nullptr,
-            /*spr_lookup_table*/ nullptr,
-            /*activation_window=*/nullptr, inputCMX.getBuffer(), sparsityMapCMX.getBuffer(), seTableCMX.getBuffer(),
+            /*spr_lookup_table*/ nullptr, inputCMX.getBuffer(), sparsityMapCMX.getBuffer(), seTableCMX.getBuffer(),
             outCMXBuffer, /*parent_output_sparsity_map=*/nullptr, outCMXBuffer,
             /*output_sparsity_map_buff=*/nullptr, /*profiling_data=*/nullptr, vpux::VPUIP::NCETaskType::CONV,
             kernelSize, strides, kernelPaddings,
-            /*activation_window_channel_length=*/nullptr,
             /*is_continued=*/nullptr,
             /*cm_sp_pattern=*/nullptr,
             /*is_segmented=*/nullptr,
@@ -322,20 +333,11 @@ void buildSETableTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp
 
     fcnBuilder.create<mlir::func::ReturnOp>(loc, SmallVector<mlir::Value>{functionOutput});
 
-    // set runtime resources
-    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
-
-    mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
-    initCompilerOptions.numberOfDPUGroups = 1;
-    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
-
-    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
+    mlir::PassManager pmBuilderEnd(module->getName(), mlir::OpPassManager::Nesting::Implicit);
     if (conv.compress) {
-        pm.addPass(VPUIP::createCompressWeightsBTCPass(log));
+        pmBuilderEnd.addPass(VPUIP::createCompressWeightsBTCPass(log));
     }
-
-    VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");
+    VPUX_THROW_UNLESS(mlir::succeeded(pmBuilderEnd.run(module)), "Compilation failed");
 
     auto outputTensorTypeVec =
             SmallVector<mlir::Type>{getTensorType(ShapeRef(outputShape), outputType, vpux::DimsOrder::NHWC, nullptr)};

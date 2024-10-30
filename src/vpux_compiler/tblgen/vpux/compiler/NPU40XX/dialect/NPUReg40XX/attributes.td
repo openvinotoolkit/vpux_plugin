@@ -7,19 +7,20 @@
 #define VPUX_COMPILER_DIALECT_NPUReg40XX_ATTRIBUTES
 
 include "vpux/compiler/core/attributes.td"
+include "vpux/compiler/dialect/VPURegMapped/attr_interfaces.td"
 include "vpux/compiler/NPU40XX/dialect/NPUReg40XX/dialect.td"
 
 //
 // Base classes
 //
 
-class NPUReg40XX_I64EnumAttr <string name, string summary, list<I64EnumAttrCase> cases> : 
+class NPUReg40XX_I64EnumAttr <string name, string summary, list<I64EnumAttrCase> cases> :
         I64EnumAttr<name, summary, cases> {
     let cppNamespace = "vpux::NPUReg40XX";
     let genSpecializedAttr = 0;
 }
 
-class NPUReg40XX_EnumAttr <EnumAttrInfo enumInfo, string name = "", list <Trait> traits = []> : 
+class NPUReg40XX_EnumAttr <EnumAttrInfo enumInfo, string name = "", list <Trait> traits = []> :
         EnumAttr<NPUReg40XX_Dialect, enumInfo, name, traits> {
     let assemblyFormat = "`<`$value`>`";
 }
@@ -48,5 +49,7 @@ def NPUReg40XX_TaskType :
 }
 
 def NPUReg40XX_TaskTypeAttr : NPUReg40XX_EnumAttr<NPUReg40XX_TaskType, "task_type">;
+
+def DMADescriptorAttr : DescriptorAttrBase<NPUReg40XX_Dialect, "vpux::NPUReg40XX::Descriptors::DMARegister", "DMARegister"> {}
 
 #endif  // VPUX_COMPILER_DIALECT_NPUReg40XX_ATTRIBUTES

@@ -296,17 +296,20 @@ bool vpux::VPU::NCEPermuteOp::checkStrategyCompatibility(VPU::MultiClusterStrate
     const auto arch = getArch(getOperation());
     // SOK is only enabled on 40XX+, but 37XX also supports it, need to enable and refactor.
     // Tracked by: E116491
+    const auto origInputShape = getShape(this->getInput());
+    const auto expandedChannels = this->getExpandedChannels();
     return strategy == VPU::MultiClusterStrategy::SplitOverHeightOverlapped ||
-           ((arch == VPU::ArchKind::NPU40XX) && strategy == VPU::MultiClusterStrategy::SplitOverKernel);
+           ((arch == VPU::ArchKind::NPU40XX) && strategy == VPU::MultiClusterStrategy::SplitOverKernel &&
+            origInputShape[Dims4D::Act::C] == expandedChannels);
 }
 
-vpux::VPU::DistributedTensorNative vpux::VPU::NCEPermuteOp::getExplicitDistributedTensorAttr(
+vpux::VPU::DistributionInfo vpux::VPU::NCEPermuteOp::getExplicitDistributionInfoAttr(
         vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, ArrayRef<int64_t> numTiles,
         const int64_t numClusters, ArrayRef<int64_t> alignment, const bool uniformDistributedSegments,
         const vpux::VPU::OverlapDistributionParams& overlapParams) {
-    return VPU::getNCEExplicitDistributedTensorNative(mlir::dyn_cast<VPU::NCEOpInterface>(getOperation()), shape,
-                                                      distributionMode, numTiles, numClusters, alignment,
-                                                      uniformDistributedSegments, overlapParams);
+    return VPU::getNCEExplicitDistributionInfo(mlir::dyn_cast<VPU::NCEOpInterface>(getOperation()), shape,
+                                               distributionMode, numTiles, numClusters, alignment,
+                                               uniformDistributedSegments, overlapParams);
 }
 
 bool VPU::NCEPermuteOp::isOperationSplitOverHeightCompatible(const vpux::TileInfo& outputTile) {
@@ -318,28 +321,41 @@ bool VPU::NCEPermuteOp::isOperationSplitOverWidthCompatible(ShapeRef outputShape
 }
 
 bool VPU::NCEPermuteOp::isOperationSplitOverKernelCompatible(ShapeRef outputShape, ShapeRef offset, ShapeRef axis) {
+    const auto arch = getArch(getOperation());
+    const auto origInputShape = getShape(this->getInput());
+    const auto expandedChannels = this->getExpandedChannels();
+    if (arch == VPU::ArchKind::NPU37XX || origInputShape[Dims4D::Act::C] != expandedChannels) {
+        return false;
+    }
     return VPU::isOperationSplitOverKernelCompatible(getOperation(), outputShape, offset, axis);
 }
 
-bool VPU::NCEPermuteOp::doesLayerFitIntoCMX(VPU::MultiClusterStrategy strategy, Byte reservedMem) {
-    auto nceOp = mlir::cast<VPU::NCEPermuteOp>(getOperation());
-    const auto outputType = nceOp->getResult(0).getType().cast<vpux::NDTypeInterface>();
-    auto numClusters = VPU::getOptimalNumClusters(nceOp, outputType.getShape(), strategy);
+vpux::NDTypeInterface vpux::VPU::NCEPermuteOp::getDistributedTypeForOpOperand(mlir::OpOperand& operand,
+                                                                              bool hasExplicitDistributedAttr,
+                                                                              SiblingOpsAnalysis& siblingsAnalysis) {
+    auto clusteredOp = mlir::cast<VPU::ClusteredOpInterface>(getOperation());
+    auto origOp = mlir::cast<NCEPermuteOp>(getOperation());
+    const auto strategy = clusteredOp.getMultiClusterStrategy().value();
+    auto outputTensorType = origOp.getOutput().getType().cast<vpux::NDTypeInterface>();
+    auto numClusters = VPU::getOptimalNumClusters(clusteredOp, outputTensorType.getShape(), strategy);
+    auto* ctx = clusteredOp->getContext();
+    if (operand.get() == origOp.getInput()) {
+        const auto activationTensorDistributionMode = getActivationTensorDistributionMode(clusteredOp, strategy);
+        const auto activationTensorNumTiles =
+                getIntArrayAttr(ctx, getActivationTensorNumTiles(clusteredOp, numClusters, strategy));
 
-    SmallVector<Byte> buffers = {
-            VPU::getTotalAllocSizeWithDistribution(
-                    getInput().getType(),
-                    getActivationDistributionAttrFromOp(nceOp, getInput().getType(), numClusters.getInt(), strategy)),
-            VPU::getTotalAllocSizeWithDistribution(
-                    getOutput().getType(),
-                    getOutputDistributionAttrFromOp(nceOp, getOutput().getType(), numClusters.getInt(), strategy))};
+        mlir::ArrayAttr activationAlignmentAttr = nullptr;
+        const auto activationAlignment = getActivationTensorAlignment(clusteredOp, numClusters, strategy);
+        if (activationAlignment.has_value()) {
+            activationAlignmentAttr = getIntArrayAttr(ctx, activationAlignment.value());
+        }
 
-    auto totalAvailableCMXSize = reservedMem.count() == 0 ? getTotalCMXSize(getOperation()).count()
-                                                          : getTotalCMXFragmentationAwareSize(getOperation()).count();
-
-    return vpux::VPU::calculateAlignedBuffersMemoryRequirement(getArch(getOperation()), buffers).count() +
-                   reservedMem.count() <=
-           totalAvailableCMXSize;
+        return getDistributedTypeFromInput(clusteredOp, origOp.getInput(), activationTensorDistributionMode,
+                                           activationTensorNumTiles, activationAlignmentAttr, strategy,
+                                           hasExplicitDistributedAttr, siblingsAnalysis);
+    }
+    VPUX_THROW("Failed to compute distributed type for op {0}", clusteredOp);
+    return nullptr;
 }
 
 //

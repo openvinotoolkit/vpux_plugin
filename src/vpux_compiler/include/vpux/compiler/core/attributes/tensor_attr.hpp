@@ -44,5 +44,6 @@ TensorAttr getTensorAttr(mlir::RankedTensorType type);
 mlir::AffineMap getOrder(mlir::RankedTensorType type);
 vpux::IndexedSymbolAttr getMemorySpace(mlir::RankedTensorType type);
 mlir::ArrayAttr getBounds(mlir::RankedTensorType type);
+mlir::ArrayAttr getBounds(mlir::Value value);
 
 }  // namespace vpux

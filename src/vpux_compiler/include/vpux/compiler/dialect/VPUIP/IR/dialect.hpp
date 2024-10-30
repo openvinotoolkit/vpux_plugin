@@ -5,13 +5,12 @@
 
 #pragma once
 
-#include "vpux/compiler/dialect/IE/IR/ops.hpp"
-#include "vpux/compiler/dialect/IERT/ops.hpp"
-#include "vpux/compiler/dialect/VPU/IR/ops.hpp"
-#include "vpux/compiler/dialect/const/ops.hpp"
+#include "vpux/compiler/core/attributes/indexed_symbol_attr.hpp"
+#include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 
-#include <mlir/Dialect/Quant/QuantOps.h>
+#include <mlir/Dialect/Async/IR/Async.h>
 #include <mlir/IR/Dialect.h>
+#include <mlir/IR/DialectImplementation.h>
 
 //
 // Generated

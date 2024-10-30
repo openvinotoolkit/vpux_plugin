@@ -46,3 +46,13 @@ void vpux::ELFNPU37XX::CreateSymbolTableSectionOp::serialize(elf::Writer& writer
 
     sectionMap[getOperation()] = section;
 }
+
+void vpux::ELFNPU37XX::CreateSymbolTableSectionOp::preserialize(elf::Writer& writer,
+                                                                vpux::ELFNPU37XX::SectionMapType& sectionMap) {
+    VPUX_UNUSED(writer);
+    VPUX_UNUSED(sectionMap);
+
+    // don't implement and go into elf::Writer internal state first
+    // as there're symbol entries to be updated first
+    // E#136375
+}

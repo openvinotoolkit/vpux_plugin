@@ -209,8 +209,8 @@ mlir::LogicalResult MVNFusion::matchAndRewrite(IE::DivideOp origOp, mlir::Patter
     }
 
     const auto ctx = origOp.getContext();
-    auto preReshapeOp = rewriter.create<IE::ReshapeOp>(origOp.getLoc(), inputMeanOp.getInput(), nullptr, false,
-                                                       getIntArrayAttr(ctx, newShapeOpt.value()));
+    auto preReshapeOp = rewriter.create<IE::ReshapeOp>(takeOpLoc(origOp, "in_reshape"), inputMeanOp.getInput(), nullptr,
+                                                       false, getIntArrayAttr(ctx, newShapeOpt.value()));
 
     const auto normVarianceAttr = mlir::BoolAttr::get(ctx, true);
     const auto acrossChannelsAttr = mlir::BoolAttr::get(ctx, isAcrossChannel);
@@ -220,8 +220,9 @@ mlir::LogicalResult MVNFusion::matchAndRewrite(IE::DivideOp origOp, mlir::Patter
                                             normVarianceAttr, epsAttr);
 
     _log.trace("Replace '{0}' with new op '{1}'", origOp.getLoc(), mvnOp);
-    rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, mvnOp.getOutput(), nullptr, false,
-                                               getIntArrayAttr(ctx, getShape(origOp.getOutput())));
+    auto outReshape = rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, mvnOp.getOutput(), nullptr, false,
+                                                                 getIntArrayAttr(ctx, getShape(origOp.getOutput())));
+    extendOpLoc(outReshape, "out_reshape");
     return mlir::success();
 }
 

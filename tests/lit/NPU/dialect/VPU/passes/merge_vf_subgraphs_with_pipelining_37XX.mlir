@@ -21,7 +21,7 @@ func.func @MergeNonTiledRegion(
         %cst_0 as %arg5: tensor<80x1x1x4xsi32>) attributes {tilingStrategy = [1, 1, 1, 1]} -> tensor<1x80x1024x4xf16, {order = #NHWC}> {
       %3 = VPU.NCE.Convolution(%arg3, %arg4, %arg5)
       {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-      ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
+      opaque_ppe = #VPU.PPEStub<>,
       rawFilterShape = [80, 48, 1, 1], strides = [1, 1]} -> tensor<1x80x1024x4xf16, {order = #NHWC}>
       VPU.Yield %3
    }
@@ -36,7 +36,7 @@ func.func @MergeNonTiledRegion(
         %cst as %arg5: tensor<48x1x1x4xsi32>) attributes {tilingStrategy = [1, 1, 1, 1]} -> tensor<1x48x1024x4xf16, {order = #NHWC}> {
       %3 = VPU.NCE.Convolution(%arg3, %arg4, %arg5)
       {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-      ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
+      opaque_ppe = #VPU.PPEStub<>,
       rawFilterShape = [48, 80, 1, 1], strides = [1, 1]} -> tensor<1x48x1024x4xf16, {order = #NHWC}>
       VPU.Yield %3
    }
@@ -73,7 +73,7 @@ func.func @VFIncreaseTileStrategy(
         %cst_0 as %arg5: tensor<4096x1x1x4xsi32>) attributes {tilingStrategy = [1, 1, 10, 1]} -> tensor<1x4096x1024x4xf16, {order = #NHWC}> {
       %3 = VPU.NCE.Convolution(%arg3, %arg4, %arg5)
       {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-      ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
+      opaque_ppe = #VPU.PPEStub<>,
       rawFilterShape = [4096, 48, 1, 1], strides = [1, 1]} -> tensor<1x4096x1024x4xf16, {order = #NHWC}>
       VPU.Yield %3
    }
@@ -88,7 +88,7 @@ func.func @VFIncreaseTileStrategy(
         %cst_2 as %arg5: tensor<48x1x1x4xsi32>) attributes {tilingStrategy = [1, 1, 10, 1]} -> tensor<1x48x1024x4xf16, {order = #NHWC}> {
       %3 = VPU.NCE.Convolution(%arg3, %arg4, %arg5)
       {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-      ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
+      opaque_ppe = #VPU.PPEStub<>,
       rawFilterShape = [48, 4096, 1, 1], strides = [1, 1]} -> tensor<1x48x1024x4xf16, {order = #NHWC}>
       VPU.Yield %3
    }
@@ -118,8 +118,7 @@ func.func @MergeVFWithoutVFPipelining(
       %3 = VPU.NCE.DepthConvolution(%arg2, %arg3, %arg4) {
          multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
          pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-         ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-         lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
+         opaque_ppe = #VPU.PPEStub<>,
          rawFilterShape = [640, 1, 1, 1], strides = [1, 1]} -> tensor<1x640x64x64xf16, {order = #NHWC}>
       %4 = VPU.Swish(%3) {
          beta_value = 1.000000e+00 : f64,
@@ -134,8 +133,7 @@ func.func @MergeVFWithoutVFPipelining(
          kernel_size = [1, 1],
          multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
          pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-         ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = 0 : i64, clamp_high = 255 : i64,
-         lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [75.397386847614229], fp_prelu_alpha = 75.397384643554688 : f64>,
+         opaque_ppe = #VPU.PPEStub<>,
          strides = [1, 1]} -> tensor<1x640x64x64x!qElemType, {order = #NHWC}>
       VPU.Yield %5
    }

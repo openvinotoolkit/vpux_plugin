@@ -20,34 +20,42 @@ namespace {
 class OptimizeSparsifyDesparsifyPairsPass final :
         public VPU::OptimizeSparsifyDesparsifyPairsBase<OptimizeSparsifyDesparsifyPairsPass> {
 public:
+    explicit OptimizeSparsifyDesparsifyPairsPass(const VPU::ActivationSparsityOptions& options, Logger log) {
+        Base::initLogger(log, Base::getArgumentName());
+        Base::copyOptionValuesFrom(options);
+
+        parseFromOptions();
+    }
+
     explicit OptimizeSparsifyDesparsifyPairsPass(Logger log) {
         Base::initLogger(log, Base::getArgumentName());
     }
 
-    mlir::LogicalResult initialize(mlir::MLIRContext* ctx) final;
-    mlir::LogicalResult delegateInitializeOptions(StringRef actSparsityProfile);
+    mlir::LogicalResult initializeOptions(StringRef options) final;
 
 private:
     void safeRunOnFunc() final;
+    void parseFromOptions();
 
+private:
     VPU::ActivationSparsityProfile _sparsityProfile{VPU::ActivationSparsityProfile::S0};
 };
 
-mlir::LogicalResult OptimizeSparsifyDesparsifyPairsPass::initialize(mlir::MLIRContext* ctx) {
-    if (mlir::failed(Base::initialize(ctx))) {
+mlir::LogicalResult OptimizeSparsifyDesparsifyPairsPass::initializeOptions(StringRef options) {
+    if (mlir::failed(Base::initializeOptions(options))) {
         return mlir::failure();
     }
 
-    const auto parsedSparsityProfile = VPU::symbolizeActivationSparsityProfile(sparsityProfile.getValue());
-    if (!parsedSparsityProfile.has_value()) {
-        return mlir::failure();
-    }
-    _sparsityProfile = parsedSparsityProfile.value();
+    parseFromOptions();
+
     return mlir::success();
 }
 
-mlir::LogicalResult OptimizeSparsifyDesparsifyPairsPass::delegateInitializeOptions(StringRef actSparsityProfile) {
-    return Base::initializeOptions(printToString("{0}={1}", sparsityProfile.getArgStr(), actSparsityProfile));
+void OptimizeSparsifyDesparsifyPairsPass::parseFromOptions() {
+    const auto parsedSparsityProfile = VPU::symbolizeActivationSparsityProfile(this->actSparsityProfile.getValue());
+    if (parsedSparsityProfile.has_value()) {
+        _sparsityProfile = parsedSparsityProfile.value();
+    }
 }
 
 //
@@ -242,17 +250,12 @@ void OptimizeSparsifyDesparsifyPairsPass::safeRunOnFunc() {
 //
 // createOptimizeSparsifyDesparsifyPairsPass
 //
+
 std::unique_ptr<mlir::Pass> vpux::VPU::createOptimizeSparsifyDesparsifyPairsPass(Logger log) {
     return std::make_unique<OptimizeSparsifyDesparsifyPairsPass>(log);
 }
 
-std::unique_ptr<mlir::Pass> vpux::VPU::createAndInitOptimizeSparsifyDesparsifyPairsPass(StringRef actSparsityProfile,
-                                                                                        Logger log) {
-    auto pass = vpux::VPU::createOptimizeSparsifyDesparsifyPairsPass(log);
-    if (mlir::failed(static_cast<OptimizeSparsifyDesparsifyPairsPass*>(pass.get())
-                             ->delegateInitializeOptions(actSparsityProfile))) {
-        VPUX_THROW("Incorrect option used for \"{0}\" pass initialization: {1}", pass->getName(), actSparsityProfile);
-    }
-
-    return pass;
+std::unique_ptr<mlir::Pass> vpux::VPU::createOptimizeSparsifyDesparsifyPairsPass(
+        const VPU::ActivationSparsityOptions& options, Logger log) {
+    return std::make_unique<OptimizeSparsifyDesparsifyPairsPass>(options, log);
 }

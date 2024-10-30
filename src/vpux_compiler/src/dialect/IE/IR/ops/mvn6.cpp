@@ -88,8 +88,8 @@ mlir::LogicalResult ConvertConstToAttr::matchAndRewrite(IE::MVN6Op origOp, mlir:
     }
 
     const auto axesAttr = getIntArrayAttr(getContext(), axes.value());
-    rewriter.replaceOpWithNewOp<IE::MVN6Op>(origOp, origOp.getInput(), nullptr, axesAttr,
-                                            origOp.getNormalizeVarianceAttr(), origOp.getEpsAttr(),
+    rewriter.replaceOpWithNewOp<IE::MVN6Op>(origOp, origOp.getInput(), origOp.getScale(), origOp.getBias(), nullptr,
+                                            axesAttr, origOp.getNormalizeVarianceAttr(), origOp.getEpsAttr(),
                                             origOp.getEpsModeAttr());
     return mlir::success();
 }

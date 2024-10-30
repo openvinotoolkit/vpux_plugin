@@ -10,6 +10,7 @@
 #include "vpux/compiler/dialect/ELFNPU37XX/dialect.hpp"
 #include "vpux/compiler/dialect/IE/IR/dialect.hpp"
 #include "vpux/compiler/dialect/IERT/ops.hpp"  // E#106904: IERT doesn't have a dialect header
+#include "vpux/compiler/dialect/VPU/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPU/utils/dry_run_utils.hpp"
 #include "vpux/compiler/dialect/VPUASM/dialect.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/dialect.hpp"
@@ -18,6 +19,7 @@
 #include "vpux/compiler/dialect/VPUMI40XX/dialect.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPURegMapped/dialect.hpp"
+#include "vpux/compiler/dialect/VPURegMapped/types.hpp"
 #include "vpux/compiler/utils/passes.hpp"
 
 #include "vpux/utils/core/logger.hpp"
@@ -55,6 +57,7 @@ std::unique_ptr<mlir::Pass> createBufferizeIEPass(Logger log = Logger::global())
 
 std::unique_ptr<mlir::Pass> createConvertIEToVPUM2IPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createConvertLayers2VPUPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createConvertDynamicQuantToVPUNCEPass(Logger log = Logger::global());
 
 //
 // LowerVPU2VPUIP
@@ -69,9 +72,9 @@ std::unique_ptr<mlir::Pass> createConvertLayers2VPUPass(Logger log = Logger::glo
 
 std::unique_ptr<mlir::Pass> createOneShotBufferizeVPU2VPUIPPass();
 std::unique_ptr<mlir::Pass> createInPlaceBufferizationAnalyzePass();
+std::unique_ptr<mlir::Pass> createAdjustDynamicOpsBeforeBufferizationPass();
 std::unique_ptr<mlir::Pass> createAddBuffersForNetResults(Logger log = Logger::global());
 
-std::unique_ptr<mlir::Pass> createConvertSWLayers2VPUIPUPAPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createConvertSWLayers2AffinePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createConvertAffine2LLVMPass(Logger log = Logger::global());
 

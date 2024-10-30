@@ -33,6 +33,30 @@ func.func @MoveExpandBeforeMultipleSlices(%arg0: tensor<2x70x4x4xf16>, %arg1: te
 
 // -----
 
+// CHECK-LABEL: func.func @SkipAffineForIncompatibleShapes
+// CHECK-SAME:        [[INPUT:%arg0]]: tensor<1x256x1104x1xf16>
+func.func @SkipAffineForIncompatibleShapes(%arg0: tensor<1x256x1104x1xf16>) -> tensor<1x256x1104x1xf16> {
+    %0 = IE.Slice %arg0 [0, 0, 1, 0] [1, 256, 1, 1] : tensor<1x256x1104x1xf16> to tensor<1x256x1x1xf16>
+    %1 = IE.Slice %arg0 [0, 0, 1102, 0] [1, 256, 1, 1] : tensor<1x256x1104x1xf16> to tensor<1x256x1x1xf16>
+
+    %2 = IE.Concat(%0, %arg0, %1) {static_offsets = [[0, 0, 0, 0], [0, 0, 1, 0], [0, 0, 1105, 0]]} : tensor<1x256x1x1xf16>, tensor<1x256x1104x1xf16>, tensor<1x256x1x1xf16> -> tensor<1x256x1106x1xf16>
+    
+    %3 = IE.Slice %2 [0, 0, 0, 0] [1, 256, 1104, 1] : tensor<1x256x1106x1xf16> to tensor<1x256x1104x1xf16>
+    
+    return %3: tensor<1x256x1104x1xf16>
+
+    // CHECK:   [[SLICE0:%.+]] = IE.Slice [[INPUT]] [0, 0, 1, 0] [1, 256, 1, 1] : tensor<1x256x1104x1xf16> to tensor<1x256x1x1xf16>
+    // CHECK:   [[SLICE1:%.+]] = IE.Slice [[INPUT]]  [0, 0, 1102, 0] [1, 256, 1, 1] : tensor<1x256x1104x1xf16> to tensor<1x256x1x1xf16>
+
+    // CHECK:   [[CONCAT:%.+]] = IE.Concat([[SLICE0]], [[INPUT]], [[SLICE1]])
+
+    // CHECK:   [[SLICE3:%.+]] = IE.Slice [[CONCAT]] [0, 0, 0, 0] [1, 256, 1104, 1] : tensor<1x256x1106x1xf16> to tensor<1x256x1104x1xf16>
+
+    // CHECK:   return [[SLICE3]] : tensor<1x256x1104x1xf16>
+}
+
+// -----
+
 func.func @NoChangesExpandModifiesSliceAxis(%arg0: tensor<1x140x4x4xf16>, %arg1: tensor<16x80x1x1xf16>) -> tensor<2x16x4x4xf16> {
     %0 = IE.Slice %arg0 [0, 0, 0, 0] [1, 70, 4, 4] : tensor<1x140x4x4xf16> to tensor<1x70x4x4xf16>
     %1 = IE.Slice %arg0 [0, 70, 0, 0] [1, 70, 4, 4] : tensor<1x140x4x4xf16> to tensor<1x70x4x4xf16>

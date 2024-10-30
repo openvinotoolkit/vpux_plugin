@@ -45,11 +45,11 @@ TEST_P(LargeMishTest_NPU3720, SW) {
     run(Platform::NPU3720);
 }
 
-INSTANTIATE_TEST_CASE_P(smoke_LargeMishInDDR, LargeMishTest_NPU3720,
-                        ::testing::Values(LargeMishTestParams{
-                                {1, 64, 32, 514}  // in_shape
-                        }),
-                        LargeMishTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_LargeMishInDDR, LargeMishTest_NPU3720,
+                         ::testing::Values(LargeMishTestParams{
+                                 {1, 64, 32, 514}  // in_shape
+                         }),
+                         LargeMishTest_NPU3720::getTestCaseName);
 
 class LargeMishTest_NPU4000 : public LargeMishTest_NPU3720 {};
 
@@ -58,11 +58,11 @@ TEST_P(LargeMishTest_NPU4000, HW) {
     run(Platform::NPU4000);
 }
 
-INSTANTIATE_TEST_CASE_P(smoke_LargeMishInDDR, LargeMishTest_NPU4000,
-                        ::testing::Values(LargeMishTestParams{
-                                {1, 64, 32, 514}  // in_shape
-                        }),
-                        LargeMishTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_LargeMishInDDR, LargeMishTest_NPU4000,
+                         ::testing::Values(LargeMishTestParams{
+                                 {1, 64, 32, 514}  // in_shape
+                         }),
+                         LargeMishTest_NPU3720::getTestCaseName);
 
 class TwoMishTest_NPU3720 : public VpuOv2LayerTest, public testing::WithParamInterface<LargeMishTestParams> {
     void SetUp() override {
@@ -96,11 +96,11 @@ TEST_P(TwoMishTest_NPU3720, SW) {
     run(Platform::NPU3720);
 }
 
-INSTANTIATE_TEST_CASE_P(smoke_TwoMishInDDR, TwoMishTest_NPU3720,
-                        ::testing::Values(LargeMishTestParams{
-                                {1, 32, 32, 514}  // in_shape
-                        }),
-                        TwoMishTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_TwoMishInDDR, TwoMishTest_NPU3720,
+                         ::testing::Values(LargeMishTestParams{
+                                 {1, 32, 32, 514}  // in_shape
+                         }),
+                         TwoMishTest_NPU3720::getTestCaseName);
 
 class TwoMishTest_NPU4000 : public TwoMishTest_NPU3720 {};
 
@@ -111,11 +111,11 @@ TEST_P(TwoMishTest_NPU4000, HW) {
     run(Platform::NPU4000);
 }
 
-INSTANTIATE_TEST_CASE_P(smoke_TwoMishInDDR, TwoMishTest_NPU4000,
-                        ::testing::Values(LargeMishTestParams{
-                                {1, 32, 32, 514}  // in_shape
-                        }),
-                        TwoMishTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_TwoMishInDDR, TwoMishTest_NPU4000,
+                         ::testing::Values(LargeMishTestParams{
+                                 {1, 32, 32, 514}  // in_shape
+                         }),
+                         TwoMishTest_NPU3720::getTestCaseName);
 
 class TwoScatterUpdateTest_NPU3720 : public VpuOv2LayerTest, public testing::WithParamInterface<LargeMishTestParams> {
     void SetUp() override {
@@ -157,11 +157,11 @@ TEST_P(TwoScatterUpdateTest_NPU3720, SW) {
     run(Platform::NPU3720);
 }
 
-INSTANTIATE_TEST_CASE_P(smoke_TwoScatterUpdateInDDR, TwoScatterUpdateTest_NPU3720,
-                        ::testing::Values(LargeMishTestParams{
-                                {1, 64, 32, 514}  // in_shape
-                        }),
-                        TwoScatterUpdateTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_TwoScatterUpdateInDDR, TwoScatterUpdateTest_NPU3720,
+                         ::testing::Values(LargeMishTestParams{
+                                 {1, 64, 32, 514}  // in_shape
+                         }),
+                         TwoScatterUpdateTest_NPU3720::getTestCaseName);
 
 class TwoScatterUpdateTest_NPU4000 : public TwoScatterUpdateTest_NPU3720 {};
 
@@ -170,10 +170,10 @@ TEST_P(TwoScatterUpdateTest_NPU4000, HW) {
     run(Platform::NPU4000);
 }
 
-INSTANTIATE_TEST_CASE_P(smoke_TwoScatterUpdateInDDR, TwoScatterUpdateTest_NPU4000,
-                        ::testing::Values(LargeMishTestParams{
-                                {1, 64, 32, 514}  // in_shape
-                        }),
-                        TwoScatterUpdateTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_TwoScatterUpdateInDDR, TwoScatterUpdateTest_NPU4000,
+                         ::testing::Values(LargeMishTestParams{
+                                 {1, 64, 32, 514}  // in_shape
+                         }),
+                         TwoScatterUpdateTest_NPU3720::getTestCaseName);
 
 }  // namespace ov::test

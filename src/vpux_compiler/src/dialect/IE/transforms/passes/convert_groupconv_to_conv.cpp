@@ -152,35 +152,39 @@ mlir::LogicalResult ConvertGroupConvToConvPass::GroupConvToSingleConvConverter::
         const auto subviewOffsets = Shape{(groupIdx - 1) * groupOutSize, 0, 0, 0};
         const auto subviewStaticShape = Shape{groupOutSize, weightsShape[Dims4D::Filter::IC],
                                               weightsShape[Dims4D::Filter::KY], weightsShape[Dims4D::Filter::KX]};
-        auto groupWeights = weightsContentAttr.subview(subviewOffsets, subviewStaticShape);
+        auto groupWeightsSetup = weightsContentAttr.transform().subview(subviewOffsets, subviewStaticShape);
 
         if (isWeightsHasFQ) {
             SmallVector<mlir::Value> concatInputs;
             if (groupIdx > 1) {
                 const auto padBefore = Shape{groupOutSize, (groupIdx - 1) * groupInSize,
                                              weightsShape[Dims4D::Filter::KY], weightsShape[Dims4D::Filter::KX]};
-                concatInputs.push_back(createConstantOpForPadding(padBefore, weightsElemType, padValue, rewriter,
-                                                                  weightsCst.getLoc()));
+                concatInputs.push_back(
+                        createConstantOpForPadding(padBefore, weightsElemType, padValue, rewriter, origOp.getLoc()));
             }
 
-            concatInputs.push_back(
-                    rewriter.create<Const::DeclareOp>(weightsCst.getLoc(), groupWeights.getType(), groupWeights));
+            auto groupWeights = groupWeightsSetup.get();
+            concatInputs.push_back(rewriter.create<Const::DeclareOp>(origOp.getLoc(), groupWeights.getType(),
+                                                                     std::move(groupWeights)));
 
             if (groupIdx < groupNumb) {
                 const auto padAfter = Shape{groupOutSize, (groupNumb - groupIdx) * groupInSize,
                                             weightsShape[Dims4D::Filter::KY], weightsShape[Dims4D::Filter::KX]};
                 concatInputs.push_back(
-                        createConstantOpForPadding(padAfter, weightsElemType, padValue, rewriter, weightsCst.getLoc()));
+                        createConstantOpForPadding(padAfter, weightsElemType, padValue, rewriter, origOp.getLoc()));
             }
 
-            return rewriter.create<IE::ConcatOp>(weightsCst.getLoc(), concatInputs, Dims4D::Filter::IC).getResult();
+            return rewriter
+                    .create<IE::ConcatOp>(takeOpLoc(origOp, StringLiteral("concat_{0}"), groupIdx), concatInputs,
+                                          Dims4D::Filter::IC)
+                    .getResult();
         }
 
         const auto paddingBefore = Shape{0, (groupIdx - 1) * groupInSize, 0, 0};
         const auto paddingAfter = Shape{0, (groupNumb - groupIdx) * groupInSize, 0, 0};
-        auto newGroupWeights = groupWeights.padWithZero(paddingBefore, paddingAfter);
+        auto newGroupWeights = groupWeightsSetup.padWithZero(paddingBefore, paddingAfter).get();
 
-        return rewriter.create<Const::DeclareOp>(weightsCst.getLoc(), newGroupWeights.getType(), newGroupWeights)
+        return rewriter.create<Const::DeclareOp>(origOp.getLoc(), newGroupWeights.getType(), std::move(newGroupWeights))
                 .getResult();
     };
 
@@ -189,14 +193,16 @@ mlir::LogicalResult ConvertGroupConvToConvPass::GroupConvToSingleConvConverter::
         concatInputs.push_back(reconstructGroupWeights(groupID + 1));
     }
 
-    auto weightsConcat = rewriter.createOrFold<IE::ConcatOp>(weightsCst.getLoc(), concatInputs, Dims4D::Filter::OC);
+    auto weightsConcat =
+            rewriter.createOrFold<IE::ConcatOp>(takeOpLoc(origOp, "weights_concat"), concatInputs, Dims4D::Filter::OC);
 
     auto newWeights = weightsConcat;
     if (isWeightsHasFQ) {
-        newWeights = rewriter.create<IE::FakeQuantizeOp>(weightsFQ.getLoc(), newWeights, weightsFQ.getInputLow(),
-                                                         weightsFQ.getInputHigh(), weightsFQ.getOutputLow(),
-                                                         weightsFQ.getOutputHigh(), weightsFQ.getLevelsAttr(),
-                                                         weightsFQ.getLowFpTypeAttr(), weightsFQ.getAutoBroadcastAttr())
+        newWeights = rewriter.create<IE::FakeQuantizeOp>(takeOpLoc(origOp, "weights_fq"), newWeights,
+                                                         weightsFQ.getInputLow(), weightsFQ.getInputHigh(),
+                                                         weightsFQ.getOutputLow(), weightsFQ.getOutputHigh(),
+                                                         weightsFQ.getLevelsAttr(), weightsFQ.getLowFpTypeAttr(),
+                                                         weightsFQ.getAutoBroadcastAttr())
                              .getResult();
         weightsFQ.replaceAllUsesWith(newWeights);
         weightsFQ.erase();
@@ -204,7 +210,8 @@ mlir::LogicalResult ConvertGroupConvToConvPass::GroupConvToSingleConvConverter::
 
     rewriter.replaceOpWithNewOp<IE::ConvolutionOp>(origOp, origOp.getInput(), newWeights, origOp.getBias(),
                                                    origOp.getStrides(), origOp.getPadsBegin(), origOp.getPadsEnd(),
-                                                   origOp.getDilations(), nullptr, nullptr, nullptr);
+                                                   origOp.getDilations(), nullptr, nullptr, nullptr,
+                                                   origOp.getOutputChannelsAttr(), origOp.getInputChannelsAttr());
 
     return mlir::success();
 }
@@ -253,8 +260,8 @@ mlir::LogicalResult ConvertGroupConvToConvPass::GroupConvToMultiConvConverter::m
         Shape inputOffsets = Shape(inputShape.size(), 0);
         inputOffsets[Dims4D::Act::C] = checked_cast<int64_t>(inputShape[Dims4D::Act::C] / group * sliceIdx);
         const auto inputOffsetsAttr = getIntArrayAttr(getContext(), inputOffsets);
-        const auto inputSlice =
-                rewriter.createOrFold<IE::SliceOp>(origOp->getLoc(), input, inputOffsetsAttr, inputShapeAttr);
+        const auto inputSlice = rewriter.createOrFold<IE::SliceOp>(
+                takeOpLoc(origOp, StringLiteral("slice_in_{0}"), sliceIdx), input, inputOffsetsAttr, inputShapeAttr);
 
         // Slice weights
         Shape weightsOffsets = Shape(weightsShape.size(), 0);
@@ -269,32 +276,38 @@ mlir::LogicalResult ConvertGroupConvToConvPass::GroupConvToMultiConvConverter::m
             auto outputLow = fakeQuantizeOp.getOutputLow();
             auto outputHigh = fakeQuantizeOp.getOutputHigh();
 
-            auto newInput = rewriter.createOrFold<IE::SliceOp>(fakeQuantizeOp->getLoc(), fakeQuantizeOp.getInput(),
-                                                               weightsOffsetsAttr, weightsShapeAttr);
+            auto newInput = rewriter.createOrFold<IE::SliceOp>(
+                    takeOpLoc(fakeQuantizeOp, StringLiteral("slice_in_{0}"), sliceIdx), fakeQuantizeOp.getInput(),
+                    weightsOffsetsAttr, weightsShapeAttr);
             if (inputLow.getType().cast<vpux::NDTypeInterface>().getShape()[Dims4D::Filter::OC] != 1) {
                 inputLow = mlir::cast<mlir::TypedValue<mlir::RankedTensorType>>(rewriter.createOrFold<IE::SliceOp>(
-                        fakeQuantizeOp->getLoc(), inputLow, weightsOffsetsAttr, fakeQuantizeParamShapeAttr));
+                        takeOpLoc(fakeQuantizeOp, StringLiteral("slice_in_low_{0}"), sliceIdx), inputLow,
+                        weightsOffsetsAttr, fakeQuantizeParamShapeAttr));
             }
             if (outputLow.getType().cast<vpux::NDTypeInterface>().getShape()[Dims4D::Filter::OC] != 1) {
                 outputLow = mlir::cast<mlir::TypedValue<mlir::RankedTensorType>>(rewriter.createOrFold<IE::SliceOp>(
-                        fakeQuantizeOp->getLoc(), outputLow, weightsOffsetsAttr, fakeQuantizeParamShapeAttr));
+                        takeOpLoc(fakeQuantizeOp, StringLiteral("slice_out_low_{0}"), sliceIdx), outputLow,
+                        weightsOffsetsAttr, fakeQuantizeParamShapeAttr));
             }
             if (inputHigh.getType().cast<vpux::NDTypeInterface>().getShape()[Dims4D::Filter::OC] != 1) {
                 inputHigh = mlir::cast<mlir::TypedValue<mlir::RankedTensorType>>(rewriter.createOrFold<IE::SliceOp>(
-                        fakeQuantizeOp->getLoc(), inputHigh, weightsOffsetsAttr, fakeQuantizeParamShapeAttr));
+                        takeOpLoc(fakeQuantizeOp, StringLiteral("slice_in_high_{0}"), sliceIdx), inputHigh,
+                        weightsOffsetsAttr, fakeQuantizeParamShapeAttr));
             }
             if (outputHigh.getType().cast<vpux::NDTypeInterface>().getShape()[Dims4D::Filter::OC] != 1) {
                 outputHigh = mlir::cast<mlir::TypedValue<mlir::RankedTensorType>>(rewriter.createOrFold<IE::SliceOp>(
-                        fakeQuantizeOp->getLoc(), outputHigh, weightsOffsetsAttr, fakeQuantizeParamShapeAttr));
+                        takeOpLoc(fakeQuantizeOp, StringLiteral("slice_out_high_{0}"), sliceIdx), outputHigh,
+                        weightsOffsetsAttr, fakeQuantizeParamShapeAttr));
             }
 
-            weightsSlice = rewriter.create<IE::FakeQuantizeOp>(fakeQuantizeOp.getLoc(), newInput, inputLow, inputHigh,
-                                                               outputLow, outputHigh, fakeQuantizeOp.getLevelsAttr(),
-                                                               fakeQuantizeOp.getLowFpTypeAttr(),
-                                                               fakeQuantizeOp.getAutoBroadcastAttr());
+            weightsSlice = rewriter.create<IE::FakeQuantizeOp>(
+                    takeOpLoc(fakeQuantizeOp, StringLiteral("weights_fq_{0}"), sliceIdx), newInput, inputLow, inputHigh,
+                    outputLow, outputHigh, fakeQuantizeOp.getLevelsAttr(), fakeQuantizeOp.getLowFpTypeAttr(),
+                    fakeQuantizeOp.getAutoBroadcastAttr());
         } else {
             weightsSlice =
-                    rewriter.createOrFold<IE::SliceOp>(origOp->getLoc(), weights, weightsOffsetsAttr, weightsShapeAttr);
+                    rewriter.createOrFold<IE::SliceOp>(takeOpLoc(origOp, StringLiteral("weights_slice_{0}"), sliceIdx),
+                                                       weights, weightsOffsetsAttr, weightsShapeAttr);
         }
 
         // Slice Bias
@@ -315,7 +328,7 @@ mlir::LogicalResult ConvertGroupConvToConvPass::GroupConvToMultiConvConverter::m
         auto newConvLoc = appendLoc(origOp->getLoc(), "_ConvertGroupConv_{0}", sliceIdx);
         auto convOp = rewriter.create<IE::ConvolutionOp>(
                 newConvLoc, inputSlice, weightsSlice, biasSlice, origOp.getStrides(), origOp.getPadsBegin(),
-                origOp.getPadsEnd(), origOp.getDilations(), nullptr, nullptr, nullptr);
+                origOp.getPadsEnd(), origOp.getDilations(), nullptr, nullptr, nullptr, nullptr, nullptr);
 
         slices.push_back(convOp);
     }

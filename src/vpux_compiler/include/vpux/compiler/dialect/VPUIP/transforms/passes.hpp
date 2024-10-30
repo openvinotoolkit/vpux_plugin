@@ -52,13 +52,14 @@ std::unique_ptr<mlir::Pass> createUnrollExpandDMAPass(Logger log = Logger::globa
 std::unique_ptr<mlir::Pass> createUnrollPerAxisTileDMAPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createUnrollSwKernelPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createDMABarrierOptimizationPass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createReduceBarrierDependenciesPass(Logger log = Logger::global());
+
 std::unique_ptr<mlir::Pass> createFuseConstantsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createResolveDMAWithSwizzlingPass(Logger log = Logger::global());
 
 std::unique_ptr<mlir::Pass> createMovePureViewOpBeforeCopyPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createOptimizeCopiesPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createOptimizeConcatViewCopiesPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createOptimizeSubviewCopiesPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createOptimizeParallelCopiesPass(bool enableOptimizeConstCopy = true,
                                                              Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createFuseLastCopyPass(Logger log = Logger::global());
@@ -68,16 +69,15 @@ std::unique_ptr<mlir::Pass> createSetMemorySpacePass(MemKindCreateFunc memKindCb
 std::unique_ptr<mlir::Pass> createConvertEltwiseToInPlacePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createInsertCopyForEltwiseInPlaceInputPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createLinearizationPass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createMaximizeUPACyclesPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createBreakDataFlowPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createPatchWeightsTablePass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createPatchPopulateWeightTableWithShavePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createDMATaskProfilingReserveMemPass(
         DMAProfilingMode dmaProfilingMode = DMAProfilingMode::DISABLED, Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createDMATaskProfilingAfterBarrierSchedPass(
         DMAProfilingMode dmaProfilingMode = DMAProfilingMode::DISABLED, Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createCaptureWorkpointPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createDPUProfilingPass(MemKindCreateFunc memKindCb, Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createUPAProfilingPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createGroupProfilingBuffersPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createActShaveProfilingPass(MemKindCreateFunc memKindCb, Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createWrapWithPermuteAsNNDMAPass(Logger log = Logger::global());
@@ -106,6 +106,8 @@ std::unique_ptr<mlir::Pass> createSWKernelPrefetchingReserveMemPass(Logger log =
 std::unique_ptr<mlir::Pass> createFuseDDRCopiesIntoConcats(Logger log = Logger::global());
 
 std::unique_ptr<mlir::Pass> createLegalizeRepeatingFuncCallsPass(Logger log = Logger::global());
+
+std::unique_ptr<mlir::Pass> createAddCopyBetweenSWKernelsAndNetworkIOPass(Logger log = Logger::global());
 
 //
 // Asynchronous Scheduling pipeline
@@ -167,6 +169,9 @@ struct DefaultHWOptionsDialectBase : public virtual vpux::DefaultHWOptionsBase {
 
     BoolOption enableSWProfiling{*this, "sw-profiling", llvm::cl::desc("Enable SW task profiling"),
                                  llvm::cl::init(true)};
+
+    BoolOption enableM2IProfiling{*this, "m2i-profiling", llvm::cl::desc("Enable M2I task profiling"),
+                                  llvm::cl::init(true)};
 
     BoolOption enableOptimizeCopies{*this, "optimize-copies", llvm::cl::desc("Enable optimize-copies pass"),
                                     llvm::cl::init(true)};

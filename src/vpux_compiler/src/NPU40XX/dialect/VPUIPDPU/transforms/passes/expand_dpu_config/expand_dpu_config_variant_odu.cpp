@@ -26,7 +26,19 @@ mlir::LogicalResult buildODUOutSubtensor(mlir::OpBuilder& builder, const mlir::L
 }
 
 mlir::LogicalResult buildODUHaloRegionOp(mlir::OpBuilder& builder, const mlir::Location& loc, const Logger& log,
-                                         mlir::ArrayAttr haloRegions, bool outSparsityEnabled) {
+                                         mlir::Block* varBlock, mlir::ArrayAttr haloRegions, bool outSparsityEnabled) {
+    if (!haloRegions.empty()) {
+        builder.setInsertionPointToEnd(varBlock);
+
+        auto haloCfgOp = builder.create<ODUHaloCfgOp>(loc);
+        auto& region = haloCfgOp.getOperation()->getRegion(0);
+        auto entryBlock = builder.createBlock(&region);
+
+        if (entryBlock == nullptr) {
+            log.error("Error creating entry block for ODUHaloCfgOp");
+            return mlir::failure();
+        }
+    }
     for (const auto& attr : haloRegions) {
         auto haloRegion = attr.dyn_cast<VPUIP::DPUHaloRegionAttr>();
         if (!haloRegion) {
@@ -64,6 +76,7 @@ mlir::LogicalResult buildODUHaloRegionOp(mlir::OpBuilder& builder, const mlir::L
 
 mlir::LogicalResult vpux::VPUIPDPU::arch40xx::buildDPUVariantODU(VPUASM::DPUVariantOp origVarOp,
                                                                  mlir::OpBuilder& builder, const Logger& log,
+                                                                 mlir::Block* varBlock,
                                                                  ELF::SymbolReferenceMap& symRefMap) {
     if (buildODUOutSubtensor(builder, origVarOp.getLoc(), log, parseIntArrayAttr<int64_t>(origVarOp.getStart()),
                              parseIntArrayAttr<int64_t>(origVarOp.getEnd()))
@@ -73,7 +86,7 @@ mlir::LogicalResult vpux::VPUIPDPU::arch40xx::buildDPUVariantODU(VPUASM::DPUVari
 
     auto origInvOp = mlir::cast<VPUASM::DPUInvariantOp>(symRefMap.lookupSymbol(origVarOp.getInvariant()));
     if (auto haloRegions = origVarOp.getHaloRegionsAttr()) {
-        if (buildODUHaloRegionOp(builder, origVarOp.getLoc(), log, haloRegions,
+        if (buildODUHaloRegionOp(builder, origVarOp.getLoc(), log, varBlock, haloRegions,
                                  origInvOp.getOutputSparsityMap().has_value())
                     .failed()) {
             return mlir::failure();

@@ -102,8 +102,8 @@ func.func @main(%1: memref<1x1x1x32xf16>, %2: memref<1x1x1x32xf16>) -> memref<1x
   // CHECK:       ELF.Reloc offset(1288) sourceSym(@symtab::@elfsym.task.shave.invocation.0.0) relocType(<R_VPU_64>) addend(0)
   // CHECK:       ELF.Reloc offset(1568) sourceSym(@symtab::@elfsym.program.managedBarrier) relocType(<R_VPU_64>) addend(0)
   // CHECK:       ELF.Reloc offset(1600) sourceSym(@symtab::@elfsym.shave.runtime) relocType(<R_VPU_64>) addend(0)
-  // CHECK:       ELF.Reloc offset(1760) sourceSym(@symtab::@elfsym.program.workItem) relocType(<R_VPU_64>) addend(0) (description : "")
-  // CHECK:       ELF.Reloc offset(1800) sourceSym(@symtab::@elfsym.program.managedBarrier) relocType(<R_VPU_64>) addend(0) (description : "")
-  // CHECK:       ELF.Reloc offset(2080) sourceSym(@symtab::@elfsym.program.bootstrap) relocType(<R_VPU_64>) addend(0) (description : "")
+  // CHECK:       ELF.Reloc offset(1760) sourceSym(@symtab::@elfsym.program.workItem) relocType(<R_VPU_64>) addend(0)
+  // CHECK:       ELF.Reloc offset(1800) sourceSym(@symtab::@elfsym.program.managedBarrier) relocType(<R_VPU_64>) addend(0) 
+  // CHECK:       ELF.Reloc offset(2080) sourceSym(@symtab::@elfsym.program.bootstrap) relocType(<R_VPU_64>) addend(0)
 
 }

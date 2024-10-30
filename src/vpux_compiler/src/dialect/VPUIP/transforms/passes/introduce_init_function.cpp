@@ -162,7 +162,8 @@ mlir::Operation* IntroduceInitFunctionPass::createMatchingOperation(mlir::OpBuil
                 auto bias = Const::createConst<float>(builder, biasLoc, biasType, {biasValue});
 
                 return builder.create<IE::AddOp>(loc, input, bias, IE::AutoBroadcastType::NUMPY,
-                                                 /*postOp=*/nullptr, /*clamp=*/nullptr);
+                                                 /*postOp=*/nullptr, /*clamp=*/nullptr, /*outputChannels=*/nullptr,
+                                                 /*inputChannels=*/nullptr);
             })
             .Case<Const::BroadcastAttr>([&](Const::BroadcastAttr broadcast) {
                 const auto axis = broadcast.getAxis().getInt();
@@ -186,7 +187,7 @@ mlir::Operation* IntroduceInitFunctionPass::createMatchingOperation(mlir::OpBuil
                         getIntArrayOfArray(changeShapeAndElemType.getContext(), reassociationMap.value());
                 return builder.create<IE::AffineReshapeOp>(loc, input, dimMapping, changeShapeAndElemType.getShape());
             })
-            .Case<Const::ConvertElemTypeAttr>([&](Const::ConvertElemTypeAttr convert) {
+            .Case<Const::CastElemTypeAttr>([&](Const::CastElemTypeAttr convert) {
                 return builder.create<IE::ConvertOp>(loc, input, convert.getElemType());
             })
             .Case<Const::DequantizeAttr>([&](Const::DequantizeAttr /*dequantize*/) {
@@ -224,7 +225,8 @@ mlir::Operation* IntroduceInitFunctionPass::createMatchingOperation(mlir::OpBuil
                 auto scale = Const::createConst<float>(builder, scaleLoc, scaleType, {scaleValue});
 
                 return builder.create<IE::MultiplyOp>(loc, input, scale, IE::AutoBroadcastType::NUMPY,
-                                                      /*postOp=*/nullptr, /*clamp=*/nullptr);
+                                                      /*postOp=*/nullptr, /*clamp=*/nullptr,
+                                                      /*outputChannels=*/nullptr, /*inputChannels=*/nullptr);
             })
             .Case<Const::ReshapeAttr>([&](Const::ReshapeAttr reshape) {
                 return builder.create<IE::ReshapeOp>(loc, input, /*shape=*/nullptr, /*specialZero=*/nullptr,
@@ -252,7 +254,8 @@ mlir::Operation* IntroduceInitFunctionPass::createMatchingOperation(mlir::OpBuil
                         }
 
                         auto contentAttr = Const::ContentAttr::get(data);
-                        auto inverse = builder.create<Const::DeclareOp>(inverseLoc, inverseType, contentAttr);
+                        auto inverse =
+                                builder.create<Const::DeclareOp>(inverseLoc, inverseType, std::move(contentAttr));
 
                         return builder.create<IE::DivideOp>(loc, inverse, input, IE::AutoBroadcastType::NUMPY);
                     })

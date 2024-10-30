@@ -30,13 +30,16 @@ public:
 
 public:
     ReservedMemInfo(mlir::ModuleOp moduleOp, mlir::AnalysisManager& am);
-    ReservedMemInfo(mlir::func::FuncOp netFunc, AllocationInfo& allocationInfo, MemLiveRangeInfo& liveRangeInfo);
+    ReservedMemInfo(mlir::func::FuncOp netFunc);
 
     // returns reserved addresses and sizes for func
     MemReservedMap& getReservedMemInfo(mlir::StringRef funcName);
 
 private:
-    void init(mlir::func::FuncOp netFunc, AllocationInfo& allocationInfo, MemLiveRangeInfo& liveRangeInfo);
+    ReservedAddressAndSizeVector getUniqueRanges(const ValueOrderedSet& buffers, ScanResult& scanResult);
+    void reserveFunctionRanges(mlir::func::FuncOp netFunc, MemLiveRangeInfo& liveRangeInfo, ScanResult& scanResult);
+    void reserveModuleRanges(ScanResult& scanResult);
+    void linearizeCallOps(mlir::func::FuncOp netFunc, AsyncDepsInfo& depsInfo);
 
 private:
     Logger _log = Logger::global().nest("reserved-mem-info", 0);

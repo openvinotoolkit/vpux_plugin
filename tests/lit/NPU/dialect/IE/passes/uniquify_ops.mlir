@@ -97,6 +97,26 @@ func.func @UniquifyExpands(%arg0: tensor<1x13x227x227xf16, {order = #NHWC}>) -> 
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
+// CHECK-LABEL: @SkipUniquifyExpandsIfAttrDiff
+// CHECK-SAME:        [[INPUT1:%arg[0-9]]]: tensor<1x10x227x227xf16, {order = #NHWC}>
+func.func @SkipUniquifyExpandsIfAttrDiff(%arg0: tensor<1x10x227x227xf16, {order = #NHWC}>) -> tensor<1x16x227x227x!quant.uniform<u8:f16, 1.1534313725490195:128>, {order = #NHWC}> {
+    %0 = IE.Expand(%arg0) {pads_begin = [0, 0, 0, 0], pads_end = [0, 6, 0, 0]} : tensor<1x10x227x227xf16, {order = #NHWC}> -> tensor<1x16x227x227xf16, {order = #NHWC}>
+    %1 = IE.Expand(%arg0) {pads_begin = [0, 3, 0, 0], pads_end = [0, 3, 0, 0]} : tensor<1x10x227x227xf16, {order = #NHWC}> -> tensor<1x16x227x227xf16, {order = #NHWC}>
+    %2 = IE.And(%0, %1) {auto_broadcast = #IE.auto_broadcast_type<NONE_OR_EXPLICIT>} : tensor<1x16x227x227xf16, {order = #NHWC}>, tensor<1x16x227x227xf16, {order = #NHWC}> -> tensor<1x16x227x227x!quant.uniform<u8:f16, 1.1534313725490195:128>, {order = #NHWC}>
+
+    return %2 : tensor<1x16x227x227x!quant.uniform<u8:f16, 1.1534313725490195:128>, {order = #NHWC}>
+
+    //CHECK:      [[EXPAND_0:%.*]] = IE.Expand([[INPUT1]]) {pads_begin = [0, 0, 0, 0], pads_end = [0, 6, 0, 0]} : tensor<1x10x227x227xf16, {order = #NHWC}> -> tensor<1x16x227x227xf16, {order = #NHWC}>
+    //CHECK:      [[EXPAND_1:%.*]] = IE.Expand([[INPUT1]]) {pads_begin = [0, 3, 0, 0], pads_end = [0, 3, 0, 0]} : tensor<1x10x227x227xf16, {order = #NHWC}> -> tensor<1x16x227x227xf16, {order = #NHWC}>
+    //CHECK:      [[And:%.*]] = IE.And([[EXPAND_0]], [[EXPAND_1]]) {auto_broadcast = #IE.auto_broadcast_type<NONE_OR_EXPLICIT>} : tensor<1x16x227x227xf16, {order = #NHWC}>, tensor<1x16x227x227xf16, {order = #NHWC}> -> tensor<1x16x227x227x!qElemType, {order = #NHWC}>
+
+    // CHECK: return [[And]] : tensor<1x16x227x227x!qElemType, {order = #NHWC}>
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
 func.func @UniquifyExpandReorders(%arg0: tensor<1x13x227x227xf16>) -> tensor<2x16x227x227xf16, {order = #NHWC}> {
     %0 = IE.Reorder(%arg0) {dstOrder = #NHWC} : tensor<1x13x227x227xf16> -> tensor<1x13x227x227xf16, {order = #NHWC}>
     %1 = IE.Expand(%0) {pads_begin = [0, 0, 0, 0], pads_end = [0, 3, 0, 0]} : tensor<1x13x227x227xf16, {order = #NHWC}> -> tensor<1x16x227x227xf16, {order = #NHWC}>
@@ -691,4 +711,35 @@ func.func @UniquifyFloor(%arg0: tensor<1x1x1x880xf16>) -> (tensor<1x1x1x880xf16>
     // CHECK: [[VAL0:%.*]] = IE.Floor({{[^:]+}})
     // CHECK-NOT: IE.Floor
     // CHECK: return [[VAL0]], [[VAL0]] : tensor<1x1x1x880xf16>, tensor<1x1x1x880xf16>
+}
+
+// -----
+
+// CHECK-LABEL: @UniquifyAffineReshapeWithMaxIterations
+// CHECK-SAME:        [[INPUT1:%arg[0-9]]]: tensor<15x2xf16>
+func.func @UniquifyAffineReshapeWithMaxIterations(%arg0: tensor<15x2xf16>) -> tensor<390xf16> {
+    %0 = IE.AffineReshape(%arg0) { dim_mapping = [[0], [1]], shape_value = [30] } : tensor<15x2xf16> -> tensor<30xf16>
+    %1 = IE.AffineReshape(%arg0) { dim_mapping = [[0], [1]], shape_value = [30] } : tensor<15x2xf16> -> tensor<30xf16>
+    %2 = IE.AffineReshape(%arg0) { dim_mapping = [[0], [1]], shape_value = [30] } : tensor<15x2xf16> -> tensor<30xf16>
+    %3 = IE.AffineReshape(%arg0) { dim_mapping = [[0], [1]], shape_value = [30] } : tensor<15x2xf16> -> tensor<30xf16>
+    %4 = IE.AffineReshape(%arg0) { dim_mapping = [[0], [1]], shape_value = [30] } : tensor<15x2xf16> -> tensor<30xf16>
+    %5 = IE.AffineReshape(%arg0) { dim_mapping = [[0], [1]], shape_value = [30] } : tensor<15x2xf16> -> tensor<30xf16>
+    %6 = IE.AffineReshape(%arg0) { dim_mapping = [[0], [1]], shape_value = [30] } : tensor<15x2xf16> -> tensor<30xf16>
+    %7 = IE.AffineReshape(%arg0) { dim_mapping = [[0], [1]], shape_value = [30] } : tensor<15x2xf16> -> tensor<30xf16>
+    %8 = IE.AffineReshape(%arg0) { dim_mapping = [[0], [1]], shape_value = [30] } : tensor<15x2xf16> -> tensor<30xf16>
+    %9 = IE.AffineReshape(%arg0) { dim_mapping = [[0], [1]], shape_value = [30] } : tensor<15x2xf16> -> tensor<30xf16>
+    %10 = IE.AffineReshape(%arg0) { dim_mapping = [[0], [1]], shape_value = [30] } : tensor<15x2xf16> -> tensor<30xf16>
+    %11 = IE.AffineReshape(%arg0) { dim_mapping = [[0], [1]], shape_value = [30] } : tensor<15x2xf16> -> tensor<30xf16>
+    %12 = IE.AffineReshape(%arg0) { dim_mapping = [[0], [1]], shape_value = [30] } : tensor<15x2xf16> -> tensor<30xf16>
+    %13 = IE.Concat(%0, %1, %2, %3, %4, %5, %6, %7, %8, %9, %10, %11, %12) {static_offsets = [[0], [30], [60], [90], [120], [150], [180], [210], [240], [270], [300], [330], [360]]}
+         : tensor<30xf16>, tensor<30xf16>, tensor<30xf16>, tensor<30xf16>, tensor<30xf16>, tensor<30xf16>, tensor<30xf16>, tensor<30xf16>, tensor<30xf16>, tensor<30xf16>, tensor<30xf16>, tensor<30xf16>, tensor<30xf16> -> tensor<390xf16>
+
+    return %13 : tensor<390xf16>
+
+    // CHECK: [[RESHAPE:%.*]] = IE.AffineReshape([[INPUT1]])
+    // CHECK-SAME{LITERAL}:     {dim_mapping = [[0], [1]], shape_value = [30]} : tensor<15x2xf16> -> tensor<30xf16>
+    // CHECK: [[CONCAT:%.*]] = IE.Concat([[RESHAPE]], [[RESHAPE]], [[RESHAPE]], [[RESHAPE]], [[RESHAPE]], [[RESHAPE]], [[RESHAPE]], [[RESHAPE]], [[RESHAPE]], [[RESHAPE]], [[RESHAPE]], [[RESHAPE]], [[RESHAPE]])
+    // CHECK-SAME{LITERAL}:     {static_offsets = [[0], [30], [60], [90], [120], [150], [180], [210], [240], [270], [300], [330], [360]]} : tensor<30xf16>, tensor<30xf16>, tensor<30xf16>, tensor<30xf16>, tensor<30xf16>, tensor<30xf16>, tensor<30xf16>, tensor<30xf16>, tensor<30xf16>, tensor<30xf16>, tensor<30xf16>, tensor<30xf16>, tensor<30xf16> -> tensor<390xf16>
+
+    // CHECK: return [[CONCAT]] : tensor<390xf16>
 }

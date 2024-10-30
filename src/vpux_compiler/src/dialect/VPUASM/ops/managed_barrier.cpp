@@ -28,12 +28,8 @@ size_t vpux::VPUASM::ManagedBarrierOp::getAlignmentRequirements() {
     return alignof(nn_public::VpuTaskBarrierMap);
 }
 
-vpux::ELF::SectionFlagsAttr vpux::VPUASM::ManagedBarrierOp::getAccessingProcs(mlir::SymbolUserMap&) {
+vpux::ELF::SectionFlagsAttr vpux::VPUASM::ManagedBarrierOp::getPredefinedMemoryAccessors() {
     return (ELF::SectionFlagsAttr::SHF_EXECINSTR);
-}
-
-vpux::ELF::SectionFlagsAttr vpux::VPUASM::ManagedBarrierOp::getUserProcs() {
-    return (ELF::SectionFlagsAttr::SHF_NONE);
 }
 
 std::optional<ELF::SectionSignature> vpux::VPUASM::ManagedBarrierOp::getSectionSignature() {

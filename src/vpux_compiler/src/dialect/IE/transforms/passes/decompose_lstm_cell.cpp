@@ -1,7 +1,9 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2023-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
+
+#include <utility>
 
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 
@@ -19,11 +21,12 @@ namespace {
 
 class LSTMCellRewriter final : public mlir::OpRewritePattern<IE::LSTMCellOp> {
 public:
-    LSTMCellRewriter(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<IE::LSTMCellOp>(ctx), _log(log) {
+    LSTMCellRewriter(mlir::MLIRContext* ctx, Logger log)
+            : mlir::OpRewritePattern<IE::LSTMCellOp>(ctx), _log(std::move(log)) {
         this->setDebugName("LSTMCellRewriter");
     }
 
-    mlir::LogicalResult matchAndRewrite(IE::LSTMCellOp addOp, mlir::PatternRewriter& rewriter) const final;
+    mlir::LogicalResult matchAndRewrite(IE::LSTMCellOp lstmCell, mlir::PatternRewriter& rewriter) const final;
 
 private:
     Logger _log;
@@ -35,21 +38,29 @@ mlir::LogicalResult LSTMCellRewriter::matchAndRewrite(IE::LSTMCellOp lstmCell, m
     }
     _log.trace("Got op {0} at {1}", lstmCell->getName(), lstmCell->getLoc());
 
-    auto matMulInputOp = rewriter.create<IE::MatMulOp>(takeOpLoc(lstmCell, "in_mul"), lstmCell.getInputData(),
-                                                       lstmCell.getWeights(), false, true);
-    auto matMulHiddenStateOp =
+    mlir::Value newInput = lstmCell.getInputData();
+    if (lstmCell.getWeights()) {
+        newInput = rewriter.create<IE::MatMulOp>(takeOpLoc(lstmCell, "in_mul"), lstmCell.getInputData(),
+                                                 lstmCell.getWeights(), false, true);
+    }
+
+    if (lstmCell.getBiases()) {
+        newInput =
+                rewriter.create<IE::AddOp>(takeOpLoc(lstmCell, "bias"), newInput, lstmCell.getBiases(),
+                                           IE::AutoBroadcastTypeAttr::get(getContext(), IE::AutoBroadcastType::NUMPY),
+                                           nullptr, nullptr, nullptr, nullptr);
+    }
+
+    const mlir::Value matMulHiddenState =
             rewriter.create<IE::MatMulOp>(takeOpLoc(lstmCell, "mul_hid"), lstmCell.getInitialHiddenState(),
                                           lstmCell.getRecurrenceWeights(), false, true);
 
-    auto biasesAddOp = rewriter.create<IE::AddOp>(
-            takeOpLoc(lstmCell, "bias"), matMulInputOp.getOutput(), lstmCell.getBiases(),
-            IE::AutoBroadcastTypeAttr::get(getContext(), IE::AutoBroadcastType::NUMPY), nullptr, nullptr);
-    auto lstmGatesInputOp = rewriter.create<IE::AddOp>(
-            takeOpLoc(lstmCell, "gates"), biasesAddOp.getOutput(), matMulHiddenStateOp.getOutput(),
-            IE::AutoBroadcastTypeAttr::get(getContext(), IE::AutoBroadcastType::NONE_OR_EXPLICIT), nullptr, nullptr);
+    const mlir::Value lstmGatesInput = rewriter.create<IE::AddOp>(
+            takeOpLoc(lstmCell, "gates"), newInput, matMulHiddenState,
+            IE::AutoBroadcastTypeAttr::get(getContext(), IE::AutoBroadcastType::NONE_OR_EXPLICIT), nullptr, nullptr,
+            nullptr, nullptr);
 
-    rewriter.replaceOpWithNewOp<IE::LSTMGatesOp>(lstmCell, lstmGatesInputOp.getOutput(),
-                                                 lstmCell.getInitialCellState());
+    rewriter.replaceOpWithNewOp<IE::LSTMGatesOp>(lstmCell, lstmGatesInput, lstmCell.getInitialCellState());
 
     return mlir::success();
 }
@@ -61,7 +72,7 @@ mlir::LogicalResult LSTMCellRewriter::matchAndRewrite(IE::LSTMCellOp lstmCell, m
 class DecomposeLSTMCellPass final : public IE::DecomposeLSTMCellBase<DecomposeLSTMCellPass> {
 public:
     explicit DecomposeLSTMCellPass(Logger log) {
-        Base::initLogger(log, Base::getArgumentName());
+        Base::initLogger(std::move(log), Base::getArgumentName());
     }
 
 private:
@@ -91,5 +102,5 @@ void DecomposeLSTMCellPass::safeRunOnFunc() {
 //
 
 std::unique_ptr<mlir::Pass> vpux::IE::createDecomposeLSTMCellPass(Logger log) {
-    return std::make_unique<DecomposeLSTMCellPass>(log);
+    return std::make_unique<DecomposeLSTMCellPass>(std::move(log));
 }

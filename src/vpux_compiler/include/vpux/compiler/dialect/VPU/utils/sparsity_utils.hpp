@@ -54,7 +54,7 @@ NDTypeInterface getEffectiveSparseOutputType(T sparseType) {
         return dataNDType.changeShape(outShape);
     }
 
-    auto getDistribution = [](mlir::Type componentType) -> VPU::DistributedTensorAttr {
+    auto getDistribution = [](mlir::Type componentType) -> VPU::DistributionInfoAttr {
         if (auto distributedTensor = componentType.dyn_cast<VPU::DistributedTensorType>()) {
             return distributedTensor.getDistribution();
         } else if (auto distributedBuffer = componentType.dyn_cast<VPUIP::DistributedBufferType>()) {

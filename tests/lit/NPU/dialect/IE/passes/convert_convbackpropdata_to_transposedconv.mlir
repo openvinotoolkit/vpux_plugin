@@ -15,7 +15,7 @@ func.func @ConvertConvBackpropDataToTransposedConv(%input: tensor<1x16x23x30xf16
         } : tensor<1x16x23x30xf16>, tensor<16x32x2x1xf16> -> tensor<1x32x46x59xf16>
     return %output : tensor<1x32x46x59xf16>
 
-    // CHECK:       [[FILTER:%.+]] = const.Declare tensor<32x16x2x1xf16> = dense<1.000000e+00> : tensor<32x16x2x1xf16>
+    // CHECK:       [[FILTER:%.+]] = const.Declare tensor<32x16x2x1xf16> = dense<1.000000e+00> : tensor<16x32x2x1xf16>, [#const.Reverse<1 : i64>, #const.Transpose<#map>]
     // CHECK-NOT:   IE.ConvolutionBackpropData
     // CHECK:       [[OUTPUT:%.+]] = IE.TransposedConvolution([[INPUT]], [[FILTER]]) {
     // CHECK-SAME:      dilations = [1, 1], operandSegmentSizes = array<i32: 1, 1, 0, 0>, output_padding = [0, 0], pads_begin = [0, 0], pads_end = [0, 0], strides = [2, 2]
@@ -34,7 +34,7 @@ func.func @ConvertConvBackpropDataToTransposedConv1D(%input: tensor<1x16x23xf16>
         } : tensor<1x16x23xf16>, tensor<16x32x2xf16> -> tensor<1x32x46xf16>
     return %output : tensor<1x32x46xf16>
 
-    // CHECK:       [[FILTER:%.+]] = const.Declare tensor<32x16x2xf16> = dense<1.000000e+00> : tensor<32x16x2xf16>
+    // CHECK:       [[FILTER:%.+]] = const.Declare tensor<32x16x2xf16> = dense<1.000000e+00> : tensor<16x32x2xf16>, [#const.Reverse<1 : i64>, #const.Transpose<#HCW>]
     // CHECK-NOT:   IE.ConvolutionBackpropData
     // CHECK:       [[OUTPUT:%.+]] = IE.TransposedConvolution([[INPUT]], [[FILTER]]) {
     // CHECK-SAME:      dilations = [1], operandSegmentSizes = array<i32: 1, 1, 0, 0>, output_padding = [0], pads_begin = [0], pads_end = [0], strides = [2]
@@ -76,7 +76,7 @@ func.func @ConvertQuantizedConvBackpropDataToTransposedConv(%input: tensor<1x16x
 
     // CHECK-DAG:   [[INPUT_LOW:%.+]] = const.Declare tensor<1xf16> = dense<0.000000e+00> : tensor<1xf16>
     // CHECK-DAG:   [[INPUT_HIGH:%.+]] = const.Declare tensor<1xf16> = dense<2.550000e+02> : tensor<1xf16>
-    // CHECK-DAG:   [[FILTER:%.+]] = const.Declare tensor<32x16x2x1xf16> = dense<1.000000e+00> : tensor<32x16x2x1xf16>
+    // CHECK-DAG:   [[FILTER:%.+]] = const.Declare tensor<32x16x2x1xf16> = dense<1.000000e+00> : tensor<16x32x2x1xf16>, [#const.Reverse<1 : i64>, #const.Transpose<#map>]
     // CHECK-DAG:   [[FILTER_LOW:%.+]] = const.Declare tensor<32x1x1x1xf16> = dense<0.000000e+00> : tensor<1x32x1x1xf16>, [#const.Transpose<#map>]
     // CHECK-DAG:   [[FILTER_HIGH:%.+]] = const.Declare tensor<32x1x1x1xf16> = dense<1.000000e+00> : tensor<1x32x1x1xf16>, [#const.Transpose<#map>]
     // CHECK-DAG:   [[OUTPUT_LOW:%.+]] = const.Declare tensor<1xf16> = dense<1.000000e+00> : tensor<1xf16>
@@ -113,7 +113,7 @@ func.func @ConvertGroupConvBackpropDataToGroupTransposedConv(%input: tensor<1x32
         } : tensor<1x32x23x30xf16>, tensor<2x16x32x2x1xf16> -> tensor<1x64x46x59xf16>
     return %output : tensor<1x64x46x59xf16>
 
-    // CHECK:       [[FILTER:%.+]] = const.Declare tensor<2x32x16x2x1xf16> = dense<1.000000e+00> : tensor<2x32x16x2x1xf16>
+    // CHECK:       [[FILTER:%.+]] = const.Declare tensor<2x32x16x2x1xf16> = dense<1.000000e+00> : tensor<2x16x32x2x1xf16>, [#const.Reverse<2 : i64>, #const.Transpose<#map>]
     // CHECK-NOT:   IE.GroupConvolutionBackpropData
     // CHECK:       [[OUTPUT:%.+]] = IE.GroupTransposedConvolution([[INPUT]], [[FILTER]]) {
     // CHECK-SAME:      dilations = [1, 1], output_padding = [0, 0], pads_begin = [0, 0], pads_end = [0, 0], strides = [2, 2]
@@ -132,7 +132,7 @@ func.func @ConvertGroupConvBackpropDataToGroupTransposedConv1D(%input: tensor<1x
         } : tensor<1x32x23xf16>, tensor<2x16x32x2xf16> -> tensor<1x64x46xf16>
     return %output : tensor<1x64x46xf16>
 
-    // CHECK:       [[FILTER:%.+]] = const.Declare tensor<2x32x16x2xf16> = dense<1.000000e+00> : tensor<2x32x16x2xf16>
+    // CHECK:       [[FILTER:%.+]] = const.Declare tensor<2x32x16x2xf16> = dense<1.000000e+00> : tensor<2x16x32x2xf16>, [#const.Reverse<2 : i64>, #const.Transpose<#NHCW>]
     // CHECK-NOT:   IE.GroupConvolutionBackpropData
     // CHECK:       [[OUTPUT:%.+]] = IE.GroupTransposedConvolution([[INPUT]], [[FILTER]]) {
     // CHECK-SAME:      dilations = [1], output_padding = [0], pads_begin = [0], pads_end = [0], strides = [2]
@@ -174,7 +174,7 @@ func.func @ConvertQuantizedGroupConvBackpropDataToGroupTransposedConv(%input: te
 
     // CHECK-DAG:   [[INPUT_LOW:%.+]] = const.Declare tensor<1xf16> = dense<0.000000e+00> : tensor<1xf16>
     // CHECK-DAG:   [[INPUT_HIGH:%.+]] = const.Declare tensor<1xf16> = dense<2.550000e+02> : tensor<1xf16>
-    // CHECK-DAG:   [[FILTER:%.+]] = const.Declare tensor<2x32x16x2x1xf16> = dense<1.000000e+00> : tensor<2x32x16x2x1xf16>
+    // CHECK-DAG:   [[FILTER:%.+]] = const.Declare tensor<2x32x16x2x1xf16> = dense<1.000000e+00> : tensor<2x16x32x2x1xf16>, [#const.Reverse<2 : i64>, #const.Transpose<#map>]
     // CHECK-DAG:   [[FILTER_LOW:%.+]] = const.Declare tensor<1x32x1x1x1xf16> = dense<0.000000e+00> : tensor<1x1x32x1x1xf16>, [#const.Transpose<#map>]
     // CHECK-DAG:   [[FILTER_HIGH:%.+]] = const.Declare tensor<1x32x1x1x1xf16> = dense<1.000000e+00> : tensor<1x1x32x1x1xf16>, [#const.Transpose<#map>]
     // CHECK-DAG:   [[OUTPUT_LOW:%.+]] = const.Declare tensor<1xf16> = dense<1.000000e+00> : tensor<1xf16>
@@ -236,7 +236,7 @@ func.func @ConvertQuantizedConvertedConvBackpropDataToTransposedConv(%input: ten
 
     // CHECK-DAG:   [[INPUT_LOW:%.+]] = const.Declare tensor<1xf16> = dense<0.000000e+00> : tensor<1xf16>
     // CHECK-DAG:   [[INPUT_HIGH:%.+]] = const.Declare tensor<1xf16> = dense<2.550000e+02> : tensor<1xf16>
-    // CHECK-DAG:   [[FILTER:%.+]] = const.Declare tensor<32x16x2x1xf16> = dense<1.000000e+00> : tensor<32x16x2x1xf16>
+    // CHECK-DAG:   [[FILTER:%.+]] = const.Declare tensor<32x16x2x1xf16> = dense<1.000000e+00> : tensor<16x32x2x1xf16>, [#const.Reverse<1 : i64>, #const.Transpose<#map>]
     // CHECK-DAG:   [[FILTER_LOW:%.+]] = const.Declare tensor<32x1x1x1xf16> = dense<0.000000e+00> : tensor<1x32x1x1xf16>, [#const.Transpose<#map>]
     // CHECK-DAG:   [[FILTER_HIGH:%.+]] = const.Declare tensor<32x1x1x1xf16> = dense<1.000000e+00> : tensor<1x32x1x1xf16>, [#const.Transpose<#map>]
     // CHECK-DAG:   [[OUTPUT_LOW:%.+]] = const.Declare tensor<1xf16> = dense<1.000000e+00> : tensor<1xf16>
@@ -300,7 +300,7 @@ func.func @ConvertQuantizedConvertedGroupConvBackpropDataToGroupTransposedConv(%
 
     // CHECK-DAG:   [[INPUT_LOW:%.+]] = const.Declare tensor<1xf16> = dense<0.000000e+00> : tensor<1xf16>
     // CHECK-DAG:   [[INPUT_HIGH:%.+]] = const.Declare tensor<1xf16> = dense<2.550000e+02> : tensor<1xf16>
-    // CHECK-DAG:   [[FILTER:%.+]] = const.Declare tensor<2x32x16x2x1xf16> = dense<1.000000e+00> : tensor<2x32x16x2x1xf16>
+    // CHECK-DAG:   [[FILTER:%.+]] = const.Declare tensor<2x32x16x2x1xf16> = dense<1.000000e+00> : tensor<2x16x32x2x1xf16>, [#const.Reverse<2 : i64>, #const.Transpose<#map>]
     // CHECK-DAG:   [[FILTER_LOW:%.+]] = const.Declare tensor<1x32x1x1x1xf16> = dense<0.000000e+00> : tensor<1x1x32x1x1xf16>, [#const.Transpose<#map>]
     // CHECK-DAG:   [[FILTER_HIGH:%.+]] = const.Declare tensor<1x32x1x1x1xf16> = dense<1.000000e+00> : tensor<1x1x32x1x1xf16>, [#const.Transpose<#map>]
     // CHECK-DAG:   [[OUTPUT_LOW:%.+]] = const.Declare tensor<1xf16> = dense<1.000000e+00> : tensor<1xf16>

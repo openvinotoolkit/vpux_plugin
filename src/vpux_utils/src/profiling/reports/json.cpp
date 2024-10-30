@@ -142,7 +142,6 @@ private:
 constexpr auto CLUSTER_PROCESS_NAME = "Cluster";
 constexpr auto DMA_PROCESS_NAME = "DMA";
 constexpr auto LAYER_PROCESS_NAME = "Layers";
-constexpr auto UPA_PROCESS_NAME = "UPA";
 constexpr auto M2I_PROCESS_NAME = "M2I";
 
 constexpr auto VARIANT_NAME = "Variants";
@@ -153,14 +152,12 @@ constexpr auto DMA_TASK_CATEGORY = "DMA";
 constexpr auto DPU_TASK_CATEGORY = "DPU";
 constexpr auto NONE_TASK_CATEGORY = "NONE";
 constexpr auto SW_TASK_CATEGORY = "SW";
-constexpr auto UPA_TASK_CATEGORY = "UPA";
 constexpr auto M2I_TASK_CATEGORY = "M2I";
 
 static const std::map<TaskInfo::ExecType, std::string> enumToStr = {{TaskInfo::ExecType::NONE, NONE_TASK_CATEGORY},
                                                                     {TaskInfo::ExecType::DPU, DPU_TASK_CATEGORY},
                                                                     {TaskInfo::ExecType::SW, SW_TASK_CATEGORY},
                                                                     {TaskInfo::ExecType::DMA, DMA_TASK_CATEGORY},
-                                                                    {TaskInfo::ExecType::UPA, UPA_TASK_CATEGORY},
                                                                     {TaskInfo::ExecType::M2I, M2I_TASK_CATEGORY}
 
 };
@@ -169,8 +166,6 @@ std::string getTraceEventThreadName(const TaskInfo& task) {
     switch (task.exec_type) {
     case TaskInfo::ExecType::DMA:
         return DMA_TASK_CATEGORY;
-    case TaskInfo::ExecType::UPA:
-        return SW_TASK_CATEGORY;  // we use SW task labels for UPA threads
     case TaskInfo::ExecType::SW:
         return std::string(SW_TASK_CATEGORY) + " / " + SHAVE_NAME;
     case TaskInfo::ExecType::DPU:
@@ -224,15 +219,6 @@ void TraceEventExporter::processTasks(const std::vector<TaskInfo>& tasks) {
         auto clusterSwTasks = swTasks.selectTasksFromCluster(clusterId);
         processTraceEvents(clusterSwTasks, processName, /* createNewProcess= */ clusterDpuTasks.empty());
     }
-
-    //
-    // Export non-clustered SW tasks into separate UPA process
-    //
-    TaskList upaTasks = TaskList(tasks).selectUPAtasks();
-    processTraceEvents(upaTasks, UPA_PROCESS_NAME, /* createNewProcess= */ true);
-
-    VPUX_THROW_WHEN(!upaTasks.empty() && !swTasks.empty(),
-                    "UPA and Shave tasks should be mutually exclusive but are found to coexist");
 
     TaskList m2iTasks = TaskList(tasks).selectM2Itasks();
     processTraceEvents(m2iTasks, M2I_PROCESS_NAME, /* createNewProcess= */ true);

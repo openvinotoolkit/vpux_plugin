@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2023-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -16,6 +16,32 @@
 using namespace vpux;
 
 namespace {
+
+mlir::Value updateConstStorageValues(mlir::OpBuilder& builder, Const::DeclareOp origConst, ArrayRef<float> values) {
+    // Note: do a little trick here: when original constant's base content is
+    // FP32, store new values also in FP32 (to ensure we do not lose any
+    // information due to FP32 -> FP16 conversion). otherwise, store the data in
+    // the output format (originals are either FP or some integer values that
+    // were historically converted to FP16).
+    const auto finalType = mlir::cast<NDTypeInterface>(origConst.getOutput().getType());
+    const auto baseContentType = mlir::cast<NDTypeInterface>(origConst.getContentAttr().getBaseContent().getType());
+    if (baseContentType.getElementType().isF32()) {
+        const auto fp32TensorType =
+                mlir::RankedTensorType::get(finalType.getShape(), mlir::Float32Type::get(builder.getContext()));
+        // Note: if createFloatConst() is changed to always store data in FP32
+        // (with optional conversion to FP16), then this branch won't be needed.
+        return Const::createConst(builder, origConst->getLoc(), fp32TensorType, values,
+                                  [finalElemType = finalType.getElementType()](Const::ContentSetup& setup) {
+                                      if (bool constTypeIsAlreadyCorrect = finalElemType.isF32();
+                                          constTypeIsAlreadyCorrect) {
+                                          return std::move(setup);
+                                      }
+                                      return setup.castElemType(finalElemType);
+                                  });
+    }
+
+    return Const::createFloatConst(builder, origConst->getLoc(), mlir::cast<mlir::RankedTensorType>(finalType), values);
+}
 
 //
 // HandleConstWeightsFakeQuant
@@ -46,14 +72,19 @@ mlir::LogicalResult HandleConstWeightsFakeQuant::matchAndRewrite(IE::FakeQuantiz
     mlir::Type storageType;
     int64_t quantMin = 0;
     int64_t quantMax = 0;
-    std::tie(quantMin, quantMax, storageType) = getStorageParams(origOp.getContext(), origOp.getLevels().value(),
-                                                                 Const::hasNegativeValues(inLowConst.getContent()));
+    if (origOp.getLevels().has_value()) {
+        std::tie(quantMin, quantMax, storageType) = getStorageParams(origOp.getContext(), *origOp.getLevels(),
+                                                                     Const::hasNegativeValues(inLowConst.getContent()));
+    } else {
+        std::tie(quantMin, quantMax, storageType) = getStorageParams(origOp.getContext(), *origOp.getLowFpType());
+    }
 
     const auto outLowContent = outLowConst.getContent();
-    auto outLowVals = SmallVector<float>(outLowContent.getValues<float>());
+    auto outLowVals = to_small_vector(outLowContent.getValues<float>());
     const auto outHighContent = outHighConst.getContent();
-    auto outHighVals = SmallVector<float>(outHighContent.getValues<float>());
-    broadcastRange(outLowVals, outHighVals, origOp.getAutoBroadcast());
+    auto outHighVals = to_small_vector(outHighContent.getValues<float>());
+    // out_low.size() == out_high.size() always holds for *weights* by
+    // definition (see --weights-dequantize-to-fake-quantize).
     VPUX_THROW_UNLESS(outLowVals.size() == outHighVals.size(),
                       "FakeQuantize output low size '{0}' not equal with output high size '{1}'", outLowVals.size(),
                       outHighVals.size());
@@ -63,37 +94,34 @@ mlir::LogicalResult HandleConstWeightsFakeQuant::matchAndRewrite(IE::FakeQuantiz
     SmallVector<double> updatedScales(outChannelSize);
     SmallVector<int64_t> updatedZeroPoints(outChannelSize);
     SmallVector<bool> scalesNegativeMask(outChannelSize, false);
-    SmallVector<float> newOutLowVals = outLowVals;
-    SmallVector<float> newOutHighVals = outHighVals;
     loop_1d(LoopExecPolicy::Parallel, origOp.getContext(), outChannelSize, [&](size_t idx) {
-        const auto outLowVal = outLowVals[idx];
-        const auto outHighVal = outHighVals[idx];
+        auto& outLowVal = outLowVals[idx];
+        auto& outHighVal = outHighVals[idx];
         if (outLowVal > 0 && outHighVal < 0) {
             scalesNegativeMask[idx] = true;
-            newOutLowVals[idx] *= -1;
-            newOutHighVals[idx] *= -1;
+            outLowVal *= -1;
+            outHighVal *= -1;
         }
         std::tie(updatedScales[idx], updatedZeroPoints[idx]) =
-                calcScaleAndZeroPoint(quantMin, quantMax, newOutLowVals[idx], newOutHighVals[idx]);
+                calcScaleAndZeroPoint(quantMin, quantMax, outLowVal, outHighVal);
     });
 
     // Update Quantized Const Values: Q' = (S < 0) ? 2 * ZP - Q : Q
     auto quantWeights = origOp.getInput().getDefiningOp<Const::DeclareOp>();
     const auto weightsContent = quantWeights.getContent();
-    const auto weightsVal = weightsContent.getValues<float>();
+    auto weightsVal = to_small_vector(weightsContent.getValues<float>());
     VPUX_THROW_UNLESS(weightsVal.size() % updatedScales.size() == 0,
                       "Got unexpected weights size '{0}' and scales size '{1}'", weightsVal.size(),
                       updatedScales.size());
     auto kernelSize = checked_cast<size_t>(weightsVal.size() / updatedScales.size());
 
-    SmallVector<float> newWeightsVal(weightsVal.size());
     bool isUpdatedWeightsOutOfRange = false;
     loop_2d(LoopExecPolicy::Parallel, origOp.getContext(), updatedScales.size(), kernelSize,
             [&](int64_t scalesIdx, int64_t kernelIdx) {
                 const auto weightsIdx = scalesIdx * kernelSize + kernelIdx;
-                const auto origVal = weightsVal[weightsIdx];
+                auto& origVal = weightsVal[weightsIdx];
                 const auto newVal = 2 * updatedZeroPoints[scalesIdx] - origVal;
-                newWeightsVal[weightsIdx] = scalesNegativeMask[scalesIdx] ? newVal : origVal;
+                origVal = scalesNegativeMask[scalesIdx] ? newVal : origVal;
 
                 if (scalesNegativeMask[scalesIdx] && (newVal < quantMin || newVal > quantMax)) {
                     innerLog.trace("New weights '{0}' out of rang ['{1}', '{2}']", newVal, quantMin, quantMax);
@@ -106,18 +134,14 @@ mlir::LogicalResult HandleConstWeightsFakeQuant::matchAndRewrite(IE::FakeQuantiz
     }
 
     // Update constant data
-    auto newQuantWeights = Const::updateConstStorageValues(innerLog, rewriter, quantWeights, newWeightsVal);
-    auto newOutLowConst = Const::updateConstStorageValues(innerLog, rewriter, outLowConst, newOutLowVals);
-    auto newOutHighConst = Const::updateConstStorageValues(innerLog, rewriter, outHighConst, newOutHighVals);
-    if (mlir::failed(newQuantWeights) || mlir::failed(newOutLowConst) || mlir::failed(newOutHighConst)) {
-        innerLog.trace("Cannot update constant storage values");
-        return mlir::failure();
-    }
+    auto newQuantWeights = updateConstStorageValues(rewriter, quantWeights, weightsVal);
+    auto newOutLowConst = updateConstStorageValues(rewriter, outLowConst, outLowVals);
+    auto newOutHighConst = updateConstStorageValues(rewriter, outHighConst, outHighVals);
 
     // Update FakeQuantize output parameters
     rewriter.replaceOpWithNewOp<IE::FakeQuantizeOp>(
-            origOp, newQuantWeights.value(), origOp.getInputLow(), origOp.getInputHigh(), newOutLowConst.value(),
-            newOutHighConst.value(), origOp.getLevelsAttr(), origOp.getLowFpTypeAttr(), origOp.getAutoBroadcastAttr());
+            origOp, newQuantWeights, origOp.getInputLow(), origOp.getInputHigh(), newOutLowConst, newOutHighConst,
+            origOp.getLevelsAttr(), origOp.getLowFpTypeAttr(), origOp.getAutoBroadcastAttr());
 
     rewriter.eraseOp(quantWeights);
     rewriter.eraseOp(outLowConst);
@@ -149,11 +173,6 @@ void HandleFakeQuantHasNegativeScalesPass::safeRunOnFunc() {
     target.addDynamicallyLegalOp<IE::FakeQuantizeOp>([&](IE::FakeQuantizeOp origOp) {
         _log.trace("Got FakeQuantize Operation '{1}'", origOp->getLoc());
 
-        if (!origOp.getLevels().has_value()) {
-            _log.trace("Levels attribute has no value.");
-            return true;
-        }
-
         const auto inputType = origOp.getInput().getType().cast<vpux::NDTypeInterface>();
         if (inputType.getRank() != 4) {
             _log.nest().trace("Tensor '{0}' rank should equal 4, but got '{1}'", origOp->getLoc(), inputType.getRank());
@@ -179,7 +198,11 @@ void HandleFakeQuantHasNegativeScalesPass::safeRunOnFunc() {
         auto outLowVals = SmallVector<float>(outLowContent.getValues<float>());
         const auto outHighContent = outHighConst.getContent();
         auto outHighVals = SmallVector<float>(outHighContent.getValues<float>());
-        broadcastRange(outLowVals, outHighVals, origOp.getAutoBroadcast());
+        // out_low.size() == out_high.size() always holds for *weights* by
+        // definition (see --weights-dequantize-to-fake-quantize).
+        VPUX_THROW_UNLESS(outLowVals.size() == outHighVals.size(),
+                          "FakeQuantize output low size '{0}' not equal with output high size '{1}'", outLowVals.size(),
+                          outHighVals.size());
         const auto hasNegativeScales = llvm::any_of(zip(outLowVals, outHighVals), [](const auto& vals) {
             return std::get<0>(vals) > 0 && std::get<1>(vals) < 0;
         });

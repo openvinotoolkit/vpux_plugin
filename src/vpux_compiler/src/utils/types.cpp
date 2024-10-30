@@ -17,6 +17,7 @@
 #include <mlir/Dialect/Quant/QuantTypes.h>
 
 #include <llvm/ADT/TypeSwitch.h>
+#include <numeric>
 
 using namespace vpux;
 
@@ -126,40 +127,26 @@ Byte vpux::getCompactSize(mlir::Value val) {
 }
 
 std::optional<int32_t> vpux::getQuantizedAxis(int32_t axis, ShapeRef prevShape, ShapeRef newShape) {
-    auto prevArray = to_small_vector(prevShape.toValues());
-    auto newArray = to_small_vector(newShape.toValues());
-
-    if (checked_cast<size_t>(axis) >= prevShape.size()) {
+    if (checked_cast<size_t>(axis) >= prevShape.size() || prevShape[Dim(axis)] == 1) {
         return std::nullopt;
     }
 
-    const auto isEqualOne = [](int64_t val) {
-        return val == 1;
-    };
+    const auto sizeAtAxis = prevShape[Dim(axis)];
+    const auto fullSizeIncludingAxis =
+            std::accumulate(prevShape.begin(), prevShape.begin() + axis + 1, int64_t(1), std::multiplies<int64_t>());
 
-    auto firstPrevIter = std::find_if_not(prevArray.begin(), prevArray.end(), isEqualOne);
-    auto firstNewIter = std::find_if_not(newArray.begin(), newArray.end(), isEqualOne);
-
-    if (firstPrevIter == prevArray.end() || firstNewIter == newArray.end()) {
-        return axis;
+    int64_t accumSize = 1;
+    for (auto it = newShape.begin(); it != newShape.end(); ++it) {
+        accumSize *= *it;
+        if (accumSize == fullSizeIncludingAxis && *it == sizeAtAxis) {
+            return static_cast<int32_t>(std::distance(newShape.begin(), it));
+        }
+        if (accumSize > fullSizeIncludingAxis) {
+            break;
+        }
     }
 
-    const auto gap = checked_cast<int32_t>(std::distance(newArray.begin(), firstNewIter) -
-                                           std::distance(prevArray.begin(), firstPrevIter));
-    const auto newArraySize = newArray.size();
-
-    prevArray.erase(std::remove_if(prevArray.begin(), prevArray.end(), isEqualOne), prevArray.end());
-    newArray.erase(std::remove_if(newArray.begin(), newArray.end(), isEqualOne), newArray.end());
-
-    if (!std::equal(prevArray.begin(), prevArray.end(), newArray.begin(), newArray.end())) {
-        return std::nullopt;
-    }
-
-    if (axis < -gap || axis + gap >= checked_cast<int32_t>(newArraySize)) {
-        return std::nullopt;
-    }
-
-    return axis + gap;
+    return std::nullopt;
 }
 
 //
@@ -413,5 +400,5 @@ bool vpux::isSubByteType(mlir::Type elemType) {
 bool vpux::isBufferType(mlir::Type type) {
     // Note: BaseMemRefType covers MemRefType, UnrankedMemRefType,
     // VPUIP::DistributedBufferType, VPUIP::SparseBufferType and VPUIP::BoundedBufferType
-    return mlir::isa<mlir::BaseMemRefType, VPUIP::BufferType>(type);
+    return mlir::isa<mlir::BaseMemRefType>(type);
 }

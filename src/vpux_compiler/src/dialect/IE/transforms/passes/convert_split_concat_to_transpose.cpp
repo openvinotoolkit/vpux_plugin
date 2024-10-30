@@ -237,7 +237,8 @@ mlir::LogicalResult SplitAffineReshapeConcatRewriter::matchAndRewrite(IE::SplitO
 
     const auto orderAttr =
             mlir::AffineMapAttr::get(mlir::AffineMap::getPermutationMap(transPerm, rewriter.getContext()));
-    auto newTransposeOp = rewriter.create<IE::TransposeOp>(origOp->getLoc(), origOp.getInput(), nullptr, orderAttr);
+    auto newTransposeOp =
+            rewriter.create<IE::TransposeOp>(takeOpLoc(origOp, "transpose_in"), origOp.getInput(), nullptr, orderAttr);
     concatOp.replaceAllUsesWith(newTransposeOp.getOutput());
 
     _log.trace("[{0}] Replaced with 'IE::TransposeOp'", getDebugName());
@@ -308,9 +309,10 @@ mlir::LogicalResult SplitConcatRewriter::matchAndRewrite(IE::ConcatOp origOp, ml
         return mlir::failure();
     }
 
-    auto affineReshape = rewriter.create<IE::AffineReshapeOp>(
-            origOp->getLoc(), splitOp.getInput(), getIntArrayOfArray(getContext(), reassociationMap.value()),
-            getIntArrayAttr(rewriter.getContext(), origOutputShape));
+    auto affineReshape =
+            rewriter.create<IE::AffineReshapeOp>(takeOpLoc(origOp, "reshape_in"), splitOp.getInput(),
+                                                 getIntArrayOfArray(getContext(), reassociationMap.value()),
+                                                 getIntArrayAttr(rewriter.getContext(), origOutputShape));
     rewriter.replaceOp(origOp, affineReshape.getOutput());
 
     _log.trace("[{0}] Replaced with 'IE::AffineReshapeOp'", getDebugName());

@@ -130,7 +130,8 @@ mlir::Value createDilatedConvOp(mlir::PatternRewriter& rewriter, IE::Convolution
     return rewriter
             .create<IE::ConvolutionOp>(convOp.getLoc(), input, convOp.getFilter(), convOp.getBias(),
                                        convOp.getStridesAttr(), padsBeginAttr, padsEndAttr, dilationsAttr,
-                                       convOp.getPostOpAttr(), convOp.getClampAttr(), convOp.getStaticScaleAttr())
+                                       convOp.getPostOpAttr(), convOp.getClampAttr(), convOp.getStaticScaleAttr(),
+                                       convOp.getOutputChannelsAttr(), convOp.getInputChannelsAttr())
             .getResult();
 }
 
@@ -141,7 +142,8 @@ mlir::Value createDilatedConvOp(mlir::PatternRewriter& rewriter, IE::GroupConvol
             .create<IE::GroupConvolutionOp>(groupConvOp.getLoc(), input, groupConvOp.getFilter(), groupConvOp.getBias(),
                                             groupConvOp.getStridesAttr(), padsBeginAttr, padsEndAttr, dilationsAttr,
                                             groupConvOp.getGroupsAttr(), groupConvOp.getPostOpAttr(),
-                                            groupConvOp.getClampAttr())
+                                            groupConvOp.getClampAttr(), groupConvOp.getOutputChannelsAttr(),
+                                            groupConvOp.getInputChannelsAttr())
             .getResult();
 }
 

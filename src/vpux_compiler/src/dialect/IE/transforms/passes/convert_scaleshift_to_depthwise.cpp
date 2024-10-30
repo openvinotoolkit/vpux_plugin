@@ -80,14 +80,14 @@ mlir::LogicalResult ConvertScaleShiftToDWPass::ScaleShiftOpConverter::matchAndRe
         const auto dataType = mlir::RankedTensorType::get(shape, elemType);
 
         const auto denseElementVal = mlir::DenseElementsAttr::get(dataStorageType, value);
-        auto contentAttr = Const::ContentAttr::get(denseElementVal);
+        auto contentAttrSetup = Const::ContentAttr::transform(denseElementVal);
 
         for (auto dim : enumerate(shape)) {
             if (dim.value() > 1) {
-                contentAttr = contentAttr.broadcast(Dim(dim.index()), dim.value());
+                contentAttrSetup = contentAttrSetup.broadcast(Dim(dim.index()), dim.value());
             }
         }
-        return rewriter.create<Const::DeclareOp>(origOp.getLoc(), dataType, contentAttr);
+        return rewriter.create<Const::DeclareOp>(origOp.getLoc(), dataType, contentAttrSetup.get());
     };
 
     if (origOp.getWeights() != nullptr) {
@@ -102,17 +102,18 @@ mlir::LogicalResult ConvertScaleShiftToDWPass::ScaleShiftOpConverter::matchAndRe
         if (inputFq != nullptr) {
             // the created FQ is artificial, levels are set to 255 in correlation with FQ range from 0.0f to 254.0f (255
             // integer values)
+            const auto lowFpTypeAttr = inputFq.getLowFpTypeAttr();
+            const auto levelsAttr = lowFpTypeAttr == nullptr ? getIntAttr(rewriter, 255) : nullptr;
             auto newFqOp =
                     rewriter.create<IE::FakeQuantizeOp>(origOp->getLoc(), weights, weights, weights, weights, weights,
-                                                        /*levelsAttr=*/getIntAttr(rewriter, 255),
-                                                        inputFq.getLowFpTypeAttr(), inputFq.getAutoBroadcastAttr());
+                                                        levelsAttr, lowFpTypeAttr, inputFq.getAutoBroadcastAttr());
             weights = newFqOp.getOutput();
         }
     }
 
     rewriter.replaceOpWithNewOp<IE::GroupConvolutionOp>(origOp, origOp.getInput(), weights, origOp.getBiases(),
                                                         stridesAttr, padBeginAttr, padEndAttr, dilationsAttr, groupAttr,
-                                                        nullptr, nullptr);
+                                                        nullptr, nullptr, nullptr, nullptr);
 
     return mlir::success();
 }

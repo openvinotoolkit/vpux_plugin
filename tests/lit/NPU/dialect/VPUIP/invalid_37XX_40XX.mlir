@@ -50,7 +50,7 @@ func.func @main() {
 // -----
 
 func.func @main() {
-// expected-error@+1 {{Array of section indexes is supported only for vpuip/distributed buffer type}}
+// expected-error@+1 {{Array of section indexes is supported only for distributed buffer type}}
     %buf0 = VPURT.DeclareBuffer <CMX_NN> [0, 1] <0> -> memref<10xf16, @CMX_NN>
 }
 

@@ -51,8 +51,8 @@ module @OneDMAWithoutAttributes {
   // CHECK:       ELF.CreateSection @program.mapped_inference
   // CHECK:       NPUReg40XX.MappedInference
 
-  // CHECK:       ELF.CreateSymbolTableSection @symtab.io.NetworkInput secFlags(VPU_SHF_USERINPUT)
-  // CHECK:       ELF.CreateSymbolTableSection @symtab.io.NetworkOutput secFlags(VPU_SHF_USEROUTPUT)
+  // CHECK:       ELF.CreateSymbolTableSection @symtab.io.NetworkInput secFlags("VPU_SHF_JIT|VPU_SHF_USERINPUT")
+  // CHECK:       ELF.CreateSymbolTableSection @symtab.io.NetworkOutput secFlags("VPU_SHF_JIT|VPU_SHF_USEROUTPUT")
 
   // CHECK:       ELF.CreateSymbolTableSection @symtab secFlags("SHF_NONE")
   // CHECK:       ELF.Symbol @elfsym.buffer.CMX_NN.0 of(@buffer.CMX_NN.0)

@@ -28,11 +28,7 @@ size_t VPUASM::DeclareTaskAddrBufOp::getAlignmentRequirements() {
     return sizeof(uint32_t);
 }
 
-ELF::SectionFlagsAttr VPUASM::DeclareTaskAddrBufOp::getAccessingProcs(mlir::SymbolUserMap&) {
-    return ELF::SectionFlagsAttr::VPU_SHF_PROC_DMA;
-}
-
-ELF::SectionFlagsAttr VPUASM::DeclareTaskAddrBufOp::getUserProcs() {
+ELF::SectionFlagsAttr VPUASM::DeclareTaskAddrBufOp::getPredefinedMemoryAccessors() {
     return ELF::SectionFlagsAttr::VPU_SHF_PROC_DMA;
 }
 

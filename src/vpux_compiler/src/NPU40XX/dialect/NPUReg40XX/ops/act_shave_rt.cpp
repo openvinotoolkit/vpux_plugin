@@ -32,14 +32,6 @@ size_t vpux::NPUReg40XX::ActShaveRtOp::getAlignmentRequirements() {
     return ELF::VPUX_SHAVE_ALIGNMENT;
 }
 
-vpux::ELF::SectionFlagsAttr vpux::NPUReg40XX::ActShaveRtOp::getAccessingProcs(mlir::SymbolUserMap&) {
-    return (ELF::SectionFlagsAttr::VPU_SHF_PROC_SHAVE);
-}
-
-vpux::ELF::SectionFlagsAttr vpux::NPUReg40XX::ActShaveRtOp::getUserProcs() {
-    return ELF::SectionFlagsAttr::SHF_NONE;
-}
-
 std::optional<ELF::SectionSignature> vpux::NPUReg40XX::ActShaveRtOp::getSectionSignature() {
     return {};
 }
@@ -51,7 +43,7 @@ bool vpux::NPUReg40XX::ActShaveRtOp::hasMemoryFootprint() {
 uint32_t vpux::NPUReg40XX::ActShaveRtOp::getKernelEntry() {
     const auto elfBlob = ELF::getKernelELF(getOperation(), getKernelPath());
 
-    auto accessor = elf::ElfDDRAccessManager(elfBlob.data(), elfBlob.size());
+    auto accessor = elf::DDRAccessManager<elf::DDRAlwaysEmplace>(elfBlob.data(), elfBlob.size());
     auto elf_reader = elf::Reader<elf::ELF_Bitness::Elf32>(&accessor);
 
     auto actKernelHeader = elf_reader.getHeader();

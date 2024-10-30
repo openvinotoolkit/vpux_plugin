@@ -11,34 +11,34 @@
 #include "vpux/utils/core/logger.hpp"
 #include "vpux/utils/core/small_string.hpp"
 
+#include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
 
 namespace vpux {
 namespace VPU {
+
+template <typename NCEOp>
+SmallVector<vpux::NDTypeInterface> getTileTypes(NCEOp origOp, const TileInfo& outTile,
+                                                const std::optional<InputTiling>& inputTiles) {
+    auto siblingsAnalysis = SiblingOpsAnalysis(origOp.getOperation());
+    auto tileDistributions = getTileDistributions(origOp, siblingsAnalysis, outTile, inputTiles);
+    SmallVector<vpux::NDTypeInterface> tileTypes;
+    for (auto tileDistribution : tileDistributions) {
+        auto tileType = getDistributedTypeFromDistributionMap(tileDistribution.first, tileDistribution.second);
+        tileTypes.push_back(tileType);
+    }
+
+    return tileTypes;
+}
 
 // Convolution
 
 SmallVector<vpux::NDTypeInterface> getTileTypes(VPU::ConvolutionOp origOp, const TileInfo& outTile,
                                                 const std::optional<InputTiling>& inputTiles = std::nullopt);
 
-SmallVector<vpux::NDTypeInterface> getTileTypes(VPU::NCEConvolutionOp origOp, const TileInfo& outTile,
-                                                const std::optional<InputTiling>& inputTiles = std::nullopt);
-
-SmallVector<vpux::NDTypeInterface> getTileTypes(VPU::NCECompressConvolutionOp origOp, const TileInfo& outTile,
-                                                const std::optional<InputTiling>& inputTiles = std::nullopt);
-
-SmallVector<vpux::NDTypeInterface> getTileTypes(VPU::NCEMaxPoolOp origOp, const TileInfo& outTile,
-                                                const std::optional<InputTiling>& inputTiles = std::nullopt);
-// AveragePool
-
-SmallVector<vpux::NDTypeInterface> getTileTypes(VPU::NCEAveragePoolOp origOp, const TileInfo& outTile,
-                                                const std::optional<InputTiling>& inputTiles = std::nullopt);
-
 // GroupConvolution
 
 SmallVector<vpux::NDTypeInterface> getTileTypes(VPU::GroupConvolutionOp origOp, const TileInfo& outTile,
-                                                const std::optional<InputTiling>& inputTiles = std::nullopt);
-SmallVector<vpux::NDTypeInterface> getTileTypes(VPU::NCEDepthConvolutionOp origOp, const TileInfo& outTile,
                                                 const std::optional<InputTiling>& inputTiles = std::nullopt);
 
 SmallVector<vpux::NDTypeInterface> getTileTypes(VPU::DequantizeOp origOp, const TileInfo& outTile,
@@ -47,10 +47,9 @@ SmallVector<vpux::NDTypeInterface> getTileTypes(VPU::DequantizeOp origOp, const 
 SmallVector<vpux::NDTypeInterface> getTileTypes(mlir::Operation* op, const TileInfo& outTile,
                                                 const std::optional<InputTiling>& inputTiles = std::nullopt);
 
-// Permute
-
-SmallVector<vpux::NDTypeInterface> getTileTypes(VPU::NCEPermuteOp origOp, const TileInfo& outTile,
-                                                const std::optional<InputTiling>& inputTiles = std::nullopt);
+std::vector<std::pair<NDTypeInterface, TensorDistributionMap>> getTileDistributions(
+        mlir::Operation* op, SiblingOpsAnalysis& siblingsAnalysis, const TileInfo& outTile,
+        const std::optional<InputTiling>& inputTiles = std::nullopt);
 
 Byte getRequiredCMXForWeight(VPU::ConvolutionOp convOp, const vpux::TileInfo& tiling,
                              const std::optional<InputTiling>& inputTiles = std::nullopt);

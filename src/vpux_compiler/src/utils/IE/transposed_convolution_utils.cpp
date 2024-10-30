@@ -5,6 +5,9 @@
 
 #include "vpux/compiler/utils/IE/transposed_convolution_utils.hpp"
 
+#include "vpux/compiler/dialect/IE/utils/quantization.hpp"
+#include "vpux/compiler/utils/rewriter.hpp"
+
 namespace vpux {
 namespace IE {
 // Checks whether the TransposedConvolution filter is a constant or a FakeQuantize with a constant input
@@ -48,16 +51,6 @@ mlir::LogicalResult canConvertGroupTransposedConvToGroupConv(IE::GroupTransposed
     return mlir::success();
 }
 
-auto createFQ(mlir::PatternRewriter& rewriter, mlir::Value input, IE::FakeQuantizeOp fq) {
-    const auto outputType = fq.getOutput().getType().cast<vpux::NDTypeInterface>();
-    const auto newOutputType = outputType.changeShape(getShape(input));
-    return rewriter
-            .create<IE::FakeQuantizeOp>(fq.getLoc(), newOutputType, input, fq.getInputLow(), fq.getInputHigh(),
-                                        fq.getOutputLow(), fq.getOutputHigh(), fq.getLevelsAttr(),
-                                        fq.getLowFpTypeAttr(), fq.getAutoBroadcast())
-            .getOutput();
-}
-
 mlir::Value createPadding(mlir::PatternRewriter& rewriter, mlir::Location loc, mlir::Value input, Dim axis,
                           int64_t nums, IE::FakeQuantizeOp inputFQ) {
     auto ctx = rewriter.getContext();
@@ -68,18 +61,19 @@ mlir::Value createPadding(mlir::PatternRewriter& rewriter, mlir::Location loc, m
     offsets[axis.ind()] = inputShape[axis] - 1;
     sizes[axis.ind()] = 1;
 
-    auto subSlice = rewriter.create<IE::SliceOp>(loc, input, getIntArrayAttr(ctx, offsets), getIntArrayAttr(ctx, sizes))
+    auto subSlice = rewriter.create<IE::SliceOp>(appendLoc(loc, "subslice"), input, getIntArrayAttr(ctx, offsets),
+                                                 getIntArrayAttr(ctx, sizes))
                             .getResult();
     if (inputFQ != nullptr) {
-        subSlice = createFQ(rewriter, subSlice, inputFQ);
+        subSlice = vpux::IE::createFQ(rewriter, subSlice, inputFQ, takeOpLoc(inputFQ, "fq_in")).getOutput();
     }
 
     SmallVector<mlir::Value> subSlices;
     subSlices.push_back(input);
     subSlices.insert(subSlices.end(), nums, subSlice);
-    auto concatOp = rewriter.create<IE::ConcatOp>(loc, subSlices, axis).getOutput();
+    auto concatOp = rewriter.create<IE::ConcatOp>(appendLoc(loc, "slices_concat"), subSlices, axis).getOutput();
     if (inputFQ != nullptr) {
-        concatOp = createFQ(rewriter, concatOp, inputFQ);
+        concatOp = vpux::IE::createFQ(rewriter, concatOp, inputFQ, takeOpLoc(inputFQ, "fq_out")).getOutput();
     }
 
     return concatOp;

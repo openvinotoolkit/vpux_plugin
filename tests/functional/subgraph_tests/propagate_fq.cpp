@@ -164,9 +164,9 @@ const std::vector<std::vector<int64_t>> transposes = {
         {0, 3, 2, 1},
 };
 
-INSTANTIATE_TEST_CASE_P(smoke_PropagateFQSubGraph, PropagateFQSubGraphTest_NPU3720,
-                        ::testing::Combine(::testing::ValuesIn(transposes)),
-                        PropagateFQSubGraphTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_PropagateFQSubGraph, PropagateFQSubGraphTest_NPU3720,
+                         ::testing::Combine(::testing::ValuesIn(transposes)),
+                         PropagateFQSubGraphTest_NPU3720::getTestCaseName);
 
 // PropagateFQUpwardSubGraphTest_NPU3720
 
@@ -183,8 +183,8 @@ TEST_P(PropagateFQUpwardSubGraphTest_NPU3720, SW) {
 std::vector<std::vector<float>> fqRanges1 = {{0.0f, 8.0f, 0.0f, 8.0f}};
 std::vector<std::vector<float>> fqRanges2 = {{0.0f, 8.0f, 0.0f, 8.0f}, {0.0f, 4.0f, 0.0f, 4.0f}};
 
-INSTANTIATE_TEST_CASE_P(smoke_PropagateUpFQSubGraph, PropagateFQUpwardSubGraphTest_NPU3720,
-                        ::testing::Combine(::testing::ValuesIn(fqRanges1), ::testing::ValuesIn(fqRanges2)),
-                        PropagateFQUpwardSubGraphTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_PropagateUpFQSubGraph, PropagateFQUpwardSubGraphTest_NPU3720,
+                         ::testing::Combine(::testing::ValuesIn(fqRanges1), ::testing::ValuesIn(fqRanges2)),
+                         PropagateFQUpwardSubGraphTest_NPU3720::getTestCaseName);
 
 }  // namespace ov::test

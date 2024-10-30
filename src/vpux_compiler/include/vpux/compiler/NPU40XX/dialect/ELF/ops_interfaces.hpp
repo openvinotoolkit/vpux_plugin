@@ -109,21 +109,21 @@ struct hash<vpux::ELF::SectionSignature> final {
 
 struct vpux::ELF::RelocationInfo {
     RelocationInfo(mlir::SymbolRefAttr source, vpux::ELF::ElfSectionInterface targetSection, size_t offset,
-                   vpux::ELF::RelocationType relocType, size_t addend, bool isOffsetRelative = true,
-                   std::string description = "")
+                   vpux::ELF::RelocationType relocType, size_t addend, std::string description = "",
+                   bool isOffsetRelative = true)
             : source{source},
               targetSection{targetSection},
               offset{offset},
               relocType{relocType},
               addend{addend},
-              isOffsetRelative{isOffsetRelative},
-              description(std::move(description)){};
+              description(std::move(description)),
+              isOffsetRelative{isOffsetRelative} {};
 
     mlir::SymbolRefAttr source;
     vpux::ELF::ElfSectionInterface targetSection;
     size_t offset;
     vpux::ELF::RelocationType relocType;
     size_t addend;
-    bool isOffsetRelative;
     std::string description;
+    bool isOffsetRelative;
 };

@@ -5,8 +5,9 @@
 
 #include "vpux/compiler/conversion/passes/VPU2VPUIP/bufferize_sw_ops_interface.hpp"
 #include "vpux/compiler/NPU40XX/utils.hpp"
-#include "vpux/compiler/conversion/rewriters/VPU2VPUIP/sw_rewriter.hpp"
+#include "vpux/compiler/dialect/VPU/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/convert_to_dma_utils.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/sw_utils.hpp"
 #include "vpux/compiler/utils/allocate_buffers.hpp"
@@ -225,6 +226,7 @@ mlir::LogicalResult vpux::bufferizeSWLayerOp(mlir::RewriterBase& rewriter, mlir:
     auto* ctx = op->getContext();
     auto layerOp = mlir::cast<VPU::LayerOpInterface>(op);
     auto swLayerOp = mlir::cast<VPUIP::SoftwareLayerOpInterface>(op);
+
     const auto memSpaceCMX = vpux::IndexedSymbolAttr::get(ctx, stringifyEnum(VPU::MemoryKind::CMX_NN), 0);
 
     SmallVector<mlir::Value> opResults(op->getResults().begin(), op->getResults().end());
@@ -377,6 +379,32 @@ mlir::LogicalResult vpux::bufferizeSWLayerOpInNceClusterTiling(mlir::RewriterBas
 namespace {
 
 //
+// ConcatOpBufferizeModel
+//
+
+class ConcatOpBufferizeModel : public BufferizableOpInterfaceExternalModelBase<ConcatOpBufferizeModel, VPU::ConcatOp> {
+public:
+    mlir::LogicalResult bufferizeImpl(VPU::ConcatOp origOp, mlir::RewriterBase& rewriter,
+                                      const mlir::bufferization::BufferizationOptions& options,
+                                      VPU::ConcatOp::Adaptor adaptor) const;
+};
+
+bool isLegalConcatOp(VPU::ConcatOp concatOp) {
+    const auto outputType = concatOp.getOutput().getType().cast<vpux::NDTypeInterface>();
+    return outputType.getShape().isStatic();
+}
+
+mlir::LogicalResult ConcatOpBufferizeModel::bufferizeImpl(VPU::ConcatOp origOp, mlir::RewriterBase& rewriter,
+                                                          const mlir::bufferization::BufferizationOptions& options,
+                                                          VPU::ConcatOp::Adaptor adaptor) const {
+    if (isLegalConcatOp(origOp)) {
+        return vpux::bufferizeOp(origOp->getContext(), origOp, adaptor, rewriter);
+    }
+    SoftwareLayerOpBufferizeModel<VPU::ConcatOp> concatOpSoftwareModel;
+    return concatOpSoftwareModel.bufferizeImpl(origOp, rewriter, options, adaptor);
+}
+
+//
 // StridedSliceOpBufferizeModel
 //
 
@@ -390,6 +418,9 @@ public:
 
 bool isLegalStridedSliceOp(VPU::StridedSliceOp stridedSliceOp) {
     auto attrToVector = [&](mlir::ArrayAttr attr) {
+        if (attr == nullptr) {
+            return SmallVector<uint32_t>{};
+        }
         return parseIntArrayAttr<uint32_t>(attr);
     };
     const auto greaterThanOne = [](auto dim) {
@@ -397,6 +428,9 @@ bool isLegalStridedSliceOp(VPU::StridedSliceOp stridedSliceOp) {
     };
     const auto stridesVec = attrToVector(stridedSliceOp.getStridesAttrAttr());
     const auto beginsVec = attrToVector(stridedSliceOp.getBeginsAttrAttr());
+    if (stridesVec.empty() || beginsVec.empty()) {
+        return false;
+    }
 
     const auto strideDimCount = llvm::count_if(stridesVec, greaterThanOne);
     const auto beginsDimCount = llvm::count_if(beginsVec, greaterThanOne);
@@ -500,6 +534,8 @@ void vpux::registerSoftwareLayerBufferizableOpInterfaces(mlir::DialectRegistry& 
         VPU::GatherNDOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::GatherNDOp>>(*ctx);
         VPU::GatherTreeOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::GatherTreeOp>>(*ctx);
         VPU::ConditionalCopyOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::ConditionalCopyOp>>(*ctx);
+        VPU::LoopSelectOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::LoopSelectOp>>(*ctx);
+        VPU::GroupNormalizationOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::GroupNormalizationOp>>(*ctx);
         VPU::TanOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::TanOp>>(*ctx);
         VPU::TanhOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::TanhOp>>(*ctx);
         VPU::SinOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::SinOp>>(*ctx);
@@ -520,6 +556,7 @@ void vpux::registerSoftwareLayerBufferizableOpInterfaces(mlir::DialectRegistry& 
         VPU::DepthToSpaceOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::DepthToSpaceOp>>(*ctx);
         VPU::SpaceToDepthOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::SpaceToDepthOp>>(*ctx);
         VPU::SpaceToBatch::attachInterface<SoftwareLayerOpBufferizeModel<VPU::SpaceToBatch>>(*ctx);
+        VPU::BatchToSpace::attachInterface<SoftwareLayerOpBufferizeModel<VPU::BatchToSpace>>(*ctx);
         VPU::AvgPoolOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::AvgPoolOp>>(*ctx);
         VPU::AdaptiveAvgPoolOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::AdaptiveAvgPoolOp>>(*ctx);
         VPU::AdaptiveMaxPoolOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::AdaptiveMaxPoolOp>>(*ctx);
@@ -593,6 +630,7 @@ void vpux::registerSoftwareLayerBufferizableOpInterfaces(mlir::DialectRegistry& 
         VPU::ErfOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::ErfOp>>(*ctx);
         VPU::BucketizeOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::BucketizeOp>>(*ctx);
         VPU::MaxPoolOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::MaxPoolOp>>(*ctx);
+        VPU::MaxPool8Op::attachInterface<SoftwareLayerOpBufferizeModel<VPU::MaxPool8Op>>(*ctx);
         VPU::RollOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::RollOp>>(*ctx);
         VPU::CTCGreedyDecoderSeqLenOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::CTCGreedyDecoderSeqLenOp>>(
                 *ctx);
@@ -612,5 +650,12 @@ void vpux::registerSoftwareLayerBufferizableOpInterfaces(mlir::DialectRegistry& 
         VPU::AccumulateOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::AccumulateOp>>(*ctx);
         VPU::NonZeroOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::NonZeroOp>>(*ctx);
         VPU::ShapeOfOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::ShapeOfOp>>(*ctx);
+        VPU::DynamicReshapeOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::DynamicReshapeOp>>(*ctx);
+        VPU::DynamicTileOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::DynamicTileOp>>(*ctx);
+        VPU::ConcatOp::attachInterface<ConcatOpBufferizeModel>(*ctx);
+        VPU::RMSOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::RMSOp>>(*ctx);
+        VPU::InverseOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::InverseOp>>(*ctx);
+        VPU::DeformableConvolutionOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::DeformableConvolutionOp>>(
+                *ctx);
     });
 }

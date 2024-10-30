@@ -4733,4 +4733,50 @@ def SpecialCastOp : IERT_Op<"SpecialCast",
     }];
 }
 
+//
+// DeformableConvolutionOp
+//
+
+def IERT_DeformableConvolutionOp :
+        IERT_LayerOp<1, "DeformableConvolution",
+            [
+                ViewLikeOpInterface
+            ]
+        > {
+    let summary = "InferenceEngine run-time DeformableConvolution layer";
+
+    let arguments = (ins
+        MemRefOf<[F16, F32]>:$input,
+        MemRefOf<[F16, F32]>:$offset,
+        MemRefOf<[F16, F32]>:$kernel,
+        Optional<MemRefOf<[F16, F32]>>:$mask,
+        MemRefOf<[F16, F32]>:$output_buff,
+
+        I64ArrayAttr:$strides,
+        I64ArrayAttr:$pads_begin,
+        I64ArrayAttr:$pads_end,
+        I64ArrayAttr:$dilations,
+
+        IntAttr:$group,
+        IntAttr:$deformable_group,
+        UnitAttr:$biliniar_interpolate_pad
+    );
+
+    let results = (outs
+        MemRefOf<[F16, F32, quant_QuantizedType]>:$output
+    );
+
+    let assemblyFormat = [{
+        attr-dict
+        `inputs` `(`
+                    $input `:` type($input) `,`
+                    $offset `:` type($offset) `,`
+                    $kernel `:` type($kernel) (`,`
+                    $mask^ `:` type($mask))?
+                `)`
+        `outputs` `(` $output_buff `:` type($output_buff) `)`
+        `->` type(results)
+    }];
+}
+
 #endif

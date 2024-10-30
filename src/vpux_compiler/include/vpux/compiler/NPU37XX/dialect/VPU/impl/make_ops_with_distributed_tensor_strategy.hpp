@@ -19,16 +19,20 @@ namespace vpux::VPU::arch37xx {
 */
 class MakeOpsWithDistributedTensorStrategy : public IGreedilyPassStrategy {
 public:
-    MakeOpsWithDistributedTensorStrategy(llvm::DenseMap<mlir::OpResult, OverlapDistributionParams>& overlapParamsLookup,
-                                         bool enableExplicitDistributedTensorAttr)
-            : _overlapParamsLookup(overlapParamsLookup),
-              _enableExplicitDistributedTensorAttr(enableExplicitDistributedTensorAttr) {
+    MakeOpsWithDistributedTensorStrategy(
+            const llvm::DenseMap<mlir::OpResult, vpux::NDTypeInterface>& typeLookup,
+            const llvm::DenseMap<mlir::Operation*, llvm::DenseMap<int, vpux::NDTypeInterface>>& inputTypeLookup,
+            bool enableExplicitDistributionInfoAttr)
+            : _typeLookup(typeLookup),
+              _inputTypeLookup(inputTypeLookup),
+              _enableExplicitDistributionInfoAttr(enableExplicitDistributionInfoAttr) {
     }
     void addPatterns(mlir::RewritePatternSet& patterns, Logger& log) const override final;
 
 private:
-    llvm::DenseMap<mlir::OpResult, OverlapDistributionParams>& _overlapParamsLookup;
-    bool _enableExplicitDistributedTensorAttr = false;
+    const llvm::DenseMap<mlir::OpResult, vpux::NDTypeInterface>& _typeLookup;
+    const llvm::DenseMap<mlir::Operation*, llvm::DenseMap<int, vpux::NDTypeInterface>>& _inputTypeLookup;
+    bool _enableExplicitDistributionInfoAttr = false;
 };
 
 }  // namespace vpux::VPU::arch37xx

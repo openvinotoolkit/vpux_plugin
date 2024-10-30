@@ -130,9 +130,9 @@ mlir::LogicalResult MoveViewLikeOps::matchAndRewrite(VPU::GroupSparseTensorOp or
 
             auto rewriteInput = [&](mlir::Value value, ShapeRef offsets, ShapeRef sizes) {
                 if (auto constOp = value.getDefiningOp<Const::DeclareOp>()) {
-                    auto newContentAttr = constOp.getContentAttr().subview(offsets, sizes);
+                    auto newContentAttr = constOp.transformContentAttr().subview(offsets, sizes).get();
                     auto newConstOp = rewriter.create<Const::DeclareOp>(constOp.getLoc(), newContentAttr.getType(),
-                                                                        newContentAttr);
+                                                                        std::move(newContentAttr));
                     return newConstOp.getOutput();
                 }
                 auto newSliceOp = rewriter.create<VPU::SliceOp>(value.getLoc(), value, getIntArrayAttr(ctx, offsets),

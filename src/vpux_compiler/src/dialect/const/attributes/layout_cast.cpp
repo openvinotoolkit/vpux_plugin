@@ -83,12 +83,6 @@ Const::Content vpux::Const::LayoutCastAttr::transform(vpux::Const::Content& inpu
     return Const::Content::moveBuffer(inferOutputType(input.getType()), std::move(input));
 }
 
-//
-// ContentAttr::transpose
-//
-
-Const::ContentAttr vpux::Const::ContentAttr::layoutCast(DimsOrder dstOrder) const {
-    return ContentAttr::addTransformation(
-            *this, Const::LayoutCastAttr::get(mlir::AffineMapAttr::get(dstOrder.toAffineMap(getContext())))
-                           .cast<Const::TransformAttrInterface>());
+Const::ContentSetup vpux::Const::ContentSetup::layoutCast(DimsOrder dstOrder) {
+    return addTransformation(Const::LayoutCastAttr::get(mlir::AffineMapAttr::get(dstOrder.toAffineMap(getContext()))));
 }

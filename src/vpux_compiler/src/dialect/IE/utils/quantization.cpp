@@ -5,6 +5,9 @@
 
 #include "vpux/compiler/dialect/IE/utils/quantization.hpp"
 
+#include "vpux/compiler/dialect/IE/IR/ops_interfaces.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
+
 using namespace vpux;
 
 std::optional<int64_t> getFQAxisIndex(IE::FakeQuantizeOp fq, Logger log) {
@@ -80,6 +83,20 @@ bool IE::areAnyUserQuantizeOps(mlir::Operation* op) {
     return llvm::any_of(op->getUsers(), [](mlir::Operation* op) {
         return mlir::isa<IE::QuantizeOp>(op);
     });
+}
+
+bool IE::areAllUsersQuantized(mlir::Operation* op) {
+    for (auto user : op->getUsers()) {
+        if (mlir::dyn_cast<IE::QuantizeOp>(user) == nullptr) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool IE::isPerAxisQuant(mlir::Value val) {
+    auto elemType = val.getType().dyn_cast<vpux::NDTypeInterface>().getElementType();
+    return elemType.isa<mlir::quant::UniformQuantizedPerAxisType>();
 }
 
 bool IE::checkQuantApproximation(mlir::Operation* op) {
@@ -173,51 +190,6 @@ mlir::quant::UniformQuantizedType IE::getQuantizedTypeFromFakeQuantize(IE::FakeQ
     return outQuantizeElemType.dyn_cast<mlir::quant::UniformQuantizedType>();
 }
 
-//
-// IE::arch37xx
-//
-
-bool IE::arch37xx::isMixPrecisionSupported(mlir::Operation* origOp, const bool isPReLUSupported, Logger log) {
-    if (!mlir::isa<IE::ConvolutionOp, IE::GroupConvolutionOp, IE::AddOp, IE::AvgPoolOp, IE::TransposedConvolutionOp>(
-                origOp)) {
-        return false;
-    }
-
-    // Check that the kernel size are not exceding the NCE HW limits
-    if (VPU::NCEInvariant::verifyKernel(origOp, log).failed()) {
-        return false;
-    }
-
-    // If the Add operands have different shapes the operation will be mapped on SHAVE, which does not support mixed
-    // precision operations
-    if (mlir::isa<IE::AddOp>(origOp)) {
-        auto addOp = mlir::dyn_cast<IE::AddOp>(origOp);
-        const auto shape1 = getShape(addOp.getInput1());
-        const auto shape2 = getShape(addOp.getInput2());
-        if (shape1 != shape2)
-            return false;
-    }
-
-    // Float input with quantized output supports leaky ReLU when quantize out is per-tensor.
-    // Further checks are not necessary, bail out.
-    if (isPReLUSupported) {
-        return true;
-    }
-
-    // HW limitations below do not apply to NPU37XX
-    // However, leaky ReLU does not work accurately in quant in / float out mode.
-    // In quant in / float out flow, PReLU alpha coefficient can only be represented as prelu_mult.
-    // prelu_shift is not available in such configuration.
-    // Therefore, it becomes problematic to express rational negative slopes.
-    // See E#58368 for details.
-    const auto hasLeakyReLUConsumer = llvm::any_of(origOp->getUsers(), [](mlir::Operation* op) {
-        return mlir::isa<IE::LeakyReluOp>(op);
-    });
-
-    // Thus, mixed precision is supported only when consumers and post-ops are not leaky ReLU
-    return !hasLeakyReLUConsumer && !hasLeakyReLUPostOp(origOp);
-}
-
 bool vpux::IE::isPerTensorFQ(ArrayRef<IE::FakeQuantizeOp> fqOps) {
     const auto checkFQAxis = [](IE::FakeQuantizeOp fq) -> bool {
         const auto greaterThanOne = [](auto dim) {
@@ -247,13 +219,67 @@ bool vpux::IE::isPerTensorFQ(ArrayRef<IE::FakeQuantizeOp> fqOps) {
     return true;
 }
 
+IE::FakeQuantizeOp vpux::IE::createFQ(mlir::PatternRewriter& rewriter, mlir::Value input, IE::FakeQuantizeOp fq,
+                                      mlir::Location loc) {
+    const auto outputType = fq.getOutput().getType().cast<vpux::NDTypeInterface>();
+    const auto newOutputType = outputType.changeShape(getShape(input));
+    return rewriter.create<IE::FakeQuantizeOp>(loc, newOutputType, input, fq.getInputLow(), fq.getInputHigh(),
+                                               fq.getOutputLow(), fq.getOutputHigh(), fq.getLevelsAttr(),
+                                               fq.getLowFpTypeAttr(), fq.getAutoBroadcastAttr());
+}
+
 Const::DeclareOp vpux::IE::createFQConst(mlir::MLIRContext* ctx, mlir::Location loc, float val,
                                          mlir::RankedTensorType argType, mlir::PatternRewriter& rewriter) {
     const auto denseElementVal = wrapData(mlir::RankedTensorType::get({1, 1, 1, 1}, mlir::Float32Type::get(ctx)), val);
     VPUX_THROW_UNLESS(denseElementVal != nullptr, "Failed to generate the denseElementVal.");
-    const auto cstAttr = Const::ContentAttr::get(denseElementVal)
-                                 .convertElemType(argType.cast<vpux::NDTypeInterface>().getElementType());
-    return rewriter.create<Const::DeclareOp>(loc, argType, cstAttr);
+    auto cstAttr = Const::ContentAttr::transform(denseElementVal)
+                           .castElemType(argType.cast<vpux::NDTypeInterface>().getElementType())
+                           .get();
+    return rewriter.create<Const::DeclareOp>(loc, argType, std::move(cstAttr));
+}
+
+mlir::Value vpux::IE::createFQScaling(mlir::Location loc, mlir::Value input, float scaleFactor, mlir::Type elemType,
+                                      std::optional<int64_t> levels, std::optional<mlir::Type> lowFpType,
+                                      vpux::IE::AutoBroadcastTypeAttr autoBroadcast, mlir::PatternRewriter& rewriter) {
+    // Creates and inserts an FQ which scales the given input by a factor.
+    VPUX_THROW_WHEN(scaleFactor > 1.0f, "Superunitary scaling factor causes FQ to overflow: {0} > 1.0", scaleFactor);
+
+    const auto fqArgType = mlir::RankedTensorType::get({}, elemType);
+    if (levels.has_value()) {
+        // Integer case
+        const auto levels_value = *levels;
+        VPUX_THROW_WHEN(levels_value != 256 && levels_value != 255, "Got (currently) unsupported levels: {0}",
+                        levels_value);
+
+        auto fqLevelsVal = getIntAttr(rewriter, levels_value);
+        auto fqLowVal = Const::createFloatConst(rewriter, loc, fqArgType, 0.0f);
+        auto fqInHighVal = Const::createFloatConst(rewriter, loc, fqArgType, levels_value - 1);
+        auto fqOutHighVal = Const::createFloatConst(rewriter, loc, fqArgType, (levels_value - 1) * scaleFactor);
+
+        auto fq = rewriter.create<IE::FakeQuantizeOp>(loc, input.getType(), input, fqLowVal, fqInHighVal, fqLowVal,
+                                                      fqOutHighVal, fqLevelsVal,
+                                                      /*lowFpType=*/nullptr, autoBroadcast);
+        return fq.getOutput();
+    }
+
+    if (lowFpType.has_value()) {
+        // Low precision floating-point case
+        const auto rangeOrFail = vpux::getFp8Range(*lowFpType);
+        VPUX_THROW_WHEN(mlir::failed(rangeOrFail), "Unsupported FQ lowFpType: {0}", *lowFpType);
+        const auto lowVal = std::get<0>(*rangeOrFail), highVal = std::get<1>(*rangeOrFail);
+
+        auto fqInLowVal = Const::createFloatConst(rewriter, loc, fqArgType, lowVal);
+        auto fqInHighVal = Const::createFloatConst(rewriter, loc, fqArgType, highVal);
+        auto fqOutLowVal = Const::createFloatConst(rewriter, loc, fqArgType, lowVal * scaleFactor);
+        auto fqOutHighVal = Const::createFloatConst(rewriter, loc, fqArgType, highVal * scaleFactor);
+
+        auto fq = rewriter.create<IE::FakeQuantizeOp>(
+                loc, input.getType(), input, fqInLowVal, fqInHighVal, fqOutLowVal, fqOutHighVal,
+                /*levels=*/nullptr, mlir::TypeAttr::get(*lowFpType), autoBroadcast);
+        return fq.getOutput();
+    }
+
+    VPUX_THROW("Neither levels nor lowFpType were provided.");
 }
 
 Const::details::ContentRange<float> vpux::IE::getConst(Const::DeclareOp declOp) {

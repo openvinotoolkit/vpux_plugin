@@ -43,18 +43,20 @@ mlir::quant::QuantizedType extractQuantizedType(mlir::Value operand) {
 
 mlir::OpFoldResult vpux::IE::QuantizeOp::fold(FoldAdaptor adaptor) {
     auto operands = adaptor.getOperands();
-    if (auto cst = operands[0].dyn_cast_or_null<Const::ContentAttr>()) {
+    if (auto ephemeral = operands[0].dyn_cast_or_null<Const::EphemeralContentAttr>()) {
+        const auto cst = static_cast<Const::ContentAttr>(ephemeral);
+
         // Compiler must add real quantization of content if dequantization was before
         bool hasDequant = llvm::any_of(cst.getTransformations(), [](mlir::Attribute attr) {
             return attr.isa<Const::DequantizeAttr>();
         });
         const auto quantType = extractQuantizedType(getOutput());
         if (hasDequant) {
-            return cst.quantize(quantType);
+            return cst.transform().quantize(quantType).get();
         }
 
         const auto quantStorageType = normalizeQuantStorageType(quantType);
-        return cst.convertElemType(quantStorageType).quantCast(quantType);
+        return cst.transform().castElemType(quantStorageType).quantCast(quantType).get();
     }
 
     if (auto dequantize = getInput().getDefiningOp<IE::DequantizeOp>()) {

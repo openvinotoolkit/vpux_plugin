@@ -7,13 +7,13 @@
 #include "vpux/compiler/dialect/VPUMI40XX/ops.hpp"
 #include "vpux/compiler/dialect/VPUMI40XX/passes.hpp"
 #include "vpux/compiler/dialect/VPUMI40XX/utils.hpp"
+#include "vpux/compiler/dialect/VPUMI40XX/wlm_utils.hpp"
 #include "vpux/compiler/dialect/VPURegMapped/ops.hpp"
 
 using namespace vpux;
 
 namespace {
 
-using lcaCache = llvm::DenseMap<std::pair<uint32_t, uint32_t>, llvm::SmallVector<mlir::Value>>;
 class AddEnqueueOpsPass : public VPUMI40XX::AddEnqueueOpsBase<AddEnqueueOpsPass> {
 public:
     explicit AddEnqueueOpsPass(Logger log) {
@@ -24,218 +24,6 @@ private:
     static constexpr int64_t DMA_OUTSTANDING_TRANSACTIONS = 64;
     void safeRunOnFunc() final;
 };
-
-bool taskOpComparator(mlir::Operation* lhs, mlir::Operation* rhs) {
-    auto lhsTask = mlir::cast<VPURegMapped::TaskOpInterface>(lhs);
-    auto rhsTask = mlir::cast<VPURegMapped::TaskOpInterface>(rhs);
-    return lhsTask.getIndexType().getValue() < rhsTask.getIndexType().getValue();
-}
-
-// Function to get the maximum barrier based on their type values(virtual id)
-auto getMaxBarrier(SmallVector<mlir::Value>& barriers) {
-    return std::max_element(barriers.begin(), barriers.end(), [](mlir::Value lhs, mlir::Value rhs) {
-        return mlir::cast<VPUMI40XX::ConfigureBarrierOp>(lhs.getDefiningOp()).getType().getValue() <
-               mlir::cast<VPUMI40XX::ConfigureBarrierOp>(rhs.getDefiningOp()).getType().getValue();
-    });
-}
-
-// Function to get the minimum barrier based on their type values(virtual id)
-auto getMinBarrier(SmallVector<mlir::Value>& barriers) {
-    return std::min_element(barriers.begin(), barriers.end(), [](mlir::Value lhs, mlir::Value rhs) {
-        return mlir::cast<VPUMI40XX::ConfigureBarrierOp>(lhs.getDefiningOp()).getType().getValue() <
-               mlir::cast<VPUMI40XX::ConfigureBarrierOp>(rhs.getDefiningOp()).getType().getValue();
-    });
-}
-
-void reindexEnqueueOps(llvm::SmallVector<VPURegMapped::EnqueueOp> enquOps) {
-    if (enquOps.size() == 0) {
-        return;
-    }
-
-    auto ctx = enquOps[0].getContext();
-    auto index = [&ctx](auto taskIdx) {
-        return VPURegMapped::IndexType::get(ctx, checked_cast<uint32_t>(taskIdx));
-    };
-
-    enquOps[0].getResult().setType(index(0));
-    enquOps[0].getPreviousTaskIdxMutable().clear();
-
-    for (size_t i = 1; i < enquOps.size(); i++) {
-        auto enqu = enquOps[i];
-        enqu.getResult().setType(index(i));
-        enqu.getPreviousTaskIdxMutable().assign(enquOps[i - 1]);
-    }
-
-    return;
-}
-
-mlir::ValueRange getClosestProductionBarriers(VPURegMapped::TaskOpInterface taskOp) {
-    do {
-        auto executableTaskOp = mlir::dyn_cast<VPUMI40XX::ExecutableTaskOpInterface>(taskOp.getOperation());
-        if (executableTaskOp && (executableTaskOp.updateBarriers().size() != 0)) {
-            return executableTaskOp.updateBarriers();
-        }
-
-        auto taskOpUsers = taskOp.getOperation()->getResult(0).getUsers();
-        auto nextTaskDown = llvm::find_if(taskOpUsers, [&taskOp](mlir::Operation* user) {
-            auto next = mlir::dyn_cast<VPURegMapped::TaskOpInterface>(user);
-            return next && (next.getPreviousTask() == taskOp);
-        });
-
-        taskOp = nextTaskDown != taskOpUsers.end() ? mlir::cast<VPURegMapped::TaskOpInterface>(*nextTaskDown) : nullptr;
-
-    } while (taskOp);
-
-    return mlir::ValueRange{};
-}
-
-void dfs(mlir::Value val, llvm::SetVector<mlir::Value>& visited) {
-    visited.insert(val);
-    for (auto user : val.getUsers()) {
-        auto barr = mlir::dyn_cast<VPUMI40XX::ConfigureBarrierOp>(user);
-        if (!barr)
-            continue;
-        if (!visited.contains(barr.getResult())) {
-            dfs(barr.getResult(), visited);
-        }
-    }
-}
-
-llvm::SmallVector<mlir::Value> lca(mlir::Value lhs, mlir::Value rhs, lcaCache& cache) {
-    if (lhs == rhs)
-        return {lhs};
-
-    auto lhsBar = mlir::cast<VPUMI40XX::ConfigureBarrierOp>(lhs.getDefiningOp());
-    auto rhsBarr = mlir::cast<VPUMI40XX::ConfigureBarrierOp>(rhs.getDefiningOp());
-    auto lhsPos = lhsBar.getType().cast<VPURegMapped::IndexType>().getValue();
-    auto rhsPos = rhsBarr.getType().cast<VPURegMapped::IndexType>().getValue();
-
-    if (lhsPos > rhsPos) {
-        std::swap(lhs, rhs);
-    }
-
-    if (cache.contains({lhsPos, rhsPos})) {
-        return cache[{lhsPos, rhsPos}];
-    }
-
-    llvm::SmallVector<mlir::Value> lcas;
-
-    llvm::SetVector<mlir::Value> visitedLhs, visitedRhs;
-    llvm::SetVector<mlir::Value> intersection;
-
-    dfs(lhs, visitedLhs);
-    dfs(rhs, visitedRhs);
-
-    // get the intersection of the 2
-    for (auto lhsIt : visitedLhs) {
-        if (visitedRhs.contains(lhsIt)) {
-            intersection.insert(lhsIt);
-        }
-    }
-
-    // each barr who's deps is not in the intersection is an LCA
-    for (auto val : intersection) {
-        auto barr = mlir::cast<VPUMI40XX::ConfigureBarrierOp>(val.getDefiningOp());
-        auto count = llvm::count_if(barr.getDependencies(), [&intersection](mlir::Value val) {
-            return intersection.contains(val);
-        });
-        if (count == 0) {
-            lcas.push_back(val);
-        }
-    }
-    cache[{lhsPos, rhsPos}] = lcas;
-    return lcas;
-}
-
-llvm::SmallVector<mlir::Value> lca(llvm::SmallVector<mlir::Value>& lhs, mlir::Value rhs, lcaCache& cache) {
-    llvm::SmallVector<mlir::Value> lcas;
-
-    for (auto val : lhs) {
-        lcas.append(lca(val, rhs, cache));
-    }
-
-    return lcas;
-}
-
-llvm::SmallVector<mlir::Value> lca(llvm::SmallVector<mlir::Value>& barrierVals, lcaCache& cache) {
-    // sanity... only makes sense in debug modes
-    assert(std::all_of(barrierVals.begin(), barrierVals.end(),
-                       [](mlir::Value val) {
-                           return mlir::isa<VPUMI40XX::ConfigureBarrierOp>(val.getDefiningOp());
-                       }) &&
-           "LCA requires all of the values to be defined by configureBarrierOps {0}");
-
-    if (barrierVals.size() <= 1) {
-        return barrierVals;
-    }
-
-    if (barrierVals.size() == 2) {
-        return lca(barrierVals[0], barrierVals[1], cache);
-    }
-
-    llvm::SmallVector<mlir::Value> lcas = lca(barrierVals[0], barrierVals[1], cache);
-    for (size_t i = 2; i < barrierVals.size(); ++i) {
-        lcas = lca(lcas, barrierVals[i], cache);
-    }
-
-    return lcas;
-}
-
-VPURegMapped::TaskOpInterface getNextOp(VPURegMapped::TaskOpInterface op) {
-    auto users = op.getResult().getUsers();
-    auto nexOpIt = llvm::find_if(users, [&op](mlir::Operation* user) {
-        auto nextTask = mlir::dyn_cast<VPURegMapped::TaskOpInterface>(user);
-        return nextTask && (nextTask.getTaskType() == op.getTaskType()) && (nextTask.getPreviousTask() == op);
-    });
-
-    op = nexOpIt != users.end() ? mlir::cast<VPURegMapped::TaskOpInterface>(*nexOpIt) : nullptr;
-    return op;
-}
-
-// TODO: (E#115494) consider explicitly materializing the "previous ID" inside the IR
-llvm::SmallVector<mlir::Value> getPreviousUsages(mlir::ValueRange barrs,
-                                                 llvm::SmallVector<VPUMI40XX::ConfigureBarrierOp> allBarrs) {
-    llvm::SmallVector<mlir::Value> previousUsages;
-
-    // assuming taskIdx of barrier is the same as it's listIdx
-    auto getPreviousUsage = [&allBarrs](int64_t startIdx, uint8_t pid) -> mlir::Value {
-        if (startIdx == 0) {
-            return nullptr;
-        }
-        for (auto idx = startIdx - 1; idx >= 0; idx--) {
-            if (allBarrs[idx].getId() == pid) {
-                return allBarrs[idx].getResult();
-            }
-        }
-        return nullptr;
-    };
-
-    for (auto barr : barrs) {
-        auto barrOp = mlir::cast<VPUMI40XX::ConfigureBarrierOp>(barr.getDefiningOp());
-        auto idx = barrOp.getType().getValue();
-        auto pid = barrOp.getId();
-        auto previousUsage = getPreviousUsage(idx, pid);
-        if (previousUsage)
-            previousUsages.push_back(previousUsage);
-    }
-
-    return previousUsages;
-}
-
-// TODO: ned to figure out a clean way to get barriers purely from taskOpInterface
-VPUMI40XX::ExecutableTaskOpInterface getBarrieredOp(VPURegMapped::TaskOpInterface primary,
-                                                    VPURegMapped::TaskOpInterface secondary) {
-    if (primary.getTaskType() == VPURegMapped::TaskType::DPUInvariant) {
-        return mlir::cast<VPUMI40XX::ExecutableTaskOpInterface>(primary.getOperation());
-    } else if (primary.getTaskType() == VPURegMapped::TaskType::ActKernelRange) {
-        return mlir::cast<VPUMI40XX::ExecutableTaskOpInterface>(secondary.getOperation());
-    } else {
-        VPUX_THROW("Unknown TaskType for pair {0} {1}", primary.getResult(), secondary.getResult());
-        return nullptr;
-    }
-
-    return nullptr;
-}
 
 // Check if barrier that was chosen for enqueuing a task does not depend on a barrier
 // that is to be produced by this task itself what will create a deadlock during execution
@@ -305,10 +93,9 @@ void verifyEnqueueBarrierIsNotBlockedByFutureTask(VPUMI40XX::MappedInferenceOp m
     auto barrierCount = barrierConsumerCounter.size();
     for (auto& barrier : barriers) {
         auto barrierIdx = barrier.getResult().getType().cast<VPURegMapped::IndexType>().getValue();
-        VPUX_THROW_TYPED_WHEN(WlmRollbackException, barrierIdx >= barrierCount,
-                              "Invalid barrier index - {0} out of possible {1}", barrierIdx, barrierCount);
-        VPUX_THROW_TYPED_WHEN(WlmRollbackException, barrierConsumerCounter[barrierIdx] > -1,
-                              "Barrier {0} has already been updated", barrierIdx);
+        VPUX_THROW_WHEN(barrierIdx >= barrierCount,
+                        "Invalid barrier index - {0} out of possible amount of barriers {1}", barrierIdx, barrierCount);
+        VPUX_THROW_WHEN(barrierConsumerCounter[barrierIdx] > -1, "Barrier {0} has already been updated", barrierIdx);
 
         if (barrier.getConsumerCount().has_value()) {
             barrierConsumerCounter[barrierIdx] = barrier.getConsumerCount().value();
@@ -347,9 +134,9 @@ void verifyEnqueueBarrierIsNotBlockedByFutureTask(VPUMI40XX::MappedInferenceOp m
                 if (auto executableTaskOp = mlir::dyn_cast<VPUMI40XX::ExecutableTaskOpInterface>(dmaOp)) {
                     for (const auto& waitBar : executableTaskOp.waitBarriers()) {
                         auto barrierIdx = waitBar.getType().cast<VPURegMapped::IndexType>().getValue();
-                        VPUX_THROW_TYPED_WHEN(WlmRollbackException, barrierIdx >= barrierCount,
-                                              "Invalid barrier index - {0} out of possible {1}", barrierIdx,
-                                              barrierCount);
+                        VPUX_THROW_WHEN(barrierIdx >= barrierCount,
+                                        "Invalid barrier index - {0} out of possible amount of barriers {1}",
+                                        barrierIdx, barrierCount);
                         barrierConsumerCounter[barrierIdx]--;
                     }
                 }
@@ -357,7 +144,7 @@ void verifyEnqueueBarrierIsNotBlockedByFutureTask(VPUMI40XX::MappedInferenceOp m
                 auto nextDma = VPUMI40XX::getNextOp(mlir::cast<VPURegMapped::TaskOpInterface>(dmaOp));
                 nextDmaOp = nextDma ? nextDma.getOperation() : nullptr;
 
-            } while (dmaOp != lastDmaWithNoEnqueue[tileIdx][listIdx]);
+            } while (nextDmaOp != nullptr && dmaOp != lastDmaWithNoEnqueue[tileIdx][listIdx]);
         }
     }
 
@@ -390,11 +177,12 @@ void verifyEnqueueBarrierIsNotBlockedByFutureTask(VPUMI40XX::MappedInferenceOp m
             if (barrieredOp) {
                 for (const auto& waitBar : barrieredOp.waitBarriers()) {
                     auto barrierIdx = waitBar.getType().cast<VPURegMapped::IndexType>().getValue();
-                    VPUX_THROW_TYPED_WHEN(WlmRollbackException, barrierIdx >= barrierCount,
-                                          "Invalid barrier index - {0} out of possible {1}", barrierIdx, barrierCount);
-                    VPUX_THROW_TYPED_UNLESS(WlmRollbackException, barrierConsumerCounter[barrierIdx] > 0,
-                                            "Barrier {0} consumer count cannot be decremented - {1}", barrierIdx,
-                                            barrierConsumerCounter[barrierIdx]);
+                    VPUX_THROW_WHEN(barrierIdx >= barrierCount,
+                                    "Invalid barrier index - {0} out of possible amount of barriers {1}", barrierIdx,
+                                    barrierCount);
+                    VPUX_THROW_UNLESS(barrierConsumerCounter[barrierIdx] > 0,
+                                      "Barrier {0} consumer count cannot be decremented - {1}", barrierIdx,
+                                      barrierConsumerCounter[barrierIdx]);
                     barrierConsumerCounter[barrierIdx]--;
                 }
             }
@@ -427,77 +215,77 @@ void verifyEnqueueBarrierIsNotBlockedByFutureTask(VPUMI40XX::MappedInferenceOp m
 1. If Enqueue of ShaveTasks happens at Virt#619
 2. At the point of enqueue the previousUsage virt#617:phys#11 of waitBarrier virt#650:phys#11 has not
 been consumed fully consumed (full consumption happens at Virt#620)
-3. When this enqueue happens runtime checks the state of phys#11 and since phys#11 has not been reprogrammed yet it has
-production counter 0 thus runtime allows the Shave task to execute
-4. Because the SHV FIFO is empty, we start executing the SHV immediately while the DMA1 and DMA2 are still writing to
-CMX
+3. When this enqueue happens runtime checks the state of phys#11 and since phys#11 has not been reprogrammed yet it
+has production counter 0 thus runtime allows the Shave task to execute
+4. Because the SHV FIFO is empty, we start executing the SHV immediately while the DMA1 and DMA2 are still writing
+to CMX
 
-This sort of behaviour creates unstable runs as sometimes we will see the inference pass while some times the runtime
-throws context violation
+This sort of behaviour creates unstable runs as sometimes we will see the inference pass while some times the
+runtime throws context violation
 */
 
-// This function checks for above described case and throws a rollback exception when it encounters such enqueues
-void verifyEnqueueOpForFirstTaskInFifo(VPUMI40XX::ExecutableTaskOpInterface barrieredOp, mlir::Value enqTarget,
-                                       const SmallVector<VPUMI40XX::ConfigureBarrierOp>& barriers) {
-    auto contains = [](const llvm::SmallVector<mlir::Value>& vec, const mlir::Value& element) {
-        return std::find(vec.begin(), vec.end(), element) != vec.end();
-    };
-
+// This function checks for above described case and delay enqueue if it's possible
+mlir::Value delayEnqueueOpForFirstTaskInFifo(VPUMI40XX::ExecutableTaskOpInterface barrieredOp, mlir::Value enqTarget,
+                                             const SmallVector<VPUMI40XX::ConfigureBarrierOp>& barriers,
+                                             VPUMI40XX::lcaCache& cache) {
     auto enqTargetOp = mlir::cast<VPUMI40XX::ConfigureBarrierOp>(enqTarget.getDefiningOp());
     auto enqBarrierIdx = enqTargetOp.getType().getValue();
     auto waitBarriers =
             llvm::SmallVector<mlir::Value>(barrieredOp.waitBarriers().begin(), barrieredOp.waitBarriers().end());
-    auto waitBarrierUsages = getPreviousUsages(waitBarriers, barriers);
-    auto maxBarrierIt = getMaxBarrier(waitBarrierUsages);
-    if (maxBarrierIt == waitBarrierUsages.end())
-        return;
+    auto waitBarrierUsages = VPUMI40XX::getPreviousUsages(waitBarriers, barriers);
+    if (waitBarrierUsages.empty()) {
+        return enqTarget;
+    }
+    auto maxBarrierIt = VPUMI40XX::getMaxBarrier(waitBarrierUsages);
 
-    // maxBarrierUsageOp here represents the last barrier which has the same pid as the wait barrier of
+    // maxBarrierOp here represents the last barrier which has the same pid as the wait barrier of
     // the taskOp
-    auto maxBarrierUsageOp = mlir::cast<VPUMI40XX::ConfigureBarrierOp>(maxBarrierIt->getDefiningOp());
-    if (maxBarrierUsageOp.getType().getValue() >= enqBarrierIdx) {
-        return;
+    auto maxBarrierOp = mlir::cast<VPUMI40XX::ConfigureBarrierOp>(maxBarrierIt->getDefiningOp());
+    if (maxBarrierOp.getType().getValue() >= enqBarrierIdx) {
+        return enqTarget;
     }
 
     SmallVector<mlir::Value> maxBarrierUpdateBarriers;
-    for (auto user : maxBarrierUsageOp.getResult().getUsers()) {
+    for (auto user : maxBarrierOp.getResult().getUsers()) {
         if (auto executableTaskOp = mlir::dyn_cast<VPUMI40XX::ExecutableTaskOpInterface>(user)) {
             auto waitBarriers = llvm::SmallVector<mlir::Value>(executableTaskOp.waitBarriers().begin(),
                                                                executableTaskOp.waitBarriers().end());
-            if (contains(waitBarriers, maxBarrierUsageOp.getResult())) {
+            if (VPUMI40XX::contains(waitBarriers, maxBarrierOp.getResult())) {
                 auto updateBarriers = llvm::SmallVector<mlir::Value>(executableTaskOp.updateBarriers().begin(),
                                                                      executableTaskOp.updateBarriers().end());
-                auto minUpdateBarrier = getMinBarrier(updateBarriers);
+                auto minUpdateBarrier = VPUMI40XX::getMinBarrier(updateBarriers);
                 maxBarrierUpdateBarriers.push_back(*minUpdateBarrier);
             }
         }
     }
 
-    // Min barrier here represents the first barrier that is updated by the users of maxBarrierUsageOp
+    // Min barrier here represents the first barrier that is updated by the users of maxBarrierOp
     // Min barrier is chosen for the check as we only care about reprogramming and making sure the barrier is
     // consumed rather than checking when all the users have finished and updated their barriers
-    auto minBarrierUpdateBarrierIt = getMinBarrier(maxBarrierUpdateBarriers);
+    auto minBarrierUpdateBarrierIt = VPUMI40XX::getMinBarrier(maxBarrierUpdateBarriers);
+    auto maxBarrierUpdateBarrierIt = VPUMI40XX::getMaxBarrier(maxBarrierUpdateBarriers);
     auto minBarrierUpdateBarrierOp =
             mlir::cast<VPUMI40XX::ConfigureBarrierOp>(minBarrierUpdateBarrierIt->getDefiningOp());
+    auto maxBarrierUpdateBarrierOp =
+            mlir::cast<VPUMI40XX::ConfigureBarrierOp>(maxBarrierUpdateBarrierIt->getDefiningOp());
 
-    bool earlyEnqueue = false;
-    // If minBarrierUpdateBarrierOp has enqueue barrier in dependencies then we know that enqueue barrier would be
-    // consumed before enqTargetOp is produced. In this case the position of enqueue is fine as the pid of wait
-    // barrier for the task would be reprogrammed
-    if (minBarrierUpdateBarrierOp.getType().getValue() > enqBarrierIdx &&
-        !contains(minBarrierUpdateBarrierOp.getDependencies(), enqTargetOp.getResult())) {
-        earlyEnqueue = true;
-    }
-
-    VPUX_THROW_TYPED_WHEN(WlmRollbackException, earlyEnqueue, "Early enqueue on '{0}' found for task '{1}'",
-                          enqTargetOp, barrieredOp);
+    // We have case where the enqueue is between the first and the last update barrier of the previous usage of wait
+    // barrier. These case can be problematic as we would not know if maxBarrierUpdateBarrierOp has been produced or
+    // not hence can't garntee reprogramming of previous usage of wait barrier
+    if (maxBarrierUpdateBarrierOp.getType().getValue() > enqBarrierIdx &&
+        enqBarrierIdx > minBarrierUpdateBarrierOp.getType().getValue()) {
+        auto lcas = VPUMI40XX::lca(maxBarrierUpdateBarriers, cache);
+        return *VPUMI40XX::getMinBarrier(lcas);
+    } else {
+        return enqTarget;
+    };
 }
 
 void addEnqus(VPUMI40XX::MappedInferenceOp mpi, const VPURegMapped::TaskType primary,
               const VPURegMapped::TaskType secondary, const int64_t tilesCount,
               const llvm::SmallVector<vpux::VPUMI40XX::ConfigureBarrierOp>& barriers, mlir::Value& firstEnqu,
-              VPURegMapped::EnqueueOp& globalPreviousEnqu, mlir::OpBuilder& builder, int64_t& counter, lcaCache& cache,
-              Logger log) {
+              VPURegMapped::EnqueueOp& globalPreviousEnqu, mlir::OpBuilder& builder, int64_t& counter,
+              VPUMI40XX::lcaCache& cache, Logger log) {
     auto ctx = mpi.getContext();
 
     auto getFetchTask = [](mlir::Value result) {
@@ -530,8 +318,8 @@ void addEnqus(VPUMI40XX::MappedInferenceOp mpi, const VPURegMapped::TaskType pri
                                         return taskOp && taskOp.getTaskType() == secondary;
                                     }));
 
-            auto firstSecondaryIt = vpux::min_element(filteredRange, taskOpComparator);
-            auto lastSecondaryIt = vpux::max_element(filteredRange, taskOpComparator);
+            auto firstSecondaryIt = vpux::min_element(filteredRange, VPUMI40XX::taskOpComparator);
+            auto lastSecondaryIt = vpux::max_element(filteredRange, VPUMI40XX::taskOpComparator);
             auto firstSecondary = mlir::cast<VPURegMapped::TaskOpInterface>(**firstSecondaryIt);
             auto lastSecondary = mlir::cast<VPURegMapped::TaskOpInterface>(**lastSecondaryIt);
 
@@ -550,14 +338,14 @@ void addEnqus(VPUMI40XX::MappedInferenceOp mpi, const VPURegMapped::TaskType pri
                     .
 
                 Start with the fetchTask, get all the users such that the previous task for user is fetchTask
-                For the next iteration this user becomes the task and the loop continues until we find a task which is
-                of type ExecutableTaskOpInterface e.g. DMA0_1 and use its updateBarriers to ensure the fetch task has
-                been completed
+                For the next iteration this user becomes the task and the loop continues until we find a task which
+               is of type ExecutableTaskOpInterface e.g. DMA0_1 and use its updateBarriers to ensure the fetch task
+               has been completed
             */
-            auto fetchTaskUpdateBarrs = getClosestProductionBarriers(
+            auto fetchTaskUpdateBarrs = VPUMI40XX::getClosestProductionBarriers(
                     mlir::cast<VPURegMapped::TaskOpInterface>(previousFetchTask.getOperation()));
 
-            auto barrieredOp = getBarrieredOp(taskOp, lastSecondary);
+            auto barrieredOp = VPUMI40XX::getBarrieredOp(taskOp, lastSecondary);
             // Similar approach comparing to DMA L:593, to ensure both wait,update have been reprogrammed before
             // Enqueuing the task have both wait and update barriers in the lca search space
             llvm::SmallVector<mlir::Value> targetBarriers(barrieredOp.updateBarriers().begin(),
@@ -573,23 +361,25 @@ void addEnqus(VPUMI40XX::MappedInferenceOp mpi, const VPURegMapped::TaskType pri
                 previousUsages.push_back(*fetchTaskUpdateBarrs.begin());
             }
 
-            auto lcas = lca(previousUsages, cache);
+            auto lcas = VPUMI40XX::lca(previousUsages, cache);
 
-            VPUX_THROW_UNLESS(lcas.size(), "Could not find a lowest commont ancestor");
+            VPUX_THROW_UNLESS(lcas.size(), "Could not find a lowest common ancestor");
 
-            auto enqueueTarget = *getMinBarrier(lcas);
-            if (isFirstEnqueue) {
-                verifyEnqueueOpForFirstTaskInFifo(barrieredOp, enqueueTarget, barriers);
+            auto enqueueTarget = *VPUMI40XX::getMinBarrier(lcas);
+
+            // We need to check the first task which has a reused wait barrier
+            auto previousUsagesWaitBarrier = getPreviousUsages(barrieredOp.waitBarriers(), barriers);
+            if (isFirstEnqueue && !previousUsagesWaitBarrier.empty()) {
+                enqueueTarget = delayEnqueueOpForFirstTaskInFifo(barrieredOp, enqueueTarget, barriers, cache);
                 isFirstEnqueue = false;
             }
 
-            // we can get into a corner case where a subsequent DPU can be enqueued before it's predecessing enque,
-            // based on barrier constraints. we could include the previous barriers enqueue barrier into the LCA, but
-            // need to prove that will be satisfactory. For now, assuming that barriers are topologically ordered, we
-            // will compare with
-            // the previous enqueOp's triggering barriers list idx
+            // we can get into a corner case where a subsequent DPU can be enqueued before it's preceding enqueue,
+            // based on barrier constraints. we could include the previous barriers enqueue barrier into the
+            // LCA, but need to prove that will be satisfactory. For now, assuming that barriers are
+            // topologically ordered, we will compare with the previous enqueOp's triggering barriers list idx
 
-            // not needed anymore as long as we are sure to topologically sory enqueue tasks themselves
+            // not needed anymore as long as we are sure to topologically sort enqueue tasks themselves
             // since now Runtime guarantees ordered submission of enqueues
             if (localPreviousEnqu) {
                 auto previousEnquBarrier = localPreviousEnqu.getBarrier();
@@ -604,10 +394,9 @@ void addEnqus(VPUMI40XX::MappedInferenceOp mpi, const VPURegMapped::TaskType pri
                                     verifyEnqueueBarrierHasNoTopoDepOnBarrs(enqueueTarget, targetBarriers, log),
                                     "Invalid enqueue barrier found for task '{0}'", taskOp);
 
-            // if the previous enqueue's barrier is the same as the target barrier, we can just add this variant range
-            // to the previous enqueue. This is made with the assumption that we topologically iterate over the variants
-            // list by their listOrder
-
+            // if the previous enqueue's barrier is the same as the target barrier, we can just add this variant
+            // range to the previous enqueue. This is made with the assumption that we topologically iterate over
+            // the variants list by their listOrder
             if (localPreviousEnqu && (localPreviousEnqu.getBarrier() == enqueueTarget)) {
                 localPreviousEnqu.getEndMutable().assign(lastSecondary->getResult(0));
             } else {
@@ -624,7 +413,7 @@ void addEnqus(VPUMI40XX::MappedInferenceOp mpi, const VPURegMapped::TaskType pri
                     firstEnqu = localPreviousEnqu.getResult();
             }
 
-            taskOp = getNextOp(taskOp);
+            taskOp = VPUMI40XX::getNextOp(taskOp);
         } while (taskOp);
 
         globalPreviousEnqu = localPreviousEnqu;
@@ -647,7 +436,7 @@ void AddEnqueueOpsPass::safeRunOnFunc() {
     int64_t globalEnquCounter = 0;
 
     // We often call LCA for same pair of barriers in in that case we having cache is beneficial
-    lcaCache cache;
+    VPUMI40XX::lcaCache cache;
 
     addEnqus(mpi, VPURegMapped::TaskType::DPUInvariant, VPURegMapped::TaskType::DPUVariant, tilesCount, barriers,
              firstEnqu, globalPreviousEnqu, builder, globalEnquCounter, cache, _log);
@@ -696,9 +485,9 @@ void AddEnqueueOpsPass::safeRunOnFunc() {
                             B2 (461:14)
 
                        In the case above if we only choose updateBarrier's (B2) previous usage (B2Prev) for lca and
-                       B2Prev is chosen as Enqueue for DMA_01. Then the problem is that DMA_01 is in the FIFO and starts
-                       listening to production of Phy5 which is also mapped to B1Prev apart from B1 and hence decrements
-                       the counter after execution for Phy5 causing underflow
+                       B2Prev is chosen as Enqueue for DMA_01. Then the problem is that DMA_01 is in the FIFO and
+                       starts listening to production of Phy5 which is also mapped to B1Prev apart from B1 and hence
+                       decrements the counter after execution for Phy5 causing underflow
                     */
                     llvm::SmallVector<mlir::Value> targetBarrs(executableTaskOp.waitBarriers().begin(),
                                                                executableTaskOp.waitBarriers().end());
@@ -711,10 +500,10 @@ void AddEnqueueOpsPass::safeRunOnFunc() {
                         previousUsages.append(outstandingBarrierCondition.begin(), outstandingBarrierCondition.end());
                     }
 
-                    auto lcas = lca(previousUsages, cache);
+                    auto lcas = VPUMI40XX::lca(previousUsages, cache);
 
                     if (lcas.size()) {
-                        auto enqueueTarget = *getMinBarrier(lcas);
+                        auto enqueueTarget = *VPUMI40XX::getMinBarrier(lcas);
 
                         if (localPreviousEnqu) {
                             auto previousEnquBarrier = localPreviousEnqu.getBarrier();
@@ -796,7 +585,7 @@ void AddEnqueueOpsPass::safeRunOnFunc() {
         mpi.getWorkItemTasksMutable().assign(enquOps[0].getResult());
     }
     mpi.setWorkItemCount(enquOps.size());
-    reindexEnqueueOps(enquOps);
+    VPUMI40XX::reindexEnqueueOps(enquOps);
 
     // Verify enqueue ops can be enqueued at given barriers
     verifyEnqueueBarrierIsNotBlockedByFutureTask(mpi, enquOps, barriers, lastDmaWithNoEnqueue, tilesCount, _log);

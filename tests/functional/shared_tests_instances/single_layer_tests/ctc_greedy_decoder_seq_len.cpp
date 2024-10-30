@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation
+// Copyright (C) 2022-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -121,15 +121,12 @@ class CTCGreedyDecoderSeqLenLayerTestCommon :
         public NPUCTCGreedyDecoderSeqLenLayerTest,
         virtual public VpuOv2LayerTest {};
 
-class CTCGreedyDecoderSeqLenLayerTest_NPU3720 : public CTCGreedyDecoderSeqLenLayerTestCommon {};
-class CTCGreedyDecoderSeqLenLayerTest_NPU4000 : public CTCGreedyDecoderSeqLenLayerTestCommon {};
-
-TEST_P(CTCGreedyDecoderSeqLenLayerTest_NPU3720, HW) {
+TEST_P(CTCGreedyDecoderSeqLenLayerTestCommon, NPU3720_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(CTCGreedyDecoderSeqLenLayerTest_NPU4000, HW) {
+TEST_P(CTCGreedyDecoderSeqLenLayerTestCommon, NPU4000_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
@@ -140,7 +137,7 @@ TEST_P(CTCGreedyDecoderSeqLenLayerTest_NPU4000, HW) {
 using namespace ov::test;
 
 const std::vector<ov::element::Type> probPrecisions = {ov::element::f16};
-const std::vector<ov::element::Type> idxPrecisions = {ov::element::i32};
+const std::vector<ov::element::Type> idxPrecisions = {ov::element::i32, ov::element::i64};
 
 std::vector<bool> mergeRepeated{true, false};
 
@@ -155,10 +152,5 @@ const auto params = testing::Combine(::testing::ValuesIn(inputShape), ::testing:
                                      ::testing::ValuesIn(blankIndexes), ::testing::ValuesIn(mergeRepeated),
                                      ::testing::Values(DEVICE_NPU));
 
-// NPU3720
-INSTANTIATE_TEST_SUITE_P(smoke_CTCGreedyDecoderSeqLenTests, CTCGreedyDecoderSeqLenLayerTest_NPU3720, params,
-                         NPUCTCGreedyDecoderSeqLenLayerTest::getTestCaseName);
-
-// NPU4000
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_CTCGreedyDecoderSeqLenTest, CTCGreedyDecoderSeqLenLayerTest_NPU4000, params,
+INSTANTIATE_TEST_SUITE_P(smoke_CTCGreedyDecoderSeqLenTests, CTCGreedyDecoderSeqLenLayerTestCommon, params,
                          NPUCTCGreedyDecoderSeqLenLayerTest::getTestCaseName);

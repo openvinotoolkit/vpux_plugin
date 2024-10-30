@@ -19,9 +19,9 @@ namespace {
 
 class NCEPermuteRewriter final : public mlir::OpRewritePattern<VPU::NCEPermuteOp> {
 public:
-    NCEPermuteRewriter(mlir::MLIRContext* ctx, bool enableExplicitDistributedTensorAttr, Logger log)
+    NCEPermuteRewriter(mlir::MLIRContext* ctx, bool enableExplicitDistributionInfoAttr, Logger log)
             : mlir::OpRewritePattern<VPU::NCEPermuteOp>(ctx),
-              _enableExplicitDistributedTensorAttr(enableExplicitDistributedTensorAttr),
+              _enableExplicitDistributionInfoAttr(enableExplicitDistributionInfoAttr),
               _log(log) {
         setDebugName("NCEPermuteRewriter");
     }
@@ -32,7 +32,7 @@ public:
 private:
     vpux::VPU::CopyOp buildInputCopy(mlir::PatternRewriter& rewriter, VPU::ClusteredOpInterface clusteredOp,
                                      mlir::Value input, mlir::Type distType) const;
-    bool _enableExplicitDistributedTensorAttr = false;
+    bool _enableExplicitDistributionInfoAttr = false;
     Logger _log;
 };
 
@@ -55,9 +55,9 @@ mlir::LogicalResult NCEPermuteRewriter::matchAndRewrite(VPU::NCEPermuteOp origOp
     auto outputTensorType = origOp.getOutput().getType().cast<vpux::NDTypeInterface>();
     auto numClusters = VPU::getOptimalNumClusters(clusteredOp, outputTensorType.getShape(), strategy);
     const auto activationTensorDistributionMode = getActivationTensorDistributionMode(clusteredOp, strategy);
-    const auto activationTensorNumTiles = getActivationTensorNumTiles(clusteredOp, numClusters.getInt(), strategy);
+    const auto activationTensorNumTiles = getActivationTensorNumTiles(clusteredOp, numClusters, strategy);
 
-    const auto activationAlignment = getActivationTensorAlignment(clusteredOp, numClusters.getInt(), strategy);
+    const auto activationAlignment = getActivationTensorAlignment(clusteredOp, numClusters, strategy);
 
     const auto neutralPads = VPU::Padding(0, 0, 0, 0);
     auto nceOp = mlir::dyn_cast<VPU::NCEOpInterface>(origOp.getOperation());
@@ -73,9 +73,9 @@ mlir::LogicalResult NCEPermuteRewriter::matchAndRewrite(VPU::NCEPermuteOp origOp
     const auto inputDistType = VPU::createDistributedTensorType(
             clusteredOp, inputTensorType, activationTensorDistributionMode, activationTensorNumTiles, numClusters,
             activationAlignment.has_value() ? activationAlignment.value() : ArrayRef<int64_t>{},
-            uniformDistributedSegments, _enableExplicitDistributedTensorAttr, overlapParams);
+            uniformDistributedSegments, _enableExplicitDistributionInfoAttr, overlapParams);
     const auto fusedDistType =
-            fuseOverlapParams(clusteredOp, inputDistType, nextConv, _enableExplicitDistributedTensorAttr);
+            fuseOverlapParams(clusteredOp, inputDistType, nextConv, _enableExplicitDistributionInfoAttr);
 
     const auto inputCopyOp = buildInputCopy(rewriter, clusteredOp, origOp.getInput(), fusedDistType);
 
@@ -117,16 +117,12 @@ vpux::VPU::CopyOp NCEPermuteRewriter::buildInputCopy(mlir::PatternRewriter& rewr
 void VPU::arch37xx::MakeOpsWithDistributedTensorStrategy::addPatterns(mlir::RewritePatternSet& patterns,
                                                                       Logger& log) const {
     auto ctx = patterns.getContext();
-    patterns.add<VPU::NCEConvolutionRewriter>(ctx, _overlapParamsLookup, _enableExplicitDistributedTensorAttr, log);
-    patterns.add<VPU::NCEDepthConvolutionRewriter>(ctx, _overlapParamsLookup, _enableExplicitDistributedTensorAttr,
-                                                   log);
-    patterns.add<VPU::NCEMaxPoolRewriter>(ctx, _overlapParamsLookup, _enableExplicitDistributedTensorAttr, log);
-    patterns.add<VPU::NCEAveragePoolRewriter>(ctx, _overlapParamsLookup, _enableExplicitDistributedTensorAttr, log);
-    patterns.add<VPU::NCEEltwiseRewriter>(ctx, _overlapParamsLookup, _enableExplicitDistributedTensorAttr, log);
-    patterns.add<VPU::NCESWRewriter>(ctx, _overlapParamsLookup, _enableExplicitDistributedTensorAttr, log);
-    patterns.add<VPU::NCECompressConvolutionRewriter>(ctx, _overlapParamsLookup, _enableExplicitDistributedTensorAttr,
-                                                      log);
-    patterns.add<VPU::NCEInterpolateRewriter>(ctx, _overlapParamsLookup, _enableExplicitDistributedTensorAttr, log);
-    patterns.add<VPU::NCEMatMulRewriter>(ctx, _overlapParamsLookup, _enableExplicitDistributedTensorAttr, log);
-    patterns.add<NCEPermuteRewriter>(ctx, _enableExplicitDistributedTensorAttr, log);
+    patterns.add<VPU::ClusteredOpRewriter>(
+            ctx, _typeLookup, _inputTypeLookup,
+            [](VPU::ClusteredOpInterface op) {
+                return !(mlir::isa<VPU::NCEEltwiseOp>(op) || mlir::isa<VPU::NCEPermuteOp>(op));
+            },
+            log);
+    patterns.add<VPU::NCEEltwiseRewriter>(ctx, _typeLookup, _inputTypeLookup, log);
+    patterns.add<NCEPermuteRewriter>(ctx, _enableExplicitDistributionInfoAttr, log);
 }

@@ -86,27 +86,17 @@ mlir::LogicalResult ConvolutionBackpropDataConversion::matchAndRewrite(IE::Convo
     auto filterType = filterOp.getType().cast<NDTypeInterface>();
     auto newDimsOrder = getNewFilterDimsOrder(filterType.getRank());
     auto filterDimOC = Dim(1);
-    auto contentAttr = filterOp.getContentAttr().reverse(filterDimOC).transpose(newDimsOrder);
-    auto content = contentAttr.fold();
-    auto contentType = content.getType();
-
-    // It is necessary to copy the contents of the folded constant into a new buffer since the data conversion
-    // does not take place until the values are extracted (e.g. inside `Const::Content::copyTo`)
-    const auto contentSize = checked_cast<size_t>(contentType.getTotalAllocSize().count());
-    std::vector<char> newContent(contentSize);
-    content.copyTo(MutableArrayRef(newContent.data(), contentSize));
-    const auto foldedBaseContent =
-            mlir::DenseElementsAttr::getFromRawBuffer(mlir::cast<mlir::ShapedType>(contentType), ArrayRef(newContent));
-    auto newContentAttr = Const::ContentAttr::get(foldedBaseContent);
+    auto contentAttr = filterOp.transformContentAttr().reverse(filterDimOC).transpose(newDimsOrder).get();
 
     auto filterShape = to_small_vector(filterType.getShape());
     std::swap(filterShape[Dims4D::Filter::OC.ind()], filterShape[Dims4D::Filter::IC.ind()]);
     auto newFilterType = filterType.changeShape(Shape(filterShape));
 
-    auto newFilterConstant = rewriter.create<Const::DeclareOp>(filterOp.getLoc(), newFilterType, newContentAttr);
+    auto newFilterConstant =
+            rewriter.create<Const::DeclareOp>(takeOpLoc(filterOp, "new_filter"), newFilterType, std::move(contentAttr));
     auto newFilter = newFilterConstant.getOutput();
 
-    const auto transposeFqInput = [&](mlir::Value fqInput) -> mlir::Value {
+    const auto transposeFqInput = [&](mlir::Value fqInput, StringRef locSuffix) -> mlir::Value {
         auto fqInputType = fqInput.getType().cast<NDTypeInterface>();
         if (fqInputType.getNumElements() == 1) {
             return fqInput;
@@ -117,30 +107,33 @@ mlir::LogicalResult ConvolutionBackpropDataConversion::matchAndRewrite(IE::Convo
                                            }));
         std::swap(permutation[Dims4D::Filter::OC.ind()], permutation[Dims4D::Filter::IC.ind()]);
         auto orderAttr = mlir::AffineMapAttr::get(mlir::AffineMap::getPermutationMap(permutation, getContext()));
-        auto transposeOp = rewriter.create<IE::TransposeOp>(filterOp.getLoc(), fqInput, /*order=*/nullptr, orderAttr);
+        auto transposeOp = rewriter.create<IE::TransposeOp>(
+                takeOpLoc(filterOp, StringLiteral("transpose_{0}"), locSuffix), fqInput,
+                /*order=*/nullptr, orderAttr);
         return transposeOp.getOutput();
     };
 
     if (filterFqOp != nullptr) {
         // In case the filter is quantized per-axis, make sure the axes are also correct for the new filter
-        auto inputLow = transposeFqInput(filterFqOp.getInputLow());
-        auto inputHigh = transposeFqInput(filterFqOp.getInputHigh());
-        auto outputLow = transposeFqInput(filterFqOp.getOutputLow());
-        auto outputHigh = transposeFqInput(filterFqOp.getOutputHigh());
+        auto inputLow = transposeFqInput(filterFqOp.getInputLow(), "input_low");
+        auto inputHigh = transposeFqInput(filterFqOp.getInputHigh(), "input_high");
+        auto outputLow = transposeFqInput(filterFqOp.getOutputLow(), "output_low");
+        auto outputHigh = transposeFqInput(filterFqOp.getOutputHigh(), "output_high");
         newFilter = rewriter.createOrFold<IE::FakeQuantizeOp>(
-                filterOp.getLoc(), newFilter, inputLow, inputHigh, outputLow, outputHigh, filterFqOp.getLevelsAttr(),
-                filterFqOp.getLowFpTypeAttr(), filterFqOp.getAutoBroadcastAttr());
+                takeOpLoc(filterFqOp, "fq_in"), newFilter, inputLow, inputHigh, outputLow, outputHigh,
+                filterFqOp.getLevelsAttr(), filterFqOp.getLowFpTypeAttr(), filterFqOp.getAutoBroadcastAttr());
     }
 
     if (filterConvertOp != nullptr) {
-        newFilter = rewriter.createOrFold<IE::ConvertOp>(filterOp.getLoc(), newFilter,
+        newFilter = rewriter.createOrFold<IE::ConvertOp>(takeOpLoc(filterFqOp, "filter_cvt_in"), newFilter,
                                                          filterConvertOp.getDstElemTypeAttr());
     }
 
     rewriter.replaceOpWithNewOp<IE::TransposedConvolutionOp>(
             origOp, origOp.getInput(), newFilter, origOp.getOutputShape(), /*bias*/ nullptr, origOp.getStridesAttr(),
             origOp.getPadsBeginAttr(), origOp.getPadsEndAttr(), origOp.getDilationsAttr(),
-            origOp.getOutputPaddingAttr(), /*postOp=*/nullptr, /*clamp=*/nullptr);
+            origOp.getOutputPaddingAttr(), /*postOp=*/nullptr, /*clamp=*/nullptr, /*output_channels=*/nullptr,
+            /*input_channels=*/nullptr);
 
     return mlir::success();
 }
@@ -211,28 +204,18 @@ mlir::LogicalResult GroupConvolutionBackpropDataConversion::matchAndRewrite(IE::
     auto filterType = filterOp.getType().cast<NDTypeInterface>();
     auto newDimsOrder = getNewFilterDimsOrder(filterType.getRank());
     auto filterDimOC = Dim(2);
-    auto contentAttr = filterOp.getContentAttr().reverse(filterDimOC).transpose(newDimsOrder);
-    auto content = contentAttr.fold();
-    auto contentType = content.getType();
-
-    // It is necessary to copy the contents of the folded constant into a new buffer since the data conversion
-    // does not take place until the values are extracted (e.g. inside `Const::Content::copyTo`)
-    const auto contentSize = checked_cast<size_t>(contentType.getTotalAllocSize().count());
-    std::vector<char> newContent(contentSize);
-    content.copyTo(MutableArrayRef(newContent.data(), contentSize));
-    const auto foldedBaseContent =
-            mlir::DenseElementsAttr::getFromRawBuffer(mlir::cast<mlir::ShapedType>(contentType), ArrayRef(newContent));
-    auto newContentAttr = Const::ContentAttr::get(foldedBaseContent);
+    auto contentAttr = filterOp.transformContentAttr().reverse(filterDimOC).transpose(newDimsOrder).get();
 
     auto filterShape = to_small_vector(filterType.getShape());
     std::swap(filterShape[IE::GROUP_TRANSPOSED_CONV_C_IN_DIM_INDEX],
               filterShape[IE::GROUP_TRANSPOSED_CONV_C_OUT_DIM_INDEX]);
     auto newFilterType = filterType.changeShape(Shape(filterShape));
 
-    auto newFilterConstant = rewriter.create<Const::DeclareOp>(filterOp.getLoc(), newFilterType, newContentAttr);
+    auto newFilterConstant =
+            rewriter.create<Const::DeclareOp>(takeOpLoc(filterOp, "new_filter"), newFilterType, std::move(contentAttr));
     auto newFilter = newFilterConstant.getOutput();
 
-    const auto transposeFqInput = [&](mlir::Value fqInput) -> mlir::Value {
+    const auto transposeFqInput = [&](mlir::Value fqInput, StringLiteral locSuffix) -> mlir::Value {
         auto fqInputType = fqInput.getType().cast<NDTypeInterface>();
         if (fqInputType.getNumElements() == 1) {
             return fqInput;
@@ -244,30 +227,33 @@ mlir::LogicalResult GroupConvolutionBackpropDataConversion::matchAndRewrite(IE::
         std::swap(permutation[IE::GROUP_TRANSPOSED_CONV_C_IN_DIM_INDEX],
                   permutation[IE::GROUP_TRANSPOSED_CONV_C_OUT_DIM_INDEX]);
         auto orderAttr = mlir::AffineMapAttr::get(mlir::AffineMap::getPermutationMap(permutation, getContext()));
-        auto transposeOp = rewriter.create<IE::TransposeOp>(filterOp.getLoc(), fqInput, /*order=*/nullptr, orderAttr);
+        auto transposeOp = rewriter.create<IE::TransposeOp>(
+                takeOpLoc(filterOp, StringLiteral("transpose_{0}"), locSuffix), fqInput,
+                /*order=*/nullptr, orderAttr);
         return transposeOp.getOutput();
     };
 
     if (filterFqOp != nullptr) {
         // In case the filter is quantized per-axis, make sure the axes are also correct for the new filter
-        auto inputLow = transposeFqInput(filterFqOp.getInputLow());
-        auto inputHigh = transposeFqInput(filterFqOp.getInputHigh());
-        auto outputLow = transposeFqInput(filterFqOp.getOutputLow());
-        auto outputHigh = transposeFqInput(filterFqOp.getOutputHigh());
+        auto inputLow = transposeFqInput(filterFqOp.getInputLow(), "input_low");
+        auto inputHigh = transposeFqInput(filterFqOp.getInputHigh(), "input_high");
+        auto outputLow = transposeFqInput(filterFqOp.getOutputLow(), "output_low");
+        auto outputHigh = transposeFqInput(filterFqOp.getOutputHigh(), "output_high");
         newFilter = rewriter.createOrFold<IE::FakeQuantizeOp>(
-                filterFqOp.getLoc(), newFilter, inputLow, inputHigh, outputLow, outputHigh, filterFqOp.getLevelsAttr(),
-                filterFqOp.getLowFpTypeAttr(), filterFqOp.getAutoBroadcastAttr());
+                takeOpLoc(filterFqOp, "in_fq"), newFilter, inputLow, inputHigh, outputLow, outputHigh,
+                filterFqOp.getLevelsAttr(), filterFqOp.getLowFpTypeAttr(), filterFqOp.getAutoBroadcastAttr());
     }
 
     if (filterConvertOp != nullptr) {
-        newFilter = rewriter.createOrFold<IE::ConvertOp>(filterConvertOp.getLoc(), newFilter,
+        newFilter = rewriter.createOrFold<IE::ConvertOp>(takeOpLoc(filterConvertOp, "filter_cvt_in"), newFilter,
                                                          filterConvertOp.getDstElemTypeAttr());
     }
 
     rewriter.replaceOpWithNewOp<IE::GroupTransposedConvolutionOp>(
             origOp, origOp.getInput(), newFilter, origOp.getOutputShape(), origOp.getStridesAttr(),
             origOp.getPadsBeginAttr(), origOp.getPadsEndAttr(), origOp.getDilationsAttr(),
-            origOp.getOutputPaddingAttr(), /*postOp=*/nullptr, /*clamp=*/nullptr);
+            origOp.getOutputPaddingAttr(), /*postOp=*/nullptr, /*clamp=*/nullptr, /*outputChannels=*/nullptr,
+            /*outputChannels=*/nullptr);
 
     return mlir::success();
 }

@@ -138,7 +138,7 @@ bool vpux::VPUIP::VPUIPDialect::hasExecutorInstanceMask(mlir::async::ExecuteOp e
 
 bool vpux::VPUIP::VPUIPDialect::isComputeExecutorKind(VPU::ExecutorKind executorKind) {
     static const llvm::DenseSet<VPU::ExecutorKind> computeExecutors = {
-            VPU::ExecutorKind::DPU, VPU::ExecutorKind::SHAVE_ACT, VPU::ExecutorKind::SHAVE_UPA, VPU::ExecutorKind::M2I};
+            VPU::ExecutorKind::DPU, VPU::ExecutorKind::SHAVE_ACT, VPU::ExecutorKind::M2I};
     return computeExecutors.find(executorKind) != computeExecutors.end();
 }
 
@@ -160,7 +160,7 @@ mlir::ArrayAttr vpux::VPUIP::VPUIPDialect::getExecutorInstanceMask(mlir::async::
 
 mlir::Operation* vpux::VPUIP::VPUIPDialect::materializeConstant(mlir::OpBuilder& builder, mlir::Attribute value,
                                                                 mlir::Type type, mlir::Location loc) {
-    if (!value.isa<Const::ContentAttr>()) {
+    if (!mlir::isa<Const::EphemeralContentAttr>(value)) {
         (void)errorAt(loc, "Can't materialize VPUIP Constant from Attribute '{0}'", value);
         return nullptr;
     }
@@ -170,7 +170,8 @@ mlir::Operation* vpux::VPUIP::VPUIPDialect::materializeConstant(mlir::OpBuilder&
         return nullptr;
     }
 
-    return builder.create<Const::DeclareOp>(loc, type, value.cast<Const::ContentAttr>());
+    return builder.create<Const::DeclareOp>(
+            loc, type, static_cast<Const::ContentAttr>(mlir::cast<Const::EphemeralContentAttr>(value)));
 }
 
 //

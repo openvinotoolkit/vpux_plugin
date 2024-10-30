@@ -7,6 +7,7 @@ import os
 import os.path
 import shutil
 
+
 def writeHtmlFile(html):
     html["html"] = html["html"] + """
 </body>
@@ -16,7 +17,7 @@ def writeHtmlFile(html):
     print(html["html"], file=htmlFile)
     htmlFile.close()
     for css in html["style_files"]:
-        if not os.path.exists(os.path.join(html["dir_name"], css)) :
+        if not os.path.exists(os.path.join(html["dir_name"], css)):
             try:
                 shutil.copyfile(os.path.basename(css), os.path.join(html["dir_name"], css))
             except:

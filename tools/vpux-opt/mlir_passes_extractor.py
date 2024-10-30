@@ -51,7 +51,7 @@ for line in sys.stdin:
             f"Misformed pass definition in the row: {line}. Expected row suffix: //----- //"
         )
 
-    pass_attributes_list = line[pass_marker[1] :].split()
+    pass_attributes_list = line[pass_marker[1]:].split()
 
     # filter out by pass printing order
     pass_attributes_list[0] = pass_attributes_list[0].lower()

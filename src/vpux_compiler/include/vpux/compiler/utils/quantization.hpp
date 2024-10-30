@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -68,7 +68,7 @@ std::tuple<MultType, uint8_t, int8_t> approximate(uint8_t bits, double target) {
 
 class QuantizationApproximation {
 public:
-    QuantizationApproximation(vpux::VPU::ArchKind architecture, double target);
+    QuantizationApproximation(double target);
 
     int64_t mult() const;
     int64_t shift() const;
@@ -84,8 +84,7 @@ private:
 
 class EltwiseQuantizationApproximation {
 public:
-    EltwiseQuantizationApproximation(vpux::VPU::ArchKind architecture, double input1Target, double input2Target,
-                                     double outputTarget);
+    EltwiseQuantizationApproximation(double input1Target, double input2Target, double outputTarget);
 
     QuantizationApproximation input1() const;
     QuantizationApproximation input2() const;
@@ -99,7 +98,7 @@ private:
 
 class PReLUApproximation {
 public:
-    PReLUApproximation(vpux::VPU::ArchKind architecture, double alpha);
+    PReLUApproximation(double alpha);
 
     int64_t mult() const;
     int64_t shift() const;
@@ -110,7 +109,13 @@ private:
     uint8_t _shift;
 };
 
-std::pair<int64_t, int64_t> getClampValuesForQuantizedOps(std::pair<double, double> realMinMax,
+mlir::FailureOr<int64_t> extractScalarOrUniformZP(mlir::quant::QuantizedType quantizedType);
+bool hasScalarOrUniformZP(mlir::quant::QuantizedType quantizedType);
+
+std::pair<int64_t, int64_t> getIntClampValuesForQuantizedOps(std::pair<double, double> realMinMax,
+                                                             mlir::quant::QuantizedType outElemQType,
+                                                             mlir::Type outElemType);
+std::pair<double, double> getFpClampValuesForQuantizedOps(std::pair<double, double> realMinMax,
                                                           mlir::quant::QuantizedType outElemQType,
                                                           mlir::Type outElemType);
 
@@ -118,7 +123,11 @@ std::pair<int64_t, int64_t> getClampValuesForQuantizedOps(std::pair<double, doub
 // FakeQuantize support
 //
 
-mlir::quant::QuantizedType getQuantizedType(mlir::Attribute lowConstAttr, mlir::Attribute highConstAttr,
+namespace Const {
+class ContentAttr;
+}
+
+mlir::quant::QuantizedType getQuantizedType(const Const::ContentAttr& lowConst, const Const::ContentAttr& highConst,
                                             std::optional<int64_t> levels, std::optional<mlir::Type> lowFpType,
                                             mlir::FloatType realType, bool isSigned, mlir::Location loc,
                                             IE::AutoBroadcastType broadcast = IE::AutoBroadcastType::NONE_OR_EXPLICIT,

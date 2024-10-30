@@ -1,11 +1,12 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 
 #include <numeric>
 
 #include <mlir/Dialect/Quant/QuantTypes.h>
 
+#include "vpux/compiler/dialect/VPU/transforms/factories/nce_sparsity_converters.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
@@ -29,9 +30,9 @@ namespace hwtest {
 namespace {
 
 struct DistributedAttrs {
-    VPU::DistributedTensorAttr parentInDistrAttr;
-    VPU::DistributedTensorAttr parentOutDistrAttr;
-    VPU::DistributedTensorAttr weightsDistrAttr;
+    VPU::DistributionInfoAttr parentInDistrAttr;
+    VPU::DistributionInfoAttr parentOutDistrAttr;
+    VPU::DistributionInfoAttr weightsDistrAttr;
 
     DistributedAttrs(mlir::MLIRContext* ctx, nb::SegmentationType sType, const std::size_t numClusters, bool broadcast,
                      mlir::Type outputType, const int64_t inputWidth) {
@@ -47,19 +48,19 @@ struct DistributedAttrs {
             mlir::ArrayAttr outAlignment = getIntArrayAttr(ctx, SmallVector<int64_t>{{1, alignedChannelNum, 1, 1}});
             mlir::ArrayAttr wAlignment = getIntArrayAttr(ctx, SmallVector<int64_t>{alignedChannelNum, 1, 1, 1});
 
-            parentInDistrAttr = VPU::DistributedTensorAttr::get(ctx, duplicatedDistrModeAttr, nullptr, nullptr, nullptr,
-                                                                nullptr, numClustersAttr, nullptr, nullptr, nullptr,
-                                                                nullptr, nullptr, nullptr, nullptr);
+            parentInDistrAttr = VPU::DistributionInfoAttr::get(ctx, duplicatedDistrModeAttr, nullptr, nullptr, nullptr,
+                                                               nullptr, numClustersAttr, nullptr, nullptr, nullptr,
+                                                               nullptr, nullptr, nullptr, nullptr);
 
             const VPU::DistributionMode outputMode =
                     (broadcast == true ? VPU::DistributionMode::DUPLICATED : VPU::DistributionMode::NONE) |
                     VPU::DistributionMode::SEGMENTED;
-            parentOutDistrAttr = VPU::DistributedTensorAttr::get(
+            parentOutDistrAttr = VPU::DistributionInfoAttr::get(
                     ctx, VPU::DistributionModeAttr::get(ctx, outputMode), outNumTiles, nullptr, nullptr, nullptr,
                     numClustersAttr, outAlignment, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
-            weightsDistrAttr = VPU::DistributedTensorAttr::get(ctx, segmentedDistrModeAttr, wNumTiles, nullptr, nullptr,
-                                                               nullptr, numClustersAttr, wAlignment, nullptr, nullptr,
-                                                               nullptr, nullptr, nullptr, nullptr);
+            weightsDistrAttr = VPU::DistributionInfoAttr::get(ctx, segmentedDistrModeAttr, wNumTiles, nullptr, nullptr,
+                                                              nullptr, numClustersAttr, wAlignment, nullptr, nullptr,
+                                                              nullptr, nullptr, nullptr, nullptr);
         }
 
         if (sType == nb::SegmentationType::SOH) {
@@ -67,26 +68,26 @@ struct DistributedAttrs {
             const auto alignment = getIntArrayAttr(
                     ctx, SmallVector<int64_t>{
                                  1, 1, VPU::getSOHPerClusterHeightAlignment(inputWidth, /*isInputSparse=*/false), 1});
-            parentInDistrAttr = VPU::DistributedTensorAttr::get(ctx, segmentedDistrModeAttr, numTiles, nullptr, nullptr,
-                                                                nullptr, numClustersAttr, alignment, nullptr, nullptr,
-                                                                nullptr, nullptr, nullptr, nullptr);
+            parentInDistrAttr = VPU::DistributionInfoAttr::get(ctx, segmentedDistrModeAttr, numTiles, nullptr, nullptr,
+                                                               nullptr, numClustersAttr, alignment, nullptr, nullptr,
+                                                               nullptr, nullptr, nullptr, nullptr);
 
             const VPU::DistributionMode outputMode =
                     (broadcast == true ? VPU::DistributionMode::MULTICASTED : VPU::DistributionMode::NONE) |
                     VPU::DistributionMode::SEGMENTED;
-            parentOutDistrAttr = VPU::DistributedTensorAttr::get(
+            parentOutDistrAttr = VPU::DistributionInfoAttr::get(
                     ctx, VPU::DistributionModeAttr::get(ctx, outputMode), numTiles, nullptr, nullptr, nullptr,
                     numClustersAttr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
 
-            weightsDistrAttr = VPU::DistributedTensorAttr::get(ctx, duplicatedDistrModeAttr, nullptr, nullptr, nullptr,
-                                                               nullptr, numClustersAttr, nullptr, nullptr, nullptr,
-                                                               nullptr, nullptr, nullptr, nullptr);
+            weightsDistrAttr = VPU::DistributionInfoAttr::get(ctx, duplicatedDistrModeAttr, nullptr, nullptr, nullptr,
+                                                              nullptr, numClustersAttr, nullptr, nullptr, nullptr,
+                                                              nullptr, nullptr, nullptr, nullptr);
         }
     }
 };
 
 VPURT::DeclareBufferOp createParentBuffer(mlir::MLIRContext* ctx, mlir::OpBuilder& builder,
-                                          VPU::DistributedTensorAttr distrTensorAttr, mlir::Type tensorType,
+                                          VPU::DistributionInfoAttr distrTensorAttr, mlir::Type tensorType,
                                           ArrayRef<int64_t> tensorShape, const DimsOrder dimsOrder,
                                           ArrayRef<int64_t> clusters, const std::size_t offset) {
     const auto cmxMemRefType = getMemRefType(VPURT::BufferSection::CMX_NN, tensorShape, tensorType, dimsOrder);
@@ -110,7 +111,7 @@ VPURT::DeclareBufferOp createParentBuffer(mlir::MLIRContext* ctx, mlir::OpBuilde
 
 // Create Weights DDR & CMX buffers and DMAs for them
 SmallVector<VPURT::DeclareBufferOp> handleWeights(mlir::OpBuilder& builder, VPURT::DeclareBufferOp parentTensor,
-                                                  Const::ContentAttr weightsContent, ArrayRef<int64_t> clusters,
+                                                  Const::ContentAttr&& weightsContent, ArrayRef<int64_t> clusters,
                                                   std::size_t& offset, VPURT::ConfigureBarrierOp updateBarrier) {
     const auto numClusters = clusters.size();
     auto loc = builder.getUnknownLoc();
@@ -137,7 +138,7 @@ SmallVector<VPURT::DeclareBufferOp> handleWeights(mlir::OpBuilder& builder, VPUR
         const auto weightsDDRType =
                 getMemRefType(VPURT::BufferSection::Constant, llvm::to_vector(tensorTypeIf.getShape()),
                               tensorTypeIf.getElementType(), tensorTypeIf.getDimsOrder());
-        auto weightsDDRBuffer = builder.create<vpux::Const::DeclareOp>(loc, weightsDDRType, weightsContent);
+        auto weightsDDRBuffer = builder.create<vpux::Const::DeclareOp>(loc, weightsDDRType, std::move(weightsContent));
 
         VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(builder, mlir::ValueRange(), mlir::ValueRange(updateBarrier.getBarrier()),
                                               loc, weightsDDRBuffer, parentTensor, 0);
@@ -153,7 +154,8 @@ SmallVector<VPURT::DeclareBufferOp> handleWeights(mlir::OpBuilder& builder, VPUR
                                   tensorTypeIf.getElementType(), tensorTypeIf.getDimsOrder());
             // Create weights slice by using subview on the full weights content
             auto weightsDDRBuffer = builder.create<vpux::Const::DeclareOp>(
-                    loc, weightsDDRMemRefType, weightsContent.subview(weightsOffset, perClusterShapes[idx]));
+                    loc, weightsDDRMemRefType,
+                    weightsContent.transform().subview(weightsOffset, perClusterShapes[idx]).get());
             weightsOffset[vpux::Dims4D::Filter::OC] += perClusterShapes[idx][vpux::Dims4D::Filter::OC];
 
             VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(builder, mlir::ValueRange(),
@@ -224,17 +226,20 @@ SmallVector<VPURT::DeclareBufferOp> handleWeightsTable(mlir::MLIRContext* ctx, m
                 getMemRefType(VPURT::BufferSection::Constant, wtableShape, wtableElemType, DimsOrder::NHWC);
 
         // Create weights table content
+        const auto ppeConverter = VPU::NCESparsity::getPPEConverterCb(arch);
+        const auto biasConverter = VPU::NCESparsity::getBiasConverterCb(arch);
         const auto weightsTable = VPU::NCESparsity::getWeightsTable(
                 inputType, outputType, 0,
                 static_cast<std::int32_t>(weightsOutputChannelsStrideInBits.count() / CHAR_BIT),
-                VPU::NCESparsity::SPARSITY_PTR_WHEN_NO_SPARSITY, sparsityPtrStep, arch,
+                VPU::NCESparsity::SPARSITY_PTR_WHEN_NO_SPARSITY, sparsityPtrStep, ppeConverter, biasConverter,
                 wtableShape[vpux::Dims4D::Filter::OC.ind()], weightsTypeIf.getElementType());
         auto wtableTensorType = mlir::RankedTensorType::get(wtableShape, wtableElemType);
         const auto weightsTableValues =
                 mlir::DenseElementsAttr::get(wtableTensorType, llvm::ArrayRef<std::int32_t>(weightsTable));
 
         auto weightsDDRBuffer = builder.create<vpux::Const::DeclareOp>(
-                loc, wtableDDRType, vpux::Const::ContentAttr::get(weightsTableValues).reorder(vpux::DimsOrder::NHWC));
+                loc, wtableDDRType,
+                vpux::Const::ContentAttr::transform(weightsTableValues).reorder(vpux::DimsOrder::NHWC).get());
 
         VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(builder, mlir::ValueRange(), mlir::ValueRange(updateBarrier.getBarrier()),
                                               loc, weightsDDRBuffer, wtableParentBuffer, 0);
@@ -250,10 +255,12 @@ SmallVector<VPURT::DeclareBufferOp> handleWeightsTable(mlir::MLIRContext* ctx, m
                                   wtableElemType, DimsOrder::NHWC);
 
             // Create weights table content for each weights table chunck
+            const auto ppeConverter = VPU::NCESparsity::getPPEConverterCb(arch);
+            const auto biasConverter = VPU::NCESparsity::getBiasConverterCb(arch);
             const auto weightsTable = VPU::NCESparsity::getWeightsTable(
                     inputType, outputType, 0,
                     static_cast<std::int32_t>(weightsOutputChannelsStrideInBits.count() / CHAR_BIT),
-                    VPU::NCESparsity::SPARSITY_PTR_WHEN_NO_SPARSITY, sparsityPtrStep, arch,
+                    VPU::NCESparsity::SPARSITY_PTR_WHEN_NO_SPARSITY, sparsityPtrStep, ppeConverter, biasConverter,
                     wtableTypeIf.getShape()[vpux::Dims4D::Filter::OC], weightsTypeIf.getElementType());
             auto wtableTensorType =
                     mlir::RankedTensorType::get(llvm::to_vector(wtableTypeIf.getShape()), wtableElemType);
@@ -262,7 +269,7 @@ SmallVector<VPURT::DeclareBufferOp> handleWeightsTable(mlir::MLIRContext* ctx, m
 
             auto wtableDDRBuffer = builder.create<vpux::Const::DeclareOp>(
                     loc, wtableDDRType,
-                    vpux::Const::ContentAttr::get(weightsTableValues).reorder(vpux::DimsOrder::NHWC));
+                    vpux::Const::ContentAttr::transform(weightsTableValues).reorder(vpux::DimsOrder::NHWC).get());
 
             VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(builder, mlir::ValueRange(),
                                                   mlir::ValueRange(updateBarrier.getBarrier()), loc, wtableDDRBuffer,
@@ -330,6 +337,13 @@ void buildMultiClustersDPUTest(const nb::TestCaseJsonDescriptor& testDesc, mlir:
     VPUX_THROW_UNLESS(!weightsShape.empty(), "buildMultiClustersDPUTest: Got empty weightsShape");
     VPUX_THROW_UNLESS(!weightsTableShape.empty(), "buildMultiClustersDPUTest: Got empty weightsTableShape");
 
+    // set runtime resources
+    mlir::PassManager pmBuilderInit(module->getName(), mlir::OpPassManager::Nesting::Implicit);
+    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.numberOfDPUGroups = numClusters;
+    VPU::buildInitCompilerPipeline(pmBuilderInit, initCompilerOptions, log);
+    VPUX_THROW_UNLESS(mlir::succeeded(pmBuilderInit.run(module)), "Init compilation failed");
+
     const char* weightsFileName = "weights.dat";
 
     const auto inputParamType =
@@ -370,14 +384,17 @@ void buildMultiClustersDPUTest(const nb::TestCaseJsonDescriptor& testDesc, mlir:
     auto functionInput = function.getArgument(0);
 
     const auto weightsValues = generateWeights(builder, weightsShape, weightsType, ctx, weightsFileName);
-    auto weightsAttribute = Const::ContentAttr::get(weightsValues);
-    weightsAttribute = weightsAttribute.reorder(DimsOrder::OYXI);
+    auto weightsAttributeSetup = Const::ContentAttr::transform(weightsValues);
+    weightsAttributeSetup = weightsAttributeSetup.reorder(DimsOrder::OYXI);
 
     if (auto qty = weightsType.dyn_cast<mlir::quant::QuantizedType>()) {
-        const auto quantizedType = vpux::changeStorageType(qty, weightsAttribute.getType().getElementType());
-        weightsAttribute = weightsAttribute.quantCast(quantizedType);
+        auto contentType = Const::inferFinalTypeAndSplat(weightsAttributeSetup.getBaseContent(),
+                                                         weightsAttributeSetup.getTransformations())
+                                   .first;
+        const auto quantizedType = vpux::changeStorageType(qty, contentType.getElementType());
+        weightsAttributeSetup = weightsAttributeSetup.quantCast(quantizedType);
         if (qty.getStorageType().isInteger(4)) {
-            weightsAttribute = weightsAttribute.bitPack(4);
+            weightsAttributeSetup = weightsAttributeSetup.bitPack(4);
         }
     }
 
@@ -401,8 +418,8 @@ void buildMultiClustersDPUTest(const nb::TestCaseJsonDescriptor& testDesc, mlir:
     // Weights tensor
     auto weightsParentBuffer = createParentBuffer(ctx, functionBuilder, distrBufferParams.weightsDistrAttr, weightsType,
                                                   weightsShape, DimsOrder::OYXI, taskClusters, offsetCMX);
-    auto weightsCMXBufferVec = handleWeights(functionBuilder, weightsParentBuffer, weightsAttribute, taskClusters,
-                                             offsetCMX, updateBarrier);
+    auto weightsCMXBufferVec = handleWeights(functionBuilder, weightsParentBuffer, weightsAttributeSetup.get(),
+                                             taskClusters, offsetCMX, updateBarrier);
 
     const auto outAlignment = VPU::NCEInvariant::getAlignment(outputType) *
                               static_cast<vpux::Bit>(getElemTypeSize(outputType)).count() / CHAR_BIT;
@@ -431,7 +448,7 @@ void buildMultiClustersDPUTest(const nb::TestCaseJsonDescriptor& testDesc, mlir:
             const auto outDistrAttr =
                     (multiClusterParams.segmentation == nb::SegmentationType::SOH)
                             ? distrBufferParams.parentOutDistrAttr
-                            : VPU::DistributedTensorAttr::get(
+                            : VPU::DistributionInfoAttr::get(
                                       ctx, VPU::DistributionModeAttr::get(ctx, VPU::DistributionMode::DUPLICATED),
                                       nullptr, nullptr, nullptr, nullptr, numClustersAttr, nullptr, nullptr, nullptr,
                                       nullptr, nullptr, nullptr, nullptr);
@@ -557,10 +574,9 @@ void buildMultiClustersDPUTest(const nb::TestCaseJsonDescriptor& testDesc, mlir:
                 functionBuilder, mlir::ValueRange(waitBarrier.getBarrier()),
                 mlir::ValueRange(updateBarrier.getBarrier()), loc, inCMXBufferVec[idx].getBuffer(),
                 weightsCMXBufferVec[idx].getBuffer(), wtableCMXBufferVec[idx].getBuffer(),
-                /*instruction_table_list=*/nullptr, /*spr_lookup_table*/ nullptr,
-                /*activation_window=*/nullptr, inParentDistributedCMX.getBuffer(), outParentDistributedCMX.getBuffer(),
-                outCMXBufferVec[idx].getBuffer(), vpux::VPUIP::NCETaskType::CONV, kernelSize, kernelStrides,
-                kernelPaddings, /*activation_window_channel_length=*/nullptr, /*is_continued=*/nullptr,
+                /*instruction_table_list=*/nullptr, /*spr_lookup_table*/ nullptr, inParentDistributedCMX.getBuffer(),
+                outParentDistributedCMX.getBuffer(), outCMXBufferVec[idx].getBuffer(), vpux::VPUIP::NCETaskType::CONV,
+                kernelSize, kernelStrides, kernelPaddings, /*is_continued=*/nullptr,
                 /*cm_sp_pattern=*/nullptr, /*is_segmented=*/isSegmented, /*out_channel_offset=*/nullptr);
 
         const auto workloadPadding =
@@ -607,16 +623,11 @@ void buildMultiClustersDPUTest(const nb::TestCaseJsonDescriptor& testDesc, mlir:
 
     functionBuilder.create<mlir::func::ReturnOp>(loc, functionOutputs);
 
-    mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
-    initCompilerOptions.numberOfDPUGroups = numClusters;
-    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
-
+    mlir::PassManager pmBuilderEnd(module->getName(), mlir::OpPassManager::Nesting::Implicit);
     if (conv.compress) {
-        pm.addPass(VPUIP::createCompressWeightsBTCPass(log));
+        pmBuilderEnd.addPass(VPUIP::createCompressWeightsBTCPass(log));
     }
-
-    VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");
+    VPUX_THROW_UNLESS(mlir::succeeded(pmBuilderEnd.run(module)), "Compilation failed");
 
     SmallVector<mlir::Type> outputTensorTypesVec;
     for (std::size_t idx = 0; idx < numClusters; idx++) {

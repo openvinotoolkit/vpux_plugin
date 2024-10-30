@@ -103,12 +103,6 @@ Const::Content vpux::Const::TransposeAttr::transform(vpux::Const::Content& input
     return Const::details::memPermuteTransformation(input, outType, memPerm);
 }
 
-//
-// ContentAttr::transpose
-//
-
-Const::ContentAttr vpux::Const::ContentAttr::transpose(DimsOrder newOrder) const {
-    return ContentAttr::addTransformation(
-            *this, Const::TransposeAttr::get(mlir::AffineMapAttr::get(newOrder.toAffineMap(getContext())))
-                           .cast<Const::TransformAttrInterface>());
+Const::ContentSetup vpux::Const::ContentSetup::transpose(DimsOrder newOrder) {
+    return addTransformation(Const::TransposeAttr::get(mlir::AffineMapAttr::get(newOrder.toAffineMap(getContext()))));
 }

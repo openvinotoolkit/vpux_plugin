@@ -4,7 +4,9 @@
 //
 
 #include "vpux/compiler/dialect/VPURT/interfaces/barrier_simulator.hpp"
+#include "vpux/compiler/core/barrier_info.hpp"
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
+#include "vpux/compiler/dialect/VPURT/utils/barrier_legalization_utils.hpp"
 
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
@@ -120,10 +122,70 @@ void vpux::VPURT::VirtualDependencyTracker::print(Logger log) const {
 }
 
 //
+// BarrierWlmHandler
+//
+
+vpux::VPURT::BarrierWlmHandler::BarrierWlmHandler(BarrierInfo& barrierInfo): _barrierInfo(barrierInfo) {
+    _barrierInfo.buildTaskQueueTypeMap();
+    _blockIdxOfTaskControlMap = 0;
+    _taskControlMapAndOffset = _barrierInfo.buildTaskControlMap(_blockIdxOfTaskControlMap);
+}
+
+vpux::VPURT::BarrierWlmHandler::BarrierWlmHandler(BarrierInfoTest& barrierInfoTest): _barrierInfo(barrierInfoTest) {
+    // Task queue type is provided as part of barrierInfoTest
+    _blockIdxOfTaskControlMap = 0;
+    _taskControlMapAndOffset = _barrierInfo.buildTaskControlMap(_blockIdxOfTaskControlMap);
+}
+
+// Function which checks for barrier PID reuse in case _wlmPidProgramming is set (WLM)
+// PID can be reused only if there is a dependency from prevVid to current vid
+// and prevVid is guaranteed to be fully consumed before schedule is at barrier with given vid
+bool vpux::VPURT::BarrierWlmHandler::canBarrierReusePidFromBarrier(size_t vid, size_t prevVid) {
+    auto prevBarConsumers = _barrierInfo.getBarrierConsumers(prevVid);
+    auto barProducers = _barrierInfo.getBarrierProducers(vid);
+
+    // Check if there is a path from all prevBarConsumers to all task from barProducers
+    //           |-> prevBarConsumer0 ->  ..  -> barProducer0 -> |
+    //  prevBar->|-> prevBarConsumer1 ->  ..  -> barProducer1 -> | -> bar
+    //                                        -> barProducer2 -> |
+    for (auto& prevBarConsumer : prevBarConsumers) {
+        bool isPath = false;
+        auto prevBarConsumerBlock = _barrierInfo.getControlGraphBlockIndex(prevBarConsumer);
+        for (auto& barProducer : barProducers) {
+            auto barProducerBlock = _barrierInfo.getControlGraphBlockIndex(barProducer);
+            if (barProducerBlock != prevBarConsumerBlock) {
+                // If tasks are from different blocks then they are guaranteed to have a path
+                // through a sync task
+                isPath = true;
+            } else {
+                // Control map is stored only for single control graph block to save memory space
+                // If processing moves to next block index rebuild control map for it
+                // TODO: Check scenario when task control map is rebuild back to block index for which it contained
+                // data in some previous iteration
+                if (barProducerBlock != _blockIdxOfTaskControlMap) {
+                    _blockIdxOfTaskControlMap = barProducerBlock;
+                    _taskControlMapAndOffset = _barrierInfo.buildTaskControlMap(_blockIdxOfTaskControlMap);
+                }
+
+                auto& [taskControlMap, taskControlMapOffset] = _taskControlMapAndOffset;
+                isPath = _barrierInfo.controlPathExistsBetweenTasksInSameBlock(
+                        taskControlMap, prevBarConsumer - taskControlMapOffset, barProducer - taskControlMapOffset,
+                        true);
+            }
+            if (!isPath) {
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+//
 // BarrierSimulator
 //
 
-vpux::VPURT::BarrierSimulator::BarrierSimulator(mlir::func::FuncOp funcOp, bool wlm) {
+vpux::VPURT::BarrierSimulator::BarrierSimulator(mlir::func::FuncOp funcOp) {
     _barrierProducerSlotCount = static_cast<int64_t>(VPUIP::getBarrierMaxVariantCount(funcOp));
     _barrierTotalSlotCount = static_cast<int64_t>(VPUIP::getBarrierMaxVariantSum(funcOp));
     _availableBarriers = VPUIP::getNumAvailableBarriers(funcOp);
@@ -131,11 +193,19 @@ vpux::VPURT::BarrierSimulator::BarrierSimulator(mlir::func::FuncOp funcOp, bool 
     assignVirtualIds(funcOp);
     parseBarriers(funcOp);
     parseTasks(funcOp);
-    if (wlm) {
-        _samePidTopoDep = true;
-        buildBarrierControlMap(funcOp);
-    }
     cleanUpVirtualIds(funcOp);
+}
+
+vpux::VPURT::BarrierSimulator::BarrierSimulator(mlir::func::FuncOp funcOp, bool wlmFlag, BarrierInfo& barrierInfo)
+        : BarrierSimulator(funcOp) {
+    if (wlmFlag) {
+        configureForWlm(barrierInfo);
+    }
+}
+
+void vpux::VPURT::BarrierSimulator::configureForWlm(vpux::BarrierInfo& barrierInfo) {
+    _barrierWlmHandlerOpt = BarrierWlmHandler(barrierInfo);
+    _wlmPidProgramming = true;
 }
 
 const VPURT::BarrierConfig& vpux::VPURT::BarrierSimulator::getConfig(mlir::Value bar) const {
@@ -171,57 +241,6 @@ void vpux::VPURT::BarrierSimulator::parseBarriers(mlir::Operation* parentOp) {
 
         _usedBarriers = std::max(_usedBarriers, barrierOp.getId() + 1);
     });
-}
-
-// Gather data on each barrier dependency on other barriers either directly or through
-// dependency chain. Later this data will be used during physical barrier assignment
-// TODO: This function creates a data structure with large memory consumption in big models
-//  Should be optimized as part of E#127369
-void vpux::VPURT::BarrierSimulator::buildBarrierControlMap(mlir::func::FuncOp funcOp) {
-    DenseMap<VPURT::TaskQueueType, VPURT::TaskOp> taskQueueLastOpMap;
-
-    _barrierControlMap.resize(_barriers.size());
-    for (auto& bitMap : _barrierControlMap) {
-        bitMap.resize(_barriers.size());
-    }
-
-    funcOp->walk([&](VPURT::TaskOp taskOp) {
-        mlir::DenseSet<int64_t> depBars;
-
-        // For now do this only for DMA as other tasks are nevertheless always guarded by barriers.
-        // TODO: This would need to be extended once following tasks are resolved: E#124900 and E#126579
-        if (taskOp.getExecutorKind() == VPU::ExecutorKind::DMA_NN) {
-            const auto taskQueueType = VPURT::getTaskQueueType(taskOp, false);
-            if (taskQueueLastOpMap.find(taskQueueType) != taskQueueLastOpMap.end()) {
-                // Get deps from previous task
-                for (const auto bar : taskQueueLastOpMap[taskQueueType].getWaitBarriers()) {
-                    depBars.insert(getVirtualId(bar.getDefiningOp()));
-                }
-            }
-
-            taskQueueLastOpMap[taskQueueType] = taskOp;
-        }
-
-        // Get wait barriers fom current task
-        for (const auto bar : taskOp.getWaitBarriers()) {
-            depBars.insert(getVirtualId(bar.getDefiningOp()));
-        }
-
-        for (const auto bar : taskOp.getUpdateBarriers()) {
-            auto vid = getVirtualId(bar.getDefiningOp());
-            for (const auto depBar : depBars) {
-                _barrierControlMap[vid].set(depBar);
-            }
-        }
-    });
-
-    // Transitive closure
-    for (auto& curDeps : _barrierControlMap) {
-        for (auto curDepInd : curDeps.set_bits()) {
-            const auto& depOfDeps = _barrierControlMap[curDepInd];
-            curDeps |= depOfDeps;
-        }
-    }
 }
 
 void vpux::VPURT::BarrierSimulator::parseTasks(mlir::Operation* parentOp) {
@@ -297,12 +316,6 @@ void vpux::VPURT::BarrierSimulator::parseTasks(mlir::Operation* parentOp) {
 
         case VPU::ExecutorKind::SHAVE_ACT: {
             _actTasks.emplace_back(virtualDep);
-            updateBarrierConfigs(taskOp);
-            break;
-        }
-
-        case VPU::ExecutorKind::SHAVE_UPA: {
-            _upaTasks.emplace_back(virtualDep);
             updateBarrierConfigs(taskOp);
             break;
         }
@@ -430,7 +443,6 @@ mlir::LogicalResult vpux::VPURT::BarrierSimulator::simulateBarriers(Logger log, 
     SmallVector<size_t> dma(_dmaTasks.size(), 0);
     size_t dpu = 0;
     size_t act = 0;
-    size_t upa = 0;
     size_t m2i = 0;
     bool progressed = false;
 
@@ -455,17 +467,26 @@ mlir::LogicalResult vpux::VPURT::BarrierSimulator::simulateBarriers(Logger log, 
     };
 
     for (; bar < _barriers.size() || isDmaFifoNotComplete() || dpu < _nceTasks.size() || act < _actTasks.size() ||
-           upa < _upaTasks.size() || m2i < _m2iTasks.size();
+           m2i < _m2iTasks.size();
          progressed = false) {
-        log.nest(1).trace("DMA:{0}; DPU: {1} / {2}; ACT: {3} / {4}; UPA: {5} / {6}; M2I: {7} / "
-                          "{8}; BAR: {9} / {10}",
-                          getDmaProgressLog(), dpu, _nceTasks.size(), act, _actTasks.size(), upa, _upaTasks.size(), m2i,
-                          _m2iTasks.size(), bar, _barriers.size());
+        log.nest(1).trace("DMA:{0}; DPU: {1} / {2}; ACT: {3} / {4}; M2I: {5} / "
+                          "{6}; BAR: {7} / {8}",
+                          getDmaProgressLog(), dpu, _nceTasks.size(), act, _actTasks.size(), m2i, _m2iTasks.size(), bar,
+                          _barriers.size());
 
         // Static vs dynamic barriers need a different loop exit condition
         const auto hasBarriersToMap = [&]() {
             if (_isDynamicBarriers) {
                 return !nextReal.empty();
+            } else if (!_barrierPidToVidInstancesQueueMap.empty()) {
+                // In case for simulation PID to VID mapping is provided check if any free barrier can be mapped
+                // Check if any pid is free to map
+                for (size_t pid = 0; pid < toVirtual.size(); pid++) {
+                    if (toVirtual[pid] == -1 && !_barrierPidToVidInstancesQueueMap[pid].empty()) {
+                        return true;
+                    }
+                }
+                return false;
             } else {
                 return toVirtual[_barriers[bar].realId] == -1;
             }
@@ -477,10 +498,11 @@ mlir::LogicalResult vpux::VPURT::BarrierSimulator::simulateBarriers(Logger log, 
             int64_t real = -1;
 
             if (_isDynamicBarriers) {
-                if (_samePidTopoDep) {
+                if (_wlmPidProgramming && _barrierWlmHandlerOpt.has_value()) {
                     // In this mode barrier simulator will iteratively try to pick free PID for given VID
                     // and check if there is a topological dependency with its previous usage - goal is to not
-                    // use same PID on parallel branches
+                    // use same PID on parallel branches and guarantee barrier is fully consumed before same
+                    // PID is going to be used for next VID
                     auto numOfAvailablePhysBars = nextReal.size();
                     while (numOfAvailablePhysBars) {
                         real = nextReal.front();
@@ -490,7 +512,7 @@ mlir::LogicalResult vpux::VPURT::BarrierSimulator::simulateBarriers(Logger log, 
                             // Check if there is dependency with previous usage of this pid which implies a linear
                             // dependency otherwise barriers may be alive in parallel If unsuccessful try to find next
                             // physial barrier
-                            if (_barrierControlMap[bar][prevVid] == false) {
+                            if (!_barrierWlmHandlerOpt.value().canBarrierReusePidFromBarrier(bar, prevVid)) {
                                 // Push this PID back to the ring buffer as it cannot be used for this VID
                                 nextReal.push(real);
                                 // Decrement amount of barriers to still be checked
@@ -512,18 +534,34 @@ mlir::LogicalResult vpux::VPURT::BarrierSimulator::simulateBarriers(Logger log, 
                 }
 
                 _barriers[bar].realId = real;
+            } else if (!_barrierPidToVidInstancesQueueMap.empty()) {
+                // In case for simulation PID to VID mapping is provided pick next free barrier from this data
+                for (size_t pid = 0; pid < toVirtual.size(); pid++) {
+                    if (toVirtual[pid] == -1 && !_barrierPidToVidInstancesQueueMap[pid].empty()) {
+                        real = pid;
+                        break;
+                    }
+                }
             } else {
                 real = _barriers[bar].realId;
             }
 
             VPUX_THROW_WHEN(real < 0, "No new barrier was mapped");
 
-            toVirtual[checked_cast<size_t>(real)] = checked_cast<int64_t>(bar);
+            auto vid = bar;
 
-            log.nest(3).trace("VID[{0}]: PID {1}, producers {2}, consumers {3}, prev VID {4}", bar, real,
+            if (!_barrierPidToVidInstancesQueueMap.empty()) {
+                vid = _barrierPidToVidInstancesQueueMap[real].front();
+                _barrierPidToVidInstancesQueueMap[real].pop();
+                _barrierProgrammingOrder.push_back(vid);
+            }
+
+            toVirtual[checked_cast<size_t>(real)] = checked_cast<size_t>(vid);
+
+            log.nest(3).trace("VID[{0}]: PID {1}, producers {2}, consumers {3}, prev VID {4}", vid, real,
                               _barriers[bar].producerCount, _barriers[bar].consumerCount,
                               prevVidOfPhysBar[checked_cast<size_t>(real)]);
-            prevVidOfPhysBar[real] = bar;
+            prevVidOfPhysBar[real] = checked_cast<size_t>(vid);
         }
 
         // condition to create new batch of barriers
@@ -540,7 +578,7 @@ mlir::LogicalResult vpux::VPURT::BarrierSimulator::simulateBarriers(Logger log, 
             bool activeBarrierIsMapped = false;
             for (const auto& activeBar : toVirtual) {
                 if (activeBar == -1) {
-                    VPUX_THROW_WHEN(_samePidTopoDep == false, "Found not mapped barrier with exceeding barriers");
+                    VPUX_THROW_WHEN(_wlmPidProgramming == false, "Found not mapped barrier with exceeding barriers");
                     // Skip barrier if was not mapped yet. This can happen if PID cannot be reused for given VID
                     // because of lack of topological dependency
                     continue;
@@ -564,7 +602,7 @@ mlir::LogicalResult vpux::VPURT::BarrierSimulator::simulateBarriers(Logger log, 
             }
             for (const auto& activeBar : toVirtual) {
                 if (activeBar == -1) {
-                    VPUX_THROW_WHEN(_samePidTopoDep == false, "Found not mapped barrier with exceeding barriers");
+                    VPUX_THROW_WHEN(_wlmPidProgramming == false, "Found not mapped barrier with exceeding barriers");
                     // Skip barrier if was not mapped yet. This can happen if PID cannot be reused for given VID
                     // because of lack of topological dependency
                     continue;
@@ -646,24 +684,6 @@ mlir::LogicalResult vpux::VPURT::BarrierSimulator::simulateBarriers(Logger log, 
             log.nest(3).trace("ACT[{0}]: waits: {1}, posts: {2}", act, dt.waits, dt.posts);
         }
 
-        // Process UPA tasks
-        log.nest(2).trace("Process UPA tasks");
-        for (; upa < _upaTasks.size(); ++upa, progressed = true) {
-            auto& dt = _upaTasks[upa];
-
-            const auto status =
-                    processSim(_vdt.dep(dt.virtualDep), dt, dt.count, "UPA", upa, toVirtual, nextReal, log.nest(3));
-
-            if (status == Status::Fail) {
-                return mlir::failure();
-            }
-            if (status == Status::Skip) {
-                break;
-            }
-
-            log.nest(3).trace("UPA[{0}]: waits: {1}, posts: {2}", upa, dt.waits, dt.posts);
-        }
-
         // Process M2I tasks
         log.nest(2).trace("Process M2I tasks");
         for (; m2i < _m2iTasks.size(); ++m2i, progressed = true) {
@@ -698,7 +718,7 @@ mlir::LogicalResult vpux::VPURT::BarrierSimulator::simulateBarriers(Logger log, 
             };
 
             if (!progressed) {
-                VPUX_THROW_WHEN(!_samePidTopoDep && freeBarriers > 0,
+                VPUX_THROW_WHEN(!_wlmPidProgramming && freeBarriers > 0,
                                 "Simulation not progressed and there are '{0}' free barriers", freeBarriers);
                 // increase real barrier size
                 toVirtual.push_back(-1);
@@ -747,10 +767,10 @@ mlir::LogicalResult vpux::VPURT::BarrierSimulator::simulateBarriers(Logger log, 
         }
 
         if (!progressed) {
-            log.error("Barrier simulation blocked at DMA:{0}; DPU: {1} / {2}; ACT: {3} / {4}; UPA: "
-                      "{5} / {6}; M2I: {7} / {8}; BAR: {9} / {10}",
-                      getDmaProgressLog(), dpu, _nceTasks.size(), act, _actTasks.size(), upa, _upaTasks.size(), m2i,
-                      _m2iTasks.size(), bar, _barriers.size());
+            log.error("Barrier simulation blocked at DMA:{0}; DPU: {1} / {2}; ACT: {3} / {4}; "
+                      "M2I: {5} / {6}; BAR: {7} / {8}",
+                      getDmaProgressLog(), dpu, _nceTasks.size(), act, _actTasks.size(), m2i, _m2iTasks.size(), bar,
+                      _barriers.size());
 
             for (size_t b = 0; b < bar; ++b) {
                 if (_barriers[b].producerCount != 0 || _barriers[b].consumerCount != 0)
@@ -768,6 +788,32 @@ mlir::LogicalResult vpux::VPURT::BarrierSimulator::simulateBarriers(Logger log, 
     }
 
     return mlir::success();
+}
+
+// Simulate barriers with provided virtual to physical barrier configuration. Retrieve
+// order barriers were reprogrammed. This will later be used to reorder IR
+SmallVector<size_t> vpux::VPURT::BarrierSimulator::generateBarrierOrderWithSimulation(
+        Logger log, int64_t numBarriers, SmallVector<size_t>& virtualToPhysicalBarrierMapping) {
+    VPUX_THROW_UNLESS(_isDynamicBarriers,
+                      "Unexpected dynamic barrier type for barrier simulation with manual barrier mapping configured");
+    _isDynamicBarriers = false;
+    size_t prevVid = 0;
+    for (size_t vid = 0; vid < virtualToPhysicalBarrierMapping.size(); vid++) {
+        auto pid = virtualToPhysicalBarrierMapping[vid];
+        _barriers[vid].realId = pid;
+        VPUX_THROW_UNLESS(vid >= prevVid, "Incorrect VID order");
+        prevVid = vid;
+        _barrierPidToVidInstancesQueueMap[pid].push(vid);
+    }
+    _barrierProgrammingOrder.reserve(virtualToPhysicalBarrierMapping.size());
+
+    auto result = simulateBarriers(log, numBarriers);
+    _isDynamicBarriers = true;
+    if (mlir::failed(result)) {
+        return {};
+    }
+
+    return _barrierProgrammingOrder;
 }
 
 VPURT::BarrierSimulator::Status vpux::VPURT::BarrierSimulator::processSim(

@@ -11,7 +11,7 @@
 
 using namespace vpux;
 
-int32_t VPU::arch37xx::getScale(uint8_t shift, uint16_t mult, double rescale, mlir::Type inputType, VPU::PPETaskAttr) {
+int32_t VPU::arch37xx::getScale(uint8_t shift, uint16_t mult, double rescale, mlir::Type inputType) {
     // NPU37XX expects scale in IEEE754 format in NCE_DPU_PPE_FP_SCALE register in case input has FP16/BF16 type
     auto inStorageType = mlir::quant::QuantizedType::castToStorageType(inputType);
     if (inputType.isa<mlir::FloatType>() || inStorageType.isFloat8E5M2() || inStorageType.isFloat8E4M3FN()) {
@@ -28,6 +28,13 @@ int32_t VPU::arch37xx::getScale(uint8_t shift, uint16_t mult, double rescale, ml
     return (PPE_SHIFT_VALUE << PPE_SHIFT_OFFSET) | (PPE_MULT_VALUE << PPE_MULT_OFFSET);
 }
 
-int32_t VPU::arch37xx::getBias(double realVal) {
+int32_t VPU::arch37xx::getBias(double realVal, mlir::Type inputType) {
+    // On NPU 37xx and 4000, the PPE has a FP and an INT PPE pipeline. Both pipelines have the possibility to apply
+    // per-output-channel bias stored in weights table. Depending on input data type bias is aplied as follow: for
+    // I/U8/4 input data type, bias is applied with INT pipeline and bias should have int32_t values while for FP input
+    // data type bias is applied with FP pipeline and should have float32_t values
+    if (mlir::isa<mlir::quant::QuantizedType>(inputType)) {
+        return checked_cast<int32_t>(std::round(realVal));
+    }
     return VPU::NCESparsity::toHex(realVal);
 }

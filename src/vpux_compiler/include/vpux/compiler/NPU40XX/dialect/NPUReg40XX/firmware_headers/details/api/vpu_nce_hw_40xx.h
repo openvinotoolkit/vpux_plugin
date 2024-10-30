@@ -301,17 +301,17 @@ typedef struct {
         } odu_cast_bf;
     } odu_cast[3];
 
-    uint32_t reserved0;
+    uint32_t reserved1;
 
     union {
-        uint32_t reserved1;
+        uint32_t ppe_lut_ptr;
         struct {
-            uint32_t reserved2 : 16;
+            uint32_t ppe_lut_ptr : 16;
             uint32_t unused_1 : 2;
-            uint32_t reserved3 : 1;
+            uint32_t ppe_lut_ptr_force : 1;
             uint32_t unused_2 : 13;
         } ppe_lut_ptr_bf;
-    } reserved1;
+    } reserved2;
 
     uint32_t nvar_tag;
 
@@ -457,7 +457,7 @@ typedef struct {
         uint32_t var_cfg;
         struct {
             uint32_t reserved_0 : 8;
-            uint32_t reserved1 : 1;
+            uint32_t reserved : 1;
             uint32_t invar_line_cnt_en : 1;
             uint32_t invar_line_cnt_cnt : 4;
             uint32_t invar_lptr_force : 1;

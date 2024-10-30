@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation
+// Copyright (C) 2022-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -15,20 +15,17 @@ namespace test {
 
 class DepthToSpaceLayerTestCommon : public DepthToSpaceLayerTest, virtual public VpuOv2LayerTest {};
 
-class DepthToSpaceLayerTest_NPU3720 : public DepthToSpaceLayerTestCommon {};
-class DepthToSpaceLayerTest_NPU4000 : public DepthToSpaceLayerTestCommon {};
-
-TEST_P(DepthToSpaceLayerTest_NPU3720, HW) {
+TEST_P(DepthToSpaceLayerTestCommon, NPU3720_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(DepthToSpaceLayerTest_NPU4000, HW) {
+TEST_P(DepthToSpaceLayerTestCommon, NPU4000_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
 
-TEST_P(DepthToSpaceLayerTest_NPU4000, SW) {
+TEST_P(DepthToSpaceLayerTestCommon, NPU4000_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
@@ -50,7 +47,6 @@ const std::vector<ov::op::v0::DepthToSpace::DepthToSpaceMode> modes = {
         ov::op::v0::DepthToSpace::DepthToSpaceMode::BLOCKS_FIRST,
         ov::op::v0::DepthToSpace::DepthToSpaceMode::DEPTH_FIRST};
 
-// ------ NPU3720/4000 ------
 const auto DepthToSpaceBS2_PRECOMMIT =
         ::testing::Combine(::testing::ValuesIn({static_shapes_to_test_representation({ov::Shape{1, 4, 3, 3}})}),
                            ::testing::ValuesIn(inputPrecisions), ::testing::ValuesIn(modes), ::testing::Values(2),
@@ -78,35 +74,19 @@ const auto DepthToSpaceBS5_with_large_height =
                            ::testing::ValuesIn(inputPrecisions), ::testing::ValuesIn(modes), ::testing::Values(2),
                            ::testing::Values(DEVICE_NPU));
 
-/* ============= NPU 3720 ============= */
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_DepthToSpaceBS2, DepthToSpaceLayerTestCommon, DepthToSpaceBS2_PRECOMMIT,
+                         DepthToSpaceLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_DepthToSpaceBS2, DepthToSpaceLayerTest_NPU3720, DepthToSpaceBS2_PRECOMMIT,
-                         DepthToSpaceLayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_DepthToSpaceBS3, DepthToSpaceLayerTestCommon, DepthToSpaceBS3_PRECOMMIT,
+                         DepthToSpaceLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_DepthToSpaceBS3, DepthToSpaceLayerTest_NPU3720, DepthToSpaceBS3_PRECOMMIT,
-                         DepthToSpaceLayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_DepthToSpaceBS4, DepthToSpaceLayerTestCommon, smoke_DepthToSpaceBS4,
+                         DepthToSpaceLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_DepthToSpaceBS4, DepthToSpaceLayerTest_NPU3720, smoke_DepthToSpaceBS4,
-                         DepthToSpaceLayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_DepthToSpace_with_tiling, DepthToSpaceLayerTestCommon, smoke_DepthToSpaceBS4_with_tiling,
+                         DepthToSpaceLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_DepthToSpace_with_tiling, DepthToSpaceLayerTest_NPU3720,
-                         smoke_DepthToSpaceBS4_with_tiling, DepthToSpaceLayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_DepthToSpace_with_large_height, DepthToSpaceLayerTest_NPU3720,
-                         DepthToSpaceBS5_with_large_height, DepthToSpaceLayerTest_NPU3720::getTestCaseName);
-
-/* ============= NPU 4000 ============= */
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_DepthToSpaceBS2, DepthToSpaceLayerTest_NPU4000, DepthToSpaceBS2_PRECOMMIT,
-                         DepthToSpaceLayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_DepthToSpaceBS3, DepthToSpaceLayerTest_NPU4000, DepthToSpaceBS3_PRECOMMIT,
-                         DepthToSpaceLayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_DepthToSpaceBS4, DepthToSpaceLayerTest_NPU4000, smoke_DepthToSpaceBS4,
-                         DepthToSpaceLayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_DepthToSpace_with_tiling, DepthToSpaceLayerTest_NPU4000,
-                         smoke_DepthToSpaceBS4_with_tiling, DepthToSpaceLayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_DepthToSpace_with_large_height, DepthToSpaceLayerTestCommon,
+                         DepthToSpaceBS5_with_large_height, DepthToSpaceLayerTestCommon::getTestCaseName);
 
 }  // namespace

@@ -134,6 +134,22 @@ func.func @ConvertAddWithHWWithDiffInputShape(%arg0: tensor<50x16x10x10xf16>, %a
 
 // -----
 
+!qElemType = !quant.uniform<u8:f16, 2.000000e+00>
+
+// CHECK-LABEL: func.func @ConvertAddWithQuant
+// CHECK-SAME: ([[ARG:%.+]]: tensor<2x3x224x224xf16>)
+func.func @ConvertAddWithQuant(%arg0: tensor<2x3x224x224xf16>) -> tensor<2x3x224x224x!quant.uniform<u8:f16, 2.000000e+00>> {
+    %0 = IE.Add(%arg0, %arg0) {auto_broadcast = #IE.auto_broadcast_type<NONE_OR_EXPLICIT>} : tensor<2x3x224x224xf16>, tensor<2x3x224x224xf16> -> tensor<2x3x224x224x!quant.uniform<u8:f16, 2.000000e+00>>
+    return %0 : tensor<2x3x224x224x!quant.uniform<u8:f16, 2.000000e+00>>
+    // CHECK: [[SHAPE_CAST_IN1:%.*]] = IE.ShapeCast {shape = [1, 6, 224, 224]} inputs([[ARG]] : tensor<2x3x224x224xf16>) -> tensor<1x6x224x224xf16>
+    // CHECK: [[SHAPE_CAST_IN2:%.*]] = IE.ShapeCast {shape = [1, 6, 224, 224]} inputs([[ARG]] : tensor<2x3x224x224xf16>) -> tensor<1x6x224x224xf16>
+    // CHECK: [[ADD:%.*]] = IE.Add([[SHAPE_CAST_IN1]], [[SHAPE_CAST_IN2]]) {auto_broadcast = #IE.auto_broadcast_type<NONE_OR_EXPLICIT>} : tensor<1x6x224x224xf16>, tensor<1x6x224x224xf16> -> tensor<1x6x224x224x!qElemType>
+    // CHECK: [[SHAPE_CAST_OUT:%.*]] = IE.ShapeCast {shape = [2, 3, 224, 224]} inputs([[ADD]] : tensor<1x6x224x224x!qElemType>) -> tensor<2x3x224x224x!qElemType>
+    // CHECK: return [[SHAPE_CAST_OUT]] : tensor<2x3x224x224x!qElemType>
+}
+
+// -----
+
 #map = affine_map<(d0, d1, d2, d3) -> (d2, d1, d0, d3)>
 
 func.func @ConvertGroupConvolution(%arg0: tensor<16x16x1x32xf16>) -> tensor<16x16x1x32xf16> {
@@ -221,4 +237,65 @@ func.func @ConvertSigmoid(%arg0: tensor<9376x3x1x1xf16>) -> tensor<9376x3x1x1xf1
     // CHECK-LITERAL: {dim_mapping = [[0], [0, 1], [2], [3]], shape_value = [9376, 3, 1, 1]} : tensor<1x28128x1x1xf16> -> tensor<9376x3x1x1xf16>
 
     // CHECK: return [[OUT_AFFINERESHAPE]] : tensor<9376x3x1x1xf16>
+}
+
+// -----
+
+#map = affine_map<(d0, d1, d2, d3) -> (d2, d1, d0, d3)>
+
+// CHECK-LABEL: @ConvertConvWithSharedInputAndWeight
+// CHECK-SAME:      [[INPUT:%.+]]: tensor<16x96x1x1xf16>
+func.func @ConvertConvWithSharedInputAndWeight(%arg0: tensor<16x96x1x1xf16>) -> tensor<16x16x1x1xf16> {
+    %0 = IE.Convolution(%arg0, %arg0) {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<16x96x1x1xf16>, tensor<16x96x1x1xf16> -> tensor<16x16x1x1xf16>
+    return %0 : tensor<16x16x1x1xf16>
+    // CHECK: [[IN_TRANSPOSE:%.+]] = IE.Transpose([[INPUT]]) {order_value = #map} : tensor<16x96x1x1xf16> -> tensor<1x96x16x1xf16>
+    // CHECK: [[CONV:%.+]] = IE.Convolution([[IN_TRANSPOSE]], [[INPUT]])
+    // CHECK-SAME:          {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} :
+    // CHECK-SAME:          tensor<1x96x16x1xf16>, tensor<16x96x1x1xf16> -> tensor<1x16x16x1xf16>
+    // CHECK: [[OUT_TRANSPOSE:%.+]] = IE.Transpose([[CONV]]) {order_value = #map} : tensor<1x16x16x1xf16> -> tensor<16x16x1x1xf16>
+
+    // CHECK: return [[OUT_TRANSPOSE]] : tensor<16x16x1x1xf16>
+}
+
+// -----
+
+// CHECK-LABEL: @ReshapeGroupConv
+// CHECK-SAME: [[INPUT:%.+]]: tensor<1024x1x16x32xf16>
+func.func @ReshapeGroupConv(%arg0: tensor<1024x1x16x32xf16>) -> tensor<1024x1x16x32xf16> {
+    %cst = const.Declare tensor<1x1x1x1xf16> = dense<1.0> : tensor<1x1x1x1xf16>
+    %grp_conv = IE.GroupConvolution(%arg0, %cst) {
+        dilations = [1, 1], groups = 1 : i64,
+        pads_begin = [0, 0], pads_end = [0, 0],
+        strides = [1, 1]
+        } : tensor<1024x1x16x32xf16>, tensor<1x1x1x1xf16> -> tensor<1024x1x16x32xf16>
+
+    return %grp_conv: tensor<1024x1x16x32xf16>
+
+    // CHECK: [[CST:%.+]] = const.Declare tensor<1x1x1x1xf16> = dense<1.000000e+00> : tensor<1x1x1x1xf16>
+    // CHECK: [[SHAPECAST_IN:%.+]] = IE.ShapeCast {shape = [1, 1024, 16, 32]} inputs([[INPUT]] : tensor<1024x1x16x32xf16>) -> tensor<1x1024x16x32xf16>
+    // CHECK: [[SHAPE_CST:%.+]] = const.Declare tensor<4xsi32> = dense<[1024, 1, 1, 1]> : tensor<4xsi64>, [#const.CastElemType<si32>]
+    // CHECK: [[BROADCAST:%.+]] = IE.Broadcast([[CST]], [[SHAPE_CST]]) {mode = #IE.broadcast_type<NUMPY>} : tensor<1x1x1x1xf16>, tensor<4xsi32> -> tensor<1024x1x1x1xf16>
+    // CHECK: [[GRP_CONV:%.+]] = IE.GroupConvolution([[SHAPECAST_IN]], [[BROADCAST]]) {
+    // CHECK-SAME:                  dilations = [1, 1], groups = 1024 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]
+    // CHECK-SAME:                  } : tensor<1x1024x16x32xf16>, tensor<1024x1x1x1xf16> -> tensor<1x1024x16x32xf16>
+    // CHECK: [[SHAPECAST_OUT:%.+]] = IE.ShapeCast {shape = [1024, 1, 16, 32]} inputs([[GRP_CONV]] : tensor<1x1024x16x32xf16>) -> tensor<1024x1x16x32xf16>
+    // CHECK: return [[SHAPECAST_OUT]] : tensor<1024x1x16x32xf16>
+}
+
+// -----
+
+// CHECK-LABEL: @ReshapeMultiply
+// CHECK-SAME: [[INPUT:%.+]]: tensor<1024x1x16x32xf16>
+func.func @ReshapeMultiply(%arg0: tensor<1024x1x16x32xf16>) -> tensor<1024x1x16x32xf16> {
+    %cst = const.Declare tensor<1024x1x1x32xf16> = dense<-1.0> : tensor<1024x1x1x32xf16>
+    %multiply = IE.Multiply(%arg0, %cst) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1024x1x16x32xf16>, tensor<1024x1x1x32xf16> -> tensor<1024x1x16x32xf16>
+
+    return %multiply : tensor<1024x1x16x32xf16>
+
+    // CHECK: [[CST:%.+]] = const.Declare tensor<1024x1x1x32xf16> = dense<-1.000000e+00> : tensor<1024x1x1x32xf16>
+    // CHECK: [[SHAPE_CAST1:%.+]] = IE.ShapeCast {shape = [1, 1024, 16, 32]} inputs([[INPUT]] : tensor<1024x1x16x32xf16>) -> tensor<1x1024x16x32xf16>
+    // CHECK: [[SHAPE_CAST2:%.+]] = IE.ShapeCast {shape = [1, 1024, 1, 32]} inputs([[CST]] : tensor<1024x1x1x32xf16>) -> tensor<1x1024x1x32xf16>
+    // CHECK: [[MULTIPLY:%.+]] = IE.Multiply([[SHAPE_CAST1]], [[SHAPE_CAST2]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x1024x16x32xf16>, tensor<1x1024x1x32xf16> -> tensor<1x1024x16x32xf16>
+    // CHECK: [[SHAPE_CAST_OUT:%.+]] = IE.ShapeCast {shape = [1024, 1, 16, 32]} inputs([[MULTIPLY]] : tensor<1x1024x16x32xf16>) -> tensor<1024x1x16x32xf16>
+    // CHECK: return [[SHAPE_CAST_OUT]] : tensor<1024x1x16x32xf16>
 }

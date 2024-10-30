@@ -76,10 +76,10 @@ mlir::OpFoldResult vpux::IE::SliceOp::fold(FoldAdaptor adaptor) {
         return getSource();
     }
 
-    if (const auto origContent = operands[0].dyn_cast_or_null<Const::ContentAttr>()) {
+    if (const auto origContent = operands[0].dyn_cast_or_null<Const::EphemeralContentAttr>()) {
         const auto offset = Shape(parseIntArrayAttr<int64_t>(getStaticOffsets()));
         const auto shape = Shape(parseIntArrayAttr<int64_t>(getStaticSizes()));
-        return origContent.subview(offset, shape);
+        return static_cast<Const::ContentAttr>(origContent).transform().subview(offset, shape).get();
     }
 
     return nullptr;

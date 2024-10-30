@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation
+// Copyright (C) 2022-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -12,31 +12,29 @@ using namespace ov::test::utils;
 namespace ov {
 namespace test {
 class NormalizeL2LayerTestCommon : public NormalizeL2LayerTest, virtual public VpuOv2LayerTest {};
-class NormalizeL2LayerTest_NPU3720 : public NormalizeL2LayerTestCommon {};
-class NormalizeL2LayerTest_NPU4000 : public NormalizeL2LayerTestCommon {};
-class NormalizeL2LayerTest_NPU4000_6DPU : public NormalizeL2LayerTestCommon {};
-class NormalizeL2LayerTest_NPU4000_2DPU : public NormalizeL2LayerTestCommon {};
+class NormalizeL2LayerTest_6DPU : public NormalizeL2LayerTestCommon {};
+class NormalizeL2LayerTest_2DPU : public NormalizeL2LayerTestCommon {};
 
-TEST_P(NormalizeL2LayerTest_NPU3720, HW) {
+TEST_P(NormalizeL2LayerTestCommon, NPU3720_HW) {
     abs_threshold = 0.02;
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(NormalizeL2LayerTest_NPU4000, HW) {
+TEST_P(NormalizeL2LayerTestCommon, NPU4000_HW) {
     abs_threshold = 0.02;
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
 
-TEST_P(NormalizeL2LayerTest_NPU4000_6DPU, HW) {
+TEST_P(NormalizeL2LayerTest_6DPU, NPU4000_HW) {
     abs_threshold = 0.02;
     setDefaultHardwareMode();
     run(Platform::NPU4000);
     configuration["NPU_DPU_GROUPS"] = "6";
 }
 
-TEST_P(NormalizeL2LayerTest_NPU4000_2DPU, HW) {
+TEST_P(NormalizeL2LayerTest_2DPU, NPU4000_HW) {
     abs_threshold = 0.02;
     setDefaultHardwareMode();
     run(Platform::NPU4000);
@@ -56,8 +54,6 @@ const std::vector<ov::op::EpsMode> epsMode = {
         ov::op::EpsMode::ADD,
         ov::op::EpsMode::MAX,
 };
-
-/* ============= NPU 3720/4000 ============= */
 
 const std::vector<float> eps = {
         9.9999999392252903e-09,
@@ -104,56 +100,43 @@ const auto paramsMini4D =
                          testing::ValuesIn(static_shapes_to_test_representation(shapes4D)),
                          testing::ValuesIn(modelTypes), testing::Values(DEVICE_NPU));
 
-/* ============= NPU 3720 ============= */
+INSTANTIATE_TEST_SUITE_P(smoke_NormalizeL2_2D, NormalizeL2LayerTestCommon, params2D,
+                         NormalizeL2LayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_NormalizeL2_2D, NormalizeL2LayerTest_NPU3720, params2D,
-                         NormalizeL2LayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_NormalizeL2_3D, NormalizeL2LayerTestCommon, params3D,
+                         NormalizeL2LayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_NormalizeL2_3D, NormalizeL2LayerTest_NPU3720, params3D,
-                         NormalizeL2LayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_NormalizeL2_4D, NormalizeL2LayerTest_NPU3720, params4D,
-                         NormalizeL2LayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_NormalizeL2_4D, NormalizeL2LayerTestCommon, params4D,
+                         NormalizeL2LayerTestCommon::getTestCaseName);
 
 /* ============= Tiling ============= */
 
-INSTANTIATE_TEST_SUITE_P(smoke_NormalizeL2_real_net_tiling_1, NormalizeL2LayerTest_NPU4000_2DPU,
+INSTANTIATE_TEST_SUITE_P(smoke_NormalizeL2_real_net_tiling_1, NormalizeL2LayerTest_2DPU,
                          testing::Combine(testing::ValuesIn(axesTiling4D),
                                           testing::ValuesIn(std::vector<float>{3.0815954528967052E-41}),
                                           testing::Values(epsMode[0]),
                                           testing::ValuesIn(static_shapes_to_test_representation(shapesTiling4D)),
                                           testing::ValuesIn(modelTypes), testing::Values(DEVICE_NPU)),
-                         NormalizeL2LayerTest_NPU4000_2DPU::getTestCaseName);
+                         NormalizeL2LayerTest_2DPU::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_NormalizeL2_real_net_tiling_1, NormalizeL2LayerTest_NPU3720,
+INSTANTIATE_TEST_SUITE_P(smoke_NormalizeL2_real_net_tiling_1, NormalizeL2LayerTestCommon,
                          testing::Combine(testing::ValuesIn(axesTiling4D),
                                           testing::ValuesIn(std::vector<float>{3.0815954528967052E-41}),
                                           testing::Values(epsMode[0]),
                                           testing::ValuesIn(static_shapes_to_test_representation(shapesTiling4D)),
                                           testing::ValuesIn(modelTypes), testing::Values(DEVICE_NPU)),
-                         NormalizeL2LayerTest_NPU3720::getTestCaseName);
+                         NormalizeL2LayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_NormalizeL2_real_net_tiling_2, NormalizeL2LayerTest_NPU3720,
+INSTANTIATE_TEST_SUITE_P(smoke_NormalizeL2_real_net_tiling_2, NormalizeL2LayerTestCommon,
                          testing::Combine(testing::Values(std::vector<int64_t>({3})),
                                           testing::ValuesIn(std::vector<float>{9.9999997473787516e-05}),
                                           testing::Values(epsMode[1]),
                                           testing::Values(static_shapes_to_test_representation(
                                                   std::vector<ov::Shape>({{3, 3, 64, 2304}}))),
                                           testing::ValuesIn(modelTypes), testing::Values(DEVICE_NPU)),
-                         NormalizeL2LayerTest_NPU3720::getTestCaseName);
+                         NormalizeL2LayerTestCommon::getTestCaseName);
 
-/* ============= NPU 4000 ============= */
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_NormalizeL2_2D, NormalizeL2LayerTest_NPU4000, params2D,
-                         NormalizeL2LayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_NormalizeL2_3D, NormalizeL2LayerTest_NPU4000, params3D,
-                         NormalizeL2LayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_NormalizeL2_4D, NormalizeL2LayerTest_NPU4000, params4D,
-                         NormalizeL2LayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_NormalizeL2_4D, NormalizeL2LayerTest_NPU4000_6DPU, paramsMini4D,
-                         NormalizeL2LayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_NormalizeL2_4D, NormalizeL2LayerTest_6DPU, paramsMini4D,
+                         NormalizeL2LayerTest_6DPU::getTestCaseName);
 
 }  // namespace

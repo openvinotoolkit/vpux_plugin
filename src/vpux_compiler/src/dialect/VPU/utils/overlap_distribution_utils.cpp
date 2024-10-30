@@ -5,7 +5,7 @@
 
 #include "vpux/compiler/dialect/VPU/utils/overlap_distribution_utils.hpp"
 #include "vpux/compiler/core/tiling.hpp"
-#include "vpux/compiler/dialect/VPU/IR/native_attributes/distributed_tensor_native.hpp"
+#include "vpux/compiler/dialect/VPU/IR/native_attributes/distribution_info.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/utils/explicit_distribution_utils.hpp"
 
@@ -320,8 +320,8 @@ OverlapDistributionParams vpux::VPU::getOverlappedDistributionParameters(
 
     const auto distributionMode = VPU::DistributionMode::OVERLAPPED;
     auto neutralDistribution =
-            VPU::DistributedTensorNative(distributionMode, numTiles, neutralKernel, neutralStrides, neutralPads,
-                                         numClusters, {}, uniformDistributedSegments, {}, {}, {}, {}, {});
+            VPU::DistributionInfo(distributionMode, numTiles, neutralKernel, neutralStrides, neutralPads, numClusters,
+                                  {}, uniformDistributedSegments, {}, {}, {}, {}, {});
 
     const auto shape = tensorType.getShape();
     const auto computeShapes = getPerClusterComputeShapes(shape, neutralDistribution);
@@ -369,9 +369,8 @@ OverlapDistributionParams vpux::VPU::getOverlappedDistributionParameters(
             }
         }
 
-        auto consumerDistr =
-                VPU::DistributedTensorNative(distributionMode, numTiles, kernelSize, stridesSize, padsSize, numClusters,
-                                             {}, uniformDistributedSegments, {}, {}, {}, {}, {});
+        auto consumerDistr = VPU::DistributionInfo(distributionMode, numTiles, kernelSize, stridesSize, padsSize,
+                                                   numClusters, {}, uniformDistributedSegments, {}, {}, {}, {}, {});
 
         auto tensorShape = shape.toValues();
 
@@ -572,12 +571,12 @@ OverlapDistributionParams vpux::VPU::getActivationOverlappedParams(VPU::Clustere
 
     const auto distributionMode = VPU::DistributionMode::OVERLAPPED;
 
-    const auto candidateDistribution = VPU::DistributedTensorNative(
+    const auto candidateDistribution = VPU::DistributionInfo(
             distributionMode, activationTensorNumTiles, candidateOverlappedParams.getKernel(),
             candidateOverlappedParams.getStride(), candidateOverlappedParams.getPads(), numTilesPerDim, {},
             /*hasUniformDistributedSegments*/ true, {}, {}, {}, {}, {});
 
-    const auto localDistributedAttr = VPU::DistributedTensorNative(
+    const auto localDistributedAttr = VPU::DistributionInfo(
             distributionMode, activationTensorNumTiles, localOverlappedParams.getKernel(),
             localOverlappedParams.getStride(), localOverlappedParams.getPads(), numTilesPerDim, {},
             /*hasUniformDistributedSegments*/ true, {}, {}, {}, {}, {});
@@ -637,21 +636,26 @@ std::set<VPU::ClusteredOpInterface> vpux::VPU::getSiblingOps(mlir::Operation* op
     return siblingSubgraph;
 }
 
-OverlapDistributionParams vpux::VPU::getActivationOverlappedParams(VPU::ClusteredOpInterface clusteredOp,
-                                                                   ArrayRef<int64_t> activationTensorNumTiles,
-                                                                   const bool uniformDistributedSegments,
-                                                                   vpux::NDTypeInterface inputType,
-                                                                   const vpux::TileInfo& tileInfo) {
+bool vpux::VPU::outputOverlappedParamsIsHaloSupported(VPU::ClusteredOpInterface clusteredOp) {
     auto archKind = getArch(clusteredOp.getOperation());
     const std::set<VPU::ArchKind> compatibleTargets = {
             VPU::ArchKind::NPU40XX,
     };
 
+    return compatibleTargets.count(archKind) > 0;
+}
+
+OverlapDistributionParams vpux::VPU::getActivationOverlappedParams(VPU::ClusteredOpInterface clusteredOp,
+                                                                   ArrayRef<int64_t> activationTensorNumTiles,
+                                                                   const bool uniformDistributedSegments,
+                                                                   SiblingOpsAnalysis& siblingsAnalysis,
+                                                                   vpux::NDTypeInterface inputType,
+                                                                   const vpux::TileInfo& tileInfo) {
     // For 37XX, we do not set input workloads explicitly and therefore
     // OVERLAPPED should only represent the current op's input needs w/o
     // the sibling requirements
     // E#106872 to remove arch check
-    if (compatibleTargets.count(archKind) != 1) {
+    if (!outputOverlappedParamsIsHaloSupported(clusteredOp)) {
         const auto kernelTileAxis = extractKernelTileAxis(activationTensorNumTiles);
         return getOverlappedDistributionParameters(SmallVector<VPU::ClusteredOpInterface>({clusteredOp}),
                                                    kernelTileAxis);
@@ -660,8 +664,45 @@ OverlapDistributionParams vpux::VPU::getActivationOverlappedParams(VPU::Clustere
     // TODO: E#112803 Add support for extended memory view for sparse types with SETable
     auto sparseType = clusteredOp->getOperand(0).getType().dyn_cast<VPU::SparseTensorType>();
     const bool isSparseTypeInputWithSeTable = (sparseType != nullptr) && (sparseType.getSeAttr() != nullptr);
-    const auto siblingSubgraph = (isSparseTypeInputWithSeTable) ? std::set<VPU::ClusteredOpInterface>{clusteredOp}
-                                                                : getSiblingOps(clusteredOp.getOperation());
+    SmallVector<VPU::ClusteredOpInterface> siblingSubgraph{};
+    if (isSparseTypeInputWithSeTable) {
+        siblingSubgraph.push_back(clusteredOp);
+    } else {
+        auto siblings = siblingsAnalysis.getSiblings(clusteredOp);
+        siblingSubgraph.append(siblings.begin(), siblings.end());
+    }
+
+    const auto clusteringAxis = VPU::getDistributedTilingAxis(activationTensorNumTiles);
+    return getOverlappedDistributionParameters(
+            (inputType != nullptr) ? inputType : clusteredOp->getOperand(0).getType().cast<NDTypeInterface>(),
+            siblingSubgraph, activationTensorNumTiles[clusteringAxis], activationTensorNumTiles,
+            uniformDistributedSegments, tileInfo);
+}
+
+OverlapDistributionParams vpux::VPU::getActivationOverlappedParams(VPU::ClusteredOpInterface clusteredOp,
+                                                                   ArrayRef<int64_t> activationTensorNumTiles,
+                                                                   const bool uniformDistributedSegments,
+                                                                   vpux::NDTypeInterface inputType,
+                                                                   const vpux::TileInfo& tileInfo) {
+    // For 37XX, we do not set input workloads explicitly and therefore
+    // OVERLAPPED should only represent the current op's input needs w/o
+    // the sibling requirements
+    // E#106872 to remove arch check
+    if (!outputOverlappedParamsIsHaloSupported(clusteredOp)) {
+        const auto kernelTileAxis = extractKernelTileAxis(activationTensorNumTiles);
+        return getOverlappedDistributionParameters(SmallVector<VPU::ClusteredOpInterface>({clusteredOp}),
+                                                   kernelTileAxis);
+    }
+
+    // TODO: E#112803 Add support for extended memory view for sparse types with SETable
+    auto sparseType = clusteredOp->getOperand(0).getType().dyn_cast<VPU::SparseTensorType>();
+    const bool isSparseTypeInputWithSeTable = (sparseType != nullptr) && (sparseType.getSeAttr() != nullptr);
+    std::set<VPU::ClusteredOpInterface> siblingSubgraph{};
+    if (isSparseTypeInputWithSeTable) {
+        siblingSubgraph.insert(clusteredOp);
+    } else {
+        siblingSubgraph.merge(getSiblingOps(clusteredOp.getOperation()));
+    }
 
     const auto clusteringAxis = VPU::getDistributedTilingAxis(activationTensorNumTiles);
     return getOverlappedDistributionParameters(
@@ -761,7 +802,7 @@ OverlapDistributionParams vpux::VPU::getOutputOverlappedParams(VPU::ClusteredOpI
                                         : outputTensorNumTiles[Dims4D::Act::W.ind()];
     const auto distributionMode = VPU::DistributionMode::OVERLAPPED;
 
-    const auto candidateDistribution = VPU::DistributedTensorNative(
+    const auto candidateDistribution = VPU::DistributionInfo(
             distributionMode, outputTensorNumTiles, candidateOverlappedParams.getKernel(),
             candidateOverlappedParams.getStride(), candidateOverlappedParams.getPads(), numTilesPerDim, {},
             /*hasUniformDistributedSegments*/ true, {}, {}, {}, {}, {});
@@ -809,19 +850,6 @@ OverlapDistributionParams vpux::VPU::getOutputOverlappedParams(VPU::ClusteredOpI
     return candidateOverlappedParams;
 }
 
-bool vpux::VPU::outputOverlappedParamsIsHaloSupported(VPU::ClusteredOpInterface clusteredOp) {
-    auto archKind = getArch(clusteredOp.getOperation());
-    const std::set<VPU::ArchKind> compatibleTargets = {
-            VPU::ArchKind::NPU40XX,
-    };
-
-    if (compatibleTargets.count(archKind) != 1) {
-        return false;
-    }
-
-    return true;
-}
-
 OverlapDistributionParams vpux::VPU::getOutputOverlappedParamsNoHalo(VPU::ClusteredOpInterface clusteredOp,
                                                                      ArrayRef<int64_t> outputTensorNumTiles) {
     auto archKind = getArch(clusteredOp.getOperation());
@@ -853,17 +881,18 @@ OverlapDistributionParams vpux::VPU::getOutputOverlappedParams(VPU::ClusteredOpI
                                                                const bool uniformDistributedSegments,
                                                                vpux::NDTypeInterface outputType,
                                                                const vpux::TileInfo& tileInfo,
-                                                               std::set<VPU::ClusteredOpInterface>& siblings) {
+                                                               SiblingOpsAnalysis& siblingsAnalysis) {
     // For arch w/o halo support
     // E#106872 to remove arch check
     if (!outputOverlappedParamsIsHaloSupported(clusteredOp)) {
         return getOutputOverlappedParamsNoHalo(clusteredOp, outputTensorNumTiles);
     }
 
+    auto consumers = siblingsAnalysis.getConsumers(clusteredOp);
     const auto clusteringAxis = VPU::getDistributedTilingAxis(outputTensorNumTiles);
     return getOverlappedDistributionParameters(
             (outputType != nullptr) ? outputType : clusteredOp->getResult(0).getType().cast<NDTypeInterface>(),
-            SmallVector<VPU::ClusteredOpInterface>(siblings.begin(), siblings.end()),
+            SmallVector<VPU::ClusteredOpInterface>(consumers.begin(), consumers.end()),
             outputTensorNumTiles[clusteringAxis], outputTensorNumTiles, uniformDistributedSegments, tileInfo);
 }
 
@@ -878,22 +907,7 @@ OverlapDistributionParams vpux::VPU::getOutputOverlappedParams(VPU::ClusteredOpI
         return getOutputOverlappedParamsNoHalo(clusteredOp, outputTensorNumTiles);
     }
 
-    std::set<VPU::ClusteredOpInterface> consumers{};
-
-    if (isPassthroughOp(clusteredOp.getOperation())) {
-        // For passthrough ops, ensure input and output tensors use the same pool of ops to determine the
-        // distribution
-        consumers.merge(getSiblingOps(clusteredOp.getOperation()));
-    } else {
-        for (const auto& consumer : clusteredOp->getUsers()) {
-            // find first valid consumer and use it to get all its clustered siblings
-            if (mlir::isa<VPU::ClusteredOpInterface>(consumer) || isPassthroughOp(consumer)) {
-                consumers.merge(getSiblingOps(consumer));
-                break;
-            }
-        }
-    }
-
+    auto siblingsAnalysis = SiblingOpsAnalysis(clusteredOp);
     return getOutputOverlappedParams(clusteredOp, outputTensorNumTiles, uniformDistributedSegments, outputType,
-                                     tileInfo, consumers);
+                                     tileInfo, siblingsAnalysis);
 }

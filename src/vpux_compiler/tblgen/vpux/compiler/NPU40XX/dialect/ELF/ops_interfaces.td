@@ -38,6 +38,15 @@ def ELF_SectionInterface : OpInterface<"ElfSectionInterface"> {
     let cppNamespace = "vpux::ELF";
 
     let methods = [
+        // make interface more modular and replace preserialize with getBinarySize
+        // E#136377
+        InterfaceMethod<
+            "Serialization setup for the Op (elf sections creation, memory pre-allocation)",
+            "void",
+            "preserialize", (ins "elf::Writer&":$writer,
+                                 "vpux::DenseMap<mlir::Operation*, elf::writer::Section*>&":$sectionMap,
+                                 "vpux::ELF::SymbolReferenceMap&":$symRefMap)
+        >,
         InterfaceMethod<
             "Serialize the Section into an ELF entity",
             "void",
@@ -74,23 +83,50 @@ def ELF_SectionInterface : OpInterface<"ElfSectionInterface"> {
             }]
         >,
         InterfaceMethod<
+            "Get the section flags",
+            "::vpux::ELF::SectionFlagsAttr",
+            "getSectionFlags", (ins), [{}], [{
+                auto op = this->getOperation();
+                auto flagsAttr = op->template getAttrOfType<ELF::SectionFlagsAttrAttr>("secFlags");
+                return flagsAttr.getValue();
+            }]
+        >,
+        InterfaceMethod<
+            "Update the section flags with new flags",
+            "::vpux::ELF::SectionFlagsAttr",
+            "updateSectionFlags", (ins "::vpux::ELF::SectionFlagsAttr":$flags), [{}], [{
+                auto op = this->getOperation();
+                auto currFlags = this->getSectionFlags();
+                if (::vpux::ELF::bitEnumContainsAll(currFlags, flags)) {
+                    return currFlags;
+                } else {
+                    auto newFlags = currFlags | flags;
+                    op->setAttr("secFlags", ::vpux::ELF::SectionFlagsAttrAttr::get(op->getContext(), newFlags));
+                    return newFlags;
+                }
+            }]
+        >,
+        InterfaceMethod<
             "Get the symbol table where the symbol for the given section should be inserted",
             "ELF::SectionSignature",
             "getSymbolTableSectionSignature", (ins), [{}], [{
                 auto op = this->getOperation();
                 auto sectionFlagsAttr = op->template getAttrOfType<ELF::SectionFlagsAttrAttr>("secFlags");
                 auto sectionFlags = sectionFlagsAttr ? sectionFlagsAttr.getValue() : ELF::SectionFlagsAttr::SHF_NONE;
+                auto symTabFlags = ELF::SectionFlagsAttr::SHF_NONE;
                 auto name = "symtab";
                 if (static_cast<bool>(sectionFlags & ELF::SectionFlagsAttr::VPU_SHF_USERINPUT)) {
                     name = "symtab.io.NetworkInput";
+                    symTabFlags = ELF::SectionFlagsAttr::VPU_SHF_USERINPUT | ELF::SectionFlagsAttr::VPU_SHF_JIT;
                 } else if (static_cast<bool>(sectionFlags & ELF::SectionFlagsAttr::VPU_SHF_USEROUTPUT)) {
                     name = "symtab.io.NetworkOutput";
+                    symTabFlags = ELF::SectionFlagsAttr::VPU_SHF_USEROUTPUT | ELF::SectionFlagsAttr::VPU_SHF_JIT;
                 } else if (static_cast<bool>(sectionFlags & ELF::SectionFlagsAttr::VPU_SHF_PROFOUTPUT)) {
                     name = "symtab.io.ProfilingOutput";
-                } else {
-                    sectionFlags = ELF::SectionFlagsAttr::SHF_NONE;
+                    symTabFlags = ELF::SectionFlagsAttr::VPU_SHF_PROFOUTPUT | ELF::SectionFlagsAttr::VPU_SHF_JIT;
                 }
-                return ELF::SectionSignature(name, sectionFlags);
+
+                return ELF::SectionSignature(name, symTabFlags);
             }]
         >
     ];
@@ -145,7 +181,8 @@ def ELF_BinaryOpInterface : OpInterface<"BinaryOpInterface"> {
         >,
 
         InterfaceMethod<
-            "Get the size in bytes of the serialized form of this object",
+            // E#136377
+            "Get the size in bytes of the serialized form of this object; it maybe not the same as sizeof for non-POD types",
             "size_t",
             "getBinarySize", (ins), [{}],
             /*defaultImplementation*/ [{
@@ -170,6 +207,23 @@ def ELF_BinaryOpInterface : OpInterface<"BinaryOpInterface"> {
                 return $_op.getBinarySize();
             }]
         >
+    ];
+}
+
+//
+// PredefinedPurposeMemoryOpInterface
+//
+
+def ELF_PredefinedPurposeMemoryOpInterface : OpInterface<"PredefinedPurposeMemoryOpInterface"> {
+    let description = "ELF Interface for the operations that represent accessible memory";
+    let cppNamespace = "vpux::ELF";
+
+    let methods = [
+        InterfaceMethod<
+            "Get the flags representing the processors that are known to access the memory represented by the op",
+            "::vpux::ELF::SectionFlagsAttr",
+            "getPredefinedMemoryAccessors", (ins)
+        >,
     ];
 }
 
@@ -199,18 +253,6 @@ def ELF_WrappableOpInterface : OpInterface<"WrappableOpInterface"> {
             "Get the alignment requirements for the serialization of this op",
             "size_t",
             "getAlignmentRequirements", (ins)
-        >,
-
-        InterfaceMethod<
-            "Get the accessing processors of the Op",
-            "::vpux::ELF::SectionFlagsAttr",
-            "getAccessingProcs", (ins "mlir::SymbolUserMap&":$symbolUserMap)
-        >,
-
-        InterfaceMethod<
-            "Get the accessing processors of the Op user(s)",
-            "::vpux::ELF::SectionFlagsAttr",
-            "getUserProcs", (ins)
         >,
 
         InterfaceMethod<
@@ -260,6 +302,41 @@ def ELF_RelocatableOpInterface : OpInterface<"RelocatableOpInterface"> {
             "std::vector<vpux::ELF::RelocationInfo>",
             "getRelocationInfo", (ins "ELF::SymbolReferenceMap&":$symRefMap)
         >
+    ];
+}
+
+//
+// DDRMemoryAccessingOpInterface
+//
+
+def ELF_DDRMemoryAccessingOpInterface : OpInterface<"DDRMemoryAccessingOpInterface"> {
+    let description = "ELF Interface for the operations that imply access to DDR Memory";
+    let cppNamespace = "vpux::ELF";
+
+    let methods = [
+        InterfaceMethod<
+            "Get the Symbol names of all the sections that this Op has symbolic links to",
+            "::llvm::SmallVector<::mlir::StringAttr>",
+            "getAccessedSections", (ins), [{}],
+            /*defaultImplementation*/ [{
+                    llvm::SmallVector<mlir::StringAttr> accessedSections;
+                    auto dictAttr = this->getOperation()->getAttrDictionary();
+
+                    dictAttr.walk([&] (mlir::Attribute attribute) {
+                        if (auto symRef = mlir::dyn_cast<mlir::SymbolRefAttr>(attribute)) {
+                            if (!mlir::isa<mlir::FlatSymbolRefAttr>(symRef)) {
+                                accessedSections.push_back(symRef.getRootReference());
+                            }
+                        }
+                    });
+                    return accessedSections;
+            }]
+        >,
+        InterfaceMethod<
+            "Get the memory accessing processor that this op implies in terms of SectionFlags",
+            "::vpux::ELF::SectionFlagsAttr",
+            "getMemoryAccessingProc", (ins)
+        >,
     ];
 }
 

@@ -88,12 +88,8 @@ Const::Content vpux::Const::ReshapeAttr::transform(vpux::Const::Content& input) 
     return Const::Content::moveBuffer(inferOutputType(input.getType()), std::move(input));
 }
 
-//
-// ContentAttr::reshape
-//
+Const::ContentSetup vpux::Const::ContentSetup::reshape(ShapeRef newShape) {
+    return addTransformation(
 
-Const::ContentAttr vpux::Const::ContentAttr::reshape(ShapeRef newShape) const {
-    return ContentAttr::addTransformation(
-            *this,
-            Const::ReshapeAttr::get(getIntArrayAttr(getContext(), newShape)).cast<Const::TransformAttrInterface>());
+            Const::ReshapeAttr::get(getIntArrayAttr(getContext(), newShape)));
 }

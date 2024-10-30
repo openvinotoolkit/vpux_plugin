@@ -8,9 +8,11 @@
 #include "vpux/compiler/core/layers.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/utils/convolution_utils.hpp"
+#include "vpux/compiler/dialect/IE/utils/quantization.hpp"
 #include "vpux/compiler/dialect/VPU/utils/conv_utils.hpp"
 #include "vpux/compiler/utils/IE/transposed_convolution_utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
+#include "vpux/compiler/utils/rewriter.hpp"
 
 #include <mlir/Transforms/DialectConversion.h>
 
@@ -52,7 +54,7 @@ mlir::LogicalResult TransposedConvolutionConversion::matchAndRewrite(IE::Transpo
     auto filterShape = getShape(origOp.getFilter()).toValues();
     VPUX_THROW_UNLESS(filterShape.size() == 4, "Only 2D transposed convolution is supported");
 
-    auto featureUpScale = IE::createUpsampling(rewriter, origOp, padsOutput, false);
+    auto featureUpScale = IE::createUpsampling(rewriter, takeOpLoc(origOp, "upscale_in"), origOp, padsOutput, false);
     if (mlir::failed(featureUpScale)) {
         _log.nest().trace("Failed to create Upsampling for {0}", origOp->getLoc());
         return mlir::failure();
@@ -66,19 +68,45 @@ mlir::LogicalResult TransposedConvolutionConversion::matchAndRewrite(IE::Transpo
 
     const auto outputFQ = mlir::dyn_cast<IE::FakeQuantizeOp>(*(origOp.getOutput().user_begin()));
     if (padsOutput[Dims4D::PadsOutput::Y] > 0) {
-        paddingOutput = createPadding(rewriter, origOp->getLoc(), paddingOutput, Dims4D::Act::H,
+        paddingOutput = createPadding(rewriter, takeOpLoc(origOp, "width"), paddingOutput, Dims4D::Act::H,
                                       padsOutput[Dims4D::PadsOutput::Y], outputFQ);
     }
     if (padsOutput[Dims4D::PadsOutput::X] > 0) {
-        paddingOutput = createPadding(rewriter, origOp->getLoc(), paddingOutput, Dims4D::Act::W,
+        paddingOutput = createPadding(rewriter, takeOpLoc(origOp, "heigth"), paddingOutput, Dims4D::Act::W,
                                       padsOutput[Dims4D::PadsOutput::X], outputFQ);
     }
 
-    auto resultOP =
-            rewriter.create<IE::ConvolutionOp>(origOp.getLoc(), paddingOutput, origOp.getFilter(), origOp.getBias(),
-                                               strides, padsBegin, padsEnd, dilations, origOp.getPostOpAttr(),
-                                               origOp.getClampAttr(), /*staticScale=*/nullptr)
-                    .getOutput();
+    auto resultOP = rewriter.create<IE::ConvolutionOp>(origOp.getLoc(), paddingOutput, origOp.getFilter(),
+                                                       origOp.getBias(), strides, padsBegin, padsEnd, dilations,
+                                                       origOp.getPostOpAttr(), origOp.getClampAttr(),
+                                                       /*staticScale=*/nullptr, origOp.getOutputChannelsAttr(),
+                                                       origOp.getInputChannelsAttr())
+                            .getOutput();
+
+    const auto nceOutputShape = resultOP.getType().cast<vpux::NDTypeInterface>().getShape();
+    if (origOp.getOutputShape() != nullptr && nceOutputShape != outputShape) {
+        // In case the outputShape is specified, create sliceOp for crop
+        auto upsamplingOp = paddingOutput.getDefiningOp<IE::UpsamplingOp>();
+        const auto padHeightVector = parseIntArrayAttr<int64_t>(upsamplingOp.getPadAttr().getPadsHeight());
+        const auto padWidthVector = parseIntArrayAttr<int64_t>(upsamplingOp.getPadAttr().getPadsWidth());
+        const auto origPadLeft = filterShape[Dims4D::Filter::KX] - 1;
+        const auto origPadTop = filterShape[Dims4D::Filter::KY] - 1;
+        const auto reducedPadLeft = origPadLeft - padWidthVector[0];
+        const auto reducedPadTop = origPadTop - padHeightVector[0];
+        const auto padsBeginVector = Shape(parseIntArrayAttr<int64_t>(origOp.getPadsBegin()));
+        auto offsets = SmallVector<int64_t>(outputShape.size(), 0);
+        auto sizes = SmallVector<int64_t>(outputShape.begin(), outputShape.end());
+        offsets[Dims4D::Act::H.ind()] = padsBeginVector[Dims4D::PadsBegin::Top] - reducedPadTop;
+        offsets[Dims4D::Act::W.ind()] = padsBeginVector[Dims4D::PadsBegin::Left] - reducedPadLeft;
+
+        resultOP = rewriter.create<IE::SliceOp>(takeOpLoc(origOp, "slice_out"), resultOP,
+                                                getIntArrayAttr(getContext(), offsets),
+                                                getIntArrayAttr(getContext(), sizes))
+                           .getResult();
+        if (outputFQ != nullptr) {
+            resultOP = vpux::IE::createFQ(rewriter, resultOP, outputFQ, takeOpLoc(outputFQ, "fq_out")).getOutput();
+        }
+    }
 
     rewriter.replaceOp(origOp, resultOP);
 

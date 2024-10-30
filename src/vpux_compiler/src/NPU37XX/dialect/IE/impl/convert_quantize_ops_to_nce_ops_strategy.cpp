@@ -18,10 +18,12 @@ mlir::Value buildDwWeights(const mlir::Location& loc, const int64_t OC, const ml
         const auto baseType = mlir::RankedTensorType::get({OC, 1, 1, 1}, mlir::Float16Type::get(ctx));
         const auto baseAttr = mlir::DenseElementsAttr::get(baseType, ArrayRef(vals));
         const auto contentAttr = Const::ContentAttr::get(baseAttr);
-        const auto quantWeightsConstAttr =
-                contentAttr.convertElemType(normalizeQuantStorageType(quantizeType)).quantCast(quantizeType);
+        auto quantWeightsConstAttr = contentAttr.transform()
+                                             .castElemType(normalizeQuantStorageType(quantizeType))
+                                             .quantCast(quantizeType)
+                                             .get();
         const auto weightsType = contentAttr.getType().cast<vpux::NDTypeInterface>().changeElemType(quantizeType);
-        return rewriter.create<Const::DeclareOp>(loc, weightsType, quantWeightsConstAttr);
+        return rewriter.create<Const::DeclareOp>(loc, weightsType, std::move(quantWeightsConstAttr));
     }
     if (elementType.isF16()) {
         const std::vector<vpux::type::float16> vals(OC, 1.f);
@@ -104,7 +106,8 @@ mlir::LogicalResult DequantizeToAddRewriter::matchAndRewrite(IE::DequantizeOp or
             rewriter.create<IE::QuantizeCastOp>(originOp.getLoc(), originOp.getInput(), outQuantizeElemType);
 
     rewriter.replaceOpWithNewOp<IE::AddOp>(originOp, originOp.getType(), quantizeCastOp.getResult(),
-                                           quantizeCastOp.getResult(), broadcastType, nullptr, nullptr);
+                                           quantizeCastOp.getResult(), broadcastType, nullptr, nullptr, nullptr,
+                                           nullptr);
 
     return mlir::success();
 }
@@ -146,7 +149,7 @@ mlir::LogicalResult DequantizeToDwRewriter::matchAndRewrite(IE::DequantizeOp ori
     rewriter.replaceOpWithNewOp<IE::GroupConvolutionOp>(
             originOp, originOp.getOutput().getType(), originOp.getInput(), quantWeightsOp,
             /*bias=*/nullptr, attrStrides, attrPadsBegin, attrPadsEnd, dilationsAttr, getIntAttr(ctx, OC),
-            /*post_opAttr=*/nullptr, /*clampAttr*/ nullptr);
+            /*post_opAttr=*/nullptr, /*clampAttr*/ nullptr, /*output_channels=*/nullptr, /*input_channels=*/nullptr);
 
     return mlir::success();
 }
@@ -188,7 +191,7 @@ mlir::LogicalResult QuantizeToAddRewriter::matchAndRewrite(IE::QuantizeOp origin
     auto newAddOutType = mlir::RankedTensorType::get(originOp.getType().getShape(), quantizeElemType);
 
     auto addOp = rewriter.create<IE::AddOp>(originOp.getLoc(), newAddOutType, originOp.getInput(), originOp.getInput(),
-                                            broadcastType, nullptr, nullptr);
+                                            broadcastType, nullptr, nullptr, nullptr, nullptr);
 
     rewriter.replaceOpWithNewOp<IE::QuantizeCastOp>(originOp, addOp.getResult(), outElemType);
 
@@ -227,7 +230,7 @@ mlir::LogicalResult QuantizeToDwRewriter::matchAndRewrite(IE::QuantizeOp originO
     rewriter.replaceOpWithNewOp<IE::GroupConvolutionOp>(
             originOp, originOp.getOutput().getType(), originOp.getInput(), weights,
             /*bias=*/nullptr, attrStrides, attrPadsBegin, attrPadsEnd, dilationsAttr, getIntAttr(ctx, OC),
-            /*post_opAttr=*/nullptr, /*clampAttr*/ nullptr);
+            /*post_opAttr=*/nullptr, /*clampAttr*/ nullptr, /*outputChannels=*/nullptr, /*input_channels=*/nullptr);
 
     return mlir::success();
 }

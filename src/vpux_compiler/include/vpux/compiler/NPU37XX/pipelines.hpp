@@ -78,9 +78,9 @@ struct ReferenceHWOptions37XX final : public ReferenceHWOptions<ReferenceHWOptio
     BoolOption enableOutputPipelining{*this, "output-pipelining", llvm::cl::desc("Enable output pipelining"),
                                       llvm::cl::init(false)};
 
-    BoolOption enableExplicitDistributedTensorAttr{
+    BoolOption enableExplicitDistributionInfoAttr{
             *this, "enable-explicit-distributed-attr",
-            llvm::cl::desc("Enable DistributedTensorAttr with explicit per cluster memory/compute shapes & offsets"),
+            llvm::cl::desc("Enable DistributionInfoAttr with explicit per cluster memory/compute shapes & offsets"),
             llvm::cl::init(false)};
 
     BoolOption enableGroupedMatMul{*this, "enable-grouped-matmul",

@@ -13,6 +13,7 @@
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/empty_node.hpp"
 #include "vpux/compiler/utils/infer_output_shape.hpp"
+#include "vpux/compiler/utils/rewriter.hpp"
 
 #include "vpux/utils/core/checked_cast.hpp"
 #include "vpux/utils/core/range.hpp"
@@ -29,32 +30,26 @@ struct StridedSliceInputData final {
     SmallVector<int64_t> strides;
 };
 
-StridedSliceInputData extractData(mlir::Location loc, IE::StridedSliceOpAdaptor stridedSlice) {
-    if (stridedSlice.getBegins() != nullptr) {
-        auto begins = IE::constInputToData(loc, stridedSlice.getBegins());
-        auto ends = IE::constInputToData(loc, stridedSlice.getEnds());
-        auto strides = IE::constInputToData(loc, stridedSlice.getStrides());
-
-        return StridedSliceInputData{mlir::succeeded(begins) ? begins.value() : SmallVector<int64_t>{},
-                                     mlir::succeeded(ends) ? ends.value() : SmallVector<int64_t>{},
-                                     mlir::succeeded(strides) ? strides.value() : SmallVector<int64_t>{}};
+SmallVector<int64_t> extractValues(mlir::Location loc, mlir::Value input, mlir::ArrayAttr attr) {
+    if (input != nullptr) {
+        auto values = IE::constInputToData(loc, input);
+        if (mlir::succeeded(values)) {
+            return values.value();
+        }
     }
-
-    if (stridedSlice.getBeginsAttr().has_value()) {
-        return StridedSliceInputData{stridedSlice.getBeginsAttr().has_value()
-                                             ? parseIntArrayAttr<int64_t>(stridedSlice.getBeginsAttr().value())
-                                             : SmallVector<int64_t>{},
-                                     stridedSlice.getEndsAttr().has_value()
-                                             ? parseIntArrayAttr<int64_t>(stridedSlice.getEndsAttr().value())
-                                             : SmallVector<int64_t>{},
-                                     stridedSlice.getStridesAttr().has_value()
-                                             ? parseIntArrayAttr<int64_t>(stridedSlice.getStridesAttr().value())
-                                             : SmallVector<int64_t>{}};
+    if (attr != nullptr) {
+        return parseIntArrayAttr<int64_t>(attr);
     }
-
-    return StridedSliceInputData{{}, {}, {}};
+    return {};
 }
 
+StridedSliceInputData extractData(mlir::Location loc, IE::StridedSliceOpAdaptor stridedSlice) {
+    auto beginsVal = extractValues(loc, stridedSlice.getBegins(), stridedSlice.getBeginsAttr().value_or(nullptr));
+    auto endsVal = extractValues(loc, stridedSlice.getEnds(), stridedSlice.getEndsAttr().value_or(nullptr));
+    auto stridesVal = extractValues(loc, stridedSlice.getStrides(), stridedSlice.getStridesAttr().value_or(nullptr));
+
+    return StridedSliceInputData{std::move(beginsVal), std::move(endsVal), std::move(stridesVal)};
+}
 }  // namespace
 
 mlir::LogicalResult vpux::IE::StridedSliceOp::inferReturnTypeComponents(
@@ -211,8 +206,7 @@ mlir::LogicalResult ComposeStridedSlice::matchAndRewrite(IE::StridedSliceOp orig
     const auto endsAttr = getIntArrayAttr(getContext(), resultEnd);
     const auto stridesAttr = getIntArrayAttr(getContext(), resultStride);
 
-    const auto fusedLoc =
-            mlir::FusedLoc::get(producerSliceOp->getLoc().getContext(), {producerSliceOp->getLoc(), origOp->getLoc()});
+    const auto fusedLoc = takeOpLoc(origOp, "composed");
     const auto newOp = rewriter.create<IE::StridedSliceOp>(
             fusedLoc, producerSliceOp.getInput(), origOp.getBegins(), origOp.getEnds(), origOp.getStrides(), beginsAttr,
             endsAttr, stridesAttr, origOp.getBeginMask(), origOp.getEndMask(), origOp.getNewAxisMask(),
@@ -301,8 +295,8 @@ mlir::LogicalResult ConvertNegStrideStridedSlice2Reverse::matchAndRewrite(IE::St
     const auto seqLenStorageType =
             mlir::RankedTensorType::get({static_cast<int64_t>(seqLen.size())}, getSInt64Type(rewriter.getContext()));
     const auto seqLenData = Const::createConst(rewriter, slice.getLoc(), seqLenStorageType, ArrayRef(seqLen),
-                                               [&](Const::ContentAttr attr) {
-                                                   return attr.convertElemType(getSInt32Type(rewriter.getContext()));
+                                               [&](Const::ContentSetup& setup) {
+                                                   return setup.castElemType(getSInt32Type(rewriter.getContext()));
                                                });
     rewriter.replaceOpWithNewOp<IE::ReverseSequenceOp>(slice, slice.getInput(), seqLenData,
                                                        getIntAttr(rewriter.getContext(), seqAxis),

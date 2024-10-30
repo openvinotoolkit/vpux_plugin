@@ -30,14 +30,9 @@ size_t vpux::VPUASM::DPUInvariantOp::getAlignmentRequirements() {
     return alignof(nn_public::VpuDPUInvariant);
 }
 
-vpux::ELF::SectionFlagsAttr vpux::VPUASM::DPUInvariantOp::getAccessingProcs(mlir::SymbolUserMap&) {
+vpux::ELF::SectionFlagsAttr vpux::VPUASM::DPUInvariantOp::getPredefinedMemoryAccessors() {
     // DPU can't access DDR, therefore DPU descriptors are copied from DDR to metadata in CMX by DMA
-    return ELF::SectionFlagsAttr::VPU_SHF_PROC_DMA;
-}
-
-vpux::ELF::SectionFlagsAttr vpux::VPUASM::DPUInvariantOp::getUserProcs() {
-    // DPU can access only CMX
-    return ELF::SectionFlagsAttr::SHF_NONE;
+    return ELF::SectionFlagsAttr::SHF_EXECINSTR | ELF::SectionFlagsAttr::VPU_SHF_PROC_DMA;
 }
 
 std::optional<ELF::SectionSignature> vpux::VPUASM::DPUInvariantOp::getSectionSignature() {
@@ -66,13 +61,8 @@ size_t vpux::VPUASM::DPUVariantOp::getAlignmentRequirements() {
     return alignof(nn_public::VpuDPUVariant);
 }
 
-vpux::ELF::SectionFlagsAttr vpux::VPUASM::DPUVariantOp::getAccessingProcs(mlir::SymbolUserMap&) {
-    return ELF::SectionFlagsAttr::VPU_SHF_PROC_DMA;
-}
-
-vpux::ELF::SectionFlagsAttr vpux::VPUASM::DPUVariantOp::getUserProcs() {
-    // DPU can access only CMX
-    return ELF::SectionFlagsAttr::SHF_NONE;
+vpux::ELF::SectionFlagsAttr vpux::VPUASM::DPUVariantOp::getPredefinedMemoryAccessors() {
+    return ELF::SectionFlagsAttr::SHF_EXECINSTR | ELF::SectionFlagsAttr::VPU_SHF_PROC_DMA;
 }
 
 std::optional<ELF::SectionSignature> vpux::VPUASM::DPUVariantOp::getSectionSignature() {
@@ -101,13 +91,8 @@ size_t vpux::VPUASM::DPUInvariantOp_37XX::getAlignmentRequirements() {
     return alignof(nn_public::VpuDPUInvariant);
 }
 
-vpux::ELF::SectionFlagsAttr vpux::VPUASM::DPUInvariantOp_37XX::getAccessingProcs(mlir::SymbolUserMap&) {
-    return ELF::SectionFlagsAttr::VPU_SHF_PROC_DMA;
-}
-
-vpux::ELF::SectionFlagsAttr vpux::VPUASM::DPUInvariantOp_37XX::getUserProcs() {
-    // DPU can access only CMX
-    return ELF::SectionFlagsAttr::SHF_NONE;
+vpux::ELF::SectionFlagsAttr vpux::VPUASM::DPUInvariantOp_37XX::getPredefinedMemoryAccessors() {
+    return ELF::SectionFlagsAttr::SHF_EXECINSTR | ELF::SectionFlagsAttr::VPU_SHF_PROC_DMA;
 }
 
 std::optional<ELF::SectionSignature> vpux::VPUASM::DPUInvariantOp_37XX::getSectionSignature() {
@@ -135,13 +120,8 @@ size_t vpux::VPUASM::DPUVariantOp_37XX::getAlignmentRequirements() {
     return alignof(nn_public::VpuDPUVariant);
 }
 
-vpux::ELF::SectionFlagsAttr vpux::VPUASM::DPUVariantOp_37XX::getAccessingProcs(mlir::SymbolUserMap&) {
-    return ELF::SectionFlagsAttr::VPU_SHF_PROC_DMA;
-}
-
-vpux::ELF::SectionFlagsAttr vpux::VPUASM::DPUVariantOp_37XX::getUserProcs() {
-    // DPU can access only CMX
-    return ELF::SectionFlagsAttr::SHF_NONE;
+vpux::ELF::SectionFlagsAttr vpux::VPUASM::DPUVariantOp_37XX::getPredefinedMemoryAccessors() {
+    return ELF::SectionFlagsAttr::SHF_EXECINSTR | ELF::SectionFlagsAttr::VPU_SHF_PROC_DMA;
 }
 
 std::optional<ELF::SectionSignature> vpux::VPUASM::DPUVariantOp_37XX::getSectionSignature() {

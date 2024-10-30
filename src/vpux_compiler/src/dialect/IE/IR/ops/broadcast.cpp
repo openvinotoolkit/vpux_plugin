@@ -70,7 +70,8 @@ mlir::OpFoldResult vpux::IE::BroadcastOp::fold(FoldAdaptor adaptor) {
     }
 
     // move broadcast to const attribute.
-    if (auto contentAttr = operands[0].dyn_cast_or_null<Const::ContentAttr>()) {
+    if (auto ephemeral = operands[0].dyn_cast_or_null<Const::EphemeralContentAttr>()) {
+        const auto contentAttr = static_cast<Const::ContentAttr>(ephemeral);
         const auto inputShape = to_small_vector(getShape(getInput()));
         const auto outputShape = to_small_vector(getShape(getOutput()));
         const auto broadcastType = getMode().value_or(IE::BroadcastType::NUMPY);
@@ -99,17 +100,19 @@ mlir::OpFoldResult vpux::IE::BroadcastOp::fold(FoldAdaptor adaptor) {
             }
         }
 
+        auto contentAttrSetup = contentAttr.transform();
+
         if (adjustedInputShape != inputShape) {
-            contentAttr = contentAttr.reshape(Shape(adjustedInputShape));
+            contentAttrSetup = contentAttrSetup.reshape(Shape(adjustedInputShape));
         }
 
         for (const auto& dim : enumerate(outputShape)) {
             if (dim.value() > 1 && dim.value() != adjustedInputShape[dim.index()]) {
-                contentAttr = contentAttr.broadcast(Dim(dim.index()), outputShape[dim.index()]);
+                contentAttrSetup = contentAttrSetup.broadcast(Dim(dim.index()), outputShape[dim.index()]);
             }
         }
 
-        return contentAttr;
+        return contentAttrSetup.get();
     }
 
     return nullptr;

@@ -4,8 +4,9 @@
 //
 
 #include "vpux/compiler/dialect/const/attributes/content.hpp"
+#include "vpux/compiler/dialect/const/utils/sub_byte.hpp"
+#include "vpux/compiler/utils/convert_utils.hpp"
 #include "vpux/compiler/utils/types.hpp"
-
 #include "vpux/utils/core/format.hpp"
 #include "vpux/utils/core/func_ref.hpp"
 
@@ -13,62 +14,21 @@
 
 using namespace vpux;
 
-//
-// ConvertElemTypeAttr::verify
-//
-
 mlir::LogicalResult vpux::Const::ConvertElemTypeAttr::verify(FuncRef<mlir::InFlightDiagnostic()> emitError,
                                                              mlir::Type elemType) {
     if (elemType == nullptr) {
         return printTo(emitError(), "Got NULL 'elemType' in 'ConvertElemTypeAttr'");
     }
 
-    if (!elemType.isIntOrFloat()) {
-        return printTo(emitError(), "Only integers and floats are supported in ConvertElemTypeAttr");
+    // TODO: Support quantization transformation
+    if (mlir::isa<mlir::quant::QuantizedType>(elemType)) {
+        return printTo(emitError(), "Unsupported conversion: 'outElemType = {1}'", elemType);
     }
 
     return mlir::success();
 }
 
-//
-// ConvertElemTypeAttr::print
-//
-
-void vpux::Const::ConvertElemTypeAttr::print(mlir::AsmPrinter& printer) const {
-    printer << "<";
-    printer.printType(getElemType());
-    printer << ">";
-}
-
-//
-// ConvertElemTypeAttr::parse
-//
-
-mlir::Attribute vpux::Const::ConvertElemTypeAttr::parse(mlir::AsmParser& parser, mlir::Type) {
-    if (mlir::failed(parser.parseLess())) {
-        return nullptr;
-    }
-
-    mlir::Type elemType;
-    if (mlir::failed(parser.parseType(elemType))) {
-        return nullptr;
-    }
-
-    if (mlir::failed(parser.parseGreater())) {
-        return nullptr;
-    }
-
-    return parser.getChecked<Const::ConvertElemTypeAttr>(elemType);
-}
-
-//
-// ConvertElemTypeAttr::inferOutputType
-//
-
 vpux::NDTypeInterface vpux::Const::ConvertElemTypeAttr::inferOutputType(vpux::NDTypeInterface input) const {
-    VPUX_THROW_UNLESS(input.getElementType().isIntOrFloat(), "Can't convert '{0}' element type to '{1}'",
-                      input.getElementType(), getElemType());
-
     return input.changeElemType(getElemType());
 }
 
@@ -76,19 +36,26 @@ bool vpux::Const::ConvertElemTypeAttr::inferOutputSplat(bool inputIsSplat, vpux:
     return inputIsSplat;
 }
 
-//
-// ConvertElemTypeAttr::transform
-//
-
 Const::Content vpux::Const::ConvertElemTypeAttr::transform(vpux::Const::Content& input) const {
-    return Const::Content::moveBuffer(inferOutputType(input.getType()), std::move(input));
+    auto inType = input.getType();
+    auto outNDType = inferOutputType(inType);
+    auto outputIsSplat = inferOutputSplat(input.isSplat(), inType);
+
+    if (auto qElemType = inType.getElementType().dyn_cast<mlir::quant::QuantizedType>()) {
+        // TODO: Support dequantization transformation
+        VPUX_THROW("Unsupported conversion: {0} -> {1}", qElemType, outNDType.getElementType());
+    }
+
+    // For subbyte type, we unpack the data
+    auto bitWidth = inType.getElemTypeSize().count();
+    if (bitWidth < CHAR_BIT && outNDType.getElementType().isInteger(8)) {
+        return subByteConversion(input, outNDType, outputIsSplat, bitWidth);
+    }
+
+    // TODO: Support generic transformation
+    VPUX_THROW("Unsupported conversion: {0} -> {1}", inType.getElementType(), outNDType.getElementType());
 }
 
-//
-// ContentAttr::convertElemType
-//
-
-Const::ContentAttr vpux::Const::ContentAttr::convertElemType(mlir::Type newElemType) const {
-    return ContentAttr::addTransformation(
-            *this, Const::ConvertElemTypeAttr::get(newElemType).cast<Const::TransformAttrInterface>());
+Const::ContentSetup vpux::Const::ContentSetup::convertElemType(mlir::Type newElemType) {
+    return addTransformation(Const::ConvertElemTypeAttr::get(newElemType));
 }

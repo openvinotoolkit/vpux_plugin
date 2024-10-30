@@ -86,6 +86,17 @@ void vpux::VPU::ConcatOp::build(mlir::OpBuilder& builder, mlir::OperationState& 
 
 namespace {
 
+using GetShapeFunc = std::function<Shape(const mlir::Value)>;
+
+Shape getDynamicShape(const mlir::Value val) {
+    return val.getType().cast<vpux::NDTypeInterface>().getShape().toValues();
+}
+
+Shape getUpperBounds(const mlir::Value val) {
+    auto outBounds = val.getType().cast<vpux::BoundedTypeInterface>().getBounds();
+    return Shape(parseIntArrayAttr<int64_t>(outBounds));
+}
+
 Dim normalizeAxis(VPU::ConcatOpAdaptor concat) {
     const auto inType = concat.getInputs().front().getType().cast<vpux::NDTypeInterface>();
     const auto inRank = inType.getRank();
@@ -103,14 +114,14 @@ Dim normalizeAxis(VPU::ConcatOpAdaptor concat) {
     return Dim(axisInd);
 }
 
-mlir::FailureOr<Shape> inferOutShapeWithAxis(VPU::ConcatOpAdaptor concat, mlir::Location loc) {
-    const auto inType = concat.getInputs().front().getType().cast<vpux::NDTypeInterface>();
+mlir::FailureOr<Shape> inferOutShapeWithAxis(VPU::ConcatOpAdaptor concat, const GetShapeFunc& getShapeFunctor,
+                                             mlir::Location loc) {
     const auto axis = normalizeAxis(concat);
 
-    auto outShape = inType.getShape().toValues();
+    Shape outShape = getShapeFunctor(concat.getInputs().front());
 
     for (const auto val : concat.getInputs().drop_front()) {
-        const auto curShape = getShape(val);
+        const auto curShape = getShapeFunctor(val);
 
         if (curShape.size() != outShape.size()) {
             return errorAt(loc, "Concat inputs have mismatched ranks: '{0}' vs '{1}'", curShape.size(),
@@ -140,7 +151,8 @@ mlir::FailureOr<Shape> inferOutShapeWithAxis(VPU::ConcatOpAdaptor concat, mlir::
     return outShape;
 }
 
-mlir::FailureOr<Shape> inferOutShapeWithOffsets(VPU::ConcatOpAdaptor concat, mlir::Location loc) {
+mlir::FailureOr<Shape> inferOutShapeWithOffsets(VPU::ConcatOpAdaptor concat, const GetShapeFunc& getShapeFunctor,
+                                                mlir::Location loc) {
     if (!concat.getStaticOffsets().has_value()) {
         return errorAt(loc, "Missing static_offsets attribute");
     }
@@ -158,7 +170,7 @@ mlir::FailureOr<Shape> inferOutShapeWithOffsets(VPU::ConcatOpAdaptor concat, mli
 
     for (const auto p : zip(concat.getInputs(), allOffsets)) {
         const auto curVal = std::get<0>(p);
-        const auto curShape = getShape(curVal);
+        const auto curShape = getShapeFunctor(curVal);
 
         if (curShape.size() != outShape.size()) {
             return errorAt(loc, "Concat inputs have mismatched ranks: '{0}' vs '{1}'", curShape.size(),
@@ -173,8 +185,12 @@ mlir::FailureOr<Shape> inferOutShapeWithOffsets(VPU::ConcatOpAdaptor concat, mli
 
         for (const auto ind : irange(outShape.size())) {
             const auto d = Dim(ind);
-
-            outShape[d] = std::max(outShape[d], curOffsets[d] + curShape[d]);
+            if (curShape[d] == mlir::ShapedType::kDynamic) {
+                VPUX_THROW_UNLESS(curOffsets[d] == 0, "Concatenation over dynamic dimension is not supported.");
+                outShape[d] = curShape[d];
+            } else {
+                outShape[d] = std::max(outShape[d], curOffsets[d] + curShape[d]);
+            }
         }
     }
 
@@ -337,8 +353,8 @@ mlir::LogicalResult vpux::VPU::ConcatOp::inferReturnTypes(mlir::MLIRContext* ctx
     }
 
     // Infer output shape
-    const auto outShape =
-            concat.getPerAxis() ? inferOutShapeWithAxis(concat, loc) : inferOutShapeWithOffsets(concat, loc);
+    const auto outShape = concat.getPerAxis() ? inferOutShapeWithAxis(concat, getDynamicShape, loc)
+                                              : inferOutShapeWithOffsets(concat, getDynamicShape, loc);
     if (mlir::failed(outShape)) {
         return mlir::failure();
     }
@@ -353,7 +369,7 @@ mlir::LogicalResult vpux::VPU::ConcatOp::inferReturnTypes(mlir::MLIRContext* ctx
 
     const auto inType = concat.getInputs().front().getType();
     const auto distributedIn = inType.dyn_cast<VPU::DistributedTypeInterface>();
-    VPU::DistributedTensorAttr possibleDistribution =
+    VPU::DistributionInfoAttr possibleDistribution =
             distributedIn != nullptr && distributedIn.containsDistributedTypes()
                     ? distributedIn.getDistributedTypes().front().cast<VPU::DistributedTensorType>().getDistribution()
                     : nullptr;
@@ -365,11 +381,28 @@ mlir::LogicalResult vpux::VPU::ConcatOp::inferReturnTypes(mlir::MLIRContext* ctx
                 distributedIn.changeShapeForExplicitDistribution(Shape(outShape.value()), outputDistribution);
         inferredTypes.emplace_back(outputType);
     } else {
-        const auto typeComponents =
-                TypeComponents().setShape(Shape(outShape.value())).setElementType(outElemType.value());
+        if (outShape.value().isStatic()) {
+            const auto typeComponents =
+                    TypeComponents().setShape(Shape(outShape.value())).setElementType(outElemType.value());
 
-        const auto outputType = inType.cast<NDTypeInterface>().changeTypeComponents(typeComponents);
-        inferredTypes.emplace_back(outputType);
+            const auto outputType = inType.cast<NDTypeInterface>().changeTypeComponents(typeComponents);
+            inferredTypes.emplace_back(outputType);
+        } else {
+            // Infer output bounds
+            const auto outBounds = concat.getPerAxis() ? inferOutShapeWithAxis(concat, getUpperBounds, loc)
+                                                       : inferOutShapeWithOffsets(concat, getUpperBounds, loc);
+            if (mlir::failed(outBounds)) {
+                return mlir::failure();
+            }
+
+            const auto typeComponents = TypeComponents()
+                                                .setShape(Shape(outShape.value()))
+                                                .setElementType(outElemType.value())
+                                                .setBounds(getIntArrayAttr(ctx, outBounds.value().raw()));
+            const auto outputType = inType.cast<NDTypeInterface>().changeTypeComponents(typeComponents);
+
+            inferredTypes.emplace_back(outputType);
+        }
     }
 
     return mlir::success();
@@ -649,8 +682,7 @@ mlir::LogicalResult FuseConcatsWithDifferentAxes::matchAndRewrite(VPU::ConcatOp 
             }
 
             const auto strategy = clusteredOp.getMultiClusterStrategy().value();
-            const auto numCluster =
-                    clusteredOp.getOptimalNumClusters(getShape(clusteredOp->getResult(0)), strategy).getInt();
+            const auto numCluster = clusteredOp.getOptimalNumClusters(getShape(clusteredOp->getResult(0)), strategy);
             auto inType = sliceOp.getResult().getType();
             SmallVector<int64_t> tilingScheme;
             if (mlir::isa<VPU::SWOpInterface>(nextUser)) {
@@ -658,6 +690,7 @@ mlir::LogicalResult FuseConcatsWithDifferentAxes::matchAndRewrite(VPU::ConcatOp 
             } else {
                 auto nceOp = mlir::dyn_cast<VPU::NCEOpInterface>(nextUser);
                 auto isFilter = !mlir::isa<VPU::NCEEltwiseOp>(nceOp.getOperation()) &&
+                                nceOp.getWeightsOperand() != nullptr &&
                                 nceOp.getWeightsOperand().getDefiningOp() == sliceOp;
                 tilingScheme = isFilter ? VPU::getWeightsTensorNumTiles(clusteredOp, inType, numCluster, strategy)
                                         : VPU::getActivationTensorNumTiles(clusteredOp, numCluster, strategy);
@@ -719,7 +752,7 @@ mlir::OpFoldResult VPU::ConcatOp::fold(FoldAdaptor) {
 }
 
 namespace {
-bool isSOHWithHeightConcatAxis(ShapeRef inputShape, ShapeRef outputShape, VPU::DistributedTensorAttr distributedAttr) {
+bool isSOHWithHeightConcatAxis(ShapeRef inputShape, ShapeRef outputShape, VPU::DistributionInfoAttr distributedAttr) {
     if (inputShape[Dims4D::Act::H] == outputShape[Dims4D::Act::H]) {
         // inputs are not concatenated over H
         return false;
@@ -769,8 +802,16 @@ mlir::LogicalResult vpux::VPU::ConcatOp::verify() {
                             : val.getType().cast<mlir::RankedTensorType>();
             const auto curDesc = vpux::getTensorAttr(curType);
 
-            if (curDesc != inDesc) {
-                return errorAt(loc, "Misaligned TensorType attributes for '{0}' inputs", getOperationName());
+            if (val.getType().cast<NDTypeInterface>().getShape().isStatic()) {
+                if (curDesc != inDesc) {
+                    return errorAt(loc, "Misaligned TensorType attributes for '{0}' inputs", getOperationName());
+                }
+            } else {
+                // Bounds may be different.
+                // Other than that the descriptors must match.
+                if (curDesc.getOrder() != inDesc.getOrder() || curDesc.getMemSpace() != inDesc.getMemSpace()) {
+                    return errorAt(loc, "Misaligned TensorType attributes for '{0}' inputs", getOperationName());
+                }
             }
         }
     } else if (const auto inTypeDistributed = input1DataType.dyn_cast<VPU::DistributedTensorType>()) {
@@ -813,7 +854,7 @@ mlir::LogicalResult vpux::VPU::ConcatOp::verify() {
             if (curType.getDistribution() != inDistribution) {
                 if ((!VPU::isDistributedAttrWithExplicitShapesAndOffsets(curType.getDistribution()) ||
                      !VPU::isDistributedAttrWithExplicitShapesAndOffsets(inDistribution))) {
-                    return errorAt(loc, "Misaligned DistributedTensorAttr for '{0}' inputs", getOperationName());
+                    return errorAt(loc, "Misaligned DistributionInfoAttr for '{0}' inputs", getOperationName());
                 }
 
                 const auto curTypeShape = curType.getShape();
@@ -896,7 +937,7 @@ bool vpux::VPU::ConcatOp::checkStrategyCompatibility(VPU::MultiClusterStrategy s
            strategy == VPU::MultiClusterStrategy::SplitOverHeight || strategy == VPU::MultiClusterStrategy::Clustering;
 }
 
-vpux::VPU::DistributedTensorNative vpux::VPU::ConcatOp::getExplicitDistributedTensorAttr(
+vpux::VPU::DistributionInfo vpux::VPU::ConcatOp::getExplicitDistributionInfoAttr(
         vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, ArrayRef<int64_t> numTiles,
         const int64_t numClusters, ArrayRef<int64_t> alignment, const bool uniformDistributedSegments,
         const vpux::VPU::OverlapDistributionParams& overlapParams) {
@@ -951,14 +992,15 @@ bool VPU::ConcatOp::isOperationSplitOverKernelCompatible(ShapeRef outputShape, S
     return VPU::isOperationSplitOverKernelCompatible(getOperation(), outputShape, offset, axis);
 }
 
-bool VPU::ConcatOp::doesLayerFitIntoCMX(VPU::MultiClusterStrategy strategy, Byte reservedMem) {
+bool VPU::ConcatOp::doesLayerFitIntoCMX(VPU::MultiClusterStrategy strategy, SiblingOpsAnalysis& siblingsAnalysis,
+                                        Byte reservedMem) {
     auto concatOp = mlir::cast<VPU::ConcatOp>(getOperation());
     const auto outputType = concatOp->getResult(0).getType().cast<vpux::NDTypeInterface>();
     auto numClusters = VPU::getOptimalNumClusters(concatOp, outputType.getShape(), strategy);
 
     SmallVector<Byte> buffersSize{VPU::getTotalAllocSizeWithDistribution(
             getOutput().getType(),
-            getOutputDistributionAttrFromOp(concatOp, getOutput().getType(), numClusters.getInt(), strategy))};
+            getOutputDistributionAttrFromOp(concatOp, getOutput().getType(), numClusters, strategy, siblingsAnalysis))};
 
     auto totalAvailableCMXSize = reservedMem.count() == 0 ? getTotalCMXSize(getOperation()).count()
                                                           : getTotalCMXFragmentationAwareSize(getOperation()).count();

@@ -35,14 +35,6 @@ size_t vpux::NPUReg40XX::ActKernelRangeOp::getAlignmentRequirements() {
     return alignof(nn_public::VpuActKernelRange);
 }
 
-vpux::ELF::SectionFlagsAttr vpux::NPUReg40XX::ActKernelRangeOp::getAccessingProcs(mlir::SymbolUserMap&) {
-    return ELF::SectionFlagsAttr::VPU_SHF_PROC_DMA;
-}
-
-vpux::ELF::SectionFlagsAttr vpux::NPUReg40XX::ActKernelRangeOp::getUserProcs() {
-    return ELF::SectionFlagsAttr::VPU_SHF_PROC_SHAVE;
-}
-
 std::optional<ELF::SectionSignature> vpux::NPUReg40XX::ActKernelRangeOp::getSectionSignature() {
     return {};
 }
@@ -62,7 +54,8 @@ std::vector<ELF::RelocationInfo> vpux::NPUReg40XX::ActKernelRangeOp::getRelocati
         relocs.push_back(ELF::RelocationInfo(
                 kernelText, targetSection,
                 offsetof(nn_public::VpuActKernelRange, text_window_base) + offsetof(nn_public::VpuPtr<void>, ptr),
-                ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, kernelText)));
+                ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, kernelText),
+                "Kernel text (ptr in text_window_base) for act kernel range reloc"));
     }
     return relocs;
 }

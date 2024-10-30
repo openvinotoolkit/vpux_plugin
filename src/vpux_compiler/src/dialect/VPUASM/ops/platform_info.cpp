@@ -21,19 +21,17 @@ void vpux::VPUASM::PlatformInfoOp::serialize(elf::writer::BinaryDataSection<uint
 }
 
 size_t vpux::VPUASM::PlatformInfoOp::getBinarySize() {
-    return sizeof(elf::platform::PlatformInfo);
+    // calculate size based on serialized form, instead of just sizeof(PlatformInfo)
+    // serialization uses metadata that also gets stored in the blob and must be accounted for
+    // also for non-POD types (e.g. have vector as member) account for all data to be serialized
+    // (data owned by vector, instead of just pointer)
+    elf::platform::PlatformInfo platformInfo;
+    platformInfo.mArchKind = ELF::mapVpuArchKindToElfArchKind(getArchKind());
+    return elf::platform::PlatformInfoSerialization::serialize(platformInfo).size();
 }
 
 size_t vpux::VPUASM::PlatformInfoOp::getAlignmentRequirements() {
     return alignof(elf::platform::PlatformInfo);
-}
-
-vpux::ELF::SectionFlagsAttr vpux::VPUASM::PlatformInfoOp::getAccessingProcs(mlir::SymbolUserMap&) {
-    return ELF::SectionFlagsAttr::SHF_NONE;
-}
-
-vpux::ELF::SectionFlagsAttr vpux::VPUASM::PlatformInfoOp::getUserProcs() {
-    return ELF::SectionFlagsAttr::SHF_NONE;
 }
 
 std::optional<ELF::SectionSignature> vpux::VPUASM::PlatformInfoOp::getSectionSignature() {

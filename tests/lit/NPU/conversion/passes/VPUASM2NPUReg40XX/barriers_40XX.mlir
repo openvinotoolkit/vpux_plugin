@@ -27,29 +27,29 @@ module @OneDMAWithoutAttributes attributes {VPU.arch = #VPU.arch_kind<NPU40XX>} 
 
 //CHECK-LABEL: @main
 //CHECK: NPUReg40XX.ConfigureBarrier
-//CHECK: next_same_id_ offset 0 size 32 = UINT 0xFFFFFFFF,
-//CHECK: producer_count_ offset 4 size 16 = UINT 3,
-//CHECK: consumer_count_ offset 6 size 16 = UINT 1,
-//CHECK: real_id_ offset 8 size 8 = UINT 0,
+//CHECK: next_same_id_ offset 0 size 32 = UINT 0xFFFFFFFF
+//CHECK: producer_count_ offset 4 size 16 = UINT 3
+//CHECK: consumer_count_ offset 6 size 16 = UINT 1
+//CHECK: real_id_ offset 8 size 8 = UINT 0
 //CHECK-NOT:  tb_work_item_idx
 
 //CHECK: NPUReg40XX.ConfigureBarrier
-//CHECK: next_same_id_ offset 0 size 32 = UINT 0xC,
-//CHECK: producer_count_ offset 4 size 16 = UINT 0x22,
-//CHECK: consumer_count_ offset 6 size 16 = UINT 0x2B,
-//CHECK: real_id_ offset 8 size 8 = UINT 0x11,
+//CHECK: next_same_id_ offset 0 size 32 = UINT 0xC
+//CHECK: producer_count_ offset 4 size 16 = UINT 0x22
+//CHECK: consumer_count_ offset 6 size 16 = UINT 0x2B
+//CHECK: real_id_ offset 8 size 8 = UINT 0x11
 //CHECK-NOT:  tb_work_item_idx
 
 //CHECK: NPUReg40XX.ManagedBarrier
-//CHECK: tb_next_same_id offset 0 size 32 = UINT 0xFFFFFFFF,
-//CHECK: tb_producer_count offset 4 size 16 = UINT 4,
-//CHECK: tb_consumer_count offset 6 size 16 = UINT 5,
-//CHECK: tb_real_id offset 8 size 8 = UINT 0,
-//CHECK: tb_work_item_idx offset 12 size 32 = UINT 0x3E7,
+//CHECK: tb_next_same_id offset 0 size 32 = UINT 0xFFFFFFFF
+//CHECK: tb_producer_count offset 4 size 16 = UINT 4
+//CHECK: tb_consumer_count offset 6 size 16 = UINT 5
+//CHECK: tb_real_id offset 8 size 8 = UINT 0
+//CHECK: tb_work_item_idx offset 12 size 32 = UINT 0x3E7
 
 //CHECK: NPUReg40XX.ManagedBarrier
-//CHECK: tb_next_same_id offset 0 size 32 = UINT 4,
-//CHECK: tb_producer_count offset 4 size 16 = UINT 0x17,
-//CHECK: tb_consumer_count offset 6 size 16 = UINT 0x20,
-//CHECK: tb_real_id offset 8 size 8 = UINT 1,
-//CHECK: tb_work_item_idx offset 12 size 32 = UINT 0,
+//CHECK: tb_next_same_id offset 0 size 32 = UINT 4
+//CHECK: tb_producer_count offset 4 size 16 = UINT 0x17
+//CHECK: tb_consumer_count offset 6 size 16 = UINT 0x20
+//CHECK: tb_real_id offset 8 size 8 = UINT 1
+//CHECK: tb_work_item_idx offset 12 size 32 = UINT 0

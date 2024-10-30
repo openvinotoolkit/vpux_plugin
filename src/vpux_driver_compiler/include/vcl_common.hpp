@@ -94,6 +94,17 @@ struct BuildInfo {
     vcl_result_t parseIOOption(const std::vector<std::string>& ioInfoOptions);
 
     /**
+     * @brief Parse the config string and update parsedConfig
+     *
+     * @param descOptions The info must contain runtime configuration of compiler, but it can also have other info
+     * which will be ignored
+     *
+     * @return vcl_result_t
+     * @see prepareBuildFlags()
+     */
+    vcl_result_t prepareConfig(const std::string& descOptions);
+
+    /**
      * @brief Parse the build flags from vcl_executable_desc_t and store the results
      *
      * @param descOptions The info includes input and output info of model, runtime configuration of compiler
@@ -133,5 +144,18 @@ struct BuildInfo {
     VPUXCompilerL0* pvc = nullptr;
     VCLLogger* logger = nullptr;
 };  // BuildInfo
+
+template <class Callable>
+class Scoped {
+public:
+    explicit Scoped(Callable&& callable): _callable(std::forward<Callable>(callable)) {
+    }
+    ~Scoped() {
+        _callable();
+    }
+
+private:
+    Callable _callable;
+};
 
 }  // namespace VPUXDriverCompiler

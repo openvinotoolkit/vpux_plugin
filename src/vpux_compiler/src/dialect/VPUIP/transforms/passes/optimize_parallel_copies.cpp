@@ -86,45 +86,36 @@ std::optional<uint32_t> ParallelCopiesRewriter::getComputeOpPosition(mlir::Opera
     return std::nullopt;
 }
 
-bool hasSiblingCopyFusable(VPUIP::SubViewOp subViewOp, VPUIP::CopyOp copyOp, mlir::Operation* parentOp, Logger log) {
-    bool hasSiblingCopy = false;
-    if (parentOp == nullptr || parentOp->getNumResults() <= 0) {
-        log.trace("Is not fusable because haven't consumers or parent is empty");
+bool hasSiblingCopyFusable(VPUIP::SubViewOp subViewOp, VPUIP::CopyOp copyOp, mlir::Value buffer, Logger log) {
+    auto parentOp = buffer.getDefiningOp();
+    if (parentOp != nullptr && parentOp->getNumResults() <= 0) {
+        log.trace("Is not fusable because parent does not have any consumers");
         return false;
     }
-    for (auto siblingOp : parentOp->getResult(0).getUsers()) {
-        if (siblingOp == copyOp) {
-            continue;
-        }
+    for (auto siblingOp : buffer.getUsers()) {
         log.trace("Processing siblingOp {0}", siblingOp->getLoc());
-        if (!vpux::VPUIP::hasDistributedOperand(siblingOp) && !mlir::isa<VPUIP::CopyOp>(*siblingOp)) {
-            if (!mlir::isa<VPUIP::CopyOp>(*siblingOp)) {
-                if (!mlir::isa<VPUIP::SubViewOp>(*siblingOp)) {
+        if (!mlir::isa<VPUIP::CopyOp>(*siblingOp)) {
+            if (!mlir::isa<VPUIP::SubViewOp>(*siblingOp)) {
+                continue;
+            } else {
+                // TODO: E#116963
+                auto childOfSiblingOp = to_vector(siblingOp->getResult(0).getUsers()).back();
+                if (!mlir::isa<VPUIP::CopyOp>(childOfSiblingOp)) {
                     continue;
-                } else {
-                    // TODO: E#116963
-                    auto childOfSiblingOp = to_vector(siblingOp->getResult(0).getUsers()).back();
-                    if (!mlir::isa<VPUIP::CopyOp>(childOfSiblingOp)) {
-                        continue;
-                    }
-                    // match SubView->Copy
-                    if (subViewOp == nullptr) {
-                        continue;
-                    }
-                    auto siblingSubViewOp = mlir::dyn_cast<VPUIP::SubViewOp>(siblingOp);
-                    if (parseIntArrayAttr<int64_t>(subViewOp.getStaticOffsets()) !=
-                                parseIntArrayAttr<int64_t>(siblingSubViewOp.getStaticOffsets()) ||
-                        parseIntArrayAttr<int64_t>(subViewOp.getStaticSizes()) !=
-                                parseIntArrayAttr<int64_t>(siblingSubViewOp.getStaticSizes())) {
-                        continue;
-                    }
-                    siblingOp = childOfSiblingOp;
                 }
+                // match SubView->Copy
+                if (subViewOp == nullptr) {
+                    continue;
+                }
+                auto siblingSubViewOp = mlir::dyn_cast<VPUIP::SubViewOp>(siblingOp);
+                if (parseIntArrayAttr<int64_t>(subViewOp.getStaticOffsets()) !=
+                            parseIntArrayAttr<int64_t>(siblingSubViewOp.getStaticOffsets()) ||
+                    parseIntArrayAttr<int64_t>(subViewOp.getStaticSizes()) !=
+                            parseIntArrayAttr<int64_t>(siblingSubViewOp.getStaticSizes())) {
+                    continue;
+                }
+                siblingOp = childOfSiblingOp;
             }
-        }
-
-        if (vpux::VPUIP::hasDistributedOperand(siblingOp)) {
-            return true;
         }
 
         // Check 3: current op's consumers are copied to DDR immediately after execution
@@ -132,7 +123,7 @@ bool hasSiblingCopyFusable(VPUIP::SubViewOp subViewOp, VPUIP::CopyOp copyOp, mli
             log.trace("Processing childOfSiblingOp {0}", childOfSiblingOp->getLoc());
             if (childOfSiblingOp->use_empty()) {
                 log.trace("Is not fusable because childOfSiblingOp haven't consumers");
-                return false;
+                continue;
             }
             for (const auto grandChildOfSiblingOp : childOfSiblingOp->getResult(0).getUsers()) {
                 auto concatOp = mlir::dyn_cast<VPUIP::ConcatViewOp>(grandChildOfSiblingOp);
@@ -143,7 +134,7 @@ bool hasSiblingCopyFusable(VPUIP::SubViewOp subViewOp, VPUIP::CopyOp copyOp, mli
                                               : mlir::dyn_cast<VPUIP::CopyOp>(grandChildOfSiblingOp);
                 if (childCopyOfSiblingOp == nullptr) {
                     log.trace("Is not fusable because childOfSiblingOp is not CopyOp");
-                    return false;
+                    continue;
                 }
                 const auto input = childCopyOfSiblingOp.getInput().getType().cast<vpux::NDTypeInterface>();
                 const auto output = childCopyOfSiblingOp.getOutput().getType().cast<vpux::NDTypeInterface>();
@@ -155,9 +146,11 @@ bool hasSiblingCopyFusable(VPUIP::SubViewOp subViewOp, VPUIP::CopyOp copyOp, mli
             }
         }
 
-        hasSiblingCopy = true;
+        if (siblingOp != copyOp) {
+            return true;
+        }
     }
-    return hasSiblingCopy;
+    return false;
 }
 
 bool isCopyFusable(VPUIP::CopyOp copyOp, bool enableOptimizeConstCopy, Logger& log) {
@@ -165,16 +158,7 @@ bool isCopyFusable(VPUIP::CopyOp copyOp, bool enableOptimizeConstCopy, Logger& l
     const auto srcMemory = copyOp.getInput().getType().cast<vpux::NDTypeInterface>().getMemoryKind();
     const auto dstMemory = copyOp.getOutput().getType().cast<vpux::NDTypeInterface>().getMemoryKind();
     if (srcMemory == dstMemory || srcMemory == VPU::MemoryKind::CMX_NN) {
-        log.trace("Is not fusable because not DDR->CMX copy");
-        return false;
-    }
-
-    // Check 2: parallel
-    // All the consumers of the parent op should be copies
-    // At least one more copy except for the current one
-    auto parentOp = copyOp.getInput().getDefiningOp();
-    if (parentOp == nullptr) {
-        log.trace("Is not fusable because haven't parentOp");
+        log.trace("Is not fusable because not DDR->CMX copy: {0}->{1}", srcMemory, dstMemory);
         return false;
     }
 
@@ -202,9 +186,13 @@ bool isCopyFusable(VPUIP::CopyOp copyOp, bool enableOptimizeConstCopy, Logger& l
     // 1. for weight table, contents of weigthTable need to be adjusted with proper pointer value
     // 2. for compressed convolution, const data like weight also will be adjusted in ConvWeightsCompression pass,
     // will prevent the copy optimization.
-    if (mlir::isa<Const::DeclareOp>(parentOp)) {
+    if (mlir::isa_and_nonnull<Const::DeclareOp>(copyOp.getInput().getDefiningOp())) {
         if (!enableOptimizeConstCopy) {
             log.trace("Is not fusable because enableOptimizeConstCopy is not enabled");
+            return false;
+        }
+        if (copyOp.getInput().getDefiningOp()->hasOneUse()) {
+            log.trace("Is not fusable because has one use");
             return false;
         }
         auto copyOutput = copyOp.getOutput();
@@ -231,16 +219,16 @@ bool isCopyFusable(VPUIP::CopyOp copyOp, bool enableOptimizeConstCopy, Logger& l
                 }
             }
         }
-        return !parentOp->hasOneUse();
+        return true;
     }
 
     auto subViewFusable = false;
-    if (auto subViewOp = mlir::dyn_cast<VPUIP::SubViewOp>(parentOp)) {
-        subViewFusable = hasSiblingCopyFusable(subViewOp, copyOp, subViewOp.getSource().getDefiningOp(), log);
+    if (auto subViewOp = mlir::dyn_cast_or_null<VPUIP::SubViewOp>(copyOp.getInput().getDefiningOp())) {
+        subViewFusable = hasSiblingCopyFusable(subViewOp, copyOp, subViewOp.getSource(), log);
     }
     // We have 2 calls here, one to check if we have SubViewOp 1..n SubviewOp
     // Other for TilingCopy 1..n TilingCopy
-    if (!(subViewFusable || hasSiblingCopyFusable(nullptr, copyOp, parentOp, log))) {
+    if (!subViewFusable && !hasSiblingCopyFusable(nullptr, copyOp, copyOp.getInput(), log)) {
         log.trace("Is not fusable because doesn't have fusable sibling");
         return false;
     }
@@ -279,7 +267,7 @@ mlir::LogicalResult ParallelCopiesRewriter::matchAndRewrite(VPUIP::CopyOp origin
             return false;
         }
 
-        if (isClusterCopy && srcCopyOp.getResult().getType() != op->getResult(0).getType()) {
+        if (srcCopyOp.getResult().getType() != op->getResult(0).getType()) {
             return false;
         }
 
@@ -400,47 +388,45 @@ mlir::LogicalResult ParallelCopiesRewriter::matchAndRewrite(VPUIP::CopyOp origin
         rewriter.replaceAllUsesWith(siblingCopyOutputBuff, copyOpOutputBuff);
     };
 
-    auto parentOp = newRootCopyOp.getInput().getDefiningOp();
+    auto sharedBuffer = newRootCopyOp.getInput();
     bool hasReplaceParallelCopies = false;
-    // Optimize pattern: SubviewParentOp -> ParentOp(SubView) -> CopyOp
-    if (auto subViewOp = mlir::dyn_cast<VPUIP::SubViewOp>(parentOp)) {
-        if (auto subviewParentOp = subViewOp.getSource().getDefiningOp()) {
-            auto parentOpusers = to_small_vector(subviewParentOp->getResult(0).getUsers());
-            for (auto* siblingOp : llvm::make_early_inc_range(parentOpusers | reversed)) {
-                auto siblingSubViewOp = mlir::dyn_cast<VPUIP::SubViewOp>(siblingOp);
-                if (siblingSubViewOp == nullptr || !isSubViewSameFunc(subViewOp, siblingSubViewOp)) {
-                    continue;
-                }
+    // Optimize pattern: SharedBuffer -> ParentOp(SubView) -> CopyOp
+    if (auto subViewOp = mlir::dyn_cast_or_null<VPUIP::SubViewOp>(sharedBuffer.getDefiningOp())) {
+        auto parentOpusers = to_small_vector(subViewOp.getSource().getUsers());
+        for (auto* siblingOp : llvm::make_early_inc_range(parentOpusers | reversed)) {
+            auto siblingSubViewOp = mlir::dyn_cast<VPUIP::SubViewOp>(siblingOp);
+            if (siblingSubViewOp == nullptr || !isSubViewSameFunc(subViewOp, siblingSubViewOp)) {
+                continue;
+            }
 
-                auto siblingCopyOp = *siblingSubViewOp.getResult().getUsers().begin();
-                if (!isCopySameFunc(newRootCopyOp, siblingCopyOp) || !isWithinCostDistance(siblingCopyOp) ||
-                    isSameCopyFunc(newRootCopyOp, siblingCopyOp)) {
-                    continue;
-                }
+            auto siblingCopyOp = *siblingSubViewOp.getResult().getUsers().begin();
+            if (!isCopySameFunc(newRootCopyOp, siblingCopyOp) || !isWithinCostDistance(siblingCopyOp) ||
+                isSameCopyFunc(newRootCopyOp, siblingCopyOp)) {
+                continue;
+            }
 
-                nestedLogger.trace("Fuse SubView op {0} to {1}", siblingSubViewOp->getLoc(), subViewOp->getLoc());
-                updateSiblingCopyOutputBuff(newRootCopyOp, siblingCopyOp);
-                rewriter.replaceAllUsesWith(siblingSubViewOp->getResult(0), subViewOp->getResult(0));
-                rewriter.replaceAllUsesWith(siblingCopyOp->getResult(0), newRootCopyOp->getResult(0));
-                rewriter.eraseOp(siblingCopyOp);
-                rewriter.eraseOp(siblingSubViewOp);
-                hasReplaceParallelCopies = true;
+            nestedLogger.trace("Fuse SubView op {0} to {1}", siblingSubViewOp->getLoc(), subViewOp->getLoc());
+            updateSiblingCopyOutputBuff(newRootCopyOp, siblingCopyOp);
+            rewriter.replaceAllUsesWith(siblingSubViewOp->getResult(0), subViewOp->getResult(0));
+            rewriter.replaceAllUsesWith(siblingCopyOp->getResult(0), newRootCopyOp->getResult(0));
+            rewriter.eraseOp(siblingCopyOp);
+            rewriter.eraseOp(siblingSubViewOp);
+            hasReplaceParallelCopies = true;
 
-                for (auto user : newRootCopyOp->getResult(0).getUsers()) {
-                    if (user->isBeforeInBlock(newRootCopyOp)) {
-                        newRootCopyOp->moveBefore(user);
-                    }
+            for (auto user : newRootCopyOp->getResult(0).getUsers()) {
+                if (user->isBeforeInBlock(newRootCopyOp)) {
+                    newRootCopyOp->moveBefore(user);
                 }
-                for (auto user : subViewOp->getResult(0).getUsers()) {
-                    if (user->isBeforeInBlock(subViewOp)) {
-                        subViewOp->moveBefore(user);
-                    }
+            }
+            for (auto user : subViewOp->getResult(0).getUsers()) {
+                if (user->isBeforeInBlock(subViewOp)) {
+                    subViewOp->moveBefore(user);
                 }
-                auto copyOpOutputBuff = newRootCopyOp.getOutputBuff();
-                for (auto user : copyOpOutputBuff.getUsers()) {
-                    if (user->isBeforeInBlock(copyOpOutputBuff.getDefiningOp())) {
-                        copyOpOutputBuff.getDefiningOp()->moveBefore(user);
-                    }
+            }
+            auto copyOpOutputBuff = newRootCopyOp.getOutputBuff();
+            for (auto user : copyOpOutputBuff.getUsers()) {
+                if (user->isBeforeInBlock(copyOpOutputBuff.getDefiningOp())) {
+                    copyOpOutputBuff.getDefiningOp()->moveBefore(user);
                 }
             }
         }
@@ -449,7 +435,7 @@ mlir::LogicalResult ParallelCopiesRewriter::matchAndRewrite(VPUIP::CopyOp origin
     // Optimize pattern: ParentOp -> CopyOp
     prevCopyOp = nullptr;
     prevComputePostion = std::numeric_limits<uint32_t>::max();
-    auto parentOpUsers = to_small_vector(parentOp->getResult(0).getUsers());
+    auto parentOpUsers = to_small_vector(sharedBuffer.getUsers());
     for (auto* siblingOp : llvm::make_early_inc_range(parentOpUsers | reversed)) {
         if (!isCopySameFunc(newRootCopyOp, siblingOp) || !isWithinCostDistance(siblingOp) ||
             isSameCopyFunc(newRootCopyOp, siblingOp)) {

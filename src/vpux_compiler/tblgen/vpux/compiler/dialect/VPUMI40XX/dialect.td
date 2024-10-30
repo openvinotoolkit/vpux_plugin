@@ -14,7 +14,7 @@ def VPUMI40XX_Dialect : Dialect {
     let description = [{
 The **VPUMI40XX Dialect** represents NN RunTime IR together with MappedInference
     constructs in terms of the MLIR framework.
-    This is specific for NPU40XX HW architecture.
+    This is specific for VPU40XX HW architecture.
 
 [./VPUMI40XX/_ops_interfaces.md]
     }];

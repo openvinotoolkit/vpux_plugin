@@ -26,6 +26,14 @@ void vpux::VPUASM::VPUASMDialect::initialize() {
     // registerAttributes();
 }
 
+// Note: for some reason, this cpp-only printer method has to be declared in
+// vpux::VPUASM namespace.
+namespace vpux::VPUASM {
+void printContentAttr(mlir::OpAsmPrinter& printer, const ConstBufferOp&, const vpux::Const::ContentAttr& content) {
+    vpux::Const::printContentAttr(printer, content);
+}
+}  // namespace vpux::VPUASM
+
 //
 // Generated
 //

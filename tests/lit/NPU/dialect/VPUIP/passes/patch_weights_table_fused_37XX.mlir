@@ -50,7 +50,7 @@ func.func @PatchFusedConstantWithSwizzling() -> !IpOp_Stub {
             DPUTask {outEnd = [103, 103, 63], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0]}
         }
         PPE : {
-            PPETask <LPRELU> {clamp_high = 255 : i64, clamp_low = 0 : i64, fp_prelu_alpha = 0.099609375 : f64, lrelu_mult = 102 : i64, lrelu_shift = 10 : i64}
+            PPETask {opaque_ppe = #VPU.PPEStub<>}
         }
     async.yield %out : !IpOp_Stub
     }
@@ -58,7 +58,8 @@ func.func @PatchFusedConstantWithSwizzling() -> !IpOp_Stub {
     %5 = async.await %r1 : !async.value<memref<1x64x104x104xf16, #NHWC, [@CMX_NN, 0]>>
     return %5 : memref<1x64x104x104xf16, #NHWC, [@CMX_NN, 0]>
     // CHECK-DAG:   [[FUSED_CONSTANT:%.*]] = const.Declare memref<1x1x1x5120xui8, {order = #NCHW, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 512 : i64>}> = dense<
-    // CHECK-SAME: #const.RelocateWeightsTable<weightsPtr=[1405952], sparsityPtr=16777215 : i64, offsets=[0], weightsTableSize=1024 : i64, weightsElemBitSize=16 : i64, channelOffset=0 : i64>, #const.SwizzleConstant<5 : i64, 3 : i64>
+    // CHECK-SAME: #const.RelocateWeightsTable<weightsPtr=[1405952], sparsityPtr=16777215 : i64, offsets=[0], weightsTableSize=1024 : i64, weightsElemBitSize=16 : i64, channelOffset=0 : i64
+    // CHECK-SAME: #const.SwizzleConstant<5 : i64, 3 : i64>
     // CHECK:   [[INPUT:%.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <512> -> memref<1x64x104x104xf16, #NHWC, [@CMX_NN, 0]>
     // CHECK:   [[OUTPUT:%.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <692736> -> memref<1x64x104x104xf16, #NHWC, [@CMX_NN, 0]>
     // CHECK:   [[FUSED_BUF:%.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <1404928> -> memref<1x1x1x5120xui8, {order = #NCHW, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 512 : i64>}, [@CMX_NN, 0]>

@@ -25,5 +25,8 @@ void overwriteManualStrategy(llvm::json::Value& manualStrategy,
 void updateTilingStrategyInJSONForOperations(llvm::json::Value& json,
                                              llvm::MapVector<mlir::Location, mlir::Operation*>& operations);
 
+void saveMCSideLoadStrategyToFile(mlir::func::FuncOp func, StringRef strategyJsonPath,
+                                  const mlir::DenseMap<mlir::Operation*, size_t>& opToHash, StringRef modelHash);
+
 }  // namespace VPU
 }  // namespace vpux

@@ -194,12 +194,12 @@ mlir::Value createNewConstValue(Const::DeclareOp constOp, Dim expandAxisVal, Sha
                                 mlir::PatternRewriter& rewriter) {
     const auto constShape = getShape(constOp);
     int64_t padding = expandOutShape[expandAxisVal] - constShape[expandAxisVal];
-    auto contentAttr = constOp.getContentAttr();
     SmallVector<int64_t> padBegin(constShape.size(), 0);
     SmallVector<int64_t> padEnd(constShape.size(), 0);
     padEnd[expandAxisVal.ind()] = padding;
-    contentAttr = contentAttr.padWithZero(ShapeRef(padBegin), ShapeRef(padEnd));
-    return rewriter.create<Const::DeclareOp>(constOp->getLoc(), contentAttr.getType(), contentAttr).getResult();
+    auto contentAttr = constOp.transformContentAttr().padWithZero(ShapeRef(padBegin), ShapeRef(padEnd)).get();
+    return rewriter.create<Const::DeclareOp>(constOp->getLoc(), contentAttr.getType(), std::move(contentAttr))
+            .getResult();
 }
 
 IE::FuseMode vpux::IE::getFuseMode(ShapeRef patternInShape, ShapeRef patternOutShape) {

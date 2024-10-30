@@ -5,8 +5,10 @@
 
 #include "vpux/compiler/core/function_outlining_splitter.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
-
+#include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/utils/hash.hpp"
+
+#include "vpux/utils/core/array_ref.hpp"
 #include "vpux/utils/core/dense_map.hpp"
 
 using namespace vpux;
@@ -19,8 +21,17 @@ namespace {
 
 class RepeatingBlocksIdentifier {
 public:
-    RepeatingBlocksIdentifier(size_t minOpsInBlock, size_t maxNumIterations, Logger log)
-            : _minOpsInBlock(minOpsInBlock), _maxNumIterations(maxNumIterations), _log(log) {
+    RepeatingBlocksIdentifier(size_t minOpsInBlock, size_t maxNumIterations, bool separateFunctions,
+                              bool weightsAsInputs, const Logger& log)
+            : _minOpsInBlock(minOpsInBlock),
+              _maxNumIterations(maxNumIterations),
+              _separateFunctions(separateFunctions),
+              _weightsAsInputs(weightsAsInputs),
+              _log(log) {
+        // The CLI argument parser already ensures that these are mutually exclusive. Just to be safe, we prohibit the
+        // construction of an invalid instance.
+        VPUX_THROW_WHEN(separateFunctions && weightsAsInputs,
+                        "'Separate functions' and 'weights as inputs' cannot be enabled at the same time");
     }
     SmallVector<OutliningInstance> getOutliningInstances(mlir::func::FuncOp mainFunction);
 
@@ -66,6 +77,8 @@ private:
     };
     using OpInstances = std::vector<OpInstance>;
 
+    using OpValuePair = std::pair<llvm::hash_code, size_t>;
+
 private:
     void identifyUniqueOperations(mlir::func::FuncOp mainFunction);
     bool tryMergeAdjacentBlocks();
@@ -73,9 +86,14 @@ private:
                                               const InstancePair& currentInstancePair);
     std::optional<MergeCandidateInfo> chooseMergeCandidate(
             const std::unordered_map<BlockPair, std::vector<MergeCandidateInfo>>& mergeCandidates);
-    bool performMerge(const MergeCandidateInfo& candidateIt);
+    bool performMerge(const MergeCandidateInfo& candidateInfo);
     void removeLeftoverBlocks();
 
+    std::optional<InstanceId> getInstanceId(mlir::Operation* op);
+    void addInputsOutputsForSeparateFunctions(IRSlice& instance, InstanceId instanceId, mlir::Operation* op);
+    void addInputsOutputsForSharedFunction(IRSlice& instance, InstanceId instanceId, mlir::Operation* op,
+                                           SmallVector<OpValuePair>& instanceInputs,
+                                           SmallVector<OpValuePair>& instanceOutputs);
     SmallVector<OutliningInstance> prepareOutliningInstances(mlir::func::FuncOp mainFunction);
 
     void printBlocks(StringLiteral note);
@@ -83,6 +101,8 @@ private:
 private:
     size_t _minOpsInBlock;
     size_t _maxNumIterations;
+    bool _separateFunctions;
+    bool _weightsAsInputs;
     Logger _log;
 
     std::unordered_map<mlir::Operation*, llvm::hash_code> _opHash{};
@@ -440,25 +460,178 @@ void RepeatingBlocksIdentifier::removeLeftoverBlocks() {
     printBlocks("after removeLeftoverBlocks");
 }
 
+std::optional<RepeatingBlocksIdentifier::InstanceId> RepeatingBlocksIdentifier::getInstanceId(mlir::Operation* op) {
+    const auto opInstanceIt = _opInstance.find(op);
+    if (opInstanceIt == _opInstance.end()) {
+        return std::nullopt;
+    }
+    return opInstanceIt->second;
+}
+
+SmallVector<mlir::Operation*> getConstantParents(mlir::Operation* op, SmallVector<mlir::Value>& blockArgs) {
+    if (mlir::isa<Const::DeclareOp>(op)) {
+        return SmallVector<mlir::Operation*>{op};
+    }
+
+    // Quantized weights could be represented as subgraphs, such as:
+    //              Cst         Cst
+    //               |           |
+    // Weights -> Subtract -> Multiply -> [user]
+    // These subgraphs are included into the outlined function, so that the low-precision pipeline can correctly
+    // quantize the user operation
+    if (mlir::isa<IE::SubtractOp, IE::MultiplyOp, IE::ConvertOp, IE::FakeQuantizeOp>(op)) {
+        SmallVector<mlir::Operation*> parentConstOps;
+        for (auto operand : op->getOperands()) {
+            const auto parentOp = operand.getDefiningOp();
+            if (parentOp == nullptr) {
+                blockArgs.push_back(operand);
+                continue;
+            }
+            const auto ops = getConstantParents(parentOp, blockArgs);
+            if (ops.empty()) {
+                return {};
+            }
+            parentConstOps.append(ops.begin(), ops.end());
+        }
+        parentConstOps.push_back(op);
+        return parentConstOps;
+    }
+
+    return {};
+}
+
+void RepeatingBlocksIdentifier::addInputsOutputsForSeparateFunctions(IRSlice& instance, InstanceId instanceId,
+                                                                     mlir::Operation* op) {
+    // Add the dependencies of the operation to the current instance or mark them input values
+    for (auto operand : op->getOperands()) {
+        const bool operandAlreadyCovered = llvm::find(instance.inputs, operand) != instance.inputs.end();
+        if (operandAlreadyCovered) {
+            continue;
+        }
+
+        auto parentOp = operand.getDefiningOp();
+        // Operand is a block argument in the original function
+        if (parentOp == nullptr) {
+            instance.inputs.push_back(operand);
+            continue;
+        }
+
+        const auto maybeParentInstanceId = getInstanceId(parentOp);
+        // Parent operation is not placed in the current instance
+        if (!maybeParentInstanceId.has_value() || maybeParentInstanceId.value() != instanceId) {
+            // An exception is the case where the parent operation is a constant; this operations should be
+            // placed in the current instance regardless of where it was placed initially
+            SmallVector<mlir::Value> blockArgs;
+            const auto constParents = getConstantParents(parentOp, blockArgs);
+            if (!constParents.empty()) {
+                for (auto constParent : constParents) {
+                    if (llvm::find(instance.operations, constParent) == instance.operations.end()) {
+                        instance.operations.push_back(constParent);
+                    }
+                }
+                for (auto blockArg : blockArgs) {
+                    if (llvm::find(instance.inputs, blockArg) == instance.inputs.end()) {
+                        instance.inputs.push_back(blockArg);
+                    }
+                }
+                continue;
+            }
+            instance.inputs.push_back(operand);
+        }
+    }
+
+    // Mark the results of the operation as outputs if they have users outside the current instance
+    for (auto result : op->getResults()) {
+        // The result is already in the list of output values
+        const bool resultAlreadyCovered = llvm::find(instance.outputs, result) != instance.outputs.end();
+        if (resultAlreadyCovered) {
+            continue;
+        }
+
+        auto anyUserOutside = llvm::any_of(result.getUsers(), [&](mlir::Operation* userOp) {
+            const auto maybeUserInstanceId = getInstanceId(userOp);
+            return !maybeUserInstanceId.has_value() || maybeUserInstanceId.value() != instanceId;
+        });
+        if (anyUserOutside) {
+            instance.outputs.push_back(result);
+        }
+    }
+}
+
+void RepeatingBlocksIdentifier::addInputsOutputsForSharedFunction(IRSlice& instance, InstanceId instanceId,
+                                                                  mlir::Operation* op,
+                                                                  SmallVector<OpValuePair>& instanceInputs,
+                                                                  SmallVector<OpValuePair>& instanceOutputs) {
+    // Add the dependencies of the operation to the current instance or mark them input values
+    // All instances of a repeating block must have the same input values, even if not all of them are connected
+    // to the operations inside an instance. This is required since all instances will be represented as calls
+    // to the same function. For this reason, as an initial step, all the outside input connections to the
+    // instances are collected and only later the input values deduced
+    for (auto& operand : op->getOpOperands()) {
+        const bool operandAlreadyCovered =
+                llvm::find_if(instanceInputs, [&](auto& input) {
+                    return input.first == _opHash[op] && input.second == operand.getOperandNumber();
+                }) != instanceInputs.end();
+        if (operandAlreadyCovered) {
+            continue;
+        }
+
+        auto parentOp = operand.get().getDefiningOp();
+        // Operand is a block argument in the original function
+        if (parentOp == nullptr) {
+            instanceInputs.emplace_back(_opHash[op], operand.getOperandNumber());
+            continue;
+        }
+
+        const auto maybeParentInstanceId = getInstanceId(parentOp);
+        // Parent operation is not placed in the current instance
+        if (!maybeParentInstanceId.has_value() || maybeParentInstanceId.value() != instanceId) {
+            // An exception is the case where the parent operation is a constant; this operations should be
+            // placed in the current instance regardless of where it was placed initially
+            if (mlir::isa<Const::DeclareOp>(parentOp) && !_weightsAsInputs) {
+                auto constAlreadyAdded = llvm::find(instance.operations, parentOp) != instance.operations.end();
+                if (!constAlreadyAdded) {
+                    instance.operations.push_back(parentOp);
+                }
+                continue;
+            }
+            instanceInputs.emplace_back(_opHash[op], operand.getOperandNumber());
+        }
+    }
+
+    // Similar to the inputs, collect all the output connection types across all instances, since each instance
+    // must have the same number of output values. After all connections are collected, the output values will
+    // be deduced for every instance
+    for (auto result : op->getResults()) {
+        bool resultAlreadyCovered = llvm::find_if(instanceOutputs, [&](auto& output) {
+                                        return output.first == _opHash[op] && output.second == result.getResultNumber();
+                                    }) != instanceOutputs.end();
+        if (resultAlreadyCovered) {
+            continue;
+        }
+
+        auto anyUserOutside = llvm::any_of(result.getUsers(), [&](mlir::Operation* userOp) {
+            const auto maybeUserInstanceId = getInstanceId(userOp);
+            return !maybeUserInstanceId.has_value() || maybeUserInstanceId.value() != instanceId;
+        });
+        if (anyUserOutside) {
+            instanceOutputs.emplace_back(_opHash[op], result.getResultNumber());
+        }
+    }
+}
+
 /**
  * @brief Based on the blocks identified ahead of time, sort the operations in each instance topologically and mark the
  * input and output values of the instance
  */
 SmallVector<OutliningInstance> RepeatingBlocksIdentifier::prepareOutliningInstances(mlir::func::FuncOp mainFunction) {
     SmallVector<OutliningInstance> outliningInstances(_blocks.size());
-    SmallVector<SmallVector<std::pair<llvm::hash_code, size_t>>> outliningInstancesInputs(_blocks.size());
-    SmallVector<SmallVector<std::pair<llvm::hash_code, size_t>>> outliningInstancesOutputs(_blocks.size());
+    SmallVector<SmallVector<OpValuePair>> outliningInstancesInputs(_blocks.size());
+    SmallVector<SmallVector<OpValuePair>> outliningInstancesOutputs(_blocks.size());
 
     std::unordered_map<BlockId, size_t> blockOutliningIdx;
     size_t lastBlock = 0;
 
-    const auto getInstanceId = [&](mlir::Operation* op) -> std::optional<InstanceId> {
-        const auto opInstanceIt = _opInstance.find(op);
-        if (opInstanceIt == _opInstance.end()) {
-            return std::nullopt;
-        }
-        return opInstanceIt->second;
-    };
     const auto getBlockId = [&](InstanceId instanceId) -> BlockId {
         const auto instanceBlockIt = _instanceBlock.find(instanceId);
         VPUX_THROW_WHEN(instanceBlockIt == _instanceBlock.end(), "Missing block for instance {0}", instanceId);
@@ -496,102 +669,55 @@ SmallVector<OutliningInstance> RepeatingBlocksIdentifier::prepareOutliningInstan
         const auto idx = getInstanceIdx(blockId, instanceId);
         auto& instance = instances[idx];
 
-        // Add the dependencies of the operation to the current instance or mark them input values
-        // All instances of a repeating block must have the same input values, even if not all of them are connected to
-        // the operations inside an instance. This is required since all instances will be represented as calls to the
-        // same function. For this reason, as an initial step, all the outside input connections to the instances are
-        // collected and only later the input values deduced
-        auto& instanceInputs = outliningInstancesInputs[outliningInstanceIdx];
-        for (auto& operand : op->getOpOperands()) {
-            // The operand is already in the list of input values
-            if (llvm::find_if(instanceInputs, [&](auto& input) {
-                    return input.first == _opHash[op] && input.second == operand.getOperandNumber();
-                }) != instanceInputs.end()) {
-                continue;
-            }
-
-            auto parentOp = operand.get().getDefiningOp();
-            // Operand is a block argument in the original function
-            if (parentOp == nullptr) {
-                instanceInputs.emplace_back(_opHash[op], operand.getOperandNumber());
-                continue;
-            }
-
-            const auto maybeParentInstanceId = getInstanceId(parentOp);
-            // Parent operation is not placed in the current instance
-            if (!maybeParentInstanceId.has_value() || maybeParentInstanceId.value() != instanceId) {
-                // An exception is the case where the parent operation is a constant; this operations should be placed
-                // in the current instance regardless of where it was placed initially
-                if (mlir::isa<Const::DeclareOp>(parentOp)) {
-                    auto constAlreadyAdded = llvm::find(instance.operations, parentOp) != instance.operations.end();
-                    if (!constAlreadyAdded) {
-                        instance.operations.push_back(parentOp);
-                    }
-                    continue;
-                }
-                instanceInputs.emplace_back(_opHash[op], operand.getOperandNumber());
-            }
-        }
-
-        // Similar to the inputs, collect all the output connection types across all instances, since each instance must
-        // have the same number of output values. After all connections are collected, the output values will be deduced
-        // for every instance
-        auto& instanceOutputs = outliningInstancesOutputs[outliningInstanceIdx];
-        for (auto result : op->getResults()) {
-            // The result is already in the list of output values
-            if (llvm::find_if(instanceOutputs, [&](auto& output) {
-                    return output.first == _opHash[op] && output.second == result.getResultNumber();
-                }) != instanceOutputs.end()) {
-                continue;
-            }
-
-            auto anyUserOutside = llvm::any_of(result.getUsers(), [&](mlir::Operation* userOp) {
-                const auto maybeUserInstanceId = getInstanceId(userOp);
-                return !maybeUserInstanceId.has_value() || maybeUserInstanceId.value() != instanceId;
-            });
-            if (anyUserOutside) {
-                instanceOutputs.emplace_back(_opHash[op], result.getResultNumber());
-            }
+        if (_separateFunctions) {
+            addInputsOutputsForSeparateFunctions(instance, instanceId, op);
+        } else {
+            auto& instanceInputs = outliningInstancesInputs[outliningInstanceIdx];
+            auto& instanceOutputs = outliningInstancesOutputs[outliningInstanceIdx];
+            addInputsOutputsForSharedFunction(instance, instanceId, op, instanceInputs, instanceOutputs);
         }
 
         instance.operations.push_back(op);
     });
 
-    // Extract the inputs and outputs of all instances for each block type. If a block has N instances, it is possible
-    // that some of the instances (e.g. the last one) do not have the same number of users as the other instances.
-    // However, since all instances call the same function, they must return all values even if some are unused.
-    // Similarly, some instances could use one value multiple times, in which case the value has to be passed multiple
-    // times for that instance's call to cover the other instances that receive different values instead
-    for (const auto& [instances, inputs, outputs] :
-         zip(outliningInstances, outliningInstancesInputs, outliningInstancesOutputs)) {
-        for (const auto& [instanceIdx, instance] : instances | indexed) {
-            for (const auto& input : inputs) {
-                const auto inputHash = input.first;
-                const auto operandNumber = input.second;
-                auto opIt = llvm::find_if(instance.operations, [&](mlir::Operation* op) {
-                    return inputHash == _opHash[op];
-                });
-                VPUX_THROW_WHEN(opIt == instance.operations.end(), "Missing operation with hash {0} in instance {1}",
-                                input.first, instanceIdx);
-                instance.inputs.push_back((*opIt)->getOperand(operandNumber));
+    if (!_separateFunctions) {
+        // Extract the inputs and outputs of all instances for each block type. If a block has N instances, it is
+        // possible that some of the instances (e.g. the last one) do not have the same number of users as the other
+        // instances. However, since all instances call the same function, they must return all values even if some are
+        // unused. Similarly, some instances could use one value multiple times, in which case the value has to be
+        // passed multiple times for that instance's call to cover the other instances that receive different values
+        // instead
+        for (const auto& [instances, inputs, outputs] :
+             zip(outliningInstances, outliningInstancesInputs, outliningInstancesOutputs)) {
+            for (const auto& [instanceIdx, instance] : instances | indexed) {
+                for (const auto& input : inputs) {
+                    const auto inputHash = input.first;
+                    const auto operandNumber = input.second;
+                    auto opIt = llvm::find_if(instance.operations, [&](mlir::Operation* op) {
+                        return inputHash == _opHash[op];
+                    });
+                    VPUX_THROW_WHEN(opIt == instance.operations.end(),
+                                    "Missing operation with hash {0} in instance {1}", input.first, instanceIdx);
+                    instance.inputs.push_back((*opIt)->getOperand(operandNumber));
 
-                // The first instance is expected to be used for outlining the function. Each argument is used only
-                // once, therefore we explicitly map each argument to its user, so that the outliner can correctly
-                // connect the arguments to the operations. The first instance might pass the same value multiple times,
-                // in which case the outliner is not aware to which user the value should be connected (other instances
-                // may pass different values, after all)
-                if (instanceIdx == 0) {
-                    instance.inputUserMapping.emplace_back(*opIt, operandNumber);
+                    // The first instance is expected to be used for outlining the function. Each argument is used only
+                    // once, therefore we explicitly map each argument to its user, so that the outliner can correctly
+                    // connect the arguments to the operations. The first instance might pass the same value multiple
+                    // times, in which case the outliner is not aware to which user the value should be connected (other
+                    // instances may pass different values, after all)
+                    if (instanceIdx == 0) {
+                        instance.inputUserMapping.emplace_back(*opIt, operandNumber);
+                    }
                 }
-            }
 
-            for (auto& output : outputs) {
-                auto opIt = llvm::find_if(instance.operations, [&](mlir::Operation* op) {
-                    return output.first == _opHash[op];
-                });
-                VPUX_THROW_WHEN(opIt == instance.operations.end(), "Missing operation with hash {0} in instance {1}",
-                                output.first, instanceIdx);
-                instance.outputs.push_back((*opIt)->getResult(output.second));
+                for (auto& output : outputs) {
+                    auto opIt = llvm::find_if(instance.operations, [&](mlir::Operation* op) {
+                        return output.first == _opHash[op];
+                    });
+                    VPUX_THROW_WHEN(opIt == instance.operations.end(),
+                                    "Missing operation with hash {0} in instance {1}", output.first, instanceIdx);
+                    instance.outputs.push_back((*opIt)->getResult(output.second));
+                }
             }
         }
     }
@@ -656,8 +782,13 @@ SmallVector<OutliningInstance> RepeatingBlocksIdentifier::getOutliningInstances(
 };  // namespace
 
 FunctionOutlinerRepeatingBlocks::FunctionOutlinerRepeatingBlocks(size_t minOpsInBlock, size_t maxNumIterations,
+                                                                 bool separateFunctions, bool weightsAsInputs,
                                                                  Logger log)
-        : _minOpsInBlock(minOpsInBlock), _maxNumIterations(maxNumIterations), _log(log) {
+        : _minOpsInBlock(minOpsInBlock),
+          _maxNumIterations(maxNumIterations),
+          _separateFunctions(separateFunctions),
+          _weightsAsInputs(weightsAsInputs),
+          _log(log) {
     _log.setName("function-outliner-repeating-blocks");
 }
 
@@ -669,7 +800,8 @@ SmallVector<OutliningInstance> FunctionOutlinerRepeatingBlocks::getOutliningTarg
         return {};
     }
 
-    RepeatingBlocksIdentifier repeatingBlocksIdentifier(_minOpsInBlock, _maxNumIterations, _log);
+    RepeatingBlocksIdentifier repeatingBlocksIdentifier(_minOpsInBlock, _maxNumIterations, _separateFunctions,
+                                                        _weightsAsInputs, _log);
     const auto outliningInstances = repeatingBlocksIdentifier.getOutliningInstances(mainFunction);
 
     if (_log.isActive(LogLevel::Debug)) {

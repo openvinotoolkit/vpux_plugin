@@ -108,7 +108,7 @@ func.func @convertPadToConcatWith3DShape(%arg0: tensor<1x96x21499xf16>) -> tenso
 
     return %0 : tensor<1x96x21500xf16>
 
-    // CHECK-DAG:      [[CST0:%.*]] = const.Declare tensor<1x96x1xf16> = dense<0.000000e+00> : tensor<1x96x1xf32>, [#const.ConvertElemType<f16>]
+    // CHECK-DAG:      [[CST0:%.*]] = const.Declare tensor<1x96x1xf16> = dense<0.000000e+00> : tensor<1x96x1xf32>, [#const.CastElemType<f16>]
     // CHECK-NOT:      IE.Pad
     // CHECK:       [[VAR0:%.*]] = IE.Concat(%arg0, [[CST0]]) {per_axis = #IE.Concat<axis = 2 : i64>}
     // CHECK-SAME:       tensor<1x96x21499xf16>, tensor<1x96x1xf16> -> tensor<1x96x21500xf16>
@@ -122,8 +122,8 @@ func.func @convertPadToConcatWith5DShape(%arg0: tensor<1x16x32x64x128xf16>) -> t
 
     return %0 : tensor<1x17x32x64x129xf16>
 
-    // CHECK-DAG:      [[CST0:%.*]] = const.Declare tensor<1x16x32x64x1xf16> = dense<1.000000e+00> : tensor<1x16x32x64x1xf32>, [#const.ConvertElemType<f16>]
-    // CHECK-DAG:      [[CST1:%.*]] = const.Declare tensor<1x1x32x64x129xf16> = dense<1.000000e+00> : tensor<1x1x32x64x129xf32>, [#const.ConvertElemType<f16>]
+    // CHECK-DAG:      [[CST0:%.*]] = const.Declare tensor<1x16x32x64x1xf16> = dense<1.000000e+00> : tensor<1x16x32x64x1xf32>, [#const.CastElemType<f16>]
+    // CHECK-DAG:      [[CST1:%.*]] = const.Declare tensor<1x1x32x64x129xf16> = dense<1.000000e+00> : tensor<1x1x32x64x129xf32>, [#const.CastElemType<f16>]
 
     // CHECK-NOT:      IE.Pad
     // CHECK:       [[CONCAT0:%.*]] = IE.Concat(%arg0, [[CST0]]) {per_axis = #IE.Concat<axis = 4 : i64>}

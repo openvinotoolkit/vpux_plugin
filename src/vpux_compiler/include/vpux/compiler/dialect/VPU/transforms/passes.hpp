@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -102,6 +102,8 @@ struct TilingOptions : mlir::PassPipelineOptions<TilingOptions> {
                                    llvm::cl::desc("Write the multiclustering and tiling strategy to a JSON file"),
                                    llvm::cl::init(false)};
 
+    StrOption modelHash{*this, "model-hash", llvm::cl::desc("Hash of model XML architecture"), llvm::cl::init("")};
+
     TilingOptions() = default;
 
     template <class OtherOptions>
@@ -114,6 +116,7 @@ struct TilingOptions : mlir::PassPipelineOptions<TilingOptions> {
         enableShaveDDRAccessOptimization = options.enableShaveDDRAccessOptimization;
         readStrategyFromJson = options.readStrategyFromJson;
         writeStrategyToJson = options.writeStrategyToJson;
+        modelHash = options.modelHash;
     }
 };
 
@@ -149,10 +152,25 @@ struct InitCompilerOptions : mlir::PassPipelineOptions<InitCompilerOptions> {
     BoolOption enableAutoPaddingODU{*this, "enable-auto-padding-odu",
                                     llvm::cl::desc("Enable auto padding for output channels"), llvm::cl::init(false)};
 
+    // SetupChannelsAutoPadding pass options
+    BoolOption enableAutoPaddingIDU{*this, "enable-auto-padding-idu",
+                                    llvm::cl::desc("Enable auto padding for output channels"), llvm::cl::init(false)};
+
     // SetupIsReduceSupported pass options
     BoolOption enableIsReduceSupported{*this, "enable-is-reduce-supported",
                                        ::llvm::cl::desc("[Optional] Set IsReduceSupported for NCE to true/false"),
                                        ::llvm::cl::init(false)};
+
+    // SetupEnableFP16CompressedConv pass option
+    BoolOption enableFP16CompressedConvolution{*this, "enable-fp16-compressed-convolution",
+                                               llvm::cl::desc("Enable FP16 Compressed convolution op"),
+                                               llvm::cl::init(false)};
+
+    StrOption ppeVersion{
+            *this, "ppe-version",
+            ::llvm::cl::desc("Specifies the compiler's target PPE hardware version ['Auto', 'IntPPE', 'FpPPE']. When "
+                             "set to 'Auto', the latest PPE version available on the target architecture is picked."),
+            ::llvm::cl::init("Auto")};
 
     InitCompilerOptions() = default;
 
@@ -173,6 +191,9 @@ struct InitCompilerOptions : mlir::PassPipelineOptions<InitCompilerOptions> {
         setOptionValue(availableCMXMemory, options.availableCMXMemory);
         setOptionValue(allowCustomValues, options.allowCustomValues);
         setOptionValue(wlmRollback, options.wlmRollback);
+        setOptionValue(enableFP16CompressedConvolution, options.enableFP16CompressedConvolution);
+        setOptionValue(enableAutoPaddingIDU, options.enableAutoPaddingIDU);
+        setOptionValue(enableAutoPaddingODU, options.enableAutoPaddingODU);
     }
 
     InitCompilerOptions(ArchKind archParam, CompilationMode compilationModeParam,
@@ -180,7 +201,10 @@ struct InitCompilerOptions : mlir::PassPipelineOptions<InitCompilerOptions> {
                         std::optional<int> numberOfDPUGroupsParam = std::nullopt,
                         std::optional<int> numberOfDMAPortsParam = std::nullopt,
                         std::optional<bool> wlmRollbackParam = std::nullopt,
-                        std::optional<Byte> availableCMXMemoryParam = std::nullopt) {
+                        std::optional<Byte> availableCMXMemoryParam = std::nullopt,
+                        std::optional<bool> enableFP16CompressedConvolutionParam = std::nullopt,
+                        std::optional<bool> enableAutoPaddingIDUParam = std::nullopt,
+                        std::optional<bool> enableAutoPaddingODUParam = std::nullopt) {
         arch = std::string(VPU::stringifyEnum(archParam));
         compilationMode = std::string(VPU::stringifyEnum(compilationModeParam));
 
@@ -188,7 +212,10 @@ struct InitCompilerOptions : mlir::PassPipelineOptions<InitCompilerOptions> {
         maybeSetValue(numberOfDPUGroups, numberOfDPUGroupsParam);
         maybeSetValue(numberOfDMAPorts, numberOfDMAPortsParam);
         maybeSetValue(wlmRollback, wlmRollbackParam);
+        maybeSetValue(enableFP16CompressedConvolution, enableFP16CompressedConvolutionParam);
         setAvailableCMXMemory(availableCMXMemoryParam);
+        maybeSetValue(enableAutoPaddingIDU, enableAutoPaddingIDUParam);
+        maybeSetValue(enableAutoPaddingODU, enableAutoPaddingODUParam);
     }
 
 public:
@@ -228,36 +255,40 @@ std::unique_ptr<mlir::Pass> createCMXConcatPass(Logger log = Logger::global(), b
 std::unique_ptr<mlir::Pass> createSplitNCEOpsOntoWorkloadsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createResolveEltwiseWithZTiledWorkloadsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createShiftOutputWorkloadsForHaloPass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createMakeOpsWithDistributedTensorPass(bool enableExplicitDistributedTensorAttr = false,
+std::unique_ptr<mlir::Pass> createMakeOpsWithDistributedTensorPass(bool enableExplicitDistributionInfoAttr = false,
                                                                    Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createAdjustDistributedTensorAroundOpsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createWrapDistributedOpsInNCEClusterTiling(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createAdjustMemorySpacePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createMultiClusterStrategyAssignmentPass(bool enablePrefetchTiling = true,
+                                                                     bool enableMcSideLoadingDump = false,
+                                                                     StringRef modelHash = "",
                                                                      Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createManualStrategyUtilsPass();
 std::unique_ptr<mlir::Pass> createManualStrategyUtilsPass(bool writeStrategyToJSON,
                                                           StringRef writeStrategyFileLocation = "strategy_out.json",
                                                           bool readStrategyFromJSON = false,
                                                           StringRef readStrategyFileLocation = "strategy_in.json",
+                                                          bool enableSideLoadDump = false, StringRef modelHash = "",
                                                           Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createManualStrategyUtilsPass(bool writeStrategyToJSON,
                                                           StringRef writeStrategyFileLocation = "strategy_out.json",
                                                           bool readStrategyFromJSON = false,
                                                           StringRef readStrategyFileLocation = "strategy_in.json",
                                                           bool updateStrategyForOutputPipelining = false,
+                                                          bool enableSideLoadDump = false, StringRef modelHash = "",
                                                           Logger log = Logger::global());
 
-std::unique_ptr<mlir::Pass> createResolvePWLPostOpsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createDetectionOutputDecompositionPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createSplitGRUSequencePass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createAdjustLSTMCellInputsOrderPass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createComputeInterpolateCoordinatesPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createTileLSTMSequencePass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createAdjustLSTMCellInputsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createDetectInPlaceEltwisePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createFuseNCEInterpolateConsumersPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createAddExplicitPaddingBeforeNCEPermutePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createOutputPipelineTilingPass(bool enablePrefetchTiling = true,
                                                            Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createLegalizeDynamicShapeConcatForSWLayersPass(Logger log = Logger::global());
 
 void buildInitCompilerPipeline(mlir::OpPassManager& pm, const VPU::InitCompilerOptions& options,
                                Logger log = Logger::global());
@@ -272,9 +303,11 @@ std::unique_ptr<mlir::Pass> createSparsifyWeightsPass(
 std::unique_ptr<mlir::Pass> createRecomputeSparsityPtrsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createFuseSparsityOpsPass(std::optional<bool> fuseSparsify = std::nullopt,
                                                       Logger log = Logger::global());
+
 std::unique_ptr<mlir::Pass> createOptimizeSparsifyDesparsifyPairsPass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createAndInitOptimizeSparsifyDesparsifyPairsPass(StringRef actSparsityProfile,
-                                                                             Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createOptimizeSparsifyDesparsifyPairsPass(const VPU::ActivationSparsityOptions& options,
+                                                                      Logger log = Logger::global());
+
 std::unique_ptr<mlir::Pass> createOptimizeSparsityOpsPass(SparsityProfileCreateFunc sparsityProfileCreateCb,
                                                           Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createWrapOpsInSparsifyDesparsifyPairsPass();
@@ -311,7 +344,6 @@ std::unique_ptr<mlir::Pass> createMergeVfSubgraphsPass(bool enableVerticalFusion
 std::unique_ptr<mlir::Pass> createVfTilingPass(bool enableVerticalFusionPipelining = false,
                                                Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createUnrollUnusedVerticalFusionRegionPass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createSetupPPEPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createEnsureNCEOpsSizeRequirementsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createFuseClampPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createOptimizeConcatPass(Logger log = Logger::global());
@@ -352,6 +384,14 @@ std::unique_ptr<mlir::Pass> createSetupPerBarrierVariantConstraintPass(const Ini
                                                                        Logger log = Logger::global());
 
 //
+// Setup Max Kernel Size
+//
+
+std::unique_ptr<mlir::Pass> createSetupMaxKernelSizePass();
+std::unique_ptr<mlir::Pass> createSetupMaxKernelSizePass(const InitCompilerOptions& initCompilerOptions,
+                                                         Logger log = Logger::global());
+
+//
 // Channels Auto Padding
 //
 
@@ -366,6 +406,14 @@ std::unique_ptr<mlir::Pass> createSetupChannelsAutoPaddingPass(const InitCompile
 std::unique_ptr<mlir::Pass> createSetupIsReduceSupportedPass();
 std::unique_ptr<mlir::Pass> createSetupIsReduceSupportedPass(const InitCompilerOptions& initCompilerOptions,
                                                              Logger log = Logger::global());
+
+//
+// FP16 Compressed Convolution
+//
+
+std::unique_ptr<mlir::Pass> createSetupEnableFP16CompressedConvPass();
+std::unique_ptr<mlir::Pass> createSetupEnableFP16CompressedConvPass(const InitCompilerOptions& initCompilerOptions,
+                                                                    Logger log = Logger::global());
 
 //
 // DefaultHWOptions(for all devices)

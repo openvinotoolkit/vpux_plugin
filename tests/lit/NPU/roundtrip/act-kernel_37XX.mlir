@@ -14,7 +14,6 @@ module @Test attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilationMode
   IE.ExecutorResource 1 of @DMA_NN
   IE.TileResource 1 of @NCE {
     IE.MemoryResource 2097152 bytes of @CMX_NN {VPU.bandwidth = 32 : i64, VPU.derateFactor = 1.000000e+00 : f64}
-    IE.ExecutorResource 1 of @SHAVE_UPA
     IE.ExecutorResource 1 of @SHAVE_ACT
     IE.ExecutorResource 1 of @DPU
   }

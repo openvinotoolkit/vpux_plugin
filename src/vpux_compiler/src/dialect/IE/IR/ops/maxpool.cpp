@@ -32,8 +32,12 @@ mlir::LogicalResult vpux::IE::MaxPoolOp::inferReturnTypeComponents(
     const auto inType = maxPool.getInput().getType().cast<mlir::ShapedType>().getElementType();
     const auto inShape = maxPool.getInput().getType().cast<mlir::ShapedType>().getShape();
 
-    const auto outputShape = inferMaxPoolOutputShape(inShape, windowStrides, dataPaddingBelow, dataPaddingAbove,
-                                                     windowShape, roundingType);
+    auto outputShape = inferMaxPoolOutputShape(inShape, windowStrides, dataPaddingBelow, dataPaddingAbove, windowShape,
+                                               roundingType);
+
+    if (maxPool.getOutputChannels().has_value()) {
+        outputShape[Dims4D::Act::C.ind()] = maxPool.getOutputChannels().value();
+    }
 
     inferredReturnShapes.emplace_back(outputShape, inType);
 

@@ -9,9 +9,6 @@
 
 // CHECK-LABEL: @Gather
 module @Gather attributes {VPU.arch = #VPU.arch_kind<NPU40XX>, VPU.compilationMode = #VPU.compilation_mode<DefaultHW>} {
-    // CHECK-DAG: {{  }}module @UsedMemory
-    // CHECK-DAG: {{    }}IE.MemoryResource {{[0-9]+}} bytes of @DDR
-
     // CHECK-DAG: {{  }}IE.TileResource
     // CHECK-DAG: {{    }}builtin.module @UsedMemory
     // CHECK-NEXT: {{      }}IE.MemoryResource {{[0-9]+}} bytes of @CMX_NN
@@ -44,7 +41,7 @@ module @Gather attributes {VPU.arch = #VPU.arch_kind<NPU40XX>, VPU.compilationMo
 
     // CHECK:       func.func @main(
     // CHECK-SAME:      [[ARG0:%.+]]: memref<1x1xsi32, @DDR>,
-    // CHECK-SAME:      [[ARG1:%.+]]: memref<1x1x4096xf16, @DDR>) -> memref<1x1x4096xf16, @DDR> {
+    // CHECK-SAME:      [[ARG1:%.+]]: memref<1x1x4096xf16, @DDR>) -> memref<1x1x4096xf16, @DDR>
     func.func @main(%arg0: memref<1x1xsi32>, %arg1: memref<1x1x4096xf16>) -> memref<1x1x4096xf16> {
         %cst = const.Declare memref<32000x4096xf16> = dense<1.0> : tensor<32000x4096xf16>
         %alloc_0 = memref.alloc() : memref<1x1xsi32, [@CMX_NN, 0]>
@@ -75,7 +72,7 @@ module @Gather attributes {VPU.arch = #VPU.arch_kind<NPU40XX>, VPU.compilationMo
         // CHECK-SAME:              outputs([[DUMMY_BUFF1]] : memref<0x0x0x0xi32, @DDR>) -> memref<0x0x0x0xi32, @DDR>
 
         // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier) updates([[BAR1]] : !VPURT.Barrier) {
-        // CHECK:   VPUIP.NNDMA {port = 0 : i64} inputs([[IN]] : memref<1x1xsi32, @DDR>) outputs([[BUFF0]] : memref<1x1xsi32, [@CMX_NN, 0]>) -> memref<1x1xsi32, [@CMX_NN, 0]>
+        // CHECK:   VPUIP.NNDMA {is_out_of_order, port = 0 : i64} inputs([[IN]] : memref<1x1xsi32, @DDR>) outputs([[BUFF0]] : memref<1x1xsi32, [@CMX_NN, 0]>) -> memref<1x1xsi32, [@CMX_NN, 0]>
 
         // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) updates([[BAR2]] : !VPURT.Barrier) {
         // CHECK:   VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 0, 0, 0>} @VPU.SW::@cache_invalidate inputs() outputs() on tile 0{

@@ -425,7 +425,7 @@ func.func @AddQuantizeCastReshapeDequantNotRemove(%arg0: tensor<1x2x48x25xf16>) 
 // CHECK-SAME:    ([[INPUT:%.+]]: tensor<1x2x48x25xf16>) -> tensor<1x2x48x50xf16>
 func.func @AddConcatDequantNotRemove(%arg0: tensor<1x2x48x25xf16>) -> tensor<1x2x48x50xf16> {
   %cst = const.Declare tensor<1x2x48x25x!qElemType> = dense<1.0> :
-    tensor<1x2x48x25xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>]
+    tensor<1x2x48x25xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType>]
 
   %0 = IE.Add(%arg0, %arg0) {
     auto_broadcast = #IE.auto_broadcast_type<NUMPY>
@@ -444,7 +444,7 @@ func.func @AddConcatDequantNotRemove(%arg0: tensor<1x2x48x25xf16>) -> tensor<1x2
   return %3 : tensor<1x2x48x50xf16>
 
   // CHECK-DAG:  [[CST:%.+]] = const.Declare tensor<1x2x48x25x!qElemType> = dense<1.000000e+00> :
-  // CHECK-SAME:   tensor<1x2x48x25xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>]
+  // CHECK-SAME:   tensor<1x2x48x25xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType>]
 
   // CHECK:       [[VAL0:%.+]] = IE.Add([[INPUT]], [[INPUT]]) {
   // CHECK-SAME:    auto_broadcast = #IE.auto_broadcast_type<NUMPY>

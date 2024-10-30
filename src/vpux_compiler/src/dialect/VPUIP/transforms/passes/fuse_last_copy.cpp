@@ -86,7 +86,8 @@ void fuseLastCopy(VPUIP::CopyOp copyOp, const AliasesInfo& aliasesInfo, Logger l
 
         if (mlir::isa<VPUIP::GenericReshapeOp, VPUIP::QuantizeCastOp>(typeCastOp)) {
             auto preOfTypeCastOp = typeCastOp->getOperand(0).getDefiningOp();
-            while (mlir::isa<VPUIP::GenericReshapeOp, VPUIP::QuantizeCastOp, VPUIP::PermuteCastOp>(preOfTypeCastOp)) {
+            while (mlir::isa<VPUIP::GenericReshapeOp, VPUIP::QuantizeCastOp, VPUIP::PermuteCastOp, VPUIP::ShapeCastOp>(
+                    preOfTypeCastOp)) {
                 if (!preOfTypeCastOp->hasOneUse()) {
                     return;
                 }
@@ -123,13 +124,50 @@ void fuseLastCopy(VPUIP::CopyOp copyOp, const AliasesInfo& aliasesInfo, Logger l
                     permuteCastOp.getDstOrderAttr(), permuteCastOp.getMemPermAttr());
 
             newBuffer = newPermuteCast.getResult();
+        } else if (auto shapeCastOp = mlir::dyn_cast<VPUIP::ShapeCastOp>(typeCastOp)) {
+            // check is simple ShapeCast
+            if (shapeCastOp.getExplicitOutputShapes().has_value() ||
+                shapeCastOp.getExplicitOutputOffsets().has_value()) {
+                nestedLogger.trace("ShapeCast with explicit shapes and offsets not supported");
+                return;
+            }
+
+            // check if shape cast has compatible rank
+            const auto sourceRootType = mlir::cast<vpux::NDTypeInterface>(sourceRoot.getType());
+            auto copyOutputType = mlir::cast<vpux::NDTypeInterface>(copyOp.getOutputBuff().getType());
+            if (sourceRootType.getRank() != copyOutputType.getRank()) {
+                nestedLogger.trace("ShapeCast rank not compatible {0} and {1}", sourceRootType.getRank(),
+                                   copyOutputType.getRank());
+                return;
+            }
+
+            // check if shape cast has compatible type after reshape
+            const auto sourceRootShape = sourceRootType.getShape();
+            auto copyOutputTypeWithNewShape = copyOutputType.changeShape(sourceRootShape);
+            if (copyOutputTypeWithNewShape != sourceRootType) {
+                nestedLogger.trace("ShapeCast type not compatible {0} and {1}", sourceRootType,
+                                   copyOutputTypeWithNewShape);
+                return;
+            }
+
+            // do the shape cast in output
+            mlir::OpBuilder builder(shapeCastOp);
+            builder.setInsertionPoint(sourceRoot.getDefiningOp());
+
+            auto newShapeCast = builder.create<VPUIP::ShapeCastOp>(
+                    shapeCastOp.getLoc(), sourceRoot.getType(), copyOp.getOutputBuff(),
+                    getIntArrayAttr(shapeCastOp.getContext(), sourceRootShape),
+                    shapeCastOp.getExplicitOutputShapesAttr(), shapeCastOp.getExplicitOutputOffsetsAttr());
+
+            newBuffer = newShapeCast.getResult();
         } else {
             nestedLogger.trace("Cannot match because of missed concat in generic branch");
             return;
         }
 
         auto childTypeCast = *typeCastOp->getResult(0).getUsers().begin();
-        if (mlir::isa<VPUIP::GenericReshapeOp, VPUIP::QuantizeCastOp, VPUIP::PermuteCastOp>(typeCastOp)) {
+        if (mlir::isa<VPUIP::GenericReshapeOp, VPUIP::QuantizeCastOp, VPUIP::PermuteCastOp, VPUIP::ShapeCastOp>(
+                    typeCastOp)) {
             childTypeCast->setOperand(0, newBuffer);
         }
         typeCastOp->replaceAllUsesWith(typeCastOp->getOperands());

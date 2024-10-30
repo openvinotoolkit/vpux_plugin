@@ -111,33 +111,31 @@ func.func @SplitSimpleConstant(%arg0: !DummyT) -> !DummyT {
 !DummyT = memref<1x3x224x224xf16, @DDR>
 
 // Verify that quant type was splitted properly.
-// CHECK: !qElemType = !quant.uniform<u8<0:254>:f16:0, {1.000000e+00:127,2.000000e+00:127,3.000000e+00:127
-// CHECK: !qElemType2 = !quant.uniform<u8<0:254>:f16:0, {1.610000e+02:127,1.620000e+02:127,1.630000e+02:127,1.640000e+02:127
+// CHECK: [[Q_ELEM_TYPE_0:!.+]] = !quant.uniform<u8<0:254>:f16:0, {1.000000e+00:127,2.000000e+00:127,3.000000e+00:127
+// CHECK: [[Q_ELEM_TYPE_1:!.+]] = !quant.uniform<u8<0:254>:f16:0, {1.610000e+02:127,1.620000e+02:127,1.630000e+02:127,1.640000e+02:127
 
-// CHECK-LABEL: @SplitPerAxisQuantized
+// CHECK: @SplitPerAxisQuantized
 func.func @SplitPerAxisQuantized(%arg0: !DummyT) -> !DummyT {
-    %cst = const.Declare !Weights = dense<1> : tensor<320x960x1x1xui8>, [#const.QuantCast<!qElemType>]
-    // CHECK:       [[CST_0:%.+]] = const.Declare memref<160x960x1x1x!qElemType> =
-    // CHECK-SAME:      dense<1> : tensor<320x960x1x1xui8>, [#const.QuantCast<!qElemType1>, #const.SubView<[0, 0, 0, 0], [160, 960, 1, 1]>]
-    // CHECK:       [[CST_1:%.+]] = const.Declare memref<160x960x1x1x!qElemType2> =
-    // CHECK-SAME:      dense<1> : tensor<320x960x1x1xui8>, [#const.QuantCast<!qElemType1>, #const.SubView<[160, 0, 0, 0], [160, 960, 1, 1]>]
+    %cst = const.Declare !Weights = dense<1> : tensor<320x960x1x1xui8>, [#const.CastElemType<!qElemType>]
+    // CHECK-DAG:       [[CST_0:%.+]] = const.Declare memref<160x960x1x1x[[Q_ELEM_TYPE_0]]> = dense<1> : tensor<320x960x1x1xui8>, [#const.SubView<[0, 0, 0, 0], [160, 960, 1, 1]>, #const.CastElemType<[[Q_ELEM_TYPE_0]]>]
+    // CHECK-DAG:       [[CST_1:%.+]] = const.Declare memref<160x960x1x1x[[Q_ELEM_TYPE_1]]> = dense<1> : tensor<320x960x1x1xui8>, [#const.SubView<[160, 0, 0, 0], [160, 960, 1, 1]>, #const.CastElemType<[[Q_ELEM_TYPE_1]]>]
 
     %0 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     %1 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     %2 = VPURT.DeclareBuffer <CMX_NN> [2] <0> -> !WeightsCmx
-    // CHECK:       [[BUFFER_CMX_0:%.+]] = VPURT.DeclareBuffer <CMX_NN> [2] <0> -> memref<160x960x1x1x!qElemType, [@CMX_NN, 2]>
-    // CHECK:       [[BUFFER_CMX_1:%.+]] = VPURT.DeclareBuffer <CMX_NN> [2] <153600> -> memref<160x960x1x1x!qElemType2, [@CMX_NN, 2]>
+    // CHECK:       [[BUFFER_CMX_0:%.+]] = VPURT.DeclareBuffer <CMX_NN> [2] <0> -> memref<160x960x1x1x[[Q_ELEM_TYPE_0]], [@CMX_NN, 2]>
+    // CHECK:       [[BUFFER_CMX_1:%.+]] = VPURT.DeclareBuffer <CMX_NN> [2] <153600> -> memref<160x960x1x1x[[Q_ELEM_TYPE_1]], [@CMX_NN, 2]>
 
     VPURT.Task waits(%0 : !VPURT.Barrier) updates(%1 : !VPURT.Barrier) {
       %3 = VPUIP.NNDMA {port = 0 : i64, split_candidate} inputs(%cst : !Weights) outputs(%2 : !WeightsCmx) -> !WeightsCmx
     }
-    // CHECK:       [[NNDMA_0:%.+]] = VPUIP.NNDMA {port = 0 : i64} inputs([[CST_0]] : memref<160x960x1x1x!qElemType>)
-    // CHECK-SAME:         outputs([[BUFFER_CMX_0]] : memref<160x960x1x1x!qElemType, [@CMX_NN, 2]>)
-    // CHECK-SAME:          -> memref<160x960x1x1x!qElemType, [@CMX_NN, 2]>
+    // CHECK:       [[NNDMA_0:%.+]] = VPUIP.NNDMA {port = 0 : i64} inputs([[CST_0]] : memref<160x960x1x1x[[Q_ELEM_TYPE_0]]>)
+    // CHECK-SAME:         outputs([[BUFFER_CMX_0]] : memref<160x960x1x1x[[Q_ELEM_TYPE_0]], [@CMX_NN, 2]>)
+    // CHECK-SAME:          -> memref<160x960x1x1x[[Q_ELEM_TYPE_0]], [@CMX_NN, 2]>
 
-    // CHECK:       [[NNDMA_1:%.+]] = VPUIP.NNDMA {port = 1 : i64} inputs([[CST_1]] : memref<160x960x1x1x!qElemType2>)
-    // CHECK-SAME:         outputs([[BUFFER_CMX_1]] : memref<160x960x1x1x!qElemType2, [@CMX_NN, 2]>)
-    // CHECK-SAME:          -> memref<160x960x1x1x!qElemType2, [@CMX_NN, 2]>
+    // CHECK:       [[NNDMA_1:%.+]] = VPUIP.NNDMA {port = 1 : i64} inputs([[CST_1]] : memref<160x960x1x1x[[Q_ELEM_TYPE_1]]>)
+    // CHECK-SAME:         outputs([[BUFFER_CMX_1]] : memref<160x960x1x1x[[Q_ELEM_TYPE_1]], [@CMX_NN, 2]>)
+    // CHECK-SAME:          -> memref<160x960x1x1x[[Q_ELEM_TYPE_1]], [@CMX_NN, 2]>
 
     return %arg0 : !DummyT
 }
@@ -154,7 +152,7 @@ func.func @SplitPerAxisQuantized(%arg0: !DummyT) -> !DummyT {
 
 // CHECK-LABEL: @SplitSwizzledConstant
 func.func @SplitSwizzledConstant(%arg0: !DummyT) -> !DummyT {
-    %cst = const.Declare !Weights = dense<1.0> : tensor<384x64x1x1xf32>, [#const.ConvertElemType<f16>, #const.Reorder<#NHWC>, #const.SubView<[256, 0, 0, 0], [128, 64, 1, 1]>, #const.SwizzleConstant<5 : i64, 4 : i64>]
+    %cst = const.Declare !Weights = dense<1.0> : tensor<384x64x1x1xf32>, [#const.CastElemType<f16>, #const.Reorder<#NHWC>, #const.SubView<[256, 0, 0, 0], [128, 64, 1, 1]>, #const.SwizzleConstant<5 : i64, 4 : i64>]
     // CHECK:       [[CST_0:%.+]] = const.Declare memref<64x64x1x1xf16, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}>
     // CHECK-SAME:      dense<1.000000e+00> : tensor<4096x1x1x1xf16, {order = #NHWC}>
     // CHECK:       [[CST_1:%.+]] = const.Declare memref<64x64x1x1xf16, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}>
@@ -230,7 +228,7 @@ func.func @SplitThirdAxis(%arg0: !DummyT) -> !DummyT {
 
 // CHECK-LABEL: @SplitSwizzledSubbyteConstant
 func.func @SplitSwizzledSubbyteConstant(%arg0: !DummyT) -> !DummyT {
-    %cst = const.Declare !SparsityMap = dense<1> : tensor<512x512x1x1xui8>, [#const.ConvertElemType<i1>, #const.Reorder<#NHWC>, #const.SwizzleConstant<5 : i64, 4 : i64>]
+    %cst = const.Declare !SparsityMap = dense<1> : tensor<512x512x1x1xui8>, [#const.CastElemType<i1>, #const.Reorder<#NHWC>, #const.SwizzleConstant<5 : i64, 4 : i64>]
     // CHECK:       [[CST_0:%.+]] = const.Declare memref<256x512x1x1xi1, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}> = dense<true> : tensor<131072x1x1x1xi1, {order = #NHWC}>
     // CHECK:       [[CST_1:%.+]] = const.Declare memref<256x512x1x1xi1, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}> = dense<true> : tensor<131072x1x1x1xi1, {order = #NHWC}>
 

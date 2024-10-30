@@ -76,14 +76,6 @@ size_t NPUReg40XX::M2IOp::getAlignmentRequirements() {
     return alignof(nn_public::VpuMediaTask);
 }
 
-ELF::SectionFlagsAttr NPUReg40XX::M2IOp::getAccessingProcs(mlir::SymbolUserMap&) {
-    return ELF::SectionFlagsAttr::SHF_EXECINSTR | ELF::SectionFlagsAttr::VPU_SHF_PROC_DMA;
-}
-
-ELF::SectionFlagsAttr NPUReg40XX::M2IOp::getUserProcs() {
-    return ELF::SectionFlagsAttr::SHF_NONE;
-}
-
 std::optional<ELF::SectionSignature> NPUReg40XX::M2IOp::getSectionSignature() {
     return {};
 }
@@ -130,15 +122,16 @@ std::vector<ELF::RelocationInfo> NPUReg40XX::M2IOp::getRelocationInfo(ELF::Symbo
     //
 
     relocs.push_back(ELF::RelocationInfo(inputSymRef, targetSection, getSymRefOffsetForReloc(*this, inputSymRef),
-                                         ELF::RelocationType::R_VPU_64_BIT_OR_B21_B26_UNSET, addend));
+                                         ELF::RelocationType::R_VPU_64_BIT_OR_B21_B26_UNSET, addend,
+                                         "Input (inputSymRef) in M2I reloc"));
 
-    relocs.push_back(ELF::RelocationInfo(inputSymRef, targetSection,
-                                         buffDescOffset + offsetof(VpuMediaBuffDescriptor, inAddr1),
-                                         ELF::RelocationType::R_VPU_64_BIT_OR_B21_B26_UNSET, addendInAddr1));
+    relocs.push_back(ELF::RelocationInfo(
+            inputSymRef, targetSection, buffDescOffset + offsetof(VpuMediaBuffDescriptor, inAddr1),
+            ELF::RelocationType::R_VPU_64_BIT_OR_B21_B26_UNSET, addendInAddr1, "Input (inAddr1) in M2I reloc"));
 
-    relocs.push_back(ELF::RelocationInfo(inputSymRef, targetSection,
-                                         buffDescOffset + offsetof(VpuMediaBuffDescriptor, inAddr2),
-                                         ELF::RelocationType::R_VPU_64_BIT_OR_B21_B26_UNSET, addendInAddr2));
+    relocs.push_back(ELF::RelocationInfo(
+            inputSymRef, targetSection, buffDescOffset + offsetof(VpuMediaBuffDescriptor, inAddr2),
+            ELF::RelocationType::R_VPU_64_BIT_OR_B21_B26_UNSET, addendInAddr2, "Input (inAddr2) in M2I reloc"));
 
     //
     // output reloc
@@ -148,7 +141,8 @@ std::vector<ELF::RelocationInfo> NPUReg40XX::M2IOp::getRelocationInfo(ELF::Symbo
 
     relocs.push_back(ELF::RelocationInfo(outputSymRef, targetSection, getSymRefOffsetForReloc(*this, outputSymRef),
                                          ELF::RelocationType::R_VPU_64_BIT_OR_B21_B26_UNSET,
-                                         ELF::getOffsetOfSymRef(symRefMap, outputSymRef)));
+                                         ELF::getOffsetOfSymRef(symRefMap, outputSymRef),
+                                         "Output (outputSymRef) in M2I reloc"));
 
     //
     // next link reloc
@@ -157,7 +151,8 @@ std::vector<ELF::RelocationInfo> NPUReg40XX::M2IOp::getRelocationInfo(ELF::Symbo
     if (auto nextLinkSymRef = getNextLink().value_or(nullptr)) {
         relocs.push_back(ELF::RelocationInfo(
                 nextLinkSymRef, targetSection, getSymRefOffsetForReloc(*this, nextLinkSymRef),
-                ELF::RelocationType::R_VPU_32_BIT_OR_B21_B26_UNSET, ELF::getOffsetOfSymRef(symRefMap, nextLinkSymRef)));
+                ELF::RelocationType::R_VPU_32_BIT_OR_B21_B26_UNSET, ELF::getOffsetOfSymRef(symRefMap, nextLinkSymRef),
+                "Next link (nextLinkSymRef) in M2I reloc"));
     }
 
     return relocs;

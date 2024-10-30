@@ -15,8 +15,8 @@ size_t calcMinBitsRequirement(uint64_t value) {
     return checked_cast<size_t>(std::ceil(log2(value + 1)));
 }
 
-void updateRegMappedInitializationValues(std::map<std::string, std::map<std::string, uint64_t>>& values,
-                                         const std::map<std::string, std::map<std::string, uint64_t>>& newValues) {
+void updateRegMappedInitializationValues(std::map<std::string, std::map<std::string, RegFieldValue>>& values,
+                                         const std::map<std::string, std::map<std::string, RegFieldValue>>& newValues) {
     for (auto newRegisterIter = newValues.begin(); newRegisterIter != newValues.end(); ++newRegisterIter) {
         auto correspondingRegisterIter = values.find(newRegisterIter->first);
         VPUX_THROW_UNLESS(correspondingRegisterIter != values.end(),

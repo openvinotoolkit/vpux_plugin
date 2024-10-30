@@ -4,6 +4,7 @@
 //
 
 #include "vpux/compiler/NPU37XX/dialect/VPU/IR/ops_interfaces.hpp"
+#include "vpux/compiler/dialect/IE/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPU/utils/manual_strategy_utils.hpp"
 #include "vpux/compiler/dialect/VPUIP/interfaces/nce_invariant.hpp"
 #include "vpux/compiler/utils/asm.hpp"

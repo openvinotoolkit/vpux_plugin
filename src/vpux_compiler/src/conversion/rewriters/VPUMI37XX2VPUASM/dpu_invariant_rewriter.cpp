@@ -52,8 +52,8 @@ mlir::LogicalResult DPUInvariantRewriter::symbolize(VPUMI37XX::DPUInvariantOp op
             op.getLoc(), symName, taskIdx, taskLocation, inputSym, inputSparsityMapSym, inputSETableSym, weightsSym,
             weightsSparsityMapSym, weightTableSym, parentInputSym, parentInputSparsityMapSym, parentInputSETableSym,
             parentOutputSym, outputSymsAttr, profilingDataSym, waitAttr, updateAttr, op.getNceTaskTypeAttr(),
-            op.getMpeFrequentModeAttr(), op.getKernelSizeAttr(), op.getKernelStridesAttr(), op.getKernelPaddingAttr(),
-            op.getActivationWindowChannelLengthAttr(), op.getIsContinuedAttr(), op.getCmSpPatternAttr(),
+            op.getEltwiseTypeAttr(), op.getMpeFrequentModeAttr(), op.getKernelSizeAttr(), op.getKernelStridesAttr(),
+            op.getKernelPaddingAttr(), op.getIsContinuedAttr(), op.getCmSpPatternAttr(),
             op.getInputChannelsCompressionAttr(), op.getIsSegmentedAttr(), op.getOutChannelOffsetAttr(),
             op.getStartAfterAttr(), op.getCleanAfterAttr());
 

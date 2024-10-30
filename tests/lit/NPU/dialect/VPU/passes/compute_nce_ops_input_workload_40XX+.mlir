@@ -27,6 +27,7 @@ module @ConvInputWorkloadsHeight  {
 
   func.func @main(%arg0: !Input_CMX, %arg1: !Weights_CMX, %arg2: !WeightsTable_CMX) -> !Output_CMX {
     %0 =  VPU.NCE.Convolution(%arg0, %arg1, %arg2) {
+            opaque_ppe = #VPU.PPEStub<>,
             pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
             rawFilterShape = [48, 16, 3, 3],
             strides = [2, 2]
@@ -80,6 +81,7 @@ module @ConvInputWorkloadsOC  {
 
   func.func @main(%arg0: !Input_CMX, %arg1: !Weights_CMX, %arg2: !WeightsTable_CMX) -> !Output_CMX {
     %0 = VPU.NCE.Convolution(%arg0, %arg1, %arg2) {
+            opaque_ppe = #VPU.PPEStub<>,
             pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
             rawFilterShape = [48, 16, 3, 3],
             strides = [2, 2]
@@ -117,7 +119,6 @@ module @ConvInputWorkloadsOC  {
 !Output_CMX = tensor<1x32x31x31xf16, {mem_space = @CMX_NN, order = #NHWC}>
 !Weights_CMX = tensor<32x16x1x1xf16, {mem_space = @CMX_NN, order = #NHWC}>
 !WeightsTable_CMX = tensor<32x1x1x4xsi32, {mem_space = @CMX_NN, order = #NHWC}>
-!ActWindow_CMX = tensor<1x1x1x16xui8, {mem_space = @CMX_NN, order = #NHWC}>
 
 // CHECK-LABEL: @DWConvInputWorkloadsHeight
 module @DWConvInputWorkloadsHeight  {
@@ -126,15 +127,14 @@ module @DWConvInputWorkloadsHeight  {
     DataInfo "input" : tensor<1x32x62x62xf16>
     DataInfo "weights" : tensor<32x16x1x1xf16>
     DataInfo "weightsTable" : tensor<32x1x1x4xsi32>
-    DataInfo "actWindow" : tensor<1x1x1x16xui8>
   } outputsInfo :  {
     DataInfo "output" : tensor<1x32x31x31xf16>
   } profilingOutputsInfo :  {
   }
 
-  func.func @main(%arg0: !Input_CMX, %arg1: !Weights_CMX, %arg2: !WeightsTable_CMX, %arg3: !ActWindow_CMX) -> !Output_CMX {
-    %0 = VPU.NCE.DepthConvolution(%arg0, %arg1, %arg2, %arg3) {
-            activation_window_channel_length = 27 : i64,
+  func.func @main(%arg0: !Input_CMX, %arg1: !Weights_CMX, %arg2: !WeightsTable_CMX) -> !Output_CMX {
+    %0 = VPU.NCE.DepthConvolution(%arg0, %arg1, %arg2) {
+            opaque_ppe = #VPU.PPEStub<>,
             pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
             rawFilterShape = [32, 1, 3, 3],
             strides = [2, 2]
@@ -173,7 +173,6 @@ module @DWConvInputWorkloadsHeight  {
 !Output_CMX = tensor<1x48x31x31xf16, {mem_space = @CMX_NN, order = #NHWC}>
 !Weights_CMX = tensor<48x16x1x1xf16, {mem_space = @CMX_NN, order = #NHWC}>
 !WeightsTable_CMX = tensor<48x1x1x4xsi32, {mem_space = @CMX_NN, order = #NHWC}>
-!ActWindow_CMX = tensor<1x1x1x16xui8, {mem_space = @CMX_NN, order = #NHWC}>
 
 // CHECK-LABEL: @DWConvInputWorkloadsOC
 module @DWConvInputWorkloadsOC  {
@@ -182,15 +181,14 @@ module @DWConvInputWorkloadsOC  {
     DataInfo "input" : tensor<1x48x62x62xf16>
     DataInfo "weights" : tensor<48x16x1x1xf16>
     DataInfo "weightsTable" : tensor<48x1x1x4xsi32>
-    DataInfo "actWindow" : tensor<1x1x1x16xui8>
   } outputsInfo :  {
     DataInfo "output" : tensor<1x48x31x31xf16>
   } profilingOutputsInfo :  {
   }
 
-  func.func @main(%arg0: !Input_CMX, %arg1: !Weights_CMX, %arg2: !WeightsTable_CMX, %arg3: !ActWindow_CMX) -> !Output_CMX {
-    %0 = VPU.NCE.DepthConvolution(%arg0, %arg1, %arg2, %arg3) {
-            activation_window_channel_length = 27 : i64,
+  func.func @main(%arg0: !Input_CMX, %arg1: !Weights_CMX, %arg2: !WeightsTable_CMX) -> !Output_CMX {
+    %0 = VPU.NCE.DepthConvolution(%arg0, %arg1, %arg2) {
+            opaque_ppe = #VPU.PPEStub<>,
             pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
             rawFilterShape = [48, 1, 3, 3],
             strides = [2, 2]
@@ -278,6 +276,7 @@ module @ConvInputWorkloadsSOHExtraLines  {
               %arg2 as %arg6: !WeightsTable_CMX)
               -> !Output_CMX {
       %0 = VPU.NCE.Convolution(%arg4, %arg5, %arg6) {
+              opaque_ppe = #VPU.PPEStub<>,
               pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
               rawFilterShape = [48, 16, 3, 3],
               strides = [1, 1]
@@ -422,6 +421,7 @@ module @SparseConvInputWorkloadsSOHExtraLines  {
               %arg2 as %arg6: !WeightsTable_CMX)
               -> !Output_CMX {
       %0 = VPU.NCE.Convolution(%arg4, %arg5, %arg6) {
+              opaque_ppe = #VPU.PPEStub<>,
               pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
               rawFilterShape = [48, 16, 3, 3],
               strides = [1, 1]
@@ -542,6 +542,7 @@ module @ConvInputWorkloadsSOK  {
               %arg2 as %arg6: !WeightsTable_CMX)
               -> !Output_CMX {
       %0 =  VPU.NCE.Convolution(%arg4, %arg5, %arg6) {
+              opaque_ppe = #VPU.PPEStub<>,
               pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
               rawFilterShape = [64, 16, 3, 3],
               strides = [1, 1]
@@ -650,6 +651,7 @@ module @ConvInputWorkloadsSOHNoExtraLines  {
               %arg2 as %arg6: !WeightsTable_CMX)
               -> !Output_CMX {
       %0 =  VPU.NCE.Convolution(%arg4, %arg5, %arg6) {
+              opaque_ppe = #VPU.PPEStub<>,
               pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
               rawFilterShape = [48, 16, 3, 3],
               strides = [1, 1]
@@ -725,7 +727,6 @@ module @ConvInputWorkloadsSOHNoExtraLines  {
 
 !Weights_CMX = tensor<80x16x1x1xf16, {mem_space = @CMX_NN, order = #NHWC}>
 !WeightsTable_CMX = tensor<80x1x1x4xsi32, {mem_space = @CMX_NN, order = #NHWC}>
-!ActWindow_CMX = tensor<1x1x1x16xui8, {mem_space = @CMX_NN, order = #NHWC}>
 
 !Input_DDR = tensor<1x80x62x62xf16, {order = #NHWC}>
 !InputStub_CMX = tensor<1x80x62x62xf16, {mem_space = @CMX_NN, order = #NHWC}>
@@ -738,13 +739,12 @@ module @DWInputWorkloadsSOKSEGSEG  {
     DataInfo "input" : tensor<1x80x62x62xf16>
     DataInfo "weights" : tensor<80x16x1x1xf16>
     DataInfo "weightsTable" : tensor<80x1x1x4xsi32>
-    DataInfo "actWindow" : tensor<1x1x1x16xui8>
   } outputsInfo :  {
     DataInfo "output" : tensor<1x80x62x62xf16>
   } profilingOutputsInfo :  {
   }
 
-  func.func @main(%arg0: !Input_DDR, %arg1: !Weights_CMX, %arg2: !WeightsTable_CMX, %arg3: !ActWindow_CMX) -> !Output_CMX {
+  func.func @main(%arg0: !Input_DDR, %arg1: !Weights_CMX, %arg2: !WeightsTable_CMX) -> !Output_CMX {
     %input_cmx = VPU.NCE.ClusterTiling(%arg0 as %arg4: !Input_DDR) -> !Input_CMX {
         %0 = VPU.Copy(%arg4) { out_mem_space = @CMX_NN } : !Input_DDR -> !InputStub_CMX
         VPU.Yield %0
@@ -753,11 +753,10 @@ module @DWInputWorkloadsSOKSEGSEG  {
     %output_cmx = VPU.NCE.ClusterTiling (
               %input_cmx as %arg5: !InputStub_CMX,
               %arg1 as %arg6: !Weights_CMX,
-              %arg2 as %arg7: !WeightsTable_CMX,
-              %arg3 as %arg8: !ActWindow_CMX)
+              %arg2 as %arg7: !WeightsTable_CMX)
               -> !Output_CMX {
-      %0 =  VPU.NCE.DepthConvolution(%arg5, %arg6, %arg7, %arg8) {
-              activation_window_channel_length = 18 : i64,
+      %0 =  VPU.NCE.DepthConvolution(%arg5, %arg6, %arg7) {
+              opaque_ppe = #VPU.PPEStub<>,
               pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
               rawFilterShape = [80, 1, 3, 3],
               strides = [1, 1]
@@ -833,7 +832,6 @@ module @DWInputWorkloadsSOKSEGSEG  {
 
 !Weights_CMX = tensor<80x16x1x1xf16, {mem_space = @CMX_NN, order = #NHWC}>
 !WeightsTable_CMX = tensor<80x1x1x4xsi32, {mem_space = @CMX_NN, order = #NHWC}>
-!ActWindow_CMX = tensor<1x1x1x16xui8, {mem_space = @CMX_NN, order = #NHWC}>
 
 !Input_DDR = tensor<1x80x62x62xf16, {order = #NHWC}>
 !InputStub_CMX = tensor<1x80x62x62xf16, {mem_space = @CMX_NN, order = #NHWC}>
@@ -846,13 +844,12 @@ module @DWInputWorkloadsSOKSEGDUP  {
     DataInfo "input" : tensor<1x80x62x62xf16>
     DataInfo "weights" : tensor<80x16x1x1xf16>
     DataInfo "weightsTable" : tensor<80x1x1x4xsi32>
-    DataInfo "actWindow" : tensor<1x1x1x16xui8>
   } outputsInfo :  {
     DataInfo "output" : tensor<1x80x62x62xf16>
   } profilingOutputsInfo :  {
   }
 
-  func.func @main(%arg0: !Input_DDR, %arg1: !Weights_CMX, %arg2: !WeightsTable_CMX, %arg3: !ActWindow_CMX) -> !Output_CMX {
+  func.func @main(%arg0: !Input_DDR, %arg1: !Weights_CMX, %arg2: !WeightsTable_CMX) -> !Output_CMX {
     %input_cmx = VPU.NCE.ClusterTiling(%arg0 as %arg4: !Input_DDR) -> !Input_CMX {
         %0 = VPU.Copy(%arg4) { out_mem_space = @CMX_NN } : !Input_DDR -> !InputStub_CMX
         VPU.Yield %0
@@ -861,11 +858,10 @@ module @DWInputWorkloadsSOKSEGDUP  {
     %output_cmx = VPU.NCE.ClusterTiling (
               %input_cmx as %arg5: !InputStub_CMX,
               %arg1 as %arg6: !Weights_CMX,
-              %arg2 as %arg7: !WeightsTable_CMX,
-              %arg3 as %arg8: !ActWindow_CMX)
+              %arg2 as %arg7: !WeightsTable_CMX)
               -> !Output_CMX {
-      %0 =  VPU.NCE.DepthConvolution(%arg5, %arg6, %arg7, %arg8) {
-              activation_window_channel_length = 18 : i64,
+      %0 =  VPU.NCE.DepthConvolution(%arg5, %arg6, %arg7) {
+              opaque_ppe = #VPU.PPEStub<>,
               pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
               rawFilterShape = [80, 1, 3, 3],
               strides = [1, 1]
@@ -941,7 +937,6 @@ module @DWInputWorkloadsSOKSEGDUP  {
 
 !Weights_CMX = tensor<80x16x1x1xf16, {mem_space = @CMX_NN, order = #NHWC}>
 !WeightsTable_CMX = tensor<80x1x1x4xsi32, {mem_space = @CMX_NN, order = #NHWC}>
-!ActWindow_CMX = tensor<1x1x1x16xui8, {mem_space = @CMX_NN, order = #NHWC}>
 
 !Input_DDR = tensor<1x80x62x62xf16, {order = #NHWC}>
 !InputStub_CMX = tensor<1x80x62x62xf16, {mem_space = @CMX_NN, order = #NHWC}>
@@ -954,13 +949,12 @@ module @DWInputWorkloadsSOKDUPSEG  {
     DataInfo "input" : tensor<1x80x62x62xf16>
     DataInfo "weights" : tensor<80x16x1x1xf16>
     DataInfo "weightsTable" : tensor<80x1x1x4xsi32>
-    DataInfo "actWindow" : tensor<1x1x1x16xui8>
   } outputsInfo :  {
     DataInfo "output" : tensor<1x80x62x62xf16>
   } profilingOutputsInfo :  {
   }
 
-  func.func @main(%arg0: !Input_DDR, %arg1: !Weights_CMX, %arg2: !WeightsTable_CMX, %arg3: !ActWindow_CMX) -> !Output_CMX {
+  func.func @main(%arg0: !Input_DDR, %arg1: !Weights_CMX, %arg2: !WeightsTable_CMX) -> !Output_CMX {
     %input_cmx = VPU.NCE.ClusterTiling(%arg0 as %arg4: !Input_DDR) -> !Input_CMX {
         %0 = VPU.Copy(%arg4) { out_mem_space = @CMX_NN } : !Input_DDR -> !InputStub_CMX
         VPU.Yield %0
@@ -969,11 +963,10 @@ module @DWInputWorkloadsSOKDUPSEG  {
     %output_cmx = VPU.NCE.ClusterTiling (
               %input_cmx as %arg5: !InputStub_CMX,
               %arg1 as %arg6: !Weights_CMX,
-              %arg2 as %arg7: !WeightsTable_CMX,
-              %arg3 as %arg8: !ActWindow_CMX)
+              %arg2 as %arg7: !WeightsTable_CMX)
               -> !Output_CMX {
-      %0 =  VPU.NCE.DepthConvolution(%arg5, %arg6, %arg7, %arg8) {
-              activation_window_channel_length = 18 : i64,
+      %0 =  VPU.NCE.DepthConvolution(%arg5, %arg6, %arg7) {
+              opaque_ppe = #VPU.PPEStub<>,
               pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
               rawFilterShape = [80, 1, 3, 3],
               strides = [1, 1]
@@ -1049,6 +1042,7 @@ module @ConvInputWorkloadsHeight  {
   func.func @main(%arg0: !Input_CMX, %arg1: !Weights_CMX, %arg2: !WeightsTable_CMX) -> !Output_CMX {
     %0 =  VPU.NCE.CompressConvolution(%arg0, %arg1, %arg2) {
             cm_sp_pattern = 15 : i64, minimumHardwareExecutionCost = 4294967398 : i64,
+            opaque_ppe = #VPU.PPEStub<>,
             pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 1 : i64, bottom = 0 : i64>,
             rawFilterShape = [32, 4, 3, 3], strides = [2, 2]
         } -> !Output_CMX {
@@ -1078,7 +1072,7 @@ module @ConvInputWorkloadsHeight  {
 func.func @NCEPermuteInputWorkloads(%arg0: tensor<1x3x224x224xf16>) -> tensor<1x4x224x224x!qElemType, {order = #NHWC}> {
     %0 = VPU.NCE.Permute(%arg0) {
             dstElemType = !qElemType, dstOrder = #NHWC, expandedChannels = 4 : i64,
-            minimumHardwareExecutionCost = 4294967300 : i64
+            minimumHardwareExecutionCost = 4294967300 : i64, opaque_ppe = #VPU.PPEStub<>
         } -> tensor<1x4x224x224x!qElemType, {order = #NHWC}> {
             VPU.DPU.Workload outOffsets [0, 0, 0, 0] outSizes [1, 4, 224, 224] <left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64> <CUBOID_16x16>
         }
@@ -1135,7 +1129,8 @@ func.func @NCEPermuteNoExtraLinesAtInput(%arg0: !Input_DDR) -> !Output_CMX {
         %0 = VPU.NCE.Permute(%arg2) {
                 dstElemType = !quant.uniform<u8:f16, 1.000000e+00>,
                 dstOrder = #NHWC,
-                expandedChannels = 4 : i64, minimumHardwareExecutionCost = 4294967300 : i64
+                expandedChannels = 4 : i64, minimumHardwareExecutionCost = 4294967300 : i64,
+                opaque_ppe = #VPU.PPEStub<>
         } -> !OutputStub_CMX {
           VPU.DPU.Workload outOffsets [0, 0, 0, 0] outSizes [1, 4, 112, 224] <left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64> <CUBOID_16x16> attributes {cluster_id = 0 : i64}
           VPU.DPU.Workload outOffsets [0, 0, 112, 0] outSizes [1, 4, 112, 224] <left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64> <CUBOID_16x16> attributes {cluster_id = 1 : i64}
@@ -1206,7 +1201,8 @@ func.func @NCEPermuteWithAdjustedInputWorkloadForExtraLines(%arg0: !Input_DDR) -
         %0 = VPU.NCE.Permute(%arg2) {
                 dstElemType = !quant.uniform<u8:f16, 1.000000e+00>,
                 dstOrder = #NHWC,
-                expandedChannels = 4 : i64, minimumHardwareExecutionCost = 4294967300 : i64
+                expandedChannels = 4 : i64, minimumHardwareExecutionCost = 4294967300 : i64,
+                opaque_ppe = #VPU.PPEStub<>
         } -> !OutputStub_CMX {
           VPU.DPU.Workload outOffsets [0, 0, 0, 0] outSizes [1, 4, 112, 224] <left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64> <CUBOID_16x16> attributes {cluster_id = 0 : i64}
           VPU.DPU.Workload outOffsets [0, 0, 112, 0] outSizes [1, 4, 112, 224] <left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64> <CUBOID_16x16> attributes {cluster_id = 1 : i64}
@@ -1283,7 +1279,8 @@ func.func @NCEPermuteInputWorkloadsSOC(%arg0: !Input_DDR) -> !Output_CMX {
         %0 = VPU.NCE.Permute(%arg2) {
                 dstElemType = f16,
                 dstOrder = #NHWC,
-                expandedChannels = 128 : i64, minimumHardwareExecutionCost = 5442 : i64
+                expandedChannels = 128 : i64, minimumHardwareExecutionCost = 5442 : i64,
+                opaque_ppe = #VPU.PPEStub<>
         } -> !OutputStub_CMX {
             VPU.DPU.Workload outOffsets [0, 0, 0, 0] outSizes [1, 32, 32, 64] <left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64> <CUBOID_16x16> attributes {cluster_id = 0 : i64}
             VPU.DPU.Workload outOffsets [0, 32, 0, 0] outSizes [1, 32, 32, 64] <left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64> <CUBOID_16x16> attributes {cluster_id = 1 : i64}
@@ -1333,7 +1330,7 @@ func.func @NCEPermuteInputWorkloadsSOC(%arg0: !Input_DDR) -> !Output_CMX {
 func.func @NCEPermuteInputWorkloadsChannels(%arg0: tensor<1x3x224x224xf16>) -> tensor<1x4x224x224x!qElemType, {order = #NHWC}> {
     %0 = VPU.NCE.Permute(%arg0) {
             dstElemType = !qElemType, dstOrder = #NHWC, expandedChannels = 4 : i64,
-            minimumHardwareExecutionCost = 4294967300 : i64
+            minimumHardwareExecutionCost = 4294967300 : i64, opaque_ppe = #VPU.PPEStub<>
         } -> tensor<1x4x224x224x!qElemType, {order = #NHWC}> {
             VPU.DPU.Workload outOffsets [0, 0, 0, 0] outSizes [1, 2, 224, 224] <left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64> <CUBOID_16x16> attributes {cluster_id = 0 : i64}
             VPU.DPU.Workload outOffsets [0, 2, 0, 0] outSizes [1, 2, 224, 224] <left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64> <CUBOID_16x16> attributes {cluster_id = 1 : i64}
@@ -1454,6 +1451,7 @@ module @SparseNearestNCEInterpolateInputWorkloadsSOHExtraLines  {
       %0 = VPU.NCE.Interpolate(%arg5, %arg6, %arg7) {
               minimumHardwareExecutionCost = 2886 : i64,
               mode = #VPU.nce_interpolate_mode<NEAREST>,
+              opaque_ppe = #VPU.PPEStub<>,
               rawFilterShape = [16, 16, 1, 1],
               strides = [1, 1]
           } -> tensor<1x16x64x64xf16, {mem_space = @CMX_NN, order = #NHWC}> {
@@ -1585,6 +1583,7 @@ module @SparseNearestNCEInterpolateInputWorkloadsSOHExtraLinesWithExplicitOffset
       %0 = VPU.NCE.Interpolate(%arg5, %arg6, %arg7) {
               minimumHardwareExecutionCost = 2886 : i64,
               mode = #VPU.nce_interpolate_mode<NEAREST>,
+              opaque_ppe = #VPU.PPEStub<>,
               rawFilterShape = [16, 16, 1, 1],
               strides = [1, 1]
           } -> tensor<1x16x64x64xf16, {mem_space = @CMX_NN, order = #NHWC}> {
@@ -1712,6 +1711,7 @@ module @SparseBilinearNCEInterpolateInputWorkloadsSOHExtraLines  {
       %0 = VPU.NCE.Interpolate(%arg5, %arg6, %arg7) {
               minimumHardwareExecutionCost = 14721 : i64,
               mode = #VPU.nce_interpolate_mode<BILINEAR>,
+              opaque_ppe = #VPU.PPEStub<>,
               rawFilterShape = [16, 16, 4, 4],
               strides = [2, 2]
           } -> tensor<1x16x64x64xf16, {mem_space = @CMX_NN, order = #NHWC}> {
@@ -1843,6 +1843,7 @@ module @SparseBilinearNCEInterpolateInputWorkloadsSOHExtraLines  {
       %0 = VPU.NCE.Interpolate(%arg5, %arg6, %arg7) {
               minimumHardwareExecutionCost = 14721 : i64,
               mode = #VPU.nce_interpolate_mode<BILINEAR>,
+              opaque_ppe = #VPU.PPEStub<>,
               rawFilterShape = [16, 16, 4, 4],
               strides = [2, 2]
           } -> tensor<1x16x64x64xf16, {mem_space = @CMX_NN, order = #NHWC}> {

@@ -11,13 +11,11 @@
 !Output_DDR = memref<1x16x16x16xf16, #NHWC, @DDR>
 !Weights_DDR = memref<16x1x1x4xf16, #NHWC, @DDR>
 !WeightsTable_DDR = memref<16x1x1x4xsi32, @DDR>
-!ActivationWindow_DDR = memref<1x1x1x16xui8, @DDR>
 
 !InputStub_CMX = memref<1x16x16x16xf16, #NHWC, @CMX_NN>
 !OutputStub_CMX = memref<1x16x16x16xf16, #NHWC, @CMX_NN>
 !WeightsStub_CMX = memref<16x1x1x4xf16, #NHWC, @CMX_NN>
 !WeightsTableStub_CMX = memref<16x1x1x4xsi32, @CMX_NN>
-!ActivationWindowStub_CMX = memref<1x1x1x16xui8, @CMX_NN>
 
 // CHECK-LABEL: @FuseConstantsConv
 func.func @FuseConstantsConv(%in : !Input_DDR) -> !OutputStub_CMX {
@@ -35,7 +33,6 @@ func.func @FuseConstantsConv(%in : !Input_DDR) -> !OutputStub_CMX {
     %2 = VPUIP.Copy inputs(%weights : !Weights_DDR) outputs(%buf3 : !WeightsStub_CMX) -> !WeightsStub_CMX
     %3 = VPUIP.NCEClusterTask
         {
-            activation_window_channel_length = 27 : i64,
             kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
             kernel_size = [1, 1],
             kernel_strides = [1, 1],
@@ -63,7 +60,6 @@ func.func @FuseConstantsConv(%in : !Input_DDR) -> !OutputStub_CMX {
 
 	// CHECK-DAG:       [[FUSED_CONSTANT:%.+]] = const.Declare memref<1x1x1x384xui8>
     // CHECK-NOT:   [[WEIGHT_TABLE:%.+]] = const.Declare !WeightsTable_DDR
-    // CHECK-NOT:   [[ACTIVATION_WINDOW:%.+]] = const.Declare !ActivationWindow_DDR
     // CHECK-NOT:   [[WEIGHTS:%.+]] = const.Declare !Weights_DDR
 
     // CHECK:       [[OUT_BUF1:%.+]] = memref.alloc() : memref<1x16x16x16xf16, #NHWC, @CMX_NN>
@@ -90,7 +86,6 @@ func.func @FuseConstantsConv(%in : !Input_DDR) -> !OutputStub_CMX {
     // CHECK-SAME:		{order = #NCHW, strides = [384, 384, 384, 1]}, [@CMX_NN, 0]> to memref<16x1x1x4xf16, #NHWC, @CMX_NN>
 
     // CHECK:       [[VAR6:%.*]] = VPUIP.NCEClusterTask
-    // CHECK-SAME:          activation_window_channel_length = 27 : i64,
     // CHECK-SAME:          constantsFused = true,
     // CHECK-SAME:          kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
     // CHECK-SAME:          kernel_size = [1, 1],
@@ -118,13 +113,11 @@ func.func @FuseConstantsConv(%in : !Input_DDR) -> !OutputStub_CMX {
 !Output_DDR = memref<1x16x16x16xf16, #NHWC, @DDR>
 !Weights_DDR = memref<16x1x1x4x!qElemType, #NHWC, @DDR>
 !WeightsTable_DDR = memref<16x1x1x4xsi32, @DDR>
-!ActivationWindow_DDR = memref<1x1x1x16xui8, @DDR>
 
 !InputStub_CMX = memref<1x16x16x16xf16, #NHWC, @CMX_NN>
 !OutputStub_CMX = memref<1x16x16x16xf16, #NHWC, @CMX_NN>
 !WeightsStub_CMX = memref<16x1x1x4x!qElemType, #NHWC, @CMX_NN>
 !WeightsTableStub_CMX = memref<16x1x1x4xsi32, @CMX_NN>
-!ActivationWindowStub_CMX = memref<1x1x1x16xui8, @CMX_NN>
 
 // CHECK-LABEL: @FuseConstantsConv
 func.func @FuseConstantsConv(%in : !Input_DDR) -> !OutputStub_CMX {
@@ -135,14 +128,13 @@ func.func @FuseConstantsConv(%in : !Input_DDR) -> !OutputStub_CMX {
     %buf3 = memref.alloc() : !WeightsStub_CMX
 
     %weight_table = const.Declare !WeightsTable_DDR = dense<1> : tensor<16x1x1x4xsi32>
-    %weights = const.Declare !Weights_DDR = dense<1.0> : tensor<16x1x1x4xf16>, [#const.ConvertElemType<si4>, #const.QuantCast<!qElemType>, #const.Reorder<#NHWC>]
+    %weights = const.Declare !Weights_DDR = dense<1.0> : tensor<16x1x1x4xf16>, [#const.CastElemType<si4>, #const.CastElemType<!qElemType>, #const.Reorder<#NHWC>]
 
     %0 = VPUIP.Copy inputs(%weight_table : !WeightsTable_DDR) outputs(%buf2 : !WeightsTableStub_CMX) -> !WeightsTableStub_CMX
     %1 = VPUIP.Copy inputs(%in : !Input_DDR) outputs(%buf0 : !InputStub_CMX) -> !InputStub_CMX
     %2 = VPUIP.Copy inputs(%weights : !Weights_DDR) outputs(%buf3 : !WeightsStub_CMX) -> !WeightsStub_CMX
     %3 = VPUIP.NCEClusterTask
         {
-            activation_window_channel_length = 27 : i64,
             kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
             kernel_size = [1, 1],
             kernel_strides = [1, 1],
@@ -168,9 +160,8 @@ func.func @FuseConstantsConv(%in : !Input_DDR) -> !OutputStub_CMX {
         }
     return %3 : !OutputStub_CMX
 
-    // CHECK-DAG:   [[FUSED_CONSTANT:%.+]] = const.Declare memref<1x1x1x288xui8> = dense<1> : tensor<16x1x1x4xsi32>, [#const.Fuse<tensor<1x1x1x288xui8>, weightsTable = <dense<1> : tensor<16x1x1x4xsi32>>, weights = <dense<1.000000e+00> : tensor<16x1x1x4xf16>, [#const.ConvertElemType<si4>, #const.QuantCast<!qElemType>, #const.Reorder<#NHWC>]>>]
+    // CHECK-DAG:   [[FUSED_CONSTANT:%.+]] = const.Declare memref<1x1x1x288xui8> = dense<1> : tensor<16x1x1x4xsi32>, [#const.Fuse<tensor<1x1x1x288xui8>, weightsTable = <dense<1> : tensor<16x1x1x4xsi32>>, weights = <dense<1.000000e+00> : tensor<16x1x1x4xf16>, [#const.CastElemType<si4>, #const.CastElemType<!qElemType>, #const.Reorder<#NHWC>]>>]
     // CHECK-NOT:   [[WEIGHT_TABLE:%.+]] = const.Declare !WeightsTable_DDR
-    // CHECK-NOT:   [[ACTIVATION_WINDOW:%.+]] = const.Declare !ActivationWindow_DDR
     // CHECK-NOT:   [[WEIGHTS:%.+]] = const.Declare !Weights_DDR
 
     // CHECK:       [[OUT_BUF1:%.+]] = memref.alloc() : memref<1x16x16x16xf16, #NHWC, @CMX_NN>
@@ -197,7 +188,6 @@ func.func @FuseConstantsConv(%in : !Input_DDR) -> !OutputStub_CMX {
     // CHECK-SAME:		{order = #NCHW, strides = [288, 288, 288, 1]}, [@CMX_NN, 0]> to memref<16x1x1x4x!qElemType, #NHWC, @CMX_NN>
 
     // CHECK:       [[VAR6:%.*]] = VPUIP.NCEClusterTask
-    // CHECK-SAME:          activation_window_channel_length = 27 : i64,
     // CHECK-SAME:          constantsFused = true,
     // CHECK-SAME:          kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
     // CHECK-SAME:          kernel_size = [1, 1],
@@ -224,13 +214,11 @@ func.func @FuseConstantsConv(%in : !Input_DDR) -> !OutputStub_CMX {
 !Output_DDR = memref<1x16x16x16xf16, #NHWC, @DDR>
 !Weights_DDR = memref<16x1x1x4xf16, #NHWC, @DDR>
 !WeightsTable_DDR = memref<16x1x1x4xsi32, @DDR>
-!ActivationWindow_DDR = memref<1x1x1x16xui8, @DDR>
 
 !InputStub_CMX = memref<1x16x16x16xf16, #NHWC, @CMX_NN>
 !OutputStub_CMX = memref<1x16x16x16xf16, #NHWC, @CMX_NN>
 !WeightsStub_CMX = memref<16x1x1x4xf16, #NHWC, @CMX_NN>
 !WeightsTableStub_CMX = memref<16x1x1x4xsi32, @CMX_NN>
-!ActivationWindowStub_CMX = memref<1x1x1x16xui8, @CMX_NN>
 
 // CHECK-LABEL: @FuseConstantsMaxPool
 func.func @FuseConstantsMaxPool(%in : !Input_DDR) -> !OutputStub_CMX {
@@ -238,17 +226,13 @@ func.func @FuseConstantsMaxPool(%in : !Input_DDR) -> !OutputStub_CMX {
     %buf0 = memref.alloc() : !InputStub_CMX
     %buf1 = memref.alloc() : !OutputStub_CMX
     %buf2 = memref.alloc() : !WeightsTableStub_CMX
-    %buf3 = memref.alloc() : !ActivationWindowStub_CMX
 
     %weight_table = const.Declare !WeightsTable_DDR = dense<1> : tensor<16x1x1x4xsi32>
-    %act_wind = const.Declare !ActivationWindow_DDR = dense<1> : tensor<1x1x1x16xui8>
 
     %0 = VPUIP.Copy inputs(%weight_table : !WeightsTable_DDR) outputs(%buf2 : !WeightsTableStub_CMX) -> !WeightsTableStub_CMX
-    %1 = VPUIP.Copy inputs(%act_wind : !ActivationWindow_DDR) outputs(%buf3 : !ActivationWindowStub_CMX) -> !ActivationWindowStub_CMX
     %2 = VPUIP.Copy inputs(%in : !Input_DDR) outputs(%buf0 : !InputStub_CMX) -> !InputStub_CMX
     %3 = VPUIP.NCEClusterTask
         {
-            activation_window_channel_length = 27 : i64,
             kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
             kernel_size = [1, 1],
             kernel_strides = [1, 1],
@@ -256,7 +240,6 @@ func.func @FuseConstantsMaxPool(%in : !Input_DDR) -> !OutputStub_CMX {
         }
         input(%2 : !InputStub_CMX)
         weight_table(%0 : !WeightsTableStub_CMX)
-        activation_window(%1 : !ActivationWindowStub_CMX)
         parent_input(%2 : !InputStub_CMX)
         parent_output(%buf1 : !OutputStub_CMX)
         outputs(%buf1 : !OutputStub_CMX) -> !OutputStub_CMX
@@ -274,35 +257,22 @@ func.func @FuseConstantsMaxPool(%in : !Input_DDR) -> !OutputStub_CMX {
         }
     return %3 : !OutputStub_CMX
 
-    // CHECK-DAG:       [[FUSED_CONSTANT:%.+]] = const.Declare memref<1x1x1x272xui8>
+    // CHECK-DAG:       [[FUSED_CONSTANT:%.+]] = const.Declare memref<1x1x1x256xui8>
     // CHECK-NOT:   [[WEIGHT_TABLE:%.+]] = const.Declare !WeightsTable_DDR
-    // CHECK-NOT:   [[ACTIVATION_WINDOW:%.+]] = const.Declare !ActivationWindow_DDR
 
     // CHECK:       [[OUT_BUF1:%.+]] = memref.alloc() : memref<1x16x16x16xf16, #NHWC, @CMX_NN>
     // CHECK:       [[OUT_BUF2:%.+]] = memref.alloc() : memref<1x16x16x16xf16, #NHWC, @CMX_NN>
     // CHECK:       [[VAR_INPUT:%.*]] = VPUIP.Copy inputs(%arg0 : memref<1x16x16x16xf16, #NHWC, @DDR>)
     // CHECK-SAME:      outputs([[OUT_BUF1]] : memref<1x16x16x16xf16, #NHWC, @CMX_NN>) -> memref<1x16x16x16xf16, #NHWC, @CMX_NN>
 
-    // CHECK:       [[VAR0:%.*]] = memref.alloc() : memref<1x1x1x272xui8, [@CMX_NN, 0]>
-    // CHECK:       [[VAR1:%.*]] = VPUIP.Copy inputs([[FUSED_CONSTANT]] : memref<1x1x1x272xui8>)
-    // CHECK-SAME:      outputs([[VAR0]] : memref<1x1x1x272xui8, [@CMX_NN, 0]>) -> memref<1x1x1x272xui8, [@CMX_NN, 0]>
+    // CHECK:       [[VAR0:%.*]] = memref.alloc() : memref<1x1x1x256xui8, [@CMX_NN, 0]>
+    // CHECK:       [[VAR1:%.*]] = VPUIP.Copy inputs([[FUSED_CONSTANT]] : memref<1x1x1x256xui8>)
+    // CHECK-SAME:      outputs([[VAR0]] : memref<1x1x1x256xui8, [@CMX_NN, 0]>) -> memref<1x1x1x256xui8, [@CMX_NN, 0]>
 
-    // CHECK:       [[VAR2:%.*]] = VPUIP.SubView [[VAR1]] [0, 0, 0, 0] [1, 1, 1, 256] :
-    // CHECK-SAME:		memref<1x1x1x272xui8, [@CMX_NN, 0]> to memref<1x1x1x256xui8,
-    // CHECK-SAME:		{order = #NCHW, strides = [272, 272, 272, 1]}, [@CMX_NN, 0]>
-
-    // CHECK:       [[VAR3:%.*]] = VPUIP.ViewOp [[VAR2]] : memref<1x1x1x256xui8,
-    // CHECK-SAME:		{order = #NCHW, strides = [272, 272, 272, 1]}, [@CMX_NN, 0]> to memref<16x1x1x4xsi32, @CMX_NN>
-
-    // CHECK:       [[VAR4:%.*]] = VPUIP.SubView [[VAR1]] [0, 0, 0, 256] [1, 1, 1, 16] :
-    // CHECK-SAME:		memref<1x1x1x272xui8, [@CMX_NN, 0]> to memref<1x1x1x16xui8,
-    // CHECK-SAME:		{order = #NCHW, strides = [272, 272, 272, 1]}, [@CMX_NN, 0]>
-
-    // CHECK:       [[VAR5:%.*]] = VPUIP.ViewOp [[VAR4]] : memref<1x1x1x16xui8,
-    // CHECK-SAME:		{order = #NCHW, strides = [272, 272, 272, 1]}, [@CMX_NN, 0]> to memref<1x1x1x16xui8, @CMX_NN>
+    // CHECK:       [[VAR3:%.*]] = VPUIP.ViewOp [[VAR1]] : memref<1x1x1x256xui8,
+    // CHECK-SAME:		[@CMX_NN, 0]> to memref<16x1x1x4xsi32, @CMX_NN>
 
     // CHECK:       [[VAR6:%.*]] = VPUIP.NCEClusterTask
-    // CHECK-SAME:          activation_window_channel_length = 27 : i64,
     // CHECK-SAME:          constantsFused = true,
     // CHECK-SAME:          kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
     // CHECK-SAME:          kernel_size = [1, 1],
@@ -310,7 +280,6 @@ func.func @FuseConstantsMaxPool(%in : !Input_DDR) -> !OutputStub_CMX {
     // CHECK-SAME:          task_type = #VPUIP.nce_task_type<MAXPOOL>
     // CHECK-SAME:      input([[VAR_INPUT]] : memref<1x16x16x16xf16, #NHWC, @CMX_NN>)
     // CHECK-SAME:      weight_table([[VAR3]] : memref<16x1x1x4xsi32, @CMX_NN>)
-    // CHECK-SAME:      activation_window([[VAR5]] : memref<1x1x1x16xui8, @CMX_NN>)
     // CHECK-SAME:      parent_input([[VAR_INPUT]] : memref<1x16x16x16xf16, #NHWC, @CMX_NN>)
     // CHECK-SAME:      parent_output([[OUT_BUF2]] : memref<1x16x16x16xf16, #NHWC, @CMX_NN>)
     // CHECK-SAME:      outputs([[OUT_BUF2]] : memref<1x16x16x16xf16, #NHWC, @CMX_NN>)
@@ -321,128 +290,6 @@ func.func @FuseConstantsMaxPool(%in : !Input_DDR) -> !OutputStub_CMX {
     // CHECK-SAME:          pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>
     // CHECK:       return [[VAR6]] : memref<1x16x16x16xf16, #NHWC, @CMX_NN>
 
-}
-
-// -----
-
-#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
-#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
-
-!Input_DDR = memref<1x16x16x16xf16, #NCHW, @DDR>
-!Output_DDR = memref<1x16x16x16xf16, #NHWC, @DDR>
-!Weights_DDR = memref<16x1x1x4xf16, #NHWC, @DDR>
-!WeightsTable_DDR = memref<16x1x1x4xsi32, @DDR>
-!ActivationWindow_DDR = memref<1x1x1x16xui8, @DDR>
-
-!InputStub_CMX = memref<1x16x16x16xf16, #NCHW, @CMX_NN>
-!OutputStub_CMX = memref<1x16x16x16xf16, #NHWC, @CMX_NN>
-!WeightsStub_CMX = memref<16x1x1x4xf16, #NHWC, @CMX_NN>
-!WeightsTableStub_CMX = memref<16x1x1x4xsi32, @CMX_NN>
-!ActivationWindowStub_CMX = memref<1x1x1x16xui8, @CMX_NN>
-
-// CHECK-LABEL: @FuseConstantsCMConv
-func.func @FuseConstantsCMConv(%in : !Input_DDR) -> !OutputStub_CMX {
-
-    %buf0 = memref.alloc() : !InputStub_CMX
-    %buf1 = memref.alloc() : !OutputStub_CMX
-    %buf2 = memref.alloc() : !WeightsTableStub_CMX
-    %buf3 = memref.alloc() : !ActivationWindowStub_CMX
-    %buf4 = memref.alloc() : !WeightsStub_CMX
-
-    %weight_table = const.Declare !WeightsTable_DDR = dense<1> : tensor<16x1x1x4xsi32>
-    %act_wind = const.Declare !ActivationWindow_DDR = dense<1> : tensor<1x1x1x16xui8>
-    %weights = const.Declare !Weights_DDR = dense<1.0> : tensor<16x1x1x4xf16>, [#const.Reorder<#NHWC>]
-
-    %0 = VPUIP.Copy inputs(%weight_table : !WeightsTable_DDR) outputs(%buf2 : !WeightsTableStub_CMX) -> !WeightsTableStub_CMX
-    %1 = VPUIP.Copy inputs(%act_wind : !ActivationWindow_DDR) outputs(%buf3 : !ActivationWindowStub_CMX) -> !ActivationWindowStub_CMX
-    %2 = VPUIP.Copy inputs(%in : !Input_DDR) outputs(%buf0 : !InputStub_CMX) -> !InputStub_CMX
-    %3 = VPUIP.Copy inputs(%weights : !Weights_DDR) outputs(%buf4 : !WeightsStub_CMX) -> !WeightsStub_CMX
-
-    %4 = VPUIP.NCEClusterTask
-        {
-                activation_window_channel_length = 16 : i64,
-                kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                kernel_size = [3, 3],
-                kernel_strides = [1, 1],
-                task_type = #VPUIP.nce_task_type<CMCONV>
-        }
-        input(%2 : !InputStub_CMX)
-        weights(%3 : !WeightsStub_CMX)
-        weight_table(%0 : !WeightsTableStub_CMX)
-        activation_window(%1 : !ActivationWindowStub_CMX)
-        parent_input(%2 : !InputStub_CMX)
-        parent_output(%buf1 : !OutputStub_CMX)
-        outputs(%buf1 : !OutputStub_CMX) -> !OutputStub_CMX
-        variants :
-        {
-            DPUTask
-            {
-                outEnd = [55, 10, 15], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>,
-                pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                outStart = [0, 0, 0]
-            }
-        }
-        PPE :
-        {
-        }
-    return %4 : !OutputStub_CMX
-
-    // CHECK-DAG:       [[FUSED_CONSTANT:%.+]] = const.Declare memref<1x1x1x400xui8>
-    // CHECK-NOT:   [[WEIGHT_TABLE:%.+]] = const.Declare !WeightsTable_DDR
-    // CHECK-NOT:   [[ACTIVATION_WINDOW:%.+]] = const.Declare !ActivationWindow_DDR
-    // CHECK-NOT:   [[WEIGHTS:%.+]] = const.Declare !Weights_DDR
-
-    // CHECK:       [[OUT_BUF1:%.+]] = memref.alloc() : memref<1x16x16x16xf16, @CMX_NN>
-    // CHECK:       [[OUT_BUF2:%.+]] = memref.alloc() : memref<1x16x16x16xf16, #NHWC, @CMX_NN>
-    // CHECK:       [[VAR_INPUT:%.*]] = VPUIP.Copy inputs(%arg0 : memref<1x16x16x16xf16, @DDR>)
-    // CHECK-SAME:      outputs([[OUT_BUF1]] : memref<1x16x16x16xf16, @CMX_NN>) -> memref<1x16x16x16xf16, @CMX_NN>
-
-    // CHECK:       [[VAR0:%.*]] = memref.alloc() : memref<1x1x1x400xui8, [@CMX_NN, 0]>
-    // CHECK:       [[VAR1:%.*]] = VPUIP.Copy inputs([[FUSED_CONSTANT]] : memref<1x1x1x400xui8>)
-    // CHECK-SAME:      outputs([[VAR0]] : memref<1x1x1x400xui8, [@CMX_NN, 0]>) -> memref<1x1x1x400xui8, [@CMX_NN, 0]>
-
-    // CHECK:       [[VAR2:%.*]] = VPUIP.SubView [[VAR1]] [0, 0, 0, 0] [1, 1, 1, 256] :
-    // CHECK-SAME:		memref<1x1x1x400xui8, [@CMX_NN, 0]> to memref<1x1x1x256xui8,
-    // CHECK-SAME:		{order = #NCHW, strides = [400, 400, 400, 1]}, [@CMX_NN, 0]>
-
-    // CHECK:       [[VAR3:%.*]] = VPUIP.ViewOp [[VAR2]] : memref<1x1x1x256xui8,
-    // CHECK-SAME:		{order = #NCHW, strides = [400, 400, 400, 1]}, [@CMX_NN, 0]> to memref<16x1x1x4xsi32, @CMX_NN>
-
-    // CHECK:       [[VAR4:%.*]] = VPUIP.SubView [[VAR1]] [0, 0, 0, 256] [1, 1, 1, 128] :
-    // CHECK-SAME:		memref<1x1x1x400xui8, [@CMX_NN, 0]> to memref<1x1x1x128xui8,
-    // CHECK-SAME:		{order = #NCHW, strides = [400, 400, 400, 1]}, [@CMX_NN, 0]>
-
-    // CHECK:       [[VAR5:%.*]] = VPUIP.ViewOp [[VAR4]] : memref<1x1x1x128xui8,
-    // CHECK-SAME:		{order = #NCHW, strides = [400, 400, 400, 1]}, [@CMX_NN, 0]> to memref<16x1x1x4xf16, #NHWC, @CMX_NN>
-
-    // CHECK:       [[VAR6:%.*]] = VPUIP.SubView [[VAR1]] [0, 0, 0, 384] [1, 1, 1, 16] :
-    // CHECK-SAME:		memref<1x1x1x400xui8, [@CMX_NN, 0]> to memref<1x1x1x16xui8,
-    // CHECK-SAME:		{order = #NCHW, strides = [400, 400, 400, 1]}, [@CMX_NN, 0]>
-
-    // CHECK:       [[VAR7:%.*]] = VPUIP.ViewOp [[VAR6]] : memref<1x1x1x16xui8,
-    // CHECK-SAME:		{order = #NCHW, strides = [400, 400, 400, 1]}, [@CMX_NN, 0]> to memref<1x1x1x16xui8, @CMX_NN>
-
-    // CHECK:       [[VAR8:%.*]] = VPUIP.NCEClusterTask
-    // CHECK-SAME:          activation_window_channel_length = 16 : i64,
-    // CHECK-SAME:          constantsFused = true,
-    // CHECK-SAME:          kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-    // CHECK-SAME:          kernel_size = [3, 3],
-    // CHECK-SAME:          kernel_strides = [1, 1],
-    // CHECK-SAME:          task_type = #VPUIP.nce_task_type<CMCONV>
-    // CHECK-SAME:      input([[VAR_INPUT]] : memref<1x16x16x16xf16, @CMX_NN>)
-    // CHECK-SAME:      weights([[VAR5]] : memref<16x1x1x4xf16, #NHWC, @CMX_NN>)
-    // CHECK-SAME:      weight_table([[VAR3]] : memref<16x1x1x4xsi32, @CMX_NN>)
-    // CHECK-SAME:      activation_window([[VAR7]] : memref<1x1x1x16xui8, @CMX_NN>)
-    // CHECK-SAME:      parent_input([[VAR_INPUT]] : memref<1x16x16x16xf16, @CMX_NN>)
-    // CHECK-SAME:      parent_output([[OUT_BUF2]] : memref<1x16x16x16xf16, #NHWC, @CMX_NN>)
-    // CHECK-SAME:      outputs([[OUT_BUF2]] : memref<1x16x16x16xf16, #NHWC, @CMX_NN>)
-    // CHECK:           DPUTask
-    // CHECK-SAME:          <VECTOR_FP16>,
-    // CHECK-SAME:          outEnd = [55, 10, 15],
-    // CHECK-SAME:          outStart = [0, 0, 0],
-    // CHECK-SAME:          pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>
-
-    // CHECK:       return [[VAR8]] : memref<1x16x16x16xf16, #NHWC, @CMX_NN>
 }
 
 // -----
@@ -460,7 +307,6 @@ func.func @FuseConstantsCMConv(%in : !Input_DDR) -> !OutputStub_CMX {
 !WeightsStub_CMX = memref<16x16x1x1xf16, {sparsityCompression = #VPUIP.SparsityCompressionAttr<axis = 0 : i64, numElems = dense<16> : tensor<16xi64>, alignment = 16 : i64>, order = #NHWC}, @CMX_NN>
 !WeightsSMStub_CMX = memref<16x1x1x128xi1, @CMX_NN>
 !WeightsTableStub_CMX = memref<16x1x1x4xsi32, @CMX_NN>
-!ActivationWindowStub_CMX = memref<1x1x1x16xui8, @CMX_NN>
 
 // CHECK-LABEL: @FuseConstantsConvSparseWeights
 func.func @FuseConstantsConvSparseWeights(%in : !Input_DDR) -> !OutputStub_CMX {
@@ -481,7 +327,6 @@ func.func @FuseConstantsConvSparseWeights(%in : !Input_DDR) -> !OutputStub_CMX {
     %3 = VPUIP.Copy inputs(%weights_sm : !WeightsSM_DDR) outputs(%buf4 : !WeightsSMStub_CMX) -> !WeightsSMStub_CMX
     %4 = VPUIP.NCEClusterTask
         {
-            activation_window_channel_length = 27 : i64,
             kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
             kernel_size = [1, 1],
             kernel_strides = [1, 1],
@@ -545,7 +390,6 @@ func.func @FuseConstantsConvSparseWeights(%in : !Input_DDR) -> !OutputStub_CMX {
     // CHECK-SAME:      {order = #NCHW, strides = [1024, 1024, 1024, 1]}, [@CMX_NN, 0]> to memref<16x1x1x128xi1, @CMX_NN>
 
     // CHECK:       [[VAR8:%.*]] = VPUIP.NCEClusterTask
-    // CHECK-SAME:          activation_window_channel_length = 27 : i64,
     // CHECK-SAME:          constantsFused = true,
     // CHECK-SAME:          kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
     // CHECK-SAME:          kernel_size = [1, 1],
@@ -626,7 +470,6 @@ func.func @FuseDuplicatedConstants(%input : !Input_DDR) -> !Output_DDR
 
     %4 = VPUIP.NCEClusterTask
         {
-            activation_window_channel_length = 27 : i64,
             kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
             kernel_size = [1, 1],
             kernel_strides = [1, 1],
@@ -709,7 +552,7 @@ func.func @FuseDuplicatedConstants(%input : !Input_DDR) -> !Output_DDR
     num_clusters = 2
 }>
 
-!Input_DDR = memref<1x16x56x56xf16, #NHWC, @DDR>
+!Input_DDR = memref<1x16x112x28xf16, #NHWC, @DDR>
 !Weights_DDR = memref<32x32x1x1xf16, #NHWC, @DDR>
 !WeightsTable_DDR = memref<32x1x1x4xsi32, @DDR>
 !Output_DDR = memref<1x16x56x56xf16, #NHWC, @DDR>
@@ -743,7 +586,6 @@ func.func @FuseDuplicatedConstantsWithShapeCast(%input : !Input_DDR) -> !Output_
 
     %4 = VPUIP.NCEClusterTask
         {
-            activation_window_channel_length = 27 : i64,
             kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
             kernel_size = [1, 1],
             kernel_strides = [1, 1],
@@ -783,7 +625,7 @@ func.func @FuseDuplicatedConstantsWithShapeCast(%input : !Input_DDR) -> !Output_
     // CHECK:   [[BUF_OUT_DDR:%.+]] = memref.alloc() : memref<1x16x56x56xf16, #NHWC, @DDR>
 
     // CHECK:       [[COPY_INPUT:%.+]] = VPUIP.Copy
-    // CHECK-SAME:      inputs(%arg0 : memref<1x16x56x56xf16, #NHWC, @DDR>)
+    // CHECK-SAME:      inputs(%arg0 : memref<1x16x112x28xf16, #NHWC, @DDR>)
     // CHECK-SAME:      outputs([[BUF_OUT_1_CMX]]
 
     // CHECK:   [[FUSED_CMX:%.+]] = VPURT.AllocDistributed -> !VPUIP.DistributedBuffer<1x1x1x1280xf16, {order = #NCHW, strides = [1280, 1280, 1280, 1]}, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>
@@ -873,7 +715,6 @@ func.func @FuseDuplicatedConstantsWithExplicitDistributedAttr(%input : !Input_DD
 
     %4 = VPUIP.NCEClusterTask
         {
-            activation_window_channel_length = 27 : i64,
             kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
             kernel_size = [1, 1],
             kernel_strides = [1, 1],
@@ -1010,12 +851,8 @@ func.func @DoNotFuseWeightsFromNonConstant(%input : !Input_0_DDR, %input1 : !Inp
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>
             }
         } PPE : {
-            PPETask <NOOP> {
-                clamp_high = 2147483647 : i64,
-                clamp_low = -2147483648 : i64,
-                fp_prelu_alpha = 1.000000e+00 : f64,
-                lrelu_mult = 1 : i64,
-                lrelu_shift = 0 : i64
+            PPETask {
+                opaque_ppe = #VPU.PPEStub<>
             }
         }
 
@@ -1099,7 +936,7 @@ func.func @DoNotFuseWeightsFromNonConstant(%input : !Input_0_DDR, %input1 : !Inp
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 // CHECK-LABEL: @FuseSignedQuantizedWeightsMixedPrecision
 func.func @FuseSignedQuantizedWeightsMixedPrecision(%arg0: memref<1x16x16x16xf16, #NHWC, @DDR>, %arg1: memref<1x16x16x16xf16, #NHWC, @DDR>) -> memref<1x16x16x16xf16, #NHWC, @DDR> {
-    %weights = const.Declare memref<16x16x1x1x!qElemType, #NHWC> = dense<"0x00C9A3BEF9486844534800C970C7E8C3FE4811C747C514C823C046C67CC02DC2CA4221C05B48363AED4677BE78C36943DB37E9C586BC904769C5BAC88239D24224489EBED9BAB23C8BBD31C764480AC6914504465244AF480E4677C312C8B143CF3587474D47E447954626C898469CC88AC49AC668C89047D24204C8723F50BEDE4294480FBF4E390DC6AD4335C461C328C77643AB45B146FFBED1C8A9C80145F640E3486D42F74408C464C44FBCC9458FC5EFC744C82BBCECB816480AC821C409483FC49CC766C7F037CEC82AC827432B48C4C51B48B0C405C465B1C03E77C8463DEE3D8F4011C79148253FC8C4FE4361C5F4C75A39E0BE8048C74371B0DEBE7F3A80C84F45BE398CC88D4233C7C434D9457248B4C8ED3EAA470948873A40C729BC37C7D8472646E6C018C0263AB1C6184246488DC117C2AE3D04458341854479C7AB479C43F240E9410545D8C10BC244459AC4BDC1EB470E45C1BDA047A648E2C88A42D7A8DE4043C8B5C7BD457F485CC802BCCAC1453E6B4859BFCFC042C5424509486F45E53DF2C3F9C87445B040F1C6EFC24A3E5438E9C8B8472E44B6C1B3B816484B45EF4038B9D7C89FC44B48A246A3431B3CF9484DC88EC667B842C7DB44534829C6DF43B6B957C865C51C4547311445D4C53B4882C83B44093684C78EC6CDC826C0BDC8DAC7B8C8473213C5F5C733473AC4373A5DC53A3CAD480049"> : tensor<16x16x1x1xf16>, [#const.ConvertElemType<si8>, #const.QuantCast<!qElemType>, #const.Reorder<#NHWC>]
+    %weights = const.Declare memref<16x16x1x1x!qElemType, #NHWC> = dense<"0x00C9A3BEF9486844534800C970C7E8C3FE4811C747C514C823C046C67CC02DC2CA4221C05B48363AED4677BE78C36943DB37E9C586BC904769C5BAC88239D24224489EBED9BAB23C8BBD31C764480AC6914504465244AF480E4677C312C8B143CF3587474D47E447954626C898469CC88AC49AC668C89047D24204C8723F50BEDE4294480FBF4E390DC6AD4335C461C328C77643AB45B146FFBED1C8A9C80145F640E3486D42F74408C464C44FBCC9458FC5EFC744C82BBCECB816480AC821C409483FC49CC766C7F037CEC82AC827432B48C4C51B48B0C405C465B1C03E77C8463DEE3D8F4011C79148253FC8C4FE4361C5F4C75A39E0BE8048C74371B0DEBE7F3A80C84F45BE398CC88D4233C7C434D9457248B4C8ED3EAA470948873A40C729BC37C7D8472646E6C018C0263AB1C6184246488DC117C2AE3D04458341854479C7AB479C43F240E9410545D8C10BC244459AC4BDC1EB470E45C1BDA047A648E2C88A42D7A8DE4043C8B5C7BD457F485CC802BCCAC1453E6B4859BFCFC042C5424509486F45E53DF2C3F9C87445B040F1C6EFC24A3E5438E9C8B8472E44B6C1B3B816484B45EF4038B9D7C89FC44B48A246A3431B3CF9484DC88EC667B842C7DB44534829C6DF43B6B957C865C51C4547311445D4C53B4882C83B44093684C78EC6CDC826C0BDC8DAC7B8C8473213C5F5C733473AC4373A5DC53A3CAD480049"> : tensor<16x16x1x1xf16>, [#const.CastElemType<si8>, #const.CastElemType<!qElemType>, #const.Reorder<#NHWC>]
     %weight_table = const.Declare memref<16x1x1x4xsi32> = dense<[[[[0, 0, 1006699012, 0]]], [[[16, 0, 1006699012, 0]]], [[[32, 0, 1006699012, 0]]], [[[48, 0, 1006699012, 0]]], [[[64, 0, 1006699012, 0]]], [[[80, 0, 1006699012, 0]]], [[[96, 0, 1006699012, 0]]], [[[112, 0, 1006699012, 0]]], [[[128, 0, 1006699012, 0]]], [[[144, 0, 1006699012, 0]]], [[[160, 0, 1006699012, 0]]], [[[176, 0, 1006699012, 0]]], [[[192, 0, 1006699012, 0]]], [[[208, 0, 1006699012, 0]]], [[[224, 0, 1006699012, 0]]], [[[240, 0, 1006699012, 0]]]]> : tensor<16x1x1x4xsi32>
 
     %alloc_input = memref.alloc() : memref<1x16x16x16xf16, #NHWC, [@CMX_NN, 0]>
@@ -1118,14 +955,14 @@ func.func @FuseSignedQuantizedWeightsMixedPrecision(%arg0: memref<1x16x16x16xf16
         outputs(%out_alloc : memref<1x16x16x16xf16, #NHWC, [@CMX_NN, 0]>) -> memref<1x16x16x16xf16, #NHWC, [@CMX_NN, 0]> variants : {
         DPUTask {inEnd = [15, 15, 15], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [15, 15, 15], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-        PPETask <NOOP> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, fp_prelu_alpha = 1.000000e+00 : f64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64}
+        PPETask {opaque_ppe = #VPU.PPEStub<>}
     }
     %out_ddr = VPUIP.Copy inputs(%out_cmx : memref<1x16x16x16xf16, #NHWC, [@CMX_NN, 0]>) outputs(%arg1 : memref<1x16x16x16xf16, #NHWC, @DDR>) -> memref<1x16x16x16xf16, #NHWC, @DDR>
     return %out_ddr : memref<1x16x16x16xf16, #NHWC, @DDR>
 	// CHECK-DAG:   [[FUSED_CONSTANT:%.+]] = const.Declare memref<1x1x1x512xui8>
     // CHECK-SAME:  [#const.Fuse<tensor<1x1x1x512xui8>, weightsTable =
     // CHECK-SAME   weights =
-    // CHECK-SAME   [#const.ConvertElemType<si8>, #const.QuantCast<!qElemType>, #const.Reorder<#NHWC>]>>]
+    // CHECK-SAME   [#const.CastElemType<si8>, #const.CastElemType<!qElemType>, #const.Reorder<#NHWC>]>>]
     // CHECK-NOT:   [[WEIGHTS:%.+]] = const.Declare memref<16x16x1x1x!qElemType
     // CHECK-NOT:   [[WEIGHT_TABLE:%.+]] = const.Declare memref<16x1x1x4xsi32>
 
@@ -1164,7 +1001,7 @@ func.func @FuseWeightsWithMajorityOfF16Type(%arg0: memref<1x16x16x16xf16, #NHWC,
         outputs(%out_alloc : memref<1x16x16x16xf16, #NHWC, [@CMX_NN, 0]>) -> memref<1x16x16x16xf16, #NHWC, [@CMX_NN, 0]> variants : {
         DPUTask {inEnd = [15, 15, 15], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [15, 15, 15], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-        PPETask <NOOP> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, fp_prelu_alpha = 1.000000e+00 : f64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64}
+        PPETask {opaque_ppe = #VPU.PPEStub<>}
     }
     %out_ddr = VPUIP.Copy inputs(%out_cmx : memref<1x16x16x16xf16, #NHWC, [@CMX_NN, 0]>) outputs(%arg1 : memref<1x16x16x16xf16, #NHWC, @DDR>) -> memref<1x16x16x16xf16, #NHWC, @DDR>
     return %out_ddr : memref<1x16x16x16xf16, #NHWC, @DDR>

@@ -1,11 +1,12 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 
 #include <numeric>
 
 #include <mlir/Dialect/Quant/QuantTypes.h>
 
+#include "vpux/compiler/dialect/VPU/transforms/factories/nce_sparsity_converters.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
@@ -59,6 +60,14 @@ void buildRaceConditionDPUDMAACTTest(const nb::TestCaseJsonDescriptor& testDesc,
     const auto output = testDesc.getOutputLayers().front();
     const auto iterationCount = testDesc.getIterationCount();
     const auto numClusters = testDesc.getNumClusters();
+
+    // set runtime resources
+    mlir::PassManager pmBuilderInit(module->getName(), mlir::OpPassManager::Nesting::Implicit);
+    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::ReferenceHW);
+    initCompilerOptions.numberOfDPUGroups = numClusters;
+    initCompilerOptions.numberOfDMAPorts = 1;
+    VPU::buildInitCompilerPipeline(pmBuilderInit, initCompilerOptions, log);
+    VPUX_THROW_UNLESS(mlir::succeeded(pmBuilderInit.run(module)), "Init compilation failed");
 
     const llvm::SmallVector<std::int64_t> inputShape{input.shape.begin(), input.shape.end()};
     const llvm::SmallVector<std::int64_t> outputShape{output.shape.begin(), output.shape.end()};
@@ -133,7 +142,7 @@ void buildRaceConditionDPUDMAACTTest(const nb::TestCaseJsonDescriptor& testDesc,
     auto functionOutput_2 = function.getArgument(3);
 
     const auto weightsValues = generateWeights(builder, weightsShape, weightsType, ctx, weightsFileName);
-    const auto weightsAttribute = generateDefaultWeightsAttr(weightsValues, weightsType);
+    auto weightsAttribute = generateDefaultWeightsAttr(weightsValues, weightsType);
 
     const auto weightsDDRType =
             getMemRefType(VPURT::BufferSection::Constant, weightsShape, weightsType, DimsOrder::NHWC);
@@ -141,7 +150,7 @@ void buildRaceConditionDPUDMAACTTest(const nb::TestCaseJsonDescriptor& testDesc,
     auto weightsCMX = createDeclareTensorOp(functionBuilder, VPURT::BufferSection::CMX_NN, weightsShape, weightsType,
                                             vpux::DimsOrder::OYXI, 0, WEIGHTS_CMX_OFFSET);
 
-    auto weightsDDR = functionBuilder.create<vpux::Const::DeclareOp>(loc, weightsDDRType, weightsAttribute);
+    auto weightsDDR = functionBuilder.create<vpux::Const::DeclareOp>(loc, weightsDDRType, std::move(weightsAttribute));
 
     auto outputCMX_0 = createDeclareTensorOp(functionBuilder, VPURT::BufferSection::CMX_NN, outputShape, outputType,
                                              DimsOrder::NHWC, 0, OUTPUT_CMX_OFFSET_0);  // DPU result
@@ -155,10 +164,12 @@ void buildRaceConditionDPUDMAACTTest(const nb::TestCaseJsonDescriptor& testDesc,
 
     const auto weightsTableDDRType = mlir::RankedTensorType::get(weightsTableShape, int32);
     const auto sparsityPtrStep = 0;
+    const auto ppeConverter = VPU::NCESparsity::getPPEConverterCb(testDesc.getArchitecture());
+    const auto biasConverter = VPU::NCESparsity::getBiasConverterCb(testDesc.getArchitecture());
     const auto weightsTable = VPU::NCESparsity::getWeightsTable(
             inputType, outputType, static_cast<std::int32_t>(WEIGHTS_CMX_OFFSET),
             static_cast<std::int32_t>(weightsOutputChannelsStrideInBits.count() / CHAR_BIT),
-            VPU::NCESparsity::SPARSITY_PTR_WHEN_NO_SPARSITY, sparsityPtrStep, testDesc.getArchitecture(),
+            VPU::NCESparsity::SPARSITY_PTR_WHEN_NO_SPARSITY, sparsityPtrStep, ppeConverter, biasConverter,
             output.shape[1], weightsType);
 
     const auto weightsTableDDRMemRef =
@@ -167,7 +178,7 @@ void buildRaceConditionDPUDMAACTTest(const nb::TestCaseJsonDescriptor& testDesc,
             mlir::DenseElementsAttr::get(weightsTableDDRType, llvm::ArrayRef<std::int32_t>(weightsTable));
     auto weightsTableDDR = functionBuilder.create<vpux::Const::DeclareOp>(
             loc, weightsTableDDRMemRef,
-            vpux::Const::ContentAttr::get(weightsTableValues).reorder(vpux::DimsOrder::NHWC));
+            vpux::Const::ContentAttr::transform(weightsTableValues).reorder(vpux::DimsOrder::NHWC).get());
 
     auto weightsTableCMX = createDeclareTensorOp(functionBuilder, VPURT::BufferSection::CMX_NN, weightsTableShape,
                                                  int32, DimsOrder::NHWC, 0, WEIGHTSTABLE_CMX_OFFSET);
@@ -211,9 +222,9 @@ void buildRaceConditionDPUDMAACTTest(const nb::TestCaseJsonDescriptor& testDesc,
         auto nceTask_0 = VPURT::wrapIntoTaskOp<VPUIP::NCEClusterTaskOp>(
                 functionBuilder, mlir::ValueRange(waitBarrier.getBarrier()),
                 mlir::ValueRange(updateBarrier.getBarrier()), loc, inputCMXVec[0].getBuffer(), weightsCMX.getBuffer(),
-                weightsTableCMX.getBuffer(), nullptr, nullptr, nullptr, inputCMXVec[0].getBuffer(),
-                outputCMX_0.getBuffer(), outputCMX_0.getBuffer(), vpux::VPUIP::NCETaskType::CONV, kernelSize, strides,
-                kernelPaddings, nullptr, nullptr);
+                weightsTableCMX.getBuffer(), nullptr, nullptr, inputCMXVec[0].getBuffer(), outputCMX_0.getBuffer(),
+                outputCMX_0.getBuffer(), vpux::VPUIP::NCETaskType::CONV, kernelSize, strides, kernelPaddings, nullptr,
+                nullptr);
 
         const auto start = getIntArrayAttr(ctx, std::vector<std::int64_t>{0, 0, 0});
         const auto outEnd = getIntArrayAttr(
@@ -253,17 +264,11 @@ void buildRaceConditionDPUDMAACTTest(const nb::TestCaseJsonDescriptor& testDesc,
     functionBuilder.create<mlir::func::ReturnOp>(
             loc, mlir::ValueRange{functionOutput_0, functionOutput_1, functionOutput_2});
 
-    mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::ReferenceHW);
-    initCompilerOptions.numberOfDPUGroups = numClusters;
-    initCompilerOptions.numberOfDMAPorts = 1;
-    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
-
+    mlir::PassManager pmBuilderEnd(module->getName(), mlir::OpPassManager::Nesting::Implicit);
     if (conv.compress) {
-        pm.addPass(VPUIP::createCompressWeightsBTCPass(log));
+        pmBuilderEnd.addPass(VPUIP::createCompressWeightsBTCPass(log));
     }
-
-    VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");
+    VPUX_THROW_UNLESS(mlir::succeeded(pmBuilderEnd.run(module)), "Compilation failed");
 
     buildCNNOp(builder, function.getName(),
                {getTensorType(ShapeRef(inputShape), inputType, vpux::DimsOrder::NHWC, nullptr)},

@@ -70,7 +70,7 @@ func.func @SparseConvolution(%input: !SparseInput,
         %weightsTable as %arg3: !WeightsTableType) -> !SparseConvOutputDist {
         %20 = VPU.NCE.Convolution(%arg1, %arg2, %arg3)
                 {pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 1 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LRELU>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
+                opaque_ppe = #VPU.PPEInt<mode = <LRELU>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
                 rawFilterShape = [128, 256, 3, 3], strides = [2, 2]}
                     -> !SparseConvOutputCMX
         VPU.Yield %20
@@ -89,7 +89,7 @@ func.func @SparseConvolution(%input: !SparseInput,
         %weightsTable as %arg3: !WeightsTableType)  -> !SparseConvOutputDist {
         %20 = VPU.NCE.Convolution(%arg1, %arg2, %arg3)
                 {pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 1 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LRELU>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
+                opaque_ppe = #VPU.PPEInt<mode = <LRELU>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
                 rawFilterShape = [128, 256, 3, 3], strides = [2, 2]}
                     -> !SparseConvOutputCMX
         VPU.Yield %20
@@ -118,7 +118,7 @@ func.func @SparseConvolution(%input: !SparseInput,
             -> !VPU.SparseTensor<data=!VPU.DistributedTensor<1x128x6x6xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, @CMX_NN, {mode = "DUPLICATED|SEGMENTED", num_tiles = [1, 2, 1, 1], num_clusters = 2 : i64, alignment = [1, 16, 1, 1]}>, sparsity_map=!VPU.DistributedTensor<1x128x6x6xi1, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, @CMX_NN, {mode = "DUPLICATED|SEGMENTED", num_tiles = [1, 2, 1, 1], num_clusters = 2 : i64, alignment = [1, 16, 1, 1]}>> {
         %20 = VPU.NCE.Convolution(%arg1, %arg2, %arg3)
                 {pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
+                opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
                 rawFilterShape = [128, 256, 3, 3], strides = [2, 2]} -> !VPU.SparseTensor<data=tensor<1x128x6x6xf16, {mem_space = @CMX_NN, order = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>}>, sparsity_map=tensor<1x128x6x6xi1, {mem_space = @CMX_NN, order = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>}>>
         VPU.Yield %20
     }
@@ -239,7 +239,7 @@ func.func @ConcatUsersHaveDifferentOperandNums(
                                 -> !ConcatInputsDistributed {
         %20 = VPU.NCE.Eltwise(%arg0, %arg1) {
             op_type = #VPU.eltwise_type<ADD>,
-            ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
+            opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
             lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00], fp_prelu_alpha = 1.000000e+00 : f64>
         } -> tensor<1x640x16x16xf16, {mem_space = @CMX_NN, order = #NHWC}>
         VPU.Yield %20
@@ -263,7 +263,7 @@ func.func @ConcatUsersHaveDifferentOperandNums(
                                 -> !ConcatInputsDistributed {
         %20 = VPU.NCE.Eltwise(%arg0, %arg1) {
             op_type = #VPU.eltwise_type<ADD>,
-            ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
+            opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
             lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00], fp_prelu_alpha = 1.000000e+00 : f64>
         } -> tensor<1x640x16x16xf16, {mem_space = @CMX_NN, order = #NHWC}>
         VPU.Yield %20
@@ -287,7 +287,7 @@ func.func @ConcatUsersHaveDifferentOperandNums(
         %20 = VPU.NCE.MaxPool(%arg0) {
             kernel_size = [1, 1],
             pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-            ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
+            opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
             lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>, strides = [1, 1]
         } -> tensor<1x1280x16x16xf16, {mem_space = @CMX_NN, order = #NHWC}>
         VPU.Yield %20
@@ -310,7 +310,7 @@ func.func @ConcatUsersHaveDifferentOperandNums(
                                  %12 as %arg1: tensor<1x1280x16x16xf16, {mem_space = @CMX_NN, order = #NHWC}>) -> !ConcatUserDistributed {
         %20 = VPU.NCE.Eltwise(%arg0, %arg1) {
             op_type = #VPU.eltwise_type<ADD>,
-            ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
+            opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
             lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00], fp_prelu_alpha = 1.000000e+00 : f64>
         } -> tensor<1x1280x16x16xf16, {mem_space = @CMX_NN, order = #NHWC}>
         VPU.Yield %20
@@ -377,9 +377,10 @@ func.func @ConcatUsersHaveDifferentOperandNums(
     // CHECK-SAME:                      -> !VPU.DistributedTensor<1x1280x16x16xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
     // CHECK:           VPU.NCE.MaxPool(%arg5) {
     // CHECK-SAME:                      kernel_size = [1, 1],
+    // CHECK-SAME:                      opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
+    // CHECK-SAME:                      lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
     // CHECK-SAME:                      pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-    // CHECK-SAME:                      ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-    // CHECK-SAME:                      lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>, strides = [1, 1]}
+    // CHECK-SAME:                      strides = [1, 1]}
     // CHECK-SAME:                      -> tensor<1x1280x16x16xf16, {mem_space = @CMX_NN, order = #NHWC}>
     // CHECK:           VPU.Yield
     // CHECK:       }
@@ -404,7 +405,7 @@ func.func @ConcatUsersHaveDifferentOperandNums(
     // CHECK-SAME:                      -> !VPU.DistributedTensor<1x1280x16x16xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
     // CHECK:           VPU.NCE.Eltwise(%arg5, %arg6) {
     // CHECK-SAME:                      op_type = #VPU.eltwise_type<ADD>,
-    // CHECK-SAME:                      ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
+    // CHECK-SAME:                      opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
     // CHECK-SAME:                      lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00], fp_prelu_alpha = 1.000000e+00 : f64>}
     // CHECK-SAME:                      -> tensor<1x1280x16x16xf16, {mem_space = @CMX_NN, order = #NHWC}>
     // CHECK:           VPU.Yield
@@ -447,13 +448,9 @@ func.func @SkipCMXConcatForNCEPermute(%arg0: tensor<1x16x90x160xf16, {order = #N
            -> tensor<1x32x90x160xf16, {order = #NHWC}> {
     %maxPoolWeightsTable = const.Declare tensor<16x1x1x4xsi32, {mem_space = @CMX_NN, order = #NCHW}> =
         dense<1> : tensor<16x1x1x4xsi32, {mem_space = @CMX_NN, order = #NCHW}>
-    %activationWindow = const.Declare tensor<1x1x1x16xui8, {mem_space = @CMX_NN, order = #NCHW}> =
-        dense<1> : tensor<1x1x1x16xui8, {mem_space = @CMX_NN, order = #NCHW}>
 
     %maxPoolWeightsTable1 = const.Declare tensor<32x1x1x4xsi32, {mem_space = @CMX_NN, order = #NCHW}> =
         dense<1> : tensor<32x1x1x4xsi32, {mem_space = @CMX_NN, order = #NCHW}>
-    %activationWindow1 = const.Declare tensor<1x1x1x16xui8, {mem_space = @CMX_NN, order = #NCHW}> =
-        dense<1> : tensor<1x1x1x16xui8, {mem_space = @CMX_NN, order = #NCHW}>
 
     // Input 1 of Concat
     %0 = VPU.NCE.ClusterTiling (%arg0 as %arg2: tensor<1x16x90x160xf16, {order = #NHWC}>) -> !Distributed {
@@ -462,11 +459,11 @@ func.func @SkipCMXConcatForNCEPermute(%arg0: tensor<1x16x90x160xf16, {order = #N
     }
     %1 = VPU.NCE.ClusterTiling (
         %0 as %arg2: tensor<1x16x90x160xf16, {mem_space = @CMX_NN, order = #NHWC}>,
-        %maxPoolWeightsTable as %arg3: tensor<16x1x1x4xsi32, {mem_space = @CMX_NN, order = #NCHW}>,
-        %activationWindow as %arg4: tensor<1x1x1x16xui8, {mem_space = @CMX_NN, order = #NCHW}>)
+        %maxPoolWeightsTable as %arg3: tensor<16x1x1x4xsi32, {mem_space = @CMX_NN, order = #NCHW}>)
             -> !Distributed {
-        %21 = VPU.NCE.MaxPool(%arg2, %arg3, %arg4) {
-                activation_window_channel_length = 4 : i64,
+        %21 = VPU.NCE.MaxPool(%arg2, %arg3) {
+                opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
+                lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 strides = [1, 1],
                 kernel_size = [1, 1]
@@ -489,7 +486,7 @@ func.func @SkipCMXConcatForNCEPermute(%arg0: tensor<1x16x90x160xf16, {order = #N
             dstElemType = f16,
             dstOrder = #NHWC,
             expandedChannels = 16 : i64,
-            ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
+            opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
             lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>
         } -> tensor<1x16x90x160xf16, {mem_space = @CMX_NN, order = #NHWC}>
         VPU.Yield %21
@@ -509,11 +506,11 @@ func.func @SkipCMXConcatForNCEPermute(%arg0: tensor<1x16x90x160xf16, {order = #N
 
     %8 = VPU.NCE.ClusterTiling (
         %7 as %arg2: tensor<1x32x90x160xf16, {mem_space = @CMX_NN, order = #NHWC}>,
-        %maxPoolWeightsTable1 as %arg3: tensor<32x1x1x4xsi32, {mem_space = @CMX_NN, order = #NCHW}>,
-        %activationWindow1 as %arg4: tensor<1x1x1x16xui8, {mem_space = @CMX_NN, order = #NCHW}>)
+        %maxPoolWeightsTable1 as %arg3: tensor<32x1x1x4xsi32, {mem_space = @CMX_NN, order = #NCHW}>)
             -> !Distributed2 {
-        %21 = VPU.NCE.MaxPool(%arg2, %arg3, %arg4) {
-                activation_window_channel_length = 4 : i64,
+        %21 = VPU.NCE.MaxPool(%arg2, %arg3) {
+                opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
+                lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 strides = [1, 1],
                 kernel_size = [1, 1]
@@ -529,7 +526,6 @@ func.func @SkipCMXConcatForNCEPermute(%arg0: tensor<1x16x90x160xf16, {order = #N
     return %9 : tensor<1x32x90x160xf16, {order = #NHWC}>
 
     // CHECK:       [[CST:%.+]] = const.Declare tensor<16x1x1x4xsi32, {mem_space = @CMX_NN, order = #NCHW}> = dense<1> : tensor<16x1x1x4xsi32, {mem_space = @CMX_NN, order = #NCHW}>
-    // CHECK:       [[CST_0:%.+]] = const.Declare tensor<1x1x1x16xui8, {mem_space = @CMX_NN, order = #NCHW}> = dense<1> : tensor<1x1x1x16xui8, {mem_space = @CMX_NN, order = #NCHW}>
     // CHECK:       [[CST_1:%.+]] = const.Declare tensor<32x1x1x4xsi32, {mem_space = @CMX_NN, order = #NCHW}> = dense<1> : tensor<32x1x1x4xsi32, {mem_space = @CMX_NN, order = #NCHW}>
 
     // CHECK:       [[COPY_IN_0:%.+]] = VPU.NCE.ClusterTiling ([[INPUT0]] as [[ARG0:%[^:]+]]: tensor<1x16x90x160xf16, {order = #NHWC}>) -> !VPU.DistributedTensor<1x16x90x160xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
@@ -539,11 +535,9 @@ func.func @SkipCMXConcatForNCEPermute(%arg0: tensor<1x16x90x160xf16, {order = #N
 
     // CHECK:       [[MAXPOOL_0:%.+]] = VPU.NCE.ClusterTiling (
     // CHECK-SAME:                          [[COPY_IN_0]] as [[ARG1:%[^:]+]]: tensor<1x16x90x160xf16, {mem_space = @CMX_NN, order = #NHWC}>,
-    // CHECK-SAME:                          [[CST]] as [[ARG2:%[^:]+]]: tensor<16x1x1x4xsi32, {mem_space = @CMX_NN, order = #NCHW}>,
-    // CHECK-SAME:                          [[CST_0]] as [[ARG3:%[^:]+]]: tensor<1x1x1x16xui8, {mem_space = @CMX_NN, order = #NCHW}>)
+    // CHECK-SAME:                          [[CST]] as [[ARG2:%[^:]+]]: tensor<16x1x1x4xsi32, {mem_space = @CMX_NN, order = #NCHW}>)
     // CHECK-SAME:                      -> !VPU.DistributedTensor<1x16x90x160xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
-    // CHECK:               VPU.NCE.MaxPool([[ARG1]], [[ARG2]] , [[ARG3]] ) {
-    // CHECK-SAME:                  activation_window_channel_length = 4 : i64,
+    // CHECK:               VPU.NCE.MaxPool([[ARG1]], [[ARG2]] ) {
     // CHECK-SAME:                  kernel_size = [1, 1],
     // CHECK-SAME:                  pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
     // CHECK-SAME:                  strides = [1, 1]}
@@ -566,7 +560,7 @@ func.func @SkipCMXConcatForNCEPermute(%arg0: tensor<1x16x90x160xf16, {order = #N
     // CHECK-SAME:                  dstElemType = f16,
     // CHECK-SAME:                  dstOrder = #NHWC,
     // CHECK-SAME:                  expandedChannels = 16 : i64,
-    // CHECK-SAME:                  ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
+    // CHECK-SAME:                  opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
     // CHECK-SAME:                  lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>
     // CHECK-SAME:          } -> tensor<1x16x90x160xf16, {mem_space = @CMX_NN, order = #NHWC}>
     // CHECK:               VPU.Yield
@@ -593,11 +587,9 @@ func.func @SkipCMXConcatForNCEPermute(%arg0: tensor<1x16x90x160xf16, {order = #N
 
     // CHECK:       [[MAXPOOL_1:%.+]] = VPU.NCE.ClusterTiling (
     // CHECK-SAME:                          [[COPY_IN_2]] as [[ARG9:%[^:]+]]: tensor<1x32x90x160xf16, {mem_space = @CMX_NN, order = #NHWC}>,
-    // CHECK-SAME:                          %cst_1 as [[ARG10:%[^:]+]]: tensor<32x1x1x4xsi32, {mem_space = @CMX_NN, order = #NCHW}>,
-    // CHECK-SAME:                          %cst_0 as [[ARG11:%[^:]+]]: tensor<1x1x1x16xui8, {mem_space = @CMX_NN, order = #NCHW}>)
+    // CHECK-SAME:                          %cst_0 as [[ARG10:%[^:]+]]: tensor<32x1x1x4xsi32, {mem_space = @CMX_NN, order = #NCHW}>)
     // CHECK-SAME:                      -> !VPU.DistributedTensor<1x32x90x160xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
-    // CHECK:               VPU.NCE.MaxPool([[ARG9]], [[ARG10]] , [[ARG11]] ) {
-    // CHECK-SAME:                  activation_window_channel_length = 4 : i64,
+    // CHECK:               VPU.NCE.MaxPool([[ARG9]], [[ARG10]] ) {
     // CHECK-SAME:                  kernel_size = [1, 1],
     // CHECK-SAME:                  pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
     // CHECK-SAME:                  strides = [1, 1]}
@@ -667,16 +659,14 @@ func.func @SkipCMXConcatForNCEPermute(%arg0: tensor<1x16x90x160xf16, {order = #N
 // CHECK-SAME:  [[INPUT:%.+]]: tensor<1x64x36x36xf16, {order = #NHWC}>
 func.func @InsertAvgPoolingWhenNCEOpHasExtraUser(%arg0: tensor<1x64x36x36xf16, {order = #NHWC}>)
            -> tensor<1x64x104x104x!qElemType2, {order = #NHWC}> {
-    %convWeights = const.Declare tensor<32x32x3x3x!qElemType1, {order = #NHWC}> = dense<1.0> : tensor<32x32x3x3xf32>, [#const.ConvertElemType<f16>, #const.ConvertElemType<ui8>, #const.QuantCast<!qElemType1>, #const.Reorder<#NHWC>]
+    %convWeights = const.Declare tensor<32x32x3x3x!qElemType1, {order = #NHWC}> = dense<1.0> : tensor<32x32x3x3xf32>, [#const.CastElemType<f16>, #const.CastElemType<ui8>, #const.CastElemType<!qElemType1>, #const.Reorder<#NHWC>]
     %convWeightsTable = const.Declare tensor<32x1x1x4xsi32> = dense<1> : tensor<32x1x1x4xsi32>
 
-    %convWeights1 = const.Declare tensor<32x32x3x3x!qElemType3, {order = #NHWC}> = dense<1.0> : tensor<32x32x3x3xf32>, [#const.ConvertElemType<f16>, #const.ConvertElemType<ui8>, #const.QuantCast<!qElemType3>, #const.Reorder<#NHWC>]
+    %convWeights1 = const.Declare tensor<32x32x3x3x!qElemType3, {order = #NHWC}> = dense<1.0> : tensor<32x32x3x3xf32>, [#const.CastElemType<f16>, #const.CastElemType<ui8>, #const.CastElemType<!qElemType3>, #const.Reorder<#NHWC>]
     %convWeightsTable1 = const.Declare tensor<32x1x1x4xsi32> = dense<1> : tensor<32x1x1x4xsi32>
 
     %maxPoolWeightsTable = const.Declare tensor<64x1x1x4xsi32, {mem_space = @CMX_NN, order = #NCHW}> =
         dense<1> : tensor<64x1x1x4xsi32, {mem_space = @CMX_NN, order = #NCHW}>
-    %activationWindow = const.Declare tensor<1x1x1x16xui8, {mem_space = @CMX_NN, order = #NCHW}> =
-        dense<1> : tensor<1x1x1x16xui8, {mem_space = @CMX_NN, order = #NCHW}>
 
     // Input 1 of Concat
     %0 = VPU.NCE.ClusterTiling (%arg0 as %arg1: tensor<1x32x104x104x!qElemType, {order = #NHWC}>) -> !Distributed {
@@ -697,9 +687,9 @@ func.func @InsertAvgPoolingWhenNCEOpHasExtraUser(%arg0: tensor<1x64x36x36xf16, {
         %2 as %arg3: tensor<32x1x1x4xsi32, {mem_space = @CMX_NN, order = #NCHW}>)
             -> !Distributed3 {
         %21 = VPU.NCE.Convolution(%arg1, %arg2, %arg3) {
-                pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>, clamp_low = 0 : i64, clamp_high = 255 : i64,
+                opaque_ppe = #VPU.PPEInt<mode = <LPRELU>, clamp_low = 0 : i64, clamp_high = 255 : i64,
                 lrelu_mult = 1638 : i64, lrelu_shift = 14 : i64, fp_prelu_alpha = 0.0999755859375 : f64>,
+                pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
                 rawFilterShape = [32, 32, 3, 3],
                 strides = [1, 1]
             } -> tensor<1x32x104x104x!qElemType2, {mem_space = @CMX_NN, order = #NHWC}>
@@ -725,9 +715,9 @@ func.func @InsertAvgPoolingWhenNCEOpHasExtraUser(%arg0: tensor<1x64x36x36xf16, {
         %6 as %arg3: tensor<32x1x1x4xsi32, {mem_space = @CMX_NN, order = #NCHW}>)
             -> !Distributed3 {
         %21 = VPU.NCE.Convolution(%arg1, %arg2, %arg3) {
-                pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>, clamp_low = 0 : i64, clamp_high = 255 : i64,
+                opaque_ppe = #VPU.PPEInt<mode = <LPRELU>, clamp_low = -128 : i64, clamp_high = 127 : i64,
                 lrelu_mult = 1638 : i64, lrelu_shift = 14 : i64, fp_prelu_alpha = 0.0999755859375 : f64>,
+                pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
                 rawFilterShape = [32, 32, 3, 3],
                 strides = [1, 1]
             } -> tensor<1x32x104x104x!qElemType2, {mem_space = @CMX_NN, order = #NHWC}>
@@ -746,11 +736,11 @@ func.func @InsertAvgPoolingWhenNCEOpHasExtraUser(%arg0: tensor<1x64x36x36xf16, {
     }
     %11 = VPU.NCE.ClusterTiling (
         %10 as %arg1: tensor<1x64x104x104x!qElemType2, {order = #NHWC}>,
-        %maxPoolWeightsTable as %arg2: tensor<64x1x1x4xsi32, {mem_space = @CMX_NN, order = #NCHW}>,
-        %activationWindow as %arg3: tensor<1x1x1x16xui8, {mem_space = @CMX_NN, order = #NCHW}>)
+        %maxPoolWeightsTable as %arg2: tensor<64x1x1x4xsi32, {mem_space = @CMX_NN, order = #NCHW}>)
             -> !Distributed5 {
-        %21 = VPU.NCE.MaxPool(%arg1, %arg2, %arg3) {
-                activation_window_channel_length = 16 : i64,
+        %21 = VPU.NCE.MaxPool(%arg1, %arg2) {
+                opaque_ppe = #VPU.PPEInt<mode = <LPRELU>, clamp_low = -128 : i64, clamp_high = 127 : i64,
+                lrelu_mult = 1638 : i64, lrelu_shift = 14 : i64, fp_prelu_alpha = 0.0999755859375 : f64>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 strides = [1, 1],
                 kernel_size = [1, 1]
@@ -765,11 +755,10 @@ func.func @InsertAvgPoolingWhenNCEOpHasExtraUser(%arg0: tensor<1x64x36x36xf16, {
 
     return %12 : tensor<1x64x104x104x!qElemType2, {order = #NHWC}>
 
-    // CHECK:       [[CST:%.+]] = const.Declare tensor<32x32x3x3x!qElemType1, {order = #NHWC}> = dense<1.000000e+00> : tensor<32x32x3x3xf32>, [#const.ConvertElemType<f16>, #const.ConvertElemType<ui8>, #const.QuantCast<!qElemType1>, #const.Reorder<#NHWC>]
+    // CHECK:       [[CST:%.+]] = const.Declare tensor<32x32x3x3x!qElemType1, {order = #NHWC}> = dense<1.000000e+00> : tensor<32x32x3x3xf32>, [#const.CastElemType<f16>, #const.CastElemType<ui8>, #const.CastElemType<!qElemType1>, #const.Reorder<#NHWC>]
     // CHECK:       [[CST_0:%.+]] = const.Declare tensor<32x1x1x4xsi32> = dense<1> : tensor<32x1x1x4xsi32>
-    // CHECK:       [[CST_1:%.+]] = const.Declare tensor<32x32x3x3x!qElemType2, {order = #NHWC}> = dense<1.000000e+00> : tensor<32x32x3x3xf32>, [#const.ConvertElemType<f16>, #const.ConvertElemType<ui8>, #const.QuantCast<!qElemType2>, #const.Reorder<#NHWC>]
+    // CHECK:       [[CST_1:%.+]] = const.Declare tensor<32x32x3x3x!qElemType2, {order = #NHWC}> = dense<1.000000e+00> : tensor<32x32x3x3xf32>, [#const.CastElemType<f16>, #const.CastElemType<ui8>, #const.CastElemType<!qElemType2>, #const.Reorder<#NHWC>]
     // CHECK:       [[CST_2:%.+]] = const.Declare tensor<64x1x1x4xsi32, {mem_space = @CMX_NN, order = #NCHW}> = dense<1> : tensor<64x1x1x4xsi32, {mem_space = @CMX_NN, order = #NCHW}>
-    // CHECK:       [[CST_3:%.+]] = const.Declare tensor<1x1x1x16xui8, {mem_space = @CMX_NN, order = #NCHW}> = dense<1> : tensor<1x1x1x16xui8, {mem_space = @CMX_NN, order = #NCHW}>
 
     // CHECK:       [[COPY_IN_0:%.+]] = VPU.NCE.ClusterTiling ([[INPUT]] as [[ARG0:%[^:]+]]: tensor<1x32x104x104x!qElemType3, {order = #NHWC}>)
     // CHECK-SAME:                      -> !VPU.DistributedTensor<1x32x104x104x!qElemType3, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
@@ -795,9 +784,9 @@ func.func @InsertAvgPoolingWhenNCEOpHasExtraUser(%arg0: tensor<1x64x36x36xf16, {
     // CHECK-SAME:                          [[COPY_IN_2]] as [[ARG5:%[^:]+]]: tensor<32x1x1x4xsi32, {mem_space = @CMX_NN, order = #NCHW}>)
     // CHECK-SAME:                      -> !VPU.DistributedTensor<1x32x104x104x!qElemType, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
     // CHECK:               VPU.NCE.Convolution([[ARG3]], [[ARG4]], [[ARG5]]) {
+    // CHECK-SAME:                  opaque_ppe = #VPU.PPEInt<mode = <LPRELU>, clamp_low = 0 : i64, clamp_high = 255 : i64,
+    // CHECK-SAME:                      lrelu_mult = 1638 : i64, lrelu_shift = 14 : i64, fp_prelu_alpha = 0.0999755859375 : f64>,
     // CHECK-SAME:                  pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
-    // CHECK-SAME:                  ppe = #VPU.PPETask<mode = <LPRELU>, clamp_low = 0 : i64, clamp_high = 255 : i64,
-    // CHECK-SAME:                  lrelu_mult = 1638 : i64, lrelu_shift = 14 : i64, fp_prelu_alpha = 0.0999755859375 : f64>,
     // CHECK-SAME:                  rawFilterShape = [32, 32, 3, 3],
     // CHECK-SAME:                  strides = [1, 1]}
     // CHECK-SAME:          -> tensor<1x32x104x104x!qElemType, {mem_space = @CMX_NN, order = #NHWC}>
@@ -807,11 +796,13 @@ func.func @InsertAvgPoolingWhenNCEOpHasExtraUser(%arg0: tensor<1x64x36x36xf16, {
     // CHECK:       [[AVGPOOL:%.+]] = VPU.NCE.ClusterTiling ([[CONV]] as [[ARG6:%[^:]+]]: tensor<1x32x104x104x!qElemType, {mem_space = @CMX_NN, order = #NHWC}>)
     // CHECK-SAME:                      -> !VPU.DistributedTensor<1x32x104x104x!qElemType, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
     // CHECK:               VPU.NCE.AveragePool([[ARG6]]) {
-    // CHECK-SAME:                  kernel_size = [1, 1],
-    // CHECK-SAME:                  pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-    // CHECK-SAME:                  ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = 0 : i64, clamp_high = 255 : i64,
+    // CHECK-SAME:              kernel_size = [1, 1],
+    // CHECK-SAME:              opaque_ppe = #VPU.PPEInt<mode = <NOOP>,
+    // CHECK-SAME:                  clamp_low = 0 : i64,
+    // CHECK-SAME:                  lamp_high = 255 : i64,
     // CHECK-SAME:                  lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-    // CHECK-SAME:                  quant_mult = [16384], quant_shift = [14], quant_post_shift = 0 : i64>,
+    // CHECK-SAME:                  quant_mult = [16384], quant_shift = [14], quant_post_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>
+    // CHECK-SAME:                  pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
     // CHECK-SAME:                  strides = [1, 1]}
     // CHECK-SAME:          -> tensor<1x32x104x104x!qElemType, {mem_space = @CMX_NN, order = #NHWC}>
     // CHECK:               VPU.Yield
@@ -835,9 +826,9 @@ func.func @InsertAvgPoolingWhenNCEOpHasExtraUser(%arg0: tensor<1x64x36x36xf16, {
     // CHECK-SAME:                          [[COPY_IN_4]] as [[ARG11:%[^:]+]]: tensor<32x1x1x4xsi32, {mem_space = @CMX_NN, order = #NCHW}>)
     // CHECK-SAME:                      -> !VPU.DistributedTensor<1x32x104x104x!qElemType, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
     // CHECK:               VPU.NCE.Convolution([[ARG9]], [[ARG10]], [[ARG11]]) {
+    // CHECK-SAME:                          opaque_ppe = #VPU.PPEInt<mode = <LPRELU>, clamp_low = -128 : i64, clamp_high = 127 : i64,
+    // CHECK-SAME:                              lrelu_mult = 1638 : i64, lrelu_shift = 14 : i64, fp_prelu_alpha = 0.0999755859375 : f64>,
     // CHECK-SAME:                          pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
-    // CHECK-SAME:                          ppe = #VPU.PPETask<mode = <LPRELU>, clamp_low = 0 : i64, clamp_high = 255 : i64,
-    // CHECK-SAME:                          lrelu_mult = 1638 : i64, lrelu_shift = 14 : i64, fp_prelu_alpha = 0.0999755859375 : f64>,
     // CHECK-SAME:                          rawFilterShape = [32, 32, 3, 3],
     // CHECK-SAME:                          strides = [1, 1]}
     // CHECK-SAME:          -> tensor<1x32x104x104x!qElemType, {mem_space = @CMX_NN, order = #NHWC}>
@@ -855,11 +846,9 @@ func.func @InsertAvgPoolingWhenNCEOpHasExtraUser(%arg0: tensor<1x64x36x36xf16, {
 
     // CHECK:       [[MAXPOOL:%.+]] = VPU.NCE.ClusterTiling (
     // CHECK-SAME:                          [[CMX_CONCAT]] as [[ARG12:%[^:]+]]: tensor<1x64x104x104x!qElemType, {order = #NHWC}>,
-    // CHECK-SAME:                          [[CST_2]] as [[ARG13:%[^:]+]]: tensor<64x1x1x4xsi32, {mem_space = @CMX_NN, order = #NCHW}>,
-    // CHECK-SAME:                          [[CST_3]] as [[ARG14:%[^:]+]]: tensor<1x1x1x16xui8, {mem_space = @CMX_NN, order = #NCHW}>)
+    // CHECK-SAME:                          [[CST_2]] as [[ARG13:%[^:]+]]: tensor<64x1x1x4xsi32, {mem_space = @CMX_NN, order = #NCHW}>)
     // CHECK-SAME:                      -> !VPU.DistributedTensor<1x64x104x104x!qElemType, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
-    // CHECK:               VPU.NCE.MaxPool([[ARG12]], [[ARG13]] , [[ARG14]] ) {
-    // CHECK-SAME:                          activation_window_channel_length = 16 : i64,
+    // CHECK:               VPU.NCE.MaxPool([[ARG12]], [[ARG13]] ) {
     // CHECK-SAME:                          kernel_size = [1, 1],
     // CHECK-SAME:                          pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
     // CHECK-SAME:                          strides = [1, 1]}
@@ -867,8 +856,8 @@ func.func @InsertAvgPoolingWhenNCEOpHasExtraUser(%arg0: tensor<1x64x36x36xf16, {
     // CHECK:               VPU.Yield
     // CHECK:       }
 
-    // CHECK:       [[COPY_OUT:%.+]] = VPU.NCE.ClusterTiling ([[MAXPOOL]] as [[ARG15:%[^:]+]]: tensor<1x64x104x104x!qElemType, {mem_space = @CMX_NN, order = #NHWC}>) -> tensor<1x64x104x104x!qElemType, {order = #NHWC}> {
-    // CHECK:               VPU.Copy([[ARG15]]) : tensor<1x64x104x104x!qElemType, {mem_space = @CMX_NN, order = #NHWC}> -> tensor<1x64x104x104x!qElemType, {order = #NHWC}>
+    // CHECK:       [[COPY_OUT:%.+]] = VPU.NCE.ClusterTiling ([[MAXPOOL]] as [[ARG14:%[^:]+]]: tensor<1x64x104x104x!qElemType, {mem_space = @CMX_NN, order = #NHWC}>) -> tensor<1x64x104x104x!qElemType, {order = #NHWC}> {
+    // CHECK:               VPU.Copy([[ARG14]]) : tensor<1x64x104x104x!qElemType, {mem_space = @CMX_NN, order = #NHWC}> -> tensor<1x64x104x104x!qElemType, {order = #NHWC}>
     // CHECK:               VPU.Yield
     // CHECK:       }
 

@@ -16,6 +16,7 @@
 #include "vpux/compiler/dialect/VPU/utils/se_roll_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/sparsity_utils.hpp"
 #include "vpux/compiler/dialect/VPUIP/interfaces/dpu_tiler.hpp"
+#include "vpux/utils/core/error.hpp"
 
 #include <mlir/IR/IRMapping.h>
 #include <vpux/compiler/dialect/VPUIP/utils/convert_to_dma_utils.hpp>
@@ -88,116 +89,8 @@ mlir::LogicalResult checkAndAlignActInputTiling(vpux::VPU::NCEOpInterface nceOp,
     VPUX_THROW("Cannot find aligned act input tiling for op {0} at {1}", nceOp->getName(), nceOp->getLoc());
 }
 
-// Temporari solution until E#59988 will be implemented.
-// Function can be deleted when E#59993 related interface will be added.
-SmallVector<mlir::Value> reifyTileTopK(VPU::TilingBuilderOpInterface origOp, const TileInfo& outputTile,
-                                       mlir::OpBuilder& builder, Logger log) {
-    log = log.nest(2);
-    log.trace("{0}", outputTile);
-
-    auto inputTiling = origOp.backInferTileInfo(outputTile, log);
-    auto& inTiles = inputTiling.tiles;
-    VPUX_THROW_UNLESS(!inTiles.empty(), "Got empty tile information");
-
-    mlir::IRMapping mapper;
-    for (auto p : origOp->getOperands() | indexed) {
-        auto origInput = p.value();
-        auto inputIdx = p.index();
-        const auto valName = printToString("input {0}", inputIdx);
-        const auto tiledInput = vpux::VPU::makeTile(builder, origOp->getLoc(), origInput, inTiles[inputIdx], valName);
-        mapper.map(origInput, tiledInput);
-    }
-    const auto tileLoc = appendLoc(origOp->getLoc(), "output tile {0}", outputTile.offsets);
-    auto* tiledOp = builder.clone(*origOp, mapper);
-    tiledOp->setLoc(tileLoc);
-
-    auto tiledBuilderOp = mlir::dyn_cast<VPU::TilingBuilderOpInterface>(tiledOp);
-    VPUX_THROW_WHEN(tiledBuilderOp == nullptr, "Operation '{0}' doesn't implement TilingBuilderOpInterface",
-                    tiledBuilderOp->getName());
-    tiledBuilderOp.adjustAttrs(inputTiling, outputTile);
-
-    SmallVector<mlir::Value> ret;
-    for (auto p : origOp->getResults() | indexed) {
-        auto idx = p.index();
-        const auto baseResType = origOp->getResult(idx).getType().cast<vpux::NDTypeInterface>();
-        const auto tiledResType = baseResType.extractDenseTile(outputTile.offsets, outputTile.shape);
-        auto tiledRes = tiledOp->getResult(idx);
-        tiledRes.setType(tiledResType);
-        ret.push_back(tiledRes);
-    }
-    return ret;
-}
-
-mlir::LogicalResult applyTileStrategyGatherDMA(VPU::TilingBuilderOpInterface origOp, const OutputTiling& tiles,
-                                               mlir::PatternRewriter& rewriter, Logger log) {
-    auto copyOp = mlir::dyn_cast<VPU::CopyOp>(*(origOp->getResults()[0].user_begin()));
-    if (!copyOp) {
-        log.trace("No copyOp after GatherDMA, cannot apply tiling");
-        return mlir::failure();
-    }
-
-    SmallVector<mlir::Value> resultTileVals;
-    SmallVector<ShapeRef> resultTileOffsets;
-
-    resultTileVals.reserve(tiles.size());
-    resultTileOffsets.reserve(tiles.size());
-    for (const auto& outputTile : tiles) {
-        const auto tiledRes = reifyTile(origOp, outputTile, rewriter, log);
-        const auto tiledShape = getShape(tiledRes);
-        VPUX_THROW_UNLESS(tiledShape == outputTile.shape,
-                          "Inferred tiled output shape '{0}' doesn't match with generated '{1}'", tiledShape,
-                          outputTile.shape);
-        const auto ddrMemSpace = IndexedSymbolAttr::get(origOp.getContext(), stringifyEnum(VPU::MemoryKind::DDR));
-        auto copyOp = rewriter.create<VPU::CopyOp>(origOp->getLoc(), tiledRes, ddrMemSpace);
-        resultTileVals.push_back(copyOp.getOutput());
-        resultTileOffsets.push_back(outputTile.offsets);
-    }
-
-    rewriter.replaceOpWithNewOp<VPU::ConcatOp>(copyOp, copyOp->getResult(0).getType(), mlir::ValueRange(resultTileVals),
-                                               ArrayRef(resultTileOffsets));
-
-    rewriter.eraseOp(origOp);
-
-    return mlir::success();
-}
-
-// Temporari solution until E#59988 will be implemented.
-// Function can be deleted when E#59993 related interface will be added.
-mlir::LogicalResult applyTileStrategyTopK(VPU::TilingBuilderOpInterface origOp, const OutputTiling& tiles,
-                                          mlir::PatternRewriter& rewriter, Logger log) {
-    // apply the generated tiling strategy and create tiled operations
-    // insert the tiled pattern with a concat to the IR
-    SmallVector<SmallVector<mlir::Value>> resultTileVals(origOp->getNumResults());
-    SmallVector<SmallVector<ShapeRef>> resultTileOffsets(origOp->getNumResults());
-    for (const auto& outputTile : tiles) {
-        const auto tiledRes = reifyTileTopK(origOp, outputTile, rewriter, log);
-        for (auto p : origOp->getResults() | indexed) {
-            auto idx = p.index();
-            const auto tiledShape = getShape(tiledRes[idx]);
-            VPUX_THROW_UNLESS(tiledShape == outputTile.shape,
-                              "Inferred tiled output shape '{0}' doesn't match with generated '{1}'", tiledShape,
-                              outputTile.shape);
-            resultTileOffsets[idx].push_back(outputTile.offsets);
-            resultTileVals[idx].push_back(tiledRes[idx]);
-        }
-    }
-
-    SmallVector<mlir::Value> opsConcat;
-    for (auto p : origOp->getResults() | indexed) {
-        auto idx = p.index();
-        auto opConcat =
-                rewriter.create<VPU::ConcatOp>(origOp->getLoc(), origOp->getResult(idx).getType(),
-                                               mlir::ValueRange(resultTileVals[idx]), ArrayRef(resultTileOffsets[idx]));
-        opsConcat.push_back(opConcat.getOutput());
-    }
-    rewriter.replaceOp(origOp, opsConcat);
-
-    return mlir::success();
-}
-
-// Function can be deleted when E#59993 related interface will be added.
-SmallVector<mlir::Value> reifyTilesMultiOutput(VPU::TilingBuilderOpInterface origOp, const TileInfo& outputTile,
-                                               mlir::OpBuilder& builder, Logger log) {
+SmallVector<mlir::Value> reifyTiles(VPU::TilingBuilderOpInterface origOp, const TileInfo& outputTile,
+                                    mlir::OpBuilder& builder, Logger log) {
     log = log.nest(2);
     log.trace("{0}", outputTile);
 
@@ -233,155 +126,89 @@ SmallVector<mlir::Value> reifyTilesMultiOutput(VPU::TilingBuilderOpInterface ori
     return tiledOp->getResults();
 }
 
-// This is an attempt to implement multi-output tiling
-// Should be removed after a common approach will be implemented E#59993
-mlir::LogicalResult applyTileStrategyMultiOutput(VPU::TilingBuilderOpInterface origOp, const OutputTiling& tiles,
-                                                 mlir::PatternRewriter& rewriter, Logger log) {
-    auto resultTileVals = SmallVector<SmallVector<mlir::Value>>(origOp->getNumResults());
-    auto resultTileOffsets = SmallVector<SmallVector<Shape>>(origOp->getNumResults());
-
-    for (const auto& outputTile : tiles) {
-        const auto values = reifyTilesMultiOutput(origOp, outputTile, rewriter, log);
-        const auto outputTiles = origOp.getOutputTiling(outputTile, log);
-
-        for (const auto& p : zip(values, outputTiles)) {
-            const auto tiledShape = getShape(std::get<0>(p));
-            VPUX_THROW_UNLESS(tiledShape == std::get<1>(p).shape,
-                              "Inferred tiled output shape '{0}' doesn't match with generated '{1}'", tiledShape,
-                              outputTile.shape);
-        }
-
-        for (const auto& p : origOp->getResults() | indexed) {
-            auto idx = p.index();
-            resultTileOffsets[idx].push_back(outputTiles[idx].offsets);
-            resultTileVals[idx].push_back(values[idx]);
-        }
+mlir::LogicalResult applyTileStrategyGatherDMA(VPU::TilingBuilderOpInterface origOp, const OutputTiling& tiles,
+                                               mlir::PatternRewriter& rewriter, Logger log) {
+    auto copyOp = mlir::dyn_cast<VPU::CopyOp>(*(origOp->getResults()[0].user_begin()));
+    if (!copyOp) {
+        log.trace("No copyOp after GatherDMA, cannot apply tiling");
+        return mlir::failure();
     }
 
-    SmallVector<mlir::Value> opsConcat;
-    for (const auto& p : origOp->getResults() | indexed) {
-        auto idx = p.index();
-        auto opConcat =
-                rewriter.create<VPU::ConcatOp>(origOp->getLoc(), origOp->getResult(idx).getType(),
-                                               mlir::ValueRange(resultTileVals[idx]), ArrayRef(resultTileOffsets[idx]));
-        opsConcat.push_back(opConcat.getOutput());
-    }
-    rewriter.replaceOp(origOp, opsConcat);
-
-    return mlir::success();
-}
-
-mlir::Value reifyTile(VPU::TilingBuilderOpInterface origOp, const TileInfo& outputTile, mlir::OpBuilder& builder,
-                      Logger log) {
-    log = log.nest(2);
-    log.trace("{0}", outputTile);
-
-    auto inputTiling = origOp.backInferTileInfo(outputTile, log);
-    auto& inTiles = inputTiling.tiles;
-
-    VPUX_THROW_UNLESS(!inTiles.empty(), "Got empty tile information");
-
-    mlir::IRMapping mapper;
-    for (auto p : origOp->getOperands() | indexed) {
-        auto origInput = p.value();
-        auto inputIdx = p.index();
-
-        const auto valName = printToString("input {0}", inputIdx);
-        const auto tiledInput = vpux::VPU::makeTile(builder, origOp->getLoc(), origInput, inTiles[inputIdx], valName);
-
-        mapper.map(origInput, tiledInput);
-    }
-
-    const auto tileLoc = appendLoc(origOp->getLoc(), "output tile {0}", outputTile.offsets);
-
-    auto* tiledOp = builder.clone(*origOp, mapper);
-    tiledOp->setLoc(tileLoc);
-
-    auto tiledBuilderOp = mlir::dyn_cast<VPU::TilingBuilderOpInterface>(tiledOp);
-    VPUX_THROW_WHEN(tiledBuilderOp == nullptr, "Operation '{0}' doesn't implement TilingBuilderOpInterface",
-                    tiledBuilderOp->getName());
-
-    tiledBuilderOp.adjustAttrs(inputTiling, outputTile);
-
-    const auto baseResType = origOp->getResult(0).getType().cast<vpux::NDTypeInterface>();
-    const auto tiledResType = baseResType.extractDenseTile(outputTile.offsets, outputTile.shape);
-
-    auto tiledRes = tiledOp->getResult(0);
-    tiledRes.setType(tiledResType);
-
-    return tiledRes;
-}
-
-mlir::LogicalResult applyTileStrategy(VPU::TilingBuilderOpInterface origOp, const OutputTiling& tiles,
-                                      mlir::PatternRewriter& rewriter, Logger log) {
-    // TODO: delete when function will allow rewrite for multiple output ops (E#59988)
-    if (mlir::isa<VPU::TopKOp>(origOp)) {
-        return applyTileStrategyTopK(origOp, tiles, rewriter, log);
-    }
-    if (mlir::isa<VPU::GatherDMAOp>(origOp)) {
-        return applyTileStrategyGatherDMA(origOp, tiles, rewriter, log);
-    }
-    if (mlir::isa<VPU::DetectionOutputSortOp>(origOp) || mlir::isa<VPU::DetectionOutputNmsCaffeOp>(origOp) ||
-        mlir::isa<VPU::GRUSequenceOp>(origOp) || mlir::isa<VPU::GRUSequenceLastPartOp>(origOp)) {
-        return applyTileStrategyMultiOutput(origOp, tiles, rewriter, log);
-    }
-
-    // apply the generated tiling strategy and create tiled operations
-    // insert the tiled pattern with a concat to the IR
     SmallVector<mlir::Value> resultTileVals;
     SmallVector<ShapeRef> resultTileOffsets;
 
     resultTileVals.reserve(tiles.size());
     resultTileOffsets.reserve(tiles.size());
-
     for (const auto& outputTile : tiles) {
-        const auto tiledRes = reifyTile(origOp, outputTile, rewriter, log);
-
-        const auto tiledShape = getShape(tiledRes);
+        const auto tiledReuslts = reifyTiles(origOp, outputTile, rewriter, log);
+        const auto tiledShape = getShape(tiledReuslts[0]);
         VPUX_THROW_UNLESS(tiledShape == outputTile.shape,
                           "Inferred tiled output shape '{0}' doesn't match with generated '{1}'", tiledShape,
                           outputTile.shape);
-
-        resultTileVals.push_back(tiledRes);
+        const auto ddrMemSpace = IndexedSymbolAttr::get(origOp.getContext(), stringifyEnum(VPU::MemoryKind::DDR));
+        auto copyOp = rewriter.create<VPU::CopyOp>(origOp->getLoc(), tiledReuslts[0], ddrMemSpace);
+        resultTileVals.push_back(copyOp.getOutput());
         resultTileOffsets.push_back(outputTile.offsets);
     }
 
-    rewriter.replaceOpWithNewOp<VPU::ConcatOp>(origOp, origOp->getResult(0).getType(), mlir::ValueRange(resultTileVals),
+    rewriter.replaceOpWithNewOp<VPU::ConcatOp>(copyOp, copyOp->getResult(0).getType(), mlir::ValueRange(resultTileVals),
                                                ArrayRef(resultTileOffsets));
 
-    // update concat users and also place correctly in the IR
-    for (auto* concatOp : resultTileVals[0].getUsers()) {
-        if (!mlir::isa<VPU::ConcatOp>(concatOp)) {
-            continue;
-        }
+    rewriter.eraseOp(origOp);
 
-        for (auto concatConsumer : concatOp->getResult(0).getUsers()) {
-            if (concatOp->isBeforeInBlock(concatConsumer)) {
-                continue;
-            }
-            concatOp->moveBefore(concatConsumer);
-            // also move the Slice+Conv pattern, first conv, then slice
-            for (auto concatOperand : concatOp->getOperands()) {
-                auto concatProducer = concatOperand.getDefiningOp();
-                if (concatProducer->isBeforeInBlock(concatOp)) {
-                    continue;
-                }
-                concatProducer->moveBefore(concatOp);
-                auto sliceOp = concatProducer->getOperand(0).getDefiningOp();
-                for (auto sliceOperand : concatProducer->getOperands()) {
-                    if (mlir::isa<VPU::SliceOp>(sliceOperand.getDefiningOp())) {
-                        sliceOp = sliceOperand.getDefiningOp();
-                        break;
-                    }
-                }
-                if (!mlir::isa<VPU::SliceOp>(sliceOp)) {
-                    continue;
-                }
-                sliceOp->moveBefore(concatProducer);
-            }
-        }
-        break;
+    return mlir::success();
+}
+
+mlir::LogicalResult applyTileStrategy(VPU::TilingBuilderOpInterface origOp, const OutputTiling& tiles,
+                                      mlir::PatternRewriter& rewriter, Logger log) {
+    // Refactoring ticket E#141093
+    if (mlir::isa<VPU::GatherDMAOp>(origOp)) {
+        return applyTileStrategyGatherDMA(origOp, tiles, rewriter, log);
     }
+
+    const auto results = origOp->getResults();
+
+    auto resultTileValues = SmallVector<SmallVector<mlir::Value>>(results.size());
+    auto resultTileOffsets = SmallVector<SmallVector<Shape>>(results.size());
+
+    for (const auto& outputTile : tiles) {
+        auto tiledResults = reifyTiles(origOp, outputTile, rewriter, log);
+        const auto outputTiling = origOp.getOutputTiling(outputTile, log);
+        VPUX_THROW_UNLESS(results.size() == outputTiling.size(),
+                          "Number of results '{0}' doesn't match with number of output tiles '{1}' at '{2}'",
+                          results.size(), outputTiling.size(), origOp->getLoc());
+
+        for (const auto i : irange(results.size())) {
+            const auto& outputTile = outputTiling[i];
+            auto tiledResult = tiledResults[i];
+
+            const auto tiledShape = getShape(tiledResult);
+            VPUX_THROW_UNLESS(tiledShape == outputTile.shape,
+                              "Inferred output shape '{0}' doesn't match tiled shape '{1}' at '{2}'", tiledShape,
+                              outputTile.shape, tiledResult.getDefiningOp()->getLoc());
+
+            const auto resultType = mlir::cast<vpux::NDTypeInterface>(results[i].getType());
+            const auto resultDenseTile = resultType.extractDenseTile(outputTile.offsets, outputTile.shape);
+
+            tiledResult.setType(resultDenseTile);
+
+            resultTileValues[i].push_back(tiledResult);
+            resultTileOffsets[i].push_back(outputTiling[i].offsets);
+        }
+    }
+
+    SmallVector<mlir::Value> concatOps;
+    for (const auto i : irange(results.size())) {
+        auto resultType = origOp->getResult(i).getType();
+        auto tileValues = mlir::ValueRange(resultTileValues[i]);
+        auto tileOffsets = ArrayRef(resultTileOffsets[i]);
+
+        auto concatOp = rewriter.create<VPU::ConcatOp>(origOp->getLoc(), resultType, tileValues, tileOffsets);
+
+        concatOps.push_back(concatOp.getOutput());
+    }
+
+    rewriter.replaceOp(origOp, concatOps);
 
     return mlir::success();
 }
@@ -403,6 +230,18 @@ bool hasMultiBranches(mlir::Operation* op) {
         }
     }
     return false;
+}
+
+Dim getHighestDimFromType(vpux::NDTypeInterface type) {
+    const auto order = type.getDimsOrder();
+    const auto shape = type.getShape();
+    for (auto i : irange(order.numDims())) {
+        auto dim = order.dimAt(i);
+        if (shape[dim] > 1) {
+            return dim;
+        }
+    }
+    return order.dimAt(0);
 }
 
 mlir::Operation* getParentComputeOp(mlir::Operation* op) {
@@ -596,11 +435,11 @@ bool opNeedsTiling(mlir::Operation* op, bool enablePrefetchTiling, Logger log) {
     return false;
 }
 
-std::optional<size_t> getMaxWorkLoadNumberPerClusterForNCEWithSparseOutput(VPU::ArchKind arch,
-                                                                           ArrayRef<Shape> perClusterShapes,
-                                                                           ArrayRef<int64_t> supportedChannels) {
-    const auto getWorkloadNum = [&](int64_t channelSupported) {
+std::optional<std::pair<size_t, size_t>> getWorkLoadInformationForNCEWithSparseOutput(
+        VPU::ArchKind arch, ArrayRef<Shape> perClusterShapes, ArrayRef<int64_t> supportedChannels) {
+    auto getWorkloadNum = [&](int64_t channelSupported) {
         size_t wlMaxNumPerCluster = 0;
+        size_t wlNumInTotal = 0;
         for (const auto& perClusterShape : perClusterShapes) {
             size_t wlNum;
             const auto perClusterChannel = perClusterShape[vpux::Dims4D::Act::C];
@@ -613,8 +452,9 @@ std::optional<size_t> getMaxWorkLoadNumberPerClusterForNCEWithSparseOutput(VPU::
             if (wlMaxNumPerCluster < wlNum) {
                 wlMaxNumPerCluster = wlNum;
             }
+            wlNumInTotal += wlNum;
         }
-        return wlMaxNumPerCluster;
+        return std::make_pair(wlMaxNumPerCluster, wlNumInTotal);
     };
 
     auto sparsityConstraint = VPU::getSparsityConstraint(arch);
@@ -670,7 +510,6 @@ bool doesNCEOpChannelSatisfyWorkload(mlir::Operation* nceOp, const TileInfo& out
         log.trace("tileChannel {0} can not be divisible by minSupportedChannel {1}", tileChannel, minSupportedChannel);
         return false;
     }
-    const auto maxNumClusters = tileChannel / minSupportedChannel;
 
     auto getDataType = [](mlir::Type type) {
         if (auto sparseTensor = type.dyn_cast<VPU::SparseTensorType>()) {
@@ -684,19 +523,13 @@ bool doesNCEOpChannelSatisfyWorkload(mlir::Operation* nceOp, const TileInfo& out
         const auto outputTileType = outputType.extractDenseTile(outputTile.offsets, outputTile.shape);
 
         auto clusterOp = mlir::dyn_cast<VPU::ClusteredOpInterface>(nceOp);
-        if (clusterOp == nullptr || !clusterOp.getMultiClusterStrategy().has_value() ||
-            clusterOp.getMultiClusterStrategy().value() != VPU::MultiClusterStrategy::SplitOverKernel) {
+        if (clusterOp == nullptr || !clusterOp.getMultiClusterStrategy().has_value()) {
             return SmallVector<Shape>{outputTile.shape};
         }
-        // SOK case
-        auto numClusters =
-                VPU::getOptimalNumClusters(clusterOp, outputTile.shape, VPU::MultiClusterStrategy::SplitOverKernel);
-        // check wl channel on each cluster to satisfy supportedChannels
-        if (numClusters.getInt() > maxNumClusters) {
-            numClusters = mlir::IntegerAttr::get(getInt64Type(nceOp->getContext()), maxNumClusters);
-        }
-        auto distributedType = getDistributedOutputTypeFromOp(clusterOp, outputTileType, numClusters,
-                                                              VPU::MultiClusterStrategy::SplitOverKernel);
+        // multi cluster case
+        auto strategy = clusterOp.getMultiClusterStrategy().value();
+        auto numClusters = VPU::getOptimalNumClusters(clusterOp, outputTile.shape, strategy);
+        auto distributedType = getDistributedOutputTypeFromOp(clusterOp, outputTileType, numClusters, strategy);
         return getDataType(distributedType).cast<VPU::DistributedTensorType>().getPerClusterComputeShapes();
     };
 
@@ -708,15 +541,18 @@ bool doesNCEOpChannelSatisfyWorkload(mlir::Operation* nceOp, const TileInfo& out
     const auto isSparseRemoved = nceOpIf != nullptr && VPU::shouldRemoveOutputSparsity(nceOpIf);
 
     size_t wlMaxNumPerCluster = 0;
+    size_t wlNumInTotal = 0;
     if (nceOp->getResult(0).getType().isa<VPU::SparseTensorType>() && !isSparseRemoved) {
         // NCE operations with sparse outputs must have all variants with the same number of channels
         // except of the last one which can have fewer channels than the rest
-        const auto maxWorkloadNum = getMaxWorkLoadNumberPerClusterForNCEWithSparseOutput(
-                getArch(nceOp), perClusterShapes, supportedChannels);
-        if (!maxWorkloadNum.has_value()) {
+        const auto workloadInformation =
+                getWorkLoadInformationForNCEWithSparseOutput(getArch(nceOp), perClusterShapes, supportedChannels);
+        if (!workloadInformation.has_value()) {
             return false;
         }
-        wlMaxNumPerCluster = maxWorkloadNum.value();
+        auto [wlMaxNumPerClusterTmp, wlNumInTotalTmp] = workloadInformation.value();
+        wlMaxNumPerCluster = wlMaxNumPerClusterTmp;
+        wlNumInTotal = wlNumInTotalTmp;
     } else {
         for (const auto& perClusterShape : perClusterShapes) {
             const auto perClusterChannel = perClusterShape[vpux::Dims4D::Act::C];
@@ -724,13 +560,14 @@ bool doesNCEOpChannelSatisfyWorkload(mlir::Operation* nceOp, const TileInfo& out
             // There may be some invalid tileChannel passed into. For example, channel is 16 but supportedChannels is
             // [32]. We can't split it over C in that case.
             if (wlChannels.size() == 0) {
-                log.warning("splitWorkloadChannel failed: perClusterChannel - {0}, supportedChannels - {1}",
-                            perClusterChannel, supportedChannels);
+                log.debug("splitWorkloadChannel failed: perClusterChannel - {0}, supportedChannels - {1}",
+                          perClusterChannel, supportedChannels);
                 return false;
             }
             if (wlMaxNumPerCluster < wlChannels.size()) {
                 wlMaxNumPerCluster = wlChannels.size();
             }
+            wlNumInTotal += wlChannels.size();
         }
     }
 
@@ -741,7 +578,26 @@ bool doesNCEOpChannelSatisfyWorkload(mlir::Operation* nceOp, const TileInfo& out
     const auto maxSlotsSum = VPUIP::getBarrierMaxVariantSum(nceOp);
     const auto availableSlot = std::min(maxAvailableSlots, maxSlotsSum) / 2;
 
-    return wlMaxNumPerCluster <= availableSlot;
+    // the variants count should be less than availableSlot on each cluster, otherwise there could be an illegal
+    // scenario for the barrier
+    //
+    // the sum of variants count from all clusters should be less than maxSlotsSum, otherwise there could a serialized
+    // dpu execution between clusters
+    //
+    // but if there's no tiling for the layer when we don't consider the constraint for the sum of variants, it's not
+    // worth to introduce the extra tiling to parallelize dpu execution
+    // it's because this extra tiling will be on channel dimension and it will introduce stride dma which takes more
+    // time than serialized dpu execution
+    const auto isTiled = llvm::any_of(outputTile.axis, [](auto axis) {
+        return axis > 1;
+    });
+    if (!isTiled) {
+        // for non-tiled operations it may not be performant to introduce extra tiling
+        return wlMaxNumPerCluster <= availableSlot;
+    }
+
+    // allow all clusters to execute in parallel - driven by a single barrier
+    return wlNumInTotal < maxSlotsSum;
 }
 
 std::optional<DimArr> getSEPConvTilingOrder(mlir::Operation* op) {
@@ -833,7 +689,8 @@ SmallVector<OutputTiling> getOneDimTilingStrategies(mlir::Operation* op, TilingM
         auto targetDim = *nonOneDims.begin();
         auto findSupportedTileSize = isSupportedTileSize(op, prefetchableTilesOnDim, tilingMode, log);
         while (mlir::failed(findSupportedTileSize)) {
-            if (!isDimLeftToTile(prefetchableTilesOnDim, maxNumTiles, targetDim)) {
+            if (prefetchableTilesOnDim[targetDim] >= MAX_PREFETCH_TILING_TIME * isolatedTiling[0].axis[targetDim] ||
+                !isDimLeftToTile(prefetchableTilesOnDim, maxNumTiles, targetDim)) {
                 break;
             }
             auto nextTileSearchResult = getNextTiling(targetDim, dimToAlign, dimAlignment, prefetchableTilesOnDim,
@@ -854,6 +711,77 @@ SmallVector<OutputTiling> getOneDimTilingStrategies(mlir::Operation* op, TilingM
     return supportedTilingStrategies;
 }
 
+SmallVector<OutputTiling> getBeneficialOneDimTilingStrategies(mlir::Operation* op,
+                                                              const SmallVector<OutputTiling>& oneDimStrategies) {
+    auto nceOp = mlir::dyn_cast<VPU::NCEOpInterface>(op);
+    if (nceOp == nullptr) {
+        return oneDimStrategies;
+    }
+
+    const auto inShape = getShape(op->getOperand(0));
+    const auto outShape = getShape(op->getResult(0));
+    const auto kernelSize = nceOp.getKernelSizeVal();
+    const auto strideSize = nceOp.getStridesVal();
+
+    // The VPUNN cost-based tiling strategy method considers tiling in only one dimension to have the best performance
+    // However, for scenarios where tiling is done along the height (H) or width (W) and the output consists of only one
+    // line, there are two significant inefficiencies:
+    //  1. The DPU utilization rate is low
+    //  2. The overlap of input data is large
+    // Since compiler does not pass 2D tiling options to VPUNN, there is no precise cost function for such cases
+    // The motivation here is to remove one-dimensional tiling strategies that result in large input overlaps:
+    // If the total tiled sub-task input shape is twice as large as the original input, this strategy will be removed
+    auto isTileSizeBeneficial = [](const int64_t inSize, const int64_t outSize, const int64_t kernel,
+                                   const int64_t stride, const int64_t tileSize) -> bool {
+        return (outSize * stride / inSize + (kernel - stride) * tileSize / inSize) <= VPU::INPUT_OVERLAP_THRESHOLD;
+    };
+
+    SmallVector<OutputTiling> beneficialOneDimTilingStrategies;
+    for (const auto& oneDimStrategy : oneDimStrategies) {
+        auto tilesOnDim = oneDimStrategy[0].axis;
+        auto nonOneDims = getNonOneDim(tilesOnDim);
+        VPUX_THROW_UNLESS(nonOneDims.size() == 1,
+                          "Expected exactly one dimension with a tile size larger than one, but got {0}",
+                          nonOneDims.size());
+
+        const auto tileDim = nonOneDims.front();
+        if (tileDim != Dims4D::Act::H && tileDim != Dims4D::Act::W) {
+            beneficialOneDimTilingStrategies.push_back(oneDimStrategy);
+            continue;
+        }
+
+        auto tileSize = tilesOnDim[tileDim];
+        if (op->hasAttr(VPU::multiClusterStrategy)) {
+            auto strategy = op->getAttrOfType<VPU::MultiClusterStrategyAttr>(VPU::multiClusterStrategy).getValue();
+            auto module = op->getParentOfType<mlir::ModuleOp>();
+            auto tileOp = IE::getTileExecutor(module);
+            if (tileDim == Dims4D::Act::H) {
+                tileSize *= (strategy == VPU::MultiClusterStrategy::SplitOverHeight ||
+                             strategy == VPU::MultiClusterStrategy::SplitOverHeightOverlapped)
+                                    ? tileOp.getCount()
+                                    : 1;
+            } else if (tileDim == Dims4D::Act::W) {
+                tileSize *= (strategy == VPU::MultiClusterStrategy::SplitOverWidth) ? tileOp.getCount() : 1;
+            }
+        }
+
+        bool isHeightTilingBeneficial =
+                (tileDim == Dims4D::Act::H) && isTileSizeBeneficial(inShape[Dims4D::Act::H], outShape[Dims4D::Act::H],
+                                                                    kernelSize[Dims4D::Kernel::Y.ind()],
+                                                                    strideSize[Dims4D::Strides::Y.ind()], tileSize);
+        bool isWidthTilingBeneficial =
+                (tileDim == Dims4D::Act::W) && isTileSizeBeneficial(inShape[Dims4D::Act::W], outShape[Dims4D::Act::W],
+                                                                    kernelSize[Dims4D::Kernel::X.ind()],
+                                                                    strideSize[Dims4D::Strides::X.ind()], tileSize);
+
+        if (isHeightTilingBeneficial || isWidthTilingBeneficial) {
+            beneficialOneDimTilingStrategies.push_back(oneDimStrategy);
+        }
+    }
+
+    return beneficialOneDimTilingStrategies;
+}
+
 mlir::FailureOr<OutputTiling> getHWLayerTilingStrategyBasedOnCost(mlir::Operation* op, TilingMode tilingMode,
                                                                   DimArrRef tileDimOrder,
                                                                   const std::shared_ptr<LayerCostModel>& costModel,
@@ -872,7 +800,8 @@ mlir::FailureOr<OutputTiling> getHWLayerTilingStrategyBasedOnCost(mlir::Operatio
 
     VPUX_THROW_UNLESS(outputShape.size() == 4, "Unsupported operation '{0}' at '{1}', it has non 4D result",
                       op->getName(), op->getLoc());
-    auto oneDimStratgies = getOneDimTilingStrategies(op, tilingMode, log.nest());
+    auto oneDimStrategyCandidates = getOneDimTilingStrategies(op, tilingMode, log.nest());
+    auto oneDimStratgies = getBeneficialOneDimTilingStrategies(op, oneDimStrategyCandidates);
     if (oneDimStratgies.empty()) {
         return getHWLayerTilingStrategyWithTileDimOrder(op, tilingMode, tileDimOrder, log);
     }

@@ -86,50 +86,6 @@ bool hasNegativeValues(const Const::Content& content) {
     });
 }
 
-mlir::FailureOr<mlir::Value> updateConstStorageValues(const Logger& log, mlir::OpBuilder& builder,
-                                                      Const::DeclareOp origConst, ArrayRef<float> values) {
-    const auto contentAttr = origConst.getContentAttr();
-    const auto origTransAttrs = contentAttr.getTransformations();
-    const auto baseContentType = mlir::cast<NDTypeInterface>(contentAttr.getBaseContent().getType());
-    const auto origOutType = mlir::cast<NDTypeInterface>(origConst.getOutput().getType());
-
-    SmallVector<Const::TransformAttrInterface> reserveTransAttrs;
-    auto newBaseContentType = baseContentType;
-    if (checked_cast<int64_t>(values.size()) == baseContentType.getShape().totalSize()) {
-        reserveTransAttrs = to_small_vector(origTransAttrs);
-    } else if (checked_cast<int64_t>(values.size()) == origOutType.getShape().totalSize()) {
-        newBaseContentType = newBaseContentType.changeShape(origOutType.getShape());
-        for (const auto& attr : origTransAttrs) {
-            if (attr.isa<Const::ConvertElemTypeAttr>()) {
-                reserveTransAttrs.push_back(attr);
-            } else if (attr.isa<Const::ReshapeAttr, Const::BroadcastAttr, Const::SubViewAttr,
-                                Const::PadWithZeroAttr>()) {
-                continue;
-            } else {
-                // There are many constant transformation attributions
-                // It is possible to consider all attributions, but great effort for all corner cases
-                log.trace("Unexpected constant transformation attribution '{0}'", attr);
-                return mlir::failure();
-            }
-        }
-    } else {
-        log.trace("Unexpected values size '{0}' that mismatch with constant base type '{1}' and output type '{2}'",
-                  values.size(), baseContentType, origOutType);
-        return mlir::failure();
-    }
-
-    const auto denseElementVal = wrapData(mlir::cast<mlir::RankedTensorType>(newBaseContentType), values);
-    VPUX_THROW_WHEN(denseElementVal == nullptr, "Incompatible data type {0}, only float16 or float32 are supported",
-                    newBaseContentType.getElementType());
-
-    auto newContentAttr = Const::ContentAttr::get(denseElementVal);
-    for (const auto& attr : reserveTransAttrs) {
-        newContentAttr = Const::ContentAttr::addTransformation(newContentAttr, attr);
-    }
-
-    return builder.create<Const::DeclareOp>(origConst.getLoc(), origOutType, newContentAttr).getOutput();
-}
-
 mlir::Value buildWeightsConst(mlir::OpBuilder& builder, mlir::Location loc, mlir::RankedTensorType type,
                               ArrayRef<float> values) {
     const auto ctx = builder.getContext();
@@ -147,18 +103,18 @@ mlir::Value buildWeightsConst(mlir::OpBuilder& builder, mlir::Location loc, mlir
     const auto dataType = mlir::RankedTensorType::get(type.getShape(), mlir::Float32Type::get(ctx));
     const auto dataAttr = mlir::DenseElementsAttr::get(dataType, values);
 
-    auto contentAttr = Const::ContentAttr::get(dataAttr);
+    auto contentAttrSetup = Const::ContentAttr::transform(dataAttr);
     VPUX_THROW_WHEN(!(mlir::isa<mlir::quant::QuantizedType, mlir::Float16Type>(origElemType)), "Unsupported type {0}",
                     origElemType);
     if (auto qElemType = filterElemType.dyn_cast<mlir::quant::QuantizedType>()) {
-        contentAttr = contentAttr.convertElemType(getUInt8Type(ctx));
-        contentAttr = contentAttr.quantCast(qElemType);
+        contentAttrSetup = contentAttrSetup.castElemType(getUInt8Type(ctx)).quantCast(qElemType);
     } else if (origElemType.isa<mlir::Float16Type>()) {
-        contentAttr = contentAttr.convertElemType(mlir::Float16Type::get(ctx));
+        contentAttrSetup = contentAttrSetup.castElemType(mlir::Float16Type::get(ctx));
     }
-    contentAttr = contentAttr.reorder(mlir::cast<NDTypeInterface>(type).getDimsOrder());
+    contentAttrSetup = contentAttrSetup.reorder(mlir::cast<NDTypeInterface>(type).getDimsOrder());
+    auto contentAttr = contentAttrSetup.get();
 
-    return builder.create<Const::DeclareOp>(loc, contentAttr.getType(), contentAttr).getOutput();
+    return builder.create<Const::DeclareOp>(loc, contentAttr.getType(), std::move(contentAttr)).getOutput();
 }
 
 SmallVector<Const::DeclareOp> getDeclareOpsUses(Const::RodataOp rodataOp, mlir::Operation* from) {

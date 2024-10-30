@@ -52,7 +52,7 @@ func.func @MultipleInputSingleOutputDeBatched(%arg0: tensor<3x3x62x62xf32>, %arg
     // CHECK: [[SLICE_01:%.*]] = IE.Slice [[ARG1]] [0, 0, 0, 0] [1, 48, 60, 60] :
     // CHECK-SAME:  tensor<3x48x60x60xf32> to tensor<1x48x60x60xf32>
 
-    // CHECK: [[FUNC_0:%.*]] = call @MultipleInputSingleOutputDeBatched_Batch1([[SLICE_00]], [[SLICE_01]]) :
+    // CHECK: [[FUNC_0:%.*]] = call @MultipleInputSingleOutputDeBatched_Batch1([[SLICE_00]], [[SLICE_01]]) {debatched = [0, 3]} :
     // CHECK-SAME:  (tensor<1x3x62x62xf32>, tensor<1x48x60x60xf32>) -> tensor<1x48x60x60xf32>
 
     // CHECK: [[SLICE_10:%.*]] = IE.Slice [[ARG0]] [1, 0, 0, 0] [1, 3, 62, 62] :
@@ -60,7 +60,7 @@ func.func @MultipleInputSingleOutputDeBatched(%arg0: tensor<3x3x62x62xf32>, %arg
     // CHECK: [[SLICE_11:%.*]] = IE.Slice [[ARG1]] [1, 0, 0, 0] [1, 48, 60, 60] :
     // CHECK-SAME:  tensor<3x48x60x60xf32> to tensor<1x48x60x60xf32>
 
-    // CHECK: [[FUNC_1:%.*]] = call @MultipleInputSingleOutputDeBatched_Batch1([[SLICE_10]], [[SLICE_11]]) :
+    // CHECK: [[FUNC_1:%.*]] = call @MultipleInputSingleOutputDeBatched_Batch1([[SLICE_10]], [[SLICE_11]]) {debatched = [1, 3]} :
     // CHECK-SAME:  (tensor<1x3x62x62xf32>, tensor<1x48x60x60xf32>) -> tensor<1x48x60x60xf32>
 
     // CHECK: [[SLICE_20:%.*]] = IE.Slice [[ARG0]] [2, 0, 0, 0] [1, 3, 62, 62] :
@@ -68,7 +68,7 @@ func.func @MultipleInputSingleOutputDeBatched(%arg0: tensor<3x3x62x62xf32>, %arg
     // CHECK: [[SLICE_21:%.*]] = IE.Slice [[ARG1]] [2, 0, 0, 0] [1, 48, 60, 60] :
     // CHECK-SAME:  tensor<3x48x60x60xf32> to tensor<1x48x60x60xf32>
 
-    // CHECK: [[FUNC_2:%.*]] = call @MultipleInputSingleOutputDeBatched_Batch1([[SLICE_20]], [[SLICE_21]]) :
+    // CHECK: [[FUNC_2:%.*]] = call @MultipleInputSingleOutputDeBatched_Batch1([[SLICE_20]], [[SLICE_21]]) {debatched = [2, 3]} :
     // CHECK-SAME:  (tensor<1x3x62x62xf32>, tensor<1x48x60x60xf32>) -> tensor<1x48x60x60xf32>
 
     // CHECK: [[CONCAT:%.*]] = IE.Concat([[FUNC_0]], [[FUNC_1]], [[FUNC_2]]) {
@@ -106,7 +106,7 @@ func.func @MultipleInputDifferentRanksSingleOutputDeBatched(%arg0: tensor<3x3x62
     // CHECK: [[SLICE_01:%.+]] = IE.Slice [[ARG1]] [0, 0, 0] [1, 48, 3600] :
     // CHECK-SAME:  tensor<3x48x3600xf32> to tensor<1x48x3600xf32>
 
-    // CHECK: [[FUNC_0:%.+]] = call @MultipleInputDifferentRanksSingleOutputDeBatched_Batch1([[SLICE_00]], [[SLICE_01]]) :
+    // CHECK: [[FUNC_0:%.+]] = call @MultipleInputDifferentRanksSingleOutputDeBatched_Batch1([[SLICE_00]], [[SLICE_01]]) {debatched = [0, 3]} :
     // CHECK-SAME:  (tensor<1x3x62x62xf32>, tensor<1x48x3600xf32>) -> tensor<1x48x60x60xf32>
 
     // CHECK: [[SLICE_10:%.+]] = IE.Slice [[ARG0]] [1, 0, 0, 0] [1, 3, 62, 62] :
@@ -114,7 +114,7 @@ func.func @MultipleInputDifferentRanksSingleOutputDeBatched(%arg0: tensor<3x3x62
     // CHECK: [[SLICE_11:%.+]] = IE.Slice [[ARG1]] [1, 0, 0] [1, 48, 3600] :
     // CHECK-SAME:  tensor<3x48x3600xf32> to tensor<1x48x3600xf32>
 
-    // CHECK: [[FUNC_1:%.+]] = call @MultipleInputDifferentRanksSingleOutputDeBatched_Batch1([[SLICE_10]], [[SLICE_11]]) :
+    // CHECK: [[FUNC_1:%.+]] = call @MultipleInputDifferentRanksSingleOutputDeBatched_Batch1([[SLICE_10]], [[SLICE_11]]) {debatched = [1, 3]} :
     // CHECK-SAME:  (tensor<1x3x62x62xf32>, tensor<1x48x3600xf32>) -> tensor<1x48x60x60xf32>
 
     // CHECK: [[SLICE_20:%.+]] = IE.Slice [[ARG0]] [2, 0, 0, 0] [1, 3, 62, 62] :
@@ -122,7 +122,7 @@ func.func @MultipleInputDifferentRanksSingleOutputDeBatched(%arg0: tensor<3x3x62
     // CHECK: [[SLICE_21:%.+]] = IE.Slice [[ARG1]] [2, 0, 0] [1, 48, 3600] :
     // CHECK-SAME:  tensor<3x48x3600xf32> to tensor<1x48x3600xf32>
 
-    // CHECK: [[FUNC_2:%.+]] = call @MultipleInputDifferentRanksSingleOutputDeBatched_Batch1([[SLICE_20]], [[SLICE_21]]) :
+    // CHECK: [[FUNC_2:%.+]] = call @MultipleInputDifferentRanksSingleOutputDeBatched_Batch1([[SLICE_20]], [[SLICE_21]]) {debatched = [2, 3]} :
     // CHECK-SAME:  (tensor<1x3x62x62xf32>, tensor<1x48x3600xf32>) -> tensor<1x48x60x60xf32>
 
     // CHECK: [[CONCAT:%.+]] = IE.Concat([[FUNC_0]], [[FUNC_1]], [[FUNC_2]]) {
@@ -156,17 +156,17 @@ func.func @SingleInputMultipleOutputDeBatched(%arg0: tensor<3x3x62x62xf32>) -> (
     // CHECK:   [[SLICE_0:%.*]] = IE.Slice [[ARG0]] [0, 0, 0, 0] [1, 3, 62, 62] :
     // CHECK-SAME:      tensor<3x3x62x62xf32> to tensor<1x3x62x62xf32>
 
-    // CHECK:   [[FUNC_0:%.*]]:2 = call @SingleInputMultipleOutputDeBatched_Batch1([[SLICE_0]]) : (tensor<1x3x62x62xf32>) -> (tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32>)
+    // CHECK:   [[FUNC_0:%.*]]:2 = call @SingleInputMultipleOutputDeBatched_Batch1([[SLICE_0]]) {debatched = [0, 3]} : (tensor<1x3x62x62xf32>) -> (tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32>)
 
     // CHECK:   [[SLICE_1:%.*]] = IE.Slice [[ARG0]] [1, 0, 0, 0] [1, 3, 62, 62] :
     // CHECK-SAME:      tensor<3x3x62x62xf32> to tensor<1x3x62x62xf32>
 
-    // CHECK:   [[FUNC_1:%.*]]:2 = call @SingleInputMultipleOutputDeBatched_Batch1([[SLICE_1]]) : (tensor<1x3x62x62xf32>) -> (tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32>)
+    // CHECK:   [[FUNC_1:%.*]]:2 = call @SingleInputMultipleOutputDeBatched_Batch1([[SLICE_1]]) {debatched = [1, 3]} : (tensor<1x3x62x62xf32>) -> (tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32>)
 
     // CHECK:   [[SLICE_2:%.*]] = IE.Slice [[ARG0]] [2, 0, 0, 0] [1, 3, 62, 62] :
     // CHECK-SAME:      tensor<3x3x62x62xf32> to tensor<1x3x62x62xf32>
 
-    // CHECK:   [[FUNC_2:%.*]]:2 = call @SingleInputMultipleOutputDeBatched_Batch1([[SLICE_2]]) : (tensor<1x3x62x62xf32>) -> (tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32>)
+    // CHECK:   [[FUNC_2:%.*]]:2 = call @SingleInputMultipleOutputDeBatched_Batch1([[SLICE_2]]) {debatched = [2, 3]} : (tensor<1x3x62x62xf32>) -> (tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32>)
 
     // CHECK:   [[CONCAT_0:%.*]] = IE.Concat([[FUNC_0]]#0, [[FUNC_1]]#0, [[FUNC_2]]#0) {
     // CHECK-SAME:      per_axis = #IE.Concat<axis = 0 : i64>
@@ -199,17 +199,17 @@ func.func @SingleInputSingleOutputDeBatchedTo2(%arg0: tensor<6x3x62x62xf32>) -> 
 
     // CHECK: [[SLICE_0:%.*]] = IE.Slice [[ARG0]] [0, 0, 0, 0] [2, 3, 62, 62] :
     // CHECK-SAME:  tensor<6x3x62x62xf32> to tensor<2x3x62x62xf32>
-    // CHECK: [[FUNC_0:%.*]] = call @SingleInputSingleOutputDeBatchedTo2_Batch2([[SLICE_0]]) :
+    // CHECK: [[FUNC_0:%.*]] = call @SingleInputSingleOutputDeBatchedTo2_Batch2([[SLICE_0]]) {debatched = [0, 3]} :
     // CHECK-SAME:  (tensor<2x3x62x62xf32>) -> tensor<2x48x60x60xf32>
 
     // CHECK: [[SLICE_1:%.*]] = IE.Slice [[ARG0]] [2, 0, 0, 0] [2, 3, 62, 62] :
     // CHECK-SAME:  tensor<6x3x62x62xf32> to tensor<2x3x62x62xf32>
-    // CHECK: [[FUNC_1:%.*]] = call @SingleInputSingleOutputDeBatchedTo2_Batch2([[SLICE_1]]) :
+    // CHECK: [[FUNC_1:%.*]] = call @SingleInputSingleOutputDeBatchedTo2_Batch2([[SLICE_1]]) {debatched = [1, 3]} :
     // CHECK-SAME:  (tensor<2x3x62x62xf32>) -> tensor<2x48x60x60xf32>
 
     // CHECK: [[SLICE_2:%.*]] = IE.Slice [[ARG0]] [4, 0, 0, 0] [2, 3, 62, 62] :
     // CHECK-SAME:  tensor<6x3x62x62xf32> to tensor<2x3x62x62xf32>
-    // CHECK: [[FUNC_2:%.*]] = call @SingleInputSingleOutputDeBatchedTo2_Batch2([[SLICE_2]]) :
+    // CHECK: [[FUNC_2:%.*]] = call @SingleInputSingleOutputDeBatchedTo2_Batch2([[SLICE_2]]) {debatched = [2, 3]} :
     // CHECK-SAME:  (tensor<2x3x62x62xf32>) -> tensor<2x48x60x60xf32>
 
     // CHECK: [[CONCAT:%.*]] = IE.Concat([[FUNC_0]], [[FUNC_1]], [[FUNC_2]]) {

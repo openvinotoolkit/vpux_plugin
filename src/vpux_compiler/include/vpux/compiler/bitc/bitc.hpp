@@ -15,7 +15,7 @@ struct BitCompactorConfig {
     ArchType arch_type;  // NPU37XX / NPU40XX
     bool weight_compress_enable{true};
     bool bypass_compression{false};
-    bool mode_fp16_enable{false};  // NPU40XX only
+    bool mode_fp16_enable{false};  // NPU40XX
 
     // For sparse mode
     std::vector<uint8_t> bitmap;

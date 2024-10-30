@@ -17,11 +17,34 @@ class MatMulLayerTestCommon : public MatMulLayerTest, virtual public VpuOv2Layer
 class MatMulLayerTest_HW_NPU3720 : public MatMulLayerTestCommon {};
 class MatMulLayerTest_SW_NPU3720 : public MatMulLayerTestCommon {};
 
+class MatMulLayerTest_HW_NPU3720_ppe_fp16_clamp : public MatMulLayerTestCommon {
+    void generate_inputs(const std::vector<ov::Shape>& inputShapes) override {
+        inputs.clear();
+        const auto& funcInputs = function->inputs();
+        OPENVINO_ASSERT(inputShapes.size() == funcInputs.size(),
+                        "Input shapes number does not match with inputs number");
+
+        auto createAndFillTensor = [](ov::Shape inputStaticShape) -> ov::Tensor {
+            auto inputTensor = ov::Tensor{ov::element::f32, inputStaticShape};
+            const auto totalSize =
+                    std::accumulate(inputStaticShape.begin(), inputStaticShape.end(), 1, std::multiplies<size_t>());
+            auto inputData = inputTensor.data<ov::element_type_traits<ov::element::f32>::value_type>();
+            for (size_t i = 0; i < totalSize; i++) {
+                inputData[i] = static_cast<float>(300.0f);
+            }
+            return inputTensor;
+        };
+
+        for (size_t i = 0; i < funcInputs.size(); ++i) {
+            const auto& funcInput = funcInputs[i];
+            auto tensor = createAndFillTensor(inputShapes[i]);
+            inputs.insert({funcInput.get_node_shared_ptr(), tensor});
+        }
+    }
+};
+
 class MatMulLayerTest_HW_NPU4000 : public MatMulLayerTestCommon {};
 class MatMulLayerTest_SW_NPU4000 : public MatMulLayerTestCommon {};
-
-void skipCompilationCallBackImpl() {
-}
 
 TEST_P(MatMulLayerTest_HW_NPU3720, HW) {
     setDefaultHardwareMode();
@@ -44,6 +67,12 @@ TEST_P(MatMulLayerTest_HW_NPU4000, HW) {
     rel_threshold = 0.001;
     setDefaultHardwareMode();
     run(Platform::NPU4000);
+}
+
+TEST_P(MatMulLayerTest_HW_NPU3720_ppe_fp16_clamp, HW) {
+    rel_threshold = 1;
+    setDefaultHardwareMode();
+    run(Platform::NPU3720);
 }
 
 }  // namespace test
@@ -160,6 +189,19 @@ INSTANTIATE_TEST_SUITE_P(smoke_MatMulSecondTrans, MatMulLayerTest_SW_NPU3720, ma
 
 INSTANTIATE_TEST_SUITE_P(smoke_MatMulBothTrans, MatMulLayerTest_SW_NPU3720, matMulParamsBothTrans,
                          MatMulLayerTest_SW_NPU3720::getTestCaseName);
+
+const std::vector<std::vector<ov::Shape>> shape1dBothTransClamp = {
+        {{10, 10}, {10, 10}},
+};
+
+const auto matMul1dBothTransClampParams =
+        ::testing::Combine(::testing::ValuesIn(static_shapes_to_test_representation(shape1dBothTransClamp)),
+                           ::testing::Values(transposeInputs.at(3)), ::testing::Values(ov::element::f32),
+                           ::testing::Values(InputLayerType::PARAMETER), ::testing::Values(DEVICE_NPU),
+                           ::testing::Values(additional_config));
+
+INSTANTIATE_TEST_SUITE_P(MatMul1dBothTransClamp, MatMulLayerTest_HW_NPU3720_ppe_fp16_clamp,
+                         matMul1dBothTransClampParams, MatMulLayerTest_HW_NPU3720_ppe_fp16_clamp::getTestCaseName);
 
 /* ============= NPU4000 ============= */
 

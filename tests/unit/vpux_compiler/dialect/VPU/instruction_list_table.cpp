@@ -53,6 +53,6 @@ std::vector<InstructionListTableStruct> instructionListsAndExpectedOutputs = {
                              738818,    278530,   803330,   5522434,  804354,   -180222,  868866,   345090,
                              869890,    409602,   0,        6,        6,        6,        6,        6}}};
 
-INSTANTIATE_TEST_CASE_P(Unit, MLIR_InstructionListTableTest, testing::ValuesIn(instructionListsAndExpectedOutputs));
+INSTANTIATE_TEST_SUITE_P(Unit, MLIR_InstructionListTableTest, testing::ValuesIn(instructionListsAndExpectedOutputs));
 
 }  // namespace

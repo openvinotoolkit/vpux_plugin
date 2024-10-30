@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2023-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -22,7 +22,7 @@ mlir::LogicalResult DPUVariantRewriter::matchAndRewrite(VPUASM::DPUVariantOp op,
             op.getWorkloadIdAttr());
 
     auto& variantRegion = variant.getRegion();
-    rewriter.createBlock(&variantRegion);
+    auto varBlock = rewriter.createBlock(&variantRegion);
 
     auto dpuVariantExpandIface = mlir::dyn_cast<VPUASM::DPUVariantExpandOpInterface>(op.getOperation());
     if (dpuVariantExpandIface == nullptr) {
@@ -31,16 +31,20 @@ mlir::LogicalResult DPUVariantRewriter::matchAndRewrite(VPUASM::DPUVariantOp op,
         return mlir::failure();
     }
 
-    if (dpuVariantExpandIface.expandIDUConfig(rewriter, _log, _symRefMap).failed()) {
-        return mlir::failure();
-    }
+    {
+        mlir::OpBuilder::InsertionGuard guard(rewriter);
 
-    if (dpuVariantExpandIface.expandPPEConfig(rewriter, _log, _symRefMap).failed()) {
-        return mlir::failure();
-    }
+        if (dpuVariantExpandIface.expandIDUConfig(rewriter, _log, _symRefMap).failed()) {
+            return mlir::failure();
+        }
 
-    if (dpuVariantExpandIface.expandODUConfig(rewriter, _log, _symRefMap).failed()) {
-        return mlir::failure();
+        if (dpuVariantExpandIface.expandPPEConfig(rewriter, _log, _symRefMap).failed()) {
+            return mlir::failure();
+        }
+
+        if (dpuVariantExpandIface.expandODUConfig(rewriter, _log, varBlock, _symRefMap).failed()) {
+            return mlir::failure();
+        }
     }
 
     auto invariant = mlir::cast<VPUASM::DPUInvariantOp>(_symRefMap.lookupSymbol(op.getInvariant()));

@@ -21,7 +21,7 @@ func.func @RemoveCMXToCMXCopyPropagateStrideToCopy(%arg0 : memref<1x256x36x36xf1
             DPUTask {cluster_id = 0 : i64, outEnd = [35, 35, 63], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>, outStart = [0, 0, 0]}
             DPUTask {cluster_id = 1 : i64, outEnd = [35, 35, 127], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>, outStart = [0, 0, 64]}
         } PPE : {
-        PPETask <LPRELU> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, fp_prelu_alpha = 0.199951171875 : f64, lrelu_mult = 1638 : i64, lrelu_shift = 13 : i64}
+        PPETask {opaque_ppe = #VPU.PPEStub<>}
         }
 
     %3 = VPUIP.NCEClusterTask {kernel_padding = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>, kernel_size = [3, 3], kernel_strides = [1, 1], minimumHardwareExecutionCost = 93417 : i64, task_type = #VPUIP.nce_task_type<CONV>}
@@ -30,7 +30,7 @@ func.func @RemoveCMXToCMXCopyPropagateStrideToCopy(%arg0 : memref<1x256x36x36xf1
             DPUTask {cluster_id = 0 : i64, outEnd = [35, 35, 63], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>, outStart = [0, 0, 0]}
             DPUTask {cluster_id = 1 : i64, outEnd = [35, 35, 127], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>, outStart = [0, 0, 64]}
         } PPE : {
-        PPETask <LPRELU> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, fp_prelu_alpha = 0.199951171875 : f64, lrelu_mult = 1638 : i64, lrelu_shift = 13 : i64}
+        PPETask {opaque_ppe = #VPU.PPEStub<>}
         }
     %4 = memref.alloc() : memref<1x256x36x36xf16, #NHWC, @CMX_NN>
 
@@ -57,7 +57,7 @@ func.func @RemoveCMXToCMXCopyPropagateStrideToCopy(%arg0 : memref<1x256x36x36xf1
     // CHECK:           DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [35, 35, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>}
     // CHECK:           DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [35, 35, 127], outStart = [0, 0, 64], pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>}
     // CHECK:           } PPE : {
-    // CHECK:               PPETask <LPRELU> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, fp_prelu_alpha = 0.199951171875 : f64, lrelu_mult = 1638 : i64, lrelu_shift = 13 : i64}
+    // CHECK:               PPETask {opaque_ppe = #VPU.PPEStub<>}
     // CHECK:           }
 
     // CHECK:       [[SBUVIEW_1:%.*]] = VPUIP.SubView [[BUFF_0]] [0, 128, 0, 0] [1, 128, 36, 36] : memref<1x256x36x36xf16, #NHWC, @CMX_NN> to memref<1x128x36x36xf16, {order = #NHWC, strides = [331776, 1, 9216, 256]}, @CMX_NN>
@@ -68,7 +68,7 @@ func.func @RemoveCMXToCMXCopyPropagateStrideToCopy(%arg0 : memref<1x256x36x36xf1
     // CHECK:           DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [35, 35, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>}
     // CHECK:           DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [35, 35, 127], outStart = [0, 0, 64], pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>}
     // CHECK:           } PPE : {
-    // CHECK:               PPETask <LPRELU> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, fp_prelu_alpha = 0.199951171875 : f64, lrelu_mult = 1638 : i64, lrelu_shift = 13 : i64}
+    // CHECK:               PPETask {opaque_ppe = #VPU.PPEStub<>}
     // CHECK:           }
 
     // CHECK:       [[CONCAT:%.*]] = VPUIP.ConcatView inputs([[NCETASK_0]], [[NCETASK_1]] : memref<1x128x36x36xf16, {order = #NHWC, strides = [331776, 1, 9216, 256]}, @CMX_NN>, memref<1x128x36x36xf16, {order = #NHWC, strides = [331776, 1, 9216, 256]}, @CMX_NN>)
@@ -121,7 +121,7 @@ func.func @RemoveCMXToCMXCopyPropagateStrideToQuantizeCast(%arg0 : memref<1x256x
                                           %arg1 as %arg4: memref<1x256x26x26x!qElemType, #NHWC, @CMX_NN>)
                                            outputs(%0 as %arg5: memref<1x256x26x26x!qElemType, #NHWC, @CMX_NN>)
                                            -> !ConvOutputType {
-        %11 = VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
+        %11 = VPUIP.NCEClusterTask {minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
             input(%arg3 : memref<1x256x26x26x!qElemType, #NHWC, @CMX_NN>)
             weights(%arg4 : memref<1x256x26x26x!qElemType, #NHWC, @CMX_NN>)
             parent_input(%arg3 : memref<1x256x26x26x!qElemType, #NHWC, @CMX_NN>)
@@ -130,7 +130,7 @@ func.func @RemoveCMXToCMXCopyPropagateStrideToQuantizeCast(%arg0 : memref<1x256x
                 -> memref<1x256x26x26x!qElemType, #NHWC, @CMX_NN> variants :  {
                 DPUTask {cluster_id = 0 : i64, outEnd = [87, 47, 63], mpe_mode = #VPU.mpe_mode<MATRIX>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0]}
         } PPE :  {
-            PPETask <ADD> {clamp_high = 131 : i64, clamp_low = -124 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_mult = [26565], quant_post_shift = 0 : i64, quant_shift = [15]}
+            PPETask {opaque_ppe = #VPU.PPEStub<>}
         }
     }
     %2 = VPUIP.QuantizeCast inputs(%1 : !ConvOutputType) -> memref<1x256x26x26x!qElemType, #NHWC, @CMX_NN>
@@ -191,7 +191,7 @@ func.func @RemoveCMXToCMXClustringCopyAndInsertNewCopy(%arg0 : !distributeType, 
                                        %arg0 as %arg3: memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
                                 outputs(%0 as %arg4: memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
                                     -> !distributeType {
-        %15 = VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
+        %15 = VPUIP.NCEClusterTask {minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
             input(%arg2 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
             weights(%arg3 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
             parent_input(%arg2 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
@@ -200,7 +200,7 @@ func.func @RemoveCMXToCMXClustringCopyAndInsertNewCopy(%arg0 : !distributeType, 
                 -> memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN> variants :  {
                 DPUTask {cluster_id = 0 : i64, outEnd = [87, 47, 63], mpe_mode = #VPU.mpe_mode<MATRIX>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0]}
         } PPE :  {
-            PPETask <ADD> {clamp_high = 131 : i64, clamp_low = -124 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_mult = [26565], quant_post_shift = 0 : i64, quant_shift = [15]}
+            PPETask {opaque_ppe = #VPU.PPEStub<>}
         }
     }
 
@@ -210,7 +210,7 @@ func.func @RemoveCMXToCMXClustringCopyAndInsertNewCopy(%arg0 : !distributeType, 
                                        %2 as %arg3: memref<1x64x48x88x!qElemType1, #NHWC, @CMX_NN>)
                                 outputs(%3 as %arg4: memref<1x64x48x88x!qElemType1, #NHWC, @CMX_NN>)
                                     -> !distributeType1 {
-        %15 = VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
+        %15 = VPUIP.NCEClusterTask {minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
             input(%arg2 : memref<1x64x48x88x!qElemType1, #NHWC, @CMX_NN>)
             weights(%arg3 : memref<1x64x48x88x!qElemType1, #NHWC, @CMX_NN>)
             parent_input(%arg2 : memref<1x64x48x88x!qElemType1, #NHWC, @CMX_NN>)
@@ -219,7 +219,7 @@ func.func @RemoveCMXToCMXClustringCopyAndInsertNewCopy(%arg0 : !distributeType, 
                 -> memref<1x64x48x88x!qElemType1, #NHWC, @CMX_NN> variants :  {
                 DPUTask {cluster_id = 0 : i64, outEnd = [87, 47, 63], mpe_mode = #VPU.mpe_mode<MATRIX>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0]}
         } PPE :  {
-            PPETask <ADD> {clamp_high = 131 : i64, clamp_low = -124 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_mult = [26565], quant_post_shift = 0 : i64, quant_shift = [15]}
+            PPETask {opaque_ppe = #VPU.PPEStub<>}
         }
     }
 
@@ -228,7 +228,7 @@ func.func @RemoveCMXToCMXClustringCopyAndInsertNewCopy(%arg0 : !distributeType, 
                                        %arg1 as %arg3: memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
                                 outputs(%5 as %arg4: memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
                                     -> !distributeType {
-        %15 = VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
+        %15 = VPUIP.NCEClusterTask {minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
             input(%arg2 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
             weights(%arg3 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
             parent_input(%arg2 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
@@ -237,7 +237,7 @@ func.func @RemoveCMXToCMXClustringCopyAndInsertNewCopy(%arg0 : !distributeType, 
                 -> memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN> variants :  {
                 DPUTask {cluster_id = 0 : i64, outEnd = [87, 47, 63], mpe_mode = #VPU.mpe_mode<MATRIX>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0]}
         } PPE :  {
-            PPETask <ADD> {clamp_high = 131 : i64, clamp_low = -124 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_mult = [26565], quant_post_shift = 0 : i64, quant_shift = [15]}
+            PPETask {opaque_ppe = #VPU.PPEStub<>}
         }
     }
 
@@ -270,7 +270,7 @@ func.func @RemoveCMXToCMXClustringCopyAndInsertNewCopy(%arg0 : !distributeType, 
     // CHECK:       [[ADD_0:%.+]] = VPUIP.NCEClusterTiling inputs([[INPUT1]] as %arg2: memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>, [[INPUT1]] as %arg3: memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
     // CHECK-SAME:              outputs([[SUBVIEW_0]] as %arg4: memref<1x64x48x88x!qElemType, {order = #NHWC, strides = [540672, 1, 11264, 128]}, @CMX_NN>)
     // CHECK-SAME:              -> !VPUIP.DistributedBuffer<1x64x48x88x!qElemType, {order = #NHWC, strides = [540672, 1, 11264, 128]}, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 4, 1], num_clusters = 4 : i64}> {
-    // CHECK:             [[ADD_0_INNER:%.+]] = VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
+    // CHECK:             [[ADD_0_INNER:%.+]] = VPUIP.NCEClusterTask {minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
     // CHECK-SAME:              input(%arg2 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>) weights(%arg3 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>) parent_input(%arg2 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
     // CHECK-SAME:              parent_output(%arg4 : memref<1x64x48x88x!qElemType, {order = #NHWC, strides = [540672, 1, 11264, 128]}, @CMX_NN>) outputs(%arg4 : memref<1x64x48x88x!qElemType, {order = #NHWC, strides = [540672, 1, 11264, 128]}, @CMX_NN>) -> memref<1x64x48x88x!qElemType, {order = #NHWC, strides = [540672, 1, 11264, 128]}, @CMX_NN>
 
@@ -292,7 +292,7 @@ func.func @RemoveCMXToCMXClustringCopyAndInsertNewCopy(%arg0 : !distributeType, 
     // CHECK:       [[BUFF_3:%.+]] = VPURT.AllocDistributed -> !VPUIP.DistributedBuffer<1x64x48x88x!qElemType1, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 4, 1], num_clusters = 4 : i64}>
     // CHECK:       [[ADD_1:%.+]] =  VPUIP.NCEClusterTiling inputs([[QUANTCAST]] as %arg2: memref<1x64x48x88x!qElemType1, #NHWC, @CMX_NN>, [[QUANTCAST]] as %arg3: memref<1x64x48x88x!qElemType1, #NHWC, @CMX_NN>)
     // CHECK-SAME:              outputs([[BUFF_3]] as %arg4: memref<1x64x48x88x!qElemType1, #NHWC, @CMX_NN>) -> !VPUIP.DistributedBuffer<1x64x48x88x!qElemType1, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 4, 1], num_clusters = 4 : i64}> {
-    // CHECK:           [[ADD_1_INNER:%.+]] = VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
+    // CHECK:           [[ADD_1_INNER:%.+]] = VPUIP.NCEClusterTask {minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
     // CHECK-SAME:              input(%arg2 : memref<1x64x48x88x!qElemType1, #NHWC, @CMX_NN>) weights(%arg3 : memref<1x64x48x88x!qElemType1, #NHWC, @CMX_NN>) parent_input(%arg2 : memref<1x64x48x88x!qElemType1, #NHWC, @CMX_NN>)
     // CHECK-SAME:              parent_output(%arg4 : memref<1x64x48x88x!qElemType1, #NHWC, @CMX_NN>) outputs(%arg4 : memref<1x64x48x88x!qElemType1, #NHWC, @CMX_NN>) -> memref<1x64x48x88x!qElemType1, #NHWC, @CMX_NN>
 
@@ -301,7 +301,7 @@ func.func @RemoveCMXToCMXClustringCopyAndInsertNewCopy(%arg0 : !distributeType, 
     // CHECK:       [[ADD_2:%.+]] = VPUIP.NCEClusterTiling inputs([[INPUT2]] as %arg2: memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>, [[INPUT2]] as %arg3: memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
     // CHECK-SAME:              outputs([[SUBVIEW_1]] as %arg4: memref<1x64x48x88x!qElemType, {order = #NHWC, strides = [540672, 1, 11264, 128]}, @CMX_NN>)
     // CHECK-SAME:              -> !VPUIP.DistributedBuffer<1x64x48x88x!qElemType, {order = #NHWC, strides = [540672, 1, 11264, 128]}, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 4, 1], num_clusters = 4 : i64}> {
-    // CHECK:           [[ADD_2_INNER:%.+]] = VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
+    // CHECK:           [[ADD_2_INNER:%.+]] = VPUIP.NCEClusterTask {minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
     // CHECK-SAME:              input(%arg2 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>) weights(%arg3 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>) parent_input(%arg2 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
     // CHECK-SAME:              parent_output(%arg4 : memref<1x64x48x88x!qElemType, {order = #NHWC, strides = [540672, 1, 11264, 128]}, @CMX_NN>) outputs(%arg4 : memref<1x64x48x88x!qElemType, {order = #NHWC, strides = [540672, 1, 11264, 128]}, @CMX_NN>) -> memref<1x64x48x88x!qElemType, {order = #NHWC, strides = [540672, 1, 11264, 128]}, @CMX_NN>
 
@@ -324,7 +324,7 @@ func.func @RemoveCMXToCMXCopyAndInsertNewCopy(%arg0 : memref<1x64x48x88x!qElemTy
                                               %arg1 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
                                     -> (memref<1x64x48x88x!qElemType1, #NHWC, @CMX_NN>, memref<1x128x48x88x!qElemType, #NHWC, @CMX_NN>) {
     %0 = memref.alloc() : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>
-    %1 = VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
+    %1 = VPUIP.NCEClusterTask {minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
             input(%arg0 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
             weights(%arg0 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
             parent_input(%arg0 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
@@ -333,12 +333,12 @@ func.func @RemoveCMXToCMXCopyAndInsertNewCopy(%arg0 : memref<1x64x48x88x!qElemTy
                 -> memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN> variants :  {
                 DPUTask {cluster_id = 0 : i64, outEnd = [87, 47, 63], mpe_mode = #VPU.mpe_mode<MATRIX>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0]}
         } PPE :  {
-            PPETask <ADD> {clamp_high = 131 : i64, clamp_low = -124 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_mult = [26565], quant_post_shift = 0 : i64, quant_shift = [15]}
+            PPETask {opaque_ppe = #VPU.PPEStub<>}
         }
 
     %2 = VPUIP.QuantizeCast inputs(%1 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>) -> memref<1x64x48x88x!qElemType1, #NHWC, @CMX_NN>
     %3 = memref.alloc() : memref<1x64x48x88x!qElemType1, #NHWC, @CMX_NN>
-    %4 = VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
+    %4 = VPUIP.NCEClusterTask {minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
             input(%2 : memref<1x64x48x88x!qElemType1, #NHWC, @CMX_NN>)
             weights(%2 : memref<1x64x48x88x!qElemType1, #NHWC, @CMX_NN>)
             parent_input(%2 : memref<1x64x48x88x!qElemType1, #NHWC, @CMX_NN>)
@@ -347,11 +347,11 @@ func.func @RemoveCMXToCMXCopyAndInsertNewCopy(%arg0 : memref<1x64x48x88x!qElemTy
                 -> memref<1x64x48x88x!qElemType1, #NHWC, @CMX_NN> variants :  {
                 DPUTask {cluster_id = 0 : i64, outEnd = [87, 47, 63], mpe_mode = #VPU.mpe_mode<MATRIX>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0]}
         } PPE :  {
-            PPETask <ADD> {clamp_high = 131 : i64, clamp_low = -124 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_mult = [26565], quant_post_shift = 0 : i64, quant_shift = [15]}
+            PPETask {opaque_ppe = #VPU.PPEStub<>}
         }
 
     %5 = memref.alloc() : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>
-    %6 = VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
+    %6 = VPUIP.NCEClusterTask {minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
             input(%arg1 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
             weights(%arg1 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
             parent_input(%arg1 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
@@ -360,7 +360,7 @@ func.func @RemoveCMXToCMXCopyAndInsertNewCopy(%arg0 : memref<1x64x48x88x!qElemTy
                 -> memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN> variants :  {
                 DPUTask {cluster_id = 0 : i64, outEnd = [87, 47, 63], mpe_mode = #VPU.mpe_mode<MATRIX>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0]}
         } PPE :  {
-            PPETask <ADD> {clamp_high = 131 : i64, clamp_low = -124 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_mult = [26565], quant_post_shift = 0 : i64, quant_shift = [15]}
+            PPETask {opaque_ppe = #VPU.PPEStub<>}
         }
 
     %7 = memref.alloc() : memref<1x128x48x88x!qElemType, #NHWC, @CMX_NN>
@@ -381,7 +381,7 @@ func.func @RemoveCMXToCMXCopyAndInsertNewCopy(%arg0 : memref<1x64x48x88x!qElemTy
 
     // CHECK:       [[BUFF_0:%.+]] = memref.alloc() : memref<1x128x48x88x!qElemType, #NHWC, @CMX_NN>
     // CHECK:       [[SUBVIEW_0:%.+]]  = VPUIP.SubView [[BUFF_0]] [0, 0, 0, 0] [1, 64, 48, 88]
-    // CHECK:       [[ADD_0:%.+]] = VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
+    // CHECK:       [[ADD_0:%.+]] = VPUIP.NCEClusterTask {minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
     // CHECK-SAME:          input([[INPUT1]] : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>) weights([[INPUT1]] : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>) parent_input([[INPUT1]] : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
     // CHECK-SAME:          parent_output([[SUBVIEW_0]] : memref<1x64x48x88x!qElemType, {order = #NHWC, strides = [540672, 1, 11264, 128]}, @CMX_NN>)
 
@@ -390,12 +390,12 @@ func.func @RemoveCMXToCMXCopyAndInsertNewCopy(%arg0 : memref<1x64x48x88x!qElemTy
     // CHECK-SAME:          outputs([[BUFF_1]] : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>) -> memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>
     // CHECK:       [[QUANTCAST:%.+]] = VPUIP.QuantizeCast inputs([[COPY_0]] : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>) -> memref<1x64x48x88x!qElemType1, #NHWC, @CMX_NN>
     // CHECK:       [[BUFF_2:%.+]] = memref.alloc() : memref<1x64x48x88x!qElemType1, #NHWC, @CMX_NN>
-    // CHECK:       [[ADD_1:%.+]] = VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
+    // CHECK:       [[ADD_1:%.+]] = VPUIP.NCEClusterTask {minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
     // CHECK-SAME:          input([[QUANTCAST]] : memref<1x64x48x88x!qElemType1, #NHWC, @CMX_NN>) weights([[QUANTCAST]] : memref<1x64x48x88x!qElemType1, #NHWC, @CMX_NN>) parent_input([[QUANTCAST]] : memref<1x64x48x88x!qElemType1, #NHWC, @CMX_NN>)
     // CHECK-SAME:          parent_output([[BUFF_2]] : memref<1x64x48x88x!qElemType1, #NHWC, @CMX_NN>)
 
     // CHECK:       [[SUBVIEW_1:%.+]]  = VPUIP.SubView [[BUFF_0]] [0, 64, 0, 0] [1, 64, 48, 88]
-    // CHECK:       [[ADD_2:%.+]] = VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
+    // CHECK:       [[ADD_2:%.+]] = VPUIP.NCEClusterTask {minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
     // CHECK-SAME:          input([[INPUT2]] : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>) weights([[INPUT2]] : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>) parent_input([[INPUT2]] : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
     // CHECK-SAME:          parent_output([[SUBVIEW_1]] : memref<1x64x48x88x!qElemType, {order = #NHWC, strides = [540672, 1, 11264, 128]}, @CMX_NN>)
 
@@ -415,7 +415,7 @@ func.func @RemoveCMXToCMXCopyAndInsertNewCopyWithReshapeNCEUser(%arg0 : memref<1
                                               %arg1 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
                                     -> (memref<1x32x48x176x!qElemType, #NHWC, @CMX_NN>, memref<1x128x48x88x!qElemType, #NHWC, @CMX_NN>) {
     %0 = memref.alloc() : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>
-    %1 = VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
+    %1 = VPUIP.NCEClusterTask {minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
             input(%arg0 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
             weights(%arg0 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
             parent_input(%arg0 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
@@ -424,12 +424,12 @@ func.func @RemoveCMXToCMXCopyAndInsertNewCopyWithReshapeNCEUser(%arg0 : memref<1
                 -> memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN> variants :  {
                 DPUTask {cluster_id = 0 : i64, outEnd = [87, 47, 63], mpe_mode = #VPU.mpe_mode<MATRIX>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0]}
         } PPE :  {
-            PPETask <ADD> {clamp_high = 131 : i64, clamp_low = -124 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_mult = [26565], quant_post_shift = 0 : i64, quant_shift = [15]}
+            PPETask {opaque_ppe = #VPU.PPEStub<>}
         }
 
     %2 = VPUIP.GenericReshape inputs(%1 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>) -> memref<1x32x48x176x!qElemType, #NHWC, @CMX_NN>
     %3 = memref.alloc() : memref<1x32x48x176x!qElemType, #NHWC, @CMX_NN>
-    %4 = VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
+    %4 = VPUIP.NCEClusterTask {minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
             input(%2 : memref<1x32x48x176x!qElemType, #NHWC, @CMX_NN>)
             weights(%2 : memref<1x32x48x176x!qElemType, #NHWC, @CMX_NN>)
             parent_input(%2 : memref<1x32x48x176x!qElemType, #NHWC, @CMX_NN>)
@@ -438,11 +438,11 @@ func.func @RemoveCMXToCMXCopyAndInsertNewCopyWithReshapeNCEUser(%arg0 : memref<1
                 -> memref<1x32x48x176x!qElemType, #NHWC, @CMX_NN> variants :  {
                 DPUTask {cluster_id = 0 : i64, outEnd = [175, 47, 31], mpe_mode = #VPU.mpe_mode<MATRIX>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0]}
         } PPE :  {
-            PPETask <ADD> {clamp_high = 131 : i64, clamp_low = -124 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_mult = [26565], quant_post_shift = 0 : i64, quant_shift = [15]}
+            PPETask {opaque_ppe = #VPU.PPEStub<>}
         }
 
     %5 = memref.alloc() : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>
-    %6 = VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
+    %6 = VPUIP.NCEClusterTask {minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
             input(%arg1 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
             weights(%arg1 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
             parent_input(%arg1 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
@@ -451,7 +451,7 @@ func.func @RemoveCMXToCMXCopyAndInsertNewCopyWithReshapeNCEUser(%arg0 : memref<1
                 -> memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN> variants :  {
                 DPUTask {cluster_id = 0 : i64, outEnd = [87, 47, 63], mpe_mode = #VPU.mpe_mode<MATRIX>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0]}
         } PPE :  {
-            PPETask <ADD> {clamp_high = 131 : i64, clamp_low = -124 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_mult = [26565], quant_post_shift = 0 : i64, quant_shift = [15]}
+            PPETask {opaque_ppe = #VPU.PPEStub<>}
         }
 
     %7 = memref.alloc() : memref<1x128x48x88x!qElemType, #NHWC, @CMX_NN>
@@ -472,7 +472,7 @@ func.func @RemoveCMXToCMXCopyAndInsertNewCopyWithReshapeNCEUser(%arg0 : memref<1
 
     // CHECK:       [[BUFF_0:%.+]] = memref.alloc() : memref<1x128x48x88x!qElemType, #NHWC, @CMX_NN>
     // CHECK:       [[SUBVIEW_0:%.+]]  = VPUIP.SubView [[BUFF_0]] [0, 0, 0, 0] [1, 64, 48, 88]
-    // CHECK:       [[ADD_0:%.+]] = VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
+    // CHECK:       [[ADD_0:%.+]] = VPUIP.NCEClusterTask {minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
     // CHECK-SAME:          input([[INPUT1]] : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>) weights([[INPUT1]] : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>) parent_input([[INPUT1]] : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
     // CHECK-SAME:          parent_output([[SUBVIEW_0]] : memref<1x64x48x88x!qElemType, {order = #NHWC, strides = [540672, 1, 11264, 128]}, @CMX_NN>)
 
@@ -481,12 +481,12 @@ func.func @RemoveCMXToCMXCopyAndInsertNewCopyWithReshapeNCEUser(%arg0 : memref<1
     // CHECK-SAME:          outputs([[BUFF_1]] : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>) -> memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>
     // CHECK:       [[RESHAPE:%.+]] = VPUIP.GenericReshape inputs([[COPY_0]] : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>) -> memref<1x32x48x176x!qElemType, #NHWC, @CMX_NN>
     // CHECK:       [[BUFF_2:%.+]] = memref.alloc() : memref<1x32x48x176x!qElemType, #NHWC, @CMX_NN>
-    // CHECK:       [[ADD_1:%.+]] = VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
+    // CHECK:       [[ADD_1:%.+]] = VPUIP.NCEClusterTask {minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
     // CHECK-SAME:          input([[RESHAPE]] : memref<1x32x48x176x!qElemType, #NHWC, @CMX_NN>) weights([[RESHAPE]] : memref<1x32x48x176x!qElemType, #NHWC, @CMX_NN>) parent_input([[RESHAPE]] : memref<1x32x48x176x!qElemType, #NHWC, @CMX_NN>)
     // CHECK-SAME:          parent_output([[BUFF_2]] : memref<1x32x48x176x!qElemType, #NHWC, @CMX_NN>)
 
     // CHECK:       [[SUBVIEW_1:%.+]]  = VPUIP.SubView [[BUFF_0]] [0, 64, 0, 0] [1, 64, 48, 88]
-    // CHECK:       [[ADD_2:%.+]] = VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
+    // CHECK:       [[ADD_2:%.+]] = VPUIP.NCEClusterTask {minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
     // CHECK-SAME:          input([[INPUT2]] : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>) weights([[INPUT2]] : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>) parent_input([[INPUT2]] : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
     // CHECK-SAME:          parent_output([[SUBVIEW_1]] : memref<1x64x48x88x!qElemType, {order = #NHWC, strides = [540672, 1, 11264, 128]}, @CMX_NN>)
 
@@ -506,7 +506,7 @@ func.func @RemoveCMXToCMXCopyAndInsertNewCopyWithReshapeCopyUser(%arg0 : memref<
                                               %arg1 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
                                     -> (memref<1x32x48x176x!qElemType, #NHWC, @DDR>, memref<1x128x48x88x!qElemType, #NHWC, @CMX_NN>) {
     %0 = memref.alloc() : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>
-    %1 = VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
+    %1 = VPUIP.NCEClusterTask {minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
             input(%arg0 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
             weights(%arg0 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
             parent_input(%arg0 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
@@ -515,7 +515,7 @@ func.func @RemoveCMXToCMXCopyAndInsertNewCopyWithReshapeCopyUser(%arg0 : memref<
                 -> memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN> variants :  {
                 DPUTask {cluster_id = 0 : i64, outEnd = [87, 47, 63], mpe_mode = #VPU.mpe_mode<MATRIX>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0]}
         } PPE :  {
-            PPETask <ADD> {clamp_high = 131 : i64, clamp_low = -124 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_mult = [26565], quant_post_shift = 0 : i64, quant_shift = [15]}
+            PPETask {opaque_ppe = #VPU.PPEStub<>}
         }
 
     %2 = VPUIP.GenericReshape inputs(%1 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>) -> memref<1x32x48x176x!qElemType, #NHWC, @CMX_NN>
@@ -525,7 +525,7 @@ func.func @RemoveCMXToCMXCopyAndInsertNewCopyWithReshapeCopyUser(%arg0 : memref<
                                -> memref<1x32x48x176x!qElemType, #NHWC, @DDR>
 
     %5 = memref.alloc() : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>
-    %6 = VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
+    %6 = VPUIP.NCEClusterTask {minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
             input(%arg1 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
             weights(%arg1 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
             parent_input(%arg1 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
@@ -534,7 +534,7 @@ func.func @RemoveCMXToCMXCopyAndInsertNewCopyWithReshapeCopyUser(%arg0 : memref<
                 -> memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN> variants :  {
                 DPUTask {cluster_id = 0 : i64, outEnd = [87, 47, 63], mpe_mode = #VPU.mpe_mode<MATRIX>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0]}
         } PPE :  {
-            PPETask <ADD> {clamp_high = 131 : i64, clamp_low = -124 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_mult = [26565], quant_post_shift = 0 : i64, quant_shift = [15]}
+            PPETask {opaque_ppe = #VPU.PPEStub<>}
         }
 
     %7 = memref.alloc() : memref<1x128x48x88x!qElemType, #NHWC, @CMX_NN>
@@ -555,7 +555,7 @@ func.func @RemoveCMXToCMXCopyAndInsertNewCopyWithReshapeCopyUser(%arg0 : memref<
 
     // CHECK:       [[BUFF_0:%.+]] = memref.alloc() : memref<1x128x48x88x!qElemType, #NHWC, @CMX_NN>
     // CHECK:       [[SUBVIEW_0:%.+]]  = VPUIP.SubView [[BUFF_0]] [0, 0, 0, 0] [1, 64, 48, 88]
-    // CHECK:       [[ADD_0:%.+]] = VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
+    // CHECK:       [[ADD_0:%.+]] = VPUIP.NCEClusterTask {minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
     // CHECK-SAME:          input([[INPUT1]] : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>) weights([[INPUT1]] : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>) parent_input([[INPUT1]] : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
     // CHECK-SAME:          parent_output([[SUBVIEW_0]] : memref<1x64x48x88x!qElemType, {order = #NHWC, strides = [540672, 1, 11264, 128]}, @CMX_NN>)
 
@@ -567,7 +567,7 @@ func.func @RemoveCMXToCMXCopyAndInsertNewCopyWithReshapeCopyUser(%arg0 : memref<
     // CHECK:       [[COPY_1:%.+]] = VPUIP.Copy inputs([[RESHAPE]] : memref<1x32x48x176x!qElemType, #NHWC, @CMX_NN>) outputs([[BUFF_2]] : memref<1x32x48x176x!qElemType, #NHWC, @DDR>) -> memref<1x32x48x176x!qElemType, #NHWC, @DDR>
 
     // CHECK:       [[SUBVIEW_1:%.+]]  = VPUIP.SubView [[BUFF_0]] [0, 64, 0, 0] [1, 64, 48, 88]
-    // CHECK:       [[ADD_2:%.+]] = VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
+    // CHECK:       [[ADD_2:%.+]] = VPUIP.NCEClusterTask {minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
     // CHECK-SAME:          input([[INPUT2]] : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>) weights([[INPUT2]] : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>) parent_input([[INPUT2]] : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
     // CHECK-SAME:          parent_output([[SUBVIEW_1]] : memref<1x64x48x88x!qElemType, {order = #NHWC, strides = [540672, 1, 11264, 128]}, @CMX_NN>)
 
@@ -594,7 +594,7 @@ func.func @RemoveCMXToCMXTilingCopyAndInsertNewCopyWithReshapeCopyUser(%arg0 : !
                                        %arg0 as %arg3: memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
                                 outputs(%0 as %arg4: memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
                                     -> !distributeType {
-        %15 = VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
+        %15 = VPUIP.NCEClusterTask {minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
             input(%arg2 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
             weights(%arg3 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
             parent_input(%arg2 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
@@ -603,7 +603,7 @@ func.func @RemoveCMXToCMXTilingCopyAndInsertNewCopyWithReshapeCopyUser(%arg0 : !
                 -> memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN> variants :  {
                 DPUTask {cluster_id = 0 : i64, outEnd = [87, 47, 63], mpe_mode = #VPU.mpe_mode<MATRIX>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0]}
         } PPE :  {
-            PPETask <ADD> {clamp_high = 131 : i64, clamp_low = -124 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_mult = [26565], quant_post_shift = 0 : i64, quant_shift = [15]}
+            PPETask {opaque_ppe = #VPU.PPEStub<>}
         }
     }
 
@@ -623,7 +623,7 @@ func.func @RemoveCMXToCMXTilingCopyAndInsertNewCopyWithReshapeCopyUser(%arg0 : !
                                        %arg1 as %arg3: memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
                                 outputs(%5 as %arg4: memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
                                     -> !distributeType {
-        %15 = VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
+        %15 = VPUIP.NCEClusterTask {minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
             input(%arg2 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
             weights(%arg3 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
             parent_input(%arg2 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
@@ -632,7 +632,7 @@ func.func @RemoveCMXToCMXTilingCopyAndInsertNewCopyWithReshapeCopyUser(%arg0 : !
                 -> memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN> variants :  {
                 DPUTask {cluster_id = 0 : i64, outEnd = [87, 47, 63], mpe_mode = #VPU.mpe_mode<MATRIX>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0]}
         } PPE :  {
-            PPETask <ADD> {clamp_high = 131 : i64, clamp_low = -124 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_mult = [26565], quant_post_shift = 0 : i64, quant_shift = [15]}
+            PPETask {opaque_ppe = #VPU.PPEStub<>}
         }
     }
 
@@ -665,7 +665,7 @@ func.func @RemoveCMXToCMXTilingCopyAndInsertNewCopyWithReshapeCopyUser(%arg0 : !
     // CHECK:       [[ADD_0:%.+]] = VPUIP.NCEClusterTiling inputs([[INPUT1]] as %arg2: memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>, [[INPUT1]] as %arg3: memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
     // CHECK-SAME:              outputs([[SUBVIEW_0]] as %arg4: memref<1x64x48x88x!qElemType, {order = #NHWC, strides = [540672, 1, 11264, 128]}, @CMX_NN>)
     // CHECK-SAME:              -> !VPUIP.DistributedBuffer<1x64x48x88x!qElemType, {order = #NHWC, strides = [540672, 1, 11264, 128]}, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 4, 1], num_clusters = 4 : i64}> {
-    // CHECK:             [[ADD_0_INNER:%.+]] = VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
+    // CHECK:             [[ADD_0_INNER:%.+]] = VPUIP.NCEClusterTask {minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
     // CHECK-SAME:              input(%arg2 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>) weights(%arg3 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>) parent_input(%arg2 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
     // CHECK-SAME:              parent_output(%arg4 : memref<1x64x48x88x!qElemType, {order = #NHWC, strides = [540672, 1, 11264, 128]}, @CMX_NN>) outputs(%arg4 : memref<1x64x48x88x!qElemType, {order = #NHWC, strides = [540672, 1, 11264, 128]}, @CMX_NN>) -> memref<1x64x48x88x!qElemType, {order = #NHWC, strides = [540672, 1, 11264, 128]}, @CMX_NN>
 
@@ -692,7 +692,7 @@ func.func @RemoveCMXToCMXTilingCopyAndInsertNewCopyWithReshapeCopyUser(%arg0 : !
     // CHECK:       [[ADD_2:%.+]] = VPUIP.NCEClusterTiling inputs([[INPUT2]] as %arg2: memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>, [[INPUT2]] as %arg3: memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
     // CHECK-SAME:              outputs([[SUBVIEW_1]] as %arg4: memref<1x64x48x88x!qElemType, {order = #NHWC, strides = [540672, 1, 11264, 128]}, @CMX_NN>)
     // CHECK-SAME:              -> !VPUIP.DistributedBuffer<1x64x48x88x!qElemType, {order = #NHWC, strides = [540672, 1, 11264, 128]}, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 4, 1], num_clusters = 4 : i64}> {
-    // CHECK:           [[ADD_2_INNER:%.+]] = VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
+    // CHECK:           [[ADD_2_INNER:%.+]] = VPUIP.NCEClusterTask {minimumHardwareExecutionCost = 1081 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
     // CHECK-SAME:              input(%arg2 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>) weights(%arg3 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>) parent_input(%arg2 : memref<1x64x48x88x!qElemType, #NHWC, @CMX_NN>)
     // CHECK-SAME:              parent_output(%arg4 : memref<1x64x48x88x!qElemType, {order = #NHWC, strides = [540672, 1, 11264, 128]}, @CMX_NN>) outputs(%arg4 : memref<1x64x48x88x!qElemType, {order = #NHWC, strides = [540672, 1, 11264, 128]}, @CMX_NN>) -> memref<1x64x48x88x!qElemType, {order = #NHWC, strides = [540672, 1, 11264, 128]}, @CMX_NN>
 
@@ -757,7 +757,7 @@ func.func @RemoveCMXToCMXTilingCopyAndInsertNewCopyWithReshapeCopyUserSparsity(
             DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [13, 13, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 1 : i64, bottom = 0 : i64>}
             DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [13, 13, 127], outStart = [0, 0, 64], pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 1 : i64, bottom = 0 : i64>}
         } PPE : {
-            PPETask <LRELU> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, fp_prelu_alpha = 1.000000e+00 : f64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64}
+            PPETask {opaque_ppe = #VPU.PPEStub<>}
         }
     }
 
@@ -831,7 +831,7 @@ func.func @RemoveCMXToCMXTilingCopyAndInsertNewCopyWithReshapeCopyUserSparsity(
             DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [13, 13, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 1 : i64, bottom = 0 : i64>}
             DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [13, 13, 127], outStart = [0, 0, 64], pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 1 : i64, bottom = 0 : i64>}
         } PPE : {
-            PPETask <LRELU> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, fp_prelu_alpha = 1.000000e+00 : f64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64}
+            PPETask {opaque_ppe = #VPU.PPEStub<>}
         }
     }
 
@@ -1029,7 +1029,7 @@ func.func @RemoveCMXToCMXCopyAndInsertNewCopyWithReshapeSparsity(
             DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [13, 13, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 1 : i64, bottom = 0 : i64>}
             DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [13, 13, 127], outStart = [0, 0, 64], pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 1 : i64, bottom = 0 : i64>}
         } PPE : {
-            PPETask <LRELU> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, fp_prelu_alpha = 1.000000e+00 : f64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64}
+            PPETask {opaque_ppe = #VPU.PPEStub<>}
         }
 
     // Input 2: Allocated buffer for grouped op output
@@ -1080,7 +1080,7 @@ func.func @RemoveCMXToCMXCopyAndInsertNewCopyWithReshapeSparsity(
             DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [13, 13, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 1 : i64, bottom = 0 : i64>}
             DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [13, 13, 127], outStart = [0, 0, 64], pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 1 : i64, bottom = 0 : i64>}
         } PPE : {
-            PPETask <LRELU> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, fp_prelu_alpha = 1.000000e+00 : f64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64}
+            PPETask {opaque_ppe = #VPU.PPEStub<>}
         }
 
     %data14 = VPUIP.SubView %4 [0, 128, 0, 0] [1, 128, 14, 14] : !OutDataBufferType

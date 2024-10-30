@@ -1,15 +1,19 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#include "vpux/compiler/dialect/VPU/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPU/transforms/factories/nce_sparsity_converters.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/conv_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/eltwise_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/max_kernel_size_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
+#include "vpux/compiler/dialect/VPU/utils/ppe_version_config.hpp"
 #include "vpux/compiler/utils/VPU/ppe_utils.hpp"
 
 #include "vpux/compiler/dialect/const/utils/utils.hpp"
@@ -98,7 +102,6 @@ mlir::LogicalResult rewriteSparsityOpWithEltwiseOp(mlir::PatternRewriter& rewrit
         std::ignore = matchFailed(log, rewriter, origOp, "[{0}] {1}", debugName, msg.str());
     };
 
-    const auto loc = origOp->getLoc();
     auto ctx = origOp->getContext();
 
     auto input = origOp->getOperand(0);
@@ -140,7 +143,7 @@ mlir::LogicalResult rewriteSparsityOpWithEltwiseOp(mlir::PatternRewriter& rewrit
         outputType = outputType.changeShape(alignedShape);
     }
 
-    if (!VPU::isNCEEltwiseSupported(arch, inputType, inputType, outputType,
+    if (!VPU::isNCEEltwiseSupported(origOp, inputType, inputType, outputType,
                                     /*allowDifferentScales=*/true,
                                     /*allowDifferentZp=*/true, /*checkLayout=*/true, /*checkChannelAlignment=*/true,
                                     logCb)) {
@@ -168,11 +171,10 @@ mlir::LogicalResult rewriteSparsityOpWithEltwiseOp(mlir::PatternRewriter& rewrit
     outputTypeForPPEAttr = outputTypeForPPEAttr.changeElemType(newType);
 
     const auto opType = VPU::EltwiseType::ADD;
-    auto ppeTaskAttr =
-            VPU::getNCEEltwisePPETaskAttr(inputType, inputType, outputTypeForPPEAttr, nullptr, loc, opType, ctx, arch);
+    const auto ppeOpaqueAttr = VPU::PpeVersionConfig::retrievePPEAttribute(origOp);
 
     auto nceOp = rewriter.create<VPU::NCEEltwiseOp>(origOp->getLoc(), outputType, input, input,
-                                                    VPU::EltwiseTypeAttr::get(ctx, opType), ppeTaskAttr,
+                                                    VPU::EltwiseTypeAttr::get(ctx, opType), ppeOpaqueAttr,
                                                     /*multi_cluster_strategyAttr=*/nullptr,
                                                     /*is_inplace*/ nullptr);
 
@@ -221,25 +223,25 @@ mlir::Value createFilter(mlir::PatternRewriter& rewriter, mlir::Location loc, vp
     auto dataStorageType = mlir::RankedTensorType::get(shape.raw(), mlir::Float32Type::get(ctx));
     auto dataAttr = mlir::DenseElementsAttr::get(dataStorageType, ArrayRef(content));
 
-    auto contentAttr = Const::ContentAttr::get(dataAttr);
+    auto contentAttrSetup = Const::ContentAttr::transform(dataAttr);
     if (auto qElemType = elemType.dyn_cast<mlir::quant::QuantizedType>()) {
-        contentAttr = contentAttr.convertElemType(getUInt8Type(ctx));
-        contentAttr = contentAttr.quantCast(qElemType);
+        contentAttrSetup = contentAttrSetup.castElemType(getUInt8Type(ctx)).quantCast(qElemType);
     } else if (elemType.isa<mlir::Float16Type>()) {
-        contentAttr = contentAttr.convertElemType(mlir::Float16Type::get(ctx));
+        contentAttrSetup = contentAttrSetup.castElemType(mlir::Float16Type::get(ctx));
     }
     if (order != DimsOrder::fromNumDims(shape.size())) {
-        contentAttr = contentAttr.reorder(order);
+        contentAttrSetup = contentAttrSetup.reorder(order);
     }
 
-    auto filterContentAttr = contentAttr.sparsify(/*compressOutputType=*/false);
-    auto filterConstOp = rewriter.create<Const::DeclareOp>(loc, filterType, filterContentAttr);
+    auto filterContentAttr = contentAttrSetup.clone().sparsify(/*compressOutputType=*/false).get();
+    auto filterConstOp = rewriter.create<Const::DeclareOp>(loc, filterType, std::move(filterContentAttr));
 
     // The sparsity map is introduced to avoid the compute with the numerous zero values in the filter
-    auto sparsityMapContentAttr = contentAttr.getSparsityMap();
+    auto sparsityMapContentAttr = contentAttrSetup.clone().getSparsityMap().get();
     auto sparsityMapConstOp =
-            rewriter.create<Const::DeclareOp>(loc, sparsityMapContentAttr.getType(), sparsityMapContentAttr);
+            rewriter.create<Const::DeclareOp>(loc, sparsityMapContentAttr.getType(), std::move(sparsityMapContentAttr));
 
+    auto contentAttr = contentAttrSetup.get();
     const auto numNonSparseElements = vpux::countNonSparseElementsPerOC(contentAttr.fold(), elemType);
     const auto numNonSparseElementsType =
             mlir::RankedTensorType::get({static_cast<int64_t>(numNonSparseElements.size())}, getInt64Type(ctx));
@@ -318,7 +320,7 @@ mlir::LogicalResult rewriteSparsityOpWithConv(mlir::PatternRewriter& rewriter, m
     const SmallVector<int64_t> dilations{1, 1};
     const auto pads = vpux::PadInfo(0, 0, 0, 0);
 
-    if (!VPU::isNCEConvSupported(arch, inputType, filterType, outputType, dilations, /*KY=*/1, /*KX=*/1, /*SY=*/1,
+    if (!VPU::isNCEConvSupported(origOp, inputType, filterType, outputType, dilations, /*KY=*/1, /*KX=*/1, /*SY=*/1,
                                  /*SX=*/1, pads, /*checkLayout=*/true, /*checkChannelAlignment=*/true, logCb)) {
         return matchFailed(log, rewriter, origOp,
                            "Cannot lower operation to NCE Convolution because of HW requirements");
@@ -327,9 +329,11 @@ mlir::LogicalResult rewriteSparsityOpWithConv(mlir::PatternRewriter& rewriter, m
     auto filter = createFilter(rewriter, origOp->getLoc(), filterType);
 
     // TODO: add weights sparsity map to save compute
-    VPU::PPETaskAttr ppeTaskAttr = nullptr;
+    const auto ppeOpaqueAttr = VPU::PpeVersionConfig::retrievePPEAttribute(origOp);
+    const auto ppeConverter = VPU::NCESparsity::getPPEConverterCb(arch);
+    const auto biasConverter = VPU::NCESparsity::getBiasConverterCb(arch);
     auto weightsTableVec = VPU::createWeightsTableData(origOp->getOperand(0), origOp->getResult(0), filter,
-                                                       /*bias=*/nullptr, OC, ppeTaskAttr, arch, /*postOpAttr=*/nullptr,
+                                                       /*bias=*/{}, OC, ppeConverter, biasConverter,
                                                        /*constScale=*/nullptr);
     auto weightsTable = VPU::createWeightsTableTensor(rewriter, origOp->getLoc(), weightsTableVec);
 
@@ -337,10 +341,10 @@ mlir::LogicalResult rewriteSparsityOpWithConv(mlir::PatternRewriter& rewriter, m
     auto padAttr = VPU::getPaddingAttr(ctx, pads);
     auto rawFilterShape = getIntArrayAttr(ctx, filterType.getShape().raw());
 
-    auto nceOp = rewriter.create<VPU::NCEConvolutionOp>(
-            origOp->getLoc(), outputType, input, filter, weightsTable, /*activationWindow=*/nullptr,
-            /*instructionListTable=*/nullptr, stridesAttr, padAttr, ppeTaskAttr, rawFilterShape,
-            /*activationWindowChannelLength=*/nullptr, /*multi_cluster_strategyAttr=*/nullptr);
+    auto nceOp = rewriter.create<VPU::NCEConvolutionOp>(origOp->getLoc(), outputType, input, filter, weightsTable,
+                                                        /*instructionListTable=*/nullptr, stridesAttr, padAttr,
+                                                        ppeOpaqueAttr, rawFilterShape,
+                                                        /*multi_cluster_strategyAttr=*/nullptr);
 
     auto newOutput = nceOp.getOutput();
 
@@ -381,6 +385,8 @@ public:
 
 private:
     void safeRunOnFunc() final;
+
+private:
     std::optional<bool> _maybeFakeSparsify;
 };
 

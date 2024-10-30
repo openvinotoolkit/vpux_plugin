@@ -33,10 +33,10 @@ func.func @ConvertConstToAttr3InputsSizes(%arg0: tensor<1x3x10x10xf32>) -> tenso
     // CHECK-NOT:   const.Declare
     %2 = IE.Interpolate(%arg0, %0, %1) {attr = #IE.Interpolate<antialias = false, coord_mode = <HALF_PIXEL>, cube_coeff = -7.500000e-01, mode = <NEAREST>, nearest_mode = <ROUND_PREFER_FLOOR>, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], shape_calc_mode = <SIZES>>, operandSegmentSizes = array<i32: 1, 1, 1, 0>} : tensor<1x3x10x10xf32>, tensor<4xsi64>, tensor<4xf32> -> tensor<1x3x20x15xf32>
     // CHECK:       %[[VAL0:.*]] = IE.Interpolate(%arg0) {attr = #IE.Interpolate<mode = <NEAREST>, shape_calc_mode = <SIZES>, coord_mode = <HALF_PIXEL>, nearest_mode = <ROUND_PREFER_FLOOR>, antialias = false, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], cube_coeff = -7.500000e-01 : f64>,
-    // CHECK-SAME: axes_attr = [2, 3],
+    // CHECK-SAME: axes_attr = [0, 1, 2, 3],
     // CHECK-SAME: operandSegmentSizes = array<i32: 1, 0, 0, 0>,
-    // CHECK-SAME: scales_attr = [2.000000e+00, 1.500000e+00],
-    // CHECK-SAME: sizes_attr = [20, 15]}
+    // CHECK-SAME: scales_attr = [1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00],
+    // CHECK-SAME: sizes_attr = [1, 3, 20, 15]}
     // CHECK-SAME: tensor<1x3x10x10xf32> -> tensor<1x3x20x15xf32>
 
     return %2 : tensor<1x3x20x15xf32>
@@ -52,10 +52,10 @@ func.func @ConvertConstToAttr3InputsScales(%arg0: tensor<1x3x10x10xf32>) -> tens
     // CHECK-NOT:   const.Declare
     %2 = IE.Interpolate(%arg0, %0, %1) {attr = #IE.Interpolate<antialias = false, coord_mode = <HALF_PIXEL>, cube_coeff = -7.500000e-01, mode = <NEAREST>, nearest_mode = <ROUND_PREFER_FLOOR>, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], shape_calc_mode = <SCALES>>, operandSegmentSizes = array<i32: 1, 1, 1, 0>} : tensor<1x3x10x10xf32>, tensor<4xsi64>, tensor<4xf32> -> tensor<1x3x20x15xf32>
     // CHECK:       %[[VAL0:.*]] = IE.Interpolate(%arg0) {attr = #IE.Interpolate<mode = <NEAREST>, shape_calc_mode = <SIZES>, coord_mode = <HALF_PIXEL>, nearest_mode = <ROUND_PREFER_FLOOR>, antialias = false, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], cube_coeff = -7.500000e-01 : f64>,
-    // CHECK-SAME: axes_attr = [2, 3],
+    // CHECK-SAME: axes_attr = [0, 1, 2, 3],
     // CHECK-SAME: operandSegmentSizes = array<i32: 1, 0, 0, 0>,
-    // CHECK-SAME: scales_attr = [2.000000e+00, 1.500000e+00],
-    // CHECK-SAME: sizes_attr = [20, 15]}
+    // CHECK-SAME: scales_attr = [1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00],
+    // CHECK-SAME: sizes_attr = [1, 3, 20, 15]}
     // CHECK-SAME: tensor<1x3x10x10xf32> -> tensor<1x3x20x15xf32>
 
     return %2 : tensor<1x3x20x15xf32>
@@ -75,7 +75,7 @@ func.func @InferOutputShapeWithFloatScales(%arg0: tensor<1x128x3x3xf32>) -> tens
     // CHECK:       [[INTERP:%.*]] = IE.Interpolate(%arg0)
     // CHECK-SAME:      mode = <LINEAR_ONNX>, shape_calc_mode = <SIZES>, coord_mode = <ASYMMETRIC>, nearest_mode = <ROUND_PREFER_FLOOR>
     // CHECK-SAME:      antialias = false, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], cube_coeff = -7.500000e-01 : f64>,
-    // CHECK-SAME:      axes_attr = [2, 3], operandSegmentSizes = array<i32: 1, 0, 0, 0>, scales_attr = [1.6666666666666667, 1.6666666666666667], sizes_attr = [5, 5]} : tensor<1x128x3x3xf32> -> tensor<1x128x5x5xf32>
+    // CHECK-SAME:      axes_attr = [0, 1, 2, 3], operandSegmentSizes = array<i32: 1, 0, 0, 0>, scales_attr = [1.000000e+00, 1.000000e+00, 1.000000e+00, 1.000000e+00], sizes_attr = [1, 128, 5, 5]} : tensor<1x128x3x3xf32> -> tensor<1x128x5x5xf32>
     // CHECK:       return [[INTERP]]
 }
 
@@ -140,7 +140,7 @@ func.func @ConvertToNearestWithSCALESMode(%arg0: tensor<1x96x1x1xf32>) -> tensor
     // CHECK:       [[INTERP:%.*]] = IE.Interpolate(%arg0)
     // CHECK-SAME:      mode = <NEAREST>, shape_calc_mode = <SIZES>, coord_mode = <ASYMMETRIC>, nearest_mode = <ROUND_PREFER_FLOOR>
     // CHECK-SAME:      antialias = false, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], cube_coeff = -7.500000e-01 : f64>,
-    // CHECK-SAME:      axes_attr = [2, 3], operandSegmentSizes = array<i32: 1, 0, 0, 0>, scales_attr = [3.300000e+01, 3.300000e+01], sizes_attr = [33, 33]} : tensor<1x96x1x1xf32> -> tensor<1x96x33x33xf32>
+    // CHECK-SAME:      axes_attr = [2, 3], operandSegmentSizes = array<i32: 1, 0, 0, 0>, scales_attr = [1.000000e+00, 1.000000e+00], sizes_attr = [33, 33]} : tensor<1x96x1x1xf32> -> tensor<1x96x33x33xf32>
     // CHECK:       return [[INTERP]]
 }
 
@@ -157,7 +157,7 @@ func.func @NotConvertToNearestWithSCALESMode(%arg0: tensor<1x96x3x1xf32>) -> ten
     // CHECK:       [[INTERP:%.*]] = IE.Interpolate(%arg0)
     // CHECK-SAME:      mode = <LINEAR_ONNX>, shape_calc_mode = <SIZES>, coord_mode = <ALIGN_CORNERS>, nearest_mode = <ROUND_PREFER_FLOOR>
     // CHECK-SAME:      antialias = false, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], cube_coeff = -7.500000e-01 : f64>,
-    // CHECK-SAME:      axes_attr = [2, 3], operandSegmentSizes = array<i32: 1, 0, 0, 0>, scales_attr = [1.100000e+01, 3.300000e+01], sizes_attr = [33, 33]} : tensor<1x96x3x1xf32> -> tensor<1x96x33x33xf32>
+    // CHECK-SAME:      axes_attr = [2, 3], operandSegmentSizes = array<i32: 1, 0, 0, 0>, scales_attr = [1.000000e+00, 1.000000e+00], sizes_attr = [33, 33]} : tensor<1x96x3x1xf32> -> tensor<1x96x33x33xf32>
     // CHECK:       return [[INTERP]]
 }
 

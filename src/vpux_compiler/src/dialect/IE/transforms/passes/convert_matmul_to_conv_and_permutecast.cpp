@@ -126,7 +126,8 @@ mlir::LogicalResult ConvertMatMulToConvPass::MatMulOpConverter::matchAndRewrite(
     auto padsEnd = getIntArrayAttr(ctx, SmallVector<int64_t>{0, 0});
     auto dilations = getIntArrayAttr(ctx, SmallVector<int64_t>{1, 1});
     auto convOp = rewriter.create<IE::ConvolutionOp>(takeOpLoc(matmulOp, "as_convolution"), convInput, weight, nullptr,
-                                                     strides, padsBegin, padsEnd, dilations, nullptr, nullptr, nullptr)
+                                                     strides, padsBegin, padsEnd, dilations, nullptr, nullptr, nullptr,
+                                                     nullptr, nullptr)
                           .getOutput();
 
     _log.trace("Insert ConvolutionOp {0} ", convOp);

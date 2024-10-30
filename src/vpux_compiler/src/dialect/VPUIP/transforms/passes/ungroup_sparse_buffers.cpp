@@ -122,6 +122,34 @@ void ungroupOperation(Logger& log, mlir::OpBuilder& builder, mlir::Operation* op
 }
 
 //
+// RemoveGroupUngroup
+//
+
+class RemoveGroupUngroupRewriter final : public mlir::OpRewritePattern<VPUIP::GroupSparseBufferOp> {
+public:
+    RemoveGroupUngroupRewriter(mlir::MLIRContext* ctx): mlir::OpRewritePattern<VPUIP::GroupSparseBufferOp>(ctx) {
+    }
+
+    mlir::LogicalResult matchAndRewrite(VPUIP::GroupSparseBufferOp groupOp,
+                                        mlir::PatternRewriter& /*rewriter*/) const final {
+        if (llvm::any_of(groupOp.getOutput().getUsers(), [](mlir::Operation* userOp) {
+                return !mlir::isa<VPUIP::UngroupSparseBufferOp>(userOp);
+            })) {
+            return mlir::failure();
+        }
+
+        const auto operands = groupOp.getOperands();
+        for (auto userOp : groupOp.getOutput().getUsers()) {
+            for (auto userResult : userOp->getResults() | indexed) {
+                userResult.value().replaceAllUsesWith(operands[userResult.index()]);
+            }
+        }
+
+        return mlir::success();
+    }
+};
+
+//
 // UngroupSparseBuffers
 //
 
@@ -148,6 +176,7 @@ void UngroupSparseBuffers::safeRunOnFunc() {
         return sparseValues;
     };
 
+    // Insert group / ungroup operations around each instance of sparse types
     for (auto& op : llvm::make_early_inc_range(func.getOps())) {
         if (mlir::isa<VPUIP::GroupSparseBufferOp, VPUIP::UngroupSparseBufferOp>(op)) {
             continue;
@@ -169,6 +198,14 @@ void UngroupSparseBuffers::safeRunOnFunc() {
 
         mlir::OpBuilder builder(&op);
         ungroupOperation(_log, builder, &op, sparseOperands, sparseResults);
+    }
+
+    // Remove pairs of group - ungroup operations
+    auto& ctx = getContext();
+    mlir::RewritePatternSet patterns(&ctx);
+    patterns.add<RemoveGroupUngroupRewriter>(&ctx);
+    if (mlir::failed(mlir::applyPatternsAndFoldGreedily(func, std::move(patterns), getDefaultGreedyRewriteConfig()))) {
+        signalPassFailure();
     }
 }
 

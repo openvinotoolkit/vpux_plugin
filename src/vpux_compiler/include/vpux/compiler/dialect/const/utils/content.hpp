@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include "vpux/compiler/dialect/const/utils/const_data.hpp"
 #include "vpux/compiler/utils/types.hpp"
 
 #include "vpux/utils/core/checked_cast.hpp"
@@ -16,8 +17,6 @@
 #include <mlir/Dialect/Quant/QuantTypes.h>
 
 #include <llvm/Support/TypeName.h>
-
-#include <memory>
 
 namespace vpux {
 namespace Const {
@@ -124,7 +123,8 @@ public:
 
 public:
     bool operator==(const ContentRangeBase& other) const {
-        return _elemSize == other._elemSize && _isSplat == other._isSplat && _data == other._data;
+        return _elemSize == other._elemSize && _isSplat == other._isSplat && _data.data() == other._data.data() &&
+               _data.size() == other._data.size();
     }
     bool operator!=(const ContentRangeBase& other) const {
         return !(*this == other);
@@ -166,6 +166,9 @@ public:
 class Content final {
 public:
     Content() = default;
+    Content(vpux::NDTypeInterface type, ConstData&& data, mlir::Type storageElemType, bool isSplat)
+            : _type(type), _data(std::move(data)), _storageElemType(storageElemType), _isSplat(isSplat) {
+    }
 
     // `data` storage might have different element type than base `type`.
     // The `getValues` / `getSplatValue` methods accept template type parameter and convert element type on the fly.
@@ -175,7 +178,7 @@ public:
     static Content allocTempBuffer(vpux::NDTypeInterface type, mlir::Type storageElemType, bool isSplat,
                                    size_t tempBufRawSize);
     static Content moveBuffer(vpux::NDTypeInterface type, Content&& other);
-    Content copyUnownedBuffer();
+    static Content copyUnownedBuffer(Content&& origin);
 
 public:
     vpux::NDTypeInterface getType() const {
@@ -193,7 +196,7 @@ public:
         const Bit storageElemTypeSize = vpux::getElemTypeSize(_storageElemType);
         VPUX_THROW_WHEN(storageElemTypeSize.count() < CHAR_BIT, "Unsupported storage type of size '{0}' bits.",
                         storageElemTypeSize.count());
-        return details::ContentRange<OutT>(_data, _isSplat, storageElemTypeSize, getType().getNumElements(),
+        return details::ContentRange<OutT>(_data.data(), _isSplat, storageElemTypeSize, getType().getNumElements(),
                                            std::move(cvtOp));
     }
 
@@ -240,12 +243,12 @@ public:
 public:
     template <typename OutT>
     MutableArrayRef<OutT> getTempBuf() & {
-        VPUX_THROW_UNLESS(_tempBuf != nullptr, "Temp buffer was not allocated");
+        VPUX_THROW_WHEN(_data.hasExternalOrigin(), "This data is read-only");
 
         VPUX_THROW_UNLESS(_data.size() % sizeof(OutT) == 0,
                           "Size of tempBuf needs to be multiple of '{0}' but is '{1}'", sizeof(OutT), _data.size());
 
-        return MutableArrayRef<OutT>(reinterpret_cast<OutT*>(_tempBuf.get()), _data.size() / sizeof(OutT));
+        return _data.mutableData<OutT>();
     }
 
     template <typename OutT>
@@ -259,7 +262,7 @@ public:
     void setStorageElemType(mlir::Type newStorageElemType);
 
     ArrayRef<char> getRawStorageBuf() const& {
-        return _data;
+        return _data.data();
     }
 
     ArrayRef<char> getRawStorageBuf() && = delete;
@@ -269,12 +272,11 @@ public:
         VPUX_THROW_UNLESS(_data.size() % sizeof(OutT) == 0, "Size of buffer needs to be multiple of '{0}' but is '{1}'",
                           sizeof(OutT), _data.size());
 
-        return ArrayRef<OutT>(reinterpret_cast<const OutT*>(_data.data()), _data.size() / sizeof(OutT));
+        return _data.data<OutT>();
     }
 
     MutableArrayRef<char> getRawTempBuf() & {
-        VPUX_THROW_UNLESS(_tempBuf != nullptr, "Temp buffer was not allocated");
-        return MutableArrayRef(_tempBuf.get(), _data.size());
+        return getTempBuf<char>();
     }
 
     MutableArrayRef<char> getRawTempBuf() && = delete;
@@ -344,10 +346,9 @@ private:
 
 private:
     vpux::NDTypeInterface _type;
-    ArrayRef<char> _data;
+    ConstData _data;
     mlir::Type _storageElemType;
     bool _isSplat = false;
-    std::shared_ptr<char[]> _tempBuf;
 };
 
 }  // namespace Const

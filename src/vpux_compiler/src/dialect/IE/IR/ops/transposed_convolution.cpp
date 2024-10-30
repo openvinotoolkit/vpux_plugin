@@ -83,11 +83,19 @@ mlir::LogicalResult vpux::IE::TransposedConvolutionOp::inferReturnTypeComponents
         mlirOutputShape.push_back(filterShape[0]);
         std::copy(outputShapeVals.begin(), outputShapeVals.end(), std::back_inserter(mlirOutputShape));
 
+        if (convBackpropData.getOutputChannels().has_value()) {
+            mlirOutputShape[Dims4D::Filter::OC.ind()] = convBackpropData.getOutputChannels().value();
+        }
+
         inferredReturnShapes.emplace_back(mlirOutputShape, featureType);
     } else {
-        const auto mlirOutputShape =
+        auto mlirOutputShape =
                 inferTransposedConvBackpropOutputShape(inputShape, filterShape, windowStrides, dataPaddingBelow,
                                                        dataPaddingAbove, windowDilations, outputPadding);
+
+        if (convBackpropData.getOutputChannels().has_value()) {
+            mlirOutputShape[Dims4D::Filter::OC.ind()] = convBackpropData.getOutputChannels().value();
+        }
         inferredReturnShapes.emplace_back(mlirOutputShape, featureType);
     }
 

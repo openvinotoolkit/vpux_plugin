@@ -44,8 +44,8 @@ mlir::OpFoldResult vpux::VPU::ShapeCastOp::fold(FoldAdaptor adaptor) {
     if (inputType.getElementType().dyn_cast_or_null<mlir::quant::UniformQuantizedPerAxisType>()) {
         return nullptr;
     }
-    if (const auto attr = operands[0].dyn_cast_or_null<Const::ContentAttr>()) {
-        return attr.reshape(outputType.getShape());
+    if (const auto attr = operands[0].dyn_cast_or_null<Const::EphemeralContentAttr>()) {
+        return static_cast<Const::ContentAttr>(attr).transform().reshape(outputType.getShape()).get();
     }
 
     return nullptr;

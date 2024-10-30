@@ -7,7 +7,10 @@
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/overlap_distribution_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/sibling_ops_analysis.hpp"
+#include "vpux/compiler/dialect/VPU/utils/sw_utils.hpp"
 
+#include <llvm/ADT/TypeSwitch.h>
 #include <mlir/IR/IRMapping.h>
 #include <mlir/Transforms/DialectConversion.h>
 
@@ -23,47 +26,78 @@ namespace {
 class MakeOpsWithDistributedTensorPass final :
         public MakeOpsWithDistributedTensorBase<MakeOpsWithDistributedTensorPass> {
 public:
-    MakeOpsWithDistributedTensorPass(Logger log): _enableExplicitDistributedTensorAttr(false) {
+    MakeOpsWithDistributedTensorPass(Logger log): _enableExplicitDistributionInfoAttr(false) {
         Base::initLogger(log, Base::getArgumentName());
     };
 
-    explicit MakeOpsWithDistributedTensorPass(bool enableExplicitDistributedTensorAttr, Logger log)
-            : _enableExplicitDistributedTensorAttr(enableExplicitDistributedTensorAttr) {
+    explicit MakeOpsWithDistributedTensorPass(bool enableExplicitDistributionInfoAttr, Logger log)
+            : _enableExplicitDistributionInfoAttr(enableExplicitDistributionInfoAttr) {
         Base::initLogger(log, Base::getArgumentName());
     }
 
     mlir::LogicalResult initialize(mlir::MLIRContext* ctx) final;
 
 private:
-    bool _enableExplicitDistributedTensorAttr = false;
+    bool _enableExplicitDistributionInfoAttr = false;
     void safeRunOnFunc() final;
-    static bool areOpSiblingsNeeded(VPU::ClusteredOpInterface clusteredOp, VPU::MultiClusterStrategy strategy);
+    static void insertDistributedInputTypes(
+            VPU::ClusteredOpInterface clusteredOp, bool hasExplicitDistributedAttr,
+            SiblingOpsAnalysis& siblingsAnalysis,
+            llvm::DenseMap<mlir::Operation*, llvm::DenseMap<int, vpux::NDTypeInterface>>& inputTypeLookup);
 };
 
 mlir::LogicalResult MakeOpsWithDistributedTensorPass::initialize(mlir::MLIRContext* ctx) {
     if (mlir::failed(Base::initialize(ctx))) {
         return mlir::failure();
     }
-    if (enableExplicitDistributedTensorAttr.hasValue()) {
-        _enableExplicitDistributedTensorAttr = enableExplicitDistributedTensorAttr.getValue();
+    if (enableExplicitDistributionInfoAttr.hasValue()) {
+        _enableExplicitDistributionInfoAttr = enableExplicitDistributionInfoAttr.getValue();
         return mlir::success();
     }
 
     return mlir::success();
 }
 
-bool MakeOpsWithDistributedTensorPass::areOpSiblingsNeeded(VPU::ClusteredOpInterface clusteredOp,
-                                                           VPU::MultiClusterStrategy strategy) {
-    if (!outputOverlappedParamsIsHaloSupported(clusteredOp)) {
-        return false;
-    }
-    const auto outputTensorDistributionMode = vpux::VPU::getOutputTensorDistributionMode(clusteredOp, strategy);
-    if (outputTensorDistributionMode == DistributionMode::OVERLAPPED &&
-        !mlir::isa<VPU::SWOpInterface>(clusteredOp.getOperation())) {
-        return true;
-    }
+void MakeOpsWithDistributedTensorPass::insertDistributedInputTypes(
+        VPU::ClusteredOpInterface clusteredOp, bool hasExplicitDistributedAttr, SiblingOpsAnalysis& siblingsAnalysis,
+        llvm::DenseMap<mlir::Operation*, llvm::DenseMap<int, vpux::NDTypeInterface>>& inputTypeLookup) {
+    llvm::DenseMap<int, vpux::NDTypeInterface> operandLookup;
+    if (mlir::isa<VPU::SWOpInterface>(clusteredOp.getOperation())) {
+        auto origOp = mlir::cast<VPU::SWOpInterface>(clusteredOp.getOperation());
+        const auto strategy = clusteredOp.getMultiClusterStrategy().value();
+        auto* ctx = clusteredOp->getContext();
+        auto numClusters = VPU::getOptimalNumClusters(clusteredOp, getShape(origOp->getResult(0)), strategy);
+        for (auto& operand : origOp->getOpOperands()) {
+            const auto operandType = operand.get().getType().cast<vpux::NDTypeInterface>();
+            const auto activationTensorDistributionMode =
+                    getSWInputTensorDistributionMode(clusteredOp, strategy, operandType);
+            const auto activationTensorNumTiles =
+                    getIntArrayAttr(ctx, getSWInputTensorNumTiles(clusteredOp, numClusters, strategy, operandType));
 
-    return false;
+            // Input alignment is possibly needed to keep compatibility and avoid spilling
+            // Only support:
+            //       NCE_DPU (non SOH/SOHOverlapped)
+            //          |
+            //       NCE_SW  (Clustering/SOK)
+            const auto activationAlignment =
+                    getActivationTensorAlignment(clusteredOp, numClusters, strategy, operandType);
+            const auto activationAlignmentAttr =
+                    activationAlignment.has_value() ? getIntArrayAttr(ctx, activationAlignment.value()) : nullptr;
+
+            operandLookup.insert(std::make_pair(
+                    operand.getOperandNumber(),
+                    getDistributedTypeFromInput(clusteredOp, operand.get(), activationTensorDistributionMode,
+                                                activationTensorNumTiles, activationAlignmentAttr, strategy,
+                                                hasExplicitDistributedAttr, siblingsAnalysis)));
+        }
+    } else {
+        for (auto& operand : clusteredOp->getOpOperands()) {
+            operandLookup.insert(std::make_pair(
+                    operand.getOperandNumber(),
+                    clusteredOp.getDistributedTypeForOpOperand(operand, hasExplicitDistributedAttr, siblingsAnalysis)));
+        }
+    }
+    inputTypeLookup.insert(std::make_pair(clusteredOp.getOperation(), operandLookup));
 }
 
 //
@@ -74,75 +108,29 @@ void MakeOpsWithDistributedTensorPass::safeRunOnFunc() {
     auto func = getOperation();
     auto& ctx = getContext();
 
-    llvm::DenseMap<mlir::OpResult, OverlapDistributionParams> overlapParamsLookup;
-    std::vector<std::set<VPU::ClusteredOpInterface>> siblingGroups;
-
-    auto findInSiblingGroups = [&](mlir::Operation* consumerOp) -> std::optional<std::set<VPU::ClusteredOpInterface>> {
-        auto clusteredConsumerOp = mlir::dyn_cast<VPU::ClusteredOpInterface>(consumerOp);
-        if (clusteredConsumerOp == nullptr) {
-            return std::nullopt;
-        }
-        for (const auto& siblingGroup : siblingGroups) {
-            if (siblingGroup.find(clusteredConsumerOp) != siblingGroup.end()) {
-                return siblingGroup;
-            }
-        }
-        return std::nullopt;
-    };
-
+    llvm::DenseMap<mlir::OpResult, vpux::NDTypeInterface> typeLookup;
+    llvm::DenseMap<mlir::Operation*, llvm::DenseMap<int, vpux::NDTypeInterface>> inputTypeLookup;
+    auto& siblingsAnalysis = getAnalysis<SiblingOpsAnalysis>();
     func->walk([&](VPU::ClusteredOpInterface clusteredOp) {
-        std::set<VPU::ClusteredOpInterface> opSiblings = {};
         const auto strategyAttr = clusteredOp.getMultiClusterStrategy();
         if (!strategyAttr.has_value()) {
             return;
         }
         auto strategy = strategyAttr.value();
 
-        if (areOpSiblingsNeeded(clusteredOp, strategy)) {
-            mlir::Operation* consumerOp = nullptr;
-            if (isPassthroughOp(clusteredOp.getOperation())) {
-                // For passthrough ops, ensure input and output tensors use the same pool of ops to determine the
-                // distribution
-                consumerOp = clusteredOp.getOperation();
-            } else {
-                for (const auto& consumer : clusteredOp->getUsers()) {
-                    // find first valid consumer and use it to get all its clustered siblings
-                    if (mlir::isa<VPU::ClusteredOpInterface>(consumer) || isPassthroughOp(consumer)) {
-                        consumerOp = consumer;
-                        break;
-                    }
-                }
-            }
-            if (consumerOp != nullptr) {
-                auto cachedSiblingGroup = findInSiblingGroups(consumerOp);
-                if (cachedSiblingGroup.has_value()) {
-                    opSiblings.merge(cachedSiblingGroup.value());
-                }
-                if (opSiblings.empty()) {
-                    opSiblings = getSiblingOps(consumerOp);
-                    if (!opSiblings.empty()) {
-                        auto clusteredSiblingOp = *opSiblings.begin();
-                        // The cache may be missed when consumer is not a clustered op, so we need to check it again
-                        // here and store it if necessary
-                        if (!findInSiblingGroups(clusteredSiblingOp.getOperation()).has_value()) {
-                            siblingGroups.emplace_back(opSiblings);
-                        }
-                    }
-                }
-            }
-        }
-
         for (const auto& opResult : clusteredOp->getResults()) {
-            overlapParamsLookup.insert(std::make_pair(
+            typeLookup.insert(std::make_pair(
                     opResult,
-                    getOverlapDistributionParams(clusteredOp, opResult.getType().cast<vpux::NDTypeInterface>(),
-                                                 opSiblings, strategy)));
+                    getDistributedOutputTensorType(clusteredOp, opResult.getType().cast<vpux::NDTypeInterface>(),
+                                                   siblingsAnalysis, strategy, _enableExplicitDistributionInfoAttr)));
         }
+        insertDistributedInputTypes(clusteredOp, _enableExplicitDistributionInfoAttr, siblingsAnalysis,
+                                    inputTypeLookup);
     });
 
     mlir::RewritePatternSet patterns(&ctx);
-    auto strategy = vpux::VPU::createMakeOpsWithDistributedTensorStrategyGetter(func, overlapParamsLookup,
-                                                                                _enableExplicitDistributedTensorAttr);
+    auto strategy = vpux::VPU::createMakeOpsWithDistributedTensorStrategy(func, typeLookup, inputTypeLookup,
+                                                                          _enableExplicitDistributionInfoAttr);
     // Both ACT Shaves and DPUs are grouped together in NCE clusters, in a symmetric manner.
     // Each NCE cluster has the same amount of DPUs and ACT shaves.
     // Thus shaves have the availability for distributing across clusters similar to DPUs.
@@ -170,7 +158,7 @@ void MakeOpsWithDistributedTensorPass::safeRunOnFunc() {
 // createMakeOpsWithDistributedTensorPass
 //
 
-std::unique_ptr<mlir::Pass> VPU::createMakeOpsWithDistributedTensorPass(bool enableExplicitDistributedTensorAttr,
+std::unique_ptr<mlir::Pass> VPU::createMakeOpsWithDistributedTensorPass(bool enableExplicitDistributionInfoAttr,
                                                                         Logger log) {
-    return std::make_unique<MakeOpsWithDistributedTensorPass>(enableExplicitDistributedTensorAttr, log);
+    return std::make_unique<MakeOpsWithDistributedTensorPass>(enableExplicitDistributionInfoAttr, log);
 }

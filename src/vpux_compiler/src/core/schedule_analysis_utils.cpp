@@ -11,8 +11,8 @@
 
 using namespace vpux;
 
-static const std::map<std::string, int> executorStrToId = {{"DMA_NN", 0},    {"DPU", 1},       {"NCE", 2},
-                                                           {"SHAVE_UPA", 3}, {"SHAVE_ACT", 4}, {"SHAVE_NN", 5}};
+static const std::map<std::string, int> executorStrToId = {
+        {"DMA_NN", 0}, {"DPU", 1}, {"NCE", 2}, {"SHAVE_ACT", 3}, {"SHAVE_NN", 4}};
 
 ExecutorStallCycles vpux::getExecutorStallRegions(ScheduledOpInfoVec& scheduledOps) {
     ExecutorStallCycles executorStalls;
@@ -111,8 +111,6 @@ StringRef vpux::getTaskType(const ScheduledOpInfo& op) {
         taskType = "DMA-spill-in";
     } else if (op.isOriginalSpillWriteOp()) {
         taskType = "DMA-spill-out";
-    } else if (op.queueType.execKind == VPU::ExecutorKind::SHAVE_UPA) {
-        taskType = "UPA";
     } else if (op.queueType.execKind == VPU::ExecutorKind::DMA_NN) {
         if (op.isDataOp()) {
             taskType = "DMA-in";
@@ -331,8 +329,6 @@ void vpux::createTracingJSON(mlir::func::FuncOp& netFunc, StringRef fileName) {
                << R"(, "args": {"name" : "DPU"}},)" << std::endl;
     out_stream << std::string(R"({"name": "thread_name", "ph": "M", "pid": )") << 0 << R"(, "tid": )" << 2
                << R"(, "args": {"name" : "NCE"}},)" << std::endl;
-    out_stream << std::string(R"({"name": "thread_name", "ph": "M", "pid": )") << 0 << R"(, "tid": )" << 3
-               << R"(, "args": {"name" : "SHAVE_UPA"}},)" << std::endl;
     out_stream << std::string(R"({"name": "thread_name", "ph": "M", "pid": )") << 0 << R"(, "tid": )" << 4
                << R"(, "args": {"name" : "SHAVE_ACT"}},)" << std::endl;
     out_stream << std::string(R"({"name": "thread_name", "ph": "M", "pid": )") << 0 << R"(, "tid": )" << 5

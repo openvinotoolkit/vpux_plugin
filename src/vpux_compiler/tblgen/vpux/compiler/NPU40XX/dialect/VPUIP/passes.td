@@ -203,4 +203,23 @@ def SplitDMAToBalanceLoad : PassBase<"split-dma-to-balance-load", "vpux::Functio
     let constructor = "vpux::VPUIP::arch40xx::createSplitDMAToBalanceLoadPass()";
 }
 
+//
+// LegalizeScheduleForWlmFetchDmas
+//
+
+def LegalizeScheduleForWlmFetchDmas : PassBase<"legalize-schedule-for-wlm", "vpux::FunctionPass"> {
+    let summary = "Pass inserts dummy dmas to facilitate workload-management pass";
+
+    let description = [{
+        Workload Management pass expects to always find a DMA on tile 0 and list 0 for attaching a 
+        fetch task which copies the descriptors from DDR to CMX Metadata. In cases when we have super optimized 
+        schedule we may not have any such DMAs which would cause the fetch task insertion algorithm to fail
+
+        This pass understands how WLM creates execution groups and attaches fetch task. It emulates and tries to fit the
+        dummy DMAs such we would always find DMAs during fetch task insertion while maintaining a valid schedule
+    }];
+
+    let constructor = "vpux::VPUIP::arch40xx::createLegalizeScheduleForWlmFetchDmasPass()";
+}
+
 #endif

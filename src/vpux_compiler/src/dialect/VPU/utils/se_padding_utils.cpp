@@ -5,6 +5,7 @@
 
 #include "vpux/compiler/dialect/VPU/utils/se_padding_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/conv_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/max_kernel_size_utils.hpp"
 #include "vpux/utils/core/numeric.hpp"
 
 using namespace vpux;
@@ -12,7 +13,7 @@ using namespace VPU;
 
 namespace {
 
-bool isSupportedSEPPadImpl(VPU::ArchKind arch, NDTypeInterface inputType, NDTypeInterface outputType,
+bool isSupportedSEPPadImpl(mlir::Operation* op, NDTypeInterface inputType, NDTypeInterface outputType,
                            IE::PadMode padMode, mlir::ArrayAttr padsBeginAttr, mlir::ArrayAttr padsEndAttr,
                            mlir::FloatAttr padValueAttr, LogCb logCb, bool checkLayout, bool checkChannelAlignment,
                            bool supportsInputActCompression, mlir::MLIRContext* ctx) {
@@ -72,10 +73,11 @@ bool isSupportedSEPPadImpl(VPU::ArchKind arch, NDTypeInterface inputType, NDType
 
     const auto dilations = SmallVector<int64_t>{1, 1};
     const auto pads = PadInfo(0, 0, 0, 0);
+
     // When SEP Pad Op is enabled, it will be converted to NCEConvolution
     // with kernel size, strides, and dilations set to [1, 1]
     // This is to verify that it can meet the NCEConvolution HW requirements, such as channel alignment and layout.
-    return VPU::isNCEConvSupported(arch, inputType, weightsType, outputType, dilations, /*KY=*/1, /*KX=*/1, /*SY=*/1,
+    return VPU::isNCEConvSupported(op, inputType, weightsType, outputType, dilations, /*KY=*/1, /*KX=*/1, /*SY=*/1,
                                    /*SX=*/1, pads, checkLayout, checkChannelAlignment, logCb,
                                    supportsInputActCompression);
 }
@@ -86,16 +88,18 @@ bool VPU::isSupportedSEPPadOp(IE::PadOp padOp, LogCb logCb, bool checkLayout, bo
                               bool supportsInputActCompression) {
     auto inputType = padOp.getInput().getType().cast<NDTypeInterface>();
     auto outputType = padOp.getOutput().getType().cast<NDTypeInterface>();
-    return isSupportedSEPPadImpl(getArch(padOp), inputType, outputType, padOp.getMode(), padOp.getPadsBeginAttrAttr(),
-                                 padOp.getPadsEndAttrAttr(), padOp.getPadValueAttrAttr(), logCb, checkLayout,
-                                 checkChannelAlignment, supportsInputActCompression, padOp.getContext());
+    return isSupportedSEPPadImpl(padOp.getOperation(), inputType, outputType, padOp.getMode(),
+                                 padOp.getPadsBeginAttrAttr(), padOp.getPadsEndAttrAttr(), padOp.getPadValueAttrAttr(),
+                                 logCb, checkLayout, checkChannelAlignment, supportsInputActCompression,
+                                 padOp.getContext());
 }
 
 bool VPU::isSupportedSEPPadOp(VPU::PadOp padOp, LogCb logCb, bool checkLayout, bool checkChannelAlignment,
                               bool supportsInputActCompression) {
     auto inputType = padOp.getInput().getType().cast<NDTypeInterface>();
     auto outputType = padOp.getOutput().getType().cast<NDTypeInterface>();
-    return isSupportedSEPPadImpl(getArch(padOp), inputType, outputType, padOp.getMode(), padOp.getPadsBeginAttrAttr(),
-                                 padOp.getPadsEndAttrAttr(), padOp.getPadValueAttrAttr(), logCb, checkLayout,
-                                 checkChannelAlignment, supportsInputActCompression, padOp.getContext());
+    return isSupportedSEPPadImpl(padOp.getOperation(), inputType, outputType, padOp.getMode(),
+                                 padOp.getPadsBeginAttrAttr(), padOp.getPadsEndAttrAttr(), padOp.getPadValueAttrAttr(),
+                                 logCb, checkLayout, checkChannelAlignment, supportsInputActCompression,
+                                 padOp.getContext());
 }

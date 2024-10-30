@@ -4,10 +4,13 @@
 
 #pragma once
 
+#include <openvino/opsets/opset11.hpp>
 #include <openvino/runtime/core.hpp>
 
 // create dummy network for tests
 std::shared_ptr<ov::Model> buildSingleLayerSoftMaxNetwork();
+
+std::shared_ptr<ov::Model> createModelWithLargeSize();
 
 // class encapsulated Platform getting from environmental variable
 class PlatformEnvironment {

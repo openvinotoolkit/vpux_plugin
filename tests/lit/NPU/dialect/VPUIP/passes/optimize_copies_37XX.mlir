@@ -15,7 +15,7 @@
 }>
 
 !InputStub_CMX = memref<1x30x120x120xf16, #NHWC, [@CMX_NN, 0]>
-!SpilledOutput_DDR = memref<1x3x120x120xf16, #NHWC, @DDR>
+!SpilledOutput_DDR = memref<1x30x120x120xf16, #NHWC, [@CMX_NN, 0]>
 
 func.func @NotFuseCMXCopyToTheFrontOfTillingCopyDueToCMXSizeLimitation() -> !InputStub_CMX {
   %0 = VPURT.AllocDistributed -> !InputDistributedType
@@ -30,11 +30,9 @@ func.func @NotFuseCMXCopyToTheFrontOfTillingCopyDueToCMXSizeLimitation() -> !Inp
   return %4 : !InputStub_CMX
 
   // CHECK:   [[BUF_0:%.*]] = VPURT.AllocDistributed -> !VPUIP.DistributedBuffer<1x30x120x120xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 2, 1, 1], num_clusters = 2 : i64}>
-  // CHECK:   [[BUF_1:%.*]] = memref.alloc() : memref<1x3x120x120xf16, #NHWC, @DDR>
-  // CHECK:   [[COPY_0:%.*]] = VPUIP.NCEClusterTiling inputs([[BUF_0]] as %arg0: memref<1x30x120x120xf16, #NHWC, @CMX_NN>) outputs([[BUF_1]] as %arg1: memref<1x3x120x120xf16, #NHWC, @DDR>) -> memref<1x3x120x120xf16, #NHWC, @DDR> {
-  // CHECK:       VPUIP.Copy inputs(%arg0 : memref<1x30x120x120xf16, #NHWC, @CMX_NN>) outputs(%arg1 : memref<1x3x120x120xf16, #NHWC, @DDR>) -> memref<1x3x120x120xf16, #NHWC, @DDR>
+  // CHECK:   [[BUF_1:%.*]] = memref.alloc() : memref<1x30x120x120xf16, #NHWC, [@CMX_NN, 0]>
+  // CHECK:   [[COPY_0:%.*]] = VPUIP.NCEClusterTiling inputs([[BUF_0]] as %arg0: memref<1x30x120x120xf16, #NHWC, @CMX_NN>) outputs([[BUF_1]] as %arg1: memref<1x30x120x120xf16, #NHWC, [@CMX_NN, 0]>) -> memref<1x30x120x120xf16, #NHWC, [@CMX_NN, 0]> {
+  // CHECK:       VPUIP.Copy inputs(%arg0 : memref<1x30x120x120xf16, #NHWC, @CMX_NN>) outputs(%arg1 : memref<1x30x120x120xf16, #NHWC, [@CMX_NN, 0]>) -> memref<1x30x120x120xf16, #NHWC, [@CMX_NN, 0]>
   // CHECK:   }
-  // CHECK:   [[BUF_2:%.*]] = memref.alloc() : memref<1x30x120x120xf16, #NHWC, [@CMX_NN, 0]>
-  // CHECK:   [[COPY_1:%.*]] = VPUIP.Copy inputs([[COPY_0]] : memref<1x3x120x120xf16, #NHWC, @DDR>) outputs([[BUF_2]] : memref<1x30x120x120xf16, #NHWC, [@CMX_NN, 0]>) -> memref<1x30x120x120xf16, #NHWC, [@CMX_NN, 0]>
-  // CHECK:   return [[COPY_1]] : memref<1x30x120x120xf16, #NHWC, [@CMX_NN, 0]>
+  // CHECK:   return [[COPY_0]] : memref<1x30x120x120xf16, #NHWC, [@CMX_NN, 0]>
 }

@@ -16,6 +16,7 @@
 // Generated
 //
 
+#include <vpux/compiler/NPU40XX/dialect/NPUReg40XX/descriptors.hpp>
 #include <vpux/compiler/NPU40XX/dialect/NPUReg40XX/enums.hpp.inc>
 
 #define GET_ATTRDEF_CLASSES

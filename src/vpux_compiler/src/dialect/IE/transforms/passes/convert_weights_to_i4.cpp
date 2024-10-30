@@ -136,14 +136,16 @@ mlir::LogicalResult ConstRewriter::matchAndRewrite(Const::DeclareOp origOp, OpAd
 
     _log.nest().trace("Convert content from '{0}' to '{1}'", origQuantType, newQuantType);
 
-    const auto newContentAttr = origOp.getContentAttr()
-                                        .quantCast()
-                                        .convertElemType(getUInt32Type(getContext()))
-                                        .add(checked_cast<double>(storageMin))
-                                        .convertElemType(getSInt4Type(getContext()))
-                                        .quantCast(newQuantType);
+    auto newContentAttr = origOp.getContentAttr()
+                                  .transform()
+                                  .castElemType(normalizeQuantStorageType(origQuantType))
+                                  .castElemType(getUInt32Type(getContext()))
+                                  .add(checked_cast<double>(storageMin))
+                                  .castElemType(getSInt4Type(getContext()))
+                                  .quantCast(newQuantType)
+                                  .get();
 
-    rewriter.replaceOpWithNewOp<Const::DeclareOp>(origOp, newType, newContentAttr);
+    rewriter.replaceOpWithNewOp<Const::DeclareOp>(origOp, newType, std::move(newContentAttr));
     return mlir::success();
 }
 

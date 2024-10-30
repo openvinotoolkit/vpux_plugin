@@ -107,11 +107,6 @@ Const::Content vpux::Const::DequantizeAttr::transform(vpux::Const::Content& inpu
     return output;
 }
 
-//
-// ContentAttr::dequantize
-//
-
-Const::ContentAttr vpux::Const::ContentAttr::dequantize() const {
-    return ContentAttr::addTransformation(
-            *this, Const::DequantizeAttr::get(getContext()).cast<Const::TransformAttrInterface>());
+Const::ContentSetup vpux::Const::ContentSetup::dequantize() {
+    return addTransformation(Const::DequantizeAttr::get(getContext()));
 }

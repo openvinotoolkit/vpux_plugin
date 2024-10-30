@@ -8,7 +8,6 @@
 #include "vpux/compiler/NPU37XX/dialect/VPUIP/transforms/passes/unroll_cluster_tiling.hpp"
 
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
-#include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/sw_utils.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
@@ -118,14 +117,19 @@ void VPUIP::arch37xx::ClusterSWRewriter::matchAndRewrite(VPUIP::SwKernelOp swTas
         }
     }
 
-    auto getPerClusterTileInfo = [&numClusters](ShapeRef shape, ShapeRef offset, int64_t tileDim) {
+    auto getPerClusterTileInfo = [&numClusters](ShapeRef shape, ShapeRef offset, std::optional<int64_t> tileDim) {
         Shape axis(shape.size(), 1);
-        axis[Dim(tileDim)] = numClusters;
+        if (tileDim.has_value()) {
+            axis[Dim(tileDim.value())] = numClusters;
+        }
         return TileInfo(shape, offset, axis);
     };
 
     // For overlapped input, the Swkernel's attr need to be updated according to its input/output tiles
-    auto needUpdateAttrs = inDistributionMode == VPU::DistributionMode::OVERLAPPED;
+    const auto kernelEntryName = getSwKernelEntryName(swTask);
+    auto needUpdateAttrs =
+            inDistributionMode == VPU::DistributionMode::OVERLAPPED || kernelEntryName == "lstm_sequence";
+
     if (needUpdateAttrs) {
         auto outTileIndex = VPUIP::getTilingDimIndex(outputType);
         VPUX_THROW_UNLESS(outTileIndex.has_value(), "Can not get tiling dim for {0}", outputType);
@@ -134,12 +138,10 @@ void VPUIP::arch37xx::ClusterSWRewriter::matchAndRewrite(VPUIP::SwKernelOp swTas
             for (const auto& operand : parentInputBuffs) {
                 auto distributedType = operand.getType().dyn_cast<VPUIP::DistributedBufferType>();
                 auto tileIndex = VPUIP::getTilingDimIndex(distributedType);
-                if (tileIndex.has_value()) {
-                    auto tileInfo = getPerClusterTileInfo(distributedType.getPerClusterMemoryShapes()[clusterId],
-                                                          distributedType.getPerClusterMemoryShapeOffsets()[clusterId],
-                                                          tileIndex.value());
-                    tiles.push_back(tileInfo);
-                }
+                auto tileInfo =
+                        getPerClusterTileInfo(distributedType.getPerClusterMemoryShapes()[clusterId],
+                                              distributedType.getPerClusterMemoryShapeOffsets()[clusterId], tileIndex);
+                tiles.push_back(tileInfo);
             }
             auto inTiles = TilingInfo(tiles);
             auto outTile = getPerClusterTileInfo(outputType.getPerClusterComputeShapes()[clusterId],

@@ -26,10 +26,9 @@ const std::vector<ov::element::Type> modelTypes = {ov::element::f16};
 const std::vector<ov::op::RecurrentSequenceDirection> directions = {ov::op::RecurrentSequenceDirection::FORWARD,
                                                                     ov::op::RecurrentSequenceDirection::REVERSE};
 
-const std::vector<ov::test::utils::TensorIteratorBody> tiBodyTypes = {ov::test::utils::TensorIteratorBody::LSTM,
-                                                                      ov::test::utils::TensorIteratorBody::GRU};
+const std::vector<ov::test::utils::TensorIteratorBody> tiBodyTypes = {ov::test::utils::TensorIteratorBody::GRU};
 
-// RNN Op is not supported. Tracked By Issue: [E-117139]
+// RNN Op is not supported. Tracked By Issue: [E#117139]
 const std::vector<ov::test::utils::TensorIteratorBody> tiBodyTypes_RNN = {ov::test::utils::TensorIteratorBody::RNN};
 
 const auto tensorIteratorPrecommitParams_RNN =
@@ -68,13 +67,13 @@ const auto tensorIteratorPrecommitParamsAll_2 =
                            testing::ValuesIn(modelTypes),                  // netPrecision
                            testing::Values(ov::test::utils::DEVICE_NPU));  // targetDevice
 
-INSTANTIATE_TEST_CASE_P(DISABLED_smoke_precommit_TensorIterator, TensorIteratorLayerTest_NPU3720,
-                        tensorIteratorPrecommitParams_RNN, TensorIteratorLayerTestCommon ::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(DISABLED_smoke_precommit_TensorIterator, TensorIteratorLayerTest_NPU3720,
+                         tensorIteratorPrecommitParams_RNN, TensorIteratorLayerTestCommon ::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(smoke_precommit_TensorIterator_1, TensorIteratorLayerTest_NPU3720,
-                        tensorIteratorPrecommitParamsAll_1, TensorIteratorLayerTestCommon ::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_TensorIterator_1, TensorIteratorLayerTest_NPU3720,
+                         tensorIteratorPrecommitParamsAll_1, TensorIteratorLayerTestCommon ::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(smoke_precommit_TensorIterator_2, TensorIteratorLayerTest_NPU3720,
-                        tensorIteratorPrecommitParamsAll_2, TensorIteratorLayerTestCommon ::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_TensorIterator_2, TensorIteratorLayerTest_NPU3720,
+                         tensorIteratorPrecommitParamsAll_2, TensorIteratorLayerTestCommon ::getTestCaseName);
 
 }  // namespace ov::test

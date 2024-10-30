@@ -5,6 +5,7 @@
 
 #include "vpux/compiler/dialect/VPUMI40XX/kernel_params_utils.hpp"
 #include "vpux/compiler/core/bounded_buffer.hpp"
+#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 
 namespace vpux {
 namespace VPUMI40XX {
@@ -86,7 +87,6 @@ sw_params::Location KernelParamsSerializer::getSwParamsLocationFromMemKind(VPU::
     static const EnumMap<VPU::MemoryKind, sw_params::Location> memKindMapping = {
             {VPU::MemoryKind::DDR, sw_params::Location::DDR},
             {VPU::MemoryKind::CMX_NN, sw_params::Location::NN_CMX},
-            {VPU::MemoryKind::CMX_UPA, sw_params::Location::UPA_CMX},
             {VPU::MemoryKind::CSRAM, sw_params::Location::NONE},
             {VPU::MemoryKind::Register, sw_params::Location::NONE},
     };
@@ -116,7 +116,9 @@ void KernelParamsSerializer::addAttrsToVector(SmallVector<uint8_t>& vec, mlir::A
     }
 }
 
-void KernelParamsSerializer::addTensorArgToVector(SmallVector<uint8_t>& vec, mlir::Value value, bool isDynamic) {
+void KernelParamsSerializer::addTensorArgToVector(SmallVector<uint8_t>& vec,
+                                                  std::optional<uint32_t> tileMaskForBroadcast, mlir::Value value,
+                                                  bool isDynamic) {
     sw_params::MemRefData memrefData{};
 
     const auto shape = getShape(value);
@@ -133,6 +135,10 @@ void KernelParamsSerializer::addTensorArgToVector(SmallVector<uint8_t>& vec, mli
     auto ndTypeMemSpace = ndType.getMemSpace();
     auto tileIndex = ndTypeMemSpace == nullptr ? 0 : ndType.getMemSpace().getIndex().value_or(0);
     uint32_t tileMask = 1 << (tileIndex + 21);
+    if (tileMaskForBroadcast.has_value()) {
+        tileMask |= tileMaskForBroadcast.value();
+    }
+
     memrefData.dataAddr = tileMask;
 
     memrefData.dataType = getDataTypeFromMlirType(ndType.getElementType());
@@ -165,6 +171,36 @@ auto extractKernelBuffer(VPUIP::SwKernelOp& swKernelOp, int32_t inDimsSize, int3
     }
 }
 
+auto computeTileMaskForBroadcast(mlir::Value outputBuff) {
+    std::optional<uint32_t> tileMaskForBroadcast;
+    const auto distributedOutputBuff = outputBuff.getType().dyn_cast<VPUIP::DistributedBufferType>();
+
+    if (distributedOutputBuff) {
+        const auto distributedTensorAttr = distributedOutputBuff.getDistribution();
+        if (distributedTensorAttr && distributedTensorAttr.getMode().getValue() == VPU::DistributionMode::DUPLICATED) {
+            const auto numClusters = static_cast<size_t>(distributedTensorAttr.getNumClusters().getInt());
+            auto definingOp = mlir::dyn_cast<VPURT::DeclareBufferOp>(outputBuff.getDefiningOp());
+
+            VPUX_THROW_WHEN(!definingOp.getSectionIndex().has_value(), "Distributed buffer without section index: {0}",
+                            definingOp);
+
+            const auto clusters = parseIntArrayAttr<int64_t>(definingOp.getSectionIndex().value());
+            VPUX_THROW_WHEN(
+                    clusters.size() != numClusters,
+                    "Size of distributed buffer section index ({0}) different than distribution num_clusters ({1})",
+                    clusters.size(), numClusters);
+
+            auto tileMask = 0;
+            for (size_t clusterIdx = 0; clusterIdx < numClusters; ++clusterIdx) {
+                tileMask |= 1 << (clusters[clusterIdx] + 21);
+            }
+            tileMaskForBroadcast = tileMask;
+        }
+    }
+
+    return tileMaskForBroadcast;
+}
+
 SmallVector<uint8_t> KernelParamsSerializer::createKernelParams(VPUIP::SwKernelOp swKernelOp) {
     SmallVector<uint8_t> paramsVector;
 
@@ -190,14 +226,20 @@ SmallVector<uint8_t> KernelParamsSerializer::createKernelParams(VPUIP::SwKernelO
                 auto ioNdTypeIf = ioType.cast<vpux::NDTypeInterface>();
                 VPUX_THROW_UNLESS(blockArgNdTypeIf != nullptr || ioNdTypeIf != nullptr,
                                   "createKernelParams: sw kernel I/O does not implement NDTypeInterface");
-                VPUX_THROW_UNLESS(vpux::areTypesCompatible(blockArgType, ioType,
-                                                           vpux::IE::TypeComparisonMode::STRICT_EQUAL, true, true),
-                                  "createKernelParams: types of sw kernel I/O do not match");
+                if (!vpux::areTypesCompatible(blockArgType, ioType, vpux::IE::TypeComparisonMode::STRICT_EQUAL, true,
+                                              true)) {
+                    VPUX_THROW("createKernelParams: types of sw kernel I/O do not match, op: {0}, loc: {1}",
+                               swKernelOp->getName(), swKernelOp.getLoc());
+                }
                 VPUX_THROW_UNLESS(blockArgNdTypeIf.getShape() == ioNdTypeIf.getShape(),
-                                  "createKernelParams: shapes of I/O do not match");
+                                  "createKernelParams: shapes of I/O do not match, op: {0}", swKernelOp->getName(),
+                                  ", loc: ", swKernelOp.getLoc());
 
                 const auto [buffer, isDynamic] = extractKernelBuffer(swKernelOp, dynInputShapesSize, blockId);
-                addTensorArgToVector(paramsVector, buffer, isDynamic);
+                auto tileMaskForOutputBroadcast =
+                        blockId < insSize ? std::nullopt
+                                          : computeTileMaskForBroadcast(swKernelOp.getOutputBuffs()[blockId - insSize]);
+                addTensorArgToVector(paramsVector, tileMaskForOutputBroadcast, buffer, isDynamic);
             } else {
                 VPUX_THROW("Only block arguments are supported");
             }

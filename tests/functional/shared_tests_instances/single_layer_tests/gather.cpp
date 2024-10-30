@@ -90,8 +90,7 @@ const auto params =
                          testing::Values(DEVICE_NPU));                                          // Device name
 
 INSTANTIATE_TEST_CASE_P(smoke_Gather1, GatherLayerTest_NPU3720, params, GatherLayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_Gather1, GatherLayerTest_NPU4000, params, GatherLayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_Gather1, GatherLayerTest_NPU4000, params, GatherLayerTest_NPU4000::getTestCaseName);
 
 }  // namespace
 
@@ -123,9 +122,9 @@ const auto genParams(const ov::Shape inputShape, const int axis, const size_t id
     INSTANTIATE_TEST_CASE_P(conform_Gather1_##no, GatherLayerTest_NPU3720, genParams(inputShape, axis, numIndices), \
                             GatherLayerTest_NPU3720::getTestCaseName)
 
-#define GEN_PRECOMMIT_NPU3720_TEST(no, inputShape, axis, numIndices)                 \
-    INSTANTIATE_TEST_CASE_P(conform_precommit_Gather1_##no, GatherLayerTest_NPU3720, \
-                            genParams(inputShape, axis, numIndices), GatherLayerTest_NPU3720::getTestCaseName)
+#define GEN_PRECOMMIT_NPU3720_TEST(no, inputShape, axis, numIndices)                  \
+    INSTANTIATE_TEST_SUITE_P(conform_precommit_Gather1_##no, GatherLayerTest_NPU3720, \
+                             genParams(inputShape, axis, numIndices), GatherLayerTest_NPU3720::getTestCaseName)
 
 GEN_TEST(0, (ov::Shape{10, 20, 30, 40}), 2, 4);                  //=> {10,20,4,40}
 GEN_TEST(1, (ov::Shape{32, 3, 3, 3}), 0, 27);                    //=> {27,3,3,3}
@@ -160,13 +159,13 @@ namespace {  // opset7::Gather tests
                                              testing::Values(ov::element::f16), testing::Values(DEVICE_NPU)),     \
                             Gather7LayerTest_NPU3720::getTestCaseName)
 
-#define GEN7_PRECOMMIT_NPU3720_TEST(no, inputShape, indicesShape, axis, batch_dims)                               \
-    INSTANTIATE_TEST_CASE_P(smoke_precommit_Gather7_##no, Gather7LayerTest_NPU3720,                               \
-                            testing::Combine(testing::Values(static_shapes_to_test_representation({inputShape})), \
-                                             testing::Values(std::vector<size_t> indicesShape),                   \
-                                             testing::Values(std::tuple<int, int>{axis, batch_dims}),             \
-                                             testing::Values(ov::element::f16), testing::Values(DEVICE_NPU)),     \
-                            Gather7LayerTest_NPU3720::getTestCaseName)
+#define GEN7_PRECOMMIT_NPU3720_TEST(no, inputShape, indicesShape, axis, batch_dims)                                \
+    INSTANTIATE_TEST_SUITE_P(smoke_precommit_Gather7_##no, Gather7LayerTest_NPU3720,                               \
+                             testing::Combine(testing::Values(static_shapes_to_test_representation({inputShape})), \
+                                              testing::Values(std::vector<size_t> indicesShape),                   \
+                                              testing::Values(std::tuple<int, int>{axis, batch_dims}),             \
+                                              testing::Values(ov::element::f16), testing::Values(DEVICE_NPU)),     \
+                             Gather7LayerTest_NPU3720::getTestCaseName)
 
 GEN7_TEST(0, (ov::Shape{3, 5, 1, 1}), ({3, 2}), 1, 1);
 GEN7_TEST(1, (ov::Shape{4, 3, 5, 1}), ({4, 4}), 2, 1);
@@ -192,37 +191,37 @@ const std::vector<ov::element::Type> modelType = {ov::element::f16, ov::element:
                                              testing::ValuesIn(modelType), testing::Values(DEVICE_NPU)),          \
                             Gather8LayerTest_NPU3720::getTestCaseName)
 
-#define GEN8_PRECOMMIT_NPU3720_TEST(no, inputShape, indicesShape, axis, batch_dims)                               \
-    INSTANTIATE_TEST_CASE_P(smoke_precommit_Gather8_##no, Gather8LayerTest_NPU3720,                               \
-                            testing::Combine(testing::Values(static_shapes_to_test_representation({inputShape})), \
-                                             testing::Values(std::vector<size_t> indicesShape),                   \
-                                             testing::Values(std::tuple<int, int>{axis, batch_dims}),             \
-                                             testing::Values(ov::element::f16), testing::Values(DEVICE_NPU)),     \
-                            Gather8LayerTest_NPU3720::getTestCaseName)
+#define GEN8_PRECOMMIT_NPU3720_TEST(no, inputShape, indicesShape, axis, batch_dims)                                \
+    INSTANTIATE_TEST_SUITE_P(smoke_precommit_Gather8_##no, Gather8LayerTest_NPU3720,                               \
+                             testing::Combine(testing::Values(static_shapes_to_test_representation({inputShape})), \
+                                              testing::Values(std::vector<size_t> indicesShape),                   \
+                                              testing::Values(std::tuple<int, int>{axis, batch_dims}),             \
+                                              testing::Values(ov::element::f16), testing::Values(DEVICE_NPU)),     \
+                             Gather8LayerTest_NPU3720::getTestCaseName)
 
-#define GEN8_TILING_NPU3720_TEST(no, inputShape, indicesShape, axis, batch_dims)                                  \
-    INSTANTIATE_TEST_CASE_P(smoke_Gather8_Tiling_##no, Gather8LayerTest_NPU3720,                                  \
-                            testing::Combine(testing::Values(static_shapes_to_test_representation({inputShape})), \
-                                             testing::Values(std::vector<size_t> indicesShape),                   \
-                                             testing::Values(std::tuple<int, int>{axis, batch_dims}),             \
-                                             testing::Values(ov::element::f16), testing::Values(DEVICE_NPU)),     \
-                            Gather8LayerTest_NPU3720::getTestCaseName)
+#define GEN8_TILING_NPU3720_TEST(no, inputShape, indicesShape, axis, batch_dims)                                   \
+    INSTANTIATE_TEST_SUITE_P(smoke_Gather8_Tiling_##no, Gather8LayerTest_NPU3720,                                  \
+                             testing::Combine(testing::Values(static_shapes_to_test_representation({inputShape})), \
+                                              testing::Values(std::vector<size_t> indicesShape),                   \
+                                              testing::Values(std::tuple<int, int>{axis, batch_dims}),             \
+                                              testing::Values(ov::element::f16), testing::Values(DEVICE_NPU)),     \
+                             Gather8LayerTest_NPU3720::getTestCaseName)
 
-#define GEN8_PRECOMMIT_NPU4000_TEST(no, inputShape, indicesShape, axis, batch_dims)                               \
-    INSTANTIATE_TEST_CASE_P(smoke_precommit_Gather8_##no, Gather8LayerTest_NPU4000,                               \
-                            testing::Combine(testing::Values(static_shapes_to_test_representation({inputShape})), \
-                                             testing::Values(std::vector<size_t> indicesShape),                   \
-                                             testing::Values(std::tuple<int, int>{axis, batch_dims}),             \
-                                             testing::Values(ov::element::f16), testing::Values(DEVICE_NPU)),     \
-                            Gather8LayerTest_NPU4000::getTestCaseName)
+#define GEN8_PRECOMMIT_NPU4000_TEST(no, inputShape, indicesShape, axis, batch_dims)                                \
+    INSTANTIATE_TEST_SUITE_P(smoke_precommit_Gather8_##no, Gather8LayerTest_NPU4000,                               \
+                             testing::Combine(testing::Values(static_shapes_to_test_representation({inputShape})), \
+                                              testing::Values(std::vector<size_t> indicesShape),                   \
+                                              testing::Values(std::tuple<int, int>{axis, batch_dims}),             \
+                                              testing::Values(ov::element::f16), testing::Values(DEVICE_NPU)),     \
+                             Gather8LayerTest_NPU4000::getTestCaseName)
 
-#define GEN8_NPU4000_TEST(no, inputShape, indicesShape, axis, batch_dims)                                         \
-    INSTANTIATE_TEST_CASE_P(smoke_Gather8_##no, Gather8LayerTest_NPU4000,                                         \
-                            testing::Combine(testing::Values(static_shapes_to_test_representation({inputShape})), \
-                                             testing::Values(std::vector<size_t> indicesShape),                   \
-                                             testing::Values(std::tuple<int, int>{axis, batch_dims}),             \
-                                             testing::Values(ov::element::f16), testing::Values(DEVICE_NPU)),     \
-                            Gather8LayerTest_NPU4000::getTestCaseName)
+#define GEN8_NPU4000_TEST(no, inputShape, indicesShape, axis, batch_dims)                                          \
+    INSTANTIATE_TEST_SUITE_P(smoke_Gather8_##no, Gather8LayerTest_NPU4000,                                         \
+                             testing::Combine(testing::Values(static_shapes_to_test_representation({inputShape})), \
+                                              testing::Values(std::vector<size_t> indicesShape),                   \
+                                              testing::Values(std::tuple<int, int>{axis, batch_dims}),             \
+                                              testing::Values(ov::element::f16), testing::Values(DEVICE_NPU)),     \
+                             Gather8LayerTest_NPU4000::getTestCaseName)
 
 GEN8_TEST(0, (ov::Shape{3, 5, 1, 1}), ({3, 2}), 1, 1);
 GEN8_TEST(1, (ov::Shape{4, 3, 5, 1}), ({4, 4}), 2, 1);

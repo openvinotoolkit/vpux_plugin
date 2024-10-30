@@ -103,9 +103,9 @@ mlir::Value createPaddingConstForConcat(ArrayRef<int64_t> constShape, mlir::Loca
     const auto padDataStorage = mlir::DenseElementsAttr::get(padDataStorageType, static_cast<float>(padValue));
 
     const auto padDataType = mlir::RankedTensorType::get(constShape, origElemType);
-    const auto padDataAttr = Const::ContentAttr::get(padDataStorage).convertElemType(origElemType);
+    auto padDataAttr = Const::ContentAttr::transform(padDataStorage).castElemType(origElemType).get();
 
-    auto constant = rewriter.create<Const::DeclareOp>(loc, padDataType, padDataAttr);
+    auto constant = rewriter.create<Const::DeclareOp>(loc, padDataType, std::move(padDataAttr));
 
     const auto dataOrder = inputType.getDimsOrder();
     const auto orderMap = dataOrder.toAffineMap(rewriter.getContext());
@@ -116,21 +116,19 @@ const mlir::ArrayAttr inferOffsetsAttrWithAxis(IE::ConcatOp origOp, int64_t& axi
     auto rank = origOp.getOutput().getType().cast<vpux::NDTypeInterface>().getRank();
 
     SmallVector<SmallVector<int64_t>> finalOffsets;
+    finalOffsets.reserve(origOp.getInputs().size());
     finalOffsets.push_back(SmallVector<int64_t>(rank, 0));
-    int64_t correctAxis;
     if (axis < 0) {
-        correctAxis = axis + rank;
-    } else {
-        correctAxis = axis;
+        axis += rank;
     }
 
-    for (auto input : origOp.getInputs() | indexed) {
+    auto inputs = llvm::drop_end(origOp.getInputs(), 1);
+    for (auto input : llvm::enumerate(inputs)) {
         auto inputShape = getShape(input.value());
         auto offsets = SmallVector<int64_t>(rank, 0);
-        offsets[correctAxis] = inputShape[Dim(correctAxis)] + finalOffsets.back()[correctAxis];
+        offsets[axis] = inputShape[Dim(axis)] + finalOffsets.back()[axis];
         finalOffsets.push_back(offsets);
     }
-    finalOffsets.pop_back();
 
     return getIntArrayOfArray(origOp.getContext(), finalOffsets);
 }

@@ -13,7 +13,7 @@ func.func @RemoveDuplicatedSparsify(%arg0: tensor<1x16x16x16xf16, {order = #NHWC
     %1 = VPU.Sparsify(%arg0) : tensor<1x16x16x16xf16, {order = #NHWC}> -> !VPU.SparseTensor<data=tensor<1x16x16x16xf16, {order = #NHWC}>>
     %2 = VPU.NCE.Eltwise(%0, %1) {
         op_type = #VPU.eltwise_type<ADD>,
-        ppe = #VPU.PPETask<mode = <ADD>, clamp_high = 2147483647, clamp_low = -2147483648, lrelu_mult = 1, lrelu_shift = 0>
+        opaque_ppe = #VPU.PPEStub<>
     } -> tensor<1x16x16x16xf16, {order = #NHWC}>
 
     return %2 : tensor<1x16x16x16xf16, {order = #NHWC}>
@@ -39,7 +39,7 @@ func.func @RemoveSparsifyOps(%arg0: tensor<1x16x16x16xf16, {order = #NHWC}>, %ar
     %1 = VPU.Sparsify(%arg1) : tensor<1x16x16x16xf16, {order = #NHWC}> -> !VPU.SparseTensor<data=tensor<1x16x16x16xf16, {order = #NHWC}>>
     %2 = VPU.NCE.Eltwise(%0, %1) {
         op_type = #VPU.eltwise_type<ADD>,
-        ppe = #VPU.PPETask<mode = <ADD>, clamp_high = 2147483647, clamp_low = -2147483648, lrelu_mult = 1, lrelu_shift = 0>
+        opaque_ppe = #VPU.PPEStub<>
     } -> tensor<1x16x16x16xf16, {order = #NHWC}>
 
     return %2 : tensor<1x16x16x16xf16, {order = #NHWC}>
@@ -63,7 +63,7 @@ func.func @RemoveSparsifyOps(%arg0: tensor<1x16x16x16xf16, {order = #NHWC}>, %ar
 func.func @RemoveExtraDesparsify(%arg0: tensor<1x16x16x16xf16, {order = #NHWC}>) -> tensor<1x16x16x16xf16, {order = #NHWC}> {
     %0 = VPU.NCE.Eltwise(%arg0, %arg0) {
         op_type = #VPU.eltwise_type<ADD>,
-        ppe = #VPU.PPETask<mode = <ADD>, clamp_high = 2147483647, clamp_low = -2147483648, lrelu_mult = 1, lrelu_shift = 0>
+        opaque_ppe = #VPU.PPEStub<>
     } -> !VPU.SparseTensor<data=tensor<1x16x16x16xf16, {order = #NHWC}>>
     %1 = VPU.Desparsify(%0) : !VPU.SparseTensor<data=tensor<1x16x16x16xf16, {order = #NHWC}>> -> tensor<1x16x16x16xf16, {order = #NHWC}>
     %2 = VPU.MaxPool(%1) {

@@ -44,25 +44,26 @@ mlir::LogicalResult vpux::VPU::PermuteCastOp::inferReturnTypes(mlir::MLIRContext
 // DistributedCastOpInterface
 //
 
-mlir::FailureOr<VPU::DistributedTypeInterface> vpux::VPU::PermuteCastOp::inferCastedDistOutput(
-        VPU::DistributedTensorType inDistributedType) {
-    if (inDistributedType == nullptr || inDistributedType.getDistribution() == nullptr) {
+mlir::FailureOr<std::pair<mlir::Type, VPU::DistributionInfo>> vpux::VPU::PermuteCastOp::inferCastedTypeAndDistribution(
+        vpux::NDTypeInterface inType, VPU::DistributionInfo& distribution) {
+    if (inType == nullptr || mlir::isa<VPU::DistributedTensorType>(inType) ||
+        distribution.getDistributionMode() == DistributionMode::NONE) {
         return mlir::failure();
     }
-    const auto ctx = getContext();
     const auto srcType = getInput().getType().cast<NDTypeInterface>();
     const auto dstType = getOutput().getType().cast<NDTypeInterface>();
 
     auto castedOutputDistribution =
-            applyPermutationOnDistributedTensorAttr(inDistributedType, getMemPerm(), srcType.getDimsOrder(),
-                                                    dstType.getDimsOrder(), srcType.getShape(), dstType.getShape());
+            applyPermutationOnDistributionInfo(inType, distribution, getMemPerm(), srcType.getDimsOrder(),
+                                               dstType.getDimsOrder(), srcType.getShape(), dstType.getShape());
     if (mlir::failed(castedOutputDistribution)) {
         return mlir::failure();
-    }
-
-    const auto dstDimsOrderAttr = mlir::AffineMapAttr::get(dstType.getDimsOrder().toAffineMap(ctx));
-    const auto newDistributionType =
-            DistributedTensorType::get(ctx, dstType.getShape().raw(), dstType.getElementType(), dstDimsOrderAttr,
-                                       inDistributedType.getMemSpace(), castedOutputDistribution.value());
-    return newDistributionType.cast<VPU::DistributedTypeInterface>();
+    };
+    const auto typeComponents = TypeComponents()
+                                        .setShape(dstType.getShape())
+                                        .setDimsOrder(dstType.getDimsOrder())
+                                        .setElementType(dstType.getElementType())
+                                        .setMemSpace(inType.getMemSpace());
+    return std::make_pair(mlir::cast<mlir::Type>(dstType.changeTypeComponents(typeComponents)),
+                          castedOutputDistribution.value());
 }

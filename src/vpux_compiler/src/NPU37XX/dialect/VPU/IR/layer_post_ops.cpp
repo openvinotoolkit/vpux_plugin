@@ -1,10 +1,11 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2023-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 #include "vpux/compiler/NPU37XX/dialect/VPU/IR/ops_interfaces.hpp"
 
+#include "vpux/compiler/dialect/IE/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPU/utils/layer_post_ops_utils.hpp"
 #include "vpux/compiler/dialect/VPUIP/interfaces/nce_invariant.hpp"
 
@@ -29,7 +30,7 @@ bool isSupportedHWPostOp(mlir::Operation* mainOp, mlir::Operation* postOp, const
 
                 return true;
             })
-            // TODO: remove option after E-83187
+            // TODO: remove option after E#83187
             .Case<IE::ClampOp>([&](IE::ClampOp clampOp) {
                 const auto isQuantized = vpux::VPU::checkForQuantization(mainOp, postOp);
                 if (clampOp != nullptr) {
@@ -115,5 +116,8 @@ void vpux::VPU::arch37xx::registerLayerWithPostOpModelInterface(mlir::DialectReg
         IE::AvgPoolOp::attachInterface<LayerWithPostOpModel<IE::AvgPoolOp>>(*ctx);
         IE::AddOp::attachInterface<LayerWithPostOpModel<IE::AddOp>>(*ctx);
         IE::SubtractOp::attachInterface<LayerWithPostOpModel<IE::SubtractOp>>(*ctx);
+    });
+    registry.addExtension(+[](mlir::MLIRContext* ctx, VPU::VPUDialect*) {
+        VPU::TransposedConvolutionOp::attachInterface<LayerWithPostOpModel<VPU::TransposedConvolutionOp>>(*ctx);
     });
 }

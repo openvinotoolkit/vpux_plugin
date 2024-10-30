@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2023-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -32,7 +32,6 @@ func.func @DoNotSwizzleDueToAlignmentMemIncrease(%in : memref<1x16x149x150xf16, 
 
     %1 = VPUIP.NCEClusterTask
         {
-            activation_window_channel_length = 27 : i64,
             kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
             kernel_size = [1, 1],
             kernel_strides = [1, 1],
@@ -59,7 +58,6 @@ func.func @DoNotSwizzleDueToAlignmentMemIncrease(%in : memref<1x16x149x150xf16, 
 
     %2 = VPUIP.NCEClusterTask
         {
-            activation_window_channel_length = 27 : i64,
             kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
             kernel_size = [3, 3],
             kernel_strides = [1, 1],
@@ -87,7 +85,6 @@ func.func @DoNotSwizzleDueToAlignmentMemIncrease(%in : memref<1x16x149x150xf16, 
 
     %3 = VPUIP.NCEClusterTask
         {
-            activation_window_channel_length = 27 : i64,
             kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
             kernel_size = [1, 1],
             kernel_strides = [1, 1],
@@ -174,6 +171,11 @@ func.func @DoNotSwizzleDueToAlignmentMemIncrease(%in : memref<1x16x149x150xf16, 
 !WeightsStub_CMX = memref<16x16x1x1xf16, #NHWC, [@CMX_NN, 0]>
 !OutputStub_CMX = memref<1x16x148x148xf16, #NHWC, [@CMX_NN, 0]>
 
+IE.TileResource 1 of @NCE at 1.700000e+03 MHz {
+    IE.MemoryResource 1470000 bytes of @CMX_NN {VPU.bandwidth = 64 : i64, VPU.derateFactor = 1.000000e+00 : f64}
+    IE.ExecutorResource 1 of @DPU
+}
+
 func.func @SetSwizzlingForConstantButNotActivationDueToCmxSizeLimit(%input : !Input_DDR)
                         -> !Output_DDR {
 
@@ -195,7 +197,6 @@ func.func @SetSwizzlingForConstantButNotActivationDueToCmxSizeLimit(%input : !In
 
     %4 = VPUIP.NCEClusterTask
         {
-            activation_window_channel_length = 27 : i64,
             kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
             kernel_size = [1, 1],
             kernel_strides = [1, 1],
@@ -222,7 +223,6 @@ func.func @SetSwizzlingForConstantButNotActivationDueToCmxSizeLimit(%input : !In
 
     %5 = VPUIP.NCEClusterTask
         {
-            activation_window_channel_length = 27 : i64,
             kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
             kernel_size = [1, 1],
             kernel_strides = [1, 1],
@@ -348,13 +348,9 @@ func.func @CannotSwizzledDueToMultiUserWhichCannotSwizzled(%arg0 : memref<1x256x
         }
         PPE :
         {
-            PPETask <NOOP>
+            PPETask
             {
-                clamp_high = 2147483647 : i64,
-                clamp_low = -2147483648 : i64,
-                fp_prelu_alpha = 1.000000e+00 : f64,
-                lrelu_mult = 1 : i64,
-                lrelu_shift = 0 : i64
+                opaque_ppe = #VPU.PPEStub<>
             }
         }
 
@@ -389,13 +385,9 @@ func.func @CannotSwizzledDueToMultiUserWhichCannotSwizzled(%arg0 : memref<1x256x
         }
         PPE :
         {
-            PPETask <NOOP>
+            PPETask
             {
-                clamp_high = 2147483647 : i64,
-                clamp_low = -2147483648 : i64,
-                fp_prelu_alpha = 1.000000e+00 : f64,
-                lrelu_mult = 1 : i64,
-                lrelu_shift = 0 : i64
+                opaque_ppe = #VPU.PPEStub<>
             }
         }
 
@@ -427,7 +419,7 @@ func.func @CannotSwizzledDueToMultiUserWhichCannotSwizzled(%arg0 : memref<1x256x
     // CHECK-NEXT:        DPUTask {cluster_id = 0 : i64, inEnd = [79, 2, 255], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [39, 0, 255], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     // CHECK-NEXT:        DPUTask {cluster_id = 1 : i64, inEnd = [79, 2, 255], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [39, 0, 255], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     // CHECK-NEXT:      } PPE : {
-    // CHECK-NEXT:        PPETask <NOOP> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, fp_prelu_alpha = 1.000000e+00 : f64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64}
+    // CHECK-NEXT:        PPETask {opaque_ppe = #VPU.PPEStub<>}
     // CHECK-NEXT:      }
     // CHECK:      [[CONV_2:%.+]] = VPUIP.NCEClusterTask {is_superdense, kernel_padding = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, kernel_size = [3, 3], kernel_strides = [2, 2], minimumHardwareExecutionCost = 99787 : i64, task_type = #VPUIP.nce_task_type<CONV>}
     // CHECK-SAME:   input([[COPY_IN_2]] : memref<1x256x7x80xf16, #NHWC, @CMX_NN>) weights(%arg4 : memref<256x256x3x3xf16, #NHWC, @CMX_NN>) weight_table(%arg3 : memref<256x1x1x4xsi32, #NHWC, @CMX_NN>)
@@ -436,7 +428,7 @@ func.func @CannotSwizzledDueToMultiUserWhichCannotSwizzled(%arg0 : memref<1x256x
     // CHECK-NEXT:        DPUTask {cluster_id = 0 : i64, inEnd = [79, 4, 255], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [39, 1, 255], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     // CHECK-NEXT:        DPUTask {cluster_id = 1 : i64, inEnd = [79, 2, 255], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [39, 0, 255], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     // CHECK-NEXT:      } PPE : {
-    // CHECK-NEXT:        PPETask <NOOP> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, fp_prelu_alpha = 1.000000e+00 : f64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64}
+    // CHECK-NEXT:        PPETask {opaque_ppe = #VPU.PPEStub<>}
     // CHECK-NEXT:      }
     // CHECK:      [[OUT_1:%.+]] = VPUIP.Copy inputs([[CONV_1]] : memref<1x256x2x40xf16, #NHWC, @CMX_NN>) outputs([[OUTPUT_1]] : memref<1x256x2x40xf16, #NHWC, @DDR>) -> memref<1x256x2x40xf16, #NHWC, @DDR>
     // CHECK:      [[OUT_2:%.+]] = VPUIP.Copy inputs([[CONV_2]] : memref<1x256x3x40xf16, #NHWC, @CMX_NN>) outputs([[OUTPUT_2]] : memref<1x256x3x40xf16, #NHWC, @DDR>) -> memref<1x256x3x40xf16, #NHWC, @DDR>
@@ -449,33 +441,18 @@ func.func @CannotSwizzledDueToMultiUserWhichCannotSwizzled(%arg0 : memref<1x256x
 #GNHWC = affine_map<(d0, d1, d2, d3, d4) -> (d0, d1, d3, d4, d2)>
 #NCDHW = affine_map<(d0, d1, d2, d3, d4) -> (d0, d1, d2, d3, d4)>
 
-IE.TileResource 1 of @NCE at 1.700000e+03 MHz {
-    IE.MemoryResource 1470000 bytes of @CMX_NN {VPU.bandwidth = 64 : i64, VPU.derateFactor = 1.000000e+00 : f64}
-    IE.ExecutorResource 1 of @DPU
-}
+!InputBuffer = !VPUIP.DistributedBuffer<25x1x64x2x4xf16, #GNHWC, @CMX_NN, {
+    mode = "SEGMENTED",
+    num_tiles = [4, 1, 1, 1, 1],
+    num_clusters = 4 : i64,
+    uniform_distributed_segments,
+    compute_shapes = [[7, 1, 64, 2, 4], [6, 1, 64, 2, 4], [6, 1, 64, 2, 4], [6, 1, 64, 2, 4]],
+    compute_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]],
+    memory_shapes = [[7, 1, 64, 2, 4], [6, 1, 64, 2, 4], [6, 1, 64, 2, 4], [6, 1, 64, 2, 4]],
+    memory_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]]
+}>
 
-func.func @DoNotSwizzle5dTensors(
-    %IN: !VPUIP.DistributedBuffer<25x1x64x2x4xf16, #GNHWC, @CMX_NN, {
-        mode = "SEGMENTED",
-        num_tiles = [4, 1, 1, 1, 1],
-        num_clusters = 4 : i64,
-        uniform_distributed_segments,
-        compute_shapes = [[7, 1, 64, 2, 4], [6, 1, 64, 2, 4], [6, 1, 64, 2, 4], [6, 1, 64, 2, 4]],
-        compute_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]],
-        memory_shapes = [[7, 1, 64, 2, 4], [6, 1, 64, 2, 4], [6, 1, 64, 2, 4], [6, 1, 64, 2, 4]],
-        memory_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]]
-    }>,
-    %OUT: !VPUIP.DistributedBuffer<25x1x16x2x4xf16, #GNHWC, @CMX_NN, {
-        mode = "SEGMENTED",
-        num_tiles = [4, 1, 1, 1, 1],
-        num_clusters = 4 : i64,
-        uniform_distributed_segments,
-        compute_shapes = [[7, 1, 16, 2, 4], [6, 1, 16, 2, 4], [6, 1, 16, 2, 4], [6, 1, 16, 2, 4]],
-        compute_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]],
-        memory_shapes = [[7, 1, 16, 2, 4], [6, 1, 16, 2, 4], [6, 1, 16, 2, 4], [6, 1, 16, 2, 4]],
-        memory_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]]
-    }>
-) -> !VPUIP.DistributedBuffer<25x1x16x2x4xf16, #GNHWC, @CMX_NN, {
+!OutputBuffer = !VPUIP.DistributedBuffer<25x1x16x2x4xf16, #GNHWC, @CMX_NN, {
     mode = "SEGMENTED",
     num_tiles = [4, 1, 1, 1, 1],
     num_clusters = 4 : i64,
@@ -484,76 +461,68 @@ func.func @DoNotSwizzle5dTensors(
     compute_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]],
     memory_shapes = [[7, 1, 16, 2, 4], [6, 1, 16, 2, 4], [6, 1, 16, 2, 4], [6, 1, 16, 2, 4]],
     memory_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]]
-}> {
+}>
+
+!WeightsBuffer = !VPUIP.DistributedBuffer<25x16x64x1x1xf16, #GNHWC, @CMX_NN, {
+    mode = "SEGMENTED",
+    num_tiles = [4, 1, 1, 1, 1],
+    num_clusters = 4 : i64,
+    uniform_distributed_segments,
+    compute_shapes = [[7, 16, 64, 1, 1], [6, 16, 64, 1, 1], [6, 16, 64, 1, 1], [6, 16, 64, 1, 1]],
+    compute_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]],
+    memory_shapes = [[7, 16, 64, 1, 1], [6, 16, 64, 1, 1], [6, 16, 64, 1, 1], [6, 16, 64, 1, 1]],
+    memory_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]]
+}>
+
+!WeightTableBuffer = !VPUIP.DistributedBuffer<25x16x1x1x4xsi32, #NCDHW, @CMX_NN, {
+    mode = "SEGMENTED",
+    num_tiles = [4, 1, 1, 1, 1],
+    num_clusters = 4 : i64,
+    uniform_distributed_segments,
+    compute_shapes = [[7, 16, 1, 1, 4], [6, 16, 1, 1, 4], [6, 16, 1, 1, 4], [6, 16, 1, 1, 4]],
+    compute_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]],
+    memory_shapes = [[7, 16, 1, 1, 4], [6, 16, 1, 1, 4], [6, 16, 1, 1, 4], [6, 16, 1, 1, 4]],
+    memory_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]]
+}>
+
+IE.TileResource 1 of @NCE at 1.700000e+03 MHz {
+    IE.MemoryResource 1470000 bytes of @CMX_NN {VPU.bandwidth = 64 : i64, VPU.derateFactor = 1.000000e+00 : f64}
+    IE.ExecutorResource 1 of @DPU
+}
+
+func.func @DoNotSwizzle5dTensors(
+    %IN: !InputBuffer,
+    %OUT: !OutputBuffer
+) -> !OutputBuffer {
+// CHECK:           [[IN:%arg.+]]: !VPUIP.DistributedBuffer<25x1x64x2x4xf16, #GNHWC, @CMX_NN
+// CHECK-SAME:      [[OUT:%arg.+]]: !VPUIP.DistributedBuffer<25x1x16x2x4xf16, #GNHWC, @CMX_NN
     %WEIGHTS_CST = const.Declare memref<25x16x64x1x1xf16, #GNHWC> = dense<1.0> : tensor<1x25x16x64xf16>,
         [#const.Reshape<[25, 16, 64, 1, 1]>, #const.Reorder<#GNHWC>]
+    // CHECK-NOT: swizzlingScheme = #VPUIP.SwizzlingSchemeAttr
+    // CHECK:   [[WEIGHTS_CST:%.+]] = const.Declare memref<25x16x64x1x1xf16, #GNHWC>
 
     %WEIGHT_TABLE_CST = const.Declare memref<25x16x1x1x4xsi32> = dense<1> : tensor<25x16x1x1x4xsi32>
+    // CHECK:   [[WEIGHT_TABLE_CST:%.+]] = const.Declare memref<25x16x1x1x4xsi32>
 
-    %ALLOC_WEIGHTS = VPURT.AllocDistributed -> !VPUIP.DistributedBuffer<25x16x64x1x1xf16, #GNHWC, @CMX_NN, {
-        mode = "SEGMENTED",
-        num_tiles = [4, 1, 1, 1, 1],
-        num_clusters = 4 : i64,
-        uniform_distributed_segments,
-        compute_shapes = [[7, 16, 64, 1, 1], [6, 16, 64, 1, 1], [6, 16, 64, 1, 1], [6, 16, 64, 1, 1]],
-        compute_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]],
-        memory_shapes = [[7, 16, 64, 1, 1], [6, 16, 64, 1, 1], [6, 16, 64, 1, 1], [6, 16, 64, 1, 1]],
-        memory_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]]}>
+    %ALLOC_WEIGHTS = VPURT.AllocDistributed -> !WeightsBuffer
+    // CHECK:   [[ALLOC_WEIGHTS:%.+]] = VPURT.AllocDistributed -> !VPUIP.DistributedBuffer<25x16x64x1x1xf16, #GNHWC, @CMX_NN,
 
     %WEIGHTS = VPUIP.Copy
         inputs(%WEIGHTS_CST : memref<25x16x64x1x1xf16, #GNHWC>)
-        outputs(%ALLOC_WEIGHTS : !VPUIP.DistributedBuffer<25x16x64x1x1xf16, #GNHWC, @CMX_NN, {
-            mode = "SEGMENTED",
-            num_tiles = [4, 1, 1, 1, 1],
-            num_clusters = 4 : i64,
-            uniform_distributed_segments,
-            compute_shapes = [[7, 16, 64, 1, 1], [6, 16, 64, 1, 1], [6, 16, 64, 1, 1], [6, 16, 64, 1, 1]],
-            compute_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]],
-            memory_shapes = [[7, 16, 64, 1, 1], [6, 16, 64, 1, 1], [6, 16, 64, 1, 1], [6, 16, 64, 1, 1]],
-            memory_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]]
-        }>) -> !VPUIP.DistributedBuffer<25x16x64x1x1xf16, #GNHWC, @CMX_NN, {
-            mode = "SEGMENTED",
-            num_tiles = [4, 1, 1, 1, 1],
-            num_clusters = 4 : i64,
-            uniform_distributed_segments,
-            compute_shapes = [[7, 16, 64, 1, 1], [6, 16, 64, 1, 1], [6, 16, 64, 1, 1], [6, 16, 64, 1, 1]],
-            compute_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]],
-            memory_shapes = [[7, 16, 64, 1, 1], [6, 16, 64, 1, 1], [6, 16, 64, 1, 1], [6, 16, 64, 1, 1]],
-            memory_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]]
-        }>
+        outputs(%ALLOC_WEIGHTS : !WeightsBuffer) -> !WeightsBuffer
+    // CHECK:   [[WEIGHTS:%.+]] = VPUIP.Copy
+    // CHECK-SAME:  inputs([[WEIGHTS_CST]]
+    // CHECK-SAME:  outputs([[ALLOC_WEIGHTS]]
 
-    %ALLOC_WEIGHT_TABLE = VPURT.AllocDistributed -> !VPUIP.DistributedBuffer<25x16x1x1x4xsi32, #NCDHW, @CMX_NN, {
-        mode = "SEGMENTED",
-        num_tiles = [4, 1, 1, 1, 1],
-        num_clusters = 4 : i64,
-        uniform_distributed_segments,
-        compute_shapes = [[7, 16, 1, 1, 4], [6, 16, 1, 1, 4], [6, 16, 1, 1, 4], [6, 16, 1, 1, 4]],
-        compute_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]],
-        memory_shapes = [[7, 16, 1, 1, 4], [6, 16, 1, 1, 4], [6, 16, 1, 1, 4], [6, 16, 1, 1, 4]],
-        memory_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]]
-    }>
+    %ALLOC_WEIGHT_TABLE = VPURT.AllocDistributed -> !WeightTableBuffer
+    // CHECK:   [[ALLOC_WEIGHT_TABLE:%.+]] = VPURT.AllocDistributed -> !VPUIP.DistributedBuffer<25x16x1x1x4xsi32, #NCDHW, @CMX_NN
 
     %WEIGHT_TABLE = VPUIP.Copy
         inputs(%WEIGHT_TABLE_CST : memref<25x16x1x1x4xsi32>)
-        outputs(%ALLOC_WEIGHT_TABLE : !VPUIP.DistributedBuffer<25x16x1x1x4xsi32, #NCDHW, @CMX_NN, {
-            mode = "SEGMENTED",
-            num_tiles = [4, 1, 1, 1, 1],
-            num_clusters = 4 : i64,
-            uniform_distributed_segments,
-            compute_shapes = [[7, 16, 1, 1, 4], [6, 16, 1, 1, 4], [6, 16, 1, 1, 4], [6, 16, 1, 1, 4]],
-            compute_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]],
-            memory_shapes = [[7, 16, 1, 1, 4], [6, 16, 1, 1, 4], [6, 16, 1, 1, 4], [6, 16, 1, 1, 4]],
-            memory_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]]
-        }>) -> !VPUIP.DistributedBuffer<25x16x1x1x4xsi32, #NCDHW, @CMX_NN, {
-            mode = "SEGMENTED",
-            num_tiles = [4, 1, 1, 1, 1],
-            num_clusters = 4 : i64,
-            uniform_distributed_segments,
-            compute_shapes = [[7, 16, 1, 1, 4], [6, 16, 1, 1, 4], [6, 16, 1, 1, 4], [6, 16, 1, 1, 4]],
-            compute_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]],
-            memory_shapes = [[7, 16, 1, 1, 4], [6, 16, 1, 1, 4], [6, 16, 1, 1, 4], [6, 16, 1, 1, 4]],
-            memory_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]]
-        }>
+        outputs(%ALLOC_WEIGHT_TABLE : !WeightTableBuffer) -> !WeightTableBuffer
+    // CHECK:   [[WEIGHT_TABLE:%.+]] = VPUIP.Copy
+    // CHECK-SAME:  inputs([[WEIGHT_TABLE_CST]]
+    // CHECK-SAME:  outputs([[ALLOC_WEIGHT_TABLE]]
 
     %MATMUL = VPUIP.NCEClusterTask {
         kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
@@ -561,75 +530,12 @@ func.func @DoNotSwizzle5dTensors(
         kernel_strides = [1, 1],
         task_type = #VPUIP.nce_task_type<CONV>
     }
-    input(%IN : !VPUIP.DistributedBuffer<25x1x64x2x4xf16, #GNHWC, @CMX_NN, {
-        mode = "SEGMENTED",
-        num_tiles = [4, 1, 1, 1, 1],
-        num_clusters = 4 : i64,
-        uniform_distributed_segments,
-        compute_shapes = [[7, 1, 64, 2, 4], [6, 1, 64, 2, 4], [6, 1, 64, 2, 4], [6, 1, 64, 2, 4]],
-        compute_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]],
-        memory_shapes = [[7, 1, 64, 2, 4], [6, 1, 64, 2, 4], [6, 1, 64, 2, 4], [6, 1, 64, 2, 4]],
-        memory_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]]
-    }>)
-    weights(%WEIGHTS : !VPUIP.DistributedBuffer<25x16x64x1x1xf16, #GNHWC, @CMX_NN, {
-        mode = "SEGMENTED",
-        num_tiles = [4, 1, 1, 1, 1],
-        num_clusters = 4 : i64,
-        uniform_distributed_segments,
-        compute_shapes = [[7, 16, 64, 1, 1], [6, 16, 64, 1, 1], [6, 16, 64, 1, 1], [6, 16, 64, 1, 1]],
-        compute_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]],
-        memory_shapes = [[7, 16, 64, 1, 1], [6, 16, 64, 1, 1], [6, 16, 64, 1, 1], [6, 16, 64, 1, 1]],
-        memory_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]]
-    }>)
-    weight_table(%WEIGHT_TABLE : !VPUIP.DistributedBuffer<25x16x1x1x4xsi32, #NCDHW, @CMX_NN, {
-        mode = "SEGMENTED",
-        num_tiles = [4, 1, 1, 1, 1],
-        num_clusters = 4 : i64,
-        uniform_distributed_segments,
-        compute_shapes = [[7, 16, 1, 1, 4], [6, 16, 1, 1, 4], [6, 16, 1, 1, 4], [6, 16, 1, 1, 4]],
-        compute_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]],
-        memory_shapes = [[7, 16, 1, 1, 4], [6, 16, 1, 1, 4], [6, 16, 1, 1, 4], [6, 16, 1, 1, 4]],
-        memory_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]]
-    }>)
-    parent_input(%IN : !VPUIP.DistributedBuffer<25x1x64x2x4xf16, #GNHWC, @CMX_NN, {
-        mode = "SEGMENTED",
-        num_tiles = [4, 1, 1, 1, 1],
-        num_clusters = 4 : i64,
-        uniform_distributed_segments,
-        compute_shapes = [[7, 1, 64, 2, 4], [6, 1, 64, 2, 4], [6, 1, 64, 2, 4], [6, 1, 64, 2, 4]],
-        compute_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]],
-        memory_shapes = [[7, 1, 64, 2, 4], [6, 1, 64, 2, 4], [6, 1, 64, 2, 4], [6, 1, 64, 2, 4]],
-        memory_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]]
-    }>)
-    parent_output(%OUT : !VPUIP.DistributedBuffer<25x1x16x2x4xf16, #GNHWC, @CMX_NN, {
-        mode = "SEGMENTED",
-        num_tiles = [4, 1, 1, 1, 1],
-        num_clusters = 4 : i64,
-        uniform_distributed_segments,
-        compute_shapes = [[7, 1, 16, 2, 4], [6, 1, 16, 2, 4], [6, 1, 16, 2, 4], [6, 1, 16, 2, 4]],
-        compute_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]],
-        memory_shapes = [[7, 1, 16, 2, 4], [6, 1, 16, 2, 4], [6, 1, 16, 2, 4], [6, 1, 16, 2, 4]],
-        memory_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]]
-    }>)
-    outputs(%OUT : !VPUIP.DistributedBuffer<25x1x16x2x4xf16, #GNHWC, @CMX_NN, {
-        mode = "SEGMENTED",
-        num_tiles = [4, 1, 1, 1, 1],
-        num_clusters = 4 : i64,
-        uniform_distributed_segments,
-        compute_shapes = [[7, 1, 16, 2, 4], [6, 1, 16, 2, 4], [6, 1, 16, 2, 4], [6, 1, 16, 2, 4]],
-        compute_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]],
-        memory_shapes = [[7, 1, 16, 2, 4], [6, 1, 16, 2, 4], [6, 1, 16, 2, 4], [6, 1, 16, 2, 4]],
-        memory_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]]
-    }>) -> !VPUIP.DistributedBuffer<25x1x16x2x4xf16, #GNHWC, @CMX_NN, {
-        mode = "SEGMENTED",
-        num_tiles = [4, 1, 1, 1, 1],
-        num_clusters = 4 : i64,
-        uniform_distributed_segments,
-        compute_shapes = [[7, 1, 16, 2, 4], [6, 1, 16, 2, 4], [6, 1, 16, 2, 4], [6, 1, 16, 2, 4]],
-        compute_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]],
-        memory_shapes = [[7, 1, 16, 2, 4], [6, 1, 16, 2, 4], [6, 1, 16, 2, 4], [6, 1, 16, 2, 4]],
-        memory_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]]
-    }>
+    input(%IN : !InputBuffer)
+    weights(%WEIGHTS : !WeightsBuffer)
+    weight_table(%WEIGHT_TABLE : !WeightTableBuffer)
+    parent_input(%IN : !InputBuffer)
+    parent_output(%OUT : !OutputBuffer)
+    outputs(%OUT : !OutputBuffer) -> !OutputBuffer
     variants : {
         DPUTask {
             cluster_id = 0 : i64,
@@ -668,25 +574,18 @@ func.func @DoNotSwizzle5dTensors(
             pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>
         }
     } PPE : {
-        PPETask <NOOP> {
-            clamp_high = 2147483647 : i64,
-            clamp_low = -2147483648 : i64,
-            fp_prelu_alpha = 1.000000e+00 : f64,
-            lrelu_mult = 1 : i64,
-            lrelu_shift = 0 : i64
+        PPETask {
+            opaque_ppe = #VPU.PPEStub<>
         }
     }
+    // CHECK:   [[MATMUL:%.+]] = VPUIP.NCEClusterTask
+    // CHECK-SAME:  input([[IN]]
+    // CHECK-SAME:  weights([[WEIGHTS]]
+    // CHECK-SAME:  weight_table([[WEIGHT_TABLE]]
+    // CHECK-SAME:  parent_input([[IN]]
+    // CHECK-SAME:  parent_output([[OUT]]
+    // CHECK-SAME:  outputs([[OUT]]
 
-    return %OUT : !VPUIP.DistributedBuffer<25x1x16x2x4xf16, #GNHWC, @CMX_NN, {
-        mode = "SEGMENTED",
-        num_tiles = [4, 1, 1, 1, 1],
-        num_clusters = 4 : i64,
-        uniform_distributed_segments,
-        compute_shapes = [[7, 1, 16, 2, 4], [6, 1, 16, 2, 4], [6, 1, 16, 2, 4], [6, 1, 16, 2, 4]],
-        compute_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]],
-        memory_shapes = [[7, 1, 16, 2, 4], [6, 1, 16, 2, 4], [6, 1, 16, 2, 4], [6, 1, 16, 2, 4]],
-        memory_offsets = [[0, 0, 0, 0, 0], [7, 0, 0, 0, 0], [13, 0, 0, 0, 0], [19, 0, 0, 0, 0]]
-    }>
-
-    // CHECK-NOT: swizzlingScheme = #VPUIP.SwizzlingSchemeAttr
+    return %OUT : !OutputBuffer
+    // CHECK:   return [[OUT]]
 }

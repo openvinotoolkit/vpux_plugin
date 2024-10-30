@@ -10,12 +10,12 @@
 !qElemType2 = !quant.uniform<u8:f16, 1.23423>
 
 func.func @ConstFoldWithRealQuantize() -> tensor<1x8x4x4x!qElemType> {
-    %0 = const.Declare tensor<1x8x4x4xf16> = dense<5.0> : tensor<1x8x4x4xf32>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType2>, #const.Dequantize]
+    %0 = const.Declare tensor<1x8x4x4xf16> = dense<5.0> : tensor<1x8x4x4xf32>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType2>, #const.Dequantize]
     %1 = IE.Quantize(%0) {dstElemType = !qElemType}: tensor<1x8x4x4xf16> -> tensor<1x8x4x4x!qElemType>
     return %1 : tensor<1x8x4x4x!qElemType>
 
-    // CHECK:       [[VAL0:%.*]] = const.Declare tensor<1x8x4x4x!qElemType> = dense<5.000000e+00> : tensor<1x8x4x4xf32>, 
-    // CHECK-SAME:          [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType1>, 
+    // CHECK:       [[VAL0:%.*]] = const.Declare tensor<1x8x4x4x!qElemType> = dense<5.000000e+00> : tensor<1x8x4x4xf32>,
+    // CHECK-SAME:          [#const.CastElemType<ui8>, #const.CastElemType<!qElemType1>,
     // CHECK-SAME:           #const.Dequantize, #const.Quantize<!qElemType>]
     // CHECK-NOT:   IE.Quantize
     // CHECK:       return [[VAL0]]
@@ -32,7 +32,7 @@ func.func @ConstFold() -> tensor<1x8x4x4x!qElemType> {
 
     // CHECK:       [[VAL0:%.*]] = const.Declare tensor<1x8x4x4x!qElemType> =
     // CHECK-SAME:       dense<5.000000e+00> : tensor<1x8x4x4xf32>,
-    // CHECK-SAME:       [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>]
+    // CHECK-SAME:       [#const.CastElemType<ui8>, #const.CastElemType<!qElemType>]
     // CHECK-NOT:   IE.Quantize
     // CHECK:       return [[VAL0]]
 }

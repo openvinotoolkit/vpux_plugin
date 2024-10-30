@@ -6,7 +6,7 @@
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 #include "vpux/compiler/dialect/IE/utils/concat_utils.hpp"
 #include "vpux/compiler/dialect/IE/utils/slice_utils.hpp"
-
+#include "vpux/compiler/utils/permute_utils.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
 using namespace vpux;
@@ -109,8 +109,8 @@ mlir::LogicalResult TileSliceRewriter::matchAndRewrite(IE::SliceOp origOp, mlir:
     Shape newShape(tileOpInputShape.raw());
     newShape[tileAxis.value()] = newRepeatValue;
     const auto newOutputType = outputType.changeShape(newShape);
-    auto newTileOp = rewriter.create<IE::TileOp>(origOp->getLoc(), newOutputType, tileOp.getInput(), nullptr,
-                                                 getIntArrayAttr(ctx, repeatsOnNewShape));
+    auto newTileOp = rewriter.create<IE::TileOp>(takeOpLoc(origOp, "tile_in"), newOutputType, tileOp.getInput(),
+                                                 nullptr, getIntArrayAttr(ctx, repeatsOnNewShape));
     if (hasReshape) {
         const auto sliceOutShape = getShape(origOp.getResult()).raw();
         rewriter.replaceOpWithNewOp<IE::AffineReshapeOp>(origOp, newTileOp.getOutput(), reshapeOp.getDimMappingAttr(),
@@ -146,6 +146,14 @@ mlir::LogicalResult ConcatSliceRewriter::matchAndRewrite(IE::SliceOp origOp, mli
                                : origOp.getSource().getDefiningOp<IE::ConcatOp>();
 
     if (concatOp == nullptr || !concatOp.getStaticOffsetsAttr()) {
+        return mlir::failure();
+    }
+
+    // Previously the rewriter is before adjust layout, which only handle NCHW compatible layout.
+    // After add the rewriter to run after adjust layout, we see some performance regression for
+    // some very small model, acutally caused by runtime idle. #E135787
+    auto outType = origOp.getResult().getType().cast<vpux::NDTypeInterface>();
+    if (outType.getDimsOrder() != DimsOrder::fromNumDims(outType.getShape().size())) {
         return mlir::failure();
     }
 
@@ -204,7 +212,8 @@ mlir::LogicalResult ConcatSliceRewriter::matchAndRewrite(IE::SliceOp origOp, mli
                    sliceOffsetShape, curOffsetShape, sliceOutShape, curShape);
 
         if (hasReshape) {
-            curVal = rewriter.create<IE::AffineReshapeOp>(reshapeOp.getLoc(), curVal, reshapeOp.getDimMapping(),
+            curVal = rewriter.create<IE::AffineReshapeOp>(takeOpLoc(reshapeOp, "affine_in"), curVal,
+                                                          reshapeOp.getDimMapping(),
                                                           getIntArrayAttr(rewriter.getContext(), curShape));
         }
 
@@ -219,6 +228,177 @@ mlir::LogicalResult ConcatSliceRewriter::matchAndRewrite(IE::SliceOp origOp, mli
     }
 
     return mlir::failure();
+}
+
+//
+// SliceConcatRewriter
+//
+
+class SliceConcatRewriter final : public mlir::OpRewritePattern<IE::SliceOp> {
+public:
+    SliceConcatRewriter(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<IE::SliceOp>(ctx), _log(log) {
+        setDebugName("SliceConcatRewriter");
+    }
+
+    mlir::LogicalResult matchAndRewrite(IE::SliceOp origOp, mlir::PatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+bool isContinuousSlices(SmallVector<IE::SliceOp>& sliceOps, vpux::Dim sliceDim) {
+    for (auto idx : irange(sliceOps.size() - 1)) {
+        const auto preOffsets = parseIntArrayAttr<int64_t>(sliceOps[idx].getStaticOffsets());
+        const auto preSizes = parseIntArrayAttr<int64_t>(sliceOps[idx].getStaticSizes());
+        const auto nextOffsets = parseIntArrayAttr<int64_t>(sliceOps[idx + 1].getStaticOffsets());
+        if (preOffsets[sliceDim.ind()] + preSizes[sliceDim.ind()] != nextOffsets[sliceDim.ind()]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+mlir::LogicalResult SliceConcatRewriter::matchAndRewrite(IE::SliceOp origOp, mlir::PatternRewriter& rewriter) const {
+    _log.trace("Rewrite Slice Concat operation '{0}' at '{1}'", origOp->getName(), origOp->getLoc());
+
+    auto ctx = origOp->getContext();
+    auto sliceParent = origOp.getSource();
+    auto outShape = getShape(origOp.getResult());
+    auto refSliceAxis = IE::getSingleDiffAxis(getShape(origOp.getSource()), outShape);
+    if (!refSliceAxis.has_value()) {
+        return matchFailed(rewriter, origOp, "Not a single axis slice operation");
+    }
+
+    if (!origOp->hasOneUse()) {
+        return matchFailed(rewriter, origOp, "Slice has more than one user");
+    }
+
+    auto concatOp = mlir::dyn_cast<IE::ConcatOp>(*origOp.getResult().getUsers().begin());
+    if (concatOp == nullptr) {
+        return matchFailed(rewriter, origOp, "Slice user is not a concat");
+    }
+
+    auto concatAxis = IE::getSingleDiffAxis(outShape, getShape(concatOp.getOutput()));
+    if (!concatAxis.has_value()) {
+        return matchFailed(rewriter, origOp, "Not a single axis concat operation");
+    }
+
+    SmallVector<IE::SliceOp> sliceOps;
+    for (auto user : sliceParent.getUsers()) {
+        if (auto sliceOp = mlir::dyn_cast<IE::SliceOp>(user)) {
+            auto sliceAxis = IE::getSingleDiffAxis(getShape(sliceOp.getSource()), getShape(sliceOp.getResult()));
+            if (!sliceAxis.has_value() || sliceAxis.value() != refSliceAxis.value()) {
+                return matchFailed(rewriter, origOp, "Don't have same slice axis");
+            }
+            if (!sliceOp->hasOneUse()) {
+                return matchFailed(rewriter, origOp, "Slice has more than one user");
+            }
+            // slice have the same concat user
+            if (concatOp == (*sliceOp.getResult().getUsers().begin())) {
+                sliceOps.push_back(sliceOp);
+            }
+        }
+    }
+    if (sliceOps.size() < 2) {
+        return matchFailed(rewriter, origOp, "Need to have at least 2 slice operation");
+    }
+
+    // sort slice ops according to the offset
+    std::sort(sliceOps.begin(), sliceOps.end(), [&](IE::SliceOp firstOp, IE::SliceOp secondOp) {
+        const auto firstOffsets = parseIntArrayAttr<int64_t>(firstOp.getStaticOffsets());
+        const auto secondOffsets = parseIntArrayAttr<int64_t>(secondOp.getStaticOffsets());
+        return firstOffsets[refSliceAxis.value().ind()] < secondOffsets[refSliceAxis.value().ind()];
+    });
+
+    // only continuous slices can be optimized.
+    if (!isContinuousSlices(sliceOps, refSliceAxis.value())) {
+        return matchFailed(rewriter, origOp, "Not continious slice from parent");
+    }
+
+    SmallVector<IE::SliceOp> concatSliceParent;
+    bool firstSliceMatched = false;
+    for (auto operand : concatOp->getOperands()) {
+        if (auto sliceOp = mlir::dyn_cast_or_null<IE::SliceOp>(operand.getDefiningOp())) {
+            if (sliceOp == sliceOps.front()) {
+                firstSliceMatched = true;
+            }
+            if (firstSliceMatched) {
+                concatSliceParent.push_back(sliceOp);
+                if (sliceOp == sliceOps.back()) {
+                    break;
+                } else {
+                    continue;
+                }
+            }
+        }
+        if (firstSliceMatched) {
+            break;
+        }
+    }
+
+    if (concatSliceParent != sliceOps) {
+        return matchFailed(rewriter, origOp, "Slice is not the same sequence as concat");
+    }
+
+    // if concat axis is different with slice axis, try to add a permuteCastOp.
+    if (concatAxis.value() != refSliceAxis.value()) {
+        const auto inType = sliceParent.getType().cast<vpux::NDTypeInterface>();
+        const auto dimsOrder = inType.getDimsOrder();
+        auto permVec = to_small_vector(dimsOrder.toPermutation() | transformed([](Dim dim) {
+                                           return checked_cast<int64_t>(dim.ind());
+                                       }));
+        std::swap(permVec[dimsOrder.dimPos(concatAxis.value())], permVec[dimsOrder.dimPos(refSliceAxis.value())]);
+        const auto newOrder = DimsOrder::fromAffineMap(mlir::AffineMap::getPermutationMap(ArrayRef(permVec), ctx));
+        const auto memPerm = vpux::getPermutationFromOrders(dimsOrder, newOrder, ctx);
+        if (!isTrivialPermute(inType.getMemShape(), memPerm)) {
+            return matchFailed(rewriter, origOp,
+                               "Could not add permuteCast when slice axis and concat axis is different");
+        }
+        sliceParent =
+                rewriter.create<IE::PermuteCastOp>(origOp->getLoc(), sliceParent, dimsOrder.toAffineMap(ctx), memPerm);
+    }
+
+    const auto firstOffsets = parseIntArrayAttr<int64_t>(sliceOps.front().getStaticOffsets());
+    Shape sliceOffset(firstOffsets.size());
+    sliceOffset[concatAxis.value()] = firstOffsets[refSliceAxis.value().ind()];
+    Shape sliceShape(getShape(sliceParent));
+    sliceShape[concatAxis.value()] = std::accumulate(sliceOps.begin(), sliceOps.end(), 0, [&](auto& a, auto& b) {
+        const auto sliceSize = parseIntArrayAttr<int64_t>(b.getStaticSizes());
+        return a + sliceSize[refSliceAxis.value().ind()];
+    });
+
+    auto newSlice = rewriter.create<IE::SliceOp>(origOp->getLoc(), sliceParent,
+                                                 getIntArrayAttr(getContext(), sliceOffset.raw()),
+                                                 getIntArrayAttr(getContext(), sliceShape.raw()));
+
+    // replace several slice input with one big slice input
+    SmallVector<mlir::Value> concatInput;
+    for (auto parent : concatOp->getOperands()) {
+        auto slice = mlir::dyn_cast_or_null<IE::SliceOp>(parent.getDefiningOp());
+        if (slice == nullptr) {
+            concatInput.push_back(parent);
+            continue;
+        }
+        if (std::find(sliceOps.begin(), sliceOps.end(), slice) == sliceOps.end()) {
+            concatInput.push_back(parent);
+        } else {
+            if (std::find(concatInput.begin(), concatInput.end(), newSlice.getResult()) == concatInput.end()) {
+                concatInput.push_back(newSlice.getResult());
+            }
+        }
+    }
+
+    auto newConcat = rewriter.create<IE::ConcatOp>(origOp->getLoc(), mlir::ValueRange(concatInput), concatAxis.value());
+    for (auto operand : newConcat->getOperands()) {
+        auto parentOp = operand.getDefiningOp();
+        if (parentOp && newConcat->isBeforeInBlock(parentOp)) {
+            parentOp->moveAfter(parentOp);
+        }
+    }
+
+    rewriter.replaceOp(concatOp, newConcat.getOutput());
+    _log.trace("Optimize slice and concat operations successfully");
+    return mlir::success();
 }
 
 //
@@ -242,6 +422,7 @@ void OptimizeOpSlicePass::safeRunOnFunc() {
     mlir::RewritePatternSet patterns(&ctx);
     patterns.insert<ConcatSliceRewriter>(&ctx, _log);
     patterns.insert<TileSliceRewriter>(&ctx, _log);
+    patterns.insert<SliceConcatRewriter>(&ctx, _log);
 
     if (mlir::failed(
                 mlir::applyPatternsAndFoldGreedily(func, std::move(patterns), vpux::getDefaultGreedyRewriteConfig()))) {

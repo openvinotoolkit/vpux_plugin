@@ -21,20 +21,24 @@ void vpux::IE::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm, const I
                                                 Logger log) {
     const auto grc = getDefaultGreedyRewriteConfig();
 
-    if (options.enableFunctionOutlining) {
+    pm.addPass(createStartLocationVerifierPass(log, options.locationsVerificationMode));
+
+    bool isOutliningEnabled = options.functionOutlining.hasValue();
+    if (isOutliningEnabled) {
         pm.addPass(mlir::createCanonicalizerPass(grc));
+
         if (options.enableDebatcher) {
             pm.addPass(IE::createAndInitDebatcherPass(options.debatcherExtraArgs, log));
             log.info("Enforce 'function-outlining-mode=batching' as 'debatching' was explicitly requested");
             pm.addPass(IE::createOutlinerPass("batching", log));
             pm.addPass(IE::createDeDebatcherPass(log));
+            pm.addPass(IE::createOverrideTileExecutorNumPass("override-to-tiles-per-batch", log));
         } else {
-            pm.addPass(IE::createOutlinerPass(options.functionOutliningMode, log));
+            pm.addPass(IE::createOutlinerPass(options.functionOutlining, log));
         }
     }
 
     pm.addPass(mlir::createCanonicalizerPass(grc));
-    pm.addPass(createStartLocationVerifierPass(log, options.locationsVerificationMode));
 
     // Level 3 : Topology
     if (options.logOpOptimizations) {
@@ -46,7 +50,7 @@ void vpux::IE::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm, const I
     IE::arch37xx::buildInitialTransformationsPipeline(pm, IE::arch37xx::TransformOptions(options), log);
     IE::buildAdjustPrecisionPipeline(pm, IE::AdjustPrecisionOptions(options), log);
 
-    IE::buildOperationConversionPipeline(pm, log);
+    IE::buildOperationConversionPipeline(pm, IE::OperationConversionOptions(options), log);
 
     if (options.enableM2I) {
         pm.addPass(IE::createM2IBatchNormFusionPass());
@@ -54,6 +58,7 @@ void vpux::IE::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm, const I
 
     pm.addPass(IE::createConvertNceOpsTo4DPass(log));
     pm.addPass(IE::createUnrollConv3dToConv2dPass(log));
+    pm.addPass(IE::createReshapeMaxPoolPass(log));
     if (options.enableHandleLargeKernel) {
         pm.addPass(IE::createAdjustMaxPoolInputShapePass(log));
         pm.addPass(IE::createHandleLargeKernelsPass(log));
@@ -69,18 +74,18 @@ void vpux::IE::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm, const I
     pm.addPass(IE::createConvertSplitConcatToTransposePass(log));
     pm.addPass(IE::createConvertShapeTo4DPass(log));
     pm.addPass(mlir::createCanonicalizerPass(grc));
-
     //  [Tracking number: E#101595]
     // This temporary check is necessary for m2i interpolate functional tests and it will be removed as part of
     // E#101595
     pm.addPass(IE::createConvertToSpatialOpPass(isOptionEnabled(options.enableM2I),
                                                 isOptionEnabled(options.enableExperimentalSEPtrsOperations), log));
-
+    pm.addPass(IE::createConvertSubtractToAddPass(log));
+    pm.addPass(IE::createConvertBranchesConcatToConvPass(log));
     pm.addPass(IE::createSwapOperationsPass(isOptionEnabled(options.enableSEPtrsOperations) ||
                                                     isOptionEnabled(options.enableExperimentalSEPtrsOperations),
                                             log));
     pm.addPass(IE::createSwapPadLayerPass(log));
-    pm.addPass(IE::createConvertSubtractToAddPass(log));
+    pm.addPass(IE::arch37xx::createFuseStaticScalePass(log, false));
     pm.addPass(IE::createConvertToScaleShiftPass(log));
     pm.addPass(IE::createBroadcastInputForAddPass(log));
     pm.addPass(IE::createConvertGRNToNormalizeL2Pass(log));
@@ -101,6 +106,7 @@ void vpux::IE::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm, const I
     pm.addPass(IE::createSwapD2SAndScaleShiftPass(log));
 
     IE::buildAdjustForVPUPipeline(pm, IE::AdjustForVPUOptions(options), log);
+    pm.addPass(createStopLocationVerifierPass(log));
 
     pm.addPass(IE::createHandleExcludePadForAvgPoolPass(log));
     pm.addPass(IE::createResolveStridedSlicePass(log));
@@ -125,6 +131,7 @@ void vpux::IE::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm, const I
     if (options.enableHandleLargePads) {
         pm.addPass(IE::createHandleLargePadsPass(log));
     }
+
     pm.addPass(IE::createConvertGroupConvToConvPass(log));
     pm.addPass(mlir::createCanonicalizerPass(grc));
     if (options.enableOptimizeScaleShiftToDWConv) {
@@ -144,9 +151,9 @@ void vpux::IE::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm, const I
     // buildLowPrecisionPipeline) to eliminate potential quantization ops on
     // constant operands
     pm.addPass(IE::createConvertDivideToMultiplyPass(log));
-    // Note: apply FuseMultiplyToConv after ConvertDivideToMultiply to increase
+    // Note: apply FuseStaticScale after ConvertDivideToMultiply to increase
     // the applicability
-    pm.addPass(IE::arch37xx::createFuseMultiplyToConvPass(log));
+    pm.addPass(IE::arch37xx::createFuseStaticScalePass(log));
     pm.addPass(IE::createOptimizeTileOpPass(log));
 
     if (options.enableSEPtrsOperations && options.enableSplitBilinerIntoHAndW) {
@@ -168,7 +175,7 @@ void vpux::IE::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm, const I
         pm.addPass(IE::createUpstreamSlicePass(log));
     }
 
-    pm.addPass(IE::createOptimizeGroupConvConcatPass(log));
+    pm.addPass(IE::createConvertBranchesConcatToConvPass(log));
 
     pm.addPass(IE::createSwapMVNWithTransposePass(log));
 
@@ -190,7 +197,8 @@ void vpux::IE::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm, const I
     IE::arch37xx::buildOptimizeMemPermuteAndActivationChannelsExpandPipeline(
             pm, IE::ExpandActivationChannelsOptions(options), log);
     pm.addPass(IE::createRemoveViewLikeOpsChainPass(log));
-
+    pm.addPass(IE::createOptimizeOpSlicePass(log));
+    pm.addPass(IE::createUniquifyOpsPass(log));
     if (options.enableExpandActivationChannels) {
         pm.addPass(IE::createExpandActivationWidthPass(log));
         pm.addPass(IE::createAdjustInputShapePass(log));

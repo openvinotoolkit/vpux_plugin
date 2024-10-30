@@ -9,12 +9,12 @@ endif()
 
 set(TARGET_NAME VPUXLoader)
 
-set(ELF_DIR "${InferenceEngineVPUXPlugin_SOURCE_DIR}/thirdparty/elf/vpux_elf/")
-set(LOADER_DIR_INC "${InferenceEngineVPUXPlugin_SOURCE_DIR}/thirdparty/elf/vpux_elf/loader/include/")
-set(LOADER_DIR_HPI_INC "${InferenceEngineVPUXPlugin_SOURCE_DIR}/thirdparty/elf/vpux_elf/hpi_component/include/")
-set(LOADER_DIR_HPI_SRC "${InferenceEngineVPUXPlugin_SOURCE_DIR}/thirdparty/elf/vpux_elf/hpi_component/src")
-set(LOADER_DIR_SRC "${InferenceEngineVPUXPlugin_SOURCE_DIR}/thirdparty/elf/vpux_elf/loader/src")
-set(LOADER_DIR "${InferenceEngineVPUXPlugin_SOURCE_DIR}/thirdparty/elf/vpux_elf/loader/")
+set(ELF_DIR "${InferenceEngineVPUXPlugin_SOURCE_DIR}/thirdparty/graphFile-schema/vpux_elf/")
+set(LOADER_DIR_INC "${InferenceEngineVPUXPlugin_SOURCE_DIR}/thirdparty/graphFile-schema/vpux_elf/loader/include/")
+set(LOADER_DIR_HPI_INC "${InferenceEngineVPUXPlugin_SOURCE_DIR}/thirdparty/graphFile-schema/vpux_elf/hpi_component/include/")
+set(LOADER_DIR_HPI_SRC "${InferenceEngineVPUXPlugin_SOURCE_DIR}/thirdparty/graphFile-schema/vpux_elf/hpi_component/src")
+set(LOADER_DIR_SRC "${InferenceEngineVPUXPlugin_SOURCE_DIR}/thirdparty/graphFile-schema/vpux_elf/loader/src")
+set(LOADER_DIR "${InferenceEngineVPUXPlugin_SOURCE_DIR}/thirdparty/graphFile-schema/vpux_elf/loader/")
 
 if (WIN32)
     set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
@@ -33,7 +33,6 @@ set(Loader_Library_SRCS
     ${ELF_DIR}/core/include/vpux_elf/types/data_types.hpp
     ${ELF_DIR}/core/include/vpux_elf/types/elf_header.hpp
     ${ELF_DIR}/core/include/vpux_elf/types/elf_structs.hpp
-    ${ELF_DIR}/core/include/vpux_elf/types/program_header.hpp
     ${ELF_DIR}/core/include/vpux_elf/types/relocation_entry.hpp
     ${ELF_DIR}/core/include/vpux_elf/types/section_header.hpp
     ${ELF_DIR}/core/include/vpux_elf/utils/utils.hpp
@@ -44,7 +43,6 @@ set(Loader_Library_SRCS
     ${ELF_DIR}/core/include/vpux_elf/writer/relocation.hpp
     ${ELF_DIR}/core/include/vpux_elf/writer/relocation_section.hpp
     ${ELF_DIR}/core/include/vpux_elf/writer/section.hpp
-    ${ELF_DIR}/core/include/vpux_elf/writer/segment.hpp
     ${ELF_DIR}/core/include/vpux_elf/writer/string_section.hpp
     ${ELF_DIR}/core/include/vpux_elf/writer/symbol.hpp
     ${ELF_DIR}/core/include/vpux_elf/writer/symbol_section.hpp

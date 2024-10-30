@@ -59,7 +59,7 @@ const std::vector<ov::op::v0::SpaceToDepth::SpaceToDepthMode> modes = {
         ov::op::v0::SpaceToDepth::SpaceToDepthMode::BLOCKS_FIRST,
         ov::op::v0::SpaceToDepth::SpaceToDepthMode::DEPTH_FIRST};
 
-/* ============= NPU 3720/4000 ============= */
+/* ============= NPU 3720/4000/5010 ============= */
 
 const auto SpaceToDepthBS2_PRECOMMIT =
         ::testing::Combine(::testing::ValuesIn(ov::test::static_shapes_to_test_representation(

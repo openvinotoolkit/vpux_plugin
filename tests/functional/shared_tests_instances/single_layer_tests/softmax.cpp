@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation
+// Copyright (C) 2022-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -73,7 +73,7 @@ const auto params2D = testing::Combine(
         testing::ValuesIn(ov::test::static_shapes_to_test_representation(inShapes2D)), testing::ValuesIn(axis2D),
         testing::Values(ov::test::utils::DEVICE_NPU), testing::Values(ov::test::Config{}));
 
-INSTANTIATE_TEST_CASE_P(smoke_SoftMax2D, SoftMaxLayerTestCommon, params2D, SoftMaxLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_SoftMax2D, SoftMaxLayerTestCommon, params2D, SoftMaxLayerTestCommon::getTestCaseName);
 
 //
 // Input 3D
@@ -88,7 +88,7 @@ const auto params3D = testing::Combine(
         testing::ValuesIn(ov::test::static_shapes_to_test_representation(inShapes3D)), testing::ValuesIn(axis3D),
         testing::Values(ov::test::utils::DEVICE_NPU), testing::Values(ov::test::Config{}));
 
-INSTANTIATE_TEST_CASE_P(smoke_SoftMax3D, SoftMaxLayerTestCommon, params3D, SoftMaxLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_SoftMax3D, SoftMaxLayerTestCommon, params3D, SoftMaxLayerTestCommon::getTestCaseName);
 
 //
 // Input 4D
@@ -104,15 +104,15 @@ const auto params4D = testing::Combine(
         testing::ValuesIn(ov::test::static_shapes_to_test_representation(inShapes4D)), testing::ValuesIn(axis4D),
         testing::Values(ov::test::utils::DEVICE_NPU), testing::Values(ov::test::Config{}));
 
-INSTANTIATE_TEST_CASE_P(smoke_SoftMax4D, SoftMaxLayerTestCommon, params4D, SoftMaxLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_SoftMax4D, SoftMaxLayerTestCommon, params4D, SoftMaxLayerTestCommon::getTestCaseName);
 
 const auto precommit_params4D = testing::Combine(
         testing::ValuesIn(modelTypes), testing::ValuesIn(inputTypes), testing::ValuesIn(outputTypes),
         testing::ValuesIn(ov::test::static_shapes_to_test_representation({{1, 2, 72, 10}})), testing::ValuesIn(axis4D),
         testing::Values(ov::test::utils::DEVICE_NPU), testing::Values(ov::test::Config{}));
 
-INSTANTIATE_TEST_CASE_P(smoke_precommit_SoftMax4D, SoftMaxLayerTestCommon, precommit_params4D,
-                        SoftMaxLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_SoftMax4D, SoftMaxLayerTestCommon, precommit_params4D,
+                         SoftMaxLayerTestCommon::getTestCaseName);
 
 //
 // Test tiling functionality
@@ -126,7 +126,7 @@ const auto paramsTilingCases = testing::Combine(
         testing::ValuesIn(ov::test::static_shapes_to_test_representation(inShapes)), testing::ValuesIn(axis),
         testing::Values(ov::test::utils::DEVICE_NPU), testing::Values(ov::test::Config{}));
 
-INSTANTIATE_TEST_CASE_P(smoke_TilingSoftMax, SoftMaxLayerTestCommon, paramsTilingCases,
-                        SoftMaxLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_TilingSoftMax, SoftMaxLayerTestCommon, paramsTilingCases,
+                         SoftMaxLayerTestCommon::getTestCaseName);
 
 }  // namespace

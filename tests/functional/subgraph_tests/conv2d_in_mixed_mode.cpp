@@ -86,12 +86,12 @@ public:
 // Platform test definition
 //
 
-TEST_F(Conv2dInMixedMode, NPU3720) {
+TEST_F(Conv2dInMixedMode, NPU3720_TestKindSubgraph) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_F(Conv2dInMixedMode, NPU4000) {
+TEST_F(Conv2dInMixedMode, NPU4000_TestKindSubgraph) {
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }

@@ -254,11 +254,11 @@ func.func @UnrollNCEWithNCHWOutput(%input: !Input_DDR, %output: !Output_DDR) -> 
     }
 
     VPURT.Task waits(%bar_dma_in : !VPURT.Barrier) updates(%bar_nce : !VPURT.Barrier) {
-      %10 = VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, minimumHardwareExecutionCost = 4699 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>} input(%cmx_in : !InputDistributed) weights(%cmx_in : !InputDistributed) parent_input(%cmx_in : !InputDistributed) parent_output(%cmx_out : !OutputDistributed) outputs(%cmx_out : !OutputDistributed) -> !OutputDistributed  variants : {
+      %10 = VPUIP.NCEClusterTask {minimumHardwareExecutionCost = 4699 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>} input(%cmx_in : !InputDistributed) weights(%cmx_in : !InputDistributed) parent_input(%cmx_in : !InputDistributed) parent_output(%cmx_out : !OutputDistributed) outputs(%cmx_out : !OutputDistributed) -> !OutputDistributed  variants : {
         DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [15, 7, 431], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
         DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [15, 15, 431], outStart = [0, 8, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
       } PPE : {
-        PPETask <NOOP> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, fp_prelu_alpha = 1.000000e+00 : f64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00]}
+        PPETask {opaque_ppe = #VPU.PPEStub<>}
       }
     }
     VPURT.Task waits(%bar_nce : !VPURT.Barrier) {
@@ -300,7 +300,7 @@ func.func @UnrollNCEWithNCHWOutput(%input: !Input_DDR, %output: !Output_DDR) -> 
 
     // CHECK: VPURT.Task waits([[BAR_DMA]] : !VPURT.Barrier) updates([[BAR_NCE]] : !VPURT.Barrier) {
     // CHECK: VPUIP.NCEClusterTask
-    // CHECK-SAME:  {activation_window_channel_length = 0 : i64, is_segmented, task_type = #VPUIP.nce_task_type<ELTWISE>}
+    // CHECK-SAME:  {is_segmented, task_type = #VPUIP.nce_task_type<ELTWISE>}
     // CHECK-SAME:  input([[NCE_INPUT_CMX_0]] : memref<1x432x8x16xf16, #NHWC, [@CMX_NN, 0]>)
     // CHECK-SAME:  weights([[WEIGHTS_CMX_0]] : memref<1x432x8x16xf16, #NHWC, [@CMX_NN, 0]>)
     // CHECK-SAME:  parent_input([[PARENT_IN_CMX]] : !VPUIP.DistributedBuffer<1x432x16x16xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>)
@@ -309,11 +309,11 @@ func.func @UnrollNCEWithNCHWOutput(%input: !Input_DDR, %output: !Output_DDR) -> 
     // CHECK-SAME:  -> !VPUIP.DistributedBuffer<1x432x8x16xf16, {order = #NCHW, strides = [110592, 256, 16, 1]}, @CMX_NN, {mode = "SEGMENTED|MULTICASTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64, alignment = [1, 16, 1, 1]}> variants : {
     // CHECK:    DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [15, 7, 431], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     // CHECK:    } PPE : {
-    // CHECK:      PPETask <NOOP> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, fp_prelu_alpha = 1.000000e+00 : f64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00]}
+    // CHECK:      PPETask {opaque_ppe = #VPU.PPEStub<>}
 
     // CHECK:  VPURT.Task waits([[BAR_DMA]] : !VPURT.Barrier) updates([[BAR_NCE]] : !VPURT.Barrier) {
     // CHECK:  VPUIP.NCEClusterTask
-    // CHECK-SAME:  {activation_window_channel_length = 0 : i64, is_segmented, task_type = #VPUIP.nce_task_type<ELTWISE>}
+    // CHECK-SAME:  {is_segmented, task_type = #VPUIP.nce_task_type<ELTWISE>}
     // CHECK-SAME:  input([[NCE_INPUT_CMX_1]] : memref<1x432x8x16xf16, #NHWC, [@CMX_NN, 1]>)
     // CHECK-SAME:  weights([[WEIGHTS_CMX_1]] : memref<1x432x8x16xf16, #NHWC, [@CMX_NN, 1]>)
     // CHECK-SAME:  parent_input([[PARENT_IN_CMX]] : !VPUIP.DistributedBuffer<1x432x16x16xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>)
@@ -322,7 +322,7 @@ func.func @UnrollNCEWithNCHWOutput(%input: !Input_DDR, %output: !Output_DDR) -> 
     // CHECK-SAME:  -> !VPUIP.DistributedBuffer<1x432x8x16xf16, {order = #NCHW, strides = [110592, 256, 16, 1]}, @CMX_NN, {mode = "SEGMENTED|MULTICASTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64, alignment = [1, 16, 1, 1]}> variants : {
     // CHECK:    DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [15, 15, 431], outStart = [0, 8, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     // CHECK:    } PPE : {
-    // CHECK:      PPETask <NOOP> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, fp_prelu_alpha = 1.000000e+00 : f64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00]}
+    // CHECK:      PPETask {opaque_ppe = #VPU.PPEStub<>}
     // CHECK:    }
 
     // CHECK: VPURT.Task waits([[BAR_NCE]] : !VPURT.Barrier) {

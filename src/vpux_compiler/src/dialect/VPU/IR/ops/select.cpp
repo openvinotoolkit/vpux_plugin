@@ -53,36 +53,13 @@ bool vpux::VPU::SelectOp::checkStrategyCompatibility(VPU::MultiClusterStrategy s
            strategy == VPU::MultiClusterStrategy::SplitOverWidth;
 }
 
-vpux::VPU::DistributedTensorNative vpux::VPU::SelectOp::getExplicitDistributedTensorAttr(
+vpux::VPU::DistributionInfo vpux::VPU::SelectOp::getExplicitDistributionInfoAttr(
         vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, ArrayRef<int64_t> numTiles,
         const int64_t numClusters, ArrayRef<int64_t> alignment, const bool uniformDistributedSegments,
         const vpux::VPU::OverlapDistributionParams& overlapParams) {
-    return VPU::getSWExplicitDistributedTensorNative(mlir::cast<VPU::SWOpInterface>(getOperation()), shape,
-                                                     distributionMode, numTiles, numClusters, alignment,
-                                                     uniformDistributedSegments, overlapParams);
-}
-
-bool VPU::SelectOp::doesLayerFitIntoCMX(VPU::MultiClusterStrategy strategy, Byte reservedMem) {
-    auto selectOp = mlir::cast<VPU::SelectOp>(getOperation());
-    const auto outputShape = getShape(selectOp.getOutput());
-    auto numClusters = VPU::getOptimalNumClusters(selectOp, outputShape, strategy);
-
-    SmallVector<Byte> buffersSize{VPU::getTotalAllocSizeWithDistribution(
-            getOutput().getType(),
-            getOutputDistributionAttrFromOp(selectOp, getOutput().getType(), numClusters.getInt(), strategy))};
-
-    for (const auto input : selectOp->getOperands()) {
-        buffersSize.push_back(VPU::getTotalAllocSizeWithDistribution(
-                input.getType(),
-                getActivationDistributionAttrFromOp(selectOp, input.getType(), numClusters.getInt(), strategy)));
-    }
-
-    auto totalAvailableCMXSize = reservedMem.count() == 0 ? getTotalCMXSize(getOperation()).count()
-                                                          : getTotalCMXFragmentationAwareSize(getOperation()).count();
-
-    return vpux::VPU::calculateAlignedBuffersMemoryRequirement(getArch(getOperation()), buffersSize).count() +
-                   reservedMem.count() <=
-           totalAvailableCMXSize;
+    return VPU::getSWExplicitDistributionInfo(mlir::cast<VPU::SWOpInterface>(getOperation()), shape, distributionMode,
+                                              numTiles, numClusters, alignment, uniformDistributedSegments,
+                                              overlapParams);
 }
 
 //

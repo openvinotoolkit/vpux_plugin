@@ -273,3 +273,163 @@ func.func @NotBeneficialToTranspose4dData() -> tensor<512x64x200x128xf32> {
     return %FQ : tensor<512x64x200x128xf32>
     // CHECK:   return [[FQ]] : tensor<512x64x200x128xf32>
 }
+
+// -----
+
+#HWC = affine_map<(d0, d1, d2) -> (d1, d2, d0)>
+#map = affine_map<(d0, d1, d2) -> (d2, d0, d1)>
+
+// CHECK-LABEL: @TransposeGroupsWAI
+// CHECK-SAME: ([[ARG:%.+]]: tensor<1280x20x128xf32>)
+func.func @TransposeGroupsWAI(%arg0: tensor<1280x20x128xf32>) -> tensor<1280x2560xf32> {
+
+    %IN_LOW = const.Declare tensor<1x1x1xf32> = dense<0.0> : tensor<1x1x1xf32>
+    // CHECK-DAG:   [[IN_LOW:%.*]] = const.Declare tensor<1x1x1xf32> = dense<0.000000e+00> : tensor<1x1x1xf32>
+
+    %IN_HIGH = const.Declare tensor<1x1x1xf32> = dense<15.0> : tensor<1x1x1xf32>
+    // CHECK-DAG:   [[IN_HIGH:%.*]] = const.Declare tensor<1x1x1xf32> = dense<1.500000e+01> : tensor<1x1x1xf32>
+
+    %OUT_LOW = const.Declare tensor<1280x20x1xf32> = dense<-16.0>  : tensor<1280x20x1xf32>
+    // CHECK-DAG:   [[OUT_LOW:%.*]] = const.Declare tensor<1280x20x1xf32> = dense<-1.600000e+01> : tensor<1280x20x1xf32>
+
+    %OUT_HIGH = const.Declare tensor<1280x20x1xf32> = dense<14.0>  : tensor<1280x20x1xf32>
+    // CHECK-DAG:   [[OUT_HIGH:%.*]] = const.Declare tensor<1280x20x1xf32> = dense<1.400000e+01> : tensor<1280x20x1xf32>
+
+    // CHECK-NOT:    IE.Transpose
+
+    %FQ = IE.FakeQuantize(%arg0, %IN_LOW, %IN_HIGH, %OUT_LOW, %OUT_HIGH) {
+        auto_broadcast = #IE.auto_broadcast_type<NUMPY>,
+        levels = 16 : i64
+    } : tensor<1280x20x128xf32>,
+        tensor<1x1x1xf32>,
+        tensor<1x1x1xf32>,
+        tensor<1280x20x1xf32>,
+        tensor<1280x20x1xf32> -> tensor<1280x20x128xf32>
+
+    // CHECK:   [[FQ:%.*]] = IE.FakeQuantize([[ARG]], [[IN_LOW]], [[IN_HIGH]], [[OUT_LOW]], [[OUT_HIGH]]) {
+    // CHECK-SAME:      auto_broadcast = #IE.auto_broadcast_type<NUMPY>,
+    // CHECK-SAME:      levels = 16 : i64
+    // CHECK-SAME:  } : tensor<1280x20x128xf32>, tensor<1x1x1xf32>, tensor<1x1x1xf32>, tensor<1280x20x1xf32>, tensor<1280x20x1xf32> -> tensor<1280x20x128xf32>
+
+    // CHECK-NOT:    IE.Transpose
+    
+    %RESHAPE = IE.AffineReshape(%FQ) {
+        dim_mapping = [[0], [1], [1]],
+        shape_value = [1280, 2560]
+    } : tensor<1280x20x128xf32> -> tensor<1280x2560xf32>
+
+    // CHECK:   [[RESHAPE:%.*]] = IE.AffineReshape([[FQ]]) {
+
+    return %RESHAPE : tensor<1280x2560xf32>
+    // CHECK:   return [[RESHAPE]] : tensor<1280x2560xf32>
+}
+
+// -----
+
+#HWC = affine_map<(d0, d1, d2) -> (d1, d2, d0)>
+#map = affine_map<(d0, d1, d2) -> (d2, d0, d1)>
+
+// CHECK-LABEL: @WAIConvertDoNotInsertTranspose
+// CHECK-SAME: ([[ARG:%.+]]: tensor<1280x20x128xui4>)
+func.func @WAIConvertDoNotInsertTranspose(%arg0: tensor<1280x20x128xui4>) -> tensor<1280x2560xf32> {
+
+    %IN_LOW = const.Declare tensor<1x1x1xf32> = dense<0.0> : tensor<1x1x1xf32>
+    // CHECK-DAG:   [[IN_LOW:%.*]] = const.Declare tensor<1x1x1xf32> = dense<0.000000e+00> : tensor<1x1x1xf32>
+
+    %IN_HIGH = const.Declare tensor<1x1x1xf32> = dense<15.0> : tensor<1x1x1xf32>
+    // CHECK-DAG:   [[IN_HIGH:%.*]] = const.Declare tensor<1x1x1xf32> = dense<1.500000e+01> : tensor<1x1x1xf32>
+
+    %OUT_LOW = const.Declare tensor<1280x20x1xf32> = dense<-16.0>  : tensor<1280x20x1xf32>
+    // CHECK-DAG:   [[OUT_LOW:%.*]] = const.Declare tensor<1280x20x1xf32> = dense<-1.600000e+01> : tensor<1280x20x1xf32>
+
+    %OUT_HIGH = const.Declare tensor<1280x20x1xf32> = dense<14.0>  : tensor<1280x20x1xf32>
+    // CHECK-DAG:   [[OUT_HIGH:%.*]] = const.Declare tensor<1280x20x1xf32> = dense<1.400000e+01> : tensor<1280x20x1xf32>
+    
+    // CHECK:   [[CONVERT:%.*]] = IE.Convert([[ARG]]) {
+    %CONVERT = IE.Convert(%arg0) {dstElemType = f32} : tensor<1280x20x128xui4> -> tensor<1280x20x128xf32>
+
+    // CHECK-NOT:    IE.Transpose
+
+    %FQ = IE.FakeQuantize(%CONVERT, %IN_LOW, %IN_HIGH, %OUT_LOW, %OUT_HIGH) {
+        auto_broadcast = #IE.auto_broadcast_type<NUMPY>,
+        levels = 16 : i64
+    } : tensor<1280x20x128xf32>,
+        tensor<1x1x1xf32>,
+        tensor<1x1x1xf32>,
+        tensor<1280x20x1xf32>,
+        tensor<1280x20x1xf32> -> tensor<1280x20x128xf32>
+
+    // CHECK:   [[FQ:%.*]] = IE.FakeQuantize([[CONVERT]], [[IN_LOW]], [[IN_HIGH]], [[OUT_LOW]], [[OUT_HIGH]]) {
+    // CHECK-SAME:      auto_broadcast = #IE.auto_broadcast_type<NUMPY>,
+    // CHECK-SAME:      levels = 16 : i64
+    // CHECK-SAME:  } : tensor<1280x20x128xf32>, tensor<1x1x1xf32>, tensor<1x1x1xf32>, tensor<1280x20x1xf32>, tensor<1280x20x1xf32> -> tensor<1280x20x128xf32>
+
+    // CHECK-NOT:    IE.Transpose
+    
+    %RESHAPE = IE.AffineReshape(%FQ) {
+        dim_mapping = [[0], [1], [1]],
+        shape_value = [1280, 2560]
+    } : tensor<1280x20x128xf32> -> tensor<1280x2560xf32>
+
+    // CHECK:   [[RESHAPE:%.*]] = IE.AffineReshape([[FQ]]) {
+
+    return %RESHAPE : tensor<1280x2560xf32>
+    // CHECK:   return [[RESHAPE]] : tensor<1280x2560xf32>
+}
+
+// -----
+
+#HWC = affine_map<(d0, d1, d2) -> (d1, d2, d0)>
+#map = affine_map<(d0, d1, d2) -> (d2, d0, d1)>
+
+// CHECK-LABEL: @WAINoInsertTranspose
+// CHECK-SAME: ([[ARG:%.+]]: tensor<1280x2560xf32>)
+func.func @WAINoInsertTranspose(%arg0: tensor<1280x2560xf32>) -> tensor<1280x2560xf32> {
+
+    %IN_LOW = const.Declare tensor<1x1x1xf32> = dense<0.0> : tensor<1x1x1xf32>
+    // CHECK-DAG:   [[IN_LOW:%.*]] = const.Declare tensor<1x1x1xf32> = dense<0.000000e+00> : tensor<1x1x1xf32>
+
+    %IN_HIGH = const.Declare tensor<1x1x1xf32> = dense<15.0> : tensor<1x1x1xf32>
+    // CHECK-DAG:   [[IN_HIGH:%.*]] = const.Declare tensor<1x1x1xf32> = dense<1.500000e+01> : tensor<1x1x1xf32>
+
+    %OUT_LOW = const.Declare tensor<1280x20x1xf32> = dense<-16.0>  : tensor<1280x20x1xf32>
+    // CHECK-DAG:   [[OUT_LOW:%.*]] = const.Declare tensor<1280x20x1xf32> = dense<-1.600000e+01> : tensor<1280x20x1xf32>
+
+    %OUT_HIGH = const.Declare tensor<1280x20x1xf32> = dense<14.0>  : tensor<1280x20x1xf32>
+    // CHECK-DAG:   [[OUT_HIGH:%.*]] = const.Declare tensor<1280x20x1xf32> = dense<1.400000e+01> : tensor<1280x20x1xf32>
+    
+    // CHECK:   [[RESHAPE1:%.*]] = IE.AffineReshape([[ARG]])
+    %RESHAPE1 = IE.AffineReshape(%arg0) {
+        dim_mapping = [[0], [1, 2]],
+        shape_value = [1280, 20, 128]
+    } : tensor<1280x2560xf32> -> tensor<1280x20x128xf32>
+
+    // CHECK-NOT:   IE.Transpose
+
+    %FQ = IE.FakeQuantize(%RESHAPE1, %IN_LOW, %IN_HIGH, %OUT_LOW, %OUT_HIGH) {
+        auto_broadcast = #IE.auto_broadcast_type<NUMPY>,
+        levels = 16 : i64
+    } : tensor<1280x20x128xf32>,
+        tensor<1x1x1xf32>,
+        tensor<1x1x1xf32>,
+        tensor<1280x20x1xf32>,
+        tensor<1280x20x1xf32> -> tensor<1280x20x128xf32>
+
+    // CHECK:   [[FQ:%.*]] = IE.FakeQuantize([[RESHAPE1]], [[IN_LOW]], [[IN_HIGH]], [[OUT_LOW]], [[OUT_HIGH]]) {
+    // CHECK-SAME:      auto_broadcast = #IE.auto_broadcast_type<NUMPY>,
+    // CHECK-SAME:      levels = 16 : i64
+    // CHECK-SAME:  } : tensor<1280x20x128xf32>, tensor<1x1x1xf32>, tensor<1x1x1xf32>, tensor<1280x20x1xf32>, tensor<1280x20x1xf32> -> tensor<1280x20x128xf32>
+
+    // CHECK-NOT:   IE.Transpose
+    
+    %RESHAPE2 = IE.AffineReshape(%FQ) {
+        dim_mapping = [[0], [1], [1]],
+        shape_value = [1280, 2560]
+    } : tensor<1280x20x128xf32> -> tensor<1280x2560xf32>
+
+    // CHECK:   [[RESHAPE2:%.*]] = IE.AffineReshape([[FQ]]) {
+
+    return %RESHAPE2 : tensor<1280x2560xf32>
+    // CHECK:   return [[RESHAPE2]] : tensor<1280x2560xf32>
+}
+

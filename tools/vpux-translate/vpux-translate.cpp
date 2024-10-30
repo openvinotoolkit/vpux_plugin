@@ -7,8 +7,6 @@
 #include "vpux/compiler/dialect/ELFNPU37XX/export.hpp"
 #include "vpux/compiler/dialect/ELFNPU37XX/import.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
-#include "vpux/compiler/dialect/VPUIP/graph-schema/export.hpp"
-#include "vpux/compiler/dialect/VPUIP/graph-schema/import.hpp"
 #include "vpux/compiler/frontend/IE.hpp"
 #include "vpux/compiler/init.hpp"
 #include "vpux/compiler/interfaces_registry.hpp"
@@ -62,9 +60,12 @@ llvm::cl::opt<std::string> vpuxBounds("set-upper-bounds",
                                                      "18 3 3\", no commas between bounds values"),
                                       llvm::cl::init(""));
 
-llvm::cl::opt<bool> enableDummyOpReplacement{"dummy-op-replacement",
-                                             llvm::cl::desc("Replace unsupported SW Kernel ops with Dummy ones"),
-                                             llvm::cl::init(false)};
+llvm::cl::opt<DummyOpMode> enableDummyOpReplacement{
+        "dummy-op-replacement", llvm::cl::desc("Replace unsupported SW Kernel ops with Dummy ones"),
+        llvm::cl::init(DummyOpMode::DISABLED),
+        llvm::cl::values(
+                clEnumValN(DummyOpMode::DISABLED, "DISABLED", "No replacement for unsupported SW Kernels ops"),
+                clEnumValN(DummyOpMode::ENABLED, "ENABLED", "Replace unsupported SW Kernels ops with Dummy ops"))};
 
 llvm::cl::opt<bool> dynamicShapeToStatic{
         "dynamic-shape-to-static",
@@ -141,43 +142,11 @@ mlir::OwningOpRef<mlir::ModuleOp> importIE(llvm::SourceMgr& sourceMgr, mlir::MLI
         // For NPU37XX and NPU40XX the graph transformations are different compared to the rest of the platforms
         // because scales do not need to be aligned. Running with VPU::ArchKind::UNKNOWN will align scales, which
         // can result in an accuracy drop for NPU37XX and NPU40XX.
-        module = IE::importNetwork(ctx, model, useSharedConstants, rootTiming, vpuxProfiling, enableDummyOpReplacement,
-                                   dynamicShapeToStatic, VPU::ArchKind::UNKNOWN);
+        module = IE::importNetwork(ctx, model, IE::buildOVParams(model), IE::buildOVResults(model), useSharedConstants,
+                                   rootTiming, vpuxProfiling, enableDummyOpReplacement, dynamicShapeToStatic,
+                                   VPU::ArchKind::UNKNOWN);
     } catch (const std::exception& ex) {
         printTo(llvm::errs(), "Failed to translate IE IR {0} to MLIR : {1}", netFileName, ex.what());
-        return nullptr;
-    }
-
-    return module;
-}
-
-//
-// import-VPUIP
-//
-
-mlir::OwningOpRef<mlir::ModuleOp> importVPUIP(llvm::SourceMgr& sourceMgr, mlir::MLIRContext* ctx) {
-    if (sourceMgr.getNumBuffers() != 1) {
-        printTo(llvm::errs(),
-                "Invalid source file for blob, it has unsupported number of "
-                "buffers {0}",
-                sourceMgr.getNumBuffers());
-        return nullptr;
-    }
-
-    const auto blobFileName = sourceMgr.getMemoryBuffer(1)->getBufferIdentifier();
-    if (blobFileName.empty()) {
-        printTo(llvm::errs(), "Invalid source file for blob, not a file");
-        return nullptr;
-    }
-
-    mlir::OwningOpRef<mlir::ModuleOp> module;
-    std::ifstream blobStream(blobFileName.str(), std::ios::binary);
-    auto blob = std::vector<char>(std::istreambuf_iterator<char>(blobStream), std::istreambuf_iterator<char>());
-
-    try {
-        module = VPUIP::importBlob(ctx, blob);
-    } catch (const std::exception& ex) {
-        printTo(llvm::errs(), "Failed to translate blob {0} to MLIR : {1}", blobFileName, ex.what());
         return nullptr;
     }
 
@@ -216,28 +185,22 @@ mlir::OwningOpRef<mlir::ModuleOp> importELF(llvm::SourceMgr& sourceMgr, mlir::ML
 }
 
 //
-// export-VPUIP
+// export-ELF
 //
-
-mlir::LogicalResult exportVPUIP(mlir::ModuleOp module, llvm::raw_ostream& output) {
-    mlir::DefaultTimingManager tm;
-    auto rootTiming = tm.getRootScope();
-    const std::vector<std::shared_ptr<const ov::Node>> params;
-    const std::vector<std::shared_ptr<const ov::Node>> results;
-    const auto buf = VPUIP::exportToBlob(module, rootTiming, params, results);
-    output.write(reinterpret_cast<const char*>(buf.data()), buf.size());
-    return mlir::success();
-}
 
 mlir::LogicalResult exportELF(mlir::ModuleOp module, llvm::raw_ostream& output) {
     mlir::DefaultTimingManager tm;
 
     auto arch = VPU::getArch(module.getOperation());
 
+    const std::set<VPU::ArchKind> compatibleTargets = {
+            VPU::ArchKind::NPU40XX,
+    };
+
     if (arch == VPU::ArchKind::NPU37XX) {
         const auto buf = ELFNPU37XX::exportToELF(module);
         output.write(reinterpret_cast<const char*>(buf.data()), buf.size());
-    } else if (arch == VPU::ArchKind::NPU40XX) {
+    } else if (compatibleTargets.count(arch) > 0) {
         const auto buf = ELF::exportToELF(module);
         output.write(reinterpret_cast<const char*>(buf.data()), buf.size());
     } else {
@@ -300,8 +263,7 @@ int main(int argc, char* argv[]) {
         // however, it would be a better option to extract arch info from module for the export
         const auto arch = vpux::parseArchKind(argc, argv);
         auto dialectRegistration = [&](mlir::DialectRegistry& registry) {
-            registerDialects(registry);
-            vpux::registerCommonInterfaces(registry, /*enableDummyOp*/ true);
+            registry = vpux::createDialectRegistry(vpux::DummyOpMode::ENABLED);
 
             auto interfacesRegistry = vpux::createInterfacesRegistry(arch);
             interfacesRegistry->registerInterfaces(registry);
@@ -309,13 +271,9 @@ int main(int argc, char* argv[]) {
         mlir::TranslateToMLIRRegistration("import-IE", "Translate OV IR to IE dialect", importIE, dialectRegistration);
         mlir::TranslateToMLIRRegistration("import-HWTEST", "Translate PSS test case described by config.json to blob",
                                           importHWTEST, dialectRegistration);
-        mlir::TranslateToMLIRRegistration("import-VPUIP", "Translate blob to VPUIP dialect", importVPUIP,
-                                          dialectRegistration);
         mlir::TranslateToMLIRRegistration("import-ELF", "Translate blob to ELF dialect", importELF,
                                           dialectRegistration);
 
-        mlir::TranslateFromMLIRRegistration("export-VPUIP", "Translate VPUIP dialect to blob", exportVPUIP,
-                                            dialectRegistration);
         mlir::TranslateFromMLIRRegistration("export-ELF", "Translate ELF dialect to blob", exportELF,
                                             dialectRegistration);
         mlir::TranslateFromMLIRRegistration("export-LLVMIR", "Translate LLVMIR dialect to blob", exportLLVMIR,

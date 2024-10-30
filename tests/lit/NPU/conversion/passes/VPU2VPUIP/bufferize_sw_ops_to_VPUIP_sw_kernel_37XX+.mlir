@@ -1,9 +1,9 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2023-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
-// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --one-shot-bufferize-VPU-to-VPUIP %s | FileCheck %s
+// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% ppe-version=IntPPE" --one-shot-bufferize-VPU-to-VPUIP %s | FileCheck %s
 // REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 // CHECK:  module @VPU.SW {
@@ -270,14 +270,40 @@ func.func @ThreeSWLayers(%input: tensor<1x1x1x2000xf16>) -> tensor<1x1x1x2000xf1
 // -----
 
 // CHECK:  module @VPU.SW {
-// CHECK-NEXT:    func.func private @builtin_Interpolate(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, i64, i64, i64, i64, i64, none, none, none, none, f64, none, none) attributes {VPU.kernel_code = "interpolate.cpp", VPU.kernel_entry = "interpolate", VPU.task_type = @COMPUTE}
+// CHECK-NEXT:    func.func private @builtin_ReduceMean(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, i64, i64, none) attributes {VPU.kernel_code = "reduce_mean.cpp", VPU.kernel_entry = "reduce_mean", VPU.task_type = @COMPUTE}
+// CHECK-NEXT:    func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
+// CHECK-NEXT:  }
+
+// CHECK-LABEL:  func.func @ReduceMean
+// CHECK-SAME:      ([[ARG0:%.+]]: memref<1x512x7x7xf16>, [[ARG1:%.+]]: memref<1x512x7xf16>)
+func.func @ReduceMean(%input0: tensor<1x512x7x7xf16>, %input1: tensor<1x512x7xf16>) -> tensor<1x512x7xf16> {
+    %output = VPU.ReduceMean(%input0) {axes_value = [2]} : tensor<1x512x7x7xf16> -> tensor<1x512x7xf16>
+    return %output : tensor<1x512x7xf16>
+
+    // CHECK: [[INPUT_BUFFER_CMX:%.+]] = memref.alloc() : memref<1x512x7x7xf16, [@CMX_NN, 0]>
+    // CHECK: [[INPUT_CMX:%.+]] = VPUIP.Copy inputs([[ARG0]] : memref<1x512x7x7xf16>) outputs([[INPUT_BUFFER_CMX]] : memref<1x512x7x7xf16, [@CMX_NN, 0]>) -> memref<1x512x7x7xf16, [@CMX_NN, 0]>
+    // CHECK: [[REDUCEMEAN_BUFFER_CMX:%.+]] = memref.alloc() : memref<1x512x7xf16, [@CMX_NN, 0]>
+
+    // CHECK: [[OUTPUT:%.+]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_ReduceMean inputs([[INPUT_CMX]] as {{[^:]+}}: memref<1x512x7x7xf16, [@CMX_NN, 0]>) outputs([[REDUCEMEAN_BUFFER_CMX]] as {{[^:]+}}: memref<1x512x7xf16, [@CMX_NN, 0]>) on tile 0 -> memref<1x512x7xf16, [@CMX_NN, 0]>{
+    // CHECK:   VPUIP.SW.Kernel.run {attrs = [0, 1, [1]]}({{[^:]+}}, {{[^:]+}}) : memref<1x512x7x7xf16, [@CMX_NN, 0]>, memref<1x512x7xf16, [@CMX_NN, 0]>
+    // CHECK: }
+
+    // CHECK: [[OUTPUT_BUFFER:%.+]] = memref.alloc() : memref<1x512x7xf16>
+    // CHECK: [[OUTPUT_DDR:%.+]] = VPUIP.Copy inputs([[OUTPUT]] : memref<1x512x7xf16, [@CMX_NN, 0]>) outputs([[OUTPUT_BUFFER]] : memref<1x512x7xf16>) -> memref<1x512x7xf16>
+    // CHECK: return [[OUTPUT_DDR]] : memref<1x512x7xf16>
+}
+
+// -----
+
+// CHECK:  module @VPU.SW {
+// CHECK-NEXT:    func.func private @builtin_Interpolate(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, i64, i64, i64, i64, none, none, none, none, f64, none, none) attributes {VPU.kernel_code = "interpolate.cpp", VPU.kernel_entry = "interpolate", VPU.task_type = @COMPUTE}
 // CHECK-NEXT:    func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
 // CHECK-NEXT:  }
 
 // CHECK-LABEL:  func.func @InterpolateSWLayerWithUnnecessaryScalingAxes
 // CHECK-SAME:      ([[ARG:%.+]]: memref<1x128x1x1xf16>)
 func.func @InterpolateSWLayerWithUnnecessaryScalingAxes(%input: tensor<1x128x1x1xf16>) -> tensor<1x128x32x32xf16> {
-    %output = VPU.Interpolate(%input) {attr = #IE.Interpolate<antialias = false, coord_mode = <ALIGN_CORNERS>, cube_coeff = -7.500000e-01 : f64, mode = <LINEAR_ONNX>, nearest_mode = <ROUND_PREFER_FLOOR>, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], shape_calc_mode = <SIZES>>, axes_attr = [0, 1, 2, 3], initial_input_dims_attr = [1, 128, 1, 1], initial_input_offset_attr = [0, 0, 0, 0], initial_output_dims_attr = [1, 128, 32, 32], initial_output_offset_attr = [0, 0, 0, 0], operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0>, scales_attr = [1.000000e+00, 1.000000e+00, 3.200000e+00, 3.200000e+00], sizes_attr = [1, 128, 32, 32], tile_offset_attr = [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00]} : tensor<1x128x1x1xf16> -> tensor<1x128x32x32xf16>
+    %output = VPU.Interpolate(%input) {attr = #IE.Interpolate<antialias = false, coord_mode = <ALIGN_CORNERS>, cube_coeff = -7.500000e-01 : f64, mode = <LINEAR_ONNX>, nearest_mode = <ROUND_PREFER_FLOOR>, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], shape_calc_mode = <SIZES>>, axes_attr = [0, 1, 2, 3], initial_input_dims_attr = [1, 128, 1, 1], initial_input_offset_attr = [0, 0, 0, 0], initial_output_dims_attr = [1, 128, 32, 32], initial_output_offset_attr = [0, 0, 0, 0], operandSegmentSizes = array<i32: 1, 0, 0, 0>, scales_attr = [1.000000e+00, 1.000000e+00, 3.200000e+00, 3.200000e+00], sizes_attr = [1, 128, 32, 32], tile_offset_attr = [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00]} : tensor<1x128x1x1xf16> -> tensor<1x128x32x32xf16>
 
     return %output : tensor<1x128x32x32xf16>
 
@@ -286,7 +312,7 @@ func.func @InterpolateSWLayerWithUnnecessaryScalingAxes(%input: tensor<1x128x1x1
     // CHECK: [[INTERPOLATE_BUFFER_CMX:%.+]] = memref.alloc() : memref<1x128x32x32xf16, [@CMX_NN, 0]>
 
     // CHECK: [[OUTPUT:%.+]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Interpolate inputs([[INPUT_CMX]] as {{[^:]+}}: memref<1x128x1x1xf16, [@CMX_NN, 0]>) outputs([[INTERPOLATE_BUFFER_CMX]] as {{[^:]+}}: memref<1x128x32x32xf16, [@CMX_NN, 0]>) on tile 0 -> memref<1x128x32x32xf16, [@CMX_NN, 0]>{
-    // CHECK:   VPUIP.SW.Kernel.run {attrs = [-9223372036854775808, 2, 4, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [1, 1, 128, 1], [32, 32, 128, 1], [2, 3], -7.500000e-01, [0, 0, 0, 0], [0, 0, 0, 0]]}({{[^:]+}}, {{[^:]+}}) : memref<1x128x1x1xf16, [@CMX_NN, 0]>, memref<1x128x32x32xf16, [@CMX_NN, 0]>
+    // CHECK:   VPUIP.SW.Kernel.run {attrs = [2, 4, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [1, 1, 128, 1], [32, 32, 128, 1], [2, 3], -7.500000e-01, [0, 0, 0, 0], [0, 0, 0, 0]]}({{[^:]+}}, {{[^:]+}}) : memref<1x128x1x1xf16, [@CMX_NN, 0]>, memref<1x128x32x32xf16, [@CMX_NN, 0]>
     // CHECK: }
 
     // CHECK: [[OUTPUT_BUFFER:%.+]] = memref.alloc() : memref<1x128x32x32xf16>
@@ -299,14 +325,14 @@ func.func @InterpolateSWLayerWithUnnecessaryScalingAxes(%input: tensor<1x128x1x1
 // Input buffer is smaller so input buffer will be placed in DDR and output buffer will be placed in NNCMX.
 
 // CHECK:  module @VPU.SW {
-// CHECK-NEXT:    func.func private @builtin_Interpolate(memref<*xf16>, memref<*xf16, [@CMX_NN, 0]>, i64, i64, i64, i64, i64, none, none, none, none, f64, none, none) attributes {VPU.kernel_code = "interpolate.cpp", VPU.kernel_entry = "interpolate", VPU.task_type = @COMPUTE}
+// CHECK-NEXT:    func.func private @builtin_Interpolate(memref<*xf16>, memref<*xf16, [@CMX_NN, 0]>, i64, i64, i64, i64, none, none, none, none, f64, none, none) attributes {VPU.kernel_code = "interpolate.cpp", VPU.kernel_entry = "interpolate", VPU.task_type = @COMPUTE}
 // CHECK-NEXT:    func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
 // CHECK-NEXT:  }
 
 // CHECK-LABEL:  func.func @SingleSWLayerTooLargeForCMXCaseA
 // CHECK-SAME:      ({{[^:]+}}: memref<1x128x50x50xf16>)
 func.func @SingleSWLayerTooLargeForCMXCaseA(%input: tensor<1x128x50x50xf16>) -> tensor<1x128x75x75xf16> {
-    %output = VPU.Interpolate(%input) {attr = #IE.Interpolate<antialias = false, coord_mode = <ALIGN_CORNERS>, cube_coeff = -7.500000e-01 : f64, mode = <LINEAR_ONNX>, nearest_mode = <ROUND_PREFER_FLOOR>, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], shape_calc_mode = <SIZES>>, axes_attr = [0, 1, 2, 3], initial_input_dims_attr = [1, 128, 50, 50], initial_input_offset_attr = [0, 0, 0, 0], initial_output_dims_attr = [1, 128, 75, 75], initial_output_offset_attr = [0, 0, 0, 0], operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0>, scales_attr = [1.000000e+00, 1.000000e+00, 1.50000e+00, 1.50000e+00], sizes_attr = [1, 128, 75, 75], tile_offset_attr = [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00]} : tensor<1x128x50x50xf16> -> tensor<1x128x75x75xf16>
+    %output = VPU.Interpolate(%input) {attr = #IE.Interpolate<antialias = false, coord_mode = <ALIGN_CORNERS>, cube_coeff = -7.500000e-01 : f64, mode = <LINEAR_ONNX>, nearest_mode = <ROUND_PREFER_FLOOR>, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], shape_calc_mode = <SIZES>>, axes_attr = [0, 1, 2, 3], initial_input_dims_attr = [1, 128, 50, 50], initial_input_offset_attr = [0, 0, 0, 0], initial_output_dims_attr = [1, 128, 75, 75], initial_output_offset_attr = [0, 0, 0, 0], operandSegmentSizes = array<i32: 1, 0, 0, 0>, scales_attr = [1.000000e+00, 1.000000e+00, 1.50000e+00, 1.50000e+00], sizes_attr = [1, 128, 75, 75], tile_offset_attr = [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00]} : tensor<1x128x50x50xf16> -> tensor<1x128x75x75xf16>
     return %output : tensor<1x128x75x75xf16>
 
     // CHECK: [[OUTPUT_BUFFER_CMX:%.+]] = memref.alloc() : memref<1x128x75x75xf16, [@CMX_NN, 0]>
@@ -315,7 +341,7 @@ func.func @SingleSWLayerTooLargeForCMXCaseA(%input: tensor<1x128x50x50xf16>) -> 
     // CHECK-NOT: memref.alloc()
 
     // CHECK: [[OUTPUT:%.+]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Interpolate inputs({{[^:]+}} as {{[^:]+}}: memref<1x128x50x50xf16>) outputs([[OUTPUT_BUFFER_CMX]] as {{[^:]+}}: memref<1x128x75x75xf16, [@CMX_NN, 0]>) on tile 0 -> memref<1x128x75x75xf16, [@CMX_NN, 0]>{
-    // CHECK:   VPUIP.SW.Kernel.run {attrs = [-9223372036854775808, 2, 4, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [50, 50, 128, 1], [75, 75, 128, 1], [2, 3], -7.500000e-01, [0, 0, 0, 0], [0, 0, 0, 0]]}({{[^:]+}}, {{[^:]+}}) : memref<1x128x50x50xf16>, memref<1x128x75x75xf16, [@CMX_NN, 0]>
+    // CHECK:   VPUIP.SW.Kernel.run {attrs = [2, 4, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [50, 50, 128, 1], [75, 75, 128, 1], [2, 3], -7.500000e-01, [0, 0, 0, 0], [0, 0, 0, 0]]}({{[^:]+}}, {{[^:]+}}) : memref<1x128x50x50xf16>, memref<1x128x75x75xf16, [@CMX_NN, 0]>
     // CHECK: }
 
     // CHECK: [[OUTPUT_BUFFER:%.+]] = memref.alloc() : memref<1x128x75x75xf16>
@@ -328,14 +354,14 @@ func.func @SingleSWLayerTooLargeForCMXCaseA(%input: tensor<1x128x50x50xf16>) -> 
 // Input buffer is larger so input buffer will be placed in NNCMX and output buffer will be placed in DDR.
 
 // CHECK:  module @VPU.SW {
-// CHECK-NEXT:    func.func private @builtin_Interpolate(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16>, i64, i64, i64, i64, i64, none, none, none, none, f64, none, none) attributes {VPU.kernel_code = "interpolate.cpp", VPU.kernel_entry = "interpolate", VPU.task_type = @COMPUTE}
+// CHECK-NEXT:    func.func private @builtin_Interpolate(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16>, i64, i64, i64, i64, none, none, none, none, f64, none, none) attributes {VPU.kernel_code = "interpolate.cpp", VPU.kernel_entry = "interpolate", VPU.task_type = @COMPUTE}
 // CHECK-NEXT:    func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
 // CHECK-NEXT:  }
 
 // CHECK-LABEL:  func.func @SingleSWLayerTooLargeForCMXCaseB
 // CHECK-SAME:      ([[ARG:%.+]]: memref<1x128x75x75xf16>)
 func.func @SingleSWLayerTooLargeForCMXCaseB(%input: tensor<1x128x75x75xf16>) -> tensor<1x128x50x50xf16> {
-    %output = VPU.Interpolate(%input) {attr = #IE.Interpolate<antialias = false, coord_mode = <ALIGN_CORNERS>, cube_coeff = -7.500000e-01 : f64, mode = <LINEAR_ONNX>, nearest_mode = <ROUND_PREFER_FLOOR>, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], shape_calc_mode = <SIZES>>, axes_attr = [0, 1, 2, 3], initial_input_dims_attr = [1, 128, 75, 75], initial_input_offset_attr = [0, 0, 0, 0], initial_output_dims_attr = [1, 128, 50, 50], initial_output_offset_attr = [0, 0, 0, 0], operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0>, scales_attr = [1.000000e+00, 1.000000e+00, 0.666666e+00, 0.666666e+00], sizes_attr = [1, 128, 50, 50], tile_offset_attr = [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00]} : tensor<1x128x75x75xf16> -> tensor<1x128x50x50xf16>
+    %output = VPU.Interpolate(%input) {attr = #IE.Interpolate<antialias = false, coord_mode = <ALIGN_CORNERS>, cube_coeff = -7.500000e-01 : f64, mode = <LINEAR_ONNX>, nearest_mode = <ROUND_PREFER_FLOOR>, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0], shape_calc_mode = <SIZES>>, axes_attr = [0, 1, 2, 3], initial_input_dims_attr = [1, 128, 75, 75], initial_input_offset_attr = [0, 0, 0, 0], initial_output_dims_attr = [1, 128, 50, 50], initial_output_offset_attr = [0, 0, 0, 0], operandSegmentSizes = array<i32: 1, 0, 0, 0>, scales_attr = [1.000000e+00, 1.000000e+00, 0.666666e+00, 0.666666e+00], sizes_attr = [1, 128, 50, 50], tile_offset_attr = [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00]} : tensor<1x128x75x75xf16> -> tensor<1x128x50x50xf16>
     return %output : tensor<1x128x50x50xf16>
 
     // CHECK: [[INPUT_BUFFER_CMX:%.+]] = memref.alloc() : memref<1x128x75x75xf16, [@CMX_NN, 0]>
@@ -343,7 +369,7 @@ func.func @SingleSWLayerTooLargeForCMXCaseB(%input: tensor<1x128x75x75xf16>) -> 
     // CHECK: [[INTERPOLATE_BUFFER_DDR:%.+]] = memref.alloc() : memref<1x128x50x50xf16>
 
     // CHECK: [[OUTPUT:%.+]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Interpolate inputs({{[^:]+}} as {{[^:]+}}: memref<1x128x75x75xf16, [@CMX_NN, 0]>) outputs([[INTERPOLATE_BUFFER_DDR]] as {{[^:]+}}: memref<1x128x50x50xf16>) on tile 0 -> memref<1x128x50x50xf16>{
-    // CHECK:   VPUIP.SW.Kernel.run {attrs = [-9223372036854775808, 2, 4, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [75, 75, 128, 1], [50, 50, 128, 1], [2, 3], -7.500000e-01, [0, 0, 0, 0], [0, 0, 0, 0]]}({{[^:]+}}, {{[^:]+}}) : memref<1x128x75x75xf16, [@CMX_NN, 0]>, memref<1x128x50x50xf16>
+    // CHECK:   VPUIP.SW.Kernel.run {attrs = [2, 4, 0, 0, [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00], [75, 75, 128, 1], [50, 50, 128, 1], [2, 3], -7.500000e-01, [0, 0, 0, 0], [0, 0, 0, 0]]}({{[^:]+}}, {{[^:]+}}) : memref<1x128x75x75xf16, [@CMX_NN, 0]>, memref<1x128x50x50xf16>
     // CHECK: }
 
     // CHECK-NOT: memref.alloc()
@@ -439,7 +465,7 @@ func.func @StridedSlice2Dim(%input: tensor<3x40x40x15xf16>) -> tensor<3x40x20x5x
     // CHECK: [[STRIDESLICE_BUFFER_CMX:%.+]] = memref.alloc() : memref<3x40x20x5xf16, [@CMX_NN, 0]>
     // CHECK: [[OUTPUT:%.+]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_StridedSlice inputs([[INPUT_CMX]] as {{[^:]+}}: memref<3x40x40x15xf16, [@CMX_NN, 0]>) outputs([[STRIDESLICE_BUFFER_CMX]] as {{[^:]+}}: memref<3x40x20x5xf16, [@CMX_NN, 0]>) on tile 0 -> memref<3x40x20x5xf16, [@CMX_NN, 0]>{
     // CHECK:   VPUIP.SW.Kernel.run
-    // CHECK-SAME{LITERAL}: {attrs = [-9223372036854775808, [0, 0, 0, 0], [3, 40, 40, 15], [1, 1, 2, 3], 1, 1, 1]}
+    // CHECK-SAME{LITERAL}: {attrs = [9223372036854775807, [0, 0, 0, 0], [3, 40, 40, 15], [1, 1, 2, 3], 1, 1, 1]}
     // CHECK:  ({{[^:]+}}, {{[^:]+}}) : memref<3x40x40x15xf16, [@CMX_NN, 0]>, memref<3x40x20x5xf16, [@CMX_NN, 0]>
     // CHECK: }
 
@@ -597,6 +623,26 @@ func.func @SpaceToBatchSWLayer(%input0: tensor<2x8x8x3x3xf16>) -> tensor<48x2x2x
 }
 
 // -----
+
+// CHECK-LABEL: func.func @GroupNormalization
+// CHECK-SAME:      ([[ARG0:%.+]]: memref<1x4x16x16xf16>, [[ARG1:%.+]]: memref<4xf16>, [[ARG2:%.+]]: memref<4xf16>)
+func.func @GroupNormalization(%arg0: tensor<1x4x16x16xf16>, %arg1: tensor<4xf16>, %arg2: tensor<4xf16>) -> tensor<1x4x16x16xf16> {
+    %0 = VPU.GroupNormalization(%arg0, %arg1, %arg2) {epsilon = 9.9999997473787516E-5 : f32, num_groups = 2 : i32} : tensor<1x4x16x16xf16>, tensor<4xf16>, tensor<4xf16> -> tensor<1x4x16x16xf16>
+    return %0 : tensor<1x4x16x16xf16>
+
+    // CHECK:  VPUIP.SW.Kernel
+    // CHECK-SAME:  {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_GroupNormalization
+    // CHECK-SAME:  inputs({{[^:]+}} as {{[^:]+}}: memref<1x4x16x16xf16, [@CMX_NN, 0]>, {{[^:]+}} as {{[^:]+}}: memref<4xf16, [@CMX_NN, 0]>, {{[^:]+}} as {{[^:]+}}: memref<4xf16, [@CMX_NN, 0]>)
+    // CHECK-SAME:  outputs({{[^:]+}} as {{[^:]+}}: memref<1x4x16x16xf16, [@CMX_NN, 0]>) on tile 0
+    // CHECK-SAME:  -> memref<1x4x16x16xf16, [@CMX_NN, 0]>{
+
+    // CHECK:       VPUIP.SW.Kernel.run
+    // CHECK-SAME: {attrs = [9.9999997473787516E-5, 2]}
+    // CHECK:  ({{[^:]+}}, {{[^:]+}}, {{[^:]+}}, {{[^:]+}}) : memref<1x4x16x16xf16, [@CMX_NN, 0]>, memref<4xf16, [@CMX_NN, 0]>, memref<4xf16, [@CMX_NN, 0]>, memref<1x4x16x16xf16, [@CMX_NN, 0]>
+    // CHECK:  }
+}
+
+// -----
 // CHECK-LABEL:  func.func @AdaptiveMaxPoolSWLayer
 // CHECK-SAME:      ([[ARG:%.+]]: memref<2x3x7xf16>)
 func.func @AdaptiveMaxPoolSWLayer(%arg0: tensor<2x3x7xf16>) -> (tensor<2x3x1xf16>, tensor<2x3x1xsi32>) {
@@ -632,6 +678,30 @@ func.func @BucketizeSWLayer(%input0: tensor<1x20x20xf16>, %input1: tensor<100xf1
     // CHECK-SAME{LITERAL}: {attrs = [1]}
     // CHECK:  ({{[^:]+}}, {{[^:]+}}, {{[^:]+}}) : memref<1x20x20xf16, [@CMX_NN, 0]>, memref<100xf16, [@CMX_NN, 0]>, memref<1x20x20xsi32, [@CMX_NN, 0]>
     // CHECK:  }
+}
+
+// -----
+// CHECK-LABEL: func.func @MaxPool8SWLayer
+// CHECK-SAME:  ([[ARG0:%.+]]: memref<1x3x30x30xf16>) -> (memref<1x3x13x26xf16>, memref<1x3x13x26xsi32>)
+func.func @MaxPool8SWLayer(%arg0: tensor<1x3x30x30xf16>) -> (tensor<1x3x13x26xf16>, tensor<1x3x13x26xsi32>) {
+    %output, %output_index = VPU.MaxPool8(%arg0) {axis = 0 : i64, dilations = [2, 2], index_element_type = si32, kernel_size = [3, 5], pads_begin = [0, 2], pads_end = [0, 2], rounding_type = #IE.rounding_type<FLOOR>, strides = [2, 1]} : tensor<1x3x30x30xf16> -> tensor<1x3x13x26xf16>, tensor<1x3x13x26xsi32>
+    return %output, %output_index : tensor<1x3x13x26xf16>, tensor<1x3x13x26xsi32>
+
+
+    // CHECK: [[ALLOC:%.+]] = memref.alloc() : memref<1x3x30x30xf16, [@CMX_NN, 0]>
+    // CHECK: [[COPY0:%.+]] = VPUIP.Copy inputs([[ARG0]] : memref<1x3x30x30xf16>) outputs([[ALLOC]] : memref<1x3x30x30xf16, [@CMX_NN, 0]>) -> memref<1x3x30x30xf16, [@CMX_NN, 0]>
+    // CHECK: [[ALLOC0:%.+]] = memref.alloc() : memref<1x3x13x26xf16, [@CMX_NN, 0]>
+    // CHECK: [[ALLOC1:%.+]] = memref.alloc() : memref<1x3x13x26xsi32, [@CMX_NN, 0]>
+
+    // CHECK: VPUIP.SW.Kernel
+    // CHECK-SAME: {resultSegmentSizes = array<i32: 2, 0, 0>} @VPU.SW::@builtin_MaxPool8
+    // CHECK-SAME: inputs([[COPY0:%.+]] as {{[^:]+}}: memref<1x3x30x30xf16, [@CMX_NN, 0]>)
+    // CHECK-SAME: outputs([[ALLOC0]] as {{[^:]+}}: memref<1x3x13x26xf16, [@CMX_NN, 0]>, [[ALLOC1]] as {{[^:]+}}: memref<1x3x13x26xsi32, [@CMX_NN, 0]>) on tile 0 -> (memref<1x3x13x26xf16, [@CMX_NN, 0]>, memref<1x3x13x26xsi32, [@CMX_NN, 0]>){
+
+    // CHECK: VPUIP.SW.Kernel.run
+    // CHECK-SAME{LITERAL}: {attrs = [[1, 3, 5], [1, 2, 1], [1, 2, 2], [0, 0, 2], [0, 0, 2], 3]}
+    // CHECK-SAME: memref<1x3x30x30xf16, [@CMX_NN, 0]>, memref<1x3x13x26xf16, [@CMX_NN, 0]>, memref<1x3x13x26xsi32, [@CMX_NN, 0]>
+    // CHECK: }
 }
 
 // -----
@@ -785,25 +855,25 @@ func.func @DynamicPermuteCast(%arg: tensor<1x?x?x16xf16, {bounds = [1, 32, 64, 1
 // -----
 
 // CHECK:  module @VPU.SW {
-// CHECK-NEXT:    func.func private @builtin_Gather(memref<*xf16>, memref<*xsi32, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, i64, i64) attributes {VPU.kernel_code = "gather.cpp", VPU.kernel_entry = "gather", VPU.task_type = @COMPUTE}
+// CHECK-NEXT:    func.func private @builtin_Gather(memref<*xf16>, memref<*xsi32, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, i64, i64, i64) attributes {VPU.kernel_code = "gather.cpp", VPU.kernel_entry = "gather", VPU.task_type = @COMPUTE}
 // CHECK-NEXT:    func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
 // CHECK-NEXT:  }
 
 // CHECK-LABEL:  func.func @GatherWithDDRAccessOutputAtCMX
 // CHECK-SAME:      ([[INPUT:%.+]]: memref<51865x512xf16>)
 func.func @GatherWithDDRAccessOutputAtCMX(%arg0: tensor<51865x512xf16>) -> tensor<1x16x512xf16> {
-    %cst = const.Declare tensor<1x16xsi32> = dense<1> : tensor<1x16xsi64>, [#const.ConvertElemType<si32>]
-    %output = VPU.Gather(%arg0, %cst) {axis_value = 0 : i64, batch_dims = 0 : i64} : tensor<51865x512xf16>, tensor<1x16xsi32> -> tensor<1x16x512xf16>
+    %cst = const.Declare tensor<1x16xsi32> = dense<1> : tensor<1x16xsi64>, [#const.CastElemType<si32>]
+    %output = VPU.Gather(%arg0, %cst) {axis_value = 0 : i64, batch_dims = 0 : i64, indices_rank = 2 : i64} : tensor<51865x512xf16>, tensor<1x16xsi32> -> tensor<1x16x512xf16>
     return %output: tensor<1x16x512xf16>
 
-    // CHECK-DAG: [[INDICES:%.+]] = const.Declare memref<1x16xsi32> = dense<1> : tensor<1x16xsi64>, [#const.ConvertElemType<si32>]
+    // CHECK-DAG: [[INDICES:%.+]] = const.Declare memref<1x16xsi32> = dense<1> : tensor<1x16xsi64>, [#const.CastElemType<si32>]
     // CHECK: [[INDICES_ALLOC:%.+]] = memref.alloc() : memref<1x16xsi32, [@CMX_NN, 0]>
     // CHECK: [[INDICES_COPY:%.+]] = VPUIP.Copy inputs([[INDICES]] : memref<1x16xsi32>) outputs([[INDICES_ALLOC]] : memref<1x16xsi32, [@CMX_NN, 0]>) -> memref<1x16xsi32, [@CMX_NN, 0]>
 
     // CHECK: [[OUTPUT_CMX:%.+]] = memref.alloc() : memref<1x16x512xf16, [@CMX_NN, 0]>
     // CHECK: [[GATHER:%.+]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Gather inputs([[INPUT]] as {{[^:]+}}: memref<51865x512xf16>, [[INDICES_COPY]] as {{[^:]+}}: memref<1x16xsi32, [@CMX_NN, 0]>) outputs([[OUTPUT_CMX]] as {{[^:]+}}: memref<1x16x512xf16, [@CMX_NN, 0]>) on tile 0 -> memref<1x16x512xf16, [@CMX_NN, 0]>{
     // CHECK:   VPUIP.SW.Kernel.run
-    // CHECK-SAME{LITERAL}: {attrs = [1, 0]}
+    // CHECK-SAME{LITERAL}: {attrs = [1, 0, 2]}
     // CHECK: ({{[^:]+}}, {{[^:]+}}) : memref<51865x512xf16>, memref<1x16xsi32, [@CMX_NN, 0]>, memref<1x16x512xf16, [@CMX_NN, 0]>
     // CHECK: }
 
@@ -816,25 +886,25 @@ func.func @GatherWithDDRAccessOutputAtCMX(%arg0: tensor<51865x512xf16>) -> tenso
 // Using DDR Access for GatherOp with the output buffer in DDR leads to suboptimal performance and should be avoided
 
 // CHECK:  module @VPU.SW {
-// CHECK-NEXT:    func.func private @builtin_Gather(memref<*xf16>, memref<*xsi32, [@CMX_NN, 0]>, memref<*xf16>, i64, i64) attributes {VPU.kernel_code = "gather.cpp", VPU.kernel_entry = "gather", VPU.task_type = @COMPUTE}
+// CHECK-NEXT:    func.func private @builtin_Gather(memref<*xf16>, memref<*xsi32, [@CMX_NN, 0]>, memref<*xf16>, i64, i64, i64) attributes {VPU.kernel_code = "gather.cpp", VPU.kernel_entry = "gather", VPU.task_type = @COMPUTE}
 // CHECK-NEXT:    func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
 // CHECK-NEXT:  }
 
 // CHECK-LABEL:  func.func @GatherWithDDRAccessOutputAtDDR
 // CHECK-SAME:      ([[INPUT:%.+]]: memref<51865x512xf16>)
 func.func @GatherWithDDRAccessOutputAtDDR(%arg0: tensor<51865x512xf16>) -> tensor<1x2000x512xf16> {
-    %cst = const.Declare tensor<1x2000xsi32> = dense<1> : tensor<1x2000xsi64>, [#const.ConvertElemType<si32>]
-    %output = VPU.Gather(%arg0, %cst) {axis_value = 0 : i64, batch_dims = 0 : i64} : tensor<51865x512xf16>, tensor<1x2000xsi32> -> tensor<1x2000x512xf16>
+    %cst = const.Declare tensor<1x2000xsi32> = dense<1> : tensor<1x2000xsi64>, [#const.CastElemType<si32>]
+    %output = VPU.Gather(%arg0, %cst) {axis_value = 0 : i64, batch_dims = 0 : i64, indices_rank = 2 : i64} : tensor<51865x512xf16>, tensor<1x2000xsi32> -> tensor<1x2000x512xf16>
     return %output: tensor<1x2000x512xf16>
 
-    // CHECK-DAG: [[INDICES:%.+]] = const.Declare memref<1x2000xsi32> = dense<1> : tensor<1x2000xsi64>, [#const.ConvertElemType<si32>]
+    // CHECK-DAG: [[INDICES:%.+]] = const.Declare memref<1x2000xsi32> = dense<1> : tensor<1x2000xsi64>, [#const.CastElemType<si32>]
     // CHECK: [[INDICES_ALLOC:%.+]] = memref.alloc() : memref<1x2000xsi32, [@CMX_NN, 0]>
     // CHECK: [[INDICES_COPY:%.+]] = VPUIP.Copy inputs([[INDICES]] : memref<1x2000xsi32>) outputs([[INDICES_ALLOC]] : memref<1x2000xsi32, [@CMX_NN, 0]>) -> memref<1x2000xsi32, [@CMX_NN, 0]>
 
     // CHECK: [[OUTPUT_DDR:%.+]] = memref.alloc() : memref<1x2000x512xf16>
     // CHECK: [[GATHER:%.+]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Gather inputs([[INPUT]] as {{[^:]+}}: memref<51865x512xf16>, [[INDICES_COPY]] as {{[^:]+}}: memref<1x2000xsi32, [@CMX_NN, 0]>) outputs([[OUTPUT_DDR]] as {{[^:]+}}: memref<1x2000x512xf16>) on tile 0 -> memref<1x2000x512xf16>{
     // CHECK:   VPUIP.SW.Kernel.run
-    // CHECK-SAME{LITERAL}: {attrs = [1, 0]}
+    // CHECK-SAME{LITERAL}: {attrs = [1, 0, 2]}
     // CHECK: ({{[^:]+}}, {{[^:]+}}) : memref<51865x512xf16>, memref<1x2000xsi32, [@CMX_NN, 0]>, memref<1x2000x512xf16>
     // CHECK: }
 
@@ -918,4 +988,238 @@ func.func @GRUSequenceLastPartWithDDRAccess_(%arg0: tensor<1x1x1x3072xf16>, %arg
     // CHECK: [[ALLOC6:%.+]] = memref.alloc() : memref<1x1x1024xf16>
     // CHECK: [[COPY4:%.+]] = VPUIP.Copy inputs([[RESULT]]#1 : memref<1x1x1024xf16, [@CMX_NN, 0]>) outputs([[ALLOC6]] : memref<1x1x1024xf16>) -> memref<1x1x1024xf16>
     // CHECK: return [[COPY3]], [[COPY4]] : memref<1x1x1x1024xf16>, memref<1x1x1024xf16>
+}
+
+// -----
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+
+// CHECK:  module @VPU.SW {
+// CHECK-NEXT:    func.func private @builtin_Concat(memref<*xf16, [@CMX_NN, 0]>, memref<*xsi32, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, memref<*xsi32, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, memref<*xsi32, [@CMX_NN, 0]>, none, none) attributes {VPU.kernel_code = "concat.cpp", VPU.kernel_entry = "concat", VPU.task_type = @COMPUTE}
+// CHECK-NEXT:    func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
+// CHECK-NEXT:  }
+
+// CHECK-LABEL:   func.func @ConcatSWLayer
+
+// CHECK-SAME:         ([[ARG0:%.+]]: !VPUIP.BoundedBuffer<data=memref<1x2x3x8xf16>, dynamic_shape=memref<4xsi32>>,
+// CHECK-SAME:         [[ARG1:%.+]]: !VPUIP.BoundedBuffer<data=memref<1x2x3x8xf16>, dynamic_shape=memref<4xsi32>>)
+// CHECK-SAME:         -> !VPUIP.BoundedBuffer<data=memref<1x4x3x8xf16>, dynamic_shape=memref<4xsi32>>
+func.func @ConcatSWLayer(%arg0: tensor<1x2x3x?xf16, {bounds = [1, 2, 3, 8], order = #NCHW}>,
+                                %arg1: tensor<1x2x3x?xf16, {bounds = [1, 2, 3, 8], order = #NCHW}>)
+                                -> tensor<1x4x3x?xf16, {bounds = [1, 4, 3, 8], order = #NCHW}> {
+
+    %0 = VPU.Concat(%arg0, %arg1) {static_offsets = [[0, 0, 0, 0], [0, 2, 0, 0]]} : tensor<1x2x3x?xf16, {bounds = [1, 2, 3, 8], order = #NCHW}>, tensor<1x2x3x?xf16, {bounds = [1, 2, 3, 8], order = #NCHW}> -> tensor<1x4x3x?xf16, {bounds = [1, 4, 3, 8], order = #NCHW}>
+    return %0 : tensor<1x4x3x?xf16, {bounds = [1, 4, 3, 8], order = #NCHW}>
+
+    // CHECK:  [[ALLOC:%.+]] = memref.alloc() : memref<1x2x3x8xf16, [@CMX_NN, 0]>
+    // CHECK:  [[ALLOC0:%.+]] = memref.alloc() : memref<4xsi32, [@CMX_NN, 0]>
+    // CHECK:  [[BUFFER0:%.+]] = VPUIP.GroupBoundedBuffer([[ALLOC]], [[ALLOC0]])
+    // CHECK:            : memref<1x2x3x8xf16, [@CMX_NN, 0]>, memref<4xsi32, [@CMX_NN, 0]>
+    // CHECK:            -> !VPUIP.BoundedBuffer<data=memref<1x2x3x8xf16, [@CMX_NN, 0]>, dynamic_shape=memref<4xsi32, [@CMX_NN, 0]>>
+    // CHECK:  [[COPY0:%.+]] = VPUIP.Copy inputs({{[^:]+}}  : !VPUIP.BoundedBuffer<data=memref<1x2x3x8xf16>, dynamic_shape=memref<4xsi32>>)
+    // CHECK:  outputs([[BUFFER0]] : !VPUIP.BoundedBuffer<data=memref<1x2x3x8xf16, [@CMX_NN, 0]>, dynamic_shape=memref<4xsi32, [@CMX_NN, 0]>>)
+    // CHECK:  -> !VPUIP.BoundedBuffer<data=memref<1x2x3x8xf16, [@CMX_NN, 0]>, dynamic_shape=memref<4xsi32, [@CMX_NN, 0]>>
+
+    // CHECK:  [[ALLOC1:%.+]] = memref.alloc() : memref<1x2x3x8xf16, [@CMX_NN, 0]>
+    // CHECK:  [[ALLOC2:%.+]] = memref.alloc() : memref<4xsi32, [@CMX_NN, 0]>
+    // CHECK:  [[BUFFER1:%.+]] = VPUIP.GroupBoundedBuffer([[ALLOC1]], [[ALLOC2]])
+    // CHECK:           : memref<1x2x3x8xf16, [@CMX_NN, 0]>, memref<4xsi32, [@CMX_NN, 0]>
+    // CHECK:           -> !VPUIP.BoundedBuffer<data=memref<1x2x3x8xf16, [@CMX_NN, 0]>, dynamic_shape=memref<4xsi32, [@CMX_NN, 0]>>
+    // CHECK:  [[COPY1:%.+]] = VPUIP.Copy inputs({{[^:]+}} : !VPUIP.BoundedBuffer<data=memref<1x2x3x8xf16>, dynamic_shape=memref<4xsi32>>)
+    // CHECK:           outputs([[BUFFER1]] : !VPUIP.BoundedBuffer<data=memref<1x2x3x8xf16, [@CMX_NN, 0]>, dynamic_shape=memref<4xsi32, [@CMX_NN, 0]>>)
+    // CHECK:           -> !VPUIP.BoundedBuffer<data=memref<1x2x3x8xf16, [@CMX_NN, 0]>, dynamic_shape=memref<4xsi32, [@CMX_NN, 0]>>
+
+    // CHECK:  [[ALLOC3:%.+]] = memref.alloc() : memref<1x4x3x8xf16, [@CMX_NN, 0]>
+    // CHECK:  [[ALLOC4:%.+]] = memref.alloc() : memref<4xsi32, [@CMX_NN, 0]>
+    // CHECK:  [[BUFFER2:%.+]] = VPUIP.GroupBoundedBuffer([[ALLOC3]], [[ALLOC4]])
+    // CHECK:           : memref<1x4x3x8xf16, [@CMX_NN, 0]>, memref<4xsi32, [@CMX_NN, 0]>
+    // CHECK:           -> !VPUIP.BoundedBuffer<data=memref<1x4x3x8xf16, [@CMX_NN, 0]>, dynamic_shape=memref<4xsi32, [@CMX_NN, 0]>>
+
+    // CHECK:  [[RES:%.+]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
+    // CHECK:           @VPU.SW::@builtin_Concat inputs([[COPY0]] as {{[^:]+}}:
+    // CHECK:               !VPUIP.BoundedBuffer<data=memref<1x2x3x8xf16, [@CMX_NN, 0]>, dynamic_shape=memref<4xsi32, [@CMX_NN, 0]>>,
+    // CHECK:               [[COPY1]] as {{[^:]+}}: !VPUIP.BoundedBuffer<data=memref<1x2x3x8xf16, [@CMX_NN, 0]>, dynamic_shape=memref<4xsi32, [@CMX_NN, 0]>>)
+    // CHECK:               outputs([[BUFFER2]] as {{[^:]+}}: !VPUIP.BoundedBuffer<data=memref<1x4x3x8xf16, [@CMX_NN, 0]>, dynamic_shape=memref<4xsi32, [@CMX_NN, 0]>>) on tile 0
+    // CHECK:               -> !VPUIP.BoundedBuffer<data=memref<1x4x3x8xf16, [@CMX_NN, 0]>, dynamic_shape=memref<4xsi32, [@CMX_NN, 0]>>{
+    // CHECK:                       VPUIP.SW.Kernel.run
+    // CHECK-SAME{LITERAL}:             {attrs = [[0, 0, 0, 0], [0, 0, 2, 0]]}
+    // CHECK:                           ({{[^:]+}}, {{[^:]+}}, {{[^:]+}}) : !VPUIP.BoundedBuffer<data=memref<1x2x3x8xf16, [@CMX_NN, 0]>, dynamic_shape=memref<4xsi32, [@CMX_NN, 0]>>,
+    // CHECK:                                   !VPUIP.BoundedBuffer<data=memref<1x2x3x8xf16, [@CMX_NN, 0]>, dynamic_shape=memref<4xsi32, [@CMX_NN, 0]>>,
+    // CHECK:                                   !VPUIP.BoundedBuffer<data=memref<1x4x3x8xf16, [@CMX_NN, 0]>, dynamic_shape=memref<4xsi32, [@CMX_NN, 0]>>
+    // CHECK:  }
+
+    // CHECK:  [[ALLOC5:%.+]] = memref.alloc() : memref<1x4x3x8xf16>
+    // CHECK:  [[ALLOC6:%.+]] = memref.alloc() : memref<4xsi32>
+    // CHECK:  [[BUFFER3:%.+]] = VPUIP.GroupBoundedBuffer([[ALLOC5]], [[ALLOC6]])
+    // CHECK:           : memref<1x4x3x8xf16>, memref<4xsi32>
+    // CHECK:           -> !VPUIP.BoundedBuffer<data=memref<1x4x3x8xf16>, dynamic_shape=memref<4xsi32>>
+    // CHECK:  [[COPY2:%.+]] = VPUIP.Copy inputs([[RES]]
+    // CHECK:           : !VPUIP.BoundedBuffer<data=memref<1x4x3x8xf16, [@CMX_NN, 0]>, dynamic_shape=memref<4xsi32, [@CMX_NN, 0]>>)
+    // CHECK:           outputs([[BUFFER3]] : !VPUIP.BoundedBuffer<data=memref<1x4x3x8xf16>, dynamic_shape=memref<4xsi32>>) -> !VPUIP.BoundedBuffer<data=memref<1x4x3x8xf16>, dynamic_shape=memref<4xsi32>>
+
+    // CHECK:  return [[COPY2]] : !VPUIP.BoundedBuffer<data=memref<1x4x3x8xf16>, dynamic_shape=memref<4xsi32>>
+}
+
+// -----
+
+// CHECK:  module @VPU.SW {
+// CHECK-NEXT:    func.func private @builtin_RMS(memref<*xf32, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, memref<*xf32, [@CMX_NN, 0]>, f64) attributes {VPU.kernel_code = "rms_norm.cpp", VPU.kernel_entry = "rms_norm", VPU.task_type = @COMPUTE}
+// CHECK-NEXT:    func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
+// CHECK-NEXT:  }
+
+// CHECK-LABEL:  func.func @RMSNorm
+// CHECK-SAME:      [[INPUT:%.+]]: memref<1x2x6xf32>
+func.func @RMSNorm(%input: tensor<1x2x6xf32>) -> tensor<1x2x6xf32> {
+    %cst = const.Declare tensor<6xf16> = dense<[2.900000e-02, 1.400000e-02, 3.000000e-03, 1.300000e-02, 1.500000e-02, 0.00899999961]> : tensor<6xf32>, [#const.CastElemType<f16>]
+    %rmsop = VPU.RMS(%input, %cst) {epsilon = 9.9999997473787516E-6 : f64} : tensor<1x2x6xf32>, tensor<6xf16> -> tensor<1x2x6xf32>
+    return %rmsop : tensor<1x2x6xf32>
+
+// CHECK:    [[CST:%.+]] = const.Declare memref<6xf16> = dense<[2.900000e-02, 1.400000e-02, 3.000000e-03, 1.300000e-02, 1.500000e-02, 0.00899999961]> : tensor<6xf32>, [#const.CastElemType<f16>]
+// CHECK:    [[ALLOC:%.+]] = memref.alloc() : memref<1x2x6xf32, [@CMX_NN, 0]>
+// CHECK:    [[COPY0:%.+]] = VPUIP.Copy inputs([[INPUT]] : memref<1x2x6xf32>) outputs([[ALLOC]] : memref<1x2x6xf32, [@CMX_NN, 0]>) -> memref<1x2x6xf32, [@CMX_NN, 0]>
+
+// CHECK:    [[ALLOC0:%.+]] = memref.alloc() : memref<6xf16, [@CMX_NN, 0]>
+// CHECK:    [[COPY1:%.+]] = VPUIP.Copy inputs([[CST]] : memref<6xf16>) outputs([[ALLOC0]] : memref<6xf16, [@CMX_NN, 0]>) -> memref<6xf16, [@CMX_NN, 0]>
+
+// CHECK:    [[ALLOC1:%.+]] = memref.alloc() : memref<1x2x6xf32, [@CMX_NN, 0]>
+// CHECK:    [[RES:%.+]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_RMS inputs([[COPY0]] as {{[^:]+}}: memref<1x2x6xf32, [@CMX_NN, 0]>, [[COPY1]] as {{[^:]+}}: memref<6xf16, [@CMX_NN, 0]>) outputs([[ALLOC1]] as {{[^:]+}}: memref<1x2x6xf32, [@CMX_NN, 0]>) on tile 0 -> memref<1x2x6xf32, [@CMX_NN, 0]>{
+// CHECK:      VPUIP.SW.Kernel.run {attrs = [9.9999997473787516E-6]}({{[^:]+}}, {{[^:]+}}, {{[^:]+}}) : memref<1x2x6xf32, [@CMX_NN, 0]>, memref<6xf16, [@CMX_NN, 0]>, memref<1x2x6xf32, [@CMX_NN, 0]>
+// CHECK:    }
+
+// CHECK:    [[ALLOC2:%.+]] = memref.alloc() : memref<1x2x6xf32>
+// CHECK:    [[COPY2:%.+]] = VPUIP.Copy inputs([[RES]] : memref<1x2x6xf32, [@CMX_NN, 0]>) outputs([[ALLOC2]] : memref<1x2x6xf32>) -> memref<1x2x6xf32>
+// CHECK:    return [[COPY2]] : memref<1x2x6xf32>
+}
+
+// -----
+
+// CHECK:  module @VPU.SW {
+// CHECK-NEXT:    func.func private @builtin_Inverse(memref<*xf32, [@CMX_NN, 0]>, memref<*xf32, [@CMX_NN, 0]>, i64) attributes {VPU.kernel_code = "inverse.cpp", VPU.kernel_entry = "inverse", VPU.task_type = @COMPUTE}
+// CHECK-NEXT:    func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
+// CHECK-NEXT:  }
+
+// CHECK-LABEL:  func.func @Inverse
+// CHECK-SAME:      [[INPUT:%.+]]: memref<1x10x2x2xf32>
+func.func @Inverse(%input: tensor<1x10x2x2xf32>) -> tensor<1x10x2x2xf32> {
+    %inverseop = VPU.Inverse(%input) {__inplace_operands_attr__ = ["true"], adjoint} : tensor<1x10x2x2xf32> -> tensor<1x10x2x2xf32>
+    return %inverseop : tensor<1x10x2x2xf32>
+
+// CHECK:    [[ALLOC:%.+]] = memref.alloc() : memref<1x10x2x2xf32, [@CMX_NN, 0]>
+// CHECK:    [[COPY0:%.+]] = VPUIP.Copy inputs([[INPUT]] : memref<1x10x2x2xf32>) outputs([[ALLOC]] : memref<1x10x2x2xf32, [@CMX_NN, 0]>) -> memref<1x10x2x2xf32, [@CMX_NN, 0]>
+
+// CHECK:    [[ALLOC0:%.+]] = memref.alloc() : memref<1x10x2x2xf32, [@CMX_NN, 0]>
+
+// CHECK:    [[RES:%.+]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Inverse inputs([[COPY0]] as {{[^:]+}}: memref<1x10x2x2xf32, [@CMX_NN, 0]>) outputs([[ALLOC0]] as {{[^:]+}}: memref<1x10x2x2xf32, [@CMX_NN, 0]>) on tile 0 -> memref<1x10x2x2xf32, [@CMX_NN, 0]>{
+// CHECK:      VPUIP.SW.Kernel.run {attrs = [1]}({{[^:]+}}, {{[^:]+}}) : memref<1x10x2x2xf32, [@CMX_NN, 0]>, memref<1x10x2x2xf32, [@CMX_NN, 0]>
+// CHECK:    }
+
+// CHECK:    [[ALLOC1:%.+]] = memref.alloc() : memref<1x10x2x2xf32>
+// CHECK:    [[COPY1:%.+]] = VPUIP.Copy inputs([[RES]] : memref<1x10x2x2xf32, [@CMX_NN, 0]>) outputs([[ALLOC1]] : memref<1x10x2x2xf32>) -> memref<1x10x2x2xf32>
+// CHECK:    return [[COPY1]] : memref<1x10x2x2xf32>
+}
+
+// -----
+
+// CHECK-LABEL: func.func @DeformableConvolutionSWLayer
+// CHECK-SAME:  ([[ARG0:%.+]]: memref<1x128x19x19xf16>, [[ARG1:%.+]]: memref<1x18x19x19xf16>, [[ARG2:%.+]]: memref<128x128x3x3xf16>, [[ARG3:%.+]]: memref<1x9x19x19xf16>) -> memref<1x128x19x19xf16>
+func.func @DeformableConvolutionSWLayer(%arg0: tensor<1x128x19x19xf16>, %arg1: tensor<1x18x19x19xf16>, %arg2: tensor<128x128x3x3xf16>, %arg3: tensor<1x9x19x19xf16>) -> tensor<1x128x19x19xf16> {
+    %output = VPU.DeformableConvolution(%arg0, %arg1, %arg2, %arg3) {biliniar_interpolate_pad, deformable_group = 1 : i64, dilations = [1, 1], group = 1 : i64, pads_begin = [1, 1], pads_end = [1, 1], strides = [1, 1]} : tensor<1x128x19x19xf16>, tensor<1x18x19x19xf16>, tensor<128x128x3x3xf16>, tensor<1x9x19x19xf16> -> tensor<1x128x19x19xf16>
+    return %output : tensor<1x128x19x19xf16>
+
+    // CHECK:   [[ALLOC:%.+]] = memref.alloc() : memref<1x128x19x19xf16, [@CMX_NN, 0]>
+    // CHECK:   [[COPY0:%.+]] = VPUIP.Copy inputs([[ARG0]] : memref<1x128x19x19xf16>) outputs([[ALLOC]] : memref<1x128x19x19xf16, [@CMX_NN, 0]>) -> memref<1x128x19x19xf16, [@CMX_NN, 0]>
+    // CHECK:   [[ALLOC0:%.+]] = memref.alloc() : memref<1x18x19x19xf16, [@CMX_NN, 0]>
+    // CHECK:   [[COPY1:%.+]] = VPUIP.Copy inputs([[ARG1]] : memref<1x18x19x19xf16>) outputs([[ALLOC0]] : memref<1x18x19x19xf16, [@CMX_NN, 0]>) -> memref<1x18x19x19xf16, [@CMX_NN, 0]>
+    // CHECK:   [[ALLOC1:%.+]] = memref.alloc() : memref<128x128x3x3xf16, [@CMX_NN, 0]>
+    // CHECK:   [[COPY2:%.+]] = VPUIP.Copy inputs([[ARG2]] : memref<128x128x3x3xf16>) outputs([[ALLOC1]] : memref<128x128x3x3xf16, [@CMX_NN, 0]>) -> memref<128x128x3x3xf16, [@CMX_NN, 0]>
+    // CHECK:   [[ALLOC2:%.+]] = memref.alloc() : memref<1x9x19x19xf16, [@CMX_NN, 0]>
+    // CHECK:   [[COPY3:%.+]] = VPUIP.Copy inputs([[ARG3]] : memref<1x9x19x19xf16>) outputs([[ALLOC2]] : memref<1x9x19x19xf16, [@CMX_NN, 0]>) -> memref<1x9x19x19xf16, [@CMX_NN, 0]>
+    // CHECK:   [[ALLOC3:%.+]] = memref.alloc() : memref<1x128x19x19xf16, [@CMX_NN, 0]>
+
+    // CHECK:   VPUIP.SW.Kernel
+    // CHECK-SAME:  {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_DeformableConvolution
+    // CHECK-SAME:  inputs([[COPY0]] as {{[^:]+}}: memref<1x128x19x19xf16, [@CMX_NN, 0]>, [[COPY1]] as {{[^:]+}}: memref<1x18x19x19xf16, [@CMX_NN, 0]>,
+    // CHECK-SAME:  [[COPY2]] as {{[^:]+}}: memref<128x128x3x3xf16, [@CMX_NN, 0]>, [[COPY3]] as {{[^:]+}}: memref<1x9x19x19xf16, [@CMX_NN, 0]>)
+    // CHECK-SAME:  outputs([[ALLOC3]] as {{[^:]+}}: memref<1x128x19x19xf16, [@CMX_NN, 0]>) on tile 0 -> memref<1x128x19x19xf16, [@CMX_NN, 0]>{
+
+    // CHECK:   VPUIP.SW.Kernel.run
+    // CHECK-SAME{LITERAL}: {attrs = [[1, 1], [1, 1], [1, 1], [1, 1], 1, 1, 1]}
+    // CHECK-SAME:  memref<1x128x19x19xf16, [@CMX_NN, 0]>, memref<1x18x19x19xf16, [@CMX_NN, 0]>, memref<128x128x3x3xf16, [@CMX_NN, 0]>, memref<1x9x19x19xf16, [@CMX_NN, 0]>, memref<1x128x19x19xf16, [@CMX_NN, 0]>
+    // CHECK:   }
+}
+
+// -----
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+
+module @DynamicBroadcastShapeSubgraph {
+  IE.CNNNetwork entryPoint : @main inputsInfo : {
+    DataInfo "input_1" : tensor<4x1x1xf16>
+    DataInfo "input_0" : tensor<1x4x5x5xf16>
+  } outputsInfo : {
+    DataInfo "Broadcast_63" friendlyName = "Result_67" : tensor<1x4x5x5xf16>
+  }
+  // CHECK: func.func @main([[ARG0:%.+]]: memref<4x1x1xf16>, [[ARG1:%.+]]: !VPUIP.BoundedBuffer<data=memref<1x4x5x5xf16>, dynamic_shape=memref<4xsi32>>) -> !VPUIP.BoundedBuffer<data=memref<1x4x5x5xf16>, dynamic_shape=memref<4xsi32>> {
+  func.func @main(%arg0: tensor<4x1x1xf16>, %arg1: tensor<1x4x?x?xf16, {bounds = [1, 4, 5, 5], order = #NCHW}>) -> tensor<1x4x?x?xf16, {bounds = [1, 4, 5, 5], order = #NCHW}> {
+    %0 = VPU.ShapeOf(%arg1) : tensor<1x4x?x?xf16, {bounds = [1, 4, 5, 5], order = #NCHW}> -> tensor<4xsi32>
+    %1 = VPU.AffineReshape(%arg0) {dim_mapping = [[0, 1], [2], [3]], shape_value = [1, 4, 1, 1]} : tensor<4x1x1xf16> -> tensor<1x4x1x1xf16>
+    %2 = VPU.DynamicTile(%1, %0) {output_bounds = [1, 4, 5, 5], output_shape = [1, 4, -9223372036854775808, -9223372036854775808]} : tensor<1x4x1x1xf16>, tensor<4xsi32> -> tensor<1x4x?x?xf16, {bounds = [1, 4, 5, 5], order = #NCHW}>
+    return %2 : tensor<1x4x?x?xf16, {bounds = [1, 4, 5, 5], order = #NCHW}>
+
+    // CHECK:    [[ALLOC:%.+]] = memref.alloc() : memref<1x4x5x5xf16, [@CMX_NN, 0]>
+    // CHECK:    [[ALLOC_0:%.+]] = memref.alloc() : memref<4xsi32, [@CMX_NN, 0]>
+    // CHECK:    [[BUFF:%.+]] = VPUIP.GroupBoundedBuffer([[ALLOC]], [[ALLOC_0]]) : memref<1x4x5x5xf16, [@CMX_NN, 0]>, memref<4xsi32, [@CMX_NN, 0]> -> !VPUIP.BoundedBuffer<data=memref<1x4x5x5xf16, [@CMX_NN, 0]>, dynamic_shape=memref<4xsi32, [@CMX_NN, 0]>>
+    // CHECK:    [[COPY:%.+]] = VPUIP.Copy inputs(%arg1 : !VPUIP.BoundedBuffer<data=memref<1x4x5x5xf16>, dynamic_shape=memref<4xsi32>>) outputs([[BUFF]] : !VPUIP.BoundedBuffer<data=memref<1x4x5x5xf16, [@CMX_NN, 0]>, dynamic_shape=memref<4xsi32, [@CMX_NN, 0]>>) -> !VPUIP.BoundedBuffer<data=memref<1x4x5x5xf16, [@CMX_NN, 0]>, dynamic_shape=memref<4xsi32, [@CMX_NN, 0]>>
+    // CHECK:    [[ALLOC_1:%.+]] = memref.alloc() : memref<4xsi32, [@CMX_NN, 0]>
+    // CHECK:    [[RESULT:%.+]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_ShapeOf inputs([[COPY]] as %arg2: !VPUIP.BoundedBuffer<data=memref<1x4x5x5xf16, [@CMX_NN, 0]>, dynamic_shape=memref<4xsi32, [@CMX_NN, 0]>>) outputs([[ALLOC_1]] as %arg3: memref<4xsi32, [@CMX_NN, 0]>) on tile 0 -> memref<4xsi32, [@CMX_NN, 0]>{
+    // CHECK:      VPUIP.SW.Kernel.run(%arg2, %arg3) : !VPUIP.BoundedBuffer<data=memref<1x4x5x5xf16, [@CMX_NN, 0]>, dynamic_shape=memref<4xsi32, [@CMX_NN, 0]>>, memref<4xsi32, [@CMX_NN, 0]>
+    // CHECK:    }
+    // CHECK:    [[ALLOC_2:%.+]] = memref.alloc() : memref<4xsi32>
+    // CHECK:    [[COPY_0:%.+]] = VPUIP.Copy inputs([[RESULT]] : memref<4xsi32, [@CMX_NN, 0]>) outputs([[ALLOC_2]] : memref<4xsi32>) -> memref<4xsi32>
+    // CHECK:    [[RESHAPE:%.+]] = VPUIP.GenericReshape inputs(%arg0 : memref<4x1x1xf16>) -> memref<1x4x1x1xf16>
+    // CHECK:    [[ALLOC_3:%.+]] = memref.alloc() : memref<1x4x1x1xf16, [@CMX_NN, 0]>
+    // CHECK:    [[COPY_1:%.+]] = VPUIP.Copy inputs([[RESHAPE]] : memref<1x4x1x1xf16>) outputs([[ALLOC_3]] : memref<1x4x1x1xf16, [@CMX_NN, 0]>) -> memref<1x4x1x1xf16, [@CMX_NN, 0]>
+    // CHECK:    [[ALLOC_4:%.+]] = memref.alloc() : memref<4xsi32, [@CMX_NN, 0]>
+    // CHECK:    [[COPY_2:%.+]] = VPUIP.Copy inputs([[COPY_0]] : memref<4xsi32>) outputs([[ALLOC_4]] : memref<4xsi32, [@CMX_NN, 0]>) -> memref<4xsi32, [@CMX_NN, 0]>
+    // CHECK:    [[ALLOC_5:%.+]] = memref.alloc() : memref<1x4x5x5xf16, [@CMX_NN, 0]>
+    // CHECK:    [[ALLOC_6:%.+]] = memref.alloc() : memref<4xsi32, [@CMX_NN, 0]>
+    // CHECK:    [[BUFF_0:%.+]] = VPUIP.GroupBoundedBuffer([[ALLOC_5]], [[ALLOC_6]]) : memref<1x4x5x5xf16, [@CMX_NN, 0]>, memref<4xsi32, [@CMX_NN, 0]> -> !VPUIP.BoundedBuffer<data=memref<1x4x5x5xf16, [@CMX_NN, 0]>, dynamic_shape=memref<4xsi32, [@CMX_NN, 0]>>
+    // CHECK:    [[RESULT_0:%.+]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_DynamicTile inputs([[COPY_1]] as %arg2: memref<1x4x1x1xf16, [@CMX_NN, 0]>, [[COPY_2]] as %arg3: memref<4xsi32, [@CMX_NN, 0]>) outputs([[BUFF_0]] as %arg4: !VPUIP.BoundedBuffer<data=memref<1x4x5x5xf16, [@CMX_NN, 0]>, dynamic_shape=memref<4xsi32, [@CMX_NN, 0]>>) on tile 0 -> !VPUIP.BoundedBuffer<data=memref<1x4x5x5xf16, [@CMX_NN, 0]>, dynamic_shape=memref<4xsi32, [@CMX_NN, 0]>>{
+    // CHECK:      VPUIP.SW.Kernel.run {attrs = [4, [1, 1, 1, 1]]}(%arg2, %arg3, %arg4) : memref<1x4x1x1xf16, [@CMX_NN, 0]>, memref<4xsi32, [@CMX_NN, 0]>, !VPUIP.BoundedBuffer<data=memref<1x4x5x5xf16, [@CMX_NN, 0]>, dynamic_shape=memref<4xsi32, [@CMX_NN, 0]>>
+    // CHECK:    }
+    // CHECK:    [[ALLOC_8:%.+]] = memref.alloc() : memref<1x4x5x5xf16>
+    // CHECK:    [[ALLOC_9:%.+]] = memref.alloc() : memref<4xsi32>
+    // CHECK:    [[BUFF_1:%.+]] = VPUIP.GroupBoundedBuffer([[ALLOC_8]], [[ALLOC_9]]) : memref<1x4x5x5xf16>, memref<4xsi32> -> !VPUIP.BoundedBuffer<data=memref<1x4x5x5xf16>, dynamic_shape=memref<4xsi32>>
+    // CHECK:    [[COPY_3:%.+]] = VPUIP.Copy inputs([[RESULT_0]] : !VPUIP.BoundedBuffer<data=memref<1x4x5x5xf16, [@CMX_NN, 0]>, dynamic_shape=memref<4xsi32, [@CMX_NN, 0]>>) outputs([[BUFF_1]] : !VPUIP.BoundedBuffer<data=memref<1x4x5x5xf16>, dynamic_shape=memref<4xsi32>>) -> !VPUIP.BoundedBuffer<data=memref<1x4x5x5xf16>, dynamic_shape=memref<4xsi32>>
+    // CHECK:    return [[COPY_3]] : !VPUIP.BoundedBuffer<data=memref<1x4x5x5xf16>, dynamic_shape=memref<4xsi32>>
+  }
+}
+
+// -----
+
+#CHW = affine_map<(d0, d1, d2) -> (d0, d1, d2)>
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+
+// CHECK: func.func @DynamicTileFromBroadcast([[ARG0:%.+]]: !VPUIP.BoundedBuffer<data=memref<1x1x10xsi64>, dynamic_shape=memref<3xsi32>>, [[ARG1:%.+]]: memref<4xsi32>) -> !VPUIP.BoundedBuffer<data=memref<1x1x10x5xsi64>, dynamic_shape=memref<4xsi32>> {
+func.func @DynamicTileFromBroadcast(%arg0: tensor<1x1x?xsi64, {bounds = [1, 1, 10], order = #CHW}>, %arg1: tensor<4xsi32>) -> tensor<1x1x?x?xsi64, {bounds = [1, 1, 10, 5], order = #NCHW}> {
+    %0 = VPU.DynamicTile(%arg0, %arg1) {output_bounds = [1, 1, 10, 5], output_shape = [1, 1, -9223372036854775808, -9223372036854775808]} : tensor<1x1x?xsi64, {bounds = [1, 1, 10], order = #CHW}>, tensor<4xsi32> -> tensor<1x1x?x?xsi64, {bounds = [1, 1, 10, 5], order = #NCHW}>
+    return %0 : tensor<1x1x?x?xsi64, {bounds = [1, 1, 10, 5], order = #NCHW}>
+
+    // CHECK:    [[ALLOC:%.+]] = memref.alloc() : memref<1x1x10xsi64, [@CMX_NN, 0]>
+    // CHECK:    [[ALLOC_0:%.+]] = memref.alloc() : memref<3xsi32, [@CMX_NN, 0]>
+    // CHECK:    [[BUFF:%.+]] = VPUIP.GroupBoundedBuffer([[ALLOC]], [[ALLOC_0:%.+]]) : memref<1x1x10xsi64, [@CMX_NN, 0]>, memref<3xsi32, [@CMX_NN, 0]> -> !VPUIP.BoundedBuffer<data=memref<1x1x10xsi64, [@CMX_NN, 0]>, dynamic_shape=memref<3xsi32, [@CMX_NN, 0]>>
+    // CHECK:    [[COPY:%.+]] = VPUIP.Copy inputs([[ARG0]] : !VPUIP.BoundedBuffer<data=memref<1x1x10xsi64>, dynamic_shape=memref<3xsi32>>) outputs([[BUFF]] : !VPUIP.BoundedBuffer<data=memref<1x1x10xsi64, [@CMX_NN, 0]>, dynamic_shape=memref<3xsi32, [@CMX_NN, 0]>>) -> !VPUIP.BoundedBuffer<data=memref<1x1x10xsi64, [@CMX_NN, 0]>, dynamic_shape=memref<3xsi32, [@CMX_NN, 0]>>
+    // CHECK:    [[ALLOC_1:%.+]] = memref.alloc() : memref<4xsi32, [@CMX_NN, 0]>
+    // CHECK:    [[COPY_0:%.+]] = VPUIP.Copy inputs([[ARG1]] : memref<4xsi32>) outputs([[ALLOC_1]] : memref<4xsi32, [@CMX_NN, 0]>) -> memref<4xsi32, [@CMX_NN, 0]>
+    // CHECK:    [[ALLOC_2:%.+]] = memref.alloc() : memref<1x1x10x5xsi64, [@CMX_NN, 0]>
+    // CHECK:    [[ALLOC_3:%.+]] = memref.alloc() : memref<4xsi32, [@CMX_NN, 0]>
+    // CHECK:    [[BUFF_0:%.+]] = VPUIP.GroupBoundedBuffer([[ALLOC_2]], [[ALLOC_3]]) : memref<1x1x10x5xsi64, [@CMX_NN, 0]>, memref<4xsi32, [@CMX_NN, 0]> -> !VPUIP.BoundedBuffer<data=memref<1x1x10x5xsi64, [@CMX_NN, 0]>, dynamic_shape=memref<4xsi32, [@CMX_NN, 0]>>
+    // CHECK:    [[RESULT:%.+]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_DynamicTile inputs([[COPY]] as %arg2: !VPUIP.BoundedBuffer<data=memref<1x1x10xsi64, [@CMX_NN, 0]>, dynamic_shape=memref<3xsi32, [@CMX_NN, 0]>>, [[COPY_0]] as %arg3: memref<4xsi32, [@CMX_NN, 0]>) outputs([[BUFF_0]] as %arg4: !VPUIP.BoundedBuffer<data=memref<1x1x10x5xsi64, [@CMX_NN, 0]>, dynamic_shape=memref<4xsi32, [@CMX_NN, 0]>>) on tile 0 -> !VPUIP.BoundedBuffer<data=memref<1x1x10x5xsi64, [@CMX_NN, 0]>, dynamic_shape=memref<4xsi32, [@CMX_NN, 0]>>{
+    // CHECK:      VPUIP.SW.Kernel.run {attrs = [4, [1, 1, 1, 1]]}(%arg2, %arg3, %arg4) : !VPUIP.BoundedBuffer<data=memref<1x1x10xsi64, [@CMX_NN, 0]>, dynamic_shape=memref<3xsi32, [@CMX_NN, 0]>>, memref<4xsi32, [@CMX_NN, 0]>, !VPUIP.BoundedBuffer<data=memref<1x1x10x5xsi64, [@CMX_NN, 0]>, dynamic_shape=memref<4xsi32, [@CMX_NN, 0]>>
+    // CHECK:    }
+    // CHECK:    [[ALLOC_4:%.+]] = memref.alloc() : memref<1x1x10x5xsi64>
+    // CHECK:    [[ALLOC_5:%.+]] = memref.alloc() : memref<4xsi32>
+    // CHECK:    [[BUFF_1:%.+]] = VPUIP.GroupBoundedBuffer([[ALLOC_4]], [[ALLOC_5]]) : memref<1x1x10x5xsi64>, memref<4xsi32> -> !VPUIP.BoundedBuffer<data=memref<1x1x10x5xsi64>, dynamic_shape=memref<4xsi32>>
+    // CHECK:    [[COPY_1:%.+]] = VPUIP.Copy inputs([[RESULT]] : !VPUIP.BoundedBuffer<data=memref<1x1x10x5xsi64, [@CMX_NN, 0]>, dynamic_shape=memref<4xsi32, [@CMX_NN, 0]>>) outputs([[BUFF_1]] : !VPUIP.BoundedBuffer<data=memref<1x1x10x5xsi64>, dynamic_shape=memref<4xsi32>>) -> !VPUIP.BoundedBuffer<data=memref<1x1x10x5xsi64>, dynamic_shape=memref<4xsi32>>
+    // CHECK:    return [[COPY_1]] : !VPUIP.BoundedBuffer<data=memref<1x1x10x5xsi64>, dynamic_shape=memref<4xsi32>>
 }

@@ -66,7 +66,7 @@ TEST_F(MetricsUnitTests, TasksDistributionStats_testOverlapTest) {
     TaskList testTasks({makeTask(3, 8), makeTask(10, 15)});
     TaskList refTasks({makeTask(1, 2), makeTask(6, 12)});
 
-    auto stats = testTaskDurations(testTasks, refTasks);
+    const auto stats = testTaskDurations(testTasks, refTasks);
 
     EXPECT_EQ(stats.overlapTime, 4);
     EXPECT_EQ(stats.idleTime, 1);
@@ -74,6 +74,46 @@ TEST_F(MetricsUnitTests, TasksDistributionStats_testOverlapTest) {
     EXPECT_EQ(stats.sumOfDurations, 17);
 }
 
+TEST_F(MetricsUnitTests, TasksDistributionStats_testIntegerOverflow) {
+    constexpr auto maxInt = static_cast<uint64_t>(std::numeric_limits<int32_t>::max());
+    constexpr auto maxUInt = static_cast<uint64_t>(std::numeric_limits<uint32_t>::max());
+
+    TaskList testTasks({makeTask(0, 8), makeTask(maxInt - 10, maxInt + 1)});
+    TaskList testTasksUint({makeTask(0, 8), makeTask(maxUInt - 10, maxUInt + 1)});
+
+    EXPECT_EQ(testTasks.getTotalDuration(), maxInt + 1);
+    EXPECT_EQ(testTasksUint.getTotalDuration(), maxUInt + 1);
+
+    TaskList testTasksS({makeTask(0, maxInt - 10), makeTask(1, 12)});
+    TaskList testTasksSUint({makeTask(0, maxUInt - 10), makeTask(1, 12)});
+
+    EXPECT_EQ(testTasksS.getSumOfDurations(), maxInt + 1);
+    EXPECT_EQ(testTasksSUint.getSumOfDurations(), maxUInt + 1);
+
+    constexpr auto maxU64 = std::numeric_limits<uint64_t>::max();
+    constexpr auto execType = TaskInfo::ExecType::DMA;
+
+    // this task list is valid, while not summ of all duration
+    TaskList testTasksU64{{TaskInfo{"", "", execType, 0, 1}, TaskInfo{"", "", execType, maxU64 - 10, 10}}};
+
+    EXPECT_EQ(testTasksU64.getSumOfDurations(), 11);
+    EXPECT_EQ(testTasksU64.getTotalDuration(), maxU64);
+
+    TaskList testTaskU64_2{{TaskInfo{"", "", execType, 0, 1}, TaskInfo{"", "", execType, 1, maxU64 - 1}}};
+    EXPECT_EQ(testTaskU64_2.getSumOfDurations(), maxU64);
+
+    // this task list have a task that end time is u64 overflow - so total duration cannot be computed
+    TaskList testTasksU64_3{{TaskInfo{"", "", execType, 0, 1}, TaskInfo{"", "", execType, maxU64 - 10, 11}}};
+
+    EXPECT_ANY_THROW(testTasksU64_3.getTotalDuration());
+    EXPECT_EQ(testTasksU64_3.getSumOfDurations(), 12);
+
+    // sum of durations cannot be computed in u64 precision
+    TaskList testTasksU64_4{{TaskInfo{"", "", execType, 0, 11}, TaskInfo{"", "", execType, 10, maxU64 - 10}}};
+
+    EXPECT_EQ(testTasksU64_4.getTotalDuration(), maxU64);
+    EXPECT_ANY_THROW(testTasksU64_4.getSumOfDurations());
+}
 /*
  * Test overlap of tracks without parallel tasks
  *

@@ -129,7 +129,9 @@ mlir::LogicalResult SwapTransposeConcat::ConcatConverter::matchAndRewrite(IE::Co
 
     auto newConcat = rewriter.create<IE::ConcatOp>(origOp.getLoc(), newInputs, perAxisAttr, staticOffsets);
 
-    rewriter.replaceOpWithNewOp<IE::TransposeOp>(origOp, origOp.getType(), newConcat, nullptr, orderAttr);
+    auto transposeOp =
+            rewriter.replaceOpWithNewOp<IE::TransposeOp>(origOp, origOp.getType(), newConcat, nullptr, orderAttr);
+    extendOpLoc(transposeOp, "transpose_out");
 
     return mlir::success();
 }

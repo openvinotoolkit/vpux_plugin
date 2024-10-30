@@ -127,7 +127,7 @@ std::vector<InferStridedSliceData> inferStridedSliceData = {{{1, 32, 12, 64}, /*
 
 // clang-format on
 
-INSTANTIATE_TEST_CASE_P(StridedSlice, InferStridedSliceTests, testing::ValuesIn(inferStridedSliceData));
+INSTANTIATE_TEST_SUITE_P(StridedSlice, InferStridedSliceTests, testing::ValuesIn(inferStridedSliceData));
 
 struct InferPoolingData {
     std::vector<int64_t> inDataShape;
@@ -164,7 +164,7 @@ std::vector<InferPoolingData> inferMaxPoolData = {
 
 // clang-format on
 
-INSTANTIATE_TEST_CASE_P(MaxPool, InferMaxPoolTests, testing::ValuesIn(inferMaxPoolData));
+INSTANTIATE_TEST_SUITE_P(MaxPool, InferMaxPoolTests, testing::ValuesIn(inferMaxPoolData));
 
 class InferAvgPoolTests : public testing::TestWithParam<InferPoolingData> {};
 
@@ -192,7 +192,7 @@ std::vector<InferPoolingData> inferAvgPoolData = {
 
 // clang-format on
 
-INSTANTIATE_TEST_CASE_P(AvgPool, InferAvgPoolTests, testing::ValuesIn(inferAvgPoolData));
+INSTANTIATE_TEST_SUITE_P(AvgPool, InferAvgPoolTests, testing::ValuesIn(inferAvgPoolData));
 
 struct InferConvBackpropData {
     std::vector<int64_t> inputShape;
@@ -253,7 +253,7 @@ std::vector<InferConvBackpropData> inferConvBackpropData = {{{1, 3, 64, 64},    
 
 // clang-format on
 
-INSTANTIATE_TEST_CASE_P(ConvBackpropData, InferConvBackpropDataTests, testing::ValuesIn(inferConvBackpropData));
+INSTANTIATE_TEST_SUITE_P(ConvBackpropData, InferConvBackpropDataTests, testing::ValuesIn(inferConvBackpropData));
 
 struct InferGroupConvBackpropData {
     std::vector<int64_t> inputShape;
@@ -315,8 +315,8 @@ std::vector<InferGroupConvBackpropData> inferGroupConvBackpropData = {
 
 // clang-format on
 
-INSTANTIATE_TEST_CASE_P(GroupConvBackpropData, InferGroupConvBackpropDataTests,
-                        testing::ValuesIn(inferGroupConvBackpropData));
+INSTANTIATE_TEST_SUITE_P(GroupConvBackpropData, InferGroupConvBackpropDataTests,
+                         testing::ValuesIn(inferGroupConvBackpropData));
 
 struct InferTransposedConvBackpropData {
     std::vector<int64_t> inputShape;
@@ -378,8 +378,8 @@ std::vector<InferTransposedConvBackpropData> inferTransposedConvBackpropData = {
 
 // clang-format on
 
-INSTANTIATE_TEST_CASE_P(TransposedConvBackpropData, InferTransposedConvBackpropDataTests,
-                        testing::ValuesIn(inferTransposedConvBackpropData));
+INSTANTIATE_TEST_SUITE_P(TransposedConvBackpropData, InferTransposedConvBackpropDataTests,
+                         testing::ValuesIn(inferTransposedConvBackpropData));
 
 struct InferTransposedGroupConvBackpropData {
     std::vector<int64_t> inputShape;
@@ -442,5 +442,90 @@ std::vector<InferTransposedGroupConvBackpropData> inferTransposedGroupConvBackpr
 
 // clang-format on
 
-INSTANTIATE_TEST_CASE_P(TransposedGroupConvBackpropData, InferTransposedGroupConvBackpropDataTests,
-                        testing::ValuesIn(inferTransposedGroupConvBackpropData));
+INSTANTIATE_TEST_SUITE_P(TransposedGroupConvBackpropData, InferTransposedGroupConvBackpropDataTests,
+                         testing::ValuesIn(inferTransposedGroupConvBackpropData));
+
+enum class ActivationFunction { ReLU, SoftMax };
+
+using InferOutputForActivationFunction = testing::TestWithParam<ActivationFunction>;
+
+mlir::Operation* buildActivationFunction(mlir::OpBuilder& builder, mlir::Value input,
+                                         const ActivationFunction funcType) {
+    const auto loc = input.getLoc();
+    const auto ctx = builder.getContext();
+    switch (funcType) {
+    case ActivationFunction::ReLU:
+        return builder.create<IE::ReLUOp>(loc, input);
+    case ActivationFunction::SoftMax:
+        return builder.create<IE::SoftMaxOp>(loc, input, /*axisInd=*/getIntAttr(ctx, 1), /*padSize=*/nullptr);
+    default:
+        return nullptr;
+    }
+    return nullptr;
+}
+
+TEST_P(InferOutputForActivationFunction, InferOutputTests) {
+    auto registry = vpux::createDialectRegistry();
+    mlir::MLIRContext ctx{registry};
+    ctx.loadDialect<IE::IEDialect>();
+
+    mlir::OpBuilder builder(&ctx);
+    const auto loc = mlir::UnknownLoc::get(&ctx);
+    const SmallVector<int64_t> shape{1, 16, 32, mlir::ShapedType::kDynamic};
+    const SmallVector<int64_t> inBounds{shape[0], shape[1], shape[2], 320};
+    const auto elemType = mlir::Float16Type::get(&ctx);
+    const auto affineMap = mlir::AffineMapAttr::get(vpux::DimsOrder::NCHW.toAffineMap(&ctx));
+    const auto inBoundsAttr = getIntArrayAttr(&ctx, inBounds);
+    const auto tensorAttr = vpux::TensorAttr::get(&ctx, affineMap, /*memSpace=*/nullptr, inBoundsAttr);
+    const auto tensorType = mlir::RankedTensorType::get(shape, elemType, tensorAttr);
+    mlir::OwningOpRef<mlir::tensor::EmptyOp> inputOp =
+            builder.create<mlir::tensor::EmptyOp>(loc, tensorType, mlir::ValueRange{});
+    mlir::OwningOpRef<mlir::Operation*> activationOp =
+            buildActivationFunction(builder, inputOp->getResult(), GetParam());
+    ASSERT_NE(activationOp.get(), nullptr);
+    const auto outputType = mlir::dyn_cast_or_null<vpux::BoundedTypeInterface>(activationOp->getResult(0).getType());
+    ASSERT_NE(outputType, nullptr);
+    const auto outputBoundsAttr = outputType.getBounds();
+    ASSERT_NE(outputBoundsAttr, nullptr);
+    const auto outputBounds = parseIntArrayAttr<int64_t>(outputBoundsAttr);
+    EXPECT_EQ(outputBounds, inBounds);
+}
+
+INSTANTIATE_TEST_SUITE_P(CheckBounds, InferOutputForActivationFunction,
+                         testing::ValuesIn({ActivationFunction::ReLU, ActivationFunction::SoftMax}));
+
+using InferAddOutput = testing::Test;
+
+TEST_F(InferAddOutput, InferAddOutputTests) {
+    auto registry = vpux::createDialectRegistry();
+    mlir::MLIRContext ctx{registry};
+    ctx.loadDialect<IE::IEDialect>();
+
+    mlir::OpBuilder builder(&ctx);
+    const auto loc = mlir::UnknownLoc::get(&ctx);
+    const SmallVector<int64_t> shape{1, 16, 32, mlir::ShapedType::kDynamic};
+    const SmallVector<int64_t> inBounds{shape[0], shape[1], shape[2], 320};
+    const auto elemType = mlir::Float16Type::get(&ctx);
+    const auto affineMap = mlir::AffineMapAttr::get(vpux::DimsOrder::NCHW.toAffineMap(&ctx));
+    const auto inBoundsAttr = getIntArrayAttr(&ctx, inBounds);
+    const auto tensorAttr = vpux::TensorAttr::get(&ctx, affineMap, /*memSpace=*/nullptr, inBoundsAttr);
+    const auto lhsTensorType = mlir::RankedTensorType::get(shape, elemType, tensorAttr);
+    const auto rhsTensorType = mlir::RankedTensorType::get(SmallVector<int64_t>{1, 16, 1, 1}, elemType);
+    mlir::OwningOpRef<mlir::tensor::EmptyOp> lhsOp =
+            builder.create<mlir::tensor::EmptyOp>(loc, lhsTensorType, mlir::ValueRange{});
+    mlir::OwningOpRef<mlir::tensor::EmptyOp> rhsOp =
+            builder.create<mlir::tensor::EmptyOp>(loc, rhsTensorType, mlir::ValueRange{});
+    mlir::OwningOpRef<IE::AddOp> addOp =
+            builder.create<IE::AddOp>(loc, lhsOp->getResult(), rhsOp->getResult(),
+                                      IE::AutoBroadcastTypeAttr::get(&ctx, IE::AutoBroadcastType::NUMPY),
+                                      /*post_op=*/nullptr,
+                                      /*clamp=*/nullptr,
+                                      /*output_channels=*/nullptr,
+                                      /*input_channels=*/nullptr);
+    const auto outputType = mlir::dyn_cast_or_null<vpux::BoundedTypeInterface>(addOp->getOutput().getType());
+    ASSERT_NE(outputType, nullptr);
+    const auto outputBoundsAttr = outputType.getBounds();
+    ASSERT_NE(outputBoundsAttr, nullptr);
+    const auto outputBounds = parseIntArrayAttr<int64_t>(outputBoundsAttr);
+    EXPECT_EQ(outputBounds, inBounds);
+}

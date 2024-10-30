@@ -462,6 +462,8 @@ private:
     std::unordered_map<operationIdxType, size_t> _inDegreeTable;
     // operation out-degree, number of outgoing edges
     std::unordered_map<operationIdxType, size_t> _outDegreeTable;
+    // level limit for op prefetching, do not check later ready operations
+    const size_t _prefetchingLevelLimit = 35;
     // level of DMAs corresponding to how many DPUs will execute before this DMA is needed
     mlir::DenseMap<operationIdxType, size_t> _dataOpLevels;
     // contains the operation writing to the buffer
@@ -481,9 +483,8 @@ private:
     // TODO: Currently scheduler supports only multiple DMA executors (ports)
     std::map<QueueType, SmallVector<size_t>> _executorPipelines = {
             {{VPU::ExecutorKind::DMA_NN}, {1}},    {{VPU::ExecutorKind::DPU}, {1}},
-            {{VPU::ExecutorKind::SHAVE_UPA}, {1}}, {{VPU::ExecutorKind::NCE}, {1}},
-            {{VPU::ExecutorKind::SHAVE_NN}, {1}},  {{VPU::ExecutorKind::SHAVE_ACT}, {1}},
-            {{VPU::ExecutorKind::M2I}, {1}}};
+            {{VPU::ExecutorKind::NCE}, {1}},       {{VPU::ExecutorKind::SHAVE_NN}, {1}},
+            {{VPU::ExecutorKind::SHAVE_ACT}, {1}}, {{VPU::ExecutorKind::M2I}, {1}}};
 
     // spilled operation cycle cost
     mlir::DenseMap<mlir::Value, size_t> _spillBufferCycleCost;

@@ -21,7 +21,7 @@ func.func @QuantizedConv(%input: tensor<1x3x62x62xui8>) -> tensor<1x4x60x60xf32>
         { auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 } :
         tensor<1x3x62x62xf32>, tensor<f32>, tensor<f32>, tensor<f32>, tensor<f32> -> tensor<1x3x62x62xf32>
 
-    %weights = const.Declare tensor<4x3x3x3xf32> = dense<128> : tensor<4x3x3x3xui8>, [#const.ConvertElemType<f32>]
+    %weights = const.Declare tensor<4x3x3x3xf32> = dense<128> : tensor<4x3x3x3xui8>, [#const.CastElemType<f32>]
 
     %weights_in_low = const.Declare tensor<1xf32> = dense<0.0> : tensor<1xf32>
     %weights_in_high = const.Declare tensor<1xf32> = dense<255.0> : tensor<1xf32>
@@ -30,7 +30,7 @@ func.func @QuantizedConv(%input: tensor<1x3x62x62xui8>) -> tensor<1x4x60x60xf32>
     %weights_out_high = const.Declare tensor<4x1x1x1xf32> = dense<[[[[1.0]]], [[[1.1]]], [[[1.2]]], [[[1.3]]]]> : tensor<4x1x1x1xf32>
 
     %weights_fq = IE.FakeQuantize(%weights, %weights_in_low, %weights_in_high, %weights_out_low, %weights_out_high)
-        { auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 255 } :
+        { auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 } :
         tensor<4x3x3x3xf32>, tensor<1xf32>, tensor<1xf32>, tensor<4x1x1x1xf32>, tensor<4x1x1x1xf32> -> tensor<4x3x3x3xf32>
 
     %conv = IE.Convolution(%input_fq, %weights_fq)
@@ -50,7 +50,7 @@ func.func @QuantizedConv(%input: tensor<1x3x62x62xui8>) -> tensor<1x4x60x60xf32>
 
     // CHECK-DAG:     [[WEIGHTS:%.*]] = const.Declare
     // CHECK-SAME:    dense<128> : tensor<4x3x3x3xui8>,
-    // CHECK-SAME:    [#const.ConvertElemType<f32>, #const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>]
+    // CHECK-SAME:    [#const.CastElemType<f32>, #const.CastElemType<ui8>, #const.CastElemType<!qElemType>]
 
     // CHECK:     [[INPUT_QUANT:%.*]] = IE.QuantizeCast([[INPUT]]) {dstElemType = !qElemType1} :
     // CHECK-SAME:     tensor<1x3x62x62xui8> -> tensor<1x3x62x62x!qElemType1>
@@ -71,19 +71,19 @@ func.func @QuantizedConv(%input: tensor<1x3x62x62xui8>) -> tensor<1x4x60x60xf32>
 !qElemType = !quant.uniform<u8:f16, 2.000000e+00:128>
 // CHECK: !qElemType = !quant.uniform<i8:f16, 2.000000e+00>
 func.func @MixedPrecisionI8Convolution(%arg0: tensor<1x2x1x1xf32>) -> tensor<1x2x1x1xf32> {
-    %cst = const.Declare tensor<1x1x1x1xf16> = dense<0.000000e+00> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
-    %cst_0 = const.Declare tensor<1x1x1x1xf16> = dense<2.550000e+02> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
-    %cst_1 = const.Declare tensor<1x1x1x1xf16> = dense<-2.560000e+02> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
-    %cst_2 = const.Declare tensor<1x1x1x1xf16> = dense<2.540000e+02> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
-    %cst_3 = const.Declare tensor<2x2x1x1xf16> = dense<[[[[0.000000e+00]], [[2.550000e+02]]], [[[1.310000e+02]], [[1.290000e+02]]]]> : tensor<2x2x1x1xf32>, [#const.ConvertElemType<f16>]
+    %cst = const.Declare tensor<1x1x1x1xf16> = dense<0.000000e+00> : tensor<1x1x1x1xf32>, [#const.CastElemType<f16>]
+    %cst_0 = const.Declare tensor<1x1x1x1xf16> = dense<2.550000e+02> : tensor<1x1x1x1xf32>, [#const.CastElemType<f16>]
+    %cst_1 = const.Declare tensor<1x1x1x1xf16> = dense<-2.560000e+02> : tensor<1x1x1x1xf32>, [#const.CastElemType<f16>]
+    %cst_2 = const.Declare tensor<1x1x1x1xf16> = dense<2.540000e+02> : tensor<1x1x1x1xf32>, [#const.CastElemType<f16>]
+    %cst_3 = const.Declare tensor<2x2x1x1xf16> = dense<[[[[0.000000e+00]], [[2.550000e+02]]], [[[1.310000e+02]], [[1.290000e+02]]]]> : tensor<2x2x1x1xf32>, [#const.CastElemType<f16>]
     %0 = IE.FakeQuantize(%cst_3, %cst, %cst_0, %cst_1, %cst_2) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64} : tensor<2x2x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16> -> tensor<2x2x1x1xf16>
     %1 = IE.Convert(%arg0) {dstElemType = f16} : tensor<1x2x1x1xf32> -> tensor<1x2x1x1xf16>
     %2 = IE.Convolution(%1, %0) {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x2x1x1xf16>, tensor<2x2x1x1xf16> -> tensor<1x2x1x1xf16>
     %3 = IE.Convert(%2) {dstElemType = f32} : tensor<1x2x1x1xf16> -> tensor<1x2x1x1xf32>
     return %3 : tensor<1x2x1x1xf32>
     // CHECK:     [[CST:%.*]] = const.Declare tensor<2x2x1x1x!qElemType>
-    // CHECK-SAME:  : tensor<2x2x1x1xf32>, [#const.ConvertElemType<f16>, #const.ConvertElemType<ui8>, #const.QuantCast<!qElemType1>, #const.QuantCast<>,
-    // CHECK-SAME:   #const.ConvertElemType<f16>, #const.Add<-1.280000e+02 : f64>, #const.ConvertElemType<si8>, #const.QuantCast<!qElemType>]
+    // CHECK-SAME:  : tensor<2x2x1x1xf32>, [#const.CastElemType<f16>, #const.CastElemType<ui8>, #const.CastElemType<!qElemType1>, #const.CastElemType<ui8>,
+    // CHECK-SAME:   #const.CastElemType<f16>, #const.Add<-1.280000e+02 : f64>, #const.CastElemType<si8>, #const.CastElemType<!qElemType>]
     // CHECK:     [[VAL0:%.*]] = IE.Convert([[ARG0:%.*]])  {dstElemType = f16} : tensor<1x2x1x1xf32> -> tensor<1x2x1x1xf16>
     // CHECK:     [[CONV:%.*]] = IE.Convolution([[VAL0]], [[CST]])
     // CHECK-SAME: {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x2x1x1xf16>, tensor<2x2x1x1x!qElemType> -> tensor<1x2x1x1xf16>

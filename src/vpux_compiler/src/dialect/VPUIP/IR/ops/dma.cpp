@@ -132,24 +132,6 @@ void vpux::VPUIP::NNDMAOp::build(mlir::OpBuilder& builder, mlir::OperationState&
           /* profilingMetadata=*/nullptr, split_candidate);
 }
 
-VPUIP::BlobWriter::SpecificTask vpux::VPUIP::NNDMAOp::serialize(VPUIP::BlobWriter& writer) {
-    const auto srcOff = writer.getTensorRef(getInput());
-    const auto dstOff = writer.getTensorRef(getOutputBuff());
-
-    const auto port = getPort();
-    VPUX_THROW_UNLESS(port.has_value(), "DMA port has not been set");
-    const auto portValue = port.value();
-
-    MVCNN::NNDMATaskBuilder builder(writer);
-    builder.add_src(srcOff);
-    builder.add_dst(dstOff);
-    builder.add_dma_hwp_id(checked_cast<int32_t>(this->getDmaHwpId().value_or(0)));
-    builder.add_port(checked_cast<uint8_t>(portValue));
-    builder.add_set_ord(static_cast<uint8_t>(!getIsOutOfOrder()));  // ORD
-    builder.add_set_crit(static_cast<uint8_t>(getIsCritical()));    // CRIT
-    return {builder.Finish().Union(), MVCNN::SpecificTask_NNDMATask};
-}
-
 mlir::LogicalResult vpux::VPUIP::NNDMAOp::verify() {
     auto loc = getLoc();
 
@@ -204,26 +186,6 @@ void vpux::VPUIP::PermuteDMAOp::build(mlir::OpBuilder& builder, mlir::OperationS
           /*is_critical=*/nullptr, mem_perm, dma_descriptor, nullptr, /* profilingMetadata */ nullptr);
 }
 
-VPUIP::BlobWriter::SpecificTask vpux::VPUIP::PermuteDMAOp::serialize(VPUIP::BlobWriter& writer) {
-    const auto srcOff = writer.getTensorRef(getInput());
-    const auto dstOff = writer.getTensorRef(getOutputBuff());
-    const auto descriptor = writer.getPermuteNNDMADescriptorReference(getOperation());
-
-    const auto port = getPort();
-    VPUX_THROW_UNLESS(port.has_value(), "DMA port has not been set");
-    const auto portValue = port.value();
-
-    MVCNN::NNDMATaskBuilder builder(writer);
-    builder.add_src(srcOff);
-    builder.add_dst(dstOff);
-    builder.add_port(checked_cast<uint8_t>(portValue));
-    builder.add_dma_hwp_id(checked_cast<int32_t>(this->getDmaHwpId().value_or(0)));
-    builder.add_set_ord(static_cast<uint8_t>(!getIsOutOfOrder()));  // ORD
-    builder.add_set_crit(static_cast<uint8_t>(getIsCritical()));    // CRIT
-    builder.add_descriptor(&descriptor);
-    return {builder.Finish().Union(), MVCNN::SpecificTask_NNDMATask};
-}
-
 mlir::LogicalResult vpux::VPUIP::PermuteDMAOp::verify() {
     return verifyTensorSize(getLoc(), getInput());
 }
@@ -272,9 +234,9 @@ mlir::LogicalResult vpux::VPUIP::GatherDMAOp::verify() {
         return mlir::success();
     }
 
-    // TODO: #E-86281 move to 40xx
+    // TODO: #E#86281 move to 40xx
     if (arch != VPU::ArchKind::NPU40XX) {
-        return errorAt(loc, "Operation {0} is only supported for NPUX40XX but got {1}.", getOperationName(), arch);
+        return errorAt(loc, "Operation {0} is only supported for NPU40XX, but got {1}.", getOperationName(), arch);
     }
 
     auto indicesType = getIndices().getType().cast<vpux::NDTypeInterface>();
@@ -294,11 +256,6 @@ mlir::LogicalResult vpux::VPUIP::GatherDMAOp::verify() {
     }
 
     return verifyTensorSize(loc, getOutput());
-}
-
-// Not needed for a NPU40XX specific DMA op since we use ELF as default but TaskOpInterface requires it.
-VPUIP::BlobWriter::SpecificTask vpux::VPUIP::GatherDMAOp::serialize(VPUIP::BlobWriter&) {
-    VPUX_THROW("Serialization for gather DMA operation is not supported.");
 }
 
 size_t vpux::VPUIP::GatherDMAOp::getOperationCycleCost(std::shared_ptr<VPUNN::VPUCostModel>& costModel) {
@@ -330,24 +287,6 @@ void vpux::VPUIP::ConvertDMAOp::build(mlir::OpBuilder& builder, mlir::OperationS
           /* dma_hwp_id=*/nullptr, /* profilingMetadata */ nullptr);
 }
 
-VPUIP::BlobWriter::SpecificTask vpux::VPUIP::ConvertDMAOp::serialize(VPUIP::BlobWriter& writer) {
-    const auto srcOff = writer.getTensorRef(getInput());
-    const auto dstOff = writer.getTensorRef(getOutputBuff());
-
-    const auto port = getPort();
-    VPUX_THROW_UNLESS(port.has_value(), "DMA port has not been set");
-    const auto portValue = port.value();
-
-    MVCNN::NNDMATaskBuilder builder(writer);
-    builder.add_src(srcOff);
-    builder.add_dst(dstOff);
-    builder.add_dma_hwp_id(checked_cast<int32_t>(this->getDmaHwpId().value_or(0)));
-    builder.add_port(checked_cast<uint8_t>(portValue));
-    builder.add_set_ord(static_cast<uint8_t>(!getIsOutOfOrder()));  // ORD
-    builder.add_set_crit(static_cast<uint8_t>(getIsCritical()));    // CRIT
-    return {builder.Finish().Union(), MVCNN::SpecificTask_NNDMATask};
-}
-
 mlir::LogicalResult vpux::VPUIP::ConvertDMAOp::verify() {
     auto loc = getLoc();
     auto arch = VPU::getArch(getOperation());
@@ -365,7 +304,8 @@ mlir::LogicalResult vpux::VPUIP::ConvertDMAOp::verify() {
     if ((arch != VPU::ArchKind::NPU40XX) || !inputElementType.isF32() ||
         (!outputElementType.isF16() && !outputElementType.isBF16())) {
         return errorAt(loc,
-                       "Operation {0} is only supported for NPU40XX arch for F32 to F16/BF16 conversion. "
+                       "Operation {0} is only supported for NPU40XX arch for F32 to F16/BF16 "
+                       "conversion. "
                        "Got arch {1} "
                        "and conversion from {2} to {3}",
                        getOperationName(), arch, inputElementType, outputElementType);
@@ -456,36 +396,6 @@ void vpux::VPUIP::DecompressDMAOp::build(mlir::OpBuilder& builder, mlir::Operati
           /* dma_hwp_id= */ nullptr, /* profilingMetadata */ nullptr);
 }
 
-VPUIP::BlobWriter::SpecificTask vpux::VPUIP::DecompressDMAOp::serialize(VPUIP::BlobWriter& writer) {
-    const auto srcOff = writer.getTensorRef(getInput());
-    const auto dstOff = writer.getTensorRef(getOutputBuff());
-
-    MVCNN::NNDMATaskBuilder builder(writer);
-
-    if (getActCompressionSizeEntry()) {
-        const auto act_compression_size_entryOff = writer.getTensorRef(getActCompressionSizeEntry());
-        builder.add_act_compression_size_entry(act_compression_size_entryOff);
-        // In case of Activation Spill Decompression: use DMA to decompress the activation.
-        builder.add_compression(true);
-    } else {
-        // In case of BitCompactor weight compression: use BitCompactor to compress weights and the DMA will de-compress
-        // the weights
-        builder.add_compression(true);
-    }
-
-    const auto port = getPort();
-    VPUX_THROW_UNLESS(port.has_value(), "DMA port has not been set");
-    const auto portValue = port.value();
-
-    builder.add_src(srcOff);
-    builder.add_dst(dstOff);
-    builder.add_dma_hwp_id(checked_cast<int32_t>(this->getDmaHwpId().value_or(0)));
-    builder.add_port(checked_cast<uint8_t>(portValue));
-    builder.add_set_ord(static_cast<uint8_t>(!getIsOutOfOrder()));  // ORD
-    builder.add_set_crit(static_cast<uint8_t>(getIsCritical()));    // CRIT
-    return {builder.Finish().Union(), MVCNN::SpecificTask_NNDMATask};
-}
-
 mlir::LogicalResult vpux::VPUIP::DecompressDMAOp::verify() {
     auto loc = getLoc();
 
@@ -556,28 +466,6 @@ void vpux::VPUIP::CompressDMAOp::build(mlir::OpBuilder& builder, mlir::Operation
           /* dma_hwp_id= */ nullptr, /* profilingMetadata */ nullptr);
 }
 
-VPUIP::BlobWriter::SpecificTask vpux::VPUIP::CompressDMAOp::serialize(VPUIP::BlobWriter& writer) {
-    const auto srcOff = writer.getTensorRef(getInput());
-    const auto dstOff = writer.getTensorRef(getOutputBuff());
-    const auto act_compression_size_entryOff = writer.getTensorRef(getActCompressionSizeEntry());
-
-    const auto port = getPort();
-    VPUX_THROW_UNLESS(port.has_value(), "DMA port has not been set");
-    const auto portValue = port.value();
-
-    MVCNN::NNDMATaskBuilder builder(writer);
-    builder.add_src(srcOff);
-    builder.add_dst(dstOff);
-    builder.add_act_compression_size_entry(act_compression_size_entryOff);
-    // In case of Activation Spill Compression: use DMA to compress the activation.
-    builder.add_compression(true);
-    builder.add_port(checked_cast<uint8_t>(portValue));
-    builder.add_dma_hwp_id(checked_cast<int32_t>(this->getDmaHwpId().value_or(0)));
-    builder.add_set_ord(static_cast<uint8_t>(!getIsOutOfOrder()));  // ORD
-    builder.add_set_crit(static_cast<uint8_t>(getIsCritical()));    // CRIT
-    return {builder.Finish().Union(), MVCNN::SpecificTask_NNDMATask};
-}
-
 mlir::LogicalResult vpux::VPUIP::CompressDMAOp::verify() {
     auto loc = getLoc();
 
@@ -632,26 +520,6 @@ void vpux::VPUIP::DepthToSpaceDMAOp::build(mlir::OpBuilder& odsBuilder, mlir::Op
           /* profilingMetadata */ nullptr);
 }
 
-VPUIP::BlobWriter::SpecificTask vpux::VPUIP::DepthToSpaceDMAOp::serialize(VPUIP::BlobWriter& writer) {
-    const auto srcOff = writer.getTensorRef(getInput());
-    const auto dstOff = writer.getTensorRef(getOutputBuff());
-    const auto descriptor = writer.getDepthToSpaceNNDMADescriptorReference(getOperation());
-
-    const auto port = getPort();
-    VPUX_THROW_UNLESS(port.has_value(), "DMA port has not been set");
-    const auto portValue = port.value();
-
-    MVCNN::NNDMATaskBuilder builder(writer);
-    builder.add_src(srcOff);
-    builder.add_dst(dstOff);
-    builder.add_port(checked_cast<uint8_t>(portValue));
-    builder.add_dma_hwp_id(checked_cast<int32_t>(this->getDmaHwpId().value_or(0)));
-    builder.add_set_ord(static_cast<uint8_t>(!getIsOutOfOrder()));  // ORD
-    builder.add_set_crit(static_cast<uint8_t>(getIsCritical()));    // CRIT
-    builder.add_descriptor(&descriptor);
-    return {builder.Finish().Union(), MVCNN::SpecificTask_NNDMATask};
-}
-
 mlir::LogicalResult vpux::VPUIP::DepthToSpaceDMAOp::verify() {
     return verifyTensorSize(getLoc(), getInput());
 }
@@ -685,26 +553,6 @@ void vpux::VPUIP::SpaceToDepthDMAOp::build(mlir::OpBuilder& odsBuilder, mlir::Op
     build(odsBuilder, odsState, input, output_buff, port, block_size, mode, dma_descriptor,
           /*is_out_of_order=*/nullptr, /*is_critical=*/nullptr, /* dma_hwp_id= */ nullptr,
           /* profilingMetadata */ nullptr);
-}
-
-VPUIP::BlobWriter::SpecificTask vpux::VPUIP::SpaceToDepthDMAOp::serialize(VPUIP::BlobWriter& writer) {
-    const auto srcOff = writer.getTensorRef(getInput());
-    const auto dstOff = writer.getTensorRef(getOutputBuff());
-    const auto descriptor = writer.getSpaceToDepthNNDMADescriptorReference(getOperation());
-
-    const auto port = getPort();
-    VPUX_THROW_UNLESS(port.has_value(), "DMA port has not been set");
-    const auto portValue = port.value();
-
-    MVCNN::NNDMATaskBuilder builder(writer);
-    builder.add_src(srcOff);
-    builder.add_dst(dstOff);
-    builder.add_port(checked_cast<uint8_t>(portValue));
-    builder.add_dma_hwp_id(checked_cast<int32_t>(this->getDmaHwpId().value_or(0)));
-    builder.add_set_ord(static_cast<uint8_t>(!getIsOutOfOrder()));  // ORD
-    builder.add_set_crit(static_cast<uint8_t>(getIsCritical()));    // CRIT
-    builder.add_descriptor(&descriptor);
-    return {builder.Finish().Union(), MVCNN::SpecificTask_NNDMATask};
 }
 
 mlir::LogicalResult vpux::VPUIP::SpaceToDepthDMAOp::verify() {
@@ -756,26 +604,6 @@ mlir::LogicalResult vpux::VPUIP::ExpandDMAOp::verify() {
     return mlir::success();
 }
 
-VPUIP::BlobWriter::SpecificTask vpux::VPUIP::ExpandDMAOp::serialize(VPUIP::BlobWriter& writer) {
-    const auto srcOff = writer.getTensorRef(getInput());
-    const auto dstOff = writer.getTensorRef(getOutputBuff());
-    const auto descriptor = writer.getExpandNNDMADescriptorReference(getOperation());
-
-    const auto port = getPort();
-    VPUX_THROW_UNLESS(port.has_value(), "DMA port has not been set");
-    const auto portValue = port.value();
-
-    MVCNN::NNDMATaskBuilder builder(writer);
-    builder.add_src(srcOff);
-    builder.add_dst(dstOff);
-    builder.add_port(checked_cast<uint8_t>(portValue));
-    builder.add_dma_hwp_id(checked_cast<int32_t>(this->getDmaHwpId().value_or(0)));
-    builder.add_set_ord(static_cast<uint8_t>(!getIsOutOfOrder()));  // ORD
-    builder.add_set_crit(static_cast<uint8_t>(getIsCritical()));    // CRIT
-    builder.add_descriptor(&descriptor);
-    return {builder.Finish().Union(), MVCNN::SpecificTask_NNDMATask};
-}
-
 size_t vpux::VPUIP::ExpandDMAOp::getOperationCycleCost(std::shared_ptr<VPUNN::VPUCostModel>& costModel) {
     auto module = getOperation()->getParentOfType<mlir::ModuleOp>();
 
@@ -805,26 +633,6 @@ void vpux::VPUIP::PerAxisTileDMAOp::build(mlir::OpBuilder& odsBuilder, mlir::Ope
     build(odsBuilder, odsState, input, output_buff, port, axis, tiles, dma_descriptor,
           /*is_out_of_order=*/nullptr, /*is_critical=*/nullptr, /* dma_hwp_id= */ nullptr,
           /* profilingMetadata */ nullptr);
-}
-
-VPUIP::BlobWriter::SpecificTask vpux::VPUIP::PerAxisTileDMAOp::serialize(VPUIP::BlobWriter& writer) {
-    const auto srcOff = writer.getTensorRef(getInput());
-    const auto dstOff = writer.getTensorRef(getOutputBuff());
-    const auto descriptor = writer.getPerAxisTileNNDMADescriptorReference(getOperation());
-
-    const auto port = getPort();
-    VPUX_THROW_UNLESS(port.has_value(), "DMA port has not been set");
-    const auto portValue = port.value();
-
-    MVCNN::NNDMATaskBuilder builder(writer);
-    builder.add_src(srcOff);
-    builder.add_dst(dstOff);
-    builder.add_port(checked_cast<uint8_t>(portValue));
-    builder.add_dma_hwp_id(checked_cast<int32_t>(this->getDmaHwpId().value_or(0)));
-    builder.add_set_ord(static_cast<uint8_t>(!getIsOutOfOrder()));  // ORD
-    builder.add_set_crit(static_cast<uint8_t>(getIsCritical()));    // CRIT
-    builder.add_descriptor(&descriptor);
-    return {builder.Finish().Union(), MVCNN::SpecificTask_NNDMATask};
 }
 
 mlir::LogicalResult vpux::VPUIP::PerAxisTileDMAOp::verify() {
@@ -886,26 +694,6 @@ mlir::LogicalResult vpux::VPUIP::UpsamplingDMAOp::verify() {
     return mlir::success();
 }
 
-VPUIP::BlobWriter::SpecificTask vpux::VPUIP::UpsamplingDMAOp::serialize(VPUIP::BlobWriter& writer) {
-    const auto srcOff = writer.getTensorRef(getInput());
-    const auto dstOff = writer.getTensorRef(getOutputBuff());
-    const auto descriptor = writer.getUpsamplingNNDMADescriptorReference(getOperation());
-
-    const auto port = getPort();
-    VPUX_THROW_UNLESS(port.has_value(), "DMA port has not been set");
-    const auto portValue = port.value();
-
-    MVCNN::NNDMATaskBuilder builder(writer);
-    builder.add_src(srcOff);
-    builder.add_dst(dstOff);
-    builder.add_port(checked_cast<uint8_t>(portValue));
-    builder.add_dma_hwp_id(checked_cast<int32_t>(this->getDmaHwpId().value_or(0)));
-    builder.add_set_ord(static_cast<uint8_t>(!getIsOutOfOrder()));  // ORD
-    builder.add_set_crit(static_cast<uint8_t>(getIsCritical()));    // CRIT
-    builder.add_descriptor(&descriptor);
-    return {builder.Finish().Union(), MVCNN::SpecificTask_NNDMATask};
-}
-
 size_t vpux::VPUIP::UpsamplingDMAOp::getOperationCycleCost(std::shared_ptr<VPUNN::VPUCostModel>& costModel) {
     auto module = getOperation()->getParentOfType<mlir::ModuleOp>();
 
@@ -914,25 +702,6 @@ size_t vpux::VPUIP::UpsamplingDMAOp::getOperationCycleCost(std::shared_ptr<VPUNN
     // getDMACost()
     const auto arch = VPU::getArch(module);
     return checked_cast<size_t>(getDMACost(getInput(), getOutput(), arch, costModel));
-}
-
-VPUIP::BlobWriter::SpecificTask vpux::VPUIP::SyncDMAOp::serialize(VPUIP::BlobWriter& writer) {
-    const auto port = getPort();
-    VPUX_THROW_UNLESS(port.has_value(), "DMA port has not been set");
-    const auto portValue = port.value();
-
-    MVCNN::NNDMATaskBuilder builder(writer);
-    const auto srcOff = writer.getTensorRef(getInput());
-    const auto dstOff = writer.getTensorRef(getOutputBuff());
-    const auto descriptor = writer.getSyncNNDMADescriptorReference(getOperation());
-    builder.add_src(srcOff);
-    builder.add_dst(dstOff);
-    builder.add_port(checked_cast<uint8_t>(portValue));
-    builder.add_dma_hwp_id(this->getDmaHwpId().value_or(0));
-    builder.add_set_ord(static_cast<uint8_t>(!getIsOutOfOrder()));  // ORD
-    builder.add_set_crit(static_cast<uint8_t>(getIsCritical()));    // CRIT
-    builder.add_descriptor(&descriptor);
-    return {builder.Finish().Union(), MVCNN::SpecificTask_NNDMATask};
 }
 
 mlir::LogicalResult vpux::VPUIP::SyncDMAOp::verify() {

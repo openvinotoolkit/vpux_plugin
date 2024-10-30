@@ -22,18 +22,18 @@ def setOutDir(newOutDir):
     outDir = newOutDir
 
 
-def printUsage(desc = False):
+def printUsage(desc=False):
     if desc:
         print("Searches the directory tree (starting from 'SOURCE_DIRECTORY') the xml files with OpenVINO IRs,\n",
-            "    should be run in the directory where it lies,\n",
-            "    prepares the layers information from IRs into Markdown formatted files with layers lists and pivot table,\n",
-            "    places the results in 'OUTPUT_DIRECTORY'.\n")
+              "    should be run in the directory where it lies,\n",
+              "    prepares the layers information from IRs into Markdown formatted files with layers lists and pivot table,\n",
+              "    places the results in 'OUTPUT_DIRECTORY'.\n")
     print("Usage: \n",
-    "    python info.py <SOURCE_DIRECTORY> [<OUTPUT_DIRECTORY>('./' as default)])")
+          "    python info.py <SOURCE_DIRECTORY> [<OUTPUT_DIRECTORY>('./' as default)])")
 
 
 def writeCrossTable(networks, layers):
-    mdMain = MdUtils(file_name = outDir + '/LAYERS_NETWORKS', title='Networks to layers correspondence')
+    mdMain = MdUtils(file_name=outDir + '/LAYERS_NETWORKS', title='Networks to layers correspondence')
     mdMain.new_line()
     networkList = sorted(networks.keys())
     layerSet = set(layers.keys())
@@ -46,11 +46,12 @@ def writeCrossTable(networks, layers):
 
     nCols = len(mdRows)
     nRows = 1
-    for layer in sorted(list(layerSet), key = helpers.sortLayers):
+    for layer in sorted(list(layerSet), key=helpers.sortLayers):
         mdRow = ["[" + layer + "](./mdlayers/" + layer + ".md)"]
         for network in networkList:
             if layer in networks[network]["layerTypes"]:
-                mdRow.append("&nbsp; &nbsp; **[ + ](./mdnetworks/" + networks[network]["netName"] + ".md#" + str(layer).lower() + ")**")
+                mdRow.append("&nbsp; &nbsp; **[ + ](./mdnetworks/" + networks[network]
+                             ["netName"] + ".md#" + str(layer).lower() + ")**")
             else:
                 mdRow.append(" ")
         nRows += 1
@@ -59,10 +60,10 @@ def writeCrossTable(networks, layers):
     mdMain.create_md_file()
 
 
-def layerDataForTable(layers, layerType, manyNets = False):
+def layerDataForTable(layers, layerType, manyNets=False):
     layerData = layers[layerType]
     listOfLayers = list(set(layerData.keys()) - set(["FOUND_ATTRIBUTES"]))
-    listOfAttr = sorted(list(layerData["FOUND_ATTRIBUTES"]), key = helpers.sortKey)
+    listOfAttr = sorted(list(layerData["FOUND_ATTRIBUTES"]), key=helpers.sortKey)
     mdRows = list(listOfAttr)
     mdRows.append("ids")
     nCols = len(mdRows)
@@ -74,14 +75,16 @@ def layerDataForTable(layers, layerType, manyNets = False):
         delimiter0 = ""
         for net in layerData[layerKey]["ids"]:
             if manyNets:
-                ids = ids + delimiter0 + "[" + net + "](../mdnetworks/" + net + ".md#" + layerType.lower() + ") &nbsp;ids&nbsp;:&nbsp; "
+                ids = ids + delimiter0 + "[" + net + "](../mdnetworks/" + net + \
+                    ".md#" + layerType.lower() + ") &nbsp;ids&nbsp;:&nbsp; "
                 delimiter0 = "<br>"
             else:
                 ids = "ids&nbsp;:&nbsp;&nbsp; "
             delimiter1 = ""
             xmlLineNums = layerData[layerKey]["ids"][net]["lines"]
             for id in layerData[layerKey]["ids"][net]["ids"]:
-                ids = ids + delimiter1 + "[" + id + "](../mdnetworks/" + net + ".1xml#L" + str(xmlLineNums[helpers.get_anchor_id(id)]) + ")"
+                ids = ids + delimiter1 + "[" + id + "](../mdnetworks/" + net + \
+                    ".1xml#L" + str(xmlLineNums[helpers.get_anchor_id(id)]) + ")"
                 delimiter1 = ", "
         mdRows.append(ids)
         nRows = nRows + 1
@@ -94,7 +97,7 @@ def writeNetwork(network):
     xmlFile = Path(network["path"])
     shutil.copyfile(str(xmlFile), xmlToMdFileName)
 
-    mdNetwork = MdUtils(file_name = outDir + "/mdnetworks/" + mdFileName)
+    mdNetwork = MdUtils(file_name=outDir + "/mdnetworks/" + mdFileName)
     mdNetwork.new_header(1, "Layers info for " + mdFileName)
     networkIrName = network["irNetName"]
     if networkIrName != None:
@@ -103,19 +106,20 @@ def writeNetwork(network):
     mdNetwork.write("[... to 'Networks to layers correspondence'](../LAYERS_NETWORKS.md)\n")
 
     layerTypes = network["layerTypes"]
-    for layerType in sorted(list(layerTypes), key = helpers.sortLayers):
+    for layerType in sorted(list(layerTypes), key=helpers.sortLayers):
         mdRows, nRows, nCols = layerDataForTable(layerTypes, layerType, False)
 
         mdNetwork.write('\n<a href id="' + layerType.lower() + '"></a>\n')
         mdNetwork.new_header(3, layerType.lower())
-        mdNetwork.write("**of " + mdFileName + " ([... to all " + layerType + " s](../mdlayers/" + layerType + ".md#" + mdFileName.lower() + "))**\n")
+        mdNetwork.write("**of " + mdFileName + " ([... to all " + layerType +
+                        " s](../mdlayers/" + layerType + ".md#" + mdFileName.lower() + "))**\n")
         mdNetwork.new_table(columns=nCols, rows=nRows + 1, text=mdRows, text_align='left')
 
     mdNetwork.create_md_file()
 
 
 def writeLayer(layers, layerType):
-    mdLayer = MdUtils(file_name = outDir + "/mdlayers/" + layerType)
+    mdLayer = MdUtils(file_name=outDir + "/mdlayers/" + layerType)
     mdLayer.new_header(1, 'All layers"' + layerType + '"')
     mdLayer.new_header(2, " ")
     mdLayer.write("[... to 'Networks to layers correspondence'](../LAYERS_NETWORKS.md)\n")

@@ -22,14 +22,14 @@ public:
 };
 
 // Slice input, merged input and concat output cases
-class TensorIteratorSubGraphTestCommon_NPU3720_FORWARD : public TensorIteratorSubGraphTestCommon {
+class TensorIteratorSubGraphTestCommon_FORWARD : public TensorIteratorSubGraphTestCommon {
     void SetUp() override {
         // Setting up test data
         inType = ov::element::f32;
         std::vector<std::vector<size_t>> exInputShapes, bodyInputShapes;
-        exInputShapes = {{2, 3, 6, 10}, {4, 4, 5, 5}};
+        exInputShapes = {{1, 3, 6, 10}, {1, 4, 5, 5}};
         int64_t axis = 1;
-        bodyInputShapes = {{2, 1, 6, 10}, {4, 4, 5, 5}};
+        bodyInputShapes = {{1, 1, 6, 10}, {1, 4, 5, 5}};
         const ov::Shape weightsShape{1};
 
         init_input_shapes(static_shapes_to_test_representation({exInputShapes[0], exInputShapes[1]}));
@@ -65,19 +65,26 @@ class TensorIteratorSubGraphTestCommon_NPU3720_FORWARD : public TensorIteratorSu
     }
 };
 
-TEST_F(TensorIteratorSubGraphTestCommon_NPU3720_FORWARD, HW) {
+class TensorIteratorSubGraphTestCommon_NPU3720_FORWARD : public TensorIteratorSubGraphTestCommon_FORWARD {};
+TEST_F(TensorIteratorSubGraphTestCommon_NPU3720_FORWARD, NPU3720_TestKindSubgraph) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-class TensorIteratorSubGraphTestCommon_NPU3720_REVERSE : public TensorIteratorSubGraphTestCommon {
+class TensorIteratorSubGraphTestCommon_NPU4000_FORWARD : public TensorIteratorSubGraphTestCommon_FORWARD {};
+TEST_F(TensorIteratorSubGraphTestCommon_NPU4000_FORWARD, NPU4000_TestKindSubgraph) {
+    setDefaultHardwareMode();
+    run(Platform::NPU4000);
+}
+
+class TensorIteratorSubGraphTestCommon_REVERSE : public TensorIteratorSubGraphTestCommon {
     void SetUp() override {
         // Setting up test data
         inType = ov::element::f32;
         std::vector<std::vector<size_t>> exInputShapes, bodyInputShapes;
-        exInputShapes = {{2, 3, 6, 10}, {4, 4, 5, 5}};
+        exInputShapes = {{1, 3, 6, 10}, {1, 4, 5, 5}};
         int64_t axis = 1;
-        bodyInputShapes = {{2, 1, 6, 10}, {4, 4, 5, 5}};
+        bodyInputShapes = {{1, 1, 6, 10}, {1, 4, 5, 5}};
         const ov::Shape weightsShape{1};
 
         init_input_shapes(static_shapes_to_test_representation({exInputShapes[0], exInputShapes[1]}));
@@ -113,9 +120,16 @@ class TensorIteratorSubGraphTestCommon_NPU3720_REVERSE : public TensorIteratorSu
     }
 };
 
-TEST_F(TensorIteratorSubGraphTestCommon_NPU3720_REVERSE, HW) {
+class TensorIteratorSubGraphTestCommon_NPU3720_REVERSE : public TensorIteratorSubGraphTestCommon_REVERSE {};
+TEST_F(TensorIteratorSubGraphTestCommon_NPU3720_REVERSE, NPU3720_TestKindSubgraph) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
+}
+
+class TensorIteratorSubGraphTestCommon_NPU4000_REVERSE : public TensorIteratorSubGraphTestCommon_REVERSE {};
+TEST_F(TensorIteratorSubGraphTestCommon_NPU4000_REVERSE, NPU4000_TestKindSubgraph) {
+    setDefaultHardwareMode();
+    run(Platform::NPU4000);
 }
 
 }  // namespace ov::test

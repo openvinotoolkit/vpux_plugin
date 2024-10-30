@@ -4,6 +4,7 @@
 //
 
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPU/transforms/factories/max_lstm_hidden_size_constant.hpp"
 
 using namespace vpux;
 
@@ -30,13 +31,10 @@ mlir::LogicalResult vpux::VPU::LSTMCellOp::inferReturnTypes(mlir::MLIRContext* c
 namespace {
 
 bool isSupported(VPU::ArchKind arch, ShapeRef inputDataShape, ShapeRef initialHiddenStateShape) {
-    if (arch != VPU::ArchKind::NPU40XX) {
-        return false;
-    }
+    auto maxHiddenSize = getMaxLstmHiddenSizeConstant(arch);
     // shave implementation allow reduced size. Bigger size can be map on DPU.
     // Cost model can be interrogate.
     constexpr int64_t maxInputSize(256);
-    constexpr int64_t maxHiddenSize(128);
     constexpr int64_t maxBatchSize(1);
     // shave asm implement just 16 element alignment input and hidden size. Except that speed is low.
     constexpr int64_t alignmentRequired(16);

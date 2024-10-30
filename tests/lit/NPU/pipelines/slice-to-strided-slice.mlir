@@ -11,7 +11,7 @@
 // CHECK:   IE.CNNNetwork entryPoint : @main inputsInfo : {
 // CHECK:       DataInfo "Parameter_52" : tensor<16xf16>
 // CHECK:   } outputsInfo : {
-// CHECK:   DataInfo "Slice_57" : tensor<8xf16>
+// CHECK:   DataInfo "Slice_57" friendlyName = "Result_58" : tensor<8xf16>
 // CHECK:   }
 // CHECK:   func.func @main([[ARG0:[^:]+]]: tensor<16xf16>) -> tensor<8xf16> {
 // CHECK:      [[CONST:%.*]] = const.Declare tensor<1xsi64> = dense<4> : tensor<1xsi64>

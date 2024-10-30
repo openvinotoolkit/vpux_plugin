@@ -86,19 +86,24 @@ INSTANTIATE_TEST_SUITE_P(smoke_ScatterElementsUpdate, ScatterElementsUpdateLayer
 namespace {  // ScatterElementsUpdate12
 
 std::map<std::vector<size_t>, std::map<std::vector<size_t>, std::vector<int>>> axesShapeInShapeV12{
-        {{10, 12}, {{{1, 2}, {0, 1}}}},
+        {{2, 3, 4}, {{{1, 7, 1}, {1, -1}}}},
 };
 
 const std::vector<std::vector<int64_t>> idxWithNegativeValues = {
-        {1, 0},
+        {-1, 0, -1, -1, 2, 1, 1},
 };
 
-INSTANTIATE_TEST_SUITE_P(smoke_ScatterEltsUpdate12, ScatterElementsUpdate12LayerTestCommon,
+std::vector<ov::op::v12::ScatterElementsUpdate::Reduction> reductionModes{
+        ov::op::v12::ScatterElementsUpdate::Reduction::NONE, ov::op::v12::ScatterElementsUpdate::Reduction::SUM,
+        ov::op::v12::ScatterElementsUpdate::Reduction::PROD, ov::op::v12::ScatterElementsUpdate::Reduction::MAX,
+        ov::op::v12::ScatterElementsUpdate::Reduction::MIN,  ov::op::v12::ScatterElementsUpdate::Reduction::MEAN,
+};
+
+INSTANTIATE_TEST_SUITE_P(smoke_ScatterElementsUpdate12, ScatterElementsUpdate12LayerTestCommon,
                          ::testing::Combine(::testing::ValuesIn(combineShapes(axesShapeInShapeV12)),
                                             ::testing::ValuesIn(idxWithNegativeValues),
-                                            ::testing::Values(ov::op::v12::ScatterElementsUpdate::Reduction::NONE),
-                                            ::testing::Values(true), ::testing::Values(ov::element::f16),
-                                            ::testing::Values(ov::element::i32),
+                                            ::testing::ValuesIn(reductionModes), ::testing::ValuesIn({true, false}),
+                                            ::testing::Values(ov::element::f16), ::testing::Values(ov::element::i32),
                                             ::testing::Values(ov::test::utils::DEVICE_NPU)),
                          ScatterElementsUpdate12LayerTestCommon::getTestCaseName);
 

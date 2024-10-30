@@ -88,10 +88,10 @@ TEST_P(SelectDuplicatedInputTestCommon, NPU4000_HW) {
     run(Platform::NPU4000);
 }
 
-INSTANTIATE_TEST_CASE_P(smoke_SelectDuplicatedInput, SelectDuplicatedInputTestCommon,
-                        ::testing::Values(SelectDuplicatedInputTestParams{
-                                1, 1, 1024, 1024  // input shape
-                        }),
-                        SelectDuplicatedInputTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_SelectDuplicatedInput, SelectDuplicatedInputTestCommon,
+                         ::testing::Values(SelectDuplicatedInputTestParams{
+                                 1, 1, 1024, 1024  // input shape
+                         }),
+                         SelectDuplicatedInputTestCommon::getTestCaseName);
 
 }  // namespace ov::test::subgraph

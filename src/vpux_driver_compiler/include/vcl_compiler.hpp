@@ -78,6 +78,16 @@ public:
     std::pair<VPUXExecutableL0*, vcl_result_t> importNetwork(BuildInfo& buildInfo);
 
     /**
+     * @brief Use VPUX MLIR compiler to create blob with user info
+     * @note Blob storage is allocated via given allocator
+     *
+     * @param buildInfo Include the model data, ioInfo, compilation configs
+     * @param allocator Allocator for blob storage allocation
+     * @return vpux::NetworkDescriptionView Include non-owning view into blob and metadata
+     */
+    vpux::NetworkDescriptionView importNetwork(BuildInfo& buildInfo, const vcl_allocator_t* allocator);
+
+    /**
      * @brief Check if a model can be supported by current compiler
      *
      * @param buildInfo include the model data, default compilation config

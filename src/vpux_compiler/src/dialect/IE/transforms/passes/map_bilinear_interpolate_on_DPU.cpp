@@ -60,9 +60,9 @@ mlir::Value createGenericGroupConv(mlir::PatternRewriter& rewriter, mlir::Locati
 
     auto weights = createGroupConvWeightsForBilinearInterp(rewriter, loc, input, bilinearCoeffs, index, weightShape,
                                                            outputSize);
-    auto groupConvOp = rewriter.create<IE::GroupConvolutionOp>(loc, input, weights, /*bias=*/nullptr, stridesAttr,
-                                                               padBeginAttr, padEndAttr, dilationsAttr, groupAttr,
-                                                               /*post_opAttr=*/nullptr, /*clampAttr*/ nullptr);
+    auto groupConvOp = rewriter.create<IE::GroupConvolutionOp>(
+            loc, input, weights, /*bias=*/nullptr, stridesAttr, padBeginAttr, padEndAttr, dilationsAttr, groupAttr,
+            /*post_opAttr=*/nullptr, /*clampAttr*/ nullptr, /*outputChannels=*/nullptr, /*inputChannels=*/nullptr);
     return groupConvOp.getOutput();
 }
 
@@ -102,7 +102,7 @@ mlir::Value IE::MapBilinearInterpolateOnDPUBaseRewriter::createIdentityPooling(m
     auto avgPoolOp = rewriter.create<IE::AvgPoolOp>(
             loc, input, getIntArrayAttr(rewriter, poolKernels), getIntArrayAttr(rewriter, poolStrides), padsAttr,
             padsAttr, vpux::IE::RoundingTypeAttr::get(rewriter.getContext(), vpux::IE::RoundingType::FLOOR),
-            mlir::UnitAttr::get(rewriter.getContext()), nullptr, nullptr);
+            mlir::UnitAttr::get(rewriter.getContext()), nullptr, nullptr, nullptr, nullptr, nullptr);
 
     return avgPoolOp.getOutput();
 }

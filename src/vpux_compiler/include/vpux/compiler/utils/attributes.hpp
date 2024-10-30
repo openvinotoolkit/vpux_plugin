@@ -100,6 +100,21 @@ mlir::ArrayAttr getFPArrayOfArray(mlir::MLIRContext* ctx, Range&& arrayOfArray) 
 }
 
 //
+// parse<Scalar>Attr
+//
+
+template <typename T>
+T parseIntAttr(mlir::Attribute attr) {
+    const auto intAttr = attr.dyn_cast_or_null<mlir::IntegerAttr>();
+    VPUX_THROW_UNLESS(intAttr != nullptr, "Got non Integer Attribute '{0}'", attr);
+    if (intAttr.getType().isUnsignedInteger()) {
+        return checked_cast<T>(intAttr.getUInt());
+    }
+
+    return checked_cast<T>(intAttr.getValue().getSExtValue());
+}
+
+//
 // parse<Scalar>ArrayAttr
 //
 

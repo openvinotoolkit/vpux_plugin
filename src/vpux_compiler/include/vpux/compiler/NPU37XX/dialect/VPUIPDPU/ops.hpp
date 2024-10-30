@@ -7,6 +7,7 @@
 
 #include "vpux/compiler/dialect/VPUIPDPU/attributes.hpp"
 #include "vpux/compiler/dialect/VPUIPDPU/ops.hpp"
+#include "vpux/compiler/dialect/VPUIPDPU/ops_interfaces.hpp"
 
 //
 // Generated

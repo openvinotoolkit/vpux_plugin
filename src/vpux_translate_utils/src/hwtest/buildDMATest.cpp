@@ -62,6 +62,24 @@ be possible:
 
 void buildDMA(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module, mlir::OpBuilder builder, Logger& log,
               mlir::Type inputType, mlir::Type outputType) {
+    auto testArchitecture = testDesc.getArchitecture();
+
+    // set runtime resources
+    mlir::PassManager pmBuilderInit(module->getName(), mlir::OpPassManager::Nesting::Implicit);
+    std::optional<int> numTiles = std::nullopt;
+    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
+
+    if (testArchitecture == vpux::VPU::ArchKind::NPU40XX) {
+        // E#77729
+        numTiles = 2;
+    }
+
+    auto initCompilerOptions = VPU::InitCompilerOptions(testArchitecture, VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.setNumberOfDPUGroups(numTiles);
+    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
+    VPU::buildInitCompilerPipeline(pmBuilderInit, initCompilerOptions, log);
+    VPUX_THROW_UNLESS(mlir::succeeded(pmBuilderInit.run(module)), "Init compilation failed");
+
     auto input = testDesc.getInputLayerList().front();
     auto dmaParams = testDesc.getDMAparams();
     auto output = testDesc.getOutputLayers().front();
@@ -69,7 +87,6 @@ void buildDMA(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module,
     SmallVector<int64_t> inShape(input.shape.begin(), input.shape.end());
     SmallVector<int64_t> outShape(output.shape.begin(), output.shape.end());
 
-    auto testArchitecture = testDesc.getArchitecture();
     if (testArchitecture == vpux::VPU::ArchKind::NPU40XX) {
         VPUX_THROW_UNLESS(dmaParams.engine == 0, "buildDMA: DMA on NPU40XX should have 1 engine");
     }
@@ -304,26 +321,13 @@ void buildDMA(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module,
     }
 
     funcbuilder.create<mlir::func::ReturnOp>(builder.getUnknownLoc(), funcOutput);
-    // set runtime resources
-    mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    std::optional<int> numTiles = std::nullopt;
-    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
 
-    if (testArchitecture == vpux::VPU::ArchKind::NPU40XX) {
-        // E#77729
-        numTiles = 2;
-    }
-
-    auto initCompilerOptions = VPU::InitCompilerOptions(testArchitecture, VPU::CompilationMode::DefaultHW);
-    initCompilerOptions.setNumberOfDPUGroups(numTiles);
-    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
-    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
-
+    mlir::PassManager pmBuilderEnd(module->getName(), mlir::OpPassManager::Nesting::Implicit);
     // assign physical barriers instead of virtual barriers
-    pm.addPass(VPURT::createAssignPhysicalBarriersPass(false, log));
-    pm.addPass(VPURT::createBarrierSimulationPass(log));
+    pmBuilderEnd.addPass(VPURT::createAssignPhysicalBarriersPass(false, false, std::nullopt, log));
+    pmBuilderEnd.addPass(VPURT::createBarrierSimulationPass(log));
 
-    VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");
+    VPUX_THROW_UNLESS(mlir::succeeded(pmBuilderEnd.run(module)), "Compilation failed");
     // IE.CNNNetwork
     buildCNNOp(builder, func.getName(), {getTensorType(ShapeRef(inShape), inputType, DimsOrder::NHWC, nullptr)},
                {getTensorType(ShapeRef(outShape), outputType, DimsOrder::NHWC, nullptr)});

@@ -12,7 +12,7 @@
 // CHECK-LABEL: @Fold
 func.func @Fold(%arg0: memref<1x3x16x16x!qElemType>) -> memref<1x3x16x16x!qElemType> {
     %0 = const.Declare memref<1x3x16x16x!qElemType> =
-        dense<1.000000e+00> : tensor<1x3x16x16xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>]
+        dense<1.000000e+00> : tensor<1x3x16x16xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType>]
 
     %1 = VPUIP.QuantizeCast
         inputs(%0 : memref<1x3x16x16x!qElemType>)
@@ -27,7 +27,7 @@ func.func @Fold(%arg0: memref<1x3x16x16x!qElemType>) -> memref<1x3x16x16x!qElemT
     return %2 : memref<1x3x16x16x!qElemType>
 
     // CHECK-DAG:       [[CST:%.+]] = const.Declare memref<1x3x16x16x!qElemType> =
-    // CHECK-SAME:       dense<1.000000e+00> : tensor<1x3x16x16xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>]
+    // CHECK-SAME:       dense<1.000000e+00> : tensor<1x3x16x16xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType>]
 
     // CHECK:       [[VAR0:%.+]] = VPUIP.Copy inputs([[CST]] : memref<1x3x16x16x!qElemType>)
     // CHECK-SAME:       outputs(%arg0 : memref<1x3x16x16x!qElemType>) -> memref<1x3x16x16x!qElemType>
@@ -48,7 +48,7 @@ func.func @Fold(%arg0: memref<1x3x16x16x!qElemType>) -> memref<1x3x16x16x!qElemT
 // CHECK-LABEL: @FuseQuantizeCastOps
 func.func @FuseQuantizeCastOps(%arg0: memref<1x3x2x16x!qElemType2>) -> memref<1x3x2x16x!qElemType2> {
     %0 = const.Declare memref<1x3x2x16x!qElemType> =
-        dense<1.000000e+00> : tensor<1x3x2x16xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>]
+        dense<1.000000e+00> : tensor<1x3x2x16xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType>]
 
     %1 = memref.alloc() : memref<1x3x2x16x!qElemType>
     %2 = VPUIP.Copy
@@ -66,7 +66,7 @@ func.func @FuseQuantizeCastOps(%arg0: memref<1x3x2x16x!qElemType2>) -> memref<1x
 
     return %5 : memref<1x3x2x16x!qElemType2>
 
-    // CHECK-DAG:   [[CST:%.+]] = const.Declare memref<1x3x2x16x!qElemType1> = dense<1.000000e+00> : tensor<1x3x2x16xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType1>]
+    // CHECK-DAG:   [[CST:%.+]] = const.Declare memref<1x3x2x16x!qElemType1> = dense<1.000000e+00> : tensor<1x3x2x16xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType1>]
     // CHECK:   [[VAR0:%.+]] = memref.alloc() : memref<1x3x2x16x!qElemType1>
     // CHECK:   [[VAR1:%.+]] = VPUIP.Copy inputs([[CST]] : memref<1x3x2x16x!qElemType1>) outputs([[VAR0]] : memref<1x3x2x16x!qElemType1>) -> memref<1x3x2x16x!qElemType1>
     // CHECK:   [[VAR2:%.+]] = VPUIP.QuantizeCast inputs([[VAR1]] : memref<1x3x2x16x!qElemType1>) -> memref<1x3x2x16x!qElemType>

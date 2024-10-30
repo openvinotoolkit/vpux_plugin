@@ -40,7 +40,7 @@ public:
     using mlir::OpRewritePattern<IE::InterpolateOp>::OpRewritePattern;
 
 public:
-    mlir::LogicalResult matchAndRewrite(IE::InterpolateOp interpolateOp, mlir::PatternRewriter& rewriter) const final;
+    mlir::LogicalResult matchAndRewrite(IE::InterpolateOp InterpolateOp, mlir::PatternRewriter& rewriter) const final;
 };
 
 mlir::LogicalResult ConvertInputsToAttr::matchAndRewrite(IE::InterpolateOp interpolateOp,
@@ -49,39 +49,26 @@ mlir::LogicalResult ConvertInputsToAttr::matchAndRewrite(IE::InterpolateOp inter
         interpolateOp.getAxesAttr().has_value()) {
         return mlir::failure();
     }
-    const auto loc = interpolateOp.getLoc();
 
-    // Infer sizes, scales and axes from input, output and pads.
-    const auto inType = interpolateOp.getInput().getType().cast<NDTypeInterface>();
-    const auto inShape = inType.getShape().raw();
-    const auto outType = interpolateOp.getOutput().getType().cast<NDTypeInterface>();
-    const auto outShape = outType.getShape().raw();
-
-    const auto extractPads = [&](const mlir::ArrayAttr padsAttr) {
-        const auto pads = IE::extractIntVector(loc, nullptr, padsAttr);
-        if (mlir::failed(pads) || pads.value().size() != outShape.size()) {
-            return SmallVector<int64_t>(outShape.size(), 0);
-        }
-        return pads.value();
-    };
-    const SmallVector<int64_t> padsBeginVal = extractPads(interpolateOp.getAttr().getPadsBegin());
-    const SmallVector<int64_t> padsEndVal = extractPads(interpolateOp.getAttr().getPadsEnd());
-
-    SmallVector<int64_t> sizesVal;
-    SmallVector<double> scalesVal;
-    SmallVector<int64_t> axesVal;
-
-    for (size_t i = 0; i < inShape.size(); i++) {
-        const auto paddedInDim = inShape[i] + padsBeginVal[i] + padsEndVal[i];
-        if (paddedInDim != outShape[i]) {
-            sizesVal.push_back(outShape[i]);
-            scalesVal.push_back(static_cast<double>(outShape[i]) / static_cast<double>(paddedInDim));
-            axesVal.push_back(static_cast<int64_t>(i));
-        }
+    // Get Sizes Attr
+    auto sizes = IE::extractIntVector(interpolateOp.getLoc(), interpolateOp.getSizes(), std::nullopt);
+    if (mlir::failed(sizes)) {
+        return mlir::failure();
     }
+    const auto sizesVal = sizes.value();
+    auto sizesAttr = getIntArrayAttr(interpolateOp.getContext(), sizesVal);
 
-    const auto sizesAttr = getIntArrayAttr(interpolateOp.getContext(), sizesVal);
-    const auto scalesAttr = getFPArrayAttr(interpolateOp.getContext(), scalesVal);
+    // Get Scales Attr
+    auto scales = IE::extractFPVector(interpolateOp.getLoc(), interpolateOp.getScales(), std::nullopt);
+    if (mlir::failed(scales)) {
+        return mlir::failure();
+    }
+    const auto scalesVal = scales.value();
+    auto scalesAttr = getFPArrayAttr(interpolateOp.getContext(), scalesVal);
+
+    // Get Axes Attr
+    const auto inType = interpolateOp.getInput().getType().cast<NDTypeInterface>();
+    const auto axesVal = IE::getInterpAxesVal(interpolateOp.getLoc(), interpolateOp.getAxes(), std::nullopt, inType);
     const auto axesAttr = getIntArrayAttr(interpolateOp.getContext(), axesVal);
 
     // Convert `shape_calculation_mode` from `Scales` to `Sizes`
@@ -90,6 +77,22 @@ mlir::LogicalResult ConvertInputsToAttr::matchAndRewrite(IE::InterpolateOp inter
     auto interpolateAttr = interpolateOp.getAttr();
     const auto calcModeAttr = interpolateAttr.getShapeCalcMode();
     if (calcModeAttr != nullptr && calcModeAttr.getValue() == IE::InterpolateCalcMode::SCALES) {
+        VPUX_THROW_UNLESS(scalesVal.size() == axesVal.size(),
+                          "Interpolate 'Axes' size '{0}' should equal with `Scales` size '{1}'", axesVal.size(),
+                          scalesVal.size());
+
+        const auto outputShape =
+                IE::calcOutputShapes(interpolateOp, interpolateOp.getLoc(), Logger::global(), getContext());
+
+        SmallVector<int64_t> newSizesVal(axesVal.size());
+        for (const auto& idx : irange(axesVal.size())) {
+            newSizesVal[idx] = outputShape[axesVal[idx]];
+        }
+        sizesAttr = getIntArrayAttr(interpolateOp.getContext(), newSizesVal);
+
+        SmallVector<int64_t> newScalesVal(axesVal.size(), 1.0);
+        scalesAttr = getFPArrayAttr(interpolateOp.getContext(), newScalesVal);
+
         const auto newCalcModeAttr =
                 IE::InterpolateCalcModeAttr::get(interpolateOp.getContext(), IE::InterpolateCalcMode::SIZES);
         interpolateAttr = IE::InterpolateAttr::get(
@@ -122,7 +125,7 @@ mlir::LogicalResult ConvertInputToFP16::matchAndRewrite(IE::InterpolateOp op, ml
     const std::set<VPU::ArchKind> incompatibleTargets = {
             VPU::ArchKind::NPU40XX,
     };
-    // NPU4000-M2I does not support C-minor FP16
+    // VPU4000-M2I does not support C-minor FP16
     if (incompatibleTargets.count(arch) > 0 && (VPU::getCompilationMode(op) != VPU::CompilationMode::ReferenceSW)) {
         return mlir::failure();
     }

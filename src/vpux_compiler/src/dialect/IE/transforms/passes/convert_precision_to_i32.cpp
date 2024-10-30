@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#include "vpux/compiler/dialect/IE/IR/dialect.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 #include "vpux/compiler/dialect/IE/utils/convert_op_types.hpp"
@@ -61,6 +62,7 @@ void ConvertPrecisionToI32Pass::safeRunOnModule() {
     target.addDynamicallyLegalOp<IE::TopKOp>(isLegalOp);
     target.addDynamicallyLegalOp<IE::AdaptiveAvgPoolOp>(isLegalOp);
     target.addDynamicallyLegalOp<IE::AdaptiveMaxPoolOp>(isLegalOp);
+    target.addDynamicallyLegalOp<IE::MaxPool8Op>(isLegalOp);
     target.addDynamicallyLegalOp<IE::EqualOp>(isLegalOp);
     target.addDynamicallyLegalOp<IE::NotEqualOp>(isLegalOp);
     target.addDynamicallyLegalOp<IE::PowerOp>(isLegalOp);
@@ -97,6 +99,10 @@ void ConvertPrecisionToI32Pass::safeRunOnModule() {
         op->setAttr("element_type", mlir::TypeAttr::get(sInt32Type));
     });
     module.walk([&](IE::AdaptiveMaxPoolOp op) {
+        mlir::Type sInt32Type = mlir::IntegerType::get(&ctx, 32, mlir::IntegerType::Signed);
+        op->setAttr("index_element_type", mlir::TypeAttr::get(sInt32Type));
+    });
+    module.walk([&](IE::MaxPool8Op op) {
         mlir::Type sInt32Type = mlir::IntegerType::get(&ctx, 32, mlir::IntegerType::Signed);
         op->setAttr("index_element_type", mlir::TypeAttr::get(sInt32Type));
     });

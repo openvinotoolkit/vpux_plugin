@@ -61,10 +61,15 @@ void WeightsDequantizeToFakeQuantizePass::safeRunOnFunc() {
     mlir::RewritePatternSet patterns(&ctx);
 
     // register platform specific rewriters using the platform specific strategy
-    auto strategy = vpux::IE::createWeightsDequantizeToFakeQuantizeStrategyGetter(func, _enableWDBlockArgumentInput);
+    auto strategy = vpux::IE::createWeightsDequantizeToFakeQuantizeStrategy(func, _enableWDBlockArgumentInput);
     strategy->addPatterns(patterns, _log);
 
     auto config = getDefaultGreedyRewriteConfig();
+    // Note: the implicit contract in the compiler mandates that all
+    // quantization-like patterns are converted to FQ. thus, we have to run
+    // forever until convergence. if this halts, there's a bug somewhere in the
+    // pass.
+    config.maxIterations = mlir::GreedyRewriteConfig::kNoLimit;
     if (mlir::failed(applyPatternsAndFoldGreedily(func, std::move(patterns), config))) {
         signalPassFailure();
     }

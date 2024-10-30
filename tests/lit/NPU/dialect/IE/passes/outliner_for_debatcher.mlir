@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --outliner="mode=batching" --canonicalize %s | FileCheck %s
+// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --outliner="function-outlining=\"batching=''\"" --canonicalize %s | FileCheck %s
 // REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 module @OneInputOneOutput {
@@ -39,7 +39,7 @@ module @OneInputOneOutput {
 
 // CHECK: DataInfo "output" : tensor<3x48x60x60xf16>
 
-// CHECK: func.func private @main_batch1([[ARG0:%.+]]: tensor<1x3x62x62xf32>) -> tensor<1x48x60x60xf32> {
+// CHECK: func.func private @main_batching1([[ARG0:%.+]]: tensor<1x3x62x62xf32>) -> tensor<1x48x60x60xf32> {
 // CHECK:   [[CST:%.+]] = const.Declare tensor<48x3x3x3xf32> = dense<1.000000e+00> : tensor<48x3x3x3xf32>
 // CHECK:   [[CONV:%.+]] = IE.Convolution([[ARG0]], [[CST]]) {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x3x62x62xf32>, tensor<48x3x3x3xf32> -> tensor<1x48x60x60xf32>
 // CHECK:   [[SOFT:%.+]] = IE.SoftMax([[CONV]]) {axisInd = 1 : i64} : tensor<1x48x60x60xf32> -> tensor<1x48x60x60xf32>
@@ -50,7 +50,7 @@ module @OneInputOneOutput {
 
 // CHECK: func.func @main([[ARG0:%.+]]: tensor<3x3x62x62xf32>) -> tensor<3x48x60x60xf32> {
 // CHECK:   [[VAL0:%0]] = builtin.unrealized_conversion_cast [[ARG0]] : tensor<3x3x62x62xf32> to tensor<1x3x62x62xf32>
-// CHECK:   [[PART:%.+]] = call @main_batch1([[VAL0]]) : (tensor<1x3x62x62xf32>) -> tensor<1x48x60x60xf32>
+// CHECK:   [[PART:%.+]] = call @main_batching1([[VAL0]]) : (tensor<1x3x62x62xf32>) -> tensor<1x48x60x60xf32>
 // CHECK:   [[VAL1:%.+]] = builtin.unrealized_conversion_cast [[PART]] : tensor<1x48x60x60xf32> to tensor<3x48x60x60xf32>
 // CHECK:   return [[VAL1]] : tensor<3x48x60x60xf32>
 // CHECK: }
@@ -95,7 +95,7 @@ module @MultipleInputsOneOutput {
 
 // CHECK: DataInfo "output" : tensor<3x48x60x60xf32>
 
-// CHECK: func.func private @main_batch1([[ARG0:%.+]]: tensor<1x3x62x62xf32>, [[ARG1:%.+]]: tensor<1x48x60x60xf32>) -> tensor<1x48x60x60xf32> {
+// CHECK: func.func private @main_batching1([[ARG0:%.+]]: tensor<1x3x62x62xf32>, [[ARG1:%.+]]: tensor<1x48x60x60xf32>) -> tensor<1x48x60x60xf32> {
 // CHECK:   [[CST:%.+]] = const.Declare tensor<48x3x3x3xf32> = dense<1.000000e+00> : tensor<48x3x3x3xf32>
 // CHECK:   [[CONV:%.+]] = IE.Convolution([[ARG0]], [[CST]]) {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x3x62x62xf32>, tensor<48x3x3x3xf32> -> tensor<1x48x60x60xf32>
 // CHECK:   [[SOFT:%.+]] = IE.SoftMax([[CONV]]) {axisInd = 1 : i64} : tensor<1x48x60x60xf32> -> tensor<1x48x60x60xf32>
@@ -107,7 +107,7 @@ module @MultipleInputsOneOutput {
 // CHECK: func.func @main(%arg0: tensor<3x3x62x62xf32>, %arg1: tensor<3x48x60x60xf32>) -> tensor<3x48x60x60xf32> {
 // CHECK:   [[VAL0:%.+]] = builtin.unrealized_conversion_cast %arg0 : tensor<3x3x62x62xf32> to tensor<1x3x62x62xf32>
 // CHECK:   [[VAL1:%.+]] = builtin.unrealized_conversion_cast %arg1 : tensor<3x48x60x60xf32> to tensor<1x48x60x60xf32>
-// CHECK:   [[FUNC_RES:%.+]] = call @main_batch1([[VAL0]], [[VAL1]]) : (tensor<1x3x62x62xf32>, tensor<1x48x60x60xf32>) -> tensor<1x48x60x60xf32>
+// CHECK:   [[FUNC_RES:%.+]] = call @main_batching1([[VAL0]], [[VAL1]]) : (tensor<1x3x62x62xf32>, tensor<1x48x60x60xf32>) -> tensor<1x48x60x60xf32>
 // CHECK:   [[RET:%.+]] = builtin.unrealized_conversion_cast [[FUNC_RES]] : tensor<1x48x60x60xf32> to tensor<3x48x60x60xf32>
 // CHECK:   return [[RET]] : tensor<3x48x60x60xf32>
 // CHECK: }
@@ -151,7 +151,7 @@ module @OneInputMultipleOutputsFirstSlice {
 // CHECK: DataInfo "output0" : tensor<3x48x60x60xf16>
 // CHECK: DataInfo "output1" : tensor<1x48x60x60xf16>
 
-// CHECK: func.func private @main_batch1([[ARG0:%.+]]: tensor<1x3x62x62xf32>) -> (tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32>) {
+// CHECK: func.func private @main_batching1([[ARG0:%.+]]: tensor<1x3x62x62xf32>) -> (tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32>) {
 // CHECK:   [[CST:%.+]] = const.Declare tensor<48x3x3x3xf32> = dense<1.000000e+00> : tensor<48x3x3x3xf32>
 // CHECK:   [[CONV:%.+]] = IE.Convolution([[ARG0]], [[CST]]) {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x3x62x62xf32>, tensor<48x3x3x3xf32> -> tensor<1x48x60x60xf32>
 // CHECK:   [[SOFT:%.+]] = IE.SoftMax([[CONV]]) {axisInd = 1 : i64} : tensor<1x48x60x60xf32> -> tensor<1x48x60x60xf32>
@@ -162,7 +162,7 @@ module @OneInputMultipleOutputsFirstSlice {
 
 // CHECK: func.func @main([[ARG0:%.+]]: tensor<3x3x62x62xf32>) -> (tensor<3x48x60x60xf32>, tensor<1x48x60x60xf32>) {
 // CHECK:   [[VAL0:%0]] = builtin.unrealized_conversion_cast [[ARG0]] : tensor<3x3x62x62xf32> to tensor<1x3x62x62xf32>
-// CHECK:   [[PART:%.+]]:2 = call @main_batch1([[VAL0]]) : (tensor<1x3x62x62xf32>) -> (tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32>)
+// CHECK:   [[PART:%.+]]:2 = call @main_batching1([[VAL0]]) : (tensor<1x3x62x62xf32>) -> (tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32>)
 // CHECK:   [[VAL1:%.+]] = builtin.unrealized_conversion_cast [[PART]]#1 : tensor<1x48x60x60xf32> to tensor<3x48x60x60xf32>
 // CHECK:   return [[VAL1]], [[PART]]#0 : tensor<3x48x60x60xf32>, tensor<1x48x60x60xf32>
 // CHECK: }
@@ -207,7 +207,7 @@ module @OneInputMultipleOutputsLastSlice {
 // CHECK: DataInfo "output0" : tensor<3x48x60x60xf16>
 // CHECK: DataInfo "output1" : tensor<3x48x60x60xf16>
 
-// CHECK: func.func private @main_batch1([[ARG0:%.+]]: tensor<1x3x62x62xf32>) -> (tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32>) {
+// CHECK: func.func private @main_batching1([[ARG0:%.+]]: tensor<1x3x62x62xf32>) -> (tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32>) {
 // CHECK:   [[CST:%.+]] = const.Declare tensor<48x3x3x3xf32> = dense<1.000000e+00> : tensor<48x3x3x3xf32>
 // CHECK:   [[CONV:%.+]] = IE.Convolution([[ARG0]], [[CST]]) {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x3x62x62xf32>, tensor<48x3x3x3xf32> -> tensor<1x48x60x60xf32>
 // CHECK:   [[SOFT:%.+]] = IE.SoftMax([[CONV]]) {axisInd = 1 : i64} : tensor<1x48x60x60xf32> -> tensor<1x48x60x60xf32>
@@ -218,7 +218,7 @@ module @OneInputMultipleOutputsLastSlice {
 
 // CHECK: func.func @main([[ARG0:%.+]]: tensor<3x3x62x62xf32>) -> (tensor<3x48x60x60xf32>, tensor<3x48x60x60xf32>) {
 // CHECK:   [[VAL0:%0]] = builtin.unrealized_conversion_cast [[ARG0]] : tensor<3x3x62x62xf32> to tensor<1x3x62x62xf32>
-// CHECK:   [[PART:%.+]]:2 = call @main_batch1([[VAL0]]) : (tensor<1x3x62x62xf32>) -> (tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32>)
+// CHECK:   [[PART:%.+]]:2 = call @main_batching1([[VAL0]]) : (tensor<1x3x62x62xf32>) -> (tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32>)
 // CHECK:   [[VAL1:%.+]] = builtin.unrealized_conversion_cast [[PART]]#0 : tensor<1x48x60x60xf32> to tensor<3x48x60x60xf32>
 // CHECK:   [[VAL2:%.+]] = builtin.unrealized_conversion_cast [[PART]]#1 : tensor<1x48x60x60xf32> to tensor<3x48x60x60xf32>
 // CHECK:   return [[VAL1]], [[VAL2]] : tensor<3x48x60x60xf32>, tensor<3x48x60x60xf32>
@@ -279,7 +279,7 @@ module @MultipleInputsMultipleOutputs {
 // CHECK: DataInfo "output3" : tensor<3x48x60x60xf16>
 // CHECK: DataInfo "output4" : tensor<3x48x60x60xf16>
 
-// CHECK: func.func private @main_batch1([[ARG0:%.+]]: tensor<1x3x62x62xf32>) -> (tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32>) {
+// CHECK: func.func private @main_batching1([[ARG0:%.+]]: tensor<1x3x62x62xf32>) -> (tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32>) {
 // CHECK:   [[CST:%.+]] = const.Declare tensor<48x3x3x3xf32> = dense<1.000000e+00> : tensor<48x3x3x3xf32>
 // CHECK:   [[CONV:%.+]] = IE.Convolution([[ARG0]], [[CST]]) {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x3x62x62xf32>, tensor<48x3x3x3xf32> -> tensor<1x48x60x60xf32>
 // CHECK:   [[SOFT:%.+]] = IE.SoftMax([[CONV]]) {axisInd = 1 : i64} : tensor<1x48x60x60xf32> -> tensor<1x48x60x60xf32>
@@ -291,7 +291,7 @@ module @MultipleInputsMultipleOutputs {
 
 // CHECK: func.func @main([[ARG0:%.+]]: tensor<3x3x62x62xf32>, [[ARG1:%.+]]: tensor<3x3x62x62xf32>, [[ARG2:%.+]]: tensor<3x3x62x62xf32>) -> (tensor<3x48x60x60xf32>, tensor<3x48x60x60xf32>, tensor<3x48x60x60xf32>, tensor<3x48x60x60xf32>, tensor<3x48x60x60xf32>) {
 // CHECK:   [[VAL0:%0]] = builtin.unrealized_conversion_cast [[ARG0]] : tensor<3x3x62x62xf32> to tensor<1x3x62x62xf32>
-// CHECK:   [[PART:%.+]]:5 = call @main_batch1([[VAL0]]) : (tensor<1x3x62x62xf32>) -> (tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32>)
+// CHECK:   [[PART:%.+]]:5 = call @main_batching1([[VAL0]]) : (tensor<1x3x62x62xf32>) -> (tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32>)
 // CHECK:   [[VAL11:%.+]] = builtin.unrealized_conversion_cast [[PART]]#0 : tensor<1x48x60x60xf32> to tensor<3x48x60x60xf32>
 // CHECK:   [[VAL22:%.+]] = builtin.unrealized_conversion_cast [[PART]]#1 : tensor<1x48x60x60xf32> to tensor<3x48x60x60xf32>
 // CHECK:   [[VAL33:%.+]] = builtin.unrealized_conversion_cast [[PART]]#2 : tensor<1x48x60x60xf32> to tensor<3x48x60x60xf32>

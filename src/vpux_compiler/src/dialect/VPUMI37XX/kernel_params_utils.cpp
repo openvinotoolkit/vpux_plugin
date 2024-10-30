@@ -87,7 +87,6 @@ sw_params::Location KernelParamsSerializer::getSwParamsLocationFromMemKind(VPU::
     static const EnumMap<VPU::MemoryKind, sw_params::Location> memKindMapping = {
             {VPU::MemoryKind::DDR, sw_params::Location::DDR},
             {VPU::MemoryKind::CMX_NN, sw_params::Location::NN_CMX},
-            {VPU::MemoryKind::CMX_UPA, sw_params::Location::UPA_CMX},
             {VPU::MemoryKind::CSRAM, sw_params::Location::NONE},
             {VPU::MemoryKind::Register, sw_params::Location::NONE},
     };

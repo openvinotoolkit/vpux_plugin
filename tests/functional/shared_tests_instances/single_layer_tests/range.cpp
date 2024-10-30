@@ -60,13 +60,11 @@ class RangeLayerTestCommon : public RangeLayerTest, virtual public VpuOv2LayerTe
         VpuOv2LayerTest::infer();
     }
 };
-class RangeLayerTest_NPU3720 : public RangeLayerTestCommon {};
-class RangeLayerTest_NPU4000 : public RangeLayerTestCommon {};
 
 // Do not support dynamic shapes yet, but created tests for validation when will support.
 // Tests will be disabled until this feature is implemented.
 // [Tracking number E#113199]
-class RangeLayerTestDynamic : public RangeLayerTest_NPU3720 {
+class RangeLayerTestDynamic : public RangeLayerTestCommon {
     void generate_inputs(const std::vector<ov::Shape>& targetInputStaticShapes) override {
         VpuOv2LayerTest::inputs.clear();
         float start, stop, step;
@@ -115,17 +113,17 @@ class RangeLayerTestDynamic : public RangeLayerTest_NPU3720 {
     }
 };
 
-TEST_P(RangeLayerTestDynamic, HW) {
+TEST_P(RangeLayerTestDynamic, NPU3720_HW) {
     VpuOv2LayerTest::setDefaultHardwareMode();
     VpuOv2LayerTest::run(Platform::NPU3720);
 }
 
-TEST_P(RangeLayerTest_NPU3720, HW) {
+TEST_P(RangeLayerTestCommon, NPU3720_HW) {
     VpuOv2LayerTest::setDefaultHardwareMode();
     VpuOv2LayerTest::run(Platform::NPU3720);
 }
 
-TEST_P(RangeLayerTest_NPU4000, HW) {
+TEST_P(RangeLayerTestCommon, NPU4000_HW) {
     VpuOv2LayerTest::setDefaultHardwareMode();
     VpuOv2LayerTest::run(Platform::NPU4000);
 }
@@ -154,23 +152,16 @@ const auto testRangeNegativeStepParams = ::testing::Combine(testing::Values(23.0
                                                             testing::Values(-3.0f),  // negative step
                                                             testing::ValuesIn(modelTypes), testing::Values(DEVICE_NPU));
 
-// NPU3720
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_Range, RangeLayerTest_NPU3720, testRangePositiveStepParams,
-                         RangeLayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_Range, RangeLayerTestCommon, testRangePositiveStepParams,
+                         RangeLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_negative_Range, RangeLayerTest_NPU3720, testRangeNegativeStepParams,
-                         RangeLayerTest_NPU3720::getTestCaseName);
-// NPU3720 dynamic shapes
+INSTANTIATE_TEST_SUITE_P(smoke_negative_Range, RangeLayerTestCommon, testRangeNegativeStepParams,
+                         RangeLayerTestCommon::getTestCaseName);
+// dynamic shapes
 INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_precommit_Range, RangeLayerTestDynamic, testRangePositiveStepParams,
                          RangeLayerTestDynamic::getTestCaseName);
 
 INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_negative_Range, RangeLayerTestDynamic, testRangeNegativeStepParams,
                          RangeLayerTestDynamic::getTestCaseName);
-// NPU4000
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_Range, RangeLayerTest_NPU4000, testRangePositiveStepParams,
-                         RangeLayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_negative_Range, RangeLayerTest_NPU4000, testRangeNegativeStepParams,
-                         RangeLayerTest_NPU4000::getTestCaseName);
 
 }  // namespace

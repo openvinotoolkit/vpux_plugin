@@ -1,13 +1,18 @@
 //
-// Copyright (C) 2022 Intel Corporation
+// Copyright (C) 2022-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
+#include <mlir/Dialect/Quant/QuantTypes.h>
 #include <mlir/IR/Operation.h>
+#include "vpux/compiler/core/type_interfaces.hpp"
+#include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
+#include "vpux/compiler/dialect/VPU/utils/ppe_version_config.hpp"
 
 #include "vpux/compiler/core/layers.hpp"
+#include "vpux/compiler/dialect/VPU/utils/ppe_utils.hpp"
 #include "vpux/compiler/utils/VPU/ppe_utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
@@ -540,7 +545,6 @@ bool InputConcatPattern::insertNCEOperation() {
         const auto createPoolFunc = [nceOp](mlir::OpBuilder& builder, mlir::Location loc,
                                             mlir::ValueRange newOperands) -> VPU::NCEAveragePoolOp {
             auto ctx = builder.getContext();
-            const auto arch = getArch(nceOp);
             const SmallVector<int64_t> neutralKernelStrides = {1, 1};
             const SmallVector<int64_t> pads = {0, 0};
 
@@ -549,8 +553,10 @@ bool InputConcatPattern::insertNCEOperation() {
             const auto padBeginAttr = getIntArrayAttr(ctx, pads);
             const auto padEndAttr = getIntArrayAttr(ctx, pads);
 
-            auto ppeTaskAttr = VPU::getNCEAveragePoolPPETaskAttr(newOperands[0].getType(), kernelSizeAttr,
-                                                                 newOperands[0].getType(), nullptr, loc, ctx, arch);
+            auto newOperandType = newOperands[0].getType();
+
+            auto ppeOpaqueAttr = VPU::PpeVersionConfig::retrievePPEAttribute(nceOp);
+
             // Update Clamp in PPE to align with the original NCE task
             auto nceOpIface = mlir::dyn_cast<VPU::NCEOpInterface>(nceOp);
             if (nceOpIface == nullptr) {
@@ -560,22 +566,26 @@ bool InputConcatPattern::insertNCEOperation() {
             }
             VPUX_THROW_WHEN(nceOpIface == nullptr, "Can't find NCEOpInterface");
 
-            if (nceOpIface.getPPE().has_value()) {
-                const auto origPPETask = nceOpIface.getPPE().value();
-                const auto targetClampLowAttr = origPPETask.getClampLow();
-                const auto targetClampHighAttr = origPPETask.getClampHigh();
-
-                ppeTaskAttr = VPU::PPETaskAttr::get(
-                        ctx, ppeTaskAttr.getMode(), targetClampLowAttr, targetClampHighAttr, ppeTaskAttr.getLreluMult(),
-                        ppeTaskAttr.getLreluShift(), ppeTaskAttr.getQuantScale(), ppeTaskAttr.getQuantMult(),
-                        ppeTaskAttr.getQuantShift(), ppeTaskAttr.getQuantPostShift(), ppeTaskAttr.getIn1QuantMult(),
-                        ppeTaskAttr.getIn2QuantMult(), ppeTaskAttr.getFpPreluAlpha());
+            const auto origPPETask = nceOpIface.getOpaquePPE();
+            const auto& clampAdapter = VPU::PpeVersionConfig::getFactoryAs<VPU::IPpeAdapterClamp>();
+            ppeOpaqueAttr = clampAdapter.updateClamps(ppeOpaqueAttr, origPPETask);
+            const auto elemType = newOperandType.cast<vpux::NDTypeInterface>().getElementType();
+            if (mlir::isa<mlir::quant::QuantizedType>(elemType)) {
+                if (const auto quantParamsAdapter =
+                            VPU::PpeVersionConfig::getFactoryAs<VPU::IPpeAdapterQuantParams*>()) {
+                    const auto kernelShape = parseIntArrayAttr<int64_t>(kernelSizeAttr);
+                    ppeOpaqueAttr =
+                            quantParamsAdapter->recomputeQuantParams(ppeOpaqueAttr, elemType, elemType, kernelShape);
+                }
+            }
+            if (const auto scaleAdapter = VPU::PpeVersionConfig::getFactoryAs<VPU::IPpeAdapterScale*>()) {
+                ppeOpaqueAttr = scaleAdapter->updateScale(ppeOpaqueAttr, {1.0});
             }
 
             const auto padAttr = VPU::getPaddingAttr(ctx, PadInfo(padBeginAttr, padEndAttr));
 
-            return builder.create<VPU::NCEAveragePoolOp>(loc, newOperands[0].getType(), newOperands[0], kernelSizeAttr,
-                                                         stridesAttr, padAttr, ppeTaskAttr,
+            return builder.create<VPU::NCEAveragePoolOp>(loc, newOperandType, newOperands[0], kernelSizeAttr,
+                                                         stridesAttr, padAttr, ppeOpaqueAttr,
                                                          /*multi_cluster_strategyAttr=*/nullptr);
         };
 

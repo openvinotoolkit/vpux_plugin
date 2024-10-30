@@ -192,11 +192,7 @@ void BaseClusterBufferScheduler::addProfilingOps(unsigned& currentDDROffset, Sma
 
         _builder.setInsertionPointAfter(nceTaskOp);
 
-        const auto outputType = nceTaskOp.getOutput().getType();
-        const auto outputSMType =
-                nceTaskOp.getOutputSparsityMap() ? nceTaskOp.getOutputSparsityMap().getType() : nullptr;
-        auto newCluster = _builder.create<VPUIP::NCEClusterTaskOp>(uniqLoc, outputType, outputSMType, timestampType,
-                                                                   nceTaskOp->getOperands(), nceTaskOp->getAttrs());
+        auto newCluster = _builder.create<VPUIP::NCEClusterTaskOp>(uniqLoc, nceTaskOp, timestampType);
         newCluster.setProfilingMetadataAttr(profAttr);
 
         for (const auto& region : llvm::enumerate(nceTaskOp.getRegions())) {
@@ -277,7 +273,7 @@ VPUIP::DistributedBufferType MultiClusterScheduler::getDistributedBufferType(uns
     const SmallVector<uint64_t> tiles = {_clustersNum};
     const auto numTiles = getIntArrayAttr(_ctx, tiles);
     const auto numClusters = getIntAttr(_ctx, _clustersNum);
-    auto distributedTensorAttr = VPU::DistributedTensorAttr::get(
+    auto distributedTensorAttr = VPU::DistributionInfoAttr::get(
             _ctx, distributionModeAttr, numTiles, nullptr, nullptr, nullptr, numClusters, nullptr,
             /*uniformDistributedSegments=*/mlir::UnitAttr::get(_ctx), nullptr, nullptr, nullptr, nullptr, nullptr);
     return VPUIP::DistributedBufferType::get(_ctx, {totalElements}, getUInt64Type(_ctx), layout, _memKindAttr,

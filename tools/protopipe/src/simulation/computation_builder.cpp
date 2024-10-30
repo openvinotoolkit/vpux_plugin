@@ -60,8 +60,8 @@ void OpBuilder::build(NodeHandle nh, const Compound& compound) {
     ModelsAttrMap<IRandomGenerator::Ptr> initializers_map;
 
     for (const auto& [tag, params] : compound.infer_params) {
-        input_data_map[compound.tag];
-        initializers_map[compound.tag];
+        input_data_map[tag];
+        initializers_map[tag];
     }
 
     PerformanceSimulation::Options opts{

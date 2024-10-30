@@ -86,9 +86,8 @@ void vpux::VPU::DetectionOutputSortOp::build(::mlir::OpBuilder& odsBuilder, ::ml
                                              ::mlir::Value classPredictions, ::mlir::FloatAttr confidenceThreshold,
                                              ::mlir::IntegerAttr topK) {
     auto indicesBuffer = createIndicesAuxiliaryBuffer(odsBuilder, getShape(classPredictions));
-
     auto module = getModule(odsBuilder);
-    auto numShaves = IE::getTotalNumOfActShaveEngines(module);
+    auto numShaves = IE::getTotalNumOfEngines(module, VPU::ExecutorKind::SHAVE_ACT);
 
     // 4 buffers of size 256 elements are required for counting sort
     // tensor has SEGMENTED distribution mode
@@ -104,8 +103,7 @@ void vpux::VPU::DetectionOutputSortOp::build(::mlir::OpBuilder& odsBuilder, ::ml
 
 InputTiling vpux::VPU::DetectionOutputSortOp::backInferTileInfo(const vpux::TileInfo& firstOutputTile,
                                                                 vpux::Logger /*log*/) {
-    auto module = getOperation()->getParentOfType<mlir::ModuleOp>();
-    auto numShaves = IE::getTotalNumOfActShaveEngines(module);
+    auto numShaves = IE::getTotalNumOfEngines(getOperation(), VPU::ExecutorKind::SHAVE_ACT);
     return DetectionOutputSortOpInputTiling(firstOutputTile, numShaves);
 }
 
@@ -130,13 +128,13 @@ bool vpux::VPU::DetectionOutputSortOp::checkStrategyCompatibility(VPU::MultiClus
     return strategy == VPU::MultiClusterStrategy::SplitOverHeight;
 }
 
-vpux::VPU::DistributedTensorNative vpux::VPU::DetectionOutputSortOp::getExplicitDistributedTensorAttr(
+vpux::VPU::DistributionInfo vpux::VPU::DetectionOutputSortOp::getExplicitDistributionInfoAttr(
         vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, ArrayRef<int64_t> numTiles,
         const int64_t numClusters, ArrayRef<int64_t> alignment, const bool uniformDistributedSegments,
         const vpux::VPU::OverlapDistributionParams& overlapParams) {
-    return VPU::getSWExplicitDistributedTensorNative(mlir::cast<VPU::SWOpInterface>(getOperation()), shape,
-                                                     distributionMode, numTiles, numClusters, alignment,
-                                                     uniformDistributedSegments, overlapParams);
+    return VPU::getSWExplicitDistributionInfo(mlir::cast<VPU::SWOpInterface>(getOperation()), shape, distributionMode,
+                                              numTiles, numClusters, alignment, uniformDistributedSegments,
+                                              overlapParams);
 }
 
 bool VPU::DetectionOutputSortOp::isOperationSplitOverHeightCompatible(const vpux::TileInfo& outputTile) {
@@ -158,33 +156,6 @@ bool VPU::DetectionOutputSortOp::isOperationSplitOverWidthCompatible(ShapeRef, S
 
 bool VPU::DetectionOutputSortOp::isOperationSplitOverKernelCompatible(ShapeRef, ShapeRef, ShapeRef) {
     return false;
-}
-
-bool VPU::DetectionOutputSortOp::doesLayerFitIntoCMX(VPU::MultiClusterStrategy strategy, Byte reservedMem) {
-    auto op = mlir::cast<VPU::DetectionOutputSortOp>(getOperation());
-    const auto outputType = op->getResult(0).getType().cast<vpux::NDTypeInterface>();
-    auto numClusters = VPU::getOptimalNumClusters(op, outputType.getShape(), strategy);
-
-    SmallVector<Byte> buffersSize;
-
-    for (const auto& operand : op.getOperands()) {
-        buffersSize.push_back(VPU::getTotalAllocSizeWithDistribution(
-                operand.getType(),
-                getActivationDistributionAttrFromOp(op, operand.getType(), numClusters.getInt(), strategy)));
-    }
-
-    for (const auto& result : op.getResults()) {
-        buffersSize.push_back(VPU::getTotalAllocSizeWithDistribution(
-                result.getType(),
-                getOutputDistributionAttrFromOp(op, result.getType(), numClusters.getInt(), strategy)));
-    }
-
-    auto totalAvailableCMXSize = reservedMem.count() == 0 ? getTotalCMXSize(getOperation()).count()
-                                                          : getTotalCMXFragmentationAwareSize(getOperation()).count();
-
-    return vpux::VPU::calculateAlignedBuffersMemoryRequirement(getArch(getOperation()), buffersSize).count() +
-                   reservedMem.count() <=
-           totalAvailableCMXSize;
 }
 
 //

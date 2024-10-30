@@ -61,8 +61,7 @@ bool isUpstreamPossible(IE::LayerOpInterface sliceOp, mlir::Value tensor, Logger
         return false;
     }
 
-    // Strided slice is known to be done as UPA task.
-    // It does not support datatypes generically
+    // Strided slice does not support datatypes generically
     // so we can't afford changing datatype of this operation.
     if (mlir::isa<IE::StridedSliceOp>(sliceOp)) {
         auto sliceOpElementType = tensor.getType().cast<vpux::NDTypeInterface>().getElementType();

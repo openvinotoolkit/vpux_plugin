@@ -35,7 +35,9 @@ class IFunctionOutliner {
 public:
     virtual ~IFunctionOutliner() = default;
 
-    virtual SmallVector<OutliningInstance> getOutliningTargets(mlir::func::FuncOp mainFunction) = 0;
+    virtual SmallVector<OutliningInstance> getOutliningTargets(mlir::func::FuncOp /*mainFunction*/) {
+        return {};
+    }
 };
 
 //
@@ -62,17 +64,24 @@ private:
 
 class FunctionOutlinerRepeatingBlocks final : public IFunctionOutliner {
 public:
-    FunctionOutlinerRepeatingBlocks(size_t minOpsInBlock, size_t maxNumIterations, Logger log);
+    FunctionOutlinerRepeatingBlocks(size_t minOpsInBlock, size_t maxNumIterations, bool separateFunctions,
+                                    bool weightsAsInputs, Logger log);
 
     SmallVector<OutliningInstance> getOutliningTargets(mlir::func::FuncOp mainFunction) override;
 
 private:
     size_t _minOpsInBlock;
     size_t _maxNumIterations;
+    bool _separateFunctions;
+    bool _weightsAsInputs;
     Logger _log;
 };
 
-class FunctionOutlinerBatching final : IFunctionOutliner {
+//
+// FunctionOutlinerBatching
+//
+
+class FunctionOutlinerBatching final : public IFunctionOutliner {
 public:
     FunctionOutlinerBatching(Logger log);
     SmallVector<OutliningInstance> getOutliningTargets(mlir::func::FuncOp mainFunction) override;
@@ -80,4 +89,52 @@ public:
 private:
     Logger _log;
 };
+
+//
+// Option parser
+//
+struct NaiveOptions {
+    static constexpr size_t NUM_PARTS_DEFAULT = 2;
+
+    size_t numParts;
+};
+
+struct RepeatingBlocksOptions {
+    static constexpr size_t MIN_OPS_IN_BLOCK_DEFAULT = 30;
+    static constexpr size_t MAX_NUM_ITERATIONS_DEFAULT = 100;
+    static constexpr bool WEIGHTS_AS_INPUTS_DEFAULT = false;
+
+    size_t minOpsInBlock;
+    size_t maxNumIterations;
+    bool weightsAsInputs;
+};
+
+struct RepeatingBlocksSeparateFunctionsOptions {
+    static constexpr size_t MIN_OPS_IN_BLOCK_DEFAULT = 30;
+    static constexpr size_t MAX_NUM_ITERATIONS_DEFAULT = 100;
+
+    size_t minOpsInBlock;
+    size_t maxNumIterations;
+};
+
+struct BatchingOptions {};
+
+class OutlinerPassOptions {
+    std::vector<std::variant<NaiveOptions, RepeatingBlocksOptions, RepeatingBlocksSeparateFunctionsOptions,
+                             BatchingOptions>>
+            _options;
+
+public:
+    template <class T>
+    const T* getIf(size_t i) const {
+        return std::get_if<T>(&_options[i]);
+    }
+
+    size_t count() const {
+        return _options.size();
+    }
+
+    static OutlinerPassOptions createFromString(StringRef param);
+};
+
 }  // namespace vpux

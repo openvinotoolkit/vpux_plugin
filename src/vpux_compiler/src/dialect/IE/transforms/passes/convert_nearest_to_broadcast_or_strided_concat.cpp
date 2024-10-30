@@ -5,9 +5,11 @@
 
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 #include "vpux/compiler/dialect/IE/utils/interpolate_utils.hpp"
+#include "vpux/compiler/dialect/IE/utils/quantization.hpp"
 
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/const/utils/utils.hpp"
+#include "vpux/compiler/utils/rewriter.hpp"
 #include "vpux/compiler/utils/types.hpp"
 
 #include <mlir/Transforms/DialectConversion.h>
@@ -15,16 +17,6 @@
 using namespace vpux;
 
 namespace {
-
-mlir::Value createFQ(mlir::PatternRewriter& rewriter, mlir::Value input, IE::FakeQuantizeOp fq) {
-    const auto outputType = fq.getOutput().getType().cast<vpux::NDTypeInterface>();
-    const auto newOutputType = outputType.changeShape(getShape(input));
-    return rewriter
-            .create<IE::FakeQuantizeOp>(fq.getLoc(), newOutputType, input, fq.getInputLow(), fq.getInputHigh(),
-                                        fq.getOutputLow(), fq.getOutputHigh(), fq.getLevelsAttr(),
-                                        fq.getLowFpTypeAttr(), fq.getAutoBroadcastAttr())
-            ->getResult(0);
-}
 
 //
 // ConvertNearestToBroadcastOrStridedConcatPass
@@ -92,9 +84,9 @@ mlir::LogicalResult ConvertNearestToBroadcastOrStridedConcatPass::NearestToBroad
 
     const auto shapeStorageType =
             mlir::RankedTensorType::get({static_cast<int64_t>(outShape.size())}, getSInt64Type(ctx));
-    const auto shapeConst = Const::createConst(rewriter, origOp->getLoc(), shapeStorageType, outShape.raw(),
-                                               [&](Const::ContentAttr attr) {
-                                                   return attr.convertElemType(getSInt32Type(rewriter.getContext()));
+    const auto shapeConst = Const::createConst(rewriter, takeOpLoc(origOp, "out_shape"), shapeStorageType,
+                                               outShape.raw(), [&](Const::ContentSetup& setup) {
+                                                   return setup.castElemType(getSInt32Type(rewriter.getContext()));
                                                });
     rewriter.replaceOpWithNewOp<IE::BroadcastOp>(origOp, origOp.getInput(), shapeConst, nullptr,
                                                  IE::BroadcastTypeAttr::get(ctx, IE::BroadcastType::NUMPY));
@@ -160,21 +152,23 @@ mlir::LogicalResult ConvertNearestToBroadcastOrStridedConcatPass::NearestToStrid
         widthSlices.push_back(origOp.getInput());
     }
 
-    widthConcatOp = widthSlices.size() != 1
-                            ? rewriter.create<IE::ConcatOp>(origOp->getLoc(), widthSlices, Dims4D::Act::W, 1, scaleX)
-                                      .getOutput()
-                            : widthSlices.front();
+    widthConcatOp = widthSlices.size() != 1 ? rewriter.create<IE::ConcatOp>(takeOpLoc(origOp, "wslices_concat"),
+                                                                            widthSlices, Dims4D::Act::W, 1, scaleX)
+                                                      .getOutput()
+                                            : widthSlices.front();
 
     // TODO remove this propagation after moving such functionality to Q-D propagation pass
     if (inputFQ != nullptr && outputFQ != nullptr && widthSlices.size() != 0) {
-        widthConcatOp = createFQ(rewriter, widthConcatOp, outputFQ);
+        widthConcatOp =
+                vpux::IE::createFQ(rewriter, widthConcatOp, outputFQ, takeOpLoc(outputFQ, "fq_out")).getOutput();
     }
     for (int i = 0; i < scaleY; ++i) {
         heightSlices.push_back(widthConcatOp);
     }
-    const auto resultConcat = heightSlices.size() != 1 ? rewriter.create<IE::ConcatOp>(origOp->getLoc(), heightSlices,
-                                                                                       Dims4D::Act::H, 1, scaleY)
-                                                       : heightSlices.front();
+    const auto resultConcat = heightSlices.size() != 1
+                                      ? rewriter.create<IE::ConcatOp>(takeOpLoc(origOp, "hslices_concat"), heightSlices,
+                                                                      Dims4D::Act::H, 1, scaleY)
+                                      : heightSlices.front();
 
     int64_t padW = 0;
     int64_t padH = 0;
@@ -199,12 +193,12 @@ mlir::LogicalResult ConvertNearestToBroadcastOrStridedConcatPass::NearestToStrid
     const bool needPaddingW = padW != 0;
     const bool needPaddingH = padH != 0;
 
-    auto tensorPaddedWidth = (needPaddingW)
-                                     ? IE::createPadding(rewriter, origOp, resultConcat, Dims4D::Act::W, -padW, padW)
-                                     : resultConcat;
-    auto tensorPadded = (needPaddingH)
-                                ? IE::createPadding(rewriter, origOp, tensorPaddedWidth, Dims4D::Act::H, -padH, padH)
-                                : tensorPaddedWidth;
+    auto tensorPaddedWidth =
+            (needPaddingW) ? IE::createPadding(rewriter, origOp, resultConcat, Dims4D::Act::W, -padW, padW, "width")
+                           : resultConcat;
+    auto tensorPadded = (needPaddingH) ? IE::createPadding(rewriter, origOp, tensorPaddedWidth, Dims4D::Act::H, -padH,
+                                                           padH, "height")
+                                       : tensorPaddedWidth;
 
     rewriter.replaceOp(origOp, tensorPadded);
 

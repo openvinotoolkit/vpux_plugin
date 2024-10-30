@@ -13,7 +13,7 @@ func.func @ConstFold() -> tensor<1x16xf16> {
     return %1 : tensor<1x16xf16>
 
     // CHECK-DAG:       %[[VAL0:.*]] = const.Declare tensor<1x16xf16> =
-    // CHECK-SAME:      dense<1.000000e+00> : tensor<1x16xf32>, [#const.ConvertElemType<f16>]
+    // CHECK-SAME:      dense<1.000000e+00> : tensor<1x16xf32>, [#const.CastElemType<f16>]
     // CHECK-NOT:   IE.Convert
     // CHECK:       return %[[VAL0]]
 }

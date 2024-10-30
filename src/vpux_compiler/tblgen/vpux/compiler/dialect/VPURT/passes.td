@@ -31,6 +31,11 @@ def AssignPhysicalBarriers : PassBase<"assign-physical-barriers", "vpux::Functio
             "wlmEnableOpt", "wlm-enable",
             "bool", "",
             "In case of WLM assign PID_x only if there is topological dependency to previous usage of this PID_x"
+        >,
+        Option<
+            "colorBinEnableOpt", "color-bin-enable",
+            "bool", "",
+            "Enable color bin physical barrier assignment algorithm"
         >
     ];
 }
@@ -152,8 +157,8 @@ def ReduceExceedingActiveCountBarriers : PassBase<"reduce-exceeding-active-count
     let description = [{
         This pass linearizes virtual barriers in the IR such that the number of active barriers at any time
         does not exceed the physical number of available barriers.
-        For NPU37XX and below: total producer variant count <= MAX_VARIANT_COUNT / 2 and total consumer variant count <= MAX_VARIANT_COUNT / 2
-        For NPU40XX and above: total producer + consumer variant count <= MAX_VARIANT_COUNT.
+        For VPU37XX and below: total producer variant count <= MAX_VARIANT_COUNT / 2 and total consumer variant count <= MAX_VARIANT_COUNT / 2
+        For VPU40XX and above: total producer + consumer variant count <= MAX_VARIANT_COUNT.
         With exceeding active barrier count:
         - parallel barriers can be merged
         - parallel consumers to barrier can be linearized
@@ -214,6 +219,41 @@ def InferenceExecutionAnalysis : PassBase<"inference-execution-analysis", "vpux:
     }];
 
     let constructor = "vpux::VPURT::createInferenceExecutionAnalysisPass()";
+}
+
+//
+// IntermediateBufferOutput
+//
+
+def IntermediateBufferOutput : PassBase<"intermediate-buffer-output", "vpux::FunctionPass"> {
+    let summary = "Accuracy debug utility which can dump a target buffer to output.";
+
+    let description = [{
+        Accuracy debug utility allowing to output intermediate buffer.
+        The pass will insert a DMA to output for a target buffer, of a target operation, at a target index.
+        All parameters need to be provided.
+        Details about usage can be found in `guides/how-to-debug.md`
+    }];
+
+    let constructor = "vpux::VPURT::createIntermediateBufferOutputPass()";
+
+    let options = [
+        Option<
+            "opIndexVal", "op-index",
+            "int", "",
+            "Target operation to use for buffer selection"
+        >,
+        Option<
+            "bufferIndexVal", "buffer-index",
+            "int", "",
+            "Target operation operand / result index to output"
+        >,
+        Option<
+            "insertionIndexVal", "insertion-index",
+            "int", "",
+            "Targed operation index after which DMA to output should be inserted"
+        >
+    ];
 }
 
 #endif

@@ -20,7 +20,13 @@ void vpux::VPUMI37XX::PlatformInfoOp::serialize(elf::writer::BinaryDataSection<u
 }
 
 size_t vpux::VPUMI37XX::PlatformInfoOp::getBinarySize() {
-    return sizeof(elf::platform::PlatformInfo);
+    // calculate size based on serialized form, instead of just sizeof(PlatformInfoOp)
+    // serialization uses metadata that also gets stored in the blob and must be accounted for
+    // also for non-POD types (e.g. have vector as member) account for all data to be serialized
+    // (data owned by vector, instead of just pointer)
+    elf::platform::PlatformInfo platformInfo;
+    platformInfo.mArchKind = ELFNPU37XX::mapVpuArchKindToElfArchKind(getArchKind());
+    return elf::platform::PlatformInfoSerialization::serialize(platformInfo).size();
 }
 
 size_t vpux::VPUMI37XX::PlatformInfoOp::getAlignmentRequirements() {

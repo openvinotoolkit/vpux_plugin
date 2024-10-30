@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -9,6 +9,7 @@
 #include "vpux/compiler/dialect/IE/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPU/transforms/factories/nce_sparsity_converters.hpp"
 #include "vpux/compiler/dialect/const/attributes/content.hpp"
 
 #include "vpux/utils/core/array_ref.hpp"
@@ -35,29 +36,23 @@ constexpr int32_t SPARSITY_PTR_WHEN_NO_SPARSITY = 0xFFFFFF;
 const unsigned int DEFAULT_SPARSIFIABLE_INPUT_OPERAND_ID = 0;
 const unsigned int ELTWISE_SPARSIFIABLE_SECOND_INPUT_OPERAND_ID = 1;
 
-enum class Mode { CM_CONV, DW_CONV, POOL };
+enum class Mode { DW_CONV, POOL };
 
 int64_t getBitPatternSize(Mode mode, ShapeRef kernelSize, int64_t SX, mlir::Type elemType, int64_t IC);
-
-int64_t getActivationWindowSize(Mode mode, ShapeRef kernelSize, int64_t SX, mlir::Type elemType, int64_t IC);
-
-Shape inferActivationWindowShape(int64_t fakeSparsitySize);
-Shape inferActivationWindowShape(Mode mode, ShapeRef kernelSize, int64_t SX, mlir::Type elemType, int64_t IC);
-
-std::vector<uint8_t> getFakeSparsity(Mode mode, ShapeRef kernelSize, int64_t SX, mlir::Type elemType, int64_t IC);
 
 int32_t getWeightPtrStep(mlir::Value weights);
 
 std::vector<int32_t> getWeightsTable(mlir::Type inElemType, mlir::Type outElemType,
                                      std::optional<int32_t> weightsPtrOffset, int32_t weightsPtrStep,
-                                     std::optional<int32_t> sparsityPtrOffset, int32_t sparsityPtrStep, ArchKind arch,
-                                     int64_t OC, mlir::Type weightsElemType = nullptr,
-                                     Const::ContentAttr bias = nullptr, VPU::PPETaskAttr ppe = nullptr,
-                                     vpux::IE::PostOpAttr postOpAttr = nullptr, mlir::FloatAttr constScale = nullptr);
+                                     std::optional<int32_t> sparsityPtrOffset, int32_t sparsityPtrStep,
+                                     VPU::NCESparsity::PPEConverterCb ppeConverter,
+                                     VPU::NCESparsity::BiasConverterCb biasConverter, int64_t OC,
+                                     mlir::Type weightsElemType = nullptr, const Const::ContentAttr& bias = {},
+                                     mlir::FloatAttr constScale = nullptr);
 std::vector<int32_t> getWeightsTable(mlir::Type inElemType, mlir::Type outElemType, ArrayRef<int32_t> weightPtrs,
-                                     ArrayRef<int32_t> sparsityPtrs, ArchKind arch, int64_t OC,
-                                     mlir::Type weightsElemType = nullptr, Const::ContentAttr bias = nullptr,
-                                     VPU::PPETaskAttr ppe = nullptr, vpux::IE::PostOpAttr postOpAttr = nullptr,
+                                     ArrayRef<int32_t> sparsityPtrs, VPU::NCESparsity::PPEConverterCb ppeConverter,
+                                     VPU::NCESparsity::BiasConverterCb biasConverter, int64_t OC,
+                                     mlir::Type weightsElemType = nullptr, const Const::ContentAttr& bias = {},
                                      mlir::FloatAttr constScale = nullptr);
 
 std::vector<int32_t> patchWeightsTableSparsityPtrs(const std::vector<std::int32_t>& weightsTableVals,
@@ -68,7 +63,7 @@ SmallVector<int32_t> getInstructionListTable(ArrayRef<int> rangeAttr, ArrayRef<i
 Shape inferWeightsTableShape(int64_t OC);
 Shape inferWeightsSparsityMapShape(ShapeRef dataShape);
 
-mlir::FailureOr<SmallVector<double>> getRescaledBias(Const::ContentAttr biasAttr, mlir::Type inElemType,
+mlir::FailureOr<SmallVector<double>> getRescaledBias(const Const::ContentAttr& biasAttr, mlir::Type inElemType,
                                                      mlir::Type filterElemType, int64_t OC);
 
 double getSparsityRatio(vpux::NDTypeInterface weightsType, ArrayRef<int64_t> numNonSparseElemsPerOC);
@@ -85,9 +80,9 @@ inline VPU::SparsitySupport bitwiseNot(const VPU::SparsitySupport bits) {
 int32_t get5DWeightPtrStep(mlir::Value weights);
 
 std::vector<int32_t> create5DWeightsTableData(mlir::Value opInput, mlir::Value opOutput, mlir::Value weights,
-                                              Const::ContentAttr bias, int64_t outputChannels,
-                                              vpux::VPU::PPETaskAttr ppeTaskAttr, VPU::ArchKind _arch,
-                                              vpux::IE::PostOpAttr postOpAttr);
+                                              const Const::ContentAttr& bias, int64_t outputChannels,
+                                              VPU::NCESparsity::PPEConverterCb ppeConverter,
+                                              VPU::NCESparsity::BiasConverterCb biasConverter);
 
 mlir::Value create5DWeightsTableTensor(mlir::OpBuilder& builder, mlir::Location loc, ArrayRef<int32_t> weightsTable,
                                        int64_t outputChannels, int64_t groups);

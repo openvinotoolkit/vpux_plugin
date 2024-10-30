@@ -1,11 +1,12 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2023-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 #include "vpux/compiler/NPU40XX/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/core/passes.hpp"
 
+#include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
 #include <mlir/Pass/PassManager.h>
@@ -17,20 +18,25 @@ void vpux::VPU::arch40xx::buildIncrementalPipeline(mlir::OpPassManager& pm, cons
                                                    Logger log) {
     pm.addPass(VPU::arch37xx::createDecomposeMVNPass(log));
 
-    pm.addPass(VPU::createMultiClusterStrategyAssignmentPass(options.enablePrefetching, log));
+    pm.addPass(VPU::createMultiClusterStrategyAssignmentPass(options.enablePrefetching, options.enableMCSideLoadDump,
+                                                             options.modelHash, log));
 
     pm.addPass(VPU::createManualStrategyUtilsPass(options.writeStrategyToJson, writeStrategyFileLocation,
-                                                  options.readStrategyFromJson, readStrategyFileLocation, log));
+                                                  options.readStrategyFromJson, readStrategyFileLocation,
+                                                  options.enableMCSideLoadDump, options.modelHash, log));
     pm.addPass(VPU::createSplitGRUSequencePass(log));
+    pm.addPass(VPU::arch37xx::createApplyTilingMVN1SumPass(log));
+    pm.addPass(VPU::createTileLSTMSequencePass(log));
+
+    pm.addPass(VPU::createEnsureNCEOpsSizeRequirementsPass(log));
+    pm.addPass(VPU::createOptimizeConcatPass(log));
 
     VPU::buildTilingPipeline(pm, VPU::TilingOptions(options), log);
 
-    pm.addPass(VPU::createComputeInterpolateCoordinatesPass(log));
     pm.addPass(VPU::createRemoveOutputSparseToAvoidSuboptimalDPUWorkloadsPass(log));
 
-    pm.addPass(VPU::createMakeOpsWithDistributedTensorPass(options.enableExplicitDistributedTensorAttr, log));
+    pm.addPass(VPU::createMakeOpsWithDistributedTensorPass(options.enableExplicitDistributionInfoAttr, log));
     pm.addPass(VPU::createAdjustDistributedTensorAroundOpsPass(log));
-    pm.addPass(VPU::createWrapDistributedOpsInNCEClusterTiling(log));
 }
 
 //
@@ -44,11 +50,11 @@ void vpux::VPU::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
     pm.addPass(VPU::createTileGatherPass(log));
     pm.addPass(VPU::createConvertOpToDMAForPerformantExecutionPass(log));
     pm.addPass(VPU::arch40xx::createMoveConvertAroundViewLikeOpsPass(log));
-    pm.addPass(VPU::arch37xx::createAdjustForOptimizedSwKernelPass(log));
+    pm.addPass(VPU::arch37xx::createAdjustForOptimizedLayersPass(log));
     pm.addPass(VPU::createDetectionOutputDecompositionPass(log));
     pm.addPass(VPU::arch37xx::createSplitRealDFTOpsPass(log));
     pm.addPass(VPU::arch37xx::createAddProposalAuxiliaryBufferPass(log));
-    pm.addPass(VPU::createAdjustLSTMCellInputsOrderPass(log));
+    pm.addPass(VPU::createAdjustLSTMCellInputsPass(log));
     pm.addPass(mlir::createCanonicalizerPass(grc));
 
     if (options.enableSEPtrsOperations || options.enableExperimentalSEPtrsOperations) {
@@ -60,10 +66,10 @@ void vpux::VPU::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
                 /*seExperimentalOpsEnabled=*/isOptionEnabled(options.enableExperimentalSEPtrsOperations), log));
     }
 
-    pm.addPass(VPU::createSetupPPEPass(log));
     pm.addPass(VPU::createFuseClampPass(log));
 
     pm.addPass(VPU::createEnsureNCEOpsSizeRequirementsPass(log));
+    pm.addPass(VPU::createOptimizeConcatPass(log));
 
     if (options.enableWeightsSparsity) {
         VPU::buildWeightsSparsityPipeline(pm, VPU::WeightsSparsityOptions(options), log);
@@ -93,6 +99,8 @@ void vpux::VPU::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
     pm.addPass(VPU::createOptimizeConcatPass(log));
     pm.addPass(VPU::createAdjustMemorySpacePass(log));
     pm.addPass(mlir::createCanonicalizerPass(grc));
+    pm.addPass(VPU::createWrapDistributedOpsInNCEClusterTiling(log));
+
     pm.addPass(VPU::createCMXConcatPass(log, options.supportNCEOpInsertion));
     pm.addPass(mlir::createCanonicalizerPass(grc));
 

@@ -5,7 +5,10 @@
 
 #pragma once
 
+#include "vpux/compiler/dialect/IE/IR/ops_interfaces.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPU/utils/conv_utils.hpp"
+#include "vpux/utils/core/error.hpp"
 
 namespace vpux {
 namespace VPU {
@@ -40,6 +43,9 @@ void inferAffineReshapeLayoutInfo(mlir::Operation* op, IE::LayerLayoutInfo& info
 mlir::LogicalResult verifyRegionYoloLayoutInfo(mlir::Operation* op);
 void inferRegionYoloLayoutInfo(mlir::Operation* op, IE::LayerLayoutInfo& info);
 
+void inferLSTMSequenceLayoutInfo(mlir::Operation* op, IE::LayerLayoutInfo& info);
+mlir::LogicalResult verifyLSTMSequenceLayoutInfo(mlir::Operation* op);
+
 mlir::LogicalResult verifyInterpolateLayoutInfo(mlir::Operation* op);
 void inferInterpolateLayoutInfo(mlir::Operation* op, IE::LayerLayoutInfo& info);
 
@@ -58,6 +64,7 @@ mlir::LogicalResult verifyNCEConvolutionLayoutInfo(mlir::Operation* op);
 mlir::LogicalResult verifyTopKLayoutInfo(mlir::Operation* op);
 mlir::LogicalResult verifyScatterNDUpdateLayoutInfo(mlir::Operation* op);
 mlir::LogicalResult verifyNCEPermuteLayoutInfo(mlir::Operation* op);
+mlir::LogicalResult verifySWGroupConvolutionLayoutInfo(mlir::Operation* op);
 
 mlir::LogicalResult verifyRollLayoutInfo(mlir::Operation* op);
 void inferRollLayoutInfo(mlir::Operation* op, IE::LayerLayoutInfo& info);
@@ -532,6 +539,33 @@ public:
 };
 
 //
+// SameInOutDimsOrderOpModel_NCHW_NHWC
+//
+
+class SameInOutDimsOrderOpModel_NCHW_NHWC final :
+        public IE::LayoutInfoOpInterface::FallbackModel<SameInOutDimsOrderOpModel_NCHW_NHWC> {
+public:
+    static void inferLayoutInfo(mlir::Operation* /*op*/, IE::LayerLayoutInfo& info, const bool /*seOpsEnabled*/,
+                                const bool /*seExperimentalOpsEnabled*/) {
+        const auto inOrder = info.getInput(0);
+        if (inOrder != DimsOrder::NHWC && inOrder != DimsOrder::NCHW) {
+            info.setInput(0, DimsOrder::NCHW);
+            info.setOutput(0, DimsOrder::NCHW);
+        } else {
+            VPU::inferLayoutInfoSameAnyDimsOrder(info);
+        }
+    }
+
+    mlir::LogicalResult verifyLayout(mlir::Operation* origOp) const {
+        return VPU::verifySameAnyDimsOrder(origOp);
+    }
+
+    IE::LayerLayoutInfo getLayoutInfo(mlir::Operation* origOp) const {
+        return IE::getLayoutInfo(origOp);
+    }
+};
+
+//
 // SameMultipleInOutDimsOrderOpModelForHW_NHWC
 //
 
@@ -595,6 +629,55 @@ public:
 
     IE::LayerLayoutInfo getLayoutInfo(mlir::Operation* origOp) const {
         return IE::getLayoutInfo(origOp);
+    }
+};
+
+template <class FallbackSWImplOpType, class FallbackHWImplOpType>
+class GroupConvolutionLayoutInfoOpModel final :
+        public IE::LayoutInfoOpInterface::ExternalModel<
+                GroupConvolutionLayoutInfoOpModel<FallbackSWImplOpType, FallbackHWImplOpType>,
+                VPU::GroupConvolutionOp> {
+public:
+    void inferLayoutInfo(mlir::Operation* origOp, IE::LayerLayoutInfo& info, const bool seOpsEnabled,
+                         const bool seExperimentalOpsEnabled) const {
+        auto groupConvOp = mlir::dyn_cast<VPU::GroupConvolutionOp>(origOp);
+        VPUX_THROW_WHEN(groupConvOp == nullptr,
+                        "GroupConvolutionLayoutInfoOpModel is only supported for VPU_GroupConvolutionOp");
+        if (!canBeExecutedOnNCE(origOp, seExperimentalOpsEnabled)) {
+            FallbackSWImplOpType::inferLayoutInfo(origOp, info, seOpsEnabled, seExperimentalOpsEnabled);
+            return;
+        }
+
+        FallbackHWImplOpType::inferLayoutInfo(origOp, info, seOpsEnabled, seExperimentalOpsEnabled);
+    }
+
+    mlir::LogicalResult verifyLayout(mlir::Operation* origOp) const {
+        auto groupConvOp = mlir::dyn_cast<VPU::GroupConvolutionOp>(origOp);
+        VPUX_THROW_WHEN(groupConvOp == nullptr,
+                        "GroupConvolutionLayoutInfoOpModel is only supported for VPU_GroupConvolutionOp");
+        return vpux::VPU::isDilatedGroupConv(groupConvOp) ? IE::verifyLayout(origOp)
+                                                          : VPU::verifySWGroupConvolutionLayoutInfo(origOp);
+    }
+
+private:
+    static bool canBeExecutedOnNCE(mlir::Operation* op, const bool seExperimentalOpsEnabled) {
+        if (VPU::getCompilationMode(op) == VPU::CompilationMode::ReferenceSW) {
+            // We are in reference SW compilation mode
+            return false;
+        }
+
+        if (!seExperimentalOpsEnabled) {
+            return false;
+        }
+        auto log = Logger::global().nest("can-be-executed-on-nce-group-conv", 0);
+        const auto logCb = [&](const formatv_object_base& msg) {
+            log.trace("{0}", msg.str());
+        };
+        auto groupConvOp = mlir::cast<VPU::GroupConvolutionOp>(op);
+        VPUX_THROW_WHEN(groupConvOp == nullptr,
+                        "GroupConvolutionLayoutInfoOpModel is only supported for VPU_GroupConvolutionOp");
+        return vpux::VPU::isSupportedSEPDilatedConv(groupConvOp, logCb, /*checkLayout=*/false,
+                                                    /*checkChannelAlignment=*/true);
     }
 };
 
@@ -684,6 +767,27 @@ public:
 
     mlir::LogicalResult verifyLayout(mlir::Operation* op) const {
         return VPU::verifyRollLayoutInfo(op);
+    }
+
+    IE::LayerLayoutInfo getLayoutInfo(mlir::Operation* origOp) const {
+        return IE::getLayoutInfo(origOp);
+    }
+};
+
+//
+// LSTMSequenceDimsOrderOpModel
+//
+
+class LSTMSequenceDimsOrderOpModel final :
+        public IE::LayoutInfoOpInterface::FallbackModel<LSTMSequenceDimsOrderOpModel> {
+public:
+    static void inferLayoutInfo(mlir::Operation* op, IE::LayerLayoutInfo& info, const bool /*seOpsEnabled*/,
+                                const bool /*seExperimentalOpsEnabled*/) {
+        inferLSTMSequenceLayoutInfo(op, info);
+    }
+
+    mlir::LogicalResult verifyLayout(mlir::Operation* op) const {
+        return verifyLSTMSequenceLayoutInfo(op);
     }
 
     IE::LayerLayoutInfo getLayoutInfo(mlir::Operation* origOp) const {

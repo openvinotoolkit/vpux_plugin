@@ -24,11 +24,11 @@ func.func @SingleLayer(%arg0: tensor<1x1000xf16>) -> tensor<1x1000xf16> {
 
 func.func @ConstantLayer() -> tensor<1x2x2x2xf16> {
     %0 = const.Declare tensor<1x2x2x2xf16> =
-      dense<1.0> : tensor<1x2x2x2xf32>, [#const.ConvertElemType<f16>]
+      dense<1.0> : tensor<1x2x2x2xf32>, [#const.CastElemType<f16>]
     return %0 : tensor<1x2x2x2xf16>
 
     // CHECK-DAG:       [[VAR0:%.*]] = const.Declare tensor<1x2x2x2xf16> =
-    // CHECK-SAME:      dense<1.000000e+00> : tensor<1x2x2x2xf32>, [#const.ConvertElemType<f16>]
+    // CHECK-SAME:      dense<1.000000e+00> : tensor<1x2x2x2xf32>, [#const.CastElemType<f16>]
 
     // CHECK:       return
     // CHECK-SAME: tensor<1x2x2x2xf16>
@@ -269,13 +269,13 @@ func.func @PermuteCast(%arg0: tensor<1x12x16x16xf16, {order = #NHWC}>) -> tensor
 
 // CHECK-LABEL: @Roll
 func.func @Roll(%arg0: tensor<3x10x100x200xf16>) -> tensor<3x10x100x200xf16> {
-    %cst = const.Declare tensor<1xsi32> = dense<3> : tensor<1xsi64>, [#const.ConvertElemType<si32>]
-    %cst_0 = const.Declare tensor<2xsi32> = dense<3> : tensor<2xsi64>, [#const.ConvertElemType<si32>]
+    %cst = const.Declare tensor<1xsi32> = dense<3> : tensor<1xsi64>, [#const.CastElemType<si32>]
+    %cst_0 = const.Declare tensor<2xsi32> = dense<3> : tensor<2xsi64>, [#const.CastElemType<si32>]
     %0 = IE.Roll(%arg0, %cst, %cst_0) : tensor<3x10x100x200xf16>, tensor<1xsi32>, tensor<2xsi32> -> tensor<3x10x100x200xf16>
     return %0 : tensor<3x10x100x200xf16>
 
-    // CHECK-DAG:   [[VAR1:%.*]] = const.Declare tensor<1xsi32> = dense<3> : tensor<1xsi64>, [#const.ConvertElemType<si32>]
-    // CHECK-DAG:   [[VAR2:%.*]] = const.Declare tensor<2xsi32> = dense<3> : tensor<2xsi64>, [#const.ConvertElemType<si32>]
+    // CHECK-DAG:   [[VAR1:%.*]] = const.Declare tensor<1xsi32> = dense<3> : tensor<1xsi64>, [#const.CastElemType<si32>]
+    // CHECK-DAG:   [[VAR2:%.*]] = const.Declare tensor<2xsi32> = dense<3> : tensor<2xsi64>, [#const.CastElemType<si32>]
     // CHECK:       [[VAR3:%.*]] = memref.alloc() : memref<3x10x100x200xf16>
 
     // CHECK:       [[VAR4:%.*]] = IERT.Roll
@@ -321,7 +321,7 @@ func.func @ExtractImagePatches(%arg0: tensor<64x3x10x10xf32>) -> tensor<64x27x2x
 // -----
 // CHECK-LABEL: @ReduceL2
 func.func @ReduceL2(%arg0: tensor<1x32x112x112xf16>) -> tensor<1x32x112x1xf16> {
-    %cst = const.Declare tensor<1xsi32> = dense<3> : tensor<1xsi64>, [#const.ConvertElemType<si32>]
+    %cst = const.Declare tensor<1xsi32> = dense<3> : tensor<1xsi64>, [#const.CastElemType<si32>]
     %0 = IE.ReduceL2(%arg0, %cst) {keep_dims} : tensor<1x32x112x112xf16>, tensor<1xsi32> -> tensor<1x32x112x1xf16>
     return %0 : tensor<1x32x112x1xf16>
 

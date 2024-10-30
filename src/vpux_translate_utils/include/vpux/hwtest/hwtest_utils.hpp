@@ -13,7 +13,6 @@
 #include <mlir/IR/BuiltinTypes.h>
 #include <type_traits>
 
-#include "vpux/compiler/dialect/VPUIP/graph-schema/export.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/utils/logging.hpp"
 #include "vpux/hwtest/test_case_json_parser.hpp"
@@ -124,6 +123,8 @@ void buildDWConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp modu
                  Logger& log, mlir::Type inputType, mlir::Type weightsType, mlir::Type outputType);
 void buildActShave(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module, mlir::OpBuilder builder,
                    Logger& log, const SmallVector<mlir::Type>& inputType, mlir::Type outputType);
+void buildActShaveBroadcast(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module, mlir::OpBuilder builder,
+                            Logger& log, const SmallVector<mlir::Type>& inputType, mlir::Type outputType);
 void buildM2iTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module, mlir::OpBuilder builder,
                   Logger& log, mlir::Type inputType, mlir::Type outputType);
 void buildReadAfterWriteDPUDMATest(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module,
@@ -223,7 +224,7 @@ vpux::VPUIP::DPUTaskOp createDPUTaskOp(mlir::OpBuilder builder, mlir::OpBuilder 
                                        const std::vector<int64_t>& paddingVec, VPU::MPEMode mpeMode,
                                        int64_t clusterId = 0);
 
-vpux::DimsOrder oduPermutationToLayout(const MVCNN::Permutation oduPermutation);
+vpux::DimsOrder oduPermutationToLayout(const vpux::VPUIP::Permutation oduPermutation);
 vpux::Dim getInnermostDim(const vpux::DimsOrder& order);
 
 VPU::PaddingAttr getMulticlusteringPaddings(mlir::MLIRContext* ctx, const int64_t cluster, const int64_t numClusters,

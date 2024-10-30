@@ -27,12 +27,8 @@ size_t vpux::VPUASM::BootstrapOp::getAlignmentRequirements() {
     return alignof(uint32_t);
 }
 
-vpux::ELF::SectionFlagsAttr vpux::VPUASM::BootstrapOp::getAccessingProcs(mlir::SymbolUserMap&) {
+vpux::ELF::SectionFlagsAttr vpux::VPUASM::BootstrapOp::getPredefinedMemoryAccessors() {
     return (ELF::SectionFlagsAttr::SHF_EXECINSTR);
-}
-
-vpux::ELF::SectionFlagsAttr vpux::VPUASM::BootstrapOp::getUserProcs() {
-    return (ELF::SectionFlagsAttr::SHF_NONE);
 }
 
 std::optional<ELF::SectionSignature> vpux::VPUASM::BootstrapOp::getSectionSignature() {

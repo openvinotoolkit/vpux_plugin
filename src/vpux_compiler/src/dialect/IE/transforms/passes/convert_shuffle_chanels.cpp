@@ -7,6 +7,7 @@
 
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
+#include "vpux/compiler/utils/rewriter.hpp"
 
 #include <mlir/Transforms/DialectConversion.h>
 
@@ -84,15 +85,18 @@ mlir::LogicalResult ConvertShuffleChannelsPass::ShuffleChannelsOpConverter::matc
         }
     }
     const auto shape1Attr = getIntArrayAttr(getContext(), shape1);
-    auto reShape1Op = rewriter.create<IE::ReshapeOp>(origOp->getLoc(), origOp.getInput(), nullptr, false, shape1Attr);
+    auto reShape1Op = rewriter.create<IE::ReshapeOp>(takeOpLoc(origOp, "reshape_in"), origOp.getInput(), nullptr, false,
+                                                     shape1Attr);
 
     auto permuteNdOrder = !fuseDimsHW ? SmallVector<uint32_t>{1, 0, 2, 3} : SmallVector<uint32_t>{0, 2, 1, 3};
     const auto permutationMap = mlir::AffineMap::getPermutationMap(ArrayRef(permuteNdOrder), getContext());
-    auto transpOp = rewriter.create<IE::TransposeOp>(origOp->getLoc(), reShape1Op.getOutput(), nullptr,
+    auto transpOp = rewriter.create<IE::TransposeOp>(takeOpLoc(origOp, "transpose_in"), reShape1Op.getOutput(), nullptr,
                                                      mlir::AffineMapAttr::get(permutationMap));
 
     const auto outShapeAttr = getIntArrayAttr(getContext(), outShape);
-    rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, transpOp.getOutput(), nullptr, false, outShapeAttr);
+    auto outReshape =
+            rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, transpOp.getOutput(), nullptr, false, outShapeAttr);
+    extendOpLoc(outReshape, "reshape_out");
 
     return mlir::success();
 }

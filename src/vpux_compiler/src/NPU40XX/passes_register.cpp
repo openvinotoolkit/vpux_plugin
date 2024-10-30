@@ -24,7 +24,7 @@ void PassesRegistry40XX::registerPasses() {
     vpux::IE::arch37xx::registerFuseOutstandingDequant();
     vpux::IE::arch37xx::registerConvertWeightsToI8();
     vpux::IE::arch37xx::registerExpandActivationChannelsPass();  //
-    vpux::IE::arch37xx::registerFuseMultiplyToConv();
+    vpux::IE::arch37xx::registerFuseStaticScale();
     vpux::IE::arch37xx::registerFusePermuteQuantizeExpand();
     vpux::IE::arch37xx::registerFuseReordersPass();
     vpux::IE::arch37xx::registerInsertIdentityPoolBeforeOp();
@@ -38,8 +38,9 @@ void PassesRegistry40XX::registerPasses() {
     vpux::IE::arch37xx::registerConvertSubGRUSequenceToConv();
 
     vpux::IE::arch40xx::registerIEPasses();
-    vpux::VPU::arch37xx::registerAdjustForOptimizedSwKernelPass();
+    vpux::VPU::arch37xx::registerAdjustForOptimizedLayersPass();
     vpux::VPU::arch37xx::registerDecomposeMVNPass();
+    vpux::VPU::arch37xx::registerApplyTilingMVN1SumPass();
     vpux::VPU::arch37xx::registerSplitRealDFTOpsPass();
     vpux::VPU::arch37xx::registerAddProposalAuxiliaryBufferPass();
     vpux::VPU::arch40xx::registerVPUPasses();

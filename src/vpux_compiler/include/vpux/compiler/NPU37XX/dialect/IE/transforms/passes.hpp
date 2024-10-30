@@ -34,6 +34,7 @@ std::unique_ptr<mlir::Pass> createOptimizeNetworkInputConvertPass(Logger log = L
 std::unique_ptr<mlir::Pass> createConvertWeightsToI8Pass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createProcessAsymmetricZeroPointsForConvolutionPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createFuseOutstandingDequant(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createWeightsQuantFusedIntoTaskPass(Logger log = Logger::global());
 
 //
 // Pipelines
@@ -61,19 +62,18 @@ void buildLowPrecisionPipeline(mlir::OpPassManager& pm, const LowPrecisionOption
 struct TransformOptions : mlir::PassPipelineOptions<TransformOptions> {
     TransformOptions() = default;
 
-    BoolOption enableConvertFCToConv{*this, "convert-fc-to-conv", llvm::cl::desc("Enable convert-fc-to-conv pass"),
-                                     llvm::cl::init(true)};
     BoolOption enableConvertFFTToConv{*this, "convert-fft-to-conv", llvm::cl::desc("Enable convert-fft-to-conv pass"),
                                       llvm::cl::init(true)};
     BoolOption enableGroupedMatMul{*this, "enable-grouped-matmul",
                                    llvm::cl::desc("Enable execution of grouped MatMul as a single operation."),
                                    llvm::cl::init(false)};
-
+    BoolOption fuseMvn6ScaleBias{*this, "fuse-mvn6-scale-bias", llvm::cl::desc("Enable fuse-mvn6-scale-bias pass"),
+                                 llvm::cl::init(false)};
     template <class OtherOptions>
     explicit TransformOptions(const OtherOptions& options) {
-        enableConvertFCToConv = options.enableConvertFCToConv;
         enableConvertFFTToConv = options.enableConvertFFTToConv;
         enableGroupedMatMul = options.enableGroupedMatMul;
+        fuseMvn6ScaleBias = options.fuseMvn6ScaleBias;
     }
 };
 
@@ -118,7 +118,7 @@ void buildAdjustLayoutPipeline(mlir::OpPassManager& pm, const AdjustLayoutOption
 std::unique_ptr<mlir::Pass> createPropagateReorderToNCEPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createSwapMaxPoolWithActivation(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createFuseReordersPass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createFuseMultiplyToConvPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createFuseStaticScalePass(Logger log = Logger::global(), bool moveScaleBeforeConcat = true);
 
 //
 // Generated

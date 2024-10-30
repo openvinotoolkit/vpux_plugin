@@ -69,6 +69,13 @@ OverlapDistributionParams getActivationOverlappedParams(VPU::ClusteredOpInterfac
                                                         vpux::NDTypeInterface inputType = nullptr,
                                                         const vpux::TileInfo& tileInfo = vpux::TileInfo(ShapeRef()));
 
+OverlapDistributionParams getActivationOverlappedParams(VPU::ClusteredOpInterface clusteredOp,
+                                                        ArrayRef<int64_t> activationTensorNumTiles,
+                                                        const bool uniformDistributedSegments,
+                                                        SiblingOpsAnalysis& siblingsAnalysis,
+                                                        vpux::NDTypeInterface inputType = nullptr,
+                                                        const vpux::TileInfo& tileInfo = vpux::TileInfo(ShapeRef()));
+
 std::set<VPU::ClusteredOpInterface> getSiblingOps(mlir::Operation* op);
 
 bool isPassthroughOp(mlir::Operation* op);
@@ -107,7 +114,7 @@ OverlapDistributionParams getOutputOverlappedParams(VPU::ClusteredOpInterface cl
                                                     ArrayRef<int64_t> outputTensorNumTiles,
                                                     const bool uniformDistributedSegments,
                                                     vpux::NDTypeInterface outputType, const vpux::TileInfo& tileInfo,
-                                                    std::set<VPU::ClusteredOpInterface>& siblings);
+                                                    SiblingOpsAnalysis& siblingsAnalysis);
 
 OverlapDistributionParams getOutputOverlappedParamsNoHalo(VPU::ClusteredOpInterface clusteredOp,
                                                           ArrayRef<int64_t> outputTensorNumTiles);

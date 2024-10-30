@@ -33,9 +33,14 @@ private:
 mlir::LogicalResult ConvertMVN6ToMVN1::matchAndRewrite(IE::MVN6Op origOp, mlir::PatternRewriter& rewriter) const {
     const auto inputType = origOp.getInput().getType().cast<vpux::NDTypeInterface>();
     const auto inputShape = inputType.getShape();
-    const auto inputShapeVal = inputShape.raw();
+    auto inputShapeVal = inputShape.raw();
     const auto inputShapeSize = inputShape.size();
     const auto inRank = inputType.getRank();
+
+    if (origOp.getScale() || origOp.getBias()) {
+        _log.nest().trace("MVN6 got scale/bias, cannot convert to MVN1.");
+        return mlir::failure();
+    }
 
     if (inputShapeSize < 2 || inputShapeSize > 5) {
         _log.nest().trace("MVN6 -> MVN1 conversion pass supports only 2D, 3D, 4D or 5D cases. Got {0}D input shape",
@@ -84,6 +89,24 @@ mlir::LogicalResult ConvertMVN6ToMVN1::matchAndRewrite(IE::MVN6Op origOp, mlir::
         return mlir::failure();
     }
 
+    // 4D input and axis is 1, we need a Transpose to transpose dim C
+    // to spatial dim
+    IE::TransposeOp transposeIn;
+    if (inputShapeSize == 4 && axesAttr.size() == 1 && axesAttr[0] == 1) {
+        _log.trace("Transpose dim C to spatial dim");
+        const auto transposeOrder = mlir::AffineMapAttr::get(
+                mlir::AffineMap::getPermutationMap(SmallVector<uint32_t>{0, 2, 3, 1}, getContext()));
+        const auto transposeLoc = appendLoc(origOp->getLoc(), "transpose_mvn_in");
+        rewriter.setInsertionPoint(origOp);
+        transposeIn = rewriter.create<IE::TransposeOp>(transposeLoc, origOp.getInput(), nullptr, transposeOrder);
+        origOp.setOperand(0, transposeIn);
+        vpux::inferReturnTypes(origOp, vpux::InferShapedTypeMode::SHAPE);
+
+        inputShapeVal = origOp.getInput().getType().cast<vpux::NDTypeInterface>().getShape().raw();
+        axesAttr.clear();
+        axesAttr.push_back(inputShapeSize - 1);
+    }
+
     SmallVector<int64_t> newInShape;
 
     if ((inputShapeSize == 2 || inputShapeSize == 3 || inputShapeSize == 4) && axesAttr.size() == 1 &&
@@ -130,15 +153,25 @@ mlir::LogicalResult ConvertMVN6ToMVN1::matchAndRewrite(IE::MVN6Op origOp, mlir::
     const auto epsAttr = getFPAttr(getContext(), eps);
 
     if (newInShape.size() == 4) {
-        auto reshapeInput = rewriter.create<IE::ReshapeOp>(origOp->getLoc(), origOp.getInput(), nullptr, false,
+        const auto origLoc = origOp->getLoc();
+        auto reshapeInput = rewriter.create<IE::ReshapeOp>(origLoc, origOp.getInput(), nullptr, false,
                                                            getIntArrayAttr(getContext(), newInShape));
 
-        auto mvnOp = rewriter.create<IE::MVNOp>(origOp->getLoc(), reshapeInput.getOutput(), acrossChannelsAttr,
-                                                normVarianceAttr, epsAttr);
+        auto mvnOp = rewriter.create<IE::MVNOp>(origLoc, reshapeInput.getOutput(), acrossChannelsAttr, normVarianceAttr,
+                                                epsAttr);
 
-        rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, mvnOp.getOutput(), nullptr, false,
-                                                   getIntArrayAttr(getContext(), inputShapeVal));
+        auto reshapeOut = rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, mvnOp.getOutput(), nullptr, false,
+                                                                     getIntArrayAttr(getContext(), inputShapeVal));
 
+        if (transposeIn) {
+            const auto transposeOrder = mlir::AffineMapAttr::get(
+                    mlir::AffineMap::getPermutationMap(SmallVector<uint32_t>{0, 3, 1, 2}, getContext()));
+            const auto transposeLoc = appendLoc(origLoc, "transpose_mvn_out");
+            rewriter.setInsertionPointAfter(reshapeOut);
+            auto transposeOut =
+                    rewriter.create<IE::TransposeOp>(transposeLoc, reshapeOut.getOutput(), nullptr, transposeOrder);
+            reshapeOut.getOutput().replaceAllUsesExcept(transposeOut.getOutput(), transposeOut);
+        }
         return mlir::success();
     } else {
         _log.nest().trace("MVN6 -> MVN1 conversion pass not applied");

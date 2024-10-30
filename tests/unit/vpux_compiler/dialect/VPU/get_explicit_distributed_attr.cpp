@@ -4,7 +4,7 @@
 //
 
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
-#include "vpux/compiler/dialect/VPU/IR/native_attributes/distributed_tensor_native.hpp"
+#include "vpux/compiler/dialect/VPU/IR/native_attributes/distribution_info.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/IR/types.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
@@ -22,7 +22,7 @@
 using namespace vpux;
 using PerClusterShapesOffsetsVec = SmallVector<SmallVector<int64_t>>;
 
-void testExplicitDistributedAttr(llvm::StringLiteral inputIR, vpux::VPU::DistributedTensorAttr expectedDistributedAttr,
+void testExplicitDistributedAttr(llvm::StringLiteral inputIR, vpux::VPU::DistributionInfoAttr expectedDistributedAttr,
                                  vpux::ShapeRef shape, mlir::MLIRContext* ctx) {
     auto module = mlir::parseSourceString<mlir::ModuleOp>(inputIR, ctx);
     ASSERT_TRUE(module.get() != nullptr);
@@ -43,7 +43,7 @@ void testExplicitDistributedAttr(llvm::StringLiteral inputIR, vpux::VPU::Distrib
             // HW ops & Concat will receive their overlapped params explicitly.
             if (mode == VPU::DistributionMode::OVERLAPPED &&
                 (mlir::isa<vpux::VPU::NCEOpInterface>(op) || mlir::isa<VPU::ConcatOp>(op))) {
-                const auto tempDistribution = VPU::DistributedTensorAttr::get(
+                const auto tempDistribution = VPU::DistributionInfoAttr::get(
                         ctx, expectedDistributedAttr.getMode(), numTiles, expectedDistributedAttr.getKernel(),
                         expectedDistributedAttr.getPads(), expectedDistributedAttr.getStrides(), numClusters, alignment,
                         uniformDistributedSeg, nullptr, nullptr, nullptr, nullptr, nullptr);
@@ -62,10 +62,10 @@ void testExplicitDistributedAttr(llvm::StringLiteral inputIR, vpux::VPU::Distrib
             auto numTilesArr = numTiles ? parseIntArrayAttr<int64_t>(numTiles) : SmallVector<int64_t>{};
             auto alignmentArr = alignment ? parseIntArrayAttr<int64_t>(alignment) : SmallVector<int64_t>{};
 
-            auto distributedAttr = VPU::DistributedTensorNative::getAttrFromClass(
-                    ctx, clusterOp.getExplicitDistributedTensorAttr(shape, mode, numTilesArr, numClusters.getInt(),
-                                                                    alignmentArr, uniformDistributedSeg ? true : false,
-                                                                    overlapParams));
+            auto distributedAttr = VPU::DistributionInfo::getAttrFromClass(
+                    ctx, clusterOp.getExplicitDistributionInfoAttr(shape, mode, numTilesArr, numClusters.getInt(),
+                                                                   alignmentArr, uniformDistributedSeg ? true : false,
+                                                                   overlapParams));
 
             ASSERT_EQ(distributedAttr.getMemoryShapes(), expectedDistributedAttr.getMemoryShapes());
             ASSERT_EQ(distributedAttr.getMemoryOffsets(), expectedDistributedAttr.getMemoryOffsets());
@@ -75,9 +75,9 @@ void testExplicitDistributedAttr(llvm::StringLiteral inputIR, vpux::VPU::Distrib
     }
 }
 
-using MLIR_GetExplicitDistributedTensorAttrTest = vpux::VPU::arch37xx::UnitTest;
+using MLIR_GetExplicitDistributionInfoAttrTest = vpux::VPU::arch37xx::UnitTest;
 
-TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, SWOp) {
+TEST_F(MLIR_GetExplicitDistributionInfoAttrTest, SWOp) {
     constexpr llvm::StringLiteral inputIR = R"(
         module @test {
             func.func @main(%arg0: tensor<1x1x96x160xf16>) -> tensor<1x1x192x320xf16> {
@@ -90,7 +90,7 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, SWOp) {
                     shape_calc_mode = <SIZES>>, axes_attr = [2, 3],
                     initial_input_dims_attr = [1, 1, 96, 160],
                     initial_output_dims_attr = [1, 1, 192, 320],
-                    operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0>,
+                    operandSegmentSizes = array<i32: 1, 0, 0, 0>,
                     scales_attr = [2.000000e+00, 2.000000e+00],
                     sizes_attr = [192, 320],
                     tile_offset_attr = [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00]}
@@ -115,7 +115,7 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, SWOp) {
         const auto expectedPerClusterShapesAttr = getIntArrayOfArray(&ctx, expectedPerClusterShapes);
         const auto expectedPerClusterOffsetsAttr = getIntArrayOfArray(&ctx, expectedPerClusterOffsets);
 
-        const auto overlappedDistributedAtr = VPU::DistributedTensorAttr::get(
+        const auto overlappedDistributedAtr = VPU::DistributionInfoAttr::get(
                 &ctx, overlappedMode, numTiles, nullptr, nullptr, nullptr, numClusters, nullptr, nullptr,
                 expectedPerClusterShapesAttr, expectedPerClusterOffsetsAttr, expectedPerClusterShapesAttr,
                 expectedPerClusterOffsetsAttr, nullptr);
@@ -132,7 +132,7 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, SWOp) {
 
         const auto expectedPerClusterShapesAttr = getIntArrayOfArray(&ctx, expectedPerClusterShapes);
         const auto expectedPerClusterOffsetsAttr = getIntArrayOfArray(&ctx, expectedPerClusterOffsets);
-        const auto segmentedDistributedAtr = VPU::DistributedTensorAttr::get(
+        const auto segmentedDistributedAtr = VPU::DistributionInfoAttr::get(
                 &ctx, segmentedMode, numTiles, nullptr, nullptr, nullptr, numClusters, nullptr, nullptr,
                 expectedPerClusterShapesAttr, expectedPerClusterOffsetsAttr, expectedPerClusterShapesAttr,
                 expectedPerClusterOffsetsAttr, nullptr);
@@ -148,7 +148,7 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, SWOp) {
 
         const auto expectedPerClusterShapesAttr = getIntArrayOfArray(&ctx, expectedPerClusterShapes);
         const auto expectedPerClusterOffsetsAttr = getIntArrayOfArray(&ctx, expectedPerClusterOffsets);
-        const auto duplicatedDistributedAtr = VPU::DistributedTensorAttr::get(
+        const auto duplicatedDistributedAtr = VPU::DistributionInfoAttr::get(
                 &ctx, duplicatedMode, nullptr, nullptr, nullptr, nullptr, numClusters, nullptr, nullptr,
                 expectedPerClusterShapesAttr, expectedPerClusterOffsetsAttr, expectedPerClusterShapesAttr,
                 expectedPerClusterOffsetsAttr, nullptr);
@@ -156,15 +156,14 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, SWOp) {
     }
 }
 
-TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, HWOp) {
+TEST_F(MLIR_GetExplicitDistributionInfoAttrTest, HWOp) {
     constexpr llvm::StringLiteral inputIR = R"(
         #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
         module @test {
             func.func @main(%arg0: tensor<1x32x112x112xf16, {order = #NHWC}>) -> tensor<1x32x112x112xf16, {order = #NHWC}> {
-                %cst = const.Declare tensor<1x1x1x16xui8> = dense<10> : tensor<1x1x1x16xui8>
                 %cst_0 = const.Declare tensor<32x1x1x4xsi32> = dense<10> : tensor<32x1x1x4xsi32>
-                %0 = VPU.NCE.MaxPool(%arg0, %cst_0, %cst) {
-                        activation_window_channel_length = 4 : i64,
+                %0 = VPU.NCE.MaxPool(%arg0, %cst_0) {
+                        opaque_ppe = #VPU.PPEStub<>,
                         pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                         strides = [1, 1],
                         kernel_size = [1, 1]
@@ -200,7 +199,7 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, HWOp) {
         const auto expectedPerClusterMemoryShapesAttr = getIntArrayOfArray(&ctx, expectedPerClusterMemoryShapes);
         const auto expectedPerClusterMemoryOffsetsAttr = getIntArrayOfArray(&ctx, expectedPerClusterMemoryOffsets);
 
-        const auto overlappedDistributedAtr = VPU::DistributedTensorAttr::get(
+        const auto overlappedDistributedAtr = VPU::DistributionInfoAttr::get(
                 &ctx, overlappedMode, numTiles, kernel, pads, strides, numClusters, nullptr, nullptr,
                 expectedPerClusterComputeShapesAttr, expectedPerClusterComputeOffsetsAttr,
                 expectedPerClusterMemoryShapesAttr, expectedPerClusterMemoryOffsetsAttr, nullptr);
@@ -217,7 +216,7 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, HWOp) {
 
         const auto expectedPerClusterShapesAttr = getIntArrayOfArray(&ctx, expectedPerClusterShapes);
         const auto expectedPerClusterOffsetsAttr = getIntArrayOfArray(&ctx, expectedPerClusterOffsets);
-        const auto segmentedDistributedAtr = VPU::DistributedTensorAttr::get(
+        const auto segmentedDistributedAtr = VPU::DistributionInfoAttr::get(
                 &ctx, segmentedMode, numTiles, nullptr, nullptr, nullptr, numClusters, nullptr, nullptr,
                 expectedPerClusterShapesAttr, expectedPerClusterOffsetsAttr, expectedPerClusterShapesAttr,
                 expectedPerClusterOffsetsAttr, nullptr);
@@ -233,7 +232,7 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, HWOp) {
 
         const auto expectedPerClusterShapesAttr = getIntArrayOfArray(&ctx, expectedPerClusterShapes);
         const auto expectedPerClusterOffsetsAttr = getIntArrayOfArray(&ctx, expectedPerClusterOffsets);
-        const auto duplicatedDistributedAtr = VPU::DistributedTensorAttr::get(
+        const auto duplicatedDistributedAtr = VPU::DistributionInfoAttr::get(
                 &ctx, duplicatedMode, nullptr, nullptr, nullptr, nullptr, numClusters, nullptr, nullptr,
                 expectedPerClusterShapesAttr, expectedPerClusterOffsetsAttr, expectedPerClusterShapesAttr,
                 expectedPerClusterOffsetsAttr, nullptr);
@@ -256,7 +255,7 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, HWOp) {
         const auto expectedPerClusterComputeOffsetsAttr = getIntArrayOfArray(&ctx, expectedPerClusterComputeOffsets);
         const auto expectedPerClusterMemoryShapesAttr = getIntArrayOfArray(&ctx, expectedPerClusterMemoryShapes);
         const auto expectedPerClusterMemoryOffsetsAttr = getIntArrayOfArray(&ctx, expectedPerClusterMemoryOffsets);
-        const auto duplicatedDistributedAtr = VPU::DistributedTensorAttr::get(
+        const auto duplicatedDistributedAtr = VPU::DistributionInfoAttr::get(
                 &ctx, segDupMode, numTiles, nullptr, nullptr, nullptr, numClusters, nullptr, nullptr,
                 expectedPerClusterComputeShapesAttr, expectedPerClusterComputeOffsetsAttr,
                 expectedPerClusterMemoryShapesAttr, expectedPerClusterMemoryOffsetsAttr, nullptr);
@@ -265,7 +264,7 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, HWOp) {
     }
 }
 
-TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, SparseHWSOKOp) {
+TEST_F(MLIR_GetExplicitDistributionInfoAttrTest, SparseHWSOKOp) {
     constexpr llvm::StringLiteral inputIR = R"(
         #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
         !SparseOutputType = !VPU.SparseTensor<
@@ -277,11 +276,12 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, SparseHWSOKOp) {
                 %wtable = const.Declare tensor<256x1x1x4xsi32> = dense<10> : tensor<256x1x1x4xsi32>
                 %0 = VPU.NCE.Convolution(%arg0, %weights, %wtable) {
                         pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                        ppe = #VPU.PPETask<mode = <NOOP>,
-                        clamp_low = 0 : i64, clamp_high = 255 : i64,
-                        lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                        fp_prelu_alpha = 1.000000e+00 : f64>,
-                        rawFilterShape = [256, 512, 1, 1], strides = [1, 1]
+                        opaque_ppe = #VPU.PPEInt<
+                            mode = <NOOP>,
+                            clamp_low = 0 : i64, clamp_high = 255 : i64,
+                            lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
+                            fp_prelu_alpha = 1.000000e+00 : f64>,
+                            rawFilterShape = [256, 512, 1, 1], strides = [1, 1]
                     } -> !SparseOutputType
                 return %0 : !SparseOutputType
             }
@@ -306,7 +306,7 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, SparseHWSOKOp) {
 
         const auto expectedPerClusterShapesAttr = getIntArrayOfArray(&ctx, expectedPerClusterShapes);
         const auto expectedPerClusterOffsetsAttr = getIntArrayOfArray(&ctx, expectedPerClusterOffsets);
-        const auto segmentedDistributedAtr = VPU::DistributedTensorAttr::get(
+        const auto segmentedDistributedAtr = VPU::DistributionInfoAttr::get(
                 &ctx, segmentedMode, numTiles, nullptr, nullptr, nullptr, numClusters, alignment, nullptr,
                 expectedPerClusterShapesAttr, expectedPerClusterOffsetsAttr, expectedPerClusterShapesAttr,
                 expectedPerClusterOffsetsAttr, nullptr);
@@ -333,7 +333,7 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, SparseHWSOKOp) {
         const auto expectedPerClusterComputeOffsetsAttr = getIntArrayOfArray(&ctx, expectedPerClusterComputeOffsets);
         const auto expectedPerClusterMemoryShapesAttr = getIntArrayOfArray(&ctx, expectedPerClusterMemoryShapes);
         const auto expectedPerClusterMemoryOffsetsAttr = getIntArrayOfArray(&ctx, expectedPerClusterMemoryOffsets);
-        const auto duplicatedDistributedAtr = VPU::DistributedTensorAttr::get(
+        const auto duplicatedDistributedAtr = VPU::DistributionInfoAttr::get(
                 &ctx, segDupMode, numTiles, nullptr, nullptr, nullptr, numClusters, alignment, nullptr,
                 expectedPerClusterComputeShapesAttr, expectedPerClusterComputeOffsetsAttr,
                 expectedPerClusterMemoryShapesAttr, expectedPerClusterMemoryOffsetsAttr, nullptr);
@@ -342,7 +342,7 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, SparseHWSOKOp) {
     }
 }
 
-TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, NCEPermuteOp) {
+TEST_F(MLIR_GetExplicitDistributionInfoAttrTest, NCEPermuteOp) {
     constexpr llvm::StringLiteral inputIR = R"(
         #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
@@ -356,7 +356,7 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, NCEPermuteOp) {
                     dstElemType = !qElemType,
                     dstOrder = #NHWC,
                     expandedChannels = 4 : i64,
-                    ppe = #VPU.PPETask<
+                    opaque_ppe = #VPU.PPEInt<
                         mode = <NOOP>,
                         clamp_low = -2147483648 : i64,
                         clamp_high = 2147483647 : i64,
@@ -396,7 +396,7 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, NCEPermuteOp) {
         const auto expectedPerClusterMemoryShapesAttr = getIntArrayOfArray(&ctx, expectedPerClusterMemoryShapes);
         const auto expectedPerClusterMemoryOffsetsAttr = getIntArrayOfArray(&ctx, expectedPerClusterMemoryOffsets);
 
-        const auto overlappedDistributedAtr = VPU::DistributedTensorAttr::get(
+        const auto overlappedDistributedAtr = VPU::DistributionInfoAttr::get(
                 &ctx, overlappedMode, numTiles, kernel, pads, strides, numClusters, nullptr, nullptr,
                 expectedPerClusterComputeShapesAttr, expectedPerClusterComputeOffsetsAttr,
                 expectedPerClusterMemoryShapesAttr, expectedPerClusterMemoryOffsetsAttr, nullptr);
@@ -413,7 +413,7 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, NCEPermuteOp) {
 
         const auto expectedPerClusterShapesAttr = getIntArrayOfArray(&ctx, expectedPerClusterShapes);
         const auto expectedPerClusterOffsetsAttr = getIntArrayOfArray(&ctx, expectedPerClusterOffsets);
-        const auto segmentedDistributedAtr = VPU::DistributedTensorAttr::get(
+        const auto segmentedDistributedAtr = VPU::DistributionInfoAttr::get(
                 &ctx, segmentedMode, numTiles, nullptr, nullptr, nullptr, numClusters, nullptr, nullptr,
                 expectedPerClusterShapesAttr, expectedPerClusterOffsetsAttr, expectedPerClusterShapesAttr,
                 expectedPerClusterOffsetsAttr, nullptr);
@@ -430,7 +430,7 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, NCEPermuteOp) {
 
         const auto expectedPerClusterShapesAttr = getIntArrayOfArray(&ctx, expectedPerClusterShapes);
         const auto expectedPerClusterOffsetsAttr = getIntArrayOfArray(&ctx, expectedPerClusterOffsets);
-        const auto duplicatedDistributedAtr = VPU::DistributedTensorAttr::get(
+        const auto duplicatedDistributedAtr = VPU::DistributionInfoAttr::get(
                 &ctx, duplicatedMode, nullptr, nullptr, nullptr, nullptr, numClusters, nullptr, nullptr,
                 expectedPerClusterShapesAttr, expectedPerClusterOffsetsAttr, expectedPerClusterShapesAttr,
                 expectedPerClusterOffsetsAttr, nullptr);
@@ -454,7 +454,7 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, NCEPermuteOp) {
         const auto expectedPerClusterComputeOffsetsAttr = getIntArrayOfArray(&ctx, expectedPerClusterComputeOffsets);
         const auto expectedPerClusterMemoryShapesAttr = getIntArrayOfArray(&ctx, expectedPerClusterMemoryShapes);
         const auto expectedPerClusterMemoryOffsetsAttr = getIntArrayOfArray(&ctx, expectedPerClusterMemoryOffsets);
-        const auto duplicatedDistributedAtr = VPU::DistributedTensorAttr::get(
+        const auto duplicatedDistributedAtr = VPU::DistributionInfoAttr::get(
                 &ctx, segDupMode, numTiles, nullptr, nullptr, nullptr, numClusters, nullptr, nullptr,
                 expectedPerClusterComputeShapesAttr, expectedPerClusterComputeOffsetsAttr,
                 expectedPerClusterMemoryShapesAttr, expectedPerClusterMemoryOffsetsAttr, nullptr);
@@ -463,7 +463,7 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, NCEPermuteOp) {
     }
 }
 
-TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, ConcatOp) {
+TEST_F(MLIR_GetExplicitDistributionInfoAttrTest, ConcatOp) {
     constexpr llvm::StringLiteral inputIR = R"(
         #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
         module @test {
@@ -500,7 +500,7 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, ConcatOp) {
         const auto expectedPerClusterShapesAttr = getIntArrayOfArray(&ctx, expectedPerClusterShapes);
         const auto expectedPerClusterOffsetsAttr = getIntArrayOfArray(&ctx, expectedPerClusterOffsets);
 
-        const auto overlappedDistributedAtr = VPU::DistributedTensorAttr::get(
+        const auto overlappedDistributedAtr = VPU::DistributionInfoAttr::get(
                 &ctx, overlappedMode, numTiles, kernel, pads, strides, numClusters, nullptr, nullptr,
                 expectedPerClusterShapesAttr, expectedPerClusterOffsetsAttr, expectedPerClusterShapesAttr,
                 expectedPerClusterOffsetsAttr, nullptr);
@@ -517,7 +517,7 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, ConcatOp) {
 
         const auto expectedPerClusterShapesAttr = getIntArrayOfArray(&ctx, expectedPerClusterShapes);
         const auto expectedPerClusterOffsetsAttr = getIntArrayOfArray(&ctx, expectedPerClusterOffsets);
-        const auto segmentedDistributedAtr = VPU::DistributedTensorAttr::get(
+        const auto segmentedDistributedAtr = VPU::DistributionInfoAttr::get(
                 &ctx, segmentedMode, numTiles, nullptr, nullptr, nullptr, numClusters, nullptr, nullptr,
                 expectedPerClusterShapesAttr, expectedPerClusterOffsetsAttr, expectedPerClusterShapesAttr,
                 expectedPerClusterOffsetsAttr, nullptr);
@@ -533,7 +533,7 @@ TEST_F(MLIR_GetExplicitDistributedTensorAttrTest, ConcatOp) {
 
         const auto expectedPerClusterShapesAttr = getIntArrayOfArray(&ctx, expectedPerClusterShapes);
         const auto expectedPerClusterOffsetsAttr = getIntArrayOfArray(&ctx, expectedPerClusterOffsets);
-        const auto duplicatedDistributedAtr = VPU::DistributedTensorAttr::get(
+        const auto duplicatedDistributedAtr = VPU::DistributionInfoAttr::get(
                 &ctx, duplicatedMode, nullptr, nullptr, nullptr, nullptr, numClusters, nullptr, nullptr,
                 expectedPerClusterShapesAttr, expectedPerClusterOffsetsAttr, expectedPerClusterShapesAttr,
                 expectedPerClusterOffsetsAttr, nullptr);

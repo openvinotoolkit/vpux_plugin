@@ -107,25 +107,25 @@ func.func @ConvertBilinearWithFQToStridedConcatAndConv(%arg0: tensor<1x16x96x176
     // CHECK:       [[CONCAT1:%.+]] = IE.Concat([[CONCAT0]], [[SLICE1]])
     // CHECK{LITERAL}   {static_offsets = [[0, 0, 0, 0], [0, 0, 96, 0]]} : tensor<1x16x96x177xf16>, tensor<1x16x1x177xf16> -> tensor<1x16x97x177xf16>
     // CHECK:       [[SLICE2:%.+]] = IE.Slice [[CONCAT1]] [0, 0, 0, 0] [1, 16, 97, 176] : tensor<1x16x97x177xf16> to tensor<1x16x97x176xf16>
-    // CHECK:       [[FQ1:%.+]] = IE.FakeQuantize({{[^:]+}}, {{[^:]+}}, {{[^:]+}}, {{[^:]+}}, {{[^:]+}}) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 255 : i64} :
+    // CHECK:       [[FQ1:%.+]] = IE.FakeQuantize({{[^:]+}}, {{[^:]+}}, {{[^:]+}}, {{[^:]+}}, {{[^:]+}}) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64} :
     // CHECK-SAME:      tensor<16x1x1x1xf16>, tensor<f16>, tensor<f16>, tensor<f16>, tensor<f16> -> tensor<16x1x1x1xf16>
     // CHECK:       [[GROUPCONV0:%.+]] = IE.GroupConvolution([[FQ0]], [[FQ1]]) {dilations = [1, 1], groups = 16 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} :
     // CHECK-SAME:      tensor<1x16x96x176xf16>, tensor<16x1x1x1xf16> -> tensor<1x16x96x176xf16>
     // CHECK:       [[FQ2:%.+]] = IE.FakeQuantize([[GROUPCONV0]], {{[^:]+}}, {{[^:]+}}, {{[^:]+}}, {{[^:]+}}) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64} :
     // CHECK-SAME:      tensor<1x16x96x176xf16>, tensor<f32>, tensor<f32>, tensor<f32>, tensor<f32> -> tensor<1x16x96x176xf16>
-    // CHECK:       [[FQ3:%.+]] = IE.FakeQuantize({{[^:]+}}, {{[^:]+}}, {{[^:]+}}, {{[^:]+}}, {{[^:]+}} {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 255 : i64} :
+    // CHECK:       [[FQ3:%.+]] = IE.FakeQuantize({{[^:]+}}, {{[^:]+}}, {{[^:]+}}, {{[^:]+}}, {{[^:]+}} {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64} :
     // CHECK-SAME:      tensor<16x1x1x2xf16>, tensor<f16>, tensor<f16>, tensor<f16>, tensor<f16> -> tensor<16x1x1x2xf16>
     // CHECK:       [[GROUPCONV1:%.+]] = IE.GroupConvolution([[CONCAT0]], [[FQ3]]) {dilations = [1, 1], groups = 16 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} :
     // CHECK-SAME:      tensor<1x16x96x177xf16>, tensor<16x1x1x2xf16> -> tensor<1x16x96x176xf16>
     // CHECK:       [[FQ4:%.+]] = IE.FakeQuantize([[GROUPCONV1]], {{[^:]+}}, {{[^:]+}}, {{[^:]+}}, {{[^:]+}}) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64} :
     // CHECK-SAME:      tensor<1x16x96x176xf16>, tensor<f32>, tensor<f32>, tensor<f32>, tensor<f32> -> tensor<1x16x96x176xf16>
-    // CHECK:       [[FQ5:%.+]] = IE.FakeQuantize({{[^:]+}}, {{[^:]+}}, {{[^:]+}}, {{[^:]+}}, {{[^:]+}}) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 255 : i64} :
+    // CHECK:       [[FQ5:%.+]] = IE.FakeQuantize({{[^:]+}}, {{[^:]+}}, {{[^:]+}}, {{[^:]+}}, {{[^:]+}}) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64} :
     // CHECK-SAME:      tensor<16x1x2x1xf16>, tensor<f16>, tensor<f16>, tensor<f16>, tensor<f16> -> tensor<16x1x2x1xf16>
     // CHECK:       [[GROUPCONV2:%.+]] = IE.GroupConvolution([[SLICE2]], [[FQ5]]) {dilations = [1, 1], groups = 16 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} :
     // CHECK-SAME:      tensor<1x16x97x176xf16>, tensor<16x1x2x1xf16> -> tensor<1x16x96x176xf16>
     // CHECK:       [[FQ6:%.+]] = IE.FakeQuantize([[GROUPCONV2]], {{[^:]+}}, {{[^:]+}}, {{[^:]+}}, {{[^:]+}}) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64} :
     // CHECK-SAME:      tensor<1x16x96x176xf16>, tensor<f32>, tensor<f32>, tensor<f32>, tensor<f32> -> tensor<1x16x96x176xf16>
-    // CHECK:       [[FQ7:%.+]] = IE.FakeQuantize({{[^:]+}}, {{[^:]+}}, {{[^:]+}}, {{[^:]+}}, {{[^:]+}}) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 255 : i64} :
+    // CHECK:       [[FQ7:%.+]] = IE.FakeQuantize({{[^:]+}}, {{[^:]+}}, {{[^:]+}}, {{[^:]+}}, {{[^:]+}}) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64} :
     // CHECK-SAME:      tensor<16x1x2x2xf16>, tensor<f16>, tensor<f16>, tensor<f16>, tensor<f16> -> tensor<16x1x2x2xf16>
     // CHECK:       [[GROUPCONV3:%.+]] = IE.GroupConvolution(%4, [[FQ7]]) {dilations = [1, 1], groups = 16 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} :
     // CHECK-SAME:      tensor<1x16x97x177xf16>, tensor<16x1x2x2xf16> -> tensor<1x16x96x176xf16>
@@ -133,13 +133,13 @@ func.func @ConvertBilinearWithFQToStridedConcatAndConv(%arg0: tensor<1x16x96x176
     // CHECK-SAME:      tensor<1x16x96x176xf16>, tensor<f32>, tensor<f32>, tensor<f32>, tensor<f32> -> tensor<1x16x96x176xf16>
     // CHECK:       [[CONCAT2:%.+]] = IE.Concat([[FQ2]], [[FQ4]]) {per_axis = #IE.Concat<axis = 3 : i64, offset = 1 : i64, stride = 2 : i64>} : tensor<1x16x96x176xf16>, tensor<1x16x96x176xf16> -> tensor<1x16x96x352xf16>
     // CHECK:       [[CONCAT3:%.+]] = IE.Concat([[FQ6:%.+]], [[FQ8]]) {per_axis = #IE.Concat<axis = 3 : i64, offset = 1 : i64, stride = 2 : i64>} : tensor<1x16x96x176xf16>, tensor<1x16x96x176xf16> -> tensor<1x16x96x352xf16>
-    // CHECK:       [[FQ9:%.+]] = IE.FakeQuantize({{[^:]+}}, {{[^:]+}}, {{[^:]+}}, {{[^:]+}}, {{[^:]+}}) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 255 : i64} :
+    // CHECK:       [[FQ9:%.+]] = IE.FakeQuantize({{[^:]+}}, {{[^:]+}}, {{[^:]+}}, {{[^:]+}}, {{[^:]+}}) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64} :
     // CHECK-SAME:      tensor<16x1x1x1xf16>, tensor<f16>, tensor<f16>, tensor<f16>, tensor<f16> -> tensor<16x1x1x1xf16>
     // CHECK:       [[GROUPCONV4:%.+]] = IE.GroupConvolution([[CONCAT2]], [[FQ9]]) {dilations = [1, 1], groups = 16 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} :
     // CHECK-SAME:      tensor<1x16x96x352xf16>, tensor<16x1x1x1xf16> -> tensor<1x16x96x352xf16>
     // CHECK:       [[FQ10:%.+]] = IE.FakeQuantize([[GROUPCONV4]], {{[^:]+}}, {{[^:]+}}, {{[^:]+}}, {{[^:]+}}) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64} :
     // CHECK-SAME:      tensor<1x16x96x352xf16>, tensor<f32>, tensor<f32>, tensor<f32>, tensor<f32> -> tensor<1x16x96x352xf16>
-    // CHECK:       [[FQ11:%.+]] = IE.FakeQuantize({{[^:]+}}, {{[^:]+}}, {{[^:]+}}, {{[^:]+}}, {{[^:]+}}) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 255 : i64} :
+    // CHECK:       [[FQ11:%.+]] = IE.FakeQuantize({{[^:]+}}, {{[^:]+}}, {{[^:]+}}, {{[^:]+}}, {{[^:]+}}) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64} :
     // CHECK-SAME:      tensor<16x1x1x1xf16>, tensor<f16>, tensor<f16>, tensor<f16>, tensor<f16> -> tensor<16x1x1x1xf16>
     // CHECK:       [[GROUPCONV5:%.+]] = IE.GroupConvolution([[CONCAT3]], [[FQ11]]) {dilations = [1, 1], groups = 16 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} :
     // CHECK-SAME:      tensor<1x16x96x352xf16>, tensor<16x1x1x1xf16> -> tensor<1x16x96x352xf16>
@@ -305,7 +305,7 @@ func.func @ConvertBilinearWithFQToStridedConcatAndConv(%input: tensor<1x20x80x80
     // CHECK:  [[PAD_H_B:%.+]] = IE.Slice [[PAD_W:%.+]] [0, 0, 319, 0] [1, 20, 1, 322] : tensor<1x20x320x322xf16> to tensor<1x20x1x322xf16>
     // CHECK:  [[PAD_H:%.+]] = IE.Concat([[PAD_H_F:%.+]], [[PAD_W:%.+]], [[PAD_H_B:%.+]])
     // CHECK{LITERAL}: {static_offsets = [[0, 0, 0, 0], [0, 0, 1, 0], [0, 0, 321, 0]]} : tensor<1x20x1x322xf16>, tensor<1x20x320x322xf16>, tensor<1x20x1x322xf16> -> tensor<1x20x322x322xf16>
-    // CHECK:  [[FakeQuantize_OUT:%.+]] = IE.FakeQuantize({{[^:]+}}, {{[^:]+}}, {{[^:]+}}, {{[^:]+}}, {{[^:]+}}) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 255 : i64} : tensor<20x1x4x4xf16>, tensor<f16>, tensor<f16>, tensor<f16>, tensor<f16> -> tensor<20x1x4x4xf16>
+    // CHECK:  [[FakeQuantize_OUT:%.+]] = IE.FakeQuantize({{[^:]+}}, {{[^:]+}}, {{[^:]+}}, {{[^:]+}}, {{[^:]+}}) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64} : tensor<20x1x4x4xf16>, tensor<f16>, tensor<f16>, tensor<f16>, tensor<f16> -> tensor<20x1x4x4xf16>
     // CHECK:  [[GroupConvolution_OUT:%.+]] = IE.GroupConvolution([[PAD_H:%.+]], [[FakeQuantize_OUT:%.+]]) {dilations = [1, 1], groups = 20 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [2, 2]} : tensor<1x20x322x322xf16>, tensor<20x1x4x4xf16> -> tensor<1x20x160x160xf16>
     // CHECK:  [[OUTPUT:%.+]] = IE.FakeQuantize([[GroupConvolution_OUT:%.+]], {{[^:]+}}, {{[^:]+}}, {{[^:]+}}, {{[^:]+}}) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64} : tensor<1x20x160x160xf16>, tensor<f32>, tensor<f32>, tensor<f32>, tensor<f32> -> tensor<1x20x160x160xf16>
 

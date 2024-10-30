@@ -15,15 +15,12 @@ namespace test {
 
 class BroadcastLayerTestCommon : public BroadcastLayerTest, virtual public VpuOv2LayerTest {};
 
-class BroadcastLayerTest_NPU3720 : public BroadcastLayerTestCommon {};
-class BroadcastLayerTest_NPU4000 : public BroadcastLayerTestCommon {};
-
-TEST_P(BroadcastLayerTest_NPU3720, SW) {
+TEST_P(BroadcastLayerTestCommon, NPU3720_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(BroadcastLayerTest_NPU4000, SW) {
+TEST_P(BroadcastLayerTestCommon, NPU4000_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
@@ -103,42 +100,21 @@ const auto explicitBroadcastParams2 =
                            ::testing::Values(static_shapes_to_test_representation(inShapesExplicit[1])),
                            ::testing::ValuesIn(inputPrecision), ::testing::Values(DEVICE_NPU));
 
-// ------ NPU3720 ------
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_NumpyBroadcastCheck1, BroadcastLayerTestCommon, numpyBroadcastParams1,
+                         BroadcastLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_NumpyBroadcastCheck2, BroadcastLayerTestCommon, numpyBroadcastParams2,
+                         BroadcastLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(smoke_precommit_NumpyBroadcastCheck1, BroadcastLayerTest_NPU3720, numpyBroadcastParams1,
-                        BroadcastLayerTest_NPU3720::getTestCaseName);
-INSTANTIATE_TEST_CASE_P(smoke_NumpyBroadcastCheck2, BroadcastLayerTest_NPU3720, numpyBroadcastParams2,
-                        BroadcastLayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_BidirectionalBroadcastCheck1, BroadcastLayerTestCommon,
+                         bidirectionalBroadcastParams1, BroadcastLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_BidirectionalBroadcastCheck2, BroadcastLayerTestCommon, bidirectionalBroadcastParams2,
+                         BroadcastLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_BidirectionalBroadcastCheck3, BroadcastLayerTestCommon, bidirectionalBroadcastParams3,
+                         BroadcastLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(smoke_precommit_BidirectionalBroadcastCheck1, BroadcastLayerTest_NPU3720,
-                        bidirectionalBroadcastParams1, BroadcastLayerTest_NPU3720::getTestCaseName);
-INSTANTIATE_TEST_CASE_P(smoke_BidirectionalBroadcastCheck2, BroadcastLayerTest_NPU3720, bidirectionalBroadcastParams2,
-                        BroadcastLayerTest_NPU3720::getTestCaseName);
-INSTANTIATE_TEST_CASE_P(smoke_BidirectionalBroadcastCheck3, BroadcastLayerTest_NPU3720, bidirectionalBroadcastParams3,
-                        BroadcastLayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_precommit_ExplicitBroadcastCheck1, BroadcastLayerTest_NPU3720, explicitBroadcastParams1,
-                        BroadcastLayerTest_NPU3720::getTestCaseName);
-INSTANTIATE_TEST_CASE_P(smoke_ExplicitBroadcastCheck2, BroadcastLayerTest_NPU3720, explicitBroadcastParams2,
-                        BroadcastLayerTest_NPU3720::getTestCaseName);
-
-// ------ NPU4000 ------
-
-INSTANTIATE_TEST_CASE_P(smoke_precommit_NumpyBroadcastCheck1, BroadcastLayerTest_NPU4000, numpyBroadcastParams1,
-                        BroadcastLayerTest_NPU4000::getTestCaseName);
-INSTANTIATE_TEST_CASE_P(smoke_NumpyBroadcastCheck2, BroadcastLayerTest_NPU4000, numpyBroadcastParams2,
-                        BroadcastLayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_precommit_BidirectionalBroadcastCheck1, BroadcastLayerTest_NPU4000,
-                        bidirectionalBroadcastParams1, BroadcastLayerTest_NPU4000::getTestCaseName);
-INSTANTIATE_TEST_CASE_P(smoke_BidirectionalBroadcastCheck2, BroadcastLayerTest_NPU4000, bidirectionalBroadcastParams2,
-                        BroadcastLayerTest_NPU4000::getTestCaseName);
-INSTANTIATE_TEST_CASE_P(smoke_BidirectionalBroadcastCheck3, BroadcastLayerTest_NPU4000, bidirectionalBroadcastParams3,
-                        BroadcastLayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_precommit_ExplicitBroadcastCheck1, BroadcastLayerTest_NPU4000, explicitBroadcastParams1,
-                        BroadcastLayerTest_NPU4000::getTestCaseName);
-INSTANTIATE_TEST_CASE_P(smoke_ExplicitBroadcastCheck2, BroadcastLayerTest_NPU4000, explicitBroadcastParams2,
-                        BroadcastLayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_ExplicitBroadcastCheck1, BroadcastLayerTestCommon, explicitBroadcastParams1,
+                         BroadcastLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_ExplicitBroadcastCheck2, BroadcastLayerTestCommon, explicitBroadcastParams2,
+                         BroadcastLayerTestCommon::getTestCaseName);
 
 }  // namespace

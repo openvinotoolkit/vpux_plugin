@@ -43,7 +43,7 @@ void SplitControlGraphPass::safeRunOnFunc() {
 
     auto& barrierInfo = getAnalysis<BarrierInfo>();
 
-    _log.trace("Original number of barriers {0}", barrierInfo.getNumOfVirtualBarriers());
+    _log.trace("Original number of barriers {0}", barrierInfo.getNumOfBarrierOps());
 
     barrierInfo.splitControlGraphToBlocks(_controlGraphSplitBlockSize);
 
@@ -51,7 +51,7 @@ void SplitControlGraphPass::safeRunOnFunc() {
 
     VPUX_THROW_UNLESS(barrierInfo.verifyControlGraphSplit(), "Encountered split of control graph is incorrect");
 
-    _log.trace("New number of barriers {0}", barrierInfo.getNumOfVirtualBarriers());
+    _log.trace("New number of barriers {0}", barrierInfo.getNumOfBarrierOps());
     barrierInfo.clearAttributes();
 
     VPURT::postProcessBarrierOps(func);

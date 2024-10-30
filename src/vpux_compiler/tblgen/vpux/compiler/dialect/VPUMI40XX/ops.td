@@ -225,7 +225,8 @@ def VPUMI40XX_NNDMAOp :
         OptionalAttr<IntAttr>:$dma_hwp_id,
         OptionalAttr<VPUIP_DmaProfilingMetadataAttr>:$profilingMetadata,
         UnitAttr:$allow_different_in_out_shapes,
-        Optional<AnyMemRef>:$indices
+        Optional<AnyMemRef>:$indices,
+        Optional<VPURegMapped_IndexType>:$enqueueBarrier
     );
 
     let results = (outs
@@ -265,6 +266,7 @@ def VPUMI40XX_NNDMAOp :
         ( `previousDMA` `(` $previousTask^ `:` type($previousTask) `)`)?
         (`waits` `(` $waitBarriers^ `:` type($waitBarriers) `)`)?
         (`updates` `(` $updateBarriers^ `:` type($updateBarriers) `)`)?
+        (`enqueueBarrier` `(` $enqueueBarrier^ `:` type($enqueueBarrier) `)`)?
         `start_after` `(` $start_after `)`
         `clean_after` `(` $clean_after `)`
         `acceleration_mode` `(` $acceleration_mode `)`
@@ -405,8 +407,8 @@ def VPUMI40XX_KernelParamsOp :
     let summary = "Kernel Params";
 
     let description = [{
-        This operation contains description of parameters for software kernel, accommodating both dynamic and static shapes. 
-        For dynamic shapes, the parameters `dynamicInputShapes` and `dynamicOutputShapes` are utilized. 
+        This operation contains description of parameters for software kernel, accommodating both dynamic and static shapes.
+        For dynamic shapes, the parameters `dynamicInputShapes` and `dynamicOutputShapes` are utilized.
         If a shape does not need to be dynamic, the corresponding parameter can be omitted. The shape is resolved via kernel_params for this case.
 
         Currently, support for dynamic shapes is limited to scenarios with a single input or output.
@@ -415,14 +417,14 @@ def VPUMI40XX_KernelParamsOp :
         For instance, consider a ReLu operation with the following specifications:
         - Input: `tensor<1x?x?xf32>, {bounds = [1, 18, 15], order = #CHW}`
         - Output: `tensor<1x?x?xf32>, {bounds = [1, 18, 15], order = #CHW}`
-        In this example, the dimensions are defined by the layout and bounds. Consequently, the input will allocate a buffer with memref<1x18x15xf32>, order = #CHW. 
-        
+        In this example, the dimensions are defined by the layout and bounds. Consequently, the input will allocate a buffer with memref<1x18x15xf32>, order = #CHW.
+
         In the VPUMI40XX dialect, the arguments are defined as follows:
         | Arguments              | Type                | Description                                                                                                                                                                                                 |
         |------------------------|-------------------  |-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
         | inputs                 | memref<1x18x15xf16> | Collection of static shapes (or upper bounds) of inputs/outputs.                                                                                                                                              |
         | outputs                | memref<1x18x15xf16> |                                                                                                                                                                                                             |
-        | dynamicInputShapes     | memref<3xsi32>      | Collection of dynamic shapes of inputs/outputs. The dimension value in the dynamic shape represents the size available at runtime and cannot be larger than the corresponding upper bound. The dynamic shape contains the whole shape, including both static and dynamic dimensions (its rank is equal to the rank of the corresponding input/output static shape).                                                      | 
+        | dynamicInputShapes     | memref<3xsi32>      | Collection of dynamic shapes of inputs/outputs. The dimension value in the dynamic shape represents the size available at runtime and cannot be larger than the corresponding upper bound. The dynamic shape contains the whole shape, including both static and dynamic dimensions (its rank is equal to the rank of the corresponding input/output static shape).                                                      |
         | dynamicOutputShapes    | memref<3xsi32>      |                                                                                                                                                                                                             |
         | dynamicInputShapesSize | array<i32: 1>       | Amount of inputs/outputs processed by the kernel. In this case, it is an array that contains a single integer and the value is 1. Adding the sizes is a requirement of MLIR framework. For more details, please refer to [MLIR documentation on defining dialects and operations](https://mlir.llvm.org/docs/DefiningDialects/Operations/#variadicofvariadic-operands).               |
         | dynamicOutputShapesSize| array<i32: 1>       |                                                                                                                                                                                                             |
@@ -436,7 +438,8 @@ def VPUMI40XX_KernelParamsOp :
         DenseI32ArrayAttr:$dynamicInputShapesSize,
         DenseI32ArrayAttr:$dynamicOutputShapesSize,
         StrAttr:$kernel_type,
-        ElementsAttr:$kernel_params
+        ElementsAttr:$kernel_params,
+        UnitAttr:$is_output_broadcasted
     );
 
     let results = (outs
@@ -520,7 +523,8 @@ def VPUMI40XX_ActKernelInvocationOp :
         DefaultValuedAttr<UI64Attr, "0">:$tile,
         UI64Attr:$start_after,
         UI64Attr:$clean_after,
-        OptionalAttr<VPUIP_SwProfilingMetadataAttr>:$profilingMetadata
+        OptionalAttr<VPUIP_SwProfilingMetadataAttr>:$profilingMetadata,
+        Optional<VPURegMapped_IndexType>:$enqueueBarrier
     );
 
     let results = (outs
@@ -544,6 +548,7 @@ def VPUMI40XX_ActKernelInvocationOp :
         (`profiling_data` `(` $profiling_data^ `:` type($profiling_data) `)`)?
         (`waits` `(` $waitBarriers^ `:` type($waitBarriers) `)`)?
         (`updates` `(` $updateBarriers^ `:` type($updateBarriers) `)`)?
+        (`enqueueBarrier` `(` $enqueueBarrier^ `:` type($enqueueBarrier) `)`)?
         `tile` `(` $tile `)`
         `start_after` `(` $start_after `)`
         `clean_after` `(` $clean_after `)`
@@ -641,12 +646,12 @@ def VPUMI40XX_DPUInvariantOp :
         Optional<MemRefOf<[UI64]>>:$profiling_data,
 
         VPUIP_NCETaskTypeAttr:$nce_task_type,
+        OptionalAttr<VPU_EltwiseTypeAttr>:$eltwise_type,
         VPU_MPEModeAttr:$mpe_frequent_mode,
 
         OptionalAttr<I64ArrayAttr>:$kernel_size,
         OptionalAttr<I64ArrayAttr>:$kernel_strides,
         OptionalAttr<VPU_PaddingAttr>:$kernel_padding,
-        OptionalAttr<IntAttr>:$activation_window_channel_length,
         UnitAttr:$is_continued,
         OptionalAttr<IntAttr>:$cm_sp_pattern,
         UnitAttr:$input_channels_compression,
@@ -662,7 +667,8 @@ def VPUMI40XX_DPUInvariantOp :
         Variadic<VPURegMapped_IndexType>:$waitBarriers,
         Variadic<VPURegMapped_IndexType>:$updateBarriers,
         UI64Attr:$start_after,
-        UI64Attr:$clean_after
+        UI64Attr:$clean_after,
+        Optional<VPURegMapped_IndexType>:$enqueueBarrier
     );
 
     let results = (outs
@@ -704,6 +710,7 @@ def VPUMI40XX_DPUInvariantOp :
         (`profiling_data` `(` $profiling_data^ `:` type($profiling_data) `)`)?
         (`waits` `(` $waitBarriers^ `:` type($waitBarriers) `)`)?
         (`updates` `(` $updateBarriers^ `:` type($updateBarriers) `)`)?
+        (`enqueueBarrier` `(` $enqueueBarrier^ `:` type($enqueueBarrier) `)`)?
         `->` type($index)
         `PPE` `:` $ppe
     }];
@@ -804,6 +811,12 @@ def VPUMI40XX_M2IOp :
         (`waits` `(` $waitBarriers^ `:` type($waitBarriers) `)`)?
         (`updates` `(` $updateBarriers^ `:` type($updateBarriers) `)`)?
         `->` type(results)
+    }];
+
+    let extraClassDeclaration = [{
+        mlir::Value getEnqueueBarrier() {
+            return nullptr;
+        }
     }];
 
     let extraClassDefinition = [{

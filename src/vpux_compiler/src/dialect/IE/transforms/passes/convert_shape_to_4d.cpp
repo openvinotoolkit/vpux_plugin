@@ -3,11 +3,15 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#include "vpux/compiler/core/type_interfaces.hpp"
+#include "vpux/compiler/dialect/IE/IR/dialect.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 #include "vpux/compiler/dialect/IE/utils/broadcast_utils.hpp"
 #include "vpux/compiler/dialect/IE/utils/concat_utils.hpp"
+#include "vpux/compiler/dialect/IE/utils/dynamic_shape_utils.hpp"
 #include "vpux/compiler/dialect/IE/utils/elem_type_info_utils.hpp"
+#include "vpux/compiler/utils/IE/locations.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/permute_utils.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
@@ -19,6 +23,7 @@
 #include <mlir/IR/IRMapping.h>
 #include <mlir/Transforms/DialectConversion.h>
 
+#include <algorithm>
 #include <numeric>
 #include <utility>
 
@@ -29,16 +34,16 @@ namespace {
 constexpr int64_t TARGET_TENSOR_DIM = 4;
 
 using MergeMapItem = SmallVector<int64_t>;
-using MergeMap = SmallVector<SmallVector<int64_t>>;
+using MergeMap = SmallVector<MergeMapItem>;
 
-void alignShapeToReferenceShapeSize(size_t refSisze, SmallVector<int64_t>& shape, bool extendOnH) {
-    VPUX_THROW_UNLESS(refSisze >= shape.size(), "The reference shape size({0}) < shape size({1})", refSisze,
+void alignShapeToReferenceShapeSize(size_t refSize, SmallVector<int64_t>& shape, bool extendOnH) {
+    VPUX_THROW_UNLESS(refSize >= shape.size(), "The reference shape size({0}) < shape size({1})", refSize,
                       shape.size());
-    size_t diff = refSisze - shape.size();
+    const size_t diff = refSize - shape.size();
     if (diff) {
         if (extendOnH) {
             VPUX_THROW_UNLESS(diff < 3 && diff >= 1,
-                              "Extand on H does not support reference shape size({0}) and shape size({1})", refSisze,
+                              "Extend on H does not support reference shape size({0}) and shape size({1})", refSize,
                               shape.size());
             if (diff == 2) {
                 shape.insert(shape.end(), 1, 1);
@@ -69,7 +74,7 @@ int64_t getBalancedDimIndexFromShape(SmallVector<int64_t> shape) {
 
 SmallVector<int64_t> alignShapeWithDimMap(ArrayRef<int64_t> originShape, const MergeMap& mapper) {
     SmallVector<int64_t> retNewShape;
-    for (auto& dims : mapper) {
+    for (const auto& dims : mapper) {
         int64_t dimSize = 1;
         for (auto i : dims) {
             dimSize *= originShape[i];
@@ -362,14 +367,17 @@ MergeMap extendInputShapeTo4D(IE::FakeQuantizeOp origOp) {
     return getDimMergeMapWith3Inputs(inputShape, inputLowScaleShape, outputLowScaleShape);
 }
 
-mlir::Value reshapeInputWithMergeMap(mlir::PatternRewriter& rewriter, mlir::Location loc, mlir::Value origInput,
-                                     const MergeMap& map, bool extendOnH) {
-    const auto inShape = to_small_vector(getShape(origInput));
-    if (inShape.empty()) {
-        return origInput;
-    }
+mlir::Value reshapeInputWithMergeMap(mlir::PatternRewriter& rewriter, mlir::Location loc, size_t referenceShapeSize,
+                                     mlir::Value origInput, const MergeMap& map, bool extendOnH) {
+    auto inShape = to_small_vector(getShape(origInput));
 
-    auto constInputShape = alignShapeTo4D(inShape, map, extendOnH);
+    // Note: ensure the rank of the current shape is aligned to the "reference"
+    // shape (the shape that was used to calculate the merge map). this
+    // guarantees we don't have buffer overflows due to mege map using indices
+    // outside of current shape's rank.
+    alignShapeToReferenceShapeSize(referenceShapeSize, inShape, extendOnH);
+
+    auto constInputShape = alignShapeTo4D(std::move(inShape), map, extendOnH);
     const auto constInputShapeAttr = getIntArrayAttr(rewriter.getContext(), constInputShape);
 
     return rewriter.createOrFold<IE::ReshapeOp>(loc, origInput, nullptr, false, constInputShapeAttr);
@@ -467,6 +475,44 @@ SmallVector<int64_t> alignTileShapeRepeatsTo4D(SmallVector<int64_t> origShape) {
     }
 
     return newShape;
+}
+
+std::pair<SmallVector<int64_t>, SmallVector<int64_t>> squeezeRankForTile(IE::TileOp origOp) {
+    // Squeeze the input/repeat-value ranks to support more cases, for example:
+    // tensor<1x1x8xf16>, [16, 1, 1] after squeezed tensor<1x8xf16>, [16, 1]
+    // tensor<1x1x1x1x8xf16>, [1, 1, 1, 16, 1] after squeezed tensor<1x8xf16>, [16, 1]
+    // tensor<1024x1x1x1x8xf16>, [1, 1, 1, 16, 1] after squeezed tensor<1024x1x8xf16>, [1, 16, 1]
+    // tensor<1024x128x1x1x8xf16>, [1, 1, 1, 16, 1] after squeezed tensor<1024x128x1x8xf16>, [1, 1, 16, 1]
+    auto inputType = origOp.getInput().getType().cast<NDTypeInterface>();
+    auto outputType = origOp.getOutput().getType().cast<NDTypeInterface>();
+    auto inputShape = inputType.getShape();
+    auto outputShape = outputType.getShape();
+
+    auto repeatValues = parseIntArrayAttr<int64_t>(origOp.getRepeatsValuesAttr());
+    auto squeezeVec = [](const SmallVector<int64_t>& arr) {
+        auto it = std::find_if(arr.begin(), arr.end(), [](int64_t x) {
+            return x != 1;
+        });
+        return SmallVector<int64_t>(it, arr.end());
+    };
+    SmallVector<int64_t> removedRepeatValue = squeezeVec(repeatValues);
+
+    SmallVector<int64_t> newInputShape;
+    auto inputSize = inputShape.size();
+    auto outputSize = outputShape.size();
+    auto inputOutputSizeGap = outputSize - inputSize;
+    for (size_t i = 0; i < outputSize; ++i) {
+        auto inDimVal = i < inputOutputSizeGap ? 1 : inputShape[Dim(i - inputOutputSizeGap)];
+        if (outputShape[Dim(i)] == 1) {
+            if (removedRepeatValue.size() > inputSize) {
+                removedRepeatValue.erase(removedRepeatValue.begin() + i);
+            }
+            continue;
+        }
+        newInputShape.push_back(inDimVal);
+    }
+
+    return {std::move(newInputShape), std::move(removedRepeatValue)};
 }
 
 //
@@ -604,9 +650,9 @@ mlir::LogicalResult GenericConverter<ConcreteOp>::convertWith2Inputs(ConcreteOp 
     if (std::is_same<IE::MultiplyOp, ConcreteOp>::value) {
         tryAndConvert2NCEShape(newInputShape1, newInputShape2, dimsCanMerge);
     }
-    auto newIn1 = rewriter.createOrFold<IE::ReshapeOp>(origOp->getLoc(), operands[0], nullptr, false,
+    auto newIn1 = rewriter.createOrFold<IE::ReshapeOp>(takeOpLoc(origOp, "reshape_lhs"), operands[0], nullptr, false,
                                                        getIntArrayAttr(this->getContext(), newInputShape1));
-    auto newIn2 = rewriter.createOrFold<IE::ReshapeOp>(origOp->getLoc(), operands[1], nullptr, false,
+    auto newIn2 = rewriter.createOrFold<IE::ReshapeOp>(takeOpLoc(origOp, "reshape_rhs"), operands[1], nullptr, false,
                                                        getIntArrayAttr(this->getContext(), newInputShape2));
 
     SmallVector<mlir::Value> newOperands;
@@ -622,8 +668,9 @@ mlir::LogicalResult GenericConverter<ConcreteOp>::convertWith2Inputs(ConcreteOp 
         auto resultShape = to_small_vector(resultNDI.getShape());
         result.setType(resultNDI.changeShape(ShapeRef(alignShapeTo4D(resultShape, dimsCanMerge, extendOnH))));
         const auto outputShapeAttr = getIntArrayAttr(rewriter.getContext(), resultShape);
-        auto resultReshapeOp =
-                rewriter.createOrFold<IE::ReshapeOp>(origOp->getLoc(), result, nullptr, false, outputShapeAttr);
+        auto resultReshapeOp = rewriter.createOrFold<IE::ReshapeOp>(
+                takeOpLoc(origOp, StringLiteral("reshape_out_{0}"), newResults.size()), result, nullptr, false,
+                outputShapeAttr);
         if (result == resultReshapeOp) {
             newResults.push_back(result);
         } else {
@@ -659,20 +706,28 @@ mlir::LogicalResult FakeQuantizeConverter::matchAndRewrite(IE::FakeQuantizeOp or
 
     const auto mergeMap = extendInputShapeTo4D(origOp);
 
-    const auto inputLow = reshapeInputWithMergeMap(rewriter, origOp->getLoc(), origOp.getInputLow(), mergeMap, false);
-    const auto inputHigh = reshapeInputWithMergeMap(rewriter, origOp->getLoc(), origOp.getInputHigh(), mergeMap, false);
-    const auto outputLow = reshapeInputWithMergeMap(rewriter, origOp->getLoc(), origOp.getOutputLow(), mergeMap, false);
-    const auto outputHigh =
-            reshapeInputWithMergeMap(rewriter, origOp->getLoc(), origOp.getOutputHigh(), mergeMap, false);
+    const auto referenceShapeSize = getShape(origOp.getInput()).size();
+    const auto inputLow = reshapeInputWithMergeMap(rewriter, takeOpLoc(origOp, "reshape_in_low"), referenceShapeSize,
+                                                   origOp.getInputLow(), mergeMap, false);
+    const auto inputHigh = reshapeInputWithMergeMap(rewriter, takeOpLoc(origOp, "reshape_in_high"), referenceShapeSize,
+                                                    origOp.getInputHigh(), mergeMap, false);
+    const auto outputLow = reshapeInputWithMergeMap(rewriter, takeOpLoc(origOp, "reshape_out_low"), referenceShapeSize,
+                                                    origOp.getOutputLow(), mergeMap, false);
+    const auto outputHigh = reshapeInputWithMergeMap(rewriter, takeOpLoc(origOp, "reshape_out_high"),
+                                                     referenceShapeSize, origOp.getOutputHigh(), mergeMap, false);
 
-    auto inputReshape = reshapeInputWithMergeMap(rewriter, origOp->getLoc(), origOp.getInput(), mergeMap, false);
+    auto inputReshape = reshapeInputWithMergeMap(rewriter, takeOpLoc(origOp, "reshape_in"), referenceShapeSize,
+                                                 origOp.getInput(), mergeMap, false);
 
     auto newFakeQuantizeOp = rewriter.create<IE::FakeQuantizeOp>(
-            origOp->getLoc(), inputReshape, inputLow, inputHigh, outputLow, outputHigh, origOp.getLevelsAttr(),
-            origOp.getLowFpTypeAttr(), origOp.getAutoBroadcastAttr());
+            takeOpLoc(origOp, "fq_in"), inputReshape, inputLow, inputHigh, outputLow, outputHigh,
+            origOp.getLevelsAttr(), origOp.getLowFpTypeAttr(), origOp.getAutoBroadcastAttr());
 
     const auto outputShapeAttr = getIntArrayAttr(getContext(), getShape(origOp.getOutput()));
-    rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, newFakeQuantizeOp.getOutput(), nullptr, false, outputShapeAttr);
+    auto outReshape = rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, newFakeQuantizeOp.getOutput(), nullptr, false,
+                                                                 outputShapeAttr);
+    extendOpLoc(outReshape, "reshape_out");
+
     _log.trace("[{0}] Replaced with 'IE::FakeQuantize'", getDebugName());
 
     return mlir::success();
@@ -731,8 +786,8 @@ mlir::LogicalResult TopKOpConverter::matchAndRewrite(IE::TopKOp origOp, OpAdapto
     const auto newAxisAttr = getIntAttr(origOp->getContext(), newAxis);
 
     const auto newInShapeAttr = getIntArrayAttr(this->getContext(), alignShapeTo4D(inShape, mergeMap, false));
-    const auto newInReshape =
-            rewriter.createOrFold<IE::ReshapeOp>(origOp->getLoc(), origOp.getInput(), nullptr, false, newInShapeAttr);
+    const auto newInReshape = rewriter.createOrFold<IE::ReshapeOp>(takeOpLoc(origOp, "reshape_in"), origOp.getInput(),
+                                                                   nullptr, false, newInShapeAttr);
 
     auto newTopKOp = rewriter.create<IE::TopKOp>(origOp->getLoc(), newInReshape, origOp.getK(), origOp.getKValueAttr(),
                                                  newAxisAttr, origOp.getModeAttr(), origOp.getSortAttr(),
@@ -742,8 +797,9 @@ mlir::LogicalResult TopKOpConverter::matchAndRewrite(IE::TopKOp origOp, OpAdapto
         auto idx = checked_cast<unsigned>(indexResult.index());
         auto origResult = indexResult.value();
         const auto outputShapeAttr = getIntArrayAttr(this->getContext(), getShape(origResult));
-        const auto newOutputReshape = rewriter.createOrFold<IE::ReshapeOp>(origOp->getLoc(), newTopKOp->getResult(idx),
-                                                                           nullptr, false, outputShapeAttr);
+        const auto newOutputReshape =
+                rewriter.createOrFold<IE::ReshapeOp>(takeOpLoc(origOp, StringLiteral("reshape_out_{0}"), idx),
+                                                     newTopKOp->getResult(idx), nullptr, false, outputShapeAttr);
         origResult.replaceAllUsesWith(newOutputReshape);
     }
 
@@ -774,24 +830,39 @@ mlir::LogicalResult Mvn6Converter::matchAndRewrite(IE::MVN6Op origOp, OpAdaptor,
                                                    mlir::ConversionPatternRewriter& rewriter) const {
     _log.trace("[{0}] Found IE::MVN6Op Operation '{1}'", getDebugName(), origOp->getLoc());
     const auto inType = origOp.getInput().getType().cast<vpux::NDTypeInterface>();
-    const auto inShape = inType.getShape().raw();
+    const auto inShape = SmallVector<int64_t>(inType.getShape().raw());
     const auto inRank = inShape.size();
     const auto inAxes = parseIntArrayAttr<int64_t>(origOp.getAxesValue().value());
 
     SmallVector<int64_t> newShape;
     SmallVector<int64_t> newAxes;
+    SmallVector<int64_t> actShape;     // optional scale/bias
+    SmallVector<int64_t> newActShape;  // 4D version of 'actShape'
+
+    if (origOp.getScale()) {
+        actShape = SmallVector<int64_t>(origOp.getScale().getType().getShape());
+    } else if (origOp.getBias()) {
+        actShape = SmallVector<int64_t>(origOp.getBias().getType().getShape());
+    }
 
     if (inRank < 4) {
         // insert leading 1s up to 4D and ajust axes accordingly
         auto newDims = static_cast<int64_t>(TARGET_TENSOR_DIM - inRank);
-        newShape.insert(newShape.end(), newDims, 1);
-        newShape.append(inShape.begin(), inShape.end());
+        auto to4DShape = [=](ArrayRef<int64_t> iShape, SmallVector<int64_t>& oShape) {
+            oShape.insert(oShape.end(), newDims, 1);
+            oShape.append(iShape.begin(), iShape.end());
+        };
+        to4DShape(inShape, newShape);  // main input
+        if (!actShape.empty()) {       // optional inputs
+            to4DShape(actShape, newActShape);
+        }
         // increment 'axes'
         newAxes = inAxes;
         std::for_each(newAxes.begin(), newAxes.end(), [newDims](int64_t& axis) {
             axis += newDims;
         });
     } else if (inRank == 5) {
+        VPUX_THROW_WHEN(origOp.getScale() || origOp.getBias(), "Unimplemented 5D->4D convert of MVN6 with scale/bias");
         // Find and merge two nearby axes of same type (either NORM or non-NORM)
         auto isNormAxis = [inAxes](auto curDim) {
             return std::find(inAxes.begin(), inAxes.end(), curDim) != inAxes.end();
@@ -826,16 +897,31 @@ mlir::LogicalResult Mvn6Converter::matchAndRewrite(IE::MVN6Op origOp, OpAdaptor,
     }
 
     const auto newShapeAttr = getIntArrayAttr(getContext(), newShape);
-    auto inReshape =
-            rewriter.createOrFold<IE::ReshapeOp>(origOp->getLoc(), origOp.getInput(), nullptr, false, newShapeAttr);
+    const auto newActShapeAttr = getIntArrayAttr(getContext(), newActShape);
+    auto inReshape = rewriter.createOrFold<IE::ReshapeOp>(takeOpLoc(origOp, "reshape_in"), origOp.getInput(), nullptr,
+                                                          false, newShapeAttr);
+
+    // reshape optional inputs if present
+    mlir::Value scale = origOp.getScale();
+    mlir::Value bias = origOp.getBias();
+    if (scale) {
+        scale = rewriter.createOrFold<IE::ReshapeOp>(takeOpLoc(origOp, "reshape_scale"), scale, nullptr, false,
+                                                     newActShapeAttr);
+    }
+    if (bias) {
+        bias = rewriter.createOrFold<IE::ReshapeOp>(takeOpLoc(origOp, "reshape_bias"), bias, nullptr, false,
+                                                    newActShapeAttr);
+    }
 
     const auto axisAttr = getIntArrayAttr(getContext(), newAxes);
-    auto newMvnOp = rewriter.create<IE::MVN6Op>(origOp->getLoc(), inReshape, origOp.getAxes(), axisAttr,
+    auto newMvnOp = rewriter.create<IE::MVN6Op>(origOp->getLoc(), inReshape, scale, bias, origOp.getAxes(), axisAttr,
                                                 origOp.getNormalizeVarianceAttr(), origOp.getEpsAttr(),
                                                 origOp.getEpsModeAttr());
 
     const auto outShapeAttr = getIntArrayAttr(getContext(), getShape(origOp.getOutput()));
-    rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, newMvnOp.getOutput(), nullptr, false, outShapeAttr);
+    auto outReshape =
+            rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, newMvnOp.getOutput(), nullptr, false, outShapeAttr);
+    extendOpLoc(outReshape, "reshape_out");
 
     _log.trace("[{0}] Replaced with 'IE::MVN6Op'", getDebugName());
 
@@ -890,11 +976,13 @@ mlir::LogicalResult ReduceConverter<ReduceOp>::matchAndRewrite(ReduceOp origOp, 
     const auto axisValueAttr = getIntArrayAttr(origOp->getContext(), newAxes);
     const auto outShapeAttr = getIntArrayAttr(origOp->getContext(), getShape(origOp.getOutput()));
 
-    const auto inReshape =
-            rewriter.createOrFold<IE::ReshapeOp>(origOp->getLoc(), origOp.getInput(), nullptr, false, newShapeAttr);
+    const auto inReshape = rewriter.createOrFold<IE::ReshapeOp>(takeOpLoc(origOp, "reshape_in"), origOp.getInput(),
+                                                                nullptr, false, newShapeAttr);
     auto newReduceOp =
             rewriter.create<ReduceOp>(origOp->getLoc(), inReshape, /*axes*/ nullptr, axisValueAttr, /*keepDims*/ true);
-    rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, newReduceOp.getOutput(), nullptr, false, outShapeAttr);
+    auto outReshape =
+            rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, newReduceOp.getOutput(), nullptr, false, outShapeAttr);
+    extendOpLoc(outReshape, "reshape_out");
 
     return mlir::success();
 }
@@ -1009,17 +1097,19 @@ mlir::LogicalResult StridedSliceConverter::matchAndRewrite(IE::StridedSliceOp or
         auto newShrinkAttrShapeAttr = getIntArrayAttr(getContext(), newShrinkAxisAttrShape);
         auto newEllipsisAttrShapeAttr = getIntArrayAttr(getContext(), newEllipsisAttrShape);
 
-        auto inputReshape = rewriter.createOrFold<IE::ReshapeOp>(origOp->getLoc(), newArgs.getInput(), nullptr, false,
-                                                                 newInputShapeAttr);
+        auto inputReshape = rewriter.createOrFold<IE::ReshapeOp>(takeOpLoc(origOp, "reshape_in"), newArgs.getInput(),
+                                                                 nullptr, false, newInputShapeAttr);
 
         auto newStridedSliceOp = rewriter.create<IE::StridedSliceOp>(
-                origOp->getLoc(), inputReshape, origOp.getBegins(), origOp.getEnds(), origOp.getStrides(),
-                newBeginAttrShapeAttr, newEndAttrShapeAttr, newStridesAttrShapeAttr, newBeginMaskAttrShapeAttr,
-                newEndMaskAttrShapeAttr, newAxisAttrShapeAttr, newShrinkAttrShapeAttr, newEllipsisAttrShapeAttr);
+                takeOpLoc(origOp, "as_strided_slice"), inputReshape, origOp.getBegins(), origOp.getEnds(),
+                origOp.getStrides(), newBeginAttrShapeAttr, newEndAttrShapeAttr, newStridesAttrShapeAttr,
+                newBeginMaskAttrShapeAttr, newEndMaskAttrShapeAttr, newAxisAttrShapeAttr, newShrinkAttrShapeAttr,
+                newEllipsisAttrShapeAttr);
 
         const auto outputShapeAttr = getIntArrayAttr(getContext(), getShape(origOp.getOutput()));
-        rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, newStridedSliceOp.getOutput(), nullptr, false,
-                                                   outputShapeAttr);
+        auto outReshape = rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, newStridedSliceOp.getOutput(), nullptr,
+                                                                     false, outputShapeAttr);
+        extendOpLoc(outReshape, "reshape_out");
 
     } else {
         newInputShape.append(origShape.begin(), origShape.end());
@@ -1047,17 +1137,19 @@ mlir::LogicalResult StridedSliceConverter::matchAndRewrite(IE::StridedSliceOp or
         auto newShrinkAttrShapeAttr = getIntArrayAttr(getContext(), shrinkAxisMask);
         auto newEllipsisAttrShapeAttr = getIntArrayAttr(getContext(), ellipsisMask);
 
-        auto inputReshape = rewriter.createOrFold<IE::ReshapeOp>(origOp->getLoc(), origOp.getInput(), nullptr, false,
-                                                                 newInputShapeAttr);
+        auto inputReshape = rewriter.createOrFold<IE::ReshapeOp>(takeOpLoc(origOp, "reshape_in"), origOp.getInput(),
+                                                                 nullptr, false, newInputShapeAttr);
 
         auto newStridedSliceOp = rewriter.create<IE::StridedSliceOp>(
-                origOp->getLoc(), inputReshape, origOp.getBegins(), origOp.getEnds(), origOp.getStrides(),
-                newBeginAttrShapeAttr, newEndAttrShapeAttr, newStridesAttrShapeAttr, newBeginMaskAttrShapeAttr,
-                newEndMaskAttrShapeAttr, newAxisAttrShapeAttr, newShrinkAttrShapeAttr, newEllipsisAttrShapeAttr);
+                takeOpLoc(origOp, "as_strided_slice"), inputReshape, origOp.getBegins(), origOp.getEnds(),
+                origOp.getStrides(), newBeginAttrShapeAttr, newEndAttrShapeAttr, newStridesAttrShapeAttr,
+                newBeginMaskAttrShapeAttr, newEndMaskAttrShapeAttr, newAxisAttrShapeAttr, newShrinkAttrShapeAttr,
+                newEllipsisAttrShapeAttr);
 
         const auto outputShapeAttr = getIntArrayAttr(getContext(), getShape(origOp.getOutput()));
-        rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, newStridedSliceOp.getOutput(), nullptr, false,
-                                                   outputShapeAttr);
+        auto outReshape = rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, newStridedSliceOp.getOutput(), nullptr,
+                                                                     false, outputShapeAttr);
+        extendOpLoc(outReshape, "reshape_out");
     }
 
     _log.trace("[{0}] Replaced with 'IE::StridedSlice'", getDebugName());
@@ -1087,18 +1179,16 @@ mlir::LogicalResult TileConverter::matchAndRewrite(IE::TileOp origOp, OpAdaptor,
                                                    mlir::ConversionPatternRewriter& rewriter) const {
     _log.trace("[{0}] Found IE::TileOp Operation '{1}'", getDebugName(), origOp->getLoc());
 
-    const auto origRepeatsValues = parseIntArrayAttr<int64_t>(origOp.getRepeatsValues().value());
-    const auto origInputType = origOp.getInput().getType().cast<vpux::NDTypeInterface>();
-    SmallVector<int64_t> origInputShape = to_small_vector(origInputType.getShape());
+    SmallVector<int64_t> squeezedInShape, squeezedValue;
+    std::tie(squeezedInShape, squeezedValue) = squeezeRankForTile(origOp);
 
-    auto newInputShape = alignTileShapeRepeatsTo4D(std::move(origInputShape));
+    auto newInputShape = alignTileShapeRepeatsTo4D(std::move(squeezedInShape));
 
     // Build input ReshapeOp
-    const auto newInputShapeAttr = getIntArrayAttr(rewriter.getContext(), newInputShape);
-    auto inputReshape =
-            rewriter.createOrFold<IE::ReshapeOp>(origOp.getLoc(), origOp.getInput(), nullptr, false, newInputShapeAttr);
-
-    auto repeatsOnNewShape = alignTileShapeRepeatsTo4D(std::move(origRepeatsValues));
+    const auto newInputShapeAttr = getIntArrayAttr(rewriter.getContext(), std::move(newInputShape));
+    auto inputReshape = rewriter.createOrFold<IE::ReshapeOp>(takeOpLoc(origOp, "reshape_in"), origOp.getInput(),
+                                                             nullptr, false, newInputShapeAttr);
+    auto repeatsOnNewShape = alignTileShapeRepeatsTo4D(std::move(squeezedValue));
 
     // Update the TileOp
     const auto repeatsOnNewShapeAttr = getIntArrayAttr(rewriter.getContext(), repeatsOnNewShape);
@@ -1106,7 +1196,9 @@ mlir::LogicalResult TileConverter::matchAndRewrite(IE::TileOp origOp, OpAdaptor,
 
     // Reshape to original output shape
     const auto outputShapeAttr = getIntArrayAttr(rewriter.getContext(), getShape(origOp.getOutput()));
-    rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, newTileOp.getOutput(), nullptr, false, outputShapeAttr);
+    auto outReshape =
+            rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, newTileOp.getOutput(), nullptr, false, outputShapeAttr);
+    extendOpLoc(outReshape, "reshape_out");
 
     _log.trace("[{0}] Replaced with 'IE::TileOp'", getDebugName());
 
@@ -1230,6 +1322,81 @@ mlir::LogicalResult LSTMCellConverter::matchAndRewrite(IE::LSTMCellOp origOp, Op
 }
 
 //
+// LSTMSequenceConverter
+//
+
+class LSTMSequenceConverter final : public mlir::OpConversionPattern<IE::LSTMSequenceOp> {
+public:
+    LSTMSequenceConverter(mlir::TypeConverter& typeConverter, mlir::MLIRContext* ctx, Logger log)
+            : mlir::OpConversionPattern<IE::LSTMSequenceOp>(typeConverter, ctx), _log(std::move(log)) {
+    }
+
+public:
+    mlir::LogicalResult matchAndRewrite(IE::LSTMSequenceOp origOp, OpAdaptor newArgs,
+                                        mlir::ConversionPatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+mlir::LogicalResult LSTMSequenceConverter::matchAndRewrite(IE::LSTMSequenceOp origOp, OpAdaptor,
+                                                           mlir::ConversionPatternRewriter& rewriter) const {
+    const auto ctx = rewriter.getContext();
+    const auto reshapeValueTo4D = [&](mlir::Value value, ShapeRef newShape) -> mlir::Value {
+        return rewriter.createOrFold<IE::ReshapeOp>(appendLoc(value.getLoc(), "_reshape"), value, nullptr, false,
+                                                    getIntArrayAttr(ctx, newShape));
+    };
+
+    const auto initialHiddenStateShape = getShape(origOp.getInitialHiddenState());
+    const auto batchSize = initialHiddenStateShape[Dim(0)];
+    const auto numDirections = initialHiddenStateShape[Dim(1)];
+    const auto hiddenSize = initialHiddenStateShape[Dim(2)];
+    const auto sequenceLenght = origOp.getSequenceLength();
+
+    const Shape newInitialHiddenStateShape{batchSize, numDirections, 1, hiddenSize};
+    const Shape newInitialCellStateShape{batchSize, numDirections, 1, hiddenSize};
+    const Shape newRecurrenceWeightsShape{numDirections, 4, hiddenSize, hiddenSize};
+    Shape newInputDataShape{};
+
+    mlir::Value newWeights;
+    if (const auto weights = origOp.getWeights(); weights) {
+        const auto inputSize = getShape(weights).back();
+        const Shape newWeightsShape{1, numDirections, 4 * hiddenSize, inputSize};
+        newWeights = reshapeValueTo4D(weights, newWeightsShape);
+        newInputDataShape = Shape{batchSize, 1, sequenceLenght, inputSize};
+    } else {
+        newInputDataShape = Shape{batchSize, numDirections, sequenceLenght, 4 * hiddenSize};
+    }
+
+    mlir::Value newBiases;
+    if (const auto biases = origOp.getBiases(); biases) {
+        const Shape newBiasesShape{1, numDirections, 1, 4 * hiddenSize};
+        newBiases = reshapeValueTo4D(biases, newBiasesShape);
+    }
+
+    const mlir::Value newInputData = reshapeValueTo4D(origOp.getInputData(), newInputDataShape);
+    const mlir::Value newInitialHiddenState =
+            reshapeValueTo4D(origOp.getInitialHiddenState(), newInitialHiddenStateShape);
+    const mlir::Value newInitialCellState = reshapeValueTo4D(origOp.getInitialCellState(), newInitialCellStateShape);
+    const mlir::Value newRecurrenceWeights = reshapeValueTo4D(origOp.getReccurenceWeights(), newRecurrenceWeightsShape);
+
+    auto newOp = rewriter.create<IE::LSTMSequenceOp>(origOp.getLoc(), newInputData, newInitialHiddenState,
+                                                     newInitialCellState, newWeights, newRecurrenceWeights, newBiases,
+                                                     origOp.getSequenceLengthAttr(), origOp.getDirectionAttr());
+
+    SmallVector<mlir::Value> reshapedResultsVec;
+    for (const auto& [origOpResult, newOpResult] : zip(origOp.getResults(), newOp.getResults())) {
+        const auto origShapeAttr = getIntArrayAttr(ctx, getShape(origOpResult));
+        const mlir::Value resultReshape = rewriter.createOrFold<IE::ReshapeOp>(
+                appendLoc(newOpResult.getLoc(), "_reshape"), newOpResult, nullptr, false, origShapeAttr);
+        reshapedResultsVec.push_back(resultReshape);
+    }
+
+    rewriter.replaceOp(origOp, reshapedResultsVec);
+    return mlir::success();
+}
+
+//
 // ConcatConverter
 //
 
@@ -1257,8 +1424,8 @@ mlir::LogicalResult ConcatConverter::matchAndRewrite(IE::ConcatOp origOp, OpAdap
     }
 
     const auto concatAxis = (*axis.begin()).ind();
-    const auto shapeRank = checked_cast<int32_t>(getShape(origOp.getOutput()).size());
-    auto origOutputShape = getShape(origOp.getOutput());
+    const auto origOutputShape = getShape(origOp.getOutput());
+    const auto shapeRank = checked_cast<int32_t>(origOutputShape.size());
 
     // The reason for placing the axis of concat in the third dimension is:
     // 1. We need to ensure that the batch dimension after conversion is 1.
@@ -1295,7 +1462,9 @@ mlir::LogicalResult ConcatConverter::matchAndRewrite(IE::ConcatOp origOp, OpAdap
     const auto inputs = origOp.getInputs();
     SmallVector<mlir::Value> newInputs;
     for (const auto& input : inputs) {
-        const auto inputReshape = reshapeInputWithMergeMap(rewriter, origOp->getLoc(), input, mergeMap, extendOnH);
+        const auto inputReshape =
+                reshapeInputWithMergeMap(rewriter, takeOpLoc(origOp, StringLiteral("reshape_in_{0}"), newInputs.size()),
+                                         shapeRank, input, mergeMap, extendOnH);
         newInputs.emplace_back(inputReshape);
     }
 
@@ -1325,7 +1494,9 @@ mlir::LogicalResult ConcatConverter::matchAndRewrite(IE::ConcatOp origOp, OpAdap
     auto newConcat = rewriter.create<IE::ConcatOp>(origOp->getLoc(), newInputs, nullptr, newStaticOffsetsAttr);
 
     const auto outputShapeAttr = getIntArrayAttr(this->getContext(), outShape);
-    rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, newConcat.getOutput(), nullptr, false, outputShapeAttr);
+    auto outReshape =
+            rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, newConcat.getOutput(), nullptr, false, outputShapeAttr);
+    extendOpLoc(outReshape, "reshape_out");
 
     _log.trace("[{0}] Replaced with 'IE::ConcatOp'", getDebugName());
 
@@ -1365,8 +1536,8 @@ mlir::LogicalResult TransposeConverter::matchAndRewrite(IE::TransposeOp origOp, 
 
     // Build input reshape operation
     auto reducedShapeAttr = getIntArrayAttr(rewriter.getContext(), mergedShape);
-    auto inputReshape = rewriter.createOrFold<IE::ReshapeOp>(origOp.getLoc(), origOp.getInput(), /*shape=*/nullptr,
-                                                             false, reducedShapeAttr);
+    auto inputReshape = rewriter.createOrFold<IE::ReshapeOp>(takeOpLoc(origOp, "reshape_in"), origOp.getInput(),
+                                                             /*shape=*/nullptr, false, reducedShapeAttr);
 
     auto newTransposeOp = rewriter.create<IE::TransposeOp>(origOp->getLoc(), inputReshape, nullptr,
                                                            mlir::AffineMapAttr::get(reducedPermutation));
@@ -1374,8 +1545,9 @@ mlir::LogicalResult TransposeConverter::matchAndRewrite(IE::TransposeOp origOp, 
     // Reshape to original output shape
     auto outputShape = getShape(origOp.getOutput());
     auto outputShapeAttr = getIntArrayAttr(rewriter.getContext(), outputShape);
-    rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, newTransposeOp.getOutput(), /*shape=*/nullptr, false,
-                                               outputShapeAttr);
+    auto outReshape = rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, newTransposeOp.getOutput(), /*shape=*/nullptr,
+                                                                 false, outputShapeAttr);
+    extendOpLoc(outReshape, "reshape_out");
 
     _log.trace("[{0}] Replaced with 'IE::Tranpose'", getDebugName());
     return mlir::success();
@@ -1477,14 +1649,16 @@ mlir::LogicalResult SoftmaxConverter::matchAndRewrite(IE::SoftMaxOp origOp, OpAd
     const auto newInputShapeAttr = getIntArrayAttr(getContext(), std::get<0>(newSoftmaxParamVal));
     const auto axisAttr = getIntAttr(getContext(), std::get<1>(newSoftmaxParamVal));
 
-    auto inputReshape = rewriter.createOrFold<IE::ReshapeOp>(origOp->getLoc(), origOp.getInput(), nullptr, false,
-                                                             newInputShapeAttr);
+    auto inputReshape = rewriter.createOrFold<IE::ReshapeOp>(takeOpLoc(origOp, "reshape_in"), origOp.getInput(),
+                                                             nullptr, false, newInputShapeAttr);
 
     auto newSoftmaxOp =
             rewriter.create<IE::SoftMaxOp>(origOp->getLoc(), inputReshape, axisAttr, origOp.getPadSizeAttr());
 
     const auto outputShapeAttr = getIntArrayAttr(getContext(), getShape(origOp.getOutput()));
-    rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, newSoftmaxOp.getOutput(), nullptr, false, outputShapeAttr);
+    auto outReshape = rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, newSoftmaxOp.getOutput(), nullptr, false,
+                                                                 outputShapeAttr);
+    extendOpLoc(outReshape, "reshape_out");
 
     _log.trace("[{0}] Replaced with 'IE::SoftMaxOp'", getDebugName());
 
@@ -1602,8 +1776,8 @@ mlir::LogicalResult InterpolateConverter::matchAndRewrite(IE::InterpolateOp orig
     SmallVector<int64_t> newInputShape(addDims, 1);
     newInputShape.insert(newInputShape.end(), inputShape.begin(), inputShape.end());
     const auto newInputShapeAttr = getIntArrayAttr(this->getContext(), newInputShape);
-    auto inputReshape = rewriter.createOrFold<IE::ReshapeOp>(origOp->getLoc(), origOp.getInput(), nullptr, false,
-                                                             newInputShapeAttr);
+    auto inputReshape = rewriter.createOrFold<IE::ReshapeOp>(takeOpLoc(origOp, "reshape_in"), origOp.getInput(),
+                                                             nullptr, false, newInputShapeAttr);
 
     const auto attrs = origOp.getAttr();
     const auto newPadsBeginAttr = extendShapeWithValue(attrs.getPadsBegin(), 0);
@@ -1624,7 +1798,9 @@ mlir::LogicalResult InterpolateConverter::matchAndRewrite(IE::InterpolateOp orig
 
     const auto outShape = getShape(origOp.getOutput());
     const auto outputShapeAttr = getIntArrayAttr(this->getContext(), outShape);
-    rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, newInterpOp.getOutput(), nullptr, false, outputShapeAttr);
+    auto outReshape = rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, newInterpOp.getOutput(), nullptr, false,
+                                                                 outputShapeAttr);
+    extendOpLoc(outReshape, "reshape_out");
 
     _log.trace("[{0}] Replaced with 'IE::InterpolateOp'", getDebugName());
 
@@ -1651,36 +1827,62 @@ private:
 
 mlir::LogicalResult GatherConverter::matchAndRewrite(IE::GatherOp origOp, OpAdaptor,
                                                      mlir::ConversionPatternRewriter& rewriter) const {
-    _log.trace("[{0}] Found IE::Gather Operation '{1}'", getDebugName(), origOp->getLoc());
+    auto ctx = rewriter.getContext();
+    _log.trace("[{0}] Found Gather Operation at '{1}'", getDebugName(), origOp->getLoc());
 
-    const auto origType = origOp.getInput().getType().cast<vpux::NDTypeInterface>();
-    const auto inputShape = origType.getShape().raw();
+    const auto axis = origOp.getAxisValue().value();
+    const auto inType = origOp.getInput().getType().cast<NDTypeInterface>();
+    const auto inShape = inType.getShape();
+    const auto indicesType = origOp.getIndices().getType().cast<NDTypeInterface>();
+    const auto batchDim = origOp.getBatchDims();
 
-    int64_t axis = origOp.getAxisValue().value();
-    if (axis < 0) {
-        axis += origType.getRank();
-    }
+    auto fuseDims = [](auto begin, auto end) {
+        return std::accumulate(begin, end, int64_t(1), std::multiplies<int64_t>());
+    };
 
-    auto addDims = static_cast<int32_t>(TARGET_TENSOR_DIM - origType.getRank());
-    SmallVector<int64_t> newInputShape(addDims, 1);
+    // Convert Gather Op to a 4D tensor using the following dimensional rules:
+    // [BatchDimsRange, DataBeforeAxisRange, IndicesRange, DataAfterAxisRange]
+    // Example transformations:
+    // 1. Original: Input: 5x6x7, Indices: 5x3, Axis: 1, Batch_dim: 1, Output: 5x3x7
+    //    Transformed: Input: 5x1x6x7, Indices: 5x3, Axis: 2, Batch_dim: 1, Output: 5x1x3x7
+    // 2. Original: Input: 1x5x7, Indices: 6x3, Axis: 2, Batch_dim: 0, Output: 1x5x6x3
+    //    Transformed: Input: 1x5x7x1, Indices: 18, Axis: 2, Batch_dim: 0, Output: 1x5x18x1
+    // 3. Original: Input: 1x5x1x1x6x7, Indices: 4x5, Axis: 4, Batch_dim: 0, Output: 1x5x1x1x4x5x7
+    //    Transformed: Input: 1x5x6x7, Indices: 4x5, Axis: 2, Batch_dim: 0, Output: 1x5x20x7
+    auto fusedBatchDimSize = batchDim > 0 ? fuseDims(inShape.begin(), inShape.begin() + batchDim) : 1;
+    auto fusedBeforeAxisDimSize = fuseDims(inShape.begin() + batchDim, inShape.begin() + axis);
+    auto fusedIndicesDimSize = fuseDims(indicesType.getShape().begin() + batchDim, indicesType.getShape().end());
+    auto fusedAfterAxisDimSize = fuseDims(inShape.begin() + axis + 1, inShape.end());
 
-    for (auto i = 0; i < origType.getRank(); i++) {
-        newInputShape.push_back(inputShape[i]);
-    }
+    SmallVector<int64_t> newInShape{fusedBatchDimSize, fusedBeforeAxisDimSize, inShape[Dim(axis)],
+                                    fusedAfterAxisDimSize};
+    SmallVector<int64_t> newOutShape{fusedBatchDimSize, fusedBeforeAxisDimSize, fusedIndicesDimSize,
+                                     fusedAfterAxisDimSize};
 
-    const auto newInputShapeAttr = getIntArrayAttr(getContext(), newInputShape);
-    auto inputReshape = rewriter.createOrFold<IE::ReshapeOp>(origOp->getLoc(), origOp.getInput(), nullptr, false,
-                                                             newInputShapeAttr);
+    // Support Multi Cluster feature. The Indices must be 4D to comply with requirements
+    // Two dimensions of size '1' are appended after the actual indices
+    // The attribute 'indicesRank' is used to retrieve the actual indices
+    const auto indicesRank = 2;
+    SmallVector<int64_t> newIndicesShape{fusedBatchDimSize, fusedIndicesDimSize, 1, 1};
 
-    int64_t newAxis = axis + addDims;
-    const auto axisAttr = getIntAttr(getContext(), newAxis);
+    auto newAxis = Dims4D::Act::H.ind();
+    auto newBatchDim = 1;
 
-    auto newGatherOp = rewriter.create<IE::GatherOp>(origOp.getLoc(), inputReshape, origOp.getIndices(), nullptr,
-                                                     axisAttr, origOp.getBatchDims());
-    const auto outputShapeAttr = getIntArrayAttr(getContext(), getShape(origOp.getOutput()));
-    rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, newGatherOp.getOutput(), nullptr, false, outputShapeAttr);
+    auto createReshapeOp = [&](mlir::Value input, ShapeRef shape, StringRef locSuffix) -> mlir::Value {
+        auto shapeAttr = getIntArrayAttr(ctx, shape);
+        return rewriter.createOrFold<IE::ReshapeOp>(takeOpLoc(origOp, StringLiteral("reshape_{0}"), locSuffix), input,
+                                                    nullptr, false, shapeAttr);
+    };
 
-    _log.trace("[{0}] Replaced with 'IE::GatherOp'", getDebugName());
+    auto inputReshape = createReshapeOp(origOp.getInput(), Shape(newInShape), "in");
+    auto indicesReshape = createReshapeOp(origOp.getIndices(), Shape(newIndicesShape), "indices");
+    auto newGatherOp =
+            rewriter.create<IE::GatherOp>(origOp.getLoc(), inputReshape, indicesReshape, nullptr,
+                                          getIntAttr(ctx, newAxis), newBatchDim, getIntAttr(ctx, indicesRank));
+    auto outputReshape = createReshapeOp(newGatherOp.getOutput(), getShape(origOp.getOutput()), "out");
+
+    _log.trace("Replaced {0} with 4D tensor", origOp.getLoc());
+    rewriter.replaceOp(origOp, outputReshape);
 
     return mlir::success();
 }
@@ -1715,8 +1917,9 @@ mlir::LogicalResult AccumulateConverter::matchAndRewrite(IE::AccumulateOp origOp
     const auto affineMap = mlir::AffineMap::getPermutationMap(ArrayRef(transposition), ctx);
     const auto affineMapAttr = mlir::AffineMapAttr::get(affineMap);
     const auto newOperands = newArgs.getOperands();
+    size_t counter = 0;
     const auto transposeOperand = [&](const mlir::Value val) -> mlir::Value {
-        const auto loc = appendLoc(val.getLoc(), "to_NWHC");
+        const auto loc = takeOpLoc(origOp, StringLiteral("in_{0}_to_NWHC"), counter++);
         auto transposedVal = rewriter.create<IE::TransposeOp>(loc, val, nullptr, affineMapAttr);
         return transposedVal.getOutput();
     };
@@ -1733,6 +1936,7 @@ mlir::LogicalResult AccumulateConverter::matchAndRewrite(IE::AccumulateOp origOp
                                                     /*rhsScale=*/transposedOperands[3]);
 
     auto transposeOut = rewriter.create<IE::TransposeOp>(origOp.getLoc(), newAcc.getOutput(), nullptr, affineMapAttr);
+    extendOpLoc(transposeOut, "transpose_out");
 
     rewriter.replaceOp(origOp, transposeOut.getOutput());
 
@@ -1773,16 +1977,17 @@ mlir::LogicalResult BroadcastConverter::matchAndRewrite(IE::BroadcastOp origOp, 
     }
 
     const auto newInputShapeAttr = getIntArrayAttr(getContext(), newInputShape);
-    auto inputReshape = rewriter.createOrFold<IE::ReshapeOp>(origOp->getLoc(), origOp.getInput(), nullptr, false,
-                                                             newInputShapeAttr);
+    auto inputReshape = rewriter.createOrFold<IE::ReshapeOp>(takeOpLoc(origOp, "reshape_in"), origOp.getInput(),
+                                                             nullptr, false, newInputShapeAttr);
 
     auto newBroadcastOp = rewriter.create<IE::BroadcastOp>(
             origOp->getLoc(), inputReshape,
             vpux::IE::createShapeConstForBroadCast(rewriter, getContext(), origOp->getLoc(), ShapeRef(newOutputShape)),
             origOp.getAxesMapping(), origOp.getModeAttr());
 
-    rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, newBroadcastOp.getOutput(), nullptr, false,
-                                               getIntArrayAttr(getContext(), outShape.raw()));
+    auto outReshape = rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, newBroadcastOp.getOutput(), nullptr, false,
+                                                                 getIntArrayAttr(getContext(), outShape.raw()));
+    extendOpLoc(outReshape, "reshape_out");
 
     _log.trace("[{0}] Replaced with 'IE::BroadcastOp'", getDebugName());
     return mlir::success();
@@ -1792,17 +1997,21 @@ mlir::LogicalResult BroadcastConverter::matchAndRewrite(IE::BroadcastOp origOp, 
 // safeRunOnFunc
 //
 
-void ConvertShapeTo4DPass::safeRunOnFunc() {
-    auto& ctx = getContext();
-    auto func = getOperation();
-
-    const auto reshape = [](mlir::OpBuilder& builder, mlir::RankedTensorType dstType, mlir::ValueRange inputs,
-                            mlir::Location loc) -> mlir::Value {
+auto buildReshapeMaterializer(StringRef locSuffix) {
+    const auto reshapeFunc = [=](mlir::OpBuilder& builder, mlir::RankedTensorType dstType, mlir::ValueRange inputs,
+                                 mlir::Location loc) -> mlir::Value {
         VPUX_THROW_UNLESS(inputs.size() == 1, "Got wrong number of inputs : {0}", inputs.size());
 
         const auto outShapeAttr = builder.getI64ArrayAttr(dstType.getShape());
-        return builder.createOrFold<IE::ReshapeOp>(loc, inputs.front(), nullptr, false, outShapeAttr);
+        return builder.createOrFold<IE::ReshapeOp>(appendLoc(loc, locSuffix), inputs.front(), nullptr, false,
+                                                   outShapeAttr);
     };
+    return reshapeFunc;
+}
+
+void ConvertShapeTo4DPass::safeRunOnFunc() {
+    auto& ctx = getContext();
+    auto func = getOperation();
 
     mlir::TypeConverter typeConverter;
     typeConverter.addConversion([](vpux::NDTypeInterface type) {
@@ -1810,17 +2019,15 @@ void ConvertShapeTo4DPass::safeRunOnFunc() {
         auto dimMapper = getDimMapGeneric(shape);
         return type.changeShape(ShapeRef(alignShapeTo4D(std::move(shape), dimMapper, false)));
     });
-    typeConverter.addSourceMaterialization(reshape);
-    typeConverter.addTargetMaterialization(reshape);
-    typeConverter.addArgumentMaterialization(reshape);
+    typeConverter.addSourceMaterialization(buildReshapeMaterializer("source"));
+    typeConverter.addTargetMaterialization(buildReshapeMaterializer("target"));
+    typeConverter.addArgumentMaterialization(buildReshapeMaterializer("argument"));
 
     // TODO(E#117111): the below checks are organized in a way to skip the pass
     // if op has operands/results with dynamic shapes. Converting dynamically-shaped tensor to 4D
     // will be addressed separately
     const auto isLegalOp = [&](mlir::Operation* op) {
-        const auto inShape = op->getOperand(0).getType().cast<vpux::NDTypeInterface>().getShape();
-
-        return typeConverter.isLegal(op) || inShape.isDynamic();
+        return typeConverter.isLegal(op) || IE::hasDynamicTensors(op);
     };
 
     const auto isLegalFqOp = [&](IE::FakeQuantizeOp op) {
@@ -1834,18 +2041,18 @@ void ConvertShapeTo4DPass::safeRunOnFunc() {
         return inShape.size() == TARGET_TENSOR_DIM;
     };
 
+    const auto allOperandsAre4D = [](mlir::Operation* op) {
+        return llvm::all_of(op->getOperands(), [](const auto& value) {
+            auto shape = getShape(value);
+            return shape.size() == TARGET_TENSOR_DIM;
+        });
+    };
+
     const auto isLegalEltwiseOp = [&](mlir::Operation* op) {
         if (op->getNumOperands() < 2) {
             return true;
         }
-
-        const auto is4D = [](const auto& value) {
-            auto shape = getShape(value);
-            return shape.size() == TARGET_TENSOR_DIM;
-        };
-        auto allInputsAre4D = llvm::all_of(op->getOperands(), is4D);
-
-        return allInputsAre4D;
+        return allOperandsAre4D(op);
     };
 
     const auto is4DLegalOp = [&](mlir::Operation* op) {
@@ -1872,6 +2079,32 @@ void ConvertShapeTo4DPass::safeRunOnFunc() {
 
         return !(op.getMode() == IE::BroadcastType::BIDIRECTIONAL && inType.getRank() == 5 &&
                  inType.getShape()[Dims4D::Act::N] == 1 && outShape[Dims4D::Act::N] == 1);
+    };
+
+    const auto isLegalGatherOp = [&](IE::GatherOp op) {
+        if (!op.getAxisValue().has_value()) {
+            return true;
+        }
+
+        const auto axis = op.getAxisValue().value();
+        const auto inShape = op.getInput().getType().cast<vpux::NDTypeInterface>().getShape();
+        // The purpose of converting the Gather Op to 4D is to enable Multi Cluster execution
+        // There are already several optimizations for the Gather Op, such as DDR Access and GatherDMA
+        // The Gather software kernel is optimized and performs well when the axis is the highest dimension
+        // Here, only the cases where the axis is not the highest dimension will undergo 4D conversion
+        // This is because performance regressions were observed in CI, requiring further debugging
+        const auto areDimsBeforeAxisOne = std::all_of(inShape.begin(), inShape.begin() + axis, [](int dim) {
+            return dim == 1;
+        });
+        if (areDimsBeforeAxisOne) {
+            return true;
+        }
+
+        const auto indicesShape = op.getIndices().getType().cast<vpux::NDTypeInterface>().getShape();
+        const auto outShape = op.getOutput().getType().cast<vpux::NDTypeInterface>().getShape();
+
+        return inShape.size() == TARGET_TENSOR_DIM && outShape.size() == TARGET_TENSOR_DIM &&
+               indicesShape.size() == TARGET_TENSOR_DIM;
     };
 
     mlir::ConversionTarget target(ctx);
@@ -1957,6 +2190,9 @@ void ConvertShapeTo4DPass::safeRunOnFunc() {
     target.addDynamicallyLegalOp<IE::TileOp>(is4DLegalOp);
     target.addDynamicallyLegalOp<IE::LSTMGatesOp>(is4DLegalOp);
     target.addDynamicallyLegalOp<IE::LSTMCellOp>(is4DLegalOp);
+    target.addDynamicallyLegalOp<IE::LSTMSequenceOp>(allOperandsAre4D);
+    target.addDynamicallyLegalOp<IE::GatherOp>(isLegalGatherOp);
+    target.addDynamicallyLegalOp<IE::ErfOp>(isLegalOp);
 
     mlir::RewritePatternSet patterns(&ctx);
     patterns.add<GenericConverter<IE::ClampOp>>(typeConverter, &ctx, _log);
@@ -2013,7 +2249,9 @@ void ConvertShapeTo4DPass::safeRunOnFunc() {
     patterns.add<GenericConverter<IE::MatMulOp>>(typeConverter, &ctx, _log);
     patterns.add<GenericConverter<IE::SubtractOp>>(typeConverter, &ctx, _log);
     patterns.add<GenericConverter<IE::SquaredDifferenceOp>>(typeConverter, &ctx, _log);
+    patterns.add<GenericConverter<IE::ErfOp>>(typeConverter, &ctx, _log);
 
+    patterns.add<GatherConverter>(typeConverter, &ctx, _log);
     patterns.add<FakeQuantizeConverter>(typeConverter, &ctx, _log);
     patterns.add<TopKOpConverter>(typeConverter, &ctx, _log);
     patterns.add<Mvn6Converter>(typeConverter, &ctx, _log);
@@ -2037,6 +2275,7 @@ void ConvertShapeTo4DPass::safeRunOnFunc() {
     patterns.add<TileConverter>(typeConverter, &ctx, _log);
     patterns.add<LSTMGatesConverter>(typeConverter, &ctx, _log);
     patterns.add<LSTMCellConverter>(typeConverter, &ctx, _log);
+    patterns.add<LSTMSequenceConverter>(typeConverter, &ctx, _log);
 
     if (mlir::failed(mlir::applyPartialConversion(func, target, std::move(patterns)))) {
         signalPassFailure();

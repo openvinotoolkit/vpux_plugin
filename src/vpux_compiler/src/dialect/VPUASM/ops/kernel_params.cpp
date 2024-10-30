@@ -88,6 +88,9 @@ void vpux::VPUASM::KernelParamsOp::serializeCached(elf::writer::BinaryDataSectio
 
         insertDimsIntoVector(outputDimsVector, outputNdType);
         insertStridesIntoVector(outputStridesVector, outputNdType);
+        if (getIsOutputBroadcasted()) {
+            break;
+        }
     }
 
     auto params = getKernelParams();
@@ -153,11 +156,11 @@ size_t vpux::VPUASM::KernelParamsOp::getAlignmentRequirements() {
     return ELF::VPUX_SHAVE_ALIGNMENT;
 }
 
-vpux::ELF::SectionFlagsAttr vpux::VPUASM::KernelParamsOp::getAccessingProcs(mlir::SymbolUserMap&) {
+vpux::ELF::SectionFlagsAttr vpux::VPUASM::KernelParamsOp::getPredefinedMemoryAccessors() {
     return ELF::SectionFlagsAttr::VPU_SHF_PROC_SHAVE;
 }
 
-vpux::ELF::SectionFlagsAttr vpux::VPUASM::KernelParamsOp::getUserProcs() {
+vpux::ELF::SectionFlagsAttr vpux::VPUASM::KernelParamsOp::getMemoryAccessingProc() {
     return ELF::SectionFlagsAttr::VPU_SHF_PROC_SHAVE;
 }
 
@@ -187,7 +190,8 @@ std::vector<ELF::RelocationInfo> vpux::VPUASM::KernelParamsOp::getRelocationInfo
         relocs.push_back(ELF::RelocationInfo(
                 inputSymRef, targetSection,
                 input.index() * sizeof(sw_params::MemRefData) + offsetof(sw_params::MemRefData, dataAddr), relocType,
-                ELF::getOffsetOfSymRef(symRefMap, inputSymRef)));
+                ELF::getOffsetOfSymRef(symRefMap, inputSymRef),
+                "Input " + std::to_string(input.index()) + " (dataAddr) kernel params reloc"));
     }
 
     auto kernelOutputs = getOutputs();
@@ -198,10 +202,16 @@ std::vector<ELF::RelocationInfo> vpux::VPUASM::KernelParamsOp::getRelocationInfo
                                  ? ELF::RelocationType::R_VPU_32_BIT_OR_B21_B26_UNSET
                                  : ELF::RelocationType::R_VPU_32;
 
-        relocs.push_back(ELF::RelocationInfo(outputSymRef, targetSection,
-                                             (kernelInputs.size() + output.index()) * sizeof(sw_params::MemRefData) +
-                                                     offsetof(sw_params::MemRefData, dataAddr),
-                                             relocType, ELF::getOffsetOfSymRef(symRefMap, outputSymRef)));
+        relocs.push_back(
+                ELF::RelocationInfo(outputSymRef, targetSection,
+                                    (kernelInputs.size() + output.index()) * sizeof(sw_params::MemRefData) +
+                                            offsetof(sw_params::MemRefData, dataAddr),
+                                    relocType, ELF::getOffsetOfSymRef(symRefMap, outputSymRef),
+                                    "Output " + std::to_string(output.index()) + " (dataAddr) kernel params reloc"));
+
+        if (getIsOutputBroadcasted()) {
+            break;
+        }
     }
 
     auto getNDTypeIfFromSymRef = [&symRefMap](mlir::SymbolRefAttr symRef) {
@@ -223,7 +233,8 @@ std::vector<ELF::RelocationInfo> vpux::VPUASM::KernelParamsOp::getRelocationInfo
         relocs.push_back(ELF::RelocationInfo(
                 fullSourceSymRef, targetSection,
                 kernelInputIt.index() * sizeof(sw_params::MemRefData) + offsetof(sw_params::MemRefData, dimsAddr),
-                ELF::RelocationType::R_VPU_32, addend));
+                ELF::RelocationType::R_VPU_32, addend,
+                "Input " + std::to_string(kernelInputIt.index()) + " dims (dimsAddr) kernel params reloc"));
 
         auto inputSymRef = kernelInputIt.value().cast<mlir::SymbolRefAttr>();
         addend += sizeof(int32_t) * getNDTypeIfFromSymRef(inputSymRef).getShape().size();
@@ -233,32 +244,43 @@ std::vector<ELF::RelocationInfo> vpux::VPUASM::KernelParamsOp::getRelocationInfo
         relocs.push_back(ELF::RelocationInfo(
                 fullSourceSymRef, targetSection,
                 kernelInputIt.index() * sizeof(sw_params::MemRefData) + offsetof(sw_params::MemRefData, stridesAddr),
-                ELF::RelocationType::R_VPU_32, addend));
+                ELF::RelocationType::R_VPU_32, addend,
+                "Input " + std::to_string(kernelInputIt.index()) + " strides (stridesAddr) kernel params reloc"));
 
         auto inputSymRef = kernelInputIt.value().cast<mlir::SymbolRefAttr>();
         addend += sizeof(int64_t) * getNDTypeIfFromSymRef(inputSymRef).getMemStrides().size();
     }
 
     for (auto kernelOutputIt : kernelOutputs | indexed) {
-        relocs.push_back(
-                ELF::RelocationInfo(fullSourceSymRef, targetSection,
-                                    (kernelInputs.size() + kernelOutputIt.index()) * sizeof(sw_params::MemRefData) +
-                                            offsetof(sw_params::MemRefData, dimsAddr),
-                                    ELF::RelocationType::R_VPU_32, addend));
+        relocs.push_back(ELF::RelocationInfo(
+                fullSourceSymRef, targetSection,
+                (kernelInputs.size() + kernelOutputIt.index()) * sizeof(sw_params::MemRefData) +
+                        offsetof(sw_params::MemRefData, dimsAddr),
+                ELF::RelocationType::R_VPU_32, addend,
+                "Output " + std::to_string(kernelOutputIt.index()) + " dims (dimsAddr) kernel params reloc"));
 
         auto outputSymRef = kernelOutputIt.value().cast<mlir::SymbolRefAttr>();
         addend += sizeof(int32_t) * getNDTypeIfFromSymRef(outputSymRef).getShape().size();
+
+        if (getIsOutputBroadcasted()) {
+            break;
+        }
     }
 
     for (auto kernelOutputIt : kernelOutputs | indexed) {
-        relocs.push_back(
-                ELF::RelocationInfo(fullSourceSymRef, targetSection,
-                                    (kernelInputs.size() + kernelOutputIt.index()) * sizeof(sw_params::MemRefData) +
-                                            offsetof(sw_params::MemRefData, stridesAddr),
-                                    ELF::RelocationType::R_VPU_32, addend));
+        relocs.push_back(ELF::RelocationInfo(
+                fullSourceSymRef, targetSection,
+                (kernelInputs.size() + kernelOutputIt.index()) * sizeof(sw_params::MemRefData) +
+                        offsetof(sw_params::MemRefData, stridesAddr),
+                ELF::RelocationType::R_VPU_32, addend,
+                "Output " + std::to_string(kernelOutputIt.index()) + " strides (stridesAddr) kernel params reloc"));
 
         auto outputSymRef = kernelOutputIt.value().cast<mlir::SymbolRefAttr>();
         addend += sizeof(int64_t) * getNDTypeIfFromSymRef(outputSymRef).getMemStrides().size();
+
+        if (getIsOutputBroadcasted()) {
+            break;
+        }
     }
 
     return relocs;

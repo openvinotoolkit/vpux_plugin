@@ -6,18 +6,30 @@
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --wrap-into-async-regions %s | FileCheck %s
 // REQUIRES: arch-NPU37XX || arch-NPU40XX
 
+module @VPU.SW {
+    func.func private @builtin_relu(%input : memref<*xf16>, %output : memref<*xf16>) attributes {VPU.kernel_code = "activation_relu.cpp", VPU.kernel_entry = "activation_relu", VPU.task_type = @COMPUTE}
+    func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
+}
+
 // CHECK-LABEL: @LinearGraph
 func.func @LinearGraph(%arg0: memref<1x1x1x100xf16>, %arg1: memref<1x1x1x100xf16>) -> memref<1x1x1x100xf16> {
     %0 = memref.alloc() :  memref<1x1x1x100xf16>
-    %1 = VPUIP.ReLUUPA inputs(%arg0 : memref<1x1x1x100xf16>) outputs(%0 : memref<1x1x1x100xf16>) -> memref<1x1x1x100xf16>
+    %1 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_relu
+                    inputs(%arg0 as %input_0: memref<1x1x1x100xf16>)
+                    outputs(%0 as %output_0: memref<1x1x1x100xf16>)
+                    on tile 0 -> memref<1x1x1x100xf16> {
+                VPUIP.SW.Kernel.run (%input_0, %output_0)
+                    : memref<1x1x1x100xf16>
+                    , memref<1x1x1x100xf16>
+        }
     %2 = VPUIP.Copy inputs(%1 : memref<1x1x1x100xf16>) outputs(%arg1 : memref<1x1x1x100xf16>) -> memref<1x1x1x100xf16>
     return %2 : memref<1x1x1x100xf16>
 
     // CHECK:       [[VAR0:%.+]] = memref.alloc()
 
     // CHECK:       [[TOKEN1:%.+]], [[FUTURE1:%.+]] = async.execute -> !async.value<memref<1x1x1x100xf16>>
-    // CHECK-SAME:          VPUIP.executor = @SHAVE_UPA
-    // CHECK:           [[INNER_VAR1:%.+]] = VPUIP.ReLUUPA inputs(%arg0 : memref<1x1x1x100xf16>) outputs([[VAR0]] : memref<1x1x1x100xf16>)
+    // CHECK-SAME:          VPUIP.executor = @SHAVE_ACT
+    // CHECK:           [[INNER_VAR1:%.+]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_relu inputs(%arg0 as {{[^:]+}}: memref<1x1x1x100xf16>) outputs([[VAR0]] as {{[^:]+}}: memref<1x1x1x100xf16>)
     // CHECK:           async.yield [[INNER_VAR1]]
 
     // CHECK:       [[VAR1:%.+]] = async.await [[FUTURE1]]
@@ -34,10 +46,22 @@ func.func @LinearGraph(%arg0: memref<1x1x1x100xf16>, %arg1: memref<1x1x1x100xf16
 
 // -----
 
+module @VPU.SW {
+    func.func private @builtin_relu(%input : memref<*xf16>, %output : memref<*xf16>) attributes {VPU.kernel_code = "activation_relu.cpp", VPU.kernel_entry = "activation_relu", VPU.task_type = @COMPUTE}
+    func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
+}
+
 // CHECK-LABEL: @ConcatView
 func.func @ConcatView(%arg0: memref<50x1x1xf16>, %arg1: memref<100x1x1xf16>) -> memref<100x1x1xf16> {
     %0 = VPUIP.SubView %arg1 [0, 0 ,0] [50, 1, 1] : memref<100x1x1xf16> to memref<50x1x1xf16>
-    %1 = VPUIP.ReLUUPA inputs(%arg0 : memref<50x1x1xf16>) outputs(%0 : memref<50x1x1xf16>) -> memref<50x1x1xf16>
+    %1 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_relu
+                    inputs(%arg0 as %input_0: memref<50x1x1xf16>)
+                    outputs(%0 as %output_0: memref<50x1x1xf16>)
+                    on tile 0 -> memref<50x1x1xf16> {
+                VPUIP.SW.Kernel.run (%input_0, %output_0)
+                    : memref<50x1x1xf16>
+                    , memref<50x1x1xf16>
+        }
 
     %2 = VPUIP.SubView %arg1 [50, 0, 0] [50, 1, 1] : memref<100x1x1xf16> to memref<50x1x1xf16>
     %3 = VPUIP.Copy inputs(%arg0 : memref<50x1x1xf16>) outputs(%2 : memref<50x1x1xf16>) -> memref<50x1x1xf16>
@@ -47,8 +71,8 @@ func.func @ConcatView(%arg0: memref<50x1x1xf16>, %arg1: memref<100x1x1xf16>) -> 
 
     // CHECK:       [[VAR0:%.+]] = VPUIP.SubView %arg1 [0, 0, 0] [50, 1, 1]
     // CHECK:       [[TOKEN1:%.+]], [[FUTURE1:%.+]] = async.execute -> !async.value<memref<50x1x1xf16>>
-    // CHECK-SAME:          VPUIP.executor = @SHAVE_UPA
-    // CHECK:           [[INNER_VAR1:%.+]] = VPUIP.ReLUUPA inputs(%arg0 : memref<50x1x1xf16>) outputs([[VAR0]] : memref<50x1x1xf16>)
+    // CHECK-SAME:          VPUIP.executor = @SHAVE_ACT
+    // CHECK:           [[INNER_VAR1:%.+]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_relu inputs(%arg0 as {{[^:]+}}: memref<50x1x1xf16>) outputs([[VAR0]] as {{[^:]+}}: memref<50x1x1xf16>)
     // CHECK:           async.yield [[INNER_VAR1]]
     // CHECK:       [[VAR1:%.+]] = async.await [[FUTURE1]]
 

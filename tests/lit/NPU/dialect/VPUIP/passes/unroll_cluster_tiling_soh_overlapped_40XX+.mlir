@@ -512,7 +512,6 @@ func.func @OmitHaloRegionsForEqualMemView(%arg0: memref<1x3x224x224xf16, @DDR>,
         attributes {isTrailingSWLayer = false} {
 
         %31 = VPUIP.NCEClusterTask {
-            activation_window_channel_length = 0 : i64,
             is_permute_quantize,
             is_superdense,
             minimumHardwareExecutionCost = 4294967300 : i64,
@@ -543,12 +542,8 @@ func.func @OmitHaloRegionsForEqualMemView(%arg0: memref<1x3x224x224xf16, @DDR>,
               pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>
           }
         } PPE : {
-          PPETask <ADD> {
-              clamp_high = 255 : i64,
-              clamp_low = 0 : i64,
-              lrelu_mult = 1 : i64,
-              lrelu_shift = 0 : i64,
-              quant_scale = [5.000000e-01]
+          PPETask {
+              opaque_ppe = #VPU.PPEStub<>
           }
         }
     }
@@ -739,7 +734,7 @@ func.func @UnrollNceOutputOverlappedHaloOverNonadjacentCluster() -> memref<1x784
   %CONV_OUTPUT = VPURT.DeclareBuffer <CMX_NN> <576> -> !OutputDistributed
   %OUTPUT = VPURT.DeclareBuffer <DDR> <0> -> memref<1x784x32x6xf16, #NWCH, @DDR>
   VPURT.Task updates(%BAR0 : !VPURT.Barrier) {
-    %1 = VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, is_permute_quantize, minimumHardwareExecutionCost = 4751 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
+    %1 = VPUIP.NCEClusterTask {is_permute_quantize, minimumHardwareExecutionCost = 4751 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
       input(%CONV_INPUT : !InputDistributed)
       weights(%CONV_INPUT : !InputDistributed)
       parent_input(%CONV_INPUT : !InputDistributed)
@@ -752,7 +747,7 @@ func.func @UnrollNceOutputOverlappedHaloOverNonadjacentCluster() -> memref<1x784
          DPUTask {cluster_id = 2 : i64, inEnd = [0, 31, 783], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [2, 31, 783], outStart = [2, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
          DPUTask {cluster_id = 3 : i64, inEnd = [0, 31, 783], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [2, 31, 783], outStart = [2, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
       } PPE : {
-      PPETask <ADD> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [5.000000e-01]}
+      PPETask {opaque_ppe = #VPU.PPEStub<>}
     }
   }
   VPURT.Task waits(%BAR0 : !VPURT.Barrier) {
@@ -822,7 +817,7 @@ func.func @UnrollNceOutputOverlappedHaloOverNonadjacentCluster() -> memref<1x784
   //CHECK: [[COPY_OUT2:%.*]] = VPURT.DeclareBuffer <DDR> <100352> -> memref<1x784x32x3xf16, #NWCH, @DDR>
   //CHECK: [[COPY_OUT3:%.*]] = VPURT.DeclareBuffer <DDR> <150528> -> memref<1x784x32x3xf16, #NWCH, @DDR>
   //CHECK:              VPURT.Task updates([[BAR0]] : !VPURT.Barrier) {
-  //CHECK:                  VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, is_permute_quantize, task_type = #VPUIP.nce_task_type<ELTWISE>}
+  //CHECK:                  VPUIP.NCEClusterTask {is_permute_quantize, task_type = #VPUIP.nce_task_type<ELTWISE>}
   //CHECK-SAME:                 input([[IN0]] : memref<1x784x32x2xf16, #NHWC, [@CMX_NN, 0]>)
   //CHECK-SAME:                 weights([[WEIGHT0]] : memref<1x784x32x2xf16, #NHWC, [@CMX_NN, 0]>)
   //CHECK:                      output_ITI_buff([[OUT1]] : !VPUIP.ITIBuffer<
@@ -832,11 +827,11 @@ func.func @UnrollNceOutputOverlappedHaloOverNonadjacentCluster() -> memref<1x784
   //CHECK:                 variants : {
   //CHECK:                           DPUTask {cluster_id = 0 : i64, inEnd = [1, 31, 783], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [1, 31, 783], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
   //CHECK:                      PPE : {
-  //CHECK:                           PPETask <ADD> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [5.000000e-01]}
+  //CHECK:                           PPETask {opaque_ppe = #VPU.PPEStub<>}
   //CHECK:                      }
   //CHECK:               }
   //CHECK:              VPURT.Task updates([[BAR0]] : !VPURT.Barrier) {
-  //CHECK:                  VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, is_permute_quantize, task_type = #VPUIP.nce_task_type<ELTWISE>}
+  //CHECK:                  VPUIP.NCEClusterTask {is_permute_quantize, task_type = #VPUIP.nce_task_type<ELTWISE>}
   //CHECK-SAME:                 input([[IN1]] : memref<1x784x32x2xf16, #NHWC, [@CMX_NN, 1]>)
   //CHECK-SAME:                 weights([[WEIGHT1]] : memref<1x784x32x2xf16, #NHWC, [@CMX_NN, 1]>)
   //CHECK:                      output_ITI_buff([[OUT0]], [[OUT2]], [[OUT3]]
@@ -845,11 +840,11 @@ func.func @UnrollNceOutputOverlappedHaloOverNonadjacentCluster() -> memref<1x784
   //CHECK:                  variants : {
   //CHECK:                           DPUTask {cluster_id = 1 : i64, inEnd = [1, 31, 783], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [2, 31, 783], outStart = [1, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
   //CHECK:                      PPE : {
-  //CHECK:                           PPETask <ADD> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [5.000000e-01]}
+  //CHECK:                           PPETask {opaque_ppe = #VPU.PPEStub<>}
   //CHECK:                      }
   //CHECK:               }
   //CHECK:              VPURT.Task updates([[BAR0]] : !VPURT.Barrier) {
-  //CHECK:                  VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, is_permute_quantize, task_type = #VPUIP.nce_task_type<ELTWISE>}
+  //CHECK:                  VPUIP.NCEClusterTask {is_permute_quantize, task_type = #VPUIP.nce_task_type<ELTWISE>}
   //CHECK-SAME:                 input([[IN2]] : memref<1x784x32x1xf16, #NHWC, [@CMX_NN, 2]>)
   //CHECK-SAME:                 weights([[WEIGHT2]] : memref<1x784x32x1xf16, #NHWC, [@CMX_NN, 2]>)
   //CHECK:                      output_ITI_buff([[OUT3]] : !VPUIP.ITIBuffer<
@@ -859,11 +854,11 @@ func.func @UnrollNceOutputOverlappedHaloOverNonadjacentCluster() -> memref<1x784
   //CHECK:                     variants : {
   //CHECK:                           DPUTask {cluster_id = 2 : i64, inEnd = [0, 31, 783], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [2, 31, 783], outStart = [2, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
   //CHECK:                      PPE : {
-  //CHECK:                           PPETask <ADD> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [5.000000e-01]}
+  //CHECK:                           PPETask {opaque_ppe = #VPU.PPEStub<>}
   //CHECK:                      }
   //CHECK:               }
   //CHECK:              VPURT.Task updates([[BAR0]] : !VPURT.Barrier) {
-  //CHECK:                  VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, is_permute_quantize, task_type = #VPUIP.nce_task_type<ELTWISE>}
+  //CHECK:                  VPUIP.NCEClusterTask {is_permute_quantize, task_type = #VPUIP.nce_task_type<ELTWISE>}
   //CHECK-SAME:                 input([[IN3]] : memref<1x784x32x1xf16, #NHWC, [@CMX_NN, 3]>)
   //CHECK-SAME:                 weights([[WEIGHT3]] : memref<1x784x32x1xf16, #NHWC, [@CMX_NN, 3]>)
   //CHECK-SAME:                 parent_input([[IN3]] : memref<1x784x32x1xf16, #NHWC, [@CMX_NN, 3]>)
@@ -872,7 +867,7 @@ func.func @UnrollNceOutputOverlappedHaloOverNonadjacentCluster() -> memref<1x784
   //CHECK:                      variants : {
   //CHECK:                          DPUTask {cluster_id = 3 : i64, inEnd = [0, 31, 783], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [2, 31, 783], outStart = [2, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
   //CHECK:                      PPE : {
-  //CHECK:                           PPETask <ADD> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [5.000000e-01]}
+  //CHECK:                           PPETask {opaque_ppe = #VPU.PPEStub<>}
   //CHECK:                      }
   //CHECK:               }
 

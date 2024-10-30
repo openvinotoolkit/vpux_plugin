@@ -11,7 +11,7 @@ This document is written on the basis of discussions taken as part of the task o
 
 ![NPU compilation pipeline](images/compilation_flow.png)
 
-Regardless of the device version, the compilation flow has the same appearance at the dialect level. These dialects represent different levels of detail. The IR is lowered from high level abstractions to more detailed representation step-by-step during compilation. The compilation pipeline consists of the "atomic“ passes. Each pass in compilation pipeline must represent one single transformation to reach one specific goal (either IR adaptation or IR optimization).
+Regardless of the device version, the compilation flow has the same appearance at the dialect level. These dialects represent different levels of detail. The IR is lowered from high level abstractions to more detailed representation step-by-step during compilation. The compilation pipeline consists of the "atomic“ passes. Each pass in compilation pipeline must represent one single transformation to reach one specific goal (either IR adaptation or IR optimization). More information is available from the [Compiler HLD](https://docs.intel.com/documents/MovidiusExternal/vpu27/Common/SW/HLD/external/VPUX_NN_Compiler.html) or the [presentation](https://videoportal.intel.com/media/0_dnxf87in).
 
 It is also necessary to describe the dependence of dialects from an architectural point of view: 
 
@@ -35,7 +35,7 @@ Common part consists of:
 - [dialect]_interfaces: interfaces and base classes on which passes may depend
 - other utility libraries
 
-HW-specific part consists of implementation of interfaces, passes, operations and other device-specific details/utilities. There is one library for each device version. For convenience, the diagram shows it in the form of separate libraries, so `npu_compiler_[dialectN]37xx` means the dialect folder in the [NPU37XX](../include/vpux/compiler/NPU37XX) directory.
+HW-specific part consists of implementation of interfaces, passes, operations and other device-specific details/utilities. There is one library for each device version. For convenience, the diagram shows it in the form of separate libraries, so `npu_compiler_[dialectN]37xx` means the dialect folder in the [NPU37XX](../../include/vpux/compiler/NPU37XX) directory.
 
 ## Passes
 
@@ -53,8 +53,8 @@ Hardware specific passes are designed to work on a particular platform. And from
 You are allowed to reuse passes from an older HW version for a newer one if the required feature is a strict superset:
 
 ```C++
-// 37XX 
-void vpux::buildDefaultHWModePipeline(mlir::OpPassManager& pm, const DefaultHWOptions37XX& options, Logger log) {
+// 40XX 
+void vpux::buildDefaultHWModePipeline(mlir::OpPassManager& pm, const DefaultHWOptions40XX& options, Logger log) {
     // ...
     // Use pass from previous version here
     pm.addPass(IE::arch37xx::createHwSpecific1Pass(log));
@@ -94,7 +94,7 @@ std::unique_ptr<IStrategyGetter> vpux::VPU::createMCStrategyGetter(ArchKind arch
     }
     case ArchKind::UNKNOWN:
     default: {
-        VPUX_THROW("Got UNKNOWN arch kind value");
+        VPUX_THROW("Unsupported arch kind value: {0}", arch);
     }
     }
 }
@@ -119,7 +119,7 @@ void UnrollClusterTilingPass::safeRunOnFunc() {
     auto& ctx = getContext();
     auto func = getOperation();
 
-    auto strategy = getGreedilyStrategy(func, _log);
+    auto strategy = createUnrollClusterTilingStrategy(func, _log);
     
     mlir::RewritePatternSet patterns(&ctx);
     // add necessary rewriters here
@@ -155,9 +155,10 @@ void UnrollClusterTilingStrategy::addPatterns(mlir::RewritePatternSet& patterns)
 
     patterns.add<VPUIP::ClusterDMARewriter>(&_ctx, dmaPortCount, _log);
     patterns.add<VPUIP::arch37xx::ClusterSWRewriter>(&_ctx, module, _log);
-    patterns.add<ClusterNCERewriter>(&_ctx, _log);
+    // Compared to the 37xx, we have specific ClusterNCERewriter here
+    patterns.add<VPUIP::arch40xx::ClusterNCERewriter>(&_ctx, _log);
     // Compared to the 37xx, we have also ClusterConvertDMARewriter here
-    patterns.add<ClusterConvertDMARewriter>(&ctx, dmaPortCount, _log);
+    patterns.add<VPUIP::arch40xx::ClusterConvertDMARewriter>(&ctx, dmaPortCount, _log);
 }
 ```
 
@@ -218,7 +219,17 @@ void vpux::buildDefaultHWModePipeline(mlir::OpPassManager& pm, const DefaultHWOp
     // ...
     IE::buildName1Pipeline(pm, log);
     IE::buildName2Pipeline(pm, log);
-    pm.addPass(IE::arch37xx::createHwSpecific2Pass(log));
+    pm.addPass(IE::arch37xx::createHwSpecific1Pass(log));
+    IE::buildName3Pipeline(pm, log);
+    // ...
+}
+
+// 40XX 
+void vpux::buildDefaultHWModePipeline(mlir::OpPassManager& pm, const DefaultHWOptions40XX& options, Logger log) {
+    // ...
+    IE::buildName1Pipeline(pm, log);
+    pm.addPass(IE::arch40xx::createHwSpecific2Pass(log));
+    IE::buildName2Pipeline(pm, log);
     IE::buildName3Pipeline(pm, log);
     // ...
 }
@@ -295,7 +306,8 @@ The implementation of HW passes is also duplicated for each platform. Possible w
 void StrategyManagerPass::safeRunOnFunc() {
     auto func = getOperation();
     auto module = func->getParentOfType<mlir::ModuleOp>();
-
+    
+    // in case of 40XX we have to create arch40xx::StrategyGetter
     StrategyManagerImplAlgo algo {func, std::make_unique<arch37xx::StrategyGetter>();}
     algo.foo();
 }
@@ -307,6 +319,7 @@ Then we will have the difference in compilation pipelines:
 
 void vpux::buildDefaultHWModePipeline(mlir::OpPassManager& pm, const DefaultHWOptions37XX& options, Logger log) {
     // ....
+    // Accordingly, it will be arch40xx::createStrategyManagerPass for 40XX, etc.
     pm.addPass(VPU::arch37xx::createStrategyManagerPass(log));
     // ...
 }

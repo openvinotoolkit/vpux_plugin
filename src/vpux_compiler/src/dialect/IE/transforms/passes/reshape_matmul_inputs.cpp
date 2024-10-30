@@ -4,6 +4,7 @@
 //
 
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
+#include "vpux/compiler/dialect/IE/utils/matmul.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
 using namespace vpux;
@@ -85,7 +86,7 @@ void InputsTo2D(IE::MatMulOp origOp) {
 }
 
 void TransposeInputs(IE::MatMulOp matmulOp) {
-    if (!matmulOp.getTransposeA() && matmulOp.getTransposeB()) {
+    if (IE::isMatmulWithRHSTransposition(matmulOp)) {
         return;
     }
 

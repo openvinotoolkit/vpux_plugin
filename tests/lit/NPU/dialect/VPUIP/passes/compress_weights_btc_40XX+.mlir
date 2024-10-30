@@ -11,7 +11,7 @@
 
 // CHECK-LABEL: func.func @CompressWeightsDuplicated
 func.func @CompressWeightsDuplicated() -> !VPUIP.DistributedBuffer<64x16x7x7x!qElemType, #NHWC, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}> {
-  %cst = const.Declare memref<64x16x7x7x!qElemType, #NHWC> = dense<1> : tensor<64x16x7x7xui8>, [#const.QuantCast<!qElemType>, #const.Reorder<#NHWC>]
+  %cst = const.Declare memref<64x16x7x7x!qElemType, #NHWC> = dense<1> : tensor<64x16x7x7xui8>, [#const.CastElemType<!qElemType>, #const.Reorder<#NHWC>]
   %0 = VPURT.DeclareBuffer <CMX_NN> <1605632> -> !VPUIP.DistributedBuffer<64x16x7x7x!qElemType, #NHWC, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>
 
   VPURT.Task attributes {isTrailingSWLayer = false} {
@@ -54,7 +54,7 @@ func.func @CompressWeightsDuplicated() -> !VPUIP.DistributedBuffer<64x16x7x7x!qE
 
 // CHECK-LABEL: func.func @CompressWeightsDuplicatedWithExplicitDistribution
 func.func @CompressWeightsDuplicatedWithExplicitDistribution() -> !DistributedBuffer {
-  %cst = const.Declare memref<64x16x7x7x!qElemType, #NHWC> = dense<1> : tensor<64x16x7x7xui8>, [#const.QuantCast<!qElemType>, #const.Reorder<#NHWC>]
+  %cst = const.Declare memref<64x16x7x7x!qElemType, #NHWC> = dense<1> : tensor<64x16x7x7xui8>, [#const.CastElemType<!qElemType>, #const.Reorder<#NHWC>]
   %0 = VPURT.DeclareBuffer <CMX_NN> <1605632> -> !DistributedBuffer
 
   VPURT.Task attributes {isTrailingSWLayer = false} {
@@ -105,7 +105,7 @@ func.func @CompressWeightsDuplicatedWithExplicitDistribution() -> !DistributedBu
 
 // CHECK-LABEL: @CompressQuantConstant
 func.func @CompressQuantConstant() -> memref<1x512x3x3x!qElemType, [@CMX_NN, 0]> {
-  %cst_0 = const.Declare memref<1x512x3x3x!qElemType> = dense<1> : tensor<1x512x3x3xui8>, [#const.QuantCast<!qElemType>]
+  %cst_0 = const.Declare memref<1x512x3x3x!qElemType> = dense<1> : tensor<1x512x3x3xui8>, [#const.CastElemType<!qElemType>]
   %0 = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x512x3x3x!qElemType, [@CMX_NN, 0]>
   %1 = VPUIP.NNDMA {set_crit = false, set_ord = true}
     inputs(%cst_0 : memref<1x512x3x3x!qElemType>)
@@ -160,7 +160,7 @@ func.func @CompressSwizzledConstant(%arg0: !BufferDdr, %arg1: !BufferCmx) -> !Bu
 
 // CHECK-LABEL: @NotConvert2CompressDMA
 func.func @NotConvert2CompressDMA() -> memref<1x512x3x3x!qElemType, @DDR> {
-  %cst_0 = const.Declare memref<1x512x3x3x!qElemType> = dense<1> : tensor<1x512x3x3xui8>, [#const.QuantCast<!qElemType>]
+  %cst_0 = const.Declare memref<1x512x3x3x!qElemType> = dense<1> : tensor<1x512x3x3xui8>, [#const.CastElemType<!qElemType>]
   %0 = VPURT.DeclareBuffer <DDR> <0> -> memref<1x512x3x3x!qElemType, @DDR>
   %1 = VPUIP.NNDMA {set_crit = false, set_ord = true}
     inputs(%cst_0 : memref<1x512x3x3x!qElemType>)
@@ -182,7 +182,7 @@ func.func @NotConvert2CompressDMA() -> memref<1x512x3x3x!qElemType, @DDR> {
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 func.func @CompressWeightsFP16(%arg0: memref<1x3x224x224xf16, @DDR>, %arg1: memref<1x1000xf16, @DDR>, %arg2: memref<1244xui64>) -> (memref<1x1000xf16, @DDR>, memref<1244xui64>) {
-  %cst_0 = const.Declare memref<192x16x1x1xf16, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}> = dense<1.0> : tensor<192x16x1x1xf32>, [#const.ConvertElemType<f16>, #const.Reorder<#NHWC>, #const.SwizzleConstant<5 : i64, 4 : i64>]
+  %cst_0 = const.Declare memref<192x16x1x1xf16, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}> = dense<1.0> : tensor<192x16x1x1xf32>, [#const.CastElemType<f16>, #const.Reorder<#NHWC>, #const.SwizzleConstant<5 : i64, 4 : i64>]
   %1 = VPURT.DeclareBuffer <CMX_NN> [0] <819200> {swizzlingKey = 5 : i64} -> memref<192x16x1x1xf16, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}, [@CMX_NN, 0]>
   %2 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
   %3 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier

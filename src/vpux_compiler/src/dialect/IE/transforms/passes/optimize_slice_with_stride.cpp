@@ -188,7 +188,8 @@ IE::ConvolutionOp SliceOpConverter::createConvolution(IE::SliceOp origOp, mlir::
 
     return rewriter.create<IE::ConvolutionOp>(origOp.getLoc(), convOutType, activation, weights,
                                               /*bias=*/nullptr, strides, kernelPadsBegin, kernelPadsEnd, dilations,
-                                              /*postOp=*/nullptr, /*clamp=*/nullptr, /*staticScale=*/nullptr);
+                                              /*postOp=*/nullptr, /*clamp=*/nullptr, /*staticScale=*/nullptr,
+                                              /*outputChannels=*/nullptr, /*inputChannels=*/nullptr);
 }
 
 mlir::Value SliceOpConverter::composeWeights(IE::SliceOp origOp, const mlir::Type convolutionInputType,
@@ -208,7 +209,7 @@ mlir::Value SliceOpConverter::composeWeights(IE::SliceOp origOp, const mlir::Typ
     std::vector<vpux::type::float16> weightValues(weightShape.totalSize(), checked_cast<vpux::type::float16>(0.f));
 
     // For example, Slice:1x9x1088x1920->1x3x1088x1920, offset[0, 1, 0, 0]
-    // we can constract weights with shape 3x9x1x1 like this:
+    // we can construct weights with shape 3x9x1x1 like this:
     // origChannelOffset
     //   |
     // 0 1 0 0 0 0 0 0 0
@@ -235,7 +236,25 @@ mlir::Value SliceOpConverter::composeWeights(IE::SliceOp origOp, const mlir::Typ
     for (int64_t blockRow = 0; blockRow < convolutionAlignment; blockRow++) {
         const auto blockOffsetIndex = blockRow * blockSize * kernelInputChannels;
         auto inChanOffset = origInputChannel * blockRow;
-        for (int64_t i = 0; i < blockSize; i++) {
+        // Set upper bound for the inner loop.
+        // Number of iterations must not exceed kernelInputChannels - inChanOffset - origChannelOffset
+        // This case is fine:
+        // 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0
+        //                             ^                 ^   ^
+        //                  inChanOffset  origChannelOffset  kernelInputChannels
+        // 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0
+        // 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1
+        //
+        // The following may result in out-of-bounds write:
+        // 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0
+        //                             ^                   ^ ^
+        //                  inChanOffset   origChannelOffset kernelInputChannels
+        // 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1
+        // 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 <- out of bounds write
+        //
+        // The upper bound ensures that the loop won't try to populate the third row in this case.
+        const auto upperBound = std::min(kernelInputChannels - inChanOffset - origChannelOffset, blockSize);
+        for (int64_t i = 0; i < upperBound; i++) {
             const auto index = blockOffsetIndex + inChanOffset + origChannelOffset + i * kernelInputChannels + i;
             weightValues[index] = 1.f;
         }
@@ -244,11 +263,11 @@ mlir::Value SliceOpConverter::composeWeights(IE::SliceOp origOp, const mlir::Typ
     const auto ctx = rewriter.getContext();
     const auto weightStorageType = mlir::RankedTensorType::get(weightShape.raw(), mlir::Float16Type::get(ctx));
     const auto weightStorageAttr = mlir::DenseElementsAttr::get(weightStorageType, ArrayRef(weightValues));
-    const auto weightContentAttr = Const::ContentAttr::get(weightStorageAttr);
     const auto declLoc = appendLoc(origOp.getLoc(), "weights for DPU slice");
 
     const auto weightExpressedType = mlir::RankedTensorType::get(weightShape.raw(), convolutionInputType);
-    auto declOp = rewriter.create<Const::DeclareOp>(declLoc, weightExpressedType, weightContentAttr);
+    auto declOp =
+            rewriter.create<Const::DeclareOp>(declLoc, weightExpressedType, Const::ContentAttr::get(weightStorageAttr));
 
     const auto reorderLoc = appendLoc(origOp.getLoc(), "reorder weights for DPU slice");
     const auto weightTypeNCHW = declOp.getOutput().getType().cast<vpux::NDTypeInterface>();
@@ -302,8 +321,53 @@ public:
     mlir::LogicalResult matchAndRewrite(IE::ConcatOp concatOp, mlir::PatternRewriter& rewriter) const final;
 
 private:
+    IE::ConvolutionOp createIdentityConvolution(IE::SliceOp origOp, IE::ConcatOp concatOp,
+                                                mlir::PatternRewriter& rewriter) const;
+
     Logger _log;
 };
+
+IE::ConvolutionOp SliceConcatRewriter::createIdentityConvolution(IE::SliceOp sliceOp, IE::ConcatOp concatOp,
+                                                                 mlir::PatternRewriter& rewriter) const {
+    const auto ctx = rewriter.getContext();
+    const auto strides = getIntArrayAttr(ctx, SmallVector<int64_t>{1, 1});
+    const auto kernelPadsBegin = getIntArrayAttr(ctx, SmallVector<int64_t>{0, 0});
+    const auto kernelPadsEnd = getIntArrayAttr(ctx, SmallVector<int64_t>{0, 0});
+    const auto dilations = getIntArrayAttr(ctx, SmallVector<int64_t>{1, 1});
+
+    // Compose new weights
+    const auto origInputChannel = getShape(sliceOp.getSource())[Dims4D::Act::C];
+    const auto newOutputChannel = getShape(concatOp.getOutput())[Dims4D::Act::C];
+    const auto convOutType = concatOp.getOutput().getType().cast<vpux::NDTypeInterface>();
+
+    const int64_t kernelY = 1;
+    const int64_t kernelX = 1;
+    const auto origWeightShape = Shape{newOutputChannel, origInputChannel, kernelY, kernelX};
+    std::vector<vpux::type::float16> weightValues(origWeightShape.totalSize(), checked_cast<vpux::type::float16>(0.f));
+    for (auto i : irange(origInputChannel)) {
+        weightValues[i * origInputChannel + i] = 1.0f;
+    }
+
+    const auto weightStorageType = mlir::RankedTensorType::get(origWeightShape.raw(), mlir::Float16Type::get(ctx));
+    const auto weightStorageAttr = mlir::DenseElementsAttr::get(weightStorageType, ArrayRef(weightValues));
+
+    const auto declLoc = appendLoc(sliceOp.getLoc(), "weights for DPU slice");
+
+    const auto weightExpressedType = mlir::RankedTensorType::get(origWeightShape.raw(), convOutType.getElementType());
+    auto declOp =
+            rewriter.create<Const::DeclareOp>(declLoc, weightExpressedType, Const::ContentAttr::get(weightStorageAttr));
+
+    const auto reorderLoc = appendLoc(sliceOp.getLoc(), "reorder weights for DPU slice");
+    const auto weightTypeNCHW = declOp.getOutput().getType().cast<vpux::NDTypeInterface>();
+    const auto reorderType = weightTypeNCHW.changeDimsOrder(DimsOrder::OYXI);
+    const auto orderMap = DimsOrder::OYXI.toAffineMap(ctx);
+    auto reorderOut = rewriter.createOrFold<IE::ReorderOp>(reorderLoc, reorderType, declOp.getOutput(), orderMap);
+
+    return rewriter.create<IE::ConvolutionOp>(sliceOp.getLoc(), convOutType, sliceOp.getSource(), reorderOut,
+                                              /*bias=*/nullptr, strides, kernelPadsBegin, kernelPadsEnd, dilations,
+                                              /*postOp=*/nullptr, /*clamp=*/nullptr, /*staticScale=*/nullptr,
+                                              /*outputChannels=*/nullptr, /*inputChannels=*/nullptr);
+}
 
 bool doesSliceConcatMeetRequirement(IE::SliceOp sliceOp, IE::ConcatOp concatOp) {
     auto sliceInShape = getShape(sliceOp.getSource());
@@ -317,24 +381,16 @@ bool doesSliceConcatMeetRequirement(IE::SliceOp sliceOp, IE::ConcatOp concatOp) 
         return false;
     }
 
+    // If slice's input has other users, slice cannot fuse into convolution.
+    if (!sliceOp.getSource().hasOneUse()) {
+        return false;
+    }
+
     auto inConvOp = sliceOp.getSource().getDefiningOp<IE::ConvolutionOp>();
-    if (inConvOp == nullptr) {
-        return false;
-    }
-
-    // If convolution has other users, slice cannot fuse into convolution.
-    if (!inConvOp.getOutput().hasOneUse()) {
-        return false;
-    }
-
-    Const::DeclareOp constInput = nullptr;
-    for (auto input : concatOp.getInputs()) {
-        constInput = input.getDefiningOp<Const::DeclareOp>();
-        if (constInput != nullptr) {
-            break;
-        }
-    }
-    if (constInput == nullptr) {
+    constexpr int64_t MAX_CHANNEL_TO_INSERT = 512;
+    if (inConvOp == nullptr && sliceInShape[Dims4D::Act::C] > MAX_CHANNEL_TO_INSERT) {
+        // Experimental data shows if need to insert identity convolution, and the slice input with big channel, the
+        // convolution is inefficient.
         return false;
     }
 
@@ -371,31 +427,44 @@ bool doesSliceConcatMeetRequirement(IE::SliceOp sliceOp, IE::ConcatOp concatOp) 
 //         |   Constant(broadcast)
 //          \     /
 //            Add
+// Or:
+//        Op
+//         |
+//       Slice  Constant
+//          \      /
+//           Concat
+// Insert an identity Convolution, and then fuse the Slice into previous Convolution and convert Concat to Eltwise Add
+// to reduce DMA:
+//        Op
+//         |
+//    Convolution(identity Conv with fused slice)
+//         |   Constant(broadcast)
+//          \     /
+//            Add
 mlir::LogicalResult SliceConcatRewriter::matchAndRewrite(IE::ConcatOp concatOp, mlir::PatternRewriter& rewriter) const {
     _log.trace("[{0}] Got Concat '{1}' at '{2}'", getDebugName(), concatOp->getName(), concatOp->getLoc());
 
     auto concatInputs = concatOp.getInputs();
     SmallVector<IE::SliceOp> sliceOps;
+    Const::DeclareOp constInput = nullptr;
     for (auto input : concatInputs) {
         if (input.getDefiningOp<IE::SliceOp>() != nullptr) {
             sliceOps.push_back(input.getDefiningOp<IE::SliceOp>());
+        } else if (input.getDefiningOp<Const::DeclareOp>() != nullptr) {
+            constInput = input.getDefiningOp<Const::DeclareOp>();
         }
     }
     if (sliceOps.size() != 1) {
         return matchFailed(rewriter, concatOp, "Concat is expected to have exactly one sliced input");
     }
 
+    if (constInput == nullptr) {
+        return matchFailed(rewriter, concatOp, "Concat has none input");
+    }
+
     IE::SliceOp sliceOp = sliceOps[0];
     if (!doesSliceConcatMeetRequirement(sliceOp, concatOp)) {
         return matchFailed(rewriter, concatOp, "Slice-Concat does not meet requirements");
-    }
-
-    Const::DeclareOp constInput = nullptr;
-    for (auto input : concatInputs) {
-        constInput = input.getDefiningOp<Const::DeclareOp>();
-        if (constInput != nullptr) {
-            break;
-        }
     }
 
     // For example:
@@ -411,9 +480,12 @@ mlir::LogicalResult SliceConcatRewriter::matchAndRewrite(IE::ConcatOp concatOp, 
     // channel all zero, which is make valid data consistent with the result after Slice.
     // The 'New_Constant' is from 'Constant' with attr: #const.PadWithZero<[0, 511, 0, 0], [0, 0, 0, 0]>]. After
     // broadcast the 'Constant' and add it with Convolution's output tensor to get original concat result.
+    auto inConvOp = sliceOp.getSource().getDefiningOp<IE::ConvolutionOp>();
+    if (inConvOp == nullptr) {
+        inConvOp = createIdentityConvolution(sliceOp, concatOp, rewriter);
+    }
 
     // Fuse Slice into previous Convolution.
-    auto inConvOp = sliceOp.getSource().getDefiningOp<IE::ConvolutionOp>();
     auto filter = inConvOp.getFilter();
     auto filterShape = vpux::getShape(filter);
     auto filterCst = filter.getDefiningOp<Const::DeclareOp>();
@@ -421,34 +493,35 @@ mlir::LogicalResult SliceConcatRewriter::matchAndRewrite(IE::ConcatOp concatOp, 
         return mlir::failure();
     }
     const auto sliceOutputShape = vpux::getShape(sliceOp.getResult());
-    auto cstContentAttrFilter = filterCst.getContentAttr();
+    auto cstContentAttrFilterSetup = filterCst.transformContentAttr();
     const auto subviewOffsets = Shape{0, 0, 0, 0};
     const auto subviewStaticShape = Shape{sliceOutputShape[Dims4D::Act::C], filterShape[Dims4D::Filter::IC],
                                           filterShape[Dims4D::Filter::KY], filterShape[Dims4D::Filter::KX]};
-    cstContentAttrFilter = cstContentAttrFilter.subview(subviewOffsets, subviewStaticShape);
+    cstContentAttrFilterSetup = cstContentAttrFilterSetup.subview(subviewOffsets, subviewStaticShape);
     Shape cstPadBegin = {0, 0, 0, 0};
     Shape cstPadEnd = {filterShape[Dims4D::Filter::OC] - sliceOutputShape[Dims4D::Act::C], 0, 0, 0};
-    cstContentAttrFilter = cstContentAttrFilter.padWithZero(cstPadBegin, cstPadEnd);
-    auto newFilter =
-            rewriter.create<Const::DeclareOp>(filterCst.getLoc(), cstContentAttrFilter.getType(), cstContentAttrFilter);
+    cstContentAttrFilterSetup = cstContentAttrFilterSetup.padWithZero(cstPadBegin, cstPadEnd);
+    auto cstContentAttrFilter = cstContentAttrFilterSetup.get();
+    auto newFilter = rewriter.create<Const::DeclareOp>(filterCst.getLoc(), cstContentAttrFilter.getType(),
+                                                       std::move(cstContentAttrFilter));
     auto newConvOp = rewriter.replaceOpWithNewOp<IE::ConvolutionOp>(
             inConvOp, inConvOp.getOutput().getType(), inConvOp.getInput(), newFilter, inConvOp.getBias(),
             inConvOp.getStrides(), inConvOp.getPadsBegin(), inConvOp.getPadsEnd(), inConvOp.getDilations(),
-            inConvOp.getPostOpAttr(), inConvOp.getClampAttr(), inConvOp.getStaticScaleAttr());
+            inConvOp.getPostOpAttr(), inConvOp.getClampAttr(), inConvOp.getStaticScaleAttr(),
+            inConvOp.getOutputChannelsAttr(), inConvOp.getInputChannelsAttr());
     sliceOp.getResult().replaceAllUsesWith(sliceOp.getSource());
 
     // Replace Concat with Add.
-    auto constInputAttr = constInput.getContentAttr();
     Shape addCstPadBegin = {0, sliceOutputShape[Dims4D::Act::C], 0, 0};
     Shape addCstPadEnd = {0, 0, 0, 0};
-    constInputAttr = constInputAttr.padWithZero(addCstPadBegin, addCstPadEnd);
+    auto constInputAttr = constInput.transformContentAttr().padWithZero(addCstPadBegin, addCstPadEnd).get();
     auto newConstantInput =
-            rewriter.create<Const::DeclareOp>(constInput.getLoc(), constInputAttr.getType(), constInputAttr);
+            rewriter.create<Const::DeclareOp>(constInput.getLoc(), constInputAttr.getType(), std::move(constInputAttr));
     const auto broadcastType =
             vpux::IE::AutoBroadcastTypeAttr::get(getContext(), IE::AutoBroadcastType::NONE_OR_EXPLICIT);
 
     rewriter.replaceOpWithNewOp<IE::AddOp>(concatOp, concatOp.getOutput().getType(), newConvOp.getOutput(),
-                                           newConstantInput, broadcastType, nullptr, nullptr);
+                                           newConstantInput, broadcastType, nullptr, nullptr, nullptr, nullptr);
     return mlir::success();
 }
 
@@ -494,7 +567,6 @@ mlir::LogicalResult FuseSliceWithConvRewriter::matchAndRewrite(IE::SliceOp slice
         return mlir::failure();
     }
     const auto sliceOutputShape = vpux::getShape(sliceOp.getResult());
-    auto cstContentAttrFilter = filterCst.getContentAttr();
     const auto subviewOffsets = Shape(parseIntArrayAttr<int64_t>(sliceOp.getStaticOffsets()));
 
     auto convOutShape = getShape(inConvOp.getOutput());
@@ -506,9 +578,9 @@ mlir::LogicalResult FuseSliceWithConvRewriter::matchAndRewrite(IE::SliceOp slice
 
     const auto subviewStaticShape = Shape{sliceOutputShape[vpux::Dims4D::Act::C], filterShape[vpux::Dims4D::Filter::IC],
                                           filterShape[vpux::Dims4D::Filter::KY], filterShape[vpux::Dims4D::Filter::KX]};
-    cstContentAttrFilter = cstContentAttrFilter.subview(subviewOffsets, subviewStaticShape);
-    auto newFilter =
-            rewriter.create<Const::DeclareOp>(filterCst.getLoc(), cstContentAttrFilter.getType(), cstContentAttrFilter);
+    auto cstContentAttrFilter = filterCst.transformContentAttr().subview(subviewOffsets, subviewStaticShape).get();
+    auto newFilter = rewriter.create<Const::DeclareOp>(filterCst.getLoc(), cstContentAttrFilter.getType(),
+                                                       std::move(cstContentAttrFilter));
 
     // If fused conv cannot be optimized by AdjustConvolutionShape, it will result in performance regession, skip the
     // case.
@@ -525,7 +597,8 @@ mlir::LogicalResult FuseSliceWithConvRewriter::matchAndRewrite(IE::SliceOp slice
     auto newConv = rewriter.replaceOpWithNewOp<IE::ConvolutionOp>(
             inConvOp, newOutType, inConvOp.getInput(), newFilter, inConvOp.getBias(), inConvOp.getStrides(),
             inConvOp.getPadsBegin(), inConvOp.getPadsEnd(), inConvOp.getDilations(), inConvOp.getPostOpAttr(),
-            inConvOp.getClampAttr(), inConvOp.getStaticScaleAttr());
+            inConvOp.getClampAttr(), inConvOp.getStaticScaleAttr(), inConvOp.getOutputChannelsAttr(),
+            inConvOp.getInputChannelsAttr());
     sliceOp.getResult().replaceAllUsesWith(newConv.getOutput());
 
     _log.trace("[{0}] Successfully Fuse Slice into Conv '{1}' at '{2}'", getDebugName(), newConv->getName(),

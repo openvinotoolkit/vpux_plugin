@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2023-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -24,6 +24,17 @@ namespace hwtest {
 
 void buildEltwiseSparse(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module, mlir::OpBuilder builder,
                         Logger& log, mlir::Type inputType, mlir::Type weightsType, mlir::Type outputType) {
+    // set runtime resources
+    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
+
+    mlir::PassManager pmBuilderInit(module->getName(), mlir::OpPassManager::Nesting::Implicit);
+    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.numberOfDPUGroups = 1;
+    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
+
+    VPU::buildInitCompilerPipeline(pmBuilderInit, initCompilerOptions, log);
+    VPUX_THROW_UNLESS(mlir::succeeded(pmBuilderInit.run(module)), "Init compilation failed");
+
     auto* ctx = builder.getContext();
     auto arch = testDesc.getArchitecture();
 
@@ -142,8 +153,6 @@ void buildEltwiseSparse(const nb::TestCaseJsonDescriptor& testDesc, mlir::Module
                                           0);
 
     // NCE Task
-    mlir::IntegerAttr actChannelLength = builder.getI32IntegerAttr(0);
-
     auto nceTask = VPURT::wrapIntoTaskOp<VPUIP::NCEClusterTaskOp>(
             funcBuilder, mlir::ValueRange(barrier0.getBarrier()), mlir::ValueRange(barrier1.getBarrier()),
             builder.getUnknownLoc(),
@@ -155,7 +164,6 @@ void buildEltwiseSparse(const nb::TestCaseJsonDescriptor& testDesc, mlir::Module
             /*weightsTable=*/nullptr,
             /*instruction_table_list=*/nullptr,
             /*spr_lookup_table*/ nullptr,
-            /*activation_window=*/nullptr,
             /*parent_input=*/parentInputCmx.getOperation()->getResult(0),
             /*parent_input_sparsity_map=*/inputSMCmx.getOperation()->getResult(0),
             /*parent_input_storage_element_table=*/nullptr,
@@ -166,13 +174,13 @@ void buildEltwiseSparse(const nb::TestCaseJsonDescriptor& testDesc, mlir::Module
             /*profiling_data=*/nullptr, VPUIP::NCETaskType::ELTWISE,
             /*kernel_size=*/mlir::ArrayAttr(), /*kernel_strides*/ mlir::ArrayAttr(),
             /*kernel_padding=*/VPU::PaddingAttr(),
-            /*activation_window_channel_length=*/actChannelLength,
             /*is_continued=*/nullptr, /*cm_sp_pattern=*/nullptr, /*is_segmented=*/nullptr,
             /*out_channel_offset=*/nullptr, /*input_channels_compression*/ nullptr,
             /*is_superdense=*/nullptr,
             /*is_inplace=*/nullptr,
             /*input_se_size=*/getIntAttr(ctx, static_cast<int32_t>(seSize)),
-            /*output_se_size=*/nullptr);
+            /*output_se_size=*/nullptr, /*is permute quantize*/ nullptr, /*is small kernel optimized*/ nullptr,
+            vpux::VPU::EltwiseTypeAttr::get(ctx, eltwiseMode));
 
     int64_t clampLow = std::numeric_limits<int32_t>::min();
     int64_t clampHigh = std::numeric_limits<int32_t>::max();
@@ -192,12 +200,27 @@ void buildEltwiseSparse(const nb::TestCaseJsonDescriptor& testDesc, mlir::Module
     if (inputCmxType.getElementType().isa<mlir::FloatType>()) {
         // It is intentional to apply int32 limits for floating point clamping.
         // See E#50875 for details.
-        nceTask.addPPETask(funcBuilder, eltwiseMode, clampLow, clampHigh, bypassMult, bypassShift, bypassMult,
-                           bypassShift, bypassShift, eltwiseQuantScale);
+        auto ppeAttr = VPU::PPEIntAttr::get(ctx, VPU::PPEModeAttr::get(ctx, VPU::PPEMode::NOOP),
+                                            vpux::getIntAttr(ctx, clampLow), vpux::getIntAttr(ctx, clampHigh),
+                                            vpux::getIntAttr(ctx, bypassMult), vpux::getIntAttr(ctx, bypassShift),
+                                            vpux::getFPArrayAttr(ctx, ArrayRef<double>{eltwiseQuantScale}),
+                                            vpux::getIntArrayAttr(ctx, ArrayRef<int64_t>{bypassMult}),
+                                            vpux::getIntArrayAttr(ctx, ArrayRef<int64_t>{bypassShift}),
+                                            vpux::getIntAttr(ctx, bypassShift), /* in1QuantMult = */ nullptr,
+                                            /* in2QuantMult = */ nullptr,
+                                            /* fpPreluAlpha = */ nullptr);
+        nceTask.addPPETask(funcBuilder, ppeAttr);
     } else {
-        const auto scaleApproximation = QuantizationApproximation(arch, eltwiseQuantScale);
-        nceTask.addPPETask(funcBuilder, eltwiseMode, clampLow, clampHigh, bypassMult, bypassShift,
-                           scaleApproximation.mult(), scaleApproximation.shift());
+        const auto scaleApproximation = QuantizationApproximation(eltwiseQuantScale);
+        auto ppeAttr = VPU::PPEIntAttr::get(
+                ctx, VPU::PPEModeAttr::get(ctx, VPU::PPEMode::NOOP), vpux::getIntAttr(ctx, clampLow),
+                vpux::getIntAttr(ctx, clampHigh), vpux::getIntAttr(ctx, bypassMult), vpux::getIntAttr(ctx, bypassShift),
+                /* quantScale = */ nullptr, vpux::getIntArrayAttr(ctx, ArrayRef<int64_t>{scaleApproximation.mult()}),
+                vpux::getIntArrayAttr(ctx, ArrayRef<int64_t>{scaleApproximation.shift()}),
+                vpux::getIntAttr(ctx, scaleApproximation.shift()), /* in1QuantMult = */ nullptr,
+                /* in2QuantMult = */ nullptr,
+                /* fpPreluAlpha = */ nullptr);
+        nceTask.addPPETask(funcBuilder, ppeAttr);
     }
 
     // Create DPU task for NCE task
@@ -219,17 +242,6 @@ void buildEltwiseSparse(const nb::TestCaseJsonDescriptor& testDesc, mlir::Module
                                           outputCmx.getOperation()->getResult(0), funcOutput, 0);
 
     funcBuilder.create<mlir::func::ReturnOp>(builder.getUnknownLoc(), funcOutput);
-
-    // set runtime resources
-    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
-
-    mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    auto initCompilerOptions = VPU::InitCompilerOptions(arch, VPU::CompilationMode::DefaultHW);
-    initCompilerOptions.numberOfDPUGroups = 1;
-    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
-    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
-
-    VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");
 
     // IE.CNNNetwork
     buildCNNOp(builder, func.getName(),

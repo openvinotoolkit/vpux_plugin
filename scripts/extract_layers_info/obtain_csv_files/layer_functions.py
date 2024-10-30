@@ -8,6 +8,8 @@ import xml.etree.ElementTree as ET
 import os
 
 # Fuction extract all layer types from IR-file
+
+
 def get_list_of_all_layer_types_in_IR_file(path_to_file):
     set_of_layer_types_in_CNN = set()
 
@@ -17,7 +19,7 @@ def get_list_of_all_layer_types_in_IR_file(path_to_file):
         for layer in layers.findall('layer'):
             set_of_layer_types_in_CNN.add(layer.attrib['type'])
 
-    list_of_layer_types = sorted( list(set_of_layer_types_in_CNN) )
+    list_of_layer_types = sorted(list(set_of_layer_types_in_CNN))
 
     return list_of_layer_types
 
@@ -45,7 +47,7 @@ def create_dictionary_network_names_vs_layers(list_of_files):
     for fileName in list_of_files:
         list_of_layers_for_current_CNN = get_list_of_all_layer_types_in_IR_file(fileName)
         # create record in dictionary for current IR
-        neural_networks_to_layers_dictionary[ os.path.basename(fileName)[:-4] ] = sorted(list_of_layers_for_current_CNN)
+        neural_networks_to_layers_dictionary[os.path.basename(fileName)[:-4]] = sorted(list_of_layers_for_current_CNN)
 
     return neural_networks_to_layers_dictionary
 
@@ -60,7 +62,7 @@ def collect_data_attributes(layer_type, xml_root):
     for layers in xml_root.findall('layers'):
         for layer in layers.findall('layer'):
             if layer.attrib["type"] == layer_type:
-                #begin creation of dictionary with info about this particular layer
+                # begin creation of dictionary with info about this particular layer
                 dict_one_layer_info.clear()
                 dict_one_layer_info['type'] = layer_type
                 if layer.find('data') != None:
@@ -70,22 +72,22 @@ def collect_data_attributes(layer_type, xml_root):
                                 dict_one_layer_info[key] = data.attrib.get(key)
                 if 'output' in dict_one_layer_info:
                     del dict_one_layer_info['output']
-                #special processing for input and output dimentions
+                # special processing for input and output dimentions
                 for layer_in in layer.findall('input'):
                     layer_input_dimentions.clear()
                     for port in layer_in.findall('port'):
                         current_dimention = list()
                         for dim in port.findall('dim'):
-                            current_dimention.append( int(dim.text) )
-                        layer_input_dimentions.add( tuple(current_dimention) )
+                            current_dimention.append(int(dim.text))
+                        layer_input_dimentions.add(tuple(current_dimention))
                 dict_one_layer_info["input_dimentions"] = layer_input_dimentions
                 for layer_out in layer.findall('output'):
                     layer_output_dimentions.clear()
                     for port in layer_out.findall('port'):
                         current_dimention = list()
                         for dim in port.findall('dim'):
-                            current_dimention.append( int(dim.text) )
-                        layer_output_dimentions.add( tuple(current_dimention) )
+                            current_dimention.append(int(dim.text))
+                        layer_output_dimentions.add(tuple(current_dimention))
                 dict_one_layer_info["output_dimentions"] = layer_output_dimentions
                 set_of_layer_attributes.add(str(dict_one_layer_info))
 

@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation
+// Copyright (C) 2022-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -16,7 +16,7 @@ namespace ov {
 
 namespace test {
 
-class ROIAlignV9LayerTest_Common : public ROIAlignV9LayerTest, virtual public VpuOv2LayerTest {
+class ROIAlignV9LayerTestCommon : public ROIAlignV9LayerTest, virtual public VpuOv2LayerTest {
     void generate_inputs(const std::vector<ov::Shape>& targetInputStaticShapes) override {
         VpuOv2LayerTest::inputs.clear();
         const auto& funcInputs = VpuOv2LayerTest::function->inputs();
@@ -26,21 +26,19 @@ class ROIAlignV9LayerTest_Common : public ROIAlignV9LayerTest, virtual public Vp
     }
 };
 
-class ROIAlignV9LayerTest_NPU3720 : public ROIAlignV9LayerTest_Common {};
-class ROIAlignV9LayerTest_NPU4000 : public ROIAlignV9LayerTest_Common {};
-
-TEST_P(ROIAlignV9LayerTest_NPU3720, SW) {
+TEST_P(ROIAlignV9LayerTestCommon, NPU3720_SW) {
+    abs_threshold = 0.012;
     setReferenceSoftwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(ROIAlignV9LayerTest_NPU4000, SW) {
+TEST_P(ROIAlignV9LayerTestCommon, NPU4000_SW) {
+    abs_threshold = 0.012;
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
 
 }  // namespace test
-
 }  // namespace ov
 
 using namespace ov::test;
@@ -52,9 +50,6 @@ const std::vector<ov::element::Type> modelTypes = {
 
 const std::vector<std::string> poolingMode = {"avg", "max"};
 
-//
-// NPU3720/4000
-//
 std::vector<std::vector<ov::Shape>> inputShape = {
         {{2, 22, 20, 20}}, {{2, 18, 20, 20}}, {{2, 4, 20, 20}}, {{2, 4, 20, 40}}};
 
@@ -76,14 +71,7 @@ const auto testROIAlignV9Params = testing::Combine(
         testing::ValuesIn(poolingRatio), testing::ValuesIn(poolingMode), testing::ValuesIn(alignedMode),
         testing::ValuesIn(modelTypes), testing::Values(DEVICE_NPU));
 
-// ------ NPU3720 ------
-
-INSTANTIATE_TEST_SUITE_P(precommit_ROIAlign, ROIAlignV9LayerTest_NPU3720, testROIAlignV9Params,
-                         ROIAlignV9LayerTest_NPU3720::getTestCaseName);
-
-// ------ NPU4000 ------
-
-INSTANTIATE_TEST_SUITE_P(precommit_ROIAlign, ROIAlignV9LayerTest_NPU4000, testROIAlignV9Params,
-                         ROIAlignV9LayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(precommit_ROIAlign, ROIAlignV9LayerTestCommon, testROIAlignV9Params,
+                         ROIAlignV9LayerTestCommon::getTestCaseName);
 
 }  // namespace

@@ -5,7 +5,8 @@
 
 #include "common/utils.hpp"
 
-#include "vpux/compiler/dialect/VPU/IR/native_attributes/distributed_tensor_native.hpp"
+#include "vpux/compiler/dialect/VPU/IR/dialect.hpp"
+#include "vpux/compiler/dialect/VPU/IR/native_attributes/distribution_info.hpp"
 #include "vpux/utils/core/small_vector.hpp"
 
 using MLIR_DistributedTensorCpp = MLIR_UnitBase;
@@ -34,7 +35,7 @@ TEST_F(MLIR_DistributedTensorCpp, PaddingTest) {
     EXPECT_EQ(padClass, padFromAttr);
 }
 
-TEST_F(MLIR_DistributedTensorCpp, DistributedTensorNativeTest) {
+TEST_F(MLIR_DistributedTensorCpp, DistributionInfoTest) {
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<VPU::VPUDialect>();
 
@@ -69,19 +70,19 @@ TEST_F(MLIR_DistributedTensorCpp, DistributedTensorNativeTest) {
 
     auto padAttr = pad.has_value() ? VPU::Padding::getAttrFromClass(&ctx, pad.value()) : nullptr;
 
-    auto distributedTensorAttr = VPU::DistributedTensorAttr::get(
+    auto distributedTensorAttr = VPU::DistributionInfoAttr::get(
             &ctx, distributionModeAttr, numTilesAttr, kernelAttr, padAttr, stridesAttr, numClustersAttr, alignmentAttr,
             uniformDistributedSegmentsAttr, computeShapesAttr, computeOffsetsAttr, memoryShapesAttr, memoryOffsetsAttr,
             equalMemoryAndComputeViewAttr);
 
     // CPP class
-    auto distributedTensorStruct = VPU::DistributedTensorNative(
+    auto distributedTensorStruct = VPU::DistributionInfo(
             distributionMode, numTiles, kernel, strides, pad, numClusters, alignment, uniformDistributedSegments,
             computeShapes, computeOffsets, memoryShapes, memoryOffsets, equalMemoryAndComputeView);
 
-    auto attrFromClass = VPU::DistributedTensorNative::getAttrFromClass(&ctx, distributedTensorStruct);
+    auto attrFromClass = VPU::DistributionInfo::getAttrFromClass(&ctx, distributedTensorStruct);
     EXPECT_EQ(distributedTensorAttr, attrFromClass);
 
-    auto fromAttr = VPU::DistributedTensorNative::getClassFromAttr(attrFromClass);
+    auto fromAttr = VPU::DistributionInfo::getClassFromAttr(attrFromClass);
     EXPECT_EQ(fromAttr, distributedTensorStruct);
 }

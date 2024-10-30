@@ -127,22 +127,20 @@ def OneShotBufferizeVPU2VPUIP : PassBase<"one-shot-bufferize-VPU-to-VPUIP", "vpu
 }
 
 //
-// ConvertSWLayers2VPUIPUPA
+// AdjustDynamicOpsBeforeBufferization
 //
 
-def ConvertSWLayers2VPUIPUPA : PassBase<"convert-sw-layers-to-VPUIP-UPA", "vpux::FunctionPass"> {
-    let summary = "Convert Software Operations to VPUIP UPAOp";
+def AdjustDynamicOpsBeforeBufferization : PassBase<"adjust-dynamic-ops-before-bufferization", "vpux::ModulePass"> {
+    let summary = "Prepare operation with dynamic tensors to be properly bufferized";
 
     let description = [{
-        Convert software operations from VPU to VPUIP::XXXUPAOp operations.
+        Replace dynamic operations with their alternative version that can properly handle dynamic tensors.
     }];
 
-    let constructor = "vpux::createConvertSWLayers2VPUIPUPAPass()";
+    let constructor = "vpux::createAdjustDynamicOpsBeforeBufferizationPass()";
 
     let dependentDialects = [
-        "vpux::VPUIP::VPUIPDialect",
-        "vpux::VPURT::VPURTDialect",
-        "mlir::bufferization::BufferizationDialect"
+        "vpux::VPU::VPUDialect"
     ];
 }
 
@@ -394,6 +392,21 @@ def ConvertLayers2VPU : PassBase<"convert-layers-to-VPU", "vpux::FunctionPass"> 
     let summary = "Convert Layers Operations to VPU Dialect (SW and View layers)";
 
     let constructor = "vpux::createConvertLayers2VPUPass()";
+
+    let dependentDialects = [
+        "vpux::VPU::VPUDialect",
+        "vpux::IE::IEDialect"
+    ];
+}
+
+//
+// ConvertDynamicQuantToVPUNCE
+//
+
+def ConvertDynamicQuantToVPUNCE : PassBase<"convert-dynamic-quant-to-VPU-NCE", "vpux::FunctionPass"> {
+    let summary = "Convert IE.DynamicDequantize -> IE.Convolution pattern to VPU.PopulateWeightTable-> VPU.NCE.Convolution pattern";
+
+    let constructor = "vpux::createConvertDynamicQuantToVPUNCEPass()";
 
     let dependentDialects = [
         "vpux::VPU::VPUDialect",

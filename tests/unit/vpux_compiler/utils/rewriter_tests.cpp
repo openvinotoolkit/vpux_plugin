@@ -25,12 +25,12 @@ auto dummyMemSpace(mlir::MLIRContext* ctx) {
     return vpux::IndexedSymbolAttr::get(ctx, {nameAttr, vpux::getIntAttr(ctx, 0)});
 }
 
-auto dummyDistributedTensorAttr(mlir::MLIRContext* ctx) {
+auto dummyDistributionInfoAttr(mlir::MLIRContext* ctx) {
     const auto distributionModeAttr = vpux::VPU::DistributionModeAttr::get(ctx, vpux::VPU::DistributionMode::NONE);
     const auto numClustersAttr = vpux::getIntAttr(ctx, 1);
-    return vpux::VPU::DistributedTensorAttr::get(ctx, distributionModeAttr, nullptr, nullptr, nullptr, nullptr,
-                                                 numClustersAttr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-                                                 nullptr);
+    return vpux::VPU::DistributionInfoAttr::get(ctx, distributionModeAttr, nullptr, nullptr, nullptr, nullptr,
+                                                numClustersAttr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+                                                nullptr);
 }
 }  // namespace
 
@@ -50,8 +50,7 @@ struct MLIR_BufferizeTest : ::testing::TestWithParam<CreateTensorType> {
     }
 
     MLIR_BufferizeTest() {
-        vpux::registerDialects(registry);
-        vpux::registerCommonInterfaces(registry);
+        registry = vpux::createDialectRegistry();
         ctx.appendDialectRegistry(registry);  // required for NDTypeInterface attachments
         ctx.loadDialect<vpux::Const::ConstDialect>();
         ctx.loadDialect<mlir::bufferization::BufferizationDialect>();
@@ -125,7 +124,7 @@ INSTANTIATE_TEST_SUITE_P(AllTensorTypes, MLIR_BufferizeTest,
                                      const auto elemType = mlir::Float32Type::get(ctx);
                                      return vpux::VPU::DistributedTensorType::get(ctx, {1, 2, 3, 4}, elemType,
                                                                                   orderAttr, memSpace,
-                                                                                  dummyDistributedTensorAttr(ctx));
+                                                                                  dummyDistributionInfoAttr(ctx));
                                  },
                                  // SparseTensor (with RankedTensor inside)
                                  [](mlir::MLIRContext* ctx, mlir::AffineMapAttr orderAttr,

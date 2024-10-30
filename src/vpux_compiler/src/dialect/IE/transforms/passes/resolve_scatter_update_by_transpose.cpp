@@ -6,6 +6,7 @@
 
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
+#include "vpux/compiler/utils/rewriter.hpp"
 
 #include <mlir/Transforms/DialectConversion.h>
 
@@ -101,15 +102,15 @@ mlir::LogicalResult ResolveScatterUpdateByTransposePass::TransposePlanning::matc
         const auto orderUpdatesAttr = mlir::AffineMapAttr::get(
                 mlir::AffineMap::getPermutationMap(transposeUpdatesOrder, origOp->getContext()));
 
-        auto transposedUpdates =
-                rewriter.create<IE::TransposeOp>(origOp->getLoc(), origOp.getUpdates(), nullptr, orderUpdatesAttr);
-        auto transposedInput =
-                rewriter.create<IE::TransposeOp>(origOp->getLoc(), origOp.getInput(), nullptr, orderInputAttr);
+        auto transposedUpdates = rewriter.create<IE::TransposeOp>(takeOpLoc(origOp, "transposed_updates"),
+                                                                  origOp.getUpdates(), nullptr, orderUpdatesAttr);
+        auto transposedInput = rewriter.create<IE::TransposeOp>(takeOpLoc(origOp, "transposed_input"),
+                                                                origOp.getInput(), nullptr, orderInputAttr);
 
         const auto axisAttr = getIntAttr(rewriter.getContext(), 0);
-        auto outputOrig =
-                rewriter.create<IE::ScatterUpdateOp>(origOp->getLoc(), transposedInput.getOutput(), origOp.getIndices(),
-                                                     transposedUpdates.getOutput(), nullptr, axisAttr);
+        auto outputOrig = rewriter.create<IE::ScatterUpdateOp>(takeOpLoc(origOp, "scatter_out"),
+                                                               transposedInput.getOutput(), origOp.getIndices(),
+                                                               transposedUpdates.getOutput(), nullptr, axisAttr);
 
         auto transposeOutputOrder = SmallVector<unsigned int>(inputShape.size(), 0);
         unsigned int refVal2 = 1;
@@ -123,7 +124,9 @@ mlir::LogicalResult ResolveScatterUpdateByTransposePass::TransposePlanning::matc
 
         const auto orderOutputAttr = mlir::AffineMapAttr::get(
                 mlir::AffineMap::getPermutationMap(transposeOutputOrder, origOp->getContext()));
-        rewriter.replaceOpWithNewOp<IE::TransposeOp>(origOp, outputOrig.getOutput(), nullptr, orderOutputAttr);
+        auto transposeOp =
+                rewriter.replaceOpWithNewOp<IE::TransposeOp>(origOp, outputOrig.getOutput(), nullptr, orderOutputAttr);
+        extendOpLoc(transposeOp, "transpose_out");
 
         return mlir::success();
     }

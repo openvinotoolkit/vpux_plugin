@@ -70,22 +70,22 @@ bool vpux::VPU::MVN1SumOp::checkStrategyCompatibility(VPU::MultiClusterStrategy 
     const auto inputShape = getInput().getType().cast<vpux::NDTypeInterface>().getShape();
     const auto outputShape = getSum().getType().cast<vpux::NDTypeInterface>().getShape();
     // only SOK works for MVN1_SUM, also across_channels must be false
-    return (strategy == VPU::MultiClusterStrategy::Clustering && outputShape[Dims4D::Act::H] == 1) ||
+    return (strategy == VPU::MultiClusterStrategy::Clustering) ||
            (strategy == VPU::MultiClusterStrategy::SplitOverHeight &&
             inputShape[Dims4D::Act::H] >= checked_cast<int64_t>(numTiles) &&
             outputShape[Dims4D::Act::H] >= checked_cast<int64_t>(numTiles)) ||
-           (strategy == VPU::MultiClusterStrategy::SplitOverKernel && !getAcrossChannels() &&
+           (strategy == VPU::MultiClusterStrategy::SplitOverKernel &&
             inputShape[Dims4D::Act::C] >= checked_cast<int64_t>(numTiles) &&
-            outputShape[Dims4D::Act::C] >= checked_cast<int64_t>(numTiles) && outputShape[Dims4D::Act::H] == 1);
+            outputShape[Dims4D::Act::C] >= checked_cast<int64_t>(numTiles));
 }
 
-vpux::VPU::DistributedTensorNative vpux::VPU::MVN1SumOp::getExplicitDistributedTensorAttr(
+vpux::VPU::DistributionInfo vpux::VPU::MVN1SumOp::getExplicitDistributionInfoAttr(
         vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, ArrayRef<int64_t> numTiles,
         const int64_t numClusters, ArrayRef<int64_t> alignment, const bool uniformDistributedSegments,
         const vpux::VPU::OverlapDistributionParams& overlapParams) {
-    return VPU::getSWExplicitDistributedTensorNative(mlir::dyn_cast<VPU::SWOpInterface>(getOperation()), shape,
-                                                     distributionMode, numTiles, numClusters, alignment,
-                                                     uniformDistributedSegments, overlapParams);
+    return VPU::getSWExplicitDistributionInfo(mlir::dyn_cast<VPU::SWOpInterface>(getOperation()), shape,
+                                              distributionMode, numTiles, numClusters, alignment,
+                                              uniformDistributedSegments, overlapParams);
 }
 
 //
@@ -111,6 +111,16 @@ bool vpux::VPU::MVN1SumOp::fitIntoCMX(llvm::ArrayRef<vpux::NDTypeInterface> buff
 
 bool vpux::VPU::MVN1SumOp::fitIntoCMX(llvm::ArrayRef<vpux::NDTypeInterface> buffers) {
     return fitIntoCMX(buffers, Byte(0));
+}
+
+// static clone of 'fitIntoCMX' to eval i/o buffer sizes in absence of an op-instance
+bool vpux::VPU::MVN1SumOp::buffsFitIntoCMX(mlir::ModuleOp module, vpux::NDTypeInterface in, vpux::NDTypeInterface out) {
+    SmallVector<Byte> buffersSize;
+    buffersSize.push_back(in.getTotalAllocSize());
+    buffersSize.push_back(out.getTotalAllocSize());
+    const auto arch = VPU::getArch(module);
+    auto totalAvailableCMXSize = getTotalCMXSize(module).count();
+    return vpux::VPU::calculateAlignedBuffersMemoryRequirement(arch, buffersSize).count() <= totalAvailableCMXSize;
 }
 
 bool vpux::VPU::MVN1SumOp::supportCycleCostCalculation() {

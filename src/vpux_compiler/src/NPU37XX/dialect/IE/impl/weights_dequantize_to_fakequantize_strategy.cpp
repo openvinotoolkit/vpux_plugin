@@ -5,68 +5,70 @@
 
 #include "vpux/compiler/NPU37XX/dialect/IE/impl/weights_dequantize_to_fakequantize_strategy.hpp"
 #include "vpux/compiler/dialect/IE/utils/fake_quantize_utils.hpp"
+#include "vpux/compiler/utils/rewriter.hpp"
 
 using namespace vpux;
 
 namespace {
 
-mlir::LogicalResult commonMatchAndRewrite(IE::WeightsDequantizeStructureInfo& wdInfo, mlir::PatternRewriter& rewriter) {
-    if (!wdInfo.isSuccessfulMatch()) {
-        wdInfo.log.trace("Failed to match WeightsDequantize structure");
-        return mlir::failure();
-    }
+mlir::LogicalResult commonMatchAndRewrite(mlir::Operation* origOp, IE::WeightsDequantizeStructureInfo& wdInfo,
+                                          mlir::PatternRewriter& rewriter) {
+    const auto loc = wdInfo.getLastOp()->getLoc();
 
     // The only supported weights data type are I8, U8, I4 and U4
-    if (!wdInfo.has8BitIntegerInput() && !wdInfo.has4BitIntegerInput()) {
-        wdInfo.log.trace("Input data type {0} is not supported.", wdInfo.getInputElemStorageType());
-        return mlir::failure();
-    }
-
-    // Expensive cast to high precision, done only after all validations pass
-    if (wdInfo.hasConstInput() && mlir::failed(wdInfo.ensureHighPrecisionStorage())) {
-        wdInfo.log.trace("Failed to cast low precision weights to high precision");
+    const auto inputElemType = wdInfo.getTrueElemTypeOfWeights();
+    if (!inputElemType.isInteger(8) && !inputElemType.isInteger(4)) {
+        wdInfo.log.trace("Input data type {0} is not supported.", inputElemType);
         return mlir::failure();
     }
 
     // Compute input low, input high constants of FakeQuantize using the value interval of the weights type
     const auto levels = wdInfo.getQuantizationLevels();
-    const auto levelsAttr = getIntAttr(wdInfo.getContext(), levels);
-    const float inLow = (wdInfo.hasSignedInput() ? -(levels / 2) : 0);
+    const auto levelsAttr = getIntAttr(rewriter.getContext(), levels);
+    const float inLow = (inputElemType.isSignedInteger() ? -(levels / 2) : 0);
     const float inHigh = (levels + inLow - 1);
 
-    const auto inInterval = wdInfo.getInputQuantizationInterval(inLow, inHigh);
-    auto inLowConst =
-            rewriter.create<Const::DeclareOp>(wdInfo.getLocation(), inInterval.first.getType(), inInterval.first);
-    auto inHighConst =
-            rewriter.create<Const::DeclareOp>(wdInfo.getLocation(), inInterval.second.getType(), inInterval.second);
+    const auto [inLowConst, inHighConst] =
+            wdInfo.getInputQuantizationInterval(rewriter, appendLoc(loc, "artificial_fq_in_param"), inLow, inHigh);
 
     // Compute output low and output high constants of FakeQuantize by applying a reverse scale-shift to the inputs
-    const auto outInterval = wdInfo.getOutputQuantizationInterval(inInterval);
-    auto outLowConst =
-            rewriter.create<Const::DeclareOp>(wdInfo.getLocation(), outInterval.first.getType(), outInterval.first);
-    auto outHighConst =
-            rewriter.create<Const::DeclareOp>(wdInfo.getLocation(), outInterval.second.getType(), outInterval.second);
+    const auto [outLowConst, outHighConst] =
+            wdInfo.getOutputQuantizationInterval(rewriter, appendLoc(loc, "artificial_fq_out_param"), inLow, inHigh);
 
-    const auto broadCastAttr = IE::AutoBroadcastTypeAttr::get(wdInfo.getContext(), IE::AutoBroadcastType::NUMPY);
+    const auto broadCastAttr = IE::AutoBroadcastTypeAttr::get(rewriter.getContext(), IE::AutoBroadcastType::NUMPY);
 
-    // Create the FakeQuantize to replace the WD pattern (since we're working with intergral input, only levelsAttr is
-    // given)
-    if (wdInfo.hasConstInput()) {
-        // redeclare the input after a potential high precision storage cast (this also removes any
-        // ConvertElemType transforms)
-        Const::DeclareOp fakeQuantizeInput = rewriter.create<Const::DeclareOp>(
-                wdInfo.getLocation(), wdInfo.getInputShapedType(), wdInfo.getInputContentAttr());
+    // sanity checks:
+    VPUX_THROW_WHEN(origOp->getNumResults() != 1, "Unexpected number of results {0} in operation {1}",
+                    origOp->getNumResults(), origOp->getName());
+    VPUX_THROW_WHEN(wdInfo.getLastOp()->getNumResults() != 1, "Unexpected number of results {0} in operation {1}",
+                    wdInfo.getLastOp()->getNumResults(), wdInfo.getLastOp()->getName());
 
-        rewriter.replaceOpWithNewOp<IE::FakeQuantizeOp>(wdInfo.getLastOp(), fakeQuantizeInput, inLowConst, inHighConst,
-                                                        outLowConst, outHighConst, levelsAttr, /*lowFpType=*/nullptr,
-                                                        broadCastAttr);
-    } else {
-        // without this the FQ insertion occurs before ConvertOp (=> error)
-        rewriter.setInsertionPoint(wdInfo.getLastOp());
-        rewriter.replaceOpWithNewOp<IE::FakeQuantizeOp>(wdInfo.getLastOp(), wdInfo.getInputValue(), inLowConst,
-                                                        inHighConst, outLowConst, outHighConst, levelsAttr,
-                                                        /*lowFpType=*/nullptr, broadCastAttr);
+    const auto oldOutput = wdInfo.getLastOp()->getResult(0);
+    mlir::Value fqInput = origOp->getResult(0);
+    if (wdInfo.getInput() != nullptr) {
+        fqInput = wdInfo.getInput();
     }
+
+    if (bool isConstFq = mlir::isa<Const::DeclareOp>(origOp); !isConstFq) {
+        // E#132447: later passes rely on FQ block with constant weights input
+        // being placed near the constant declarations. Once the issue is
+        // resolved, the setting of insertion point should be universal.
+        rewriter.setInsertionPoint(wdInfo.getLastOp());
+    } else {
+        // in case we only have a DeclareOp that's treated as WD block (this is
+        // a supported case somehow), we need to set the insertion point
+        // correctly to prevent domination errors.
+        rewriter.setInsertionPointAfter(origOp);
+    }
+
+    // Create the FakeQuantize to replace the WD pattern (since we're working
+    // with integral input, only levelsAttr is given)
+    auto fqOp = rewriter.create<IE::FakeQuantizeOp>(appendLoc(loc, "artificial_fq"), fqInput, inLowConst, inHighConst,
+                                                    outLowConst, outHighConst, levelsAttr, /*lowFpType=*/nullptr,
+                                                    broadCastAttr);
+    rewriter.replaceAllUsesExcept(oldOutput, fqOp.getResult(), fqOp);
+
+    wdInfo.cleanUpCurrentWdChain(rewriter);
 
     return mlir::success();
 }
@@ -82,8 +84,13 @@ public:
     mlir::LogicalResult matchAndRewrite(Const::DeclareOp origOp, mlir::PatternRewriter& rewriter) const final {
         _log.trace("Got {0} at `{1}`.", origOp->getName(), origOp->getLoc());
 
-        IE::WeightsDequantizeStructureInfo wdInfo(origOp, _log.nest());
-        return commonMatchAndRewrite(wdInfo, rewriter);
+        auto maybeWdInfo = IE::WeightsDequantizeStructureInfo::create(origOp, _log.nest());
+        if (mlir::failed(maybeWdInfo)) {
+            _log.trace("Failed to match WeightsDequantize structure");
+            return mlir::failure();
+        }
+        auto wdInfo = maybeWdInfo.value();
+        return commonMatchAndRewrite(origOp, wdInfo, rewriter);
     }
 
 private:
@@ -101,8 +108,13 @@ public:
     mlir::LogicalResult matchAndRewrite(IE::ConvertOp origOp, mlir::PatternRewriter& rewriter) const final {
         _log.trace("Got {0} at `{1}`.", origOp->getName(), origOp->getLoc());
 
-        IE::WeightsDequantizeStructureInfo wdInfo(origOp, _log.nest());
-        return commonMatchAndRewrite(wdInfo, rewriter);
+        auto maybeWdInfo = IE::WeightsDequantizeStructureInfo::create(origOp, _log.nest());
+        if (mlir::failed(maybeWdInfo)) {
+            _log.trace("Failed to match WeightsDequantize structure");
+            return mlir::failure();
+        }
+        auto wdInfo = maybeWdInfo.value();
+        return commonMatchAndRewrite(origOp, wdInfo, rewriter);
     }
 
 private:

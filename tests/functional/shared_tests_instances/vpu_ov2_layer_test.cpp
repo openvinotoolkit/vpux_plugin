@@ -4,14 +4,21 @@
 //
 
 #include "vpu_ov2_layer_test.hpp"
+#include "vpu_test_report.hpp"
+
 #include <gtest/internal/gtest-internal.h>
-#include <npu_private_properties.hpp>
+
+#include <openvino/core/dimension.hpp>
 #include <openvino/runtime/core.hpp>
 #include <openvino/runtime/make_tensor.hpp>
-#include <sstream>
-#include <vpux/utils/IE/config.hpp>
 
-#include "vpu_test_report.hpp"
+#include <npu_private_properties.hpp>
+
+#include <vpux/utils/IE/config.hpp>
+#include <vpux/utils/core/error.hpp>
+#include <vpux/utils/core/range.hpp>
+
+#include <sstream>
 
 namespace ov::test::utils {
 
@@ -347,6 +354,10 @@ void VpuOv2LayerTest::setDefaultHardwareMode() {
     configuration[ov::intel_npu::compilation_mode.name()] = "DefaultHW";
 }
 
+void VpuOv2LayerTest::setMLIRCompilerType() {
+    configuration[ov::intel_npu::compiler_type.name()] = "MLIR";
+}
+
 bool VpuOv2LayerTest::isReferenceSoftwareMode() const {
     const auto compilationMode = configuration.at(ov::intel_npu::compilation_mode.name()).as<std::string>();
     return compilationMode == "ReferenceSW";
@@ -366,8 +377,80 @@ void VpuOv2LayerTest::setPerformanceHintLatency() {
     configuration[ov::hint::performance_mode.name()] = "LATENCY";
 }
 
-void VpuOv2LayerTest::useELFCompilerBackend() {
-    configuration[ov::intel_npu::use_elf_compiler_backend.name()] = "YES";
+std::vector<std::vector<ov::Shape>> cartesianProduct(const std::vector<std::vector<ov::Shape>>& inputs) {
+    const auto hasEmptyShapeVectors = std::any_of(inputs.begin(), inputs.end(), [](const auto& shapes) {
+        return shapes.empty();
+    });
+    VPUX_THROW_UNLESS(!hasEmptyShapeVectors, "Cartesian product received an empty vector of shapes");
+
+    auto indices = std::vector<int>(inputs.size(), 0);
+    auto bounds = std::vector<int>(inputs.size(), 0);
+    llvm::transform(inputs, bounds.begin(), [](const std::vector<ov::Shape>& staticShapes) {
+        return staticShapes.size();
+    });
+
+    const auto incrementIndex = [](auto& index, const auto& bounds) {
+        for (int32_t i = index.size() - 1; i >= 0; i--) {
+            if (++index[i] < bounds[i]) {
+                return true;
+            }
+            index[i] = 0;
+        }
+        return false;
+    };
+
+    auto combinedInputs = std::vector<std::vector<ov::Shape>>{};
+    do {
+        auto combination = std::vector<ov::Shape>{};
+        combination.reserve(inputs.size());
+        for (const auto& [staticShapes, index] : llvm::zip(inputs, indices)) {
+            combination.push_back(staticShapes[index]);
+        }
+        combinedInputs.push_back(combination);
+    } while (incrementIndex(indices, bounds));
+
+    return combinedInputs;
+};
+
+std::vector<std::vector<ov::Shape>> combineStaticShapes(const std::vector<ov::test::InputShape>& inputs) {
+    auto inputsStaticShapes = std::vector<std::vector<ov::Shape>>();
+    inputsStaticShapes.reserve(inputs.size());
+    for (const auto& input : inputs) {
+        inputsStaticShapes.push_back(input.second);
+    }
+
+    return cartesianProduct(inputsStaticShapes);
+}
+
+ov::PartialShape getBoundedShape(const ov::test::InputShape& shape) {
+    const auto& [networkShape, staticShapes] = shape;
+
+    auto upperBounds = ov::Shape(networkShape.size());
+    for (const auto& staticShape : staticShapes) {
+        VPUX_THROW_UNLESS(networkShape.size() == staticShape.size(),
+                          "Network partial shape '{0}' has different rank compared to a static shape '{1}'",
+                          networkShape.size(), staticShape.size());
+        for (size_t i = 0; i < upperBounds.size(); i++) {
+            upperBounds[i] = std::max(upperBounds[i], staticShape[i]);
+        }
+    }
+
+    auto boundedShape = std::vector<ov::Dimension>();
+    boundedShape.reserve(networkShape.size());
+    for (const auto [networkDim, upperBound] : llvm::zip(networkShape, upperBounds)) {
+        if (networkDim.is_dynamic()) {
+            if (networkDim == ov::Dimension::dynamic()) {
+                boundedShape.push_back(ov::Dimension(1, upperBound));
+            } else {
+                VPUX_THROW_UNLESS(networkDim.get_max_length() >= upperBound,
+                                  "Input partial shape has insufficient upper bounds to fit a static shape");
+            }
+        } else {
+            boundedShape.push_back(ov::Dimension(networkDim));
+        }
+    }
+
+    return ov::PartialShape(boundedShape);
 }
 
 }  // namespace ov::test::utils

@@ -68,7 +68,7 @@ func.func @UnrollNCE(%input: !Input_DDR, %output: !Output_DDR) -> !Output_DDR {
     %bar1 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
 
     %weights_cst = const.Declare memref<32x16x1x1x!qElemType3, #NHWC> =
-        dense<1.0> : tensor<32x16x1x1xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType3>, #const.Reorder<#NHWC>]
+        dense<1.0> : tensor<32x16x1x1xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType3>, #const.Reorder<#NHWC>]
     %weights_table_cst = const.Declare memref<32x1x1x4xsi32> = dense<1> : tensor<32x1x1x4xsi32>
 
     // DDR buffers
@@ -139,8 +139,8 @@ func.func @UnrollNCE(%input: !Input_DDR, %output: !Output_DDR) -> !Output_DDR {
 
     //CHECK-DAG:    [[WEIGHTS_TABLE1_CST:%.*]] = const.Declare memref<16x1x1x4xsi32> = dense<1> : tensor<32x1x1x4xsi32>, [#const.SubView<[0, 0, 0, 0], [16, 1, 1, 4]>]
     //CHECK-DAG:    [[WEIGHTS_TABLE2_CST:%.*]] = const.Declare memref<16x1x1x4xsi32> = dense<1> : tensor<32x1x1x4xsi32>, [#const.SubView<[16, 0, 0, 0], [16, 1, 1, 4]>]
-    //CHECK-DAG:    [[WEIGHTS1_CST:%.*]] = const.Declare memref<16x16x1x1x!qElemType2, #NHWC> = dense<1.000000e+00> : tensor<32x16x1x1xf16>, [#const.SubView<[0, 0, 0, 0], [16, 16, 1, 1]>, #const.ConvertElemType<ui8>, #const.QuantCast<!qElemType2>, #const.Reorder<#NHWC>]
-    //CHECK-DAG:    [[WEIGHTS2_CST:%.*]] = const.Declare memref<16x16x1x1x!qElemType3, #NHWC> = dense<1.000000e+00> : tensor<32x16x1x1xf16>, [#const.SubView<[16, 0, 0, 0], [16, 16, 1, 1]>, #const.ConvertElemType<ui8>, #const.QuantCast<!qElemType3>, #const.Reorder<#NHWC>]
+    //CHECK-DAG:    [[WEIGHTS1_CST:%.*]] = const.Declare memref<16x16x1x1x!qElemType2, #NHWC> = dense<1.000000e+00> : tensor<32x16x1x1xf16>, [#const.SubView<[0, 0, 0, 0], [16, 16, 1, 1]>, #const.CastElemType<ui8>, #const.CastElemType<!qElemType2>, #const.Reorder<#NHWC>]
+    //CHECK-DAG:    [[WEIGHTS2_CST:%.*]] = const.Declare memref<16x16x1x1x!qElemType3, #NHWC> = dense<1.000000e+00> : tensor<32x16x1x1xf16>, [#const.SubView<[16, 0, 0, 0], [16, 16, 1, 1]>, #const.CastElemType<ui8>, #const.CastElemType<!qElemType3>, #const.Reorder<#NHWC>]
 
     //CHECK:        [[BAR0:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     //CHECK:        [[BAR1:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier

@@ -289,6 +289,35 @@ bool RemoveDuplicatingSlice::isDuplicatedOperation(IE::SliceOp firstOp, IE::Slic
 }
 
 //
+// RemoveDuplicatingExpand
+//
+
+class RemoveDuplicatingExpand final : public RemoveDuplicatingGeneric<IE::ExpandOp> {
+public:
+    RemoveDuplicatingExpand(mlir::MLIRContext* ctx, Logger log): RemoveDuplicatingGeneric<IE::ExpandOp>(ctx, log) {
+    }
+
+private:
+    bool isDuplicatedOperation(IE::ExpandOp firstOp, IE::ExpandOp secondOp, Logger log) const override;
+};
+
+bool RemoveDuplicatingExpand::isDuplicatedOperation(IE::ExpandOp firstOp, IE::ExpandOp secondOp, Logger) const {
+    if (firstOp.getType() != secondOp.getType()) {
+        return false;
+    }
+
+    if (firstOp.getPadsBeginAttr() != secondOp.getPadsBeginAttr()) {
+        return false;
+    }
+
+    if (firstOp.getPadsEndAttr() != secondOp.getPadsEndAttr()) {
+        return false;
+    }
+
+    return true;
+}
+
+//
 // UniquifyOpsPass
 //
 
@@ -306,7 +335,6 @@ void UniquifyOpsPass::safeRunOnFunc() {
     auto& ctx = getContext();
 
     mlir::RewritePatternSet patterns(&ctx);
-    patterns.add<RemoveDuplicatingGeneric<IE::ExpandOp>>(&ctx, _log);
     patterns.add<RemoveDuplicatingGeneric<IE::ReorderOp>>(&ctx, _log);
     patterns.add<RemoveDuplicatingGeneric<IE::PermuteCastOp>>(&ctx, _log);
     patterns.add<RemoveDuplicatingGeneric<IE::ShapeCastOp>>(&ctx, _log);
@@ -324,9 +352,12 @@ void UniquifyOpsPass::safeRunOnFunc() {
     patterns.add<RemoveDuplicatingConcat>(&ctx, _log);
     patterns.add<RemoveDuplicatingPermute>(&ctx, _log);
     patterns.add<RemoveDuplicatingSlice>(&ctx, _log);
+    patterns.add<RemoveDuplicatingExpand>(&ctx, _log);
 
     auto func = getOperation();
-    if (mlir::failed(mlir::applyPatternsAndFoldGreedily(func, std::move(patterns), getDefaultGreedyRewriteConfig()))) {
+    auto greedyRewriteConfig = getDefaultGreedyRewriteConfig();
+    greedyRewriteConfig.maxIterations *= 2;
+    if (mlir::failed(mlir::applyPatternsAndFoldGreedily(func, std::move(patterns), greedyRewriteConfig))) {
         signalPassFailure();
     }
 }

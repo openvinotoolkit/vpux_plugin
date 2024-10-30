@@ -17,7 +17,9 @@ endforeach()
 
 # TODO: Remove once the thirdparties respect these flags
 if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-    set(ie_c_cxx_deprecated_no_errors "${ie_c_cxx_deprecated_no_errors} /wd4146 /wd4703")
+    if(NOT BUILD_COMPILER_FOR_DRIVER)
+        set(ie_c_cxx_deprecated_no_errors "${ie_c_cxx_deprecated_no_errors} /wd4146 /wd4703")
+    endif()
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} ${ie_c_cxx_deprecated_no_errors}")
     set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} ${ie_c_cxx_deprecated_no_errors}")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${ie_c_cxx_deprecated_no_errors}")
@@ -103,9 +105,9 @@ endif()
 set(VPUNN_BUILD_SHARED_LIB OFF CACHE BOOL "" FORCE)
 set(VPUNN_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(VPUNN_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-add_subdirectory(vpucostmodel)
+add_subdirectory(vpucostmodel EXCLUDE_FROM_ALL)
 
-add_subdirectory(yaml-cpp)
+add_subdirectory(yaml-cpp EXCLUDE_FROM_ALL)
 # NB: Suppress warnings in yaml-cpp
 if(NOT MSVC)
     target_compile_options(yaml-cpp PRIVATE -Wno-suggest-override)

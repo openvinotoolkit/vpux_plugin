@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -65,9 +65,8 @@ def VPU_MemoryKind :
             [
                 I64EnumAttrCase<"DDR",      0>,
                 I64EnumAttrCase<"CSRAM",    1>,
-                I64EnumAttrCase<"CMX_UPA",  2>,
-                I64EnumAttrCase<"CMX_NN",   3>,
-                I64EnumAttrCase<"Register", 4>
+                I64EnumAttrCase<"CMX_NN",   2>,
+                I64EnumAttrCase<"Register", 3>
             ]
         > {
 }
@@ -106,11 +105,10 @@ def VPU_ExecutorKind :
                 I64EnumAttrCase<"DMA_NN",    0>,
                 I64EnumAttrCase<"NCE",       1>,
                 I64EnumAttrCase<"DPU",       2>,
-                I64EnumAttrCase<"SHAVE_UPA", 3>,
-                I64EnumAttrCase<"SHAVE_NN",  4>,
-                I64EnumAttrCase<"SHAVE_ACT", 5>,
-                I64EnumAttrCase<"M2I",       6>,
-                I64EnumAttrCase<"UNKNOWN",   7>,
+                I64EnumAttrCase<"SHAVE_NN",  3>,
+                I64EnumAttrCase<"SHAVE_ACT", 4>,
+                I64EnumAttrCase<"M2I",       5>,
+                I64EnumAttrCase<"UNKNOWN",   6>,
             ]
         > {
 }
@@ -248,6 +246,26 @@ def VPU_EltwiseType :
 def VPU_EltwiseTypeAttr : VPU_EnumAttr<VPU_EltwiseType, "eltwise_type">;
 
 //
+// ReduceType
+//
+
+def VPU_ReduceType :
+        VPU_I64EnumAttr<
+            "ReduceType",
+            "Type of Reduce operation",
+            [
+                I64EnumAttrCase<"MEAN",         0>,
+                I64EnumAttrCase<"SUM",          1>,
+                I64EnumAttrCase<"MAX",          2>,
+                I64EnumAttrCase<"MIN",          3>,
+                I64EnumAttrCase<"SUMOFSQUARES", 4>
+            ]
+        > {
+}
+
+def VPU_ReduceTypeAttr : VPU_EnumAttr<VPU_ReduceType, "reduce_type">;
+
+//
 // PaddingAttr
 //
 
@@ -331,10 +349,46 @@ def VPU_PPEMode :
 def VPU_PPEModeAttr : VPU_EnumAttr<VPU_PPEMode, "ppe_mode">;
 
 //
-// PPETaskAttr
+// PPEAttr
 //
 
-def VPU_PPETaskAttr : VPU_Attr<"PPETask"> {
+class VPU_PPEAttrBase<Pred condition, string summary> : Attr<condition, summary> {
+    let storageType = [{ vpux::VPU::PPEAttr }];
+    let returnType = [{ vpux::VPU::PPEAttr }];
+    let convertFromStorage = "$_self";
+}
+
+def VPU_PPEAttr : VPU_PPEAttrBase<CPred<"mlir::isa<vpux::VPU::PPEAttr>($_self)">,
+                                      "PPE attribute"> {
+        string cppType = "vpux::VPU::PPEAttr";
+}
+
+def VPU_PPEStubAttr : VPU_Attr<"PPEStub", [
+        DeclareAttrInterfaceMethods<VPU_PPEAttrInterface>
+    ] > {
+    let description = [{
+        Empty PPE attribute.
+        Useful for testing and other situations where setting a concrete PPE attribute is unfeasible.
+    }];
+
+    let assemblyFormat = "`<` struct(params) `>`";
+}
+
+def VPU_PPEIntAttr : VPU_Attr<"PPEInt", [
+        DeclareAttrInterfaceMethods<VPU_PPEAttrInterface>
+    ] > {
+    let description = [{
+        Legacy mode for VPU PPE attribute, storing parameters for both int and float PPE operations.
+        Since the PPE attribute maps directly to the HW config table, some missing fields are later replaced by mathematically neutral values.
+
+        Neutral values:
+        - `mode`: NOOP
+        - (`clamp_low`, `clamp_high`): (std::numeric_limits<int_32>::min(), std::numeric_limits<int_32>::max())
+        - (`lrelu_mult`, `lrelu_shift`): (1.0, 0.0)
+        - `fp_lrelu_alpha`: 1.0
+
+        The exact usage of the parameters inside PPE HW can be found in the PPE section of the compiler docs.
+    }];
     let parameters = (ins
         "vpux::VPU::PPEModeAttr":$mode,
         OptionalParameter<"mlir::IntegerAttr">:$clamp_low,
@@ -349,6 +403,42 @@ def VPU_PPETaskAttr : VPU_Attr<"PPETask"> {
         OptionalParameter<"mlir::ArrayAttr">:$in2_quant_mult,
         OptionalParameter<"mlir::FloatAttr">:$fp_prelu_alpha
     );
+
+    let assemblyFormat = "`<` struct(params) `>`";
+}
+
+def VPU_PPEFpAttr : VPU_Attr<"PPEFp", [
+        DeclareAttrInterfaceMethods<VPU_PPEAttrInterface>
+    ] > {
+    let description = [{
+        Non-compatible mode for VPU PPE attribute, storing parameters only for float PPE operations.
+        FloatArray attributes were chosen in order to support per-axis PPE operations in the future. Currently only scalars are used.
+
+        Since the PPE attribute maps directly to the HW config table, some missing fields are later replaced by mathematically neutral values.
+
+        Neutral values:
+        - `mode`: NOOP
+        - (`clamp_low`, `clamp_high`): (std::numeric_limits<float>::min(), std::numeric_limits<float>::max())
+        - `scale`: {1.0}
+        - `prelu_alpha`: {1.0}
+        - `bias`: {0.0}
+        - `adder`: {0.0}
+
+        The exact usage of the parameters inside PPE HW can be found in the PPE section of the compiler docs.
+    }];
+    let parameters = (ins
+        "vpux::VPU::PPEModeAttr":$mode,
+        OptionalParameter<"mlir::FloatAttr">:$clamp_low,
+        OptionalParameter<"mlir::FloatAttr">:$clamp_high,
+        OptionalParameter<"mlir::ArrayAttr">:$scale,
+        OptionalParameter<"mlir::ArrayAttr">:$prelu_alpha,
+        OptionalParameter<"mlir::ArrayAttr">:$bias,
+        OptionalParameter<"mlir::ArrayAttr">:$adder,
+        OptionalParameter<"mlir::ArrayAttr">:$in1_mult,
+        OptionalParameter<"mlir::ArrayAttr">:$in2_mult
+    );
+
+    let assemblyFormat = "`<` struct(params) `>`";
 }
 
 //
@@ -414,7 +504,7 @@ def VPU_DistributionMode :
 def VPU_DistributionModeAttr : VPU_EnumAttr<VPU_DistributionMode, "tensor_distribution_mode">;
 
 //
-// DistributedTensorAttr
+// DistributionInfoAttr
 //
 
 /////////////////////////////
@@ -479,7 +569,7 @@ def VPU_DistributionModeAttr : VPU_EnumAttr<VPU_DistributionMode, "tensor_distri
 //
 /////////////////////////////
 
-def VPU_DistributedTensorAttr : VPU_Attr<"DistributedTensor"> {
+def VPU_DistributionInfoAttr : VPU_Attr<"DistributionInfo"> {
     let parameters = (ins
         "vpux::VPU::DistributionModeAttr":$mode,
         OptionalParameter<"mlir::ArrayAttr">:$num_tiles,

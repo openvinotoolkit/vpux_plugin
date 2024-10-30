@@ -37,5 +37,3 @@ vpux-translate --vpu-arch=<YOUR device> --export-ELF -o model.blob elf.mlir
 ```
 
 5. Ultimately, the output file `model.blob` is ready to be used in on device inference
-
-

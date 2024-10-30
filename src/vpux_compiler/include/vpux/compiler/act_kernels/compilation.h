@@ -12,14 +12,13 @@
 #include <mlir/IR/BuiltinOps.h>
 
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
-#include "vpux/compiler/dialect/VPUIP/graph-schema/schema.hpp"
+#include "vpux/compiler/utils/schema.hpp"
 #include "vpux/utils/core/small_vector.hpp"
 
 namespace vpux {
 
 struct KernelDataDesc {
     std::string name;
-    // flatbuffers::Offset<MVCNN::KernelData> data;
     SmallVector<uint8_t> data;
     // unpadded size
     size_t size;

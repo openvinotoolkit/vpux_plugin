@@ -6,10 +6,10 @@ This guide is not intended to cover all possible coding problems. Its ultimate g
 ## Resources/Links
 - [C++ Core Guidelines](https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines)
 - [Clang Format](https://clang.llvm.org/docs/ClangFormat.html)
-    - [Our Clang-Format configuration](../../../.clang-format) 
+    - [Our Clang-Format configuration](../../../.clang-format)
 - [Clang Tidy](https://clang.llvm.org/extra/clang-tidy/)
     - [List of checks](https://clang.llvm.org/extra/clang-tidy/checks/list.html)
-    - [Our Clang-Tidy configuration](../../../.clang-tidy) 
+    - [Our Clang-Tidy configuration](../../../.clang-tidy)
 
 ## Naming
 
@@ -143,7 +143,7 @@ Check [here](https://en.cppreference.com/w/cpp/language/operator_alternative) fo
 ### Type Inference
 
 In most cases it should be preferred to use `auto` for the sake of correctness, flexibility and
-maintainability. 
+maintainability.
 
 - Prefer to write code against interfaces rather than implementations (care about "what", not "how")
 - Reduces needless verbosity of types like iterators
@@ -582,8 +582,7 @@ step for the compiler unit tests.
 ```cpp
 // BAD
 TEST(MLIR_IndexedSymbolAttr, CheckNestedAttr) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
+    auto registry = createDialectRegistry();
     ...
 }
 
@@ -717,7 +716,7 @@ rewriters](./guides/mlir_good_practices.md#running-multiple-rewriters-within-one
 
 ## Locations
 
-Locations are objects attached to operations and represent information about operation source. Locations originate from nGraph information (such as friendly_name) and must be preserved throughout compilation. Locations are used to name tasks in profiling reports. Each task must have unique location and unambiguously points to original nGraph node. To achieve it compiler has `LocationsVerifier` instrumentation, which checks uniqueness of locations after each pass, if enabled. 
+Locations are objects attached to operations and represent information about operation source. Locations originate from nGraph information (such as friendly_name) and must be preserved throughout compilation. Locations are used to name tasks in profiling reports. Each task must have unique location and unambiguously points to original nGraph node. To achieve it compiler has `LocationsVerifier` instrumentation, which checks uniqueness of locations after each pass, if enabled.
 
 Locations are defined as objects of `mlir::FusedLoc` in form `fused<{name = "input", type = "Parameter"}>["input", "converted_to_fp32"]`. Fields `name` and `type` are filled according to nGraph information and should not change during compilation.
 
@@ -751,7 +750,7 @@ void implementPattern(IE::ConvolutionOp origOp) {
     // OK, locations are preserved
     auto outReshape = rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, newConvOp->getResult(0), nullptr, false, outputShapeAttr);
     extendOpLoc(outReshape, "reshape_out");
-    
+
     // BAD, use extendOpLoc
     outReshape->setLoc(appendLoc(outReshape->getLoc(), "reshape_out"));
 }
@@ -767,14 +766,16 @@ auto newFuncOp = innerModuleBuilder.create<mlir::func::FuncOp>(mlir::UnknownLoc:
 _builder.create<mlir::memref::AllocOp>(mlir::NameLoc::get(mlir::StringAttr::get(_ctx, "profiling_buffer")), profBuffType); // OK, profiling buffers does not represent operation from nGraph
 ```
 
+Avoid use of constants locations as source. Constant-like operations are handled by MLIR canonicalizers, which may drop assigned location.
+
 ### Location format
 
-Each `appendLoc` or similar function adds new element to `FusedLoc` list and should represent new level of transformation or legalization of operation. During serialization all elements are joined with help of `/` symbol, so `/` should not be used in the location parts to avoid misunderstanding. 
+Each `appendLoc` or similar function adds new element to `FusedLoc` list and should represent new level of transformation or legalization of operation. During serialization all elements are joined with help of `/` symbol, so `/` should not be used in the location parts to avoid misunderstanding.
 
 Use the following guidelines when constructing new location information:
 
-- Use `"{transform}_{operand}"` format for new operations. Prefer tablegen defined operand name of the original operation and a new operation type as transform. Use `in` for main input, `out` for operation result and `in1`/`in2` for eltwise operations. For example `reshape_in`, `transpose_out`, `quantize_filter`. 
-- Use `"as_{new_op_type}"` format if operation type was changed.  
+- Use `"{transform}_{operand}"` format for new operations. Prefer tablegen defined operand name of the original operation and a new operation type as transform. Use `in` for main input, `out` for operation result and `in1`/`in2` for eltwise operations. For example `reshape_in`, `transpose_out`, `quantize_filter`.
+- Use `"as_{new_op_type}"` format if operation type was changed.
 - Split words using `_`. Do not use `_` prefix.
 - For splitted or cloned operations use indices. For example `slice_in_{0}_{1}`.
 - Provide location and operand name or location suffix to functions, which create new subgraph.

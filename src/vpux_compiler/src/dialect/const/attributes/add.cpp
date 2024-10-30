@@ -76,7 +76,6 @@ Const::Content vpux::Const::AddAttr::transform(vpux::Const::Content& input) cons
     return output;
 }
 
-Const::ContentAttr vpux::Const::ContentAttr::add(double bias) const {
-    return ContentAttr::addTransformation(
-            *this, Const::AddAttr::get(getFPAttr(getContext(), bias)).cast<Const::TransformAttrInterface>());
+Const::ContentSetup vpux::Const::ContentSetup::add(double bias) {
+    return addTransformation(Const::AddAttr::get(getFPAttr(getContext(), bias)));
 }

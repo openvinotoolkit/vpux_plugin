@@ -7,6 +7,10 @@
 // REQUIRES: arch-NPU40XX
 
 module @SimpleGraph {
+  IE.TileResource 1 of @NCE at 1.300000e+03 MHz {
+    IE.MemoryResource 1474560 bytes of @CMX_NN {VPU.bandwidth = 64 : i64, VPU.derateFactor = 1.000000e+00 : f64}
+  }
+
   module @VPU.SW {
     func.func private @builtin_Gelu(memref<*xf16, @CMX_NN>, memref<*xf16, @CMX_NN>, i1, i1, f64) attributes {VPU.kernel_code = "activation_gelu.cpp", VPU.kernel_entry = "activation_gelu"}
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
@@ -47,6 +51,7 @@ module @SimpleGraphWithReservedMem {
   }
 
   IE.TileResource 1 of @NCE at 1.300000e+03 MHz {
+    IE.MemoryResource 1474560 bytes of @CMX_NN {VPU.bandwidth = 64 : i64, VPU.derateFactor = 1.000000e+00 : f64}
     builtin.module @ReservedMemory {
         module @CustomReservedMemory {
             IE.MemoryResource 512 bytes of @CMX_NN
@@ -89,6 +94,7 @@ module @SimpleGraphWithReservedMemHasEnoughSize {
   }
 
   IE.TileResource 1 of @NCE at 1.300000e+03 MHz {
+    IE.MemoryResource 1474560 bytes of @CMX_NN {VPU.bandwidth = 64 : i64, VPU.derateFactor = 1.000000e+00 : f64}
     builtin.module @ReservedMemory {
         module @CustomReservedMemory {
             IE.MemoryResource 1024 bytes of @CMX_NN
@@ -131,6 +137,7 @@ module @SimpleGraphWith2ReservedMem {
   }
 
   IE.TileResource 1 of @NCE at 1.300000e+03 MHz {
+    IE.MemoryResource 1474560 bytes of @CMX_NN {VPU.bandwidth = 64 : i64, VPU.derateFactor = 1.000000e+00 : f64}
     builtin.module @ReservedMemory {
         module @CustomReservedMemory1 {
             IE.MemoryResource 512 bytes of @CMX_NN
@@ -179,6 +186,7 @@ module @SimpleGraphWith2ReservedMemHaveEnoughTotalSize {
   }
 
   IE.TileResource 1 of @NCE at 1.300000e+03 MHz {
+    IE.MemoryResource 1474560 bytes of @CMX_NN {VPU.bandwidth = 64 : i64, VPU.derateFactor = 1.000000e+00 : f64}
     builtin.module @ReservedMemory {
         module @CustomReservedMemory1 {
             IE.MemoryResource 128 bytes of @CMX_NN
@@ -221,6 +229,11 @@ module @SimpleGraphWith2ReservedMemHaveEnoughTotalSize {
 // -----
 
 module @SimpleGraphNoSWKernel {
+
+  IE.TileResource 1 of @NCE at 1.300000e+03 MHz {
+    IE.MemoryResource 1474560 bytes of @CMX_NN {VPU.bandwidth = 64 : i64, VPU.derateFactor = 1.000000e+00 : f64}
+  }
+
   IE.CNNNetwork entryPoint : @main inputsInfo : {
     DataInfo "data" : tensor<1x16x4x4xf16>
   } outputsInfo : {

@@ -84,7 +84,6 @@ RawProfilingRecords getTaskOfType(const RawProfilingData& rawRecords, ExecutorTy
         return rawRecords.dmaTasks;
     case ExecutorType::DPU:
         return rawRecords.dpuTasks;
-    case ExecutorType::UPA:
     case ExecutorType::ACTSHAVE:
         return rawRecords.swTasks;
     case ExecutorType::M2I:

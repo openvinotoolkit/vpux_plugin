@@ -8,8 +8,10 @@
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/utils/handle_kernels_utils.hpp"
 #include "vpux/compiler/dialect/IE/utils/reduce_infer.hpp"
+#include "vpux/compiler/dialect/VPU/utils/max_kernel_size_utils.hpp"
 #include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
+#include "vpux/compiler/utils/rewriter.hpp"
 
 #include <mlir/Transforms/DialectConversion.h>
 
@@ -116,8 +118,11 @@ void constructAvgOpParams(ArrayRef<int64_t> inputShape, ArrayRef<int64_t> output
 
     // In case both spatial dimensions are reduced, we should try to make them balanced
     // For example, global pooling kernel [77, 1] should be converted to [11, 7]
+    // For input tensors having C dim > VPU_DIMENSION_LIMIT it seems like not having them balanced is better
+    // so data can be splitted in ReshapeMaxPool pass
     if (shapeBegin[Dims4D::Act::H.ind()] == kernel[Dims4D::Kernel::Y.ind()] &&
-        shapeBegin[Dims4D::Act::W.ind()] == kernel[Dims4D::Kernel::X.ind()]) {
+        shapeBegin[Dims4D::Act::W.ind()] == kernel[Dims4D::Kernel::X.ind()] &&
+        shapeBegin[Dims4D::Act::C.ind()] <= VPU::NCEInvariant::VPU_DIMENSION_LIMIT) {
         const int64_t spatialSize = kernel[Dims4D::Kernel::Y.ind()] * kernel[Dims4D::Kernel::X.ind()];
         const auto factor = getFactorsList(spatialSize).back();
         if (shapeBegin[Dims4D::Act::H.ind()] != factor.second) {
@@ -149,8 +154,8 @@ mlir::LogicalResult generalReduceRewrite(
         auto newResult = origOp->getOperand(0);
         if (inputShape != outputShape) {
             const auto outputShapeAttr = getIntArrayAttr(ctx, outputShape);
-            newResult = rewriter.create<IE::ReshapeOp>(origOp->getLoc(), origOp->getOperand(0), nullptr, false,
-                                                       outputShapeAttr);
+            newResult = rewriter.create<IE::ReshapeOp>(takeOpLoc(origOp, "reshape_in_0"), origOp->getOperand(0),
+                                                       nullptr, false, outputShapeAttr);
         }
         rewriter.replaceOp(origOp, newResult);
         return mlir::success();
@@ -210,18 +215,19 @@ mlir::LogicalResult generalReduceRewrite(
 
         Shape newShape{newN, newC, newH, newW};
         const auto newShapeAttr = getIntArrayAttr(ctx, ShapeRef(newShape));
-        input = rewriter.create<IE::ReshapeOp>(origOp->getLoc(), input, nullptr, false, newShapeAttr);
+        input = rewriter.create<IE::ReshapeOp>(takeOpLoc(origOp, "reshape_in"), input, nullptr, false, newShapeAttr);
 
         DimArr perm{Dims4D::Act::N, Dims4D::Act::W, Dims4D::Act::C, Dims4D::Act::H};
         auto order = DimsOrder::fromPermutation(ArrayRef(perm));
         auto orderAttr = mlir::AffineMapAttr::get(order.toAffineMap(ctx));
-        input = rewriter.create<IE::TransposeOp>(origOp->getLoc(), input, nullptr, orderAttr);
+        input = rewriter.create<IE::TransposeOp>(takeOpLoc(origOp, "transpose_in"), input, nullptr, orderAttr);
         inputShape = getShape(input).raw();
     }
 
     if (shapeBegin != inputShape) {
         const auto shapeBeginAttr = getIntArrayAttr(ctx, ArrayRef(shapeBegin));
-        input = rewriter.create<IE::ReshapeOp>(origOp->getLoc(), input, nullptr, false, shapeBeginAttr);
+        input = rewriter.create<IE::ReshapeOp>(takeOpLoc(origOp, "reshape_in_2"), input, nullptr, false,
+                                               shapeBeginAttr);
     }
 
     const auto kernelAttr = getIntArrayAttr(ctx, ArrayRef(kernel));
@@ -239,12 +245,12 @@ mlir::LogicalResult generalReduceRewrite(
         DimArr perm{Dims4D::Act::N, Dims4D::Act::H, Dims4D::Act::W, Dims4D::Act::C};
         auto order = DimsOrder::fromPermutation(ArrayRef(perm));
         auto orderAttr = mlir::AffineMapAttr::get(order.toAffineMap(ctx));
-        input = rewriter.create<IE::TransposeOp>(origOp->getLoc(), input, nullptr, orderAttr);
+        input = rewriter.create<IE::TransposeOp>(takeOpLoc(origOp, "transpose_out"), input, nullptr, orderAttr);
     }
 
     if (shapeEnd != to_small_vector(getShape(input))) {
         const auto shapeEndAttr = getIntArrayAttr(ctx, ArrayRef(shapeEnd));
-        input = rewriter.create<IE::ReshapeOp>(origOp->getLoc(), input, nullptr, false, shapeEndAttr);
+        input = rewriter.create<IE::ReshapeOp>(takeOpLoc(origOp, "reshape_out"), input, nullptr, false, shapeEndAttr);
     }
 
     rewriter.replaceOp(origOp, input);
@@ -273,9 +279,10 @@ mlir::LogicalResult ReduceMeanRewriter::matchAndRewrite(IE::ReduceMeanOp origOp,
     const auto axes = parseIntArrayAttr<int64_t>(origOp.getAxesValue().value());
     return generalReduceRewrite(
             origOp, rewriter, axes, [&](mlir::Location loc, mlir::Value input, PoolingAttr attr) -> mlir::Operation* {
-                return rewriter.create<IE::AvgPoolOp>(loc, input, attr.kernelAttr, attr.stridesAttr, attr.padBeginAttr,
-                                                      attr.padEndAttr, attr.roundingAttr, attr.excludePadsAttr, nullptr,
-                                                      nullptr);
+                return rewriter.create<IE::AvgPoolOp>(appendLoc(loc, "as_avgpool"), input, attr.kernelAttr,
+                                                      attr.stridesAttr, attr.padBeginAttr, attr.padEndAttr,
+                                                      attr.roundingAttr, attr.excludePadsAttr, nullptr, nullptr,
+                                                      nullptr, nullptr, nullptr);
             });
 }
 
@@ -300,8 +307,9 @@ mlir::LogicalResult ReduceMaxRewriter::matchAndRewrite(IE::ReduceMaxOp origOp, m
     const auto axes = parseIntArrayAttr<int64_t>(origOp.getAxesValue().value());
     return generalReduceRewrite(
             origOp, rewriter, axes, [&](mlir::Location loc, mlir::Value input, PoolingAttr attr) -> mlir::Operation* {
-                return rewriter.create<IE::MaxPoolOp>(loc, input, attr.kernelAttr, attr.stridesAttr, attr.padBeginAttr,
-                                                      attr.padEndAttr, attr.roundingAttr, nullptr, nullptr);
+                return rewriter.create<IE::MaxPoolOp>(appendLoc(loc, "as_maxpool"), input, attr.kernelAttr,
+                                                      attr.stridesAttr, attr.padBeginAttr, attr.padEndAttr,
+                                                      attr.roundingAttr, nullptr, nullptr, nullptr, nullptr);
             });
 }
 
@@ -326,9 +334,10 @@ mlir::LogicalResult ReduceSumRewriter::matchAndRewrite(IE::ReduceSumOp origOp, m
     const auto axes = parseIntArrayAttr<int64_t>(origOp.getAxesValue().value());
     return generalReduceRewrite(
             origOp, rewriter, axes, [&](mlir::Location loc, mlir::Value input, PoolingAttr attr) -> mlir::Operation* {
-                input = rewriter.create<IE::AvgPoolOp>(loc, input, attr.kernelAttr, attr.stridesAttr, attr.padBeginAttr,
-                                                       attr.padEndAttr, attr.roundingAttr, attr.excludePadsAttr,
-                                                       nullptr, nullptr);
+                input = rewriter.create<IE::AvgPoolOp>(appendLoc(loc, "as_avgpool"), input, attr.kernelAttr,
+                                                       attr.stridesAttr, attr.padBeginAttr, attr.padEndAttr,
+                                                       attr.roundingAttr, attr.excludePadsAttr, nullptr, nullptr,
+                                                       nullptr, nullptr, nullptr);
 
                 mlir::MLIRContext* ctx = origOp->getContext();
                 const auto dataStorageTensor = mlir::RankedTensorType::get({1}, mlir::Float16Type::get(ctx));
@@ -349,7 +358,8 @@ mlir::LogicalResult ReduceSumRewriter::matchAndRewrite(IE::ReduceSumOp origOp, m
                 const auto cstOutput = Const::createFloatConst(rewriter, loc, dataStorageTensor, reductionDimsCount);
 
                 const auto broadCastAttr = IE::AutoBroadcastTypeAttr::get(ctx, IE::AutoBroadcastType::NUMPY);
-                return rewriter.create<IE::MultiplyOp>(loc, input, cstOutput, broadCastAttr, nullptr, nullptr);
+                return rewriter.create<IE::MultiplyOp>(loc, input, cstOutput, broadCastAttr, nullptr, nullptr, nullptr,
+                                                       nullptr);
             });
 }
 
@@ -374,11 +384,12 @@ mlir::LogicalResult ReduceMinRewriter::matchAndRewrite(IE::ReduceMinOp origOp, m
     const auto axes = parseIntArrayAttr<int64_t>(origOp.getAxesValue().value());
     return generalReduceRewrite(
             origOp, rewriter, axes, [&](mlir::Location loc, mlir::Value input, PoolingAttr attr) -> mlir::Operation* {
-                auto scale1 = rewriter.create<IE::NegativeOp>(loc, input.getType(), input);
-                auto maxPool = rewriter.create<IE::MaxPoolOp>(loc, scale1.getOutput(), attr.kernelAttr,
-                                                              attr.stridesAttr, attr.padBeginAttr, attr.padEndAttr,
-                                                              attr.roundingAttr, nullptr, nullptr);
-                return rewriter.create<IE::NegativeOp>(loc, maxPool.getOutput().getType(), maxPool.getOutput());
+                auto scale1 = rewriter.create<IE::NegativeOp>(appendLoc(loc, "inv_in"), input.getType(), input);
+                auto maxPool = rewriter.create<IE::MaxPoolOp>(
+                        appendLoc(loc, "as_maxpool"), scale1.getOutput(), attr.kernelAttr, attr.stridesAttr,
+                        attr.padBeginAttr, attr.padEndAttr, attr.roundingAttr, nullptr, nullptr, nullptr, nullptr);
+                return rewriter.create<IE::NegativeOp>(appendLoc(loc, "inv_out"), maxPool.getOutput().getType(),
+                                                       maxPool.getOutput());
             });
 }
 
@@ -432,11 +443,12 @@ void ConvertReduceToPoolingPass::safeRunOnFunc() {
         const auto outputElementType = op->getResult(0).getType().cast<vpux::NDTypeInterface>().getElementType();
         const auto isDataTypeDpuCompatible = inputElementType.isF16() && outputElementType.isF16();
 
+        const auto maxKernelSize = VPU::getMaxKernelSize(op);
         // Check that handleLargeKernels supports this op
-        const auto isKernelSizeDpuCompatible = (axes.size() == 2)
-                                                       ? (vpux::IE::isPoolingKernelSizeValid(inputShape[axes[0]]) &&
-                                                          vpux::IE::isPoolingKernelSizeValid(inputShape[axes[1]]))
-                                                       : vpux::IE::isPoolingKernelSizeValid(mergedDim);
+        const auto isKernelSizeDpuCompatible =
+                (axes.size() == 2) ? (vpux::IE::isPoolingKernelSizeValid(inputShape[axes[0]], maxKernelSize) &&
+                                      vpux::IE::isPoolingKernelSizeValid(inputShape[axes[1]], maxKernelSize))
+                                   : vpux::IE::isPoolingKernelSizeValid(mergedDim, maxKernelSize);
         const auto dpuCompatible = isKernelSizeDpuCompatible && isDataTypeDpuCompatible;
 
         const bool isHWCompilationMode = VPU::getCompilationMode(op) == VPU::CompilationMode::ReferenceHW ||
@@ -446,7 +458,7 @@ void ConvertReduceToPoolingPass::safeRunOnFunc() {
         return !(dpuCompatible && isHWCompilationMode);
     };
 
-    // For ReduceMin, in case all axes are reduced and the kernel size exceeds VPU::NCEInvariant::MAX_KERNEL_SIZE, the
+    // For ReduceMin, in case all axes are reduced and the kernel size exceeds maxKernelSize, the
     // SHAVE kernel offers more performance since the NCE solution generates pyramidal MaxPool operations based on the
     // kernel size restriction
     const auto isLegalReduceMin = [&](IE::ReduceMinOp op) {
@@ -454,8 +466,10 @@ void ConvertReduceToPoolingPass::safeRunOnFunc() {
             return true;
         }
 
+        const auto maxKernelSize = VPU::getMaxKernelSize(op);
+
         if ((getShape(op->getResult(0)).totalSize() == 1) &&
-            (getShape(op->getOperand(0)).totalSize() > std::pow(VPU::NCEInvariant::MAX_KERNEL_SIZE, 2))) {
+            (getShape(op->getOperand(0)).totalSize() > std::pow(maxKernelSize, 2))) {
             return true;
         }
 

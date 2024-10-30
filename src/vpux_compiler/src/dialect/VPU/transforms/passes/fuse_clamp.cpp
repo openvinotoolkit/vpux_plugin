@@ -1,10 +1,12 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#include "vpux/compiler/dialect/VPU/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
+#include "vpux/compiler/dialect/VPU/utils/ppe_version_config.hpp"
 
 using namespace vpux;
 
@@ -22,96 +24,24 @@ public:
 
 private:
     mlir::LogicalResult matchAndRewrite(VPU::ClampOp clampOp, mlir::PatternRewriter& rewriter) const final;
-    std::pair<int32_t, int32_t> getTargetClamps(mlir::Type outElemType, const int32_t ppeClampLow,
-                                                const int32_t ppeClampHigh, const double clampMin,
-                                                const double clampMax) const;
-    VPU::PPEModeAttr getPPEMode(const VPU::PPEModeAttr mode, mlir::Type outElemType) const;
 
 private:
     Logger _log;
 };
 
-std::pair<int32_t, int32_t> ClampConverter::getTargetClamps(mlir::Type outElemType, const int32_t ppeClampLow,
-                                                            const int32_t ppeClampHigh, const double clampMin,
-                                                            const double clampMax) const {
-    // For quantized types min/max must be divided by scale.
-    // For float types max must be converted to float16/bfloat16. Clamp min should be set to 0x80000000.
-    // Target clamp high must be the minimal value between existing PPE high and clamp max.
-    // For example:
-    // NCE has range [0, 255], clamp max = 128. Target clamp high must be set to 128.
-    // NCE has range [0, 100], clamp max = 128. Target clamp high must be set to 100.
-    // Same applies for target clamp low, except that the maximal value must be chosen.
-    if (outElemType.isa<mlir::quant::UniformQuantizedType>()) {
-        const auto perTensor = outElemType.cast<mlir::quant::UniformQuantizedType>();
-        const auto scale = perTensor.getScale();
-        const auto zp = perTensor.getZeroPoint();
-
-        const auto quantizedLow = std::round(clampMin / scale) + zp;
-        const auto quantizedHigh = std::round(clampMax / scale) + zp;
-
-        const auto targetClampLow = std::max(ppeClampLow, checked_cast<int32_t>(quantizedLow));
-        const auto targetClampHigh = std::min(ppeClampHigh, checked_cast<int32_t>(quantizedHigh));
-        return std::pair<int32_t, int32_t>{targetClampLow, targetClampHigh};
-    } else if (outElemType.isF16()) {
-        const vpux::type::float16 clampMaxF16 = static_cast<float>(clampMax);
-        const int16_t* clampMaxI16 = reinterpret_cast<const int16_t*>(&clampMaxF16);
-        const int32_t clampMaxI32 = *clampMaxI16;
-
-        const auto targetClampLow = std::numeric_limits<int32_t>::min();
-        const auto targetClampHigh = std::min(ppeClampHigh, clampMaxI32);
-        return std::pair<int32_t, int32_t>{targetClampLow, targetClampHigh};
-    } else if (outElemType.isBF16()) {
-        const vpux::type::bfloat16 clampMaxF16 = static_cast<float>(clampMax);
-        const int16_t* clampMaxI16 = reinterpret_cast<const int16_t*>(&clampMaxF16);
-        const int32_t clampMaxI32 = *clampMaxI16;
-
-        const auto targetClampLow = std::numeric_limits<int32_t>::min();
-        const auto targetClampHigh = std::min(ppeClampHigh, clampMaxI32);
-        return std::pair<int32_t, int32_t>{targetClampLow, targetClampHigh};
-    } else {
-        VPUX_THROW("ClampConverter::getTargetClamps: Unsupported type: {0}", outElemType);
-    }
-}
-
-VPU::PPEModeAttr ClampConverter::getPPEMode(const VPU::PPEModeAttr mode, mlir::Type outElemType) const {
-    // For quantized types lower bound of the clamp can be less than zero point.
-    // In that case the original mode must be set.
-    if (outElemType.isa<mlir::quant::UniformQuantizedType>()) {
-        return mode;
-    }
-
-    // For float16 and bi-float16 types lower bound of the clamp must be equal to zero.
-    // The mode effectively becomes RELUX.
-    return VPU::PPEModeAttr::get(outElemType.getContext(), VPU::PPEMode::LRELUX);
-}
-
 mlir::LogicalResult ClampConverter::matchAndRewrite(VPU::ClampOp clampOp, mlir::PatternRewriter& rewriter) const {
     auto nceOp = mlir::cast<VPU::NCEOpInterface>(clampOp.getInput().getDefiningOp());
-    const auto ppeTask = nceOp.getPPE().value();
-
     const auto clampMin = clampOp.getMin().convertToDouble();
     const auto clampMax = clampOp.getMax().convertToDouble();
-
-    const auto ppeClampLowAttr = ppeTask.getClampLow();
-    const auto ppeClampHighAttr = ppeTask.getClampHigh();
-    const auto ppeClampLow = checked_cast<int32_t>(ppeClampLowAttr.getValue().getSExtValue());
-    const auto ppeClampHigh = checked_cast<int32_t>(ppeClampHighAttr.getValue().getSExtValue());
-
     const auto outElemType = nceOp->getResult(0).getType().cast<vpux::NDTypeInterface>().getElementType();
-    const auto targetClamp = getTargetClamps(outElemType, ppeClampLow, ppeClampHigh, clampMin, clampMax);
-    const auto targetClampLow = targetClamp.first;
-    const auto targetClampHigh = targetClamp.second;
 
-    const auto ppeMode = getPPEMode(ppeTask.getMode(), outElemType);
-    auto ctx = clampOp.getContext();
-    auto ppeTaskAttr =
-            VPU::PPETaskAttr::get(ctx, ppeMode, getIntAttr(ctx, targetClampLow), getIntAttr(ctx, targetClampHigh),
-                                  ppeTask.getLreluMult(), ppeTask.getLreluShift(), ppeTask.getQuantScale(),
-                                  ppeTask.getQuantMult(), ppeTask.getQuantShift(), ppeTask.getQuantPostShift(),
-                                  ppeTask.getIn1QuantMult(), ppeTask.getIn2QuantMult(), ppeTask.getFpPreluAlpha());
+    // Update PPE attribute clamps
+    auto opaquePPEAttr = nceOp.getOpaquePPE();
+    const auto& adapter = VPU::PpeVersionConfig::getFactoryAs<vpux::VPU::IPpeAdapterClamp>();
+    opaquePPEAttr = adapter.intersectClamps(opaquePPEAttr, clampMin, clampMax, outElemType);
 
     auto newOp = mlir::dyn_cast_or_null<VPU::NCEOpInterface>(rewriter.clone(*nceOp));
-    newOp.setPPE(ppeTaskAttr);
+    newOp.setOpaquePPE(opaquePPEAttr);
     rewriter.replaceOp(clampOp, newOp->getResult(0));
     if (nceOp.use_empty()) {
         rewriter.eraseOp(nceOp);
@@ -124,11 +54,6 @@ bool isLegalClamp(VPU::ClampOp clampOp) {
     // Clamp operations without NCE producer are legal.
     auto nceOp = mlir::dyn_cast_or_null<VPU::NCEOpInterface>(clampOp.getInput().getDefiningOp());
     if (nceOp == nullptr) {
-        return true;
-    }
-
-    // NCE producers without PPE attributes are covered in FusePostOps pass.
-    if (!nceOp.getPPE().has_value()) {
         return true;
     }
 

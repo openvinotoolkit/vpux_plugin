@@ -100,12 +100,7 @@ Const::Content vpux::Const::ChangeShapeAndElemTypeAttr::transform(vpux::Const::C
     return Const::Content::moveBuffer(inferOutputType(input.getType()), std::move(input));
 }
 
-//
-// ContentAttr::changeShapeAndElemType
-//
-
-Const::ContentAttr vpux::Const::ContentAttr::changeShapeAndElemType(ShapeRef newShape, mlir::Type newElemType) const {
-    return ContentAttr::addTransformation(
-            *this, Const::ChangeShapeAndElemTypeAttr::get(getIntArrayAttr(getContext(), newShape), newElemType)
-                           .cast<Const::TransformAttrInterface>());
+Const::ContentSetup vpux::Const::ContentSetup::changeShapeAndElemType(ShapeRef newShape, mlir::Type newElemType) {
+    return addTransformation(
+            Const::ChangeShapeAndElemTypeAttr::get(getIntArrayAttr(getContext(), newShape), newElemType));
 }

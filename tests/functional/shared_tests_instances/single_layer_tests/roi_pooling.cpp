@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation
+// Copyright (C) 2022-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -17,7 +17,104 @@ namespace ov {
 
 namespace test {
 
-class ROIPoolingLayerTestCommon : public ROIPoolingLayerTest, virtual public VpuOv2LayerTest {
+using roiPoolingParamsTupleAddLayout = std::tuple<std::vector<InputShape>,  // Input, coords shapes
+                                                  ov::Shape,                // Pooled shape {pooled_h, pooled_w}
+                                                  float,                    // Spatial scale
+                                                  ov::test::utils::ROIPoolingTypes,  // ROIPooling method
+                                                  ov::element::Type,                 // Model type
+                                                  ov::Layout,                        // Input layout, newly added
+                                                  ov::test::TargetDevice>;           // Device name
+
+class ROIPoolingLayerTestAddLayout :
+        public testing::WithParamInterface<roiPoolingParamsTupleAddLayout>,
+        virtual public ov::test::SubgraphBaseTest {
+public:
+    static std::string getTestCaseName(const testing::TestParamInfo<roiPoolingParamsTupleAddLayout>& obj);
+
+protected:
+    void SetUp() override;
+};
+
+std::string ROIPoolingLayerTestAddLayout::getTestCaseName(
+        const testing::TestParamInfo<roiPoolingParamsTupleAddLayout>& obj) {
+    std::vector<InputShape> input_shapes;
+    ov::Shape pool_shape;
+    float spatial_scale;
+    ov::test::utils::ROIPoolingTypes pool_method;
+    ov::element::Type model_type;
+    ov::Layout order;
+    std::string target_device;
+    std::tie(input_shapes, pool_shape, spatial_scale, pool_method, model_type, order, target_device) = obj.param;
+
+    std::ostringstream result;
+    result << "IS=(";
+    for (size_t i = 0lu; i < input_shapes.size(); i++) {
+        result << ov::test::utils::partialShape2str({input_shapes[i].first})
+               << (i < input_shapes.size() - 1lu ? "_" : "");
+    }
+    result << ")_TS=";
+    for (size_t i = 0lu; i < input_shapes.front().second.size(); i++) {
+        result << "{";
+        for (size_t j = 0lu; j < input_shapes.size(); j++) {
+            result << ov::test::utils::vec2str(input_shapes[j].second[i]) << (j < input_shapes.size() - 1lu ? "_" : "");
+        }
+        result << "}_";
+    }
+    result << "PS=" << ov::test::utils::vec2str(pool_shape) << "_";
+    result << "Scale=" << spatial_scale << "_";
+    switch (pool_method) {
+    case utils::ROIPoolingTypes::ROI_MAX:
+        result << "Max_";
+        break;
+    case utils::ROIPoolingTypes::ROI_BILINEAR:
+        result << "Bilinear_";
+        break;
+    }
+    result << "modelType=" << model_type.to_string() << "_";
+    result << "Layout=" << order.to_string() << "_";  // newly added
+    result << "trgDev=" << target_device;
+    return result.str();
+}
+
+void ROIPoolingLayerTestAddLayout::SetUp() {
+    std::vector<InputShape> input_shapes;
+    ov::Shape pool_shape;
+    float spatial_scale;
+    ov::test::utils::ROIPoolingTypes pool_method;
+    ov::element::Type model_type;
+    ov::Layout order;
+    std::string target_device;
+    std::tie(input_shapes, pool_shape, spatial_scale, pool_method, model_type, order, targetDevice) = this->GetParam();
+
+    abs_threshold = 0.08f;
+
+    init_input_shapes(input_shapes);
+
+    auto param = std::make_shared<ov::op::v0::Parameter>(model_type, inputDynamicShapes[0]);
+    auto coord_param = std::make_shared<ov::op::v0::Parameter>(model_type, inputDynamicShapes[1]);
+    std::string pool_method_str;
+    if (pool_method == ov::test::utils::ROIPoolingTypes::ROI_MAX) {
+        pool_method_str = "max";
+    } else if (pool_method == ov::test::utils::ROIPoolingTypes::ROI_BILINEAR) {
+        pool_method_str = "bilinear";
+    } else {
+        FAIL() << "Incorrect type of ROIPooling operation";
+    }
+    auto roi_pooling =
+            std::make_shared<ov::op::v0::ROIPooling>(param, coord_param, pool_shape, spatial_scale, pool_method_str);
+    function =
+            std::make_shared<ov::Model>(roi_pooling->outputs(), ov::ParameterVector{param, coord_param}, "roi_pooling");
+
+    // enable different layouts
+    auto preProc = ov::preprocess::PrePostProcessor(function);
+    preProc.input(0).tensor().set_layout(order);
+    preProc.input(0).model().set_layout("NCHW");
+    preProc.output().tensor().set_layout(order);
+    preProc.output().model().set_layout("NCHW");
+    function = preProc.build();
+}
+
+class ROIPoolingLayerTestCommon : public ROIPoolingLayerTestAddLayout, virtual public VpuOv2LayerTest {
     void generate_inputs(const std::vector<ov::Shape>& targetInputStaticShapes) override {
         ROIPoolingTypes poolMethod = std::get<3>(GetParam());
         float spatialScale = std::get<2>(GetParam());
@@ -29,7 +126,16 @@ class ROIPoolingLayerTestCommon : public ROIPoolingLayerTest, virtual public Vpu
         const int height = is_roi_max_mode ? targetInputStaticShapes.front()[2] / spatialScale : 1;
         const int width = is_roi_max_mode ? targetInputStaticShapes.front()[3] / spatialScale : 1;
 
-        VpuOv2LayerTest::generate_inputs(targetInputStaticShapes);
+        ov::Layout order = std::get<5>(GetParam());
+        std::vector<ov::Shape> inShapes = targetInputStaticShapes;
+        if (order == "NHWC") {
+            // NCHW -> NHWC
+            inShapes[0][1] = targetInputStaticShapes[0][2];
+            inShapes[0][2] = targetInputStaticShapes[0][3];
+            inShapes[0][3] = targetInputStaticShapes[0][1];
+        }
+
+        VpuOv2LayerTest::generate_inputs(inShapes);
 
         const auto& funcInput = function->input(1);
         ov::Tensor tensor{funcInput.get_element_type(), funcInput.get_shape()};
@@ -40,21 +146,17 @@ class ROIPoolingLayerTestCommon : public ROIPoolingLayerTest, virtual public Vpu
     }
 };
 
-class ROIPoolingLayerTest_NPU3720 : public ROIPoolingLayerTestCommon {};
-class ROIPoolingLayerTest_NPU4000 : public ROIPoolingLayerTestCommon {};
-
-TEST_P(ROIPoolingLayerTest_NPU3720, SW) {
-    setReferenceSoftwareMode();
+TEST_P(ROIPoolingLayerTestCommon, NPU3720_HW) {
+    setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(ROIPoolingLayerTest_NPU4000, SW) {
-    setReferenceSoftwareMode();
+TEST_P(ROIPoolingLayerTestCommon, NPU4000_HW) {
+    setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
 
 }  // namespace test
-
 }  // namespace ov
 
 using namespace ov::test;
@@ -81,24 +183,17 @@ auto inputShapes = [](const std::vector<ov::Shape>& in1, const std::vector<ov::S
 
 const auto test_ROIPooling_max = ::testing::Combine(
         ::testing::ValuesIn(inputShapes), ::testing::ValuesIn(pooledShapes_max), ::testing::ValuesIn(spatial_scales),
-        ::testing::Values(ROIPoolingTypes::ROI_MAX), ::testing::ValuesIn(modelTypes), ::testing::Values(DEVICE_NPU));
+        ::testing::Values(ROIPoolingTypes::ROI_MAX), ::testing::ValuesIn(modelTypes),
+        ::testing::ValuesIn({ov::Layout("NCHW"), ov::Layout("NHWC")}), ::testing::Values(DEVICE_NPU));
 
-const auto test_ROIPooling_bilinear =
-        ::testing::Combine(::testing::ValuesIn(inputShapes), ::testing::ValuesIn(pooledShapes_bilinear),
-                           ::testing::Values(spatial_scales[1]), ::testing::Values(ROIPoolingTypes::ROI_BILINEAR),
-                           ::testing::ValuesIn(modelTypes), ::testing::Values(DEVICE_NPU));
+const auto test_ROIPooling_bilinear = ::testing::Combine(
+        ::testing::ValuesIn(inputShapes), ::testing::ValuesIn(pooledShapes_bilinear),
+        ::testing::Values(spatial_scales[1]), ::testing::Values(ROIPoolingTypes::ROI_BILINEAR),
+        ::testing::ValuesIn(modelTypes), ::testing::ValuesIn({ov::Layout("NCHW"), ov::Layout("NHWC")}),
+        ::testing::Values(DEVICE_NPU));
 
-// --------- NPU3720 ---------
-INSTANTIATE_TEST_SUITE_P(smoke_TestsROIPooling_max, ROIPoolingLayerTest_NPU3720, test_ROIPooling_max,
-                         ROIPoolingLayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_TestsROIPooling_max, ROIPoolingLayerTestCommon, test_ROIPooling_max,
+                         ROIPoolingLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_TestsROIPooling_bilinear, ROIPoolingLayerTest_NPU3720, test_ROIPooling_bilinear,
-                         ROIPoolingLayerTest_NPU3720::getTestCaseName);
-
-// --------- NPU4000 ---------
-// [Tracking number: E#93410]
-INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_precommit_TestsROIPooling_max, ROIPoolingLayerTest_NPU4000,
-                         test_ROIPooling_max, ROIPoolingLayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(TestsROIPooling_bilinear, ROIPoolingLayerTest_NPU4000, test_ROIPooling_bilinear,
-                         ROIPoolingLayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_TestsROIPooling_bilinear, ROIPoolingLayerTestCommon, test_ROIPooling_bilinear,
+                         ROIPoolingLayerTestCommon::getTestCaseName);

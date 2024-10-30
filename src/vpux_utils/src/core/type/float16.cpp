@@ -94,7 +94,7 @@ vpux::type::float16::float16(float value) {
     // Restore the hidden 1
     frac = 0x04000000 | ((iv & fmask_32) << 3);
     // Will any bits be shifted off?
-    int32_t shift = biased_exp_16 < -30 ? 0 : (1 << (1 - biased_exp_16));
+    uint32_t shift = biased_exp_16 < -30 ? 0 : (1 << (1 - biased_exp_16));
     uint32_t sticky = (frac & (shift - 1)) ? 1 : 0;
     if (1 + (-biased_exp_16) > 31)
         frac = 0;

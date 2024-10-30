@@ -196,12 +196,14 @@ mlir::LogicalResult ConstRewriter::matchAndRewrite(Const::DeclareOp origOp, OpAd
 
     _log.nest().trace("Convert content from '{0}' to '{1}'", origQuantType, newQuantType);
 
-    const auto newContentAttr = origOp.getContentAttr()
-                                        .quantCast()
-                                        .convertElemType(getInt32Type(getContext()))
-                                        .add(checked_cast<double>(-storageMin))
-                                        .convertElemType(getUInt8Type(getContext()))
-                                        .quantCast(newQuantType);
+    auto newContentAttr = origOp.getContentAttr()
+                                  .transform()
+                                  .castElemType(normalizeQuantStorageType(origQuantType))
+                                  .castElemType(getInt32Type(getContext()))
+                                  .add(checked_cast<double>(-storageMin))
+                                  .castElemType(getUInt8Type(getContext()))
+                                  .quantCast(newQuantType)
+                                  .get();
     const auto constTensor = origOp.getResult();
     const auto constUsers = constTensor.getUsers();
     const auto mixedPrecisionUsers = llvm::count_if(constUsers, [&](mlir::Operation* user) {
@@ -215,7 +217,7 @@ mlir::LogicalResult ConstRewriter::matchAndRewrite(Const::DeclareOp origOp, OpAd
             }
         }
     }
-    rewriter.replaceOpWithNewOp<Const::DeclareOp>(origOp, newType, newContentAttr);
+    rewriter.replaceOpWithNewOp<Const::DeclareOp>(origOp, newType, std::move(newContentAttr));
     return mlir::success();
 }
 

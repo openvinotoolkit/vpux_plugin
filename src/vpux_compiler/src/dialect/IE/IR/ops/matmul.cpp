@@ -36,6 +36,7 @@
 // 4. Usual rules of the broadcasting are applied for batch dimensions.
 //
 
+#include "vpux/compiler/dialect/IE/utils/matmul.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/utils/error.hpp"
@@ -183,7 +184,7 @@ mlir::LogicalResult TransposeInputs::matchAndRewrite(IE::MatMulOp matmulOp, mlir
         return mlir::failure();
     }
 
-    if (!matmulOp.getTransposeA() && matmulOp.getTransposeB()) {
+    if (IE::isMatmulWithRHSTransposition(matmulOp)) {
         return mlir::failure();
     }
 

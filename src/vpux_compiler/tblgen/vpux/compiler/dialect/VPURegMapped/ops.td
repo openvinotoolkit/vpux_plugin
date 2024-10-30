@@ -123,7 +123,7 @@ def VPURegMapped_EnqueueOp:
         let summary = "Op to represent actual enqueue-ment of a range of contiguous tasks";
 
         let description = [{
-            An enqueue operation refers to pushing of the task descriptors in the HW FIFO. It is performed by the runtime while 
+            An enqueue operation refers to pushing of the task descriptors in the HW FIFO. It is performed by the runtime while
             ensuring the barrier at which the enqueue is attached has been consumed and reprogrammed
         }];
 

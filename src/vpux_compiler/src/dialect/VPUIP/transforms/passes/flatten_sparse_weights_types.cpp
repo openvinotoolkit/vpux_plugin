@@ -68,8 +68,7 @@ void compressConstWeightsType(mlir::func::FuncOp func) {
             newTransformations.push_back(tr);
         }
 
-        auto newContentAttr = Const::ContentAttr::get(contentAttr.getBaseContent(), newTransformations);
-        constOp.setContentAttr(newContentAttr);
+        constOp.getProperties().content = Const::ContentAttr::get(contentAttr.getBaseContent(), newTransformations);
     });
 }
 
@@ -93,8 +92,6 @@ void flattenShapes(mlir::func::FuncOp func) {
             return VPUIP::DistributedBufferType::get(
                     distType.getContext(), distType.getShape().raw(), distType.getElementType(), distType.getLayout(),
                     distType.getMemSpace(), distType.getDistribution(), /*sparsityCompression=*/nullptr);
-        } else if (auto bufferType = type.dyn_cast<VPUIP::BufferType>()) {
-            return bufferType;
         }
         VPUX_THROW("Unsupported type {0}", type);
     };

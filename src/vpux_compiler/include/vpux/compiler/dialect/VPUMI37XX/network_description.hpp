@@ -10,6 +10,7 @@
 
 namespace vpux::VPUMI37XX {
 
-intel_npu::NetworkMetadata getNetworkMetadata(const std::vector<uint8_t>& blob);
+// E#-140887: replace mlir::ArrayRef<uint8_t> with BlobView
+intel_npu::NetworkMetadata getNetworkMetadata(mlir::ArrayRef<uint8_t> blob);
 
 }  // namespace vpux::VPUMI37XX

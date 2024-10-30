@@ -36,6 +36,8 @@ std::unique_ptr<mlir::Pass> createOptimizeConvertDMAOpPass(Logger log = Logger::
 std::unique_ptr<mlir::Pass> createAddStartBarrierPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createDetectDMASplitCandidatePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createSplitDMAToBalanceLoadPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createLegalizeScheduleForWlmFetchDmasPass(
+        const int virtualBarrierThreshold = VIRTUAL_BARRIER_THRESHOLD_WLM, Logger log = Logger::global());
 
 //
 // Memory allocation pipeline

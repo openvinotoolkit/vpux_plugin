@@ -57,8 +57,8 @@ mlir::LogicalResult vpux::VPU::SliceOp::inferReturnTypes(mlir::MLIRContext* ctx,
                        origType.getRank());
     }
 
-    auto inferExplicitDistributedAttr = [&](VPU::DistributedTensorAttr origDistribution,
-                                            ArrayRef<int64_t> inShape) -> VPU::DistributedTensorAttr {
+    auto inferExplicitDistributedAttr = [&](VPU::DistributionInfoAttr origDistribution,
+                                            ArrayRef<int64_t> inShape) -> VPU::DistributionInfoAttr {
         if (origDistribution.getMode().getValue() != VPU::DistributionMode::OVERLAPPED ||
             !VPU::isSegmentedOverlappedAxisSameAsSliceAxis(origDistribution.getNumTiles(), inShape, sliceShape)) {
             return VPU::getExplicitDistrAttrForSliceLikeOps(origDistribution, sliceShape, inShape, ctx);
@@ -81,7 +81,7 @@ mlir::LogicalResult vpux::VPU::SliceOp::inferReturnTypes(mlir::MLIRContext* ctx,
                 SmallVector<SmallVector<int64_t>>(memoryShapes.size(), SmallVector<int64_t>(inShape.size(), 0));
         const auto perClusterOffsetsAttr = vpux::getIntArrayOfArray(ctx, zeroOffsets);
 
-        return VPU::DistributedTensorAttr::get(
+        return VPU::DistributionInfoAttr::get(
                 ctx, origDistribution.getMode(), origDistribution.getNumTiles(), origDistribution.getKernel(),
                 origDistribution.getPads(), origDistribution.getStrides(), origDistribution.getNumClusters(),
                 origDistribution.getAlignment(), origDistribution.getUniformDistributedSegments(), perClusterShapesAttr,
@@ -90,7 +90,7 @@ mlir::LogicalResult vpux::VPU::SliceOp::inferReturnTypes(mlir::MLIRContext* ctx,
     };
 
     const auto distributedIn = origType.dyn_cast<VPU::DistributedTypeInterface>();
-    VPU::DistributedTensorAttr possibleDistribution =
+    VPU::DistributionInfoAttr possibleDistribution =
             distributedIn != nullptr && distributedIn.containsDistributedTypes()
                     ? distributedIn.getDistributedTypes().front().cast<VPU::DistributedTensorType>().getDistribution()
                     : nullptr;
@@ -126,10 +126,10 @@ mlir::OpFoldResult VPU::SliceOp::fold(FoldAdaptor adaptor) {
         return getSource();
     }
 
-    if (const auto origContent = operands[0].dyn_cast_or_null<Const::ContentAttr>()) {
+    if (const auto origContent = operands[0].dyn_cast_or_null<Const::EphemeralContentAttr>()) {
         const auto offset = Shape(parseIntArrayAttr<int64_t>(getStaticOffsets()));
         const auto shape = Shape(parseIntArrayAttr<int64_t>(getStaticSizes()));
-        return origContent.subview(offset, shape);
+        return static_cast<Const::ContentAttr>(origContent).transform().subview(offset, shape).get();
     }
 
     return nullptr;

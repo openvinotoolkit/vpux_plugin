@@ -8,6 +8,7 @@
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPU/utils/sibling_ops_analysis.hpp"
 #include "vpux/compiler/dialect/VPU/utils/strategy_manager/subgraph_optimizer.hpp"
 #include "vpux/utils/core/checked_cast.hpp"
 
@@ -23,7 +24,8 @@ namespace VPU {
 // and other strategy related utilities
 class StrategyManager final {
 public:
-    explicit StrategyManager(mlir::func::FuncOp func, int64_t numTiles, bool enablePrefetchTiling, Logger log);
+    explicit StrategyManager(mlir::func::FuncOp func, int64_t numTiles, bool enablePrefetchTiling, Logger log,
+                             SiblingOpsAnalysis& siblingsOpsAnalysis);
 
 public:
     void assignMultiClusterStrategy(bool enableMultiClusterForSWLayer);
@@ -36,6 +38,7 @@ private:
     Logger _log;
     LayerCostModel _costModel;
     SubgraphOptimizer _optimizer;
+    SiblingOpsAnalysis& _siblingsOpsAnalysis;
 };
 }  // namespace VPU
 }  // namespace vpux

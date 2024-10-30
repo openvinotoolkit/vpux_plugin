@@ -72,9 +72,7 @@ std::vector<std::vector<uint32_t>> generateOrders(const size_t rank) {
 };  // namespace
 
 TEST_F(MLIR_IE_ElemTypeInfoUtils, inferElemTypeTranspose) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
+    auto registry = vpux::createDialectRegistry();
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<mlir::quant::QuantizationDialect>();
 

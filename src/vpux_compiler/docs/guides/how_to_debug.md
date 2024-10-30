@@ -77,8 +77,8 @@ These tools can be used to call specific parts of the compiler (frontend, backen
 
 `vpux-translate` allows calling the frontend and backend of the compiler. For example:
 
-- importing OpenVINO IR into IE dialect IR: `vpux-translate --vpu-arch=NPU37XX --import-IE <path to xml> -o <MLIR file name>`
-- exporting VPUIP dialect IR into GraphFile blob: `vpux-translate --vpu-arch=NPU37XX --export-VPUIP <path to MLIR file> -o <graph blob file name>`
+- importing OpenVINO IR into IE dialect IR: `vpux-translate --vpu-arch=NPU37XX--import-IE <path to xml> -o <MLIR file name>`
+- exporting VPUIP dialect IR into ELF file: `vpux-translate --vpu-arch=NPU37XX --export-ELF <input MLIR file> > <output ELF file>`
 
 The full list of supported frontends and backends can be found in [vpux-translate.cpp](../../../../tools/vpux-translate/vpux-translate.cpp).
 
@@ -118,13 +118,13 @@ The tools can be used to perform a full compilation of a model:
 
 ```sh
 # Import an OpenVINO IR into IE dialect
-./vpux-translate --vpu-arch=NPU37XX--import-IE <path to OV IR> -o net.mlir
+./vpux-translate --vpu-arch=NPU37XX --import-IE <path to OV IR> -o net.mlir
 
 # Call the DefaultHWMode pipeline over the imported IR
 ./vpux-opt --vpu-arch=NPU37XX --default-hw-mode net.mlir -o net_out.mlir
 
-# Export the final IR into a GraphFile blob
-./vpux-translate --vpu-arch=NPU37XX --export-VPUIP net_out.mlir > net.blob
+# Export the final IR into an ELF file
+./vpux-translate --vpu-arch=NPU37XX --export-ELF net_out.mlir > net.blob
 ```
 
 Since each pass or pipeline can be specified individually, the user can have full control over the calling order of the passes if that is necessary. Options such as `--mlir-print-debuginfo` can also be included for both tools to also track the changes done to the original layers.
@@ -235,46 +235,6 @@ In order to dump the OpenVINO model that is obtained after the nGraph passes, us
 
 ```sh
 export NPU_SERIALIZE_CANONICAL_MODEL=1
-```
-
-## Selecting blob backend
-
-The compiler supports two compilation backends: ELF and GraphFile. To switch between the two backends when compiling a network, for example when using `compile_tool`, the following configuration key is available which accepts values of `YES` or `NO`:
-
-```
-NPU_USE_ELF_COMPILER_BACKEND YES
-```
-
-This config can be placed in a text file that is passed to the compilatiion tool (e.g. using `-c` for `compile_tool`). On developer builds, the `IE_NPU_USE_ELF_COMPILER_BACKEND` environment variable can also be used.
-
-As described in [this section](#compiling-a-model-using-vpux-translate--vpux-opt), it is also possible to use `vpux-translate` & `vpux-opt` in order to compile a model. The options given to the tools decide which backend is used:
-
-```sh
-# Import an OpenVINO IR into IE dialect
-./vpux-translate --vpu-arch=NPU37XX --import-IE <path to OV IR> -o net.mlir
-
-# Use the GraphFile backend
-./vpux-opt --vpu-arch=NPU37XX --default-hw-mode net.mlir -o net_out.mlir
-./vpux-translate --vpu-arch=NPU37XX --export-VPUIP net_out.mlir > net.blob
-
-# Use the ELF backend
-./vpux-opt --vpu-arch=NPU37XX --default-hw-mode --lower-VPUIP-to-ELF net.mlir -o net_out.mlir
-./vpux-translate --vpu-arch=NPU37XX --export-ELF net_out.mlir > net.blob
-```
-
-### Deserializing a GraphFile blob
-
-GraphFile blobs use [flatbuffers](https://flatbuffers.dev/) for serialization. It is possible to deserialize these binaries into a JSON format, in order to investigate the content and debug it:
-
-```sh
-cd <openvino>/bin/<arch>/<build-type>
-./flatc --json --defaults-json --strict-json --force-defaults lit-tests/schema/graphfile.fbs -- net.blob
-```
-
-A `net.json` file will be created which contains the deserialized blob. Changes can also be made to this JSON file, which can then be serialized back into a binary file:
-
-```sh
-./flatc -b lit-tests/schema/graphfile.fbs net.json
 ```
 
 ## Strategy manager JSON

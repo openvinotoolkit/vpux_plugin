@@ -5,11 +5,8 @@
 
 #pragma once
 
-#include "vpux/compiler/dialect/IE/IR/ops.hpp"
-#include "vpux/compiler/dialect/const/ops.hpp"
-
-#include <mlir/Dialect/Quant/QuantOps.h>
 #include <mlir/IR/Dialect.h>
+#include <mlir/IR/DialectImplementation.h>
 
 //
 // Generated

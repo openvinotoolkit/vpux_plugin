@@ -11,6 +11,7 @@
 #include "vpux/compiler/dialect/VPU/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPU/IR/types.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/types.hpp"
+#include "vpux/compiler/utils/IE/locations.hpp"
 #include "vpux/compiler/utils/analysis.hpp"
 #include "vpux/compiler/utils/logging.hpp"
 #include "vpux/utils/core/checked_cast.hpp"
@@ -245,7 +246,7 @@ mlir::LogicalResult vpux::convertFunc(mlir::func::FuncOp funcOp, ArrayRef<mlir::
         OpBuilderLogger builderLog(log.nest(2));
         mlir::OpBuilder argBuilder(firstUser, &builderLog);
 
-        auto* cvtOp = cvtOpBuilder(argBuilder, firstUser->getLoc(), val, origType);
+        auto* cvtOp = cvtOpBuilder(argBuilder, IE::getValueLocation(val), val, origType);
 
         val.replaceAllUsesExcept(cvtOp->getResult(0), llvm::SmallPtrSet<mlir::Operation*, 1>{cvtOp});
     }
@@ -255,6 +256,14 @@ mlir::LogicalResult vpux::convertFunc(mlir::func::FuncOp funcOp, ArrayRef<mlir::
     //
 
     log.trace("Convert results");
+    auto moduleOp = getModuleOp(funcOp);
+    auto netOps = to_small_vector(moduleOp.getOps<IE::CNNNetworkOp>());
+    SmallVector<IE::DataInfoOp> outputsInfo;
+    if (netOps.size() == 1) {
+        outputsInfo = to_small_vector(netOps.front().getOutputsInfo().getOps<IE::DataInfoOp>());
+    } else {
+        log.warning("Can't get location for output. If it isn't a test, please, debug this.");
+    }
 
     funcOp.walk([&](mlir::func::ReturnOp retOp) {
         log.nest().trace("Process return Operation '{0}'", retOp.getLoc());
@@ -278,7 +287,13 @@ mlir::LogicalResult vpux::convertFunc(mlir::func::FuncOp funcOp, ArrayRef<mlir::
 
             log.nest(3).trace("Convert the result type : '{0}' -> '{1}'", newType, origType);
 
-            auto* cvtOp = cvtOpBuilder(resBuilder, retOp.getLoc(), val, newType);
+            mlir::Location cvtLoc = mlir::UnknownLoc::get(retOp.getContext());
+            if (outputsInfo.empty()) {
+                cvtLoc = appendLoc(IE::getValueLocation(val), "out_{0}", p.index());
+            } else {
+                cvtLoc = outputsInfo[p.index()]->getLoc();
+            }
+            auto* cvtOp = cvtOpBuilder(resBuilder, cvtLoc, val, newType);
 
             retOp.setOperand(ind, cvtOp->getResult(0));
         }
@@ -431,12 +446,6 @@ mlir::Type vpux::reconstructTensorType(mlir::Type type) {
             })
             .Case<mlir::UnrankedMemRefType>([](mlir::UnrankedMemRefType memref) {
                 return mlir::UnrankedTensorType::get(memref.getElementType());
-            })
-            .Case<VPUIP::BufferType>([](VPUIP::BufferType memref) {
-                // Note: it is unclear what to do with this type, so just return
-                // a ranked tensor
-                const auto encoding = getTensorAttr(memref.getContext(), memref.getDimsOrder(), memref.getMemSpace());
-                return mlir::RankedTensorType::get(memref.getShape().raw(), memref.getElementType(), encoding);
             })
             .Case<VPUIP::DistributedBufferType>([](VPUIP::DistributedBufferType memref) {
                 return bufferToTensor(memref);

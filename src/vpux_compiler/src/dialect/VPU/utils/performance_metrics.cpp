@@ -88,8 +88,7 @@ double getActivityFactor(VPU::ExecutorKind execKind, mlir::ModuleOp module, IERT
     // 0.5 is a recommanded default value for AF by VPUNN team
     double activityFactor = 0.5;
     const auto arch = VPU::getArch(module);
-    if (execKind == VPU::ExecutorKind::NCE || execKind == VPU::ExecutorKind::SHAVE_UPA ||
-        execKind == VPU::ExecutorKind::SHAVE_NN) {
+    if (execKind == VPU::ExecutorKind::NCE || execKind == VPU::ExecutorKind::SHAVE_NN) {
         switch (arch) {
         case VPU::ArchKind::NPU37XX:
         case VPU::ArchKind::NPU40XX:
@@ -107,7 +106,7 @@ double getActivityFactor(VPU::ExecutorKind execKind, mlir::ModuleOp module, IERT
             }
             // In below situation, activityFactor may to be >1
             // 1) when the energy reference is not the maximum powervirus. Eg: the powerVirus for INT is smaller
-            // than powerVirus for FLOAT. Now we are using INT8 powervirus (for NPU2.7 /w v1.5.9 VPUNN releases) as
+            // than powerVirus for FLOAT. Now we are using INT8 powervirus (for NPU37XX /w v1.5.9 VPUNN releases) as
             // max power reference so that AF>1 is possible 2) If inferenceTime estimation is smaller than the
             // Energy estimated in powervirusDPUCycles their ratio will be >1. This is transitory because in the
             // real world the measured time will be bigger and the RuntimeNN will normalize the numbers considering

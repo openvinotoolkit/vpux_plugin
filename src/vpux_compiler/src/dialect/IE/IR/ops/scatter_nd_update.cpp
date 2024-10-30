@@ -19,7 +19,7 @@ mlir::LogicalResult vpux::IE::ScatterNDUpdateOp::inferReturnTypeComponents(
     }
 
     const auto inType = scatter.getInput().getType().cast<mlir::RankedTensorType>();
-    const auto outDesc = vpux::getTensorAttr(inType);
+    const auto outDesc = vpux::getTensorAttr(vpux::getOrder(inType), /*memSpace=*/nullptr, getBounds(inType));
     inferredReturnShapes.emplace_back(inType.getShape(), inType.getElementType(), outDesc);
 
     return mlir::success();

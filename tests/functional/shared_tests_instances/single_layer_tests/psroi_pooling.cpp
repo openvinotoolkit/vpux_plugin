@@ -1,4 +1,4 @@
-// Copyright (C) 2022 Intel Corporation
+// Copyright (C) 2022-2024 Intel Corporation
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -39,10 +39,7 @@ class PSROIPoolingLayerTestCommon : public PSROIPoolingLayerTest, public VpuOv2L
     }
 };
 
-class PSROIPoolingLayerTest_NPU3720 : public PSROIPoolingLayerTestCommon {};
-class PSROIPoolingLayerTest_NPU4000 : public PSROIPoolingLayerTestCommon {};
-
-TEST_P(PSROIPoolingLayerTest_NPU3720, HW) {
+TEST_P(PSROIPoolingLayerTestCommon, NPU3720_HW) {
     VpuOv2LayerTest::setSkipCompilationCallback([this](std::stringstream& skip) {
         std::string psROIPoolingMode = std::get<7>(GetParam());
         if (psROIPoolingMode == "bilinear") {
@@ -53,7 +50,7 @@ TEST_P(PSROIPoolingLayerTest_NPU3720, HW) {
     VpuOv2LayerTest::run(Platform::NPU3720);
 }
 
-TEST_P(PSROIPoolingLayerTest_NPU4000, SW) {
+TEST_P(PSROIPoolingLayerTestCommon, NPU4000_SW) {
     VpuOv2LayerTest::setSkipCompilationCallback([this](std::stringstream& skip) {
         std::string psROIPoolingMode = std::get<7>(GetParam());
         if (psROIPoolingMode == "bilinear") {
@@ -65,7 +62,6 @@ TEST_P(PSROIPoolingLayerTest_NPU4000, SW) {
 }
 
 }  // namespace test
-
 }  // namespace ov
 
 using namespace ov::test;
@@ -74,9 +70,8 @@ const std::vector<ov::element::Type> modelTypes = {ov::element::f32, ov::element
 
 const std::vector<std::vector<size_t>> inputShapeVector0 = {
         {2, 200, 20, 20}, {2, 200, 20, 16}, {2, 200, 16, 20}, {3, 200, 16, 16}};
-const std::vector<std::vector<size_t>> inputShapeVector1 = {{1, 392, 14, 14}, {1, 392, 38, 64}};
-const std::vector<std::vector<size_t>> inputShapeVector2 = {{1, 49 * 1, 14, 14}};
-const std::vector<std::vector<size_t>> inputShapeVector3 = {{1, 3240, 38, 38}};
+const std::vector<std::vector<size_t>> inputShapeVector1 = {{1, 49 * 1, 14, 14}};
+const std::vector<std::vector<size_t>> inputShapeVector2 = {{1, 3240, 38, 38}};
 
 const std::vector<std::vector<size_t>> coordShapesVector0 = {{1, 5}};
 const std::vector<std::vector<size_t>> coordShapesVector1 = {{300, 5}};
@@ -94,16 +89,6 @@ const auto paramsAvg0 = testing::Combine(::testing::ValuesIn(inputShapeVector0),
 
 const auto paramsAvg1 = testing::Combine(::testing::ValuesIn(inputShapeVector1),   // input
                                          ::testing::ValuesIn(coordShapesVector1),  // coord
-                                         ::testing::Values(8),                     // outputDim
-                                         ::testing::Values(7),                     // groupSize
-                                         ::testing::Values(0.0625f),               // spatialScale
-                                         ::testing::Values(1),                     // spatialBinX
-                                         ::testing::Values(1),                     // spatialBinY
-                                         ::testing::Values("average"),             // mode
-                                         ::testing::ValuesIn(modelTypes), ::testing::Values(DEVICE_NPU));
-
-const auto paramsAvg2 = testing::Combine(::testing::ValuesIn(inputShapeVector2),   // input
-                                         ::testing::ValuesIn(coordShapesVector0),  // coord
                                          ::testing::Values(1),                     // outputDim
                                          ::testing::Values(7),                     // groupSize
                                          ::testing::Values(0.0625f),               // spatialScale
@@ -112,7 +97,7 @@ const auto paramsAvg2 = testing::Combine(::testing::ValuesIn(inputShapeVector2),
                                          ::testing::Values("average"),             // mode
                                          ::testing::ValuesIn(modelTypes), ::testing::Values(DEVICE_NPU));
 
-const auto paramsBilinear = testing::Combine(::testing::ValuesIn(inputShapeVector3),   // input
+const auto paramsBilinear = testing::Combine(::testing::ValuesIn(inputShapeVector2),   // input
                                              ::testing::ValuesIn(coordShapesVector2),  // coord
                                              ::testing::Values(360),                   // outputDim
                                              ::testing::Values(6),                     // groupSize
@@ -122,24 +107,9 @@ const auto paramsBilinear = testing::Combine(::testing::ValuesIn(inputShapeVecto
                                              ::testing::Values("bilinear"),            // mode
                                              ::testing::ValuesIn(modelTypes), ::testing::Values(DEVICE_NPU));
 
-// --------- NPU3720 ---------
-// Passing on master branch. Please reenable when backmerge
-INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_PSROIPoolingAverageLayoutTest0, PSROIPoolingLayerTest_NPU3720, paramsAvg0,
-                         PSROIPoolingLayerTest_NPU3720::getTestCaseName);
-// Passing on master branch. Please reenable when backmerge
-INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_PSROIPoolingAverageLayoutTest1, PSROIPoolingLayerTest_NPU3720, paramsAvg2,
-                         PSROIPoolingLayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_PSROIPoolingBiliniarLayoutTest0, PSROIPoolingLayerTest_NPU3720, paramsBilinear,
-                         PSROIPoolingLayerTest_NPU3720::getTestCaseName);
-
-// --------- NPU4000 ---------
-// Passing on master branch. Please reenable when backmerge
-INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_precommit_PSROIPoolingAverageLayoutTest0, PSROIPoolingLayerTest_NPU4000,
-                         paramsAvg0, PSROIPoolingLayerTest_NPU4000::getTestCaseName);
-// Passing on master branch. Please reenable when backmerge
-INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_PSROIPoolingAverageLayoutTest0, PSROIPoolingLayerTest_NPU4000, paramsAvg2,
-                         PSROIPoolingLayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_PSROIPoolingBiliniarLayoutTest0, PSROIPoolingLayerTest_NPU4000, paramsBilinear,
-                         PSROIPoolingLayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_PSROIPoolingAverageLayoutTest0, PSROIPoolingLayerTestCommon, paramsAvg0,
+                         PSROIPoolingLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_PSROIPoolingAverageLayoutTest1, PSROIPoolingLayerTestCommon, paramsAvg1,
+                         PSROIPoolingLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_PSROIPoolingBiliniarLayoutTest0, PSROIPoolingLayerTestCommon, paramsBilinear,
+                         PSROIPoolingLayerTestCommon::getTestCaseName);

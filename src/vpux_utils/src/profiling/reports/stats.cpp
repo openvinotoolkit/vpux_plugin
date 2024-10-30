@@ -22,15 +22,10 @@ TaskStatistics::TaskStatistics(const TaskList& tasks) {
     auto dmaStatsTasks = tasks.selectDMAtasks();
     auto dpuStatsTasks = tasks.selectDPUtasks().selectClusterLevelTasks();  // for task statistics use invariants only
     auto swTasks = tasks.selectSWtasks();
-    auto upaTasks = tasks.selectUPAtasks();
-    VPUX_THROW_WHEN(!swTasks.empty() && !upaTasks.empty(),
-                    "UPA and Shave tasks should be mutually exclusive but are found to coexist");
     auto m2iTasks = tasks.selectM2Itasks();
 
     TaskList swStatsTasks;
-    if (swTasks.empty()) {
-        swStatsTasks.append(upaTasks);  // for task statistics use all UPA tasks
-    } else {
+    if (!swTasks.empty()) {
         // we use all SW tasks considered as low-level tasks being directly profiled
         // and assuming no SW task grouping is performed
         swStatsTasks.append(swTasks);
@@ -38,7 +33,7 @@ TaskStatistics::TaskStatistics(const TaskList& tasks) {
     TaskList m2iStatsTasks;
     m2iStatsTasks.append(m2iTasks);
 
-    totalDuration = static_cast<uint64_t>(tasks.getTotalDuration());
+    totalDuration = tasks.getTotalDuration();
 
     // DMA stats
     TaskTrack dmaTrack;
@@ -50,12 +45,12 @@ TaskStatistics::TaskStatistics(const TaskList& tasks) {
     dpuDuration = dpuTrack.insert(dpuStatsTasks).coalesce().getSumOfDurations();
     sumOfDpuTaskDurations = dpuStatsTasks.getSumOfDurations();
 
-    // SW (UPA and Shave) stats
+    // SW (Shave) stats
     TaskTrack swTrack;
     swDuration = swTrack.insert(swStatsTasks).coalesce().getSumOfDurations();
     sumOfSwTaskDurations = swStatsTasks.getSumOfDurations();
 
-    // SW (UPA and Shave) stats
+    // SW (Shave) stats
     TaskTrack m2iTrack;
     m2iDuration = m2iTrack.insert(m2iStatsTasks).coalesce().getSumOfDurations();
     sumOfM2ITaskDurations = m2iStatsTasks.getSumOfDurations();

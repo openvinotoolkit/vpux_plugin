@@ -65,7 +65,7 @@ void SparsifyWeightsPass::safeRunOnFunc() {
     int64_t numCandidatesSparseWeights = 0;
     int64_t numSparsifiedWeights = 0;
 
-    llvm::SmallVector<std::pair<VPU::SparseOpInterface, Const::DeclareOp>> sparseCandidates;
+    DenseMap<Const::DeclareOp, SmallVector<VPU::SparseOpInterface>> sparseCandidates;
 
     auto innerLog = _log.nest();
 
@@ -80,11 +80,6 @@ void SparsifyWeightsPass::safeRunOnFunc() {
 
         const auto weights = nceOp.getWeightsOperand();
         if (weights == nullptr) {
-            return;
-        }
-        // E#119705: Constant used by multi user will cause accuracy issue, this ticket track this issue which need
-        // further investigation
-        if (!weights.hasOneUse()) {
             return;
         }
         auto weightsType = weights.getType().cast<vpux::NDTypeInterface>();
@@ -113,20 +108,44 @@ void SparsifyWeightsPass::safeRunOnFunc() {
             return;
         }
 
-        sparseCandidates.push_back(std::make_pair(sparsifiableOp, weightsOp));
+        sparseCandidates[weightsOp].push_back(sparsifiableOp);
         ++numCandidatesSparseWeights;
     });
+
+    DenseMap<Const::DeclareOp, VPU::GroupSparseTensorOp> localReplacementCache;
+    // poor man's way to only create a GroupSparseTensor once. done this way to
+    // limit the amount of changes around multi-threaded code.
+    const auto getCachedSparseTensorOp = [&](Const::DeclareOp weightsOp, const Const::ContentSetup& newContentAttrSetup,
+                                             VPU::SparsityCompressionAttr sparsityCompressionAttr) {
+        auto it = localReplacementCache.find(weightsOp);
+        if (it != localReplacementCache.end()) {
+            return it->second;
+        }
+
+        mlir::OpBuilder builder(weightsOp);
+        auto sparsityMapContent = newContentAttrSetup.clone().getSparsityMap().get();
+        auto sparsifiedContent = newContentAttrSetup.clone().sparsify(false).get();
+        const auto sparsifiedWeights = builder.create<Const::DeclareOp>(weightsOp.getLoc(), sparsifiedContent.getType(),
+                                                                        std::move(sparsifiedContent));
+        const auto sparsityMap = builder.create<Const::DeclareOp>(weightsOp.getLoc(), sparsityMapContent.getType(),
+                                                                  std::move(sparsityMapContent));
+        auto groupedView =
+                builder.create<VPU::GroupSparseTensorOp>(weightsOp.getLoc(), sparsifiedWeights->getResult(0),
+                                                         sparsityMap->getResult(0), true, sparsityCompressionAttr);
+
+        it = localReplacementCache.insert({weightsOp, groupedView}).first;
+        return it->second;
+    };
 
     std::mutex irModificationMutex;
 
     // In parallel, count sparse elements in sparse candidates and decide which ones should be made sparse
-    loop_1d(LoopExecPolicy::Parallel, &getContext(), sparseCandidates.size(), [&](const size_t index) {
-        auto [sparsifiableOp, weightsOp] = sparseCandidates[index];
+    const auto tryToSparsify = [&](VPU::SparseOpInterface sparsifiableOp, Const::DeclareOp weightsOp,
+                                   const Const::Content& foldedContent) {
         auto nceOp = mlir::dyn_cast<VPU::NCEOpInterface>(sparsifiableOp.getOperation());
         const auto weights = nceOp.getWeightsOperand();
         auto weightsType = weights.getType().cast<vpux::NDTypeInterface>();
 
-        const auto foldedContent = weightsOp.getContent();
         const auto foldedElemType = foldedContent.getType().getElementType();
         const auto inputType = sparsifiableOp->getOperand(0).getType().cast<vpux::NDTypeInterface>();
         const auto hasFloatInput = inputType.getElementType().isa<mlir::FloatType>();
@@ -160,31 +179,40 @@ void SparsifyWeightsPass::safeRunOnFunc() {
         foldedContent.copyTo(MutableArrayRef(newContent.data(), contentSize));
         const auto foldedBaseContent = mlir::DenseElementsAttr::getFromRawBuffer(
                 mlir::cast<mlir::ShapedType>(foldedContentType), ArrayRef(newContent));
-        auto newContentAttr = Const::ContentAttr::get(foldedBaseContent);
+        auto newContentAttrSetup = Const::ContentAttr::transform(foldedBaseContent);
         // Folded constants with INT8 element types have to be cast to quantized types for the correct type to be
         // inferred from the new Const::ContentAttr
         if (auto qType = foldedElemType.dyn_cast<mlir::quant::QuantizedType>()) {
-            newContentAttr = newContentAttr.quantCast(qType);
+            newContentAttrSetup = newContentAttrSetup.quantCast(qType);
         }
 
         // IR modification is not thread safe according to MLIR documentation.
         std::lock_guard<std::mutex> guard(irModificationMutex);
 
-        mlir::OpBuilder builder(weightsOp);
-        const auto sparsityMapContent = newContentAttr.getSparsityMap();
-        const auto sparsifiedContent = newContentAttr.sparsify(false);
-        const auto sparsifiedWeights =
-                builder.create<Const::DeclareOp>(weightsOp.getLoc(), sparsifiedContent.getType(), sparsifiedContent);
-        const auto sparsityMap =
-                builder.create<Const::DeclareOp>(weightsOp.getLoc(), sparsityMapContent.getType(), sparsityMapContent);
-        const auto groupedView =
-                builder.create<VPU::GroupSparseTensorOp>(weightsOp.getLoc(), sparsifiedWeights->getResult(0),
-                                                         sparsityMap->getResult(0), true, sparsityCompressionAttr);
+        VPU::GroupSparseTensorOp groupedView =
+                getCachedSparseTensorOp(weightsOp, newContentAttrSetup, sparsityCompressionAttr);
 
-        weightsOp->replaceAllUsesWith(groupedView);
-        weightsOp->erase();
+        weightsOp->replaceUsesWithIf(groupedView, [useToReplace = sparsifiableOp.getOperation()](mlir::OpOperand& use) {
+            return use.getOwner() == useToReplace;
+        });
+        if (weightsOp->getUses().empty()) {
+            weightsOp->erase();
+        }
 
         ++numSparsifiedWeights;
+    };
+
+    loop_1d(LoopExecPolicy::Parallel, &getContext(), sparseCandidates.size(), [&](const size_t index) {
+        // Note: since we are folding here, doing a linear iterator increment is
+        // likely cheap enough.
+        auto it = sparseCandidates.begin();
+        std::advance(it, index);
+
+        auto [weightsOp, sparsifiableOps] = *it;
+        const auto foldedContent = weightsOp.getContent();
+        for (auto sparsifiableOp : sparsifiableOps) {
+            tryToSparsify(sparsifiableOp, weightsOp, foldedContent);
+        }
     });
 
     _log.trace("Sparsified weights for {0} operations out of {1} candidates", numSparsifiedWeights,

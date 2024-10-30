@@ -7,6 +7,7 @@
 
 #include "vpux/compiler/core/layers.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
+#include "vpux/compiler/dialect/IE/utils/quantization.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
@@ -25,14 +26,6 @@ struct OperationPart {
     mlir::ArrayAttr padBegin;
     mlir::ArrayAttr padEnd;
 };
-
-mlir::Operation* createFQ(mlir::PatternRewriter& rewriter, mlir::Operation* inputOp, IE::FakeQuantizeOp fq) {
-    const auto outputType = fq.getOutput().getType().cast<vpux::NDTypeInterface>();
-    const auto newOutputType = outputType.changeShape(getShape(inputOp->getResult(0)));
-    return rewriter.create<IE::FakeQuantizeOp>(fq.getLoc(), newOutputType, inputOp->getResult(0), fq.getInputLow(),
-                                               fq.getInputHigh(), fq.getOutputLow(), fq.getOutputHigh(),
-                                               fq.getLevelsAttr(), fq.getLowFpTypeAttr(), fq.getAutoBroadcastAttr());
-}
 
 bool hasSupportedStrides(const SmallVector<int64_t>& strides) {
     const auto SY = strides[0];
@@ -101,7 +94,8 @@ mlir::LogicalResult generalSplitter(mlir::Operation* origOp, mlir::PatternRewrit
 
             // TODO: temporary FQ propagation
             if (inputFQ != nullptr) {
-                slicedInput = createFQ(rewriter, slicedInput, inputFQ);
+                slicedInput = vpux::IE::createFQ(rewriter, slicedInput->getResult(0), inputFQ,
+                                                 takeOpLoc(inputFQ, StringLiteral("fq_in_{0}_{1}"), i, j));
             }
 
             const SmallVector<int64_t> newPadBegin = {padTop, padLeft};
@@ -112,7 +106,8 @@ mlir::LogicalResult generalSplitter(mlir::Operation* origOp, mlir::PatternRewrit
                                          getIntArrayAttr(ctx, newPadEnd)});
             // TODO: temporary FQ propagation
             if (outputFQ != nullptr) {
-                newOp = createFQ(rewriter, newOp, outputFQ);
+                newOp = vpux::IE::createFQ(rewriter, newOp->getResult(0), outputFQ,
+                                           takeOpLoc(outputFQ, StringLiteral("fq_out_{0}_{1}"), i, j));
             }
 
             wSliced.push_back(newOp->getResult(0));
@@ -170,10 +165,10 @@ mlir::LogicalResult ConvGeneralRewriter::matchAndRewrite(IE::ConvolutionOp origO
             ArrayRef({filterShape[Dims4D::Filter::KX], filterShape[Dims4D::Filter::KY]}), origOp.getPadsBegin(),
             origOp.getPadsEnd(),
             [&](mlir::Location loc, mlir::Value input, OperationPart part) -> mlir::Operation* {
-                return rewriter.create<IE::ConvolutionOp>(loc, input, origOp.getFilter(), origOp.getBias(),
-                                                          part.strides, part.padBegin, part.padEnd,
-                                                          origOp.getDilations(), origOp.getPostOpAttr(),
-                                                          origOp.getClampAttr(), origOp.getStaticScaleAttr());
+                return rewriter.create<IE::ConvolutionOp>(
+                        loc, input, origOp.getFilter(), origOp.getBias(), part.strides, part.padBegin, part.padEnd,
+                        origOp.getDilations(), origOp.getPostOpAttr(), origOp.getClampAttr(),
+                        origOp.getStaticScaleAttr(), origOp.getOutputChannelsAttr(), origOp.getInputChannelsAttr());
             },
             _log.nest());
 }
@@ -208,7 +203,8 @@ mlir::LogicalResult GroupConvGeneralRewriter::matchAndRewrite(IE::GroupConvoluti
             [&](mlir::Location loc, mlir::Value input, OperationPart part) -> mlir::Operation* {
                 return rewriter.create<IE::GroupConvolutionOp>(
                         loc, input, origOp.getFilter(), origOp.getBias(), part.strides, part.padBegin, part.padEnd,
-                        origOp.getDilations(), origOp.getGroupsAttr(), origOp.getPostOpAttr(), origOp.getClampAttr());
+                        origOp.getDilations(), origOp.getGroupsAttr(), origOp.getPostOpAttr(), origOp.getClampAttr(),
+                        origOp.getOutputChannelsAttr(), origOp.getInputChannelsAttr());
             },
             _log.nest());
 }
@@ -242,7 +238,8 @@ mlir::LogicalResult MaxPoolGeneralRewriter::matchAndRewrite(IE::MaxPoolOp origOp
             [&](mlir::Location loc, mlir::Value input, OperationPart part) -> mlir::Operation* {
                 return rewriter.create<IE::MaxPoolOp>(loc, input, origOp.getKernelSize(), part.strides, part.padBegin,
                                                       part.padEnd, origOp.getRoundingType(), origOp.getPostOpAttr(),
-                                                      origOp.getClampAttr());
+                                                      origOp.getClampAttr(), origOp.getOutputChannelsAttr(),
+                                                      origOp.getInputChannelsAttr());
             },
             _log.nest());
 }
@@ -281,10 +278,11 @@ mlir::LogicalResult AvgPoolGeneralRewriter::matchAndRewrite(IE::AvgPoolOp origOp
         (origStrides[Dims4D::Strides::Y.ind()] >= inputShape[Dims4D::Act::H] + padY)) {
         const auto newStrides = SmallVector<int64_t>{1, 1};
         const auto newStridesAttr = getIntArrayAttr(getContext(), newStrides);
-        rewriter.replaceOpWithNewOp<IE::AvgPoolOp>(origOp, origOp.getType(), origOp.getInput(), origOp.getKernelSize(),
-                                                   newStridesAttr, origOp.getPadsBegin(), origOp.getPadsEnd(),
-                                                   origOp.getRoundingTypeAttr(), origOp.getExcludePadsAttr(),
-                                                   origOp.getPostOpAttr(), origOp.getClampAttr());
+        rewriter.replaceOpWithNewOp<IE::AvgPoolOp>(
+                origOp, origOp.getType(), origOp.getInput(), origOp.getKernelSize(), newStridesAttr,
+                origOp.getPadsBegin(), origOp.getPadsEnd(), origOp.getRoundingTypeAttr(), origOp.getExcludePadsAttr(),
+                origOp.getPostOpAttr(), origOp.getClampAttr(), origOp.getStaticScaleAttr(),
+                origOp.getOutputChannelsAttr(), origOp.getInputChannelsAttr());
         return mlir::success();
     }
 
@@ -295,7 +293,8 @@ mlir::LogicalResult AvgPoolGeneralRewriter::matchAndRewrite(IE::AvgPoolOp origOp
                 return rewriter.create<IE::AvgPoolOp>(loc, input, origOp.getKernelSize(), part.strides, part.padBegin,
                                                       part.padEnd, origOp.getRoundingTypeAttr(),
                                                       origOp.getExcludePadsAttr(), origOp.getPostOpAttr(),
-                                                      origOp.getClampAttr());
+                                                      origOp.getClampAttr(), origOp.getStaticScaleAttr(),
+                                                      origOp.getOutputChannelsAttr(), origOp.getInputChannelsAttr());
             },
             _log.nest());
 }
@@ -348,7 +347,7 @@ mlir::LogicalResult opWithMaxPoolOptimization(
     if (!origOp->getResult(0).getUsers().empty()) {
         const auto outputFQ = mlir::dyn_cast<IE::FakeQuantizeOp>(*(origOp->getResult(0).user_begin()));
         if (outputFQ != nullptr) {
-            newOp = createFQ(rewriter, newOp, outputFQ);
+            newOp = vpux::IE::createFQ(rewriter, newOp->getResult(0), outputFQ, takeOpLoc(outputFQ, "fq_out"));
         }
     }
 
@@ -356,12 +355,13 @@ mlir::LogicalResult opWithMaxPoolOptimization(
     const SmallVector<int64_t> maxPoolKernels = {1, 1};
     const SmallVector<int64_t> pads = {0, 0};
     const auto padsAttr = getIntArrayAttr(ctx, pads);
-    const auto loc = appendLoc(origOp->getLoc(), "_maxpool_downsample");
+    const auto loc = appendLoc(origOp->getLoc(), "maxpool_downsample");
 
     log.trace("MaxPool {0} strides are {1}", loc, newStride);
-    rewriter.replaceOpWithNewOp<IE::MaxPoolOp>(
-            origOp, newOp->getResult(0), getIntArrayAttr(ctx, maxPoolKernels), getIntArrayAttr(ctx, maxPoolStrides),
-            padsAttr, padsAttr, vpux::IE::RoundingTypeAttr::get(ctx, vpux::IE::RoundingType::FLOOR), nullptr, nullptr);
+    rewriter.replaceOpWithNewOp<IE::MaxPoolOp>(origOp, newOp->getResult(0), getIntArrayAttr(ctx, maxPoolKernels),
+                                               getIntArrayAttr(ctx, maxPoolStrides), padsAttr, padsAttr,
+                                               vpux::IE::RoundingTypeAttr::get(ctx, vpux::IE::RoundingType::FLOOR),
+                                               nullptr, nullptr, nullptr, nullptr);
 
     return mlir::success();
 }
@@ -394,10 +394,10 @@ mlir::LogicalResult ConvMPOptimizationRewriter::matchAndRewrite(IE::ConvolutionO
     return opWithMaxPoolOptimization(
             origOp, rewriter, origOp.getStrides(),
             [&](mlir::Location loc, mlir::Value input, mlir::ArrayAttr strides) -> mlir::Operation* {
-                return rewriter.create<IE::ConvolutionOp>(loc, input, origOp.getFilter(), origOp.getBias(), strides,
-                                                          origOp.getPadsBegin(), origOp.getPadsEnd(),
-                                                          origOp.getDilations(), origOp.getPostOpAttr(),
-                                                          origOp.getClampAttr(), origOp.getStaticScaleAttr());
+                return rewriter.create<IE::ConvolutionOp>(
+                        loc, input, origOp.getFilter(), origOp.getBias(), strides, origOp.getPadsBegin(),
+                        origOp.getPadsEnd(), origOp.getDilations(), origOp.getPostOpAttr(), origOp.getClampAttr(),
+                        origOp.getStaticScaleAttr(), origOp.getOutputChannelsAttr(), origOp.getInputChannelsAttr());
             },
             _log.nest());
 }
@@ -430,10 +430,10 @@ mlir::LogicalResult GroupConvMPOptimizationRewriter::matchAndRewrite(IE::GroupCo
     return opWithMaxPoolOptimization(
             origOp, rewriter, origOp.getStrides(),
             [&](mlir::Location loc, mlir::Value input, mlir::ArrayAttr strides) -> mlir::Operation* {
-                return rewriter.create<IE::GroupConvolutionOp>(loc, input, origOp.getFilter(), origOp.getBias(),
-                                                               strides, origOp.getPadsBegin(), origOp.getPadsEnd(),
-                                                               origOp.getDilations(), origOp.getGroupsAttr(),
-                                                               origOp.getPostOpAttr(), origOp.getClampAttr());
+                return rewriter.create<IE::GroupConvolutionOp>(
+                        loc, input, origOp.getFilter(), origOp.getBias(), strides, origOp.getPadsBegin(),
+                        origOp.getPadsEnd(), origOp.getDilations(), origOp.getGroupsAttr(), origOp.getPostOpAttr(),
+                        origOp.getClampAttr(), origOp.getOutputChannelsAttr(), origOp.getInputChannelsAttr());
             },
             _log.nest());
 }
@@ -469,7 +469,8 @@ mlir::LogicalResult MaxPoolMPOptimizationRewriter::matchAndRewrite(IE::MaxPoolOp
             [&](mlir::Location loc, mlir::Value input, mlir::ArrayAttr strides) -> mlir::Operation* {
                 return rewriter.create<IE::MaxPoolOp>(
                         loc, input, origOp.getKernelSize(), strides, origOp.getPadsBegin(), origOp.getPadsEnd(),
-                        origOp.getRoundingType(), origOp.getPostOpAttr(), origOp.getClampAttr());
+                        origOp.getRoundingType(), origOp.getPostOpAttr(), origOp.getClampAttr(),
+                        origOp.getOutputChannelsAttr(), origOp.getInputChannelsAttr());
             },
             _log.nest());
 }
@@ -511,20 +512,22 @@ mlir::LogicalResult AvgPoolMPOptimizationRewriter::matchAndRewrite(IE::AvgPoolOp
         (origStrides[Dims4D::Strides::Y.ind()] >= inputShape[Dims4D::Act::H] + padY)) {
         const auto newStrides = SmallVector<int64_t>{1, 1};
         const auto newStridesAttr = getIntArrayAttr(getContext(), newStrides);
-        rewriter.replaceOpWithNewOp<IE::AvgPoolOp>(origOp, origOp.getType(), origOp.getInput(), origOp.getKernelSize(),
-                                                   newStridesAttr, origOp.getPadsBegin(), origOp.getPadsEnd(),
-                                                   origOp.getRoundingTypeAttr(), origOp.getExcludePadsAttr(),
-                                                   origOp.getPostOpAttr(), origOp.getClampAttr());
+        rewriter.replaceOpWithNewOp<IE::AvgPoolOp>(
+                origOp, origOp.getType(), origOp.getInput(), origOp.getKernelSize(), newStridesAttr,
+                origOp.getPadsBegin(), origOp.getPadsEnd(), origOp.getRoundingTypeAttr(), origOp.getExcludePadsAttr(),
+                origOp.getPostOpAttr(), origOp.getClampAttr(), origOp.getStaticScaleAttr(),
+                origOp.getOutputChannelsAttr(), origOp.getInputChannelsAttr());
         return mlir::success();
     }
 
     return opWithMaxPoolOptimization(
             origOp, rewriter, origOp.getStrides(),
             [&](mlir::Location loc, mlir::Value input, mlir::ArrayAttr strides) -> mlir::Operation* {
-                return rewriter.create<IE::AvgPoolOp>(loc, input, origOp.getKernelSize(), strides,
-                                                      origOp.getPadsBegin(), origOp.getPadsEnd(),
-                                                      origOp.getRoundingTypeAttr(), origOp.getExcludePadsAttr(),
-                                                      origOp.getPostOpAttr(), origOp.getClampAttr());
+                return rewriter.create<IE::AvgPoolOp>(
+                        loc, input, origOp.getKernelSize(), strides, origOp.getPadsBegin(), origOp.getPadsEnd(),
+                        origOp.getRoundingTypeAttr(), origOp.getExcludePadsAttr(), origOp.getPostOpAttr(),
+                        origOp.getClampAttr(), origOp.getStaticScaleAttr(), origOp.getOutputChannelsAttr(),
+                        origOp.getInputChannelsAttr());
             },
             _log.nest());
 }

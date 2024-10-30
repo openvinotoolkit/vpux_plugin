@@ -40,13 +40,6 @@ void vpux::profiling::printProfilingAsText(const std::vector<TaskInfo>& tasks, c
                    << ")"
                    << "\tStart(us): " << std::setw(8) << (float)task.start_time_ns / 1000 << std::endl;
             break;
-        case TaskInfo::ExecType::UPA:
-            exec_type_str = "UPA";
-            output << "Task(" << exec_type_str << "): " << std::setw(60) << taskName << "\tTime(us): " << std::setw(8)
-                   << (float)task.duration_ns / 1000 << "\tCycles:" << task.active_cycles << "(" << task.stall_cycles
-                   << ")"
-                   << "\tStart(us): " << std::setw(8) << (float)task.start_time_ns / 1000 << std::endl;
-            break;
         case TaskInfo::ExecType::M2I:
             exec_type_str = "M2I";
             output << "Task(" << exec_type_str << "): " << std::setw(60) << taskName << "\tTime(us): " << std::setw(8)

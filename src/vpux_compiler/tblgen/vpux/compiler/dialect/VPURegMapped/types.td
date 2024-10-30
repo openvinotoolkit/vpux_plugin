@@ -24,6 +24,12 @@ class VPURegMapped_Type<string name, list<Trait> traits = [],
     let mnemonic = name;
 }
 
+class VPURegMapped_Version {
+    int major = 0;
+    int minor = 0;
+    int patch = 0;
+}
+
 //
 // RegField Type
 //
@@ -40,7 +46,8 @@ def VPURegMapped_RegField : VPURegMapped_Type<"RegField"> {
         "uint32_t":$pos,
         "uint64_t":$value,
         "std::string":$name,
-        VPURegMapped_RegFieldDataType:$dataType
+        VPURegMapped_RegFieldDataType:$dataType,
+        "elf::Version":$requiredMIVersion
     );
 
     let extraClassDeclaration = [{
@@ -79,6 +86,7 @@ def VPURegMapped_Register : VPURegMapped_Type<"Register"> {
         Byte getSizeInBytes() const;
         std::vector<uint8_t> serialize() const;
         vpux::VPURegMapped::RegFieldType getField(const std::string& name) const;
+        elf::Version getRequiredMIVersion() const;
     }];
 
     let genVerifyDecl = 1;
@@ -105,6 +113,7 @@ def VPURegMapped_RegMapped : VPURegMapped_Type<"RegMapped"> {
         Byte getWidth() const;
         std::vector<uint8_t> serialize() const;
         vpux::VPURegMapped::RegisterType getRegister(const std::string& name) const;
+        elf::Version getRequiredMIVersion() const;
     }];
 
     let genVerifyDecl = 1;
@@ -115,16 +124,23 @@ def VPURegMapped_RegMapped : VPURegMapped_Type<"RegMapped"> {
 // RegField Specialization Types
 //
 
-class VPURegMapped_RegFieldWrapper<Dialect dialect, string name = "", int width = 0, int pos = 0, string dataType = "UINT"> :
+class VPURegMapped_RegFieldWrapper<Dialect dialect, string name = "", int width = 0, int pos = 0, string dataType = "UINT", VPURegMapped_Version version = VPURegMapped_Version<>> :
         TypeDef<dialect, "RegField_" # name, [], "vpux::VPURegMapped::RegFieldType"> {
 
     let mnemonic = "RegField_" # name;
     let hasCustomAssemblyFormat = 1;
 
     let extraClassDeclaration = [{
+    static elf::Version getVersion() {
+        return elf::Version(}] # version.major # [{, }] # version.minor # [{, }] # version.patch #[{);
+    }
+    static vpux::VPURegMapped::RegFieldType get(mlir::MLIRContext *context, vpux::VPURegMapped::RegFieldValue regFieldVal) {
+        auto requiredVersion = regFieldVal.version.checkValidity() ? regFieldVal.version : getVersion();
+        return vpux::VPURegMapped::RegFieldType::get(context, }] # width # [{, }] # pos # [{, regFieldVal.value, "}] # name # [{", vpux::VPURegMapped::RegFieldDataType::}] # dataType # [{, requiredVersion}] # [{);
+    }
     static vpux::VPURegMapped::RegFieldType get(mlir::MLIRContext *context, uint64_t value) {
-        return vpux::VPURegMapped::RegFieldType::get(context, }] # width # [{, }] # pos # [{, value, "}] # name # [{", vpux::VPURegMapped::RegFieldDataType::}] # dataType # [{);
-    };
+        return get(context, vpux::VPURegMapped::RegFieldValue(value, getVersion()));
+    }
     static constexpr uint8_t getRegFieldWidth() {
         return }] # width # [{;
     }
@@ -135,6 +151,16 @@ class VPURegMapped_RegFieldWrapper<Dialect dialect, string name = "", int width 
         return vpux::VPURegMapped::RegFieldDataType::}] # dataType # [{;
     }
   }];
+
+    // E#135163: revisit tablegen code after new design adoption
+    // e.g. these fields could get better names (without protective
+    // "_" in the beggining), removing unnecessary code in the class
+    // above and etc.
+    string _name = name;
+    int _offset = pos;
+    int _size = width;
+    string _type = dataType;
+    VPURegMapped_Version _version = version;
 }
 
 //
@@ -152,10 +178,10 @@ class VPURegMapped_RegisterWrapper<Dialect dialect, string regDialectStr, string
     list<string> regFieldListZeroValues = !foreach(name, regFieldTypes, "{\"" # name # "\", 0}," );
     string regFieldStrZeroValues = !interleave(regFieldListZeroValues, "\n");
 
-    list<string> regFieldListResetValues = !foreach(name, regFieldTypes, "{\"" # name # "\", extractFieldValueFromRegValue<RegField_" # name # "Type>()}," );
+    list<string> regFieldListResetValues = !foreach(name, regFieldTypes, "{\"" # name # "\", {extractFieldValueFromRegValue<RegField_" # name # "Type>(), RegField_" # name # "Type::getVersion()}}," );
     string regFieldStrResetValues = !interleave(regFieldListResetValues, "\n");
 
-    list<string> regFieldListValues = !foreach(name, regFieldTypes, "{\"" # name # "\", extractFieldValue(regType, \"" # name # "\")}," );
+    list<string> regFieldListValues = !foreach(name, regFieldTypes, "{\"" # name # "\", extractVersionedFieldValue(regType, \"" # name # "\")}," );
     string regFieldStrValues = !interleave(regFieldListValues, "\n");
 
 
@@ -163,7 +189,7 @@ class VPURegMapped_RegisterWrapper<Dialect dialect, string regDialectStr, string
     let hasCustomAssemblyFormat = 1;
 
     let extraClassDeclaration = [{
-    static vpux::VPURegMapped::RegisterType get(mlir::OpBuilder builder, std::map<std::string, uint64_t> values) {
+    static vpux::VPURegMapped::RegisterType get(mlir::OpBuilder builder, std::map<std::string, vpux::VPURegMapped::RegFieldValue> values) {
         auto regFields = getVPURegMapped_RegisterFieldArrayAttr(builder, { }] # "\n" # regFieldStr # "\n" # [{ });
         return vpux::VPURegMapped::RegisterType::get(builder.getContext(), }] # size # [{, "}] # name # [{", }] # address # [{, regFields, }] # allowOverlap # [{ );
     };
@@ -185,17 +211,26 @@ class VPURegMapped_RegisterWrapper<Dialect dialect, string regDialectStr, string
     static uint64_t extractFieldValue(vpux::VPURegMapped::RegisterType regType, std::string regFieldName) {
         return regType.getField(regFieldName).getValue();
     }
-    static std::map<std::string, uint64_t> getZeroInitilizationValues() {
+    static vpux::VPURegMapped::RegFieldValue extractVersionedFieldValue(vpux::VPURegMapped::RegisterType regType, std::string regFieldName) {
+        auto regField = regType.getField(regFieldName);
+        return vpux::VPURegMapped::RegFieldValue(regField.getValue(), regField.getRequiredMIVersion());
+    }
+    static std::map<std::string, vpux::VPURegMapped::RegFieldValue> getZeroInitilizationValues() {
         return { }] # regFieldStrZeroValues # [{ };
     }
-    static std::map<std::string, uint64_t> getResetInitilizationValues() {
+    static std::map<std::string, vpux::VPURegMapped::RegFieldValue> getResetInitilizationValues() {
         return { }] # regFieldStrResetValues # [{ };
     }
-    static std::map<std::string, uint64_t> getValues(vpux::VPURegMapped::RegMappedType regMapType) {
+    static std::map<std::string, vpux::VPURegMapped::RegFieldValue> getValues(vpux::VPURegMapped::RegMappedType regMapType) {
         auto regType = regMapType.getRegister("}] # name # [{");
         return { }] # regFieldStrValues # [{ };
     }
   }];
+
+    string _name = name;
+    int _offset = address;
+    int _size = size;
+    list<string> _fields = regFieldTypes;
 }
 
 //
@@ -221,20 +256,23 @@ class VPURegMapped_RegMappedWrapper<Dialect dialect, string regDialectStr, strin
     let hasCustomAssemblyFormat = 1;
 
     let extraClassDeclaration = [{
-    static vpux::VPURegMapped::RegMappedType get(mlir::OpBuilder builder, std::map<std::string, std::map<std::string, uint64_t>> values) {
+    static vpux::VPURegMapped::RegMappedType get(mlir::OpBuilder builder, std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>> values) {
         auto regs = getVPURegMapped_RegisterArrayAttr(builder, { }] # "\n" # regsStr # "\n" # [{ });
         return vpux::VPURegMapped::RegMappedType::get(builder.getContext(), "}] # name # [{", regs);
     };
-    static std::map<std::string, std::map<std::string, uint64_t>> getZeroInitilizationValues() {
+    static std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>> getZeroInitilizationValues() {
         return { }] # regStrZeroValues # [{ };
     }
-    static std::map<std::string, std::map<std::string, uint64_t>> getResetInitilizationValues() {
+    static std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>> getResetInitilizationValues() {
         return { }] # regStrResetValues # [{ };
     }
-    static std::map<std::string, std::map<std::string, uint64_t>> getValues(vpux::VPURegMapped::RegMappedType regMapType) {
+    static std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>> getValues(vpux::VPURegMapped::RegMappedType regMapType) {
         return { }] # regStrValues # [{ };
     }
   }];
+
+    string _name = name;
+    list<string> _registers = registerTypes;
 }
 
 //

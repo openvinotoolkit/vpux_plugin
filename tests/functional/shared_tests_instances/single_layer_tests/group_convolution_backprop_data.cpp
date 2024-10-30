@@ -1,4 +1,4 @@
-// Copyright (C) 2023 Intel Corporation
+// Copyright (C) 2023-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -15,16 +15,13 @@ namespace test {
 
 class GroupConvBackpropLayerTestCommon : public GroupConvBackpropLayerTest, virtual public VpuOv2LayerTest {};
 
-class GroupConvBackpropLayerTest_NPU3720 : public GroupConvBackpropLayerTestCommon {};
-class GroupConvBackpropLayerTest_NPU4000 : public GroupConvBackpropLayerTestCommon {};
-
-TEST_P(GroupConvBackpropLayerTest_NPU3720, HW) {
+TEST_P(GroupConvBackpropLayerTestCommon, NPU3720_HW) {
     abs_threshold = 0.1;
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(GroupConvBackpropLayerTest_NPU4000, HW) {
+TEST_P(GroupConvBackpropLayerTestCommon, NPU4000_HW) {
     abs_threshold = 0.1;
     setDefaultHardwareMode();
     run(Platform::NPU4000);
@@ -65,34 +62,18 @@ const auto groupConvBackpropData2DParams_OutputPadding = ::testing::Combine(
         ::testing::ValuesIn(numGroups), ::testing::Values(ov::op::PadType::EXPLICIT),
         ::testing::ValuesIn(outputPadding2D));
 
-// ------ NPU3720 ------
-INSTANTIATE_TEST_SUITE_P(smoke_GroupConvBackpropData2D_ExplicitPadding, GroupConvBackpropLayerTest_NPU3720,
+INSTANTIATE_TEST_SUITE_P(smoke_GroupConvBackpropData2D_ExplicitPadding, GroupConvBackpropLayerTestCommon,
                          ::testing::Combine(groupConvBackpropData2DParams_ExplicitPadding,
                                             ::testing::ValuesIn(modelTypes),
                                             ::testing::ValuesIn(static_shapes_to_test_representation(inputShapes2D)),
                                             ::testing::ValuesIn(emptyOutputShape), ::testing::Values(DEVICE_NPU)),
-                         GroupConvBackpropLayerTest_NPU3720::getTestCaseName);
+                         GroupConvBackpropLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_GroupConvBackpropData2D_OutputPadding, GroupConvBackpropLayerTest_NPU3720,
+INSTANTIATE_TEST_SUITE_P(smoke_GroupConvBackpropData2D_OutputPadding, GroupConvBackpropLayerTestCommon,
                          ::testing::Combine(groupConvBackpropData2DParams_OutputPadding,
                                             ::testing::ValuesIn(modelTypes),
                                             ::testing::ValuesIn(static_shapes_to_test_representation(inputShapes2D)),
                                             ::testing::ValuesIn(emptyOutputShape), ::testing::Values(DEVICE_NPU)),
-                         GroupConvBackpropLayerTest_NPU3720::getTestCaseName);
-
-// ------ NPU4000 ------
-INSTANTIATE_TEST_SUITE_P(smoke_GroupConvBackpropData2D_ExplicitPadding, GroupConvBackpropLayerTest_NPU4000,
-                         ::testing::Combine(groupConvBackpropData2DParams_ExplicitPadding,
-                                            ::testing::ValuesIn(modelTypes),
-                                            ::testing::ValuesIn(static_shapes_to_test_representation(inputShapes2D)),
-                                            ::testing::ValuesIn(emptyOutputShape), ::testing::Values(DEVICE_NPU)),
-                         GroupConvBackpropLayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_GroupConvBackpropData2D_OutputPadding, GroupConvBackpropLayerTest_NPU4000,
-                         ::testing::Combine(groupConvBackpropData2DParams_OutputPadding,
-                                            ::testing::ValuesIn(modelTypes),
-                                            ::testing::ValuesIn(static_shapes_to_test_representation(inputShapes2D)),
-                                            ::testing::ValuesIn(emptyOutputShape), ::testing::Values(DEVICE_NPU)),
-                         GroupConvBackpropLayerTest_NPU4000::getTestCaseName);
+                         GroupConvBackpropLayerTestCommon::getTestCaseName);
 
 }  // namespace

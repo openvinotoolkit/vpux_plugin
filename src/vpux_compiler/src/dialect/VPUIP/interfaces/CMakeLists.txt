@@ -21,8 +21,7 @@ add_mlir_dialect_library(${TARGET_NAME}
         npu_elf
         openvino::npu_al
         npu_compiler_dialect_vpurt
-        npu_compiler_dialect_vpuip
-        npu_compiler_dialect_vpuip_graph_schema)
+        npu_compiler_dialect_vpuip)
 add_dependencies(${TARGET_NAME} MLIRVPUXIncGenList)
 target_include_directories(${TARGET_NAME}
     SYSTEM PRIVATE

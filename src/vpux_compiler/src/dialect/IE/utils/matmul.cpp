@@ -1,5 +1,6 @@
 #include "vpux/compiler/dialect/IE/utils/matmul.hpp"
 #include "vpux/compiler/core/attributes/shape.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/utils/quantization.hpp"
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
 #include "vpux/compiler/utils/analysis.hpp"
@@ -74,6 +75,10 @@ bool doesIEMatMulFitIntoCMX(IE::MatMulOp matmulOp, ShapeRef input1Shape, ShapeRe
     // CMX requirement will be removed after tiling is implemented (E125519)
     const double safetyFactor = 0.9;
     return input1Shape3d[Dims3D::Act::B] == 1 || expandedCMXUsage < availableCMXBytes.count() * safetyFactor;
+}
+
+bool isMatmulWithRHSTransposition(IE::MatMulOp matmulOp) {
+    return !matmulOp.getTransposeA() && matmulOp.getTransposeB();
 }
 
 }  // namespace IE

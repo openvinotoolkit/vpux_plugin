@@ -4,6 +4,7 @@
 //
 
 #include "vpux/compiler/dialect/VPU/utils/eltwise_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/auto_padding_utils.hpp"
 
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
@@ -12,7 +13,7 @@
 using namespace vpux;
 using namespace VPU;
 
-bool vpux::VPU::isNCEEltwiseSupported(VPU::ArchKind arch, vpux::NDTypeInterface input1Type,
+bool vpux::VPU::isNCEEltwiseSupported(mlir::Operation* op, vpux::NDTypeInterface input1Type,
                                       vpux::NDTypeInterface input2Type, vpux::NDTypeInterface outputType,
                                       bool allowDifferentScales, bool allowDifferentZp, bool checkLayout,
                                       bool checkChannelAlignment, LogCb logCb) {
@@ -61,13 +62,23 @@ bool vpux::VPU::isNCEEltwiseSupported(VPU::ArchKind arch, vpux::NDTypeInterface 
         return false;
     }
 
+    auto arch = getArch(op);
     if (checkChannelAlignment) {
-        if (!NCEInvariant::isInputActTypeSupported(
-                    arch, input1Type, vpux::VPU::NCEInvariant::getAlignment(input1Type.getElementType()), false) ||
-            !NCEInvariant::isInputActTypeSupported(
-                    arch, input2Type, vpux::VPU::NCEInvariant::getAlignment(input2Type.getElementType()), false) ||
-            !NCEInvariant::isOutputActTypeSupported(
-                    outputType, vpux::VPU::NCEInvariant::getAlignment(outputType.getElementType()))) {
+        auto iface = mlir::dyn_cast<IE::AlignedChannelsOpInterface>(op);
+        auto outputAlignment = iface != nullptr ? iface.getOutputChannelAlignment()
+                                                : vpux::VPU::NCEInvariant::getAlignment(outputType.getElementType());
+        bool hasAutoPad = VPU::hasAutoPaddingIDU(getModuleOp(op));
+        auto inputAlignmentFirst = hasAutoPad && VPU::inputCompatibleWithAutoPad(input1Type)
+                                           ? 1
+                                           : vpux::VPU::NCEInvariant::getAlignment(input1Type.getElementType());
+
+        auto inputAlignmentSecond = hasAutoPad && VPU::inputCompatibleWithAutoPad(input2Type)
+                                            ? 1
+                                            : vpux::VPU::NCEInvariant::getAlignment(input2Type.getElementType());
+
+        if (!NCEInvariant::isInputActTypeSupported(arch, input1Type, inputAlignmentFirst, false) ||
+            !NCEInvariant::isInputActTypeSupported(arch, input2Type, inputAlignmentSecond, false) ||
+            !NCEInvariant::isOutputActTypeSupported(outputType, outputAlignment)) {
             logCb(formatv("Misaligned tensor shape"));
             return false;
         }

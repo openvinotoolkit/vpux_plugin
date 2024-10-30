@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#include "vpux/compiler/dialect/VPU/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/vertical_fusion_config.hpp"
 #include "vpux/compiler/dialect/VPU/utils/vertical_fusion_utils.hpp"
@@ -139,7 +140,7 @@ void VerticalFusionTilingRewriter::processOffset(mlir::Value operand, mlir::IRMa
             }
 
             operands.push(blockOperation->getOperand(0));
-            if (blockOperation->hasTrait<VPU::EltwiseOp>()) {
+            if (blockOperation->hasTrait<VPU::EltwiseOp>() && blockOperation->getNumOperands() > 1) {
                 bool isArgumentBreak = false;
                 // if there is Eltwise-like operation which one of operands
                 // is block argument, don't go further, no need to adjust offset on other argument

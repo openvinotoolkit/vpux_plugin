@@ -45,7 +45,6 @@ func.func @ConvertScalarAdd(%arg0: tensor<3614x4xf32>) -> tensor<f32> {
     //CHECK-SAME:           {kernel_size = [14456, 1], pads_begin = [0, 0], pads_end = [0, 0], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]} : tensor<1x1x14456x1xf16> -> tensor<1x1x1x1xf16>
     //CHECK:            [[ADD_0:%.*]] = IE.Add([[MAXPOOL_0]], [[CST_0]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16> -> tensor<1x1x1x1xf16>
     //CHECK:            IE.Cos([[ADD_0]]) : tensor<1x1x1x1xf16> -> tensor<1x1x1x1xf16>
-
 }
 
 // -----
@@ -168,4 +167,44 @@ func.func @Convert3dTopKLastAxis(%arg0: tensor<60x80x77xsi32>) -> (tensor<60x80x
     // CHECK:   [[RESHAPE_SHAPE:%.*]] = IE.Reshape([[SHAPE]]) {
     // CHECK-SAME:         shape_value = [60, 80, 1]} : tensor<1x1x4800x1xsi32> -> tensor<60x80x1xsi32>
     // CHECK:   return [[RESHAPE_VALUE]], [[RESHAPE_SHAPE]]
+}
+
+// -----
+
+// CHECK-LABEL: func.func @ConvertGather3DInTo4D
+// CHECK-SAME:    [[INPUT:%.+]]: tensor<2x468x2xf16>
+func.func @ConvertGather3DInTo4D(%arg0: tensor<2x468x2xf16>) -> tensor<2x71x2xf16> {
+    %cst = const.Declare tensor<71xsi32> = dense<1> : tensor<71xsi32>
+    %0 = IE.Gather(%arg0, %cst) {axis_value = 1 : i64, batch_dims = 0 : i64, indices_rank = 1 : i64} : tensor<2x468x2xf16>, tensor<71xsi32> -> tensor<2x71x2xf16>
+
+    return %0 : tensor<2x71x2xf16>
+
+    // CHECK-DAG:   [[CST:%.+]] = const.Declare tensor<1x71x1x1xsi32> = dense<1> : tensor<71xsi32>, [#const.Reshape<[1, 71, 1, 1]>]
+    // CHECK:       [[RESHAPE_IN:%.+]] = IE.AffineReshape([[INPUT]]) {
+    // CHECK-SMAE:         dim_mapping = [[0, 1], [2], [3]], shape_value = [1, 1, 468, 2]} : tensor<2x468x2xf16> -> tensor<1x2x468x2xf16>
+    // CHECK:       [[GATHER:%.+]] = IE.Gather([[RESHAPE_IN]], [[CST]]) {
+    // CHECK-SMAE:         axis_value = 2 : i64, batch_dims = 1 : i64, indices_rank = 2 : i64} : tensor<1x2x468x2xf16>, tensor<1x71x1x1xsi32> -> tensor<1x2x71x2xf16>
+    // CHECK:       [[RESHAPE_OUT:%.+]] = IE.AffineReshape([[GATHER]]) {
+    // CHECK-SMAE:         dim_mapping = [[0], [0], [1], [2]], shape_value = [1, 71, 2]} : tensor<1x2x71x2xf16> -> tensor<2x71x2xf16>
+    // CHECK:       return [[RESHAPE_OUT]]
+}
+
+// -----
+
+// CHECK-LABEL: func.func @ConvertGather5DOutTo4D
+// CHECK-SAME:    [[INPUT:%.+]]: tensor<2x5x8xf16>
+func.func @ConvertGather5DOutTo4D(%arg0: tensor<2x5x8xf16>) -> tensor<2x5x3x1x4xf16> {
+    %cst = const.Declare tensor<2x3x1x4xsi32> = dense<1> : tensor<2x3x1x4xsi32>
+    %0 = IE.Gather(%arg0, %cst) {axis_value = 2 : i64, batch_dims = 1 : i64, indices_rank = 4 : i64} : tensor<2x5x8xf16>, tensor<2x3x1x4xsi32> -> tensor<2x5x3x1x4xf16>
+
+    return %0 : tensor<2x5x3x1x4xf16>
+
+    // CHECK-DAG:   [[CST:%.+]] = const.Declare tensor<2x12x1x1xsi32> = dense<1> : tensor<2x3x1x4xsi32>, [#const.Reshape<[2, 12, 1, 1]>]
+    // CHECK:       [[RESHAPE_IN:%.+]] = IE.AffineReshape([[INPUT]]) {
+    // CHECK-SMAE:         dim_mapping = [[0], [1], [2, 3]], shape_value = [2, 5, 8, 1]} : tensor<2x5x8xf16> -> tensor<2x5x8x1xf16>
+    // CHECK:       [[GATHER:%.+]] = IE.Gather([[RESHAPE_IN]], [[CST]]) {
+    // CHECK-SMAE:         axis_value = 2 : i64, batch_dims = 1 : i64, indices_rank = 2 : i64} : tensor<2x5x8x1xf16>, tensor<2x12x1x1xsi32> -> tensor<2x5x12x1xf16>
+    // CHECK:       [[RESHAPE_OUT:%.+]] = IE.Reshape([[GATHER]]) {
+    // CHECK-SMAE:         shape_value = [2, 5, 3, 1, 4]} : tensor<2x5x12x1xf16> -> tensor<2x5x3x1x4xf16>
+    // CHECK:       return [[RESHAPE_OUT]]
 }

@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation
+// Copyright (C) 2022-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -60,21 +60,17 @@ class PriorBoxLayerTestCommon : public PriorBoxLayerTest, virtual public VpuOv2L
     }
 };
 
-class PriorBoxLayerTest_NPU3720 : public PriorBoxLayerTestCommon {};
-class PriorBoxLayerTest_NPU4000 : public PriorBoxLayerTestCommon {};
-
-TEST_P(PriorBoxLayerTest_NPU3720, SW) {
+TEST_P(PriorBoxLayerTestCommon, NPU3720_SW) {
     VpuOv2LayerTest::setReferenceSoftwareMode();
     VpuOv2LayerTest::run(Platform::NPU3720);
 }
 
-TEST_P(PriorBoxLayerTest_NPU4000, SW) {
+TEST_P(PriorBoxLayerTestCommon, NPU4000_SW) {
     VpuOv2LayerTest::setReferenceSoftwareMode();
     VpuOv2LayerTest::run(Platform::NPU4000);
 }
 
 }  // namespace test
-
 }  // namespace ov
 
 using namespace ov::test;
@@ -168,32 +164,16 @@ const auto paramsPrecommit = testing::Combine(testing::Values(param4), testing::
                                               testing::Values(static_shapes_to_test_representation(inputShape4)),
                                               testing::Values(DEVICE_NPU));
 
-// ------ NPU3720 ------
+INSTANTIATE_TEST_SUITE_P(smoke_PriorBox_1, PriorBoxLayerTestCommon, paramsConfig1,
+                         PriorBoxLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(smoke_PriorBox_1, PriorBoxLayerTest_NPU3720, paramsConfig1,
-                        PriorBoxLayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_PriorBox_2, PriorBoxLayerTestCommon, paramsConfig2,
+                         PriorBoxLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(smoke_PriorBox_2, PriorBoxLayerTest_NPU3720, paramsConfig2,
-                        PriorBoxLayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_PriorBox_3, PriorBoxLayerTestCommon, paramsConfig3,
+                         PriorBoxLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(smoke_PriorBox_3, PriorBoxLayerTest_NPU3720, paramsConfig3,
-                        PriorBoxLayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_precommit_PriorBox, PriorBoxLayerTest_NPU3720, paramsPrecommit,
-                        PriorBoxLayerTest_NPU3720::getTestCaseName);
-
-// ------ NPU4000 ------
-
-INSTANTIATE_TEST_CASE_P(smoke_PriorBox_1, PriorBoxLayerTest_NPU4000, paramsConfig1,
-                        PriorBoxLayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_PriorBox_2, PriorBoxLayerTest_NPU4000, paramsConfig2,
-                        PriorBoxLayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_PriorBox_3, PriorBoxLayerTest_NPU4000, paramsConfig3,
-                        PriorBoxLayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_precommit_PriorBox, PriorBoxLayerTest_NPU4000, paramsPrecommit,
-                        PriorBoxLayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_PriorBox, PriorBoxLayerTestCommon, paramsPrecommit,
+                         PriorBoxLayerTestCommon::getTestCaseName);
 
 }  // namespace

@@ -9,6 +9,7 @@
 #include "vpux/compiler/NPU40XX/dialect/VPURT/transforms/passes.hpp"
 
 #include "vpux/compiler/core/passes.hpp"
+#include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPURT/transforms/passes.hpp"
 #include "vpux/compiler/dialect/const/passes.hpp"
 
@@ -50,7 +51,6 @@ void vpux::VPUIP::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
     const auto grc = getDefaultGreedyRewriteConfig();
 
     pm.addPass(VPUIP::createTileActShaveKernelTaskPass(log));
-    pm.addPass(mlir::createCanonicalizerPass(grc));
     if (options.enableOptimizeCopies || options.enableOpsAsDMA) {
         // This pass is a part of "copy optimization pipeline", but need to be done before because
         // WrapWithPermuteAsNNDMA depends on it.
@@ -63,12 +63,10 @@ void vpux::VPUIP::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
     pm.addPass(mlir::createCanonicalizerPass(grc));
 
     pm.addPass(VPUIP::createConvertEltwiseToInPlacePass(log));
-    pm.addPass(mlir::createCanonicalizerPass(grc));
 
     // Level 2 : Abstract RunTime
 
     pm.addPass(VPUIP::createSetMemorySpacePass(VPU::getMemKind<VPU::MemoryKind::DDR>, log));
-    pm.addPass(mlir::createCanonicalizerPass(grc));
 
     if (options.enableSEPtrsOperations || options.enableExperimentalSEPtrsOperations) {
         pm.addPass(VPUIP::createMoveSubViewBeforeSparseBufferPass(log));
@@ -80,7 +78,6 @@ void vpux::VPUIP::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
     }
     if (options.enableWeightsSparsity || VPU::isActSparsityEnabled(options.enableActivationSparsity)) {
         pm.addPass(VPUIP::createUngroupSparseBuffersPass(log));
-        pm.addPass(mlir::createCanonicalizerPass(grc));
     }
 
     pm.addPass(VPUIP::createUngroupBoundedBuffersPass(log));
@@ -138,11 +135,17 @@ void vpux::VPUIP::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
         pm.addPass(VPUIP::createSWKernelPrefetchingReserveMemPass(log));
     }
 
+    pm.addPass(VPUIP::createAddCopyBetweenSWKernelsAndNetworkIOPass(log));
+
     pm.addPass(VPUIP::createCalculateAsyncRegionCycleCostPass(log));
 
     VPUIP::arch40xx::buildMemoryAllocationPipeline(pm, VPUIP::arch40xx::MemoryAllocationOptions(options), log);
 
     pm.addPass(VPUIP::createOptimizeAsyncDepsPass(log));
+
+    if (options.enablePopulateWeightTableWithShave) {
+        pm.addPass(VPUIP::createPatchPopulateWeightTableWithShavePass(log));
+    }
 
     // Handle WeightsTable, which requires statically allocated memory
     pm.addPass(VPUIP::createPatchWeightsTablePass(log));
@@ -193,10 +196,15 @@ void vpux::VPUIP::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
         pm.addPass(VPUIP::arch40xx::createCompressSpillDmaPass(log));
     }
 
-    if (options.enableFunctionOutlining) {
+    bool isOutliningEnabled = options.functionOutlining.hasValue();
+
+    if (isOutliningEnabled) {
         if (options.enableBarrierSchedWithFunctionOutlining) {
             pm.addPass(VPURT::arch40xx::createInsertSyncTasksPass(log));
         } else {
+            if (options.enableDebatcher) {
+                pm.addPass(IE::createOverrideTileExecutorNumPass("revert", log));
+            }
             pm.addPass(mlir::createInlinerPass());
         }
     }
@@ -209,7 +217,6 @@ void vpux::VPUIP::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
     if (options.enableControlGraphSplit) {
         pm.addPass(VPURT::createSplitControlGraphPass(options.controlGraphSplitBlockSize, log));
     }
-    pm.addPass(VPUIP::createReduceBarrierDependenciesPass(log));
 
     if (!options.linearizeSchedule) {
         pm.addPass(VPUIP::createDMABarrierOptimizationPass(log));
@@ -225,19 +232,24 @@ void vpux::VPUIP::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
         pm.addPass(VPUIP::arch40xx::createComputeTaskStrippingPass(log, dpuDryRunMode, options.shaveDryRun));
     }
 
-    VPURT::buildBarrierLegalizationPipeline(pm, options.enablePartialWorkloadManagement, true, log);
+    // Ensures legal schedule incase of WLM rollback
+    if (options.enablePartialWorkloadManagement) {
+        pm.addPass(VPUIP::arch40xx::createLegalizeScheduleForWlmFetchDmasPass(options.wlmOptimizationThreshold, log));
+    }
 
-    if (options.enableFunctionOutlining && options.enableBarrierSchedWithFunctionOutlining) {
+    VPURT::buildBarrierLegalizationPipeline(pm, options.enablePartialWorkloadManagement,
+                                            options.wlmOptimizationThreshold, /* unevenVariantSplitFlag */ true, log);
+
+    if (isOutliningEnabled && options.enableBarrierSchedWithFunctionOutlining) {
+        if (options.enableDebatcher) {
+            pm.addPass(IE::createOverrideTileExecutorNumPass("revert", log));
+        }
         pm.addPass(mlir::createInlinerPass());
         pm.addPass(VPURT::arch40xx::createOptimizeSyncTasksPass(log));
     }
 
-    if (options.enableStartBarrier) {
-        pm.addPass(VPUIP::arch40xx::createAddStartBarrierPass(log));
-    }
-    if (options.enableFinalBarrier) {
-        pm.addPass(VPURT::arch37xx::createAddFinalBarrierPass(log));
-    }
+    pm.addPass(VPUIP::arch40xx::createAddStartBarrierPass(log));
+    pm.addPass(VPURT::arch37xx::createAddFinalBarrierPass(log));
 
     pm.addPass(VPURT::arch37xx::createAddUpdateBarrierForSwKernelsPass(log));
 
@@ -254,10 +266,15 @@ void vpux::VPUIP::arch40xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
         pm.addPass(createMoveDeclarationsToTopPass(log));
     }
 
-    pm.addPass(VPURT::createAssignPhysicalBarriersPass(options.enablePartialWorkloadManagement, log));
+    pm.addPass(VPURT::createAssignPhysicalBarriersPass(options.enablePartialWorkloadManagement,
+                                                       options.enableColorBinPhysicalBarrierAssignment,
+                                                       options.wlmOptimizationThreshold, log));
     pm.addPass(VPURT::createBarrierSimulationPass(log));
     pm.addPass(mlir::createCanonicalizerPass(grc));
-    pm.nest<mlir::func::FuncOp>().addNestedPass<Const::DeclareOp>(Const::createConstantFoldingPass());
+
+    if (options.enableIntermediateBufferOutput) {
+        pm.addPass(VPURT::createIntermediateBufferOutputPass(log));
+    }
 
     if (options.enableActivityFactor || options.enableScheduleTrace) {
         pm.addPass(VPURT::createInferenceExecutionAnalysisPass(options.scheduleTraceFile, options.enableScheduleTrace,

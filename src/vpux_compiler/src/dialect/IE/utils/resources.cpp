@@ -524,16 +524,19 @@ IE::MemoryResourceOp vpux::IE::TileResourceOp::getUsedMemory(mlir::SymbolRefAttr
 }
 
 //
-// ShaveResources
+// EngineResources
 //
 
-int64_t vpux::IE::getTotalNumOfActShaveEngines(mlir::ModuleOp mainModule) {
-    auto tileOp = getTileExecutor(mainModule);
-    VPUX_THROW_UNLESS(tileOp != nullptr, "Expected tileOp executor in order to query SHAVE_ACT executor.");
-    VPUX_THROW_UNLESS(tileOp.hasSubExecutor(VPU::ExecutorKind::SHAVE_ACT),
-                      "No SHAVE_ACT executor found, check your arch");
-    auto actShavePerTile = tileOp.getSubExecutor(VPU::ExecutorKind::SHAVE_ACT);
-    return tileOp.getCount() * actShavePerTile.getCount();
+int64_t vpux::IE::getTotalNumOfEngines(mlir::ModuleOp moduleOp, VPU::ExecutorKind execKind) {
+    auto tileOp = getTileExecutor(moduleOp);
+    VPUX_THROW_UNLESS(tileOp != nullptr, "Expected tileOp executor in order to query {0} executor.", execKind);
+    auto executorPerTile = tileOp.getSubExecutor(execKind);
+    VPUX_THROW_UNLESS(executorPerTile != nullptr, "Failed to get {0} information", execKind);
+    return tileOp.getCount() * executorPerTile.getCount();
+}
+
+int64_t vpux::IE::getTotalNumOfEngines(mlir::Operation* op, VPU::ExecutorKind execKind) {
+    return getTotalNumOfEngines(op->getParentOfType<mlir::ModuleOp>(), execKind);
 }
 
 IE::TileResourceOp IE::addTileExecutor(mlir::ModuleOp mainModule, size_t count) {

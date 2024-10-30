@@ -69,6 +69,88 @@ func.func @NoDMAOutOfOrderOptimizationDueToMemOverlap() -> !type_DDR {
 
 !type_DDR = memref<1x3x64x64xf16, #NHWC, @DDR>
 
+//CHECK-LABEL: @NoDMAOutOfOrderOptimizationOn3rdTaskDueToMemOverlapWith1stTask
+func.func @NoDMAOutOfOrderOptimizationOn3rdTaskDueToMemOverlapWith1stTask() -> !type_DDR {
+
+    %input = VPURT.DeclareBuffer <NetworkInput> [0] <0> -> !type_DDR
+    %buf0 = VPURT.DeclareBuffer <DDR> <0> -> !type_DDR
+    %buf1 = VPURT.DeclareBuffer <DDR> <24576> -> !type_DDR
+    %buf2 = VPURT.DeclareBuffer <DDR> <49152> -> !type_DDR
+    %output = VPURT.DeclareBuffer <DDR> <73728> -> !type_DDR
+
+    VPURT.Task {
+      %0 = VPUIP.NNDMA {port = 0 : i64} inputs(%input : !type_DDR) outputs(%buf0: !type_DDR) -> !type_DDR
+    }
+    VPURT.Task {
+      %0 = VPUIP.NNDMA {port = 0 : i64} inputs(%buf1 : !type_DDR) outputs(%buf2: !type_DDR) -> !type_DDR
+    }
+    VPURT.Task {
+      %0 = VPUIP.NNDMA {port = 0 : i64} inputs(%buf0 : !type_DDR) outputs(%output: !type_DDR) -> !type_DDR
+    }
+    return %output : !type_DDR
+
+    // CHECK:    VPURT.Task
+    // CHECK-NEXT:    VPUIP.NNDMA
+    // CHECK-NOT:     is_out_of_order
+    // CHECK:    VPURT.Task
+    // CHECK-NEXT:    VPUIP.NNDMA
+    // CHECK-SAME:    is_out_of_order
+    // CHECK:    VPURT.Task
+    // CHECK-NEXT:    VPUIP.NNDMA
+    // CHECK-NOT:     is_out_of_order
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+!type_DDR = memref<1x3x64x64xf16, #NHWC, @DDR>
+
+//CHECK-LABEL: @DMAOutOfOrderOptimizationOn4thTaskEvenWithMemOverlapWith1stTask
+func.func @DMAOutOfOrderOptimizationOn4thTaskEvenWithMemOverlapWith1stTask() -> !type_DDR {
+
+    %input = VPURT.DeclareBuffer <NetworkInput> [0] <0> -> !type_DDR
+    %buf0 = VPURT.DeclareBuffer <DDR> <0> -> !type_DDR
+    %buf1 = VPURT.DeclareBuffer <DDR> <24576> -> !type_DDR
+    %buf2 = VPURT.DeclareBuffer <DDR> <49152> -> !type_DDR
+    %buf3 = VPURT.DeclareBuffer <DDR> <73728> -> !type_DDR
+    %buf4 = VPURT.DeclareBuffer <DDR> <98304> -> !type_DDR
+    %output = VPURT.DeclareBuffer <DDR> <122880> -> !type_DDR
+
+    VPURT.Task {
+      %0 = VPUIP.NNDMA {port = 0 : i64} inputs(%input : !type_DDR) outputs(%buf0: !type_DDR) -> !type_DDR
+    }
+    VPURT.Task {
+      %0 = VPUIP.NNDMA {port = 0 : i64} inputs(%buf1 : !type_DDR) outputs(%buf2: !type_DDR) -> !type_DDR
+    }
+    VPURT.Task {
+      %0 = VPUIP.NNDMA {port = 0 : i64} inputs(%buf3 : !type_DDR) outputs(%buf4: !type_DDR) -> !type_DDR
+    }
+    VPURT.Task {
+      %0 = VPUIP.NNDMA {port = 0 : i64} inputs(%buf0 : !type_DDR) outputs(%output: !type_DDR) -> !type_DDR
+    }
+    return %output : !type_DDR
+
+    // CHECK:    VPURT.Task
+    // CHECK-NEXT:    VPUIP.NNDMA
+    // CHECK-NOT:     is_out_of_order
+    // CHECK:    VPURT.Task
+    // CHECK-NEXT:    VPUIP.NNDMA
+    // CHECK-SAME:    is_out_of_order
+    // CHECK:    VPURT.Task
+    // CHECK-NEXT:    VPUIP.NNDMA
+    // CHECK-SAME:    is_out_of_order
+    // CHECK:    VPURT.Task
+    // CHECK-NEXT:    VPUIP.NNDMA
+    // CHECK-SAME:    is_out_of_order
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+!type_DDR = memref<1x3x64x64xf16, #NHWC, @DDR>
+
 //CHECK-LABEL: @ParallelDMAOutOfOrderOptimization
 func.func @ParallelDMAOutOfOrderOptimization() -> !type_DDR {
 

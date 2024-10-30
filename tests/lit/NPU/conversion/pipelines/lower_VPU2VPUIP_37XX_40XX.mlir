@@ -143,6 +143,7 @@ func.func @NCEConv(%arg0 : tensor<1x32x16x16xf16, {mem_space = @CMX_NN, order = 
     %weights_table = const.Declare tensor<64x1x1x4xsi32, {mem_space = @CMX_NN}> = dense<1> : tensor<64x1x1x4xsi32, {mem_space = @CMX_NN}>
 
     %out = VPU.NCE.Convolution(%arg0, %weights, %weights_table) {
+            opaque_ppe = #VPU.PPEStub<>,
             pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
             rawFilterShape = [64, 32, 3, 3],
             strides = [1, 1]
@@ -217,6 +218,7 @@ func.func @SparseNCEConv(%arg0 : tensor<1x32x16x16xf16, {order = #NHWC}>, %arg1 
             tensor<64x1x1x4xsi32> -> tensor<64x1x1x4xsi32, {mem_space = @CMX_NN}>
 
     %output_sparse_cmx = VPU.NCE.Convolution(%input_sparse_cmx, %weights_sparse_cmx, %weights_table_cmx) {
+            opaque_ppe = #VPU.PPEStub<>,
             pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
             rawFilterShape = [64, 32, 3, 3],
             strides = [1, 1]
@@ -422,6 +424,7 @@ func.func @SparseNCEConvSOH(%arg0 : !Input_DDR, %arg1 : !InputSM_DDR) -> !VPU.Sp
             %weights_table_sparse_cmx as %arg4: !WeightsTable_CMX)
             -> !VPU.SparseTensor<data=!OutputDistributed, sparsity_map=!OutputSMDistributed> {
         %0 = VPU.NCE.Convolution(%arg2, %arg3, %arg4) {
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 rawFilterShape = [64, 32, 3, 3],
                 strides = [1, 1]
@@ -585,6 +588,7 @@ func.func @SparseNCEConvSETable(%arg0 : tensor<1x32x16x16xf16, {order = #NHWC}>,
             tensor<64x1x1x4xsi32> -> tensor<64x1x1x4xsi32, {mem_space = @CMX_NN}>
 
     %output_cmx = VPU.NCE.Convolution(%input_sparse_cmx, %weights_cmx, %weights_table_cmx) {
+            opaque_ppe = #VPU.PPEStub<>,
             pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
             rawFilterShape = [64, 32, 3, 3],
             strides = [1, 1]
@@ -679,9 +683,9 @@ func.func @NCEMatMul(%arg0 : tensor<256x1x32x49x1xf16, {mem_space = @CMX_NN, ord
     %weights_table = const.Declare tensor<256x64x1x1x4xsi32, {mem_space = @CMX_NN}> = dense<1> : tensor<256x64x1x1x4xsi32, {mem_space = @CMX_NN}>
 
     %1 = VPU.NCE.MatMul(%arg0, %weights, %weights_table) {
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                rawFilterShape = [256, 64, 32, 1, 1], strides = [1, 1],
-                ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64>
+                rawFilterShape = [256, 64, 32, 1, 1], strides = [1, 1]
             } -> tensor<256x1x64x49x1xf16, {mem_space = @CMX_NN, order = #GNHWC}> {
         VPU.DPU.Workload inOffsets [0, 0, 0, 0, 0] inSizes [64, 1, 32, 49, 1] outOffsets [0, 0, 0, 0, 0]
          outSizes [64, 1, 64, 49, 1] <left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64> <CUBOID_16x16>

@@ -106,34 +106,34 @@ mlir::LogicalResult ConvertSubGRUSequenceToConvPass::GRUSequenceOpConverter::mat
     auto newInputShape = getIntArrayAttr(ctx, SmallVector<int64_t>({batchSize * seqLength, 1, 1, inputSize}));
     auto newWeightsShape = getIntArrayAttr(ctx, SmallVector<int64_t>({1, 1, weightsShape[1], inputSize}));
 
-    auto inputReshapeOp =
-            rewriter.create<IE::ReshapeOp>(origOp.getLoc(), origOp.getInputData(), nullptr, false, newInputShape);
-    auto weightsReshapeOp =
-            rewriter.create<IE::ReshapeOp>(origOp.getLoc(), origOp.getWeights(), nullptr, false, newWeightsShape);
+    auto inputReshapeOp = rewriter.create<IE::ReshapeOp>(takeOpLoc(origOp, "in_reshape"), origOp.getInputData(),
+                                                         nullptr, false, newInputShape);
+    auto weightsReshapeOp = rewriter.create<IE::ReshapeOp>(takeOpLoc(origOp, "weights_reshape"), origOp.getWeights(),
+                                                           nullptr, false, newWeightsShape);
 
     auto strides = getIntArrayAttr(ctx, SmallVector<int64_t>{1, 1});
     auto padsBegin = getIntArrayAttr(ctx, SmallVector<int64_t>{0, 0});
     auto padsEnd = getIntArrayAttr(ctx, SmallVector<int64_t>{0, 0});
     auto dilations = getIntArrayAttr(ctx, SmallVector<int64_t>{1, 1});
 
-    auto convolutionOp = rewriter.create<IE::ConvolutionOp>(origOp.getLoc(), weightsReshapeOp.getOutput(),
-                                                            inputReshapeOp.getOutput(), nullptr, strides, padsBegin,
-                                                            padsEnd, dilations, nullptr, nullptr, nullptr);
+    auto convolutionOp = rewriter.create<IE::ConvolutionOp>(
+            origOp.getLoc(), weightsReshapeOp.getOutput(), inputReshapeOp.getOutput(), nullptr, strides, padsBegin,
+            padsEnd, dilations, nullptr, nullptr, nullptr, nullptr, nullptr);
 
     auto newResultShape = getIntArrayAttr(ctx, SmallVector<int64_t>({batchSize, seqLength, weightsShape[1], 1}));
 
-    auto resultReshapeOp =
-            rewriter.create<IE::ReshapeOp>(origOp.getLoc(), convolutionOp.getOutput(), nullptr, false, newResultShape);
+    auto resultReshapeOp = rewriter.create<IE::ReshapeOp>(takeOpLoc(origOp, "out_reshape"), convolutionOp.getOutput(),
+                                                          nullptr, false, newResultShape);
 
     auto memPerm = mlir::AffineMapAttr::get(DimsOrder::NCHW.toAffineMap(ctx));
     auto dstOrder = mlir::AffineMapAttr::get(DimsOrder::NHWC.toAffineMap(ctx));
-    auto permuteCastOp =
-            rewriter.create<IE::PermuteCastOp>(origOp.getLoc(), resultReshapeOp.getOutput(), dstOrder, memPerm);
+    auto permuteCastOp = rewriter.create<IE::PermuteCastOp>(takeOpLoc(origOp, "out_permute"),
+                                                            resultReshapeOp.getOutput(), dstOrder, memPerm);
 
     auto gruSequenceLastPartOp = rewriter.create<IE::GRUSequenceLastPartOp>(
-            origOp.getLoc(), permuteCastOp.getOutput(), origOp.getInitialHiddenState(), origOp.getRecurrenceWeights(),
-            origOp.getBiases(), origOp.getHiddenSizeAttr(), origOp.getSeqLengthAttr(), origOp.getDirectionAttr(),
-            origOp.getShouldLinearBeforeResetAttr(), origOp.getClipAttr());
+            takeOpLoc(origOp, "gru_last_part"), permuteCastOp.getOutput(), origOp.getInitialHiddenState(),
+            origOp.getRecurrenceWeights(), origOp.getBiases(), origOp.getHiddenSizeAttr(), origOp.getSeqLengthAttr(),
+            origOp.getDirectionAttr(), origOp.getShouldLinearBeforeResetAttr(), origOp.getClipAttr());
 
     rewriter.replaceOp(origOp,
                        {gruSequenceLastPartOp.getMiddleHiddenState(), gruSequenceLastPartOp.getOutputHiddenState()});

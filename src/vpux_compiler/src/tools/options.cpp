@@ -38,6 +38,8 @@ vpux::VPU::ArchKind vpux::parseArchKind(int argc, char* argv[], StringRef helpHe
     static llvm::cl::opt<std::string> initCompiler("init-compiler",
                                                    llvm::cl::desc("Duplicated option for VPU::InitCompilerPass"),
                                                    llvm::cl::init(""), llvm::cl::cat(vpuxOptOptions));
+    static llvm::cl::opt<bool> listPasses("list-passes", llvm::cl::desc("Print the list of registered passes and exit"),
+                                          llvm::cl::init(false));
 
     // skip unknown options here, like split-input-file, show-dialects, etc.
     llvm::cl::list<std::string> sink(llvm::cl::Sink);
@@ -66,6 +68,7 @@ vpux::VPU::ArchKind vpux::parseArchKind(int argc, char* argv[], StringRef helpHe
         arch = getArchFromString(options->arch);
     }
 
+    listPasses.removeArgument();
     initCompiler.removeArgument();
     sink.removeArgument();
     llvm::cl::ResetAllOptionOccurrences();

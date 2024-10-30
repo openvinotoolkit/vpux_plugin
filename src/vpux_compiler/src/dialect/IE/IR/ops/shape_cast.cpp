@@ -39,19 +39,19 @@ mlir::OpFoldResult vpux::IE::ShapeCastOp::fold(FoldAdaptor adaptor) {
     if (inputType.getElementType().dyn_cast_or_null<mlir::quant::UniformQuantizedPerAxisType>()) {
         return nullptr;
     }
-    if (const auto attr = operands[0].dyn_cast_or_null<Const::ContentAttr>()) {
-        return attr.reshape(outputType.getShape());
+    if (const auto attr = operands[0].dyn_cast_or_null<Const::EphemeralContentAttr>()) {
+        return static_cast<Const::ContentAttr>(attr).transform().reshape(outputType.getShape()).get();
     }
 
     return nullptr;
 }
 
 //
-// FuseShapeCast
+// FuseWithShapeCastOrAffineReshape
 //
 
 namespace {
-class FuseShapeCast final : public mlir::OpRewritePattern<IE::ShapeCastOp> {
+class FuseWithShapeCastOrAffineReshape final : public mlir::OpRewritePattern<IE::ShapeCastOp> {
 public:
     using mlir::OpRewritePattern<IE::ShapeCastOp>::OpRewritePattern;
 
@@ -59,13 +59,22 @@ public:
     mlir::LogicalResult matchAndRewrite(IE::ShapeCastOp origOp, mlir::PatternRewriter& rewriter) const final;
 };
 
-mlir::LogicalResult FuseShapeCast::matchAndRewrite(IE::ShapeCastOp origOp, mlir::PatternRewriter& rewriter) const {
-    auto prevOp = origOp.getSource().getDefiningOp<IE::ShapeCastOp>();
-    if (prevOp == nullptr) {
+mlir::LogicalResult FuseWithShapeCastOrAffineReshape::matchAndRewrite(IE::ShapeCastOp origOp,
+                                                                      mlir::PatternRewriter& rewriter) const {
+    auto prevOp = origOp.getSource().getDefiningOp();
+    if (!mlir::isa_and_nonnull<IE::ShapeCastOp, IE::AffineReshapeOp>(prevOp)) {
         return mlir::failure();
     }
 
-    rewriter.replaceOpWithNewOp<IE::ShapeCastOp>(origOp, prevOp.getSource(), origOp.getShape());
+    auto inputType = prevOp->getOperand(0).getType().cast<NDTypeInterface>();
+    auto outputType = origOp.getResult().getType().cast<NDTypeInterface>();
+    const auto inputDimsOrder = inputType.getDimsOrder();
+    const auto outputDimsOrder = outputType.getDimsOrder();
+    if (inputDimsOrder != outputDimsOrder) {
+        return mlir::failure();
+    }
+
+    rewriter.replaceOpWithNewOp<IE::ShapeCastOp>(origOp, prevOp->getOperand(0), origOp.getShape());
     return mlir::success();
 }
 
@@ -76,5 +85,5 @@ mlir::LogicalResult FuseShapeCast::matchAndRewrite(IE::ShapeCastOp origOp, mlir:
 //
 
 void vpux::IE::ShapeCastOp::getCanonicalizationPatterns(mlir::RewritePatternSet& patterns, mlir::MLIRContext* ctx) {
-    patterns.add<FuseShapeCast>(ctx);
+    patterns.add<FuseWithShapeCastOrAffineReshape>(ctx);
 }

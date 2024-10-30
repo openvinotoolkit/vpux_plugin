@@ -9,11 +9,11 @@
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
-!Input0 = !VPUIP.Buffer<
+!Input0 = memref<
     1x16x16x32xf16, #NHWC, [@CMX_NN, 0]
 >
 
-!Input1 = !VPUIP.Buffer<
+!Input1 = memref<
     1x16x16x32xf16, #NHWC, [@CMX_NN, 1]
 >
 
@@ -168,15 +168,15 @@ func.func @main(%arg0:  memref<1x16x17x32xf16, #NHWC, [@CMX_NN, 0]>, %arg1:  mem
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
-!Input0 = !VPUIP.Buffer<
+!Input0 = memref<
     1x16x32x17xf16, #NHWC, [@CMX_NN, 0]
 >
 
-!Input1 = !VPUIP.Buffer<
+!Input1 = memref<
     1x16x32x17xf16, #NHWC, [@CMX_NN, 1]
 >
 
-!Input2 = !VPUIP.Buffer<
+!Input2 = memref<
     1x16x32x17xf16, #NHWC, [@CMX_NN, 2]
 >
 
@@ -413,15 +413,15 @@ func.func @main(%arg0:  memref<1x16x32x17xf16>, %arg1:  memref<1x16x32x17xf16>, 
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
-!Input0 = !VPUIP.Buffer<
+!Input0 = memref<
     1x16x10x10xf16, #NHWC, [@CMX_NN, 0]
 >
 
-!Input1 = !VPUIP.Buffer<
+!Input1 = memref<
     1x16x10x10xf16, #NHWC, [@CMX_NN, 1]
 >
 
-!Input2 = !VPUIP.Buffer<
+!Input2 = memref<
     1x16x10x10xf16, #NHWC, [@CMX_NN, 2]
 >
 
@@ -681,19 +681,19 @@ func.func @main(%arg0:  memref<1x16x10x10xf16>, %arg1:  memref<1x16x10x10xf16>, 
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
-!Input0 = !VPUIP.Buffer<
+!Input0 = memref<
     1x16x16x16xf16, #NHWC, [@CMX_NN, 0]
 >
 
-!Input1 = !VPUIP.Buffer<
+!Input1 = memref<
     1x16x16x16xf16, #NHWC, [@CMX_NN, 1]
 >
 
-!Input2 = !VPUIP.Buffer<
+!Input2 = memref<
     1x16x16x16xf16, #NHWC, [@CMX_NN, 2]
 >
 
-!Input3 = !VPUIP.Buffer<
+!Input3 = memref<
     1x16x16x16xf16, #NHWC, [@CMX_NN, 3]
 >
 
@@ -1083,19 +1083,19 @@ func.func @main(%arg0:  memref<1x16x16x16xf16>, %arg1:  memref<1x16x16x16xf16>, 
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
-!Input0 = !VPUIP.Buffer<
+!Input0 = memref<
     1x16x20x16xf16, #NHWC, [@CMX_NN, 0]
 >
 
-!Input1 = !VPUIP.Buffer<
+!Input1 = memref<
     1x16x20x16xf16, #NHWC, [@CMX_NN, 1]
 >
 
-!Input2 = !VPUIP.Buffer<
+!Input2 = memref<
     1x16x20x16xf16, #NHWC, [@CMX_NN, 2]
 >
 
-!Input3 = !VPUIP.Buffer<
+!Input3 = memref<
     1x16x20x16xf16, #NHWC, [@CMX_NN, 3]
 >
 
@@ -1439,15 +1439,15 @@ func.func @main(%arg0:  memref<1x16x20x16xf16>, %arg1:  memref<1x16x20x16xf16>, 
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
-!Input0 = !VPUIP.Buffer<
+!Input0 = memref<
     1x16x10x10xf16, #NHWC, [@CMX_NN, 0]
 >
 
-!Input1 = !VPUIP.Buffer<
+!Input1 = memref<
     1x16x10x10xf16, #NHWC, [@CMX_NN, 1]
 >
 
-!Input2 = !VPUIP.Buffer<
+!Input2 = memref<
     1x16x10x10xf16, #NHWC, [@CMX_NN, 2]
 >
 
@@ -1708,15 +1708,15 @@ func.func @main(%arg0:  memref<1x16x10x10xf16>, %arg1:  memref<1x16x10x10xf16>, 
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
-!Input0 = !VPUIP.Buffer<
+!Input0 = memref<
     1x16x10x10xf16, #NHWC, [@CMX_NN, 0]
 >
 
-!Input1 = !VPUIP.Buffer<
+!Input1 = memref<
     1x16x10x10xf16, #NHWC, [@CMX_NN, 1]
 >
 
-!Input2 = !VPUIP.Buffer<
+!Input2 = memref<
     1x16x10x10xf16, #NHWC, [@CMX_NN, 2]
 >
 

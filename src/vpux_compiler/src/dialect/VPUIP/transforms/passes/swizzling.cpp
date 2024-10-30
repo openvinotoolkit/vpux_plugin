@@ -264,6 +264,12 @@ bool Swizzling::canSwizzleWeights(VPUIP::NCEClusterTaskOp nceOp, DeviceInfo& dev
     }
 
     // Swizzling of 5-d weights breaks accuracy.
+    // Swizzling must be formulated for each sub-tensor in the batch individually.
+    // For example, for a weight tensor with shape 2x1x16x3x3 swizzling must apply to two 1x16x3x3 tensors.
+    // Individual buffers are not available at this stage of compilation.
+    // They appear after BatchMatMulToMatMul pass.
+    // The performance impact of swizzling in this scenario is negligible.
+    // The decision was to omit the feature for 5-d shapes.
     if (getShape(weights).size() >= DimsGroups5D::Filter::numDims) {
         _log.nest().trace("Cannot swizzle weights because they have rank 5 or higher.");
         return false;
@@ -529,9 +535,6 @@ mlir::DenseSet<mlir::Value> Swizzling::getSwizzledOperandsFromFlagsMap(VPUIP::NC
         if (nceOp.getInputSparsityMap() != nullptr) {
             swizzledOperands.insert(nceOp.getInputSparsityMap());
         }
-        if (nceOp.getActivationWindow() != nullptr) {
-            swizzledOperands.insert(nceOp.getActivationWindow());
-        }
     }
     if (swizzSettingsIt->second.weightInput) {
         swizzledOperands.insert(nceOp.getWeights());
@@ -555,6 +558,13 @@ bool Swizzling::canSwizzleActivation(VPUIP::NCEClusterTaskOp nceOp, DeviceInfo& 
 
     _log.trace("Check if output swizzling can be enabled for NCEOp '{0}'", nceOp->getLoc());
 
+    // Swizzling of 5-d activations breaks accuracy.
+    // Swizzling must be formulated for each sub-tensor in the batch individually.
+    // For example, for an activation tensor with shape 4x1x16x32x64 swizzling must apply to four 1x16x32x64 tensors.
+    // Individual buffers are not available at this stage of compilation.
+    // They appear after BatchMatMulToMatMul pass.
+    // The performance impact of swizzling in this scenario is negligible.
+    // The decision was to omit the feature for 5-d shapes.
     if (getShape(nceDataResult).size() >= DimsGroups5D::Filter::numDims) {
         _log.nest().trace("Cannot swizzle activation buffers because they have rank 5 or higher.");
         return false;
@@ -629,21 +639,6 @@ bool Swizzling::canSwizzleActivation(VPUIP::NCEClusterTaskOp nceOp, DeviceInfo& 
         auto userSwizzSettingsIt = opsInfo.opsSwizzlingFlagsMap.find(userNceOp);
         VPUX_THROW_WHEN(userSwizzSettingsIt == opsInfo.opsSwizzlingFlagsMap.end(),
                         "Not found swizzling settings for given NCEOp - {0}", userNceOp->getLoc());
-
-        // Before making final decision, check if user NCEOps which have fused constants
-        // and have constant that is related to NCEOp input (e.g. activation_window)
-        // has it also swizzled
-        if (userNceOp.getActivationWindow() != nullptr && userNceOp->hasAttr(vpux::ConstantFusing::constantsFused)) {
-            // If fused constant of user task is not swizzled then output cannot be swizzled
-            if (!userSwizzSettingsIt->second.weightInput) {
-                _log.nest().trace(
-                        "Do not enable activation swizzling because user task which has fused constant and has "
-                        "activation window does not have constants swizzled, user task - '{0}'",
-                        userNceOp->getLoc());
-                return false;
-            }
-        }
-
         userSwizzSettingsIt->second.activationInput = true;
     }
 
@@ -766,14 +761,12 @@ void Swizzling::safeRunOnFunc() {
     // Iterate IR twice. First to check what NCEOps can have constats swizzled,
     // the second time check which NCEOps can have their output swizzled.
     // Second iteration is separated because when determining if NCEOp output can be swizzled
-    // information about const swizzling is used. Some constants like activation_window impact
-    // NCEOps activation input and both need to have matching swizzling setting.
+    // information about const swizzling is used.
     // In the end HW requires to have matching swizzling setting on NCE operands which
     // are consumed/produced by same reader/writer:
     // activation reader:
     // - input
     // - input_sparisty_map
-    // - activation_window
     // weights reader
     // - weights
     // - weights_table
@@ -796,18 +789,9 @@ void Swizzling::safeRunOnFunc() {
         });
     }
 
-    // Check if in cases where fused constant is to be swizzled together with activation_window
-    // and operation input is not swizzled then constant swizzling needs to be disabled
     for (auto& opsSwizzlingFlags : opsInfo.opsSwizzlingFlagsMap) {
         auto nceOp = opsSwizzlingFlags.first;
         auto swizzFlags = opsSwizzlingFlags.second;
-        if (!swizzFlags.activationInput && swizzFlags.weightInput &&
-            nceOp->hasAttr(vpux::ConstantFusing::constantsFused) && nceOp.getActivationWindow() != nullptr) {
-            opsSwizzlingFlags.second.weightInput = false;
-            _log.trace("Cannot swizzle weights of '{0}', since it is fused constant with activation_windows and there "
-                       "is no swizzling on input",
-                       nceOp->getLoc());
-        }
 
         // In case of weights constant is used by multi users, and some of those users can be swizzled and others
         // cannot(theoretically only weight will be shared, wt will not, so we only need to check weights here, same
@@ -903,14 +887,6 @@ void Swizzling::safeRunOnFunc() {
             constantBufferSwizzling(builder, nceOp, nceOp.getWeights(), deviceInfo);
             constantBufferSwizzling(builder, nceOp, nceOp.getWeightsSparsityMap(), deviceInfo);
             constantBufferSwizzling(builder, nceOp, nceOp.getWeightTable(), deviceInfo);
-        }
-        if (flags.activationInput) {
-            // Special action need to be taken in case operation has activation_window, which
-            // is a constant but related to activation input. If nceOp has fused constants
-            // it was already swizzled as part of rest of constants
-            if (nceOp.getActivationWindow() != nullptr) {
-                constantBufferSwizzling(builder, nceOp, nceOp.getActivationWindow(), deviceInfo);
-            }
         }
 
         if (flags.activationOutput) {

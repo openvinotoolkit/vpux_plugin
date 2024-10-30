@@ -4,6 +4,7 @@
 //
 
 #include "vpux/compiler/NPU37XX/dialect/IE/transforms/passes.hpp"
+#include "vpux/compiler/NPU37XX/dialect/IE/utils/quantization.hpp"
 #include "vpux/compiler/dialect/IE/utils/quantization.hpp"
 
 #include "vpux/compiler/utils/rewriter.hpp"

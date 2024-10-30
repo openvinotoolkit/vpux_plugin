@@ -131,6 +131,7 @@ void updateCallOp(mlir::ModuleOp module) {
             result.replaceAllUsesWith(newResult);
         }
 
+        newCallOp->setAttrs(callOp->getAttrs());
         callOp.erase();
     });
 }

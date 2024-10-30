@@ -102,3 +102,22 @@ func.func @NotNormalizedEncodedVariance(%arg0: tensor<1x40448xf16>, %arg1: tenso
 // CHECK:       VPU.DetectionOutputDecodeBoxes
 // CHECK-SAME:     [[NORM_PRIORS]]
 }
+
+// -----
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+#NCWH = affine_map<(d0, d1, d2, d3) -> (d0, d1, d3, d2)>
+#NHCW = affine_map<(d0, d1, d2, d3) -> (d0, d2, d1, d3)>
+
+// CHECK-LABEL: func.func @LessDetectionsThenTopK
+func.func @LessDetectionsThenTopK(%arg0: tensor<1x25200xf16>, %arg1: tensor<1x6300xf16>, %arg2: tensor<1x1x1500xf16>) -> tensor<1x1x200x7xf16> {
+  %0 = VPU.DetectionOutput(%arg0, %arg1, %arg2) {attr = #IE.DetectionOutput<num_classes = 21 : i64, background_label_id = 0 : i64, top_k = 400 : i64, variance_encoded_in_target = true, keep_top_k = [200], code_type = <CENTER_SIZE>, share_location = false, nms_threshold = 0.30000001192092896 : f64, confidence_threshold = 5.000000e-01 : f64, clip_after_nms = false, clip_before_nms = false, decrease_label_id = false, normalized = false, input_height = 600 : i64, input_width = 1000 : i64, objectness_score = 0.000000e+00 : f64>, operandSegmentSizes = array<i32: 1, 1, 1, 0, 0>} : tensor<1x25200xf16>, tensor<1x6300xf16>, tensor<1x1x1500xf16> -> tensor<1x1x200x7xf16>
+  %1 = VPU.Convert(%0) {dstElemType = f16} : tensor<1x1x200x7xf16> -> tensor<1x1x200x7xf16>
+  return %1 : tensor<1x1x200x7xf16>
+
+  // top_k is clamped to the number of prior boxes
+  // CHECK:         VPU.DetectionOutputSort
+  // CHECK-SAME:        top_k = 300
+  // CHECK:         VPU.DetectionOutputNmsCaffe
+  // CHECK-SAME:        top_k = 300
+}

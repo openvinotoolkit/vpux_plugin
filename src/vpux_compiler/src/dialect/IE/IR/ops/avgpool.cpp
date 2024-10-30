@@ -34,8 +34,12 @@ mlir::LogicalResult vpux::IE::AvgPoolOp::inferReturnTypeComponents(
     const auto inType = avgPool.getInput().getType().cast<mlir::ShapedType>().getElementType();
     const auto inShape = avgPool.getInput().getType().cast<mlir::ShapedType>().getShape();
 
-    const auto shapeI64 = inferAvgPoolOutputShape(inShape, windowStrides, dataPaddingBelow, dataPaddingAbove,
-                                                  windowShape, roundingType);
+    auto shapeI64 = inferAvgPoolOutputShape(inShape, windowStrides, dataPaddingBelow, dataPaddingAbove, windowShape,
+                                            roundingType);
+
+    if (avgPool.getOutputChannels().has_value()) {
+        shapeI64[Dims4D::Act::C.ind()] = avgPool.getOutputChannels().value();
+    }
 
     inferredReturnShapes.emplace_back(shapeI64, inType);
 

@@ -38,14 +38,14 @@ private:
     VPU::DPUDryRunMode _dpuDryRun;
     bool _shaveDryRun;
     bool isLegalExecutorType(VPURT::TaskOp taskOp);
-    bool allBarrierProducersLegal(VPURT::DeclareVirtualBarrierOp barrierOp, BarrierInfo& barrierInfo);
-    bool allBarrierConsumersLegal(VPURT::DeclareVirtualBarrierOp barrierOp, BarrierInfo& barrierInfo);
+    bool allBarrierProducersLegal(VPURT::BarrierOpInterface barrierOp, BarrierInfo& barrierInfo);
+    bool allBarrierConsumersLegal(VPURT::BarrierOpInterface barrierOp, BarrierInfo& barrierInfo);
     void findTopLegalProducers(BarrierInfo::TaskSet& notLegalProducers, BarrierInfo::TaskSet& topLegalProducers,
                                BarrierInfo::TaskSet& tasksToRemove, BarrierInfo& barrierInfo);
-    BarrierInfo::TaskSet legalizeBarrierProducers(VPURT::DeclareVirtualBarrierOp barrierOp, BarrierInfo& barrierInfo);
+    BarrierInfo::TaskSet legalizeBarrierProducers(VPURT::BarrierOpInterface barrierOp, BarrierInfo& barrierInfo);
     void findBottomLegalConsumers(BarrierInfo::TaskSet& notLegalConsumers, BarrierInfo::TaskSet& bottomLegalConsumers,
                                   BarrierInfo::TaskSet& tasksToRemove, BarrierInfo& barrierInfo);
-    BarrierInfo::TaskSet legalizeBarrierConsumers(VPURT::DeclareVirtualBarrierOp barrierOp, BarrierInfo& barrierInfo);
+    BarrierInfo::TaskSet legalizeBarrierConsumers(VPURT::BarrierOpInterface barrierOp, BarrierInfo& barrierInfo);
 };
 
 mlir::LogicalResult ComputeTaskStrippingPass::initializeOptions(StringRef options) {
@@ -75,8 +75,7 @@ bool ComputeTaskStrippingPass::isLegalExecutorType(VPURT::TaskOp taskOp) {
     return true;
 }
 
-bool ComputeTaskStrippingPass::allBarrierProducersLegal(VPURT::DeclareVirtualBarrierOp barrierOp,
-                                                        BarrierInfo& barrierInfo) {
+bool ComputeTaskStrippingPass::allBarrierProducersLegal(VPURT::BarrierOpInterface barrierOp, BarrierInfo& barrierInfo) {
     for (const auto& producer : barrierInfo.getBarrierProducers(barrierOp)) {
         const auto producerOp = barrierInfo.getTaskOpAtIndex(producer);
         if (!ComputeTaskStrippingPass::isLegalExecutorType(producerOp)) {
@@ -86,8 +85,7 @@ bool ComputeTaskStrippingPass::allBarrierProducersLegal(VPURT::DeclareVirtualBar
     return true;
 }
 
-bool ComputeTaskStrippingPass::allBarrierConsumersLegal(VPURT::DeclareVirtualBarrierOp barrierOp,
-                                                        BarrierInfo& barrierInfo) {
+bool ComputeTaskStrippingPass::allBarrierConsumersLegal(VPURT::BarrierOpInterface barrierOp, BarrierInfo& barrierInfo) {
     for (const auto& consumer : barrierInfo.getBarrierConsumers(barrierOp)) {
         const auto consumerOp = barrierInfo.getTaskOpAtIndex(consumer);
         if (!ComputeTaskStrippingPass::isLegalExecutorType(consumerOp)) {
@@ -121,7 +119,7 @@ void ComputeTaskStrippingPass::findTopLegalProducers(BarrierInfo::TaskSet& notLe
     }
 }
 
-BarrierInfo::TaskSet ComputeTaskStrippingPass::legalizeBarrierProducers(VPURT::DeclareVirtualBarrierOp barrierOp,
+BarrierInfo::TaskSet ComputeTaskStrippingPass::legalizeBarrierProducers(VPURT::BarrierOpInterface barrierOp,
                                                                         BarrierInfo& barrierInfo) {
     // Store tasks to remove
     BarrierInfo::TaskSet tasksToRemove;
@@ -179,7 +177,7 @@ void ComputeTaskStrippingPass::findBottomLegalConsumers(BarrierInfo::TaskSet& no
     }
 }
 
-BarrierInfo::TaskSet ComputeTaskStrippingPass::legalizeBarrierConsumers(VPURT::DeclareVirtualBarrierOp barrierOp,
+BarrierInfo::TaskSet ComputeTaskStrippingPass::legalizeBarrierConsumers(VPURT::BarrierOpInterface barrierOp,
                                                                         BarrierInfo& barrierInfo) {
     // Store tasks to remove
     BarrierInfo::TaskSet tasksToRemove;
@@ -218,7 +216,7 @@ BarrierInfo::TaskSet ComputeTaskStrippingPass::legalizeBarrierConsumers(VPURT::D
 void ComputeTaskStrippingPass::safeRunOnFunc() {
     auto func = getOperation();
     auto& barrierInfo = getAnalysis<BarrierInfo>();
-    const auto numOfBarriers = barrierInfo.getNumOfVirtualBarriers();
+    const auto numOfBarriers = barrierInfo.getNumOfBarrierOps();
     if (numOfBarriers == 0) {
         return;
     }

@@ -57,18 +57,6 @@ class VPUIP_TaskOp<int numResult, string mnemonic, list<Trait> traits = []> :
     let extraClassDeclaration = commonExtraClassDeclaration;
 }
 
-class VPUIP_UPATaskOp<int numResult, string mnemonic, list<Trait> traits = []> :
-        VPUIP_TaskOp<
-            numResult,
-            mnemonic,
-            !listconcat(
-                traits,
-                [
-                    VPUIP_UPATask
-                ]
-            )
-        >;
-
 //
 // NNDMAOp
 //
@@ -87,8 +75,8 @@ def VPUIP_NNDMAOp :
     let summary = "NN DMA task";
 
     let arguments = (ins
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_ITIBuffer, VPUIP_BoundedBuffer]>:$input,
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_BoundedBuffer]>:$output_buff,
+        AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer, VPUIP_ITIBuffer, VPUIP_BoundedBuffer]>:$input,
+        AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer, VPUIP_BoundedBuffer]>:$output_buff,
 
         OptionalAttr<IntAttr>:$port,
         UnitAttr:$is_out_of_order,
@@ -102,7 +90,7 @@ def VPUIP_NNDMAOp :
     );
 
     let results = (outs
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_BoundedBuffer]>:$output
+        AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer, VPUIP_BoundedBuffer]>:$output
     );
 
     let builders = [
@@ -232,9 +220,9 @@ def VPUIP_GatherDMAOp :
     }];
 
     let arguments = (ins
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_ITIBuffer]>:$input,
+        AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer, VPUIP_ITIBuffer]>:$input,
         MemRefOf<[AnySignlessInteger, Index,I64,UI64]>:$indices,
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer]>:$outputBuff,
+        AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer]>:$outputBuff,
 
 
         IntAttr:$elementSize,
@@ -253,7 +241,7 @@ def VPUIP_GatherDMAOp :
     );
 
     let results = (outs
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer]>:$output
+        AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer]>:$output
     );
 
     let builders = [
@@ -308,8 +296,8 @@ def VPUIP_ConvertDMAOp :
     let summary = "NN DMA task which enables data conversion";
 
     let arguments = (ins
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_ITIBuffer, VPUIP_BoundedBuffer]>:$input,
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_BoundedBuffer]>:$output_buff,
+        AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer, VPUIP_ITIBuffer, VPUIP_BoundedBuffer]>:$input,
+        AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer, VPUIP_BoundedBuffer]>:$output_buff,
 
         OptionalAttr<IntAttr>:$port,
         UnitAttr:$is_out_of_order,
@@ -319,7 +307,7 @@ def VPUIP_ConvertDMAOp :
     );
 
     let results = (outs
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_BoundedBuffer]>:$output
+        AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer, VPUIP_BoundedBuffer]>:$output
     );
 
     let builders = [
@@ -559,2127 +547,6 @@ def VPUIP_SyncDMAOp :
 }
 
 //
-// ConvertUPAOp
-//
-
-def VPUIP_ConvertUPAOp :
-        VPUIP_UPATaskOp<1, "ConvertUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameShape
-            ]
-        > {
-    let summary = "Convert UPA SHAVE kernel";
-
-    let arguments = (ins
-        AnyMemRef:$input,
-        AnyMemRef:$output_buff,
-
-        OptionalAttr<F64Attr>:$scale,
-        OptionalAttr<F64Attr>:$bias,
-        UnitAttr:$fromDetectionOutput,
-        UnitAttr:$haveBatch,
-        OptionalAttr<IntAttr>:$batchID
-    );
-
-    let results = (outs
-        AnyMemRef:$output
-    );
-
-    let builders = [
-        OpBuilder<
-            (ins "mlir::Value":$input, "mlir::Value":$output)
-        >
-    ];
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// SoftMaxUPAOp
-//
-
-def VPUIP_SoftMaxUPAOp :
-        VPUIP_UPATaskOp<1, "SoftMaxUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameShape,
-                VPUIP_SameElementType
-            ]
-        > {
-    let summary = "SoftMax UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff,
-
-        IntAttr:$axisInd
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// PoolingUPAOp
-//
-
-def VPUIP_PoolingUPAOp :
-        VPUIP_UPATaskOp<1, "PoolingUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameElementType
-            ]
-        > {
-    let summary = "MAX and AVG Pooling UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff,
-
-        VPUIP_PoolLayerTypeAttr:$task_type,
-        I64ArrayAttr:$kernel,
-        I64ArrayAttr:$strides,
-        I64ArrayAttr:$padsBegin,
-        I64ArrayAttr:$padsEnd,
-        UnitAttr:$excludePad
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// AdaptiveAvgUPAOp
-//
-
-def VPUIP_AdaptiveAvgPoolUPAOp :
-        VPUIP_UPATaskOp<1, "AdaptiveAvgPoolUPA",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "Adaptive AVG UPA SHAVE kernel";
-
-    let arguments = (ins
-        MemRefOf<[F16, F32]>:$input,
-        MemRefOf<[SI32]>:$pooled_spatial_shape,
-        MemRefOf<[F16, F32]>:$output_buff
-
-    );
-
-    let results = (outs
-        MemRefOf<[F16, F32]>:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `,` $pooled_spatial_shape `:` type($pooled_spatial_shape) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-//
-// AdaptiveMaxUPAOp
-//
-
-def VPUIP_AdaptiveMaxPoolUPAOp :
-        VPUIP_UPATaskOp<2, "AdaptiveMaxPoolUPA",
-            [
-                MultiViewOpInterface
-            ]
-        > {
-    let summary = "Adaptive Max UPA SHAVE kernel";
-
-    let arguments = (ins
-        MemRefOf<[F16, F32]>:$input,
-        MemRefOf<[SI32]>:$pooled_spatial_shape,
-        MemRefOf<[F16, F32]>:$output_buff,
-        MemRefOf<[SI32]>:$output_index_buff,
-        TypeAttr:$index_element_type
-    );
-
-    let results = (outs
-        MemRefOf<[F16, F32]>:$output,
-        MemRefOf<[SI32]>:$output_index
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `,` $pooled_spatial_shape `:` type($pooled_spatial_shape) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `,` $output_index_buff `:` type($output_index_buff) `)`
-        `->` type(results)
-    }];
-}
-//
-// ConvolutionUPAOp
-//
-
-def VPUIP_ConvolutionUPAOp :
-        VPUIP_UPATaskOp<1, "ConvolutionUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameElementType
-            ]
-        > {
-    let summary = "Convolution UPA SHAVE kernel (reference implementation)";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$filter,
-        Optional<F16MemRef>:$bias,
-        F16MemRef:$output_buff,
-
-        I64ArrayAttr:$strides,
-        I64ArrayAttr:$dilations,
-        I64ArrayAttr:$padsBegin,
-        I64ArrayAttr:$padsEnd,
-        IntAttr:$groups
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `,` $filter `:` type($filter) (`,` $bias^ `:` type($bias))? `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-
-    let hasVerifier = 1;
-}
-
-//
-// ReLUUPAOp
-//
-
-def VPUIP_ReLUUPAOp :
-        VPUIP_UPATaskOp<1, "ReLUUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameShape,
-                VPUIP_SameElementType,
-                VPUIP_Legacy4D
-            ]
-        > {
-    let summary = "ReLU UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// RollUPAOp
-//
-
-def VPUIP_RollUPAOp :
-        VPUIP_UPATaskOp<1, "RollUPA",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "Roll UPA SHAVE kernel";
-
-    let arguments = (ins
-            AnyMemRef:$data,
-            MemRefOf<[SI32]>:$shift,
-            MemRefOf<[SI32]>:$axes,
-            AnyMemRef:$output_buff
-    );
-
-    let results = (outs
-            AnyMemRef:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $data `:` type($data) `,` $shift `:` type($shift) `,` $axes `:` type($axes) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-
-}
-
-//
-// SigmoidOp
-//
-
-def VPUIP_SigmoidUPAOp :
-        VPUIP_UPATaskOp<1, "SigmoidUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameShape,
-                VPUIP_SameElementType,
-                VPUIP_Legacy4D
-            ]
-        > {
-    let summary = "Sigmoid UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// HSwishUPAOp
-//
-
-def VPUIP_HSwishUPAOp :
-        VPUIP_UPATaskOp<1, "HSwishUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameShape,
-                VPUIP_SameElementType,
-                VPUIP_Legacy4D
-            ]
-        > {
-    let summary = "HSwish UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// ErfOp
-//
-
-def VPUIP_ErfUPAOp :
-        VPUIP_UPATaskOp<1, "ErfUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameShape,
-                VPUIP_SameElementType,
-                VPUIP_Legacy4D
-            ]
-        > {
-    let summary = "Erf UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// MishUPAOp
-//
-
-def VPUIP_MishUPAOp :
-        VPUIP_UPATaskOp<1, "MishUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameShape,
-                VPUIP_SameElementType,
-                VPUIP_Legacy4D
-            ]
-        > {
-    let summary = "Mish UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// FloorUPAOp
-//
-
-def VPUIP_FloorUPAOp :
-        VPUIP_UPATaskOp<1, "FloorUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameShape,
-                VPUIP_SameElementType,
-                VPUIP_Legacy4D
-            ]
-        > {
-    let summary = "Floor UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// RoundUPAOp
-//
-
-def VPUIP_RoundUPAOp :
-        VPUIP_UPATaskOp<1, "RoundUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameShape,
-                VPUIP_SameElementType,
-                VPUIP_Legacy4D
-            ]
-        > {
-    let summary = "Round UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff,
-
-        IE_RoundModeAttr:$mode
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-       }];
-}
-
-//
-// ClampUPAOp
-//
-
-def VPUIP_ClampUPAOp :
-        VPUIP_UPATaskOp<1, "ClampUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameShape,
-                VPUIP_SameElementType,
-                VPUIP_Legacy4D
-            ]
-        > {
-    let summary = "Clamp UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff,
-
-        F64Attr:$min,
-        F64Attr:$max
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// EluUPAOp
-//
-
-def VPUIP_EluUPAOp :
-        VPUIP_UPATaskOp<1, "EluUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameShape,
-                VPUIP_SameElementType,
-                VPUIP_Legacy4D
-            ]
-        > {
-    let summary = "Elu UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff,
-
-        F64Attr:$x
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// TanhUPAOp
-//
-
-def VPUIP_TanhUPAOp :
-        VPUIP_UPATaskOp<1, "TanhUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameShape,
-                VPUIP_SameElementType,
-                VPUIP_Legacy4D
-            ]
-        > {
-    let summary = "Tanh UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// SinUPAOp
-//
-
-def VPUIP_SinUPAOp :
-        VPUIP_UPATaskOp<1, "SinUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameShape,
-                VPUIP_SameElementType,
-                VPUIP_Legacy4D
-            ]
-        > {
-    let summary = "Sin UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// CosUPAOp
-//
-
-def VPUIP_CosUPAOp :
-        VPUIP_UPATaskOp<1, "CosUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameShape,
-                VPUIP_SameElementType,
-                VPUIP_Legacy4D
-            ]
-        > {
-    let summary = "Cos UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// TanUPAOp
-//
-
-def VPUIP_TanUPAOp :
-        VPUIP_UPATaskOp<1, "TanUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameShape,
-                VPUIP_SameElementType,
-                VPUIP_Legacy4D
-            ]
-        > {
-    let summary = "Tan UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// SqrtUPAOp
-//
-
-def VPUIP_SqrtUPAOp :
-        VPUIP_UPATaskOp<1, "SqrtUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameShape,
-                VPUIP_SameElementType,
-                VPUIP_Legacy4D
-            ]
-        > {
-    let summary = "Sqrt UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// SinhUPAOp
-//
-
-def VPUIP_SinhUPAOp :
-        VPUIP_UPATaskOp<1, "SinhUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameShape,
-                VPUIP_SameElementType,
-                VPUIP_Legacy4D
-            ]
-        > {
-    let summary = "Sinh UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// CoshUPAOp
-//
-
-def VPUIP_CoshUPAOp :
-        VPUIP_UPATaskOp<1, "CoshUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameShape,
-                VPUIP_SameElementType,
-                VPUIP_Legacy4D
-            ]
-        > {
-    let summary = "Cosh UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// AsinhUPAOp
-//
-
-def VPUIP_AsinhUPAOp :
-        VPUIP_UPATaskOp<1, "AsinhUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameShape,
-                VPUIP_SameElementType,
-                VPUIP_Legacy4D
-            ]
-        > {
-    let summary = "Asinh UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// AcoshUPAOp
-//
-
-def VPUIP_AcoshUPAOp :
-        VPUIP_UPATaskOp<1, "AcoshUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameShape,
-                VPUIP_SameElementType,
-                VPUIP_Legacy4D
-            ]
-        > {
-    let summary = "Acosh UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// AbsUPAOp
-//
-
-def VPUIP_AbsUPAOp :
-        VPUIP_UPATaskOp<1, "AbsUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameShape,
-                VPUIP_SameElementType,
-                VPUIP_Legacy4D
-            ]
-        > {
-    let summary = "Abs UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// HSigmoidOp
-//
-
-def VPUIP_HSigmoidUPAOp :
-        VPUIP_UPATaskOp<1, "HSigmoidUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameShape,
-                VPUIP_SameElementType,
-                VPUIP_Legacy4D
-            ]
-        > {
-    let summary = "HSigmoid UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// AtanUPAOp
-//
-
-def VPUIP_AtanUPAOp :
-        VPUIP_UPATaskOp<1, "AtanUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameShape,
-                VPUIP_SameElementType,
-                VPUIP_Legacy4D
-            ]
-        > {
-    let summary = "Atan UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// AsinUPAOp
-//
-
-def VPUIP_AsinUPAOp :
-        VPUIP_UPATaskOp<1, "AsinUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameShape,
-                VPUIP_SameElementType,
-                VPUIP_Legacy4D
-            ]
-        > {
-    let summary = "Asin UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// AcosUPAOp
-//
-
-def VPUIP_AcosUPAOp :
-        VPUIP_UPATaskOp<1, "AcosUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameShape,
-                VPUIP_SameElementType,
-                VPUIP_Legacy4D
-            ]
-        > {
-    let summary = "Acos UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// AtanhUPAOp
-//
-
-def VPUIP_AtanhUPAOp :
-        VPUIP_UPATaskOp<1, "AtanhUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameShape,
-                VPUIP_SameElementType,
-                VPUIP_Legacy4D
-            ]
-        > {
-    let summary = "Atanh UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// LogUPAOp
-//
-
-def VPUIP_LogUPAOp :
-        VPUIP_UPATaskOp<1, "LogUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameShape,
-                VPUIP_SameElementType
-            ]
-        > {
-    let summary = "Log UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// SeluUPAOp
-//
-
-def VPUIP_SeluUPAOp :
-        VPUIP_UPATaskOp<1, "SeluUPA",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "Selu UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$data,
-        F16MemRef:$output_buff,
-
-        F64Attr:$alphaValue,
-        F64Attr:$lambdaValue
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $data `:` type($data) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// GeluUPAOp
-//
-
-def VPUIP_GeluUPAOp :
-        VPUIP_UPATaskOp<1, "GeluUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameShape,
-                VPUIP_SameElementType,
-                VPUIP_Legacy4D
-            ]
-        > {
-    let summary = "Gelu UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// ExpUPAOp
-//
-
-def VPUIP_ExpUPAOp :
-        VPUIP_UPATaskOp<1, "ExpUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameShape,
-                VPUIP_SameElementType,
-                VPUIP_Legacy4D
-            ]
-        > {
-    let summary = "Exp UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// FakeQuantizeUPAOp
-//
-
-def VPUIP_FakeQuantizeUPAOp :
-        VPUIP_UPATaskOp<1, "FakeQuantizeUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameElementType
-            ]
-        > {
-    let summary = "FakeQuantize UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff,
-
-        IntAttr:$levels,
-        Const_ContentAttr:$input_low,
-        Const_ContentAttr:$input_high,
-        Const_ContentAttr:$output_low,
-        Const_ContentAttr:$output_high
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// QuantCastUPAOp
-//
-
-def VPUIP_QuantCastUPAOp :
-        VPUIP_UPATaskOp<1, "QuantCastUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameShape,
-                VPUIP_Legacy4D
-            ]
-        > {
-    let summary = "QuantCast UPA SHAVE kernel";
-
-    let arguments = (ins
-        MemRefOf<[F16, quant_QuantizedType]>:$input,
-        MemRefOf<[F16, quant_QuantizedType]>:$output_buff
-    );
-
-    let results = (outs
-        MemRefOf<[F16, quant_QuantizedType]>:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// PReluUPAOp
-//
-
-def VPUIP_PReluUPAOp :
-        VPUIP_UPATaskOp<1, "PReluUPA",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "PRelu UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$negative_slope,
-        F16MemRef:$output_buff
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `,` $negative_slope `:` type($negative_slope) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// LeakyReluUPAOp
-//
-
-def VPUIP_LeakyReluUPAOp :
-        VPUIP_UPATaskOp<1,  "LeakyReluUPA",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "LeakyRelu UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff,
-
-        F64Attr:$negative_slope
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// EltwiseUPAOp
-//
-
-def VPUIP_EltwiseUPAOp :
-        VPUIP_UPATaskOp<1, "EltwiseUPA",
-            [
-                ViewLikeOpInterface,
-            ]
-        > {
-    let summary = "Eltwise UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input1,
-        F16MemRef:$input2,
-        F16MemRef:$output_buff,
-
-        VPU_EltwiseTypeAttr:$task_type
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input1 `:` type($input1) `,` $input2 `:` type($input2) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// LogicalNotUPAOp
-//
-
-def VPUIP_LogicalNotUPAOp :
-        VPUIP_UPATaskOp<1, "LogicalNotUPA",
-            [
-                ViewLikeOpInterface,
-            ]
-        > {
-    let summary = "Logical Not UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input1,
-        F16MemRef:$output_buff,
-
-        VPU_EltwiseTypeAttr:$task_type
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input1 `:` type($input1) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// SelectUPAOp
-//
-
-def VPUIP_SelectUPAOp :
-        VPUIP_UPATaskOp<1, "SelectUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameShape
-            ]
-        > {
-    let summary = "Select UPA SHAVE kernel";
-
-    let arguments = (ins
-        MemRefOf<[SI32,F16]>:$input1,
-        MemRefOf<[SI32,F16]>:$input2,
-        MemRefOf<[SI32,F16]>:$input3,
-        MemRefOf<[SI32,F16]>:$output_buff
-    );
-
-    let results = (outs
-        MemRefOf<[SI32,F16]>:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input1 `:` type($input1) `,` $input2 `:` type($input2) `,` $input3 `:` type($input3) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// DetectionOutput
-//
-
-def VPUIP_DetectionOutputUPAOp :
-        VPUIP_UPATaskOp<1, "DetectionOutputUPA",
-            [
-                AttrSizedOperandSegments,
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "DetectionOutput UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$in_box_logits,
-        F16MemRef:$in_class_preds,
-        F16MemRef:$in_proposals,
-        Optional<F16MemRef>:$in_additional_preds,
-        Optional<F16MemRef>:$in_additional_proposals,
-
-        F16MemRef:$output_buff,
-
-        IE_DetectionOutputAttr:$attr
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $in_box_logits `:` type($in_box_logits) `,` $in_class_preds `:` type($in_class_preds) `,` $in_proposals `:` type($in_proposals) (`,` $in_additional_preds^ `:` type($in_additional_preds))? (`,` $in_additional_proposals^ `:` type($in_additional_proposals))? `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// SwishUPAOp
-//
-
-def VPUIP_SwishUPAOp :
-        VPUIP_UPATaskOp<1, "SwishUPA",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "Swish UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff,
-
-        F64Attr:$beta_value
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// HardSigmoidUPAOp
-//
-
-def VPUIP_HardSigmoidUPAOp :
-        VPUIP_UPATaskOp<1, "HardSigmoidUPA",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "HardSigmoid UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff,
-
-        F64Attr:$alpha_value,
-        F64Attr:$beta_value
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-
-//
-// EmbeddingBagOffsetsSumUPAOp
-//
-
-def VPUIP_EmbeddingBagOffsetsSumUPAOp :
-        VPUIP_UPATaskOp<1, "EmbeddingBagOffsetsSumUPA",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "EmbeddingBagOffsetsSum UPA SHAVE kernel";
-
-    let arguments = (ins
-        AnyMemRef:$input,
-        I64ArrayAttr:$indices_value,
-        I64ArrayAttr:$offsets_value,
-        IntAttr:$default_index_value,
-        F64ArrayAttr:$weights_value,
-
-        AnyMemRef:$output_buff
-    );
-
-    let results = (outs
-        AnyMemRef:$output
-    );
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// EmbeddingSegmentsSumUPAOp
-//
-
-def VPUIP_EmbeddingSegmentsSumUPAOp :
-        VPUIP_UPATaskOp<1, "EmbeddingSegmentsSumUPA",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "EmbeddingSegmentsSum UPA SHAVE kernel";
-
-    let arguments = (ins
-        AnyMemRef:$emb_table,
-        AnyMemRef:$output_buff,
-
-        I64ArrayAttr:$indices_value,
-        I64ArrayAttr:$segment_ids_value,
-        IntAttr:$num_segments_value,
-        IntAttr:$default_index_value,
-        F64ArrayAttr:$per_sample_weights_value
-    );
-
-    let results = (outs
-        AnyMemRef:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $emb_table `:` type($emb_table) `)`
-        `ouputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// GRNUPAOp
-//
-
-def VPUIP_GRNUPAOp :
-        VPUIP_UPATaskOp<1, "GRNUPA",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "GRN UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff,
-
-        F64Attr:$bias
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// ReduceUPAOp
-//
-
-def VPUIP_ReduceUPAOp :
-        VPUIP_UPATaskOp<1, "ReduceUPA",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "Reduce UPA SHAVE kernel";
-
-    let arguments = (ins
-        MemRefOf<[F16, SI32]>:$input,
-        MemRefOf<[F16, SI32]>:$output_buff,
-
-        I64ArrayAttr:$axes_value,
-        UnitAttr:$keep_dims,
-        VPUIP_ReduceLayerTypeAttr:$task_type
-    );
-
-    let results = (outs
-        MemRefOf<[F16, SI32]>:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// NormUPAOp
-//
-
-def VPUIP_NormUPAOp :
-        VPUIP_UPATaskOp<1, "NormUPA",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "Norm UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-
-        F16MemRef:$output_buff,
-
-        F64Attr:$alpha,
-        F64Attr:$beta,
-        F64Attr:$bias,
-        IntAttr:$local_size,
-        IE_LRN_IERegionAttr:$region
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-
-    let hasVerifier = 1;
-}
-
-//
-// BroadcastUPAOp
-//
-
-def VPUIP_BroadcastUPAOp :
-        VPUIP_UPATaskOp<1, "BroadcastUPA",
-            [
-                ViewLikeOpInterface
-
-            ]
-        > {
-    let summary = "Broadcast UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        MemRefOf<[SI32]>:$target_shape,
-        Optional<MemRefOf<[SI32]>>:$axes_mapping,
-
-        F16MemRef:$output_buff,
-
-        OptionalAttr<IE_BroadcastTypeAttr>:$mode
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `,` $target_shape `:` type($target_shape) (`,` $axes_mapping^ `:` type($axes_mapping))? `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// BucketizeUPAOp
-//
-
-def VPUIP_BucketizeUPAOp :
-        VPUIP_UPATaskOp<1, "BucketizeUPA",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "Bucketize UPA SHAVE kernel";
-
-    let arguments = (ins
-        MemRefOf<[SI32, SI64, F16, F32]>:$data,
-        MemRefOf<[SI32, SI64, F16, F32]>:$buckets,
-
-        MemRefOf<[SI32, SI64]>:$output_buff,
-
-        TypeAttr:$output_type,
-        UnitAttr:$with_right_bound
-    );
-
-    let results = (outs
-        MemRefOf<[SI32, SI64]>:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $data `:` type($data) `,` $buckets `:` type($buckets) `)`
-        `ouputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-
-    let hasVerifier = 1;
-}
-
-//
-// ScaleShiftUPAOp
-//
-
-def VPUIP_ScaleShiftUPAOp :
-        VPUIP_UPATaskOp<1, "ScaleShiftUPA",
-            [
-                AttrSizedOperandSegments,
-                ViewLikeOpInterface,
-                VPUIP_SameElementType,
-                VPUIP_Legacy4D
-            ]
-        > {
-    let summary = "ScaleShift UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        Optional<F16MemRef>:$weights,
-        Optional<F16MemRef>:$biases,
-        F16MemRef:$output_buff
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) (`,` $weights^ `:` type($weights))? (`,` $biases^ `:` type($biases))? `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-
-    let hasVerifier = 1;
-}
-
-//
-// VPUIP_UpsamplingUPAOp
-//
-
-def VPUIP_UpsamplingUPAOp :
-        VPUIP_UPATaskOp<1, "UpsamplingUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameElementType
-            ]
-        > {
-    let summary = "Upsampling UPA SHAVE kernel";
-
-    let arguments = (ins
-        AnyMemRef:$input,
-        AnyMemRef:$output_buff,
-
-        I64ArrayAttr:$upsampling_factor,
-        OptionalAttr<IE_UpsamplingPadAttr>:$pad
-    );
-
-    let results = (outs
-        AnyMemRef:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// PerAxisTileUPAOp
-//
-
-def VPUIP_PerAxisTileUPAOp :
-        VPUIP_UPATaskOp<1, "PerAxisTileUPA",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "Tile for per axis case UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff,
-
-        IntAttr:$axis,
-        IntAttr:$tiles
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// NegativeUPAOp
-//
-
-def VPUIP_NegativeUPAOp :
-        VPUIP_UPATaskOp<1, "NegativeUPA",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "Negative UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// SignUPAOp
-//
-
-def VPUIP_SignUPAOp :
-        VPUIP_UPATaskOp<1, "SignUPA",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "Sign UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// ProposalUPAOp
-//
-
-def VPUIP_ProposalUPAOp :
-        VPUIP_UPATaskOp<2, "ProposalUPA",
-            [
-                MultiViewOpInterface
-            ]
-        > {
-    let summary = "Proposal UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$class_probs,
-        F16MemRef:$bbox_deltas,
-        F16MemRef:$image_shape,
-        F16MemRef:$output_buff,
-        F16MemRef:$probs_buff,
-        IE_ProposalAttr:$proposal_attrs
-    );
-
-    let results = (outs
-        F16MemRef:$output,
-        F16MemRef:$probs
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $class_probs `:` type($class_probs) `,` $bbox_deltas `:` type($bbox_deltas) `,` $image_shape `:` type($image_shape) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `,` $probs_buff `:` type($probs_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// ROIPoolingUPAOp
-//
-
-def VPUIP_ROIPoolingUPAOp :
-        VPUIP_UPATaskOp<1, "ROIPoolingUPA",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "ROIPooling UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$coords,
-        F16MemRef:$output_buff,
-
-        I64ArrayAttr:$output_size,
-        F64Attr:$spatial_scale,
-        IE_ROIPoolingMethodAttr:$method
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `,` $coords `:` type($coords) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// PSROIPoolingUPAOp
-//
-
-def VPUIP_PSROIPoolingUPAOp :
-        VPUIP_UPATaskOp<1, "PSROIPoolingUPA",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "PSROIPooling UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$coords,
-        F16MemRef:$output_buff,
-
-        IntAttr:$output_dim,
-        F64Attr:$spatial_scale,
-        IntAttr:$group_size,
-        OptionalAttr<IntAttr>:$spatial_bins_x,
-        OptionalAttr<IntAttr>:$spatial_bins_y,
-        OptionalAttr<IE_PSROIPoolingModeAttr>:$mode
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `,` $coords `:` type($coords) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// ROIAlignUPAOp
-//
-
-def VPUIP_ROIAlignUPAOp :
-        VPUIP_UPATaskOp<1, "ROIAlignUPA",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "ROIAlign UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$coords,
-        MemRefOf<[SI32]>:$roisIdx,
-        F16MemRef:$output_buff,
-
-        IntAttr:$pooled_h,
-        IntAttr:$pooled_w,
-        IntAttr:$sampling_ratio,
-        F64Attr:$spatial_scale,
-        IE_ROIAlignMethodAttr:$poolingMode
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `,` $coords `:` type($coords) `,` $roisIdx `:` type($roisIdx)`)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// PermuteUPAOp
-//
-
-def VPUIP_PermuteUPAOp :
-        VPUIP_UPATaskOp<1, "PermuteUPA",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "Permute UPA SHAVE kernel";
-
-    let arguments = (ins
-        AnyMemRef:$input,
-        AnyMemRef:$output_buff,
-
-        AffineMapAttr:$order_value
-    );
-
-    let results = (outs
-        AnyMemRef:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-
-    let hasVerifier = 1;
-}
-
-//
 // DPUTaskOp
 //
 
@@ -2770,71 +637,7 @@ def VPUIP_PPETaskOp :
          > {
     let builders = [
         OpBuilder<(ins
-            CArg<"vpux::VPU::PPEMode", "vpux::VPU::PPEMode::NOOP">:$ppe_layer_type,
-            CArg<"int64_t", "std::numeric_limits<int32_t>::min()">:$clamp_low,
-            CArg<"int64_t", "std::numeric_limits<int32_t>::max()">:$clamp_high,
-            CArg<"int64_t", "1">:$lrelu_mult,
-            CArg<"int64_t", "0">:$lrelu_shift
-        )>,
-        OpBuilder<(ins
-            "vpux::VPU::PPEMode":$ppe_layer_type,
-            "double":$clamp_low,
-            "double":$clamp_high,
-            "double":$quant_scale
-        )>,
-        OpBuilder<(ins
-            "vpux::VPU::PPEMode":$ppe_layer_type,
-            "double":$clamp_low,
-            "double":$clamp_high,
-            "double":$quant_scale,
-            "double":$fp_prelu_alpha
-        )>,
-        OpBuilder<(ins
-            "vpux::VPU::PPEMode":$ppe_layer_type,
-            "int64_t":$clamp_low,
-            "int64_t":$clamp_high,
-            "int64_t":$lrelu_mult,
-            "int64_t":$lrelu_shift,
-            "int64_t":$quant_mult,
-            "int64_t":$quant_shift
-        )>,
-        OpBuilder<(ins
-            "vpux::VPU::PPEMode":$ppe_layer_type,
-            "int64_t":$clamp_low,
-            "int64_t":$clamp_high,
-            "int64_t":$lrelu_mult,
-            "int64_t":$lrelu_shift,
-            "int64_t":$quant_mult,
-            "int64_t":$quant_shift,
-            "int64_t":$quant_post_shift,
-            "double":$quant_scale
-        )>,
-        OpBuilder<(ins
-            "vpux::VPU::PPEMode":$ppe_layer_type,
-            "int64_t":$clamp_low,
-            "int64_t":$clamp_high,
-            "int64_t":$lrelu_mult,
-            "int64_t":$lrelu_shift,
-            "int64_t":$quant_mult,
-            "int64_t":$quant_shift,
-            "int64_t":$quant_post_shift,
-            "double":$quant_scale,
-            "double":$ppe_fp_scale,
-            "double":$ppe_fp_bias
-        )>,
-        OpBuilder<(ins
-            "vpux::VPU::PPEMode":$ppe_layer_type,
-            "int64_t":$clamp_low,
-            "int64_t":$clamp_high,
-            "int64_t":$lrelu_mult,
-            "int64_t":$lrelu_shift,
-            "int64_t":$quant_mult,
-            "int64_t":$quant_shift,
-            "int64_t":$quant_post_shift,
-            "double":$quant_scale,
-            "int64_t":$in1_quant_mult,
-            "int64_t":$in2_quant_mult,
-            "double":$fp_prelu_alpha
+            "VPU::PPEAttr":$opaque_ppe
         )>
     ];
 }
@@ -2878,32 +681,31 @@ def VPUIP_NCEClusterTaskOp :
     }];
 
     let arguments = (ins
-        AnyTypeOf<[MemRefOf<[F16, BF16, quant_QuantizedType]>, VPUIP_DistributedBuffer, VPUIP_Buffer, VPUIP_ITIBuffer]>:$input,
+        AnyTypeOf<[MemRefOf<[F16, BF16, quant_QuantizedType]>, VPUIP_DistributedBuffer, VPUIP_ITIBuffer]>:$input,
         Optional<AnyTypeOf<[MemRefOf<[I1]>, VPUIP_DistributedBuffer]>>:$input_sparsity_map,
         Optional<AnyTypeOf<[MemRefOf<[I32]>, VPUIP_DistributedBuffer]>>:$input_storage_element_table,
-        Optional<AnyTypeOf<[MemRefOf<[F16, BF16, quant_QuantizedType]>, VPUIP_DistributedBuffer, VPUIP_Buffer]>>:$weights,
+        Optional<AnyTypeOf<[MemRefOf<[F16, BF16, quant_QuantizedType]>, VPUIP_DistributedBuffer]>>:$weights,
         Optional<AnyTypeOf<[MemRefOf<[I1]>, VPUIP_DistributedBuffer]>>:$weights_sparsity_map,
         Optional<AnyTypeOf<[MemRefOf<[SI32]>, VPUIP_DistributedBuffer]>>:$weight_table,
         Optional<AnyTypeOf<[MemRefOf<[SI32]>, VPUIP_DistributedBuffer]>>:$instruction_list_table,
         Optional<AnyTypeOf<[MemRefOf<[UI16]>, VPUIP_DistributedBuffer]>>:$spr_lookup_table,
-        Optional<AnyTypeOf<[MemRefOf<[UI8]>, VPUIP_DistributedBuffer]>>:$activation_window,
 
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_ITIBuffer]>:$parent_input,
+        AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer, VPUIP_ITIBuffer]>:$parent_input,
         Optional<AnyTypeOf<[MemRefOf<[I1]>, VPUIP_DistributedBuffer]>>:$parent_input_sparsity_map,
         Optional<AnyTypeOf<[MemRefOf<[I32]>, VPUIP_DistributedBuffer]>>:$parent_input_storage_element_table,
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_ITIBuffer]>:$parent_output,
+        AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer, VPUIP_ITIBuffer]>:$parent_output,
         Optional<AnyTypeOf<[MemRefOf<[I1]>, VPUIP_DistributedBuffer, VPUIP_ITIBuffer]>>: $parent_output_sparsity_map,
         Variadic<VPUIP_ITIBuffer>:$output_ITI_buff,
 
-        AnyTypeOf<[MemRefOf<[F16, F32, BF16, quant_QuantizedType]>, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_ITIBuffer]>:$output_buff,
+        AnyTypeOf<[MemRefOf<[F16, F32, BF16, quant_QuantizedType]>, VPUIP_DistributedBuffer, VPUIP_ITIBuffer]>:$output_buff,
         Optional<AnyTypeOf<[MemRefOf<[I1]>, VPUIP_DistributedBuffer, VPUIP_ITIBuffer]>>:$output_sparsity_map_buff,
         Optional<AnyTypeOf<[MemRefOf<[UI64]>, VPUIP_DistributedBuffer]>>:$profiling_data,
 
         VPUIP_NCETaskTypeAttr:$task_type,
+        OptionalAttr<VPU_EltwiseTypeAttr>:$eltwise_type,
         OptionalAttr<I64ArrayAttr>:$kernel_size,
         OptionalAttr<I64ArrayAttr>:$kernel_strides,
         OptionalAttr<VPU_PaddingAttr>:$kernel_padding,
-        OptionalAttr<IntAttr>:$activation_window_channel_length,
         UnitAttr:$is_continued,
         OptionalAttr<IntAttr>:$cm_sp_pattern,
         UnitAttr:$is_segmented,
@@ -2919,7 +721,7 @@ def VPUIP_NCEClusterTaskOp :
     );
 
     let results = (outs
-        AnyTypeOf<[MemRefOf<[F16, F32, BF16, quant_QuantizedType]>, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_ITIBuffer]>:$output,
+        AnyTypeOf<[MemRefOf<[F16, F32, BF16, quant_QuantizedType]>, VPUIP_DistributedBuffer, VPUIP_ITIBuffer]>:$output,
         Optional<AnyTypeOf<[MemRefOf<[I1]>, VPUIP_DistributedBuffer, VPUIP_ITIBuffer]>>:$output_sparsity_map,
         Optional<AnyTypeOf<[MemRefOf<[UI64]>, VPUIP_DistributedBuffer]>>:$profiling_output
     );
@@ -2932,20 +734,19 @@ def VPUIP_NCEClusterTaskOp :
     let skipDefaultBuilders = 0;
 
     let builders = [
+        // used by profiling pass to keep op attributes intact
         OpBuilder<(ins
-            "mlir::Type":$output, "mlir::Type":$output_sparsity_map, "mlir::Type":$profiling_output,
-            "mlir::ValueRange":$operands,
-            "llvm::ArrayRef<mlir::NamedAttribute>":$attributes
+            "NCEClusterTaskOp":$task,
+            "mlir::Type":$profilingOutput
         )>,
 
         OpBuilder<(ins
             "mlir::Value":$input, "mlir::Value":$weights, "mlir::Value":$weight_table,
-            "mlir::Value":$instruction_list_table, "mlir::Value":$spr_lookup_table, "mlir::Value":$activation_window,
+            "mlir::Value":$instruction_list_table, "mlir::Value":$spr_lookup_table,
             "mlir::Value":$parent_input, "mlir::Value":$parent_output,
             "mlir::Value":$output_buff,
             "vpux::VPUIP::NCETaskType":$task_type,
             "mlir::ArrayAttr":$kernel_size, "mlir::ArrayAttr":$kernel_strides, "vpux::VPU::PaddingAttr":$kernel_padding,
-            "mlir::IntegerAttr":$activation_window_channel_length,
             CArg<"mlir::UnitAttr", "nullptr">:$is_continued,
             CArg<"mlir::IntegerAttr", "nullptr">:$cm_sp_pattern,
             CArg<"mlir::UnitAttr", "nullptr">:$is_segmented,
@@ -2956,18 +757,18 @@ def VPUIP_NCEClusterTaskOp :
             CArg<"mlir::IntegerAttr", "nullptr">:$input_se_size,
             CArg<"mlir::IntegerAttr", "nullptr">:$output_se_size,
             CArg<"mlir::UnitAttr", "nullptr">:$is_permute_quantize,
-            CArg<"mlir::UnitAttr", "nullptr">:$is_small_kernel_optimized
+            CArg<"mlir::UnitAttr", "nullptr">:$is_small_kernel_optimized,
+            CArg<"VPU::EltwiseTypeAttr", "nullptr">:$eltwise_type
         )>,
 
         OpBuilder<(ins
             "mlir::Type":$output,
             "mlir::Value":$input, "mlir::Value":$weights, "mlir::Value":$weight_table,
-            "mlir::Value":$instruction_list_table, "mlir::Value":$spr_lookup_table, "mlir::Value":$activation_window,
+            "mlir::Value":$instruction_list_table, "mlir::Value":$spr_lookup_table,
             "mlir::Value":$parent_input, "mlir::Value":$parent_output,
             "mlir::Value":$output_buff,
             "vpux::VPUIP::NCETaskType":$task_type,
             "mlir::ArrayAttr":$kernel_size, "mlir::ArrayAttr":$kernel_strides, "vpux::VPU::PaddingAttr":$kernel_padding,
-            "mlir::IntegerAttr":$activation_window_channel_length,
             CArg<"mlir::UnitAttr", "nullptr">:$is_continued,
             CArg<"mlir::IntegerAttr", "nullptr">:$cm_sp_pattern,
             CArg<"mlir::UnitAttr", "nullptr">:$is_segmented,
@@ -2978,17 +779,17 @@ def VPUIP_NCEClusterTaskOp :
             CArg<"mlir::IntegerAttr", "nullptr">:$input_se_size,
             CArg<"mlir::IntegerAttr", "nullptr">:$output_se_size,
             CArg<"mlir::UnitAttr", "nullptr">:$is_permute_quantize,
-            CArg<"mlir::UnitAttr", "nullptr">:$is_small_kernel_optimized
+            CArg<"mlir::UnitAttr", "nullptr">:$is_small_kernel_optimized,
+            CArg<"VPU::EltwiseTypeAttr", "nullptr">:$eltwise_type
         )>,
 
         OpBuilder<(ins
             "mlir::Value":$input, "mlir::Value":$weights, "mlir::Value":$weight_table,
-            "mlir::Value":$instruction_list_table, "mlir::Value":$spr_lookup_table, "mlir::Value":$activation_window,
+            "mlir::Value":$instruction_list_table, "mlir::Value":$spr_lookup_table,
             "mlir::Value":$parent_input, "mlir::Value":$parent_output,
             "mlir::Value":$output_buff, "mlir::Value":$profiling_data,
             "vpux::VPUIP::NCETaskType":$task_type,
             "mlir::ArrayAttr":$kernel_size, "mlir::ArrayAttr":$kernel_strides, "vpux::VPU::PaddingAttr":$kernel_padding,
-            "mlir::IntegerAttr":$activation_window_channel_length,
             CArg<"mlir::UnitAttr", "nullptr">:$is_continued,
             CArg<"mlir::IntegerAttr", "nullptr">:$cm_sp_pattern,
             CArg<"mlir::UnitAttr", "nullptr">:$is_segmented,
@@ -2999,18 +800,18 @@ def VPUIP_NCEClusterTaskOp :
             CArg<"mlir::IntegerAttr", "nullptr">:$input_se_size,
             CArg<"mlir::IntegerAttr", "nullptr">:$output_se_size,
             CArg<"mlir::UnitAttr", "nullptr">:$is_permute_quantize,
-            CArg<"mlir::UnitAttr", "nullptr">:$is_small_kernel_optimized
+            CArg<"mlir::UnitAttr", "nullptr">:$is_small_kernel_optimized,
+            CArg<"VPU::EltwiseTypeAttr", "nullptr">:$eltwise_type
         )>,
 
         OpBuilder<(ins
             "mlir::Type":$output, "mlir::Type":$profiling_output,
             "mlir::Value":$input, "mlir::Value":$weights, "mlir::Value":$weight_table,
-            "mlir::Value":$instruction_list_table, "mlir::Value":$spr_lookup_table, "mlir::Value":$activation_window,
+            "mlir::Value":$instruction_list_table, "mlir::Value":$spr_lookup_table,
             "mlir::Value":$parent_input, "mlir::Value":$parent_output,
             "mlir::Value":$output_buff, "mlir::Value":$profiling_data,
             "vpux::VPUIP::NCETaskType":$task_type,
             "mlir::ArrayAttr":$kernel_size, "mlir::ArrayAttr":$kernel_strides, "vpux::VPU::PaddingAttr":$kernel_padding,
-            "mlir::IntegerAttr":$activation_window_channel_length,
             CArg<"mlir::UnitAttr", "nullptr">:$is_continued,
             CArg<"mlir::IntegerAttr", "nullptr">:$cm_sp_pattern,
             CArg<"mlir::UnitAttr", "nullptr">:$is_segmented,
@@ -3021,20 +822,20 @@ def VPUIP_NCEClusterTaskOp :
             CArg<"mlir::IntegerAttr", "nullptr">:$input_se_size,
             CArg<"mlir::IntegerAttr", "nullptr">:$output_se_size,
             CArg<"mlir::UnitAttr", "nullptr">:$is_permute_quantize,
-            CArg<"mlir::UnitAttr", "nullptr">:$is_small_kernel_optimized
+            CArg<"mlir::UnitAttr", "nullptr">:$is_small_kernel_optimized,
+            CArg<"VPU::EltwiseTypeAttr", "nullptr">:$eltwise_type
         )>,
 
         OpBuilder<(ins
             "mlir::Value":$input, "mlir::Value":$input_sparsity_map, "mlir::Value":$input_storage_element_table,
             "mlir::Value":$weights, "mlir::Value":$weights_sparsity_map,
             "mlir::Value":$weight_table,
-            "mlir::Value":$instruction_list_table, "mlir::Value":$spr_lookup_table, "mlir::Value":$activation_window,
+            "mlir::Value":$instruction_list_table, "mlir::Value":$spr_lookup_table,
             "mlir::Value":$parent_input, "mlir::Value":$parent_input_sparsity_map, "mlir::Value":$parent_input_storage_element_table,
             "mlir::Value":$parent_output, "mlir::Value":$parent_output_sparsity_map,
             "mlir::Value":$output_buff, "mlir::Value":$output_sparsity_map_buff, "mlir::Value":$profiling_data,
             "vpux::VPUIP::NCETaskType":$task_type,
             "mlir::ArrayAttr":$kernel_size, "mlir::ArrayAttr":$kernel_strides, "vpux::VPU::PaddingAttr":$kernel_padding,
-            "mlir::IntegerAttr":$activation_window_channel_length,
             CArg<"mlir::UnitAttr", "nullptr">:$is_continued,
             CArg<"mlir::IntegerAttr", "nullptr">:$cm_sp_pattern,
             CArg<"mlir::UnitAttr", "nullptr">:$is_segmented,
@@ -3045,7 +846,8 @@ def VPUIP_NCEClusterTaskOp :
             CArg<"mlir::IntegerAttr", "nullptr">:$input_se_size,
             CArg<"mlir::IntegerAttr", "nullptr">:$output_se_size,
             CArg<"mlir::UnitAttr", "nullptr">:$is_permute_quantize,
-            CArg<"mlir::UnitAttr", "nullptr">:$is_small_kernel_optimized
+            CArg<"mlir::UnitAttr", "nullptr">:$is_small_kernel_optimized,
+            CArg<"VPU::EltwiseTypeAttr", "nullptr">:$eltwise_type
         )>,
 
         OpBuilder<(ins
@@ -3053,13 +855,12 @@ def VPUIP_NCEClusterTaskOp :
             "mlir::Value":$input, "mlir::Value":$input_sparsity_map, "mlir::Value":$input_storage_element_table,
             "mlir::Value":$weights, "mlir::Value":$weights_sparsity_map,
             "mlir::Value":$weight_table,
-            "mlir::Value":$instruction_list_table, "mlir::Value":$spr_lookup_table, "mlir::Value":$activation_window,
+            "mlir::Value":$instruction_list_table, "mlir::Value":$spr_lookup_table,
             "mlir::Value":$parent_input, "mlir::Value":$parent_input_sparsity_map, "mlir::Value":$parent_input_storage_element_table,
             "mlir::Value":$parent_output, "mlir::Value":$parent_output_sparsity_map,
             "mlir::Value":$output_buff, "mlir::Value":$output_sparsity_map_buff, "mlir::Value":$profiling_data,
             "vpux::VPUIP::NCETaskType":$task_type,
             "mlir::ArrayAttr":$kernel_size, "mlir::ArrayAttr":$kernel_strides, "vpux::VPU::PaddingAttr":$kernel_padding,
-            "mlir::IntegerAttr":$activation_window_channel_length,
             CArg<"mlir::UnitAttr", "nullptr">:$is_continued,
             CArg<"mlir::IntegerAttr", "nullptr">:$cm_sp_pattern,
             CArg<"mlir::UnitAttr", "nullptr">:$is_segmented,
@@ -3070,7 +871,8 @@ def VPUIP_NCEClusterTaskOp :
             CArg<"mlir::IntegerAttr", "nullptr">:$input_se_size,
             CArg<"mlir::IntegerAttr", "nullptr">:$output_se_size,
             CArg<"mlir::UnitAttr", "nullptr">:$is_permute_quantize,
-            CArg<"mlir::UnitAttr", "nullptr">:$is_small_kernel_optimized
+            CArg<"mlir::UnitAttr", "nullptr">:$is_small_kernel_optimized,
+            CArg<"VPU::EltwiseTypeAttr", "nullptr">:$eltwise_type
         )>,
 
         OpBuilder<(ins
@@ -3078,13 +880,12 @@ def VPUIP_NCEClusterTaskOp :
             "mlir::Value":$input, "mlir::Value":$input_sparsity_map, "mlir::Value":$input_storage_element_table,
             "mlir::Value":$weights, "mlir::Value":$weights_sparsity_map,
             "mlir::Value":$weight_table,
-            "mlir::Value":$instruction_list_table, "mlir::Value":$spr_lookup_table, "mlir::Value":$activation_window,
+            "mlir::Value":$instruction_list_table, "mlir::Value":$spr_lookup_table,
             "mlir::Value":$parent_input, "mlir::Value":$parent_input_sparsity_map, "mlir::Value":$parent_input_storage_element_table,
             "mlir::Value":$parent_output, "mlir::Value":$parent_output_sparsity_map, "mlir::ValueRange":$output_ITI_buff,
             "mlir::Value":$output_buff, "mlir::Value":$output_sparsity_map_buff, "mlir::Value":$profiling_data,
             "vpux::VPUIP::NCETaskType":$task_type,
             "mlir::ArrayAttr":$kernel_size, "mlir::ArrayAttr":$kernel_strides, "vpux::VPU::PaddingAttr":$kernel_padding,
-            "mlir::IntegerAttr":$activation_window_channel_length,
             CArg<"mlir::UnitAttr", "nullptr">:$is_continued,
             CArg<"mlir::IntegerAttr", "nullptr">:$cm_sp_pattern,
             CArg<"mlir::UnitAttr", "nullptr">:$is_segmented,
@@ -3095,7 +896,8 @@ def VPUIP_NCEClusterTaskOp :
             CArg<"mlir::IntegerAttr", "nullptr">:$input_se_size,
             CArg<"mlir::IntegerAttr", "nullptr">:$output_se_size,
             CArg<"mlir::UnitAttr", "nullptr">:$is_permute_quantize,
-            CArg<"mlir::UnitAttr", "nullptr">:$is_small_kernel_optimized
+            CArg<"mlir::UnitAttr", "nullptr">:$is_small_kernel_optimized,
+            CArg<"VPU::EltwiseTypeAttr", "nullptr">:$eltwise_type
         )>
     ];
 
@@ -3109,7 +911,6 @@ def VPUIP_NCEClusterTaskOp :
         (`weight_table` `(` $weight_table^  `:` type($weight_table) `)`)?
         (`instruction_list_table` `(` $instruction_list_table^  `:` type($instruction_list_table) `)`)?
         (`spr_lookup_table` `(` $spr_lookup_table^  `:` type($spr_lookup_table) `)`)?
-        (`activation_window` `(` $activation_window^  `:` type($activation_window) `)`)?
         `parent_input` `(` $parent_input `:` type($parent_input) `)`
         (`parent_input_sparsity_map` `(` $parent_input_sparsity_map^  `:` type($parent_input_sparsity_map) `)`)?
         (`parent_input_storage_element_table` `(` $parent_input_storage_element_table^  `:` type($parent_input_storage_element_table) `)`)?
@@ -3161,148 +962,6 @@ def VPUIP_NCEClusterTaskOp :
                 mlir::OpaqueProperties,
                 mlir::RegionRange,
                 llvm::SmallVectorImpl<mlir::Type>& inferredReturnTypes);
-    }];
-}
-
-//
-// CTCGreedyDecoderUPAOp
-//
-
-def VPUIP_CTCGreedyDecoderUPAOp :
-        VPUIP_UPATaskOp<1, "CTCGreedyDecoderUPA",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "CTCGreedyDecoder UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$sequenceLengths,
-        F16MemRef:$output_buff,
-
-        UnitAttr:$mergeRepeated
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `,` $sequenceLengths `:` type($sequenceLengths) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// CTCGreedyDecoderSeqLenUPAOp
-//
-
-def VPUIP_CTCGreedyDecoderSeqLenUPAOp :
-        VPUIP_UPATaskOp<2, "CTCGreedyDecoderSeqLenUPA",
-            [
-                MultiViewOpInterface
-            ]
-        > {
-    let summary = "CTCGreedyDecoderSeqLen UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        MemRefOf<[SI32]>:$sequenceLength,
-        Optional<MemRefOf<[SI32]>>:$blankIndex,
-        MemRefOf<[SI32]>:$output_buff,
-        MemRefOf<[SI32]>:$outputLength_buff,
-
-        UnitAttr:$mergeRepeated
-    );
-
-    let results = (outs
-        MemRefOf<[SI32]>:$output,
-        MemRefOf<[SI32]>:$outputLength
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `,` $sequenceLength `:` type($sequenceLength) `,` ($blankIndex^ `:` type($blankIndex))? `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `,` $outputLength_buff `:` type($outputLength_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// PadOp
-//
-
-def VPUIP_PadUPAOp :
-        VPUIP_UPATaskOp<1,"Pad",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "Pad UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff,
-
-        I64ArrayAttr:$pads_begin,
-        I64ArrayAttr:$pads_end,
-        OptionalAttr<F64Attr>:$pad_value,
-        IE_PadModeAttr:$mode
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// LSTMCellUPAOp
-//
-
-def VPUIP_LSTMCellUPAOp :
-        VPUIP_UPATaskOp<2, "LSTMCellUPA",
-            [
-                MultiViewOpInterface
-            ]
-        > {
-    let summary = "LSTMCell UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$inputData,
-        F16MemRef:$initialHiddenState,
-        F16MemRef:$initialCellState,
-        F16MemRef:$weights,
-        F16MemRef:$biases,
-        F16MemRef:$outputHiddenState_buff,
-        F16MemRef:$outputCellState_buff
-    );
-
-    let results = (outs
-        F16MemRef:$outputHiddenState,
-        F16MemRef:$outputCellState
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $inputData `:` type($inputData) `,` $initialHiddenState `:` type($initialHiddenState)
-        `,` $initialCellState `:` type($initialCellState) `,` $weights `:` type($weights) `,` $biases `:` type($biases) `)`
-        `outputs` `(` $outputHiddenState_buff `:` type($outputHiddenState_buff)
-        `,` $outputCellState_buff `:` type($outputCellState_buff) `)`
-        `->` type(results)
     }];
 }
 
@@ -3454,6 +1113,11 @@ def VPUIP_SwKernelOp :
             "mlir::SymbolRefAttr":$kernelFunction,
             "mlir::IntegerAttr":$tileIndex,
             "mlir::ArrayAttr":$strides
+        )>,
+        // used by profiling pass to keep op attributes intact
+        OpBuilder<(ins
+            "SwKernelOp":$swOp,
+            "mlir::Value":$profilingOutput
         )>
     ];
 
@@ -3478,354 +1142,6 @@ def VPUIP_SwKernelOp :
 }
 
 //
-// LSTMSequenceUPAOp
-//
-
-def VPUIP_LSTMSequenceUPAOp :
-        VPUIP_UPATaskOp<3, "LSTMSequenceUPA",
-            [
-                MultiViewOpInterface
-            ]
-        > {
-    let summary = "LSTMSequence UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$inputData,
-        F16MemRef:$initialHiddenState,
-        F16MemRef:$initialCellState,
-        F16MemRef:$weights,
-        F16MemRef:$biases,
-        F16MemRef:$outputHiddenValues_buff,
-        F16MemRef:$outputCellState_buff,
-        F16MemRef:$outputHiddenState_buff,
-
-        IntAttr:$sequenceLength,
-        IE_RNNSequenceDirectionAttr:$direction
-    );
-
-    let results = (outs
-        F16MemRef:$outputHiddenValues,
-        F16MemRef:$outputCellState,
-        F16MemRef:$outputHiddenState
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $inputData `:` type($inputData) `,` $initialHiddenState `:` type($initialHiddenState)
-        `,` $initialCellState `:` type($initialCellState) `,` $weights `:` type($weights) `,` $biases `:` type($biases) `)`
-        `outputs` `(` $outputHiddenValues_buff `:` type($outputHiddenValues_buff)
-        `,` $outputCellState_buff `:` type($outputCellState_buff)
-        `,` $outputHiddenState_buff `:` type($outputHiddenState_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// InterpolateOp
-//
-
-def VPUIP_InterpolateUPAOp :
-        VPUIP_UPATaskOp<1,"Interpolate",
-            [
-                ViewLikeOpInterface,
-            ]
-        > {
-    let summary = "Interpolate UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-
-        F16MemRef:$output_buff,
-
-        IE_InterpolateModeAttr:$mode,
-        IE_InterpolateCoordModeAttr:$coord_mode,
-        IE_InterpolateNearestModeAttr:$nearest_mode,
-        UnitAttr:$antialias
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-
-//
-// StridedSliceUPAOp
-//
-
-def VPUIP_StridedSliceUPAOp :
-     VPUIP_UPATaskOp<1, "StridedSlice",
-         [
-             ViewLikeOpInterface
-         ]
-     > {
-    let summary = "StridedSlice UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff,
-
-        I64ArrayAttr:$begins,
-        I64ArrayAttr:$ends,
-        I64ArrayAttr:$strides
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// FullyConnectedUPAOp
-//
-
-def VPUIP_FullyConnectedUPAOp :
-        VPUIP_UPATaskOp<1, "FullyConnectedUPA",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "FullyConnected UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$weights,
-        Optional<F16MemRef>:$bias,
-        F16MemRef:$output_buff
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `,` $weights `:` type($weights) (`,` $bias^ `:` type($bias))? `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// RegionYoloOp
-//
-
-def VPUIP_RegionYoloUPAOp :
-        VPUIP_UPATaskOp<1, "RegionYoloUPA",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "RegionYolo UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff,
-
-        IntAttr:$coords,
-        IntAttr:$classes,
-        IntAttr:$num_regions,
-        OptionalAttr<BoolAttr>:$do_softmax,
-        OptionalAttr<I64ArrayAttr>:$mask
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// ReorgYoloUPAOp
-//
-
-def VPUIP_ReorgYoloUPAOp :
-        VPUIP_UPATaskOp<1, "ReorgYoloUPA",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "ReorgYolo UPA SHAVE kernel";
-
-    let arguments = (ins
-        AnyMemRef:$input,
-        AnyMemRef:$output_buff,
-
-        IntAttr:$stride
-    );
-
-    let results = (outs
-        AnyMemRef:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// MVNOp
-//
-
-def VPUIP_MVNUPAOp :
-        VPUIP_UPATaskOp<1, "MVNUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameShape,
-                VPUIP_SameElementType
-            ]
-        > {
-    let summary = "MVN UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff,
-
-        OptionalAttr<BoolAttr>:$across_channels,
-        OptionalAttr<BoolAttr>:$normalize_variance,
-        F64Attr:$eps
-    );
-
-    let results = (outs
-        AnyMemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// GatherUPAOp
-//
-
-def VPUIP_GatherUPAOp :
-        VPUIP_UPATaskOp<1, "GatherUPA",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "Gather UPA SHAVE kernel";
-
-    let arguments = (ins
-        AnyMemRef:$input,
-        MemRefOf<[SI32]>:$indices,
-        AnyMemRef:$output_buff,
-
-        IntAttr:$axis,
-        IntAttr:$batch_dims
-    );
-
-    let results = (outs
-        AnyMemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `,` $indices `:` type($indices) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// GatherNDUPAOp
-//
-
-def VPUIP_GatherNDUPAOp :
-        VPUIP_UPATaskOp<1, "GatherNDUPA",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "GatherND UPA SHAVE kernel";
-
-    let arguments = (ins
-        AnyMemRef:$input,
-        MemRefOf<[SI32]>:$indices,
-        AnyMemRef:$output_buff,
-
-        IntAttr:$batch_dims
-    );
-
-    let results = (outs
-        AnyMemRef:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `,` $indices `:` type($indices) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// SpaceToDepthOp
-//
-
-def VPUIP_SpaceToDepthUPAOp :
-        VPUIP_UPATaskOp<1, "SpaceToDepthUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameElementType
-            ]
-        > {
-    let summary = "SpaceToDepth UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff,
-
-        IntAttr:$block_size,
-        IE_SpaceToDepthModeAttr:$mode
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
 // SpaceToDepthDMAOp
 //
 
@@ -3837,7 +1153,7 @@ def VPUIP_SpaceToDepthDMAOp :
                 VPUIP_DMATypeOpInterface
             ]
         > {
-    let summary = "A NNDMA task which performs a functionality equivalent DMA transfer to a UPA SpaceToDepth task";
+    let summary = "A NNDMA task which performs a functionality equivalent DMA transfer to a SpaceToDepth task";
 
     let arguments = (ins
         AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer]>:$input,
@@ -3899,7 +1215,7 @@ def VPUIP_PerAxisTileDMAOp :
                 VPUIP_DMATypeOpInterface
             ]
         > {
-    let summary = "A NNDMA task which performs a functionality equivalent DMA transfer to a UPA PerAxisTileUPAOp task";
+    let summary = "A NNDMA task which performs a functionality equivalent DMA transfer to a PerAxisTileOp task";
 
     let arguments = (ins
         AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer]>:$input,
@@ -3950,176 +1266,6 @@ def VPUIP_PerAxisTileDMAOp :
 }
 
 //
-// ScatterNDUpdateUPAOp
-//
-
-def VPUIP_ScatterNDUpdateUPAOp :
-        VPUIP_UPATaskOp<1, "ScatterNDUpdateUPA",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "ScatterNDUpdate UPA SHAVE kernel";
-
-    let arguments = (ins
-        AnyMemRef:$input,
-        MemRefOf<[SI32]>:$indices,
-        AnyMemRef:$updates,
-        AnyMemRef:$output_buff
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `,` $indices `:` type($indices) `,` $updates `:` type($updates) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// ScatterUpdateUPAOp
-//
-
-def VPUIP_ScatterUpdateUPAOp :
-        VPUIP_UPATaskOp<1, "ScatterUpdateUPA",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "ScatterUpdate UPA SHAVE kernel";
-
-    let arguments = (ins
-        AnyMemRef:$input,
-        MemRefOf<[SI32]>:$indices,
-        AnyMemRef:$updates,
-        AnyMemRef:$output_buff,
-        OptionalAttr<IntAttr>:$axis_value
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `,` $indices `:` type($indices) `,` $updates `:` type($updates) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-//
-// CeilingUPAOp
-//
-
-def VPUIP_CeilingUPAOp :
-        VPUIP_UPATaskOp<1, "CeilingUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameShape,
-                VPUIP_SameElementType,
-                VPUIP_Legacy4D
-            ]
-        > {
-    let summary = "Ceiling UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// GatherElementsUPAOp
-//
-
-def VPUIP_GatherElementsUPAOp :
-        VPUIP_UPATaskOp<1, "GatherElementsUPA",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "GatherElements UPA SHAVE kernel";
-
-    let arguments = (ins
-        AnyMemRef:$input,
-        MemRefOf<[SI64, SI32]>:$indices,
-        AnyMemRef:$output_buff,
-
-        IntAttr:$axis
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `,` $indices `:` type($indices) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// DepthToSpaceUPAOp
-//
-
-def VPUIP_DepthToSpaceUPAOp :
-        VPUIP_UPATaskOp<1, "DepthToSpaceUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameElementType
-            ]
-        > {
-    let summary = "DepthToSpace UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff,
-
-        IntAttr:$block_size,
-        IE_DepthToSpaceModeAttr:$mode,
-        OptionalAttr<IE_ChannelPaddingAttr>:$padded_channels
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let builders = [
-        OpBuilder<(ins "mlir::Value":$input, "mlir::Value":$output_buff, "mlir::IntegerAttr":$block_size,
-            "vpux::IE::DepthToSpaceModeAttr":$mode)
-        >
-    ];
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
 // DepthToSpaceDMAOp
 //
 
@@ -4131,7 +1277,7 @@ def VPUIP_DepthToSpaceDMAOp :
                 VPUIP_DMATypeOpInterface
             ]
         > {
-    let summary = "A NNDMA task which performs a functionality equivalent DMA transfer to a UPA DepthToSpace task";
+    let summary = "A NNDMA task which performs a functionality equivalent DMA transfer to a DepthToSpace task";
 
     let arguments = (ins
         AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer]>:$input,
@@ -4182,254 +1328,6 @@ def VPUIP_DepthToSpaceDMAOp :
         `outputs` `(` $output_buff `:` type($output_buff) `)`
         `->` type(results)
     }];
-}
-
-//
-// NormalizeIEOp
-//
-
-def VPUIP_NormalizeIEUPAOp :
-        VPUIP_UPATaskOp<1, "NormalizeIEUPA",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "NormalizeIE UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$data,
-        F16MemRef:$weights,
-        F16MemRef:$output_buff,
-
-        F64Attr:$eps,
-        BoolAttr:$across_spatial,
-        BoolAttr:$channel_shared
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $data `:` type($data) `,` $weights `:` type($weights) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// CumSumUPAOp
-//
-
-def VPUIP_CumSumUPAOp :
-        VPUIP_UPATaskOp<1, "CumSumUPA",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "CumSum UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff,
-
-        OptionalAttr<IntAttr>:$axis_value,
-        UnitAttr:$exclusive,
-        UnitAttr:$reverse
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// NonMaxSuppression
-//
-
-def VPUIP_NonMaxSuppressionUPAOp :
-        VPUIP_UPATaskOp<3, "NonMaxSuppressionUPA",
-            [
-                MultiViewOpInterface,
-            ]
-        > {
-    let summary = "NonMaxSuppression UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$in_box_coords,
-        F16MemRef:$in_box_scores,
-        MemRefOf<[SI32]>:$out_selected_indices_buff,
-        F16MemRef:$out_selected_scores_buff,
-        MemRefOf<[SI32]>:$out_valid_outputs_buff,
-
-        IE_BoxEncodingTypeAttr:$box_encoding,
-        UnitAttr:$sort_result_descending,
-
-        IntAttr:$max_output_boxes_per_class_value,
-        F64Attr:$iou_threshold_value,
-        F64Attr:$score_threshold_value,
-        F64Attr:$soft_nms_sigma_value
-    );
-
-    let results = (outs
-        MemRefOf<[SI32]>:$out_selected_indices,
-        F16MemRef:$out_selected_scores,
-        MemRefOf<[SI32]>:$out_valid_outputs
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $in_box_coords `:` type($in_box_coords) `,`
-                    $in_box_scores `:` type($in_box_scores)
-        `outputs` `(` $out_selected_indices_buff `:` type($out_selected_indices_buff) `,`
-                    $out_selected_scores_buff `:` type($out_selected_scores_buff) `,`
-                    $out_valid_outputs_buff `:` type($out_valid_outputs_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// ReverseSequenceOp
-//
-
-def VPUIP_ReverseSequenceUPAOp :
-        VPUIP_UPATaskOp<1, "ReverseSequenceUPA",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "ReverseSequence UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$data,
-        F16MemRef:$seq_length,
-        F16MemRef:$output_buff,
-
-        IntAttr:$seq_axis,
-        IntAttr:$batch_axis
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $data `:` type($data) `,` $seq_length `:` type($seq_length) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// TopKOp
-//
-
-def VPUIP_TopKUPAOp:
-        VPUIP_UPATaskOp<2,"TopK",
-            [
-                MultiViewOpInterface
-            ]
-        > {
-    let summary = "TopK UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        MemRefOf<[SI32]>:$k,
-        F16MemRef:$output_values_buff,
-        MemRefOf<[SI32]>:$target_shape_buff,
-
-        IntAttr:$axis,
-        IE_TopKModeAttr:$mode,
-        IE_TopKSortTypeAttr:$sort,
-        TypeAttr:$element_type
-    );
-
-    let results = (outs
-        F16MemRef:$output_values,
-        MemRefOf<[SI32]>:$target_shape
-    );
-}
-
-//
-// SoftPlusUPAOp
-//
-
-def VPUIP_SoftPlusUPAOp :
-        VPUIP_UPATaskOp<1, "SoftPlusUPA",
-            [
-                ViewLikeOpInterface,
-                VPUIP_SameShape,
-                VPUIP_SameElementType
-            ]
-        > {
-    let summary = "SoftPlus UPA SHAVE kernel";
-
-    let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$output_buff
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
-// YuvToRgbOp
-//
-
-def VPUIP_YuvToRgbUPAOp :
-        VPUIP_UPATaskOp<1,"YuvToRgbUPA",
-            [
-                ViewLikeOpInterface,
-                AttrSizedOperandSegments
-            ]
-        > {
-    let summary = "Yuv-to-Rgb UPA SHAVE kernel";
-
-    let arguments = (ins
-                 MemRefOf<[UI8, F16, F32]> :$input1,
-        Optional<MemRefOf<[UI8, F16, F32]>>:$input2,
-        Optional<MemRefOf<[UI8, F16, F32]>>:$input3,
-                 MemRefOf<[UI8, F16, F32]> :$output_buff,
-
-        IE_ColorFmtAttr:$inFmt,
-        IE_ColorFmtAttr:$outFmt
-    );
-
-    let results = (outs
-        MemRefOf<[UI8, F16, F32]>:$output
-    );
-
-    let hasVerifier = 1;
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input1 `:` type($input1) (`,` $input2^ `:` type($input2))? (`,` $input3^ `:` type($input3))? `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-
 }
 
 //
@@ -4512,12 +1410,12 @@ def VPUIP_NCEClusterTilingOp :
     let summary = "Operation that encapsulates details of tiling operation between clusters";
 
     let arguments = (ins
-        Variadic<AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_SparseBuffer]>>:$inputs,
-        Variadic<AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_SparseBuffer]>>:$output_buffs
+        Variadic<AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer, VPUIP_SparseBuffer]>>:$inputs,
+        Variadic<AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer, VPUIP_SparseBuffer]>>:$output_buffs
     );
 
     let results = (outs
-        Variadic<AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_SparseBuffer]>>:$results
+        Variadic<AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer, VPUIP_SparseBuffer]>>:$results
     );
 
     let regions = (region SizedRegion<1>:$body);
@@ -4545,41 +1443,6 @@ def VPUIP_NCEClusterTilingOp :
         void print(::mlir::OpAsmPrinter& p);
         static ::mlir::ParseResult parse(::mlir::OpAsmParser& parser, ::mlir::OperationState& result);
     }];
-}
-
-//
-// ExtractImagePatchesUPAOp
-//
-
-def VPUIP_ExtractImagePatchesUPAOp :
-        VPUIP_UPATaskOp<1, "ExtractImagePatchesUPA",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "ExtractImagePatches UPA SHAVE kernel";
-
-    let arguments = (ins
-        AnyMemRef:$data,
-        AnyMemRef:$output_buff,
-
-        I64ArrayAttr:$sizes,
-        I64ArrayAttr:$strides,
-        I64ArrayAttr:$rates,
-        IE_PadTypeAttr:$autoPad
-    );
-
-    let results = (outs
-        AnyMemRef:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $data `:` type($data) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-
 }
 
 //
@@ -4633,7 +1496,7 @@ def VPUIP_NonDistributedCastOp:
     );
 
     let results = (outs
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer]>:$output
+        AnyTypeOf<[AnyMemRef]>:$output
     );
 
     let assemblyFormat = [{
@@ -4663,7 +1526,7 @@ def VPUIP_SubViewOp :
     let summary = "Extract single subview from buffer";
 
     let arguments = (ins
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_SparseBuffer]>:$source,
+        AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer, VPUIP_SparseBuffer]>:$source,
 
         I64ArrayAttr:$static_offsets,
         I64ArrayAttr:$static_sizes,
@@ -4672,7 +1535,7 @@ def VPUIP_SubViewOp :
     );
 
     let results = (outs
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_SparseBuffer]>:$result
+        AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer, VPUIP_SparseBuffer]>:$result
     );
 
     let assemblyFormat = [{
@@ -4738,12 +1601,12 @@ def VPUIP_ConcatViewOp :
     let summary = "VPUIP ConcatView layer. Dummy operation to maintain use-def chains.";
 
     let arguments = (ins
-        Variadic<AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_SparseBuffer, VPUIP_BoundedBuffer]>>:$inputs,
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_SparseBuffer, VPUIP_BoundedBuffer]>:$output_buff
+        Variadic<AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer, VPUIP_SparseBuffer, VPUIP_BoundedBuffer]>>:$inputs,
+        AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer, VPUIP_SparseBuffer, VPUIP_BoundedBuffer]>:$output_buff
     );
 
     let results = (outs
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_SparseBuffer, VPUIP_BoundedBuffer]>:$output
+        AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer, VPUIP_SparseBuffer, VPUIP_BoundedBuffer]>:$output
     );
 
     let assemblyFormat = [{
@@ -4926,13 +1789,15 @@ def VPUIP_CopyOp :
     let summary = "Copy layer";
 
     let arguments = (ins
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_SparseBuffer, VPUIP_DistributedBuffer, VPUIP_BoundedBuffer]>:$input,
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_SparseBuffer, VPUIP_DistributedBuffer, VPUIP_BoundedBuffer]>:$output_buff
+        AnyTypeOf<[AnyMemRef, VPUIP_SparseBuffer, VPUIP_DistributedBuffer, VPUIP_BoundedBuffer]>:$input,
+        AnyTypeOf<[AnyMemRef, VPUIP_SparseBuffer, VPUIP_DistributedBuffer, VPUIP_BoundedBuffer]>:$output_buff
     );
 
     let results = (outs
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_SparseBuffer, VPUIP_DistributedBuffer, VPUIP_BoundedBuffer]>:$output
+        AnyTypeOf<[AnyMemRef, VPUIP_SparseBuffer, VPUIP_DistributedBuffer, VPUIP_BoundedBuffer]>:$output
     );
+
+    let hasVerifier = 1;
 
     let assemblyFormat = [{
         attr-dict
@@ -5104,8 +1969,6 @@ def VPUIP_GroupSparseBufferOp :
             return vpux::DotNodeColor::ORANGE;
         }
     }];
-
-    let hasCanonicalizer = 1;
 }
 
 //
@@ -5276,46 +2139,6 @@ def VPUIP_StubOp :
 }
 
 //
-// DeformablePSROIPoolingUPAOp
-//
-
-def VPUIP_DeformablePSROIPoolingUPAOp :
-        VPUIP_UPATaskOp<1, "DeformablePSROIPoolingUPA",
-            [
-                ViewLikeOpInterface
-            ]
-        > {
-    let summary = "DeformablePSROIPooling UPA SHAVE kernel";
-
-let arguments = (ins
-        F16MemRef:$input_score_maps,
-        F16MemRef:$input_rois,
-        Optional<MemRefOf<[F16]>>:$input_transformations,
-        F16MemRef:$output_buff,
-
-        IntAttr:$output_dim,
-        F64Attr:$spatial_scale,
-        OptionalAttr<IntAttr>:$group_size,
-        OptionalAttr<IntAttr>:$spatial_bins_x,
-        OptionalAttr<IntAttr>:$spatial_bins_y,
-        OptionalAttr<F64Attr>:$trans_std,
-        OptionalAttr<IntAttr>:$part_size,
-        OptionalAttr<IE_DeformablePSROIPoolingModeAttr>:$mode
-    );
-
-    let results = (outs
-        F16MemRef:$output
-    );
-
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input_score_maps `:` type($input_score_maps) `,` $input_rois `:` type($input_rois) (`,` $input_transformations^ `:` type($input_transformations))? `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        `->` type(results)
-    }];
-}
-
-//
 // ViewOp
 //
 
@@ -5400,8 +2223,8 @@ def VPUIP_ExpandDMAOp :
     let summary = "A NNDMA task which expands tensor by copying values from original buffer";
 
     let arguments = (ins
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer]>:$input,
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer]>:$output_buff,
+        AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer]>:$input,
+        AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer]>:$output_buff,
 
         I64ArrayAttr:$pads_begin,
         I64ArrayAttr:$pads_end,
@@ -5415,7 +2238,7 @@ def VPUIP_ExpandDMAOp :
     );
 
     let results = (outs
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer]>:$output
+        AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer]>:$output
     );
 
     let builders = [
@@ -5461,7 +2284,7 @@ def VPUIP_UpsamplingDMAOp :
                 VPUIP_DMATypeOpInterface
             ]
         > {
-    let summary = "A NNDMA task which performs a functionality equivalent DMA transfer to a UPA UpsamplingDMA task";
+    let summary = "A NNDMA task which performs a functionality equivalent DMA transfer to a UpsamplingDMA task";
 
     let arguments = (ins
         AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer]>:$input,
@@ -5530,7 +2353,7 @@ def VPUIP_ExtractFlatSliceOp :
     let summary = "Operation that extracts flat slice from DistributedBuffer";
 
     let description = [{
-        This operation provides view to single slice from DistributedBuffer on the tiling dim.
+        This operation provides view to single slice from compact DistributedBuffer on the tiling dim.
         In contrast to SubView, this operation can take buffer slice from single cluster.
         For example, !VPUIP.DistributedBuffer<1x32x16x128xf16, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 4, 1, 1]>
         And offset is 20, which effectively means, that view will be memref<1x1x16x128xf16, [@CMX_NN, 2]>, because
@@ -5682,6 +2505,48 @@ def VPUIP_UngroupBoundedBufferOp :
     let assemblyFormat = [{
         `(` operands `)` attr-dict `:` type(operands) `->` type(results)
     }];
+}
+
+//
+// VPUIP_UpsamplingOp
+//
+
+def VPUIP_UpsamplingOp :
+        VPUIP_Op<"Upsampling",
+            [
+                ViewLikeOpInterface,
+                VPUIP_SameElementType,
+                InferTypeOpInterface,
+                DeclareOpInterfaceMethods<VPUIP_LayerOpInterface>,
+                MemoryEffectsOpInterface
+            ]
+        > {
+    let summary = "Upsampling VPUIP layer";
+
+    let arguments = (ins
+        AnyMemRef:$input,
+        AnyMemRef:$output_buff,
+
+        I64ArrayAttr:$upsampling_factor,
+        OptionalAttr<IE_UpsamplingPadAttr>:$pad
+    );
+
+    let results = (outs
+        AnyMemRef:$output
+    );
+
+    let assemblyFormat = [{
+        attr-dict
+        `inputs` `(` $input `:` type($input) `)`
+        `outputs` `(` $output_buff `:` type($output_buff) `)`
+        `->` type(results)
+    }];
+
+    let extraClassDeclaration = [{
+        static vpux::VPU::ExecutorKind getExecutorKind() {
+            return vpux::VPU::ExecutorKind::SHAVE_NN;
+        }
+    }] # VPUIP_InferLayerReturnTypes<1>.impl;
 }
 
 #endif

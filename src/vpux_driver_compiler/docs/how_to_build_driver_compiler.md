@@ -31,8 +31,8 @@ Driver Compiler is built with OpenVINO static runtime. To build the library and 
         git submodule update --init --recursive
 
         cd /path/to/workspace
-        git clone https://github.com/openvinotoolkit/npu_plugin.git
-        cd npu_plugin
+        git clone https://github.com/intel-innersource/applications.ai.vpu-accelerators.vpux-plugin
+        cd applications.ai.vpu-accelerators.vpux-plugin
         git checkout -b master origin/master (Just an example, you could use your own branch/tag/commit.)
         git submodule update --init --recursive
     ```
@@ -146,6 +146,10 @@ Follow the blow guide to build the Driver Compiler library and test targets with
 Driver compiler build is a static build, to get a static build of [NPU-Plugin Project] repo, please see
  * [how to build static](../../../guides/how-to-build-static.md).
 
+To learn more about the Driver Compiler package, please see
+ * [introduction of Driver Compiler package](https://github.com/intel-innersource/applications.ai.vpu-accelerators.flex-cid-tools/blob/develop/docs/introductio-of-driver_compiler_package.md).
+ * [how to Release Driver Compiler package.md](https://github.com/intel-innersource/applications.ai.vpu-accelerators.flex-cid-tools/blob/develop/docs/how-to-release-package.md).
+
 
 ## Using CMakePresets
 
@@ -168,7 +172,7 @@ Here provides a default pre-configured CMake presets for users named: "NpuCidRel
         git submodule update --init --recursive
 
         cd /path/to/workspace
-        git clone https://github.com/openvinotoolkit/npu_plugin.git
+        git clone https://github.com/intel-innersource/applications.ai.vpu-accelerators.vpux-plugin
         cd applications.ai.vpu-accelerators.vpux-plugin
         git checkout -b master origin/master (Just an example, you could use your own branch/tag/commit.)
         git submodule update --init --recursive
@@ -241,7 +245,7 @@ Here provides a default pre-configured CMake presets for users named: "ovNpuCidR
         git submodule update --init --recursive
 
         cd /path/to/workspace
-        git clone https://github.com/openvinotoolkit/npu_plugin.git
+        git clone https://github.com/intel-innersource/applications.ai.vpu-accelerators.vpux-plugin
         cd applications.ai.vpu-accelerators.vpux-plugin
         git checkout -b master origin/master (Just an example, you could use your own branch/tag/commit.)
         git submodule update --init --recursive
@@ -308,4 +312,5 @@ Here provides a default pre-configured CMake presets for users named: "ovNpuCidR
 4. Currently Presets for "NpuCidRelease" and "ovNpuCidRelease" will build the smallest size targrts of Driver Compiler. If the user wishes to build Driver Compiler and other targets, can driectly inherit "Cid" preset and enable the needed build option to self configuration presets.
 
 [OpenVINO Project]: https://github.com/openvinotoolkit/openvino
-[NPU-Plugin Project]: https://github.com/openvinotoolkit/npu_plugin.git
+[NPU-Plugin Project]: https://github.com/intel-innersource/applications.ai.vpu-accelerators.vpux-plugin
+[CiD Project]: https://github.com/intel-innersource/applications.ai.vpu-accelerators.flex-cid-tools

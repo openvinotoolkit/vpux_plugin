@@ -114,7 +114,8 @@ mlir::LogicalResult RewriteEnqueueToDma::matchAndRewrite(VPURegMapped::FetchTask
             nullptr,  // dma_hwp_id 0 s nullptr
             nullptr,  //  profilingMetadata
             0,        // allow_different_in_out_shapes
-            nullptr   // indices
+            nullptr,  // indices
+            nullptr   // enqueueBarrier
     );
     auto secondaryDma = rewriter.create<VPUMI40XX::NNDMAOp>(
             FetchTaskOp.getLoc(), FetchTaskOp.getIndexType(),
@@ -132,7 +133,8 @@ mlir::LogicalResult RewriteEnqueueToDma::matchAndRewrite(VPURegMapped::FetchTask
             nullptr,  // dma_hwp_id 0 s nullptr
             nullptr,  // profilingMetadata
             0,        // allow_different_in_out_shapes
-            nullptr   // indices
+            nullptr,  // indices
+            nullptr   // enqueueBarrier
     );
 
     // the use of mapped inference is to be replaced with the FIRST dma.

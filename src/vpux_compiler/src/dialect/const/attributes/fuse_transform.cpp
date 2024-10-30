@@ -62,10 +62,9 @@ Const::Content Const::FuseAttr::transform(Const::Content& input) const {
     return output;
 }
 
-Const::ContentAttr Const::ContentAttr::fuse(mlir::RankedTensorType fusedTensorType, Const::ContentAttr weightsTable,
-                                            Const::ContentAttr weights, Const::ContentAttr sparsity,
-                                            Const::ContentAttr activations) const {
-    return ContentAttr::addTransformation(
-            *this, Const::FuseAttr::get(getContext(), fusedTensorType, weightsTable, weights, sparsity, activations)
-                           .cast<Const::TransformAttrInterface>());
+Const::ContentSetup Const::ContentSetup::fuse(mlir::RankedTensorType fusedTensorType, Const::ContentAttr weightsTable,
+                                              Const::ContentAttr weights, Const::ContentAttr sparsity,
+                                              Const::ContentAttr activations) {
+    return addTransformation(
+            Const::FuseAttr::get(getContext(), fusedTensorType, weightsTable, weights, sparsity, activations));
 }

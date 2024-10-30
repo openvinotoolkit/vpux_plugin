@@ -233,7 +233,8 @@ mlir::LogicalResult AdjustConvWeights::matchAndRewrite(IE::ExpandOp expandOp, ml
     rewriter.replaceOpWithNewOp<IE::ConvolutionOp>(
             convOp, convOp.getOutput().getType(), newConcatOp.getOutput(), paddedFilter, convOp.getBias(),
             convOp.getStridesAttr(), convOp.getPadsBeginAttr(), convOp.getPadsEndAttr(), convOp.getDilationsAttr(),
-            convOp.getPostOpAttr(), convOp.getClampAttr(), convOp.getStaticScaleAttr());
+            convOp.getPostOpAttr(), convOp.getClampAttr(), convOp.getStaticScaleAttr(), convOp.getOutputChannelsAttr(),
+            convOp.getInputChannelsAttr());
 
     return mlir::success();
 }

@@ -22,15 +22,21 @@ private:
     Logger _log;
     VPU::DPUDryRunMode _dryRunMode;
 
-    void fillIDUCfg(mlir::Region& DPURegion, std::map<std::string, std::map<std::string, uint64_t>>& initValues) const;
-    void fillMPECfg(mlir::Region& DPURegion, std::map<std::string, std::map<std::string, uint64_t>>& initValues) const;
-    void fillPPECfg(mlir::Region& DPURegion, std::map<std::string, std::map<std::string, uint64_t>>& initValues) const;
-    void fillODUCfg(mlir::Region& DPURegion, std::map<std::string, std::map<std::string, uint64_t>>& initValues) const;
-    void fillBarrierCfg(VPUIPDPU::DPUInvariantOp origOp,
-                        std::map<std::string, std::map<std::string, uint64_t>>& initValues) const;
-    void fillProfilingCfg(VPUIPDPU::DPUInvariantOp origOp,
-                          std::map<std::string, std::map<std::string, uint64_t>>& initValues) const;
-    void fillStubCfg(std::map<std::string, std::map<std::string, uint64_t>>& initValues) const;
+    void fillIDUCfg(mlir::Region& DPURegion,
+                    std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>>& initValues) const;
+    void fillMPECfg(mlir::Region& DPURegion,
+                    std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>>& initValues) const;
+    void fillPPECfg(mlir::Region& DPURegion,
+                    std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>>& initValues) const;
+    void fillODUCfg(mlir::Region& DPURegion,
+                    std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>>& initValues) const;
+    void fillBarrierCfg(
+            VPUIPDPU::DPUInvariantOp origOp,
+            std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>>& initValues) const;
+    void fillProfilingCfg(
+            VPUIPDPU::DPUInvariantOp origOp,
+            std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>>& initValues) const;
+    void fillStubCfg(std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>>& initValues) const;
 };
 
 }  // namespace vpuipdpu2npureg40xx

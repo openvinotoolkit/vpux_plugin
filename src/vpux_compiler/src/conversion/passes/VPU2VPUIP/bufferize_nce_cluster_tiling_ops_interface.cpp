@@ -8,6 +8,7 @@
 
 #include "vpux/compiler/core/aliases_info.hpp"
 #include "vpux/compiler/dialect/IERT/ops.hpp"
+#include "vpux/compiler/dialect/VPU/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"

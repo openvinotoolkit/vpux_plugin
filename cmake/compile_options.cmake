@@ -1,7 +1,9 @@
 #
-# Copyright (C) 2022 Intel Corporation.
+# Copyright (C) 2022-2024 Intel Corporation.
 # SPDX-License-Identifier: Apache 2.0
 #
+
+include("${CMAKE_CURRENT_LIST_DIR}/compile_options_llvm.cmake")
 
 # put flags allowing dynamic symbols into target
 macro(replace_compile_visibility_options)
@@ -93,31 +95,6 @@ function(enable_warnings_as_errors TARGET_NAME)
         )
     endif()
 endfunction()
-
-macro(set_llvm_flags)
-    set(LLVM_ENABLE_WARNINGS OFF CACHE BOOL "")
-    set(LLVM_ENABLE_BINDINGS OFF CACHE BOOL "" FORCE)
-    set(LLVM_ENABLE_RTTI ON CACHE BOOL "" FORCE)
-    set(LLVM_ENABLE_EH ON CACHE BOOL "" FORCE)
-    set(LLVM_ENABLE_BACKTRACES OFF CACHE BOOL "" FORCE)
-    set(LLVM_ENABLE_CRASH_OVERRIDES OFF CACHE BOOL "" FORCE)
-    set(LLVM_ENABLE_PROJECTS "mlir" CACHE STRING "" FORCE)
-    if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR ENABLE_DEVELOPER_BUILD)
-        set(LLVM_ENABLE_ASSERTIONS ON CACHE BOOL "" FORCE)
-    else()
-        set(LLVM_ENABLE_ASSERTIONS OFF CACHE BOOL "" FORCE)
-    endif()
-    set(LLVM_INCLUDE_TESTS OFF CACHE BOOL "" FORCE)
-    set(LLVM_INCLUDE_BENCHMARKS OFF CACHE BOOL "" FORCE)
-    set(LLVM_TARGETS_TO_BUILD "host" CACHE STRING "" FORCE)
-    set(CROSS_TOOLCHAIN_FLAGS_ "" CACHE STRING "" FORCE)
-    set(CROSS_TOOLCHAIN_FLAGS_NATIVE "" CACHE STRING "" FORCE)
-    set(LLVM_ENABLE_TERMINFO OFF CACHE BOOL "" FORCE)
-    # we do not use examples and having it enabled
-    # makes cmake complains about long path on Windows
-    set(LLVM_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-    set(LLVM_INCLUDE_EXAMPLES OFF CACHE BOOL "" FORCE)
-endmacro()
 
 macro(enable_split_dwarf)
     if ((CMAKE_BUILD_TYPE STREQUAL "Debug") OR (CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo"))

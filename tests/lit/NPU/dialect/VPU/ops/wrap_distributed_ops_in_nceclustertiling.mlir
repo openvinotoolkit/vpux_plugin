@@ -46,6 +46,7 @@ func.func @CheckConv(%input: !InputDistributed, %weights: !WeightsDistributed,
 
     %convOut = VPU.NCE.Convolution(%input, %weights, %wt) {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
                                                           pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
+                                                          opaque_ppe = #VPU.PPEStub<>,
                                                           rawFilterShape = [80, 64, 3, 3], strides = [1, 1]} -> !OutputDistributed
     return %convOut : !OutputDistributed
 }
@@ -55,6 +56,7 @@ func.func @CheckConv(%input: !InputDistributed, %weights: !WeightsDistributed,
 //CHECK-SAME:                                   -> !VPU.DistributedTensor<1x80x28x28xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
 //CHECK:                 [[INNER_OP_OUT:%.+]] = VPU.NCE.Convolution([[INNER_ARG0]], [[INNER_ARG1]], [[INNER_ARG2]])
 //CHECK-SAME:                            {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
+//CHECK-SAME:                            opaque_ppe = #VPU.PPEStub<>,
 //CHECK-SAME:                            pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
 //CHECK-SAME:                            rawFilterShape = [80, 64, 3, 3], strides = [1, 1]}
 //CHECK-SAME:                            -> tensor<1x80x28x28xf16, {mem_space = @CMX_NN, order = #NHWC}>
@@ -137,7 +139,7 @@ func.func @CheckDepthConv(%input: !InputDistributed, %weights: !WeightsDistribut
                           %wt: !WeightsTableDistributed) -> !OutputDistributed {
 
     %depthConvOut= VPU.NCE.DepthConvolution(%input, %weights, %wt) { pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
-                                                                 rawFilterShape = [32, 1, 3, 3], strides = [1, 1]} -> !OutputDistributed
+                                                                opaque_ppe = #VPU.PPEStub<>, rawFilterShape = [32, 1, 3, 3], strides = [1, 1]} -> !OutputDistributed
     return %depthConvOut : !OutputDistributed
 }
 
@@ -145,8 +147,9 @@ func.func @CheckDepthConv(%input: !InputDistributed, %weights: !WeightsDistribut
 //CHECK-SAME:                           [[WEIGHTS]] as [[INNER_ARG1:%.+]]: tensor<32x16x1x1xf16, {mem_space = @CMX_NN, order = #NHWC}>,
 //CHECK-SAME:                           [[WT]] as [[INNER_ARG2:%.+]]: tensor<32x1x1x4xsi32, {mem_space = @CMX_NN, order = #NCHW}>)
 //CHECK-SAME:                            -> !VPU.DistributedTensor<1x32x14x14xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64, alignment = [1, 16, 1, 1]}> {
-//CHECK:                [[INNER_OP_OUT:%.+]] = VPU.NCE.DepthConvolution([[INNER_ARG0]], [[INNER_ARG1]], [[INNER_ARG2]]) {pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
-//CHECK-SAME:                            rawFilterShape = [32, 1, 3, 3], strides = [1, 1]}
+//CHECK:                [[INNER_OP_OUT:%.+]] = VPU.NCE.DepthConvolution([[INNER_ARG0]], [[INNER_ARG1]], [[INNER_ARG2]]) {opaque_ppe = #VPU.PPEStub<>,
+//CHECK-SAME:                             pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
+//CHECK-SAME:                             rawFilterShape = [32, 1, 3, 3], strides = [1, 1]}
 //CHECK-SAME:                             -> tensor<1x32x14x14xf16, {mem_space = @CMX_NN, order = #NHWC}>
 //CHECK:                VPU.Yield [[INNER_OP_OUT]]
 //CHECK:        }
@@ -201,8 +204,8 @@ func.func @CheckCompressConv(%input: !InputDistributed, %weights: !WeightsDistri
     %compressConvOut= VPU.NCE.CompressConvolution(%input, %weights, %wt)  {cm_sp_pattern = 15 : i64,
                                                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeightOverlapped>,
                                                 pad = #VPU.Padding<left = 3 : i64, right = 2 : i64, top = 3 : i64, bottom = 2 : i64>,
-                                                ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = 0 : i64, clamp_high = 255 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                                                fp_prelu_alpha = 1.000000e+00 : f64>, rawFilterShape = [64, 4, 7, 7], strides = [2, 2]} -> !OutputDistributed
+                                                opaque_ppe = #VPU.PPEStub<>,
+                                                rawFilterShape = [64, 4, 7, 7], strides = [2, 2]} -> !OutputDistributed
     return %compressConvOut : !OutputDistributed
 }
 
@@ -211,8 +214,8 @@ func.func @CheckCompressConv(%input: !InputDistributed, %weights: !WeightsDistri
 //CHECK-SAME:                              [[WT]] as [[INNER_ARG2:%.+]]: tensor<64x1x1x4xsi32, {mem_space = @CMX_NN, order = #NCHW}>)
 //CHECK-SAME:                               -> !VPU.DistributedTensor<1x64x112x112xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
 //CHECK:            [[INNER_OP_OUT:%.+]] = VPU.NCE.CompressConvolution([[INNER_ARG0]], [[INNER_ARG1]], [[INNER_ARG2]]) {cm_sp_pattern = 15 : i64, multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeightOverlapped>,
+//CHECK-SAME:                   opaque_ppe = #VPU.PPEStub<>,
 //CHECK-SAME:                   pad = #VPU.Padding<left = 3 : i64, right = 2 : i64, top = 3 : i64, bottom = 2 : i64>,
-//CHECK-SAME:                   ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = 0 : i64, clamp_high = 255 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
 //CHECK-SAME:                   rawFilterShape = [64, 4, 7, 7], strides = [2, 2]}
 //CHECK-SAME:                   -> tensor<1x64x112x112xf16, {mem_space = @CMX_NN, order = #NHWC}>
 //CHECK:            VPU.Yield [[INNER_OP_OUT]]
@@ -243,8 +246,7 @@ func.func @CheckCompressConv(%input: !InputDistributed, %weights: !WeightsDistri
 func.func @CheckAvgPool(%input: !InputDistributed) -> !OutputDistributed {
 
     %avgPoolOut= VPU.NCE.AveragePool(%input)  {kernel_size = [1, 1], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                                        ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                                        lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [2.500000e-01], fp_prelu_alpha = 1.000000e+00 : f64>,
+                                        opaque_ppe = #VPU.PPEStub<>,
                                         strides = [1, 1]} -> !OutputDistributed
     return %avgPoolOut : !OutputDistributed
 }
@@ -252,9 +254,8 @@ func.func @CheckAvgPool(%input: !InputDistributed) -> !OutputDistributed {
 //CHECK:        [[NCE_CLUSTER_TILING:%.+]] = VPU.NCE.ClusterTiling ([[INPUT]] as [[INNER_ARG0:%.+]]: tensor<1x320x1x1xf16, {mem_space = @CMX_NN, order = #NHWC}>)
 //CHECK-SAME:                               -> !VPU.DistributedTensor<1x320x1x1xf16, #NHWC, @CMX_NN, {mode = "DUPLICATED|SEGMENTED", num_tiles = [1, 2, 1, 1], num_clusters = 2 : i64, alignment = [1, 16, 1, 1]}> {
 //CHECK:                 [[INNER_OP_OUT:%.+]] = VPU.NCE.AveragePool([[INNER_ARG0]])
-//CHECK-SAME:                   {kernel_size = [1, 1], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-//CHECK-SAME:                   ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-//CHECK-SAME:                   quant_scale = [2.500000e-01], fp_prelu_alpha = 1.000000e+00 : f64>, strides = [1, 1]}
+//CHECK-SAME:                   {kernel_size = [1, 1], opaque_ppe = #VPU.PPEStub<>,
+//CHECK-SAME:                    pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, strides = [1, 1]}
 //CHECK-SAME:                    -> tensor<1x320x1x1xf16, {mem_space = @CMX_NN, order = #NHWC}>
 //CHECK:                VPU.Yield [[INNER_OP_OUT]]
 //CHECK:        }
@@ -284,13 +285,13 @@ func.func @CheckAvgPool(%input: !InputDistributed) -> !OutputDistributed {
 func.func @CheckMaxPool(%input: !InputDistributed) -> !OutputDistributed {
 
     %maxPoolOut= VPU.NCE.MaxPool(%input) {kernel_size = [1, 1], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                                            strides = [1, 1]} -> !OutputDistributed
+                                            opaque_ppe = #VPU.PPEStub<>, strides = [1, 1]} -> !OutputDistributed
     return %maxPoolOut : !OutputDistributed
 }
 
 //CHECK:        [[NCE_CLUSTER_TILING:%.+]] = VPU.NCE.ClusterTiling ([[INPUT]] as [[INNER_ARG0:%.+]]: tensor<1x32x112x112xf16, {mem_space = @CMX_NN, order = #NHWC}>)
 //CHECK-SAME:                               -> !VPU.DistributedTensor<1x32x112x112xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
-//CHECK:             [[INNER_OP_OUT:%.+]] = VPU.NCE.MaxPool([[INNER_ARG0]]) {kernel_size = [1, 1], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, strides = [1, 1]}
+//CHECK:             [[INNER_OP_OUT:%.+]] = VPU.NCE.MaxPool([[INNER_ARG0]]) {kernel_size = [1, 1], opaque_ppe = #VPU.PPEStub<>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, strides = [1, 1]}
 //CHECK-SAME:                             -> tensor<1x32x112x112xf16, {mem_space = @CMX_NN, order = #NHWC}>
 //CHECK:             VPU.Yield [[INNER_OP_OUT]]
 //CHECK:        }
@@ -326,14 +327,14 @@ func.func @CheckMaxPool(%input: !InputDistributed) -> !OutputDistributed {
 
 func.func @CheckEltwise(%input0: !InputDistributed0, %input1: !InputDistributed1) -> !OutputDistributed {
 
-    %eltwiseOut= VPU.NCE.Eltwise(%input0, %input1) {op_type = #VPU.eltwise_type<ADD>} -> !OutputDistributed
+    %eltwiseOut= VPU.NCE.Eltwise(%input0, %input1) {op_type = #VPU.eltwise_type<ADD>, opaque_ppe = #VPU.PPEStub<>} -> !OutputDistributed
     return %eltwiseOut : !OutputDistributed
 }
 
 //CHECK:        [[NCE_CLUSTER_TILING:%.+]] = VPU.NCE.ClusterTiling ([[INPUT0]] as [[INNER_ARG0:%.+]]: tensor<1x32x112x112xf16, {mem_space = @CMX_NN, order = #NHWC}>,
 //CHECK-SAME:                               [[INPUT1]] as [[INNER_ARG1:%.+]]: tensor<1x32x112x112xf16, {mem_space = @CMX_NN, order = #NHWC}>)
 //CHECK-SAME:                                -> !VPU.DistributedTensor<1x32x112x112xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
-//CHECK:             [[INNER_OP_OUT:%.+]] = VPU.NCE.Eltwise([[INNER_ARG0]], [[INNER_ARG1]]) {op_type = #VPU.eltwise_type<ADD>}
+//CHECK:             [[INNER_OP_OUT:%.+]] = VPU.NCE.Eltwise([[INNER_ARG0]], [[INNER_ARG1]]) {op_type = #VPU.eltwise_type<ADD>, opaque_ppe = #VPU.PPEStub<>}
 //CHECK-SAME:                       -> tensor<1x32x112x112xf16, {mem_space = @CMX_NN, order = #NHWC}>
 //CHECK:             VPU.Yield [[INNER_OP_OUT]]
 //CHECK:        }
@@ -370,14 +371,7 @@ func.func @CheckPermute(%input: !InputDistributed) -> !OutputDistributed {
         dstOrder = #NHWC,
         expandedChannels = 4 : i64,
         multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeightOverlapped>,
-        ppe = #VPU.PPETask<
-            clamp_high = 255 : i64,
-            clamp_low = 0 : i64,
-            fp_prelu_alpha = 1.000000e+00 : f64,
-            lrelu_mult = 1 : i64,
-            lrelu_shift = 0 : i64,
-            mode = <NOOP>
-        >
+        opaque_ppe = #VPU.PPEStub<>
     } -> !OutputDistributed
     return %permuteOut : !OutputDistributed
 }
@@ -386,7 +380,7 @@ func.func @CheckPermute(%input: !InputDistributed) -> !OutputDistributed {
 //CHECK-SAME:                               -> !VPU.DistributedTensor<1x4x256x224x!qElemType, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
 //CHECK:             [[INNER_OP_OUT:%.+]] = VPU.NCE.Permute([[INNER_ARG0]]) {dstElemType = !qElemType, dstOrder = #NHWC, expandedChannels = 4 : i64,
 //CHECK-SAME:                                    multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeightOverlapped>,
-//CHECK-SAME:                                    ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = 0 : i64, clamp_high = 255 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>}
+//CHECK-SAME:                                    opaque_ppe = #VPU.PPEStub<>}
 //CHECK-SAME:                                    -> tensor<1x4x256x224x!qElemType, {mem_space = @CMX_NN, order = #NHWC}>
 //CHECK:             VPU.Yield [[INNER_OP_OUT]]
 //CHECK:        }
@@ -486,7 +480,7 @@ func.func @SparseConvolution(%input: !SparseInput,
 
     %sparseConv = VPU.NCE.Convolution(%input, %weights, %weightsTable)
                     {pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 1 : i64, bottom = 0 : i64>,
-                    ppe = #VPU.PPETask<mode = <LRELU>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
+                    opaque_ppe = #VPU.PPEStub<>,
                     rawFilterShape = [128, 256, 3, 3], strides = [2, 2]}
                         -> !SparseConvOutputDist
 
@@ -502,9 +496,8 @@ func.func @SparseConvolution(%input: !SparseInput,
 //CHECK-SAME:                 -> !VPU.SparseTensor<data=!VPU.DistributedTensor<1x128x14x14xf16, #NHWC, @CMX_NN, {mode = "DUPLICATED|SEGMENTED", num_tiles = [1, 2, 1, 1], num_clusters = 2 : i64, alignment = [1, 16, 1, 1]}>, sparsity_map=!VPU.DistributedTensor<1x128x14x14xi1, #NHWC, @CMX_NN, {mode = "DUPLICATED|SEGMENTED", num_tiles = [1, 2, 1, 1], num_clusters = 2 : i64, alignment = [1, 16, 1, 1]}>> {
 
 //CHECK:               [[INNER_OP_OUT:%.+]] = VPU.NCE.Convolution([[INNER_ARG0]], [[INNER_ARG1]], [[INNER_ARG2]]) {
+//CHECK-SAME:                    opaque_ppe = #VPU.PPEStub<>,
 //CHECK-SAME:                    pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 1 : i64, bottom = 0 : i64>,
-//CHECK-SAME:                    ppe = #VPU.PPETask<mode = <LRELU>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-//CHECK-SAME:                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
 //CHECK-SAME:                    rawFilterShape = [128, 256, 3, 3], strides = [2, 2]}
 //CHECK-SAME:                     -> !VPU.SparseTensor<data=tensor<1x128x14x14xf16, {mem_space = @CMX_NN, order = #NHWC}>, sparsity_map=tensor<1x128x14x14xi1, {mem_space = @CMX_NN, order = #NHWC}>>
 //CHECK:      VPU.Yield [[INNER_OP_OUT]]

@@ -129,13 +129,12 @@ mlir::LogicalResult DPUInvariantRewriter::symbolize(VPUMI40XX::DPUInvariantOp op
     auto invariant = rewriter.create<VPUASM::DPUInvariantOp>(
             op.getLoc(), symName, taskIdx, taskLocation, inputSym, inputSparsityMapSym, inputSETableSym, weightsSym,
             weightsSparsityMapSym, weightTableSym, sprLookupTableSym, outputSym, outputSparsityMapSym, profilingDataSym,
-            outTypeContAttr, waitAttr, updateAttr, op.getNceTaskTypeAttr(), op.getMpeFrequentModeAttr(),
-            op.getKernelSizeAttr(), op.getKernelStridesAttr(), op.getKernelPaddingAttr(),
-            op.getActivationWindowChannelLengthAttr(), op.getIsContinuedAttr(), op.getCmSpPatternAttr(),
-            op.getInputChannelsCompressionAttr(), op.getOutChannelOffsetAttr(), op.getIsSuperdenseAttr(),
-            op.getIsInplaceAttr(), op.getInputSeSizeAttr(), op.getOutputSeSizeAttr(), op.getIsPermuteQuantizeAttr(),
-            op.getIsSmallKernelOptimizedAttr(), op.getStartAfterAttr(), op.getCleanAfterAttr(), variantsInGroupAttr,
-            firstVariantAttr, lastVariantAttr);
+            outTypeContAttr, waitAttr, updateAttr, op.getNceTaskTypeAttr(), op.getEltwiseTypeAttr(),
+            op.getMpeFrequentModeAttr(), op.getKernelSizeAttr(), op.getKernelStridesAttr(), op.getKernelPaddingAttr(),
+            op.getIsContinuedAttr(), op.getCmSpPatternAttr(), op.getInputChannelsCompressionAttr(),
+            op.getOutChannelOffsetAttr(), op.getIsSuperdenseAttr(), op.getIsInplaceAttr(), op.getInputSeSizeAttr(),
+            op.getOutputSeSizeAttr(), op.getIsPermuteQuantizeAttr(), op.getIsSmallKernelOptimizedAttr(),
+            op.getStartAfterAttr(), op.getCleanAfterAttr(), variantsInGroupAttr, firstVariantAttr, lastVariantAttr);
 
     {
         auto& ppeRegion = invariant.getPpe();

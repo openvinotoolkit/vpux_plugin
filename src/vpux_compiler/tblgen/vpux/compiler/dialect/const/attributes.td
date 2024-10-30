@@ -59,148 +59,196 @@ def Const_SymElementsAttr : Const_Attr<"SymElements", [
     let hasCustomAssemblyFormat = 1;
 }
 
+// Use custom implementation instead of SymbolRefArrayAttr because SymbolRefArrayAttr
+// does not overload the return type and would require us to do extra casting.
+def Const_SymbolRefAttrArrayAttr : ArrayOfAttr<Const_Dialect,
+    "SymElementsAttrArray", "SymElementsAttrArray", "::mlir::SymbolRefAttr">;
+
 //
 // ContentAttr
 //
 
-def Const_ContentAttr : Const_Attr<"Content", [Const_RequestQueueAttrInterface]> {
+def Const_ContentAttr : Property<"::vpux::Const::ContentAttr"> {
     let summary = "Lazy folded constant content";
 
     let description = [{
-        This attribute holds base constant and transformation applied to it.
-        It provides and API to get transformed values on the fly.
+        This property holds base constant and transformation applied to it. It
+        provides and API to get transformed values on the fly.
+    }];
+
+    let hashProperty = "hash_value($_storage)";
+}
+
+def Const_EphemeralContentAttr : Const_Attr<"EphemeralContent"> {
+    let summary = "Utility wrapper attribute around real content property.";
+
+    let description = [{
+        This attribute holds the bare minimum of fields necessary to reconstruct
+        a content property from. This is used *primarily* for folding and other
+        scoped-lifetime, sensitive places where certain invariants are
+        guaranteed. General usage is prohibited.
     }];
 
     let parameters = (ins
         "mlir::ElementsAttr":$baseContent,
-        "vpux::Const::TransformAttrInterfaceArrayAttr":$transformations,
-        "vpux::NDTypeInterface":$finalType,
-        "mlir::UnitAttr":$isSplat
+        "vpux::Const::TransformAttrInterfaceArrayAttr":$transformations
     );
 
-    let builders = [
-        AttrBuilderWithInferredContext<
-            (ins "mlir::ElementsAttr":$baseContent), [{
-                const auto [finalType, isSplat] = vpux::Const::ContentAttr::inferFinalTypeAndSplat(baseContent, {});
-                return $_get(baseContent.getContext(), baseContent,
-                    vpux::Const::TransformAttrInterfaceArrayAttr(), finalType, isSplat);
-            }]
-        >,
+    let hasCustomAssemblyFormat = 1;
 
-        AttrBuilderWithInferredContext<
-            (ins "mlir::ElementsAttr":$baseContent, "mlir::ArrayRef<vpux::Const::TransformAttrInterface>":$transformations), [{
-                auto transformationsAttr = vpux::Const::TransformAttrInterfaceArrayAttr::get(baseContent.getContext(), transformations);
-                const auto [finalType, isSplat] = vpux::Const::ContentAttr::inferFinalTypeAndSplat(
-                    baseContent, transformations);
-                return $_get(baseContent.getContext(), baseContent, transformationsAttr, finalType, isSplat);
+    // helper compatibility APIs
+    let extraClassDeclaration = [{
+        operator vpux::Const::ContentAttr() const;
+        bool isSplat() const;
+        vpux::NDTypeInterface getType() const;
+    }];
+
+    let extraClassDefinition = [{
+        mlir::Attribute vpux::Const::EphemeralContentAttr::parse(mlir::AsmParser&, mlir::Type) {
+            VPUX_THROW("This attribute could not be parsed");
+            return nullptr;
+        }
+
+        vpux::Const::EphemeralContentAttr::operator vpux::Const::ContentAttr() const {
+            return vpux::Const::ContentAttr::get(getBaseContent(), getTransformations().getValue());
+        }
+
+        bool vpux::Const::EphemeralContentAttr::isSplat() const {
+            mlir::ArrayRef<vpux::Const::TransformAttrInterface> transforms{};
+            if (getTransformations()) {
+                transforms = getTransformations().getValue();
+            }
+            return vpux::Const::inferFinalTypeAndSplat(getBaseContent(), transforms).second;
+        }
+        vpux::NDTypeInterface vpux::Const::EphemeralContentAttr::getType() const {
+            mlir::ArrayRef<vpux::Const::TransformAttrInterface> transforms{};
+            if (getTransformations()) {
+                transforms = getTransformations().getValue();
+            }
+            return vpux::Const::inferFinalTypeAndSplat(getBaseContent(), transforms).first;
+        }
+    }];
+}
+
+//
+// MultiContentSymbolAttr
+//
+
+def Const_MultiContentSymbolAttr : Const_Attr<"MultiContentSymbol"> {
+    let summary = "Represents the content in const.MultiDeclare";
+
+    let description = [{
+        This attribute contains a symbol which points to a const.RodataBundle, a type and
+        a list of transformations.
+
+        To access the underlying a data, a "dereferenced version", namely an instance of
+        Const::MultiContentAttr must be acquired through functionality in Const::MultiDeclare.
+
+        ```MLIR
+        @Bundle::@Symbol : tensor<4x4xf32>, [#Const.Add<3.0>]
+        ```
+    }];
+
+    let parameters = (ins
+        // the symbol that references a 'const.RodataBundle' op
+        "::mlir::SymbolRefAttr":$bundleSymbol,
+        // and its type
+        "::vpux::NDTypeInterface":$bundleSymbolType,
+        // a list of transformations that would be applied
+        "::vpux::Const::TransformAttrInterfaceArrayAttr":$transformations,
+        // The resulting type if these transformations were applied to a buffer of type 'bundleSymbolType'. This is inferred.
+        "::vpux::NDTypeInterface":$finalType
+    );
+
+    let skipDefaultBuilders = 1;
+    let builders = [
+        AttrBuilder<(ins "::mlir::SymbolRefAttr":$bundleSymbol, "::vpux::NDTypeInterface":$bundleSymbolType, "::vpux::Const::TransformAttrInterfaceArrayAttr":$transformations), [{
+                auto transformationsAttr = ::vpux::Const::TransformAttrInterfaceArrayAttr::get($_ctxt, transformations);
+                auto finalType = ::vpux::Const::inferFinalType(bundleSymbolType, transformations);
+                return $_get($_ctxt, bundleSymbol, bundleSymbolType, transformationsAttr, finalType);
             }]
         >
     ];
 
-    let storageNamespace = "details";
-    let genVerifyDecl = 1;
-    let skipDefaultBuilders = 1;
-    let genAccessors = 0;
     let hasCustomAssemblyFormat = 1;
+}
 
-    let extraClassDeclaration = [{
-        using ValueType = vpux::Const::Content;
-
-        ValueType fold(bool bypassCache = false) const;
-
-        mlir::ElementsAttr getBaseContent() const;
-        mlir::ArrayRef<vpux::Const::TransformAttrInterface> getTransformations() const;
-        vpux::NDTypeInterface getType() const;
-        bool isSplat() const;
-
-        vpux::Const::ContentAttr broadcast(Dim axis, int64_t value) const;
-        vpux::Const::ContentAttr convertElemType(mlir::Type newElemType) const;
-        vpux::Const::ContentAttr quantCast(mlir::quant::QuantizedType newElemType = nullptr) const;
-        vpux::Const::ContentAttr dequantize() const;
-        vpux::Const::ContentAttr quantize(mlir::quant::QuantizedType targetType) const;
-        vpux::Const::ContentAttr rescale(double scale) const;
-        vpux::Const::ContentAttr relocateWeightsTablePointers(ArrayRef<uint32_t> weightsPtr, uint64_t sparsityPtr, vpux::ShapeRef offsets,
-                                                              uint64_t weightsTableSize, uint64_t weightsElemBitSize, VPUIP::SparsityCompressionAttr weightsCompression,
-                                                              uint64_t channelOffset) const;
-        vpux::Const::ContentAttr swizzleConstant(uint64_t swizzleKey, uint64_t arch) const;
-        vpux::Const::ContentAttr add(double bias) const;
-        vpux::Const::ContentAttr reshape(vpux::ShapeRef newShape) const;
-        vpux::Const::ContentAttr reverse(Dim axis) const;
-        vpux::Const::ContentAttr reorder(vpux::DimsOrder newOrder) const;
-        vpux::Const::ContentAttr padWithZero(vpux::ShapeRef padBefore, vpux::ShapeRef padAfter) const;
-        vpux::Const::ContentAttr subview(vpux::ShapeRef offset, vpux::ShapeRef shape) const;
-        vpux::Const::ContentAttr bitPack(int64_t width) const;
-        vpux::Const::ContentAttr transpose(vpux::DimsOrder newOrder) const;
-        vpux::Const::ContentAttr memPermute(vpux::DimsOrder dstOrder, vpux::DimsOrder memPerm) const;
-        vpux::Const::ContentAttr layoutCast(vpux::DimsOrder dstOrder) const;
-        vpux::Const::ContentAttr expandDilated(vpux::ShapeRef dilations) const;
-        vpux::Const::ContentAttr getSparsityMap() const;
-        vpux::Const::ContentAttr sparsify(bool compressOutputType, mlir::ElementsAttr numActualElements = nullptr) const;
-        vpux::Const::ContentAttr changeShapeAndElemType(vpux::ShapeRef newShape, mlir::Type newElemType) const;
-        vpux::Const::ContentAttr fuse(mlir::RankedTensorType fusedTensorType, Const::ContentAttr weightsTable, Const::ContentAttr weights, Const::ContentAttr sparsity, Const::ContentAttr activations) const;
-        vpux::Const::ContentAttr scalarMultInverse() const;
-
-        static vpux::Const::ContentAttr addTransformation(vpux::Const::ContentAttr input, vpux::Const::TransformAttrInterface transformation);
-        static std::pair<vpux::NDTypeInterface, mlir::UnitAttr> inferFinalTypeAndSplat(
-            mlir::ElementsAttr content, mlir::ArrayRef<vpux::Const::TransformAttrInterface> transformations);
-
-        vpux::Const::ContentAttr stripTransformationsFrom(Const::TransformAttrInterface transformation);
-        SmallVector<vpux::Const::TransformAttrInterface> getLastTransformationsFrom(Const::TransformAttrInterface transformation);
-    }];
-
-    let storageType = "vpux::Const::ContentAttr";
-    let returnType = "vpux::Const::Content";
-    let convertFromStorage = "$_self.fold()";
+def Const_ElementsAttrArrayAttr : ArrayOfAttr<Const_Dialect,
+        "ElementsAttrArray", "ElementsAttrArray", "::mlir::ElementsAttr"> {
+    // the default parser generator would use ArrayOfAttr's '$self.getValue()' which leads to a
+    // compile error
+    let convertFromStorage = "$_self";
 }
 
 //
-// Const_EquivalenceRequestAttr
+// MultiContentAttr
 //
 
-def Const_EquivalenceRequestAttr : Const_Attr<"EquivalenceRequest", [Const_RequestQueueAttrInterface]> {
-    let summary = "Marks two ContentAttr objects as being equivalent for background folding";
+def Const_MultiContentAttr : Const_Attr<"MultiContent"> {
+    let summary = "Represents the _dereferenced_ content in const.MultiDeclare";
 
     let description = [{
-        This attribute is meant to be used in the request queue for the background folding feature.
+        This attribute contains an array of mlir::ElementsAttr attributes, an array of transformations
+        and a final type. This attribute *should only* be acquired by calling Const::MultiDeclareOp::dereferenceMultiContentSymbol().
+        It _can_ be parsed and printed but is generally not designed to.
 
-        It is meant to represent that two ContentAttr objects are equivalent in terms of folding,
-        meaning that the `fold()` method will produce the same result for both attributes.
-        The main use-case for this attribute is to allow the list of transformations of a ContentAttr
-        to be optimized (e.g. produce the same result but with fewer transformations or less compute
-        per transformation), without losing the computation that was already performed.
+        Assume the user parses some IR of the following form:
+        ```MLIR
+        const.Data @Data {
+            const.Rodata @weights_0 dense<1.0> : tensor<4x4xf32>
+        }
+
+        const.BundleData @BundleStore {
+            const.RodataBundle @bundle = [@Data::@weights_0, @Data::@weights_0] : tensor<4x4xf32>
+        }
+
+        // ...
+        %cst = const.MultiDeclare tensor<4x4xf32> = @BundleStore::@bundle [<list of transformations>] : tensor<4x4xf32>
+        // ...
+        ```
+        Then `@BundleStore::@bundle [<list of transformations>] : tensor<4x4xf32>` is of type `MultiContentSymbolAttr`.
+        To allow passes to access the underlying tensor data, the bundle symbol must first be dereferenced. The
+        result is `MultiContentAttr` where the underlying Dense(Resource)ElementsAttr are directly accessible.
     }];
-
-    let mnemonic = "EquivalenceRequest";
 
     let parameters = (ins
-        "vpux::Const::ContentAttr":$originalAttr,
-        "vpux::Const::ContentAttr":$newAttr
+        // array of mlir::DenseElementsAttr or mlir::DenseResourceElementsAttr
+        Const_ElementsAttrArrayAttr:$baseContent,
+        // array of transformations
+        "vpux::Const::TransformAttrInterfaceArrayAttr":$transformations,
+        // The type when applying all transformations to any of the tensors in 'baseContent'. The verifier ensures that all underlying tensors
+        // in 'baseContent' have the same type.
+        "vpux::NDTypeInterface":$finalType
     );
 
-    let storageNamespace = "details";
-    let assemblyFormat = "`<` $originalAttr `,` $newAttr `>`";
+    let genVerifyDecl = 1;
+    let assemblyFormat = "$baseContent `:` $finalType `,` $transformations";
+
+    let builders = [
+        AttrBuilder<
+                (ins "::mlir::ArrayRef<::mlir::ElementsAttr>":$baseContent, "mlir::ArrayRef<vpux::Const::TransformAttrInterface>":$transformations), [{
+                    // Assume that finalType is equal for *all* Dense(Resource)Elements in baseContent. If this is actually the case is checked in
+                    // the verifier.
+                    VPUX_THROW_WHEN(baseContent.empty(), "'baseContent' is expected to have at least 1 element");
+                    VPUX_THROW_WHEN(::llvm::any_of(baseContent, [](auto attr) { return attr == nullptr; }), "Unexpected null elements in 'baseContent'");
+
+                    auto baseContentAttr = vpux::Const::ElementsAttrArrayAttr::get($_ctxt, baseContent);
+                    auto transformationsAttr = vpux::Const::TransformAttrInterfaceArrayAttr::get($_ctxt, transformations);
+                    auto finalType = vpux::Const::inferFinalTypeAndSplat(baseContent[0], transformations).first;
+
+                    return $_get($_ctxt, baseContentAttr, transformationsAttr, finalType);
+                }]
+            >
+    ];
 }
 
 //
-// Const_TerminateRequestAttr
+// CastElemTypeAttr
 //
 
-def Const_TerminateRequestAttr : Const_Attr<"TerminateRequest", [Const_RequestQueueAttrInterface]> {
-    let summary = "Attribute representing the termination of a background folding thread";
-
-    let description = [{
-        This attribute is meant to be used in the request queue for the background folding feature.
-        When a thread receives this attribute via the folding request queue, it will terminate its execution.
-    }];
-}
-
-//
-// ConvertElemTypeAttr
-//
-
-def Const_ConvertElemTypeAttr : Const_Attr<"ConvertElemType",
+def Const_CastElemTypeAttr : Const_Attr<"CastElemType",
         [DeclareAttrInterfaceMethods<Const_TransformAttrInterface>]> {
-    let summary = "Convert constant content element type";
+    let summary = "Cast constant content element type";
 
     let parameters = (ins
         "mlir::Type":$elemType
@@ -217,7 +265,38 @@ def Const_ConvertElemTypeAttr : Const_Attr<"ConvertElemType",
     let storageNamespace = "details";
     let genVerifyDecl = 1;
     let skipDefaultBuilders = 1;
-    let hasCustomAssemblyFormat = 1;
+    let assemblyFormat = "`<` $elemType `>`";
+}
+
+//
+// Const_ConvertElemTypeAttr
+//
+
+def Const_ConvertElemTypeAttr : Const_Attr<"ConvertElemType",
+        [DeclareAttrInterfaceMethods<Const_TransformAttrInterface>]> {
+    let summary = "Convert constant content element type";
+
+    let description = [{
+        This transformation does actual data type conversion.
+        Right now only support the sub byte type conversion.
+    }];
+
+    let parameters = (ins
+        "mlir::Type":$elemType
+    );
+
+    let builders = [
+        AttrBuilderWithInferredContext<
+            (ins "mlir::Type":$elemType), [{
+                return $_get(elemType.getContext(), elemType);
+            }]
+        >
+    ];
+
+    let storageNamespace = "details";
+    let genVerifyDecl = 1;
+    let skipDefaultBuilders = 1;
+    let assemblyFormat = "`<` $elemType `>`";
 }
 
 //
@@ -229,22 +308,21 @@ def Const_QuantCastAttr : Const_Attr<"QuantCast",
     let summary = "Cast element type from raw integer to quantized type";
 
     let parameters = (ins
-        "mlir::quant::QuantizedType":$elemType
+        "mlir::Type":$elemType
     );
 
     let builders = [
-
-        AttrBuilder<
-            (ins "mlir::quant::QuantizedType":$elemType), [{
-                return $_get($_ctxt, elemType);
+        AttrBuilderWithInferredContext<
+            (ins "mlir::Type":$elemType), [{
+                return $_get(elemType.getContext(), elemType);
             }]
         >
     ];
 
     let storageNamespace = "details";
     let genVerifyDecl = 1;
-    let hasCustomAssemblyFormat = 1;
     let skipDefaultBuilders = 1;
+    let assemblyFormat = "`<` $elemType `>`";
 }
 
 //
@@ -707,7 +785,7 @@ def Const_FuseAttr : Const_Attr<"Fuse",
 
     let parameters = (ins
         "mlir::RankedTensorType":$fusedType,
-        "Const::ContentAttr":$weightsTable,
+        OptionalParameter<"Const::ContentAttr">:$weightsTable,
         OptionalParameter<"Const::ContentAttr">:$weights,
         OptionalParameter<"Const::ContentAttr">:$sparsity,
         OptionalParameter<"Const::ContentAttr">:$activations
@@ -717,10 +795,10 @@ def Const_FuseAttr : Const_Attr<"Fuse",
     let assemblyFormat = [{
         `<`
         $fusedType
-        `,` `weightsTable` `=` `<` $weightsTable `>`
-        (`,` `weights` `=` `<` $weights^ `>`)?
-        (`,` `sparsity` `=` `<` $sparsity^ `>`)?
-        (`,` `activations` `=` `<` $activations^ `>`)?
+        (`,` `weightsTable` `=` `<` custom<ContentAttr>($weightsTable)^ `>`)?
+        (`,` `weights` `=` `<` custom<ContentAttr>($weights)^ `>`)?
+        (`,` `sparsity` `=` `<` custom<ContentAttr>($sparsity)^ `>`)?
+        (`,` `activations` `=` `<` custom<ContentAttr>($activations)^ `>`)?
         `>`
     }];
 }

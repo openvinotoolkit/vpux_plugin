@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --outliner="mode=repeating-blocks min-ops-in-block=2 max-num-iterations=10" --canonicalize %s | FileCheck %s
+// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --outliner="function-outlining=\"repeating-blocks='min-ops-in-block=2 max-num-iterations=10'\"" --canonicalize %s | FileCheck %s
 // REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 module @TwoInstances {
@@ -227,4 +227,71 @@ module @InputReuseMultipleOps {
     // CHECK:      [[CALL2:%.+]]:2 = call @main_fn1([[CALL1]]#0, [[CALL1]]#1, [[CALL1]]#1) : (tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32>) -> (tensor<1x48x60x60xf32>, tensor<1x48x60x60xf32>)
     // CHECK:      return [[CALL2]]#1 : tensor<1x48x60x60xf32>
     // CHECK:  }
+}
+
+// -----
+
+module @TwoRepeatingBlockTypes {
+    IE.CNNNetwork entryPoint : @main
+    inputsInfo : {
+        DataInfo "input" : tensor<1x3x300x300xf32>
+    } outputsInfo : {
+        DataInfo "output" : tensor<1x3x300x300xf32>
+    }
+
+    func.func @main(%input: tensor<1x3x300x300xf32>) -> tensor<1x3x300x300xf32> {
+        %maxpool1 = IE.MaxPool(%input) {kernel_size = [3, 3], pads_begin = [1, 1], pads_end = [1, 1], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]}
+            : tensor<1x3x300x300xf32> -> tensor<1x3x300x300xf32>
+        %avgpool1 = IE.AvgPool(%maxpool1) {kernel_size = [3, 3], pads_begin = [1, 1], pads_end = [1, 1], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]}
+            : tensor<1x3x300x300xf32> -> tensor<1x3x300x300xf32>
+        %avgpool2 = IE.AvgPool(%avgpool1) {kernel_size = [3, 3], pads_begin = [1, 1], pads_end = [1, 1], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]}
+            : tensor<1x3x300x300xf32> -> tensor<1x3x300x300xf32>
+
+        %softmax = IE.SoftMax(%avgpool2) {axisInd = -1} : tensor<1x3x300x300xf32> -> tensor<1x3x300x300xf32>
+
+        %add1 = IE.Add(%softmax, %softmax) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x3x300x300xf32>, tensor<1x3x300x300xf32> -> tensor<1x3x300x300xf32>
+        %multiply1 = IE.Multiply(%add1, %add1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x3x300x300xf32>, tensor<1x3x300x300xf32> -> tensor<1x3x300x300xf32>
+
+        %maxpool2 = IE.MaxPool(%multiply1) {kernel_size = [3, 3], pads_begin = [1, 1], pads_end = [1, 1], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]}
+            : tensor<1x3x300x300xf32> -> tensor<1x3x300x300xf32>
+        %avgpool3 = IE.AvgPool(%maxpool2) {kernel_size = [3, 3], pads_begin = [1, 1], pads_end = [1, 1], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]}
+            : tensor<1x3x300x300xf32> -> tensor<1x3x300x300xf32>
+        %avgpool4 = IE.AvgPool(%avgpool3) {kernel_size = [3, 3], pads_begin = [1, 1], pads_end = [1, 1], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]}
+            : tensor<1x3x300x300xf32> -> tensor<1x3x300x300xf32>
+
+        %add2 = IE.Add(%avgpool4, %avgpool4) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x3x300x300xf32>, tensor<1x3x300x300xf32> -> tensor<1x3x300x300xf32>
+        %multiply2 = IE.Multiply(%add2, %add2) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x3x300x300xf32>, tensor<1x3x300x300xf32> -> tensor<1x3x300x300xf32>
+
+        return %multiply2 : tensor<1x3x300x300xf32>
+    }
+
+    // CHECK-LABEL: @TwoRepeatingBlockTypes
+
+    // CHECK: DataInfo "input" : tensor<1x3x300x300xf32>
+    // CHECK: DataInfo "output" : tensor<1x3x300x300xf32>
+
+    // CHECK:      func.func private @main_fn1([[ARG0:%.+]]: tensor<1x3x300x300xf32>) -> tensor<1x3x300x300xf32> {
+    // CHECK:          [[MAXPOOL1:%.+]] = IE.MaxPool([[ARG0]]) {kernel_size = [3, 3], pads_begin = [1, 1], pads_end = [1, 1], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]}
+    // CHECK-SAME:          : tensor<1x3x300x300xf32> -> tensor<1x3x300x300xf32>
+    // CHECK:          [[AVGPOOL1_1:%.+]] = IE.AvgPool([[MAXPOOL1]]) {kernel_size = [3, 3], pads_begin = [1, 1], pads_end = [1, 1], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]}
+    // CHECK-SAME:          : tensor<1x3x300x300xf32> -> tensor<1x3x300x300xf32>
+    // CHECK:          [[AVGPOOL1_2:%.+]] = IE.AvgPool([[AVGPOOL1_1]]) {kernel_size = [3, 3], pads_begin = [1, 1], pads_end = [1, 1], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]}
+    // CHECK-SAME:          : tensor<1x3x300x300xf32> -> tensor<1x3x300x300xf32>
+    // CHECK:          return [[AVGPOOL1_2]] : tensor<1x3x300x300xf32>
+    // CHECK:      }
+
+    // CHECK:      func.func private @main_fn2([[ARG0:%.+]]: tensor<1x3x300x300xf32>, [[ARG1:%.+]]: tensor<1x3x300x300xf32>) -> tensor<1x3x300x300xf32> {
+    // CHECK:          [[ADD1:%.+]] = IE.Add([[ARG0]], [[ARG1]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x3x300x300xf32>, tensor<1x3x300x300xf32> -> tensor<1x3x300x300xf32>
+    // CHECK:          [[MUL1:%.+]] = IE.Multiply([[ADD1]], [[ADD1]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x3x300x300xf32>, tensor<1x3x300x300xf32> -> tensor<1x3x300x300xf32>
+    // CHECK:          return [[MUL1]] : tensor<1x3x300x300xf32>
+    // CHECK:      }
+
+    // CHECK:      func.func @main([[INPUT:%.+]]: tensor<1x3x300x300xf32>) -> tensor<1x3x300x300xf32> {
+    // CHECK:          [[FN1_CALL1:%.+]] = call @main_fn1([[INPUT]]) : (tensor<1x3x300x300xf32>) -> tensor<1x3x300x300xf32>
+    // CHECK:          [[SOFTMAX:%.+]] = IE.SoftMax([[FN1_CALL1]]) {axisInd = 3 : i64} : tensor<1x3x300x300xf32> -> tensor<1x3x300x300xf32>
+    // CHECK:          [[FN2_CALL1:%.+]] = call @main_fn2([[SOFTMAX]], [[SOFTMAX]]) : (tensor<1x3x300x300xf32>, tensor<1x3x300x300xf32>) -> tensor<1x3x300x300xf32>
+    // CHECK:          [[FN1_CALL2:%.+]] = call @main_fn1([[FN2_CALL1]]) : (tensor<1x3x300x300xf32>) -> tensor<1x3x300x300xf32>
+    // CHECK:          [[FN2_CALL2:%.+]] = call @main_fn2([[FN1_CALL2]], [[FN1_CALL2]]) : (tensor<1x3x300x300xf32>, tensor<1x3x300x300xf32>) -> tensor<1x3x300x300xf32>
+    // CHECK:          return [[FN2_CALL2]] : tensor<1x3x300x300xf32>
+    // CHECK:      }
 }

@@ -169,7 +169,6 @@ TEST_P(PoolingLayerTest_NPU3720_SingleCluster, HW) {
     });
     setDefaultHardwareMode();
     setSingleClusterMode();
-    useELFCompilerBackend();
     run(Platform::NPU3720);
 }
 
@@ -217,6 +216,30 @@ TEST_P(PoolingLayerTest_NPU4000_F32, SW) {
 
 TEST_P(PoolingLayerTest_NPU4000_SOB, HW) {
     setDefaultHardwareMode();
+    run(Platform::NPU4000);
+}
+
+class MaxPoolingV8LayerTestCommon : public MaxPoolingV8LayerTest, virtual public VpuOv2LayerTest {};
+
+TEST_P(MaxPoolingV8LayerTestCommon, NPU3720_SW) {
+    setSkipCompilationCallback([this](std::stringstream& skip) {
+        const auto netPrecision = std::get<1>(GetParam());
+        if (netPrecision == ov::element::i8 || netPrecision == ov::element::u8) {
+            skip << "MaxPool8 SingleLayerTest is not enabled with precision: " << netPrecision;
+        }
+    });
+    setReferenceSoftwareMode();
+    run(Platform::NPU3720);
+}
+
+TEST_P(MaxPoolingV8LayerTestCommon, NPU4000_SW) {
+    setSkipCompilationCallback([this](std::stringstream& skip) {
+        const auto netPrecision = std::get<1>(GetParam());
+        if (netPrecision == ov::element::i8 || netPrecision == ov::element::u8) {
+            skip << "MaxPool8 SingleLayerTest is not enabled with precision: " << netPrecision;
+        }
+    });
+    setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
 
@@ -705,7 +728,7 @@ const auto pool_inputOutputInteger = ::testing::Combine(
                            ::testing::Values(ov::op::RoundingType::FLOOR),                               //
                            ::testing::Values(ov::op::PadType::VALID),                                    //
                            ::testing::Values(false)),                                                    // excludePad,
-        ::testing::Values(ov::element::u8, ov::element::i8, ov::element::i32),                           // netPrc
+        ::testing::Values(ov::element::u8, ov::element::i8, ov::element::i32, ov::element::i64),         // netPrc
         ::testing::Values(static_shapes_to_test_representation(std::vector<ov::Shape>{{1, 1, 16, 8}})),  // inputShapes
         ::testing::Values(DEVICE_NPU));
 
@@ -723,6 +746,98 @@ auto generateSOBParamsFromInputShape = [](const std::vector<ov::Shape>& inputSha
                               ::testing::Values(static_shapes_to_test_representation(inputShapes)),  // inputShapes
                               ::testing::Values(DEVICE_NPU));
 };
+
+/* ========== MaxPool8 ========== */
+
+const std::vector<std::vector<size_t>> kernels = {{3, 5}};
+const std::vector<std::vector<size_t>> kernel_3d = {{2, 2, 2}};
+
+const std::vector<std::vector<size_t>> strides = {{2, 1}};
+const std::vector<std::vector<size_t>> strides_3d = {{1, 1, 1}};
+
+const std::vector<std::vector<size_t>> dilation = {{2, 2}};
+const std::vector<std::vector<size_t>> dilation_3d = {{1, 1, 1}};
+
+const std::vector<std::vector<size_t>> pad_begins = {{0, 2}};
+const std::vector<std::vector<size_t>> pad_begins_3d = {{0, 0, 0}};
+
+const std::vector<std::vector<size_t>> pad_ends = {{0, 2}};
+const std::vector<std::vector<size_t>> pad_ends_3d = {{0, 0, 0}};
+
+const std::vector<std::vector<ov::Shape>> inputShape = {{{1, 3, 30, 30}}};
+const std::vector<std::vector<ov::Shape>> inputShape_5d = {{{1, 4, 16, 8, 12}}};
+
+/* ========== Explicit Pad Floor Rounding ========== */
+const auto maxPool8_ExplicitPad_FloorRounding_Params = ::testing::Combine(
+        ::testing::Combine(::testing::ValuesIn(kernels), ::testing::ValuesIn(strides), ::testing::ValuesIn(dilation),
+                           ::testing::ValuesIn(pad_begins), ::testing::ValuesIn(pad_ends),
+                           ::testing::Values(ov::element::i32), ::testing::Values(0),
+                           ::testing::Values(ov::op::RoundingType::FLOOR),
+                           ::testing::Values(ov::op::PadType::EXPLICIT)),
+        ::testing::Values(ov::element::f16, ov::element::i32, ov::element::f32),
+        ::testing::ValuesIn(ov::test::static_shapes_to_test_representation(inputShape)), ::testing::Values(DEVICE_NPU));
+
+/* ========== Same Upper Pad Floor Rounding ========== */
+const auto maxPool8_SameUpperPad_FloorRounding_Params = ::testing::Combine(
+        ::testing::Combine(::testing::ValuesIn(kernels), ::testing::ValuesIn(strides), ::testing::ValuesIn(dilation),
+                           ::testing::ValuesIn(pad_begins), ::testing::ValuesIn(pad_ends),
+                           ::testing::Values(ov::element::i32), ::testing::Values(0),
+                           ::testing::Values(ov::op::RoundingType::FLOOR),
+                           ::testing::Values(ov::op::PadType::SAME_UPPER)),
+        ::testing::Values(ov::element::f16),
+        ::testing::ValuesIn(ov::test::static_shapes_to_test_representation(inputShape)), ::testing::Values(DEVICE_NPU));
+
+/* ========== Same Lower Pad Floor Rounding ========== */
+const auto maxPool8_SameLowerPad_FloorRounding_Params = ::testing::Combine(
+        ::testing::Combine(::testing::ValuesIn(kernels), ::testing::ValuesIn(strides), ::testing::ValuesIn(dilation),
+                           ::testing::ValuesIn(pad_begins), ::testing::ValuesIn(pad_ends),
+                           ::testing::Values(ov::element::i32), ::testing::Values(0),
+                           ::testing::Values(ov::op::RoundingType::FLOOR),
+                           ::testing::Values(ov::op::PadType::SAME_LOWER)),
+        ::testing::Values(ov::element::f16),
+        ::testing::ValuesIn(ov::test::static_shapes_to_test_representation(inputShape)), ::testing::Values(DEVICE_NPU));
+
+/* ========= Explicit Pad Ceil Rounding ========== */
+const auto maxPool8_ExplicitPad_CeilRounding_Params = ::testing::Combine(
+        ::testing::Combine(::testing::ValuesIn(kernels), ::testing::ValuesIn(strides), ::testing::ValuesIn(dilation),
+                           ::testing::ValuesIn(pad_begins), ::testing::ValuesIn(pad_ends),
+                           ::testing::Values(ov::element::i32), ::testing::Values(0),
+                           ::testing::Values(ov::op::RoundingType::CEIL), ::testing::Values(ov::op::PadType::EXPLICIT)),
+        ::testing::Values(ov::element::f16),
+        ::testing::ValuesIn(ov::test::static_shapes_to_test_representation(inputShape)), ::testing::Values(DEVICE_NPU));
+
+/* ========= Explicit Pad Floor Rounding 5D input========== */
+const auto maxPool8_ExplicitPad_FloorRounding_5Dinput_Params =
+        ::testing::Combine(::testing::Combine(::testing::ValuesIn(kernel_3d), ::testing::ValuesIn(strides_3d),
+                                              ::testing::Values(dilation_3d[0]), ::testing::ValuesIn(pad_begins_3d),
+                                              ::testing::ValuesIn(pad_ends_3d), ::testing::Values(ov::element::i32),
+                                              ::testing::Values(0), ::testing::Values(ov::op::RoundingType::FLOOR),
+                                              ::testing::Values(ov::op::PadType::EXPLICIT)),
+                           ::testing::Values(ov::element::f16),
+                           ::testing::ValuesIn(ov::test::static_shapes_to_test_representation(inputShape_5d)),
+                           ::testing::Values(DEVICE_NPU));
+
+/* ========= Same Upper Pad Floor Rounding 5D input========== */
+const auto maxPool8_SameUpperPad_FloorRounding_5Dinput_Params =
+        ::testing::Combine(::testing::Combine(::testing::ValuesIn(kernel_3d), ::testing::ValuesIn(strides_3d),
+                                              ::testing::ValuesIn(dilation_3d), ::testing::ValuesIn(pad_begins_3d),
+                                              ::testing::ValuesIn(pad_ends_3d), ::testing::Values(ov::element::i32),
+                                              ::testing::Values(0), ::testing::Values(ov::op::RoundingType::FLOOR),
+                                              ::testing::Values(ov::op::PadType::SAME_UPPER)),
+                           ::testing::Values(ov::element::f16),
+                           ::testing::ValuesIn(ov::test::static_shapes_to_test_representation(inputShape_5d)),
+                           ::testing::Values(DEVICE_NPU));
+
+/* ========= Same Lower Pad Ceil Rounding 5D input========== */
+const auto maxPool8_SameLowerPad_CeilRounding_5Dinput_Params =
+        ::testing::Combine(::testing::Combine(::testing::ValuesIn(kernel_3d), ::testing::ValuesIn(strides_3d),
+                                              ::testing::ValuesIn(dilation_3d), ::testing::ValuesIn(pad_begins_3d),
+                                              ::testing::ValuesIn(pad_ends_3d), ::testing::Values(ov::element::i32),
+                                              ::testing::Values(0), ::testing::Values(ov::op::RoundingType::CEIL),
+                                              ::testing::Values(ov::op::PadType::SAME_LOWER)),
+                           ::testing::Values(ov::element::f16),
+                           ::testing::ValuesIn(ov::test::static_shapes_to_test_representation(inputShape_5d)),
+                           ::testing::Values(DEVICE_NPU));
 
 INSTANTIATE_TEST_SUITE_P(smoke_Pooling_NCHW_NoPadding, PoolingLayerTest_NPU3720, pool_ExplicitNoPadding_Params,
                          PoolingLayerTest_NPU3720::getTestCaseName);
@@ -791,7 +906,7 @@ INSTANTIATE_TEST_SUITE_P_WITH_DISABLE_OPTION(smoke_AvgPooling_LargePrimeKernels,
 INSTANTIATE_TEST_SUITE_P_WITH_DISABLE_OPTION(smoke_avgPool_excludePad, PoolingLayerTest_NPU3720, avgPool_excludePad,
                                              PoolingLayerTest::getTestCaseName);
 
-// Max pool ported tests from NPU3720
+// Max pool ported tests from VPU3720
 INSTANTIATE_TEST_SUITE_P_WITH_DISABLE_OPTION(smoke_Pooling_LargeSize1, PoolingLayerTest_NPU3720, pool_LargeSize1,
                                              PoolingLayerTest::getTestCaseName);
 INSTANTIATE_TEST_SUITE_P_WITH_DISABLE_OPTION(smoke_Pooling_LargeSize2, PoolingLayerTest_NPU3720, pool_LargeSize2,
@@ -909,5 +1024,28 @@ INSTANTIATE_TEST_SUITE_P_WITH_DISABLE_OPTION(smoke_MaxPooling_LargeKernelsX, Poo
                                              maxPool_largeKernelsX, PoolingLayerTest::getTestCaseName);
 INSTANTIATE_TEST_SUITE_P_WITH_DISABLE_OPTION(smoke_MaxPooling_LargeKernelsY, PoolingLayerTest_NPU4000,
                                              maxPool_largeKernelsY, PoolingLayerTest::getTestCaseName);
+
+/* ============= MaxPool8 ============= */
+
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_MaxPool8_ExplicitPad_FloorRounding, MaxPoolingV8LayerTestCommon,
+                         maxPool8_ExplicitPad_FloorRounding_Params, MaxPoolingV8LayerTest::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(smoke_MaxPool8_SameUpperPad_FloorRounding, MaxPoolingV8LayerTestCommon,
+                         maxPool8_SameUpperPad_FloorRounding_Params, MaxPoolingV8LayerTest::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(smoke_MaxPool8_SameLowerPad_FloorRounding, MaxPoolingV8LayerTestCommon,
+                         maxPool8_SameLowerPad_FloorRounding_Params, MaxPoolingV8LayerTest::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(smoke_MaxPool8_ExplicitPad_CeilRounding, MaxPoolingV8LayerTestCommon,
+                         maxPool8_ExplicitPad_CeilRounding_Params, MaxPoolingV8LayerTest::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(smoke_MaxPool8_ExplicitPad_FloorRounding5D, MaxPoolingV8LayerTestCommon,
+                         maxPool8_ExplicitPad_FloorRounding_5Dinput_Params, MaxPoolingV8LayerTest::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(smoke_MaxPool8_SameUpperPad_CeilRounding5D, MaxPoolingV8LayerTestCommon,
+                         maxPool8_SameUpperPad_FloorRounding_5Dinput_Params, MaxPoolingV8LayerTest::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(smoke_MaxPool8_SameLowerPad_CeilRounding5D, MaxPoolingV8LayerTestCommon,
+                         maxPool8_SameLowerPad_CeilRounding_5Dinput_Params, MaxPoolingV8LayerTest::getTestCaseName);
 
 }  // namespace

@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -40,7 +40,7 @@ struct WorkloadCostParams {
     bool isWeightsSparsityEnabled = false;
     float weightsSparsityRatio = 0.0;
     VPU::MultiClusterStrategy layerStrategy = VPU::MultiClusterStrategy::Clustering;
-    VPU::PPETaskAttr ppeTask = nullptr;
+    VPU::PPEAttr ppeOpaqueAttr = nullptr;
     // Output layout default: ZMAJOR , odu permute is PERMUTE_ZXY
     // For NCE.PermuteQuantize op, odu permute is PERMUTE_YZX
     VPUIPDPU::ODUPermuteDataMode oduPermutation = VPUIPDPU::ODUPermuteDataMode::PERMUTE_ZXY;

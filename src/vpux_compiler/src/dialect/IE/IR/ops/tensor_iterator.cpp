@@ -38,14 +38,7 @@ LogicalResult vpux::IE::TensorIteratorOp::inferReturnTypeComponents(
     // Get the output size of body module
     mlir::Region* region = regions.front();
     auto& block = region->getBlocks().front();
-    llvm::SmallVector<IE::LoopTerminatorOp> loopTerminatorOps;
-    if (auto returnOp = dyn_cast<IE::LoopTerminatorOp>(block.getTerminator())) {
-        loopTerminatorOps.push_back(returnOp);
-    }
-
-    if (loopTerminatorOps.empty()) {
-        return failure();
-    }
+    auto loopTerminator = dyn_cast<IE::LoopTerminatorOp>(block.getTerminator());
 
     // collecting concating along axis cases
     auto numIterations = tensorIteratorOperator.getNumIterations();
@@ -54,48 +47,46 @@ LogicalResult vpux::IE::TensorIteratorOp::inferReturnTypeComponents(
     auto invariantOutputDescAttrVector =
             parseCustomAttrArray<IE::InvariantOutputPortMapAttr>(tensorIteratorOperator.getInvariantOutputDescsAttr());
     mlir::DenseMap<int64_t, int64_t> toConcatOutputAxisMap;
-    mlir::DenseMap<int64_t, int64_t> toConcatOutputPordIdMap;
-    mlir::DenseMap<int64_t, int64_t> invariantOutputPordIdMap;
+    mlir::DenseMap<int64_t, int64_t> toConcatOutputPortIdMap;
+    mlir::DenseMap<int64_t, int64_t> invariantOutputPortIdMap;
     for (auto copm : concatOutputDescAttrVector) {
         auto exId = copm.getExternalPortId().getValue().getSExtValue();
         auto inId = copm.getInternalLayerId().getValue().getSExtValue();
         auto axis = copm.getAxis().getValue().getSExtValue();
         toConcatOutputAxisMap.insert({inId, axis});
-        toConcatOutputPordIdMap.insert({exId, inId});
+        toConcatOutputPortIdMap.insert({exId, inId});
     }
     for (auto iopm : invariantOutputDescAttrVector) {
         auto exId = iopm.getExternalPortId().getValue().getSExtValue();
         auto inId = iopm.getInternalLayerId().getValue().getSExtValue();
-        invariantOutputPordIdMap.insert({exId, inId});
+        invariantOutputPortIdMap.insert({exId, inId});
     }
 
     // Infer return types
-    for (auto& loopTerminator : loopTerminatorOps) {
-        for (auto exId : irange(loopTerminator.getOperands().size())) {
-            int64_t inId = toConcatOutputPordIdMap.count(exId) ? toConcatOutputPordIdMap[exId]
-                                                               : invariantOutputPordIdMap[exId];
-            mlir::Value operand = loopTerminator.getOperands()[inId];
+    for (auto exId : irange(toConcatOutputPortIdMap.size() + invariantOutputPortIdMap.size())) {
+        auto inId =
+                toConcatOutputPortIdMap.count(exId) ? toConcatOutputPortIdMap[exId] : invariantOutputPortIdMap[exId];
+        auto operand = loopTerminator.getOperands()[inId];
 
-            auto inType = operand.getType().cast<RankedTensorType>();
-            const auto outDesc = vpux::getTensorAttr(inType);
+        auto inType = operand.getType().cast<RankedTensorType>();
+        const auto outDesc = vpux::getTensorAttr(inType);
 
-            // deal with concating along axis cases
-            const auto inputShape = inType.getShape();
-            SmallVector<int64_t> outShape;
-            for (size_t i = 0; i < inputShape.size(); ++i) {
-                outShape.push_back(inputShape[i]);
-            }
-
-            if (toConcatOutputPordIdMap.count(exId)) {
-                int64_t axis = toConcatOutputAxisMap[inId] < 0 ? toConcatOutputAxisMap[inId] + inputShape.size()
-                                                               : toConcatOutputAxisMap[inId];
-                VPUX_THROW_UNLESS(axis >= 0, "Wrong axis `{0}`, out of range [-Rank , Rank - 1]",
-                                  toConcatOutputAxisMap[inId]);
-                outShape[axis] = numIterations * outShape[axis];
-            }
-
-            inferredReturnShapes.emplace_back(outShape, inType.getElementType(), outDesc);
+        // deal with concating along axis cases
+        const auto inputShape = inType.getShape();
+        SmallVector<int64_t> outShape;
+        for (size_t i = 0; i < inputShape.size(); ++i) {
+            outShape.push_back(inputShape[i]);
         }
+
+        if (toConcatOutputPortIdMap.count(exId)) {
+            int64_t axis = toConcatOutputAxisMap[inId] < 0 ? toConcatOutputAxisMap[inId] + inputShape.size()
+                                                           : toConcatOutputAxisMap[inId];
+            VPUX_THROW_UNLESS(axis >= 0, "Wrong axis `{0}`, out of range [-Rank , Rank - 1]",
+                              toConcatOutputAxisMap[inId]);
+            outShape[axis] = numIterations * outShape[axis];
+        }
+
+        inferredReturnShapes.emplace_back(outShape, inType.getElementType(), outDesc);
     }
     return success();
 }

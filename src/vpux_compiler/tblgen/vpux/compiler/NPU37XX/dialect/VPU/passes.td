@@ -9,14 +9,14 @@
 include "mlir/Pass/PassBase.td"
 
 //
-// AdjustForOptimizedSwKernel
+// AdjustForOptimizedLayers
 //
 
-def AdjustForOptimizedSwKernel : PassBase<"adjust-for-optimized-sw-kernel", "vpux::FunctionPass"> {
-    let summary = "Adjust shape or layout of SW ops to leverage optimized kernel implementation";
+def AdjustForOptimizedLayers : PassBase<"adjust-for-optimized-layers", "vpux::FunctionPass"> {
+    let summary = "Adjust layers shape or layout to utilize more compute engines or leverage optimized kernel implementation";
 
     let description = [{
-        The pass adjusts the shape or layout of software ops to better leverage optimized SHAVE
+        The pass adjusts layers shape or layout to utilize more compute engines and better leverage optimized SHAVE
         implementation
         Supported Optimizations:
         - Softmax:
@@ -25,9 +25,11 @@ def AdjustForOptimizedSwKernel : PassBase<"adjust-for-optimized-sw-kernel", "vpu
         - Gelu & Multiply:
           * MultiSHAVEs & MultiClusters: Adjust shape to gather dimensions on the tile dimension to utilize more
           SHAVE engines and avoid Clustering strategy due to batch size
+         - NCEPermute:
+          * MultiClusters: Adjust shape to ensure there's enough dim size on height for MC split to utilize more DPU engines
     }];
 
-    let constructor = "vpux::VPU::arch37xx::createAdjustForOptimizedSwKernelPass()";
+    let constructor = "vpux::VPU::arch37xx::createAdjustForOptimizedLayersPass()";
 
     let dependentDialects = [
         "vpux::VPU::VPUDialect"
@@ -67,14 +69,29 @@ def DecomposeMVN : PassBase<"decompose-mvn", "vpux::FunctionPass"> {
             will be decompose in:
                 IN -> MVN1SumOp -> MVN1MeanVarOp -> MVN1NormalizeOp -> OUT
                     \_____________________________/
-
-        MVN1SumOp tiling will be done also in this pass. Because the current logic is to tile the output and after to back infer
-        to the input. Output tensor size is NxCx2 and it can be 1x1x2, it is imposible to tile and back infer in this case.
-        MVN1MeanVarOp does not need tiling because tensor is NxCx2.
-        MVN1NormalizeOp will be tiled as a normal layer.
     }];
 
     let constructor = "vpux::VPU::arch37xx::createDecomposeMVNPass()";
+
+    let dependentDialects = [
+        "vpux::VPU::VPUDialect"
+    ];
+}
+
+//
+// ApplyTilingMVN1Sum
+//
+
+def ApplyTilingMVN1Sum : PassBase<"apply-tiling-mvn1sum", "vpux::FunctionPass"> {
+    let summary = "Tiling for mvn1_sum op";
+
+    let description = [{
+        MVN1SumOp tiling will be done in this pass. Because the current logic is to tile the output and after to back infer
+        to the input. Output tensor size is NxCx2 and it can be 1x1x2, it is imposible to tile and back infer in this case.
+        MVN1MeanVarOp does not need tiling because tensor is NxCx2.
+    }];
+
+    let constructor = "vpux::VPU::arch37xx::createApplyTilingMVN1SumPass()";
 
     let dependentDialects = [
         "vpux::VPU::VPUDialect"
@@ -89,7 +106,7 @@ def AddProposalAuxiliaryBuffer : PassBase<"add-proposal-auxiliary-buffer", "vpux
     let summary = "Proposal VPU layer";
 
     let description = [{
-        The pass is only used for NPU37XX onward, and requires the creation of a auxiliary input buffer, who has the role of storing 
+        The pass is only used for NPU37XX onward, and requires the creation of a auxiliary input buffer, who has the role of storing
         the intermediate results obtained after the relevant operation.
         The results will be sorted, recalculated, and finally, the output will be extracted based on them.
         This auxiliary buffer has a necessary size depend by input parameters.

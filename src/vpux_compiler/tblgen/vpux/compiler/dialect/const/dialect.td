@@ -76,14 +76,14 @@ To perform tranformations on constant data, the new `Const::ContentAttr` must be
 ```C++
 Const::DeclareOp origConstOp = ...;
 Const::ConstContentAttr origConstAttr = origConstOp.getContentAttr();
-Const::ConstContentAttr newConstAttr = origConstAttr.convertElemType(mlir::Float16Type::get(ctx));
-Const::ConstOp newConstOp = builder.create<Const::DeclareOp>(loc, newConstAttr.getType(), newConstAttr);
+Const::ConstContentAttr newConstAttr = origConstAttr.castElemType(mlir::Float16Type::get(ctx));
+Const::ConstOp newConstOp = builder.create<Const::DeclareOp>(loc, newConstAttr.getType(), std::move(newConstAttr));
 ```
 
 In assembly code it will be represented as:
 
 ```MLIR
-%0 = const.Declare tensor<1x2x3x4xf16> = dense<...> : tensor<1x2x3x4xf32>, [#const.ConvertElemType<f16>]
+%0 = const.Declare tensor<1x2x3x4xf16> = dense<...> : tensor<1x2x3x4xf32>, [#const.CastElemType<f16>]
 ```
 
 The `Const::ConstContentAttr` might hold a list of transformations, they will be applied in the order:
@@ -92,7 +92,7 @@ The `Const::ConstContentAttr` might hold a list of transformations, they will be
 %0 = const.Declare memref<1x2x3x4xf16, #NHWC, #strides> =
         dense<...> : tensor<2x3x4xf32>,
         [
-            #const.ConvertElemType<f16>,
+            #const.CastElemType<f16>,
             #const.Reshape<[1, 2, 3, 4]>,
             #const.Reorder<#NHWC>
         ]

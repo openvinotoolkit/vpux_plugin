@@ -51,6 +51,105 @@ mlir::LogicalResult vpux::VPU::MVN1MeanVarOp::inferReturnTypes(mlir::MLIRContext
 }
 
 //
+// TilingBuilderOpInterface
+//
+
+vpux::InputTiling vpux::VPU::MVN1MeanVarOp::backInferTileInfo(const vpux::TileInfo& outputTile, vpux::Logger /*log*/) {
+    auto origInShape = getShape(getSum());
+    auto inputTile = TileInfo(origInShape);
+
+    for (auto axisTileInfo : outputTile.axis | indexed) {
+        if (auto tileVal = axisTileInfo.value(); tileVal > 1) {
+            const auto axisIdx = axisTileInfo.index();
+            inputTile.shape[Dim(axisIdx)] = outputTile.shape[Dim(axisIdx)];
+            inputTile.offsets[Dim(axisIdx)] = outputTile.offsets[Dim(axisIdx)];
+            inputTile.axis[Dim(axisIdx)] = tileVal;
+        }
+    }
+
+    return TilingInfo(inputTile);
+}
+
+void vpux::VPU::MVN1MeanVarOp::adjustAttrs(const TilingInfo& /*inputTiling*/, const TileInfo& outputTile) {
+    auto origShape = parseIntArrayAttr<int64_t>(getOrigShape());
+    int64_t groupC = 1;
+    auto internalReshape = origShape;
+
+    if (auto internalReshapeOpt = getInternalReshape(); internalReshapeOpt.has_value()) {
+        internalReshape = parseIntArrayAttr<int64_t>(internalReshapeOpt.value());
+        groupC = origShape[Dims4D::Act::C.ind()] / internalReshape[Dims4D::Act::C.ind()];
+    }
+
+    for (const auto& axisTileInfo : outputTile.axis | indexed) {
+        if (const auto tileVal = axisTileInfo.value(); tileVal > 1) {
+            const auto axisIdx = static_cast<int64_t>(axisTileInfo.index());
+            VPUX_THROW_UNLESS(axisIdx == Dims4D::Act::N.ind() || axisIdx == Dims4D::Act::C.ind(),
+                              "MVN1MeanVar Op can only tile at N or C, but got {0}", axisIdx);
+            origShape[axisIdx] = outputTile.shape[Dim(axisIdx)];
+            internalReshape[axisIdx] = outputTile.shape[Dim(axisIdx)];
+            if (axisIdx == Dims4D::Act::C.ind()) {
+                internalReshape[axisIdx] = outputTile.shape[Dim(axisIdx)] / groupC;
+            }
+        }
+    }
+
+    mlir::Builder builder(*this);
+    setOrigShapeAttr(builder.getI64ArrayAttr(origShape));
+    if (getInternalReshape().has_value()) {
+        setInternalReshapeAttr(builder.getI64ArrayAttr(internalReshape));
+    }
+}
+
+mlir::FailureOr<OutputTiling> vpux::VPU::MVN1MeanVarOp::getTilingStrategy(TilingMode tilingMode, Logger log) {
+    auto baseOp = this->getOperation();
+    VPUX_THROW_WHEN(tilingMode != TilingMode::ISOLATED,
+                    "Only supporting isolated tiling for MVN1MeanVarOp currently, for op {0} at '{1}'",
+                    baseOp->getName(), getLoc());
+
+    auto tilingInfo = mlir::dyn_cast<VPU::TilingInfoOpInterface>(baseOp);
+    const auto outputType = baseOp->getResult(0).getType().cast<vpux::NDTypeInterface>();
+    const auto outputShape = outputType.getShape();
+    const auto isSupportedTileSize = [baseOp, &tilingInfo, outputShape, log](ShapeRef nTilesOnDim,
+                                                                             TilingMode tilingMode) -> bool {
+        const auto tiles = fillDividedTiles(baseOp, nTilesOnDim, outputShape);
+        if (mlir::failed(tiles)) {
+            return false;
+        }
+        return tilingInfo.isSupportedTiling(tiles.value(), tilingMode, log);
+    };
+
+    int64_t groupC = 1;
+    if (getInternalReshape().has_value()) {
+        const auto internalReshape = parseIntArrayAttr<int64_t>(getInternalReshape().value());
+        const auto origShape = parseIntArrayAttr<int64_t>(getOrigShape());
+        groupC = origShape[Dims4D::Act::C.ind()] / internalReshape[Dims4D::Act::C.ind()];
+    }
+
+    auto maxNumTiles = Shape(outputShape);
+    maxNumTiles[Dims4D::Act::C] = outputShape[Dims4D::Act::C] / groupC;
+
+    Shape nTilesOnDim(outputShape.size(), 1);
+    DimArr tileDimOrder{Dims4D::Act::N, Dims4D::Act::C};
+    auto tileDimIter = tileDimOrder.begin();
+    auto dimToTile = *tileDimIter;
+    while (!isSupportedTileSize(nTilesOnDim, tilingMode)) {
+        while ((tileDimIter < tileDimOrder.end()) && (nTilesOnDim[dimToTile] >= maxNumTiles[dimToTile])) {
+            dimToTile = *(++tileDimIter);
+            if (tileDimIter == tileDimOrder.end()) {
+                VPUX_THROW_WHEN(tileDimIter == tileDimOrder.end(), "Failed to tile {0} at '{1}'", baseOp->getName(),
+                                baseOp->getLoc());
+            }
+        }
+
+        ++nTilesOnDim[dimToTile];
+    }
+
+    log.trace("MVN1MeanVarOp Isolated tiling strategy: {0}", nTilesOnDim);
+    auto origTiles = fillDividedTiles(baseOp, nTilesOnDim, outputShape);
+    return origTiles;
+}
+
+//
 // ClusteredOpInterface
 //
 
@@ -58,13 +157,13 @@ bool vpux::VPU::MVN1MeanVarOp::checkStrategyCompatibility(VPU::MultiClusterStrat
     return strategy == VPU::MultiClusterStrategy::Clustering;
 }
 
-vpux::VPU::DistributedTensorNative vpux::VPU::MVN1MeanVarOp::getExplicitDistributedTensorAttr(
+vpux::VPU::DistributionInfo vpux::VPU::MVN1MeanVarOp::getExplicitDistributionInfoAttr(
         vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, ArrayRef<int64_t> numTiles,
         const int64_t numClusters, ArrayRef<int64_t> alignment, const bool uniformDistributedSegments,
         const vpux::VPU::OverlapDistributionParams& overlapParams) {
-    return VPU::getSWExplicitDistributedTensorNative(mlir::dyn_cast<VPU::SWOpInterface>(getOperation()), shape,
-                                                     distributionMode, numTiles, numClusters, alignment,
-                                                     uniformDistributedSegments, overlapParams);
+    return VPU::getSWExplicitDistributionInfo(mlir::dyn_cast<VPU::SWOpInterface>(getOperation()), shape,
+                                              distributionMode, numTiles, numClusters, alignment,
+                                              uniformDistributedSegments, overlapParams);
 }
 
 //
@@ -95,6 +194,7 @@ bool vpux::VPU::MVN1MeanVarOp::fitIntoCMX(llvm::ArrayRef<vpux::NDTypeInterface> 
 bool vpux::VPU::MVN1MeanVarOp::supportCycleCostCalculation() {
     return false;
 }
+
 //
 // build
 //

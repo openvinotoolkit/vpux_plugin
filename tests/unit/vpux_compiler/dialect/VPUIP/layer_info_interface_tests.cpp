@@ -39,9 +39,16 @@ TEST_F(MLIR_VPUIP_LayerInfo, AsyncLayerOpInterface) {
 
     constexpr llvm::StringLiteral inputIR = R"(
         module @test {
+            module @VPU.SW  {
+                func.func private @builtin_Softmax(memref<*xf16>, memref<*xf16>) attributes {VPU.kernel_code = "softmax.cpp", VPU.kernel_entry = "softmax"}
+                func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
+            }
             func.func @main(%arg0: memref<1x512xf16>, %arg1: memref<1x512xf16>) -> memref<1x512xf16> {
                 %0 = memref.alloc() : memref<1x512xf16>
-                %1 = VPUIP.SoftMaxUPA {axisInd = 1 : i32} inputs(%arg0 : memref<1x512xf16>) outputs(%0 : memref<1x512xf16>) -> memref<1x512xf16>
+                %1 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
+                @VPU.SW::@builtin_Softmax inputs(%arg0 as %arg2: memref<1x512xf16>) outputs(%0 as %arg3: memref<1x512xf16>) on tile 0 -> memref<1x512xf16>  {
+                    VPUIP.SW.Kernel.run {attrs = [1]}(%arg2, %arg3) : memref<1x512xf16>, memref<1x512xf16>
+                }
                 %2 = VPUIP.Copy inputs(%1 : memref<1x512xf16>) outputs(%arg1 : memref<1x512xf16>) -> memref<1x512xf16>
                 memref.dealloc %0 : memref<1x512xf16>
                 return %2 : memref<1x512xf16>
@@ -64,10 +71,10 @@ TEST_F(MLIR_VPUIP_LayerInfo, AsyncLayerOpInterface) {
     ASSERT_TRUE(mlir::succeeded(pm.run(module.get())));
 
     for (auto& op : func.getOps()) {
-        if (mlir::isa<vpux::VPUIP::SoftMaxUPAOp>(op)) {
-            ::checkExecutorKind(&op, vpux::VPU::ExecutorKind::SHAVE_UPA);
-        } else if (mlir::isa<vpux::VPUIP::CopyOp>(op)) {
+        if (mlir::isa<vpux::VPUIP::CopyOp>(op)) {
             ::checkExecutorKind(&op, vpux::VPU::ExecutorKind::DMA_NN);
+        } else if (mlir::isa<vpux::VPUIP::SwKernelOp>(op)) {
+            ::checkExecutorKind(&op, vpux::VPU::ExecutorKind::SHAVE_ACT);
         }
     }
 }

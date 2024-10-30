@@ -226,7 +226,7 @@ private:
     // of this task. This member is a vector because there can be mutliple
     // executors of the same type that are not assigned or distinguishable by compiler
     // and are dispatched at runtime.
-    // Example: 2 ActShave engines on 1 cluster on NPU37XX
+    // Example: 2 ActShave engines on 1 cluster on VPU2.7
     SmallVector<size_t> _cycle;
 
     // Index of next tast to be executed on given queue
@@ -344,17 +344,25 @@ double vpux::VPURT::InferenceExecutionSimulator::getDPUTotalEnergy() {
 
 double vpux::VPURT::InferenceExecutionSimulator::getSHAVETotalEnergy() {
     double shaveTotalEnergy = 0;
+    std::set<std::string> unsupportedOps;
     _funcOp->walk([&](VPUIP::SwKernelOp swKernelOp) {
         double shaveEnergy = 0;
         auto vpunnSwOp = getVPUNNSWKernelOp(swKernelOp);
         if (vpunnSwOp != nullptr) {
             shaveEnergy = _cycleCostInfo.getCostModel()->SHAVEEnergy(*vpunnSwOp);
         } else {
-            _log.warning("[Energy] an unsupported SwKernel op in VPUNN found - {0}", swKernelOp->getLoc());
+            _log.debug("[Energy] an unsupported SwKernel op in VPUNN found - {0}", swKernelOp->getLoc());
+            const auto kernelName = swKernelOp.getKernelFunction().getLeafReference().str();
+            unsupportedOps.insert(kernelName);
         }
         shaveTotalEnergy += shaveEnergy;
         _log.trace("[Energy] SwKernelOp - {0}, energy - {1}", swKernelOp->getLoc(), shaveEnergy);
     });
+    if (!unsupportedOps.empty()) {
+        _log.warning("[Energy] The following SHAVE operations are unsupported by VPUNN, which can influence the "
+                     "estimation: {0}",
+                     unsupportedOps);
+    }
     return shaveTotalEnergy;
 }
 

@@ -23,8 +23,8 @@ func.func @maxpool_f16_f16() {
   %11 = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x64x8x8xf16, #NHWC, [@CMX_NN, 0]>
   %13 = VPURT.DeclareBuffer <CMX_NN> [0] <40976> -> memref<64x1x1x4xsi32, #NHWC, [@CMX_NN, 0]>
 
-  %20 = VPUMI37XX.DPUInvariant {activation_window_channel_length = 16 : i32, clean_after = 0 : ui64, kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, kernel_size = [2, 2], kernel_strides = [2, 2], mpe_frequent_mode = #VPU.mpe_mode<CUBOID_16x16>, start_after = 0 : ui64, nce_task_type = #VPUIP.nce_task_type<MAXPOOL>} taskLocation(%1 : !VPURegMapped.Index<0:0:0>) input(%8 : memref<1x64x16x16xf16, #NHWC, [@CMX_NN, 0]>) weight_table(%13 : memref<64x1x1x4xsi32, #NHWC, [@CMX_NN, 0]>) parent_input(%10 : memref<1x64x16x16xf16, #NHWC, [@CMX_NN, 0]>) parent_output(%11 : memref<1x64x8x8xf16, #NHWC, [@CMX_NN, 0]>) outputs(%9 : memref<1x64x8x8xf16, #NHWC, [@CMX_NN, 0]>) -> <0:0:0> PPE : {
-    VPUMI37XX.PPETask <NOOP> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64}
+  %20 = VPUMI37XX.DPUInvariant {clean_after = 0 : ui64, kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, kernel_size = [2, 2], kernel_strides = [2, 2], mpe_frequent_mode = #VPU.mpe_mode<CUBOID_16x16>, start_after = 0 : ui64, nce_task_type = #VPUIP.nce_task_type<MAXPOOL>} taskLocation(%1 : !VPURegMapped.Index<0:0:0>) input(%8 : memref<1x64x16x16xf16, #NHWC, [@CMX_NN, 0]>) weight_table(%13 : memref<64x1x1x4xsi32, #NHWC, [@CMX_NN, 0]>) parent_input(%10 : memref<1x64x16x16xf16, #NHWC, [@CMX_NN, 0]>) parent_output(%11 : memref<1x64x8x8xf16, #NHWC, [@CMX_NN, 0]>) outputs(%9 : memref<1x64x8x8xf16, #NHWC, [@CMX_NN, 0]>) -> <0:0:0> PPE : {
+    VPUMI37XX.PPETask {opaque_ppe = #VPU.PPEStub<>}
   }
 
   %21 = "VPUMI37XX.DPUVariant"(%0, %20) {end = [7, 7, 63], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, start = [0, 0, 0]} : (!VPURegMapped.Index<0:0:0>, !VPURegMapped.Index<0:0:0>) -> !VPURegMapped.Index<0:0:0>

@@ -204,8 +204,8 @@ func.func @HandleLargeStridesAvgPoolWithSameKernelSizeAndStride(%arg0: tensor<1x
 
 // CHECK-LABEL: @HandleLargeStridesAvgPoolWithFQinput
 func.func @HandleLargeStridesAvgPoolWithFQinput(%arg0: tensor<1x32x22x22xf16>) -> tensor<1x32x2x2xf16> {
-    %cst_0 = const.Declare tensor<1x1x1x1xf16> = dense<40.2778358> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
-    %cst_1 = const.Declare tensor<1x1x1x1xf16> = dense<-40.594986> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
+    %cst_0 = const.Declare tensor<1x1x1x1xf16> = dense<40.2778358> : tensor<1x1x1x1xf32>, [#const.CastElemType<f16>]
+    %cst_1 = const.Declare tensor<1x1x1x1xf16> = dense<-40.594986> : tensor<1x1x1x1xf32>, [#const.CastElemType<f16>]
     %0 = IE.FakeQuantize(%arg0, %cst_1, %cst_0, %cst_1, %cst_0) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64} : tensor<1x32x22x22xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16> -> tensor<1x32x22x22xf16>
     %avg_pool = IE.AvgPool(%0) {
         kernel_size = [11, 11],
@@ -218,8 +218,8 @@ func.func @HandleLargeStridesAvgPoolWithFQinput(%arg0: tensor<1x32x22x22xf16>) -
 
     return %fq : tensor<1x32x2x2xf16>
 
-    // CHECK: %cst = const.Declare tensor<1x1x1x1xf16> = dense<40.2778358> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
-    // CHECK: %cst_0 = const.Declare tensor<1x1x1x1xf16> = dense<-40.594986> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
+    // CHECK: %cst = const.Declare tensor<1x1x1x1xf16> = dense<40.2778358> : tensor<1x1x1x1xf32>, [#const.CastElemType<f16>]
+    // CHECK: %cst_0 = const.Declare tensor<1x1x1x1xf16> = dense<-40.594986> : tensor<1x1x1x1xf32>, [#const.CastElemType<f16>]
     // CHECK: [[FQ0:%.*]] = IE.FakeQuantize(%arg0, %cst_0, %cst, %cst_0, %cst) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64} : tensor<1x32x22x22xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16> -> tensor<1x32x22x22xf16>
     // CHECK: [[SLICE0:%.*]] = IE.Slice [[FQ0:%.*]] [0, 0, 0, 0] [1, 32, 11, 11] : tensor<1x32x22x22xf16> to tensor<1x32x11x11xf16>
     // CHECK: [[FQ1:%.*]] = IE.FakeQuantize([[SLICE0:%.*]], %cst_0, %cst, %cst_0, %cst) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64} : tensor<1x32x11x11xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16> -> tensor<1x32x11x11xf16>

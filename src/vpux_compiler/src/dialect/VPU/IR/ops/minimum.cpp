@@ -56,37 +56,13 @@ bool vpux::VPU::MinimumOp::checkStrategyCompatibility(VPU::MultiClusterStrategy 
     return false;
 }
 
-bool VPU::MinimumOp::doesLayerFitIntoCMX(VPU::MultiClusterStrategy strategy, Byte reservedMem) {
-    auto minimumOp = mlir::cast<VPU::MinimumOp>(getOperation());
-    const auto outputType = minimumOp->getResult(0).getType().cast<vpux::NDTypeInterface>();
-    auto numClusters = VPU::getOptimalNumClusters(minimumOp, outputType.getShape(), strategy);
-
-    SmallVector<Byte> buffersSize{
-            VPU::getTotalAllocSizeWithDistribution(getInput1().getType(),
-                                                   getActivationDistributionAttrFromOp(minimumOp, getInput1().getType(),
-                                                                                       numClusters.getInt(), strategy)),
-            VPU::getTotalAllocSizeWithDistribution(getInput2().getType(),
-                                                   getActivationDistributionAttrFromOp(minimumOp, getInput2().getType(),
-                                                                                       numClusters.getInt(), strategy)),
-            VPU::getTotalAllocSizeWithDistribution(
-                    getOutput().getType(),
-                    getOutputDistributionAttrFromOp(minimumOp, getOutput().getType(), numClusters.getInt(), strategy))};
-
-    auto totalAvailableCMXSize = reservedMem.count() == 0 ? getTotalCMXSize(getOperation()).count()
-                                                          : getTotalCMXFragmentationAwareSize(getOperation()).count();
-
-    return vpux::VPU::calculateAlignedBuffersMemoryRequirement(getArch(getOperation()), buffersSize).count() +
-                   reservedMem.count() <=
-           totalAvailableCMXSize;
-}
-
-vpux::VPU::DistributedTensorNative vpux::VPU::MinimumOp::getExplicitDistributedTensorAttr(
+vpux::VPU::DistributionInfo vpux::VPU::MinimumOp::getExplicitDistributionInfoAttr(
         vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, ArrayRef<int64_t> numTiles,
         const int64_t numClusters, ArrayRef<int64_t> alignment, const bool uniformDistributedSegments,
         const vpux::VPU::OverlapDistributionParams& overlapParams) {
-    return VPU::getSWExplicitDistributedTensorNative(mlir::cast<VPU::SWOpInterface>(getOperation()), shape,
-                                                     distributionMode, numTiles, numClusters, alignment,
-                                                     uniformDistributedSegments, overlapParams);
+    return VPU::getSWExplicitDistributionInfo(mlir::cast<VPU::SWOpInterface>(getOperation()), shape, distributionMode,
+                                              numTiles, numClusters, alignment, uniformDistributedSegments,
+                                              overlapParams);
 }
 
 bool vpux::VPU::MinimumOp::fitIntoCMX(llvm::ArrayRef<vpux::NDTypeInterface> buffers, Byte reservedMem) {

@@ -75,8 +75,17 @@ void inferPermuteReturnTypes(mlir::Value input, mlir::AffineMap memPerm, mlir::A
                                              inOrder, outOrder, memPerm);
 
     auto getOutputType = [&]() {
+        auto elemType = inType.getElementType();
+        if (auto perAxisType = elemType.dyn_cast<mlir::quant::UniformQuantizedPerAxisType>()) {
+            const auto origAxis = perAxisType.getQuantizedDimension();
+            const auto inMemAxis = inOrder.dimPos(Dim(origAxis));
+            const auto outMemAxis = DimsOrder::fromAffineMap(memPerm).dimPos(Dim(inMemAxis));
+            const auto outAxis = outOrder.dimAt(outMemAxis);
+            elemType = changeAxis(perAxisType, outAxis.ind());
+        }
+
         if (auto distributedInput = inType.dyn_cast<VPU::DistributedTensorType>()) {
-            auto outDistribution = applyPermutationOnDistributedTensorAttr(
+            auto outDistribution = applyPermutationOnDistributionInfoAttr(
                     distributedInput, memPerm, inType.getDimsOrder(), outOrder, inShape, outShape);
 
             VPUX_THROW_WHEN(
@@ -85,12 +94,12 @@ void inferPermuteReturnTypes(mlir::Value input, mlir::AffineMap memPerm, mlir::A
                     inType, memPerm, dstOrder);
 
             const auto dstDimsOrderAttr = mlir::AffineMapAttr::get(dstOrder);
-            return DistributedTensorType::get(inType.getContext(), outShape.raw(), inType.getElementType(),
-                                              dstDimsOrderAttr, inType.getMemSpace(), outDistribution.value())
+            return DistributedTensorType::get(inType.getContext(), outShape.raw(), elemType, dstDimsOrderAttr,
+                                              inType.getMemSpace(), outDistribution.value())
                     .cast<NDTypeInterface>();
         }
 
-        return inType.changeDimsOrder(outOrder).changeShape(outShape);
+        return inType.changeDimsOrder(outOrder).changeShapeElemType(outShape, elemType);
     };
 
     auto outType = getOutputType();

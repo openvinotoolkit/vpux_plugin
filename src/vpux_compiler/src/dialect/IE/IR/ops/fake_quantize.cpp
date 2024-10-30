@@ -143,9 +143,9 @@ mlir::LogicalResult TransposeGroups::matchAndRewrite(IE::FakeQuantizeOp fqOp, ml
     for (auto operand : fqOp->getOperands() | indexed) {
         auto constOp = operand.value().getDefiningOp<Const::DeclareOp>();
         if (constOp == nullptr) {
-            return matchFailed(rewriter, fqOp, "FakeQuantize input is not a constant");
+            return matchFailed(rewriter, fqOp, "FakeQuantize input is not const");
         }
-        const auto outType = constOp.getResult().getType().cast<vpux::NDTypeInterface>();
+        const auto outType = operand.value().getType().cast<vpux::NDTypeInterface>();
         if (outType.getRank() != 3) {
             return matchFailed(rewriter, fqOp, "FakeQuantize input rank does not meet the requirement");
         }

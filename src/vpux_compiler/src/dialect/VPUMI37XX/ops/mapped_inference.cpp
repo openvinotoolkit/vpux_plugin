@@ -72,8 +72,15 @@ void vpux::VPUMI37XX::MappedInferenceOp::serialize(elf::writer::BinaryDataSectio
 
     auto dmaCountVec = parseIntArrayAttr<int64_t>(getDmaCount());
     VPUX_THROW_WHEN(dmaCountVec.size() > nn_public::VPU_MAX_DMA_ENGINES, "Too many DMA lists");
-    for (size_t listIdx = 0; listIdx < dmaCountVec.size(); ++listIdx) {
-        mi.dma_tasks[listIdx].count = dmaCountVec[listIdx];
+    // in case of 1 tile scheduling lets duplicate count for both lists - we will update it during relocation process
+    if (dmaCountVec.size() == 1) {
+        for (size_t listIdx = 0; listIdx < nn_public::VPU_MAX_DMA_ENGINES; ++listIdx) {
+            mi.dma_tasks[listIdx].count = dmaCountVec[0];
+        }
+    } else {
+        for (size_t listIdx = 0; listIdx < dmaCountVec.size(); ++listIdx) {
+            mi.dma_tasks[listIdx].count = dmaCountVec[listIdx];
+        }
     }
     mi.invariants.count = getInvariantCount();
     mi.variants.count = getVariantCount();

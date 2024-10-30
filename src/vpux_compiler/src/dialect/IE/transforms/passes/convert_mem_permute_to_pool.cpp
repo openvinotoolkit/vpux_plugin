@@ -6,6 +6,7 @@
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 #include "vpux/compiler/dialect/IE/utils/expand_utils.hpp"
 #include "vpux/compiler/dialect/IE/utils/pooling_utils.hpp"
+#include "vpux/compiler/dialect/IE/utils/reshape_utils.hpp"
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
 #include "vpux/compiler/utils/permute_utils.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
@@ -117,6 +118,94 @@ SmallVector<std::pair<Shape, DimsOrder>> calculateConversions(ShapeRef originInp
     return newMaxPoolOrder;
 }
 
+bool isLegalConvertToPool(IE::MemPermuteOp memPermuteOp, mlir::AffineMap memPermMap, mlir::MLIRContext* ctx,
+                          int64_t numClusters, StringRef debugName, Logger log) {
+    const auto inOrder = DimsOrder::fromValue(memPermuteOp.getInput());
+    const auto inShape = getShape(memPermuteOp.getInput());
+    const auto inMemShape = inOrder.toMemoryOrder(inShape);
+
+    // E-128307: Replace with using a robust NCE-Op supported datatype checking mechanism
+    const auto elementType = memPermuteOp.getType().cast<NDTypeInterface>().getElementType();
+    if (elementType.isSignedInteger() || elementType.isUnsignedInteger()) {
+        log.trace("NCE MaxPool does not support signed or unsigned integer");
+        return false;
+    }
+    if (elementType.isa<mlir::FloatType>() &&
+        elementType.cast<mlir::FloatType>().getWidth() > mlir::Float16Type::get(ctx).getWidth()) {
+        log.trace("NCE MaxPool does not support float type larger than 16 bits");
+        return false;
+    }
+
+    if (inShape[Dim(0)] != 1) {
+        log.trace("MemPermuteOp with dim N > 1");
+        return false;
+    }
+
+    if (isTrivialPermute(inMemShape, memPermMap)) {
+        log.trace("MemPermuteOp is actually a permute cast");
+        return false;
+    }
+
+    const auto memPerm = DimsOrder::fromAffineMap(memPermMap);
+    if (memPerm.dimAt(0) != Dims4D::Act::N) {
+        log.trace("MemPermuteOp with dim N changed dim position");
+        return false;
+    }
+
+    if (auto parentOp = memPermuteOp.getInput().getDefiningOp<IE::ExpandOp>()) {
+        auto order = DimsOrder::fromValue(parentOp.getInput());
+        if (!IE::isEligibleConvertToConv(parentOp, log, debugName) && parentOp->hasOneUse() &&
+            order == DimsOrder::NCHW) {
+            // For expand which will be lowered into DMA op, there is an optimization in another pass later which will
+            // fuse pattern `input(NCHW) -> Expand -> Permute` into a single DMA op. So skip mempermute optimization
+            // here.
+            log.trace("MemPermuteOp will be fused with parent Expand op in later pass");
+            return false;
+        }
+    }
+
+    if (memPerm == DimsOrder::NHCW && !isBeneficialToConvert(inShape)) {
+        log.trace("MemPermuteOp is not performant using OPU permute");
+        return false;
+    }
+
+    // Populate the target shape following NCHW order of dimensions.
+    // Physical layout NHWC corresponds to logical layout NCHW.
+    const Shape targetInShape = {inMemShape[MemDim(0)], inMemShape[MemDim(3)], inMemShape[MemDim(1)],
+                                 inMemShape[MemDim(2)]};
+    const auto targetOrder = getNHWCOutputLayout(memPerm);
+
+    // Calculate the inputType of maxPoolOp
+    Shape poolInLogicShape(inShape.size());
+    auto poolInOrder = DimsOrder::NHWC;
+    for (const auto idx : irange(inShape.size())) {
+        poolInLogicShape[poolInOrder.dimAt(idx)] = inMemShape[MemDim(idx)];
+    }
+    auto poolInputType =
+            memPermuteOp.getOutput().getType().cast<vpux::NDTypeInterface>().changeDimsOrder(DimsOrder::NHWC);
+    poolInputType = poolInputType.changeShape(poolInLogicShape);
+
+    const auto IC = poolInputType.getShape()[Dims4D::Act::C];
+    const auto alignedChannel = VPU::NCEInvariant::getAlignment(poolInputType.getElementType());
+    if (IC % alignedChannel != 0) {
+        auto conversionMap = calculateConversions(targetInShape, alignedChannel, targetOrder);
+        auto hasSmallHeightNum = [&](const std::pair<Shape, DimsOrder>& map) {
+            const int64_t PERFORMANT_HEIGHT_NUM_OF_PER_CLUSTER = 4;
+            return map.first[Dims4D::Act::H] < numClusters * PERFORMANT_HEIGHT_NUM_OF_PER_CLUSTER;
+        };
+        bool hasToSplitOnDimC = llvm::any_of(conversionMap, hasSmallHeightNum);
+        // If new MaxPool has to be split on Dim C which is the inner most dimension,
+        // it is not performant because of strided DMA.
+        auto isNotPerformant = memPerm == DimsOrder::NHCW && (hasToSplitOnDimC || conversionMap.size() > 2);
+        if (conversionMap.empty() || isNotPerformant) {
+            log.trace("Channels of an IE.MaxPool are not aligned or the Conversion is not performant.");
+            return false;
+        }
+    }
+
+    return true;
+}
+
 //
 // MemPermuteRewriter
 //
@@ -140,46 +229,16 @@ mlir::LogicalResult MemPermuteRewriter::matchAndRewrite(IE::MemPermuteOp origOp,
                                                         mlir::PatternRewriter& rewriter) const {
     _log.trace("[{0}] Got '{1}' at '{2}'", getDebugName(), origOp->getName(), origOp->getLoc());
 
+    // Check whether it is legal to convert
+    if (!isLegalConvertToPool(origOp, origOp.getMemPerm(), rewriter.getContext(), _numClusters, getDebugName(),
+                              _log.nest())) {
+        return matchFailed(_log.nest(), rewriter, origOp, "Not legal to convert MemPermute to Pool");
+    }
+
     const auto inOrder = DimsOrder::fromValue(origOp.getInput());
     const auto inShape = getShape(origOp.getInput());
     const auto inMemShape = inOrder.toMemoryOrder(inShape);
-
-    // E-128307: Replace with using a robust NCE-Op supported datatype checking mechanism
-    const auto elementType = origOp.getType().cast<NDTypeInterface>().getElementType();
-    if (elementType.isSignedInteger() || elementType.isUnsignedInteger()) {
-        return matchFailed(_log.nest(), rewriter, origOp, "NCE MaxPool does not support signed or unsigned integer");
-    }
-    if (elementType.isa<mlir::FloatType>() &&
-        elementType.cast<mlir::FloatType>().getWidth() > mlir::Float16Type::get(rewriter.getContext()).getWidth()) {
-        return matchFailed(_log.nest(), rewriter, origOp,
-                           "NCE MaxPool does not support float type larger than 16 bits");
-    }
-    if (inShape[Dim(0)] != 1) {
-        return matchFailed(_log.nest(), rewriter, origOp, "MemPermuteOp with dim N > 1");
-    }
-
-    if (isTrivialPermute(inMemShape, origOp.getMemPerm())) {
-        return matchFailed(_log.nest(), rewriter, origOp, "MemPermuteOp is actually a permute cast");
-    }
     const auto memPerm = DimsOrder::fromAffineMap(origOp.getMemPerm());
-    if (memPerm.dimAt(0) != Dims4D::Act::N) {
-        return matchFailed(_log.nest(), rewriter, origOp, "MemPermuteOp with dim N changed dim position");
-    }
-
-    if (auto parentOp = origOp.getInput().getDefiningOp<IE::ExpandOp>()) {
-        auto order = DimsOrder::fromValue(parentOp.getInput());
-        if (!IE::isEligibleConvertToConv(parentOp, _log, getDebugName()) && parentOp->hasOneUse() &&
-            order == DimsOrder::NCHW) {
-            // For expand which will be lowered into DMA op, there is an optimization in another pass later which will
-            // fuse pattern `input(NCHW) -> Expand -> Permute` into a single DMA op. So skip mempermute optimization
-            // here.
-            return matchFailed(_log.nest(), rewriter, origOp,
-                               "MemPermuteOp will be fused with parent Expand op in later pass");
-        }
-    }
-    if (memPerm == DimsOrder::NHCW && !isBeneficialToConvert(inShape)) {
-        return matchFailed(_log.nest(), rewriter, origOp, "MemPermuteOp is not performant using OPU permute");
-    }
 
     // Populate the target shape following NCHW order of dimensions.
     // Physical layout NHWC corresponds to logical layout NCHW.
@@ -189,61 +248,134 @@ mlir::LogicalResult MemPermuteRewriter::matchAndRewrite(IE::MemPermuteOp origOp,
     auto ctx = rewriter.getContext();
 
     const auto nhwcOrderAttr = mlir::AffineMapAttr::get(DimsOrder::NHWC.toAffineMap(ctx));
-    auto inLayoutCast = rewriter.create<IE::LayoutCastOp>(origOp.getLoc(), origOp.getInput(), nhwcOrderAttr);
-    auto reshapedInput = rewriter.create<IE::ShapeCastOp>(origOp.getLoc(), inLayoutCast.getOutput(),
-                                                          getIntArrayAttr(ctx, targetInShape));
-    const auto& targetOrder = getNHWCOutputLayout(memPerm);
+    auto identityMap = mlir::AffineMap::getMultiDimIdentityMap(checked_cast<uint32_t>(inShape.size()), ctx);
+    auto inPermuteCastOp = rewriter.create<IE::PermuteCastOp>(origOp.getLoc(), origOp.getInput(),
+                                                              DimsOrder::NHWC.toAffineMap(ctx), identityMap);
+    inferReturnTypes(inPermuteCastOp, InferShapedTypeMode::ALL);
 
-    const auto reshapeOutType = reshapedInput.getResult().getType().cast<NDTypeInterface>();
-    const auto maxPoolOutType = reshapeOutType.changeDimsOrder(targetOrder);
-    auto maxPool = IE::createIdentityMaxPool(reshapedInput.getResult(), maxPoolOutType, rewriter);
-    auto alignInterface = mlir::dyn_cast_or_null<IE::AlignedChannelsOpInterface>(maxPool);
-    VPUX_THROW_WHEN(alignInterface == nullptr, "{0} don't have aligninterface.", origOp);
+    const auto targetOrder = getNHWCOutputLayout(memPerm);
 
-    mlir::Value latestInput = maxPool->getResult(0);
-    SmallVector<DimsOrder> newMaxPoolTargetOrder;
-    if (alignInterface.verifyChannels().failed()) {
-        const auto alignedChannel = alignInterface.getInputChannelAlignment();
-        rewriter.eraseOp(maxPool);
+    // Calculate the inputType of maxPoolOp
+    Shape poolInLogicShape(inShape.size());
+    auto poolInOrder = DimsOrder::NHWC;
+    for (const auto idx : irange(inShape.size())) {
+        poolInLogicShape[poolInOrder.dimAt(idx)] = inMemShape[MemDim(idx)];
+    }
+    auto poolInputType = origOp.getOutput().getType().cast<vpux::NDTypeInterface>().changeDimsOrder(DimsOrder::NHWC);
+    poolInputType = poolInputType.changeShape(poolInLogicShape);
 
+    const auto IC = poolInputType.getShape()[Dims4D::Act::C];
+    const auto alignedChannel = VPU::NCEInvariant::getAlignment(poolInputType.getElementType());
+    mlir::Value latestPooling = nullptr;
+
+    if (IC % alignedChannel == 0) {
+        const auto maxPoolOutType =
+                inPermuteCastOp.getResult().getType().cast<NDTypeInterface>().changeDimsOrder(targetOrder);
+        auto maxPool = IE::createIdentityMaxPool(inPermuteCastOp.getResult(), maxPoolOutType, rewriter);
+        auto alignInterface = mlir::dyn_cast_or_null<IE::AlignedChannelsOpInterface>(maxPool);
+        VPUX_THROW_WHEN(alignInterface == nullptr, "{0} don't have aligninterface.", origOp);
+        latestPooling = maxPool->getResult(0);
+    } else {
         auto conversionMap = calculateConversions(targetInShape, alignedChannel, targetOrder);
-        auto hasSmallHeightNum = [this](const std::pair<Shape, DimsOrder>& map) {
-            const int64_t PERFORMANT_HEIGHT_NUM_OF_PER_CLUSTER = 4;
-            return map.first[Dims4D::Act::H] < _numClusters * PERFORMANT_HEIGHT_NUM_OF_PER_CLUSTER;
-        };
-        bool hasToSplitOnDimC = llvm::any_of(conversionMap, hasSmallHeightNum);
-        // If new MaxPool has to be split on Dim C which is the inner most dimension,
-        // it is not performant because of strided DMA.
-        auto isNotPerformant = memPerm == DimsOrder::NHCW && (hasToSplitOnDimC || conversionMap.size() > 2);
-        if (conversionMap.empty() || isNotPerformant) {
-            rewriter.eraseOp(reshapedInput);
-            rewriter.eraseOp(inLayoutCast);
-            return matchFailed(_log.nest(), rewriter, origOp,
-                               "Channels of an IE.MaxPool are not aligned or the Conversion is not performant.");
-        }
-
-        latestInput = reshapedInput.getResult();
+        auto latestInput = inPermuteCastOp.getResult();
         for (const auto& item : conversionMap) {
             auto shapeCastTmp = rewriter.createOrFold<IE::ShapeCastOp>(origOp.getLoc(), latestInput,
                                                                        getIntArrayAttr(ctx, item.first.raw()));
             const auto layoutCastType = shapeCastTmp.getType().cast<NDTypeInterface>();
             const auto outType = layoutCastType.changeDimsOrder(item.second);
-            maxPool = IE::createIdentityMaxPool(shapeCastTmp, outType, rewriter);
+            auto maxPool = IE::createIdentityMaxPool(shapeCastTmp, outType, rewriter);
+            latestPooling = maxPool->getResult(0);
             auto inLayoutCast =
                     rewriter.create<IE::LayoutCastOp>(origOp.getLoc(), maxPool->getResult(0), nhwcOrderAttr);
             latestInput = inLayoutCast.getOutput();
         }
     }
 
-    const auto orderInAttr = mlir::AffineMapAttr::get(DimsOrder::fromValue(origOp.getOutput()).toAffineMap(ctx));
-    auto outLayoutCast = rewriter.createOrFold<IE::LayoutCastOp>(origOp.getLoc(), latestInput, orderInAttr);
+    auto dstOrder = DimsOrder::fromValue(origOp.getOutput());
+    auto outPermuteCastOp =
+            rewriter.create<IE::PermuteCastOp>(origOp.getLoc(), latestPooling, dstOrder.toAffineMap(ctx), identityMap);
+    inferReturnTypes(outPermuteCastOp, InferShapedTypeMode::ALL);
 
-    _log.trace("Fuse {0} to {1}", origOp->getLoc(), maxPool->getLoc());
+    auto dstShape = getShape(origOp.getOutput());
+    auto outShapeCastOp = rewriter.createOrFold<IE::ShapeCastOp>(origOp.getLoc(), outPermuteCastOp.getResult(),
+                                                                 getIntArrayAttr(ctx, dstShape.raw()));
 
-    const auto targetShape = getShape(origOp.getOutput()).raw();
-    auto reshapedOut = rewriter.createOrFold<IE::ShapeCastOp>(origOp.getLoc(), origOp.getType(), outLayoutCast,
-                                                              getIntArrayAttr(ctx, targetShape));
-    rewriter.replaceOp(origOp, reshapedOut);
+    rewriter.replaceOp(origOp, outShapeCastOp);
+
+    return mlir::success();
+}
+
+//
+// ConvertMemPermuteWithDimNChanged
+//
+// Convert input shape of MemPermuteOp to make it feasible to convert to pool:
+//       Input: 1x1024x16x128xf16#NCHW                          Input: 1x1024x16x128xf16#NCHW
+//           |                                   ==>                   |
+//  MemPermute: 16x128x1x1024xf16#NCHW                      Shapecast: 1x1x1024x2048xf16#NCHW
+//           |    (mem_perm: [d2, d3, d0, d1])                         |   (mem_perm: [d0, d1, d3, d2])
+//                                                         MemPermute: 1x1x2048x1024xf16#NCHW
+//                                                                     |
+//                                                          Shapecast: 16x128x1x1024xf16#NCHW
+//
+
+class ConvertMemPermuteWithDimNChanged final : public mlir::OpRewritePattern<IE::MemPermuteOp> {
+public:
+    ConvertMemPermuteWithDimNChanged(mlir::MLIRContext* ctx, int64_t numClusters, Logger log)
+            : mlir::OpRewritePattern<IE::MemPermuteOp>(ctx), _numClusters(numClusters), _log(log) {
+        this->setDebugName("ConvertMemPermuteWithDimNChanged");
+    }
+
+private:
+    mlir::LogicalResult matchAndRewrite(IE::MemPermuteOp origOp, mlir::PatternRewriter& rewriter) const final;
+
+private:
+    int64_t _numClusters;
+    Logger _log;
+};
+
+mlir::LogicalResult ConvertMemPermuteWithDimNChanged::matchAndRewrite(IE::MemPermuteOp origOp,
+                                                                      mlir::PatternRewriter& rewriter) const {
+    _log.trace("[{0}] Got '{1}' at '{2}'", getDebugName(), origOp->getName(), origOp->getLoc());
+
+    auto ctx = rewriter.getContext();
+    const int64_t SUPPORTED_RANK = 4;
+
+    auto memPerm = DimsOrder::fromAffineMap(origOp.getMemPerm());
+    if (memPerm.dimAt(0) == Dims4D::Act::N) {
+        return matchFailed(_log.nest(), rewriter, origOp, "Not MemPermuteOp with DimN changed");
+    }
+
+    const auto inputType = mlir::cast<vpux::NDTypeInterface>(origOp.getInput().getType());
+    if (inputType.getRank() != SUPPORTED_RANK) {
+        return matchFailed(_log.nest(), rewriter, origOp, "Not supported rank");
+    }
+
+    auto [mergedPermutation, mergedMemShape] =
+            vpux::getMergedPermutationAndShape(inputType, origOp.getMemPerm(), SUPPORTED_RANK);
+    extendPermutationAndShape(mergedPermutation, mergedMemShape, SUPPORTED_RANK);
+    auto mergedLogicShape = inputType.getDimsOrder().toLogicalOrder(MemShape(mergedMemShape));
+
+    // Create input ShapeCast
+    const Shape origShape = getShape(origOp.getResult()).toValues();
+    auto inputShapeCast =
+            vpux::IE::buildShapeCast(origOp.getLoc(), origOp.getInput(), mergedLogicShape.raw(), rewriter);
+
+    // Create new MemPermuteOp
+    auto newMemPermAttr = mlir::AffineMap::getPermutationMap(ArrayRef(mergedPermutation), ctx);
+    auto newMemPermuteOp = rewriter.create<IE::MemPermuteOp>(origOp.getLoc(), inputShapeCast.getResult(),
+                                                             origOp.getDstOrder(), newMemPermAttr);
+    // Check whether it is legal to convert with new memPerm
+    if (!isLegalConvertToPool(newMemPermuteOp, newMemPermAttr, rewriter.getContext(), _numClusters, getDebugName(),
+                              _log.nest())) {
+        rewriter.eraseOp(newMemPermuteOp);
+        rewriter.eraseOp(inputShapeCast);
+        return matchFailed(_log.nest(), rewriter, origOp, "Not legal to convert MemPermute to Pool");
+    }
+
+    // Create output ShapeCast
+    auto outputShapeCast = vpux::IE::buildShapeCast(origOp.getLoc(), newMemPermuteOp.getOutput(),
+                                                    getShape(origOp.getResult()), rewriter);
+    rewriter.replaceOp(origOp, outputShapeCast);
 
     return mlir::success();
 }
@@ -272,6 +404,7 @@ void ConvertMemPermuteToPoolPass::safeRunOnFunc() {
     auto numClusters = tileOp.getCount();
 
     mlir::RewritePatternSet patterns(&ctx);
+    patterns.add<ConvertMemPermuteWithDimNChanged>(&ctx, numClusters, _log);
     patterns.add<MemPermuteRewriter>(&ctx, numClusters, _log);
 
     if (mlir::failed(applyPatternsAndFoldGreedily(func, std::move(patterns), getDefaultGreedyRewriteConfig()))) {

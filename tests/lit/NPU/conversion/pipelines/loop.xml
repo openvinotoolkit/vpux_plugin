@@ -1,0 +1,255 @@
+<?xml version="1.0"?>
+<net name="Model1" version="11">
+	<layers>
+		<layer id="1" name="Parameter_3" type="Parameter" version="opset1">
+			<data shape="3,4,6,10" element_type="f32" />
+			<output>
+				<port id="0" precision="FP32" names="Parameter_3">
+					<dim>3</dim>
+					<dim>4</dim>
+					<dim>6</dim>
+					<dim>10</dim>
+				</port>
+			</output>
+		</layer>
+		<layer id="0" name="Parameter_4" type="Parameter" version="opset1">
+			<data shape="2,3,4,5" element_type="f32" />
+			<output>
+				<port id="0" precision="FP32" names="Parameter_4">
+					<dim>2</dim>
+					<dim>3</dim>
+					<dim>4</dim>
+					<dim>5</dim>
+				</port>
+			</output>
+		</layer>
+		<layer id="2" name="Constant_1" type="Const" version="opset1">
+			<data element_type="i32" shape="1" offset="0" size="4" />
+			<output>
+				<port id="0" precision="I32">
+					<dim>1</dim>
+				</port>
+			</output>
+		</layer>
+		<layer id="3" name="Constant_2" type="Const" version="opset1">
+			<data element_type="boolean" shape="1" offset="4" size="1" />
+			<output>
+				<port id="0" precision="BOOL">
+					<dim>1</dim>
+				</port>
+			</output>
+		</layer>
+		<layer id="4" name="Loop_15" type="Loop" version="opset5">
+			<port_map>
+				<input axis="0" external_port_id="2" internal_layer_id="1" start="0" end="-1" stride="1" part_size="1" />
+				<input external_port_id="3" internal_layer_id="0" />
+				<output axis="0" external_port_id="4" internal_layer_id="9" start="0" end="-1" stride="1" part_size="1" />
+				<output external_port_id="5" internal_layer_id="6" />
+				<output external_port_id="-1" internal_layer_id="3" purpose="execution_condition" />
+			</port_map>
+			<back_edges>
+				<edge from-layer="6" to-layer="0" />
+			</back_edges>
+			<input>
+				<port id="0" precision="I32">
+					<dim>1</dim>
+				</port>
+				<port id="1" precision="BOOL">
+					<dim>1</dim>
+				</port>
+				<port id="2" precision="FP32">
+					<dim>3</dim>
+					<dim>4</dim>
+					<dim>6</dim>
+					<dim>10</dim>
+				</port>
+				<port id="3" precision="FP32">
+					<dim>2</dim>
+					<dim>3</dim>
+					<dim>4</dim>
+					<dim>5</dim>
+				</port>
+			</input>
+			<output>
+				<port id="4" precision="FP32">
+					<dim>1</dim>
+					<dim>4</dim>
+					<dim>6</dim>
+					<dim>10</dim>
+				</port>
+				<port id="5" precision="FP32">
+					<dim>2</dim>
+					<dim>3</dim>
+					<dim>4</dim>
+					<dim>5</dim>
+				</port>
+			</output>
+			<body>
+				<layers>
+					<layer id="1" name="Parameter_5" type="Parameter" version="opset1">
+						<data shape="1,4,6,10" element_type="f32" />
+						<output>
+							<port id="0" precision="FP32" names="Parameter_5">
+								<dim>1</dim>
+								<dim>4</dim>
+								<dim>6</dim>
+								<dim>10</dim>
+							</port>
+						</output>
+					</layer>
+					<layer id="0" name="Parameter_7" type="Parameter" version="opset1">
+						<data shape="2,3,4,5" element_type="f32" />
+						<output>
+							<port id="0" precision="FP32" names="Parameter_7">
+								<dim>2</dim>
+								<dim>3</dim>
+								<dim>4</dim>
+								<dim>5</dim>
+							</port>
+						</output>
+					</layer>
+					<layer id="2" name="Constant_9" type="Const" version="opset1">
+						<data element_type="boolean" shape="1" offset="5" size="1" />
+						<output>
+							<port id="0" precision="BOOL">
+								<dim>1</dim>
+							</port>
+						</output>
+					</layer>
+					<layer id="4" name="Constant_8" type="Const" version="opset1">
+						<data element_type="f32" shape="1" offset="6" size="4" />
+						<output>
+							<port id="0" precision="FP32">
+								<dim>1</dim>
+							</port>
+						</output>
+					</layer>
+					<layer id="5" name="Add_11" type="Add" version="opset1">
+						<data auto_broadcast="numpy" />
+						<input>
+							<port id="0" precision="FP32">
+								<dim>2</dim>
+								<dim>3</dim>
+								<dim>4</dim>
+								<dim>5</dim>
+							</port>
+							<port id="1" precision="FP32">
+								<dim>1</dim>
+							</port>
+						</input>
+						<output>
+							<port id="2" precision="FP32">
+								<dim>2</dim>
+								<dim>3</dim>
+								<dim>4</dim>
+								<dim>5</dim>
+							</port>
+						</output>
+					</layer>
+					<layer id="7" name="Constant_6" type="Const" version="opset1">
+						<data element_type="f32" shape="1, 4, 6, 10" offset="10" size="960" />
+						<output>
+							<port id="0" precision="FP32">
+								<dim>1</dim>
+								<dim>4</dim>
+								<dim>6</dim>
+								<dim>10</dim>
+							</port>
+						</output>
+					</layer>
+					<layer id="8" name="Add_10" type="Add" version="opset1">
+						<data auto_broadcast="numpy" />
+						<input>
+							<port id="0" precision="FP32">
+								<dim>1</dim>
+								<dim>4</dim>
+								<dim>6</dim>
+								<dim>10</dim>
+							</port>
+							<port id="1" precision="FP32">
+								<dim>1</dim>
+								<dim>4</dim>
+								<dim>6</dim>
+								<dim>10</dim>
+							</port>
+						</input>
+						<output>
+							<port id="2" precision="FP32">
+								<dim>1</dim>
+								<dim>4</dim>
+								<dim>6</dim>
+								<dim>10</dim>
+							</port>
+						</output>
+					</layer>
+					<layer id="9" name="Result_12" type="Result" version="opset1">
+						<input>
+							<port id="0" precision="FP32">
+								<dim>1</dim>
+								<dim>4</dim>
+								<dim>6</dim>
+								<dim>10</dim>
+							</port>
+						</input>
+					</layer>
+					<layer id="6" name="Result_13" type="Result" version="opset1">
+						<input>
+							<port id="0" precision="FP32">
+								<dim>2</dim>
+								<dim>3</dim>
+								<dim>4</dim>
+								<dim>5</dim>
+							</port>
+						</input>
+					</layer>
+					<layer id="3" name="Result_14" type="Result" version="opset1">
+						<input>
+							<port id="0" precision="BOOL">
+								<dim>1</dim>
+							</port>
+						</input>
+					</layer>
+				</layers>
+				<edges>
+					<edge from-layer="0" from-port="0" to-layer="5" to-port="0" />
+					<edge from-layer="1" from-port="0" to-layer="8" to-port="0" />
+					<edge from-layer="2" from-port="0" to-layer="3" to-port="0" />
+					<edge from-layer="4" from-port="0" to-layer="5" to-port="1" />
+					<edge from-layer="5" from-port="2" to-layer="6" to-port="0" />
+					<edge from-layer="7" from-port="0" to-layer="8" to-port="1" />
+					<edge from-layer="8" from-port="2" to-layer="9" to-port="0" />
+				</edges>
+				<rt_info />
+			</body>
+		</layer>
+		<layer id="6" name="Result_16" type="Result" version="opset1">
+			<input>
+				<port id="0" precision="FP32">
+					<dim>1</dim>
+					<dim>4</dim>
+					<dim>6</dim>
+					<dim>10</dim>
+				</port>
+			</input>
+		</layer>
+		<layer id="5" name="Result_17" type="Result" version="opset1">
+			<input>
+				<port id="0" precision="FP32">
+					<dim>2</dim>
+					<dim>3</dim>
+					<dim>4</dim>
+					<dim>5</dim>
+				</port>
+			</input>
+		</layer>
+	</layers>
+	<edges>
+		<edge from-layer="0" from-port="0" to-layer="4" to-port="3" />
+		<edge from-layer="1" from-port="0" to-layer="4" to-port="2" />
+		<edge from-layer="2" from-port="0" to-layer="4" to-port="0" />
+		<edge from-layer="3" from-port="0" to-layer="4" to-port="1" />
+		<edge from-layer="4" from-port="5" to-layer="5" to-port="0" />
+		<edge from-layer="4" from-port="4" to-layer="6" to-port="0" />
+	</edges>
+	<rt_info />
+</net>

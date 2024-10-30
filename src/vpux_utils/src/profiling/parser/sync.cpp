@@ -95,8 +95,6 @@ SynchronizationPointsContainer findSynchronizationPoints(const RawProfilingRecor
     ExecutorType successorExecType = ExecutorType::DPU;
     if (pointKind == SynchronizationPointKind::DPU_TO_DMA) {
         std::swap(predecessorExecType, successorExecType);
-    } else if (pointKind == SynchronizationPointKind::DMA_TO_UPA) {
-        successorExecType = ExecutorType::UPA;
     }
 
     // Possible synchronization points occurs on covered from both directions barriers
@@ -157,7 +155,7 @@ std::vector<RawProfilingRecord::TimeType> getBarrierShiftEstimations(const Synch
 
 }  // namespace
 
-// Function return difference as delta = DMA - other, so later we can just add delta to convert from Other(DPU/UPA) to
+// Function return difference as delta = DMA - other, so later we can just add delta to convert from Other(DPU) to
 // DMA timer
 std::optional<int64_t> vpux::profiling::getDMA2OtherTimersShift(const RawProfilingRecords& dmaTasks,
                                                                 const RawProfilingRecords& otherTasks,

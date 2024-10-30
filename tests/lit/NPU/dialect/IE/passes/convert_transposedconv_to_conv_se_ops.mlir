@@ -59,14 +59,14 @@ func.func @DoNotConvertTransposedConvToConvWithOutputPadding(%input: tensor<1x32
 
 // CHECK-LABEL: func.func @ConvertTransposedConvToConvLargeKernelSize
 // CHECK-SAME:    ([[INPUT:%.+]]: tensor<1x32x23x30xf16>)
-func.func @ConvertTransposedConvToConvLargeKernelSize(%input: tensor<1x32x23x30xf16>) -> tensor<1x16x56x70xf16> {
-    %weights = const.Declare tensor<16x32x12x12xf16> = dense<1.000000e+00> : tensor<16x32x12x12xf16>
+func.func @ConvertTransposedConvToConvLargeKernelSize(%input: tensor<1x32x23x30xf16>) -> tensor<1x16x60x74xf16> {
+    %weights = const.Declare tensor<16x32x16x16xf16> = dense<1.000000e+00> : tensor<16x32x16x16xf16>
     %out = IE.TransposedConvolution(%input, %weights) {
             dilations = [1, 1], operandSegmentSizes = array<i32: 1, 1, 0, 0>, output_padding = [0, 0], pads_begin = [0, 0], pads_end = [0, 0], strides = [2, 2]
-        } : tensor<1x32x23x30xf16>, tensor<16x32x12x12xf16> -> tensor<1x16x56x70xf16>
-    return %out : tensor<1x16x56x70xf16>
+        } : tensor<1x32x23x30xf16>, tensor<16x32x16x16xf16> -> tensor<1x16x60x74xf16>
+    return %out : tensor<1x16x60x74xf16>
 
-    // CHECK:  [[WEIGHTS:%.+]] = const.Declare tensor<16x32x12x12xf16>
+    // CHECK:  [[WEIGHTS:%.+]] = const.Declare tensor<16x32x16x16xf16>
     // CHECK:  [[UPSAMPLING:%.+]] = IE.Upsampling([[INPUT]])
     // CHECK:  [[OUT:%.+]] = IE.Convolution([[UPSAMPLING]], [[WEIGHTS]])
     // CHECK:  return [[OUT]]

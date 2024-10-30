@@ -15,6 +15,7 @@ func.func @SplitNCEPermute(%arg0: tensor<1x31x224x224xf16>) -> tensor<1x32x224x2
         dstElemType = !qElemType,
         dstOrder = #NHWC,
         expandedChannels = 32 : i64,
+        opaque_ppe = #VPU.PPEStub<>,
         tilingStrategy = [1, 2, 1, 1]
     } -> tensor<1x32x224x224x!qElemType, {order = #NHWC}>
 
@@ -28,7 +29,8 @@ func.func @SplitNCEPermute(%arg0: tensor<1x31x224x224xf16>) -> tensor<1x32x224x2
     // CHECK:       [[OUTPUT_TILE0:%.+]] = VPU.NCE.Permute([[INPUT_TILE0]])
     // CHECK-SAME:          dstElemType = !qElemType,
     // CHECK-SAME:          dstOrder = #NHWC,
-    // CHECK-SAME:          expandedChannels = 16 : i64}
+    // CHECK-SAME:          expandedChannels = 16 : i64
+    // CHECK-SAME:          opaque_ppe = #VPU.PPEStub<>}
     // CHECK-SAME:      -> tensor<1x16x224x224x!qElemType, {order = #NHWC}>
 
     // Tile 1
@@ -39,7 +41,8 @@ func.func @SplitNCEPermute(%arg0: tensor<1x31x224x224xf16>) -> tensor<1x32x224x2
     // CHECK:       [[OUTPUT_TILE1:%.+]] = VPU.NCE.Permute([[INPUT_TILE1]])
     // CHECK-SAME:          dstElemType = !qElemType,
     // CHECK-SAME:          dstOrder = #NHWC,
-    // CHECK-SAME:          expandedChannels = 16 : i64}
+    // CHECK-SAME:          expandedChannels = 16 : i64,
+    // CHECK-SAME:          opaque_ppe = #VPU.PPEStub<>}
     // CHECK-SAME:      -> tensor<1x16x224x224x!qElemType, {order = #NHWC}>
 
     // Concat

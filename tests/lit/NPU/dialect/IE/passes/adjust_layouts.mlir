@@ -238,11 +238,11 @@ func.func @main(%arg0: tensor<1x16x30x30xf16>) -> tensor<1x16x30x30xf16> {
 module @ReorderWithScatterNDUpdate {
 
 func.func @main(%arg0: tensor<1x50x56x56xf16, {order = #NHWC}>, %arg1: tensor<1x35x56x56xf16>) -> tensor<1x50x56x56xf16> {
-    %cst = const.Declare tensor<1x35x2xsi32> = dense<1> : tensor<1x35x2xsi64>, [#const.ConvertElemType<si32>]
+    %cst = const.Declare tensor<1x35x2xsi32> = dense<1> : tensor<1x35x2xsi64>, [#const.CastElemType<si32>]
     %1 = IE.ScatterNDUpdate(%arg0, %cst, %arg1) : tensor<1x50x56x56xf16, {order = #NHWC}>, tensor<1x35x2xsi32>, tensor<1x35x56x56xf16> -> tensor<1x50x56x56xf16>
     return %1 : tensor<1x50x56x56xf16>
 
-    // CHECK:       [[CST:%.+]] = const.Declare tensor<1x35x2xsi32> = dense<1> : tensor<1x35x2xsi64>, [#const.ConvertElemType<si32>]
+    // CHECK:       [[CST:%.+]] = const.Declare tensor<1x35x2xsi32> = dense<1> : tensor<1x35x2xsi64>, [#const.CastElemType<si32>]
     // CHECK:       [[VAR0:%.+]] = IE.Reorder(%arg0) {dstOrder = #NCHW} : tensor<1x50x56x56xf16, {order = #NHWC}> -> tensor<1x50x56x56xf16>
     // CHECK:       [[VAR1:%.+]] = IE.ScatterNDUpdate([[VAR0]], [[CST]], %arg1) : tensor<1x50x56x56xf16>, tensor<1x35x2xsi32>, tensor<1x35x56x56xf16> -> tensor<1x50x56x56xf16>
     // CHECK:       return [[VAR1]] : tensor<1x50x56x56xf16>
@@ -373,4 +373,21 @@ func.func @MvnLayoutForReshapeFuse(%arg0: tensor<1x512x128x128xf16>) -> tensor<1
 
     // CHECK:  [[MVN_OUT:%.+]] = IE.MVN
     // CHECK-SAME: -> tensor<1x32x262144x1xf16, {order = #NHWC}>
+}
+
+// -----
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+#map = affine_map<(d0, d1, d2, d3) -> (d3, d0, d1, d2)>
+
+// CHECK-LABEL:   @AdjustForGeluWNCH
+// CHECK-SAME:    ([[INPUT:%.*]]: tensor<1x512x6x235xf16, {order = #map}>)
+func.func @AdjustForGeluWNCH(%arg0: tensor<1x512x6x235xf16, {order = #map}>) -> tensor<1x512x6x235xf16, {order = #map}> {
+    %0 = IE.Gelu(%arg0) : tensor<1x512x6x235xf16, {order = #map}> -> tensor<1x512x6x235xf16, {order = #map}>
+    return %0 : tensor<1x512x6x235xf16, {order = #map}>
+
+    // CHECK: [[REORDER0:%.+]] = IE.Reorder([[INPUT]]) {dstOrder = #NCHW} : tensor<1x512x6x235xf16, {order = #map}> -> tensor<1x512x6x235xf16>
+    // CHECK: [[GELU:%.+]] = IE.Gelu([[REORDER0]]) : tensor<1x512x6x235xf16> -> tensor<1x512x6x235xf16>
+    // CHECK: [[REORDER1:%.+]] = IE.Reorder([[GELU]]) {dstOrder = #map} : tensor<1x512x6x235xf16> -> tensor<1x512x6x235xf16, {order = #map}>
+    // CHECK: return [[REORDER1]] : tensor<1x512x6x235xf16, {order = #map}>
 }

@@ -212,7 +212,7 @@ func.func @NotFuseAddIdentityAvgPoolAsUnsupportedPostOp(%arg0 : tensor<1x16x320x
 
     return %ave_pool : tensor<1x16x320x320xf16, {order = #NHWC}>
     // CHECK:       IE.Add([[ARG0]], [[ARG0]])
-    // CHECK:       IE.AvgPool 
+    // CHECK:       IE.AvgPool
     //CHECK-SAME:       post_op = #IE.PostOp<name = "IE.LeakyRelu", attrs = {negative_slope = 0.0999755859375 : f64}>
     //CHECK-SAME:       tensor<1x16x320x320xf16, {order = #NHWC}>
 
@@ -249,4 +249,40 @@ func.func @FuseIdentityAvgPoolDiffOrder (%arg0: tensor<1x16x320x320xf16, {order 
     //CHECK-SAME: tensor<1x16x320x320x!qElemType, {order = #NWCH}>
 
     //CHECK-NOT: IE.AvgPool
+}
+
+// -----
+
+// CHECK-LABEL: @NotRemoveAvgPoolWithNonOneScale
+func.func @NotRemoveAvgPoolWithNonOneScale(%arg0 : tensor<1x64x10x13xf16>) -> (tensor<1x64x10x13xf16>) {
+    %ave_pool = IE.AvgPool(%arg0) {
+        kernel_size = [1, 1],
+        pads_begin = [0, 0],
+        pads_end = [0, 0],
+        rounding_type = #IE.rounding_type<FLOOR>,
+        static_scale = 0.135327876 : f32,
+        strides = [1, 1]
+    } : tensor<1x64x10x13xf16> -> tensor<1x64x10x13xf16>
+
+    return %ave_pool : tensor<1x64x10x13xf16>
+
+    // CHECK:   IE.AvgPool
+}
+
+// -----
+
+// CHECK-LABEL: @RemoveAvgPoolWithScaleEqualToOne
+func.func @RemoveAvgPoolWithScaleEqualToOne(%arg0 : tensor<1x64x10x13xf16>) -> (tensor<1x64x10x13xf16>) {
+    %ave_pool = IE.AvgPool(%arg0) {
+        kernel_size = [1, 1],
+        pads_begin = [0, 0],
+        pads_end = [0, 0],
+        rounding_type = #IE.rounding_type<FLOOR>,
+        static_scale = 1.0 : f32,
+        strides = [1, 1]
+    } : tensor<1x64x10x13xf16> -> tensor<1x64x10x13xf16>
+
+    return %ave_pool : tensor<1x64x10x13xf16>
+
+    // CHECK-NOT:   IE.AvgPool
 }

@@ -320,21 +320,23 @@ mlir::DenseElementsAttr generateWeights(mlir::OpBuilder builder, llvm::ArrayRef<
 }
 
 vpux::Const::ContentAttr generateDefaultWeightsAttr(mlir::DenseElementsAttr weights, mlir::Type type) {
-    auto weightsAttribute = vpux::Const::ContentAttr::get(weights);
-    weightsAttribute = weightsAttribute.reorder(vpux::DimsOrder::OYXI);
+    auto weightsAttributeSetup = vpux::Const::ContentAttr::transform(weights).reorder(vpux::DimsOrder::OYXI);
 
     if (auto qty = type.dyn_cast<mlir::quant::QuantizedType>()) {
         auto storageType = mlir::quant::QuantizedType::castToStorageType(qty);
         if (!(storageType.isFloat8E5M2() || storageType.isFloat8E4M3FN())) {
-            const auto quantizedType = vpux::changeStorageType(qty, weightsAttribute.getType().getElementType());
-            weightsAttribute = weightsAttribute.quantCast(quantizedType);
+            auto contentType = Const::inferFinalTypeAndSplat(weightsAttributeSetup.getBaseContent(),
+                                                             weightsAttributeSetup.getTransformations())
+                                       .first;
+            const auto quantizedType = vpux::changeStorageType(qty, contentType.getElementType());
+            weightsAttributeSetup = weightsAttributeSetup.quantCast(quantizedType);
             if (qty.getStorageType().isInteger(4)) {
-                weightsAttribute = weightsAttribute.bitPack(4);
+                weightsAttributeSetup = weightsAttributeSetup.bitPack(4);
             }
         }
     }
 
-    return weightsAttribute;
+    return weightsAttributeSetup.get();
 }
 
 std::vector<uint16_t> computeSprLookupTable(nb::ActivationType activation_type) {
@@ -540,6 +542,10 @@ void buildCNNOp(mlir::OpBuilder& builder, llvm::StringRef mainFuncName, llvm::Ar
         const auto nameAttr = builder.getStringAttr(inputName);
         const auto userTypeAttr = mlir::TypeAttr::get(inputType);
         inputsInfoBuilder.create<IE::DataInfoOp>(builder.getUnknownLoc(), nameAttr, userTypeAttr,
+                                                 /*OptionalAttr originalShape*/ nullptr,
+                                                 /*OptionalAttr friendlyName*/ nullptr,
+                                                 /*OptionalAttr inputName*/ nullptr,
+                                                 /*OptionalAttr tensorNames*/ nullptr,
                                                  /*profilingSectionsCount=*/0);
     }
 
@@ -559,6 +565,10 @@ void buildCNNOp(mlir::OpBuilder& builder, llvm::StringRef mainFuncName, llvm::Ar
         const auto nameAttr = builder.getStringAttr(resultName);
         const auto userTypeAttr = mlir::TypeAttr::get(outputType);
         outputsInfoBuilder.create<IE::DataInfoOp>(builder.getUnknownLoc(), nameAttr, userTypeAttr,
+                                                  /*OptionalAttr originalShape*/ nullptr,
+                                                  /*OptionalAttr friendlyName*/ nullptr,
+                                                  /*OptionalAttr inputName*/ nullptr,
+                                                  /*OptionalAttr tensorNames*/ nullptr,
                                                   /*profilingSectionsCount=*/0);
     }
 
@@ -580,6 +590,10 @@ void buildCNNOp(mlir::OpBuilder& builder, llvm::StringRef mainFuncName, llvm::Ar
         auto dataInfo = userInfoBuilder.create<IE::DataInfoOp>(mlir::UnknownLoc::get(ctx),
                                                                mlir::StringAttr::get(ctx, "profilingOutput"),
                                                                mlir::TypeAttr::get(outputUserResult),
+                                                               /*OptionalAttr originalShape*/ nullptr,
+                                                               /*OptionalAttr friendlyName*/ nullptr,
+                                                               /*OptionalAttr inputName*/ nullptr,
+                                                               /*OptionalAttr tensorNames*/ nullptr,
                                                                /*profilingSectionsCount=*/1);
         dataInfo.getSections().front().emplaceBlock();
 
@@ -768,19 +782,19 @@ vpux::VPUIP::DPUTaskOp createDPUTaskOp(mlir::OpBuilder builder, mlir::OpBuilder 
     return dpuTask;
 }
 
-vpux::DimsOrder oduPermutationToLayout(const MVCNN::Permutation oduPermutation) {
+vpux::DimsOrder oduPermutationToLayout(const vpux::VPUIP::Permutation oduPermutation) {
     switch (oduPermutation) {
-    case MVCNN::Permutation::Permutation_ZXY:
+    case vpux::VPUIP::Permutation::Permutation_ZXY:
         return vpux::DimsOrder::NHWC;
-    case MVCNN::Permutation::Permutation_ZYX:
+    case vpux::VPUIP::Permutation::Permutation_ZYX:
         return vpux::DimsOrder::fromCode(0x1432);  // NWHC
-    case MVCNN::Permutation::Permutation_YZX:
+    case vpux::VPUIP::Permutation::Permutation_YZX:
         return vpux::DimsOrder::fromCode(0x1423);  // NWCH
-    case MVCNN::Permutation::Permutation_YXZ:
+    case vpux::VPUIP::Permutation::Permutation_YXZ:
         return vpux::DimsOrder::fromCode(0x1243);  // NCWH
-    case MVCNN::Permutation::Permutation_XZY:
+    case vpux::VPUIP::Permutation::Permutation_XZY:
         return vpux::DimsOrder::NHCW;
-    case MVCNN::Permutation::Permutation_XYZ:
+    case vpux::VPUIP::Permutation::Permutation_XYZ:
         return vpux::DimsOrder::NCHW;
     default:
         return vpux::DimsOrder::NHWC;
@@ -842,9 +856,21 @@ VPU::PaddingAttr getMulticlusteringPaddings(mlir::MLIRContext* ctx, const int64_
 
         return VPU::PaddingAttr::get(ctx, left, right, top, bottom);
     }
+    case nb::SegmentationType::SOHW3: {
+        if (clustersPerDim.size() != 2) {
+            VPUX_THROW("SOHW3 needs clustersPerDim size to pe 2");
+        }
+
+        const auto top = (cluster == 0) || (cluster == 2) ? globalPadding.getTop() : noPad;
+        const auto bottom = (cluster == 1) || (cluster == 2) ? globalPadding.getBottom() : noPad;
+        const auto left = (cluster == 0) || (cluster == 1) ? globalPadding.getLeft() : noPad;
+        const auto right = (cluster == 2) ? globalPadding.getRight() : noPad;
+
+        return VPU::PaddingAttr::get(ctx, left, right, top, bottom);
+    }
     case nb::SegmentationType::SOHK: {
         if (clustersPerDim.size() != 2) {
-            VPUX_THROW("SOHW needs clustersPerDim size to pe 2");
+            VPUX_THROW("SOHK needs clustersPerDim size to be 2");
         }
 
         const auto heightNumClusters = clustersPerDim[0];
@@ -853,7 +879,17 @@ VPU::PaddingAttr getMulticlusteringPaddings(mlir::MLIRContext* ctx, const int64_
         const auto idxH = cluster / channelsNumClusters;
 
         const auto top = (idxH == 0) ? globalPadding.getTop() : noPad;
-        const auto bottom = (idxH == heightNumClusters - 1) ? globalPadding.getTop() : noPad;
+        const auto bottom = (idxH == heightNumClusters - 1) ? globalPadding.getBottom() : noPad;
+
+        return VPU::PaddingAttr::get(ctx, globalPadding.getLeft(), globalPadding.getRight(), top, bottom);
+    }
+    case nb::SegmentationType::SOHK3: {
+        if (clustersPerDim.size() != 2) {
+            VPUX_THROW("SOHK3 needs clustersPerDim size to be 2");
+        }
+
+        const auto top = (cluster == 1) ? noPad : globalPadding.getTop();
+        const auto bottom = (cluster == 0) ? noPad : globalPadding.getBottom();
 
         return VPU::PaddingAttr::get(ctx, globalPadding.getLeft(), globalPadding.getRight(), top, bottom);
     }

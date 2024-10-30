@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation
+// Copyright (C) 2023-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -61,16 +61,16 @@ class GridSampleLayerTestCommon : public GridSampleLayerTest, virtual public Vpu
     }
 };
 
-class GridSampleLayerTest_NPU3720 : public GridSampleLayerTestCommon {};
-class GridSampleLayerTest_NPU4000 : public GridSampleLayerTestCommon {};
+class GridSampleLayerTest_Tiling : public GridSampleLayerTestCommon {};
+class GridSampleLayerTest_no_Tiling : public GridSampleLayerTestCommon {};
 
-TEST_P(GridSampleLayerTest_NPU3720, HW) {
+TEST_P(GridSampleLayerTestCommon, NPU3720_HW) {
     VpuOv2LayerTest::abs_threshold = 0.8;
     VpuOv2LayerTest::setDefaultHardwareMode();
     VpuOv2LayerTest::run(Platform::NPU3720);
 }
 
-TEST_P(GridSampleLayerTest_NPU4000, HW) {
+TEST_P(GridSampleLayerTestCommon, NPU4000_HW) {
     VpuOv2LayerTest::abs_threshold = 0.8;
     VpuOv2LayerTest::setDefaultHardwareMode();
     VpuOv2LayerTest::run(Platform::NPU4000);
@@ -122,18 +122,17 @@ const auto paramsTiling = testing::Combine(::testing::ValuesIn(dataShapesTiling)
                                            ::testing::ValuesIn(paddingModes), ::testing::ValuesIn(dataTypes),
                                            ::testing::ValuesIn(gridTypes), ::testing::Values(DEVICE_NPU));
 
-// NPU3720
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_GridSample, GridSampleLayerTest_NPU3720, params,
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_GridSample, GridSampleLayerTestCommon, params,
                          GridSampleLayerTest::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_GridSample_Tiling, GridSampleLayerTest_NPU3720, paramsTiling,
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_GridSample_Tiling, GridSampleLayerTestCommon, paramsTiling,
                          GridSampleLayerTest::getTestCaseName);
 
-// NPU4000
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_GridSample, GridSampleLayerTest_NPU4000, params,
+// E#128241 Tiling handled separately for 5010 and 6010
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_GridSample, GridSampleLayerTest_no_Tiling, params,
                          GridSampleLayerTest::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_GridSample_Tiling, GridSampleLayerTest_NPU4000, paramsTiling,
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_GridSample_Tiling, GridSampleLayerTest_Tiling, paramsTiling,
                          GridSampleLayerTest::getTestCaseName);
 
 }  // namespace

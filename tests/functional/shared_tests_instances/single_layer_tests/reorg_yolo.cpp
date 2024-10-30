@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation
+// Copyright (C) 2022-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -30,21 +30,17 @@ class ReorgYoloLayerTestCommon : public ReorgYoloLayerTest, virtual public VpuOv
     }
 };
 
-class ReorgYoloLayerTest_NPU3720 : public ReorgYoloLayerTestCommon {};
-class ReorgYoloLayerTest_NPU4000 : public ReorgYoloLayerTestCommon {};
-
-TEST_P(ReorgYoloLayerTest_NPU3720, HW) {
+TEST_P(ReorgYoloLayerTestCommon, NPU3720_HW) {
     VpuOv2LayerTest::setDefaultHardwareMode();
     VpuOv2LayerTest::run(Platform::NPU3720);
 }
 
-TEST_P(ReorgYoloLayerTest_NPU4000, SW) {
+TEST_P(ReorgYoloLayerTestCommon, NPU4000_SW) {
     VpuOv2LayerTest::setReferenceSoftwareMode();
     VpuOv2LayerTest::run(Platform::NPU4000);
 }
 
 }  // namespace test
-
 }  // namespace ov
 
 using namespace ov::test;
@@ -74,16 +70,10 @@ const auto paramsA = testing::Combine(testing::ValuesIn(inputShapesA), testing::
 const auto paramsB = testing::Combine(testing::ValuesIn(inputShapesB), testing::ValuesIn(stridesB),
                                       testing::ValuesIn(modelTypes), testing::Values(DEVICE_NPU));
 
-INSTANTIATE_TEST_CASE_P(smoke_ReorgYolo_a, ReorgYoloLayerTest_NPU3720, paramsA,
-                        ReorgYoloLayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_CASE_P(smoke_ReorgYolo_a, ReorgYoloLayerTestCommon, paramsA,
+                        ReorgYoloLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(smoke_ReorgYolo_b, ReorgYoloLayerTest_NPU3720, paramsB,
-                        ReorgYoloLayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_ReorgYolo_a, ReorgYoloLayerTest_NPU4000, paramsA,
-                        ReorgYoloLayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_precommit_ReorgYolo_b, ReorgYoloLayerTest_NPU4000, paramsB,
-                        ReorgYoloLayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_ReorgYolo_b, ReorgYoloLayerTestCommon, paramsB,
+                         ReorgYoloLayerTestCommon::getTestCaseName);
 
 }  // namespace

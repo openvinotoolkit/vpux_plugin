@@ -36,7 +36,6 @@ func.func @PatchFusedConstantWithSpill() ->  memref<1x126x2x2xf16, #NHWC, [@CMX_
     %9 = VPUIP.ViewOp %6 : memref<1x1x1x16xui8, {order = #NCHW, strides = [784, 784, 784, 1]}, [@CMX_NN, 0]> to memref<1x1x1x16xui8, [@CMX_NN, 0]>
 
     %10 = VPUIP.NCEClusterTask {
-        activation_window_channel_length = 98 : i64,
         constantsFused = true,
         kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
         kernel_size = [7, 7],
@@ -47,7 +46,6 @@ func.func @PatchFusedConstantWithSpill() ->  memref<1x126x2x2xf16, #NHWC, [@CMX_
 
         weights(%8 : memref<16x16x1x1xf16, #NHWC, [@CMX_NN, 0]>)
         weight_table(%7 : memref<16x1x1x4xsi32, [@CMX_NN, 0]>)
-        activation_window(%9 : memref<1x1x1x16xui8, [@CMX_NN, 0]>)
 
         parent_input(%in : memref<1x1008x14x14xf16, #NHWC, [@CMX_NN, 0]>)
         parent_output(%out : memref<1x126x2x2xf16, #NHWC, [@CMX_NN, 0]>) outputs(%out : memref<1x126x2x2xf16, #NHWC, [@CMX_NN, 0]>) -> memref<1x126x2x2xf16, #NHWC, [@CMX_NN, 0]> variants :  {
@@ -60,7 +58,7 @@ func.func @PatchFusedConstantWithSpill() ->  memref<1x126x2x2xf16, #NHWC, [@CMX_
     // CHECK:   [[INPUT:%.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x1008x14x14xf16, #NHWC, [@CMX_NN, 0]>
     // CHECK:   [[OUTPUT:%.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <556416> -> memref<1x126x2x2xf16, #NHWC, [@CMX_NN, 0]>
     // CHECK-DAG:   [[FUSED_CONSTANT:%.*]] = const.Declare memref<1x1x1x784xui8> =
-    // CHECK-SAME:  #const.RelocateWeightsTable<weightsPtr=[1837312], sparsityPtr=1837824 : i64, offsets=[0], weightsTableSize=256 : i64, weightsElemBitSize=16 : i64, channelOffset=0 : i64>
+    // CHECK-SAME:  #const.RelocateWeightsTable<weightsPtr=[1837312], sparsityPtr=16777215 : i64, offsets=[0], weightsTableSize=256 : i64, weightsElemBitSize=16 : i64, channelOffset=0 : i64>
 
     // CHECK:   [[FUSED_CONSTANT_1:%.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <540288> -> memref<1x1x1x784xui8, [@CMX_NN, 0]>
     // CHECK:   [[FUSED_CONSTANT_DDR:%.*]] = VPURT.DeclareBuffer <DDR> <0> -> memref<1x1x1x784xui8, @DDR>
@@ -128,7 +126,7 @@ func.func @PatchFusedConstantWithSpillAsyncConstruct() -> !IpOp_Stub {
             DPUTask {outEnd = [103, 103, 63], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0]}
         }
         PPE : {
-            PPETask <LPRELU> {clamp_high = 255 : i64, clamp_low = 0 : i64, fp_prelu_alpha = 0.099609375 : f64, lrelu_mult = 102 : i64, lrelu_shift = 10 : i64}
+            PPETask {opaque_ppe = #VPU.PPEStub<>}
         }
     async.yield %out : !IpOp_Stub
     }

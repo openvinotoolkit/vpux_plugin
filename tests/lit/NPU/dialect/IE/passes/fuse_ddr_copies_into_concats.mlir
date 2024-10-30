@@ -16,27 +16,15 @@ func.func @FuseTwoDDR2DDRCopies(%LHS_ARG: memref<1x64x125x250x!qElemType, #NHWC,
     -> memref<1x64x250x250x!qElemType, #NHWC, @DDR> {
     // CMX2DDR transaction for the first input
     %LHS_DDR_ALLOC = memref.alloc() : memref<1x64x125x250x!qElemType, #NHWC, @DDR>
-    %LHS_CMX2DDR_COPY = VPUIP.NCEClusterTiling
-        inputs(%LHS_ARG as %arg2: memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-        outputs(%LHS_DDR_ALLOC as %arg3: memref<1x64x125x250x!qElemType, #NHWC>)
-            -> memref<1x64x125x250x!qElemType, #NHWC, @DDR> {
-        %LHS_INNER_COPY = VPUIP.Copy
-            inputs(%arg2 : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-            outputs(%arg3 : memref<1x64x125x250x!qElemType, #NHWC>)
-              -> memref<1x64x125x250x!qElemType, #NHWC>
-    }
+    %LHS_CMX2DDR_COPY = VPUIP.Copy
+        inputs(%LHS_ARG : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
+        outputs(%LHS_DDR_ALLOC : memref<1x64x125x250x!qElemType, #NHWC, @DDR>) -> memref<1x64x125x250x!qElemType, #NHWC, @DDR>
 
     // CMX2DDR transaction for the second input
     %RHS_DDR_ALLOC = memref.alloc() : memref<1x64x125x250x!qElemType, #NHWC, @DDR>
-    %RHS_CMX2DDR_COPY = VPUIP.NCEClusterTiling
-        inputs(%RHS_ARG as %arg2: memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-        outputs(%RHS_DDR_ALLOC as %arg3: memref<1x64x125x250x!qElemType, #NHWC>)
-            -> memref<1x64x125x250x!qElemType, #NHWC, @DDR> {
-        %RHS_INNER_COPY = VPUIP.Copy
-            inputs(%arg2 : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-            outputs(%arg3 : memref<1x64x125x250x!qElemType, #NHWC>)
-                -> memref<1x64x125x250x!qElemType, #NHWC>
-    }
+    %RHS_CMX2DDR_COPY = VPUIP.Copy
+        inputs(%RHS_ARG : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
+        outputs(%RHS_DDR_ALLOC : memref<1x64x125x250x!qElemType, #NHWC, @DDR>) -> memref<1x64x125x250x!qElemType, #NHWC, @DDR>
 
     // Concatenation
     %CONCAT_ALLOC = memref.alloc() : memref<1x64x250x250x!qElemType, #NHWC, @DDR>
@@ -76,9 +64,9 @@ func.func @FuseTwoDDR2DDRCopies(%LHS_ARG: memref<1x64x125x250x!qElemType, #NHWC,
     // CHECK:   [[LHS_SUBVIEW:%.*]] = VPUIP.SubView [[CONCAT_ALLOC]] [0, 0, 0, 0] [1, 64, 125, 250]
     // CHECK:   [[RHS_SUBVIEW:%.*]] = VPUIP.SubView [[CONCAT_ALLOC]] [0, 0, 125, 0] [1, 64, 125, 250]
 
-    // CHECK:   [[LHS_CMX2DDR_COPY:%.*]] = VPUIP.NCEClusterTiling
-    // CHECK-SAME:      inputs([[LHS_INPUT]] as %arg2: memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-    // CHECK-SAME:      outputs([[LHS_SUBVIEW]] as %arg3: memref<1x64x125x250x!qElemType, {
+    // CHECK:   [[LHS_CMX2DDR_COPY:%.*]] = VPUIP.Copy
+    // CHECK-SAME:      inputs([[LHS_INPUT]] : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
+    // CHECK-SAME:      outputs([[LHS_SUBVIEW]] : memref<1x64x125x250x!qElemType, {
     // CHECK-SAME:          order = #NHWC,
     // CHECK-SAME:          strides = [4000000, 1, 16000, 64]}, @DDR>
     // CHECK-SAME:      ) -> memref<1x64x125x250x!qElemType, {
@@ -86,9 +74,9 @@ func.func @FuseTwoDDR2DDRCopies(%LHS_ARG: memref<1x64x125x250x!qElemType, #NHWC,
     // CHECK-SAME:          strides = [4000000, 1, 16000, 64]
     // CHECK-SAME:      }, @DDR>
 
-    // CHECK:   [[RHS_CMX2DDR_COPY:%.*]] = VPUIP.NCEClusterTiling
-    // CHECK-SAME:      inputs([[RHS_INPUT]] as %arg2: memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-    // CHECK-SAME:      outputs([[RHS_SUBVIEW]] as %arg3: memref<1x64x125x250x!qElemType, {
+    // CHECK:   [[RHS_CMX2DDR_COPY:%.*]] = VPUIP.Copy
+    // CHECK-SAME:      inputs([[RHS_INPUT]] : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
+    // CHECK-SAME:      outputs([[RHS_SUBVIEW]] : memref<1x64x125x250x!qElemType, {
     // CHECK-SAME:          order = #NHWC,
     // CHECK-SAME:          strides = [4000000, 1, 16000, 64]}, @DDR>
     // CHECK-SAME:      ) -> memref<1x64x125x250x!qElemType, {
@@ -114,15 +102,9 @@ func.func @FuseLeftDDR2DDRCopy(%LHS_ARG: memref<1x64x125x250x!qElemType, #NHWC, 
     // Copy left input from CMX to DDR. Right input goes from DDR directly to VPUIP.ConcatView.
     // CMX2DDR transaction for the first input
     %LHS_DDR_ALLOC = memref.alloc() : memref<1x64x125x250x!qElemType, #NHWC, @DDR>
-    %LHS_CMX2DDR_COPY = VPUIP.NCEClusterTiling
-        inputs(%LHS_ARG as %arg2: memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-        outputs(%LHS_DDR_ALLOC as %arg3: memref<1x64x125x250x!qElemType, #NHWC>)
-            -> memref<1x64x125x250x!qElemType, #NHWC, @DDR> {
-        %LHS_INNER_COPY = VPUIP.Copy
-            inputs(%arg2 : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-            outputs(%arg3 : memref<1x64x125x250x!qElemType, #NHWC>)
-              -> memref<1x64x125x250x!qElemType, #NHWC>
-    }
+    %LHS_CMX2DDR_COPY = VPUIP.Copy
+        inputs(%LHS_ARG : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
+        outputs(%LHS_DDR_ALLOC : memref<1x64x125x250x!qElemType, #NHWC, @DDR>) -> memref<1x64x125x250x!qElemType, #NHWC, @DDR>
 
     // Concatenation
     %CONCAT_ALLOC = memref.alloc() : memref<1x64x250x250x!qElemType, #NHWC, @DDR>
@@ -165,9 +147,9 @@ func.func @FuseLeftDDR2DDRCopy(%LHS_ARG: memref<1x64x125x250x!qElemType, #NHWC, 
     // CHECK-SAME:      inputs(%arg1 : memref<1x64x125x250x!qElemType, #NHWC, @DDR>)
     // CHECK-SAME:      outputs([[RHS_SUBVIEW]]
 
-    // CHECK:   [[LHS_CMX2DDR_COPY:%.*]] = VPUIP.NCEClusterTiling
-    // CHECK-SAME:      inputs([[LHS_INPUT]] as %arg2: memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-    // CHECK-SAME:      outputs([[LHS_SUBVIEW]] as %arg3: memref<1x64x125x250x!qElemType, {
+    // CHECK:   [[LHS_CMX2DDR_COPY:%.*]] = VPUIP.Copy
+    // CHECK-SAME:      inputs([[LHS_INPUT]] : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
+    // CHECK-SAME:      outputs([[LHS_SUBVIEW]] : memref<1x64x125x250x!qElemType, {
     // CHECK-SAME:          order = #NHWC,
     // CHECK-SAME:          strides = [4000000, 1, 16000, 64]}, @DDR>
     // CHECK-SAME:      ) -> memref<1x64x125x250x!qElemType, {
@@ -193,15 +175,9 @@ func.func @FuseRightDDR2DDRCopy(%LHS_ARG: memref<1x64x125x250x!qElemType, #NHWC,
     // Copy right input from CMX to DDR. Left input goes from DDR to directly VPUIP.ConcatView.
     // CMX2DDR transaction for the first input
     %RHS_DDR_ALLOC = memref.alloc() : memref<1x64x125x250x!qElemType, #NHWC, @DDR>
-    %RHS_CMX2DDR_COPY = VPUIP.NCEClusterTiling
-        inputs(%RHS_ARG as %arg2: memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-        outputs(%RHS_DDR_ALLOC as %arg3: memref<1x64x125x250x!qElemType, #NHWC>)
-            -> memref<1x64x125x250x!qElemType, #NHWC, @DDR> {
-        %RHS_INNER_COPY = VPUIP.Copy
-            inputs(%arg2 : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-            outputs(%arg3 : memref<1x64x125x250x!qElemType, #NHWC>)
-              -> memref<1x64x125x250x!qElemType, #NHWC>
-    }
+    %RHS_CMX2DDR_COPY = VPUIP.Copy
+        inputs(%RHS_ARG : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
+        outputs(%RHS_DDR_ALLOC : memref<1x64x125x250x!qElemType, #NHWC, @DDR>) -> memref<1x64x125x250x!qElemType, #NHWC, @DDR>
 
     // Concatenation
     %CONCAT_ALLOC = memref.alloc() : memref<1x64x250x250x!qElemType, #NHWC, @DDR>
@@ -245,9 +221,9 @@ func.func @FuseRightDDR2DDRCopy(%LHS_ARG: memref<1x64x125x250x!qElemType, #NHWC,
 
     // CHECK:   [[RHS_SUBVIEW:%.*]] = VPUIP.SubView [[CONCAT_ALLOC]] [0, 0, 125, 0] [1, 64, 125, 250]
 
-    // CHECK:   [[RHS_CMX2DDR_COPY:%.*]] = VPUIP.NCEClusterTiling
-    // CHECK-SAME:      inputs([[RHS_INPUT]] as %arg2: memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-    // CHECK-SAME:      outputs([[RHS_SUBVIEW]] as %arg3: memref<1x64x125x250x!qElemType, {
+    // CHECK:   [[RHS_CMX2DDR_COPY:%.*]] = VPUIP.Copy
+    // CHECK-SAME:      inputs([[RHS_INPUT]] : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
+    // CHECK-SAME:      outputs([[RHS_SUBVIEW]] : memref<1x64x125x250x!qElemType, {
     // CHECK-SAME:          order = #NHWC,
     // CHECK-SAME:          strides = [4000000, 1, 16000, 64]}, @DDR>
     // CHECK-SAME:      ) -> memref<1x64x125x250x!qElemType, {
@@ -281,26 +257,14 @@ func.func @SkipDDR2DDRClusterCopy(%LHS_ARG: memref<1x64x125x250x!qElemType, #NHW
         to memref<1x64x125x250x!qElemType, {order = #NHWC, strides = [4000000, 1, 16000, 64]}, @DDR>
 
     // Copy the first input directly to VPUIP.ConcatView
-    %LHS_DDR2DDR_COPY = VPUIP.NCEClusterTiling
-        inputs(%LHS_ARG as %arg2: memref<1x64x125x250x!qElemType, #NHWC>)
-        outputs(%LHS_SUBVIEW as %arg3: memref<1x64x125x250x!qElemType, {order = #NHWC, strides = [4000000, 1, 16000, 64]}, @DDR>)
-            -> memref<1x64x125x250x!qElemType, {order = #NHWC, strides = [4000000, 1, 16000, 64]}, @DDR> {
-        %LHS_INNER_COPY = VPUIP.Copy
-            inputs(%arg2 : memref<1x64x125x250x!qElemType, #NHWC>)
-            outputs(%arg3 : memref<1x64x125x250x!qElemType, {order = #NHWC, strides = [4000000, 1, 16000, 64]}, @DDR>)
-              -> memref<1x64x125x250x!qElemType, {order = #NHWC, strides = [4000000, 1, 16000, 64]}, @DDR>
-    }
+    %LHS_DDR2DDR_COPY = VPUIP.Copy
+        inputs(%LHS_ARG : memref<1x64x125x250x!qElemType, #NHWC, @DDR>)
+        outputs(%LHS_SUBVIEW : memref<1x64x125x250x!qElemType, {order = #NHWC, strides = [4000000, 1, 16000, 64]}, @DDR>) -> memref<1x64x125x250x!qElemType, {order = #NHWC, strides = [4000000, 1, 16000, 64]}, @DDR>
 
     // Copy the second input directly to VPUIP.ConcatView
-    %RHS_DDR2DDR_COPY = VPUIP.NCEClusterTiling
-        inputs(%RHS_ARG as %arg2: memref<1x64x125x250x!qElemType, #NHWC>)
-        outputs(%RHS_SUBVIEW as %arg3: memref<1x64x125x250x!qElemType, {order = #NHWC, strides = [4000000, 1, 16000, 64]}, @DDR>)
-            -> memref<1x64x125x250x!qElemType, {order = #NHWC, strides = [4000000, 1, 16000, 64]}, @DDR> {
-        %RHS_INNER_COPY = VPUIP.Copy
-            inputs(%arg2 : memref<1x64x125x250x!qElemType, #NHWC>)
-            outputs(%arg3 : memref<1x64x125x250x!qElemType, {order = #NHWC, strides = [4000000, 1, 16000, 64]}, @DDR>)
-              -> memref<1x64x125x250x!qElemType, {order = #NHWC, strides = [4000000, 1, 16000, 64]}, @DDR>
-    }
+    %RHS_DDR2DDR_COPY = VPUIP.Copy
+        inputs(%RHS_ARG : memref<1x64x125x250x!qElemType, #NHWC, @DDR>)
+        outputs(%RHS_SUBVIEW : memref<1x64x125x250x!qElemType, {order = #NHWC, strides = [4000000, 1, 16000, 64]}, @DDR>) -> memref<1x64x125x250x!qElemType, {order = #NHWC, strides = [4000000, 1, 16000, 64]}, @DDR>
 
     %CONCAT = VPUIP.ConcatView
         inputs(%LHS_DDR2DDR_COPY,
@@ -316,13 +280,13 @@ func.func @SkipDDR2DDRClusterCopy(%LHS_ARG: memref<1x64x125x250x!qElemType, #NHW
     // CHECK:   [[LHS_SUBVIEW:%.*]] = VPUIP.SubView [[CONCAT_ALLOC]] [0, 0, 0, 0] [1, 64, 125, 250]
     // CHECK:   [[RHS_SUBVIEW:%.*]] = VPUIP.SubView [[CONCAT_ALLOC]] [0, 0, 125, 0] [1, 64, 125, 250]
 
-    // CHECK:   [[LHS_DDR2DDR_COPY:%.*]] = VPUIP.NCEClusterTiling
-    // CHECK-SAME:      inputs(%arg0 as %arg2: memref<1x64x125x250x!qElemType, #NHWC>)
-    // CHECK-SAME:      outputs([[LHS_SUBVIEW]] as %arg3: memref<1x64x125x250x!qElemType,
+    // CHECK:   [[LHS_DDR2DDR_COPY:%.*]] = VPUIP.Copy
+    // CHECK-SAME:      inputs(%arg0 : memref<1x64x125x250x!qElemType, #NHWC, @DDR>)
+    // CHECK-SAME:      outputs([[LHS_SUBVIEW]] : memref<1x64x125x250x!qElemType,
 
-    // CHECK:   [[RHS_DDR2DDR_COPY:%.*]] = VPUIP.NCEClusterTiling
-    // CHECK-SAME:      inputs(%arg1 as %arg2: memref<1x64x125x250x!qElemType, #NHWC>)
-    // CHECK-SAME:      outputs([[RHS_SUBVIEW]] as %arg3: memref<1x64x125x250x!qElemType,
+    // CHECK:   [[RHS_DDR2DDR_COPY:%.*]] = VPUIP.Copy
+    // CHECK-SAME:      inputs(%arg1 : memref<1x64x125x250x!qElemType, #NHWC, @DDR>)
+    // CHECK-SAME:      outputs([[RHS_SUBVIEW]] : memref<1x64x125x250x!qElemType,
 
     // CHECK:   [[CONCAT:%.*]] = VPUIP.ConcatView inputs([[LHS_DDR2DDR_COPY]], [[RHS_DDR2DDR_COPY]]
     // CHECK:   return [[CONCAT]] : memref<1x64x250x250x!qElemType, #NHWC, @DDR>
@@ -341,27 +305,15 @@ func.func @SkipCMX2CMXCopy(%LHS_ARG: memref<1x64x125x250x!qElemType, #NHWC, @CMX
 
     // CMX2CMX transaction for the first input
     %LHS_CMX_ALLOC = memref.alloc() : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>
-    %LHS_CMX2CMX_CLUSTER_COPY = VPUIP.NCEClusterTiling
-        inputs(%LHS_ARG as %arg2: memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-        outputs(%LHS_CMX_ALLOC as %arg3: memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-            -> memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN> {
-        %LHS_INNER_COPY = VPUIP.Copy
-            inputs(%arg2 : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-            outputs(%arg3 : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-              -> memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>
-    }
+    %LHS_CMX2CMX_CLUSTER_COPY = VPUIP.Copy
+        inputs(%LHS_ARG : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
+        outputs(%LHS_CMX_ALLOC : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>) -> memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>
 
     // CMX2CMX transaction for the second input
     %RHS_CMX_ALLOC = memref.alloc() : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>
-    %RHS_CMX2CMX_CLUSTER_COPY = VPUIP.NCEClusterTiling
-        inputs(%RHS_ARG as %arg2: memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-        outputs(%RHS_CMX_ALLOC as %arg3: memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-            -> memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN> {
-        %RHS_INNER_COPY = VPUIP.Copy
-            inputs(%arg2 : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-            outputs(%arg3 : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-                -> memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>
-    }
+    %RHS_CMX2CMX_CLUSTER_COPY = VPUIP.Copy
+        inputs(%RHS_ARG : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
+        outputs(%RHS_CMX_ALLOC : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>) -> memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>
 
     // Concatenation
     %CONCAT_ALLOC = memref.alloc() : memref<1x64x250x250x!qElemType, #NHWC, @CMX_NN>
@@ -397,14 +349,14 @@ func.func @SkipCMX2CMXCopy(%LHS_ARG: memref<1x64x125x250x!qElemType, #NHWC, @CMX
     // CHECK-SAME:    [[RHS_INPUT:%arg.*]]: memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
 
     // CHECK:   [[LHS_CMX_ALLOC:%.*]] = memref.alloc() : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>
-    // CHECK:   [[LHS_CMX2CMX_CLUSTER_COPY:%.*]] = VPUIP.NCEClusterTiling
-    // CHECK-SAME:  inputs([[LHS_INPUT]] as %arg2: memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-    // CHECK-SAME:  outputs([[LHS_CMX_ALLOC]] as %arg3: memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
+    // CHECK:   [[LHS_CMX2CMX_CLUSTER_COPY:%.*]] = VPUIP.Copy
+    // CHECK-SAME:  inputs([[LHS_INPUT]] : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
+    // CHECK-SAME:  outputs([[LHS_CMX_ALLOC]] : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
 
     // CHECK:   [[RHS_CMX_ALLOC:%.*]] = memref.alloc() : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>
-    // CHECK:   [[RHS_CMX2CMX_CLUSTER_COPY:%.*]] = VPUIP.NCEClusterTiling
-    // CHECK-SAME:  inputs([[RHS_INPUT]] as %arg2: memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-    // CHECK-SAME:  outputs([[RHS_CMX_ALLOC]] as %arg3: memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
+    // CHECK:   [[RHS_CMX2CMX_CLUSTER_COPY:%.*]] = VPUIP.Copy
+    // CHECK-SAME:  inputs([[RHS_INPUT]] : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
+    // CHECK-SAME:  outputs([[RHS_CMX_ALLOC]] : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
 
     // CHECK:   [[CONCAT_ALLOC:%.*]] = memref.alloc() : memref<1x64x250x250x!qElemType, #NHWC, @CMX_NN>
     // CHECK:   [[LHS_SUBVIEW:%.*]] = VPUIP.SubView [[CONCAT_ALLOC]] [0, 0, 0, 0] [1, 64, 125, 250]
@@ -429,94 +381,6 @@ func.func @SkipCMX2CMXCopy(%LHS_ARG: memref<1x64x125x250x!qElemType, #NHWC, @CMX
 
 !qElemType = !quant.uniform<u8:f16, 0.019874431572708431:128>
 
-// CHECK-LABEL: @SkipNonClusterCopies
-func.func @SkipNonClusterCopies(%LHS_ARG: memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>,
-                                %RHS_ARG: memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-    -> memref<1x64x250x250x!qElemType, #NHWC, @DDR> {
-    // CMX2DDR transaction for the first input
-    %LHS_DDR_ALLOC = memref.alloc() : memref<1x64x125x250x!qElemType, #NHWC, @DDR>
-    %LHS_CMX2DDR_COPY = VPUIP.Copy
-        inputs(%LHS_ARG : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-        outputs(%LHS_DDR_ALLOC : memref<1x64x125x250x!qElemType, #NHWC, @DDR>)
-            -> memref<1x64x125x250x!qElemType, #NHWC, @DDR>
-
-    // CMX2DDR transaction for the second input
-    %RHS_DDR_ALLOC = memref.alloc() : memref<1x64x125x250x!qElemType, #NHWC, @DDR>
-    %RHS_CMX2DDR_COPY = VPUIP.Copy
-        inputs(%RHS_ARG : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-        outputs(%RHS_DDR_ALLOC : memref<1x64x125x250x!qElemType, #NHWC, @DDR>)
-            -> memref<1x64x125x250x!qElemType, #NHWC, @DDR>
-
-    // Concatenation
-    %CONCAT_ALLOC = memref.alloc() : memref<1x64x250x250x!qElemType, #NHWC, @DDR>
-    %LHS_SUBVIEW = VPUIP.SubView %CONCAT_ALLOC [0, 0, 0, 0] [1, 64, 125, 250] :
-        memref<1x64x250x250x!qElemType, #NHWC, @DDR>
-        to memref<1x64x125x250x!qElemType, {order = #NHWC, strides = [4000000, 1, 16000, 64]}, @DDR>
-
-    %LHS_DDR2DDR_COPY = VPUIP.Copy
-        inputs(%LHS_CMX2DDR_COPY : memref<1x64x125x250x!qElemType, #NHWC, @DDR>)
-        outputs(%LHS_SUBVIEW : memref<1x64x125x250x!qElemType, {order = #NHWC, strides = [4000000, 1, 16000, 64]}, @DDR>)
-            -> memref<1x64x125x250x!qElemType, {order = #NHWC, strides = [4000000, 1, 16000, 64]}, @DDR>
-
-    %RHS_SUBVIEW = VPUIP.SubView %CONCAT_ALLOC [0, 0, 125, 0] [1, 64, 125, 250] :
-        memref<1x64x250x250x!qElemType, #NHWC, @DDR>
-        to memref<1x64x125x250x!qElemType, {order = #NHWC, strides = [4000000, 1, 16000, 64]}, @DDR>
-
-    %RHS_DDR2DDR_COPY = VPUIP.Copy
-        inputs(%RHS_CMX2DDR_COPY : memref<1x64x125x250x!qElemType, #NHWC, @DDR>)
-        outputs(%RHS_SUBVIEW : memref<1x64x125x250x!qElemType, {order = #NHWC, strides = [4000000, 1, 16000, 64]}, @DDR>)
-            -> memref<1x64x125x250x!qElemType, {order = #NHWC, strides = [4000000, 1, 16000, 64]}, @DDR>
-
-    %CONCAT = VPUIP.ConcatView
-        inputs(%LHS_DDR2DDR_COPY,
-               %RHS_DDR2DDR_COPY :
-               memref<1x64x125x250x!qElemType, {order = #NHWC, strides = [4000000, 1, 16000, 64]}, @DDR>,
-               memref<1x64x125x250x!qElemType, {order = #NHWC, strides = [4000000, 1, 16000, 64]}, @DDR>)
-        outputs(%CONCAT_ALLOC : memref<1x64x250x250x!qElemType, #NHWC, @DDR>)
-            -> memref<1x64x250x250x!qElemType, #NHWC, @DDR>
-
-    return %CONCAT : memref<1x64x250x250x!qElemType, #NHWC, @DDR>
-
-    // CHECK:        ([[LHS_INPUT:%arg.*]]: memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>,
-    // CHECK-SAME:    [[RHS_INPUT:%arg.*]]: memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-
-    // CHECK:   [[LHS_DDR_ALLOC:%.*]] = memref.alloc() : memref<1x64x125x250x!qElemType, #NHWC, @DDR>
-
-    // CHECK:   [[LHS_CMX2DDR_COPY:%.*]] = VPUIP.Copy
-    // CHECK-SAME:  inputs([[LHS_INPUT]] : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-    // CHECK-SAME:  outputs([[LHS_DDR_ALLOC]] : memref<1x64x125x250x!qElemType, #NHWC, @DDR>)
-
-    // CHECK:   [[RHS_DDR_ALLOC:%.*]] = memref.alloc() : memref<1x64x125x250x!qElemType, #NHWC, @DDR>
-
-    // CHECK:   [[RHS_CMX2DDR_COPY:%.*]] = VPUIP.Copy
-    // CHECK-SAME:  inputs([[RHS_INPUT]] : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-    // CHECK-SAME:  outputs([[RHS_DDR_ALLOC]] : memref<1x64x125x250x!qElemType, #NHWC, @DDR>)
-
-    // Concatenation
-    // CHECK:   [[CONCAT_ALLOC:%.*]] = memref.alloc() : memref<1x64x250x250x!qElemType, #NHWC, @DDR>
-
-    // CHECK:   [[LHS_SUBVIEW:%.*]] = VPUIP.SubView [[CONCAT_ALLOC]] [0, 0, 0, 0] [1, 64, 125, 250]
-
-    // CHECK:   [[LHS_DDR2DDR_COPY:%.*]] = VPUIP.Copy
-    // CHECK-SAME:  inputs([[LHS_CMX2DDR_COPY]] : memref<1x64x125x250x!qElemType, #NHWC, @DDR>)
-    // CHECK-SAME:  outputs([[LHS_SUBVIEW]]
-
-    // CHECK:   [[RHS_SUBVIEW:%.*]] = VPUIP.SubView [[CONCAT_ALLOC]] [0, 0, 125, 0] [1, 64, 125, 250]
-
-    // CHECK:   [[RHS_DDR2DDR_COPY:%.*]] = VPUIP.Copy
-    // CHECK-SAME:  inputs([[RHS_CMX2DDR_COPY]] : memref<1x64x125x250x!qElemType, #NHWC, @DDR>)
-    // CHECK-SAME:  outputs([[RHS_SUBVIEW]]
-
-    // CHECK:   [[CONCAT:%.*]] = VPUIP.ConcatView inputs([[LHS_DDR2DDR_COPY]], [[RHS_DDR2DDR_COPY]]
-    // CHECK:   return [[CONCAT]] : memref<1x64x250x250x!qElemType, #NHWC, @DDR>
-}
-
-// -----
-
-#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
-
-!qElemType = !quant.uniform<u8:f16, 0.019874431572708431:128>
-
 // CHECK-LABEL: @DoNotEraseClusterTask
 func.func @DoNotEraseClusterTask(%LHS_ARG: memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>,
                                  %RHS_ARG: memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
@@ -524,27 +388,15 @@ func.func @DoNotEraseClusterTask(%LHS_ARG: memref<1x64x125x250x!qElemType, #NHWC
 
     // CMX2DDR transaction for the first input
     %LHS_DDR_ALLOC = memref.alloc() : memref<1x64x125x250x!qElemType, #NHWC, @DDR>
-    %LHS_CMX2DDR_COPY = VPUIP.NCEClusterTiling
-        inputs(%LHS_ARG as %arg2: memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-        outputs(%LHS_DDR_ALLOC as %arg3: memref<1x64x125x250x!qElemType, #NHWC>)
-            -> memref<1x64x125x250x!qElemType, #NHWC, @DDR> {
-        %LHS_INNER_COPY = VPUIP.Copy
-            inputs(%arg2 : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-            outputs(%arg3 : memref<1x64x125x250x!qElemType, #NHWC>)
-              -> memref<1x64x125x250x!qElemType, #NHWC>
-    }
+    %LHS_CMX2DDR_COPY = VPUIP.Copy
+        inputs(%LHS_ARG : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
+        outputs(%LHS_DDR_ALLOC : memref<1x64x125x250x!qElemType, #NHWC, @DDR>) -> memref<1x64x125x250x!qElemType, #NHWC, @DDR>
 
     // CMX2DDR transaction for the second input
     %RHS_DDR_ALLOC = memref.alloc() : memref<1x64x125x250x!qElemType, #NHWC, @DDR>
-    %RHS_CMX2DDR_COPY = VPUIP.NCEClusterTiling
-        inputs(%RHS_ARG as %arg2: memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-        outputs(%RHS_DDR_ALLOC as %arg3: memref<1x64x125x250x!qElemType, #NHWC>)
-            -> memref<1x64x125x250x!qElemType, #NHWC, @DDR> {
-        %RHS_INNER_COPY = VPUIP.Copy
-            inputs(%arg2 : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-            outputs(%arg3 : memref<1x64x125x250x!qElemType, #NHWC>)
-                -> memref<1x64x125x250x!qElemType, #NHWC>
-    }
+    %RHS_CMX2DDR_COPY = VPUIP.Copy
+        inputs(%RHS_ARG : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
+        outputs(%RHS_DDR_ALLOC : memref<1x64x125x250x!qElemType, #NHWC, @DDR>) -> memref<1x64x125x250x!qElemType, #NHWC, @DDR>
 
     // Concatenation
     %CONCAT_ALLOC = memref.alloc() : memref<1x64x250x250x!qElemType, #NHWC, @DDR>
@@ -582,18 +434,18 @@ func.func @DoNotEraseClusterTask(%LHS_ARG: memref<1x64x125x250x!qElemType, #NHWC
     // CHECK-SAME:    [[RHS_INPUT:%arg.*]]: memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
 
     // CHECK:   [[LHS_DDR_ALLOC:%.*]] = memref.alloc() : memref<1x64x125x250x!qElemType, #NHWC, @DDR>
-    // CHECK:   [[LHS_CMX2DDR_ORIG_COPY:%.*]] = VPUIP.NCEClusterTiling
-    // CHECK-SAME:      inputs([[LHS_INPUT]] as %arg2: memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-    // CHECK-SAME:      outputs([[LHS_DDR_ALLOC]] as %arg3: memref<1x64x125x250x!qElemType, #NHWC>)
+    // CHECK:   [[LHS_CMX2DDR_ORIG_COPY:%.*]] = VPUIP.Copy
+    // CHECK-SAME:      inputs([[LHS_INPUT]] : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
+    // CHECK-SAME:      outputs([[LHS_DDR_ALLOC]] : memref<1x64x125x250x!qElemType, #NHWC, @DDR>)
 
     // CHECK:   [[CONCAT_ALLOC:%.*]] = memref.alloc() : memref<1x64x250x250x!qElemType, #NHWC, @DDR>
 
     // CHECK:   [[LHS_SUBVIEW:%.*]] = VPUIP.SubView [[CONCAT_ALLOC]] [0, 0, 0, 0] [1, 64, 125, 250]
     // CHECK:   [[RHS_SUBVIEW:%.*]] = VPUIP.SubView [[CONCAT_ALLOC]] [0, 0, 125, 0] [1, 64, 125, 250]
 
-    // CHECK:   [[LHS_CMX2DDR_COPY:%.*]] = VPUIP.NCEClusterTiling
-    // CHECK-SAME:      inputs([[LHS_INPUT]] as %arg2: memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-    // CHECK-SAME:      outputs([[LHS_SUBVIEW]] as %arg3: memref<1x64x125x250x!qElemType, {
+    // CHECK:   [[LHS_CMX2DDR_COPY:%.*]] = VPUIP.Copy
+    // CHECK-SAME:      inputs([[LHS_INPUT]] : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
+    // CHECK-SAME:      outputs([[LHS_SUBVIEW]] : memref<1x64x125x250x!qElemType, {
     // CHECK-SAME:          order = #NHWC,
     // CHECK-SAME:          strides = [4000000, 1, 16000, 64]}, @DDR>
     // CHECK-SAME:      ) -> memref<1x64x125x250x!qElemType, {
@@ -601,9 +453,9 @@ func.func @DoNotEraseClusterTask(%LHS_ARG: memref<1x64x125x250x!qElemType, #NHWC
     // CHECK-SAME:          strides = [4000000, 1, 16000, 64]
     // CHECK-SAME:      }, @DDR>
 
-    // CHECK:   [[RHS_CMX2DDR_COPY:%.*]] = VPUIP.NCEClusterTiling
-    // CHECK-SAME:      inputs([[RHS_INPUT]] as %arg2: memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
-    // CHECK-SAME:      outputs([[RHS_SUBVIEW]] as %arg3: memref<1x64x125x250x!qElemType, {
+    // CHECK:   [[RHS_CMX2DDR_COPY:%.*]] = VPUIP.Copy
+    // CHECK-SAME:      inputs([[RHS_INPUT]] : memref<1x64x125x250x!qElemType, #NHWC, @CMX_NN>)
+    // CHECK-SAME:      outputs([[RHS_SUBVIEW]] : memref<1x64x125x250x!qElemType, {
     // CHECK-SAME:          order = #NHWC,
     // CHECK-SAME:          strides = [4000000, 1, 16000, 64]}, @DDR>
     // CHECK-SAME:      ) -> memref<1x64x125x250x!qElemType, {

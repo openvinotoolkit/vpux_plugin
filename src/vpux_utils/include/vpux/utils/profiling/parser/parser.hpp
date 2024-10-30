@@ -9,6 +9,7 @@
 
 #include "vpux/utils/core/logger.hpp"
 #include "vpux/utils/profiling/common.hpp"
+#include "vpux/utils/profiling/parser/device.hpp"
 #include "vpux/utils/profiling/parser/hw.hpp"
 #include "vpux/utils/profiling/taskinfo.hpp"
 
@@ -19,8 +20,6 @@
 #include <utility>
 #include <vector>
 
-#include "schema/graphfile_generated.h"
-
 namespace vpux::profiling {
 
 class RawProfilingRecord;
@@ -29,7 +28,7 @@ using RawProfilingRecords = std::vector<RawProfilingRecordPtr>;
 
 using WorkpointRecords = std::vector<std::pair<WorkpointConfiguration_t, size_t>>;
 
-enum class SynchronizationPointKind { DMA_TO_DPU, DPU_TO_DMA, DMA_TO_UPA, STRICT_DMA_TO_DPU };
+enum class SynchronizationPointKind { DMA_TO_DPU, DPU_TO_DMA, STRICT_DMA_TO_DPU };
 
 // Container for conjucted storage of tasks of one format: RawProfilingRecordPtr/TaskInfo
 struct RawProfilingData {
@@ -49,7 +48,7 @@ using RawDataLayout = std::map<ExecutorType, std::pair<uint32_t, uint32_t>>;
 struct RawData {
     RawDataLayout sections;
     RawProfilingData rawRecords;
-    MVCNN::TargetDevice device;
+    TargetDevice device;
 };
 
 /**
@@ -80,8 +79,8 @@ public:
 
 // freq.cpp
 
-FrequenciesSetup getFrequencySetup(const MVCNN::TargetDevice device, const WorkpointRecords& workpoints,
-                                   bool highFreqPerfClk, bool fpga, vpux::Logger& log);
+FrequenciesSetup getFrequencySetup(const TargetDevice device, const WorkpointRecords& workpoints, bool highFreqPerfClk,
+                                   bool fpga, vpux::Logger& log);
 
 // sync.cpp
 

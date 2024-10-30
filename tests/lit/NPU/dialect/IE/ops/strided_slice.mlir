@@ -128,8 +128,8 @@ func.func @ComposeStridedSlices(%arg0: tensor<1x3x640x640xf16>) -> tensor<1x12x3
 
 //CHECK-LABEL: @ComposeStridedSlicesOneStridedSliceConnectToTwoStridedSlice
 func.func @ComposeStridedSlicesOneStridedSliceConnectToTwoStridedSlice(%arg0: tensor<1x3x416x416xf16>) -> tensor<1x12x208x208xf16> {
-    %cst_0 = const.Declare tensor<1x1x1x1xf16> = dense<2.541950e+02> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
-    %cst_1 = const.Declare tensor<1x1x1x1xf16> = dense<0.000000e+00> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
+    %cst_0 = const.Declare tensor<1x1x1x1xf16> = dense<2.541950e+02> : tensor<1x1x1x1xf32>, [#const.CastElemType<f16>]
+    %cst_1 = const.Declare tensor<1x1x1x1xf16> = dense<0.000000e+00> : tensor<1x1x1x1xf32>, [#const.CastElemType<f16>]
     %0 = IE.FakeQuantize(%arg0, %cst_1, %cst_0, %cst_1, %cst_0) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64} : tensor<1x3x416x416xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16> -> tensor<1x3x416x416xf16>
     %1 = IE.StridedSlice(%0) {begin_mask = [0, 0, 0, 0], begins_attr = [0, 0, 0, 0], ellipsis_mask = [0, 0, 0, 0], end_mask = [0, 0, 0, 0], ends_attr = [1, 3, 416, 416], new_axis_mask = [0, 0, 0, 0], operandSegmentSizes = array<i32: 1, 0, 0, 0>, shrink_axis_mask = [0, 0, 0, 0], strides_attr = [1, 1, 2, 1]} : tensor<1x3x416x416xf16> -> tensor<1x3x208x416xf16>
     %2 = IE.StridedSlice(%1) {begin_mask = [0, 0, 0, 0], begins_attr = [0, 0, 0, 0], ellipsis_mask = [0, 0, 0, 0], end_mask = [0, 0, 0, 0], ends_attr = [1, 3, 208, 416], new_axis_mask = [0, 0, 0, 0], operandSegmentSizes = array<i32: 1, 0, 0, 0>, shrink_axis_mask = [0, 0, 0, 0], strides_attr = [1, 1, 1, 2]} : tensor<1x3x208x416xf16> -> tensor<1x3x208x208xf16>
@@ -141,8 +141,8 @@ func.func @ComposeStridedSlicesOneStridedSliceConnectToTwoStridedSlice(%arg0: te
 
     return %7 : tensor<1x12x208x208xf16>
 
-    // CHECK-DAG: [[CST_0:%.+]] = const.Declare tensor<1x1x1x1xf16> = dense<2.541950e+02> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
-    // CHECK-DAG: [[CST_1:%.+]] = const.Declare tensor<1x1x1x1xf16> = dense<0.000000e+00> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
+    // CHECK-DAG: [[CST_0:%.+]] = const.Declare tensor<1x1x1x1xf16> = dense<2.541950e+02> : tensor<1x1x1x1xf32>, [#const.CastElemType<f16>]
+    // CHECK-DAG: [[CST_1:%.+]] = const.Declare tensor<1x1x1x1xf16> = dense<0.000000e+00> : tensor<1x1x1x1xf32>, [#const.CastElemType<f16>]
     // CHECK:     [[FQ:%.*]] = IE.FakeQuantize(%arg0, [[CST_1]], [[CST_0]], [[CST_1]], [[CST_0]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64} : tensor<1x3x416x416xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16> -> tensor<1x3x416x416xf16>
     // CHECK:     [[SLICE_1:%.*]] = IE.StridedSlice([[FQ]]) {begin_mask = [0, 0, 0, 0], begins_attr = [0, 0, 0, 0], ellipsis_mask = [0, 0, 0, 0], end_mask = [0, 0, 0, 0], ends_attr = [1, 3, 416, 416], new_axis_mask = [0, 0, 0, 0], operandSegmentSizes = array<i32: 1, 0, 0, 0>, shrink_axis_mask = [0, 0, 0, 0], strides_attr = [1, 1, 2, 2]} : tensor<1x3x416x416xf16> -> tensor<1x3x208x208xf16>
     // CHECK:     [[SLICE_2:%.*]] = IE.StridedSlice([[FQ]]) {begin_mask = [0, 0, 0, 0], begins_attr = [0, 0, 1, 0], ellipsis_mask = [0, 0, 0, 0], end_mask = [0, 0, 0, 0], ends_attr = [1, 3, 417, 416], new_axis_mask = [0, 0, 0, 0], operandSegmentSizes = array<i32: 1, 0, 0, 0>, shrink_axis_mask = [0, 0, 0, 0], strides_attr = [1, 1, 2, 2]} : tensor<1x3x416x416xf16> -> tensor<1x3x208x208xf16>
@@ -164,7 +164,7 @@ func.func @ConvertNegStrideStridedSlice2Reverse(%arg0: tensor<1x50x128xf16>) -> 
     %slice = IE.StridedSlice(%arg0, %cst, %cst_0, %cst_1) {begin_mask = [1, 0], ellipsis_mask = [], end_mask = [1, 0], new_axis_mask = [], operandSegmentSizes = array<i32: 1, 1, 1, 1>, shrink_axis_mask = []} : tensor<1x50x128xf16>, tensor<2xsi64>, tensor<2xsi64>, tensor<2xsi64> -> tensor<1x50x128xf16>
     return %slice : tensor<1x50x128xf16>
 
-    // CHECK-DAG: [[CST:%.+]] = const.Declare tensor<1xsi32> = dense<50> : tensor<1xsi64>, [#const.ConvertElemType<si32>]
+    // CHECK-DAG: [[CST:%.+]] = const.Declare tensor<1xsi32> = dense<50> : tensor<1xsi64>, [#const.CastElemType<si32>]
     // CHECK:     [[REVERSE_SEQ:%.+]] = IE.ReverseSequence(%arg0, [[CST]]) {batch_axis = 0 : i64, seq_axis = 1 : i64} : tensor<1x50x128xf16>, tensor<1xsi32> -> tensor<1x50x128xf16>
     // CHECK:     return [[REVERSE_SEQ]] : tensor<1x50x128xf16>
 }

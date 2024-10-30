@@ -55,8 +55,6 @@ public:
     mlir::LogicalResult matchAndRewrite(ConcreteOp layerOp, mlir::PatternRewriter& rewriter) const final;
 
 private:
-    virtual bool isLegalTransformation(IE::SliceOp sliceOp, ConcreteOp layerOp,
-                                       ArrayRef<ConcreteOp> siblingLayerOps) const;
     virtual bool isBeneficialTransformation(IE::SliceOp sliceOp, ConcreteOp layerOp,
                                             ArrayRef<ConcreteOp> siblingLayerOps) const;
     virtual bool doesSliceAndLayerOpModifySameAxis(IE::SliceOp sliceOp, ArrayRef<uint64_t> sliceAxes,
@@ -69,6 +67,8 @@ private:
                                                ConcreteOp layerOp) const;
 
 protected:
+    virtual bool isLegalTransformation(IE::SliceOp sliceOp, ConcreteOp layerOp,
+                                       ArrayRef<ConcreteOp> siblingLayerOps) const;
     Logger _log;
 };
 
@@ -429,6 +429,10 @@ public:
 public:
     bool doesSliceAndLayerOpModifySameAxis(IE::SliceOp sliceOp, ArrayRef<uint64_t> sliceAxes,
                                            IE::AffineReshapeOp layerOp) const override;
+    bool isLegalTransformation(IE::SliceOp sliceOp, IE::AffineReshapeOp layerOp,
+                               ArrayRef<IE::AffineReshapeOp> siblingLayerOps) const override;
+    bool doAffineInputAndOutputShapesMismatch(IE::SliceOp sliceOp, ArrayRef<uint64_t> sliceAxes,
+                                              IE::AffineReshapeOp layerOp) const;
     bool sameAttributes(IE::AffineReshapeOp layerOp, IE::AffineReshapeOp currLayerOp) const override;
     SmallVector<int64_t> getNewSizes(IE::SliceOp sliceOp, IE::AffineReshapeOp layerOp) const override;
     SmallVector<int64_t> getNewOffsets(IE::SliceOp sliceOp, ArrayRef<uint64_t> sliceAxes,
@@ -437,6 +441,20 @@ public:
     mlir::Operation* createNewLayerOp(IE::AffineReshapeOp layerOp, IE::SliceOp sliceOp,
                                       mlir::PatternRewriter& rewriter) const override;
 };
+
+bool MoveAffineReshapeBeforeSlice::isLegalTransformation(IE::SliceOp sliceOp, IE::AffineReshapeOp layerOp,
+                                                         ArrayRef<IE::AffineReshapeOp> siblingLayerOps) const {
+    if (!MoveLayerBeforeSlice::isLegalTransformation(sliceOp, layerOp, siblingLayerOps)) {
+        return false;
+    }
+
+    const auto sliceAxes = getSliceAxes(sliceOp);
+    if (doAffineInputAndOutputShapesMismatch(sliceOp, sliceAxes, layerOp)) {
+        return false;
+    }
+
+    return true;
+}
 
 bool MoveAffineReshapeBeforeSlice::doesSliceAndLayerOpModifySameAxis(IE::SliceOp sliceOp, ArrayRef<uint64_t> sliceAxes,
                                                                      IE::AffineReshapeOp) const {
@@ -451,6 +469,24 @@ bool MoveAffineReshapeBeforeSlice::doesSliceAndLayerOpModifySameAxis(IE::SliceOp
     auto shape = inType.getShape();
     auto highestDim = getHighestDim(shape, dimOrder);
     return checked_cast<uint64_t>(highestDim.ind()) != sliceAxis;
+}
+
+bool MoveAffineReshapeBeforeSlice::doAffineInputAndOutputShapesMismatch(IE::SliceOp sliceOp,
+                                                                        ArrayRef<uint64_t> sliceAxes,
+                                                                        IE::AffineReshapeOp layerOp) const {
+    // check if pattern has incompatible tensors for affine reshape given slice dimensions
+    auto outType = layerOp.getOutput().getType().dyn_cast<vpux::NDTypeInterface>();
+    auto outShape = outType.getShape();
+    const auto dimMapping = parseIntArrayOfArrayAttr<int64_t>(layerOp.getDimMapping());
+    auto mappedSliceDim = dimMapping[sliceAxes[0]];
+    auto sliceDim = Dim(mappedSliceDim[0]);
+    auto inShape = getShape(sliceOp.getSource());
+    auto restSize = outShape.totalSize() / outShape[sliceDim];
+    if (inShape.totalSize() % restSize != 0) {
+        return true;
+    }
+
+    return false;
 }
 
 bool MoveAffineReshapeBeforeSlice::sameAttributes(IE::AffineReshapeOp layerOp, IE::AffineReshapeOp currLayerOp) const {

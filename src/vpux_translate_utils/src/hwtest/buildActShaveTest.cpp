@@ -21,6 +21,18 @@ namespace hwtest {
 
 void buildActShave(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module, mlir::OpBuilder builder,
                    Logger& log, const SmallVector<mlir::Type>& inputTypes, mlir::Type outputType) {
+    // set runtime resources
+    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
+
+    mlir::PassManager pmBuilderInit(module->getName(), mlir::OpPassManager::Nesting::Implicit);
+    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::ReferenceHW);
+    initCompilerOptions.numberOfDPUGroups = 1;
+    initCompilerOptions.numberOfDMAPorts = 1;
+    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
+
+    VPU::buildInitCompilerPipeline(pmBuilderInit, initCompilerOptions, log);
+    VPUX_THROW_UNLESS(mlir::succeeded(pmBuilderInit.run(module)), "Init compilation failed");
+
     auto* ctx = builder.getContext();
 
     //  Input/Output -----------------------------------------------------------
@@ -155,20 +167,6 @@ void buildActShave(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mo
         funcOutputs.push_back(profoutput);
     }
     funcbuilder.create<mlir::func::ReturnOp>(builder.getUnknownLoc(), funcOutputs);
-
-    // set runtime resources
-    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
-
-    //  Pass Manager
-    mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-
-    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::ReferenceHW);
-    initCompilerOptions.numberOfDMAPorts = 1;
-    initCompilerOptions.numberOfDPUGroups = 1;
-    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
-    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
-
-    VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");
 
     SmallVector<mlir::Type> inputTensorTypeVec;
     for (std::size_t idx = 0; idx < inputList.size(); idx++) {

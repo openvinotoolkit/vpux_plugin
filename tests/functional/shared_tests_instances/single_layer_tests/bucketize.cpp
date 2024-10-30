@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation
+// Copyright (C) 2022-2024 Intel Corporation
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -23,10 +23,7 @@ class BucketizeLayerTestCommon : public BucketizeLayerTest, virtual public VpuOv
     }
 };
 
-class BucketizeLayerTest_NPU3720 : public BucketizeLayerTestCommon {};
-class BucketizeLayerTest_NPU4000 : public BucketizeLayerTestCommon {};
-
-TEST_P(BucketizeLayerTest_NPU3720, SW) {
+TEST_P(BucketizeLayerTestCommon, NPU3720_SW) {
     setSkipCompilationCallback([](std::stringstream& skip) {
         const auto outputType = std::get<4>(GetParam());
         if (outputType == ov::element::i64) {
@@ -37,7 +34,7 @@ TEST_P(BucketizeLayerTest_NPU3720, SW) {
     run(Platform::NPU3720);
 }
 
-TEST_P(BucketizeLayerTest_NPU4000, SW) {
+TEST_P(BucketizeLayerTestCommon, NPU4000_SW) {
     setSkipCompilationCallback([](std::stringstream& skip) {
         const auto outputType = std::get<4>(GetParam());
         if (outputType == ov::element::i64) {
@@ -88,16 +85,9 @@ const auto testBucketizeParams =
                            ::testing::Values(bucketsInputPrecisions[0]), ::testing::Values(outputPrecisions[0]),
                            ::testing::Values(DEVICE_NPU));
 
-// 3720
-INSTANTIATE_TEST_CASE_P(smoke_precomit_BucketizeTest, BucketizeLayerTest_NPU3720, testBucketizeParams,
-                        BucketizeLayerTest_NPU3720::getTestCaseName);
-INSTANTIATE_TEST_CASE_P(smoke_BucketizeTestI64, BucketizeLayerTest_NPU3720, testBucketizeParamsI64,
-                        BucketizeLayerTest_NPU3720::getTestCaseName);
-
-// 4000
-INSTANTIATE_TEST_CASE_P(smoke_precommit_BucketizeTest, BucketizeLayerTest_NPU4000, testBucketizeParams,
-                        BucketizeLayerTest_NPU4000::getTestCaseName);
-INSTANTIATE_TEST_CASE_P(smoke_BucketizeTestI64, BucketizeLayerTest_NPU4000, testBucketizeParamsI64,
-                        BucketizeLayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precomit_BucketizeTest, BucketizeLayerTestCommon, testBucketizeParams,
+                         BucketizeLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_BucketizeTestI64, BucketizeLayerTestCommon, testBucketizeParamsI64,
+                         BucketizeLayerTestCommon::getTestCaseName);
 
 }  // namespace

@@ -83,7 +83,8 @@ mlir::LogicalResult ConvertConstToAttr::matchAndRewrite(IE::ScatterElementsUpdat
     rewriter.replaceOpWithNewOp<IE::ScatterElementsUpdateOp>(
             scatterElementsUpdateOp, scatterElementsUpdateOp.getType(), scatterElementsUpdateOp.getInput(),
             scatterElementsUpdateOp.getIndices(), scatterElementsUpdateOp.getUpdates(), nullptr,
-            rewriter.getI64IntegerAttr(axisValue));
+            rewriter.getI64IntegerAttr(axisValue), scatterElementsUpdateOp.getReductionAttr(),
+            scatterElementsUpdateOp.getUseInitValAttr());
     return mlir::success();
 }
 

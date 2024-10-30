@@ -20,6 +20,7 @@ namespace npu40xx {
 #include <details/api/vpu_nce_hw_40xx.h>
 #include <details/api/vpu_nnrt_api_40xx.h>
 #include <details/api/vpu_nnrt_wlm.h>
+#include <details/api/vpu_pwrmgr_api.h>
 
 // clang-format on
 

@@ -79,12 +79,12 @@ func.func @ConstFold() -> tensor<1x3x2x4xf16> {
 !qElemType = !quant.uniform<i8<-127:127>:f16:1, {0.01, 0.02}>
 // CHECK-LABEL: @ConstFoldQuantPerChannel
 func.func @ConstFoldQuantPerChannel() -> tensor<1x2x4x3xf16> {
-    %cst = const.Declare tensor<1x2x3x4x!qElemType> = dense<1.000000e+00> : tensor<1x2x3x4xf16>, [#const.ConvertElemType<si8>, #const.QuantCast<!qElemType>]
+    %cst = const.Declare tensor<1x2x3x4x!qElemType> = dense<1.000000e+00> : tensor<1x2x3x4xf16>, [#const.CastElemType<si8>, #const.CastElemType<!qElemType>]
     %1 = IE.ShapeCast { shape = [1, 2, 4, 3] } inputs(%cst : tensor<1x2x3x4x!qElemType>) -> tensor<1x2x4x3x!qElemType>
     %2 = IE.Dequantize(%1) {dstElemType = f16} : tensor<1x2x4x3x!qElemType> -> tensor<1x2x4x3xf16>
     return %2 : tensor<1x2x4x3xf16>
 
-    // CHECK:       [[CST_0:%.+]] = const.Declare tensor<1x2x3x4x!qElemType> = dense<1.000000e+00> : tensor<1x2x3x4xf16>, [#const.ConvertElemType<si8>, #const.QuantCast<!qElemType>]
+    // CHECK:       [[CST_0:%.+]] = const.Declare tensor<1x2x3x4x!qElemType> = dense<1.000000e+00> : tensor<1x2x3x4xf16>, [#const.CastElemType<si8>, #const.CastElemType<!qElemType>]
     // CHECK:       [[VAR1:%.+]] = IE.ShapeCast {shape = [1, 2, 4, 3]} inputs([[CST_0]] : tensor<1x2x3x4x!qElemType>) -> tensor<1x2x4x3x!qElemType>
     // CHECK:       [[VAR2:%.+]] = IE.Dequantize([[VAR1]]) {dstElemType = f16} : tensor<1x2x4x3x!qElemType> -> tensor<1x2x4x3xf16>
     // CHECK:       return [[VAR2]] : tensor<1x2x4x3xf16>
@@ -95,13 +95,30 @@ func.func @ConstFoldQuantPerChannel() -> tensor<1x2x4x3xf16> {
 !qElemType = !quant.uniform<i8:f16, 0.002>
 // CHECK-LABEL: @ConstFoldQuantPerTensor
 func.func @ConstFoldQuantPerTensor() -> tensor<2x3x2x2xf16> {
-    %cst = const.Declare tensor<1x2x3x4x!qElemType> = dense<1.000000e+00> : tensor<1x2x3x4xf16>, [#const.ConvertElemType<si8>, #const.QuantCast<!qElemType>]
+    %cst = const.Declare tensor<1x2x3x4x!qElemType> = dense<1.000000e+00> : tensor<1x2x3x4xf16>, [#const.CastElemType<si8>, #const.CastElemType<!qElemType>]
     %1 = IE.ShapeCast { shape = [2, 3, 2, 2] } inputs(%cst : tensor<1x2x3x4x!qElemType>) -> tensor<2x3x2x2x!qElemType>
     %2 = IE.Dequantize(%1) {dstElemType = f16} : tensor<2x3x2x2x!qElemType> -> tensor<2x3x2x2xf16>
     return %2 : tensor<2x3x2x2xf16>
 
-    // CHECK:       [[CST_0:%.+]] = const.Declare tensor<2x3x2x2x!qElemType> = dense<1.000000e+00> : tensor<1x2x3x4xf16>, [#const.ConvertElemType<si8>, #const.QuantCast<!qElemType>, #const.Reshape<[2, 3, 2, 2]>]
+    // CHECK:       [[CST_0:%.+]] = const.Declare tensor<2x3x2x2x!qElemType> = dense<1.000000e+00> : tensor<1x2x3x4xf16>, [#const.CastElemType<si8>, #const.CastElemType<!qElemType>, #const.Reshape<[2, 3, 2, 2]>]
     // CHECK-NOT:   IE.ShapeCast
     // CHECK:       [[VAR1:%.+]] = IE.Dequantize([[CST_0]]) {dstElemType = f16} : tensor<2x3x2x2x!qElemType> -> tensor<2x3x2x2xf16>
     // CHECK:       return [[VAR1]] : tensor<2x3x2x2xf16>
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @FuseAdjacentAffineReshapeAndShapeCastOps
+// CHECK-SAME:  [[INPUT:%.+]]: tensor<1x3584x256x4xf16, {order = #NHWC}>
+func.func @FuseAdjacentAffineReshapeAndShapeCastOps(%arg0: tensor<1x3584x256x4xf16, {order = #NHWC}>) -> tensor<1x3584x256x4xf16, {order = #NHWC}> {
+    %0 = IE.AffineReshape(%arg0) {dim_mapping = [[0], [1], [2], [2, 3]], shape_value = [1, 3584, 1024, 1]} : tensor<1x3584x256x4xf16, {order = #NHWC}> -> tensor<1x3584x1024x1xf16, {order = #NHWC}>
+    %1 = IE.ShapeCast {shape = [1, 3584, 256, 4]} inputs(%0 : tensor<1x3584x1024x1xf16, {order = #NHWC}>) -> tensor<1x3584x256x4xf16, {order = #NHWC}>
+    %2 = IE.AffineReshape(%1) {dim_mapping = [[0], [1], [2], [2, 3]], shape_value = [1, 3584, 1024, 1]} : tensor<1x3584x256x4xf16, {order = #NHWC}> -> tensor<1x3584x1024x1xf16, {order = #NHWC}>
+    %3 = IE.ShapeCast {shape = [1, 3584, 256, 4]} inputs(%2 : tensor<1x3584x1024x1xf16, {order = #NHWC}>) -> tensor<1x3584x256x4xf16, {order = #NHWC}>
+
+    return %3 : tensor<1x3584x256x4xf16, {order = #NHWC}>
+
+    // CHECK:   return [[INPUT]] : tensor<1x3584x256x4xf16, {order = #NHWC}>
 }

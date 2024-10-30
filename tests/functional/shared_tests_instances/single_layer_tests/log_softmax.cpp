@@ -1,4 +1,4 @@
-// Copyright (C) 2022-2023 Intel Corporation
+// Copyright (C) 2022-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -12,15 +12,13 @@ namespace ov {
 namespace test {
 
 class LogSoftmaxLayerTestCommon : public LogSoftmaxLayerTest, virtual public VpuOv2LayerTest {};
-class LogSoftmaxLayerTest_NPU3720 : public LogSoftmaxLayerTestCommon {};
-class LogSoftmaxLayerTest_NPU4000 : public LogSoftmaxLayerTestCommon {};
 
-TEST_P(LogSoftmaxLayerTest_NPU3720, HW) {
+TEST_P(LogSoftmaxLayerTestCommon, NPU3720_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(LogSoftmaxLayerTest_NPU4000, SW) {
+TEST_P(LogSoftmaxLayerTestCommon, NPU4000_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
@@ -35,8 +33,6 @@ namespace {
 const std::vector<ov::element::Type> modelType = {ov::element::f16};
 
 std::vector<int64_t> axis2D = {0, 1};
-
-/* ============= LogSoftmax NPU3720/NPU4000 ============= */
 
 std::vector<std::vector<ov::Shape>> inShapes2D = {{{12, 5}},    {{1, 40}},   {{1, 66}},   {{1, 72}},   {{5, 120}},
                                                   {{5, 59}},    {{64, 29}},  {{1, 2312}}, {{1, 4192}}, {{1, 4335}},
@@ -70,28 +66,14 @@ const auto paramsTiling = testing::Combine(testing::ValuesIn(modelType),
                                            testing::ValuesIn({static_shapes_to_test_representation({inShapes4D[3]})}),
                                            testing::Values(1), testing::Values(DEVICE_NPU));
 
-/* ============= LogSoftmax NPU3720 ============= */
+INSTANTIATE_TEST_SUITE_P(smoke_LogSoftmax_2D, LogSoftmaxLayerTestCommon, params2D,
+                         LogSoftmaxLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_LogSoftmax_3D, LogSoftmaxLayerTestCommon, params3D,
+                         LogSoftmaxLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_LogSoftmax_4D, LogSoftmaxLayerTestCommon, params4D,
+                         LogSoftmaxLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_LogSoftmax_2D, LogSoftmaxLayerTest_NPU3720, params2D,
-                         LogSoftmaxLayerTest_NPU3720::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(smoke_LogSoftmax_3D, LogSoftmaxLayerTest_NPU3720, params3D,
-                         LogSoftmaxLayerTest_NPU3720::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(smoke_LogSoftmax_4D, LogSoftmaxLayerTest_NPU3720, params4D,
-                         LogSoftmaxLayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_LogSoftmax_tiling, LogSoftmaxLayerTest_NPU3720, paramsTiling,
-                         LogSoftmaxLayerTest_NPU3720::getTestCaseName);
-
-/* ============= LogSoftmax NPU4000 ============= */
-
-INSTANTIATE_TEST_SUITE_P(smoke_LogSoftmax_2D, LogSoftmaxLayerTest_NPU4000, params2D,
-                         LogSoftmaxLayerTest_NPU4000::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_LogSoftmax_3D, LogSoftmaxLayerTest_NPU4000, params3D,
-                         LogSoftmaxLayerTest_NPU4000::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_LogSoftmax_4D, LogSoftmaxLayerTest_NPU4000, params4D,
-                         LogSoftmaxLayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_LogSoftmax_tiling, LogSoftmaxLayerTest_NPU4000, paramsTiling,
-                         LogSoftmaxLayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_LogSoftmax_tiling, LogSoftmaxLayerTestCommon, paramsTiling,
+                         LogSoftmaxLayerTestCommon::getTestCaseName);
 
 }  // namespace

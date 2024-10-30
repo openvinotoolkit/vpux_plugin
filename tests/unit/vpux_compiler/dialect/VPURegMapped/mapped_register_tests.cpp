@@ -77,6 +77,15 @@ public:
 
         EXPECT_EQ(reg.getWidth(), testedRegisterDesc.getSize());
     }
+    void testVersion() {
+        auto module = mlir::ModuleOp::create(mlir::UnknownLoc::get(ctx.get()), StringRef("mainModule"));
+        auto builder = mlir::OpBuilder(module.getBodyRegion());
+
+        auto reg = registerType::get(builder, registerType::getResetInitilizationValues());
+
+        auto requiredVersion = reg.getRequiredMIVersion();
+        EXPECT_TRUE(requiredVersion.checkValidity());
+    }
 };
 
 template <typename T, uint32_t sizeInBytes>
@@ -103,4 +112,7 @@ TYPED_TEST(MLIR_VPURegMapped_RegisterMapped, CreateRegisterAttr) {
 }
 TYPED_TEST(MLIR_VPURegMapped_RegisterMapped, CheckRegistersSize) {
     this->testFuncCheckSize();
+}
+TYPED_TEST(MLIR_VPURegMapped_RegisterMapped, CheckRegistersVersion) {
+    this->testVersion();
 }

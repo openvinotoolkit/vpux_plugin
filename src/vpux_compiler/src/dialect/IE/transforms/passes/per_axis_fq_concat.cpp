@@ -91,70 +91,57 @@ mlir::Value createFqTensor(mlir::Location loc, const std::vector<float>& totalFq
 
 mlir::LogicalResult PerAxisFQConcatPass::ConcatOpConverter::matchAndRewrite(IE::ConcatOp origOp,
                                                                             mlir::PatternRewriter& rewriter) const {
+    _log.trace("Got {0} at `{1}`.", origOp->getName(), origOp->getLoc());
+
     if (isLegalConcat(origOp)) {
         return mlir::failure();
     }
 
-    const auto concatInputList = origOp.getInputs();
+    auto concatInputList = origOp.getInputs();
     if (concatInputList.empty()) {
         return mlir::failure();
     }
+    _log.nest().trace("Got {0} FQs as input.", concatInputList.size());
 
+    auto firstFq = concatInputList.front().getDefiningOp<IE::FakeQuantizeOp>();
+    const auto levels = firstFq.getLevels();
+    const auto lowFpType = firstFq.getLowFpType();
+    const auto autoBroadcast = firstFq.getAutoBroadcast();
     std::vector<float> totalInLo;
     std::vector<float> totalInHi;
     std::vector<float> totalOutLo;
     std::vector<float> totalOutHi;
 
-    SmallVector<IE::AutoBroadcastType> autoBroadcastVec;
-    SmallVector<int64_t> levelsVec;
-
     for (const auto& concatInput : concatInputList) {
         auto fqOp = concatInput.getDefiningOp<IE::FakeQuantizeOp>();
+
+        if (levels != fqOp.getLevels() || lowFpType != fqOp.getLowFpType() ||
+            autoBroadcast != fqOp.getAutoBroadcast()) {
+            _log.nest().trace("Got FQs with different levels, lowFpTypes or autobroadcasts.");
+            return mlir::failure();
+        }
+
         appendFqValues(fqOp.getInputLow(), totalInLo);
         appendFqValues(fqOp.getInputHigh(), totalInHi);
         appendFqValues(fqOp.getOutputLow(), totalOutLo);
         appendFqValues(fqOp.getOutputHigh(), totalOutHi);
-
-        const auto autob = fqOp.getAutoBroadcast();
-        if (!fqOp.getLevels().has_value()) {
-            return mlir::failure();
-        }
-        const auto levels = fqOp.getLevels().value();
-        autoBroadcastVec.push_back(autob);
-        levelsVec.push_back(levels);
-    }
-
-    // Check that all levels are the same.
-    const auto levels = levelsVec[0];
-    const auto isEqualLvl = [levels](const int64_t lvl) -> bool {
-        return levels == lvl;
-    };
-    if (!std::all_of(levelsVec.begin(), levelsVec.end(), isEqualLvl)) {
-        return mlir::failure();
-    }
-
-    // Check that all broadcast types are the same.
-    const auto autob = autoBroadcastVec[0];
-    const auto isEqualBroadcast = [autob](const IE::AutoBroadcastType& broadcast) -> bool {
-        return autob == broadcast;
-    };
-
-    if (!std::all_of(autoBroadcastVec.begin(), autoBroadcastVec.end(), isEqualBroadcast)) {
-        return mlir::failure();
     }
 
     auto concatOp = rewriter.create<IE::ConcatOp>(origOp->getLoc(), concatInputList, origOp.getPerAxisAttr(),
                                                   origOp.getStaticOffsetsAttr());
 
-    auto inLowOp = createFqTensor(origOp->getLoc(), totalInLo, rewriter);
-    auto inHighOp = createFqTensor(origOp->getLoc(), totalInHi, rewriter);
-    auto outLowOp = createFqTensor(origOp->getLoc(), totalOutLo, rewriter);
-    auto outHighOp = createFqTensor(origOp->getLoc(), totalOutHi, rewriter);
+    auto inLowOp = createFqTensor(takeOpLoc(origOp, "in_low"), totalInLo, rewriter);
+    auto inHighOp = createFqTensor(takeOpLoc(origOp, "in_high"), totalInHi, rewriter);
+    auto outLowOp = createFqTensor(takeOpLoc(origOp, "out_low"), totalOutLo, rewriter);
+    auto outHighOp = createFqTensor(takeOpLoc(origOp, "out_high"), totalOutHi, rewriter);
 
-    // lowFpType in not needed (nullptr), only levels are given
-    rewriter.replaceOpWithNewOp<IE::FakeQuantizeOp>(origOp, concatOp.getOutput(), inLowOp, inHighOp, outLowOp,
-                                                    outHighOp, getIntAttr(origOp.getContext(), levels),
-                                                    /*lowFpType=*/nullptr, autob);
+    auto levelsAttr = levels.has_value() ? getIntAttr(origOp.getContext(), *levels) : nullptr;
+    auto lowFpTypeAttr = lowFpType.has_value() ? mlir::TypeAttr::get(*lowFpType) : nullptr;
+
+    auto fqOp =
+            rewriter.replaceOpWithNewOp<IE::FakeQuantizeOp>(origOp, concatOp.getOutput(), inLowOp, inHighOp, outLowOp,
+                                                            outHighOp, levelsAttr, lowFpTypeAttr, autoBroadcast);
+    extendOpLoc(fqOp, "common_fq");
 
     return mlir::success();
 }

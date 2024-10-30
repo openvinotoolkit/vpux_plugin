@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -30,89 +30,11 @@ namespace {
 
 using namespace VPU::NCESparsity;
 
-bool isMixedPrecisionSupported(VPU::ArchKind arch) {
-    return arch == VPU::ArchKind::NPU37XX || arch == VPU::ArchKind::NPU40XX;
-}
-
-mlir::Type getBaseStorageType(mlir::Type elemType) {
-    if (auto quant = elemType.dyn_cast_or_null<mlir::quant::QuantizedType>()) {
-        return quant.getStorageType();
-    }
-
-    return elemType;
-}
-
-int64_t getWindowSize(int64_t KX, int64_t SX, mlir::Type elemType) {
-    VPUX_THROW_UNLESS(KX <= 11, "Unsupported kernel size {0}. Supported size up to 11", KX);
-
-    // Select the maximum window size not exceeding 32 bytes
-    // by iterating through the MPE_NUM values (2, 4, 8, 16)
-
-    auto actualType = getBaseStorageType(elemType);
-    VPUX_THROW_UNLESS(actualType.isInteger(CHAR_BIT) || actualType.isF16() || actualType.isBF16() ||
-                              actualType.isFloat8E5M2() || actualType.isFloat8E4M3FN(),
-                      "Supported only U8/I8 , BF8/HF8 and FP16/BF16 types. Type received: {0}", actualType);
-
-    // Only MPE0, MPE4, MPE8 and MPE12 support FP16 data format
-    const int mpeNumLimit = actualType.isF16() ? 4 : 16;
-
-    const Bit typeSizeInBits = getElemTypeSize(actualType);
-
-    // Window size is limited to 32 bytes by HW. Size of the data type
-    // needs to be accounted to find the max (32 for U8, 16 for FP16)
-    const int64_t maxWindowSize = 32 / (typeSizeInBits.count() / CHAR_BIT);
-    int64_t maxMpeWindowSize = 64;
-
-    int64_t windowSize = 0;
-    int mpeNum = 1;
-
-    while (mpeNum <= mpeNumLimit) {
-        if (SX <= KX) {
-            windowSize = KX + SX * (mpeNum - 1);
-        } else {
-            windowSize = KX * mpeNum;
-        }
-
-        if (windowSize <= maxWindowSize)
-            maxMpeWindowSize = windowSize;
-
-        mpeNum *= 2;
-    }
-
-    return maxMpeWindowSize;
-}
-
-std::vector<uint8_t> getBitPattern(VPU::NCESparsity::Mode mode, ShapeRef kernelSize, int64_t windowSize, int64_t IC) {
-    const auto KY = kernelSize[Dims4D::Kernel::Y];
-    const auto KX = kernelSize[Dims4D::Kernel::X];
-
-    VPUX_THROW_UNLESS(windowSize >= KX, "windowsSize must be greater than or equal to KX. windowsSize={0}, KX={1}",
-                      windowSize, KX);
-
-    const auto numBitsSet = KX;
-    const auto numBitsClear = windowSize - KX;
-
-    SmallVector<uint8_t> window;
-    window.reserve(windowSize);
-    window.insert(window.end(), numBitsSet, 1);
-    window.insert(window.end(), numBitsClear, 0);
-
-    const auto numOfRepeat = mode == VPU::NCESparsity::Mode::CM_CONV ? KY * IC : KY;
-
-    std::vector<uint8_t> bitPattern;
-    bitPattern.reserve(numOfRepeat * windowSize);
-    for (auto i = 0; i < numOfRepeat; i++) {
-        bitPattern.insert(bitPattern.end(), window.begin(), window.end());
-    }
-
-    return bitPattern;
-}
-
 constexpr std::int32_t ALIGNMENT_REQUIREMENT_IN_ELEMENTS = 16;
 
 llvm::unique_function<int32_t(size_t)> getBiasFunc(mlir::Type inElemType, mlir::Type outElemType,
-                                                   mlir::Type weightsElemType, Const::ContentAttr bias,
-                                                   VPU::ArchKind arch, size_t OC) {
+                                                   mlir::Type weightsElemType, const Const::ContentAttr& bias,
+                                                   VPU::NCESparsity::BiasConverterCb biasConverter, size_t OC) {
     if (bias == nullptr) {
         return [](int64_t) -> double {
             return 0.0f;
@@ -121,13 +43,12 @@ llvm::unique_function<int32_t(size_t)> getBiasFunc(mlir::Type inElemType, mlir::
 
     auto biasContent = bias.fold();
 
-    const auto isInQuantized = inElemType.isa<mlir::quant::QuantizedType>();
-    const auto isOutQuantized = outElemType.isa<mlir::quant::QuantizedType>();
-    const auto isWeightsQuantized = weightsElemType.isa<mlir::quant::QuantizedType>();
+    const auto isInQuantized = mlir::isa<mlir::quant::QuantizedType>(inElemType);
+    const auto isOutQuantized = mlir::isa<mlir::quant::QuantizedType>(outElemType);
+    const auto isWeightsQuantized = mlir::isa<mlir::quant::QuantizedType>(weightsElemType);
     const auto isQuant = isInQuantized && isOutQuantized;
     const auto isFloat = !isInQuantized && !isOutQuantized;
-    const auto isMixedModeSupported = isMixedPrecisionSupported(arch);
-    const auto isMixed = !isQuant && !isFloat && isMixedModeSupported;
+    const auto isMixed = !isQuant && !isFloat;
     const auto isQuantInFloatOut = isInQuantized && isMixed;
     const auto isFloatInQuantOut = isOutQuantized && isMixed;
 
@@ -139,12 +60,12 @@ llvm::unique_function<int32_t(size_t)> getBiasFunc(mlir::Type inElemType, mlir::
         auto rescaledBias = VPU::NCESparsity::getRescaledBias(bias, inElemType, weightsElemType, OC);
         VPUX_THROW_WHEN(mlir::failed(rescaledBias), "Rescaled bias value is out of range");
 
-        return [rescaledBiasValue = std::move(rescaledBias.value())](size_t oc) -> int32_t {
-            return checked_cast<int32_t>(std::round(rescaledBiasValue[oc]));
+        return [rescaledBiasValue = std::move(rescaledBias.value()), inElemType, biasConverter](size_t oc) -> int32_t {
+            return biasConverter(rescaledBiasValue[oc], inElemType);
         };
     } else if (isFloat || isFloatInQuantOut) {
-        return [biasContent = std::move(biasContent), arch, isWeightsQuantized,
-                filterQuantScales](int64_t oc) -> int32_t {
+        return [biasContent = std::move(biasContent), inElemType, isWeightsQuantized, filterQuantScales,
+                biasConverter](int64_t oc) -> int32_t {
             auto getBiasValue = [&]() {
                 if (biasContent.isSplat()) {
                     return biasContent.getSplatValue<float>();
@@ -161,47 +82,32 @@ llvm::unique_function<int32_t(size_t)> getBiasFunc(mlir::Type inElemType, mlir::
                     biasVal /= filterQuantScales.front();
                 }
             }
-            auto biasConverterCb = VPU::NCESparsity::getBiasConverterCb(arch);
-            return biasConverterCb(biasVal);
+            return biasConverter(biasVal, inElemType);
         };
     }
 
-    if (isMixedModeSupported) {
-        VPUX_THROW("In/Out element type of NCE op mismatch. quant-quant, quant-float, float-quant or float-float type "
-                   "pairs required. Got: in type {0}, out type {1}",
-                   inElemType, outElemType);
-    } else {
-        VPUX_THROW("In/Out element type of NCE op mismatch. Both types must be quantized or not quantized. Got: in "
-                   "type {0}, out type {1}",
-                   inElemType, outElemType);
-    }
+    VPUX_THROW("In/Out element type of NCE op mismatch. quant-quant, quant-float, float-quant or float-float type "
+               "pairs required. Got: in type {0}, out type {1}",
+               inElemType, outElemType);
 }
 
 llvm::unique_function<int32_t(size_t)> getMultShiftFunc(mlir::Type inElemType, mlir::Type outElemType,
-                                                        mlir::Type weightsType, VPU::PPETaskAttr ppe,
-                                                        VPU::ArchKind arch, size_t OC, bool isSpecialRelu,
+                                                        mlir::Type weightsType,
+                                                        VPU::NCESparsity::PPEConverterCb ppeConverter, size_t OC,
                                                         mlir::FloatAttr constMultiplyFpScale) {
-    if ((inElemType.isa<mlir::quant::QuantizedType>() ^ outElemType.isa<mlir::quant::QuantizedType>()) &&
-        !isMixedPrecisionSupported(arch)) {
-        VPUX_THROW("Unsupported In/Out mixed precision. Got: in type {0}, out type {1}", inElemType, outElemType);
-    }
-
-    // FP input and I8 weights are supported in case of mixed precision
-    // While Quant input and FP weights are never supported
     if (weightsType != nullptr) {
         auto inStorageType = mlir::quant::QuantizedType::castToStorageType(inElemType);
-        if ((!inElemType.isa<mlir::quant::QuantizedType>() && weightsType.isa<mlir::quant::QuantizedType>() &&
-             !isMixedPrecisionSupported(arch)) ||
-            (inElemType.isa<mlir::quant::QuantizedType>() && !weightsType.isa<mlir::quant::QuantizedType>() &&
+        if ((mlir::isa<mlir::quant::QuantizedType>(inElemType) && !mlir::isa<mlir::quant::QuantizedType>(weightsType) &&
              !inStorageType.isFloat8E5M2() && !inStorageType.isFloat8E4M3FN())) {
             VPUX_THROW("Unsupported In/Wt mixed precision. Got: in type {0}, wt type {1}", inElemType, weightsType);
         }
     }
 
-    auto inQuantScale = inElemType.isa<mlir::quant::QuantizedType>() ? extractScalesAndZeroPoints(inElemType).first
-                                                                     : SmallVector<double>{1.0};
-    auto outQuantScale = outElemType.isa<mlir::quant::QuantizedType>() ? extractScalesAndZeroPoints(outElemType).first
-                                                                       : SmallVector<double>{1.0};
+    auto inQuantScale = mlir::isa<mlir::quant::QuantizedType>(inElemType) ? extractScalesAndZeroPoints(inElemType).first
+                                                                          : SmallVector<double>{1.0};
+    auto outQuantScale = mlir::isa<mlir::quant::QuantizedType>(outElemType)
+                                 ? extractScalesAndZeroPoints(outElemType).first
+                                 : SmallVector<double>{1.0};
     auto weightsQuantScales = exractWeightsScales(weightsType);
     const auto constMultiplyScale = constMultiplyFpScale ? constMultiplyFpScale.getValueAsDouble() : 1.0;
 
@@ -214,19 +120,12 @@ llvm::unique_function<int32_t(size_t)> getMultShiftFunc(mlir::Type inElemType, m
         rescale[i] = (weightsQuantScales[i] * inQuantScale[i]) / outQuantScale[i] * constMultiplyScale;
     }
 
-    return [rescale = std::move(rescale), inElemType, ppe, arch, isSpecialRelu](size_t oc) {
+    return [rescale = std::move(rescale), inElemType, ppeConverter](size_t oc) {
         const auto quantScale = rescale[oc];
 
-        const auto scaleApproximation = QuantizationApproximation(arch, quantScale);
-        VPUX_THROW_WHEN(isSpecialRelu && (scaleApproximation.shift() < 3),
-                        "The curernt PWL solution for leakyRelu with alpha 0.25 requires shift >= 3, but the "
-                        "actual shift is {0}",
-                        scaleApproximation.shift());
-        const auto shift = isSpecialRelu ? scaleApproximation.shift() - 3 : scaleApproximation.shift();
-
-        auto ppeConverter = VPU::NCESparsity::getPPEConverterCb(arch);
-        auto multShift = ppeConverter(checked_cast<uint8_t>(shift), checked_cast<uint16_t>(scaleApproximation.mult()),
-                                      rescale[oc], inElemType, ppe);
+        const auto scaleApproximation = QuantizationApproximation(quantScale);
+        auto multShift = ppeConverter(checked_cast<uint8_t>(scaleApproximation.shift()),
+                                      checked_cast<uint16_t>(scaleApproximation.mult()), rescale[oc], inElemType);
 
         return multShift;
     };
@@ -243,97 +142,6 @@ int32_t vpux::VPU::NCESparsity::toHex(double realVal) {
     return llvm::bit_cast<int32_t>(static_cast<float>(realVal));
 }
 
-int64_t vpux::VPU::NCESparsity::getBitPatternSize(Mode mode, ShapeRef kernelSize, int64_t SX, mlir::Type elemType,
-                                                  int64_t IC) {
-    VPUX_THROW_UNLESS(kernelSize.size() == 2, "Unsupported kernel size: %d", kernelSize.size());
-
-    const auto KY = kernelSize[Dims4D::Kernel::Y];
-    const auto KX = kernelSize[Dims4D::Kernel::X];
-
-    const auto actualType = getBaseStorageType(elemType);
-    const auto windowSize = getWindowSize(KX, SX, actualType);
-
-    VPUX_THROW_UNLESS(windowSize >= KX, "windowsSize must be greater than or equal to KX. windowsSize={0}, KX={1}",
-                      windowSize, KX);
-
-    const auto numOfRepeat = mode == VPU::NCESparsity::Mode::CM_CONV ? KY * IC : KY;
-
-    return numOfRepeat * windowSize;
-}
-
-int64_t vpux::VPU::NCESparsity::getActivationWindowSize(Mode mode, ShapeRef kernelSize, int64_t SX, mlir::Type elemType,
-                                                        int64_t IC) {
-    // Align each activation map entry to 128 bits to abide the hw restriction.
-    // MaxPool is supported only in depth wise mode.
-    // Depth wise does not support weights sparsity in the real sense, but it will have to have an activation window
-    // pointer, which is regarded as "fake sparsity".
-    size_t perChannelSparsitySize = 0;
-    if (mode == Mode::CM_CONV) {
-        VPUX_THROW_UNLESS(kernelSize.size() == 2, "Unsupported kernel size: %d", kernelSize.size());
-        const auto KX = kernelSize[Dims4D::Kernel::X];
-
-        const auto actualType = getBaseStorageType(elemType);
-        const auto windowSize = getWindowSize(KX, SX, actualType);
-        const auto windowSparsitySize = std::ceil(windowSize / 8.0);
-        const auto numberOfRowsSparsityBytes = std::ceil((KX * IC * windowSparsitySize) / 16.0);
-
-        perChannelSparsitySize = static_cast<size_t>(numberOfRowsSparsityBytes * 16.0);
-    } else if (mode == Mode::DW_CONV || mode == Mode::POOL) {
-        const auto bitPatternSize = getBitPatternSize(mode, kernelSize, SX, elemType, IC);
-
-        perChannelSparsitySize = static_cast<size_t>(std::ceil(bitPatternSize / 128.0) * 16.0);
-    } else {
-        VPUX_THROW("Unsupported FakeSparsity mode");
-    }
-
-    return perChannelSparsitySize;
-}
-
-Shape vpux::VPU::NCESparsity::inferActivationWindowShape(int64_t fakeSparsitySize) {
-    return Shape{1, 1, 1, fakeSparsitySize};
-}
-
-Shape vpux::VPU::NCESparsity::inferActivationWindowShape(Mode mode, ShapeRef kernelSize, int64_t SX,
-                                                         mlir::Type elemType, int64_t IC) {
-    const auto activationWindowSize = getActivationWindowSize(mode, kernelSize, SX, elemType, IC);
-    return inferActivationWindowShape(activationWindowSize);
-}
-
-std::vector<uint8_t> vpux::VPU::NCESparsity::getFakeSparsity(Mode mode, ShapeRef kernelSize, int64_t SX,
-                                                             mlir::Type elemType, int64_t IC) {
-    const auto actualType = getBaseStorageType(elemType);
-    const auto windowSize = getWindowSize(kernelSize[Dims4D::Kernel::X], SX, actualType);
-    const auto bitPattern = getBitPattern(mode, kernelSize, windowSize, IC);
-
-    // Align each activation map entry to 128 bits to abide the hw restriction.
-    // MaxPool is supported only in depth wise mode.
-    // Depth wise does not support weights sparsity in the real sense, but it will have to have an activation window
-    // pointer, which is regarded as "fake sparsity".
-    size_t perChannelSparsitySize = 0;
-    if (mode == Mode::CM_CONV) {
-        const auto windowSparsitySize = std::ceil(windowSize / 8.0);
-        const auto numberOfRowsSparsityBytes =
-                std::ceil((kernelSize[Dims4D::Kernel::X] * IC * windowSparsitySize) / 16.0);
-        perChannelSparsitySize = static_cast<size_t>(numberOfRowsSparsityBytes * 16.0);
-    } else if (mode == Mode::DW_CONV || mode == Mode::POOL) {
-        perChannelSparsitySize = static_cast<size_t>(std::ceil(bitPattern.size() / 128.0) * 16.0);
-    } else {
-        VPUX_THROW("Unsupported FakeSparsity mode");
-    }
-
-    // Repackaging each byte from bitPattern to a bit from fakeSparsity, the rest of the bits remain zero.
-    std::vector<uint8_t> perChannelSparsity(perChannelSparsitySize, 0);
-    for (auto i : irange(bitPattern.size())) {
-        const auto dstInd = (i / 128) * 16 + (i % 128) / 8;
-        VPUX_THROW_UNLESS(dstInd < perChannelSparsity.size(),
-                          "Attempt to access index '{0}' of perChannelSparsity, which is out of range '{1}'", dstInd,
-                          perChannelSparsity.size());
-        perChannelSparsity[dstInd] |= bitPattern[i] << (i % 8);
-    }
-
-    return perChannelSparsity;
-}
-
 int32_t vpux::VPU::NCESparsity::getWeightPtrStep(mlir::Value weights) {
     if (weights == nullptr) {
         return 0;
@@ -345,59 +153,22 @@ int32_t vpux::VPU::NCESparsity::getWeightPtrStep(mlir::Value weights) {
     const auto KY = filterShape[Dims4D::Filter::KY];
     const auto KX = filterShape[Dims4D::Filter::KX];
 
-    // For Channel major and depthwise convolution case, weights table
-    // contains both activation window and weights.
-    // Check that weights have expected alignment.
-    // Other than that, weight step is the same for both z-major (OYXI) and depthwise convolutions.
     const auto origFilterType = weights.getType().cast<vpux::NDTypeInterface>();
     const auto convAlignment = VPU::NCEInvariant::getAlignment(origFilterType.getElementType());
     const auto weightsElementCount = IC * KY * KX;
-    VPUX_THROW_UNLESS(
-            weightsElementCount % convAlignment == 0,
-            "Convolution, Channel Major and Depthwise convolution weights size must be a multiple of {0}, got {1}",
-            convAlignment, weightsElementCount);
+    VPUX_THROW_UNLESS(weightsElementCount % convAlignment == 0,
+                      "Convolution and Depthwise convolution weights size must be a multiple of {0}, got {1}",
+                      convAlignment, weightsElementCount);
 
     const Bit eltSize = getElemTypeSize(weights.getType());
     return checked_cast<int32_t>(Byte(eltSize * IC * KY * KX).count());
 }
 
-bool isQuantLeakyRelu025(VPU::ArchKind arch, mlir::Type inElemType, mlir::Type outElemType,
-                         vpux::IE::PostOpAttr postOpAttr) {
-    if (arch == VPU::ArchKind::NPU37XX || arch == VPU::ArchKind::NPU40XX) {
-        return false;
-    }
-
-    if (postOpAttr == nullptr) {
-        return false;
-    }
-
-    bool isQuantized =
-            inElemType.isa<mlir::quant::UniformQuantizedType>() && outElemType.isa<mlir::quant::UniformQuantizedType>();
-    if (!isQuantized) {
-        return false;
-    }
-
-    if (postOpAttr.getName().getValue() != IE::LeakyReluOp::getOperationName()) {
-        return false;
-    }
-
-    IE::LeakyReluOp::Adaptor leakyRelu(std::nullopt, nullptr, toProperties<IE::LeakyReluOp>(postOpAttr.getAttrs()));
-    auto dummyLocation = mlir::UnknownLoc::get(inElemType.getContext());
-    if (leakyRelu.verify(dummyLocation).failed()) {
-        return false;
-    }
-
-    const auto reluSlope = leakyRelu.getNegativeSlope().convertToDouble();
-    return isFloatEqual(static_cast<float>(reluSlope), 0.25);
-}
-
-std::vector<int32_t> vpux::VPU::NCESparsity::getWeightsTable(mlir::Type inElemType, mlir::Type outElemType,
-                                                             std::optional<int32_t> weightsPtr, int32_t weightsPtrStep,
-                                                             std::optional<int32_t> sparsityPtr,
-                                                             int32_t sparsityPtrStep, VPU::ArchKind arch, int64_t OC,
-                                                             mlir::Type weightsElemType, Const::ContentAttr bias,
-                                                             VPU::PPETaskAttr ppe, vpux::IE::PostOpAttr postOpAttr,
-                                                             mlir::FloatAttr constScale) {
+std::vector<int32_t> vpux::VPU::NCESparsity::getWeightsTable(
+        mlir::Type inElemType, mlir::Type outElemType, std::optional<int32_t> weightsPtr, int32_t weightsPtrStep,
+        std::optional<int32_t> sparsityPtr, int32_t sparsityPtrStep, VPU::NCESparsity::PPEConverterCb ppeConverter,
+        VPU::NCESparsity::BiasConverterCb biasConverter, int64_t OC, mlir::Type weightsElemType,
+        const Const::ContentAttr& bias, mlir::FloatAttr constScale) {
     auto weightsPtrOffset = weightsPtr.has_value() ? weightsPtr.value() : 0;
 
     // In case of dense operation use sparsityPtrOffset beyond CMX memory range to satisfy HW requirements
@@ -413,16 +184,14 @@ std::vector<int32_t> vpux::VPU::NCESparsity::getWeightsTable(mlir::Type inElemTy
         sparsityPtrOffset += sparsityPtrStep;
     }
 
-    return getWeightsTable(inElemType, outElemType, weightsPtrs, sparsityPtrs, arch, OC, weightsElemType, bias, ppe,
-                           postOpAttr, constScale);
+    return getWeightsTable(inElemType, outElemType, weightsPtrs, sparsityPtrs, ppeConverter, biasConverter, OC,
+                           weightsElemType, bias, constScale);
 }
 
-std::vector<int32_t> vpux::VPU::NCESparsity::getWeightsTable(mlir::Type inElemType, mlir::Type outElemType,
-                                                             ArrayRef<int32_t> weightsPtrs,
-                                                             ArrayRef<int32_t> sparsityPtrs, ArchKind arch, int64_t OC,
-                                                             mlir::Type weightsElemType, Const::ContentAttr bias,
-                                                             VPU::PPETaskAttr ppe, vpux::IE::PostOpAttr postOpAttr,
-                                                             mlir::FloatAttr constScale) {
+std::vector<int32_t> vpux::VPU::NCESparsity::getWeightsTable(
+        mlir::Type inElemType, mlir::Type outElemType, ArrayRef<int32_t> weightsPtrs, ArrayRef<int32_t> sparsityPtrs,
+        VPU::NCESparsity::PPEConverterCb ppeConverter, VPU::NCESparsity::BiasConverterCb biasConverter, int64_t OC,
+        mlir::Type weightsElemType, const Const::ContentAttr& bias, mlir::FloatAttr constScale) {
     VPUX_THROW_WHEN(inElemType == nullptr || outElemType == nullptr,
                     "Can't create weights table without operation input/output types");
     VPUX_THROW_WHEN(static_cast<int64_t>(weightsPtrs.size()) != OC,
@@ -430,10 +199,10 @@ std::vector<int32_t> vpux::VPU::NCESparsity::getWeightsTable(mlir::Type inElemTy
     VPUX_THROW_WHEN(static_cast<int64_t>(sparsityPtrs.size()) != OC,
                     "Sparsity pointers size {0} different than output channels {1}", sparsityPtrs.size(), OC);
 
-    const auto isSpecialRelu = isQuantLeakyRelu025(arch, inElemType, outElemType, postOpAttr);
-    auto getMultShift = getMultShiftFunc(inElemType, outElemType, weightsElemType, ppe, arch, checked_cast<size_t>(OC),
-                                         isSpecialRelu, constScale);
-    auto getBiasFP = getBiasFunc(inElemType, outElemType, weightsElemType, bias, arch, checked_cast<size_t>(OC));
+    auto getMultShift = getMultShiftFunc(inElemType, outElemType, weightsElemType, ppeConverter,
+                                         checked_cast<size_t>(OC), constScale);
+    auto getBiasFP =
+            getBiasFunc(inElemType, outElemType, weightsElemType, bias, biasConverter, checked_cast<size_t>(OC));
 
     std::vector<std::int32_t> weightsTableVals(OC * VPU::NCEInvariant::WEIGHT_TABLE_NUM_ELEMENTS_PER_OC, 0);
 
@@ -582,7 +351,7 @@ Shape vpux::VPU::NCESparsity::inferWeightsSparsityMapShape(ShapeRef dataShape) {
     return Shape({dataShape.raw()[0], 1, 1, alignedWorkloadSize});
 }
 
-mlir::FailureOr<SmallVector<double>> vpux::VPU::NCESparsity::getRescaledBias(Const::ContentAttr biasAttr,
+mlir::FailureOr<SmallVector<double>> vpux::VPU::NCESparsity::getRescaledBias(const Const::ContentAttr& biasAttr,
                                                                              mlir::Type inElemType,
                                                                              mlir::Type filterElemType, int64_t OC) {
     auto inQuantScale = inElemType.isa<mlir::quant::QuantizedType>() ? extractScalesAndZeroPoints(inElemType).first
@@ -753,9 +522,12 @@ int32_t vpux::VPU::NCESparsity::get5DWeightPtrStep(mlir::Value weights) {
     return checked_cast<int32_t>(Byte(eltSize * IC * KY * KX).count());
 }
 
-std::vector<int32_t> vpux::VPU::NCESparsity::create5DWeightsTableData(
-        mlir::Value opInput, mlir::Value opOutput, mlir::Value weights, Const::ContentAttr bias, int64_t outputChannels,
-        vpux::VPU::PPETaskAttr ppeTaskAttr, VPU::ArchKind _arch, vpux::IE::PostOpAttr postOpAttr) {
+std::vector<int32_t> vpux::VPU::NCESparsity::create5DWeightsTableData(mlir::Value opInput, mlir::Value opOutput,
+                                                                      mlir::Value weights,
+                                                                      const Const::ContentAttr& bias,
+                                                                      int64_t outputChannels,
+                                                                      VPU::NCESparsity::PPEConverterCb ppeConverter,
+                                                                      VPU::NCESparsity::BiasConverterCb biasConverter) {
     const auto weightPtrOffset = 0;
     const auto sparsityPtrOffset = 0;
     const auto weightPtrStep = VPU::NCESparsity::get5DWeightPtrStep(weights);
@@ -766,8 +538,8 @@ std::vector<int32_t> vpux::VPU::NCESparsity::create5DWeightsTableData(
     const auto weightsElemType = weights ? weights.getType().cast<vpux::NDTypeInterface>().getElementType() : nullptr;
 
     return VPU::NCESparsity::getWeightsTable(inElemType, outElemType, weightPtrOffset, weightPtrStep, sparsityPtrOffset,
-                                             sparsityPtrStep, _arch, outputChannels, weightsElemType, bias, ppeTaskAttr,
-                                             postOpAttr);
+                                             sparsityPtrStep, ppeConverter, biasConverter, outputChannels,
+                                             weightsElemType, bias);
 }
 
 mlir::Value vpux::VPU::NCESparsity::create5DWeightsTableTensor(mlir::OpBuilder& builder, mlir::Location loc,

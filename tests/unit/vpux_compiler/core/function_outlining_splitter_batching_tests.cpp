@@ -4,6 +4,7 @@
 //
 
 #include "vpux/compiler/core/function_outlining_splitter.hpp"
+#include "vpux/compiler/dialect/IE/IR/dialect.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/init.hpp"
 
@@ -32,10 +33,7 @@ using MLIR_FunctionOutliningSplitterBatching = MLIR_UnitBase;
  *    [output]
  */
 TEST_F(MLIR_FunctionOutliningSplitterBatching, Linear) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
-
+    auto registry = createDialectRegistry();
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<IE::IEDialect>();
 
@@ -99,10 +97,7 @@ TEST_F(MLIR_FunctionOutliningSplitterBatching, Linear) {
  */
 
 TEST_F(MLIR_FunctionOutliningSplitterBatching, TwoInputs) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
-
+    auto registry = createDialectRegistry();
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<IE::IEDialect>();
 
@@ -164,10 +159,7 @@ TEST_F(MLIR_FunctionOutliningSplitterBatching, TwoInputs) {
  */
 
 TEST_F(MLIR_FunctionOutliningSplitterBatching, MultInputsMultOutputs) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
-
+    auto registry = createDialectRegistry();
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<IE::IEDialect>();
 

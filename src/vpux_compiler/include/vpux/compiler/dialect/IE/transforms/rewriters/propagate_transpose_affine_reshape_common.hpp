@@ -50,10 +50,16 @@ public:
             : mlir::OpRewritePattern<IE::AddOp>(ctx, benefit), _log(log) {
         this->setDebugName("MoveTransposeAffineReshapeThroughAdd");
     }
+    enum InputsMode {
+        Asymmetry = 0,
+        Symmetry = 1,
+        Unsupported = 2,
+    };
 
 private:
     mlir::LogicalResult matchAndRewrite(IE::AddOp origOp, mlir::PatternRewriter& rewriter) const final;
-    bool isBeneficialConversion(IE::AddOp origOp, bool sharingInput) const;
+    bool isBeneficialConversion(IE::AddOp origOp, InputsMode mode) const;
+    std::tuple<InputsMode, IE::TransposeOp, IE::AffineReshapeOp> checkAddInputsMode(IE::AddOp origOp) const;
 
 private:
     Logger _log;

@@ -8,9 +8,9 @@
 
 // CHECK-LABEL: @ConvertConstToAttr
   func.func @ConvertConstToAttr(%arg0: tensor<24x16x7x8xf32>) -> tensor<1x32x20x31xf32> {
-    %cst_shape = const.Declare tensor<4xsi32> = dense<[1, 2, 3, 4]> : tensor<4xsi64>, [#const.ConvertElemType<si32>]
-    %cst_crops_begin = const.Declare tensor<4xsi32> = dense<[0, 0, 0, 1]> : tensor<4xsi64>, [#const.ConvertElemType<si32>]
-    %cst_crops_end = const.Declare tensor<4xsi32> = dense<[0, 0, 1, 0]> : tensor<4xsi64>, [#const.ConvertElemType<si32>]
+    %cst_shape = const.Declare tensor<4xsi32> = dense<[1, 2, 3, 4]> : tensor<4xsi64>, [#const.CastElemType<si32>]
+    %cst_crops_begin = const.Declare tensor<4xsi32> = dense<[0, 0, 0, 1]> : tensor<4xsi64>, [#const.CastElemType<si32>]
+    %cst_crops_end = const.Declare tensor<4xsi32> = dense<[0, 0, 1, 0]> : tensor<4xsi64>, [#const.CastElemType<si32>]
 
     %0 = IE.BatchToSpace(%arg0, %cst_shape, %cst_crops_begin, %cst_crops_end) {operandSegmentSizes = array<i32: 1, 1, 1, 1>} : tensor<24x16x7x8xf32>, tensor<4xsi32>, tensor<4xsi32>, tensor<4xsi32> -> tensor<1x32x20x31xf32>
 

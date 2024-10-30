@@ -35,14 +35,6 @@ size_t vpux::NPUReg40XX::ActKernelInvocationOp::getAlignmentRequirements() {
     return alignof(nn_public::VpuActKernelInvocation);
 }
 
-vpux::ELF::SectionFlagsAttr vpux::NPUReg40XX::ActKernelInvocationOp::getAccessingProcs(mlir::SymbolUserMap&) {
-    return ELF::SectionFlagsAttr::VPU_SHF_PROC_DMA;
-}
-
-vpux::ELF::SectionFlagsAttr vpux::NPUReg40XX::ActKernelInvocationOp::getUserProcs() {
-    return ELF::SectionFlagsAttr::VPU_SHF_PROC_SHAVE;
-}
-
 std::optional<ELF::SectionSignature> vpux::NPUReg40XX::ActKernelInvocationOp::getSectionSignature() {
     return {};
 }
@@ -81,22 +73,25 @@ std::vector<ELF::RelocationInfo> vpux::NPUReg40XX::ActKernelInvocationOp::getRel
 
     relocs.push_back(ELF::RelocationInfo(
             getKernelRange(), targetSection, getSymRefOffsetForReloc(thisInvo, getKernelRange()),
-            ELF::RelocationType::R_VPU_64_BIT_OR_B21_B26_UNSET, ELF::getOffsetOfSymRef(symRefMap, getKernelRange())));
+            ELF::RelocationType::R_VPU_64_BIT_OR_B21_B26_UNSET, ELF::getOffsetOfSymRef(symRefMap, getKernelRange()),
+            "Kernel range in act kernel invocation reloc"));
 
     if (auto kernelData = getKernelData().value_or(nullptr)) {
-        relocs.push_back(ELF::RelocationInfo(kernelData, targetSection, getSymRefOffsetForReloc(thisInvo, kernelData),
-                                             ELF::RelocationType::R_VPU_64,
-                                             ELF::getOffsetOfSymRef(symRefMap, kernelData)));
+        relocs.push_back(ELF::RelocationInfo(
+                kernelData, targetSection, getSymRefOffsetForReloc(thisInvo, kernelData), ELF::RelocationType::R_VPU_64,
+                ELF::getOffsetOfSymRef(symRefMap, kernelData), "Kernel data in act kernel invocation reloc"));
     }
 
     relocs.push_back(
             ELF::RelocationInfo(getKernelParams(), targetSection, getSymRefOffsetForReloc(thisInvo, getKernelParams()),
-                                ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, getKernelParams())));
+                                ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, getKernelParams()),
+                                "Kernel params in act kernel invocation reloc"));
 
     if (auto profilingData = getProfilingData().value_or(nullptr)) {
         relocs.push_back(ELF::RelocationInfo(
                 profilingData, targetSection, getSymRefOffsetForReloc(thisInvo, profilingData),
-                ELF::RelocationType::R_VPU_64_BIT_OR_B21_B26_UNSET, ELF::getOffsetOfSymRef(symRefMap, profilingData)));
+                ELF::RelocationType::R_VPU_64_BIT_OR_B21_B26_UNSET, ELF::getOffsetOfSymRef(symRefMap, profilingData),
+                "Profiling data in act kernel invocation reloc"));
     }
 
     return relocs;

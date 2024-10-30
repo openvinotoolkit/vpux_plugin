@@ -5,6 +5,7 @@
 
 #include "vpux/compiler/NPU37XX/dialect/VPUIP/transforms/passes.hpp"
 #include "vpux/compiler/core/cost_model_utils.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPUIP/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/sw_utils.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/task.hpp"
@@ -69,28 +70,13 @@ mlir::async::ExecuteOp createCacheHandlingSwKernel(mlir::OpBuilder builder, OpBu
     return execOp;
 }
 
-bool isFuncArgInDDR(mlir::Value buff) {
-    if (auto blockArg = mlir::dyn_cast<mlir::BlockArgument>(buff)) {
-        auto parentOp = blockArg.getOwner()->getParentOp();
-        if (mlir::isa_and_nonnull<mlir::func::FuncOp>(parentOp)) {
-            auto buffType = buff.getType().cast<vpux::NDTypeInterface>();
-            return buffType.getMemoryKind() == VPU::MemoryKind::DDR;
-        }
-    }
-    return false;
-}
-
-bool hasAnyBlockArgOrConstBuffer(mlir::ValueRange buffers) {
+bool hasAnyConstBuffer(mlir::ValueRange buffers) {
     return llvm::any_of(buffers, [](mlir::Value buff) {
-        return mlir::isa_and_nonnull<Const::DeclareOp>(buff.getDefiningOp()) || isFuncArgInDDR(buff);
+        return mlir::isa_and_nonnull<Const::DeclareOp>(buff.getDefiningOp());
     });
 }
 
 bool hasResultsInDDR(mlir::Value op) {
-    if (isFuncArgInDDR(op)) {
-        return true;
-    }
-
     auto opResultTypes = op.getDefiningOp()->getResultTypes();
     return llvm::any_of(opResultTypes, [](mlir::Type resType) {
         return resType.cast<vpux::NDTypeInterface>().getMemoryKind() == VPU::MemoryKind::DDR;
@@ -205,15 +191,15 @@ void AddSwKernelCacheHandlingOpsPass::safeRunOnFunc() {
 
         const auto newLoc = appendLoc(loc, "_cache_handling_op");
 
-        bool hasBlockArgOrConstInputBuffs = hasAnyBlockArgOrConstBuffer(inputBuffs);
-        bool hasBlockArgOrConstOutputBuffs = hasAnyBlockArgOrConstBuffer(outputBuffs);
+        bool hasConstInputBuffs = hasAnyConstBuffer(inputBuffs);
+        bool hasConstOutputBuffs = hasAnyConstBuffer(outputBuffs);
 
         // create CACHE_INVALIDATE OR CACHE_FLUSH_INVALIDATE op
         auto origExecOpDependencies = origExecOp.getDependencies();
         auto origExecOpDependenciesVector = to_small_vector(origExecOpDependencies);
         auto origExecOpBodyOperands = origExecOp.getBodyOperands();
         if (hasInputsInDDR) {
-            if ((isCacheInvalidateNeeded(origExecOpDependencies) || hasBlockArgOrConstInputBuffs)) {
+            if ((isCacheInvalidateNeeded(origExecOpDependencies) || hasConstInputBuffs)) {
                 builder.setInsertionPoint(origExecOp);
 
                 VPU::ActShaveTaskType taskType;
@@ -237,7 +223,7 @@ void AddSwKernelCacheHandlingOpsPass::safeRunOnFunc() {
 
         // create CACHE_FLUSH op
         if (hasOutputsInDDR) {
-            if (isCacheFlushNeeded(origExecOpResultsUsersVector) || hasBlockArgOrConstOutputBuffs) {
+            if (isCacheFlushNeeded(origExecOpResultsUsersVector) || hasConstOutputBuffs) {
                 builder.setInsertionPointAfter(origExecOp);
 
                 auto flushTaskType = VPU::ActShaveTaskType::CACHE_FLUSH;

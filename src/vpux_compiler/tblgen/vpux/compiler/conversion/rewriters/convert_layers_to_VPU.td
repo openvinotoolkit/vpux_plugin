@@ -58,6 +58,21 @@ def RewriteLogSoftmax :
         >;
 
 //
+// IE.LoopSelect -> VPU.LoopSelect
+//
+
+def createLoopSelectOp :
+        NativeCodeCall<[{
+            $_builder.create<vpux::VPU::LoopSelectOp>($_loc, $0, $1, $2, $3, $4, $5)
+        }]>;
+
+def RewriteLoopSelect :
+        Pat<
+            (IE_LoopSelectOp $initExecCond, $execConds, $input, $do_concat, $axis, $stride),
+            (createLoopSelectOp $initExecCond, $execConds, $input, $do_concat, $axis, $stride)
+        >;
+
+//
 // IE.Tile -> VPU.Tile
 //
 
@@ -97,10 +112,14 @@ def createAvgPoolOp :
                 $_loc, $0, $1, $2, $3, $4, $5, $6)
         }]>;
 
+class ShouldBeNull<string desc> : Constraint<CPred<"!$_self">, desc>;
 def RewriteAvgPool :
         Pat<
-            (IE_AvgPoolOp $input, $kernel_size, $strides, $pads_begin, $pads_end, $rounding_type, $exclude_pads, $post_op, $clamp),
-            (createAvgPoolOp $input, $kernel_size, $strides, $pads_begin, $pads_end, $rounding_type, $exclude_pads)
+            (IE_AvgPoolOp $input, $kernel_size, $strides, $pads_begin, $pads_end, $rounding_type, $exclude_pads, $post_op, $clamp, $static_scale, $output_channels, $input_channels),
+            (createAvgPoolOp $input, $kernel_size, $strides, $pads_begin, $pads_end, $rounding_type, $exclude_pads, $static_scale),
+            [
+                (ShouldBeNull<"static_scale must be null">:$static_scale)
+            ]
         >;
 
 //
@@ -277,8 +296,24 @@ def createMaxPoolOp :
 
 def RewriteMaxPool :
         Pat<
-            (IE_MaxPoolOp $input, $kernel_size, $strides, $pads_begin, $pads_end, $rounding_type, $post_op, $clamp),
+            (IE_MaxPoolOp $input, $kernel_size, $strides, $pads_begin, $pads_end, $rounding_type, $post_op, $clamp, $output_channels, $input_channels),
             (createMaxPoolOp $input, $kernel_size, $strides, $pads_begin, $pads_end, $rounding_type, $post_op, $clamp)
+        >;
+
+//
+// IE.MaxPool8 -> VPU.MaxPool8
+//
+
+def createMaxPool8Op :
+        NativeCodeCall<[{
+            $_builder.create<vpux::VPU::MaxPool8Op>(
+                $_loc, $0, $1, $2, $3, $4, $5, $6, $7, $8)
+        }]>;
+
+def RewriteMaxPool8 :
+        Pat<
+            (IE_MaxPool8Op $input, $kernel_size, $strides, $dilations, $pads_begin, $pads_end, $rounding_type, $index_element_type, $axis),
+            (VPU_MaxPool8Op $input, $kernel_size, $strides, $dilations, $pads_begin, $pads_end, $rounding_type, $index_element_type, $axis)
         >;
 
 //
@@ -297,30 +332,13 @@ def createConvolutionOp :
 class IsNull<string desc> : Constraint<CPred<"!$_self">, desc>;
 def RewriteConvolution :
         Pat<
-            (IE_ConvolutionOp $input, $filter, $bias, $strides, $pads_begin, $pads_end, $dilations, $post_op, $clamp, $static_scale),
+            (IE_ConvolutionOp $input, $filter, $bias, $strides, $pads_begin, $pads_end, $dilations, $post_op, $clamp, $static_scale, $output_channels, $input_channels),
             (createConvolutionOp $input, $filter, $bias, $strides, $pads_begin, $pads_end, $dilations, $post_op, $clamp, $static_scale),
             [
                 (IsNull<"static_scale must be null">:$static_scale)
             ]
         >;
 
-//
-// IE.GroupConvolution -> VPU.GroupConvolution
-//
-
-def createGroupConvolutionOp :
-        NativeCodeCall<[{
-            $_builder.create<vpux::VPU::GroupConvolutionOp>(
-                $_loc, $0, $1,
-                $2.size() == 1 ? $2[0] : nullptr,
-                $3, $4, $5, $6, $7, $8)
-        }]>;
-
-def RewriteGroupConvolution :
-        Pat<
-            (IE_GroupConvolutionOp $input, $filter, $bias, $strides, $pads_begin, $pads_end, $dilations, $groups, $post_op, $clamp),
-            (createGroupConvolutionOp $input, $filter, $bias, $strides, $pads_begin, $pads_end, $dilations, $groups, $post_op, $clamp)
-        >;
 
 //
 // IE.ReLU -> VPU.ReLU
@@ -965,13 +983,13 @@ def RewritePower :
 
 def RewriteAdd :
         Pat<
-            (IE_AddOp $input1, $input2, $auto_broadcast, $post_op, $clamp),
+            (IE_AddOp $input1, $input2, $auto_broadcast, $post_op, $clamp, $output_channels, $input_channels),
             (createEltwiseOpWithPostOp<"Add"> $input1, $input2, $auto_broadcast, $post_op, $clamp)
         >;
 
 def RewriteSubtract :
         Pat<
-            (IE_SubtractOp $input1, $input2, $auto_broadcast, $post_op, $clamp),
+            (IE_SubtractOp $input1, $input2, $auto_broadcast, $post_op, $clamp, $output_channels, $input_channels),
             (createEltwiseOpWithPostOp<"Subtract"> $input1, $input2, $auto_broadcast, $post_op, $clamp)
         >;
 
@@ -1037,13 +1055,13 @@ def RewriteLogicalXor :
 
 def RewriteMultiply :
         Pat<
-            (IE_MultiplyOp $input1, $input2, $auto_broadcast, $post_op, $clamp),
+            (IE_MultiplyOp $input1, $input2, $auto_broadcast, $post_op, $clamp, $output_channels, $input_channels),
             (createEltwiseOpWithPostOp<"Multiply"> $input1, $input2, $auto_broadcast, $post_op, $clamp)
         >;
 
 def RewriteAnd :
         Pat<
-            (IE_AndOp $input1, $input2, $auto_broadcast, $post_op, $clamp),
+            (IE_AndOp $input1, $input2, $auto_broadcast, $post_op, $clamp, $output_channels, $input_channels),
             (createEltwiseOpWithPostOp<"And"> $input1, $input2, $auto_broadcast, $post_op, $clamp)
         >;
 
@@ -1118,6 +1136,24 @@ def RewriteBitwiseNot :
             (IE_BitwiseNotOp $input1),
             (createBitwiseNotOp $input1)
         >;
+
+//
+// IE.EmbeddingBagPackedSum -> VPU.EmbeddingBagPackedSum
+//
+
+def createEmbeddingBagPackedSumOp :
+        NativeCodeCall<[{
+                $_builder.create<vpux::VPU::EmbeddingBagPackedSumOp>(
+                      $_loc, $0, $1,
+                      $2.size() == 1 ? $2[0] : nullptr)
+        }]>;
+
+def RewriteEmbeddingBagPackedSum :
+        Pat<
+            (IE_EmbeddingBagPackedSumOp $emb_table, $indices, $per_sample_weights),
+            (createEmbeddingBagPackedSumOp $emb_table, $indices, $per_sample_weights)
+        >;
+
 
 //
 // IE.FullyConnected -> VPU.FullyConnected
@@ -1439,6 +1475,21 @@ def RewriteExpand :
         >;
 
 //
+// IE.GroupNormalization -> VPU.GroupNormalization
+//
+
+def createGroupNormalizationOp :
+    NativeCodeCall<[{
+        $_builder.create<vpux::VPU::GroupNormalizationOp>($_loc, $0, $1, $2, $3, $4)
+    }]>;
+
+def RewriteGroupNormalization :
+    Pat<
+        (IE_GroupNormalizationOp $input, $scale, $bias, $num_groups, $epsilon),
+        (createGroupNormalizationOp $input, $scale, $bias, $num_groups, $epsilon)
+    >;
+
+//
 // IE.ExpandDilated -> VPU.ExpandDilated
 //
 
@@ -1509,13 +1560,16 @@ def RewriteMVN :
 def createMVN6Op :
         NativeCodeCall<[{
             $_builder.create<vpux::VPU::MVN6Op>(
-                $_loc, $0, $1, $2, $3, $4)
+                $_loc, $0,
+                $1.size() == 1 ? $1[0] : nullptr,
+                $2.size() == 1 ? $2[0] : nullptr,
+                $3, $4, $5, $6)
         }]>;
 
 def RewriteMVN6 :
         Pat<
-            (IE_MVN6Op $input, $axes, $axes_value, $normalize_variance, $eps, $eps_mode),
-            (createMVN6Op $input, $axes_value, $normalize_variance, $eps, $eps_mode)
+            (IE_MVN6Op $input, $scale, $bias, $axes, $axes_value, $normalize_variance, $eps, $eps_mode),
+            (createMVN6Op $input, $scale, $bias, $axes_value, $normalize_variance, $eps, $eps_mode)
         >;
 
 //
@@ -1527,13 +1581,13 @@ def createGatherOp :
             $_builder.create<vpux::VPU::GatherOp>(
                 $_loc, $0, $1,
                 $2.size() == 1 ? $2[0] : nullptr,
-                $3, $4)
+                $3, $4, $5)
         }]>;
 
 def RewriteGather :
         Pat<
-            (IE_GatherOp $input, $indices, $axis, $axis_value, $batch_dims),
-            (createGatherOp $input, $indices, $axis, $axis_value, $batch_dims)
+            (IE_GatherOp $input, $indices, $axis, $axis_value, $batch_dims, $indices_rank),
+            (createGatherOp $input, $indices, $axis, $axis_value, $batch_dims, $indices_rank)
         >;
 
 //
@@ -1663,6 +1717,22 @@ def RewriteSpaceToBatch :
         >;
 
 //
+// IE.BatchToSpace -> VPU.BatchToSpace
+//
+
+def createBatchToSpace :
+        NativeCodeCall<[{
+            $_builder.create<vpux::VPU::BatchToSpace>(
+                $_loc, $0, $1, $2, $3)
+        }]>;
+
+def RewriteBatchToSpace :
+        Pat<
+            (IE_BatchToSpace $input, $block_shape, $crops_begin, $crops_end, $block_shape_value, $crops_begin_value, $crops_end_value),
+            (createBatchToSpace $input, $block_shape_value, $crops_begin_value, $crops_end_value)
+        >;
+
+//
 // IE.ScatterNDUpdate -> VPU.ScatterNDUpdate
 //
 
@@ -1701,13 +1771,13 @@ def RewriteScatterUpdate :
 def createScatterElementsUpdateOp :
         NativeCodeCall<[{
             $_builder.create<vpux::VPU::ScatterElementsUpdateOp>(
-                $_loc, $0, $1, $2, $3)
+                $_loc, $0, $1, $2, $3, $4, $5)
         }]>;
 
 def RewriteScatterElementsUpdate :
         Pat<
-            (IE_ScatterElementsUpdateOp $input, $indices, $updates, $axis, $axis_value),
-            (createScatterElementsUpdateOp $input, $indices, $updates, $axis_value)
+            (IE_ScatterElementsUpdateOp $input, $indices, $updates, $axis, $axis_value, $reduction, $use_init_val),
+            (createScatterElementsUpdateOp $input, $indices, $updates, $axis_value, $reduction, $use_init_val)
         >;
 
 //
@@ -1866,26 +1936,6 @@ def RewriteDepthToSpace :
         Pat<
             (IE_DepthToSpaceOp $input, $block_size, $mode, $padded_channels),
             (createDepthToSpaceOp $input, $block_size, $mode, $padded_channels)
-        >;
-
-//
-// IE.LSTMCell -> VPU.LSTMCell
-//
-
-def RewriteLSTMCell :
-        Pat<
-            (IE_LSTMCellOp $inputData, $initialHiddenState, $initialCellState, $weights, $recurrenceWeights, $biases, $hiddenSize),
-            (VPU_LSTMCellOp $inputData, $initialHiddenState, $initialCellState, $weights, $recurrenceWeights, $biases, $hiddenSize)
-        >;
-
-//
-// IE.LSTMSequence -> VPU.LSTMSequence
-//
-
-def RewriteLSTMSequence :
-        Pat<
-            (IE_LSTMSequenceOp $inputData, $initialHiddenState, $initialCellState, $weights, $recurrenceWeights, $biases, $sequenceLength, $direction),
-            (VPU_LSTMSequenceOp $inputData, $initialHiddenState, $initialCellState, $weights, $recurrenceWeights, $biases, $sequenceLength, $direction)
         >;
 
 //
@@ -2077,6 +2127,49 @@ def RewriteNonZero :
         Pat<
             (IE_NonZeroOp $input, $dstElemType),
             (createNonZeroOp $input)
+        >;
+
+//
+// IE.RMSOp -> VPU.RMSOp
+//
+
+def createRMSOp :
+        NativeCodeCall<[{
+            $_builder.create<vpux::VPU::RMSOp>($_loc, $0, $1, $2)
+        }]>;
+
+def RewriteRMS :
+        Pat<
+            (IE_RMSOp $input, $gamma, $epsilon),
+            (createRMSOp $input, $gamma, $epsilon)
+        >;
+
+//
+// IE.Inverse -> VPU.Inverse
+//
+
+def RewriteInverse :
+        Pat<
+            (IE_InverseOp $input, $adjoint),
+            (VPU_InverseOp $input, $adjoint)
+        >;
+
+//
+// IE.DeformableConvolution -> VPU.DeformableConvolution
+//
+
+def createDeformableConvolutionOp :
+        NativeCodeCall<[{
+            $_builder.create<vpux::VPU::DeformableConvolutionOp>(
+                $_loc, $0, $1, $2,
+                $3.size() == 1 ? $3[0] : nullptr,
+                $4, $5, $6, $7, $8, $9, $10)
+        }]>;
+
+def RewriteDeformableConvolution :
+        Pat<
+            (IE_DeformableConvolutionOp $input, $offset, $kernel, $mask, $strides, $pads_begin, $pads_end, $dilations, $group, $deformable_group, $biliniar_interpolate_pad),
+            (createDeformableConvolutionOp $input, $offset, $kernel, $mask, $strides, $pads_begin, $pads_end, $dilations, $group, $deformable_group, $biliniar_interpolate_pad)
         >;
 
 #endif

@@ -29,6 +29,11 @@ void vpux::NPUReg40XX::ManagedMappedInferenceOp::serialize(elf::writer::BinaryDa
     mmi.task_configs.count = getTaskConfigsCount();
     mmi.initial_barriers.count = getBootstrapTaskCount();
     mmi.bootstrap_workitems_count = getBootsrapWorkItemsCount();
+    mmi.actshv_used = getActshvUsed();
+    mmi.dpu_used = getDpuUsed();
+    mmi.media_used = getMediaUsed();
+    mmi.dma_from_cmx_used = getDmaFromCmxUsed();
+    mmi.dma_from_ddr_used = getDmaFromDdrUsed();
 
     uint8_t* ptrCharTmp = reinterpret_cast<uint8_t*>(&mmi);
     binDataSection.appendData(ptrCharTmp, getBinarySize());

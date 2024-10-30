@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2023-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -13,14 +13,6 @@
 #include <mlir/IR/IRMapping.h>
 
 namespace vpux {
-
-//
-// computeWeightForEmbeddingOp
-//
-
-void computeWeightForEmbeddingOp(mlir::MLIRContext* ctx, mlir::RankedTensorType& weightsTensorType,
-                                 mlir::DenseElementsAttr& baseAttr, llvm::ArrayRef<int64_t> weightsShape,
-                                 vpux::NDTypeInterface inType);
 
 //
 // IfRewrite
@@ -171,6 +163,40 @@ private:
 };
 
 //
+// LSTMCellRewrite
+//
+
+class LSTMCellRewrite final : public mlir::OpRewritePattern<IE::LSTMCellOp> {
+public:
+    LSTMCellRewrite(mlir::MLIRContext* ctx, Logger log)
+            : mlir::OpRewritePattern<IE::LSTMCellOp>(ctx), _log(std::move(log)) {
+    }
+
+public:
+    mlir::LogicalResult matchAndRewrite(IE::LSTMCellOp origOp, mlir::PatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+//
+// LSTMSequenceRewrite
+//
+
+class LSTMSequenceRewrite final : public mlir::OpRewritePattern<IE::LSTMSequenceOp> {
+public:
+    LSTMSequenceRewrite(mlir::MLIRContext* ctx, Logger log)
+            : mlir::OpRewritePattern<IE::LSTMSequenceOp>(ctx), _log(std::move(log)) {
+    }
+
+public:
+    mlir::LogicalResult matchAndRewrite(IE::LSTMSequenceOp origOp, mlir::PatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+//
 // LSTMGatesRewrite
 //
 
@@ -181,6 +207,23 @@ public:
 
 public:
     mlir::LogicalResult matchAndRewrite(IE::LSTMGatesOp origOp, mlir::PatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+//
+// GroupConvolutionRewrite
+//
+
+class GroupConvolutionRewrite final : public mlir::OpRewritePattern<IE::GroupConvolutionOp> {
+public:
+    GroupConvolutionRewrite(mlir::MLIRContext* ctx, Logger log)
+            : mlir::OpRewritePattern<IE::GroupConvolutionOp>(ctx), _log(log) {
+    }
+
+public:
+    mlir::LogicalResult matchAndRewrite(IE::GroupConvolutionOp origOp, mlir::PatternRewriter& rewriter) const final;
 
 private:
     Logger _log;
@@ -233,6 +276,39 @@ public:
 public:
     mlir::LogicalResult matchAndRewrite(IE::TransposedConvolutionOp origOp,
                                         mlir::PatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+//
+// DynamicReshapeRewrite
+//
+
+class DynamicReshapeRewrite final : public mlir::OpRewritePattern<IE::DynamicReshapeOp> {
+public:
+    DynamicReshapeRewrite(mlir::MLIRContext* ctx, Logger log)
+            : mlir::OpRewritePattern<IE::DynamicReshapeOp>(ctx), _log(log) {
+    }
+
+public:
+    mlir::LogicalResult matchAndRewrite(IE::DynamicReshapeOp origOp, mlir::PatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+//
+// DynamicTileRewrite
+//
+
+class DynamicTileRewrite final : public mlir::OpRewritePattern<IE::DynamicTileOp> {
+public:
+    DynamicTileRewrite(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<IE::DynamicTileOp>(ctx), _log(log) {
+    }
+
+public:
+    mlir::LogicalResult matchAndRewrite(IE::DynamicTileOp origOp, mlir::PatternRewriter& rewriter) const final;
 
 private:
     Logger _log;

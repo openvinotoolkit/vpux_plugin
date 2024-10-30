@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation
+// Copyright (C) 2022-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -24,9 +24,6 @@ class CTCGreedyDecoderLayerTestCommon : public CTCGreedyDecoderLayerTest, virtua
     }
 };
 
-class CTCGreedyDecoderLayerTest_NPU3720 : public CTCGreedyDecoderLayerTestCommon {};
-class CTCGreedyDecoderLayerTest_NPU4000 : public CTCGreedyDecoderLayerTestCommon {};
-
 void skipInferCallbackImpl(std::stringstream& skip, std::vector<InputShape> inShape) {
     const std::vector<InputShape> badInputShapesForMLIR = {{{}, {{50, 3, 3}}},
                                                            {{}, {{50, 3, 128}}},
@@ -38,12 +35,12 @@ void skipInferCallbackImpl(std::stringstream& skip, std::vector<InputShape> inSh
     }
 }
 
-TEST_P(CTCGreedyDecoderLayerTest_NPU3720, HW) {
+TEST_P(CTCGreedyDecoderLayerTestCommon, NPU3720_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(CTCGreedyDecoderLayerTest_NPU4000, SW) {
+TEST_P(CTCGreedyDecoderLayerTestCommon, NPU4000_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
@@ -72,12 +69,7 @@ const auto params_MLIR =
                          testing::ValuesIn(mergeRepeated),                                           // Merge repeated
                          testing::Values(DEVICE_NPU));                                               // Device name
 
-// NPU3720
-INSTANTIATE_TEST_SUITE_P(smoke_CTCGreedyDecoder, CTCGreedyDecoderLayerTest_NPU3720, params_MLIR,
-                         CTCGreedyDecoderLayerTest::getTestCaseName);
-
-// NPU4000
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_CTCGreedyDecoder, CTCGreedyDecoderLayerTest_NPU4000, params_MLIR,
+INSTANTIATE_TEST_SUITE_P(smoke_CTCGreedyDecoder, CTCGreedyDecoderLayerTestCommon, params_MLIR,
                          CTCGreedyDecoderLayerTest::getTestCaseName);
 
 }  // namespace

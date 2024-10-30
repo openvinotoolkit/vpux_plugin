@@ -9,9 +9,9 @@
 
 // CHECK: module @dynamic_transpose {
 // CHECK:   IE.CNNNetwork entryPoint : @main inputsInfo : {
-// CHECK:       DataInfo "Parameter_18" : tensor<1x3x192x192xf32>
+// CHECK:       DataInfo "Parameter_18" tensorNames = ["Parameter_18"] : tensor<1x3x192x192xf32>
 // CHECK:   } outputsInfo : {
-// CHECK:       DataInfo "Transpose_21" : tensor<1x192x3x192xf32>
+// CHECK:       DataInfo "Transpose_21" friendlyName = "Result_22" tensorNames = ["Transpose_21"] : tensor<1x192x3x192xf32>
 // CHECK:   }
 // CHECK:   func.func @main([[ARG0:[^:]+]]: tensor<1x3x192x192xf32>) -> tensor<1x192x3x192xf32> {
 // CHECK:       [[CONVERT_IN:%.*]] = IE.Convert([[ARG0]]) {

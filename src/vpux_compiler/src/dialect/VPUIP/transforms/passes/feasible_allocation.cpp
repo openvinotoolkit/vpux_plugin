@@ -14,6 +14,7 @@
 #include "vpux/compiler/core/prefetch_data_ops.hpp"
 #include "vpux/compiler/core/schedule_analysis_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/cost_model/cost_model.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/error.hpp"
@@ -200,8 +201,8 @@ private:
     void assignCyclesToExecOps(AsyncDepsInfo& depsInfo, FeasibleMemoryScheduler::ScheduledOpInfoVec& scheduledOps);
     void linearizeComputeOps(bool linearizeSchedule, bool enablePipelining, mlir::func::FuncOp& netFunc,
                              AsyncDepsInfo& depsInfo);
-    void updateAfterAllScheduleOptimizations(AsyncDepsInfo& depsInfo,
-                                             FeasibleMemoryScheduler::ScheduledOpInfoVec& scheduledOps);
+    void updateCycleAfterAllScheduleOptimizations(AsyncDepsInfo& depsInfo,
+                                                  FeasibleMemoryScheduler::ScheduledOpInfoVec& scheduledOps);
 
 private:
     VPUIP::MemKindCreateFunc _memKindCb;
@@ -298,6 +299,28 @@ void FeasibleAllocationPass::updateAsyncExecuteOpPosition(
     }
 }
 
+// This method will insert defined not scheduled operations after current operation and update reScheduled ops
+// recursion required for cases where spill will depend on spill e.g.
+//                  | SPILL-DPU0 | SPILL-DPU1 |
+// DPU0 | DPU1 |
+//             | SW |
+// where SW uses DPU0 and DPU1 output, SPILL-DPU0 will depend on SW and SPILL-DPU1 will depend on SPILL-DPU0
+// recursion required to correctly insert SPILL-DPU1 before SPILL-DPU0
+void insertSpillOps(size_t opInd, std::map<size_t, std::set<size_t>>& insertAfterOp,
+                    std::map<size_t, FeasibleMemoryScheduler::ScheduledOpInfo*>& spillToOpInfoMap,
+                    std::set<size_t>& reScheduledOps, FeasibleMemoryScheduler::ScheduledOpInfoVec& schedule) {
+    auto opsToInsert = insertAfterOp[opInd];
+    for (auto op : opsToInsert) {
+        if (reScheduledOps.find(op) != reScheduledOps.end()) {
+            continue;
+        }
+        insertSpillOps(op, insertAfterOp, spillToOpInfoMap, reScheduledOps, schedule);
+        schedule.push_back(*spillToOpInfoMap[op]);
+        reScheduledOps.insert(op);
+    }
+    insertAfterOp.erase(opInd);
+}
+
 // This method will update all AsyncExecOp position in the block related to
 // spill ops. The goal is to move them close to their dependency which can
 // be some data or control flow source or an operation that executes on same queue type
@@ -306,93 +329,70 @@ void FeasibleAllocationPass::updateAsyncExecuteOpPosition(
 // dependencies and executor type they will be executed earlier
 void FeasibleAllocationPass::updateAsyncExecuteOpPositionOfSpillOps(
         AsyncDepsInfo& depsInfo, FeasibleMemoryScheduler::ScheduledOpInfoVec& scheduledOps) {
-    std::map<std::pair<FeasibleMemoryScheduler::QueueType, size_t>, mlir::async::ExecuteOp>
-            lastExecOpOnGivenQueueInstance;
+    // TODO: E#132048 use std::unordered_map with custom hash
+    std::map<std::pair<FeasibleMemoryScheduler::QueueType, size_t>, size_t> lastExecOpOnGivenQueueInstance;
     SmallVector<std::pair<size_t, size_t>> pairOfSpillOpAndItsNewPlaceInSchedVec;
 
-    for (auto& schedOp : scheduledOps) {
-        if (schedOp.queueType.execKind != VPU::ExecutorKind::DMA_NN) {
+    std::map<size_t, std::set<size_t>> spillDepMap;
+    std::map<size_t, FeasibleMemoryScheduler::ScheduledOpInfo*> spillToOpInfoMap;
+    for (auto schedOp = scheduledOps.begin(); schedOp != scheduledOps.end(); ++schedOp) {
+        if (schedOp->queueType.execKind != VPU::ExecutorKind::DMA_NN) {
             continue;
         }
 
-        mlir::async::ExecuteOp execOp = depsInfo.getExecuteOpAtIndex(schedOp.op_);
-        VPUX_THROW_UNLESS(execOp != nullptr, "Async ExecuteOp not located based on index");
-
-        if (!schedOp.isOriginalSpillWriteOp() && !schedOp.isOriginalSpillReadOp()) {
-            for (auto instIndex : schedOp.executorInstanceMask.set_bits()) {
-                auto queueKey = std::make_pair(schedOp.queueType, instIndex);
-                lastExecOpOnGivenQueueInstance[queueKey] = execOp;
+        if (!schedOp->isOriginalSpillWriteOp() && !schedOp->isOriginalSpillReadOp()) {
+            for (auto instIndex : schedOp->executorInstanceMask.set_bits()) {
+                auto queueKey = std::make_pair(schedOp->queueType, instIndex);
+                lastExecOpOnGivenQueueInstance[queueKey] = schedOp->op_;
             }
-
             continue;
         }
 
-        SmallVector<mlir::async::ExecuteOp> depExecOps;
-        for (const auto& dep : execOp.getDependencies()) {
-            depExecOps.push_back(dep.getDefiningOp<mlir::async::ExecuteOp>());
-        }
+        // store operation dependencies
+        const auto opDeps = depsInfo.getOpDeps(schedOp->op_);
+        spillDepMap[schedOp->op_].insert(opDeps.begin(), opDeps.end());
 
-        for (auto instIndex : schedOp.executorInstanceMask.set_bits()) {
-            auto queueKey = std::make_pair(schedOp.queueType, instIndex);
+        // store previous queue dependency
+        for (auto instIndex : schedOp->executorInstanceMask.set_bits()) {
+            auto queueKey = std::make_pair(schedOp->queueType, instIndex);
             if (lastExecOpOnGivenQueueInstance.find(queueKey) != lastExecOpOnGivenQueueInstance.end()) {
-                depExecOps.push_back(lastExecOpOnGivenQueueInstance[queueKey]);
+                spillDepMap[schedOp->op_].insert(lastExecOpOnGivenQueueInstance[queueKey]);
             }
+            // update queue dependency for next op
+            lastExecOpOnGivenQueueInstance[queueKey] = schedOp->op_;
         }
 
-        std::sort(depExecOps.begin(), depExecOps.end(),
-                  [](mlir::async::ExecuteOp execOp1, mlir::async::ExecuteOp execOp2) {
-                      return execOp1->isBeforeInBlock(execOp2);
-                  });
+        // store spill operation
+        spillToOpInfoMap[schedOp->op_] = schedOp;
+    }
 
-        if (!depExecOps.empty()) {
-            auto lastDepExecOp = depExecOps.back();
-            if (lastDepExecOp->getNextNode() != execOp.getOperation()) {
-                execOp->moveAfter(lastDepExecOp);
-
-                // Store information where given spill op is to be placed
-                pairOfSpillOpAndItsNewPlaceInSchedVec.push_back(
-                        std::make_pair(schedOp.op_, depsInfo.getIndex(lastDepExecOp)));
-            }
+    FeasibleMemoryScheduler::ScheduledOpInfoVec newOrder;
+    std::set<size_t> reScheduledOps;
+    std::map<size_t, std::set<size_t>> insertAfterOp;
+    for (auto schedOp = scheduledOps.rbegin(); schedOp != scheduledOps.rend(); ++schedOp) {
+        if (!insertAfterOp[schedOp->op_].empty()) {
+            // re-schedule operations after current op
+            insertSpillOps(schedOp->op_, insertAfterOp, spillToOpInfoMap, reScheduledOps, newOrder);
         }
 
-        for (auto instIndex : schedOp.executorInstanceMask.set_bits()) {
-            auto queueKey = std::make_pair(schedOp.queueType, instIndex);
-            lastExecOpOnGivenQueueInstance[queueKey] = execOp;
+        if (schedOp->queueType.execKind != VPU::ExecutorKind::DMA_NN) {
+            newOrder.push_back(*schedOp);
+            continue;
+        }
+
+        if (!schedOp->isOriginalSpillWriteOp() && !schedOp->isOriginalSpillReadOp()) {
+            newOrder.push_back(*schedOp);
+            continue;
+        }
+
+        for (auto dep : spillDepMap[schedOp->op_]) {
+            insertAfterOp[dep].insert(schedOp->op_);
         }
     }
 
-    // Update operation placement in scheduledOps vector
-    for (auto& pairOfSpillOpAndItsNewPlaceInSched : pairOfSpillOpAndItsNewPlaceInSchedVec) {
-        auto spillOp = pairOfSpillOpAndItsNewPlaceInSched.first;
-        auto placeAfterOp = pairOfSpillOpAndItsNewPlaceInSched.second;
-
-        // Update scheduledOps
-        auto indexToInsertItr =
-                std::find_if(scheduledOps.begin(), scheduledOps.end(), [&](const ScheduledOpInfo& opInfo) {
-                    return opInfo.op_ == placeAfterOp;
-                });
-
-        auto indexOfSpillOpItr =
-                std::find_if(scheduledOps.begin(), scheduledOps.end(), [&](const ScheduledOpInfo& opInfo) {
-                    return opInfo.op_ == spillOp;
-                });
-
-        VPUX_THROW_WHEN(indexToInsertItr == scheduledOps.end(),
-                        "No iterator located matching opIdx '{0}' in scheduledOps vec", placeAfterOp);
-        VPUX_THROW_WHEN(indexOfSpillOpItr == scheduledOps.end(),
-                        "No iterator located matching opIdx '{0}' in scheduledOps vec", spillOp);
-
-        auto indexToInsert = std::distance(scheduledOps.begin(), indexToInsertItr) + 1;
-
-        auto indexOfSpillOp = std::distance(scheduledOps.begin(), indexOfSpillOpItr);
-
-        // Insert operation to new location that wil be aligned with changes in IR
-        scheduledOps.insert(scheduledOps.begin() + indexToInsert, scheduledOps[indexOfSpillOp]);
-
-        // Remove operation from old location
-        indexOfSpillOp++;
-        scheduledOps.erase(scheduledOps.begin() + indexOfSpillOp);
-    }
+    // use reversed new order
+    std::reverse(newOrder.begin(), newOrder.end());
+    scheduledOps = std::move(newOrder);
 }
 
 // This method will assign cycle intervals to 'async.execute' ops based on ScheduledOpInfoVec, and assign
@@ -419,7 +419,7 @@ void FeasibleAllocationPass::assignCyclesToExecOps(AsyncDepsInfo& depsInfo,
 // This method will re-create execution flow - schedule, after scheduling optimizations which can
 // modify order of operations and impact cycles of operations. New cycles will be assigned to
 // 'async.execute' operations and ScheduledOpInfoVec will be updated with new execution order.
-void FeasibleAllocationPass::updateAfterAllScheduleOptimizations(
+void FeasibleAllocationPass::updateCycleAfterAllScheduleOptimizations(
         AsyncDepsInfo& depsInfo, FeasibleMemoryScheduler::ScheduledOpInfoVec& scheduledOps) {
     // distribute ops into their execution queues
     std::map<std::pair<FeasibleMemoryScheduler::QueueType, size_t>,
@@ -725,16 +725,17 @@ void FeasibleAllocationPass::safeRunOnFunc() {
     linearizeComputeOps(_linearizeSchedule, _enablePipelining, func, depsInfo);
     controlEdges.updateDependenciesInIR();
 
-    // After dependencies are determined, location of spill operations should be updated
+    // 7. After dependencies are determined, location of spill operations should be updated
     // to be close to their dependencies
     updateAsyncExecuteOpPositionOfSpillOps(depsInfo, scheduledOps);
+    updateAsyncExecuteOpPosition(func, depsInfo, scheduledOps);
 
-    // After all scheduling optimization, as a final step:
-    // 1. Recreate schedule order and operation cycles after above optimizations
-    updateAfterAllScheduleOptimizations(depsInfo, scheduledOps);
-    // 2. Clean temporary attributes and log schedule
+    // 8. After all scheduling optimization, as a final step:
+    //  8.1. Recreate schedule order and operation cycles after above optimizations
+    updateCycleAfterAllScheduleOptimizations(depsInfo, scheduledOps);
+    //  8.2. Clean temporary attributes and log schedule
     scheduler.cleanUpAndLogSchedule(scheduledOps);
-    // 3. Use final order
+    //  8.3. Use final order
     updateAsyncExecuteOpPosition(func, depsInfo, scheduledOps);
 
     if (_enableScheduleStatistics) {

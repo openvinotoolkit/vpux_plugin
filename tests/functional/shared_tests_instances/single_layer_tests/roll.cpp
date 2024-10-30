@@ -6,7 +6,6 @@
 #include "vpu_ov2_layer_test.hpp"
 
 namespace ov {
-
 namespace test {
 
 class RollLayerTestCommon : public RollLayerTest, virtual public VpuOv2LayerTest {};
@@ -22,7 +21,6 @@ TEST_P(RollLayerTestCommon, NPU4000) {
 }
 
 }  // namespace test
-
 }  // namespace ov
 
 using ov::test::RollLayerTestCommon;
@@ -80,21 +78,21 @@ const auto testRollParams5 =
                            ::testing::ValuesIn(modelTypes), ::testing::Values(shift[5]), ::testing::Values(axes[5]),
                            ::testing::Values(ov::test::utils::DEVICE_NPU));
 
-INSTANTIATE_TEST_CASE_P(smoke_precommit_Roll_Test_Check0, RollLayerTestCommon, testRollParams0,
-                        RollLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_Roll_Test_Check0, RollLayerTestCommon, testRollParams0,
+                         RollLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(smoke_Roll_Test_Check1, RollLayerTestCommon, testRollParams1,
-                        RollLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_Roll_Test_Check1, RollLayerTestCommon, testRollParams1,
+                         RollLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(smoke_Roll_Test_Check2, RollLayerTestCommon, testRollParams2,
-                        RollLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_Roll_Test_Check2, RollLayerTestCommon, testRollParams2,
+                         RollLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(smoke_Roll_Test_Check3, RollLayerTestCommon, testRollParams3,
-                        RollLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_Roll_Test_Check3, RollLayerTestCommon, testRollParams3,
+                         RollLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(smoke_Roll_Test_Check4, RollLayerTestCommon, testRollParams4,
-                        RollLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_Roll_Test_Check4, RollLayerTestCommon, testRollParams4,
+                         RollLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(smoke_Roll_Test_Check5, RollLayerTestCommon, testRollParams5,
-                        RollLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_Roll_Test_Check5, RollLayerTestCommon, testRollParams5,
+                         RollLayerTestCommon::getTestCaseName);
 }  // namespace

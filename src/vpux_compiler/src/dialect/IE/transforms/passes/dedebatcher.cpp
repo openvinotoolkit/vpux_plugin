@@ -4,7 +4,9 @@
 //
 
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
+#include "vpux/compiler/utils/batch.hpp"
 #include "vpux/compiler/utils/logging.hpp"
+#include "vpux/compiler/utils/rewriter.hpp"
 #include "vpux/utils/core/format.hpp"
 
 using namespace vpux;
@@ -24,6 +26,9 @@ mlir::FailureOr<int64_t> getDeDebatchNum(mlir::func::CallOp callOp, int64_t& cas
                 dedebatchNum = ratio;
             }
             VPUX_THROW_UNLESS(dedebatchNum == ratio, "De-de-batch number is not matched for various inputs");
+            DebatchedCallOpAttributeView::inject(callOp, castOpCnt, dedebatchNum);
+            VPUX_THROW_UNLESS(DebatchedCallOpAttributeView::extract(callOp).has_value(),
+                              "Attribute {0} must be acknowledged", DebatchedCallOpAttributeView::name());
             castOpCnt++;
         }
     }
@@ -38,6 +43,7 @@ mlir::SmallVector<mlir::Operation*> sliceCallsOp(mlir::OpBuilder& builder, mlir:
     for (int i = 0; i < dedebatchNum; i++) {
         // Create sliced private function operands
         mlir::SmallVector<mlir::Value> newOperands;
+        size_t sliceIdx = 0;
         for (auto operand : privateFuncOperands) {
             if (auto convertCast = operand.getDefiningOp<mlir::UnrealizedConversionCastOp>()) {
                 auto batchedInput = convertCast.getOperand(0);
@@ -48,9 +54,11 @@ mlir::SmallVector<mlir::Operation*> sliceCallsOp(mlir::OpBuilder& builder, mlir:
                 Shape sliceOffset{
                         SmallVector<int64_t>(batchedInput.getType().cast<vpux::NDTypeInterface>().getRank(), 0)};
                 sliceOffset[Dims4D::Act::N] = getShape(debatchedInput)[Dims4D::Act::N] * i;
+                const auto sliceLoc = appendLoc(callLoc, "slice_{0}_op_{1}", sliceIdx + 1, i + 1);
                 auto slicedOperand =
-                        builder.create<IE::SliceOp>(callLoc, batchedInput, sliceOffset, getShape(debatchedInput));
+                        builder.create<IE::SliceOp>(sliceLoc, batchedInput, sliceOffset, getShape(debatchedInput));
                 newOperands.push_back(slicedOperand.getResult());
+                sliceIdx++;
             } else {
                 newOperands.push_back(operand);
             }
@@ -59,6 +67,9 @@ mlir::SmallVector<mlir::Operation*> sliceCallsOp(mlir::OpBuilder& builder, mlir:
         // Create multi-batched private function calls
         auto newCall =
                 builder.create<mlir::func::CallOp>(callLoc, callOp.getCallee(), callOp->getResultTypes(), newOperands);
+        DebatchedCallOpAttributeView::inject(newCall, i, dedebatchNum);
+        VPUX_THROW_UNLESS(DebatchedCallOpAttributeView::extract(newCall).has_value(),
+                          "Attribute {0} must be acknowledged", DebatchedCallOpAttributeView::name());
         newCallOps.push_back(newCall);
     }
     return newCallOps;

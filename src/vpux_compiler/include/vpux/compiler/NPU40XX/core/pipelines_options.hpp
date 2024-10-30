@@ -31,17 +31,11 @@ struct DefaultHWOptionsDeviceBase : public virtual vpux::DefaultHWOptionsBase {
                                                   llvm::cl::desc("Enable the experimental operation of SEP"),
                                                   llvm::cl::init(false)};
 
-    BoolOption enableStartBarrier{*this, "enable-start-barrier", llvm::cl::desc("Enable start barrier"),
-                                  llvm::cl::init(true)};
-
-    BoolOption enableFinalBarrier{*this, "enable-final-barrier", llvm::cl::desc("Enable final barrier"),
-                                  llvm::cl::init(true)};
-
     BoolOption enableM2I{*this, "enable-m2i", llvm::cl::desc("Enable M2I passes"), llvm::cl::init(false)};
 
-    BoolOption enableExplicitDistributedTensorAttr{
+    BoolOption enableExplicitDistributionInfoAttr{
             *this, "enable-explicit-distributed-attr",
-            llvm::cl::desc("Enable DistributedTensorAttr with explicit per cluster memory/compute shapes & offsets"),
+            llvm::cl::desc("Enable DistributionInfoAttr with explicit per cluster memory/compute shapes & offsets"),
             llvm::cl::init(true)};
 
     StrOption dpuDryRun{*this, "dpu-dry-run",
@@ -54,6 +48,10 @@ struct DefaultHWOptionsDeviceBase : public virtual vpux::DefaultHWOptionsBase {
     BoolOption enablePartialWorkloadManagement{*this, "enable-partial-workload-management",
                                                llvm::cl::desc("Enable partial workload management"),
                                                llvm::cl::init(true)};
+
+    IntOption wlmOptimizationThreshold{*this, "wlm-barriers-threshold",
+                                       llvm::cl::desc("Threshold for WLM optimization"),
+                                       llvm::cl::init(VIRTUAL_BARRIER_THRESHOLD_WLM)};
 
     BoolOption supportNCEOpInsertion{
             *this, "support-nce-op-insertion",
@@ -72,7 +70,7 @@ struct DefaultHWOptionsDeviceBase : public virtual vpux::DefaultHWOptionsBase {
 
 struct MCAndTilingOptionsDevice : public vpux::MCAndTilingOptionsBase {
     MCAndTilingOptionsDevice() {
-        enableExplicitDistributedTensorAttr = true;
+        enableExplicitDistributionInfoAttr = true;
     }
 };
 

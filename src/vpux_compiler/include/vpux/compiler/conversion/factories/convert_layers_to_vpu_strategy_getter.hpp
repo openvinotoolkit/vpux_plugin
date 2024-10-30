@@ -10,6 +10,6 @@
 
 namespace vpux {
 
-std::unique_ptr<IGreedilyPassStrategy> CreateConvertLayers2VPUStrategy(VPU::ArchKind arch);
+std::unique_ptr<IGreedilyPassStrategy> createConvertLayers2VPUStrategy(VPU::ArchKind arch);
 
 }  // namespace vpux

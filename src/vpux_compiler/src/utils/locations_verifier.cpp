@@ -8,6 +8,10 @@
 #include "vpux/compiler/core/developer_build_utils.hpp"
 #include "vpux/compiler/core/passes.hpp"
 
+#include "vpux/compiler/dialect/IE/IR/dialect.hpp"
+#include "vpux/compiler/dialect/VPU/IR/dialect.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/dialect.hpp"
+
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 

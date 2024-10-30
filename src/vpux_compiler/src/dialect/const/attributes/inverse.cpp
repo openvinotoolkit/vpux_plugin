@@ -37,8 +37,7 @@ Const::Content Const::ScalarMultInverseAttr::transform(Const::Content& input) co
     return output;
 }
 
-Const::ContentAttr Const::ContentAttr::scalarMultInverse() const {
-    return Const::ContentAttr::addTransformation(
-            *this, mlir::cast<Const::TransformAttrInterface>(Const::ScalarMultInverseAttr::get(getContext())));
+Const::ContentSetup Const::ContentSetup::scalarMultInverse() {
+    return addTransformation(Const::ScalarMultInverseAttr::get(getContext()));
 }
 }  // namespace vpux

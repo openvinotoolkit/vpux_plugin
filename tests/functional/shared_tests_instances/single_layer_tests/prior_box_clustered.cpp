@@ -13,15 +13,12 @@ namespace test {
 
 class PriorBoxClusteredLayerTestCommon : public PriorBoxClusteredLayerTest, virtual public VpuOv2LayerTest {};
 
-class PriorBoxClusteredLayerTest_NPU3720 : public PriorBoxClusteredLayerTestCommon {};
-class PriorBoxClusteredLayerTest_NPU4000 : public PriorBoxClusteredLayerTestCommon {};
-
-TEST_P(PriorBoxClusteredLayerTest_NPU3720, SW) {
+TEST_P(PriorBoxClusteredLayerTestCommon, NPU3720_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(PriorBoxClusteredLayerTest_NPU4000, SW) {
+TEST_P(PriorBoxClusteredLayerTestCommon, NPU4000_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
@@ -72,20 +69,10 @@ const auto paramsPrecommit = testing::Combine(
         testing::Values(static_shapes_to_test_representation(std::vector<ov::Shape>{{4, 4}, {13, 13}})),
         testing::Values(DEVICE_NPU));
 
-// ------ NPU3720 ------
+INSTANTIATE_TEST_SUITE_P(smoke_PriorBoxClustered, PriorBoxClusteredLayerTestCommon, params,
+                         PriorBoxClusteredLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(smoke_PriorBoxClustered, PriorBoxClusteredLayerTest_NPU3720, params,
-                        PriorBoxClusteredLayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_precommit_PriorBoxClustered, PriorBoxClusteredLayerTest_NPU3720, paramsPrecommit,
-                        PriorBoxClusteredLayerTest_NPU3720::getTestCaseName);
-
-// ------ NPU4000 ------
-
-INSTANTIATE_TEST_CASE_P(smoke_PriorBoxClustered, PriorBoxClusteredLayerTest_NPU4000, params,
-                        PriorBoxClusteredLayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_precommit_PriorBoxClustered, PriorBoxClusteredLayerTest_NPU4000, paramsPrecommit,
-                        PriorBoxClusteredLayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_PriorBoxClustered, PriorBoxClusteredLayerTestCommon, paramsPrecommit,
+                         PriorBoxClusteredLayerTestCommon::getTestCaseName);
 
 }  // namespace

@@ -112,26 +112,26 @@ Const::Content vpux::Const::ExpandDilatedAttr::transform(vpux::Const::Content& i
     const auto dKX = outShape[vpux::Dims4D::Filter::KX];
 
     loop_4d(LoopExecPolicy::Parallel, input.getStorageElemType().getContext(), OC, IC, KY, KX,
-            [&](int64_t oc, int64_t ic, int64_t ky, int64_t kx) {
+            [&, inputIsSplat = input.isSplat()](int64_t oc, int64_t ic, int64_t ky, int64_t kx) {
                 const auto dky = ky + (dilations[0] - 1) * ky;
                 const auto dkx = kx + (dilations[1] - 1) * kx;
 
                 const auto outRawInd = dkx + dky * dKX + ic * dKX * dKY + oc * dKX * dKY * IC;
                 const auto inRawInd = kx + ky * KX + ic * KX * KY + oc * KX * KY * IC;
 
-                std::copy_n(inBuf.data() + checked_cast<size_t>(inRawInd * elemSize.count()),
-                            checked_cast<size_t>(elemSize.count()),
+                // Note: in case of splats, there's no guarantee on how many
+                // elements data has, so always use first element.
+                const auto inBufBegin =
+                        inputIsSplat ? inBuf.data() : inBuf.data() + checked_cast<size_t>(inRawInd * elemSize.count());
+
+                // Note: this copies *single* element in a loop_4d...
+                std::copy_n(inBufBegin, checked_cast<size_t>(elemSize.count()),
                             outBuf.data() + checked_cast<size_t>(outRawInd * elemSize.count()));
             });
 
     return output;
 }
 
-//
-// ContentAttr::expandDilated
-//
-
-Const::ContentAttr vpux::Const::ContentAttr::expandDilated(ShapeRef dilations) const {
-    return ContentAttr::addTransformation(*this, Const::ExpandDilatedAttr::get(getIntArrayAttr(getContext(), dilations))
-                                                         .cast<Const::TransformAttrInterface>());
+Const::ContentSetup vpux::Const::ContentSetup::expandDilated(ShapeRef dilations) {
+    return addTransformation(Const::ExpandDilatedAttr::get(getIntArrayAttr(getContext(), dilations)));
 }

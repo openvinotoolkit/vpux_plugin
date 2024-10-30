@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation
+// Copyright (C) 2022-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -202,21 +202,17 @@ protected:
     }
 };
 
-class ProposalLayerTest_NPU3720 : public ProposalLayerTestCommon {};
-class ProposalLayerTest_NPU4000 : public ProposalLayerTestCommon {};
-
-TEST_P(ProposalLayerTest_NPU3720, HW) {
+TEST_P(ProposalLayerTestCommon, NPU3720_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(ProposalLayerTest_NPU4000, HW) {
+TEST_P(ProposalLayerTestCommon, NPU4000_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
 
 }  // namespace test
-
 }  // namespace ov
 
 using namespace ov::test;
@@ -224,25 +220,7 @@ using namespace ov::test;
 namespace {
 
 /* ============= Proposal ============= */
-const std::vector<size_t> base_size_ = {16};
-const std::vector<size_t> pre_nms_topn_ = {100};
-const std::vector<size_t> post_nms_topn_ = {100};
-const std::vector<float> nms_thresh_ = {0.7f};
-const std::vector<size_t> min_size_ = {1};
-const std::vector<std::vector<float>> ratio_ = {{1.0f, 2.0f}};
-const std::vector<std::vector<float>> scale_ = {{1.2f, 1.5f}};
-const std::vector<bool> clip_before_nms_ = {false};
-const std::vector<bool> clip_after_nms_ = {false};
-// empty string corresponds to Caffe framework
-const std::vector<std::string> framework_ = {""};
-
-const auto proposalParams0 = ::testing::Combine(::testing::ValuesIn(base_size_), ::testing::ValuesIn(pre_nms_topn_),
-                                                ::testing::ValuesIn(post_nms_topn_), ::testing::ValuesIn(nms_thresh_),
-                                                ::testing::ValuesIn(min_size_), ::testing::ValuesIn(ratio_),
-                                                ::testing::ValuesIn(scale_), ::testing::ValuesIn(clip_before_nms_),
-                                                ::testing::ValuesIn(clip_after_nms_), ::testing::ValuesIn(framework_));
-
-const auto proposalParams1 = ::testing::Combine(
+const auto proposalParams0 = ::testing::Combine(
         ::testing::Combine(::testing::ValuesIn(std::vector<size_t>{32}),
                            ::testing::ValuesIn(std::vector<size_t>{2147483647}),
                            ::testing::ValuesIn(std::vector<size_t>{100}),
@@ -254,7 +232,7 @@ const auto proposalParams1 = ::testing::Combine(
                            ::testing::ValuesIn(std::vector<std::string>{"tensowflow"})),
         ::testing::Values(ov::element::f16), ::testing::Values(DEVICE_NPU));
 
-const auto proposalParams3 = ::testing::Combine(
+const auto proposalParams1 = ::testing::Combine(
         ::testing::Combine(::testing::ValuesIn(std::vector<size_t>{4}), ::testing::ValuesIn(std::vector<size_t>{6000}),
                            ::testing::ValuesIn(std::vector<size_t>{300}),
                            ::testing::ValuesIn(std::vector<float>{0.69999998807907104f}),
@@ -265,27 +243,9 @@ const auto proposalParams3 = ::testing::Combine(
                            ::testing::ValuesIn(std::vector<std::string>{""})),
         ::testing::Values(ov::element::f16), ::testing::Values(DEVICE_NPU));
 
-const auto proposalParams4 = ::testing::Combine(
-        ::testing::Combine(::testing::ValuesIn(std::vector<size_t>{4}), ::testing::ValuesIn(std::vector<size_t>{6000}),
-                           ::testing::ValuesIn(std::vector<size_t>{300}),
-                           ::testing::ValuesIn(std::vector<float>{0.69999998807907104f}),
-                           ::testing::ValuesIn(std::vector<size_t>{4}),
-                           ::testing::ValuesIn(std::vector<std::vector<float>>{{1.0f}}),
-                           ::testing::ValuesIn(std::vector<std::vector<float>>{{1.5f}}),
-                           ::testing::ValuesIn(std::vector<bool>{true}), ::testing::ValuesIn(std::vector<bool>{false}),
-                           ::testing::ValuesIn(std::vector<std::string>{""})),
-        ::testing::Values(ov::element::f16), ::testing::Values(DEVICE_NPU));
-
-INSTANTIATE_TEST_SUITE_P(smoke_Proposal_conformance_tf, ProposalLayerTest_NPU3720, proposalParams1,
-                         ProposalLayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_Proposal, ProposalLayerTest_NPU3720, proposalParams3,
-                         ProposalLayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_Proposal_conformance_tf, ProposalLayerTest_NPU4000, proposalParams1,
-                         ProposalLayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_Proposal, ProposalLayerTest_NPU4000, proposalParams4,
-                         ProposalLayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_Proposal_conformance_tf, ProposalLayerTestCommon, proposalParams0,
+                         ProposalLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_Proposal, ProposalLayerTestCommon, proposalParams1,
+                         ProposalLayerTestCommon::getTestCaseName);
 
 }  // namespace

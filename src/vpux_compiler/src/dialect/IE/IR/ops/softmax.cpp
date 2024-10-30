@@ -20,8 +20,9 @@ mlir::LogicalResult vpux::IE::SoftMaxOp::inferReturnTypeComponents(
         return mlir::failure();
     }
 
-    const auto inType = softMax.getInput().getType().cast<mlir::ShapedType>();
-    inferredReturnShapes.emplace_back(inType.getShape(), inType.getElementType());
+    const auto inType = mlir::cast<mlir::RankedTensorType>(softMax.getInput().getType());
+    const auto outDesc = vpux::getTensorAttr(inType);
+    inferredReturnShapes.emplace_back(inType.getShape(), inType.getElementType(), outDesc);
 
     return mlir::success();
 }
@@ -44,9 +45,9 @@ mlir::OpFoldResult vpux::IE::SoftMaxOp::fold(FoldAdaptor) {
     }
 
     const auto valueType = mlir::RankedTensorType::get(inShape, mlir::Float32Type::get(getContext()));
-    const auto baseContent = Const::ContentAttr::get(mlir::DenseElementsAttr::get(valueType, 1.0f));
-
-    return baseContent.convertElemType(getOutput().getType().cast<mlir::ShapedType>().getElementType());
+    return Const::ContentAttr::transform(mlir::DenseElementsAttr::get(valueType, 1.0f))
+            .castElemType(getOutput().getType().cast<mlir::ShapedType>().getElementType())
+            .get();
 }
 
 //

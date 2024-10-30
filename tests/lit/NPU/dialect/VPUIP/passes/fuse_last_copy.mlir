@@ -263,6 +263,38 @@ func.func @FuseLastCopyWithGenericReshape(%arg0: memref<1x32x56x56x!qElemType, #
 // -----
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+!qElemType = !quant.uniform<u8:f16, 1.000000e+00>
+
+// CHECK-LABEL: func.func @FuseLastCopyWithShapeCast
+// CHECK-SAME:      [[INPUT:%arg[0-9]]]: memref<1x32x56x56x!qElemType, #NHWC, @CMX_NN>
+// CHECK-SAME:      [[OUTPUT:%arg[0-9]]]: memref<1x64x28x56x!qElemType, #NHWC, @DDR>
+func.func @FuseLastCopyWithShapeCast(%arg0: memref<1x32x56x56x!qElemType, #NHWC, @CMX_NN>,
+                                          %arg1: memref<1x64x28x56x!qElemType, #NHWC, @DDR>) -> memref<1x64x28x56x!qElemType, #NHWC, @DDR> {
+    %0 = memref.alloc() : memref<1x32x56x56x!qElemType, #NHWC, @DDR>
+    %1 = VPUIP.Copy
+        inputs(%arg0 : memref<1x32x56x56x!qElemType, #NHWC, @CMX_NN>)
+        outputs(%0 : memref<1x32x56x56x!qElemType, #NHWC, @DDR>) -> memref<1x32x56x56x!qElemType, #NHWC, @DDR>
+
+    %2 = VPUIP.ShapeCast {shape = [1, 64, 28, 56]} inputs(%1 : memref<1x32x56x56x!qElemType, #NHWC, @DDR>) -> memref<1x64x28x56x!qElemType, #NHWC, @DDR>
+    %3 = VPUIP.Copy inputs(%2 : memref<1x64x28x56x!qElemType, #NHWC, @DDR>)
+                    outputs(%arg1 : memref<1x64x28x56x!qElemType, #NHWC, @DDR>) -> memref<1x64x28x56x!qElemType, #NHWC, @DDR>
+
+    return %3 : memref<1x64x28x56x!qElemType, #NHWC, @DDR>
+
+    // CHECK:   [[VAL0:%.+]] = VPUIP.ShapeCast {shape = [1, 32, 56, 56]} inputs([[OUTPUT]] : memref<1x64x28x56x!qElemType, #NHWC, @DDR>) -> memref<1x32x56x56x!qElemType, #NHWC, @DDR>
+    // CHECK:   [[VAL1:%.+]] = VPUIP.Copy
+    // CHECK-SAME:      inputs([[INPUT]] : memref<1x32x56x56x!qElemType, #NHWC, @CMX_NN>)
+    // CHECK-SAME:      outputs([[VAL0]] : memref<1x32x56x56x!qElemType, #NHWC, @DDR>) -> memref<1x32x56x56x!qElemType, #NHWC, @DDR>
+
+    // CHECK-NOT:   VPUIP.ShapeCast
+    // CHECK-NOT:   VPUIP.Copy
+
+    // CHECK:       return [[OUTPUT]] : memref<1x64x28x56x!qElemType, #NHWC, @DDR>
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
 !InputDistributedType = !VPUIP.DistributedBuffer<
     1x64x1x1xf16, #NHWC, @CMX_NN, {
@@ -403,7 +435,6 @@ func.func @NoChangesDifferentMemSpace(%arg0: memref<1x16x4x4xf16, #NHWC>, %arg1 
 
     %2 = memref.alloc() : memref<1x16x2x2xf16, #NHWC, @CMX_NN>
     %3 = VPUIP.NCEClusterTask {
-            activation_window_channel_length = 27 : i64,
             kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
             kernel_size = [2, 2],
             kernel_strides = [2, 2],
@@ -411,7 +442,6 @@ func.func @NoChangesDifferentMemSpace(%arg0: memref<1x16x4x4xf16, #NHWC>, %arg1 
         }
         input(%1 : memref<1x16x4x4xf16, #NHWC, @CMX_NN>)
         weight_table(%arg1 : memref<16x1x1x4xsi32, @CMX_NN>)
-        activation_window(%arg2 : memref<16x1x1x16xui8, @CMX_NN>)
         parent_input(%1 : memref<1x16x4x4xf16, #NHWC, @CMX_NN>)
         parent_output(%2 : memref<1x16x2x2xf16, #NHWC, @CMX_NN>)
         outputs(%2 : memref<1x16x2x2xf16, #NHWC, @CMX_NN>) -> memref<1x16x2x2xf16, #NHWC, @CMX_NN>
@@ -465,7 +495,6 @@ func.func @NoChangesDifferentMemSpaceSparse(
     %out_data_0 = memref.alloc() : !IDataCMXType
     %out_sm_0 = memref.alloc() : !ISMCMXType
     %mp:2 = VPUIP.NCEClusterTask {
-            activation_window_channel_length = 27 : i64,
             kernel_padding = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 0 : i64, bottom = 1 : i64>,
             kernel_size = [2, 2],
             kernel_strides = [1, 1],
@@ -474,7 +503,6 @@ func.func @NoChangesDifferentMemSpaceSparse(
         input(%in_data_0 : !IDataCMXType)
         input_sparsity_map(%in_sm_0 : !ISMCMXType)
         weight_table(%arg1 : memref<16x1x1x4xsi32, @CMX_NN>)
-        activation_window(%arg2 : memref<16x1x1x16xui8, @CMX_NN>)
         parent_input(%in_data_0 : !IDataCMXType)
         parent_input_sparsity_map(%in_sm_0 : !ISMCMXType)
         parent_output(%out_data_0 : !IDataCMXType)

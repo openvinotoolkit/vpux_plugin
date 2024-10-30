@@ -170,7 +170,7 @@ mlir::OpFoldResult vpux::IE::TileOp::fold(FoldAdaptor adaptor) {
 
     auto operands = adaptor.getOperands();
     // move tile to const attribute as broadcast.
-    if (auto contentAttr = operands[0].dyn_cast_or_null<Const::ContentAttr>()) {
+    if (auto contentAttr = operands[0].dyn_cast_or_null<Const::EphemeralContentAttr>()) {
         const auto inputShape = to_small_vector(getShape(getInput()));
         const auto outputShape = to_small_vector(getShape(getOutput()));
         if (inputShape.size() != outputShape.size()) {
@@ -179,13 +179,15 @@ mlir::OpFoldResult vpux::IE::TileOp::fold(FoldAdaptor adaptor) {
             return nullptr;
         }
 
+        auto contentAttrSetup = static_cast<Const::ContentAttr>(contentAttr).transform();
+
         for (const auto& dim : enumerate(outputShape)) {
             if (dim.value() > 1 && dim.value() != inputShape[dim.index()]) {
-                contentAttr = contentAttr.broadcast(Dim(dim.index()), outputShape[dim.index()]);
+                contentAttrSetup = contentAttrSetup.broadcast(Dim(dim.index()), outputShape[dim.index()]);
             }
         }
 
-        return contentAttr;
+        return contentAttrSetup.get();
     }
     return nullptr;
 }

@@ -30,16 +30,17 @@ std::pair<Const::ContentAttr, SmallVector<float>> createContentAttrSameTransform
     const float baseValue = 1.0f;
     const auto baseType = mlir::RankedTensorType::get({numElements}, mlir::Float32Type::get(ctx));
     const auto baseAttr = mlir::DenseElementsAttr::get(baseType, baseValue);
-    auto contentAttr = Const::ContentAttr::get(baseAttr);
+    auto contentAttrSetup = Const::ContentAttr::transform(baseAttr);
 
     const size_t numTransformations = 5;
     for (size_t i = 0; i < numTransformations; ++i) {
-        contentAttr = contentAttr.add(1.0);
+        contentAttrSetup = contentAttrSetup.add(1.0);
     }
 
     const float expectedValue = baseValue + numTransformations;
     SmallVector<float> expectedFoldedResults(numElements, expectedValue);
 
+    auto contentAttr = contentAttrSetup.get();
     return std::make_pair(contentAttr, expectedFoldedResults);
 }
 
@@ -48,8 +49,12 @@ std::pair<Const::ContentAttr, SmallVector<float>> createContentAttrMixedTransfor
     const float baseValue = 0.0f;
     const auto baseType = mlir::RankedTensorType::get({numElements}, mlir::Float32Type::get(ctx));
     const auto baseAttr = mlir::DenseElementsAttr::get(baseType, baseValue);
-    auto contentAttr = Const::ContentAttr::get(baseAttr);
-    contentAttr = contentAttr.padWithZero({10}, {10}).add(1.0).rescale(3.0).subview({0}, {numElements});
+    auto contentAttr = Const::ContentAttr::transform(baseAttr)
+                               .padWithZero({10}, {10})
+                               .add(1.0)
+                               .rescale(3.0)
+                               .subview({0}, {numElements})
+                               .get();
 
     const float expectedValue = 3.0f;
     SmallVector<float> expectedFoldedResults(numElements, expectedValue);
@@ -86,9 +91,7 @@ void compile(mlir::MLIRContext* ctx, size_t numFoldingThreads, std::chrono::mill
 }
 
 TEST_P(ConstantFoldingInBackground, CompilationFlow) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
+    auto registry = vpux::createDialectRegistry();
 
     const auto numFoldingThreads = GetParam();
 
@@ -106,9 +109,7 @@ TEST_P(ConstantFoldingInBackground, CompilationFlow) {
 }
 
 TEST_P(ConstantFoldingInBackground, MultipleCompilations) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
+    auto registry = vpux::createDialectRegistry();
 
     const auto numFoldingThreads = GetParam();
 
@@ -158,9 +159,7 @@ INSTANTIATE_TEST_SUITE_P(MLIRThreading, ConstantFoldingInBackground, testing::Va
 using ConstantFoldingInBackgroundUnit = MLIR_UnitBase;
 
 TEST_F(ConstantFoldingInBackgroundUnit, EquivalenceRequest) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
+    auto registry = vpux::createDialectRegistry();
 
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<Const::ConstDialect>();
@@ -181,7 +180,8 @@ TEST_F(ConstantFoldingInBackgroundUnit, EquivalenceRequest) {
     auto contentAttr = Const::ContentAttr::get(baseAttr);
 
     // `subview` sends folding requests to the background threads
-    auto contentAttr1 = contentAttr.subview(Shape({0}), Shape({50})).subview(Shape({10}), Shape({30}));
+    auto contentAttr1 =
+            contentAttr.transform().subview(Shape({0}), Shape({50})).subview(Shape({10}), Shape({30})).get();
 
     // Manually creating a ContentAttr will not sent a folding request, so an equivalence request is manually sent
     auto optimizedSubviewTransformation = Const::SubViewAttr::get(getIntArrayAttr(&ctx, SmallVector<int64_t>({0})),
@@ -190,8 +190,8 @@ TEST_F(ConstantFoldingInBackgroundUnit, EquivalenceRequest) {
     auto& cacheManager = Const::ConstantFoldingCacheManager::getInstance();
     ASSERT_TRUE(cacheManager.contains(&ctx));
     auto& cache = cacheManager.get(&ctx);
-    auto equivalenceRequest = Const::EquivalenceRequestAttr::get(&ctx, contentAttr1, contentAttr2);
-    cache.enqueueRequest(Const::FoldingRequest{equivalenceRequest, /*newTransformation=*/nullptr});
+    auto equivalenceRequest = Const::EquivalenceRequest{contentAttr1, contentAttr2};
+    cache.enqueueRequest(Const::FoldingRequest{std::move(equivalenceRequest), /*newTransformation=*/nullptr});
 
     std::this_thread::sleep_for(100ms);
 

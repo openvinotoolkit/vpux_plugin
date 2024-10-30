@@ -8,7 +8,6 @@
 #include "vpux/compiler/dialect/IE/IR/ops_interfaces.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops_interfaces.hpp"
-#include "vpux/compiler/dialect/VPUIP/graph-schema/blob_writer.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 
 #include "vpux/utils/core/small_string.hpp"
@@ -22,8 +21,6 @@
 
 namespace vpux {
 namespace VPUIP {
-
-class BlobWriter;
 
 //
 // LayerOpInterface
@@ -55,24 +52,6 @@ void getTaskEffects(mlir::Operation* op, SmallVectorImpl<MemoryEffect>& effects)
 IndexedSymbolAttr getExecutorAttr(mlir::Operation* op, VPU::ExecutorKind kind);
 
 IndexedSymbolAttr getTaskOpExecutor(mlir::Operation* op);
-
-//
-// UPATask
-//
-
-mlir::LogicalResult verifyUPATask(mlir::Operation* op);
-
-template <typename ConcreteOp>
-class UPATask : public mlir::OpTrait::TraitBase<ConcreteOp, UPATask> {
-public:
-    static mlir::LogicalResult verifyTrait(mlir::Operation* op) {
-        return verifyUPATask(op);
-    }
-
-    static VPU::ExecutorKind getExecutorKind() {
-        return VPU::ExecutorKind::SHAVE_UPA;
-    }
-};
 
 //
 // Legacy4D

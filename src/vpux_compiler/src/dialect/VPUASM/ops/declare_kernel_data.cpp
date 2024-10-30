@@ -29,12 +29,8 @@ size_t vpux::VPUASM::DeclareKernelDataOp::getAlignmentRequirements() {
     return ELF::VPUX_SHAVE_ALIGNMENT;
 }
 
-vpux::ELF::SectionFlagsAttr vpux::VPUASM::DeclareKernelDataOp::getAccessingProcs(mlir::SymbolUserMap&) {
+vpux::ELF::SectionFlagsAttr vpux::VPUASM::DeclareKernelDataOp::getPredefinedMemoryAccessors() {
     return ELF::SectionFlagsAttr::VPU_SHF_PROC_SHAVE;
-}
-
-vpux::ELF::SectionFlagsAttr vpux::VPUASM::DeclareKernelDataOp::getUserProcs() {
-    return ELF::SectionFlagsAttr::SHF_NONE;
 }
 
 std::optional<ELF::SectionSignature> vpux::VPUASM::DeclareKernelDataOp::getSectionSignature() {

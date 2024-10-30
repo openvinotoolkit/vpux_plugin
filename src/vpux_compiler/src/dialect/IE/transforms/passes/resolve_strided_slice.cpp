@@ -7,6 +7,7 @@
 
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
+#include "vpux/compiler/utils/rewriter.hpp"
 
 #include <mlir/Transforms/DialectConversion.h>
 #include <openvino/op/util/slice_plan.hpp>
@@ -100,10 +101,10 @@ mlir::LogicalResult ResolveStridedSlicePass::SlicePlanning::matchAndRewrite(IE::
         const auto stridesAttr = getIntArrayAttr(getContext(), plan.strides);
         const auto zeroesArrayAttr = getIntArrayAttr(getContext(), SmallVector<int64_t>(plan.begins.size(), 0));
 
-        newOp = rewriter.create<IE::StridedSliceOp>(origOp->getLoc(), origOp.getInput(), origOp.getBegins(),
-                                                    origOp.getEnds(), origOp.getStrides(), beginAttr, endsAttr,
-                                                    stridesAttr, zeroesArrayAttr, zeroesArrayAttr, zeroesArrayAttr,
-                                                    zeroesArrayAttr, zeroesArrayAttr);
+        newOp = rewriter.create<IE::StridedSliceOp>(takeOpLoc(origOp, "slice_in"), origOp.getInput(),
+                                                    origOp.getBegins(), origOp.getEnds(), origOp.getStrides(),
+                                                    beginAttr, endsAttr, stridesAttr, zeroesArrayAttr, zeroesArrayAttr,
+                                                    zeroesArrayAttr, zeroesArrayAttr, zeroesArrayAttr);
     } else {
         auto source = origOp.getInput();
         if (!reverseAxis.empty()) {
@@ -118,12 +119,13 @@ mlir::LogicalResult ResolveStridedSlicePass::SlicePlanning::matchAndRewrite(IE::
             sliceShape[axis] = 1;
             for (int64_t i = 0; i < sliceNums; i++) {
                 sliceOffset[axis] = i;
-                concatInputs.push_back(
-                        rewriter.create<IE::SliceOp>(origOp.getLoc(), source, sliceOffset, sliceShape).getResult());
+                concatInputs.push_back(rewriter.create<IE::SliceOp>(takeOpLoc(origOp, StringLiteral("slice_{0}"), i),
+                                                                    source, sliceOffset, sliceShape)
+                                               .getResult());
             }
             std::reverse(concatInputs.begin(), concatInputs.end());
 
-            auto concatOp = rewriter.create<IE::ConcatOp>(origOp.getLoc(), concatInputs, Dim(axis));
+            auto concatOp = rewriter.create<IE::ConcatOp>(takeOpLoc(origOp, "concat_in"), concatInputs, Dim(axis));
             source = concatOp.getOutput();
         }
         auto sizes = std::vector<int64_t>(plan.ends.size());
@@ -142,11 +144,12 @@ mlir::LogicalResult ResolveStridedSlicePass::SlicePlanning::matchAndRewrite(IE::
             newBegin.erase(newBegin.begin() + index);
             beginAttr = getIntArrayAttr(getContext(), newBegin);
             newInputShape.erase(newInputShape.begin() + index);
-            source = mlir::cast<mlir::TypedValue<mlir::RankedTensorType>>(rewriter.createOrFold<IE::ReshapeOp>(
-                    origOp->getLoc(), source, nullptr, false, getIntArrayAttr(getContext(), newInputShape)));
+            source = mlir::cast<mlir::TypedValue<mlir::RankedTensorType>>(
+                    rewriter.createOrFold<IE::ReshapeOp>(takeOpLoc(origOp, StringLiteral("slice_{0}"), index), source,
+                                                         nullptr, false, getIntArrayAttr(getContext(), newInputShape)));
         }
         const auto endsAttr = getIntArrayAttr(getContext(), sizes);
-        newOp = rewriter.create<IE::SliceOp>(origOp->getLoc(), source, beginAttr, endsAttr);
+        newOp = rewriter.create<IE::SliceOp>(takeOpLoc(origOp, "slice_source"), source, beginAttr, endsAttr);
     }
 
     auto outputShape = plan.reshape_out_shape;
@@ -154,7 +157,9 @@ mlir::LogicalResult ResolveStridedSlicePass::SlicePlanning::matchAndRewrite(IE::
         outputShape.push_back(1);
     }
     const auto outputShapeAttr = getIntArrayAttr(getContext(), outputShape);
-    rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, newOp->getResult(0), nullptr, false, outputShapeAttr);
+    auto outReshape =
+            rewriter.replaceOpWithNewOp<IE::ReshapeOp>(origOp, newOp->getResult(0), nullptr, false, outputShapeAttr);
+    extendOpLoc(outReshape, "reshape_out");
 
     _log.trace("Replaced with 'IE::StridedSlice' -> 'IE::Reshape'");
 

@@ -18,6 +18,7 @@
 #include <chrono>
 #include <cstdio>
 #include <mutex>
+#include <optional>
 
 using namespace vpux;
 
@@ -38,6 +39,12 @@ void vpux::globalLogCb(const formatv_object_base& msg) {
 static const char* logLevelPrintout[] = {"NONE", "FATAL", "ERROR", "WARNING", "INFO", "DEBUG", "TRACE"};
 
 Logger& vpux::Logger::global() {
+    static std::optional<Logger> globalLogger = std::nullopt;
+
+    if (globalLogger.has_value()) {
+        return globalLogger.value();
+    }
+
 #if defined(VPUX_DEVELOPER_BUILD) || !defined(NDEBUG)
     LogLevel logLvl = LogLevel::Warning;
     if (const auto env = std::getenv("OV_NPU_LOG_LEVEL")) {
@@ -56,12 +63,12 @@ Logger& vpux::Logger::global() {
             logLvl = LogLevel::Trace;
         }
     }
-    static Logger log("global", logLvl);
+    globalLogger = Logger("global", logLvl);
 #else
-    static Logger log("global", LogLevel::None);
+    globalLogger = Logger("global", LogLevel::None);
 #endif
 
-    return log;
+    return globalLogger.value();
 }
 
 vpux::Logger::Logger(StringLiteral name, LogLevel lvl): _name(name), _logLevel(lvl) {

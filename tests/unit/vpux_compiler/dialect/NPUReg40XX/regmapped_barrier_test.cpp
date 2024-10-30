@@ -46,5 +46,5 @@ std::vector<std::pair<MappedRegValues, nn_public::VpuBarrierCountConfig>> barrie
          CREATE_HW_DMA_DESC(real_id_, 0xFF)},
 };
 
-INSTANTIATE_TEST_CASE_P(NPUReg40XX_MappedRegs, NPUReg40XX_NpuBarrierCountConfigTest,
-                        testing::ValuesIn(barrierFieldSet));
+INSTANTIATE_TEST_SUITE_P(NPUReg40XX_MappedRegs, NPUReg40XX_NpuBarrierCountConfigTest,
+                         testing::ValuesIn(barrierFieldSet));

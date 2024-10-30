@@ -32,8 +32,7 @@ std::unique_ptr<mlir::Pass> createSetupProfilingVPUMI40XXPass(
 std::unique_ptr<mlir::Pass> createBarrierComputationPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> reorderMappedInferenceOpsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createResolveTaskLocationPass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createBarrierTopologicalMappingPass(const int barrierThreshold = 3000,
-                                                                Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createBarrierTopologicalMappingPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createGroupExecutionOpsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createUnGroupExecutionOpsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createWorkloadManagementPass(Logger log = Logger::global());

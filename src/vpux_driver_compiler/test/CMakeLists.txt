@@ -5,6 +5,10 @@
 
 add_subdirectory(functional)
 
+if(ENABLE_PREBUILT_LLVM_MLIR_LIBS)
+    find_package(MLIR REQUIRED CONFIG)
+endif()
+
 # compilerTest as somke test
 add_executable(compilerTest compilerTest.c)
 target_link_libraries(compilerTest PUBLIC npu_driver_compiler)

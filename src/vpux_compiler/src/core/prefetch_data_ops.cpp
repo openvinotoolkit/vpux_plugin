@@ -347,9 +347,8 @@ void PrefetchDataOps::createDataOpPipeline() {
     // reset for second scheduling iteration with defined DMA order
     _operationCycles.clear();
     _executorPipelineCycles = {{VPU::ExecutorKind::DMA_NN, {}},    {VPU::ExecutorKind::DPU, {}},
-                               {VPU::ExecutorKind::SHAVE_UPA, {}}, {VPU::ExecutorKind::NCE, {}},
-                               {VPU::ExecutorKind::SHAVE_NN, {}},  {VPU::ExecutorKind::SHAVE_ACT, {}},
-                               {VPU::ExecutorKind::M2I, {}}};
+                               {VPU::ExecutorKind::NCE, {}},       {VPU::ExecutorKind::SHAVE_NN, {}},
+                               {VPU::ExecutorKind::SHAVE_ACT, {}}, {VPU::ExecutorKind::M2I, {}}};
 }
 
 void PrefetchDataOps::sortOps(SmallVector<CycleInfo>& toBeSorted) {

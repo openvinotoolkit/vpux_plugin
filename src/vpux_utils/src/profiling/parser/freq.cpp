@@ -63,32 +63,31 @@ FrequenciesSetup get40XXSetup(uint16_t pllMult, bool highFreqPerfClk) {
             highFreqPerfClk ? ProfClk40XX::PROF_CLK_HIGHFREQ_VALUE_MHZ : ProfClk40XX::PROF_CLK_DEFAULT_VALUE_MHZ);
 }
 
-FrequenciesSetup getFpgaFreqSetup(MVCNN::TargetDevice device) {
+FrequenciesSetup getFpgaFreqSetup(TargetDevice device) {
     switch (device) {
-    case MVCNN::TargetDevice::TargetDevice_VPUX40XX:
+    case TargetDevice::TargetDevice_VPUX40XX:
         return getFreqSetup40XXHelper(2.86, 5.0, 1.176);
     default:
-        VPUX_THROW("TargetDevice {0} is not supported ", MVCNN::EnumNameTargetDevice(device));
+        VPUX_THROW("TargetDevice {0} is not supported ", EnumNameTargetDevice(device));
     }
 }
 
-FrequenciesSetup getFreqSetupFromPll(MVCNN::TargetDevice device, uint16_t pll, bool highFreqPerfClk) {
+FrequenciesSetup getFreqSetupFromPll(TargetDevice device, uint16_t pll, bool highFreqPerfClk) {
     switch (device) {
-    case MVCNN::TargetDevice::TargetDevice_VPUX37XX:
+    case TargetDevice::TargetDevice_VPUX37XX:
         VPUX_THROW_WHEN(highFreqPerfClk, "Requested perf_clk high frequency value is not supported on this device.");
         return get37XXSetup(pll);
-    case MVCNN::TargetDevice::TargetDevice_VPUX40XX:
+    case TargetDevice::TargetDevice_VPUX40XX:
         return get40XXSetup(pll, highFreqPerfClk);
     default:
-        VPUX_THROW("TargetDevice {0} is not supported ", MVCNN::EnumNameTargetDevice(device));
+        VPUX_THROW("TargetDevice {0} is not supported ", EnumNameTargetDevice(device));
     }
 }
 
 }  // namespace
 
-FrequenciesSetup vpux::profiling::getFrequencySetup(const MVCNN::TargetDevice device,
-                                                    const WorkpointRecords& workpoints, bool highFreqPerfClk, bool fpga,
-                                                    vpux::Logger& log) {
+FrequenciesSetup vpux::profiling::getFrequencySetup(const TargetDevice device, const WorkpointRecords& workpoints,
+                                                    bool highFreqPerfClk, bool fpga, vpux::Logger& log) {
     FrequenciesSetup frequenciesSetup;
 
     if (fpga) {

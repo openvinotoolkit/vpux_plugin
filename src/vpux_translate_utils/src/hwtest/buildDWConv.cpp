@@ -9,6 +9,7 @@
 
 #include <mlir/Dialect/Quant/QuantTypes.h>
 
+#include "vpux/compiler/dialect/VPU/transforms/factories/nce_sparsity_converters.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
@@ -52,6 +53,17 @@ SmallVector<int64_t> getWeightsPaddedShape(ArrayRef<int64_t> wt_shape) {
 
 void buildDWConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module, mlir::OpBuilder builder,
                  Logger& log, mlir::Type inputType, mlir::Type weightsType, mlir::Type outputType) {
+    // set runtime resources
+    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
+
+    mlir::PassManager pmBuilderInit(module->getName(), mlir::OpPassManager::Nesting::Implicit);
+    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.numberOfDPUGroups = 1;
+    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
+
+    VPU::buildInitCompilerPipeline(pmBuilderInit, initCompilerOptions, log);
+    VPUX_THROW_UNLESS(mlir::succeeded(pmBuilderInit.run(module)), "Init compilation failed");
+
     auto* ctx = builder.getContext();
     auto loc = builder.getUnknownLoc();
 
@@ -116,13 +128,14 @@ void buildDWConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp modu
 
     auto wt_data_vals =
             generateWeights(builder, wt_data_shape_padded, weightsType, builder.getContext(), weight_file_name);
-    auto wt_data_attr = Const::ContentAttr::get(wt_data_vals);
+    auto wt_data_attr_setup = Const::ContentAttr::transform(wt_data_vals);
     if (auto qty = weightsType.dyn_cast<mlir::quant::QuantizedType>()) {
-        wt_data_attr = wt_data_attr.quantCast(qty);
+        wt_data_attr_setup = wt_data_attr_setup.quantCast(qty);
     }
 
-    auto weight_data_ddr = funcbuilder.create<Const::DeclareOp>(builder.getUnknownLoc(), weightData_ddr_type,
-                                                                wt_data_attr.reorder(DimsOrder::NHWC));
+    auto wt_data_attr = wt_data_attr_setup.reorder(DimsOrder::NHWC).get();
+    auto weight_data_ddr =
+            funcbuilder.create<Const::DeclareOp>(builder.getUnknownLoc(), weightData_ddr_type, std::move(wt_data_attr));
 
     // weights cmx tensor
     auto wtData_cmx_type =
@@ -132,7 +145,7 @@ void buildDWConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp modu
                                             /*data idx=*/WEIGHTS_CMX_OFFSET);
 
     auto weight_padded_totalsize = totalTensorSize(wt_data_shape_padded, weightsType);
-    const auto ACTIVATIONWINDOW_CMX_OFFSET = WEIGHTS_CMX_OFFSET + weight_padded_totalsize;
+    const auto WEIGHTSTABLE_CMX_OFFSET = WEIGHTS_CMX_OFFSET + weight_padded_totalsize;
 
     // input - output cmx tensors
     auto inputcmx_type = getMemRefType(VPURT::BufferSection::CMX_NN, 0, in_shape, inputType, DimsOrder::NHWC);
@@ -165,47 +178,6 @@ void buildDWConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp modu
             funcbuilder, mlir::ValueRange(), mlir::ValueRange(barrier0.getBarrier()), loc,
             weight_data_ddr.getOperation()->getResult(0), wtData_cmx.getOperation()->getResult(0), 0);
 
-    // Activation Window ddr
-    const auto bitPatternSize = VPU::NCESparsity::getBitPatternSize(
-            VPU::NCESparsity::Mode::DW_CONV, ShapeRef(filter_size), stried_vec[1],
-            inputType.isa<mlir::quant::QuantizedType>() ? inputType.cast<mlir::quant::QuantizedType>().getStorageType()
-                                                        : inputType,
-            in_shape[1]);
-    mlir::IntegerAttr actChannelLength = funcbuilder.getI32IntegerAttr(checked_cast<int32_t>(bitPatternSize));
-
-    const auto fakeSparsity = VPU::NCESparsity::getFakeSparsity(
-            VPU::NCESparsity::Mode::DW_CONV, ShapeRef(filter_size), stried_vec[1],
-            inputType.isa<mlir::quant::QuantizedType>() ? inputType.cast<mlir::quant::QuantizedType>().getStorageType()
-                                                        : inputType,
-            in_shape[1]);
-
-    const auto sparsity_type = getUInt8Type(ctx);
-    SmallVector<int64_t> sparsity_shape{1, 1, 1, static_cast<int64_t>(fakeSparsity.size())};
-
-    const auto dataStorageType = mlir::RankedTensorType::get(sparsity_shape, sparsity_type);
-    const auto sparsityAttr = mlir::DenseElementsAttr::get(dataStorageType, ArrayRef(fakeSparsity));
-
-    auto activationWindow_ddr_type =
-            getMemRefType(VPURT::BufferSection::Constant, sparsity_shape, sparsity_type, DimsOrder::NHWC);
-    auto activationWindow_ddr =
-            funcbuilder.create<Const::DeclareOp>(builder.getUnknownLoc(), activationWindow_ddr_type,
-                                                 Const::ContentAttr::get(sparsityAttr).reorder(DimsOrder::NHWC));
-
-    auto activationwindow_totalsize = totalTensorSize(sparsity_shape, sparsity_type);
-    auto activationwindow_totalsize_bytes = activationwindow_totalsize * sparsity_type.getIntOrFloatBitWidth() / 8;
-
-    // Activation Window cmx
-    auto actWindow_cmx_type =
-            getMemRefType(VPURT::BufferSection::CMX_NN, 0, sparsity_shape, sparsity_type, DimsOrder::NHWC);
-    auto actWindow_cmx =
-            createDeclareTensorOp(funcbuilder, actWindow_cmx_type, VPURT::BufferSection::CMX_NN, /*locale index=*/0,
-                                  /*data idx=*/ACTIVATIONWINDOW_CMX_OFFSET);
-
-    // activation window dma ddr->cmx
-    vpux::VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(
-            funcbuilder, mlir::ValueRange(), mlir::ValueRange(barrier0.getBarrier()), loc,
-            activationWindow_ddr.getOperation()->getResult(0), actWindow_cmx.getOperation()->getResult(0), 0);
-
     // weights table ddr tensor
     auto weights_outChannel = wtData_cmx_type.getShape()[0];
     SmallVector<int64_t> wtTbl_data_shape{weights_outChannel, 1, 1, 4};
@@ -226,20 +198,21 @@ void buildDWConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp modu
     auto weights_set_nbytes = weights_set_size * elementsize_bytes;
 
     const auto sparsityPtrStep = 0;
+    const auto ppeConverter = VPU::NCESparsity::getPPEConverterCb(arch);
+    const auto biasConverter = VPU::NCESparsity::getBiasConverterCb(arch);
     const std::vector<int32_t> wtTbl_data_values_vec = VPU::NCESparsity::getWeightsTable(
             inputType, outputType, static_cast<int32_t>(WEIGHTS_CMX_OFFSET), static_cast<int32_t>(weights_set_nbytes),
-            static_cast<int32_t>(ACTIVATIONWINDOW_CMX_OFFSET), sparsityPtrStep, arch, weights_outChannel, weightsType);
+            0, sparsityPtrStep, ppeConverter, biasConverter, weights_outChannel, weightsType);
 
     auto wtTbl_data_values = ArrayRef<int32_t>(wtTbl_data_values_vec);
     auto wtTbl_data_vals = mlir::DenseElementsAttr::get(wtTblData_ddr_valueType, wtTbl_data_values);
-    auto weightTbl_data_ddr =
-            funcbuilder.create<Const::DeclareOp>(builder.getUnknownLoc(), weightTblData_ddr_type,
-                                                 Const::ContentAttr::get(wtTbl_data_vals).reorder(DimsOrder::NHWC));
+    auto weightTbl_data_ddr = funcbuilder.create<Const::DeclareOp>(
+            builder.getUnknownLoc(), weightTblData_ddr_type,
+            Const::ContentAttr::transform(wtTbl_data_vals).reorder(DimsOrder::NHWC).get());
 
     // weights table cmx tensor
     auto wtTbl_cmx_type = getMemRefType(VPURT::BufferSection::CMX_NN, 0, wtTbl_data_shape,
                                         builder.getIntegerType(32, /*isSigned=*/true), DimsOrder::NHWC);
-    const auto WEIGHTSTABLE_CMX_OFFSET = ACTIVATIONWINDOW_CMX_OFFSET + activationwindow_totalsize_bytes;
 
     auto wtTbl_cmx =
             createDeclareTensorOp(funcbuilder, wtTbl_cmx_type, VPURT::BufferSection::CMX_NN, /*locale index=*/0,
@@ -260,23 +233,28 @@ void buildDWConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp modu
             funcbuilder, mlir::ValueRange(barrier0.getBarrier()), mlir::ValueRange(barrier1.getBarrier()), loc,
             outputcmx_type, inputcmx.getOperation()->getResult(0), wtData_cmx.getOperation()->getResult(0),
             wtTbl_cmx.getOperation()->getResult(0), /*instruction_table_list*/ nullptr, /*spr_lookup_table*/ nullptr,
-            actWindow_cmx.getOperation()->getResult(0), parent_inputcmx.getOperation()->getResult(0),
-            parent_outputcmx.getOperation()->getResult(0), outputcmx.getOperation()->getResult(0),
-            VPUIP::NCETaskType::DWCONV, filtersize, strides, kernel_padding, actChannelLength, /*is_continued*/ nullptr,
+            parent_inputcmx.getOperation()->getResult(0), parent_outputcmx.getOperation()->getResult(0),
+            outputcmx.getOperation()->getResult(0), VPUIP::NCETaskType::DWCONV, filtersize, strides, kernel_padding,
+            /*is_continued*/ nullptr,
             /*sp_pattern*/ nullptr);
 
     int64_t clampLow = std::numeric_limits<int32_t>::min();
     int64_t clampHigh = std::numeric_limits<int32_t>::max();
     int64_t bypassMult = 1;
     int64_t bypassShift = 0;
-
     if (auto outElemQType = outputType.template dyn_cast<mlir::quant::QuantizedType>()) {
         const auto zps = extractScalesAndZeroPoints(outputType).second;
-
         clampLow = outElemQType.getStorageTypeMin() - zps.front();
         clampHigh = outElemQType.getStorageTypeMax() - zps.front();
     }
-    nceTask.addPPETask(funcbuilder, VPU::PPEMode::NOOP, clampLow, clampHigh, bypassMult, bypassShift);
+    auto ppeAttr = VPU::PPEIntAttr::get(
+            ctx, VPU::PPEModeAttr::get(ctx, VPU::PPEMode::NOOP), vpux::getIntAttr(ctx, clampLow),
+            vpux::getIntAttr(ctx, clampHigh), vpux::getIntAttr(ctx, bypassMult), vpux::getIntAttr(ctx, bypassShift),
+            /* quantScale = */ nullptr, /* quantMult = */ nullptr, /* quantShift = */ nullptr,
+            /* quantPostShift = */ nullptr, /* in1QuantMult = */ nullptr,
+            /* in2QuantMult = */ nullptr,
+            /* fpPreluAlpha = */ nullptr);
+    nceTask.addPPETask(funcbuilder, ppeAttr);
 
     // Create DPU task for NCE task
 
@@ -297,16 +275,6 @@ void buildDWConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp modu
 
     // TODO : return empty as func does not return anything
     /* auto returnOp = */ funcbuilder.create<mlir::func::ReturnOp>(builder.getUnknownLoc(), funcoutput);
-
-    // set runtime resources
-    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
-    mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    auto initCompilerOptions = VPU::InitCompilerOptions(arch, VPU::CompilationMode::DefaultHW);
-    initCompilerOptions.numberOfDPUGroups = 1;
-    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
-    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
-
-    VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");
 
     // IE.CNNNetwork
     buildCNNOp(builder, func.getName(), {getTensorType(ShapeRef(in_shape), inputType, DimsOrder::NHWC, nullptr)},

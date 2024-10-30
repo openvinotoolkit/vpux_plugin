@@ -52,7 +52,7 @@ def NPUReg40XX_NNDMAOp :
 
     let arguments = (ins
         SymbolNameAttr:$sym_name,
-        VPURegMapped_RegisterMappedAttr:$dma_descriptor,
+        DMADescriptorAttr:$dma_descriptor,
         SymbolRefAttr:$input,
         SymbolRefArrayAttr:$output_buffs,
         OptionalAttr<SymbolRefAttr>:$next_link,
@@ -289,7 +289,12 @@ def NPUReg40XX_ManagedMappedInferenceOp :
         I64Attr:$workItemsCount,
         I64Attr:$taskConfigsCount,
         I64Attr:$bootsrapWorkItemsCount,
-        I64Attr:$bootstrapTaskCount
+        I64Attr:$bootstrapTaskCount,
+        UI8Attr:$actshv_used,
+        UI8Attr:$dpu_used,
+        UI8Attr:$media_used,
+        UI8Attr:$dma_from_ddr_used,
+        UI8Attr:$dma_from_cmx_used
     );
 }
 

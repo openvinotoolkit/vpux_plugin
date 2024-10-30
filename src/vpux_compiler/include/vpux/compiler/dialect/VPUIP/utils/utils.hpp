@@ -22,6 +22,12 @@ namespace vpux {
 namespace VPUIP {
 
 //
+// AttributeName for the barrier count in module
+//
+
+constexpr StringLiteral numberOfVirtualBarriers = "numberOfVirtualBarriers";
+
+//
 // Profiling
 //
 
@@ -42,18 +48,12 @@ constexpr uint16_t HW_DPU_PROFILING_SIZE_BYTES_37XX = 16;
 constexpr uint16_t HW_DPU_PROFILING_SIZE_BYTES_40XX = 32;
 constexpr uint32_t HW_DPU_PROFILING_MAX_BUFFER_SIZE =
         1024;  // Up to 64 DPU Tasks in single CMX DPU profiling buffer instance
-// UPA Profiling consist of 2 64bit timestamps(start and stop) + 2 32bit for active and stall counters
-constexpr uint16_t HW_UPA_PROFILING_SIZE_BYTES = 24;
 // ActShave Profiling buffer: 64bit start timestamp + 32bit duration + 4 32bit counters + 32 bit reserved
 constexpr uint16_t HW_ACT_SHAVE_PROFILING_SIZE_BYTES = 32;
 // ActShave Profiling buffer size in bytes
 constexpr uint32_t HW_ACT_SHAVE_PROFILING_MAX_BUFFER_SIZE = 256;
 // M2I Profiling buffer size in bytes
 constexpr uint32_t HW_M2I_PROFILING_MAX_BUFFER_SIZE = 128;
-// 3720 architecture has 2 Mb CMX size. This define describes its half.
-constexpr uint32_t HW_MIDDLE_OF_AVAILABLE_CMX_MEMORY_3720 = (1024 * 1024);
-// 4000 arch has 1.4 Mb of CMX memory available
-constexpr uint32_t HW_AVAILABLE_CMX_SIZE_4000 = 1024 * 1432;
 
 // SW Kernel reads a few bytes of data for better performance
 // 1024 bytes is safe for 40XX+
@@ -73,6 +73,13 @@ const EnumMap<VPU::ArchKind, size_t> firmwareVariantCount = {
 };
 
 uint16_t getProfWorkloadSize(mlir::ModuleOp module);
+
+//
+// Compile time info
+//
+
+bool hasMaxKernelSize(mlir::Operation* op);
+int64_t getMaxKernelSize(mlir::Operation* op);
 
 //
 // Run-time info
@@ -173,8 +180,38 @@ int64_t getSOHMinimalHeightAlignment(vpux::ShapeRef shape, int64_t numClusters, 
 int64_t getSpecificAxisFromAttr(mlir::ArrayAttr attr);
 
 template <typename DistType>
-VPU::DistributedTensorAttr getSOHDistAttrWithNewShape(mlir::MLIRContext* ctx, DistType origDistType, ShapeRef newShape,
-                                                      VPU::ArchKind arch) {
+bool areDistributedTypePerClusterDataCompatible(DistType inDistType, DistType outDistType) {
+    // Check per-cluster shape compatible
+    const auto inPerClusterShapes = inDistType.getPerClusterMemoryShapes();
+    const auto inPerClusterShapeOffsets = inDistType.getPerClusterMemoryShapeOffsets();
+    const auto outPerClusterShapes = outDistType.getPerClusterMemoryShapes();
+    const auto outPerClusterShapeOffsets = outDistType.getPerClusterMemoryShapeOffsets();
+    const auto inStrides = inDistType.getStrides();
+    const auto outStrides = outDistType.getStrides();
+    const auto calcBufferOffset = [](ShapeRef shapeOffset, Strides strides) {
+        Byte bufOffset{0};
+        for (size_t axis = 0; axis < strides.size(); axis++) {
+            bufOffset += shapeOffset[Dim(axis)] * static_cast<Byte>(strides[Dim(axis)]);
+        }
+        return bufOffset.count();
+    };
+    const auto isPerClusterCompatible = [&](ShapeRef inShape, ShapeRef outShape, ShapeRef inShapeOffset,
+                                            ShapeRef outShapeOffset) {
+        if (inShape.totalSize() != outShape.totalSize()) {
+            return false;
+        }
+        const auto inDataOffset = calcBufferOffset(inShapeOffset, inStrides);
+        const auto outDataOffset = calcBufferOffset(outShapeOffset, outStrides);
+
+        return inDataOffset == outDataOffset;
+    };
+    return llvm::all_of_zip(inPerClusterShapes, outPerClusterShapes, inPerClusterShapeOffsets,
+                            outPerClusterShapeOffsets, isPerClusterCompatible);
+}
+
+template <typename DistType>
+VPU::DistributionInfoAttr getSOHDistAttrWithNewShape(mlir::MLIRContext* ctx, DistType origDistType, ShapeRef newShape,
+                                                     VPU::ArchKind arch) {
     const auto origDistAttr = origDistType.getDistribution();
     VPUX_THROW_UNLESS(VPU::isSegmentedOverH(origDistAttr), "Input dist type is not SEGMENTED over H");
 
@@ -190,14 +227,25 @@ VPU::DistributedTensorAttr getSOHDistAttrWithNewShape(mlir::MLIRContext* ctx, Di
             newHeightAlignment == 1 ? nullptr : getIntArrayAttr(ctx, SmallVector<int64_t>{1, 1, newHeightAlignment, 1});
 
     if (!VPU::isDistributedAttrWithExplicitShapesAndOffsets(origDistAttr)) {
-        return VPU::DistributedTensorAttr::get(ctx, origDistAttr.getMode(), origDistAttr.getNumTiles(),
-                                               origDistAttr.getKernel(), origDistAttr.getPads(),
-                                               origDistAttr.getStrides(), origDistAttr.getNumClusters(), newAlignment,
-                                               origDistAttr.getUniformDistributedSegments(), nullptr, nullptr, nullptr,
-                                               nullptr, origDistAttr.getEqualMemoryAndComputeView());
+        auto notAlignedDistAttr = VPU::DistributionInfoAttr::get(
+                ctx, origDistAttr.getMode(), origDistAttr.getNumTiles(), origDistAttr.getKernel(),
+                origDistAttr.getPads(), origDistAttr.getStrides(), origDistAttr.getNumClusters(), nullptr,
+                origDistAttr.getUniformDistributedSegments(), nullptr, nullptr, nullptr, nullptr,
+                origDistAttr.getEqualMemoryAndComputeView());
+        auto newDistType = DistType::get(ctx, newShape, origDistType.getElementType(),
+                                         mlir::AffineMapAttr::get(origDistType.getDimsOrder().toAffineMap(ctx)),
+                                         origDistType.getMemSpace(), notAlignedDistAttr);
+        if (!areDistributedTypePerClusterDataCompatible(origDistType, newDistType)) {
+            return VPU::DistributionInfoAttr::get(
+                    ctx, origDistAttr.getMode(), origDistAttr.getNumTiles(), origDistAttr.getKernel(),
+                    origDistAttr.getPads(), origDistAttr.getStrides(), origDistAttr.getNumClusters(), newAlignment,
+                    origDistAttr.getUniformDistributedSegments(), nullptr, nullptr, nullptr, nullptr,
+                    origDistAttr.getEqualMemoryAndComputeView());
+        }
+        return notAlignedDistAttr;
     }
 
-    // When DistributedTensorAttr has explicit per cluster memory/compute shapes, recompute them for the new shape
+    // When DistributionInfoAttr has explicit per cluster memory/compute shapes, recompute them for the new shape
     // Since this method throws for any distribution mode other than SEGMENTED over H, it is safe to recompute the
     // memory/compute view
     auto optionalPerClusterMemoryShapes = VPU::getPerClusterMemoryShapes(newShape, origDistAttr);
@@ -211,7 +259,7 @@ VPU::DistributedTensorAttr getSOHDistAttrWithNewShape(mlir::MLIRContext* ctx, Di
     auto perClusterComputeOffsets =
             vpux::getIntArrayOfArray(ctx, VPU::getPerClusterComputeShapeOffsets(newShape, origDistAttr));
 
-    return VPU::DistributedTensorAttr::get(
+    return VPU::DistributionInfoAttr::get(
             ctx, origDistAttr.getMode(), origDistAttr.getNumTiles(), origDistAttr.getKernel(), origDistAttr.getPads(),
             origDistAttr.getStrides(), origDistAttr.getNumClusters(), newAlignment,
             origDistAttr.getUniformDistributedSegments(), perClusterComputeShapes, perClusterComputeOffsets,
@@ -253,32 +301,7 @@ bool isDistributedCompatibleAfterShapeChangeForViewOps(DistType inDistType, Dist
         (inShape.size() != outShape.size() && inShape[Dim(inNumTilesAxis)] != outShape[Dim(outNumTilesAxis)])) {
         return false;
     }
-
-    // Check per-cluster shape compatible
-    const auto inPerClusterShapes = inDistType.getPerClusterMemoryShapes();
-    const auto inPerClusterShapeOffsets = inDistType.getPerClusterMemoryShapeOffsets();
-    const auto outPerClusterShapes = outDistType.getPerClusterMemoryShapes();
-    const auto outPerClusterShapeOffsets = outDistType.getPerClusterMemoryShapeOffsets();
-    const auto inStrides = inDistType.getStrides();
-    const auto outStrides = outDistType.getStrides();
-    const auto calcBufferOffset = [](ShapeRef shapeOffset, Strides strides) {
-        Byte bufOffset{0};
-        for (size_t axis = 0; axis < strides.size(); axis++) {
-            bufOffset += shapeOffset[Dim(axis)] * static_cast<Byte>(strides[Dim(axis)]);
-        }
-        return bufOffset.count();
-    };
-    const auto isPerClusterCompatible = [&](ShapeRef inShape, ShapeRef outShape, ShapeRef inShapeOffset,
-                                            ShapeRef outShapeOffset) {
-        if (inShape.totalSize() != outShape.totalSize()) {
-            return false;
-        }
-        const auto inDataOffset = calcBufferOffset(inShapeOffset, inStrides);
-        const auto outDataOffset = calcBufferOffset(outShapeOffset, outStrides);
-        return inDataOffset == outDataOffset;
-    };
-    return llvm::all_of_zip(inPerClusterShapes, outPerClusterShapes, inPerClusterShapeOffsets,
-                            outPerClusterShapeOffsets, isPerClusterCompatible);
+    return areDistributedTypePerClusterDataCompatible<DistType>(inDistType, outDistType);
 }
 
 template <typename DistType>
@@ -361,8 +384,8 @@ bool isDistributedCompatibleAfterShapeChangeForViewOps(DistType inDistType, Shap
 }
 
 template <typename DistType>
-VPU::DistributedTensorAttr getOverlappedOverHDistAttrWithNewShape(mlir::MLIRContext* ctx, DistType origDistType,
-                                                                  ShapeRef newShape) {
+VPU::DistributionInfoAttr getOverlappedOverHDistAttrWithNewShape(mlir::MLIRContext* ctx, DistType origDistType,
+                                                                 ShapeRef newShape) {
     const auto origDistAttr = origDistType.getDistribution();
     VPUX_THROW_UNLESS(VPU::isOverlappedOverH(origDistAttr), "Input dist type is not OVERLAPPED over H");
 
@@ -372,14 +395,14 @@ VPU::DistributedTensorAttr getOverlappedOverHDistAttrWithNewShape(mlir::MLIRCont
     }
 
     if (!VPU::isDistributedAttrWithExplicitShapesAndOffsets(origDistAttr)) {
-        return VPU::DistributedTensorAttr::get(ctx, origDistAttr.getMode(), origDistAttr.getNumTiles(),
-                                               origDistAttr.getKernel(), origDistAttr.getPads(),
-                                               origDistAttr.getStrides(), origDistAttr.getNumClusters(), nullptr,
-                                               origDistAttr.getUniformDistributedSegments(), nullptr, nullptr, nullptr,
-                                               nullptr, origDistAttr.getEqualMemoryAndComputeView());
+        return VPU::DistributionInfoAttr::get(ctx, origDistAttr.getMode(), origDistAttr.getNumTiles(),
+                                              origDistAttr.getKernel(), origDistAttr.getPads(),
+                                              origDistAttr.getStrides(), origDistAttr.getNumClusters(), nullptr,
+                                              origDistAttr.getUniformDistributedSegments(), nullptr, nullptr, nullptr,
+                                              nullptr, origDistAttr.getEqualMemoryAndComputeView());
     }
 
-    // When DistributedTensorAttr has explicit per cluster memory/compute shapes, recompute them for the new shape
+    // When DistributionInfoAttr has explicit per cluster memory/compute shapes, recompute them for the new shape
     auto perClusterMemoryShapes = vpux::getIntArrayOfArray(
             ctx, VPU::getOverlappedPerClusterNewMemoryShapes(newShape, origShape, origDistAttr));
 
@@ -392,7 +415,7 @@ VPU::DistributedTensorAttr getOverlappedOverHDistAttrWithNewShape(mlir::MLIRCont
     auto perClusterComputeOffsets =
             vpux::getIntArrayOfArray(ctx, VPU::getPerClusterComputeShapeOffsets(newShape, origDistAttr));
 
-    return VPU::DistributedTensorAttr::get(
+    return VPU::DistributionInfoAttr::get(
             ctx, origDistAttr.getMode(), origDistAttr.getNumTiles(), origDistAttr.getKernel(), origDistAttr.getPads(),
             origDistAttr.getStrides(), origDistAttr.getNumClusters(), nullptr,
             origDistAttr.getUniformDistributedSegments(), perClusterComputeShapes, perClusterComputeOffsets,
@@ -458,10 +481,10 @@ bool isOverlappedDistributedCompatibleAfterShapeChangeForViewOps(DistType inDist
 
 mlir::FailureOr<std::pair<int64_t, int64_t>> getDistributedAxesMappingAfterShapeChanged(
         vpux::NDTypeInterface reshapeInType, vpux::NDTypeInterface reshapeOutType,
-        VPU::DistributedTensorAttr copyInDistribution, Logger log);
-VPU::DistributedTensorAttr changeDistributedAxisOnDistributedTensorAttr(VPU::DistributedTensorAttr inDistribution,
-                                                                        int64_t inDistributionAxis,
-                                                                        int64_t outDistributionAxis, ShapeRef newShape);
+        VPU::DistributionInfoAttr copyInDistribution, Logger log);
+VPU::DistributionInfoAttr changeDistributedAxisOnDistributionInfoAttr(VPU::DistributionInfoAttr inDistribution,
+                                                                      int64_t inDistributionAxis,
+                                                                      int64_t outDistributionAxis, ShapeRef newShape);
 
 //
 // Distributed buffer type compatibility check
@@ -475,7 +498,7 @@ bool hasDistributedOperand(mlir::Operation* op);
 // Compressed Convolution utility
 //
 
-bool isOnlyPadOverIC(Const::ContentAttr content);
+bool isOnlyPadOverIC(const Const::ContentAttr& content);
 bool canWeightsBeCompressed(VPUIP::NCEClusterTaskOp op);
 bool canTilingWeightsBeCompressed(VPUIP::NCEClusterTaskOp op);
 
@@ -541,8 +564,8 @@ mlir::Value createDummyBuffer(mlir::OpBuilder& builder, mlir::Operation* inserti
 //
 
 template <typename DistType>
-VPU::DistributedTensorAttr getDistributedAttrAfterShapeCast(VPU::DistributedTypeInterface origDistrType,
-                                                            ArrayRef<int64_t> shape, VPU::ArchKind arch) {
+VPU::DistributionInfoAttr getDistributedAttrAfterShapeCast(VPU::DistributedTypeInterface origDistrType,
+                                                           ArrayRef<int64_t> shape, VPU::ArchKind arch) {
     auto distributedType = origDistrType.getDistributedTypes().front().template cast<DistType>();
     auto origDistribution = distributedType.getDistribution();
     const auto mode = origDistribution.getMode().getValue();
@@ -627,7 +650,7 @@ VPU::DistributedTensorAttr getDistributedAttrAfterShapeCast(VPU::DistributedType
         }
 
         auto perClusterShapesAttr = vpux::getIntArrayOfArray(ctx, perClusterShapes);
-        return VPU::DistributedTensorAttr::get(
+        return VPU::DistributionInfoAttr::get(
                 ctx, origDistribution.getMode(), origDistribution.getNumTiles(), origDistribution.getKernel(),
                 origDistribution.getPads(), origDistribution.getStrides(), origDistribution.getNumClusters(),
                 origDistribution.getAlignment(), origDistribution.getUniformDistributedSegments(), perClusterShapesAttr,

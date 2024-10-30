@@ -195,14 +195,17 @@ size_t calculateSplitDMACost(VPUIP::NNDMAOp dmaOp, VPU::ArchKind arch,
 
     auto outputType = dmaOp.getOutput().getType().cast<NDTypeInterface>();
     auto inputShape = inputType.getShape();
-    auto outElemType = inElemType;
 
     auto [firstPartSize, secondPartSize] = VPUIP::getSplitPartSizes(inputType, tileDim);
     SmallVector<int64_t> splitShape = to_small_vector(inputShape);
     splitShape[tileDim.ind()] = secondPartSize;
 
-    return costModel->DMA(getVPUDeviceType(arch), {VPU::getVPUTensor(Shape(splitShape), inElemType)},
-                          {VPU::getVPUTensor(Shape(splitShape), outElemType)}, getMemoryLocation(inputType),
+    const auto nnType = VPU::getVPUNNElementType(inElemType);
+    VPUX_THROW_UNLESS(nnType.has_value(), "Unsupported data type: '{0}'", inElemType);
+
+    const auto nnTensor =
+            VPUNN::VPUTensor({checked_cast<unsigned int>(Shape(splitShape).totalSize()), 1, 1, 1}, nnType.value());
+    return costModel->DMA(getVPUDeviceType(arch), {nnTensor}, {nnTensor}, getMemoryLocation(inputType),
                           getMemoryLocation(outputType));
 }
 

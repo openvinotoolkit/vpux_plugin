@@ -50,4 +50,3 @@ func.func @NotSplitGRUSequence(%arg0: tensor<1x157x384xf16>, %arg1: tensor<1x1x2
 
       // CHECK:     return [[OUT_0]], [[OUT_1]] : tensor<1x1x157x256xf16>, tensor<1x1x256xf16>
 }
-

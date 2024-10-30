@@ -61,7 +61,6 @@ It deals with the following resource types:
 * Executor (CPU, HW module, DMA).
 
 ```MLIR
-IE.ExecutorResource 16 of @SHAVE_UPA
 IE.TileResource 4 of @NCE {
     IE.ExecutorResource 5 of @DPU
     IE.ExecutorResource 5 of @SHAVE_NN
@@ -71,7 +70,6 @@ IE.TileResource 4 of @NCE {
 IE.ExecutorResource 1 of @DMA_NN
 
 IE.MemoryResource 31457280 bytes of @DDR {VPUIP.bandwidth = 8 : i64, VPUIP.derateFactor = 6.000000e-01 : f64}
-IE.MemoryResource 4194304 bytes of @CMX_UPA {VPUIP.bandwidth = 16 : i64, VPUIP.derateFactor = 8.500000e-01 : f64}
 
 module @UsedMemory : {
     IE.MemoryResource 2048 bytes of @DDR

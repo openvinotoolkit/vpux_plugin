@@ -4,6 +4,7 @@
 //
 
 #include "vpux/compiler/core/aliases_info.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPUIP/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
 #include "vpux/compiler/utils/error.hpp"

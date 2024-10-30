@@ -10,8 +10,6 @@
 
 // CHECK-LABEL: @Convolution
 module @Convolution {
-    // CHECK:   {{  }}module @UsedMemory
-    // CHECK-DAG:  {{    }}IE.MemoryResource {{[0-9]+}} bytes of @DDR
     // CHECK-DAG:  {{  }}IE.ExecutorResource 2 of @DMA_NN
     // CHECK-DAG:  {{  }}IE.TileResource {activity_factor = {{[0-9]+.[0-9]+}} : f64} 2 of @NCE at 1.300000e+03 MHz
     // CHECK-DAG:  {{    }}builtin.module @UsedMemory
@@ -29,7 +27,7 @@ module @Convolution {
 
     // CHECK:       func.func @main(
     // CHECK-SAME:      [[ARG0:%.+]]: memref<1x3x62x62xf16, @DDR>,
-    // CHECK-SAME:      [[ARG1:%.+]]: memref<1x48x60x60xf16, @DDR>) -> memref<1x48x60x60xf16, @DDR> {
+    // CHECK-SAME:      [[ARG1:%.+]]: memref<1x48x60x60xf16, @DDR>) -> memref<1x48x60x60xf16, @DDR>
     func.func @main(%arg: tensor<1x3x62x62xf32>) -> tensor<1x48x60x60xf32> {
         %cst = const.Declare tensor<48x3x3x3xf32> = dense<1.0> : tensor<48x3x3x3xf32>
         %1 = IE.Convolution(%arg, %cst) {
@@ -80,8 +78,6 @@ module @Convolution {
 
 // CHECK-LABEL: @ScaleShiftSubgraph
 module @ScaleShiftSubgraph {
-    // CHECK:   {{  }}module @UsedMemory
-    // CHECK-DAG:  {{    }}IE.MemoryResource {{[0-9]+}} bytes of @DDR
     // CHECK-DAG:  {{  }}IE.ExecutorResource 2 of @DMA_NN
     // CHECK-DAG:  {{  }}IE.TileResource {activity_factor = {{[0-9]+.[0-9]+}} : f64} 2 of @NCE at 1.300000e+03 MHz
     // CHECK-DAG:  {{    }}builtin.module @UsedMemory
@@ -99,7 +95,7 @@ module @ScaleShiftSubgraph {
 
     // CHECK:       func.func @main(
     // CHECK-SAME:      [[ARG0:%.+]]: memref<1x256x20x20xf32, @DDR>,
-    // CHECK-SAME:      [[ARG1:%.+]]: memref<1x512x20x20xf32, @DDR>) -> memref<1x512x20x20xf32, @DDR> {
+    // CHECK-SAME:      [[ARG1:%.+]]: memref<1x512x20x20xf32, @DDR>) -> memref<1x512x20x20xf32, @DDR>
     func.func @main(%arg: tensor<1x256x20x20xf32>) -> tensor<1x512x20x20xf32> {
 
         %cst_0 = const.Declare tensor<1x1x1x1xf32> = dense<-2.05229545> : tensor<1x1x1x1xf32>
@@ -146,7 +142,7 @@ module @ScaleShiftSubgraph {
         // CHECK:               DPUTask
         // CHECK:               DPUTask
         // CHECK:       } PPE : {
-        // CHECK:               PPETask <LPRELU>
+        // CHECK:               PPETask {opaque_ppe = #VPU.PPEInt<mode = <LPRELU>
 
         // CHECK:       VPURT.Task waits([[barrier_0:%.*]] : !VPURT.Barrier) updates([[barrier_1:%.*]] : !VPURT.Barrier)
         // CHECK:       VPUIP.NCEClusterTask {is_segmented, kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, kernel_size = [1, 1], kernel_strides = [1, 1], task_type = #VPUIP.nce_task_type<DWCONV>}
@@ -165,6 +161,86 @@ module @ScaleShiftSubgraph {
         // CHECK:               DPUTask
         // CHECK:               DPUTask
         // CHECK:       } PPE : {
-        // CHECK:               PPETask <LPRELU>
+        // CHECK:               PPETask {opaque_ppe = #VPU.PPEInt<mode = <LPRELU>
   }
+}
+
+// -----
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+
+// CHECK-LABEL: @DynamicReshape
+module @DynamicReshape {
+    // CHECK-DAG:  {{  }}VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration
+    // CHECK-DAG:  {{  }}module @VPU.SW {
+    // CHECK-DAG:  {{    }}func.func private @builtin_DynamicReshape
+    // CHECK-DAG:  {{    }}func.func private @builtin_Convert
+    // CHECK-DAG:  {{    }}func.func private @runtime
+    // CHECK-DAG:  {{  }}IE.ExecutorResource 2 of @DMA_NN
+    // CHECK-DAG:  {{  }}IE.TileResource {activity_factor = {{.+}} : f64} 2 of @NCE at 1.300000e+03 MHz
+    // CHECK-DAG:  {{    }}builtin.module @UsedMemory
+    // CHECK-DAG:  {{      }}IE.MemoryResource {{[0-9]+}} bytes of @CMX_NN
+    // CHECK-DAG:  {{    }}builtin.module @ReservedMemory {
+    // CHECK-DAG:  {{      }}module @SWKernelPrefetchingReservedMemory {
+    // CHECK-DAG:  {{        }}IE.MemoryResource {{[0-9]+}} bytes of @CMX_NN offset {{[0-9]+}}
+    // CHECK-DAG:  {{    }}IE.MemoryResource {{[0-9]+}} bytes of @CMX_NN_FragmentationAware
+    // CHECK-DAG:  {{    }}IE.MemoryResource {{[0-9]+}} bytes of @CMX_NN {VPU.bandwidth = 32 : i64, VPU.derateFactor = {{.+}} : f64}
+    // CHECK-DAG:  {{    }}IE.ExecutorResource 1 of @DPU
+    // CHECK-DAG:  {{    }}IE.ExecutorResource 2 of @SHAVE_ACT
+    // CHECK-DAG:  {{    }}IE.ExecutorResource 1 of @SHAVE_NN
+
+    IE.CNNNetwork entryPoint : @main inputsInfo : {
+        DataInfo "Parameter_57" : tensor<1x3x10x16xf32>
+    } outputsInfo : {
+        DataInfo "Reshape_65" : tensor<1x1x2x240xf32>
+    }
+    // CHECK:   IE.CNNNetwork
+    // CHECK-SAME:  inputsInfo
+    // CHECK:       DataInfo "Parameter_57" : tensor<1x3x10x16xf32>
+    // CHECK:       DataInfo "vpux_ie_shape_Parameter_57" : tensor<4xsi32>
+    // CHECK:       outputsInfo
+    // CHECK:       DataInfo "Reshape_65" : tensor<1x1x2x240xf32>
+    // CHECK:       DataInfo "vpux_ie_shape_Reshape_65" : tensor<4xsi32>
+
+    // CHECK:       func.func @main(
+    // CHECK-SAME:      [[ARG0:%.+]]: memref<1x3x10x16xf32, @DDR>,
+    // CHECK-SAME:      [[SHAPE0:%.+]]: memref<4xsi32, @DDR>,
+    // CHECK-SAME:      [[ARG1:%.+]]: memref<1x1x2x240xf32, @DDR>,
+    // CHECK-SAME:      [[SHAPE0:%.+]]: memref<4xsi32, @DDR>
+    // CHECK-SAME:      -> (memref<1x1x2x240xf32, @DDR>, memref<4xsi32, @DDR>)
+    func.func @main(%arg0: tensor<1x3x?x?xf32, {bounds = [1, 3, 10, 16], order = #NCHW}>) -> tensor<1x1x2x?xf32, {bounds = [1, 1, 2, 240], order = #NCHW}> {
+
+        %cst = const.Declare tensor<4xsi64> = dense<[1, 1, 2, -1]> : tensor<4xsi64>
+        %0 = IE.DynamicReshape(%arg0, %cst) {output_bounds = [1, 1, 2, 240], output_shape = [1, 1, 2, -9223372036854775808]} : tensor<1x3x?x?xf32, {bounds = [1, 3, 10, 16], order = #NCHW}>, tensor<4xsi64> -> tensor<1x1x2x?xf32, {bounds = [1, 1, 2, 240], order = #NCHW}>
+        return %0 : tensor<1x1x2x?xf32, {bounds = [1, 1, 2, 240], order = #NCHW}>
+
+        // CHECK:       VPURT.Task waits([[barrier_0:%.+]] : !VPURT.Barrier) updates([[barrier_1:%.+]] : !VPURT.Barrier) {
+        // CHECK:       [[convert:%.+]], [[convert_shape:%.+]] = VPUIP.SW.Kernel
+        // CHECK-SAME:          dynamicInputShapesMap = array<i32: 0>
+        // CHECK-SAME:          dynamicOutputShapesMap = array<i32: 0>
+        // CHECK-SAME:          resultSegmentSizes = array<i32: 1, 1, 0>
+        // CHECK-SAME:      @VPU.SW::@builtin_Convert
+        // CHECK-SAME:          inputs({{%.+}} as {{%.+}}: memref<1x3x10x16xf32, [@CMX_NN, 0]>)
+        // CHECK-SAME:          outputs({{%.+}} as {{%.+}}: memref<1x3x10x16xf16, [@CMX_NN, 0]>)
+
+        // CHECK:       VPURT.Task waits([[barrier_1]] : !VPURT.Barrier) updates([[barrier_2:%.+]] : !VPURT.Barrier) {
+        // CHECK:       [[reshape:%.+]], [[reshape_shape:%.+]] = VPUIP.SW.Kernel
+        // CHECK-SAME:          dynamicInputShapesMap = array<i32: 0, -1>
+        // CHECK-SAME:          dynamicOutputShapesMap = array<i32: 0>
+        // CHECK-SAME:          resultSegmentSizes = array<i32: 1, 1, 0>
+        // CHECK-SAME:      @VPU.SW::@builtin_DynamicReshape
+        // CHECK-SAME:          inputs({{%.+}} as {{%.+}}: memref<1x3x10x16xf16, [@CMX_NN, 0]>, {{%.+}} as {{%.+}}: memref<4xsi32, [@CMX_NN, 0]>)
+        // CHECK-SAME:          outputs({{%.+}} as {{%.+}}: memref<1x1x2x240xf16, [@CMX_NN, 0]>
+
+        // CHECK:       VPURT.Task waits([[barrier_2:%.+]] : !VPURT.Barrier) updates([[barrier_3:%.+]] : !VPURT.Barrier) {
+        // CHECK:       [[convert:%.+]], [[convert_shape:%.+]] = VPUIP.SW.Kernel
+        // CHECK-SAME:          dynamicInputShapesMap = array<i32: 0>
+        // CHECK-SAME:          dynamicOutputShapesMap = array<i32: 0>
+        // CHECK-SAME:          resultSegmentSizes = array<i32: 1, 1, 0>
+        // CHECK-SAME:      @VPU.SW::@builtin_Convert
+        // CHECK-SAME:          inputs({{%.+}} as {{%.+}}: memref<1x1x2x240xf16, [@CMX_NN, 0]>)
+        // CHECK-SAME:          outputs({{%.+}} as {{%.+}}: memref<1x1x2x240xf32, [@CMX_NN, 0]>)
+
+        // CHECK:       return {{%.+}}, {{%.+}} : memref<1x1x2x240xf32, @DDR>, memref<4xsi32, @DDR>
+    }
 }

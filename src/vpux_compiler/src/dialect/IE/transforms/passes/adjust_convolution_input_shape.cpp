@@ -21,10 +21,17 @@ using namespace vpux;
 
 namespace {
 
-// TODO: needs find suitable implict reshape value. Ticket: E#78751
-constexpr int64_t CONVOLUTION_INPUT_SHAPE_ALIGNMENT = 4;
 // TODO: needs find suitable input shape size threshold value. Ticket: E#124225
 constexpr int64_t THRESHOLD_FOR_BENEFICIAL_CONVERSION = 2048;
+
+std::tuple<int64_t, int64_t> calcShapeAligned(int64_t divider, int64_t dimValue) {
+    if (dimValue == 1) {
+        divider *= VPU::NCEInvariant::VPU_SPATIAL_ALIGNMENT;
+        dimValue = VPU::NCEInvariant::VPU_SPATIAL_ALIGNMENT;
+    }
+
+    return std::make_tuple(divider, dimValue);
+}
 
 //
 // ReshapeSingleConstDWConvInput
@@ -44,12 +51,11 @@ private:
 };
 
 mlir::Value getReshapedConst(Const::DeclareOp constOp, ShapeRef shape, mlir::PatternRewriter& rewriter) {
-    auto contentAttr = constOp.getContentAttr();
     auto constOutputType = constOp.getOutput().getType().cast<vpux::NDTypeInterface>();
     const auto offset = Shape(shape.size(), 0);
-    contentAttr = contentAttr.subview(offset, shape);
     constOutputType = constOutputType.changeShape(shape);
-    return rewriter.create<Const::DeclareOp>(constOp.getLoc(), constOutputType, contentAttr).getOutput();
+    auto contentAttr = constOp.transformContentAttr().subview(offset, shape).get();
+    return rewriter.create<Const::DeclareOp>(constOp.getLoc(), constOutputType, std::move(contentAttr)).getOutput();
 }
 
 mlir::LogicalResult ReshapeSingleConstDWConvInput::matchAndRewrite(IE::GroupConvolutionOp origOp,
@@ -103,14 +109,6 @@ mlir::LogicalResult ReshapeSingleConstDWConvInput::matchAndRewrite(IE::GroupConv
         return matchFailed(rewriter, origOp, "Input shape size is not 4");
     }
 
-    auto calcShapeAligned = [&](int64_t divider, int64_t dimValue) {
-        if (dimValue == 1) {
-            divider *= CONVOLUTION_INPUT_SHAPE_ALIGNMENT;
-            dimValue = CONVOLUTION_INPUT_SHAPE_ALIGNMENT;
-        }
-        return std::make_tuple(divider, dimValue);
-    };
-
     int64_t divider = 1;
     int64_t widthReshaped, heightReshaped, channelReshaped;
     std::tie(divider, widthReshaped) = calcShapeAligned(divider, inputShape[Dims4D::Act::W]);
@@ -155,7 +153,8 @@ mlir::LogicalResult ReshapeSingleConstDWConvInput::matchAndRewrite(IE::GroupConv
     auto newGroupConv = rewriter.create<IE::GroupConvolutionOp>(
             origOp->getLoc(), inShapeCast.getResult(), newConstFilter, bias, origOp.getStridesAttr(),
             origOp.getPadsBeginAttr(), origOp.getPadsEnd(), origOp.getDilationsAttr(), newGroupAttr,
-            origOp.getPostOpAttr(), origOp.getClampAttr());
+            origOp.getPostOpAttr(), origOp.getClampAttr(), origOp.getOutputChannelsAttr(),
+            origOp.getInputChannelsAttr());
     auto origOutputType = origOp.getType().cast<vpux::NDTypeInterface>();
     newGroupConv.getOutput().setType(
             mlir::cast<mlir::RankedTensorType>(origOutputType.changeShape(getShape(newGroupConv.getOutput()))));
@@ -165,6 +164,132 @@ mlir::LogicalResult ReshapeSingleConstDWConvInput::matchAndRewrite(IE::GroupConv
                                                          getIntArrayAttr(ctx, outShape));
 
     rewriter.replaceOp(origOp, outShapeCast.getResult());
+
+    return mlir::success();
+}
+
+//
+// ReshapeAddInput
+//
+
+class ReshapeAddInput final : public mlir::OpRewritePattern<IE::AddOp> {
+public:
+    ReshapeAddInput(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<IE::AddOp>(ctx), _log(log) {
+    }
+
+public:
+    mlir::LogicalResult matchAndRewrite(IE::AddOp origOp, mlir::PatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+//
+// Adjust input shape of AddOp with same input, from C to H and W like [1, C, 1, 1] -> [1, C/16, 4, 4]
+//
+mlir::LogicalResult ReshapeAddInput::matchAndRewrite(IE::AddOp origOp, mlir::PatternRewriter& rewriter) const {
+    if (VPU::NCEInvariant::isSupported(origOp).failed()) {
+        return matchFailed(rewriter, origOp, "Not a valid NCE addOp");
+    }
+
+    const auto inputShape = getShape(origOp.getInput1());
+    const auto outputShape = getShape(origOp.getOutput());
+    const int64_t rank4D = 4;
+    if (inputShape.size() != rank4D) {
+        return matchFailed(rewriter, origOp, "Not a valid addOp with input shape size 4");
+    }
+
+    if (origOp.getInput1() != origOp.getInput2()) {
+        return matchFailed(rewriter, origOp, "Not a valid addOp with same input");
+    }
+
+    // Could not support adjust from C to H or W for per channel quantize type
+    const auto inputElementType = origOp.getInput1().getType().cast<vpux::NDTypeInterface>().getElementType();
+    const auto outputElementType = origOp.getOutput().getType().cast<vpux::NDTypeInterface>().getElementType();
+    if (inputElementType.isa<mlir::quant::UniformQuantizedPerAxisType>() ||
+        outputElementType.isa<mlir::quant::UniformQuantizedPerAxisType>()) {
+        return matchFailed(rewriter, origOp, "Could not support addOp with per channel quantize");
+    }
+
+    if (origOp.getPostOpAttr() != nullptr) {
+        return matchFailed(rewriter, origOp, "Could not support addOp with post op");
+    }
+
+    if (inputShape[Dims4D::Act::H] != 1 || inputShape[Dims4D::Act::W] != 1) {
+        return matchFailed(rewriter, origOp, "Input shape HxW is not 1x1");
+    }
+
+    // Adjust the width/height/channel for alignment
+    int64_t divider = 1;
+    int64_t widthReshaped, heightReshaped, channelReshaped;
+    std::tie(divider, widthReshaped) = calcShapeAligned(divider, inputShape[Dims4D::Act::W]);
+    std::tie(divider, heightReshaped) = calcShapeAligned(divider, inputShape[Dims4D::Act::H]);
+    if (divider == 1) {
+        return matchFailed(rewriter, origOp, "Don't need to align");
+    }
+
+    if (inputShape[Dims4D::Act::C] % divider != 0) {
+        return matchFailed(rewriter, origOp, "Input shape could not be divided {0}", inputShape[Dims4D::Act::C]);
+    }
+
+    channelReshaped = inputShape[Dims4D::Act::C] / divider;
+    auto alignIface = mlir::cast<IE::AlignedChannelsOpInterface>(origOp.getOperation());
+    if (channelReshaped % alignIface.getInputChannelAlignment() != 0) {
+        return matchFailed(rewriter, origOp, "Remaining channel is not aligned.");
+    }
+
+    // Adjust channel to avoid split, for example: tensor<1x15360x4x4> => tensor<1x7680x8x4>
+    const auto getNewChannelShape = [](int64_t lengthOfAlignment, int64_t inputToDivide,
+                                       int64_t inputToMultiply) -> SmallVector<int64_t> {
+        const auto maxFactor = std::max(checked_cast<int64_t>(2), divUp(lengthOfAlignment, checked_cast<int64_t>(2)));
+        for (const auto i : irange<int64_t>(2, maxFactor)) {
+            if (lengthOfAlignment % i == 0) {
+                const auto newShrink = inputToDivide / i;
+                if (newShrink > VPU::NCEInvariant::VPU_DIMENSION_LIMIT) {
+                    continue;
+                }
+                const auto newExpand = inputToMultiply * i;
+                if (newExpand > VPU::NCEInvariant::VPU_DIMENSION_LIMIT) {
+                    return {};
+                }
+
+                return {newShrink, newExpand};
+            }
+        }
+        return {};
+    };
+
+    if (channelReshaped > VPU::NCEInvariant::VPU_DIMENSION_LIMIT) {
+        const auto channelAlignment = channelReshaped / alignIface.getInputChannelAlignment();
+        const auto expandDim = heightReshaped <= widthReshaped ? heightReshaped : widthReshaped;
+        const auto newChannelShape = getNewChannelShape(channelAlignment, channelReshaped, expandDim);
+        if (!newChannelShape.empty()) {
+            channelReshaped = newChannelShape[0];
+            if (heightReshaped <= widthReshaped) {
+                heightReshaped = newChannelShape[1];
+            } else {
+                widthReshaped = newChannelShape[1];
+            }
+        }
+    }
+
+    // Reshape Input
+    const auto ctx = origOp->getContext();
+    const SmallVector<int64_t> newInShape = {inputShape[Dims4D::Act::N], channelReshaped, heightReshaped,
+                                             widthReshaped};
+    auto inShapeCast =
+            rewriter.create<IE::ShapeCastOp>(origOp->getLoc(), origOp.getInput1(), getIntArrayAttr(ctx, newInShape));
+
+    // Update addOp
+    const auto origType = origOp.getType().cast<vpux::NDTypeInterface>();
+    const auto newType = origType.changeShape(ShapeRef(newInShape));
+    auto newAddOp =
+            rewriter.create<IE::AddOp>(origOp->getLoc(), newType, inShapeCast.getResult(), inShapeCast.getResult(),
+                                       origOp.getAutoBroadcastAttr(), origOp.getPostOpAttr(), origOp.getClampAttr(),
+                                       origOp.getOutputChannelsAttr(), origOp.getInputChannelsAttr());
+
+    // Reshape Output
+    rewriter.replaceOpWithNewOp<IE::ShapeCastOp>(origOp, newAddOp.getOutput(), getIntArrayAttr(ctx, outputShape));
 
     return mlir::success();
 }
@@ -239,18 +364,18 @@ mlir::LogicalResult ReshapeConvInput<ConcreteOp>::matchAndRewrite(ConcreteOp con
     }
 
     auto alignOnH = inputShape[Dims4D::Act::H] == 1 &&
-                    inputShape[Dims4D::Act::W] != CONVOLUTION_INPUT_SHAPE_ALIGNMENT &&
+                    inputShape[Dims4D::Act::W] != VPU::NCEInvariant::VPU_SPATIAL_ALIGNMENT &&
                     inputShape.totalSize() > THRESHOLD_FOR_BENEFICIAL_CONVERSION;
-    int64_t convolutionInputShapeAlignment = CONVOLUTION_INPUT_SHAPE_ALIGNMENT;
+    int64_t convolutionInputShapeAlignment = VPU::NCEInvariant::VPU_SPATIAL_ALIGNMENT;
     auto inputShapeToAlign = alignOnH ? inputShape[Dims4D::Act::W] : inputShape[Dims4D::Act::H];
 
     // if the input height/width is small, reshape input is not beneficial. e.g. shape [1, 320, 4, 1]
-    if (inputShapeToAlign <= CONVOLUTION_INPUT_SHAPE_ALIGNMENT ||
-        inputShapeToAlign / CONVOLUTION_INPUT_SHAPE_ALIGNMENT < 2) {
+    if (inputShapeToAlign <= VPU::NCEInvariant::VPU_SPATIAL_ALIGNMENT ||
+        inputShapeToAlign / VPU::NCEInvariant::VPU_SPATIAL_ALIGNMENT < 2) {
         return mlir::failure();
     }
     // Find another factor if input height is not divisible by 4
-    if (inputShapeToAlign % CONVOLUTION_INPUT_SHAPE_ALIGNMENT != 0) {
+    if (inputShapeToAlign % VPU::NCEInvariant::VPU_SPATIAL_ALIGNMENT != 0) {
         int64_t val = inputShapeToAlign;
         int64_t factor = sqrt(val);
         for (; factor > 1; factor--) {
@@ -413,15 +538,15 @@ mlir::LogicalResult ReshapeExpandDWConvInput::matchAndRewrite(IE::GroupConvoluti
     auto baseContent = contentAttr.getBaseContent();
     auto dataShape = getShape(constInput.getOutput()).toValues();
 
-    Const::ContentAttr newContentAttr = Const::ContentAttr::get(baseContent);
     Shape realDataShape = baseContent.getShapedType().getShape();
 
     auto newConstOutputType = constInput.getOutput().getType().cast<vpux::NDTypeInterface>();
-    newContentAttr = newContentAttr.broadcast(Dims4D::Act::N, alignedInShape[Dims4D::Act::C]);
     auto newConstantShape = Shape(newConstOutputType.getShape().size(), int64_t(1));
     newConstantShape[Dims4D::Act::N] = alignedInShape[Dims4D::Act::C];
     newConstOutputType = newConstOutputType.changeShape(newConstantShape);
-    newContentAttr = newContentAttr.reshape(newConstantShape);
+    auto newContentAttrSetup = Const::ContentAttr::transform(baseContent)
+                                       .broadcast(Dims4D::Act::N, alignedInShape[Dims4D::Act::C])
+                                       .reshape(newConstantShape);
 
     for (auto& attr : contentAttr.getTransformations()) {
         if (attr.isa<Const::PadWithZeroAttr>() || attr.isa<Const::BroadcastAttr>()) {
@@ -439,10 +564,12 @@ mlir::LogicalResult ReshapeExpandDWConvInput::matchAndRewrite(IE::GroupConvoluti
                 continue;
             }
         }
-        newContentAttr = Const::ContentAttr::addTransformation(newContentAttr, attr);
+
+        newContentAttrSetup = newContentAttrSetup.addTransformation(attr);
     }
 
-    auto newConstInput = rewriter.create<Const::DeclareOp>(origOp->getLoc(), newConstOutputType, newContentAttr);
+    auto newConstInput =
+            rewriter.create<Const::DeclareOp>(origOp->getLoc(), newConstOutputType, newContentAttrSetup.get());
 
     // Infer group conv output shape
     const auto dataPaddingBelow = parseIntArrayAttr<int64_t>(origOp.getPadsEnd());
@@ -473,7 +600,7 @@ mlir::LogicalResult ReshapeExpandDWConvInput::matchAndRewrite(IE::GroupConvoluti
     auto grpConv = rewriter.create<IE::GroupConvolutionOp>(
             origOp->getLoc(), convOutType, shapeCastInputOp, newConstInput, origOp.getBias(), origOp.getStridesAttr(),
             origOp.getPadsBegin(), origOp.getPadsEnd(), origOp.getDilationsAttr(), groupsAttr,
-            /*post_opAttr=*/nullptr, /*clamp=*/nullptr);
+            /*post_opAttr=*/nullptr, /*clamp=*/nullptr, origOp.getOutputChannelsAttr(), origOp.getInputChannelsAttr());
 
     // Insert ShapeCast to reshape the output to original outShape
     auto unExpandedOutShape = Shape({IN, IC, convOutType.getShape()[Dims4D::Act::H], IW});
@@ -517,6 +644,7 @@ void AdjustConvolutionInputShapePass::safeRunOnFunc() {
 
     // Adjust from C to H and W like [1, C, 1, 1] -> [1, C/16, 4, 4]
     patterns.add<ReshapeSingleConstDWConvInput>(&ctx, _log);
+    patterns.add<ReshapeAddInput>(&ctx, _log);
 
     // Adust between C and H/W like [1, C, H, W] -> [1, C*4, H, W/4]
     // Also need stride[H] > 1
@@ -529,7 +657,7 @@ void AdjustConvolutionInputShapePass::safeRunOnFunc() {
 }  // namespace
 
 //
-// createConvertFCToConvPass
+// createAdjustConvolutionInputShapePass
 //
 
 std::unique_ptr<mlir::Pass> vpux::IE::createAdjustConvolutionInputShapePass(Logger log) {

@@ -185,28 +185,28 @@ VPUIP::DistributedBufferType ConstantFusing::getDistributedBufferType(VPUIP::Dis
             IndexedSymbolAttr::get(rewriter.getContext(), stringifyEnum(VPU::MemoryKind::CMX_NN));
 
     // Create updated distributedTensorAttr, remove alignment as the fused buffer is a flat buffer
-    auto origDistributedTensorAttr = origDistType.getDistribution();
+    auto origDistributionInfoAttr = origDistType.getDistribution();
 
-    if (VPU::isDistributedAttrWithExplicitShapesAndOffsets(origDistributedTensorAttr)) {
-        VPUX_THROW_WHEN(origDistributedTensorAttr.getMode().getValue() != VPU::DistributionMode::DUPLICATED,
+    if (VPU::isDistributedAttrWithExplicitShapesAndOffsets(origDistributionInfoAttr)) {
+        VPUX_THROW_WHEN(origDistributionInfoAttr.getMode().getValue() != VPU::DistributionMode::DUPLICATED,
                         "DistributedBuffer for fused constant has mode different from DUPLICATED, type = {0}",
                         origDistType);
 
         auto newDistribution =
-                VPU::getNonOverlappedDistributedAttr(typeInterface.getShape(), origDistributedTensorAttr.getMode(),
-                                                     nullptr, origDistributedTensorAttr.getNumClusters(), nullptr,
-                                                     origDistributedTensorAttr.getUniformDistributedSegments(), ctx);
+                VPU::getNonOverlappedDistributedAttr(typeInterface.getShape(), origDistributionInfoAttr.getMode(),
+                                                     nullptr, origDistributionInfoAttr.getNumClusters(), nullptr,
+                                                     origDistributionInfoAttr.getUniformDistributedSegments(), ctx);
 
         return VPUIP::DistributedBufferType::get(ctx, typeInterface.getShape().raw(), typeInterface.getElementType(),
                                                  layoutAttr, memKindAttr, newDistribution);
     }
 
-    auto distributedTensorAttr = VPU::DistributedTensorAttr::get(
-            ctx, origDistributedTensorAttr.getMode(), origDistributedTensorAttr.getNumTiles(), nullptr, nullptr,
-            nullptr, origDistributedTensorAttr.getNumClusters(), nullptr,
-            origDistributedTensorAttr.getUniformDistributedSegments(), origDistributedTensorAttr.getComputeShapes(),
-            origDistributedTensorAttr.getComputeOffsets(), origDistributedTensorAttr.getMemoryShapes(),
-            origDistributedTensorAttr.getMemoryOffsets(), origDistributedTensorAttr.getEqualMemoryAndComputeView());
+    auto distributedTensorAttr = VPU::DistributionInfoAttr::get(
+            ctx, origDistributionInfoAttr.getMode(), origDistributionInfoAttr.getNumTiles(), nullptr, nullptr, nullptr,
+            origDistributionInfoAttr.getNumClusters(), nullptr,
+            origDistributionInfoAttr.getUniformDistributedSegments(), origDistributionInfoAttr.getComputeShapes(),
+            origDistributionInfoAttr.getComputeOffsets(), origDistributionInfoAttr.getMemoryShapes(),
+            origDistributionInfoAttr.getMemoryOffsets(), origDistributionInfoAttr.getEqualMemoryAndComputeView());
 
     return VPUIP::DistributedBufferType::get(ctx, typeInterface.getShape().raw(), typeInterface.getElementType(),
                                              layoutAttr, memKindAttr, distributedTensorAttr);

@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation
+// Copyright (C) 2022-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -16,15 +16,13 @@ namespace ov {
 namespace test {
 
 class GRNLayerTestCommon : public GrnLayerTest, virtual public VpuOv2LayerTest {};
-class GRNLayerTest_NPU3720 : public GRNLayerTestCommon {};
-class GRNLayerTest_NPU4000 : public GRNLayerTestCommon {};
 
-TEST_P(GRNLayerTest_NPU3720, HW) {
+TEST_P(GRNLayerTestCommon, NPU3720_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(GRNLayerTest_NPU4000, HW) {
+TEST_P(GRNLayerTestCommon, NPU4000_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
@@ -46,23 +44,13 @@ const std::vector<float> biases = {
         1.1f,
 };
 
-/* ============= NPU 3720 ============= */
-
 // OV cases
 const std::vector<std::vector<ov::Shape>> inShapes = {{{1, 8, 24, 64}}, {{3, 16, 1, 24}}, {{2, 16, 15, 20}}};
 
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_GRN, GRNLayerTest_NPU3720,
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_GRN, GRNLayerTestCommon,
                          testing::Combine(testing::ValuesIn(modelTypes),
                                           testing::ValuesIn(static_shapes_to_test_representation(inShapes)),
                                           testing::ValuesIn(biases), testing::Values(DEVICE_NPU)),
-                         GRNLayerTest_NPU3720::getTestCaseName);
-
-/* ============= NPU 4000 ============= */
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_GRN, GRNLayerTest_NPU4000,
-                         testing::Combine(testing::ValuesIn(modelTypes),
-                                          testing::ValuesIn(static_shapes_to_test_representation(inShapes)),
-                                          testing::ValuesIn(biases), testing::Values(DEVICE_NPU)),
-                         GRNLayerTest_NPU4000::getTestCaseName);
+                         GRNLayerTestCommon::getTestCaseName);
 
 }  // namespace

@@ -4,9 +4,7 @@
 //
 
 #include "vpux/compiler/dialect/IE/utils/interpolate_utils.hpp"
-#include "vpux/compiler/core/attributes/dims_order.hpp"
-#include "vpux/utils/core/array_ref.hpp"
-#include "vpux/utils/core/error.hpp"
+#include "vpux/compiler/utils/rewriter.hpp"
 #include "vpux/utils/core/numeric.hpp"
 
 #include "vpux/compiler/utils/error.hpp"
@@ -31,7 +29,7 @@ mlir::FailureOr<SmallVector<int64_t>> extractIntVector(mlir::Location loc, const
 }
 
 mlir::Value createPadding(mlir::PatternRewriter& rewriter, IE::InterpolateOp origOp, mlir::Value input, Dim axis,
-                          int64_t forwardPad, int64_t backpad) {
+                          int64_t forwardPad, int64_t backpad, StringRef locPrefix) {
     auto inputShape = getShape(input);
     auto forwardOffsets = SmallVector<int64_t>(inputShape.size(), 0);
     auto backOffsets = SmallVector<int64_t>(inputShape.size(), 0);
@@ -50,13 +48,14 @@ mlir::Value createPadding(mlir::PatternRewriter& rewriter, IE::InterpolateOp ori
     backOffsets[axis.ind()] = inputShape[axis] - 1;
     backSizes[axis.ind()] = 1;
     auto forwardSubSlice =
-            rewriter.create<IE::SliceOp>(origOp->getLoc(), input, getIntArrayAttr(origOp.getContext(), forwardOffsets),
+            rewriter.create<IE::SliceOp>(takeOpLoc(origOp, StringLiteral("{0}_forward_slice"), locPrefix), input,
+                                         getIntArrayAttr(origOp.getContext(), forwardOffsets),
                                          getIntArrayAttr(origOp.getContext(), forwardSizes))
                     .getResult();
-    auto backSubSlice =
-            rewriter.create<IE::SliceOp>(origOp->getLoc(), input, getIntArrayAttr(origOp.getContext(), backOffsets),
-                                         getIntArrayAttr(origOp.getContext(), backSizes))
-                    .getResult();
+    auto backSubSlice = rewriter.create<IE::SliceOp>(takeOpLoc(origOp, StringLiteral("{0}_backward_slice"), locPrefix),
+                                                     input, getIntArrayAttr(origOp.getContext(), backOffsets),
+                                                     getIntArrayAttr(origOp.getContext(), backSizes))
+                                .getResult();
 
     SmallVector<mlir::Value> subSlices;
     if (forwardPad == 0) {
@@ -70,7 +69,9 @@ mlir::Value createPadding(mlir::PatternRewriter& rewriter, IE::InterpolateOp ori
     if (backpad != 0) {
         subSlices.insert(subSlices.end(), backpad, backSubSlice);
     }
-    return rewriter.create<IE::ConcatOp>(origOp->getLoc(), subSlices, axis).getOutput();
+    return rewriter
+            .create<IE::ConcatOp>(takeOpLoc(origOp, StringLiteral("{0}_pad_slice_concat"), locPrefix), subSlices, axis)
+            .getOutput();
 }
 
 mlir::FailureOr<SmallVector<double>> extractFPVector(mlir::Location loc, const mlir::Value value,
@@ -103,35 +104,6 @@ SmallVector<int64_t> getInterpAxesVal(mlir::Location loc, const mlir::Value axes
     SmallVector<int64_t> axesVal(inType.getRank());
     std::iota(axesVal.begin(), axesVal.end(), 0);
     return axesVal;
-}
-
-mlir::FailureOr<int64_t> getInnermostAxis(mlir::Location loc, DimsOrder dimsOrder, ArrayRef<int64_t> axes) {
-    if (axes.empty()) {
-        return errorAt(loc, "Got empty axes");
-    }
-    const auto numDims = static_cast<int64_t>(dimsOrder.numDims());
-    auto innermostAxis = axes[0];
-    for (auto axis : axes) {
-        if (axis < 0 || axis >= numDims) {
-            return errorAt(loc, "Axis {0} is out of expected range [0, {1}]", axis, numDims - 1);
-        }
-        if (dimsOrder.dimPos(Dim(innermostAxis)) < dimsOrder.dimPos(Dim(axis))) {
-            innermostAxis = axis;
-        }
-    }
-    return innermostAxis;
-}
-
-int64_t getInterpCoordinatesSize(mlir::Value output, int64_t innermostAxis) {
-    const auto outShape = output.getType().cast<NDTypeInterface>().getShape().raw();
-    const auto lenghtResized = outShape[innermostAxis];
-    return lenghtResized;
-}
-
-int64_t getInterpLambdasSize(mlir::Value output, int64_t innermostAxis) {
-    const auto outShape = output.getType().cast<NDTypeInterface>().getShape().raw();
-    const auto lenghtResized = outShape[innermostAxis];
-    return lenghtResized * 2;
 }
 
 void applyInterpPads(MutableArrayRef<int64_t> outShape, ArrayRef<int64_t> padsBegin, ArrayRef<int64_t> padsEnd) {
@@ -230,8 +202,11 @@ bool isEquivalentToNearestAsymmetricInterpolate(IE::InterpolateOp op) {
         return false;
     }
 
-    const auto inputShape = getShape(op.getInput());
-    const auto outputShape = getShape(op.getOutput());
+    const auto inputShape = op.getInput().getType().cast<NDTypeInterface>().getShape();
+    const auto outputShape = op.getOutput().getType().cast<NDTypeInterface>().getShape();
+    if (inputShape.size() != 4 || outputShape.size() != 4) {
+        return false;
+    }
 
     if (inputShape[Dims4D::Act::W] * 2 != outputShape[Dims4D::Act::W] ||
         inputShape[Dims4D::Act::H] * 2 != outputShape[Dims4D::Act::H]) {

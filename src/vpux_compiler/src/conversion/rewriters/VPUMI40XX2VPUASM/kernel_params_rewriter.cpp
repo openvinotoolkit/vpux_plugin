@@ -33,7 +33,7 @@ mlir::LogicalResult KernelParamsRewriter::symbolize(VPUMI40XX::KernelParamsOp op
     auto outputsAttr = mlir::ArrayAttr::get(getContext(), outputSyms);
 
     rewriter.create<VPUASM::KernelParamsOp>(op.getLoc(), symName, inputsAttr, outputsAttr, op.getKernelTypeAttr(),
-                                            op.getKernelParamsAttr());
+                                            op.getKernelParamsAttr(), op.getIsOutputBroadcasted());
 
     rewriter.eraseOp(op);
 

@@ -10,6 +10,7 @@
 #include "vpux/compiler/dialect/VPU/utils/conv_utils.hpp"
 #include "vpux/compiler/utils/IE/transposed_convolution_utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
+#include "vpux/compiler/utils/rewriter.hpp"
 
 #include <mlir/Transforms/DialectConversion.h>
 
@@ -68,7 +69,7 @@ mlir::LogicalResult GroupTransposedConvConverter::matchAndRewrite(IE::GroupTrans
         return matchFailed(rewriter, origOp, "[Unsupported]Filter is not Const::DeclareOp at {0}", origOp->getLoc());
     }
 
-    auto featureUpScale = IE::createUpsampling(rewriter, origOp, padsOutput, true);
+    auto featureUpScale = IE::createUpsampling(rewriter, takeOpLoc(origOp, "upscale_in"), origOp, padsOutput, true);
     if (mlir::failed(featureUpScale)) {
         _log.nest().trace("Failed to create Upsampling for {0}", origOp->getLoc());
         return mlir::failure();
@@ -86,25 +87,28 @@ mlir::LogicalResult GroupTransposedConvConverter::matchAndRewrite(IE::GroupTrans
     origFilterShape.erase(origFilterShape.begin());
 
     const auto filter4DShapeAttr = getIntArrayAttr(rewriter.getContext(), origFilterShape);
-    auto reshaped4DFilter = rewriter.createOrFold<IE::ReshapeOp>(origOp->getLoc(), dwConvFilter.getOutput(), nullptr,
-                                                                 false, filter4DShapeAttr);
+    auto reshaped4DFilter = rewriter.createOrFold<IE::ReshapeOp>(
+            takeOpLoc(origOp, "reshape_filter"), dwConvFilter.getOutput(), nullptr, false, filter4DShapeAttr);
 
     const auto postOp = origOp.getPostOpAttr();
     const auto clampOp = origOp.getClampAttr();
+    const auto outputChannels = origOp.getOutputChannelsAttr();
+    const auto inputChannels = origOp.getInputChannelsAttr();
 
     if (padsOutput[Dims4D::PadsOutput::Y] > 0) {
-        paddingOutput = IE::createPadding(rewriter, origOp->getLoc(), paddingOutput, Dims4D::Act::H,
+        paddingOutput = IE::createPadding(rewriter, takeOpLoc(origOp, "height"), paddingOutput, Dims4D::Act::H,
                                           padsOutput[Dims4D::PadsOutput::Y], nullptr);
     }
     if (padsOutput[Dims4D::PadsOutput::X] > 0) {
-        paddingOutput = IE::createPadding(rewriter, origOp->getLoc(), paddingOutput, Dims4D::Act::W,
+        paddingOutput = IE::createPadding(rewriter, takeOpLoc(origOp, "width"), paddingOutput, Dims4D::Act::W,
                                           padsOutput[Dims4D::PadsOutput::X], nullptr);
     }
 
-    auto resultOP = rewriter.create<IE::GroupConvolutionOp>(origOp->getLoc(), paddingOutput, reshaped4DFilter, nullptr,
-                                                            strides, padsBegin, padsEnd, dilations,
-                                                            getIntAttr(rewriter, groups), postOp, clampOp)
-                            .getOutput();
+    auto resultOP =
+            rewriter.create<IE::GroupConvolutionOp>(origOp->getLoc(), paddingOutput, reshaped4DFilter, nullptr, strides,
+                                                    padsBegin, padsEnd, dilations, getIntAttr(rewriter, groups), postOp,
+                                                    clampOp, outputChannels, inputChannels)
+                    .getOutput();
 
     rewriter.replaceOp(origOp, resultOP);
 

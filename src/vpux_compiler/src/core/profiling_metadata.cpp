@@ -6,6 +6,7 @@
 #include "vpux/compiler/core/profiling_metadata.hpp"
 #include "vpux/compiler/core/profiling.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/device.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/sw_utils.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
 #include "vpux/compiler/dialect/VPUMI37XX/utils.hpp"
@@ -23,6 +24,17 @@
 using namespace vpux;
 
 namespace {
+
+VPUIP::TargetDevice mapTargetDevice(VPU::ArchKind kind) {
+    switch (kind) {
+    case VPU::ArchKind::NPU37XX:
+        return VPUIP::TargetDevice::TargetDevice_VPUX37XX;
+    case VPU::ArchKind::NPU40XX:
+        return VPUIP::TargetDevice::TargetDevice_VPUX40XX;
+    default:
+        VPUX_THROW("Unsupported architecture '{0}'", kind);
+    }
+}
 
 bool isCacheHandlingOp(mlir::Operation* op) {
     if (auto swKernel = mlir::dyn_cast<VPUIP::SwKernelOp>(op)) {
@@ -60,7 +72,7 @@ struct ProfilingConfiguration {
 
         isDmaProfEnabled = hasSectionOfType<ExecutorType::DMA_HW, ExecutorType::DMA_SW>();
         isDpuProfEnabled = hasSectionOfType<ExecutorType::DPU>();
-        isSwProfEnabled = hasSectionOfType<ExecutorType::UPA, ExecutorType::ACTSHAVE>();
+        isSwProfEnabled = hasSectionOfType<ExecutorType::ACTSHAVE>();
         isM2iProfEnabled = hasSectionOfType<ExecutorType::M2I>();
     }
 
@@ -218,17 +230,11 @@ struct RtDialectProvider40XX : public RtDialectProvider {
     static inline bool IS_DMA_HWP_SUPPORTED = true;
 };
 
-struct DummyUpaOp {
-    static StringRef getOperationName() {
-        return "";
-    }
-};
-
 template <typename TaskType>
 using FbVector = flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<TaskType>>>;
 
 std::string cleanSwTaskType(std::string origType) {
-    const std::vector<std::pair<std::string, std::string>> REPLACE_PAIRS = {{"VPUIP.", ""}, {"UPA", ""}};
+    const std::vector<std::pair<std::string, std::string>> REPLACE_PAIRS = {{"VPUIP.", ""}};
     return std::accumulate(REPLACE_PAIRS.cbegin(), REPLACE_PAIRS.cend(), std::move(origType),
                            [](std::string a, const auto& replacement) {
                                const auto pos = a.find(replacement.first);
@@ -355,8 +361,7 @@ FbVector<ProfilingFB::SWTask> getSwTasksOffset(const ProfilingConfiguration& pro
     for (const auto& swTask : swTasks) {
         auto name = stringifyPrimaryLocationChecked(swTask->getLoc());
         std::string swTaskType;
-        // ActShave store kernel as attribute, so for all task same operation used. In case of UPA for each operation
-        // new op added to dialect
+        // ActShave store kernel as attribute, so for all task same operation used.
         const auto taskType = swTask->getName().getStringRef().str();
         if (SwType::getOperationName().str() != taskType) {
             swTaskType = cleanSwTaskType(taskType);
@@ -416,7 +421,7 @@ flatbuffers::Offset<ProfilingFB::ProfilingBuffer> createProfilingBufferOffset(Pr
 
 flatbuffers::Offset<ProfilingFB::Platform> createPlatformOffset(VPU::ArchKind arch,
                                                                 flatbuffers::FlatBufferBuilder& builder) {
-    auto targetDevice = VPUIP::mapTargetDevice(arch);
+    auto targetDevice = mapTargetDevice(arch);
     return ProfilingFB::CreatePlatform(builder, (int8_t)targetDevice);
 }
 

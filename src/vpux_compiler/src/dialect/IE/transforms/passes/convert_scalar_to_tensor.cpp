@@ -106,11 +106,12 @@ mlir::LogicalResult ConvertScalarToTensorPass::GatherScalarConverter::matchAndRe
         auto axisReshape = rewriter.create<IE::ReshapeOp>(takeOpLoc(origOp, "in_axis"), newArgs.getAxis().getType(),
                                                           origOp.getAxis(), nullptr, true, shapeAttr);
         newOp = rewriter.create<IE::GatherOp>(takeOpLoc(origOp, "gather_axis"), origOp.getInput(), newArgs.getIndices(),
-                                              axisReshape.getOutput(), origOp.getAxisValueAttr(),
-                                              origOp.getBatchDims());
+                                              axisReshape.getOutput(), origOp.getAxisValueAttr(), origOp.getBatchDims(),
+                                              origOp.getIndicesRankAttr());
     } else {
         newOp = rewriter.create<IE::GatherOp>(takeOpLoc(origOp, "gather_axis"), origOp.getInput(), newArgs.getIndices(),
-                                              nullptr, origOp.getAxisValueAttr(), origOp.getBatchDims());
+                                              nullptr, origOp.getAxisValueAttr(), origOp.getBatchDims(),
+                                              origOp.getIndicesRankAttr());
     }
     _log.nest().trace("New indices type '{0}'", newArgs.getIndices().getType());
 
@@ -154,6 +155,7 @@ void ConvertScalarToTensorPass::safeRunOnFunc() {
     mlir::ConversionTarget target(ctx);
 
     target.addLegalOp<IE::ReshapeOp, IE::AffineReshapeOp>();
+    target.addLegalOp<IE::LoopOp>();
 
     target.markUnknownOpDynamicallyLegal([&](mlir::Operation* op) {
         if (!mlir::isa<IE::LayerOpInterface>(op) || mlir::isa<IE::GatherOp>(op)) {

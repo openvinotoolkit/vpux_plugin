@@ -36,12 +36,12 @@ struct KernelsInfo final {
     }
 };
 
-bool hasSupportedKernels(ShapeRef kernelSize);
-bool isPoolingKernelSizeValid(int64_t kernelSize);
+bool hasSupportedKernels(ShapeRef kernelSize, int64_t maxKernelSize);
+bool isPoolingKernelSizeValid(int64_t kernelSize, int64_t maxKernelSize);
 
-std::optional<IE::KernelsInfo> calculateKernelsInfo(ShapeRef origKernel, Logger log);
-std::optional<IE::FactorsInfo> getFactors(const int64_t kernelSize);
-bool checkFactors(const Factors& factors, int64_t kernelSize);
+std::optional<IE::KernelsInfo> calculateKernelsInfo(ShapeRef origKernel, int64_t maxKernelSize, Logger log);
+std::optional<IE::FactorsInfo> getFactors(const int64_t kernelSize, const int64_t maxKernelSize);
+bool checkFactors(const Factors& factors, int64_t kernelSize, int64_t maxKernelSize);
 
 std::optional<Factors> getFactorsWithLimitation(int64_t val, int64_t limit);
 std::optional<Factors> getFactorsAroundWithLimitation(int64_t val, int64_t aroundVal, int64_t limit);

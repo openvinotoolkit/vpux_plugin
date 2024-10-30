@@ -67,6 +67,9 @@ mlir::LogicalResult FusePostOpsRewriter::matchAndRewrite(mlir::Operation* postOp
     }
 
     producerOp.setPostOp(postOp);
+    auto origElemType = postOp->getResult(0).getType().template cast<NDTypeInterface>().getElementType();
+    auto newType = producerOp->getOpResult(0).getType().template cast<NDTypeInterface>();
+    producerOp->getOpResult(0).setType(newType.changeElemType(origElemType));
     rewriter.replaceOp(postOp, producerOp->getResult(0));
 
     return mlir::success();

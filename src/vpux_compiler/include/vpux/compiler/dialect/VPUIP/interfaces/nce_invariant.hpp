@@ -64,7 +64,7 @@ public:
 
     static mlir::LogicalResult verifyChannels(IE::MaxPoolOp origOp, Logger log = Logger::global());
     static mlir::LogicalResult verifyChannels(VPU::NCEMaxPoolOp origOp, Logger log = Logger::global());
-    static mlir::LogicalResult verifyPoolChannels(mlir::Location loc, vpux::NDTypeInterface inputType,
+    static mlir::LogicalResult verifyPoolChannels(mlir::Operation* op, vpux::NDTypeInterface inputType,
                                                   Logger log = Logger::global());
 
     static mlir::LogicalResult verifyChannels(IE::AvgPoolOp origOp, Logger log = Logger::global());
@@ -76,10 +76,10 @@ public:
     static mlir::LogicalResult verifyChannels(IE::SubtractOp origOp, Logger log = Logger::global());
     static mlir::LogicalResult verifyChannels(IE::AndOp origOp, Logger log = Logger::global());
     static mlir::LogicalResult verifyChannels(VPU::NCEEltwiseOp origOp, Logger log = Logger::global());
-    static mlir::LogicalResult verifyEltwiseChannels(mlir::Location loc, vpux::NDTypeInterface firstInputType,
+    static mlir::LogicalResult verifyEltwiseChannels(mlir::Operation* op, vpux::NDTypeInterface firstInputType,
                                                      vpux::NDTypeInterface secondInputType,
                                                      Logger log = Logger::global());
-    static mlir::LogicalResult verifyReduceChannels(mlir::Location loc, vpux::NDTypeInterface inputType,
+    static mlir::LogicalResult verifyReduceChannels(IE::ReduceMeanOp origOp, vpux::NDTypeInterface inputType,
                                                     Logger log = Logger::global());
 
     static mlir::LogicalResult verifyChannels(IE::GroupConvolutionOp origOp, Logger log = Logger::global());

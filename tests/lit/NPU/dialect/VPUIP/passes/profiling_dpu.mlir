@@ -251,7 +251,6 @@ module @DpuProfilingMultipleOps  {
 
     %5 = memref.alloc() : !Output0_CMX
     %6 = VPUIP.NCEClusterTask {
-          activation_window_channel_length = 0 : i64,
           task_type = #VPUIP.nce_task_type<ELTWISE>
           } input(%4 : !Output0_CMX)
             weights(%4 : !Output0_CMX)
@@ -268,7 +267,7 @@ module @DpuProfilingMultipleOps  {
             DPUTask {outEnd = [191, 44, 47], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [160, 0, 0]}
             DPUTask {outEnd = [221, 44, 47], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [192, 0, 0]}
         } PPE :  {
-            PPETask <ADD> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64}
+            PPETask {opaque_ppe = #VPU.PPEStub<>}
     }
 
     //CHECK:        [[PROF_VIEW_OP_1:%.+]] = VPUIP.SubView [[BUFFER_0:%.+]] [[[VIEW_OFFSET_0:.*]]] [[[VIEW_SIZE_0:.*]]] : memref<[[BUFF_SPLIT:.*]]x[[PROFDATA_INFO_TENSOR_TYPE]], [@CMX_NN, 0]> to memref<[[VIEW_SIZE_0]]x[[PROFDATA_INFO_TENSOR_TYPE]], [@CMX_NN, 0]>
@@ -310,7 +309,6 @@ module @DpuProfilingMultipleOps  {
     %11 = memref.alloc() : !Output1_CMX
 
     %12 = VPUIP.NCEClusterTask {
-        activation_window_channel_length = 0 : i64,
         task_type = #VPUIP.nce_task_type<ELTWISE>
         }
         input(%10 : !Output1_CMX)
@@ -325,12 +323,11 @@ module @DpuProfilingMultipleOps  {
       DPUTask {outEnd = [54, 43, 31], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 33, 0]}
       DPUTask {outEnd = [54, 54, 31], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 44, 0]}
     } PPE :  {
-      PPETask <AND> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64}
+      PPETask {opaque_ppe = #VPU.PPEStub<>}
     }
 
     %13 = VPURT.AllocDistributed -> !OutputDistributed
     %14 =  VPUIP.NCEClusterTask {
-        activation_window_channel_length = 0 : i64,
         task_type = #VPUIP.nce_task_type<ELTWISE>
         }
         input(%12 : !Output1_CMX)
@@ -345,7 +342,7 @@ module @DpuProfilingMultipleOps  {
       DPUTask {cluster_id = 1 : i64, outEnd = [54, 43, 31], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 33, 0]}
       DPUTask {cluster_id = 2 : i64, outEnd = [54, 54, 31], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 44, 0]}
     } PPE :  {
-      PPETask <AND> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64}
+      PPETask {opaque_ppe = #VPU.PPEStub<>}
     }
 
     //CHECK:        [[PROF_VIEW_OP_4:%.+]] = VPUIP.SubView [[BUFFER_D]] [0] [[[PROF_VIEW_OP_4_SIZE:.*]]] : !VPUIP.DistributedBuffer<[[PROFDATA_INFO_TENSOR_SPLIT_0]]x[[PROFDATA_INFO_TENSOR_TYPE]], #C, @CMX_NN, {mode = "SEGMENTED", num_tiles = [3], num_clusters = 3 : i64, uniform_distributed_segments}>
@@ -356,7 +353,6 @@ module @DpuProfilingMultipleOps  {
 
     %15 = VPURT.AllocDistributed -> !OutputDistributed
     %16 = VPUIP.NCEClusterTask {
-        activation_window_channel_length = 0 : i64,
         task_type = #VPUIP.nce_task_type<ELTWISE>
         }
         input(%14 : !OutputDistributed)
@@ -372,7 +368,7 @@ module @DpuProfilingMultipleOps  {
       DPUTask {cluster_id = 1 : i64, outEnd = [54, 43, 31], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 33, 0]}
       DPUTask {cluster_id = 2 : i64, outEnd = [54, 54, 31], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 44, 0]}
     } PPE :  {
-      PPETask <AND> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64}
+      PPETask {opaque_ppe = #VPU.PPEStub<>}
     }
 
     //CHECK:        [[PROF_VIEW_OP_5:%.+]] = VPUIP.SubView [[BUFFER_D]] [[[PROF_VIEW_OFFSET:.*]]] [[[PROF_VIEW_OP_5_SIZE:.*]]] : !VPUIP.DistributedBuffer<[[PROFDATA_INFO_TENSOR_SPLIT_0]]x[[PROFDATA_INFO_TENSOR_TYPE]], #C, @CMX_NN, {mode = "SEGMENTED", num_tiles = [3], num_clusters = 3 : i64, uniform_distributed_segments}>

@@ -11,7 +11,7 @@ using namespace vpux;
 VPU::OverlapDistributionParams VPU::getExplicitOverlapParamsForSWOpInput(VPU::SWOpInterface swOp, ShapeRef outShape,
                                                                          ArrayRef<int64_t> numTiles,
                                                                          ArrayRef<int64_t> alignment) {
-    VPUX_THROW_WHEN(swOp == nullptr, "Cannot get SW DistributedTensorAttr, is not a SW op");
+    VPUX_THROW_WHEN(swOp == nullptr, "Cannot get SW DistributionInfoAttr, is not a SW op");
     VPUX_THROW_WHEN(swOp->getNumResults() != 1, "More than one result for Sw op: {0}", swOp);
 
     std::optional<ArrayRef<int64_t>> alignmentValue = std::nullopt;
@@ -28,6 +28,8 @@ VPU::OverlapDistributionParams VPU::getExplicitOverlapParamsForSWOpInput(VPU::SW
     SmallVector<InputTiling> inputTiles;
     for (const auto& outTile : outTiles) {
         inputTiles.push_back(tilingBuilder.backInferTileInfo(outTile, Logger::global()));
+        VPUX_THROW_UNLESS(inputTiles.back().tiles.size() == 1, "Unexpected input operands size {0}",
+                          inputTiles.back().tiles.size());
     }
 
     SmallVector<SmallVector<int64_t>> inputPerClusterShape;
@@ -41,24 +43,25 @@ VPU::OverlapDistributionParams VPU::getExplicitOverlapParamsForSWOpInput(VPU::SW
                                      inputPerClusterOffset);
 }
 
-VPU::DistributedTensorAttr VPU::getSWExplicitDistributedTensorAttr(
+VPU::DistributionInfoAttr VPU::getSWExplicitDistributionInfoAttr(
         VPU::SWOpInterface swOp, ShapeRef shape, VPU::DistributionMode distributionMode, mlir::ArrayAttr numTiles,
         mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::UnitAttr uniformDistributedSegments,
         const vpux::VPU::OverlapDistributionParams& overlapParams) {
-    VPUX_THROW_WHEN(swOp == nullptr, "Cannot get SW DistributedTensorAttr, is not a SW op");
+    VPUX_THROW_WHEN(swOp == nullptr, "Cannot get SW DistributionInfoAttr, is not a SW op");
     auto numTilesArr = numTiles ? parseIntArrayAttr<int64_t>(numTiles) : SmallVector<int64_t>{};
     auto alignmentArr = alignment ? parseIntArrayAttr<int64_t>(alignment) : SmallVector<int64_t>{};
 
-    return vpux::VPU::DistributedTensorNative::getAttrFromClass(
-            swOp.getContext(), getSWExplicitDistributedTensorNative(
-                                       swOp, shape, distributionMode, numTilesArr, numClusters.getInt(), alignmentArr,
-                                       uniformDistributedSegments ? true : false, overlapParams));
+    return vpux::VPU::DistributionInfo::getAttrFromClass(
+            swOp.getContext(),
+            getSWExplicitDistributionInfo(swOp, shape, distributionMode, numTilesArr, numClusters.getInt(),
+                                          alignmentArr, uniformDistributedSegments ? true : false, overlapParams));
 }
 
-VPU::DistributedTensorNative VPU::getSWExplicitDistributedTensorNative(
-        VPU::SWOpInterface swOp, ShapeRef shape, VPU::DistributionMode distributionMode, ArrayRef<int64_t> numTiles,
-        const int64_t numClusters, ArrayRef<int64_t> alignment, bool uniformDistributedSegments,
-        const vpux::VPU::OverlapDistributionParams& overlapParams) {
+VPU::DistributionInfo VPU::getSWExplicitDistributionInfo(VPU::SWOpInterface swOp, ShapeRef shape,
+                                                         VPU::DistributionMode distributionMode,
+                                                         ArrayRef<int64_t> numTiles, const int64_t numClusters,
+                                                         ArrayRef<int64_t> alignment, bool uniformDistributedSegments,
+                                                         const vpux::VPU::OverlapDistributionParams& overlapParams) {
     VPUX_THROW_WHEN(swOp == nullptr, "Cannot get SW DistributedTensor, is not a SW op");
 
     if (distributionMode != VPU::DistributionMode::OVERLAPPED) {
@@ -67,54 +70,55 @@ VPU::DistributedTensorNative VPU::getSWExplicitDistributedTensorNative(
     }
 
     if (overlapParams.hasNonnullComputeAndMemoryShapesOffsets()) {
-        return VPU::DistributedTensorNative(distributionMode, numTiles, {}, {}, {}, numClusters, alignment,
-                                            uniformDistributedSegments, overlapParams.getComputeShapes(),
-                                            overlapParams.getComputeOffsets(), overlapParams.getMemoryShapes(),
-                                            overlapParams.getComputeOffsets(), {});
+        return VPU::DistributionInfo(distributionMode, numTiles, {}, {}, {}, numClusters, alignment,
+                                     uniformDistributedSegments, overlapParams.getComputeShapes(),
+                                     overlapParams.getComputeOffsets(), overlapParams.getMemoryShapes(),
+                                     overlapParams.getComputeOffsets(), {});
     }
 
     const auto untiledOverlapParams =
             getExplicitOverlapParamsForSWOpInput(swOp, getShape(swOp->getResult(0)), numTiles, alignment);
 
-    return VPU::DistributedTensorNative(
-            distributionMode, numTiles, {}, {}, {}, numClusters, alignment, uniformDistributedSegments,
-            untiledOverlapParams.getComputeShapes(), untiledOverlapParams.getComputeOffsets(),
-            untiledOverlapParams.getMemoryShapes(), untiledOverlapParams.getComputeOffsets(), {});
+    return VPU::DistributionInfo(distributionMode, numTiles, {}, {}, {}, numClusters, alignment,
+                                 uniformDistributedSegments, untiledOverlapParams.getComputeShapes(),
+                                 untiledOverlapParams.getComputeOffsets(), untiledOverlapParams.getMemoryShapes(),
+                                 untiledOverlapParams.getComputeOffsets(), {});
 }
 
-VPU::DistributedTensorAttr VPU::getNCEExplicitDistributedTensorAttr(
+VPU::DistributionInfoAttr VPU::getNCEExplicitDistributionInfoAttr(
         VPU::NCEOpInterface nceOp, ShapeRef shape, VPU::DistributionMode distributionMode, mlir::ArrayAttr numTiles,
         mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::UnitAttr uniformDistributedSegments,
         const vpux::VPU::OverlapDistributionParams& overlapParams) {
-    VPUX_THROW_WHEN(nceOp == nullptr, "Cannot get HW DistributedTensorAttr, is not a HW op");
+    VPUX_THROW_WHEN(nceOp == nullptr, "Cannot get HW DistributionInfoAttr, is not a HW op");
     auto numTilesArr = numTiles ? parseIntArrayAttr<int64_t>(numTiles) : SmallVector<int64_t>{};
     auto alignmentArr = alignment ? parseIntArrayAttr<int64_t>(alignment) : SmallVector<int64_t>{};
 
-    return vpux::VPU::DistributedTensorNative::getAttrFromClass(
-            nceOp.getContext(), getNCEExplicitDistributedTensorNative(
-                                        nceOp, shape, distributionMode, numTilesArr, numClusters.getInt(), alignmentArr,
-                                        uniformDistributedSegments ? true : false, overlapParams));
+    return vpux::VPU::DistributionInfo::getAttrFromClass(
+            nceOp.getContext(),
+            getNCEExplicitDistributionInfo(nceOp, shape, distributionMode, numTilesArr, numClusters.getInt(),
+                                           alignmentArr, uniformDistributedSegments ? true : false, overlapParams));
 }
 
-VPU::DistributedTensorNative VPU::getNCEExplicitDistributedTensorNative(
-        VPU::NCEOpInterface nceOp, ShapeRef shape, VPU::DistributionMode distributionMode, ArrayRef<int64_t> numTiles,
-        const int64_t numClusters, ArrayRef<int64_t> alignment, bool uniformDistributedSegments,
-        const vpux::VPU::OverlapDistributionParams& overlapParams) {
-    VPUX_THROW_WHEN(nceOp == nullptr, "Cannot get HW DistributedTensorNative, is not a HW op");
+VPU::DistributionInfo VPU::getNCEExplicitDistributionInfo(VPU::NCEOpInterface nceOp, ShapeRef shape,
+                                                          VPU::DistributionMode distributionMode,
+                                                          ArrayRef<int64_t> numTiles, const int64_t numClusters,
+                                                          ArrayRef<int64_t> alignment, bool uniformDistributedSegments,
+                                                          const vpux::VPU::OverlapDistributionParams& overlapParams) {
+    VPUX_THROW_WHEN(nceOp == nullptr, "Cannot get HW DistributionInfo, is not a HW op");
 
     if (distributionMode == DistributionMode::OVERLAPPED) {
         VPUX_THROW_WHEN(overlapParams.getMemoryShapes().empty() || overlapParams.getMemoryOffsets().empty() ||
                                 overlapParams.getComputeShapes().empty() || overlapParams.getComputeOffsets().empty(),
                         "memoryShapes, memoryOffsets, computeShapes, computeOffsets cannot be empty.");
 
-        return DistributedTensorNative(distributionMode, numTiles, {}, {}, {}, numClusters, alignment,
-                                       uniformDistributedSegments, overlapParams.getComputeShapes(),
-                                       overlapParams.getComputeOffsets(), overlapParams.getMemoryShapes(),
-                                       overlapParams.getMemoryOffsets(), {});
+        return DistributionInfo(distributionMode, numTiles, {}, {}, {}, numClusters, alignment,
+                                uniformDistributedSegments, overlapParams.getComputeShapes(),
+                                overlapParams.getComputeOffsets(), overlapParams.getMemoryShapes(),
+                                overlapParams.getMemoryOffsets(), {});
     }
 
-    auto distributedTensor = DistributedTensorNative(distributionMode, numTiles, {}, {}, {}, numClusters, alignment,
-                                                     uniformDistributedSegments, {}, {}, {}, {}, {});
+    auto distributedTensor = DistributionInfo(distributionMode, numTiles, {}, {}, {}, numClusters, alignment,
+                                              uniformDistributedSegments, {}, {}, {}, {}, {});
 
     auto optionalClusterMemoryShapes = VPU::getPerClusterMemoryShapes(shape, distributedTensor);
 
@@ -133,20 +137,20 @@ VPU::DistributedTensorNative VPU::getNCEExplicitDistributedTensorNative(
     return distributedTensor;
 }
 
-VPU::DistributedTensorAttr VPU::getConcatExplicitDistributedAttr(
+VPU::DistributionInfoAttr VPU::getConcatExplicitDistributedAttr(
         ShapeRef shape, VPU::DistributionMode distributionMode, mlir::ArrayAttr numTiles, mlir::IntegerAttr numClusters,
         mlir::ArrayAttr alignment, mlir::UnitAttr uniformDistributedSegments,
         const vpux::VPU::OverlapDistributionParams& overlapParams, mlir::MLIRContext* ctx) {
     auto numTilesArr = numTiles ? parseIntArrayAttr<int64_t>(numTiles) : SmallVector<int64_t>{};
     auto alignmentArr = alignment ? parseIntArrayAttr<int64_t>(alignment) : SmallVector<int64_t>{};
 
-    return vpux::VPU::DistributedTensorNative::getAttrFromClass(
+    return vpux::VPU::DistributionInfo::getAttrFromClass(
             ctx,
             getConcatExplicitDistributedNative(shape, distributionMode, numTilesArr, numClusters.getInt(), alignmentArr,
                                                uniformDistributedSegments ? true : false, overlapParams));
 }
 
-VPU::DistributedTensorNative VPU::getConcatExplicitDistributedNative(
+VPU::DistributionInfo VPU::getConcatExplicitDistributedNative(
         ShapeRef shape, VPU::DistributionMode distributionMode, ArrayRef<int64_t> numTiles, int64_t numClusters,
         ArrayRef<int64_t> alignment, bool uniformDistributedSegments,
         const vpux::VPU::OverlapDistributionParams& overlapParams) {
@@ -154,14 +158,14 @@ VPU::DistributedTensorNative VPU::getConcatExplicitDistributedNative(
         VPUX_THROW_WHEN(overlapParams.getMemoryShapes().empty() || overlapParams.getMemoryOffsets().empty(),
                         "memoryShapes and memoryOffsets cannot be empty.");
 
-        return VPU::DistributedTensorNative(distributionMode, numTiles, {}, {}, {}, numClusters, alignment,
-                                            uniformDistributedSegments, overlapParams.getMemoryShapes(),
-                                            overlapParams.getMemoryOffsets(), overlapParams.getMemoryShapes(),
-                                            overlapParams.getMemoryOffsets(), {});
+        return VPU::DistributionInfo(distributionMode, numTiles, {}, {}, {}, numClusters, alignment,
+                                     uniformDistributedSegments, overlapParams.getMemoryShapes(),
+                                     overlapParams.getMemoryOffsets(), overlapParams.getMemoryShapes(),
+                                     overlapParams.getMemoryOffsets(), {});
     }
 
-    auto distributedTensor = VPU::DistributedTensorNative(distributionMode, numTiles, {}, {}, {}, numClusters,
-                                                          alignment, uniformDistributedSegments, {}, {}, {}, {}, {});
+    auto distributedTensor = VPU::DistributionInfo(distributionMode, numTiles, {}, {}, {}, numClusters, alignment,
+                                                   uniformDistributedSegments, {}, {}, {}, {}, {});
 
     auto optionalClusterMemoryShapes = VPU::getPerClusterMemoryShapes(shape, distributedTensor);
     VPUX_THROW_UNLESS(optionalClusterMemoryShapes.has_value(),
@@ -177,15 +181,15 @@ VPU::DistributedTensorNative VPU::getConcatExplicitDistributedNative(
     return distributedTensor;
 }
 
-VPU::DistributedTensorAttr vpux::VPU::getConcatExplicitDistributedAttrForNewShape(
-        VPU::DistributedTensorAttr originDistribution, vpux::ShapeRef newShape, mlir::MLIRContext* ctx) {
-    auto distribution = VPU::DistributedTensorNative::getClassFromAttr(originDistribution);
-    return VPU::DistributedTensorNative::getAttrFromClass(
+VPU::DistributionInfoAttr vpux::VPU::getConcatExplicitDistributedAttrForNewShape(
+        VPU::DistributionInfoAttr originDistribution, vpux::ShapeRef newShape, mlir::MLIRContext* ctx) {
+    auto distribution = VPU::DistributionInfo::getClassFromAttr(originDistribution);
+    return VPU::DistributionInfo::getAttrFromClass(
             ctx, getConcatExplicitDistributedNativeForNewShape(distribution, newShape));
 }
 
-VPU::DistributedTensorNative VPU::getConcatExplicitDistributedNativeForNewShape(
-        const VPU::DistributedTensorNative& originDistribution, vpux::ShapeRef newShape) {
+VPU::DistributionInfo VPU::getConcatExplicitDistributedNativeForNewShape(
+        const VPU::DistributionInfo& originDistribution, vpux::ShapeRef newShape) {
     // For non-overlapped mode, use already existing methods that compute per cluster shapes/methods
     if (originDistribution.getDistributionMode() != VPU::DistributionMode::OVERLAPPED) {
         return VPU::getConcatExplicitDistributedNative(
@@ -223,17 +227,17 @@ VPU::DistributedTensorNative VPU::getConcatExplicitDistributedNativeForNewShape(
 /// for slice ops.
 /// E.g., C=64, T=4, Alignment=16, then perClusterShape is [16, 16, 16, 16]. For sliceShape C = 32,
 /// perClusterShape should be [8, 8, 8, 8], thus original alignment must be changed
-VPU::DistributedTensorAttr VPU::getExplicitDistrAttrForSliceLikeOps(
-        VPU::DistributedTensorAttr distributionWithProperAlignment, ArrayRef<int64_t> sliceShape,
+VPU::DistributionInfoAttr VPU::getExplicitDistrAttrForSliceLikeOps(
+        VPU::DistributionInfoAttr distributionWithProperAlignment, ArrayRef<int64_t> sliceShape,
         ArrayRef<int64_t> originShape, mlir::MLIRContext* ctx) {
-    auto distribution = VPU::DistributedTensorNative::getClassFromAttr(distributionWithProperAlignment);
+    auto distribution = VPU::DistributionInfo::getClassFromAttr(distributionWithProperAlignment);
 
-    return VPU::DistributedTensorNative::getAttrFromClass(
+    return VPU::DistributionInfo::getAttrFromClass(
             ctx, getExplicitDistrNativeForSliceLikeOps(distribution, sliceShape, originShape));
 }
 
-VPU::DistributedTensorNative VPU::getExplicitDistrNativeForSliceLikeOps(
-        const VPU::DistributedTensorNative& distributionWithProperAlignment, ArrayRef<int64_t> sliceShape,
+VPU::DistributionInfo VPU::getExplicitDistrNativeForSliceLikeOps(
+        const VPU::DistributionInfo& distributionWithProperAlignment, ArrayRef<int64_t> sliceShape,
         ArrayRef<int64_t> originShape) {
     const auto mode = distributionWithProperAlignment.getDistributionMode();
 
@@ -256,9 +260,8 @@ VPU::DistributedTensorNative VPU::getExplicitDistrNativeForSliceLikeOps(
             "Overlapped clustering axis is the same as Slice/Subview axis; cannot infer per cluster shapes/offsets "
             "without compute op information");
 
-    const auto getDistribution =
-            [&](ArrayRef<SmallVector<int64_t>> perClusterShapesAttr,
-                ArrayRef<SmallVector<int64_t>> perClusterOffsetsAttr) -> VPU::DistributedTensorNative {
+    const auto getDistribution = [&](ArrayRef<SmallVector<int64_t>> perClusterShapesAttr,
+                                     ArrayRef<SmallVector<int64_t>> perClusterOffsetsAttr) -> VPU::DistributionInfo {
         // Slice/SubviewOp is not a "compute" op, so compute shapes/offsets have no reason to be different
         // from memory shapes/offsets
         auto newDistribution = distributionWithProperAlignment;
@@ -309,18 +312,18 @@ VPU::DistributedTensorNative VPU::getExplicitDistrNativeForSliceLikeOps(
  * @param sliceOutputShape The output shape of the slice like op
  * @param explicitShapes The expected output shapes on all clusters
  */
-VPU::DistributedTensorAttr vpux::VPU::getSegmentedExplicitDistrAttrForSliceLikeOps(
-        VPU::DistributedTensorAttr distributionAttr, ArrayRef<int64_t> sliceOutputShape, mlir::ArrayAttr explicitShapes,
+VPU::DistributionInfoAttr vpux::VPU::getSegmentedExplicitDistrAttrForSliceLikeOps(
+        VPU::DistributionInfoAttr distributionAttr, ArrayRef<int64_t> sliceOutputShape, mlir::ArrayAttr explicitShapes,
         mlir::MLIRContext* ctx) {
     auto explicitShapesArr =
             explicitShapes ? parseIntArrayOfArrayAttr<int64_t>(explicitShapes) : SmallVector<SmallVector<int64_t>>{};
-    auto distribution = VPU::DistributedTensorNative::getClassFromAttr(distributionAttr);
-    return VPU::DistributedTensorNative::getAttrFromClass(
+    auto distribution = VPU::DistributionInfo::getClassFromAttr(distributionAttr);
+    return VPU::DistributionInfo::getAttrFromClass(
             ctx, getSegmentedExplicitDistrNativeForSliceLikeOps(distribution, sliceOutputShape, explicitShapesArr));
 }
 
-VPU::DistributedTensorNative vpux::VPU::getSegmentedExplicitDistrNativeForSliceLikeOps(
-        const VPU::DistributedTensorNative& distribution, ArrayRef<int64_t> sliceOutputShape,
+VPU::DistributionInfo vpux::VPU::getSegmentedExplicitDistrNativeForSliceLikeOps(
+        const VPU::DistributionInfo& distribution, ArrayRef<int64_t> sliceOutputShape,
         ArrayRef<SmallVector<int64_t>> explicitShapes) {
     const auto mode = distribution.getDistributionMode();
     // Explicit DistributedAttr can be inferred in any case that has full tensor
@@ -362,7 +365,7 @@ VPU::DistributedTensorNative vpux::VPU::getSegmentedExplicitDistrNativeForSliceL
         offsetVal += shape[sliceDim];
     }
 
-    // Create DistributedTensorAttr with provided shapes and offsets. Since alignment is unnecessary, remove it from the
+    // Create DistributionInfoAttr with provided shapes and offsets. Since alignment is unnecessary, remove it from the
     // new attr
     auto newDistribution = distribution;
     newDistribution.setMemoryShapes(explicitShapes);
@@ -374,7 +377,7 @@ VPU::DistributedTensorNative vpux::VPU::getSegmentedExplicitDistrNativeForSliceL
     return newDistribution;
 }
 
-VPU::DistributedTensorAttr vpux::VPU::getNonOverlappedDistributedAttr(
+VPU::DistributionInfoAttr vpux::VPU::getNonOverlappedDistributedAttr(
         ShapeRef shape, VPU::DistributionModeAttr distrModeAttr, mlir::ArrayAttr numTiles,
         mlir::IntegerAttr numClusters, mlir::ArrayAttr alignment, mlir::UnitAttr uniformDistributedSegments,
         mlir::MLIRContext* ctx) {
@@ -382,19 +385,20 @@ VPU::DistributedTensorAttr vpux::VPU::getNonOverlappedDistributedAttr(
                     "getNonOverlappedDistributedAttr: distribution mode is OVERLAPPED");
     auto numTilesArr = numTiles ? parseIntArrayAttr<int64_t>(numTiles) : SmallVector<int64_t>{};
     auto alignmentArr = alignment ? parseIntArrayAttr<int64_t>(alignment) : SmallVector<int64_t>{};
-    return vpux::VPU::DistributedTensorNative::getAttrFromClass(
+    return vpux::VPU::DistributionInfo::getAttrFromClass(
             ctx, getNonOverlappedDistributedNative(shape, distrModeAttr.getValue(), numTilesArr, numClusters.getInt(),
                                                    alignmentArr, uniformDistributedSegments ? true : false));
 }
 
-VPU::DistributedTensorNative vpux::VPU::getNonOverlappedDistributedNative(
-        ShapeRef shape, VPU::DistributionMode distrMode, ArrayRef<int64_t> numTiles, int64_t numClusters,
-        ArrayRef<int64_t> alignment, bool uniformDistributedSegments) {
+VPU::DistributionInfo vpux::VPU::getNonOverlappedDistributedNative(ShapeRef shape, VPU::DistributionMode distrMode,
+                                                                   ArrayRef<int64_t> numTiles, int64_t numClusters,
+                                                                   ArrayRef<int64_t> alignment,
+                                                                   bool uniformDistributedSegments) {
     VPUX_THROW_WHEN(distrMode == VPU::DistributionMode::OVERLAPPED,
                     "getNonOverlappedDistributedNative: distribution mode is OVERLAPPED");
 
-    auto distributedTensor = VPU::DistributedTensorNative(distrMode, numTiles, {}, {}, {}, numClusters, alignment,
-                                                          uniformDistributedSegments, {}, {}, {}, {}, {});
+    auto distributedTensor = VPU::DistributionInfo(distrMode, numTiles, {}, {}, {}, numClusters, alignment,
+                                                   uniformDistributedSegments, {}, {}, {}, {}, {});
 
     auto optionalClusterMemoryShapes = VPU::getPerClusterMemoryShapes(shape, distributedTensor);
 
@@ -434,9 +438,9 @@ NDTypeInterface vpux::VPU::changeShapeElemTypeForDuplicatedDistributedBuffers(ND
     return distributedBuff.changeShapeElemType(shape, elemType);
 };
 
-VPU::DistributedTensorAttr vpux::VPU::getExplicitDistrAttrForSparseData(
-        VPU::DistributedTensorAttr denseDataDistribution, ShapeRef dataShape, VPU::SEAttr seAttr,
-        mlir::MLIRContext* ctx) {
+VPU::DistributionInfoAttr vpux::VPU::getExplicitDistrAttrForSparseData(VPU::DistributionInfoAttr denseDataDistribution,
+                                                                       ShapeRef dataShape, VPU::SEAttr seAttr,
+                                                                       mlir::MLIRContext* ctx) {
     if (seAttr == nullptr) {
         return denseDataDistribution;
     }
@@ -477,16 +481,17 @@ VPU::DistributedTensorAttr vpux::VPU::getExplicitDistrAttrForSparseData(
     const auto memoryView =
             getDataShapesOffsets(denseDataDistribution.getMemoryShapes(), denseDataDistribution.getMemoryOffsets());
 
-    return VPU::DistributedTensorAttr::get(ctx, denseDataDistribution.getMode(), denseDataDistribution.getNumTiles(),
-                                           nullptr, nullptr, nullptr, denseDataDistribution.getNumClusters(),
-                                           /*alignment*/ nullptr, denseDataDistribution.getUniformDistributedSegments(),
-                                           computeView.first, computeView.second, memoryView.first, memoryView.second,
-                                           denseDataDistribution.getEqualMemoryAndComputeView());
+    return VPU::DistributionInfoAttr::get(ctx, denseDataDistribution.getMode(), denseDataDistribution.getNumTiles(),
+                                          nullptr, nullptr, nullptr, denseDataDistribution.getNumClusters(),
+                                          /*alignment*/ nullptr, denseDataDistribution.getUniformDistributedSegments(),
+                                          computeView.first, computeView.second, memoryView.first, memoryView.second,
+                                          denseDataDistribution.getEqualMemoryAndComputeView());
 }
 
-VPU::DistributedTensorAttr vpux::VPU::getExplicitDistrAttrForSparsityMap(
-        VPU::DistributedTensorAttr denseDataDistribution, ShapeRef sparsityMapShape, mlir::UnitAttr isWeights,
-        mlir::MLIRContext* ctx) {
+VPU::DistributionInfoAttr vpux::VPU::getExplicitDistrAttrForSparsityMap(VPU::DistributionInfoAttr denseDataDistribution,
+                                                                        ShapeRef sparsityMapShape,
+                                                                        mlir::UnitAttr isWeights,
+                                                                        mlir::MLIRContext* ctx) {
     if (isWeights == nullptr) {
         return denseDataDistribution;
     }
@@ -520,7 +525,7 @@ VPU::DistributedTensorAttr vpux::VPU::getExplicitDistrAttrForSparsityMap(
         return getIntArrayOfArray(ctx, shapesVec);
     };
 
-    return VPU::DistributedTensorAttr::get(
+    return VPU::DistributionInfoAttr::get(
             ctx, denseDataDistribution.getMode(), denseDataDistribution.getNumTiles(), nullptr, nullptr, nullptr,
             denseDataDistribution.getNumClusters(), denseDataDistribution.getAlignment(),
             denseDataDistribution.getUniformDistributedSegments(),
@@ -529,8 +534,8 @@ VPU::DistributedTensorAttr vpux::VPU::getExplicitDistrAttrForSparsityMap(
             denseDataDistribution.getEqualMemoryAndComputeView());
 }
 
-VPU::DistributedTensorAttr vpux::VPU::getExplicitDistrAttrForSETable(VPU::DistributedTensorAttr denseDataDistribution,
-                                                                     const size_t seSize, mlir::MLIRContext* ctx) {
+VPU::DistributionInfoAttr vpux::VPU::getExplicitDistrAttrForSETable(VPU::DistributionInfoAttr denseDataDistribution,
+                                                                    const size_t seSize, mlir::MLIRContext* ctx) {
     auto getSETableShapesOffsets = [&](mlir::ArrayAttr shapesOffsetsAttr,
                                        const bool isOffset = false) -> mlir::ArrayAttr {
         auto shapesOffsetsVec = parseIntArrayOfArrayAttr<int64_t>(shapesOffsetsAttr);
@@ -552,12 +557,12 @@ VPU::DistributedTensorAttr vpux::VPU::getExplicitDistrAttrForSETable(VPU::Distri
         seTableAlignmentAttr = getIntArrayAttr(ctx, seTableAlignment);
     }
 
-    return VPU::DistributedTensorAttr::get(ctx, denseDataDistribution.getMode(), denseDataDistribution.getNumTiles(),
-                                           nullptr, nullptr, nullptr, denseDataDistribution.getNumClusters(),
-                                           seTableAlignmentAttr, denseDataDistribution.getUniformDistributedSegments(),
-                                           getSETableShapesOffsets(denseDataDistribution.getComputeShapes()),
-                                           getSETableShapesOffsets(denseDataDistribution.getComputeOffsets(), true),
-                                           getSETableShapesOffsets(denseDataDistribution.getMemoryShapes()),
-                                           getSETableShapesOffsets(denseDataDistribution.getMemoryOffsets(), true),
-                                           denseDataDistribution.getEqualMemoryAndComputeView());
+    return VPU::DistributionInfoAttr::get(ctx, denseDataDistribution.getMode(), denseDataDistribution.getNumTiles(),
+                                          nullptr, nullptr, nullptr, denseDataDistribution.getNumClusters(),
+                                          seTableAlignmentAttr, denseDataDistribution.getUniformDistributedSegments(),
+                                          getSETableShapesOffsets(denseDataDistribution.getComputeShapes()),
+                                          getSETableShapesOffsets(denseDataDistribution.getComputeOffsets(), true),
+                                          getSETableShapesOffsets(denseDataDistribution.getMemoryShapes()),
+                                          getSETableShapesOffsets(denseDataDistribution.getMemoryOffsets(), true),
+                                          denseDataDistribution.getEqualMemoryAndComputeView());
 }

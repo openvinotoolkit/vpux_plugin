@@ -21,7 +21,7 @@ func.func @AdjustFakeQuantLow(%arg0: tensor<1x3x30x30xf16>) -> tensor<1x3x30x30x
     return %1 : tensor<1x3x30x30xf16>
 
 
-    // CHECK-DAG:       [[LOW:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<0.000000e+00> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
+    // CHECK-DAG:       [[LOW:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<0.000000e+00> : tensor<1x1x1x1xf32>, [#const.CastElemType<f16>]
     // CHECK-DAG:       [[HIGH:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<5.000000e+00> : tensor<1x1x1x1xf16>
     // CHECK:       [[FQ:%.*]] = IE.FakeQuantize(%arg0, [[LOW]], [[HIGH]], [[LOW]], [[HIGH]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64} : tensor<1x3x30x30xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16> -> tensor<1x3x30x30xf16>
     // CHECK:       [[CLAMP:%.*]] = IE.Clamp([[FQ]]) {max = 5.000000e+00 : f64, min = 0.01000213623046875 : f64} : tensor<1x3x30x30xf16> -> tensor<1x3x30x30xf16>
@@ -45,7 +45,7 @@ func.func @AdjustFakeQuantHigh(%arg0: tensor<1x3x30x30xf16>) -> tensor<1x3x30x30
     return %1 : tensor<1x3x30x30xf16>
 
 
-    // CHECK-DAG:       [[HIGH:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<0.000000e+00> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
+    // CHECK-DAG:       [[HIGH:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<0.000000e+00> : tensor<1x1x1x1xf32>, [#const.CastElemType<f16>]
     // CHECK-DAG:       [[LOW:%.*]] = const.Declare tensor<1x1x1x1xf16> = dense<-5.000000e+00> : tensor<1x1x1x1xf16>
     // CHECK:       [[FQ:%.*]] = IE.FakeQuantize(%arg0, [[LOW]], [[HIGH]], [[LOW]], [[HIGH]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64} : tensor<1x3x30x30xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16> -> tensor<1x3x30x30xf16>
     // CHECK:       [[CLAMP:%.*]] = IE.Clamp(%0) {max = -0.01000213623046875 : f64, min = -5.000000e+00 : f64} : tensor<1x3x30x30xf16> -> tensor<1x3x30x30xf16>

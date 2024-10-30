@@ -81,7 +81,6 @@ Const::Content vpux::Const::RescaleAttr::transform(vpux::Const::Content& input) 
     return output;
 }
 
-Const::ContentAttr vpux::Const::ContentAttr::rescale(double scale) const {
-    return ContentAttr::addTransformation(
-            *this, Const::RescaleAttr::get(getFPAttr(getContext(), scale)).cast<Const::TransformAttrInterface>());
+Const::ContentSetup vpux::Const::ContentSetup::rescale(double scale) {
+    return addTransformation(Const::RescaleAttr::get(getFPAttr(getContext(), scale)));
 }

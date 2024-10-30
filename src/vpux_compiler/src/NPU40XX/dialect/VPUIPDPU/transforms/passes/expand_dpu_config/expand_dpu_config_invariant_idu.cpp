@@ -9,10 +9,10 @@
 #include "vpux/compiler/dialect/VPUASM/ops.hpp"
 #include "vpux/compiler/dialect/VPUIPDPU/rewriters/utils.hpp"
 
-namespace {
-
 using namespace VPUIPDPU;
-using namespace VPUIPDPU::arch40xx::IDU;
+using namespace vpux::VPUIPDPU::arch40xx::IDU;
+
+namespace vpux::VPUIPDPU::arch40xx::IDU {
 
 mlir::LogicalResult verifyInQuantConfig(const Logger& log, mlir::Type inType) {
     SmallVector<uint8_t> inQuantZero;
@@ -121,10 +121,9 @@ mlir::LogicalResult configureSparsityPattern(const Logger&, IDUConfig::InputLaye
 }
 
 mlir::LogicalResult configureStorageElement(const Logger& log, IDUConfig::StorageElement& config,
-                                            VPUIP::NCETaskType taskType, const vpux::NDTypeInterface& inActType,
+                                            VPUIP::NCETaskType taskType, const NDTypeInterface& inActType,
                                             bool inSparsityEnabled, std::optional<int64_t> seSize) {
-    if (taskType == VPUIP::NCETaskType::CONV || taskType == VPUIP::NCETaskType::CMCONV ||
-        taskType == VPUIP::NCETaskType::ELTWISE) {
+    if (taskType == VPUIP::NCETaskType::CONV || taskType == VPUIP::NCETaskType::ELTWISE) {
         auto seSizeVal = seSize.value_or(0);
         if (inSparsityEnabled && seSizeVal) {
             auto inputZ = inActType.getShape()[Dims4D::Act::C];
@@ -176,10 +175,6 @@ mlir::LogicalResult configureWorkload(const Logger& log, IDUConfig::WorkloadCfg&
     case VPUIP::NCETaskType::DWCONV:
         config.workloadType = IDUWorkloadType::DWCONV;
         break;
-    case VPUIP::NCETaskType::CMCONV:
-        // All the above are a subtype of convolution
-        config.workloadType = IDUWorkloadType::CONV;
-        break;
     case VPUIP::NCETaskType::MAXPOOL:
         config.workloadType = IDUWorkloadType::MAXPOOL;
         break;
@@ -194,7 +189,6 @@ mlir::LogicalResult configureWorkload(const Logger& log, IDUConfig::WorkloadCfg&
         config.workloadType = IDUWorkloadType::ELTWISE;
     } break;
     case VPUIP::NCETaskType::IDENTITY:
-    case VPUIP::NCETaskType::FCL:
     default:
         log.error("Workload not supported '{0}'", VPUIP::stringifyNCETaskType(taskType));
         return mlir::failure();
@@ -215,8 +209,7 @@ mlir::LogicalResult configureDepthWiseCfg(const Logger&, IDUConfig::DepthWiseCfg
 }
 
 mlir::LogicalResult configureEltwiseCfg(const Logger& log, IDUConfig::EltWiseCfg& config, VPUIP::NCETaskType taskType,
-                                        mlir::Type inActType, mlir::Type weightsType, const PPETask& ppeTask,
-                                        VPU::ArchKind arch) {
+                                        mlir::Type inActType, mlir::Type weightsType, const PPETask& ppeTask) {
     if (taskType == VPUIP::NCETaskType::ELTWISE) {
         config.eltWiseCfgOp = true;
 
@@ -234,10 +227,10 @@ mlir::LogicalResult configureEltwiseCfg(const Logger& log, IDUConfig::EltWiseCfg
             }
         } else {
             SmallVector<uint8_t> in1QuantZero, in2QuantZero;
-            if (getQuantConfig(log, inActType, in1QuantMult, in1QuantShift, in1QuantZero, arch).failed()) {
+            if (getQuantConfig(log, inActType, in1QuantMult, in1QuantShift, in1QuantZero).failed()) {
                 return mlir::failure();
             }
-            if (getQuantConfig(log, weightsType, in2QuantMult, in2QuantShift, in2QuantZero, arch).failed()) {
+            if (getQuantConfig(log, weightsType, in2QuantMult, in2QuantShift, in2QuantZero).failed()) {
                 return mlir::failure();
             }
         }
@@ -271,34 +264,34 @@ mlir::LogicalResult configureEltwiseCfg(const Logger& log, IDUConfig::EltWiseCfg
     return mlir::success();
 }
 
-}  // namespace
-
-namespace vpux::VPUIPDPU::arch40xx::IDU {
-
 PPETask evalPPETasks(mlir::Region& ppeRegion, std::optional<VPUIP::NCETaskType> taskType) {
     PPETask ppeTask;
 
     for (auto ppeTaskOp : ppeRegion.getOps<VPUASM::PPETaskOp>()) {
-        if (ppeTaskOp.getIn1QuantMult().has_value()) {
-            auto in1QuantMultArrayAttr = mlir::dyn_cast<mlir::ArrayAttr>(ppeTaskOp.getIn1QuantMult().value());
-            if (mlir::isa_and_nonnull<mlir::FloatAttr>(in1QuantMultArrayAttr.getValue()[0])) {
-                ppeTask.in1QuantMultFp = parseFPArrayAttr<float>(in1QuantMultArrayAttr);
-            } else if (mlir::isa_and_nonnull<mlir::IntegerAttr>(in1QuantMultArrayAttr.getValue()[0])) {
-                ppeTask.in1QuantMult = parseIntArrayAttr<int64_t>(in1QuantMultArrayAttr);
+        auto opaquePpeAttr = ppeTaskOp.getOpaquePpeAttr();
+        auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(opaquePpeAttr);
+        VPUX_THROW_WHEN(intPpeAttr == nullptr,
+                        "Expected PPEIntAttr type but got {0}, make sure to use the right factory version",
+                        opaquePpeAttr);
+
+        if (const auto in1QuantMultAttr = intPpeAttr.getIn1QuantMult()) {
+            if (mlir::isa_and_nonnull<mlir::FloatAttr>(in1QuantMultAttr.getValue()[0])) {
+                ppeTask.in1QuantMultFp = parseFPArrayAttr<float>(in1QuantMultAttr);
+            } else if (mlir::isa_and_nonnull<mlir::IntegerAttr>(in1QuantMultAttr.getValue()[0])) {
+                ppeTask.in1QuantMult = parseIntArrayAttr<int64_t>(in1QuantMultAttr);
             }
         }
 
-        if (ppeTaskOp.getIn2QuantMult().has_value()) {
-            auto in2QuantMultArrayAttr = mlir::dyn_cast<mlir::ArrayAttr>(ppeTaskOp.getIn2QuantMult().value());
-            if (mlir::isa_and_nonnull<mlir::FloatAttr>(in2QuantMultArrayAttr.getValue()[0])) {
-                ppeTask.in2QuantMultFp = parseFPArrayAttr<float>(in2QuantMultArrayAttr);
-            } else if (mlir::isa_and_nonnull<mlir::IntegerAttr>(in2QuantMultArrayAttr.getValue()[0])) {
-                ppeTask.in2QuantMult = parseIntArrayAttr<int64_t>(in2QuantMultArrayAttr);
+        if (const auto in2QuantMultAttr = intPpeAttr.getIn2QuantMult()) {
+            if (mlir::isa_and_nonnull<mlir::FloatAttr>(in2QuantMultAttr.getValue()[0])) {
+                ppeTask.in2QuantMultFp = parseFPArrayAttr<float>(in2QuantMultAttr);
+            } else if (mlir::isa_and_nonnull<mlir::IntegerAttr>(in2QuantMultAttr.getValue()[0])) {
+                ppeTask.in2QuantMult = parseIntArrayAttr<int64_t>(in2QuantMultAttr);
             }
         }
 
         if (taskType.has_value() && taskType.value() == VPUIP::NCETaskType::ELTWISE) {
-            const auto ppeMode = ppeTaskOp.getPpeLayerType();
+            const auto ppeMode = intPpeAttr.getMode().getValue();
             if (ppeMode != VPU::PPEMode::NOOP) {
                 switch (ppeMode) {
                 case VPU::PPEMode::ADD:
@@ -326,7 +319,7 @@ mlir::LogicalResult configureIDU(const Logger& log, IDUConfig& config, const vpu
                                  std::optional<bool> smallKernelOptimization, bool inActSparse, bool weightsSparse,
                                  std::optional<mlir::ArrayAttr> kernelSize,
                                  std::optional<mlir::ArrayAttr> kernelStrides, std::optional<int64_t> seSize,
-                                 const PPETask& ppeTask, VPU::ArchKind arch) {
+                                 const PPETask& ppeTask) {
     // IDUInActivations
     if (configureInActivations(log, config.inActivations, inActSparse).failed()) {
         return mlir::failure();
@@ -369,8 +362,7 @@ mlir::LogicalResult configureIDU(const Logger& log, IDUConfig& config, const vpu
     }
 
     // IDUEltWiseCfg
-    if (configureEltwiseCfg(log, config.eltWiseCfg, taskType, inActElementType, weightsElementType, ppeTask, arch)
-                .failed()) {
+    if (configureEltwiseCfg(log, config.eltWiseCfg, taskType, inActElementType, weightsElementType, ppeTask).failed()) {
         return mlir::failure();
     }
 
@@ -427,7 +419,7 @@ mlir::LogicalResult buildIDUConfig(mlir::OpBuilder& builder, const mlir::Locatio
     }
 
     return mlir::success();
-}  // namespace vpux::VPUIPDPU::arch40xx::IDU
+}
 
 }  // namespace vpux::VPUIPDPU::arch40xx::IDU
 
@@ -446,8 +438,7 @@ mlir::LogicalResult vpux::VPUIPDPU::arch40xx::buildDPUInvariantIDU(
                      origInvOp.getInputChannelsCompression(), origInvOp.getIsSmallKernelOptimized(),
                      getInvBlockArg(BlockArg::ACT_SPARSE_MAP_IN, invBlock, invBlockArgsPos) != nullptr,
                      getInvBlockArg(BlockArg::WEIGHTS_SPARSE_MAP, invBlock, invBlockArgsPos) != nullptr,
-                     origInvOp.getKernelSize(), origInvOp.getKernelStrides(), origInvOp.getInputSeSize(), ppeTask,
-                     VPU::getArch(origInvOp))
+                     origInvOp.getKernelSize(), origInvOp.getKernelStrides(), origInvOp.getInputSeSize(), ppeTask)
                 .failed()) {
         return mlir::failure();
     }
