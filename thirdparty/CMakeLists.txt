@@ -88,7 +88,7 @@ if (ENABLE_NPU_MONO)
     # after integration finishes
 else()
     # Legacy no-monorepo scenario
-    add_subdirectory(elf/vpux_elf)
+    add_subdirectory(elf/vpux_elf EXCLUDE_FROM_ALL)
     target_include_directories(npu_elf PRIVATE
         "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/src/vpux_compiler/include/vpux/compiler/NPU37XX/dialect/NPUReg37XX/firmware_headers/details"
         "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/src/vpux_compiler/include/vpux/compiler/NPU40XX/dialect/NPUReg40XX/firmware_headers/details")
